@@ -156,6 +156,20 @@ class ChunkedColumnInterface {
     virtual PinWrapper<Chunk*>
     GetChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const = 0;
 
+    // Pin all raw chunks required by one scan plan before constructing its
+    // cursor. Implementations backed by one cache slot should override this
+    // method so the requested cells are pinned by a single PinCells call.
+    virtual std::vector<PinWrapper<Chunk*>>
+    PinChunks(milvus::OpContext* op_ctx,
+              const std::vector<int64_t>& chunk_ids) const {
+        std::vector<PinWrapper<Chunk*>> chunks;
+        chunks.reserve(chunk_ids.size());
+        for (auto chunk_id : chunk_ids) {
+            chunks.emplace_back(GetChunk(op_ctx, chunk_id));
+        }
+        return chunks;
+    }
+
     virtual std::vector<PinWrapper<Chunk*>>
     GetAllChunks(milvus::OpContext* op_ctx) const = 0;
 

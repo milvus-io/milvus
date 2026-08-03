@@ -25,18 +25,71 @@ namespace milvus {
 
 namespace detail {
 
+class PinnedScanInput final {
+ public:
+    PinnedScanInput(int64_t first_chunk_id,
+                    std::vector<PinWrapper<Chunk*>>&& chunks)
+        : first_chunk_id_(first_chunk_id), chunks_(std::move(chunks)) {
+    }
+
+    Chunk*
+    GetChunk(int64_t chunk_id) const {
+        const auto index = chunk_id - first_chunk_id_;
+        AssertInfo(index >= 0 && index < static_cast<int64_t>(chunks_.size()),
+                   "scan chunk {} is outside pinned range [{}, {})",
+                   chunk_id,
+                   first_chunk_id_,
+                   first_chunk_id_ + chunks_.size());
+        return chunks_[index].get();
+    }
+
+ private:
+    int64_t first_chunk_id_;
+    std::vector<PinWrapper<Chunk*>> chunks_;
+};
+
+std::shared_ptr<PinnedScanInput>
+PinScanInput(const ChunkedColumnInterface* column,
+             milvus::OpContext* op_ctx,
+             int64_t start_offset,
+             int64_t length,
+             ChunkedColumnInterface::ScanProjection projection) {
+    if (length == 0 ||
+        (projection == ChunkedColumnInterface::ScanProjection::NoData &&
+         !column->IsNullable())) {
+        return nullptr;
+    }
+
+    const auto first_chunk_id =
+        static_cast<int64_t>(column->GetChunkIDByOffset(start_offset).first);
+    const auto last_chunk_id = static_cast<int64_t>(
+        column->GetChunkIDByOffset(start_offset + length - 1).first);
+    std::vector<int64_t> chunk_ids;
+    chunk_ids.reserve(last_chunk_id - first_chunk_id + 1);
+    for (auto chunk_id = first_chunk_id; chunk_id <= last_chunk_id;
+         ++chunk_id) {
+        chunk_ids.emplace_back(chunk_id);
+    }
+    auto chunks = column->PinChunks(op_ctx, chunk_ids);
+    AssertInfo(chunks.size() == chunk_ids.size(),
+               "scan pinned {} chunks for {} requested chunks",
+               chunks.size(),
+               chunk_ids.size());
+    return std::make_shared<PinnedScanInput>(first_chunk_id, std::move(chunks));
+}
+
 class FixedWidthDataScanCursor final
     : public ChunkedColumnInterface::ScanCursor {
  public:
     FixedWidthDataScanCursor(const ChunkedColumnInterface* column,
-                             milvus::OpContext* op_ctx,
+                             std::shared_ptr<PinnedScanInput> input,
                              int64_t start_offset,
                              int64_t length,
                              DataType data_type,
                              ChunkedColumnInterface::ScanProjection projection,
                              ChunkedColumnInterface::ScanValueKind value_kind)
         : column_(column),
-          op_ctx_(op_ctx),
+          input_(std::move(input)),
           data_type_(data_type),
           projection_(projection),
           value_kind_(value_kind),
@@ -91,12 +144,19 @@ class FixedWidthDataScanCursor final
                 return true;
             }
 
-            auto span = column_->Span(op_ctx_, current_chunk_id_);
-            AssertInfo(span.get().row_count() == rows,
+            AssertInfo(input_ != nullptr,
+                       "fixed-width data scan has no pinned input");
+            auto* chunk = input_->GetChunk(current_chunk_id_);
+            auto* fixed_chunk = dynamic_cast<FixedWidthChunk*>(chunk);
+            AssertInfo(fixed_chunk != nullptr,
+                       "scan chunk {} is not fixed-width",
+                       current_chunk_id_);
+            const auto span = fixed_chunk->Span();
+            AssertInfo(span.row_count() == rows,
                        "scan chunk {} row count mismatch, metadata {}, span {}",
                        current_chunk_id_,
                        rows,
-                       span.get().row_count());
+                       span.row_count());
             if (projection_ != ChunkedColumnInterface::ScanProjection::NoData) {
                 out->values.encoding =
                     ChunkedColumnInterface::ValueEncoding::FixedWidth;
@@ -108,17 +168,16 @@ class FixedWidthDataScanCursor final
                 out->values.physical_type = data_type_;
                 out->values.logical_type = data_type_;
                 out->values.size = rows_to_return;
-                out->values.byte_width = span.get().element_sizeof();
+                out->values.byte_width = span.element_sizeof();
                 // Primitive ChunkWriter keeps one payload slot per logical
                 // row; validity masks null slots instead of compacting them.
-                out->values.data = span.get().data();
+                out->values.data = span.data();
                 out->values.offset = current_chunk_offset_;
             }
-            if (span.get().valid_data() != nullptr) {
-                out->validity = span.get().valid_data() + current_chunk_offset_;
+            if (span.valid_data() != nullptr) {
+                out->validity = span.valid_data() + current_chunk_offset_;
             }
-            out->owner =
-                std::make_shared<PinWrapper<SpanBase>>(std::move(span));
+            out->owner = input_;
             out->row_id_start = scan_pos_;
             out->size = rows_to_return;
 
@@ -131,7 +190,7 @@ class FixedWidthDataScanCursor final
 
  private:
     const ChunkedColumnInterface* column_;
-    milvus::OpContext* op_ctx_;
+    std::shared_ptr<PinnedScanInput> input_;
     DataType data_type_;
     ChunkedColumnInterface::ScanProjection projection_;
     ChunkedColumnInterface::ScanValueKind value_kind_;
@@ -144,14 +203,14 @@ class FixedWidthDataScanCursor final
 class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
  public:
     ViewDataScanCursor(const ChunkedColumnInterface* column,
-                       milvus::OpContext* op_ctx,
+                       std::shared_ptr<PinnedScanInput> input,
                        int64_t start_offset,
                        int64_t length,
                        DataType data_type,
                        ChunkedColumnInterface::ScanProjection projection,
                        ChunkedColumnInterface::ScanValueKind value_kind)
         : column_(column),
-          op_ctx_(op_ctx),
+          input_(std::move(input)),
           data_type_(data_type),
           projection_(projection),
           value_kind_(value_kind),
@@ -225,44 +284,42 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
         std::pair<std::vector<VectorArrayView>, FixedVector<bool>>;
 
     struct StringOwner {
-        explicit StringOwner(PinWrapper<StringViews>&& views)
-            : views(std::move(views)) {
+        StringOwner(std::shared_ptr<PinnedScanInput> input, StringViews&& views)
+            : input(std::move(input)), views(std::move(views)) {
         }
-        PinWrapper<StringViews> views;
+        std::shared_ptr<PinnedScanInput> input;
+        StringViews views;
     };
 
     struct JsonOwner {
-        explicit JsonOwner(PinWrapper<StringViews>&& views)
-            : views(std::move(views)) {
-            auto& strings = this->views.get().first;
+        JsonOwner(std::shared_ptr<PinnedScanInput> input, StringViews&& views)
+            : input(std::move(input)), views(std::move(views)) {
+            auto& strings = this->views.first;
             values.reserve(strings.size());
             for (const auto& value : strings) {
                 values.emplace_back(Json(value));
             }
         }
-        PinWrapper<StringViews> views;
+        std::shared_ptr<PinnedScanInput> input;
+        StringViews views;
         std::vector<Json> values;
     };
 
     struct ArrayOwner {
-        explicit ArrayOwner(PinWrapper<ArrayViews>&& views)
-            : views(std::move(views)) {
+        ArrayOwner(std::shared_ptr<PinnedScanInput> input, ArrayViews&& views)
+            : input(std::move(input)), views(std::move(views)) {
         }
-        PinWrapper<ArrayViews> views;
+        std::shared_ptr<PinnedScanInput> input;
+        ArrayViews views;
     };
 
     struct VectorArrayOwner {
-        explicit VectorArrayOwner(PinWrapper<VectorArrayViews>&& views)
-            : views(std::move(views)) {
+        VectorArrayOwner(std::shared_ptr<PinnedScanInput> input,
+                         VectorArrayViews&& views)
+            : input(std::move(input)), views(std::move(views)) {
         }
-        PinWrapper<VectorArrayViews> views;
-    };
-
-    struct ValidityOwner {
-        explicit ValidityOwner(PinWrapper<Chunk*>&& chunk)
-            : chunk(std::move(chunk)) {
-        }
-        PinWrapper<Chunk*> chunk;
+        std::shared_ptr<PinnedScanInput> input;
+        VectorArrayViews views;
     };
 
     static void
@@ -291,24 +348,27 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
             return;
         }
 
-        auto owner = std::make_shared<ValidityOwner>(
-            column_->GetChunk(op_ctx_, chunk_id));
-        const auto& valid_data = owner->chunk.get()->Valid();
+        AssertInfo(input_ != nullptr, "nullable view scan has no pinned input");
+        const auto& valid_data = input_->GetChunk(chunk_id)->Valid();
         if (valid_data.empty()) {
             return;
         }
 
         out->validity = valid_data.data() + offset;
-        out->owner = std::move(owner);
+        out->owner = input_;
     }
 
     void
     FillStringViewBatch(int64_t chunk_id,
                         std::pair<int64_t, int64_t> range,
                         ChunkedColumnInterface::ScanBatch* out) const {
-        auto owner = std::make_shared<StringOwner>(
-            column_->StringViews(op_ctx_, chunk_id, range));
-        auto& views = owner->views.get();
+        AssertInfo(input_ != nullptr, "view scan has no pinned input");
+        auto* chunk = dynamic_cast<StringChunk*>(input_->GetChunk(chunk_id));
+        AssertInfo(
+            chunk != nullptr, "scan chunk {} is not string-like", chunk_id);
+        auto owner =
+            std::make_shared<StringOwner>(input_, chunk->StringViews(range));
+        auto& views = owner->views;
         out->values.encoding =
             ChunkedColumnInterface::ValueEncoding::StringView;
         out->values.kind = ChunkedColumnInterface::ScanValueKind::StringView;
@@ -326,8 +386,11 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
     FillJsonViewBatch(int64_t chunk_id,
                       std::pair<int64_t, int64_t> range,
                       ChunkedColumnInterface::ScanBatch* out) const {
-        auto owner = std::make_shared<JsonOwner>(
-            column_->StringViews(op_ctx_, chunk_id, range));
+        AssertInfo(input_ != nullptr, "view scan has no pinned input");
+        auto* chunk = dynamic_cast<StringChunk*>(input_->GetChunk(chunk_id));
+        AssertInfo(chunk != nullptr, "scan chunk {} is not JSON", chunk_id);
+        auto owner =
+            std::make_shared<JsonOwner>(input_, chunk->StringViews(range));
         out->values.encoding = ChunkedColumnInterface::ValueEncoding::JsonView;
         out->values.kind = ChunkedColumnInterface::ScanValueKind::JsonView;
         out->values.physical_type = data_type_;
@@ -336,7 +399,7 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
         out->values.offset = 0;
         out->values.size = out->size;
         out->values.byte_width = sizeof(Json);
-        FillValidity(owner->views.get().second, out);
+        FillValidity(owner->views.second, out);
         out->owner = std::move(owner);
     }
 
@@ -344,9 +407,11 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
     FillArrayViewBatch(int64_t chunk_id,
                        std::pair<int64_t, int64_t> range,
                        ChunkedColumnInterface::ScanBatch* out) const {
-        auto owner = std::make_shared<ArrayOwner>(
-            column_->ArrayViews(op_ctx_, chunk_id, range));
-        auto& views = owner->views.get();
+        AssertInfo(input_ != nullptr, "view scan has no pinned input");
+        auto* chunk = dynamic_cast<ArrayChunk*>(input_->GetChunk(chunk_id));
+        AssertInfo(chunk != nullptr, "scan chunk {} is not an array", chunk_id);
+        auto owner = std::make_shared<ArrayOwner>(input_, chunk->Views(range));
+        auto& views = owner->views;
         out->values.encoding = ChunkedColumnInterface::ValueEncoding::ArrayView;
         out->values.kind = ChunkedColumnInterface::ScanValueKind::ArrayView;
         out->values.physical_type = data_type_;
@@ -363,9 +428,14 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
     FillVectorArrayViewBatch(int64_t chunk_id,
                              std::pair<int64_t, int64_t> range,
                              ChunkedColumnInterface::ScanBatch* out) const {
-        auto owner = std::make_shared<VectorArrayOwner>(
-            column_->VectorArrayViews(op_ctx_, chunk_id, range));
-        auto& views = owner->views.get();
+        AssertInfo(input_ != nullptr, "view scan has no pinned input");
+        auto* chunk =
+            dynamic_cast<VectorArrayChunk*>(input_->GetChunk(chunk_id));
+        AssertInfo(
+            chunk != nullptr, "scan chunk {} is not a vector array", chunk_id);
+        auto owner =
+            std::make_shared<VectorArrayOwner>(input_, chunk->Views(range));
+        auto& views = owner->views;
         out->values.encoding =
             ChunkedColumnInterface::ValueEncoding::VectorArrayView;
         out->values.kind =
@@ -381,7 +451,7 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
     }
 
     const ChunkedColumnInterface* column_;
-    milvus::OpContext* op_ctx_;
+    std::shared_ptr<PinnedScanInput> input_;
     DataType data_type_;
     ChunkedColumnInterface::ScanProjection projection_;
     ChunkedColumnInterface::ScanValueKind value_kind_;
@@ -407,8 +477,9 @@ MakeFixedWidthDataScanCursor(const ChunkedColumnInterface* column,
     if (!ChunkedColumnInterface::IsPrimitiveDataType(data_type)) {
         return nullptr;
     }
+    auto input = PinScanInput(column, op_ctx, start_offset, length, projection);
     return std::make_unique<FixedWidthDataScanCursor>(column,
-                                                      op_ctx,
+                                                      std::move(input),
                                                       start_offset,
                                                       length,
                                                       data_type,
@@ -479,8 +550,10 @@ MakeDataScanCursor(const ChunkedColumnInterface* column,
                    start_offset,
                    start_offset + length,
                    column->NumRows());
+        auto input =
+            PinScanInput(column, op_ctx, start_offset, length, projection);
         return std::make_unique<ViewDataScanCursor>(column,
-                                                    op_ctx,
+                                                    std::move(input),
                                                     start_offset,
                                                     length,
                                                     data_type,

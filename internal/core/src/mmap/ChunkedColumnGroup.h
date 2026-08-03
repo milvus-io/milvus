@@ -479,6 +479,27 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
     std::vector<PinWrapper<Chunk*>>
+    PinChunks(milvus::OpContext* op_ctx,
+              const std::vector<int64_t>& chunk_ids) const override {
+        if (chunk_ids.empty()) {
+            return {};
+        }
+        auto group_chunks = group_->GetGroupChunks(op_ctx, chunk_ids);
+        std::vector<PinWrapper<Chunk*>> chunks;
+        chunks.reserve(chunk_ids.size());
+        for (auto chunk_id : chunk_ids) {
+            auto group_chunk = group_chunks->get_cell_of(chunk_id);
+            auto chunk = group_chunk->GetChunkRaw(field_id_);
+            AssertInfo(chunk != nullptr,
+                       "field {} is missing from group chunk {}",
+                       field_id_.get(),
+                       chunk_id);
+            chunks.emplace_back(group_chunks, chunk);
+        }
+        return chunks;
+    }
+
+    std::vector<PinWrapper<Chunk*>>
     GetAllChunks(milvus::OpContext* op_ctx) const override {
         std::vector<PinWrapper<Chunk*>> ret;
         auto group_chunks = group_->GetAllGroupChunks(op_ctx);

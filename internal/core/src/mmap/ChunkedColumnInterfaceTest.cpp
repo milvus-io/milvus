@@ -43,6 +43,7 @@ constexpr int64_t kVectorArrayDim = 2;
 struct ColumnFixture {
     std::shared_ptr<ChunkedColumnInterface> column;
     std::shared_ptr<std::set<cachinglayer::cid_t>> fetched;
+    std::shared_ptr<std::vector<std::vector<int64_t>>> pin_requests;
     // Keeps chunk data buffers alive for the column's lifetime.
     std::shared_ptr<void> buffer_holder;
 };
@@ -244,6 +245,70 @@ class CountingGroupChunkTranslator : public TestGroupChunkTranslator {
     std::shared_ptr<std::set<cachinglayer::cid_t>> fetched_;
 };
 
+class ScanCountingChunkedColumn : public ChunkedColumn {
+ public:
+    ScanCountingChunkedColumn(
+        std::shared_ptr<CacheSlot<Chunk>> slot,
+        const FieldMeta& field_meta,
+        std::shared_ptr<std::vector<std::vector<int64_t>>> pin_requests)
+        : ChunkedColumn(std::move(slot), field_meta),
+          pin_requests_(std::move(pin_requests)) {
+    }
+
+    std::vector<PinWrapper<Chunk*>>
+    PinChunks(milvus::OpContext* op_ctx,
+              const std::vector<int64_t>& chunk_ids) const override {
+        pin_requests_->emplace_back(chunk_ids);
+        return ChunkedColumn::PinChunks(op_ctx, chunk_ids);
+    }
+
+ private:
+    std::shared_ptr<std::vector<std::vector<int64_t>>> pin_requests_;
+};
+
+class ScanCountingProxyChunkColumn : public ProxyChunkColumn {
+ public:
+    ScanCountingProxyChunkColumn(
+        std::shared_ptr<ChunkedColumnGroup> group,
+        FieldId field_id,
+        const FieldMeta& field_meta,
+        std::shared_ptr<std::vector<std::vector<int64_t>>> pin_requests)
+        : ProxyChunkColumn(std::move(group), field_id, field_meta),
+          pin_requests_(std::move(pin_requests)) {
+    }
+
+    std::vector<PinWrapper<Chunk*>>
+    PinChunks(milvus::OpContext* op_ctx,
+              const std::vector<int64_t>& chunk_ids) const override {
+        pin_requests_->emplace_back(chunk_ids);
+        return ProxyChunkColumn::PinChunks(op_ctx, chunk_ids);
+    }
+
+ private:
+    std::shared_ptr<std::vector<std::vector<int64_t>>> pin_requests_;
+};
+
+class ScanCountingStringColumn : public ChunkedVariableColumn<std::string> {
+ public:
+    ScanCountingStringColumn(
+        std::shared_ptr<cachinglayer::CacheSlot<Chunk>> slot,
+        const FieldMeta& field_meta,
+        std::shared_ptr<std::vector<std::vector<int64_t>>> pin_requests)
+        : ChunkedVariableColumn<std::string>(std::move(slot), field_meta),
+          pin_requests_(std::move(pin_requests)) {
+    }
+
+    std::vector<PinWrapper<Chunk*>>
+    PinChunks(milvus::OpContext* op_ctx,
+              const std::vector<int64_t>& chunk_ids) const override {
+        pin_requests_->emplace_back(chunk_ids);
+        return ChunkedVariableColumn<std::string>::PinChunks(op_ctx, chunk_ids);
+    }
+
+ private:
+    std::shared_ptr<std::vector<std::vector<int64_t>>> pin_requests_;
+};
+
 struct ChunkedColumnFactory {
     static ColumnFixture
     Create(const ColumnSpec& spec) {
@@ -271,9 +336,13 @@ struct ChunkedColumnFactory {
         auto fm = MakeTestFieldMeta(spec);
         auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
             std::move(translator), nullptr);
-        auto column = std::make_shared<ChunkedColumn>(std::move(slot), fm);
+        auto pin_requests =
+            std::make_shared<std::vector<std::vector<int64_t>>>();
+        auto column = std::make_shared<ScanCountingChunkedColumn>(
+            std::move(slot), fm, pin_requests);
         return {std::static_pointer_cast<ChunkedColumnInterface>(column),
                 std::move(fetched),
+                std::move(pin_requests),
                 std::static_pointer_cast<void>(buffers)};
     }
 };
@@ -313,10 +382,13 @@ struct ProxyChunkColumnFactory {
         auto group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
         auto fm = MakeTestFieldMeta(spec);
-        auto column = std::make_shared<ProxyChunkColumn>(
-            group, FieldId(kTestFieldId), fm);
+        auto pin_requests =
+            std::make_shared<std::vector<std::vector<int64_t>>>();
+        auto column = std::make_shared<ScanCountingProxyChunkColumn>(
+            group, FieldId(kTestFieldId), fm, pin_requests);
         return {std::static_pointer_cast<ChunkedColumnInterface>(column),
                 std::move(fetched),
+                std::move(pin_requests),
                 std::static_pointer_cast<void>(buffers)};
     }
 };
@@ -633,7 +705,7 @@ TYPED_TEST(VectorArrayColumnInterfaceTest,
     EXPECT_FALSE(IsScanRowValid(batch, 1));
     EXPECT_EQ(cursor->Position(), 2);
     ASSERT_NE(batch.owner, nullptr);
-    EXPECT_EQ(batch.owner.use_count(), 1);
+    EXPECT_EQ(batch.owner.use_count(), 2);
 
     ASSERT_TRUE(cursor->Next(2, &batch));
     EXPECT_EQ(batch.row_id_start, 2);
@@ -641,7 +713,7 @@ TYPED_TEST(VectorArrayColumnInterfaceTest,
     EXPECT_TRUE(IsScanRowValid(batch, 0));
     EXPECT_TRUE(IsScanRowValid(batch, 1));
     ASSERT_NE(batch.owner, nullptr);
-    EXPECT_EQ(batch.owner.use_count(), 1);
+    EXPECT_EQ(batch.owner.use_count(), 2);
     EXPECT_EQ(cursor->Position(), kVectorArrayRows);
 }
 
@@ -676,6 +748,9 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
                             ChunkedColumnInterface::ScanValueKind::FixedWidth));
     ASSERT_NE(cursor, nullptr);
     EXPECT_EQ(cursor->Position(), 1);
+    ASSERT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ(fx.pin_requests->front(), (std::vector<int64_t>{0, 1}));
+    EXPECT_EQ(*fx.fetched, (std::set<cachinglayer::cid_t>{0, 1}));
 
     ChunkedColumnInterface::ScanBatch batch;
     ASSERT_TRUE(cursor->Next(10, &batch));
@@ -698,6 +773,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     EXPECT_EQ(cursor->Position(), 5);
 
     EXPECT_FALSE(cursor->Next(10, &batch));
+    EXPECT_EQ(fx.pin_requests->size(), 1u);
     EXPECT_EQ(*fx.fetched, (std::set<cachinglayer::cid_t>{0, 1}));
 }
 
@@ -712,6 +788,8 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     auto cursor = fx.column->Scan(
         nullptr, ChunkedColumnInterface::ScanOptions::ForNoData(0, 4));
     ASSERT_NE(cursor, nullptr);
+    ASSERT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ(fx.pin_requests->front(), (std::vector<int64_t>{0}));
 
     ChunkedColumnInterface::ScanBatch batch;
     ASSERT_TRUE(cursor->Next(4, &batch));
@@ -723,6 +801,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     EXPECT_TRUE(IsScanRowValid(batch, 2));
     EXPECT_FALSE(IsScanRowValid(batch, 3));
     EXPECT_FALSE(cursor->Next(4, &batch));
+    EXPECT_EQ(fx.pin_requests->size(), 1u);
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,
@@ -735,6 +814,8 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
         nullptr, ChunkedColumnInterface::ScanOptions::ForData(1, 4));
     ASSERT_NE(cursor, nullptr);
     EXPECT_EQ(cursor->Position(), 1);
+    ASSERT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ(fx.pin_requests->front(), (std::vector<int64_t>{0}));
 
     ChunkedColumnInterface::ScanBatch batch;
     ASSERT_TRUE(cursor->Next(2, &batch));
@@ -752,6 +833,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     EXPECT_EQ(batch.size, 1);
     EXPECT_EQ(cursor->Position(), 5);
     EXPECT_FALSE(cursor->Next(2, &batch));
+    EXPECT_EQ(fx.pin_requests->size(), 1u);
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,
@@ -764,6 +846,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
         nullptr, ChunkedColumnInterface::ScanOptions::ForNoData(0, 5));
     ASSERT_NE(cursor, nullptr);
     EXPECT_TRUE(fx.fetched->empty());
+    EXPECT_TRUE(fx.pin_requests->empty());
 
     ChunkedColumnInterface::ScanBatch batch;
     ASSERT_TRUE(cursor->Next(5, &batch));
@@ -777,6 +860,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     EXPECT_TRUE(batch.values.empty());
     EXPECT_EQ(batch.validity, nullptr);
     EXPECT_TRUE(fx.fetched->empty());
+    EXPECT_TRUE(fx.pin_requests->empty());
     EXPECT_FALSE(cursor->Next(5, &batch));
 }
 
@@ -839,13 +923,16 @@ TEST(ChunkedColumnInterfaceTest, VarcharPrimaryKeyUsesStringViewScanCursor) {
                          std::nullopt);
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
         std::move(translator), nullptr);
-    auto column =
-        MakeChunkedColumnBase(DataType::VARCHAR, std::move(slot), field_meta);
+    auto pin_requests = std::make_shared<std::vector<std::vector<int64_t>>>();
+    auto column = std::make_shared<ScanCountingStringColumn>(
+        std::move(slot), field_meta, pin_requests);
 
     auto cursor = column->Scan(nullptr,
                                ChunkedColumnInterface::ScanOptions::ForData(
                                    0, static_cast<int64_t>(values.size())));
     ASSERT_NE(cursor, nullptr);
+    ASSERT_EQ(pin_requests->size(), 1u);
+    EXPECT_EQ(pin_requests->front(), (std::vector<int64_t>{0}));
 
     ChunkedColumnInterface::ScanBatch batch;
     ASSERT_TRUE(cursor->Next(static_cast<int64_t>(values.size()), &batch));
@@ -885,8 +972,9 @@ TEST(ChunkedColumnInterfaceTest,
                          std::nullopt);
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
         std::move(translator), nullptr);
-    auto column =
-        MakeChunkedColumnBase(DataType::VARCHAR, std::move(slot), field_meta);
+    auto pin_requests = std::make_shared<std::vector<std::vector<int64_t>>>();
+    auto column = std::make_shared<ScanCountingStringColumn>(
+        std::move(slot), field_meta, pin_requests);
 
     constexpr int64_t kMaxBatchRows = 2;
     auto cursor =
@@ -897,6 +985,8 @@ TEST(ChunkedColumnInterfaceTest,
                          ChunkedColumnInterface::ScanProjection::Data,
                          ChunkedColumnInterface::ScanValueKind::StringView));
     ASSERT_NE(cursor, nullptr);
+    ASSERT_EQ(pin_requests->size(), 1u);
+    EXPECT_EQ(pin_requests->front(), (std::vector<int64_t>{0}));
 
     std::vector<std::string> scanned;
     std::vector<int64_t> batch_starts;
@@ -915,6 +1005,7 @@ TEST(ChunkedColumnInterfaceTest,
     EXPECT_EQ(batch_starts, (std::vector<int64_t>{0, 2, 4}));
     EXPECT_EQ(batch_sizes, (std::vector<int64_t>{2, 2, 1}));
     EXPECT_EQ(scanned, values);
+    EXPECT_EQ(pin_requests->size(), 1u);
 }
 
 }  // namespace milvus

@@ -314,13 +314,15 @@ Vortex converts the current Arrow slice's validity bitmap into a
 `FixedVector<bool>`, and `ScanBatch::owner` keeps that mask and the values alive
 for the batch lifetime.
 
-Scan cursors are streaming. For dense data scans, `Position()` is the next row
-not yet returned to the expression layer. `Next(max_rows)` returns a complete
-batch starting at that position, bounded by both `max_rows` and the current
-column chunk, then advances the cursor position. This keeps reader, file,
-buffer, and batch-slicing state inside the cursor. Materialized views are
-therefore bounded by the current execution request, while fixed-width batches
-remain zero-copy subviews.
+Scan creation first plans the cells required by the requested row range and
+projection, pins that complete cell set, and then constructs the cursor over
+the pinned input. Validity-only scans use the same flow but omit value parsing;
+non-nullable validity-only scans have an empty cell plan. `Next(max_rows)` never
+loads or pins cells. It only returns a complete batch starting at `Position()`,
+bounded by both `max_rows` and the current column chunk, and advances the cursor
+position. `ScanBatch::owner` shares the cursor's pinned input (plus any
+batch-local materialization) so returned pointers remain valid even if the
+cursor advances or is closed.
 
 Row-id scan supports:
 
