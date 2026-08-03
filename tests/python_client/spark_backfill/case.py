@@ -25,6 +25,10 @@ from .backfill_helpers import (
 from .contracts import extract_read_probe_result
 from .k8s_runner import SparkJobRequest, SparkJobResult
 
+# Keep positive E2E snapshots stable across Spark startup, execution, and commit.
+# Fixture teardown drops the snapshot early, so this is a maximum lifetime, not a delay.
+DEFAULT_COMPACTION_PROTECTION_SECONDS = 600
+
 
 def infer_root_path(snapshot_location: str) -> str:
     key = object_key(snapshot_location, snapshot_location.split("://", 1)[-1].split("/", 1)[0])
@@ -54,7 +58,11 @@ class BackfillCase:
     def root_path(self) -> str:
         return infer_root_path(self.snapshot_location)
 
-    def create_snapshot(self, *, compaction_protection_seconds: int = 0) -> SnapshotMetadataView:
+    def create_snapshot(
+        self,
+        *,
+        compaction_protection_seconds: int = DEFAULT_COMPACTION_PROTECTION_SECONDS,
+    ) -> SnapshotMetadataView:
         snapshot_name = unique_name("spark_backfill_snapshot")
         self.client.create_snapshot(
             snapshot_name,
@@ -93,6 +101,7 @@ class BackfillCase:
         dim: int = 4,
         include_pk: bool = True,
         score_type=None,
+        vector_type=None,
         target_fields: Sequence[str] = ("bf_score", "bf_label", "bf_vector"),
     ) -> str:
         local_path = self.tmp_path / case_id / "input.parquet"
@@ -102,6 +111,7 @@ class BackfillCase:
             dim=dim,
             include_pk=include_pk,
             score_type=score_type,
+            vector_type=vector_type,
             target_fields=target_fields,
         )
         return upload_file(
@@ -150,6 +160,17 @@ class BackfillCase:
 
     def read_result(self, result_uri: str) -> dict[str, Any]:
         return read_json_object(self.minio_client, self.settings.minio_bucket, result_uri)
+
+    def upload_result(self, case_id: str, result: Mapping[str, Any]) -> str:
+        local_path = self.tmp_path / case_id / "result.json"
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+        return upload_file(
+            self.minio_client,
+            self.settings.minio_bucket,
+            f"{self.prefix}/{case_id}/result.json",
+            local_path,
+        )
 
     def commit(self, result_uri: str) -> tuple[int, dict]:
         return commit_backfill_result(self.settings.management_endpoint, result_uri)

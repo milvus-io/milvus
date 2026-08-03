@@ -6,11 +6,11 @@ generated_from: https://zilliverse.feishu.cn/docx/Umt1d8PTOoyf9NxvPQ3cYrOInTd
 status: implemented-first-phase
 ---
 
-# Spark-Milvus Read 与 Backfill Nightly 测试计划
+# Spark-Milvus Backfill Nightly 测试计划
 
 **创建日期：** 2026-07-22
 
-**更新日期：** 2026-07-23
+**更新日期：** 2026-07-29
 
 **框架：** pytest + Kubernetes Job + `spark-submit --master local[2]`
 
@@ -18,10 +18,12 @@ status: implemented-first-phase
 
 ## 1. 目标与边界
 
-Spark-Milvus Connector 提供两类能力：
+Spark-Milvus Connector 的 Backfill Nightly 验收范围包括：
 
-1. 将 Milvus 数据读取为 Spark DataFrame，验证整表、字段裁剪、Spark SQL 和向量 TopK。
-2. 读取不可变 Snapshot，以 Parquet 主键关联为已有物理行生成目标字段列，再通过 Milvus Commit API发布。
+1. 读取不可变 Snapshot，以 Parquet 主键关联为已有物理行生成目标字段列。
+2. 通过 Milvus Commit API 发布 Backfill Result，并验证已加载 Collection 的在线可见性。
+
+> 已确认限制：当前 Connector 不支持本计划最初设计的 Spark Read E2E（整表、字段裁剪、Spark SQL 和向量 TopK），因此该能力不属于本阶段 Nightly 验收范围；现有 Read Probe 仅保留为未来能力恢复后的测试基础设施。
 
 Backfill 不是 Insert/Upsert。Snapshot 固定 Schema、Segment、主键和物理行布局；Parquet 只能给这些已有行补值，不能让 Snapshot 行集合变大。
 
@@ -91,14 +93,25 @@ Milvus PK 100          = 不存在
 Add Field → Create Snapshot → Backfill → Commit
 ```
 
-### 4.3 Snapshot 后 Insert
+### 4.3 Snapshot 后 Insert/Delete
 
-新行不属于旧 Snapshot。即使 Parquet 包含新 PK，旧 Snapshot Backfill 仍只处理原 30 行；新行保持 Insert 时的目标值、默认值或 Null。要覆盖新行必须 Flush 并重新创建 Snapshot。
+新行不属于旧 Snapshot。即使 Parquet 包含多个新 PK，旧 Snapshot Backfill 仍只处理原 30 行；新行保持 Insert 时的目标值、默认值或 Null。要覆盖新行必须 Flush 并重新创建 Snapshot。
 
-### 4.4 Snapshot 后 Add Field
+删除发生在 Snapshot 之后时，Spark 仍会按不可变 Snapshot 处理原物理行并可正常生成 Result；Commit 后实时 delete 状态必须继续生效，已删 PK 不能被旧 Snapshot 的 Backfill Artifact 复活。测试同时删除 Parquet 匹配和不匹配的 PK，并验证最终完整 PK 集合与逐字段值。
+
+### 4.4 Snapshot 后 Schema 变化
 
 - Add Field 后再用旧 Snapshot 跑 Spark：字段不在 Snapshot Schema，Spark 失败。
-- Spark 完成后 Add Field，再 Commit 旧 Result：设计上应由 SchemaVersion fencing 拒绝；当前服务端缺口由 [Milvus #51318](https://github.com/milvus-io/milvus/issues/51318) 的 `xfail(strict=True)` 跟踪。
+- 先创建非零版本 Snapshot，再 Add 或 Drop 一个与目标字段无关的字段，然后用旧 Snapshot 跑 Spark：Spark Result 仍盖旧 SchemaVersion；Commit 必须因当前版本不同而拒绝。
+- Spark 完成后 Add Field，再 Commit 旧 Result：设计上应由 SchemaVersion fencing 拒绝。拆分验证非零版本 mismatch 和合法 `0 → 1` 边界；当前服务端缺口由 [Milvus #51318](https://github.com/milvus-io/milvus/issues/51318) 的两个 `xfail(strict=True)` 跟踪。
+
+上述 Snapshot 后 Add/Drop 两个时序也由 #51318 的独立 strict xfail 参数覆盖。只有明确的 stale-schema fence 缺失才允许 xfail；Spark 阶段失败或 Commit 因其他原因失败仍视为测试失败。
+
+### 4.5 FloatVector Parquet 表示
+
+- Arrow 可变长 `list<float32>` 必须能解析为 Milvus FloatVector，并逐维验证在线可见值。
+- JSON array string（例如 `"[1.0,2.0,3.0,4.0]"`）是 Connector 明确支持的 dense vector 输入格式，也必须成功并逐维验证；它不是类型错配。
+- String 内容若不是 numeric JSON array（例如 JSON object）必须失败，不生成可 Commit 的成功 Result。
 
 ## 5. Snapshot 过期与 Compaction Protection
 
@@ -129,23 +142,25 @@ pytest 从 `MilvusClient.list_persistent_segments()` 读取 Snapshot Segment 的
 
 核心：
 
-1. Spark Read：30 行、PK、真实 `fieldIDs` 裁剪、Spark SQL、TopK。
-2. `coalesce`、`overwrite`、`replace` 发布回读。
-3. 三种 mode 的显式 Null。
-4. Parquet 多一个 Snapshot 外 PK：31 输入、30 匹配、30 写入，不新增行。
-5. Snapshot 后 Insert 不参与旧 Snapshot Backfill。
-6. Snapshot 后 Add Field 再运行 Spark 失败。
-7. Spark 后 Add Field 再 Commit：strict xfail 跟踪 #51318。
-8. 相同/更旧 Manifest Version 重复 Commit 必须拒绝。
-9. Protection 到期但无 Compaction仍可 Commit。
-10. Protection 到期且 Segment 被 Compaction 改变：旧 Result 失败，新 Snapshot 成功。
+1. `coalesce`、`overwrite`、`replace` 发布回读。
+2. 三种 mode 的显式 Null。
+3. Parquet 多一个 Snapshot 外 PK：31 输入、30 匹配、30 写入，不新增行。
+4. Snapshot 后插入多个 Row 不参与旧 Snapshot Backfill；Snapshot 后删除的 Row 不会被旧 Result 复活。
+5. Snapshot 后 Add Field 再运行 Spark 失败。
+6. Snapshot 后 Add/Drop Field，再用旧 Snapshot 跑 Spark 并 Commit：非零 SchemaVersion mismatch 必须拒绝，strict xfail 跟踪 #51318。
+7. Spark 后 Add Field 再 Commit：分别覆盖非零 SchemaVersion mismatch 与合法 `0 → 1` 边界，strict xfail 跟踪 #51318。
+8. FloatVector 覆盖 Arrow `list<float32>` 与 JSON array string，两种格式均逐维验证。
+9. 相同/更旧 Manifest Version 重复 Commit 必须拒绝。
+10. Protection 到期但无 Compaction仍可 Commit。
+11. Protection 到期且 Segment 被 Compaction 改变：旧 Result 失败，新 Snapshot 成功。
 
 负向：
 
 - 重复 PK；
 - 缺少 PK；
-- Float32/Float64/String 类型错配；
+- Float32/Float64/String 标量类型错配；
 - FloatVector 维度过小/过大；
+- FloatVector string 不是 numeric JSON array；
 - 非法 mode；
 - 非数字、零、负 batch size。
 
@@ -197,6 +212,7 @@ SPARK_BACKFILL_S3_SECRET_KEY
 ```bash
 pytest tests/python_client/spark_backfill \
   --run-spark-backfill \
+  --tags SparkBackfill \
   <Milvus/MinIO/K8s/Connector 参数> \
   -m "spark_backfill_v3 and (spark_backfill_core or spark_backfill_negative)" \
   -n 0 -v --tb=short
@@ -207,12 +223,13 @@ pytest tests/python_client/spark_backfill \
 ```bash
 pytest tests/python_client/spark_backfill \
   --run-spark-backfill \
+  --tags SparkBackfill \
   <V2 Milvus/MinIO/K8s/Connector 参数> \
   -m "spark_backfill_v2 and spark_backfill_core" \
   -n 0 -v --tb=short
 ```
 
-不带 `--run-spark-backfill` 时本目录不参与普通收集。Nightly 顺序执行 V3 和 V2，使用独立 Milvus 部署，不进入 PR CI、普通 E2E 或 pytest-xdist。
+不带 `--run-spark-backfill` 时本目录不参与普通收集。全部用例使用独立 `SparkBackfill` tag，不属于普通 Nightly 的 `L0 L1 L2 ClusterOnly` 选择范围。专用流水线顺序执行 V3 和 V2，使用独立 Milvus 部署，不进入 PR CI、普通 E2E 或 pytest-xdist。
 
 Jenkins 归档：
 
