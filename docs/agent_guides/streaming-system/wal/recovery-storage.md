@@ -5,8 +5,12 @@ Persists WAL consumer state to the catalog (etcd) and object storage. **Core inv
 ## Persisted State
 
 - **WALCheckpoint** (etcd): `MessageID` (= LastConfirmedMessageID of last consumed message), `TimeTick`, `ReplicateCheckpoint` (for secondary clusters), `AlterWalState` (for WAL backend migration).
-- **VChannel metadata** (etcd): Per-VChannel collection info, partition list, schema history, state (NORMAL / DROPPED).
-- **Segment assignments** (etcd): Per-segment growing/flushed status with row count and binary size stats.
+- **VChannel metadata** (etcd): Per-VChannel collection info, partition list,
+  schema history, lifecycle state, and the greatest sealed data version retained
+  after obsolete segment assignments are cleaned.
+- **Segment assignments** (etcd): Per-segment growing/flushed status with row
+  count and binary size stats. Tombstoned assignments are deleted only after
+  their sealed data version is covered by a persisted VChannel summary.
 - **Segment data** (object storage): Sealed segment binlog, indexes, and stats files.
 
 ## Recovery Flow

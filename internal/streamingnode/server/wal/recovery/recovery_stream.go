@@ -114,11 +114,6 @@ func (r *recoveryStorageImpl) switchModulesIntoMetaAndData() *RecoverySnapshot {
 				} else {
 					maps.Copy(snapshot.SegmentAssignments, typed.Segments)
 				}
-				if snapshot.SegmentDataVersionSummaries == nil {
-					snapshot.SegmentDataVersionSummaries = maps.Clone(typed.DataVersionSummaries)
-				} else {
-					maps.Copy(snapshot.SegmentDataVersionSummaries, typed.DataVersionSummaries)
-				}
 				snapshot.mergeLegacySegmentsIntoWritePathRecovery(typed.Segments)
 			}
 		}

@@ -256,6 +256,20 @@ func (s *snShardView) notifyUnrecoverable(version qviews.QueryViewVersion) {
 	s.consumeReportPersistAndCleanup(version, entry)
 }
 
+// notifyUnrecoverable is called by ResourceManager when the requested
+// resources can no longer be reconstructed at the QueryView DataVersion.
+func (s *snShardView) notifyUnrecoverable(version qviews.QueryViewVersion) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entry, exists := s.views[version]
+	if !exists {
+		return
+	}
+	entry.sm.OnUnrecoverable()
+	s.consumeReportPersistAndCleanup(version, entry)
+}
+
 // notifyRecoveringDone is called by ResourceManager callback when WAL catch-up
 // completes. Drives the SM from UpRecovering → Up.
 func (s *snShardView) notifyRecoveringDone(version qviews.QueryViewVersion) {

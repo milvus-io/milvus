@@ -16,6 +16,12 @@ func (m *VChannelRecoveryModule) AcquireQueryResource(req snview.AcquireResource
 		panic("query view vchannel does not match recovery module")
 	}
 	m.mu.Lock()
+	requested := qviews.FromProtoDataVersion(req.Meta.GetVersion().GetDataVersion())
+	if !requested.GTE(m.vchannelView.SegmentDataVersionSummary()) {
+		m.queryResources.Reject(req)
+		m.mu.Unlock()
+		return
+	}
 	m.queryResources.AcquireLocked(req, m.queryWALViewLocked)
 	m.mu.Unlock()
 }

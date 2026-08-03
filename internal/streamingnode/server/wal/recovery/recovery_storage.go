@@ -18,13 +18,12 @@ type WALCheckpoint = utility.WALCheckpoint
 
 // RecoverySnapshot is the snapshot of the recovery info.
 type RecoverySnapshot struct {
-	VChannels                   map[string]*streamingpb.VChannelMeta
-	SegmentAssignments          map[int64]*streamingpb.SegmentAssignmentMeta
-	SegmentDataVersionSummaries map[string]*streamingpb.SegmentDataVersionSummary
-	WritePathRecovery           *moduleapi.WritePathRecoveryModuleSnapshot
-	Checkpoint                  *WALCheckpoint
-	CheckpointDirty             bool
-	TxnBuffer                   *utility.TxnBuffer
+	VChannels          map[string]*streamingpb.VChannelMeta
+	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
+	WritePathRecovery  *moduleapi.WritePathRecoveryModuleSnapshot
+	Checkpoint         *WALCheckpoint
+	CheckpointDirty    bool
+	TxnBuffer          *utility.TxnBuffer
 	// Used during WAL alteration process
 	AlterWALInfo *AlterWALInfo
 	// SalvageCheckpoint captures the replicate checkpoint at force-promote time.

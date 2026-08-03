@@ -1,15 +1,15 @@
 # Segment View Module
 
 `SegmentModule` owns growing segment assignment and Insert/L1 persistence state.
-It is independent from VChannel and TransformLog state except for a narrow
-schema lookup when creating segment state.
+It collaborates with VChannel state for schema lookup and for crash-safe
+retention of the segment DataVersion summary. TransformLog state remains
+independent.
 
 ## 1. Ownership
 
 `SegmentModule` owns:
 
 - Segment assignment metadata;
-- vchannel-level Segment DataVersion summary;
 - growing segment lifecycle state;
 - Insert statistics and L1 buffers;
 - segment flush and lifecycle side effects;
@@ -19,7 +19,8 @@ schema lookup when creating segment state.
 
 `SegmentModule` does not own:
 
-- VChannel collection or partition metadata;
+- VChannel collection or partition metadata, including the durable
+  `segment_data_version_summary` embedded in `VChannelMeta`;
 - schema history;
 - Delete or Txn(Delete) data;
 - LoadConfig or QueryView state;
@@ -28,16 +29,23 @@ schema lookup when creating segment state.
 
 ## 2. Dependency
 
-`SegmentModule` has one required cross-module read:
+`SegmentModule` has two narrow VChannel interactions:
 
 ```text
 SegmentModule -> VChannelModule.SchemaAt(vchannel, partitionID, timetick)
+SegmentModule -> VChannelModule.AdvanceSegmentDataVersionSummary(dataVersion)
 ```
 
-This happens when observing `CreateSegment`. The returned schema snapshot is
-stored in SegmentModule state. Existing segments do not need to refresh schema
-when `AlterCollection` appends a new schema version; schema-changing
-AlterCollection flushes old segments before the schema metadata advances.
+The schema lookup happens when observing `CreateSegment`. The returned schema
+snapshot is stored in SegmentModule state. Existing segments do not need to
+refresh schema when `AlterCollection` appends a new schema version;
+schema-changing AlterCollection flushes old segments before the schema metadata
+advances.
+
+The summary advancement happens when a flushed segment tombstone is finalized.
+It monotonically raises the summary stored in `VChannelMeta`. Segment cleanup
+also reads the persisted summary and does not delete the assignment until that
+persisted value covers the segment's sealed DataVersion.
 
 ## 3. Observe Rules
 
@@ -138,45 +146,58 @@ Segment cleanup does not require reading VChannel tombstone state. Scope-level
 ack preconditions compose module Data frontiers outside SegmentModule.
 
 Segment cleanup is also responsible for preserving the vchannel DataVersion
-summary before flushed segment metadata is physically removed. SegmentModule
-does not update this summary on every flush. While flushed segment metadata is
-retained, the latest observed DataVersion can be derived from
-`SegmentAssignmentMeta.sealed_at_data_version`. Before cleanup deletes flushed
-segment metadata that would otherwise be the durable source of the maximum
-observed DataVersion, SegmentModule first persists a
-`SegmentDataVersionSummary`.
+summary before flushed segment metadata is physically removed. The summary is
+not updated on every flush. While flushed segment metadata is retained, the
+latest observed DataVersion can be derived from
+`SegmentAssignmentMeta.sealed_at_data_version`. When the segment tombstone is
+finalized, SegmentModule advances `VChannelMeta.segment_data_version_summary`.
+RecoveryStorage persists that VChannel base meta before cleanup is allowed to
+delete the segment assignment.
 
 The summary update is therefore lazy and GC-driven:
 
 ```text
-summary.data_version =
-  max(existing summary.data_version,
+vchannel_meta.segment_data_version_summary =
+  max(existing vchannel_meta.segment_data_version_summary,
       sealed_at_data_version of flushed segment metadata being removed)
 ```
 
-If retained flushed segment metadata still covers the maximum observed
-DataVersion, cleanup does not need to update the summary.
+The persistence and cleanup protocol is deliberately two phase:
+
+```text
+finalize segment tombstone
+  -> advance VChannelMeta summary
+  -> persist VChannel base meta
+  -> acknowledge the persisted VChannel snapshot
+  -> delete covered SegmentAssignmentMeta
+```
+
+If the process fails between the VChannel write and assignment deletion,
+recovery observes either the retained assignment or the durable summary. The
+assignment deletion is idempotent and is retried only after the persisted
+summary covers its sealed DataVersion.
 
 ## 5. DataVersion Summary
 
-SegmentModule owns the vchannel-level Segment DataVersion summary:
+`VChannelMeta` owns the vchannel-level Segment DataVersion summary:
 
 ```proto
-message SegmentDataVersionSummary {
-  view.DataVersion data_version = 1;
+message VChannelMeta {
+  // Other VChannel metadata is omitted.
+  view.DataVersion segment_data_version_summary = 7;
 }
 ```
 
-The summary object only records the latest DataVersion known by SegmentModule.
-Its catalog key carries the pchannel and vchannel identity; the proto does not
-need to duplicate them.
+There is no standalone summary record or `sdv` catalog key. Summary-only
+changes use the VChannel base-meta catalog operation so separately stored schema
+records are not rewritten.
 
 Snapshot DataVersion is derived as:
 
 ```text
 SegmentSnapshotDataVersion(vchannel) =
   max(
-    persisted SegmentDataVersionSummary.data_version,
+    VChannelMeta.segment_data_version_summary,
     max(sealed_at_data_version of retained FLUSHED segments in vchannel),
   )
 ```
@@ -188,11 +209,17 @@ included by `VisibleSegments`.
 
 ## 6. Recovery
 
-On WAL open, RecoveryStorage loads Segment snapshots and
-`SegmentDataVersionSummary` records from catalog, then constructs
-SegmentModule in MetaOnly mode. Historical WAL replay uses the same
-`ObserveMessage` implementation. Data tasks are enabled only after switching to
-MetaAndData mode.
+On WAL open, RecoveryStorage loads VChannel metadata and Segment snapshots from
+catalog, then constructs the modules in MetaOnly mode. The embedded summary is
+initialized as both the current and persisted VChannel summary. Historical WAL
+replay uses the same `ObserveMessage` implementation. Data tasks are enabled
+only after switching to MetaAndData mode.
+
+For a recovered tombstoned segment, recovery compares
+`sealed_at_data_version` with the embedded summary. If the assignment carries a
+newer version, recovery advances and persists the VChannel base meta before the
+assignment becomes eligible for deletion. This repairs crashes that occurred
+after the assignment tombstone was durable but before the summary was durable.
 
 Repeated `CreateSegment`, `Insert`, and `Flush` messages must be idempotent
 against persisted Segment state and Data checkpoints.
@@ -204,9 +231,8 @@ views:
 
 ```go
 type SegmentModule struct {
-    segments             map[int64]*SegmentView
-    dataVersionSummaries map[string]*SegmentDataVersionSummary
-    schemaProvider       SchemaProvider
+    segments       map[int64]*SegmentView
+    schemaProvider SchemaProvider
 }
 
 var _ moduleapi.Module = (*SegmentModule)(nil)
@@ -258,8 +284,7 @@ Switches retained Segment views into MetaAndData mode and returns:
 
 ```go
 type SegmentModuleSnapshot struct {
-    Segments             map[int64]*streamingpb.SegmentAssignmentMeta
-    DataVersionSummaries map[string]*streamingpb.SegmentDataVersionSummary
+    Segments map[int64]*streamingpb.SegmentAssignmentMeta
 }
 ```
 
@@ -268,8 +293,8 @@ exports query-visible Segment state for `VChannelWALView`.
 
 ### Module.ConsumeDirtySnapshots
 
-Returns dirty snapshots for Segment keys and Segment DataVersion summary keys.
-The operation only snapshots module-local memory and does not return an error:
+Returns dirty snapshots for Segment keys. The operation only snapshots
+module-local memory and does not return an error:
 
 ```text
 ModuleName = segment
@@ -277,18 +302,16 @@ Key        = {PChannel, SegmentID}
 Op         = Upsert or Delete
 Payload    = *streamingpb.SegmentAssignmentMeta for Upsert
 
-ModuleName = segment
-Key        = {PChannel, VChannel, "data-version-summary"}
-Op         = Upsert
-Payload    = *streamingpb.SegmentDataVersionSummary
 ```
 
 Upsert snapshots publish Segment Meta and Data progress. Delete snapshots drop
 retained tombstoned Segment metadata after cleanup is safe.
 
-Summary Upsert snapshots publish the GC-preserved vchannel DataVersion. The
-summary has no Delete snapshot in normal cleanup; an absent summary is
-equivalent to an empty DataVersion.
+Advancing the summary dirties the owning VChannel view. Its snapshot uses
+`SnapshotOpUpsertBase`, with a `*streamingpb.VChannelMeta` payload, unless the
+same stable snapshot also contains a schema change. RecoveryStorage routes the
+base-only operation to `SaveVChannelBaseMetas`; schema-changing snapshots use
+the normal VChannel save path.
 
 ### DirtySnapshot.MarkPersisted
 
@@ -329,15 +352,18 @@ dirty snapshots and still uses RecoveryStorage-owned catalog persistence.
 ## 8. Invariants
 
 1. SegmentModule owns Insert/L1 state and segment assignment metadata.
-2. SegmentModule is the only owner of Segment DataVersion summaries.
+2. VChannelMeta is the durable owner of the Segment DataVersion summary;
+   SegmentModule only advances it while finalizing segment tombstones.
 3. SegmentModule does not own VChannel lifecycle, LoadConfig, QueryView state,
    or Delete data.
 4. `SchemaAt` is read only when creating segment state.
 5. Existing segment schema snapshots are not refreshed by later schema changes.
 6. Segment Data barriers are backed by persisted Segment state, not by pending
    buffers alone.
-7. Segment tombstone and cleanup decisions are module-local.
-8. `VisibleSnapshot` selects the Segment snapshot DataVersion from
-   SegmentModule state.
-9. Segment GC persists `SegmentDataVersionSummary` before deleting flushed
+7. Segment tombstone finalization is module-local, but physical assignment
+   cleanup also requires the persisted VChannel summary to cover the sealed
+   DataVersion.
+8. `VisibleSnapshot` selects the Segment snapshot DataVersion from the embedded
+   VChannel summary plus retained Segment state.
+9. Segment GC persists the advanced VChannel base meta before deleting flushed
    metadata that carries the maximum observed DataVersion.

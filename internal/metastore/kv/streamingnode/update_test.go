@@ -154,7 +154,10 @@ func TestCatalog_SaveRecoverySnapshot_DroppedVChannelIsRetained(t *testing.T) {
 				Vchannel: "vch1",
 				State:    streamingpb.VChannelState_VCHANNEL_STATE_DROPPED,
 				CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
-					Schemas: []*streamingpb.CollectionSchemaOfVChannel{{CheckpointTimeTick: 5}},
+					Schemas: []*streamingpb.CollectionSchemaOfVChannel{{
+						State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+						CheckpointTimeTick: 5,
+					}},
 				},
 			},
 		},

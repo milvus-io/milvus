@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -45,10 +46,12 @@ func newVChannelView(
 	config runtimeConfig,
 ) *VChannelView {
 	return &VChannelView{
-		meta:                  meta,
-		persistedMetaTimeTick: persistedMetaTimeTick,
-		dirty:                 dirty,
-		metaAndData:           config.metaAndData,
+		meta:                               meta,
+		persistedMetaTimeTick:              persistedMetaTimeTick,
+		persistedSegmentDataVersionSummary: vchannelSegmentDataVersionSummary(meta),
+		dirty:                              dirty,
+		schemaDirty:                        dirty,
+		metaAndData:                        config.metaAndData,
 	}
 }
 
@@ -85,11 +88,14 @@ func NewVChannelMetaFromCreateCollectionMessage(msg message.ImmutableCreateColle
 type VChannelView struct {
 	mu sync.Mutex
 
-	meta                  *streamingpb.VChannelMeta
-	persistedMetaTimeTick uint64
-	dirty                 bool // whether the current vchannel recovery info still needs catalog persistence.
-	pendingDirtySnapshot  *streamingpb.VChannelMeta
-	walViewSnapshot       *WALViewSnapshot
+	meta                               *streamingpb.VChannelMeta
+	persistedMetaTimeTick              uint64
+	persistedSegmentDataVersionSummary qviews.DataVersion
+	dirty                              bool // whether the current vchannel recovery info still needs catalog persistence.
+	schemaDirty                        bool
+	pendingDirtySnapshot               *streamingpb.VChannelMeta
+	pendingDirtySnapshotSavesSchemas   bool
+	walViewSnapshot                    *WALViewSnapshot
 
 	metaAndData bool
 }
@@ -204,10 +210,41 @@ func (info *VChannelView) MarkSnapshotPersisted(snapshot *streamingpb.VChannelMe
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	info.markMetaPersistedLocked(snapshot.GetCheckpointTimeTick())
+	persistedSummary := vchannelSegmentDataVersionSummary(snapshot)
+	if persistedSummary.GT(info.persistedSegmentDataVersionSummary) {
+		info.persistedSegmentDataVersionSummary = persistedSummary
+	}
 	if info.pendingDirtySnapshot != nil && proto.Equal(info.pendingDirtySnapshot, snapshot) {
+		if info.pendingDirtySnapshotSavesSchemas && vchannelSchemasEqual(info.meta, snapshot) {
+			info.schemaDirty = false
+		}
 		info.pendingDirtySnapshot = nil
+		info.pendingDirtySnapshotSavesSchemas = false
 	}
 	info.dirty = !proto.Equal(info.meta, snapshot)
+}
+
+func (info *VChannelView) AdvanceSegmentDataVersionSummary(version qviews.DataVersion) bool {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if vchannelSegmentDataVersionSummary(info.meta).GTE(version) {
+		return false
+	}
+	info.meta.SegmentDataVersionSummary = version.IntoProto()
+	info.dirty = true
+	return true
+}
+
+func (info *VChannelView) SegmentDataVersionSummary() qviews.DataVersion {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return vchannelSegmentDataVersionSummary(info.meta)
+}
+
+func (info *VChannelView) PersistedSegmentDataVersionSummary() qviews.DataVersion {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return info.persistedSegmentDataVersionSummary
 }
 
 func (info *VChannelView) TryFinalizeTombstone(dataCheckpointTimeTick uint64) bool {
@@ -482,6 +519,7 @@ func (info *VChannelView) ObserveSchemaChangeMessageV2(msg message.ImmutableSche
 	})
 	info.meta.CheckpointTimeTick = msg.TimeTick()
 	info.dirty = true
+	info.schemaDirty = true
 	info.invalidateWALViewSnapshotLocked()
 	return moduleapi.ObserveResult{Meta: info.MetaBarrier()}
 }
@@ -506,6 +544,7 @@ func (info *VChannelView) ObserveAlterCollectionMessageV2(msg message.ImmutableA
 			State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
 			CheckpointTimeTick: msg.TimeTick(),
 		})
+		info.schemaDirty = true
 	}
 	info.meta.CheckpointTimeTick = msg.TimeTick()
 	info.dirty = true
@@ -646,17 +685,39 @@ func (info *VChannelView) ObserveCreatePartitionMessageV1(msg message.ImmutableC
 // ConsumeDirtyAndGetSnapshot returns the current stable dirty snapshot of the
 // vchannel recovery info. It is not a queue pop: until MarkSnapshotPersisted is
 // called, repeated calls keep returning the same in-flight snapshot.
-func (info *VChannelView) ConsumeDirtyAndGetSnapshot() *streamingpb.VChannelMeta {
+func (info *VChannelView) ConsumeDirtyAndGetSnapshot() (*streamingpb.VChannelMeta, bool) {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	if info.pendingDirtySnapshot != nil {
-		return proto.Clone(info.pendingDirtySnapshot).(*streamingpb.VChannelMeta)
+		return proto.Clone(info.pendingDirtySnapshot).(*streamingpb.VChannelMeta), info.pendingDirtySnapshotSavesSchemas
 	}
 	if !info.dirty {
-		return nil
+		return nil, false
 	}
 	info.pendingDirtySnapshot = proto.Clone(info.meta).(*streamingpb.VChannelMeta)
-	return proto.Clone(info.pendingDirtySnapshot).(*streamingpb.VChannelMeta)
+	info.pendingDirtySnapshotSavesSchemas = info.schemaDirty
+	return proto.Clone(info.pendingDirtySnapshot).(*streamingpb.VChannelMeta), info.pendingDirtySnapshotSavesSchemas
+}
+
+func vchannelSchemasEqual(left, right *streamingpb.VChannelMeta) bool {
+	leftSchemas := left.GetCollectionInfo().GetSchemas()
+	rightSchemas := right.GetCollectionInfo().GetSchemas()
+	if len(leftSchemas) != len(rightSchemas) {
+		return false
+	}
+	for i := range leftSchemas {
+		if !proto.Equal(leftSchemas[i], rightSchemas[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func vchannelSegmentDataVersionSummary(meta *streamingpb.VChannelMeta) qviews.DataVersion {
+	if meta.GetSegmentDataVersionSummary() == nil {
+		return qviews.DataVersion{}
+	}
+	return qviews.FromProtoDataVersion(meta.GetSegmentDataVersionSummary())
 }
 
 func (info *VChannelView) maybeMarkTombstonedLocked(dataCheckpointTimeTick uint64) bool {

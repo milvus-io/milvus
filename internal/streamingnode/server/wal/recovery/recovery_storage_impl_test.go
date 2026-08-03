@@ -304,9 +304,6 @@ func TestRecoveryStorageSwitchModulesMergesModuleSnapshots(t *testing.T) {
 				Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
 					1: {SegmentId: 1, Vchannel: "v1"},
 				},
-				DataVersionSummaries: map[string]*streamingpb.SegmentDataVersionSummary{
-					"v1": {},
-				},
 			},
 		}},
 		&testRecoveryModule{snapshot: moduleapi.CompositeModuleSnapshot{
@@ -316,9 +313,6 @@ func TestRecoveryStorageSwitchModulesMergesModuleSnapshots(t *testing.T) {
 			&moduleapi.SegmentModuleSnapshot{
 				Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
 					2: {SegmentId: 2, Vchannel: "v2"},
-				},
-				DataVersionSummaries: map[string]*streamingpb.SegmentDataVersionSummary{
-					"v2": {},
 				},
 			},
 		}},
@@ -330,8 +324,6 @@ func TestRecoveryStorageSwitchModulesMergesModuleSnapshots(t *testing.T) {
 	assert.Contains(t, snapshot.VChannels, "v2")
 	assert.Contains(t, snapshot.SegmentAssignments, int64(1))
 	assert.Contains(t, snapshot.SegmentAssignments, int64(2))
-	assert.Contains(t, snapshot.SegmentDataVersionSummaries, "v1")
-	assert.Contains(t, snapshot.SegmentDataVersionSummaries, "v2")
 }
 
 func TestRecoveryStorageMetaOnlyObserveDoesNotAdvanceDataCheckpoint(t *testing.T) {

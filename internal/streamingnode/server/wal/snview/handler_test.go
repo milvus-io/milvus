@@ -233,6 +233,7 @@ func TestSNHandler_ApplyViews_NewPreparing(t *testing.T) {
 }
 
 func TestSNHandler_AcquireUnrecoverableReportsUnrecoverable(t *testing.T) {
+
 	cat := newMockCatalog()
 	mgr := newMockResourceManager()
 	h := recoverSNQueryViewHandler(context.Background(), testPChannel, cat, mgr, nil)

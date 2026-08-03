@@ -5,8 +5,6 @@ import (
 	"math"
 	"sync"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	walcheckpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/checkpoint"
@@ -31,10 +29,9 @@ type ModuleConfig struct {
 	PChannel string
 	VChannel string
 
-	VChannelMeta              *streamingpb.VChannelMeta
-	Segments                  map[int64]*streamingpb.SegmentAssignmentMeta
-	SegmentDataVersionSummary *streamingpb.SegmentDataVersionSummary
-	TransformLogMeta          *streamingpb.VChannelTransformLogMeta
+	VChannelMeta     *streamingpb.VChannelMeta
+	Segments         map[int64]*streamingpb.SegmentAssignmentMeta
+	TransformLogMeta *streamingpb.VChannelTransformLogMeta
 
 	Runtime                   moduleapi.Runtime
 	Logger                    *mlog.Logger
@@ -76,8 +73,7 @@ type VChannelRecoveryModule struct {
 	pendingCleanup   map[int64]*segment.SegmentView
 	segmentFrontiers *segmentFrontierIndex
 
-	segmentDataVersionSummary *streamingpb.SegmentDataVersionSummary
-	latestInsertTimeTick      uint64
+	latestInsertTimeTick uint64
 
 	transformLog *transformlog.TransformLog
 
@@ -109,18 +105,17 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		return nil, merr.WrapErrServiceInternalMsg("vchannel recovery module vchannel is empty")
 	}
 	module := &VChannelRecoveryModule{
-		pchannel:                  config.PChannel,
-		vchannel:                  config.VChannel,
-		runtime:                   config.Runtime,
-		logger:                    config.Logger,
-		segments:                  make(map[int64]*segment.SegmentView),
-		segmentFrontiers:          newSegmentFrontierIndex(),
-		segmentDataVersionSummary: cloneSegmentDataVersionSummary(config.SegmentDataVersionSummary),
-		segmentLifecycle:          config.SegmentLifecycle,
-		segmentPackWriter:         config.SegmentPackWriter,
-		externalOnSegmentSealed:   config.OnSegmentSealed,
-		queryTransformLogStream:   config.TransformLogStream,
-		onFrontierUpdated:         config.OnFrontierUpdated,
+		pchannel:                config.PChannel,
+		vchannel:                config.VChannel,
+		runtime:                 config.Runtime,
+		logger:                  config.Logger,
+		segments:                make(map[int64]*segment.SegmentView),
+		segmentFrontiers:        newSegmentFrontierIndex(),
+		segmentLifecycle:        config.SegmentLifecycle,
+		segmentPackWriter:       config.SegmentPackWriter,
+		externalOnSegmentSealed: config.OnSegmentSealed,
+		queryTransformLogStream: config.TransformLogStream,
+		onFrontierUpdated:       config.OnFrontierUpdated,
 	}
 	module.queryResources = queryresource.NewManager(queryresource.Config{
 		Builders:         config.QueryRuntimeModuleBuilders,
@@ -143,14 +138,14 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		if module.vchannelView != nil {
 			schema = module.vchannelView.CreateSegmentSchema(meta.GetPartitionId(), meta.GetStat().GetCreateSegmentTimeTick())
 		}
-		var view *segment.SegmentView
-		view = segment.NewSegmentViewFromMetaWithConfig(meta, schema, module.segmentViewConfig())
+		view := segment.NewSegmentViewFromMetaWithConfig(meta, schema, module.segmentViewConfig())
 		module.segments[id] = view
 		if view.TombstonePersisted() {
 			if module.cleanupSegments == nil {
 				module.cleanupSegments = make(map[int64]*segment.SegmentView)
 			}
 			module.cleanupSegments[id] = view
+			module.advanceSegmentDataVersionSummaryLocked(view)
 		}
 		module.segmentFrontiers.Update(id, view.CollectionID(), view.PartitionID(), view.DurableFrontierTimeTick())
 	}
@@ -275,13 +270,17 @@ func (m *VChannelRecoveryModule) ConsumeDirtySnapshots() []moduleapi.DirtySnapsh
 	defer m.mu.Unlock()
 	snapshots := make([]moduleapi.DirtySnapshot, 0)
 	if m.vchannelView != nil {
-		if meta := m.vchannelView.ConsumeDirtyAndGetSnapshot(); meta != nil {
+		if meta, saveSchemas := m.vchannelView.ConsumeDirtyAndGetSnapshot(); meta != nil {
 			owner := m.vchannelView
 			snapshot := meta
+			op := moduleapi.SnapshotOpUpsertBase
+			if saveSchemas {
+				op = moduleapi.SnapshotOpUpsert
+			}
 			snapshots = append(snapshots, newDirtySnapshot(
 				moduleapi.ModuleNameVChannel,
 				moduleapi.SnapshotKey{PChannel: m.pchannel, VChannel: m.vchannel},
-				moduleapi.SnapshotOpUpsert,
+				op,
 				snapshot,
 				snapshot.GetCheckpointTimeTick(),
 				0,
@@ -564,15 +563,6 @@ func (m *VChannelRecoveryModule) matchesScope(scope moduleapi.Scope) bool {
 	}
 }
 
-func (m *VChannelRecoveryModule) segmentDataVersionSummaries() map[string]*streamingpb.SegmentDataVersionSummary {
-	if m.segmentDataVersionSummary == nil {
-		return nil
-	}
-	return map[string]*streamingpb.SegmentDataVersionSummary{
-		m.vchannel: cloneSegmentDataVersionSummary(m.segmentDataVersionSummary),
-	}
-}
-
 func (m *VChannelRecoveryModule) visibleSnapshot(baseGrowingTimeTick uint64, dataVersion qviews.DataVersion) walview.VisibleSegmentSnapshot {
 	snapshot := walview.VisibleSegmentSnapshot{
 		VChannel:            m.vchannel,
@@ -597,7 +587,7 @@ func (m *VChannelRecoveryModule) visibleSnapshot(baseGrowingTimeTick uint64, dat
 }
 
 func (m *VChannelRecoveryModule) segmentSnapshotDataVersion() qviews.DataVersion {
-	dataVersion := segmentDataVersionSummary(m.segmentDataVersionSummary)
+	dataVersion := m.vchannelView.SegmentDataVersionSummary()
 	for _, view := range m.segments {
 		sealedVersion, ok := view.SealedDataVersion(m.vchannel)
 		if ok && sealedVersion.GT(dataVersion) {
@@ -667,6 +657,7 @@ func (m *VChannelRecoveryModule) tryFinalizeSegmentLocked(segmentID int64, view 
 	if !view.TryFinalizeTombstoneAt(oldest, hasOldest) {
 		return false
 	}
+	m.advanceSegmentDataVersionSummaryLocked(view)
 	m.markSegmentDirty(segmentID, view)
 	return true
 }
@@ -722,7 +713,7 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 	defer m.mu.Unlock()
 	var snapshots []moduleapi.DirtySnapshot
 	for segmentID, view := range m.cleanupSegments {
-		if !view.TombstonedCleanupReady(cleanup.MetaPhysicalTimeTick, cleanup.DataPhysicalTimeTick) {
+		if !m.segmentCleanupReadyLocked(view, cleanup) {
 			continue
 		}
 		meta := view.AssignmentMeta()
@@ -743,6 +734,22 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 		))
 	}
 	return snapshots
+}
+
+func (m *VChannelRecoveryModule) advanceSegmentDataVersionSummaryLocked(view *segment.SegmentView) bool {
+	vchannel, sealedVersion, ok := view.TombstonedSealedDataVersion()
+	if !ok || vchannel != m.vchannel || m.vchannelView == nil {
+		return false
+	}
+	return m.vchannelView.AdvanceSegmentDataVersionSummary(sealedVersion)
+}
+
+func (m *VChannelRecoveryModule) segmentCleanupReadyLocked(view *segment.SegmentView, cleanup moduleapi.CleanupContext) bool {
+	if m.vchannelView == nil || !view.TombstonedCleanupReady(cleanup.MetaPhysicalTimeTick, cleanup.DataPhysicalTimeTick) {
+		return false
+	}
+	_, sealedVersion, ok := view.TombstonedSealedDataVersion()
+	return ok && m.vchannelView.PersistedSegmentDataVersionSummary().GTE(sealedVersion)
 }
 
 func (m *VChannelRecoveryModule) completeSegmentCleanup(segmentID int64, view *segment.SegmentView) {
@@ -800,20 +807,6 @@ func (m *VChannelRecoveryModule) transformFrontierTimeTick(kind moduleapi.DataPr
 		return m.transformLog.DataBarrierTimeTick()
 	}
 	return math.MaxUint64
-}
-
-func cloneSegmentDataVersionSummary(summary *streamingpb.SegmentDataVersionSummary) *streamingpb.SegmentDataVersionSummary {
-	if summary == nil {
-		return nil
-	}
-	return proto.Clone(summary).(*streamingpb.SegmentDataVersionSummary)
-}
-
-func segmentDataVersionSummary(summary *streamingpb.SegmentDataVersionSummary) qviews.DataVersion {
-	if summary == nil || summary.GetDataVersion() == nil {
-		return qviews.DataVersion{}
-	}
-	return qviews.FromProtoDataVersion(summary.GetDataVersion())
 }
 
 func deleteReplayStartAfter(snapshot walview.VisibleSegmentSnapshot) uint64 {

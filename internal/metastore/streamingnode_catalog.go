@@ -19,6 +19,10 @@ type StreamingNodeCataLog interface {
 	// SaveVChannels save vchannel on current pchannel.
 	SaveVChannels(ctx context.Context, pchannelName string, vchannels map[string]*streamingpb.VChannelMeta) error
 
+	// SaveVChannelBaseMetas saves only the vchannel base records without
+	// rewriting separately stored schema records.
+	SaveVChannelBaseMetas(ctx context.Context, pchannelName string, vchannels map[string]*streamingpb.VChannelMeta) error
+
 	// DropVChannels drops retained vchannel recovery meta on current pchannel.
 	DropVChannels(ctx context.Context, pchannelName string, vchannels map[string]*streamingpb.VChannelMeta) error
 
@@ -34,22 +38,18 @@ type StreamingNodeCataLog interface {
 	// ListSegmentAssignment list all segment assignments for the wal.
 	ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error)
 
-	// ListSegmentDataVersionSummaries lists segment data version summaries for the wal.
-	ListSegmentDataVersionSummaries(ctx context.Context, pChannelName string) (map[string]*streamingpb.SegmentDataVersionSummary, error)
-
-	// SaveSegmentDataVersionSummaries saves segment data version summaries for the wal.
-	SaveSegmentDataVersionSummaries(ctx context.Context, pChannelName string, summaries map[string]*streamingpb.SegmentDataVersionSummary) error
-
-	// ListQueryViews lists persisted StreamingNode query views for the WAL.
-	ListQueryViews(ctx context.Context, pChannelName string) ([]*viewpb.QueryViewOfShard, error)
-
-	// SaveQueryViews persists Up views and removes non-Up recovery records.
-	SaveQueryViews(ctx context.Context, pChannelName string, views []*viewpb.QueryViewOfShard) error
 	// SaveSegmentAssignments save the segment assignments for the wal.
 	SaveSegmentAssignments(ctx context.Context, pChannelName string, infos map[int64]*streamingpb.SegmentAssignmentMeta) error
 
 	// DropSegmentAssignments drops retained segment assignment recovery meta for the wal.
 	DropSegmentAssignments(ctx context.Context, pChannelName string, segmentIDs []int64) error
+
+	// ListQueryViews lists persisted StreamingNode query views for the wal.
+	ListQueryViews(ctx context.Context, pChannelName string) ([]*viewpb.QueryViewOfShard, error)
+
+	// SaveQueryViews saves StreamingNode query views for the wal.
+	SaveQueryViews(ctx context.Context, pChannelName string, views []*viewpb.QueryViewOfShard) error
+
 	// GetConsumeCheckpoint gets the consuming checkpoint of the wal.
 	// Return nil, nil if the checkpoint is not exist.
 	GetConsumeCheckpoint(ctx context.Context, pChannelName string) (*streamingpb.WALCheckpoint, error)

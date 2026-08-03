@@ -27,10 +27,9 @@ import (
 type PChannelManagerConfig struct {
 	PChannel string
 
-	VChannelMetas             map[string]*streamingpb.VChannelMeta
-	Segments                  map[int64]*streamingpb.SegmentAssignmentMeta
-	SegmentDataVersionSummary map[string]*streamingpb.SegmentDataVersionSummary
-	TransformLogMetas         map[string]*streamingpb.VChannelTransformLogMeta
+	VChannelMetas     map[string]*streamingpb.VChannelMeta
+	Segments          map[int64]*streamingpb.SegmentAssignmentMeta
+	TransformLogMetas map[string]*streamingpb.VChannelTransformLogMeta
 
 	Runtime                   moduleapi.Runtime
 	Logger                    *mlog.Logger
@@ -112,9 +111,6 @@ func (m *PChannelRecoveryManager) initialVChannels(config PChannelManagerConfig)
 	for vchannel := range m.segmentsByVChannel {
 		index[vchannel] = struct{}{}
 	}
-	for vchannel := range config.SegmentDataVersionSummary {
-		index[vchannel] = struct{}{}
-	}
 	for vchannel := range config.TransformLogMetas {
 		index[vchannel] = struct{}{}
 	}
@@ -144,7 +140,6 @@ func groupSegmentsByVChannel(segments map[int64]*streamingpb.SegmentAssignmentMe
 func (m *PChannelRecoveryManager) releaseInitialState() {
 	m.config.VChannelMetas = nil
 	m.config.Segments = nil
-	m.config.SegmentDataVersionSummary = nil
 	m.config.TransformLogMetas = nil
 	m.segmentsByVChannel = nil
 }
@@ -190,7 +185,6 @@ func (m *PChannelRecoveryManager) SwitchIntoMetaAndData() moduleapi.ModuleSnapsh
 func aggregateModuleSnapshots(snapshots []moduleapi.ModuleSnapshot) moduleapi.ModuleSnapshot {
 	vchannels := make(map[string]*streamingpb.VChannelMeta)
 	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta)
-	summaries := make(map[string]*streamingpb.SegmentDataVersionSummary)
 	transformLogs := make(map[string]*streamingpb.VChannelTransformLogMeta)
 	writePathVChannels := make(map[string]moduleapi.VChannelWritePathRecoveryState)
 	writePathSegments := make(map[int64]moduleapi.SegmentWritePathRecoveryState)
@@ -213,9 +207,6 @@ func aggregateModuleSnapshots(snapshots []moduleapi.ModuleSnapshot) moduleapi.Mo
 			for segmentID, meta := range typed.Segments {
 				segments[segmentID] = meta
 			}
-			for vchannel, summary := range typed.DataVersionSummaries {
-				summaries[vchannel] = summary
-			}
 		case *moduleapi.TransformLogModuleSnapshot:
 			for vchannel, meta := range typed.TransformLogs {
 				transformLogs[vchannel] = meta
@@ -237,10 +228,9 @@ func aggregateModuleSnapshots(snapshots []moduleapi.ModuleSnapshot) moduleapi.Mo
 	if len(vchannels) > 0 {
 		result = append(result, &moduleapi.VChannelModuleSnapshot{VChannels: vchannels})
 	}
-	if len(segments) > 0 || len(summaries) > 0 {
+	if len(segments) > 0 {
 		result = append(result, &moduleapi.SegmentModuleSnapshot{
-			Segments:             segments,
-			DataVersionSummaries: summaries,
+			Segments: segments,
 		})
 	}
 	if len(transformLogs) > 0 {
@@ -469,7 +459,6 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 		VChannel:                   vchannel,
 		VChannelMeta:               m.config.VChannelMetas[vchannel],
 		Segments:                   m.segmentsByVChannel[vchannel],
-		SegmentDataVersionSummary:  m.config.SegmentDataVersionSummary[vchannel],
 		TransformLogMeta:           m.config.TransformLogMetas[vchannel],
 		Runtime:                    runtime,
 		Logger:                     m.config.Logger,
@@ -494,6 +483,9 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 	}
 	if module.HasCleanupCandidates() {
 		m.markCleanupCandidate(module)
+	}
+	if module.vchannelView != nil && module.vchannelView.SegmentDataVersionSummary().GT(module.vchannelView.PersistedSegmentDataVersionSummary()) {
+		m.markModuleDirty(module)
 	}
 	return module, nil
 }
