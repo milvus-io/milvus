@@ -2905,3 +2905,115 @@ TEST_F(FlushGrowingSegmentTest, FlushSealedSegmentFails) {
     EXPECT_NE(status.error_code, Success);
     free(const_cast<char*>(status.error_msg));
 }
+
+// Nullable embedding list with a null row, a valid-but-empty row, and a row
+// holding one vector. The column uses mapping/compact storage, so flush's
+// BuildVectorArrayForChunk must re-derive null rows and physical offsets
+// from the offset mapping while writing logical rows out.
+TEST_F(FlushGrowingSegmentTest, FlushNullableEmbListMixedRows) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    constexpr int dim = 4;
+    auto vec_fid = schema->AddDebugVectorArrayField(
+        "structA[array_vec]", DataType::VECTOR_FLOAT, dim, "L2", true);
+    schema->set_primary_field_id(pk_fid);
+
+    constexpr int64_t N = 3;
+    VectorFieldProto expected_empty;
+    expected_empty.set_dim(dim);
+    expected_empty.mutable_float_vector();
+    VectorFieldProto expected_target;
+    expected_target.set_dim(dim);
+    for (int d = 0; d < dim; ++d) {
+        expected_target.mutable_float_vector()->add_data(1.0f + d);
+    }
+
+    auto dataset = DataGen(schema, N, 42, 0, 1, 1);
+    for (int i = 0; i < dataset.raw_->fields_data_size(); ++i) {
+        auto* field_data = dataset.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != vec_fid.get()) {
+            continue;
+        }
+        auto* rows = field_data->mutable_vectors()
+                         ->mutable_vector_array()
+                         ->mutable_data();
+        rows->Clear();
+        // row 0: null placeholder; row 1: valid but empty; row 2: payload.
+        *rows->Add() = expected_empty;
+        *rows->Add() = expected_empty;
+        *rows->Add() = expected_target;
+        field_data->mutable_valid_data()->Clear();
+        field_data->add_valid_data(false);
+        field_data->add_valid_data(true);
+        field_data->add_valid_data(true);
+        break;
+    }
+
+    // chunk_rows=1: the two physically stored rows land in separate physical
+    // chunks, so the flush walk crosses a chunk boundary in compact storage
+    // while the logical walk still sees three rows.
+    SegcoreConfig segcore_config;
+    segcore_config.set_chunk_rows(1);
+    auto segment =
+        CreateGrowingSegment(schema, empty_index_meta, 1, segcore_config);
+    ASSERT_NE(segment, nullptr);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
+    std::string segment_path = test_dir_ + "/segment_nullable_emblist";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = nullptr;
+    config.text_lob_paths = nullptr;
+    config.num_text_columns = 0;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+
+    // Read the column back and pin down the exact content: the null row must
+    // stay null (not become an empty list), the valid-but-empty row must stay
+    // a valid zero-length list (not become null), and the payload row must
+    // land at its own offset with its data intact.
+    auto field_datas = ReadFlushedFieldData(segment_path,
+                                            result,
+                                            vec_fid,
+                                            DataType::VECTOR_ARRAY,
+                                            /*nullable=*/true,
+                                            dim,
+                                            DataType::VECTOR_FLOAT);
+    ASSERT_EQ(field_datas.size(), 1);
+    ASSERT_EQ(field_datas[0]->get_num_rows(), N);
+    ASSERT_EQ(field_datas[0]->get_valid_rows(), 2);
+    EXPECT_FALSE(field_datas[0]->is_valid(0));
+    EXPECT_TRUE(field_datas[0]->is_valid(1));
+    EXPECT_TRUE(field_datas[0]->is_valid(2));
+
+    auto vector_array_data =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::VectorArray>>(
+            field_datas[0]);
+    ASSERT_NE(vector_array_data, nullptr);
+    // value_at indexes the compacted valid rows: 0 -> logical row 1 (the
+    // valid-but-empty list), 1 -> logical row 2 (the payload). Structural
+    // asserts rather than proto byte comparison, so an absent-vs-empty
+    // float_vector presence bit cannot mask a real mismatch.
+    const auto empty_out = vector_array_data->value_at(0)->output_data();
+    EXPECT_EQ(empty_out.dim(), dim);
+    EXPECT_EQ(empty_out.float_vector().data_size(), 0);
+    const auto target_out = vector_array_data->value_at(1)->output_data();
+    EXPECT_EQ(target_out.dim(), dim);
+    ASSERT_EQ(target_out.float_vector().data_size(), dim);
+    for (int d = 0; d < dim; ++d) {
+        EXPECT_FLOAT_EQ(target_out.float_vector().data(d), 1.0f + d);
+    }
+
+    FreeFlushResult(&result);
+}

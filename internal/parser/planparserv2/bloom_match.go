@@ -19,6 +19,8 @@ package planparserv2
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
+	"math/bits"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
@@ -49,6 +51,11 @@ const (
 	mbf1DomainInt64 = 1 << 0
 	mbf1DomainUTF8  = 1 << 1
 	mbf1DomainKnown = mbf1DomainInt64 | mbf1DomainUTF8
+
+	// Accepted false-positive rate range, mirroring sbbf.MinFPR / sbbf.MaxFPR.
+	// Used only to bound the fpr suggested in the over-size error.
+	mbf1MinFPR = 0.0001
+	mbf1MaxFPR = 0.05
 )
 
 // bloom_match(field, {blob}) — approximate membership filter. The client builds
@@ -100,7 +107,7 @@ func checkBloomMatchField(columnInfo *planpb.ColumnInfo, argText string) error {
 // validateBloomFilterBlob validates a client pre-built SBBF blob (raw bytes) and
 // returns it ready to embed into the plan. The client builds the bit-identical
 // MBF1/SBBF blob (client/sbbf, reproducible cross-language) and ships the
-// compact ~32 MB blob as a raw bytes template value — no proxy-side build. The
+// compact blob as a raw bytes template value — no proxy-side build. The
 // blob declares the value domains it was built from, which
 // checkBloomFilterValueDomain matches against the target field; this validation
 // covers the envelope itself (magic/version/algo/domains/num_blocks/body length)
@@ -108,11 +115,11 @@ func checkBloomMatchField(columnInfo *planpb.ColumnInfo, argText string) error {
 // is rejected here at the proxy rather than fanned out to QueryNodes.
 func validateBloomFilterBlob(blob []byte) ([]byte, error) {
 	// Per-blob gate. proxy.maxBloomFilterSize budgets the SBBF *body* (default
-	// 32 MiB); the fixed 32-byte MBF1 header is allowed on top, hence the
+	// 64 MiB); the fixed 32-byte MBF1 header is allowed on top, hence the
 	// `+ mbf1HeaderSize`. Budgeting the body rather than the whole blob matters
-	// because the SBBF body is always a power of two: a full 32 MiB body is
-	// 32 MiB + 32 B, so a whole-blob cap of exactly 32 MiB would reject it and
-	// silently drop the usable ceiling to the next power-of-two-down (a 16 MiB
+	// because the SBBF body is always a power of two: a full 64 MiB body is
+	// 64 MiB + 32 B, so a whole-blob cap of exactly 64 MiB would reject it and
+	// silently drop the usable ceiling to the next power-of-two-down (a 32 MiB
 	// body, ~half the member capacity). The 128 MiB MBF1 num_blocks format cap
 	// (checked in validateMBF1Envelope) remains the hard ceiling above this.
 	//
@@ -121,13 +128,51 @@ func validateBloomFilterBlob(blob []byte) ([]byte, error) {
 	// remains necessary to reject one oversized filter at its input boundary.
 	if maxSize := paramtable.Get().ProxyCfg.MaxBloomFilterSize.GetAsInt(); len(blob) > maxSize+mbf1HeaderSize {
 		return nil, merr.WrapErrParameterInvalidMsg(
-			"bloom_match filter blob body is %d bytes, exceeding proxy.maxBloomFilterSize (%d)",
-			len(blob)-mbf1HeaderSize, maxSize)
+			"bloom_match filter blob body is %d bytes, exceeding proxy.maxBloomFilterSize (%d)%s",
+			len(blob)-mbf1HeaderSize, maxSize, oversizedBlobHint(blob, maxSize))
 	}
 	if err := validateMBF1Envelope(blob); err != nil {
 		return nil, merr.Wrap(err, "bloom_match filter blob is invalid")
 	}
 	return blob, nil
+}
+
+// oversizedBlobHint turns "your filter is too big" into something the caller
+// can act on. Without it the only remedy visible from the error is "send fewer
+// members", when the usual fix is a higher fpr: SBBF bodies are powers of two,
+// so a member count just past a boundary doubles the blob, and one step of fpr
+// brings it back under the cap.
+//
+// It returns "" when no advice is possible. The blob is not yet validated here,
+// so n_declared is read defensively and treated as a hint only — the caller's
+// error is already decided and cannot be made wrong by a bogus value.
+func oversizedBlobHint(blob []byte, maxSize int) string {
+	if len(blob) < mbf1HeaderSize || maxSize < mbf1BytesPerBlock {
+		return ""
+	}
+	n := binary.LittleEndian.Uint64(blob[8:16])
+	if n == 0 || n > math.MaxInt64 {
+		return ""
+	}
+	// Only powers of two are reachable body sizes, so the usable budget is the
+	// largest power of two that fits under the cap, not the cap itself.
+	usable := uint64(1) << (bits.Len64(uint64(maxSize)) - 1)
+
+	// Invert the SBBF sizing formula m = -8n/ln(1-fpp^(1/8)) at m = usable*8
+	// bits: fpp = (1 - e^(-n/usable))^8. Ceil to four decimals so the suggested
+	// value is never a rounding step below what actually fits — a larger fpr
+	// only ever yields a smaller filter.
+	fpr := math.Pow(1-math.Exp(-float64(n)/float64(usable)), 8)
+	fpr = math.Ceil(fpr*10000) / 10000
+	if fpr < mbf1MinFPR {
+		fpr = mbf1MinFPR
+	}
+	if fpr > mbf1MaxFPR {
+		return fmt.Sprintf("; the declared %d members do not fit %d bytes even at the maximum fpr %g — "+
+			"reduce the member count or raise proxy.maxBloomFilterSize", n, usable, mbf1MaxFPR)
+	}
+	return fmt.Sprintf("; rebuild the filter with fpr >= %g for the declared %d members "+
+		"(SBBF bodies are powers of two, so a smaller fpr jumps straight to the next size)", fpr, n)
 }
 
 // validateMBF1Envelope structurally validates the MBF1 blob header

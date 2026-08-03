@@ -572,6 +572,13 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		DefaultValue: "64",
 		Doc:          `maximum number of operations in a single etcd transaction`,
 		Export:       true,
+		Formatter: func(value string) string {
+			maxTxnNum := getAsInt(value)
+			if maxTxnNum < 1 {
+				return "64"
+			}
+			return strconv.Itoa(maxTxnNum)
+		},
 	}
 	p.MaxEtcdTxnNum.Init(base.mgr)
 
@@ -720,14 +727,17 @@ type WoodpeckerConfig struct {
 	MetaPrefix ParamItem `refreshable:"false"`
 
 	// client
-	AppendQueueSize         ParamItem `refreshable:"true"`
-	AppendMaxRetries        ParamItem `refreshable:"true"`
-	AppendMaxBatchEntries   ParamItem `refreshable:"false"`
-	AppendMaxBatchBytes     ParamItem `refreshable:"false"`
-	SegmentRollingMaxSize   ParamItem `refreshable:"true"`
-	SegmentRollingMaxTime   ParamItem `refreshable:"true"`
-	SegmentRollingMaxBlocks ParamItem `refreshable:"true"`
-	AuditorMaxInterval      ParamItem `refreshable:"true"`
+	AppendQueueSize           ParamItem `refreshable:"true"`
+	AppendMaxRetries          ParamItem `refreshable:"true"`
+	AppendMaxBatchEntries     ParamItem `refreshable:"false"`
+	AppendMaxBatchBytes       ParamItem `refreshable:"false"`
+	SegmentRollingMaxSize     ParamItem `refreshable:"true"`
+	SegmentRollingMaxTime     ParamItem `refreshable:"true"`
+	SegmentRollingMaxBlocks   ParamItem `refreshable:"true"`
+	AuditorMaxInterval        ParamItem `refreshable:"true"`
+	DirectReadEnabled         ParamItem `refreshable:"false"`
+	DirectReadMaxBatchSize    ParamItem `refreshable:"false"`
+	DirectReadMaxFetchThreads ParamItem `refreshable:"false"`
 
 	// quorum configuration
 	// Buffer pools for different regions
@@ -855,6 +865,33 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.AuditorMaxInterval.Init(base.mgr)
+
+	p.DirectReadEnabled = ParamItem{
+		Key:          "woodpecker.client.directRead.enabled",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "Whether the Woodpecker client reads sealed segments directly from object storage in service storage mode.",
+		Export:       true,
+	}
+	p.DirectReadEnabled.Init(base.mgr)
+
+	p.DirectReadMaxBatchSize = ParamItem{
+		Key:          "woodpecker.client.directRead.maxBatchSize",
+		Version:      "2.6.0",
+		DefaultValue: "16M",
+		Doc:          "Maximum batch size for direct reads from object storage in service storage mode.",
+		Export:       true,
+	}
+	p.DirectReadMaxBatchSize.Init(base.mgr)
+
+	p.DirectReadMaxFetchThreads = ParamItem{
+		Key:          "woodpecker.client.directRead.maxFetchThreads",
+		Version:      "2.6.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of concurrent fetch threads used by Woodpecker direct reads from object storage.",
+		Export:       true,
+	}
+	p.DirectReadMaxFetchThreads.Init(base.mgr)
 
 	// Buffer pools for different regions
 	p.QuorumBufferPools = ParamItem{

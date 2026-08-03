@@ -40,15 +40,17 @@ func allocWALSchemaForTest(t *testing.T, collectionID int64, vchannel string, sc
 func TestMaterializeFunctionFieldsSkipsOmittedVersionWithoutFunctions(t *testing.T) {
 	collectionID := int64(99000)
 	vchannel := "v1"
+	allocWALSchemaForTest(t, collectionID, vchannel, 1)
 	shardManager := mock_shards.NewMockShardManager(t)
 	impl := &shardInterceptor{
 		shardManager: shardManager,
 	}
-	msg := message.NewInsertMessageBuilderV1().
+	validMsg := message.NewInsertMessageBuilderV1().
 		WithVChannel(vchannel).
 		WithHeader(&messagespb.InsertMessageHeader{CollectionId: collectionID}).
 		WithBody(&msgpb.InsertRequest{}).
 		MustBuildMutable()
+	msg := message.NewMutableMessageBeforeAppend([]byte("invalid insert body"), validMsg.Properties().ToRawMap())
 
 	insertMsg := message.MustAsMutableInsertMessageV1(msg)
 	err := impl.materializeFunctionFields(context.Background(), insertMsg, collectionID, function.LatestFunctionRunnerVersion)

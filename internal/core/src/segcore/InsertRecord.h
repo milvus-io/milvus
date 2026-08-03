@@ -1912,13 +1912,6 @@ class InsertRecordGrowing {
         data_.emplace(field_id, std::move(column));
     }
 
-    void
-    drop_field_data(FieldId field_id) {
-        std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
-        data_.erase(field_id);
-        valid_data_.erase(field_id);
-    }
-
     int64_t
     row_count() const {
         return ack_responder_.GetAck();
@@ -1972,7 +1965,7 @@ class InsertRecordGrowing {
     std::unordered_map<FieldId, ThreadSafeValidDataPtr> valid_data_{};
     mutable std::shared_mutex shared_mutex_{};
     // Protects the structure of data_ / valid_data_ against concurrent
-    // rehash: structural writes (append_*/drop/clear during schema evolution)
+    // rehash: structural writes (append_*/clear during schema evolution)
     // take it unique, lookups (get_data_base/get_valid_data/...) take it shared.
     // Kept separate from shared_mutex_ so frequent reads do not contend with
     // pk inserts.
@@ -1981,10 +1974,10 @@ class InsertRecordGrowing {
     // lifetime. The raw VectorBase* returned by get_data_base() escapes the
     // shared lock, so callers rely on no concurrent erase()/clear() of the
     // entry they hold (append-only mutation is safe). Today that holds because
-    // drop_field_data() has no callers and clear() is never called
-    // concurrently with reads; whoever adds drop-field support (e.g. schema
-    // evolution dropping fields) must also fence element lifetime, this lock
-    // alone will not save the escaped pointers.
+    // the maps are append-only -- there is no per-field erase, and clear() is
+    // never called concurrently with reads. Whoever adds drop-field support
+    // (e.g. schema evolution dropping fields) must also fence element
+    // lifetime; this lock alone will not save the escaped pointers.
     mutable std::shared_mutex field_map_mutex_{};
 };
 

@@ -118,6 +118,24 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxSize = config.NewByteSize(cfg.SegmentRollingMaxSize.GetAsSize())
 	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds()))
 	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxBlocks = cfg.SegmentRollingMaxBlocks.GetAsInt64()
+	wpConfig.Woodpecker.Client.DirectRead.Enabled = cfg.DirectReadEnabled.GetAsBool()
+	// Woodpecker validates these defaults in NewConfiguration before Milvus applies
+	// its overrides. GetAsSize/GetAsInt return 0 for malformed input, while a
+	// non-positive direct-read batch size can make a sealed segment look like EOF
+	// without scheduling any block reads, and a non-positive pool size is treated as
+	// unbounded. Keep the already-validated Woodpecker values on invalid input.
+	if v := cfg.DirectReadMaxBatchSize.GetAsSize(); v > 0 {
+		wpConfig.Woodpecker.Client.DirectRead.MaxBatchSize = config.NewByteSize(v)
+	} else {
+		mlog.Warn(context.TODO(), "invalid woodpecker directRead maxBatchSize, keeping woodpecker built-in default",
+			mlog.String("value", cfg.DirectReadMaxBatchSize.GetValue()))
+	}
+	if v := cfg.DirectReadMaxFetchThreads.GetAsInt(); v > 0 {
+		wpConfig.Woodpecker.Client.DirectRead.MaxFetchThreads = v
+	} else {
+		mlog.Warn(context.TODO(), "invalid woodpecker directRead maxFetchThreads, keeping woodpecker built-in default",
+			mlog.String("value", cfg.DirectReadMaxFetchThreads.GetValue()))
+	}
 
 	// quorum configuration
 	setQuorumConfig(wpConfig, cfg)

@@ -23,8 +23,10 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/GrowingOffsetMapping.h"
 #include "common/OffsetMapping.h"
 #include "common/OpContext.h"
+#include "common/SealedOffsetMapping.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
@@ -431,6 +433,30 @@ TEST(Util_Segcore, TransformBitsetMasksNullableVectorRowsOutsideLogicalView) {
     EXPECT_FALSE(physical_bitset[0]);
     EXPECT_FALSE(physical_bitset[1]);
     EXPECT_TRUE(physical_bitset[2]);
+}
+
+TEST(Util_Segcore, GrowingTransformBitsetMaterializesNoFilterSnapshot) {
+    using namespace milvus;
+
+    std::array<bool, 5> valid_data = {true, true, false, true, true};
+    GrowingOffsetMapping mapping;
+    mapping.Append(valid_data.data(), valid_data.size(), 0, 0);
+
+    BitsetType logical_bitset(valid_data.size());
+    BitsetView logical_view(logical_bitset);
+
+    TargetBitmap physical_bitset;
+    auto status = mapping.TransformBitset(logical_view, physical_bitset);
+
+    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::Transformed);
+    ASSERT_EQ(physical_bitset.size(), 4);
+    EXPECT_TRUE(physical_bitset.none());
+
+    std::array<bool, 2> later_valid_data = {true, true};
+    mapping.Append(later_valid_data.data(), later_valid_data.size(), 5, 4);
+    EXPECT_EQ(mapping.GetValidCount(), 6);
+    EXPECT_EQ(physical_bitset.size(), 4);
+    EXPECT_TRUE(physical_bitset.none());
 }
 
 TEST(Util_Segcore, TransformBitsetKeepsEmptyViewAsAllVisibleFastPath) {

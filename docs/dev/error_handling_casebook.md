@@ -258,13 +258,18 @@ This is the *reverse* of Pattern 1: here the C++ side really is validating
 user input, so collapsing it into the system table would have been the
 misclassification.
 
-**segcore pass-through codes collapse on the wire.** C++ codes 2004–2043 are
+**segcore pass-through codes collapse on the wire.** Most C++ codes are
 deliberately projected to 2000 (`ErrSegcore`) on the wire, with the original
-code preserved in `Reason` as `segcoreCode=`; only named sentinels
-(2001/2002/2037–2040/2099) keep distinct wire codes — note 2037 and 2040 are
-also retriable, a flag the 2000 collapse would drop. Don't "improve" a call
-site by hand-picking a 20xx number — go through `merr.SegcoreError(code, msg)`
-and let the table decide retriability and projection. Guard tests:
+code preserved in `Reason` as `segcoreCode=`. This includes C++ codes 2001 and
+2002; they do **not** map to the similarly numbered Go sentinels. The dedicated
+`segcoreCodeTable` mappings are: 2003 → `ErrSegcoreUnsupported` (wire 2001),
+2033 → `ErrSegcorePretendFinished` (wire 2002, control-flow signal), 2037 →
+`ErrSegcoreFollyOtherException`, 2038 → `ErrSegcoreFollyCancel`, 2039 →
+`ErrSegcoreOutOfRange`, 2040 → `ErrSegcoreGCPNativeError`, 2046 →
+`ErrCollectionSchemaVersionNotReady` (wire 110), and 2099 → `KnowhereError`.
+Codes 2037, 2040, and 2046 are retriable. Don't "improve" a call site by
+hand-picking a 20xx number — go through `merr.SegcoreError(code, msg)` and let
+the table decide retriability and projection. Guard tests:
 `pkg/util/merr/segcore_test.go` (`wire_code_projection`,
 `TestSegcoreCodeTableCoverage`).
 

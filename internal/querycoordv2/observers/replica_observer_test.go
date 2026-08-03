@@ -20,13 +20,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -65,6 +68,51 @@ type ReplicaObserverSuite struct {
 type replicaObserverTargetManager struct {
 	meta.TargetManagerInterface
 	collectionID int64
+}
+
+type countingChannelDistManager struct {
+	meta.ChannelDistManagerInterface
+	getByFilterCalls int
+	onGetByFilter    func(call int)
+}
+
+func (m *countingChannelDistManager) GetByFilter(filters ...meta.ChannelDistFilter) []*meta.DmChannel {
+	m.getByFilterCalls++
+	if m.onGetByFilter != nil {
+		m.onGetByFilter(m.getByFilterCalls)
+	}
+	return m.ChannelDistManagerInterface.GetByFilter(filters...)
+}
+
+type countingSegmentDistManager struct {
+	meta.SegmentDistManagerInterface
+	getByFilterCalls int
+}
+
+type saveReplicaRecordingCatalog struct {
+	metastore.QueryCoordCatalog
+	saveReplicaCalls    int
+	failSaveReplicaCall int
+	saveErr             error
+	saveReplicaBatchIDs [][]int64
+}
+
+func (c *saveReplicaRecordingCatalog) SaveReplica(ctx context.Context, replicas ...*querypb.Replica) error {
+	c.saveReplicaCalls++
+	replicaIDs := make([]int64, 0, len(replicas))
+	for _, replica := range replicas {
+		replicaIDs = append(replicaIDs, replica.GetID())
+	}
+	c.saveReplicaBatchIDs = append(c.saveReplicaBatchIDs, replicaIDs)
+	if c.saveReplicaCalls == c.failSaveReplicaCall {
+		return c.saveErr
+	}
+	return nil
+}
+
+func (m *countingSegmentDistManager) GetByFilter(filters ...meta.SegmentDistFilter) []*meta.Segment {
+	m.getByFilterCalls++
+	return m.SegmentDistManagerInterface.GetByFilter(filters...)
 }
 
 func (m *replicaObserverTargetManager) GetDmChannelsByCollection(ctx context.Context, collectionID int64, scope meta.TargetScope) map[string]*meta.DmChannel {
@@ -313,6 +361,195 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 		nodes.Insert(r.GetRWSQNodes()...)
 	}
 	suite.Equal(nodes.Len(), 2)
+}
+
+func (suite *ReplicaObserverSuite) TestCheckStreamingQueryNodesChecksDistributionForRONodes() {
+	suite.observer.Stop()
+
+	ctx := context.Background()
+	err := suite.meta.PutCollection(ctx, utils.CreateTestCollection(suite.collectionID, 1))
+	suite.NoError(err)
+	_, err = suite.meta.Spawn(ctx, suite.collectionID, map[string]int{"rg1": 1}, nil, commonpb.LoadPriority_LOW)
+	suite.NoError(err)
+
+	suite.observer.checkStreamingQueryNodesInReplica(map[string]typeutil.UniqueSet{
+		"rg1": typeutil.NewUniqueSet(int64(1)),
+	})
+	suite.distMgr.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collectionID,
+			ChannelName:  "test-insert-channel1",
+		},
+	})
+
+	channelDist := &countingChannelDistManager{
+		ChannelDistManagerInterface: suite.distMgr.ChannelDistManager,
+	}
+	segmentDist := &countingSegmentDistManager{
+		SegmentDistManagerInterface: suite.distMgr.SegmentDistManager,
+	}
+	suite.distMgr.ChannelDistManager = channelDist
+	suite.distMgr.SegmentDistManager = segmentDist
+
+	suite.observer.checkStreamingQueryNodesInReplica(map[string]typeutil.UniqueSet{
+		"rg1": typeutil.NewUniqueSet(int64(2)),
+	})
+
+	replicas := suite.meta.GetByCollection(ctx, suite.collectionID)
+	suite.Require().Len(replicas, 1)
+	suite.Equal([]int64{1}, replicas[0].GetROSQNodes())
+	suite.Equal(1, channelDist.getByFilterCalls)
+	suite.Equal(1, segmentDist.getByFilterCalls)
+
+	suite.distMgr.ChannelDistManager.Update(1)
+	suite.observer.checkStreamingQueryNodesInReplica(map[string]typeutil.UniqueSet{
+		"rg1": typeutil.NewUniqueSet(int64(2)),
+	})
+
+	replicas = suite.meta.GetByCollection(ctx, suite.collectionID)
+	suite.Empty(replicas[0].GetROSQNodes())
+	suite.Equal(2, channelDist.getByFilterCalls)
+	suite.Equal(2, segmentDist.getByFilterCalls)
+}
+
+func (suite *ReplicaObserverSuite) TestCheckStreamingQueryNodesFlushesRemovalBeforeScanningNextBatch() {
+	suite.observer.Stop()
+
+	ctx := context.Background()
+	suite.NoError(suite.meta.PutCollection(ctx, utils.CreateTestCollection(suite.collectionID, 2)))
+	replica1 := meta.NewReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  suite.collectionID,
+		ResourceGroup: "rg1",
+		RoSqNodes:     []int64{1},
+	})
+	replica2 := meta.NewReplica(&querypb.Replica{
+		ID:            2,
+		CollectionID:  suite.collectionID,
+		ResourceGroup: "rg1",
+		RoSqNodes:     []int64{2},
+	})
+	suite.NoError(suite.meta.Put(ctx, replica1, replica2))
+
+	maxTxnNumKey := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.Key
+	originalMaxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetValue()
+	suite.NoError(paramtable.Get().Save(maxTxnNumKey, "1"))
+	suite.T().Cleanup(func() {
+		suite.NoError(paramtable.Get().Save(maxTxnNumKey, originalMaxTxnNum))
+	})
+
+	firstBatchCommitted := false
+	channelDist := &countingChannelDistManager{
+		ChannelDistManagerInterface: suite.distMgr.ChannelDistManager,
+		onGetByFilter: func(call int) {
+			if call == 2 {
+				firstBatchCommitted = len(suite.meta.Get(ctx, replica1.GetID()).GetROSQNodes()) == 0
+			}
+		},
+	}
+	suite.distMgr.ChannelDistManager = channelDist
+
+	suite.observer.checkStreamingQueryNodesInReplica(map[string]typeutil.UniqueSet{
+		"rg1": typeutil.NewUniqueSet(),
+	})
+
+	suite.True(firstBatchCommitted)
+	suite.Empty(suite.meta.Get(ctx, replica1.GetID()).GetROSQNodes())
+	suite.Empty(suite.meta.Get(ctx, replica2.GetID()).GetROSQNodes())
+}
+
+func TestCheckStreamingQueryNodesBatchesRecoveryByReplicaCountAndContinuesAfterError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	catalog := &saveReplicaRecordingCatalog{}
+	nodeMgr := session.NewNodeManager()
+	metadata := meta.NewMeta(RandomIncrementIDAllocator(), catalog, nodeMgr)
+
+	for collectionID, replicaNumber := range map[int64]int32{100: 2, 200: 1, 300: 2} {
+		require.NoError(t, metadata.PutCollectionWithoutSave(ctx, utils.CreateTestCollection(collectionID, replicaNumber)))
+	}
+	replicas := []*meta.Replica{
+		meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: "RG1"}),
+		meta.NewReplica(&querypb.Replica{ID: 2, CollectionID: 100, ResourceGroup: "RG1"}),
+		meta.NewReplica(&querypb.Replica{ID: 3, CollectionID: 200, ResourceGroup: "RG1"}),
+		meta.NewReplica(&querypb.Replica{ID: 4, CollectionID: 300, ResourceGroup: "RG1"}),
+		meta.NewReplica(&querypb.Replica{ID: 5, CollectionID: 300, ResourceGroup: "RG1"}),
+	}
+	require.NoError(t, metadata.Put(ctx, replicas...))
+
+	maxTxnNumKey := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.Key
+	originalMaxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetValue()
+	require.NoError(t, paramtable.Get().Save(maxTxnNumKey, "3"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Save(maxTxnNumKey, originalMaxTxnNum))
+	})
+
+	catalog.saveReplicaCalls = 0
+	catalog.saveReplicaBatchIDs = nil
+	catalog.failSaveReplicaCall = 1
+	catalog.saveErr = errors.New("save failed")
+
+	observer := NewReplicaObserver(metadata, meta.NewDistributionManager(nodeMgr), nil)
+	observer.checkStreamingQueryNodesInReplica(map[string]typeutil.UniqueSet{
+		"RG1": typeutil.NewUniqueSet(int64(101), int64(102)),
+	})
+
+	require.Len(t, catalog.saveReplicaBatchIDs, 2)
+	require.ElementsMatch(t, []int{2, 3}, []int{
+		len(catalog.saveReplicaBatchIDs[0]),
+		len(catalog.saveReplicaBatchIDs[1]),
+	})
+	failedReplicaIDs := typeutil.NewUniqueSet(catalog.saveReplicaBatchIDs[0]...)
+	succeededReplicaIDs := typeutil.NewUniqueSet(catalog.saveReplicaBatchIDs[1]...)
+	for _, replica := range replicas {
+		updated := metadata.Get(ctx, replica.GetID())
+		if failedReplicaIDs.Contain(replica.GetID()) {
+			require.Empty(t, updated.GetRWSQNodes())
+		} else {
+			require.True(t, succeededReplicaIDs.Contain(replica.GetID()))
+			require.NotEmpty(t, updated.GetRWSQNodes())
+		}
+	}
+}
+
+func TestCheckStreamingQueryNodesContinuesCleanupAfterBatchError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	catalog := &saveReplicaRecordingCatalog{}
+	nodeMgr := session.NewNodeManager()
+	metadata := meta.NewMeta(RandomIncrementIDAllocator(), catalog, nodeMgr)
+	require.NoError(t, metadata.PutCollectionWithoutSave(ctx, utils.CreateTestCollection(100, 2)))
+
+	replicas := []*meta.Replica{
+		meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: "RG1", RoSqNodes: []int64{101}}),
+		meta.NewReplica(&querypb.Replica{ID: 2, CollectionID: 100, ResourceGroup: "RG1", RoSqNodes: []int64{102}}),
+	}
+	require.NoError(t, metadata.Put(ctx, replicas...))
+
+	maxTxnNumKey := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.Key
+	originalMaxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetValue()
+	require.NoError(t, paramtable.Get().Save(maxTxnNumKey, "1"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Save(maxTxnNumKey, originalMaxTxnNum))
+	})
+
+	catalog.saveReplicaCalls = 0
+	catalog.saveReplicaBatchIDs = nil
+	catalog.failSaveReplicaCall = 1
+	catalog.saveErr = errors.New("save failed")
+
+	observer := NewReplicaObserver(metadata, meta.NewDistributionManager(nodeMgr), nil)
+	observer.checkStreamingQueryNodesInReplica(map[string]typeutil.UniqueSet{
+		"RG1": typeutil.NewUniqueSet(),
+	})
+
+	require.Len(t, catalog.saveReplicaBatchIDs, 2)
+	require.Len(t, catalog.saveReplicaBatchIDs[0], 1)
+	require.Len(t, catalog.saveReplicaBatchIDs[1], 1)
+	failedReplicaID := catalog.saveReplicaBatchIDs[0][0]
+	succeededReplicaID := catalog.saveReplicaBatchIDs[1][0]
+	require.NotEmpty(t, metadata.Get(ctx, failedReplicaID).GetROSQNodes())
+	require.Empty(t, metadata.Get(ctx, succeededReplicaID).GetROSQNodes())
 }
 
 func (suite *ReplicaObserverSuite) TearDownTest() {

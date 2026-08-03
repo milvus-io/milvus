@@ -159,6 +159,8 @@ ThrowIfFFIError(LoonFFIResult result, const std::string& context) {
     const char* msg = loon_ffi_get_errmsg(&result);
     std::string detail = msg != nullptr ? msg : "unknown error";
     loon_ffi_free_result(&result);
+    // FIXME: Preserve result.err_code across this nested FFI boundary instead
+    // of letting the outer RETURN_EXCEPTION collapse every failure to code 5.
     throw std::runtime_error(context + ": " + detail);
 }
 

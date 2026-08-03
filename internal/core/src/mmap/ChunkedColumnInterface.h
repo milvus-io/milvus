@@ -21,6 +21,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
 #include "common/OffsetMapping.h"
+#include "common/SealedOffsetMapping.h"
 #include "common/bson_view.h"
 namespace milvus {
 
@@ -214,7 +215,8 @@ class ChunkedColumnInterface {
     }
 
     virtual void
-    BuildValidRowIds(milvus::OpContext* op_ctx) {
+    BuildValidRowIds(milvus::OpContext* op_ctx,
+                     const OffsetMappingBuildOptions& options = {}) {
         if (!IsNullable()) {
             return;
         }
@@ -253,15 +255,16 @@ class ChunkedColumnInterface {
             num_valid_rows_until_chunk_.push_back(
                 num_valid_rows_until_chunk_.back() + valid_count_per_chunk_[i]);
         }
-        BuildOffsetMapping();
+        BuildOffsetMapping(options);
         valid_row_ids_built_.store(true, std::memory_order_release);
     }
 
     // Build offset mapping from valid_data
     void
-    BuildOffsetMapping() {
+    BuildOffsetMapping(const OffsetMappingBuildOptions& options = {}) {
         if (!valid_data_.empty()) {
-            offset_mapping_.Build(valid_data_.data(), valid_data_.size());
+            offset_mapping_.Build(
+                valid_data_.data(), valid_data_.size(), options);
         }
     }
 
