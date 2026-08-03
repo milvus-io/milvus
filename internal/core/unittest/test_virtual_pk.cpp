@@ -334,15 +334,22 @@ TEST_F(VirtualPKChunkedColumnTest, SupportedOperations) {
 
     VirtualPKChunkedColumn column(segment_id, num_rows);
 
-    // DataOfChunk and Span are supported via EnsureMaterialized
+    // Chunk-backed access is supported via EnsureMaterialized so the common
+    // scan path can pin its input before constructing the cursor.
     EXPECT_NO_THROW(column.DataOfChunk(nullptr, 0));
     EXPECT_NO_THROW(column.Span(nullptr, 0));
+    EXPECT_NO_THROW(column.GetChunk(nullptr, 0));
+    EXPECT_NO_THROW(column.GetAllChunks(nullptr));
 
     // Verify DataOfChunk returns valid data
     auto data = column.DataOfChunk(nullptr, 0);
     auto pks = reinterpret_cast<const int64_t*>(data.get());
     ASSERT_NE(pks, nullptr);
     ASSERT_EQ(pks[0], GetVirtualPK(GetTruncatedSegmentID(segment_id), 0));
+
+    auto chunks = column.GetAllChunks(nullptr);
+    ASSERT_EQ(chunks.size(), 1);
+    ASSERT_EQ(chunks[0].get()->RowNums(), num_rows);
 }
 
 TEST_F(VirtualPKChunkedColumnTest, UnsupportedOperations) {
@@ -351,9 +358,6 @@ TEST_F(VirtualPKChunkedColumnTest, UnsupportedOperations) {
 
     VirtualPKChunkedColumn column(segment_id, num_rows);
 
-    // These operations should throw
-    EXPECT_THROW(column.GetChunk(nullptr, 0), std::exception);
-    EXPECT_THROW(column.GetAllChunks(nullptr), std::exception);
     EXPECT_THROW(column.StringViews(nullptr, 0, std::nullopt), std::exception);
     EXPECT_THROW(column.ArrayViews(nullptr, 0, std::nullopt), std::exception);
 }
