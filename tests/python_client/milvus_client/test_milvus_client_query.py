@@ -5446,6 +5446,99 @@ class TestQueryArray(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_array_contains_merge_equivalence(self):
+        """
+        target: compare merged ARRAY contains predicates with explicit contains_any/contains_all
+        method: query nullable, empty, and duplicate-element arrays in growing and sealed/indexed segments
+        expected: original and explicit predicates return identical primary keys in both execution paths
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        array_field = "array_values"
+
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(
+            array_field,
+            DataType.ARRAY,
+            element_type=DataType.INT64,
+            max_capacity=16,
+            nullable=True,
+        )
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+
+        vector_index = self.prepare_index_params(client)[0]
+        vector_index.add_index(field_name="vector", index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, vector_index)
+        self.load_collection(client, collection_name)
+
+        arrays = [[], None, [1], [2], [1, 2], [1, 1, 2], [3]]
+        vectors = cf.gen_vectors(len(arrays), default_dim)
+        rows = [
+            {"id": row_id, "vector": vectors[row_id], array_field: array}
+            for row_id, array in enumerate(arrays)
+        ]
+        self.insert(client, collection_name, rows)
+
+        predicate_cases = [
+            (
+                f"array_contains({array_field}, 1) or array_contains({array_field}, 2)",
+                f"array_contains_any({array_field}, [1, 2])",
+                {2, 3, 4, 5},
+            ),
+            (
+                f"array_contains({array_field}, 1) and array_contains({array_field}, 2)",
+                f"array_contains_all({array_field}, [1, 2])",
+                {4, 5},
+            ),
+            (
+                f"array_contains({array_field}, 1) or array_contains({array_field}, 1)",
+                f"array_contains_any({array_field}, [1, 1])",
+                {2, 4, 5},
+            ),
+            (
+                f"array_contains({array_field}, 1) and array_contains({array_field}, 1)",
+                f"array_contains_all({array_field}, [1, 1])",
+                {2, 4, 5},
+            ),
+        ]
+
+        def assert_equivalent():
+            for original, explicit, expected_ids in predicate_cases:
+                original_result = self.query(
+                    client,
+                    collection_name,
+                    filter=original,
+                    output_fields=["id"],
+                    limit=len(rows),
+                )[0]
+                explicit_result = self.query(
+                    client,
+                    collection_name,
+                    filter=explicit,
+                    output_fields=["id"],
+                    limit=len(rows),
+                )[0]
+                original_ids = {record["id"] for record in original_result}
+                explicit_ids = {record["id"] for record in explicit_result}
+                assert original_ids == explicit_ids == expected_ids
+
+        # Loaded-before-insert data stays in the growing segment.
+        assert_equivalent()
+
+        # Flush and add an ARRAY scalar index to exercise the sealed/indexed path.
+        self.flush(client, collection_name)
+        self.release_collection(client, collection_name)
+        array_index = self.prepare_index_params(client)[0]
+        array_index.add_index(field_name=array_field, index_type="INVERTED")
+        self.create_index(client, collection_name, array_index)
+        self.load_collection(client, collection_name)
+        assert_equivalent()
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("use_index", [True, False])
     @pytest.mark.parametrize("index_type", ["INVERTED", "BITMAP"])
     def test_milvus_client_query_array_with_prefix_like(self, use_index, index_type):
