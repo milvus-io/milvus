@@ -40,6 +40,13 @@ func TestRewriteArrayContainsChains(t *testing.T) {
 			values:   []int64{3, 1, 2, 4},
 		},
 		{
+			name: "or combines contains any",
+			expr: `array_contains_any(ArrayInt, [4, 1]) or ` +
+				`array_contains_any(ArrayInt, [3, 2])`,
+			expected: planpb.JSONContainsExpr_ContainsAny,
+			values:   []int64{4, 1, 3, 2},
+		},
+		{
 			name:     "and two contains",
 			expr:     `array_contains(ArrayInt, 1) and array_contains(ArrayInt, 2)`,
 			expected: planpb.JSONContainsExpr_ContainsAll,
@@ -58,6 +65,13 @@ func TestRewriteArrayContainsChains(t *testing.T) {
 				`(array_contains_all(ArrayInt, [1, 2]) and array_contains(ArrayInt, 4))`,
 			expected: planpb.JSONContainsExpr_ContainsAll,
 			values:   []int64{3, 1, 2, 4},
+		},
+		{
+			name: "and combines contains all",
+			expr: `array_contains_all(ArrayInt, [4, 1]) and ` +
+				`array_contains_all(ArrayInt, [3, 2])`,
+			expected: planpb.JSONContainsExpr_ContainsAll,
+			values:   []int64{4, 1, 3, 2},
 		},
 		{
 			name:     "json function name on physical array",
