@@ -32,6 +32,8 @@
 #include <utility>
 #include <vector>
 
+#include "common/EasyAssert.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/lob_column/lob_reference.h"
 
 namespace milvus::segcore {
@@ -136,6 +138,50 @@ class InstrumentedLobColumnReader : public LobColumnReader {
  private:
     std::shared_ptr<BlockingCallTracker> tracker_;
     bool closed_{false};
+};
+
+class FailingLobColumnReader : public LobColumnReader {
+ public:
+    explicit FailingLobColumnReader(arrow::Status status)
+        : status_(std::move(status)) {
+    }
+
+    arrow::Result<std::vector<uint8_t>>
+    ReadData(const uint8_t*, size_t) override {
+        return status_;
+    }
+
+    arrow::Result<std::vector<std::vector<uint8_t>>>
+    ReadBatchData(const std::vector<EncodedRef>&) override {
+        return status_;
+    }
+
+    arrow::Result<std::shared_ptr<arrow::BinaryArray>>
+    ReadArrowArray(const std::shared_ptr<arrow::BinaryArray>&) override {
+        return status_;
+    }
+
+    arrow::Result<std::vector<std::vector<uint8_t>>>
+    TakeData(const std::string&, const std::vector<int32_t>&) override {
+        return status_;
+    }
+
+    arrow::Status
+    Close() override {
+        return arrow::Status::OK();
+    }
+
+    bool
+    IsClosed() const override {
+        return false;
+    }
+
+    void
+    ClearCache() override {
+    }
+
+ private:
+    arrow::Status status_;
 };
 
 TextLobReaderFactory
@@ -304,6 +350,59 @@ TEST(TextColumnCache, ReadBatchIntoSerializesCallsOnCachedReader) {
     EXPECT_EQ(dst->Get(1), "mock-text");
     EXPECT_EQ(factory_calls->load(std::memory_order_relaxed), 1);
     EXPECT_EQ(tracker->CallCount(), 1);
+}
+
+TEST(TextColumnCache, PreservesStorageErrorWhenCreatingReader) {
+    auto status = milvus_storage::MakeExtendError(
+        milvus_storage::ExtendStatusCode::StorageTransientTimeout,
+        "storage timeout");
+    TextColumnCache cache(
+        TextColumnCacheConfig{},
+        [status](std::shared_ptr<arrow::fs::FileSystem>, const LobColumnConfig&)
+            -> arrow::Result<std::unique_ptr<LobColumnReader>> {
+            return status;
+        });
+    milvus_storage::api::Properties properties;
+
+    try {
+        static_cast<void>(cache.GetOrCreateReader(
+            "/tmp/text-column-cache", nullptr, properties));
+        FAIL() << "expected storage error";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(),
+                  milvus::ErrorCode::StorageTransientError);
+        EXPECT_NE(std::string(error.what()).find("storage timeout"),
+                  std::string::npos);
+    }
+}
+
+TEST(TextColumnCache, PreservesStorageErrorWhenReadingText) {
+    auto status = milvus_storage::MakeExtendError(
+        milvus_storage::ExtendStatusCode::AwsErrorAccessDenied,
+        "access denied");
+    TextColumnCache cache(
+        TextColumnCacheConfig{},
+        [status](std::shared_ptr<arrow::fs::FileSystem>, const LobColumnConfig&)
+            -> arrow::Result<std::unique_ptr<LobColumnReader>> {
+            std::unique_ptr<LobColumnReader> reader =
+                std::make_unique<FailingLobColumnReader>(status);
+            return reader;
+        });
+    milvus_storage::api::Properties properties;
+    auto ref = MakeLobReference();
+
+    try {
+        static_cast<void>(cache.ReadText("/tmp/text-column-cache",
+                                         nullptr,
+                                         properties,
+                                         ref.data(),
+                                         ref.size()));
+        FAIL() << "expected storage error";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::ErrorCode::StorageError);
+        EXPECT_NE(std::string(error.what()).find("access denied"),
+                  std::string::npos);
+    }
 }
 
 }  // namespace

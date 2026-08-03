@@ -65,6 +65,7 @@
 #include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/util.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -1628,9 +1629,12 @@ GetFieldDatasFromManifest(
     AssertInfo(reader != nullptr, "Failed to create reader");
 
     auto reader_result = reader->get_record_batch_reader("");
-    AssertInfo(reader_result.ok(),
-               "Failed to get record batch reader: " +
-                   reader_result.status().ToString());
+    if (!reader_result.ok()) {
+        auto error = milvus_storage::ToSegcoreError(reader_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "Failed to get record batch reader: {}",
+                  error.what());
+    }
 
     auto record_batch_reader = reader_result.ValueOrDie();
 
@@ -1638,8 +1642,12 @@ GetFieldDatasFromManifest(
     while (true) {
         std::shared_ptr<arrow::RecordBatch> batch;
         auto status = record_batch_reader->ReadNext(&batch);
-        AssertInfo(status.ok(),
-                   "Failed to read record batch: " + status.ToString());
+        if (!status.ok()) {
+            auto error = milvus_storage::ToSegcoreError(status);
+            ThrowInfo(error.get_error_code(),
+                      "Failed to read record batch: {}",
+                      error.what());
+        }
         if (batch == nullptr) {
             break;
         }
@@ -1751,10 +1759,13 @@ OpenTextFieldSegmentReader(
 
     auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
         *loon_ffi_properties, segment_base_path);
-    AssertInfo(fs_result.ok(),
-               "Failed to get filesystem for TEXT field {}: {}",
-               field_meta.field_id,
-               fs_result.status().ToString());
+    if (!fs_result.ok()) {
+        auto error = milvus_storage::ToSegcoreError(fs_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "Failed to get filesystem for TEXT field {}: {}",
+                  field_meta.field_id,
+                  error.what());
+    }
     auto fs = std::move(fs_result.ValueOrDie());
 
     auto schema = BuildTextFieldReaderSchema(field_meta, column_name);
@@ -1763,10 +1774,13 @@ OpenTextFieldSegmentReader(
 
     auto reader_result = milvus_storage::segment::SegmentReader::Open(
         fs, loon_manifest, schema, {column_name}, config);
-    AssertInfo(reader_result.ok(),
-               "Failed to open SegmentReader for TEXT field {}: {}",
-               field_meta.field_id,
-               reader_result.status().ToString());
+    if (!reader_result.ok()) {
+        auto error = milvus_storage::ToSegcoreError(reader_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "Failed to open SegmentReader for TEXT field {}: {}",
+                  field_meta.field_id,
+                  error.what());
+    }
     return std::move(reader_result.ValueOrDie());
 }
 
@@ -1798,10 +1812,13 @@ GetTextFieldDatasFromManifest(
     while (true) {
         std::shared_ptr<arrow::RecordBatch> batch;
         auto status = reader->ReadNext(&batch);
-        AssertInfo(status.ok(),
-                   "Failed to read TEXT field {} from manifest: {}",
-                   field_meta.field_id,
-                   status.ToString());
+        if (!status.ok()) {
+            auto error = milvus_storage::ToSegcoreError(status);
+            ThrowInfo(error.get_error_code(),
+                      "Failed to read TEXT field {} from manifest: {}",
+                      field_meta.field_id,
+                      error.what());
+        }
         if (batch == nullptr) {
             break;
         }
@@ -1827,10 +1844,13 @@ GetTextFieldDatasFromManifest(
     }
 
     auto status = reader->Close();
-    AssertInfo(status.ok(),
-               "Failed to close SegmentReader for TEXT field {}: {}",
-               field_meta.field_id,
-               status.ToString());
+    if (!status.ok()) {
+        auto error = milvus_storage::ToSegcoreError(status);
+        ThrowInfo(error.get_error_code(),
+                  "Failed to close SegmentReader for TEXT field {}: {}",
+                  field_meta.field_id,
+                  error.what());
+    }
 
     return field_datas;
 }

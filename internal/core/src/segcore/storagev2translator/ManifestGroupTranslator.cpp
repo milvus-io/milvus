@@ -47,6 +47,7 @@
 #include "glog/logging.h"
 #include "log/Log.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/reader.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
@@ -146,8 +147,10 @@ ManifestGroupTranslator::ManifestGroupTranslator(
       load_priority_(load_priority) {
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
-        throw std::runtime_error(fmt::format("get row group rows failed: {}",
-                                             rows_result.status().ToString()));
+        auto error = milvus_storage::ToSegcoreError(rows_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "get row group rows failed: {}",
+                  error.what());
     }
     const auto& row_group_rows = rows_result.ValueOrDie();
 
