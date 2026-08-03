@@ -177,9 +177,7 @@ func redactCreateCollectionRequestForLog(req *milvuspb.CreateCollectionRequest) 
 		redactedReq.Schema = nil
 		return redactedReq
 	}
-	schema.ExternalSource = externalspec.RedactExternalSource(schema.GetExternalSource())
-	schema.ExternalSpec = externalspec.RedactExternalSpecForLog(schema.GetExternalSpec())
-	redactedSchema, err := proto.Marshal(schema)
+	redactedSchema, err := proto.Marshal(externalspec.RedactCollectionSchemaForLog(schema))
 	if err != nil {
 		redactedReq.Schema = nil
 		return redactedReq

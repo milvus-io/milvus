@@ -714,7 +714,7 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 	primaryField, ok := getPrimaryField(coll.Schema)
 	autoID := false
 	if !ok {
-		mlog.Warn(ctx, "high level restful api, get primary field from collection schema fail", mlog.Any("collection schema", coll.Schema), mlog.Any("request", anyReq))
+		mlog.Warn(ctx, "high level restful api, get primary field from collection schema fail", mlog.FieldSchema(coll.Schema), mlog.Any("request", anyReq))
 	} else {
 		autoID = primaryField.AutoID
 	}

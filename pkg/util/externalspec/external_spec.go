@@ -23,6 +23,9 @@ import (
 	"strconv"
 	"strings"
 
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -254,6 +257,20 @@ func RedactExternalSpecForLog(specStr string) string {
 		return "<redacted>"
 	}
 	return string(out)
+}
+
+// RedactCollectionSchemaForLog returns a copy of schema with external storage
+// credentials removed. Callers can safely log the result without mutating the
+// schema used by request handling or distributed load paths.
+func RedactCollectionSchemaForLog(schema *schemapb.CollectionSchema) *schemapb.CollectionSchema {
+	if schema == nil {
+		return nil
+	}
+
+	redacted := proto.Clone(schema).(*schemapb.CollectionSchema)
+	redacted.ExternalSource = RedactExternalSource(redacted.GetExternalSource())
+	redacted.ExternalSpec = RedactExternalSpecForLog(redacted.GetExternalSpec())
+	return redacted
 }
 
 // ValidateExtfsComplete requires spec.extfs to be self-sufficient: exactly one

@@ -2250,7 +2250,7 @@ func checkPrimaryFieldData(ctx context.Context, allFields []*schemapb.FieldSchem
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		log.Error(ctx, "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
+		log.Error(ctx, "get primary field schema failed", mlog.FieldSchema(schema), mlog.Err(err))
 		return nil, err
 	}
 	if primaryFieldSchema.GetNullable() {
@@ -2396,7 +2396,7 @@ func checkUpsertPrimaryFieldData(ctx context.Context, allFields []*schemapb.Fiel
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		log.Error(ctx, "get primary field schema failed", mlog.Any("schema", schema), mlog.Err(err))
+		log.Error(ctx, "get primary field schema failed", mlog.FieldSchema(schema), mlog.Err(err))
 		return nil, nil, err
 	}
 	if primaryFieldSchema.GetNullable() {

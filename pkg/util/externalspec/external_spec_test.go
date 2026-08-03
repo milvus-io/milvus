@@ -22,6 +22,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func TestParseExternalSpec_Empty(t *testing.T) {
@@ -468,6 +470,32 @@ func TestRedactExternalSpecForLog(t *testing.T) {
 	assert.NotContains(t, redacted, "TOP_LEVEL_SECRET_SENTINEL")
 	assert.NotContains(t, redacted, "FUTURE_SECRET_SENTINEL")
 	assert.Equal(t, "<redacted>", RedactExternalSpecForLog(`{malformed SECRET_SENTINEL`))
+}
+
+func TestRedactCollectionSchemaForLog(t *testing.T) {
+	assert.Nil(t, RedactCollectionSchemaForLog(nil))
+
+	schema := &schemapb.CollectionSchema{
+		Name:           "external_collection",
+		ExternalSource: "s3://ACCESS_SENTINEL:SECRET_SENTINEL@bucket/path",
+		ExternalSpec:   `{"format":"parquet","future_secret":"TOP_LEVEL_SENTINEL","extfs":{"access_key_value":"SPEC_SENTINEL"}}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	redacted := RedactCollectionSchemaForLog(schema)
+	require.NotSame(t, schema, redacted)
+	assert.Equal(t, "external_collection", redacted.GetName())
+	assert.Equal(t, schema.GetFields(), redacted.GetFields())
+	assert.Equal(t, "<redacted>", redacted.GetExternalSource())
+	assert.JSONEq(t, `{"format":"parquet","extfs":"***"}`, redacted.GetExternalSpec())
+	assert.NotContains(t, redacted.String(), "ACCESS_SENTINEL")
+	assert.NotContains(t, redacted.String(), "SECRET_SENTINEL")
+	assert.NotContains(t, redacted.String(), "TOP_LEVEL_SENTINEL")
+	assert.NotContains(t, redacted.String(), "SPEC_SENTINEL")
+	assert.Contains(t, schema.GetExternalSource(), "ACCESS_SENTINEL")
+	assert.Contains(t, schema.GetExternalSpec(), "SPEC_SENTINEL")
 }
 
 func TestExternalSpecMarshalJSON(t *testing.T) {
