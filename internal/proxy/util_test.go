@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -998,6 +999,32 @@ func TestPasswordVerify(t *testing.T) {
 	// Sha256Password already exists within cache
 	assert.True(t, passwordVerify(ctx, username, password, privilegeCache))
 	assert.Equal(t, 2, invokedCount)
+}
+
+func BenchmarkPasswordVerifyCacheHit(b *testing.B) {
+	ctx := context.Background()
+	const (
+		username = "benchmark-user"
+		password = "benchmark-password"
+	)
+
+	privilege.ResetPrivilegeCacheForTest()
+	b.Cleanup(privilege.ResetPrivilegeCacheForTest)
+	require.NoError(b, privilege.InitPrivilegeCache(ctx, NewMixCoordMock()))
+
+	privilegeCache := privilege.GetPrivilegeCache()
+	privilegeCache.UpdateCredential(&internalpb.CredentialInfo{
+		Username:       username,
+		Sha256Password: crypto.SHA256(password, username),
+	})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if !passwordVerify(ctx, username, password, privilegeCache) {
+			b.Fatal("cached password verification failed")
+		}
+	}
 }
 
 func Test_isCollectionIsLoaded(t *testing.T) {
