@@ -28,11 +28,11 @@ DDL Callbacks (WAL message acknowledgment)
         ▼
 ┌──────────────────────────────────────────────────────────────┐
 │                        Balancer                              │
-│  • Work queue (deduplicated shard IDs)                       │
+│  • Work queue (deduplicated trigger scopes)                  │
 │  • Single goroutine loop:                                    │
 │      1. Detach the pending trigger batch                     │
-│      2. Build BalancerSnapshot (global world view)           │
-│      3. Expand trigger scopes into dirty shards              │
+│      2. Resolve the collection and shard planning scope      │
+│      3. Build a scoped snapshot and refresh the row ledger   │
 │      4. policy.Plan(snapshot, dirty) → BalancePlan           │
 │      5. Apply plan (AddPreparing + ReleaseShardViews)        │
 │  • Periodic ticker as fallback (full scan)                   │
@@ -65,9 +65,9 @@ DDL Callbacks (WAL message acknowledgment)
 
 ### Design Principles
 
-- **Level-triggered reconciliation (Kubernetes controller pattern)**: Event sources with a notifier enqueue affected shard IDs via `Trigger(scope)`; the Balancer compares desired vs. current state and converges. The periodic full scan covers sources without a direct notifier and any missed event. Multiple enqueues for the same shard are deduplicated.
+- **Level-triggered reconciliation (Kubernetes controller pattern)**: Event sources enqueue affected collection, shard, or node scopes via `Trigger(scope)`; the Balancer compares desired vs. current state and converges. The periodic full scan covers sources without a direct notifier and any missed event. Repeated scopes are deduplicated in the pending batch.
 - **Unified allocation algorithm**: A single BalancePolicy handles all scenarios. Scenario differences are encoded in input variations (available nodes, current view, data view), not separate algorithms. This prevents thrashing.
-- **Batch planning**: Each reconcile cycle detaches the pending trigger batch, builds a global snapshot, expands the batch into dirty shards, and asks the Policy for a complete plan. The Policy handles all dirty shards in one call, enabling cross-shard coordination (e.g., avoiding multiple shards targeting the same node).
+- **Scoped batch planning**: Each reconcile cycle detaches the pending trigger batch, resolves its collection and shard scope, builds one immutable snapshot for that scope, and asks the Policy for a complete plan. The Policy handles all target shards in one call while using cluster-wide node row totals for cross-shard coordination.
 - **External inputs as interfaces**: Node Manager, Replica Manager, and DataView Manager are external dependencies consumed via interfaces.
 - **Separated desired and actual state ownership**: `loadmgr` owns load-config lifecycle and desired-state snapshots; `coordview` owns actual QueryView state, shard-view aggregation, and actual-state snapshots. The Balancer composes both snapshots during reconciliation.
 
@@ -95,7 +95,7 @@ type TriggerScope struct {
 ```
 
 - `Trigger()` with no scopes triggers a full scan.
-- `Trigger(scope)` records only the affected scope; the reconcile cycle expands it into shard IDs from its load-config and shard-view snapshots.
+- `Trigger(scope)` records only the affected scope; `SnapshotBuilder` resolves it before reading scoped DataView and ShardView details.
 - A periodic ticker (e.g., 10s) calls `Trigger()` as a safety net for missed events and steady-state balance checks.
 
 #### Main Loop
@@ -115,8 +115,7 @@ for {
         continue
     }
 
-    snap  := b.buildSnapshot()
-    dirty := pending.Expand(snap)
+    snap, dirty := b.snapshotBuilder.build(ctx, pending)
     if len(dirty) == 0 {
         continue
     }
@@ -126,12 +125,51 @@ for {
 }
 ```
 
-`TakePending` establishes the reconcile-cycle boundary before snapshot
-construction. Triggers arriving during snapshot construction remain queued for
-the next cycle, so a trigger batch is expanded only against a snapshot built
-after that batch was detached from the queue.
+`TakePending` establishes the reconcile-cycle boundary before scope resolution
+and snapshot construction. Triggers arriving during construction remain queued
+for the next cycle. The detached batch is resolved before DataView and
+ShardView details are read, so scoped providers only fetch the collections and
+shards needed by that cycle.
 
 The loop is purely infrastructural: the Policy is where all business decisions happen.
+
+#### Scope Resolution
+
+`triggerBatch.resolveScope` produces three sets before provider details are
+read:
+
+```go
+type reconcileScope struct {
+    collectionIDs     map[int64]struct{}
+    collectionWideIDs map[int64]struct{}
+    targetShards      map[qviews.ShardID]struct{}
+}
+```
+
+- `collectionIDs` selects the DataViews fetched for the cycle.
+- `collectionWideIDs` identifies collection triggers whose DataView shards are
+  expanded across every configured replica.
+- `targetShards` is the exact ShardView scope and Policy input.
+
+Dirty collections combine configured replica-by-vchannel shards with resident
+shards from the Registry collection index. Dirty shards are exact targets.
+Dirty nodes expand through the Registry node index. A full planning scope
+combines every configured collection with every resident Registry shard. When
+a scoped trigger cannot be narrowed safely, it uses the same full planning
+scope; only an explicit or periodic full trigger also rebuilds the row-count
+ledger.
+
+The DataView provider exposes both full and collection-scoped reads:
+
+```go
+DataViewSnapshot(ctx context.Context) *DataViewSnapshot
+DataViewSnapshotForCollections(ctx context.Context, collectionIDs map[int64]struct{}) *DataViewSnapshot
+SegmentSnapshot(ctx context.Context, segmentIDs []int64) SegmentSnapshot
+```
+
+A nil collection set selects all collections; a non-nil empty set selects none.
+`SegmentSnapshot` supplies metadata for placement segments that need not belong
+to the latest visible DataViews in the planning scope.
 
 #### External System Integration
 
@@ -145,13 +183,13 @@ The loop is purely infrastructural: the Policy is where all business decisions h
 
 ### 2.2 BalancePolicy
 
-Processes a batch of dirty shards against a global snapshot and produces an execution plan. Stateless pure function.
+Processes a batch of target shards against one immutable snapshot and produces an execution plan. Stateless pure function.
 
 ```go
 type BalancePolicy interface {
     // Plan classifies each dirty shard and computes assignments for those that
-    // need action. Sees the entire snapshot so it can coordinate across shards
-    // (e.g., avoid two shards contending for the same target node).
+    // need action. The snapshot contains scoped shard details and cluster-wide
+    // node row totals so decisions remain coordinated across the batch.
     Plan(snap *BalancerSnapshot, dirty []qviews.ShardID) *BalancePlan
 }
 
@@ -165,7 +203,9 @@ type BalancePlan struct {
 }
 ```
 
-`BalancerSnapshot` is the global world view for this batch (see Section 4). It is built once at the start of each reconcile cycle and reused for all dirty shards in the batch.
+`BalancerSnapshot` combines scoped DataView and ShardView details with the
+global node topology and row-count projection for this batch (see Section 4).
+It is built once and reused for all target shards in the cycle.
 
 #### Why a Unified Algorithm Works
 
@@ -268,13 +308,33 @@ Owns **actual view state**: ShardViewManager lifecycle and view-derived indexes.
 ```go
 type ShardViewRegistry struct { /* ... */ }
 
-func RecoverShardViewRegistry(ctx context.Context, catalog queryview.QueryViewCatalog, syncer syncer.ReliableSyncer) (*ShardViewRegistry, error)
+func RecoverShardViewRegistry(
+    ctx context.Context,
+    catalog queryview.QueryViewCatalog,
+    syncer syncer.ReliableSyncer,
+    dataViewReferences ...qviews.DataViewReferenceManager,
+) (*ShardViewRegistry, error)
 func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager
 func (r *ShardViewRegistry) Get(shardID qviews.ShardID) *ShardViewManager
 func (r *ShardViewRegistry) Snapshot() *ShardViewSnapshot
+func (r *ShardViewRegistry) SnapshotForShards(shardIDs []qviews.ShardID) *ShardViewSnapshot
+func (r *ShardViewRegistry) CollectionShards(collectionID int64) []qviews.ShardID
+func (r *ShardViewRegistry) NodeShards(nodeID int64) []qviews.ShardID
+func (r *ShardViewRegistry) ShardIDs() []qviews.ShardID
+func (r *ShardViewRegistry) RegisterStatsObserver(observer func(qviews.ShardID, *ShardStats))
 ```
 
-Maintains live per-shard stats via ShardViewObserver callbacks from each ShardViewManager. The immutable `ShardViewSnapshot` is refreshed lazily when the live version advances.
+Maintains live per-shard stats via callbacks from each `ShardViewManager`.
+`collectionShards` supports collection-scoped reconciliation, while
+`nodeShards` tracks the shards currently referencing each node. `Snapshot()`
+publishes the resident full snapshot lazily; `SnapshotForShards()` copies only
+the requested `ShardID -> *ShardStats` entries.
+
+Shard managers remain resident for the lifetime of the Registry. A QueryView
+reaching Dropped removes that state machine from its manager, but does not
+remove the manager. Collection index entries are maintained independently of
+view state transitions. Node index entries follow the latest stats and
+disappear when the shard no longer references that node.
 
 #### CollectionLoadManager (Facade)
 
@@ -323,18 +383,18 @@ acquires resources.
 - **Loading**: At least one shard has no Up view.
 - **LoadPercentage**: `count(shards with Up view) / count(total shards) * 100`.
 
-**Recovery**: On startup: LoadConfigStore recovers from ETCD → ShardViewRegistry recovers from persisted views → Balancer triggers full reconcile.
+**Recovery**: On startup: LoadConfigStore recovers from ETCD → ShardViewRegistry recovers persisted managers, stats, and indexes → Balancer triggers a full reconcile that hydrates the row-count ledger before planning.
 
 ## 3. Policy Planning
 
 The Policy internally organizes work into three phases, but processes all dirty shards in one batch so decisions across shards are coordinated.
 
-The existing Balancer / BalancePolicy / BalancerSnapshot / BalancePlan
-boundaries already provide every input required by the normalized design:
-eligible nodes, cross-shard row counts, per-segment `RowNum`, and current
-segment-to-node states. This redesign does not add a provider, RPC, protobuf,
-or QueryView lifecycle state. It changes only Policy-internal configuration,
-steady-state row accounting, node selection, and optional-candidate emission.
+The Balancer / BalancePolicy / BalancerSnapshot / BalancePlan boundaries provide
+every input required by the normalized design: eligible nodes, cluster-wide row
+totals, target-shard row contributions, per-segment `RowNum`, and current
+segment-to-node states. Snapshot construction and row accounting remain
+Coord-local and require no additional RPC, protobuf, or QueryView lifecycle
+state.
 
 ```
 Plan(snap, dirty)
@@ -681,16 +741,18 @@ returned plan itself stores every accepted candidate and segment assignment
 and therefore requires
 `O(L + acceptedCandidates + sum over accepted candidates of S_i)` space.
 
-These bounds exclude snapshot acquisition. After its providers return their
-snapshots, `SnapshotBuilder` additionally spends `O(M + P_all)` time and
-`O(M)` balancer-owned space to build `BalanceNode` entries and aggregate row
-load, where `P_all` is the number of placement-state entries across all shards
-in the snapshot. Provider-specific snapshot construction costs are owned by
-those providers.
+These bounds exclude snapshot acquisition. `SnapshotBuilder` reads only the
+resolved DataView and ShardView scope, refreshes row counts for dirty shards,
+and uses the row-count ledger to populate cluster-wide node loads. Initial and
+periodic full reconciles rebuild the complete ledger.
 
 ## 4. BalancerSnapshot
 
-The snapshot is the global world view built once per reconcile cycle. All dirty shards in the batch are processed against the same snapshot, ensuring consistent decisions.
+The snapshot is the immutable planning view built once per reconcile cycle.
+LoadConfig and node topology remain globally visible. DataView, ShardView, and
+per-shard row details are limited to the resolved planning scope, while each
+node carries its row total across all resident shards. All target shards in the
+batch are processed against the same snapshot.
 
 ### 4.1 Structure
 
@@ -703,10 +765,14 @@ type BalancerSnapshot struct {
     NodeSnapshot       *NodeSnapshot
 
     // Per-node info with cross-shard aggregates embedded.
-    Nodes      map[int64]*BalanceNode
+    Nodes map[int64]*BalanceNode
+
+    // Exact row contributions for target shards. These values are already
+    // included in Nodes and are subtracted before replacement or release.
+    ShardRowStatsSnapshot map[qviews.ShardID]ShardRowStats
 
     // Tunables (production defaults supplied by DefaultBalanceConfig).
-    Config     *BalanceConfig
+    Config *BalanceConfig
 }
 
 // ShardStats is the per-shard placement snapshot returned by ShardViewManager.
@@ -769,6 +835,14 @@ type BalanceNode struct {
     PendingRowCount int64  // Ready / Preparing segments on this node
 }
 
+// ShardRowStats maps each QueryNode to the rows contributed by one shard.
+type ShardRowStats map[int64]NodeRowStats
+
+type NodeRowStats struct {
+    UpRowCount      int64
+    PendingRowCount int64
+}
+
 // BalanceConfig contains only policy inputs. Each score is normalized before
 // its weight is applied.
 type BalanceConfig struct {
@@ -790,7 +864,7 @@ type BalanceConfig struct {
 - The three weights must be non-negative and at least one must be positive. `StickyRowsScale` and `TargetRowsPerShardNode` must be positive.
 - `SegmentCountWeight`, `BaselineSegmentRows`, `BalanceThreshold`, and `CostEfficiencyThreshold` are not part of the normalized design.
 - The production defaults in Section 3.2 are calibrated with deterministic unit and end-to-end scenarios; they are not used as hidden normalization constants.
-- `ShardStats.Segments`, `SegmentInfo.RowNum`, and the existing node aggregates are sufficient to derive per-shard contributions and reusable-copy state. No new snapshot provider field is required.
+- `ShardRowStatsSnapshot` contains the target shards' exact contributions already included in `Nodes`. Policy subtracts these values before replacing or releasing a shard, so the global node totals are not double-counted.
 - Memory and disk capacity are intentionally not admission-control constraints in this policy. Heterogeneous-node capacity normalization can be added later when a reliable capacity signal is available.
 
 ### 4.2 State Source Summary
@@ -798,30 +872,51 @@ type BalanceConfig struct {
 ```
 BalancerSnapshot (built once per reconcile cycle)
 │
-├── LoadConfigSnapshot ← LoadConfigStore
-├── ShardViewSnapshot  ← ShardViewRegistry
-├── DataViewSnapshot   ← DataView Manager + segment lookup
-├── NodeSnapshot       ← Node Manager + Replica Manager
-├── Nodes          ← Node Manager + Replica Manager
-│                     joined with per-node row counts derived from
-│                     ShardViewSnapshot stats × DataViewSnapshot segment RowNum
-└── Config         ← runtime-supplied BalanceConfig
-                     (DefaultBalanceConfig in production wiring)
+├── LoadConfigSnapshot      ← LoadConfigStore (global)
+├── ShardViewSnapshot       ← ShardViewRegistry (target shards)
+├── DataViewSnapshot        ← DataView Manager (selected collections)
+├── NodeSnapshot            ← Node Manager + Replica Manager (global)
+├── Nodes                   ← NodeSnapshot joined with global row-count ledger
+├── ShardRowStatsSnapshot   ← row-count ledger (target shards)
+└── Config                  ← runtime-supplied BalanceConfig
+                              (DefaultBalanceConfig in production wiring)
 ```
+
+`SnapshotBuilder` owns a row-count ledger with three indexes:
+
+```go
+type rowCountLedger struct {
+    segmentRowCounts map[int64]int64
+    shardRowCount    map[qviews.ShardID]ShardRowStats
+    nodeRowCount     map[int64]NodeRowStats
+}
+```
+
+The Registry stats observer marks changed shard contributions dirty without
+performing metadata I/O or starting a reconcile. A scoped build refreshes the
+detached dirty set and keeps stable shard contributions unchanged. An explicit
+or periodic full reconcile clears and rebuilds all three indexes before
+planning. Scope fallback may expand planning to all shards without forcing a
+ledger rebuild.
 
 `RowNum` in segment metadata is the sole balance load metric. A missing or zero
 row count contributes zero load. Zero-row segments are placed using
 stickiness, fanout, and deterministic tie-breaking; no global segment-count
 bonus is added to the node score.
 
-`DeleteApplyStartAfterTimetick` from DataView is passed through to QueryView metadata but is NOT consumed by the allocation algorithm.
+The ledger caches known row counts by SegmentID. Incremental refresh batches
+cache misses through `SegmentSnapshot`; missing metadata contributes zero and
+is not cached, so a later stats update or periodic full reconcile may look it
+up again.
+
+`TransformStartAfterTimetick` from DataView is passed through to QueryView metadata but is NOT consumed by the allocation algorithm.
 
 ### 4.3 Consumption by Phase
 
 | Phase | Snapshot Fields | Purpose |
 |---|---|---|
 | **Phase 1** | `LoadConfigSnapshot`, `ShardViewSnapshot`, `DataViewSnapshot`, `Nodes[*].Alive` | Classify each dirty shard: must / may-optimize / release / none |
-| **Phase 2** | `DataViewSnapshot` shard and segment lookup, `Nodes` filtered by replica, shard segment/node states, normalized-score config | Remove current shard rows, incrementally produce the complete segment → node assignment, update partial rows and opened-node state |
+| **Phase 2** | `DataViewSnapshot` shard and segment lookup, `Nodes` filtered by replica, `ShardRowStatsSnapshot`, shard segment/node states, normalized-score config | Remove current shard rows, incrementally produce the complete segment → node assignment, update partial rows and opened-node state |
 | **Phase 3** | Current assignment and complete candidate assignment | Always emit mandatory work; emit optional work only when assignments differ |
 
 ### 4.4 Within-Batch Coordination
@@ -852,10 +947,10 @@ rebuilding it per shard, or double-counting the replacement view.
 ```
 1. Node Manager detects QN3 crash → Trigger(NodeChanged: true)
 2. Balancer loop wakes and detaches the pending full-scan trigger batch
-3. Balancer builds snapshot; QN3 is unavailable, and shard stats may already
-   reflect Syncer's OnNodeLost transitions
-4. Balancer expands the full-scan batch from the completed snapshot → dirty = [A, B, C]
-5. policy.Plan(snap, dirty):
+3. Scope resolution selects all configured and resident shards
+4. Balancer rebuilds the row-count ledger and snapshot; QN3 is unavailable,
+   and shard stats may already reflect Syncer's OnNodeLost transitions
+5. policy.Plan(snap, [A, B, C]):
    Phase 1: each shard either references unavailable QN3 or is already
             Unrecoverable → all actionMust
    Phase 2: order by size desc; for each shard:
@@ -874,7 +969,8 @@ rebuilding it per shard, or double-counting the replacement view.
 1. Load RPC → broadcast AlterLoadConfigMessage to all collection vchannels → WAL ack
 2. DDL callback: CollectionLoadManager.UpdateLoadConfig(result)
    → persist load config + ensure result vchannel ShardViewManagers + Trigger(DirtyCollections: [C1])
-3. Balancer loop wakes, snapshot includes new LoadConfig but ShardStats is empty
+3. Balancer resolves C1, reads only its DataView and resident ShardStats, and
+   expands its DataView shards across the configured replicas
 4. policy.Plan(snap, [shards of C1]):
    Phase 1: desired present, current absent → actionMust for each
    Phase 2: no stickiness; segments sorted largest-first
@@ -903,18 +999,21 @@ rebuilding it per shard, or double-counting the replacement view.
 | Component | Concurrency Model |
 |---|---|
 | Balancer | Single goroutine reconcile loop. `Trigger()` is thread-safe (enqueue only). |
+| SnapshotBuilder | Row-count ledger is owned by the serialized reconcile loop; a separate mutex protects observer-written dirty shard marks. |
 | BalancePolicy | Stateless pure function; receives immutable snapshot. Thread-safe by definition. |
 | CollectionLoadManager | Delegates desired-state mutation to LoadConfigStore (RWMutex); shard creation is an injected callback. |
+| ShardViewRegistry | RWMutex protects resident managers, stats, reverse indexes, and observer registration. |
 | ShardViewManager | `sync.Mutex` per instance (existing). `Stats()` returns an atomic snapshot. |
 
 ## 7. Component Responsibilities
 
 | Component | Responsibility | Holds State |
 |---|---|---|
-| Balancer | Scheduling framework: work queue + reconcile loop + snapshot builder + plan executor | Work queue only |
+| Balancer | Scheduling framework: work queue + reconcile loop + plan executor | Work queue |
+| SnapshotBuilder | Resolve trigger scope, compose scoped snapshots, and maintain cluster-wide row totals | Row-count ledger + dirty shard set |
 | BalancePolicy | Batch planning: classify dirty shards + compute normalized incremental assignments + emit changed optional candidates | None |
 | CollectionLoadManager | Load-config lifecycle: DDL broadcast-result handling, desired-state persistence, shard ensure callback from result vchannels, dirty collection notify. | None beyond dependencies |
-| ShardViewRegistry | Actual shard view state aggregation and resident ShardViewSnapshot publication. | Registry indexes + snapshot cache |
+| ShardViewRegistry | Actual shard view state aggregation, scoped snapshots, reverse indexes, and stats notifications. | Resident managers + stats + indexes + snapshot cache |
 | ShardViewManager | Per-shard multi-version view management (existing). Exposes `Stats()` for aggregation. | Per-shard state |
 
 ## 8. Package Layout
@@ -924,8 +1023,8 @@ internal/views/
 ├── coord/
 │   ├── balancer/
 │   │   ├── balancer.go        # Balancer + reconcile loop + plan application
-│   │   ├── snapshot_builder.go # SnapshotBuilder composition + row aggregation
-│   │   ├── trigger.go         # TriggerScope definition
+│   │   ├── snapshot_builder.go # Scoped snapshot composition + row-count ledger
+│   │   ├── trigger.go         # TriggerScope queue + reconcile scope resolution
 │   │   ├── snapshot.go        # BalancerSnapshot, BalanceNode, SegmentInfo, BalanceConfig
 │   │   ├── policy.go          # BalancePolicy interface + BalancePlan
 │   │   ├── policy_impl.go     # Default Plan() implementation + shared steady-state row tracker
@@ -949,7 +1048,6 @@ internal/views/
 2. **Global optimization passes**: The current Policy uses deterministic per-shard greedy allocation with a shared steady-state row tracker. For batches where many shards need rebalancing simultaneously (e.g., scale-out), a second optimization pass could detect and resolve cross-shard conflicts (two shards both wanting the same lightly-loaded node).
 3. **Disk-based scoring**: Add `DiskUsage`/`DiskCapacity` back to `BalanceNode` and a disk-balance soft constraint once mmap / disk-index segments are in scope.
 4. **Rate limiting**: Cap concurrent Preparing views across all shards to prevent overwhelming the cluster during large-scale events.
-5. **Snapshot incremental rebuild**: Currently snapshots are built fresh per reconcile cycle. For very large clusters, an incremental snapshot that only re-reads changed collections/shards could reduce overhead.
 
 ## 10. Verification
 
@@ -998,3 +1096,17 @@ internal/views/
 5. QueryNode failure performs mandatory recovery and converges.
 6. A small shard previously spread over many QueryNodes consolidates to a
    smaller node subset.
+
+### 10.4 Snapshot Scope and Row Accounting
+
+1. Dirty collection, shard, and node triggers resolve the expected target
+   shards without reading unrelated ShardStats.
+2. Collection-scoped DataView snapshots exclude unselected collections and
+   preserve segment metadata and delete timeticks for selected collections.
+3. Scoped planning fallback and explicit full reconciliation select the same
+   full planning scope, while only the explicit full path rebuilds the ledger.
+4. Incremental shard contribution replacement produces the same node totals as
+   a full rebuild, including overlapping views and empty stats.
+5. Collection-scoped release uses the Registry collection index, while
+   periodic full reconciliation remains the safety net for residual state
+   outside scoped triggers.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -82,110 +81,42 @@ func TestRegistry_EnsureCreatesOnce(t *testing.T) {
 	assert.Len(t, reg.Snapshot().StatsMap(), 1)
 }
 
-func TestRegistry_RequestReleaseRemovesEmptyManager(t *testing.T) {
-	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
-	manager := reg.Ensure(testShardID)
-
-	require.NoError(t, manager.RequestRelease(context.Background()))
-
-	assert.Nil(t, reg.Get(testShardID))
-	assert.Empty(t, reg.ShardIDs())
-	assert.NotContains(t, reg.Snapshot().StatsMap(), testShardID)
-}
-
-func TestRegistry_RemoveReleasedManagerDoesNotAccessManagerState(t *testing.T) {
-	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
-	manager := reg.Ensure(testShardID)
-
-	manager.mu.Lock()
-	done := make(chan struct{})
-	go func() {
-		reg.removeReleasedManager(testShardID, manager)
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		manager.mu.Unlock()
-		t.Fatal("registry removal accessed manager state")
-	}
-	manager.mu.Unlock()
-	assert.Nil(t, reg.Get(testShardID))
-}
-
-func TestRegistry_RemovesManagerAfterLastViewDurablyDropped(t *testing.T) {
+func TestRegistry_RemovesManagerAfterLastViewDropped(t *testing.T) {
 	catalog := newMockCatalog()
 	s := newMockSyncer()
 	reg := newTestRegistry(t, catalog, s)
-	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
-	version := testVersion(1, 1, 1)
-	manager := reg.Ensure(shardID)
+	shardID := qviews.ShardID{
+		ReplicaID: 1,
+		VChannel:  "by-dev-rootcoord-dml_100v0",
+	}
+	mgr := reg.Ensure(shardID)
+	builder := testBuilderForShard(100, shardID)
+	builder.SetAssignments(nil)
 
-	require.NoError(t, manager.AddPreparing(context.Background(), testBuilderForShard(100, shardID)))
+	require.NoError(t, mgr.AddPreparing(context.Background(), builder))
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
-	simulateNodeResponse(t, s, testQN1, version, qviews.QueryViewStateReady)
+	require.NoError(t, mgr.RequestRelease(context.Background()))
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
-	simulateNodeResponse(t, s, qviews.NewStreamingNodeFromVChannel(shardID.VChannel), version, qviews.QueryViewStateReady)
-	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
-	simulateNodeResponse(t, s, qviews.NewStreamingNodeFromVChannel(shardID.VChannel), version, qviews.QueryViewStateUp)
-	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
-	require.NoError(t, manager.RequestRelease(context.Background()))
-	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
-	simulateNodeResponse(t, s, qviews.NewStreamingNodeFromVChannel(shardID.VChannel), version, qviews.QueryViewStateDown)
-	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
-	simulateNodeResponse(t, s, qviews.NewStreamingNodeFromVChannel(shardID.VChannel), version, qviews.QueryViewStateDropped)
-	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
-	simulateNodeResponse(t, s, testQN1, version, qviews.QueryViewStateDropped)
+
+	version := testVersion(1, 1, 1)
+	sn := qviews.NewStreamingNodeFromVChannel(shardID.VChannel)
+	callback := s.findOnSyncResponse(sn, version)
+	require.NotNil(t, callback)
+	response := qviews.NewQueryViewAtStreamingNode(&viewpb.QueryViewMeta{
+		CollectionId: 100,
+		ReplicaId:    shardID.ReplicaID,
+		Vchannel:     shardID.VChannel,
+		Version:      version.IntoProto(),
+		State:        viewpb.QueryViewState_QueryViewStateDropped,
+	}, &viewpb.QueryViewOfStreamingNode{})
+	require.True(t, callback(response))
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
 
 	assert.Nil(t, reg.Get(shardID))
-	assert.Empty(t, reg.ShardIDs())
 	assert.Empty(t, reg.CollectionShards(100))
+	assert.Empty(t, reg.ShardIDs())
 	assert.NotContains(t, reg.Snapshot().StatsMap(), shardID)
-	assert.NotSame(t, manager, reg.Ensure(shardID))
-}
-
-func TestRegistry_DoesNotRemoveReplacementManager(t *testing.T) {
-	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
-	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
-	oldManager := reg.Ensure(shardID)
-	replacement := newShardViewManager(context.Background(), shardID, reg.flushScheduler, nil)
-	replacement.SetStatsObserver(reg.onShardStatsChanged)
-	replacement.setOnReleasedEmpty(reg.removeReleasedManager)
-
-	reg.mu.Lock()
-	reg.shards[shardID] = replacement
-	reg.mu.Unlock()
-	reg.removeReleasedManager(shardID, oldManager)
-
-	assert.Same(t, replacement, reg.Get(shardID))
-}
-
-func TestRegistry_IgnoresStatsFromEvictedManager(t *testing.T) {
-	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
-	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
-	oldManager := reg.Ensure(shardID)
-	replacement := newShardViewManager(context.Background(), shardID, reg.flushScheduler, nil)
-	replacement.SetStatsObserver(reg.onShardStatsChanged)
-	replacement.setOnReleasedEmpty(reg.removeReleasedManager)
-
-	reg.mu.Lock()
-	reg.shards[shardID] = replacement
-	reg.mu.Unlock()
-
-	// A late stats publication from the evicted manager must not install its
-	// stale placements into the slot now owned by the replacement.
-	versionBefore := reg.version
-	reg.onShardStatsChanged(shardID, oldManager, shardStatsForNodes(map[int64][]int64{101: {1}}))
-	assert.Empty(t, reg.NodeShards(1))
-	assert.Equal(t, versionBefore, reg.version)
-	require.NotNil(t, reg.stats[shardID])
-	assert.Empty(t, reg.stats[shardID].Segments)
-
-	// The current manager's stats are still adopted.
-	reg.onShardStatsChanged(shardID, replacement, shardStatsForNodes(map[int64][]int64{101: {1}}))
-	assert.ElementsMatch(t, []qviews.ShardID{shardID}, reg.NodeShards(1))
+	assert.NotSame(t, mgr, reg.Ensure(shardID))
 }
 
 func TestRegistry_RecoverWithPersistedViews(t *testing.T) {
@@ -238,6 +169,10 @@ func TestRegistry_RecoveryPublishesImmediateQueryNodeLoss(t *testing.T) {
 	view.Meta.ReplicaId = shardID.ReplicaID
 	view.Meta.Vchannel = shardID.VChannel
 
+	// Keep Stats() and node-index initialization busy long enough for the
+	// recovery sync callback to contend with observer installation. With the
+	// old Commit-before-observer ordering, the callback can be lost in this
+	// window and the registry remains stuck on Preparing.
 	segmentIDs := make([]int64, 50_000)
 	for i := range segmentIDs {
 		segmentIDs[i] = int64(10_000 + i)
@@ -279,7 +214,7 @@ func TestRegistry_EnsureIndexesCollection(t *testing.T) {
 func TestRegistry_NodeIndexTracksStatsReplacement(t *testing.T) {
 	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
-	mgr := reg.Ensure(shardID)
+	reg.Ensure(shardID)
 
 	observed := make(chan struct{}, 1)
 	reg.RegisterStatsObserver(func(_ qviews.ShardID, _ *ShardStats) {
@@ -287,27 +222,29 @@ func TestRegistry_NodeIndexTracksStatsReplacement(t *testing.T) {
 		observed <- struct{}{}
 	})
 
-	reg.onShardStatsChanged(shardID, mgr, shardStatsForNodes(map[int64][]int64{
+	reg.onShardStatsChanged(shardID, shardStatsForNodes(map[int64][]int64{
 		101: {1, 2},
 		102: {1},
 	}))
 	assert.ElementsMatch(t, []qviews.ShardID{shardID}, reg.NodeShards(1))
 	assert.ElementsMatch(t, []qviews.ShardID{shardID}, reg.NodeShards(2))
-	assert.Len(t, reg.NodeShards(1), 1)
+	assert.Len(t, reg.NodeShards(1), 1, "a shard is indexed once even when multiple segments use the node")
 	<-observed
 
-	reg.onShardStatsChanged(shardID, mgr, shardStatsForNodes(map[int64][]int64{103: {3}}))
+	reg.onShardStatsChanged(shardID, shardStatsForNodes(map[int64][]int64{
+		103: {3},
+	}))
 	assert.Empty(t, reg.NodeShards(1))
 	assert.Empty(t, reg.NodeShards(2))
 	assert.ElementsMatch(t, []qviews.ShardID{shardID}, reg.NodeShards(3))
 	<-observed
 
-	reg.onShardStatsChanged(shardID, mgr, emptyShardStats())
+	reg.onShardStatsChanged(shardID, emptyShardStats())
 	assert.Empty(t, reg.NodeShards(3))
 	<-observed
 
 	assert.NotPanics(t, func() {
-		reg.onShardStatsChanged(shardID, mgr, nil)
+		reg.onShardStatsChanged(shardID, nil)
 	})
 	assert.Empty(t, reg.NodeShards(3))
 	<-observed
@@ -318,20 +255,20 @@ func TestRegistry_SnapshotForShards(t *testing.T) {
 	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
 	shardB := qviews.ShardID{ReplicaID: 2, VChannel: "by-dev-rootcoord-dml_200v0"}
 	missing := qviews.ShardID{ReplicaID: 3, VChannel: "by-dev-rootcoord-dml_300v0"}
-	mgrA := reg.Ensure(shardA)
-	mgrB := reg.Ensure(shardB)
+	reg.Ensure(shardA)
+	reg.Ensure(shardB)
 	statsA := shardStatsForNodes(map[int64][]int64{101: {1}})
 	statsB := shardStatsForNodes(map[int64][]int64{201: {2}})
-	reg.onShardStatsChanged(shardA, mgrA, statsA)
-	reg.onShardStatsChanged(shardB, mgrB, statsB)
+	reg.onShardStatsChanged(shardA, statsA)
+	reg.onShardStatsChanged(shardB, statsB)
 
 	resident := reg.Snapshot()
 	updatedStatsA := shardStatsForNodes(map[int64][]int64{102: {3}})
-	reg.onShardStatsChanged(shardA, mgrA, updatedStatsA)
+	reg.onShardStatsChanged(shardA, updatedStatsA)
 	require.Same(t, resident, reg.snapshot)
 
 	scoped := reg.SnapshotForShards([]qviews.ShardID{shardA, missing, shardA})
-	require.Same(t, resident, reg.snapshot)
+	require.Same(t, resident, reg.snapshot, "scoped snapshot must not refresh the resident full snapshot")
 	assert.Equal(t, reg.version, scoped.Version())
 	require.Len(t, scoped.StatsMap(), 1)
 	assert.Same(t, updatedStatsA, scoped.StatsMap()[shardA])
@@ -339,7 +276,7 @@ func TestRegistry_SnapshotForShards(t *testing.T) {
 
 	scoped.StatsMap()[shardB] = statsB
 	next := reg.SnapshotForShards([]qviews.ShardID{shardA})
-	assert.NotContains(t, next.StatsMap(), shardB)
+	assert.NotContains(t, next.StatsMap(), shardB, "each scoped snapshot must own its outer map")
 	assert.Same(t, updatedStatsA, next.StatsMap()[shardA])
 }
 
@@ -370,6 +307,12 @@ func TestRecoverShardViewRegistryAllowsTerminalCleanup(t *testing.T) {
 	require.Equal(t, qviews.QueryViewStateDropping, manager.views[testVersion(3, 1, 2)].State())
 	manager.mu.Unlock()
 	require.Empty(t, refs.unpins)
+
+	version := testVersion(3, 1, 2)
+	simulateNodeResponse(t, s, testSN, version, qviews.QueryViewStateDropped)
+	simulateNodeResponse(t, s, testQN1, version, qviews.QueryViewStateDropped)
+	require.NoError(t, registry.flushScheduler.Flush(context.Background()))
+	require.Nil(t, registry.Get(qviews.NewShardIDFromQVMeta(view.GetMeta())))
 }
 
 func TestRecoverShardViewRegistryRollsBackReferencesOnFailure(t *testing.T) {

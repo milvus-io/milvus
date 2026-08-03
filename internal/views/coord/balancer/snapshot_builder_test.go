@@ -3,6 +3,7 @@ package balancer
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -43,10 +44,55 @@ func (f *fakeNodeProvider) notifyNodeChanged() {
 type fakeDataViewProvider struct {
 	collections []*viewpb.DataViewOfCollection
 	segments    map[int64]*SegmentInfo
+
+	collectionRequests []map[int64]struct{}
+	segmentRequests    [][]int64
+	segmentRequestHook func()
 }
 
 func (f *fakeDataViewProvider) DataViewSnapshot(context.Context) *DataViewSnapshot {
 	return NewDataViewSnapshot(1, f.collections, newMapSegmentSnapshot(f.segments))
+}
+
+func (f *fakeDataViewProvider) DataViewSnapshotForCollections(_ context.Context, collectionIDs map[int64]struct{}) *DataViewSnapshot {
+	f.collectionRequests = append(f.collectionRequests, collectionIDs)
+	selected := f.collections
+	if collectionIDs != nil {
+		selected = nil
+		for _, collection := range f.collections {
+			if _, ok := collectionIDs[collection.GetCollectionId()]; ok {
+				selected = append(selected, collection)
+			}
+		}
+	}
+
+	segmentInfos := make(map[int64]*SegmentInfo)
+	for _, collection := range selected {
+		for _, shard := range collection.GetShards() {
+			for _, partition := range shard.GetPartitions() {
+				for _, segmentID := range partition.GetSegmentIds() {
+					if info := f.segments[segmentID]; info != nil {
+						segmentInfos[segmentID] = info
+					}
+				}
+			}
+		}
+	}
+	return NewDataViewSnapshot(1, selected, newMapSegmentSnapshot(segmentInfos))
+}
+
+func (f *fakeDataViewProvider) SegmentSnapshot(_ context.Context, segmentIDs []int64) SegmentSnapshot {
+	f.segmentRequests = append(f.segmentRequests, append([]int64(nil), segmentIDs...))
+	if f.segmentRequestHook != nil {
+		f.segmentRequestHook()
+	}
+	segments := make(map[int64]*SegmentInfo, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		if info := f.segments[segmentID]; info != nil {
+			segments[segmentID] = info
+		}
+	}
+	return newMapSegmentSnapshot(segments)
 }
 
 // --- fake catalog/syncer for the registry and store ---
@@ -111,6 +157,11 @@ func storeWithConfig(t *testing.T, collectionID, replicaID int64, partitions []i
 	return store
 }
 
+func buildFullSnapshot(builder *SnapshotBuilder) *BalancerSnapshot {
+	snapshot, _ := builder.build(context.Background(), triggerBatch{full: true})
+	return snapshot
+}
+
 // addShardWithPreparingView inserts a shard in the registry and gives it a
 // single Preparing view with the specified placements.
 func addShardWithPreparingView(
@@ -145,7 +196,7 @@ func TestSnapshotBuilder_EmptyInputs(t *testing.T) {
 		&BalanceConfig{},
 	)
 
-	snap := builder.Build(context.Background())
+	snap := buildFullSnapshot(builder)
 	require.NotNil(t, snap)
 	assert.Empty(t, snap.ConfigsMap())
 	assert.Empty(t, snap.ShardStatsMap())
@@ -171,7 +222,7 @@ func TestSnapshotBuilder_NodeInfosCopied(t *testing.T) {
 		&BalanceConfig{},
 	)
 
-	snap := builder.Build(context.Background())
+	snap := buildFullSnapshot(builder)
 	require.Len(t, snap.Nodes, 2)
 
 	n1 := snap.Nodes[1]
@@ -220,7 +271,7 @@ func TestSnapshotBuilder_AggregatePerNodeRowLoad(t *testing.T) {
 		&BalanceConfig{},
 	)
 
-	snap := builder.Build(context.Background())
+	snap := buildFullSnapshot(builder)
 	require.Len(t, snap.Nodes, 2)
 
 	n1 := snap.Nodes[1]
@@ -254,8 +305,9 @@ func TestSnapshotBuilder_AggregatePerNodeRowCount(t *testing.T) {
 		&BalanceConfig{},
 	)
 
-	snap := builder.Build(context.Background())
+	snap := buildFullSnapshot(builder)
 	assert.Equal(t, int64(10), snap.Nodes[1].PendingRowCount)
+	assert.Equal(t, NodeRowStats{PendingRowCount: 10}, snap.ShardRowStatsSnapshot[shardID][1])
 }
 
 func TestSnapshotBuilder_CollectsSegmentsFromDataViewsAndPlacements(t *testing.T) {
@@ -296,7 +348,7 @@ func TestSnapshotBuilder_CollectsSegmentsFromDataViewsAndPlacements(t *testing.T
 		&BalanceConfig{},
 	)
 
-	snap := builder.Build(context.Background())
+	snap := buildFullSnapshot(builder)
 
 	// Segment metadata stays behind the DataView snapshot lookup; Build no
 	// longer materializes a segment map.
@@ -333,7 +385,7 @@ func TestSnapshotBuilder_UnknownNodeInPlacementIsSkipped(t *testing.T) {
 		&BalanceConfig{},
 	)
 
-	snap := builder.Build(context.Background())
+	snap := buildFullSnapshot(builder)
 	// Node 99 does not appear in snap.Nodes; Balancer's Phase 1 will flag
 	// current view as referencing an unavailable node.
 	_, ok := snap.Nodes[99]
@@ -357,10 +409,284 @@ func TestSnapshotBuilder_MissingSegmentInfoContributesZero(t *testing.T) {
 		&BalanceConfig{},
 	)
 
-	snap := builder.Build(context.Background())
+	snap := buildFullSnapshot(builder)
 	n1 := snap.Nodes[1]
 	// Only segment 101 contributes its RowNum; segment 102 contributes 0.
 	assert.Equal(t, int64(10), n1.PendingRowCount)
+}
+
+func TestRowCountLedger_ReplaceShardRowStats(t *testing.T) {
+	shardID := qviews.ShardID{ReplicaID: 10, VChannel: "by-dev-rootcoord-dml_0_1v0"}
+	ledger := newRowCountLedger()
+	ledger.segmentRowCounts = map[int64]int64{
+		101: 100,
+		102: 50,
+		103: 30,
+	}
+
+	first := testShardStats(
+		nil,
+		0,
+		placement(101, 10, 1, coordview.SegmentStateUp),
+		placement(101, 10, 2, coordview.SegmentStateReady),
+		placement(102, 10, 1, coordview.SegmentStatePreparing),
+		placement(103, 10, 3, coordview.SegmentStateUnrecoverable),
+	)
+	ledger.replaceShardRowStats(shardID, first)
+
+	assert.Equal(t, NodeRowStats{UpRowCount: 100, PendingRowCount: 50}, ledger.nodeRowCount[1])
+	assert.Equal(t, NodeRowStats{PendingRowCount: 100}, ledger.nodeRowCount[2])
+	assert.NotContains(t, ledger.nodeRowCount, int64(3))
+
+	replacement := testShardStats(
+		nil,
+		0,
+		placement(101, 10, 2, coordview.SegmentStateUp),
+		placement(102, 10, 2, coordview.SegmentStatePreparing),
+	)
+	ledger.replaceShardRowStats(shardID, replacement)
+
+	assert.NotContains(t, ledger.nodeRowCount, int64(1))
+	assert.Equal(t, NodeRowStats{UpRowCount: 100, PendingRowCount: 50}, ledger.nodeRowCount[2])
+
+	ledger.replaceShardRowStats(shardID, &coordview.ShardStats{Segments: map[int64]*coordview.SegmentStats{}})
+	assert.Empty(t, ledger.nodeRowCount)
+	assert.NotContains(t, ledger.shardRowCount, shardID)
+
+	ledger.replaceShardRowStats(shardID, nil)
+	assert.Empty(t, ledger.nodeRowCount)
+}
+
+func TestSnapshotBuilder_RowCountDirtySetSwapPreservesNewMarks(t *testing.T) {
+	firstShard := qviews.ShardID{ReplicaID: 10, VChannel: "by-dev-rootcoord-dml_0_1v0"}
+	secondShard := qviews.ShardID{ReplicaID: 20, VChannel: "by-dev-rootcoord-dml_0_2v0"}
+	store := emptyLoadConfigStore(t)
+	registry := emptyRegistry(t)
+	t.Cleanup(registry.Close)
+	addShardWithPreparingView(t, registry, firstShard, map[int64]map[int64][]int64{
+		1: {10: {101}},
+	})
+	requestStarted := make(chan struct{})
+	continueRequest := make(chan struct{})
+	provider := &fakeDataViewProvider{
+		segments: map[int64]*SegmentInfo{101: {SegmentID: 101, RowNum: 100}},
+		segmentRequestHook: func() {
+			close(requestStarted)
+			<-continueRequest
+		},
+	}
+	builder := NewSnapshotBuilder(
+		store,
+		registry,
+		&fakeNodeProvider{infos: map[int64]*NodeInfo{1: {NodeID: 1, Alive: true}}},
+		provider,
+		&BalanceConfig{},
+	)
+	builder.ObserveShardStats(firstShard, nil)
+
+	buildDone := make(chan struct{})
+	go func() {
+		builder.build(context.Background(), triggerBatch{
+			dirtyShards: map[qviews.ShardID]struct{}{firstShard: {}},
+		})
+		close(buildDone)
+	}()
+	select {
+	case <-requestStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for metadata request")
+	}
+
+	builder.ObserveShardStats(secondShard, nil)
+	close(continueRequest)
+	select {
+	case <-buildDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for snapshot build")
+	}
+
+	assert.Equal(t, []qviews.ShardID{secondShard}, builder.takeRowCountDirtyShards())
+	assert.Empty(t, builder.takeRowCountDirtyShards())
+}
+
+func TestSnapshotBuilder_FullRebuildClearsStaleLedgerEntries(t *testing.T) {
+	shardID := qviews.ShardID{ReplicaID: 10, VChannel: "by-dev-rootcoord-dml_0_1v0"}
+	staleShardID := qviews.ShardID{ReplicaID: 20, VChannel: "by-dev-rootcoord-dml_0_2v0"}
+	store := emptyLoadConfigStore(t)
+	registry := emptyRegistry(t)
+	t.Cleanup(registry.Close)
+	addShardWithPreparingView(t, registry, shardID, map[int64]map[int64][]int64{
+		1: {10: {101}},
+	})
+	builder := NewSnapshotBuilder(
+		store,
+		registry,
+		&fakeNodeProvider{infos: map[int64]*NodeInfo{
+			1: {NodeID: 1, Alive: true},
+			2: {NodeID: 2, Alive: true},
+		}},
+		&fakeDataViewProvider{segments: map[int64]*SegmentInfo{
+			101: {SegmentID: 101, RowNum: 100},
+		}},
+		&BalanceConfig{},
+	)
+
+	first := buildFullSnapshot(builder)
+	assert.Equal(t, int64(100), first.Nodes[1].PendingRowCount)
+
+	builder.rowCountLedger.segmentRowCounts[999] = 900
+	builder.rowCountLedger.shardRowCount[staleShardID] = ShardRowStats{
+		2: {PendingRowCount: 900},
+	}
+	builder.rowCountLedger.nodeRowCount[2] = NodeRowStats{PendingRowCount: 900}
+
+	second := buildFullSnapshot(builder)
+
+	assert.Equal(t, int64(100), second.Nodes[1].PendingRowCount)
+	assert.Zero(t, second.Nodes[2].PendingRowCount)
+	assert.NotContains(t, builder.rowCountLedger.segmentRowCounts, int64(999))
+	assert.NotContains(t, builder.rowCountLedger.shardRowCount, staleShardID)
+	assert.NotContains(t, builder.rowCountLedger.nodeRowCount, int64(2))
+}
+
+func TestSnapshotBuilder_ScopedRefreshUsesCachedNonTargetAndMatchesFullPlan(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	targetShard := qviews.ShardID{ReplicaID: replicaID, VChannel: "by-dev-rootcoord-dml_0_1v0"}
+	nonTargetShard := qviews.ShardID{ReplicaID: 20, VChannel: "by-dev-rootcoord-dml_0_2v0"}
+	store := storeWithConfig(t, collectionID, replicaID, []int64{10}, []int64{1, 2})
+	registry := emptyRegistry(t)
+	t.Cleanup(registry.Close)
+	registry.Ensure(targetShard)
+	addShardWithPreparingView(t, registry, nonTargetShard, map[int64]map[int64][]int64{
+		1: {20: {201}},
+	})
+	provider := &fakeDataViewProvider{
+		collections: []*viewpb.DataViewOfCollection{
+			{
+				CollectionId: collectionID,
+				DataVersion:  (&qviews.DataVersion{StreamingVersion: 1}).IntoProto(),
+				Shards:       []*viewpb.DataViewOfShard{shardDataView(targetShard.VChannel, 10, 101)},
+			},
+			{
+				CollectionId: 2,
+				DataVersion:  (&qviews.DataVersion{StreamingVersion: 1}).IntoProto(),
+				Shards:       []*viewpb.DataViewOfShard{shardDataView(nonTargetShard.VChannel, 20, 201)},
+			},
+		},
+		segments: map[int64]*SegmentInfo{
+			101: {SegmentID: 101, PartitionID: 10, RowNum: 100},
+			201: {SegmentID: 201, PartitionID: 20, RowNum: 900},
+		},
+	}
+	nodeProvider := &fakeNodeProvider{infos: map[int64]*NodeInfo{
+		1: {NodeID: 1, Alive: true},
+		2: {NodeID: 2, Alive: true},
+	}}
+	builder := NewSnapshotBuilder(
+		store,
+		registry,
+		nodeProvider,
+		provider,
+		policyTestConfig(),
+	)
+
+	hydrated := buildFullSnapshot(builder)
+	require.Equal(t, int64(900), hydrated.Nodes[1].PendingRowCount)
+	provider.collectionRequests = nil
+	provider.segmentRequests = nil
+	builder.ObserveShardStats(nonTargetShard, nil)
+
+	scoped, targets := builder.build(context.Background(), triggerBatch{
+		dirtyColls: map[int64]struct{}{collectionID: {}},
+	})
+
+	assert.Equal(t, []qviews.ShardID{targetShard}, targets)
+	assert.Contains(t, scoped.ShardStatsMap(), targetShard)
+	assert.NotContains(t, scoped.ShardStatsMap(), nonTargetShard)
+	assert.Equal(t, int64(900), scoped.Nodes[1].PendingRowCount)
+	assert.Equal(t, []map[int64]struct{}{setOf[int64](collectionID)}, provider.collectionRequests)
+	assert.Empty(t, provider.segmentRequests, "cached non-target rows must not trigger metadata I/O")
+
+	oracle := &BalancerSnapshot{
+		Config:             builder.config,
+		LoadConfigSnapshot: store.Snapshot(),
+		ShardViewSnapshot:  registry.Snapshot(),
+		DataViewSnapshot:   provider.DataViewSnapshot(context.Background()),
+		NodeSnapshot:       nodeProvider.Snapshot(),
+	}
+	oracle.Nodes = buildBalanceNodes(oracle.NodeSnapshot)
+	aggregateNodeLoad(oracle.Nodes, oracle.ShardStatsMap(), oracle)
+	assert.Equal(t, oracle.Nodes, scoped.Nodes)
+
+	policy := NewDefaultBalancePolicy()
+	scopedPlan := policy.Plan(scoped, targets)
+	fullPlan := policy.Plan(oracle, []qviews.ShardID{targetShard})
+	require.Contains(t, scopedPlan.Prepares, targetShard)
+	require.Contains(t, fullPlan.Prepares, targetShard)
+	assert.Equal(
+		t,
+		assignmentsFromBuilder(fullPlan.Prepares[targetShard]),
+		assignmentsFromBuilder(scopedPlan.Prepares[targetShard]),
+	)
+}
+
+func TestSnapshotBuilder_MissingNonTargetMetadataDoesNotScheduleRetry(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	targetShard := qviews.ShardID{ReplicaID: replicaID, VChannel: "by-dev-rootcoord-dml_0_1v0"}
+	nonTargetShard := qviews.ShardID{ReplicaID: 20, VChannel: "by-dev-rootcoord-dml_0_2v0"}
+	store := storeWithConfig(t, collectionID, replicaID, []int64{10}, []int64{1, 2})
+	registry := emptyRegistry(t)
+	t.Cleanup(registry.Close)
+	registry.Ensure(targetShard)
+	addShardWithPreparingView(t, registry, nonTargetShard, map[int64]map[int64][]int64{
+		1: {20: {201}},
+	})
+	provider := &fakeDataViewProvider{
+		collections: []*viewpb.DataViewOfCollection{
+			{
+				CollectionId: collectionID,
+				DataVersion:  (&qviews.DataVersion{StreamingVersion: 1}).IntoProto(),
+				Shards:       []*viewpb.DataViewOfShard{shardDataView(targetShard.VChannel, 10, 101)},
+			},
+			{
+				CollectionId: 2,
+				DataVersion:  (&qviews.DataVersion{StreamingVersion: 1}).IntoProto(),
+				Shards:       []*viewpb.DataViewOfShard{shardDataView(nonTargetShard.VChannel, 20, 201)},
+			},
+		},
+		segments: map[int64]*SegmentInfo{
+			101: {SegmentID: 101, PartitionID: 10, RowNum: 100},
+		},
+	}
+	builder := NewSnapshotBuilder(
+		store,
+		registry,
+		&fakeNodeProvider{infos: map[int64]*NodeInfo{
+			1: {NodeID: 1, Alive: true},
+			2: {NodeID: 2, Alive: true},
+		}},
+		provider,
+		policyTestConfig(),
+	)
+	pending := triggerBatch{dirtyColls: map[int64]struct{}{collectionID: {}}}
+
+	first := buildFullSnapshot(builder)
+	assert.Zero(t, first.Nodes[1].PendingRowCount)
+	assert.Equal(t, [][]int64{{201}}, provider.segmentRequests)
+
+	provider.segmentRequests = nil
+	second, _ := builder.build(context.Background(), pending)
+	assert.Zero(t, second.Nodes[1].PendingRowCount)
+	assert.Empty(t, provider.segmentRequests)
+
+	provider.segments[201] = &SegmentInfo{SegmentID: 201, PartitionID: 20, RowNum: 900}
+	provider.segmentRequests = nil
+	third, _ := builder.build(context.Background(), pending)
+	assert.Zero(t, third.Nodes[1].PendingRowCount)
+	assert.Empty(t, provider.segmentRequests)
+
+	fourth := buildFullSnapshot(builder)
+	assert.Equal(t, int64(900), fourth.Nodes[1].PendingRowCount)
 }
 
 func TestAggregateNodeLoad_SkipsUnrecoverableLoad(t *testing.T) {

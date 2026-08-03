@@ -8,10 +8,19 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	balancerapi "github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func (m *fakeGCDataViewManager) DataViewSnapshotForCollections(ctx context.Context, collectionIDs map[int64]struct{}) *balancerapi.DataViewSnapshot {
+	return balancerapi.NewDataViewSnapshot(0, m.snapshotViews, nil)
+}
+
+func (m *fakeGCDataViewManager) SegmentSnapshot(ctx context.Context, segmentIDs []int64) balancerapi.SegmentSnapshot {
+	return nil
+}
 
 func TestServerCreateCollectionDataViewDelegatesToDataViewManager(t *testing.T) {
 	manager := &fakeGCDataViewManager{}
@@ -127,6 +136,45 @@ func TestDataViewSegmentStoreSelectSegmentsSkipsDroppedPartition(t *testing.T) {
 	require.Equal(t, int64(1408), segments[0].GetMemSize())
 	require.Equal(t, uint64(500), segments[0].GetStartPosition().GetTimestamp())
 	require.Equal(t, uint64(500), segments[0].GetTransformStartAfterTimetick())
+}
+
+func TestDataViewSegmentStoreGetSegmentsMapsBatch(t *testing.T) {
+	m := &meta{
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    NewSegmentsInfo(),
+	}
+	first := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:                            100,
+		CollectionID:                  1,
+		PartitionID:                   10,
+		InsertChannel:                 "ch-1",
+		NumOfRows:                     11,
+		State:                         commonpb.SegmentState_Flushed,
+		Level:                         datapb.SegmentLevel_L1,
+		DeleteApplyStartAfterTimetick: 500,
+	})
+	second := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            101,
+		CollectionID:  1,
+		PartitionID:   11,
+		InsertChannel: "ch-1",
+		NumOfRows:     22,
+		State:         commonpb.SegmentState_Flushed,
+		Level:         datapb.SegmentLevel_L1,
+	})
+	m.segments.SetSegment(100, first)
+	m.segments.SetSegment(101, second)
+
+	segments := (&dataViewSegmentStore{meta: m}).GetSegments(context.Background(), []int64{101, 404, 100})
+
+	require.Len(t, segments, 2)
+	require.Equal(t, int64(101), segments[0].GetID())
+	require.Equal(t, int64(22), segments[0].GetNumOfRows())
+	require.Equal(t, int64(100), segments[1].GetID())
+	require.Equal(t, int64(10), segments[1].GetPartitionID())
+	require.Equal(t, uint64(500), segments[1].GetTransformStartAfterTimetick())
+	first.NumOfRows = 99
+	require.Equal(t, int64(11), segments[1].GetNumOfRows())
 }
 
 func TestDataViewRecoveryUsesCollectionPartitions(t *testing.T) {
