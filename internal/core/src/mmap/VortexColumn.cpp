@@ -423,11 +423,11 @@ class VortexRowIdScanCursor final : public ChunkedColumnInterface::ScanCursor {
           sources_(std::move(sources)) {
         AssertInfo(start_offset >= 0 && length >= 0 &&
                        start_offset + length <=
-                           static_cast<int64_t>(column_->NumRows()),
+                           static_cast<int64_t>(column->NumRows()),
                    "vortex row id scan range [{}, {}) out of rows {}",
                    start_offset,
                    start_offset + length,
-                   column_->NumRows());
+                   column->NumRows());
     }
 
     int64_t
