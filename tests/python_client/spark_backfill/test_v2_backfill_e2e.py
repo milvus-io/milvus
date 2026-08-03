@@ -1,4 +1,5 @@
 import pytest
+from common.common_type import CaseLabel
 
 from spark_backfill.backfill_helpers import (
     assert_commit_succeeded,
@@ -10,7 +11,12 @@ from spark_backfill.backfill_helpers import (
 )
 from spark_backfill.contracts import build_ground_truth
 
-pytestmark = [pytest.mark.spark_e2e, pytest.mark.spark_backfill_v2, pytest.mark.spark_backfill_core]
+pytestmark = [
+    pytest.mark.tags(CaseLabel.SparkBackfill),
+    pytest.mark.spark_e2e,
+    pytest.mark.spark_backfill_v2,
+    pytest.mark.spark_backfill_core,
+]
 TARGET_FIELDS = ("bf_score", "bf_label", "bf_vector")
 
 

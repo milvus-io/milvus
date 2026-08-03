@@ -17,12 +17,13 @@ from spark_backfill.backfill_helpers import (
     remove_object_prefix,
     unique_name,
 )
-from spark_backfill.case import BackfillCase, infer_root_path
+from spark_backfill.case import DEFAULT_COMPACTION_PROTECTION_SECONDS, BackfillCase, infer_root_path
 from spark_backfill.config import SparkBackfillSettings
 from spark_backfill.k8s_resources import (
     assert_rbac_permissions,
     build_ephemeral_secret,
     build_support_config_map,
+    read_storage_credentials,
 )
 from spark_backfill.k8s_runner import KubernetesSparkRunner, SparkRuntimeConfig
 from spark_backfill.toolbox_runner import ToolboxRuntimeConfig, ToolboxSparkRunner
@@ -63,11 +64,27 @@ def spark_backfill_settings(request):
 
 
 @pytest.fixture(scope="session")
-def spark_storage_credentials():
+def spark_storage_credentials(spark_backfill_settings, spark_k8s_apis):
     access_key = os.getenv("SPARK_BACKFILL_S3_ACCESS_KEY", "")
     secret_key = os.getenv("SPARK_BACKFILL_S3_SECRET_KEY", "")
     if bool(access_key) != bool(secret_key):
         pytest.fail("SPARK_BACKFILL_S3_ACCESS_KEY and SPARK_BACKFILL_S3_SECRET_KEY must both be set or both be empty")
+    if access_key:
+        return access_key, secret_key
+
+    if spark_backfill_settings.storage_secret_name:
+        _, core_api, _ = spark_k8s_apis
+        try:
+            return read_storage_credentials(
+                core_api,
+                spark_backfill_settings.spark_k8s_namespace,
+                spark_backfill_settings.storage_secret_name,
+            )
+        except Exception as exc:
+            pytest.fail(
+                "Failed to read static S3 credentials from Kubernetes Secret "
+                f"{spark_backfill_settings.storage_secret_name!r}: {exc}"
+            )
     return access_key, secret_key
 
 
@@ -222,7 +239,12 @@ def spark_backfill_case_factory(
 ):
     resources = []
 
-    def factory(*, expected_storage_kind, compaction_protection_seconds=0, flush_batch_size=10):
+    def factory(
+        *,
+        expected_storage_kind,
+        compaction_protection_seconds=DEFAULT_COMPACTION_PROTECTION_SECONDS,
+        flush_batch_size=10,
+    ):
         collection_name = unique_name("spark_backfill")
         snapshot_names = []
         resource = {"collection_name": collection_name, "snapshot_names": snapshot_names, "prefix": ""}
@@ -312,7 +334,6 @@ def backfill_case_factory(spark_backfill_case_factory):
         return spark_backfill_case_factory(expected_storage_kind="v3", **kwargs)
 
     return factory
-
 
 @pytest.fixture
 def backfill_v2_case_factory(spark_backfill_case_factory):

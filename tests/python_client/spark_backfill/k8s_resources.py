@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Mapping
 
 
@@ -35,6 +36,37 @@ def build_ephemeral_secret(name: str, *, access_key: str, secret_key: str, milvu
         "type": "Opaque",
         "stringData": string_data,
     }
+
+
+def decode_storage_credentials(secret_data: Mapping[str, str]) -> tuple[str, str]:
+    key_pairs = (
+        ("s3-access-key", "s3-secret-key"),
+        ("accesskey", "secretkey"),
+    )
+    for access_key_name, secret_key_name in key_pairs:
+        access_key = secret_data.get(access_key_name, "")
+        secret_key = secret_data.get(secret_key_name, "")
+        if not access_key and not secret_key:
+            continue
+        if not access_key or not secret_key:
+            raise ValueError(
+                f"Kubernetes Secret must contain both {access_key_name!r} and {secret_key_name!r}"
+            )
+        try:
+            return (
+                base64.b64decode(access_key, validate=True).decode("utf-8"),
+                base64.b64decode(secret_key, validate=True).decode("utf-8"),
+            )
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise ValueError("Kubernetes Secret contains invalid storage credentials") from exc
+    raise ValueError(
+        "Kubernetes Secret does not contain a supported storage credential key pair"
+    )
+
+
+def read_storage_credentials(core_api, namespace: str, secret_name: str) -> tuple[str, str]:
+    secret = core_api.read_namespaced_secret(secret_name, namespace)
+    return decode_storage_credentials(getattr(secret, "data", None) or {})
 
 
 def required_rbac_permissions(*, create_secret: bool, runner_mode: str = "job") -> list[tuple[str, str, str]]:

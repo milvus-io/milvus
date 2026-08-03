@@ -26,6 +26,19 @@ class BackfillContractError(AssertionError):
     """A Snapshot, Backfill Result, Commit response, or visible row violated the E2E contract."""
 
 
+class StaleSchemaFenceMissingError(BackfillContractError):
+    """Milvus accepted at least part of a Result stamped with a stale SchemaVersion."""
+
+
+def log_contains_message(logs: str, expected: str) -> bool:
+    def normalize(value: str) -> str:
+        tokens = re.findall(r"\w+", value.casefold())
+        expanded = ("primary key" if token == "pk" else token for token in tokens)
+        return " ".join(expanded)
+
+    return normalize(expected) in normalize(logs)
+
+
 @dataclass(frozen=True)
 class SnapshotMetadataView:
     location: str
@@ -146,6 +159,9 @@ def collection_field_ids(client, collection_name: str, field_names: Sequence[str
 def make_source_rows(count: int = 30, dim: int = 4) -> list[dict[str, Any]]:
     rows = []
     for primary_key in range(count):
+        bf_score = 1000.0 if primary_key == 0 else 1010.0 if primary_key == 10 else None
+        bf_label = f"source-{primary_key}" if primary_key in {0, 1, 10} else None
+        bf_vector = [float(primary_key)] * dim if primary_key in {0, 2, 10} else None
         rows.append(
             {
                 "id": primary_key,
@@ -153,9 +169,9 @@ def make_source_rows(count: int = 30, dim: int = 4) -> list[dict[str, Any]]:
                 "base_float": float(primary_key),
                 "text": f"row-{primary_key}",
                 "vector": [float(primary_key) + offset / 10.0 for offset in range(dim)],
-                "bf_score": 1000.0 if primary_key == 0 else None,
-                "bf_label": "source-1" if primary_key == 1 else None,
-                "bf_vector": [9.0] * dim if primary_key == 2 else None,
+                "bf_score": bf_score,
+                "bf_label": bf_label,
+                "bf_vector": bf_vector,
             }
         )
     return rows
@@ -183,6 +199,7 @@ def write_backfill_parquet(
     dim: int = 4,
     include_pk: bool = True,
     score_type: pa.DataType | None = None,
+    vector_type: pa.DataType | None = None,
     target_fields: Sequence[str] = ("bf_score", "bf_label", "bf_vector"),
 ) -> None:
     fields = []
@@ -193,7 +210,13 @@ def write_backfill_parquet(
     if "bf_label" in target_fields:
         fields.append(pa.field("bf_label", pa.string(), nullable=True))
     if "bf_vector" in target_fields:
-        fields.append(pa.field("bf_vector", pa.list_(pa.float32(), dim), nullable=True))
+        fields.append(
+            pa.field(
+                "bf_vector",
+                vector_type or pa.list_(pa.float32(), dim),
+                nullable=True,
+            )
+        )
     for field in target_fields:
         if field not in {"bf_score", "bf_label", "bf_vector"}:
             fields.append(pa.field(field, pa.float32(), nullable=True))
@@ -358,7 +381,8 @@ def inspect_result_artifacts(minio_client, bucket: str, result: Mapping[str, Any
         kind = storage_kind(segment)
         if kind == "v3":
             for artifact_path in segment.get("manifestPaths", []):
-                artifacts.append(_stat_artifact(minio_client, bucket, segment_id, kind, artifact_path))
+                manifest_path = _v3_manifest_path(artifact_path, int(segment.get("version", -1)))
+                artifacts.append(_stat_artifact(minio_client, bucket, segment_id, kind, manifest_path))
         else:
             for group in segment.get("column_groups", []):
                 group_artifacts = []
@@ -376,6 +400,15 @@ def inspect_result_artifacts(minio_client, bucket: str, result: Mapping[str, Any
     if not artifacts:
         raise BackfillContractError("Backfill Result contains no physical artifacts")
     return artifacts
+
+
+def _v3_manifest_path(base_path: str, version: int) -> str:
+    path = str(base_path).rstrip("/")
+    if path.endswith(".avro"):
+        return path
+    if version < 0:
+        raise BackfillContractError(f"Storage V3 Result has no committed Manifest version for base path: {base_path}")
+    return f"{path}/_metadata/manifest-{version}.avro"
 
 
 def _stat_artifact(minio_client, bucket: str, segment_id: int, kind: str, artifact_path: str) -> dict[str, Any]:
@@ -424,6 +457,25 @@ def assert_commit_succeeded(response: Mapping[str, Any], *, expected_segments: s
         raise BackfillContractError("Commit reported failed segments")
 
 
+def assert_stale_schema_commit_rejected(
+    http_status: int,
+    response: Mapping[str, Any],
+    *,
+    result_version: int,
+    current_version: int,
+) -> None:
+    if http_status == 200:
+        raise StaleSchemaFenceMissingError("stale-schema Backfill Result was unexpectedly accepted")
+    committed = int(response.get("committed_segments", response.get("committedSegments", 0)))
+    if committed != 0:
+        raise StaleSchemaFenceMissingError(f"stale-schema rejection committed {committed} segments")
+
+    message = str(response.get("msg", response.get("message", ""))).casefold()
+    expected = f"computed against schema version {result_version} but collection is now at version {current_version}"
+    if "stale backfill result" not in message or expected not in message:
+        raise BackfillContractError(f"Commit did not report the expected stale-schema rejection: {response!r}")
+
+
 def unique_name(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
@@ -440,7 +492,13 @@ def create_backfill_collection(client, collection_name: str, dim: int = 4) -> No
     schema.add_field("bf_vector", DataType.FLOAT_VECTOR, dim=dim, nullable=True)
     indexes = client.prepare_index_params()
     indexes.add_index("vector", index_type="FLAT", metric_type="L2")
-    client.create_collection(collection_name, schema=schema, index_params=indexes)
+    indexes.add_index("bf_vector", index_type="FLAT", metric_type="L2")
+    client.create_collection(
+        collection_name,
+        schema=schema,
+        index_params=indexes,
+        consistency_level="Strong",
+    )
 
 
 def object_key(uri_or_key: str, expected_bucket: str) -> str:
