@@ -619,26 +619,26 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Int8:
-					result, err := strconv.ParseInt(dataString, 0, 8)
-					if err != nil {
+					result, actual, ok := parseRESTInteger(fieldValue, 8)
+					if !ok {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(
-							schemapb.DataType_name[int32(fieldType)], dataString,
+							schemapb.DataType_name[int32(fieldType)], actual,
 							fmt.Sprintf("field %s value must be an integer in range [%d, %d]", fieldName, math.MinInt8, math.MaxInt8))
 					}
 					reallyData[fieldName] = int8(result)
 				case schemapb.DataType_Int16:
-					result, err := strconv.ParseInt(dataString, 0, 16)
-					if err != nil {
+					result, actual, ok := parseRESTInteger(fieldValue, 16)
+					if !ok {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(
-							schemapb.DataType_name[int32(fieldType)], dataString,
+							schemapb.DataType_name[int32(fieldType)], actual,
 							fmt.Sprintf("field %s value must be an integer in range [%d, %d]", fieldName, math.MinInt16, math.MaxInt16))
 					}
 					reallyData[fieldName] = int16(result)
 				case schemapb.DataType_Int32:
-					result, err := strconv.ParseInt(dataString, 0, 32)
-					if err != nil {
+					result, actual, ok := parseRESTInteger(fieldValue, 32)
+					if !ok {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(
-							schemapb.DataType_name[int32(fieldType)], dataString,
+							schemapb.DataType_name[int32(fieldType)], actual,
 							fmt.Sprintf("field %s value must be an integer in range [%d, %d]", fieldName, math.MinInt32, math.MaxInt32))
 					}
 					reallyData[fieldName] = int32(result)
@@ -939,10 +939,10 @@ func isJSONDigit(ch byte) bool {
 	return ch >= '0' && ch <= '9'
 }
 
-// parseStructSubInteger parses an exact integer from a JSON number literal.
+// parseJSONInteger parses an exact integer from a JSON number literal.
 // Integer-valued decimal and exponent forms are accepted without converting
 // through float64 or computing attacker-controlled arbitrary-precision powers.
-func parseStructSubInteger(raw string, bitSize int) (int64, bool) {
+func parseJSONInteger(raw string, bitSize int) (int64, bool) {
 	switch bitSize {
 	case 8, 16, 32, 64:
 	default:
@@ -1091,6 +1091,21 @@ func parseStructSubInteger(raw string, bitSize int) (int64, bool) {
 	return value, true
 }
 
+// parseRESTInteger preserves the raw token for JSON numbers so validation runs
+// before gjson can normalize decimal or exponent forms through float64. Quoted
+// integer strings retain the existing base-prefix behavior.
+func parseRESTInteger(value gjson.Result, bitSize int) (int64, string, bool) {
+	actual := value.String()
+	if value.Type == gjson.Number {
+		actual = value.Raw
+		parsed, ok := parseJSONInteger(actual, bitSize)
+		return parsed, actual, ok
+	}
+
+	parsed, err := strconv.ParseInt(actual, 0, bitSize)
+	return parsed, actual, err == nil
+}
+
 func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result) (*schemapb.ScalarField, error) {
 	switch sub.GetElementType() {
 	case schemapb.DataType_Bool:
@@ -1120,7 +1135,7 @@ func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result) (
 			if v.Type != gjson.Number {
 				return nil, wrapStructSubParseError(sub, v, "expect integer")
 			}
-			value, ok := parseStructSubInteger(v.Raw, bitSize)
+			value, ok := parseJSONInteger(v.Raw, bitSize)
 			if !ok {
 				return nil, wrapStructSubParseError(sub, v,
 					fmt.Sprintf("expect integer in range [%d, %d]", minValue, maxValue))
@@ -1136,7 +1151,7 @@ func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result) (
 			if v.Type != gjson.Number {
 				return nil, wrapStructSubParseError(sub, v, "expect integer")
 			}
-			value, ok := parseStructSubInteger(v.Raw, 64)
+			value, ok := parseJSONInteger(v.Raw, 64)
 			if !ok {
 				return nil, wrapStructSubParseError(sub, v,
 					fmt.Sprintf("expect integer in range [%d, %d]", int64(math.MinInt64), int64(math.MaxInt64)))

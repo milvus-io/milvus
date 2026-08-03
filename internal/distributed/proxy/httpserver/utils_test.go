@@ -1037,23 +1037,39 @@ func TestAnyToColumns(t *testing.T) {
 func TestCheckAndSetData(t *testing.T) {
 	t.Run("integer range validation", func(t *testing.T) {
 		tests := []struct {
-			name          string
-			dataType      schemapb.DataType
-			min           int64
-			max           int64
-			invalidValues []int64
+			name              string
+			dataType          schemapb.DataType
+			min               int64
+			max               int64
+			invalidValues     []int64
+			invalidJSONValues []string
 		}{
 			{
 				name: "int8", dataType: schemapb.DataType_Int8, min: math.MinInt8, max: math.MaxInt8,
 				invalidValues: []int64{-129, 128, 200, 256, 1000, 65535},
+				invalidJSONValues: []string{
+					"127.00000000000000000000000000001",
+					"-128.00000000000000000000000000001",
+					"1e-999999",
+				},
 			},
 			{
 				name: "int16", dataType: schemapb.DataType_Int16, min: math.MinInt16, max: math.MaxInt16,
 				invalidValues: []int64{-32769, 32768, 65535, 100000},
+				invalidJSONValues: []string{
+					"32767.00000000000000000000000000001",
+					"-32768.00000000000000000000000000001",
+					"1e-999999",
+				},
 			},
 			{
 				name: "int32", dataType: schemapb.DataType_Int32, min: math.MinInt32, max: math.MaxInt32,
 				invalidValues: []int64{-2147483649, 2147483648, 4294967295},
+				invalidJSONValues: []string{
+					"2147483647.00000000000000000001",
+					"-2147483648.00000000000000000001",
+					"1e-999999",
+				},
 			},
 		}
 
@@ -1084,6 +1100,21 @@ func TestCheckAndSetData(t *testing.T) {
 					}
 				}
 
+				for _, input := range []struct {
+					raw      string
+					expected int64
+				}{
+					{raw: "100.0", expected: 100},
+					{raw: "1e2", expected: 100},
+					{raw: strconv.Quote("0x64"), expected: 100},
+				} {
+					body := []byte(fmt.Sprintf(`{"data":[{"book_id":1,"book_intro":[0.1,0.2],"word_count":2,"%s":%s}]}`, FieldNarrowInt, input.raw))
+					rows, _, err := checkAndSetData(body, schema, false)
+					require.NoError(t, err)
+					require.Len(t, rows, 1)
+					assert.EqualValues(t, input.expected, rows[0][FieldNarrowInt])
+				}
+
 				for _, value := range test.invalidValues {
 					literal := strconv.FormatInt(value, 10)
 					for _, valueJSON := range []string{literal, strconv.Quote(literal)} {
@@ -1095,6 +1126,16 @@ func TestCheckAndSetData(t *testing.T) {
 						assert.Contains(t, err.Error(), FieldNarrowInt)
 						assert.Contains(t, err.Error(), fmt.Sprintf("[%d, %d]", test.min, test.max))
 					}
+				}
+
+				for _, valueJSON := range test.invalidJSONValues {
+					body := []byte(fmt.Sprintf(`{"data":[{"book_id":1,"book_intro":[0.1,0.2],"word_count":2,"%s":%s}]}`, FieldNarrowInt, valueJSON))
+					_, _, err := checkAndSetData(body, schema, false)
+					require.Error(t, err)
+					assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+					assert.Contains(t, err.Error(), "actual="+valueJSON)
+					assert.Contains(t, err.Error(), FieldNarrowInt)
+					assert.Contains(t, err.Error(), fmt.Sprintf("[%d, %d]", test.min, test.max))
 				}
 			})
 		}
@@ -4395,7 +4436,7 @@ func TestPrintStructArrayFieldsV2(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_FloatVector.String(), subs[1][HTTPReturnFieldElementType])
 }
 
-func TestParseStructSubInteger(t *testing.T) {
+func TestParseJSONInteger(t *testing.T) {
 	tests := []struct {
 		name    string
 		raw     string
@@ -4433,7 +4474,7 @@ func TestParseStructSubInteger(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			value, ok := parseStructSubInteger(test.raw, test.bitSize)
+			value, ok := parseJSONInteger(test.raw, test.bitSize)
 			assert.Equal(t, test.ok, ok)
 			if test.ok {
 				assert.Equal(t, test.value, value)
@@ -4442,14 +4483,14 @@ func TestParseStructSubInteger(t *testing.T) {
 	}
 
 	largeScaledInteger := "1" + strings.Repeat("0", 4096) + "e-4096"
-	value, ok := parseStructSubInteger(largeScaledInteger, 64)
+	value, ok := parseJSONInteger(largeScaledInteger, 64)
 	require.True(t, ok)
 	assert.Equal(t, int64(1), value)
 
-	_, ok = parseStructSubInteger("1e-999999", 64)
+	_, ok = parseJSONInteger("1e-999999", 64)
 	assert.False(t, ok)
 	allocations := testing.AllocsPerRun(1000, func() {
-		parseStructSubInteger("1e-999999", 64)
+		parseJSONInteger("1e-999999", 64)
 	})
 	assert.LessOrEqual(t, allocations, float64(2))
 }
