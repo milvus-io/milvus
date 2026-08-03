@@ -1467,4 +1467,24 @@ func TestCanMergeSort(t *testing.T) {
 		plan := &datapb.CompactionPlan{Schema: emptySchema, SegmentBinlogs: segs}
 		assert.False(t, canMergeSort(plan, params))
 	})
+
+	t.Run("exactly max segments allowed", func(t *testing.T) {
+		segs := make([]*datapb.CompactionSegmentBinlogs, params.MaxSegmentMergeSort)
+		for i := range segs {
+			segs[i] = &datapb.CompactionSegmentBinlogs{SegmentID: int64(i), IsSorted: true}
+		}
+		plan := &datapb.CompactionPlan{Schema: emptySchema, SegmentBinlogs: segs}
+		assert.True(t, canMergeSort(plan, params))
+	})
+
+	t.Run("later unsorted segment rejected", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: emptySchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSorted: true},
+				{SegmentID: 2},
+			},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
 }

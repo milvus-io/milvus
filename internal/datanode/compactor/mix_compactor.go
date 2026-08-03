@@ -562,9 +562,11 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	return planResult, nil
 }
 
-// canMergeSort reports whether this plan's segments can be merged by
-// storage.MergeSort, which requires every input to be physically ordered by the
-// plan's merge key.
+// canMergeSort reports whether this plan is eligible for storage.MergeSort,
+// which merges without sorting and so requires every input to already be
+// ordered by the plan's merge key. This checks that each segment carries a
+// sort flag from sort compaction; it does not yet check that the flag
+// corresponds to this plan's merge key.
 func canMergeSort(plan *datapb.CompactionPlan, params compaction.Params) bool {
 	if !params.UseMergeSort {
 		return false
@@ -574,7 +576,7 @@ func canMergeSort(plan *datapb.CompactionPlan, params compaction.Params) bool {
 			return false
 		}
 	}
-	// Merge sort holds one record per reader, so the reader count is capped. A
+	// Each reader holds a live record, so memory grows with the reader count. A
 	// single segment is allowed: merge sort keeps the output flagged sorted,
 	// whereas mergeSplit emits it unsorted and needs a follow-up sort compaction.
 	return len(plan.GetSegmentBinlogs()) <= params.MaxSegmentMergeSort
