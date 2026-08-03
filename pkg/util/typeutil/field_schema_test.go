@@ -89,6 +89,7 @@ func TestValidateFieldTypeSchema(t *testing.T) {
 			DataType:    schemapb.DataType_Array,
 			ElementType: schemapb.DataType_Array,
 		})
+		require.ErrorContains(t, err, "element type Array is not supported")
 		require.ErrorContains(t, err, "must specify type_schema")
 	})
 

@@ -145,7 +145,7 @@ func ValidateFieldTypeSchema(field *schemapb.FieldSchema) error {
 		if field.GetDataType() == schemapb.DataType_Array &&
 			field.GetElementType() == schemapb.DataType_Array {
 			return merr.WrapErrParameterInvalidMsg(
-				"nested array field %s must specify type_schema",
+				"element type Array is not supported without type_schema; nested array field %s must specify type_schema",
 				field.GetName())
 		}
 		return nil

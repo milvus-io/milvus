@@ -912,6 +912,7 @@ func TestValidateFieldNestedArray(t *testing.T) {
 		}
 		err := ValidateField(field, schema)
 		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "element type Array is not supported")
 		assert.Contains(t, err.Error(), "must specify type_schema")
 	})
 
