@@ -1855,6 +1855,39 @@ func TestBuildQueryResp(t *testing.T) {
 	assert.Equal(t, true, compareRows(rows, exceptRows, compareRow))
 }
 
+func TestBuildSearchResp(t *testing.T) {
+	t.Run("element offsets", func(t *testing.T) {
+		rows, err := buildSearchResp(&schemapb.SearchResultData{
+			Ids:            generateIDs(schemapb.DataType_Int64, 3),
+			Scores:         DefaultScores,
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 1}},
+		}, true, nil)
+		require.NoError(t, err)
+		require.Equal(t, int64(0), rows[0][HTTPReturnElementOffset])
+		require.Equal(t, int64(2), rows[1][HTTPReturnElementOffset])
+		require.Equal(t, int64(1), rows[2][HTTPReturnElementOffset])
+	})
+
+	t.Run("no element offsets", func(t *testing.T) {
+		rows, err := buildSearchResp(&schemapb.SearchResultData{
+			Ids:    generateIDs(schemapb.DataType_Int64, 1),
+			Scores: DefaultScores[:1],
+		}, true, nil)
+		require.NoError(t, err)
+		require.NotContains(t, rows[0], HTTPReturnElementOffset)
+	})
+
+	t.Run("mismatched element offsets", func(t *testing.T) {
+		_, err := buildSearchResp(&schemapb.SearchResultData{
+			Ids:            generateIDs(schemapb.DataType_Int64, 2),
+			Scores:         DefaultScores[:2],
+			ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+		}, true, nil)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.ErrorContains(t, err, "element_indices length (1) does not match row count (2)")
+	})
+}
+
 func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 	t.Run("nullable vector derives logical rows from ValidData", func(t *testing.T) {
 		fieldData := &schemapb.FieldData{

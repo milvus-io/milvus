@@ -194,7 +194,8 @@ const (
 	HTTPReturnMaxIndexVersion = "maxIndexVersion"
 	HTTPReturnIndexParams     = "indexParams"
 
-	HTTPReturnDistance = "distance"
+	HTTPReturnDistance      = "distance"
+	HTTPReturnElementOffset = "offset"
 
 	HTTPReturnRowCount = "rowCount"
 

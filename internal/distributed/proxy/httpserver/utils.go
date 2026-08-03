@@ -2847,6 +2847,41 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	return queryResp, nil
 }
 
+func buildSearchResp(results *schemapb.SearchResultData, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) ([]map[string]interface{}, error) {
+	if results == nil {
+		return nil, merr.WrapErrServiceInternalMsg("search result is nil")
+	}
+
+	rows, err := buildQueryResp(
+		0,
+		results.GetOutputFields(),
+		results.GetFieldsData(),
+		results.GetIds(),
+		results.GetScores(),
+		enableInt64,
+		collectionSchema,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	elementOffsets := results.GetElementIndices().GetData()
+	if len(elementOffsets) == 0 {
+		return rows, nil
+	}
+	if len(elementOffsets) != len(rows) {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"search result element_indices length (%d) does not match row count (%d)",
+			len(elementOffsets), len(rows),
+		)
+	}
+
+	for i, offset := range elementOffsets {
+		rows[i][HTTPReturnElementOffset] = offset
+	}
+	return rows, nil
+}
+
 func hasSearchAggregationResult(results *schemapb.SearchResultData) bool {
 	return results != nil && (len(results.GetAggTopks()) > 0 || len(results.GetAggBuckets()) > 0)
 }

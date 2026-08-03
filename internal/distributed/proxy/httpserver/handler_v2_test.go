@@ -1001,6 +1001,77 @@ func TestHybridSearchWithRerank(t *testing.T) {
 	sendReqAndVerify(t, testEngine, queryTestCases.path, http.MethodPost, queryTestCases)
 }
 
+func TestSearchV2ReturnsElementOffsets(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	testCases := []struct {
+		name        string
+		path        string
+		requestBody string
+		hybrid      bool
+	}{
+		{
+			name:        "search",
+			path:        versionalV2(EntityCategory, SearchAction),
+			requestBody: `{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":2}`,
+		},
+		{
+			name: "hybrid search",
+			path: versionalV2(EntityCategory, HybridSearchAction),
+			requestBody: `{"collectionName":"book","search":[` +
+				`{"data":[[0.1,0.2]],"annsField":"book_intro","metricType":"L2","limit":2},` +
+				`{"data":[[0.1,0.2]],"annsField":"book_intro","metricType":"L2","limit":2}],` +
+				`"rerank":{"strategy":"weighted","params":{"weights":[0.5,0.5]}},"limit":2,"groupingField":"book_id"}`,
+			hybrid: true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			mp := mocks.NewMockProxy(t)
+			testEngine := initHTTPServerV2(mp, false)
+			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+				CollectionName: DefaultCollectionName,
+				Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
+				ShardsNum:      ShardNumDefault,
+				Status:         &StatusSuccess,
+			}, nil).Once()
+
+			searchResult := &milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
+				NumQueries:     1,
+				TopK:           2,
+				Topks:          []int64{2},
+				Ids:            generateIDs(schemapb.DataType_Int64, 2),
+				Scores:         []float32{0.9, 0.8},
+				ElementIndices: &schemapb.LongArray{Data: []int64{0, 2}},
+			}}
+			if testCase.hybrid {
+				mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(searchResult, nil).Once()
+			} else {
+				mp.EXPECT().Search(mock.Anything, mock.Anything).Return(searchResult, nil).Once()
+			}
+
+			req := httptest.NewRequest(http.MethodPost, testCase.path, bytes.NewReader([]byte(testCase.requestBody)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			var response struct {
+				Code int                      `json:"code"`
+				Data []map[string]interface{} `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+			require.Zero(t, response.Code)
+			require.Len(t, response.Data, 2)
+			require.Contains(t, response.Data[0], "offset")
+			require.Equal(t, float64(0), response.Data[0]["offset"])
+			require.Equal(t, float64(2), response.Data[1]["offset"])
+		})
+	}
+}
+
 func TestDocInDocOutSearch(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
