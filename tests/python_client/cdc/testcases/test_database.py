@@ -158,7 +158,7 @@ class TestCDCSyncDatabase(TestCDCSyncBase):
                     if key not in downstream_props or str(downstream_props[key]) != str(expected_value):
                         return False
                 return True
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(check_alter_properties, sync_timeout, f"alter database properties {db_name}")
@@ -223,7 +223,7 @@ class TestCDCSyncDatabase(TestCDCSyncBase):
                     return False
 
                 return True
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(check_drop_properties, sync_timeout, f"drop database properties {db_name}")

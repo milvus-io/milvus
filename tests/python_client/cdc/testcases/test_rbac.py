@@ -388,7 +388,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         # Initial cleanup - try to drop if exists
         try:
             upstream_client.drop_privilege_group(group_name)
-        except:
+        except Exception:
             pass  # Ignore if doesn't exist
 
         # Create privilege group in upstream
@@ -420,7 +420,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         # Cleanup
         try:
             upstream_client.drop_privilege_group(group_name)
-        except:
+        except Exception:
             pass
 
     def test_drop_privilege_group(self, upstream_client, downstream_client, sync_timeout):
@@ -433,7 +433,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         # Initial cleanup
         try:
             upstream_client.drop_privilege_group(group_name)
-        except:
+        except Exception:
             pass
 
         # Create privilege group first
@@ -577,7 +577,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         # Initial cleanup
         try:
             upstream_client.drop_privilege_group(group_name)
-        except:
+        except Exception:
             pass
 
         # Create privilege group first
@@ -648,7 +648,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         # Cleanup
         try:
             upstream_client.drop_privilege_group(group_name)
-        except:
+        except Exception:
             pass
 
     def test_remove_privileges_from_group(self, upstream_client, downstream_client, sync_timeout):
@@ -661,7 +661,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
         # Initial cleanup
         try:
             upstream_client.drop_privilege_group(group_name)
-        except:
+        except Exception:
             pass
 
         # Create privilege group first

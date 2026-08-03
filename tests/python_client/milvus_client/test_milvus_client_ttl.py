@@ -246,7 +246,10 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
             )[0]
             assert len(res[0]) > 0
             for hit in res[0]:
-                assert hit.get(bool_field) == False
+                # keep `== False`: .get() yields None when the field is missing, and both
+                # `not ...` (would pass) and `is False` (would break on a numpy bool) change
+                # what this asserts
+                assert hit.get(bool_field) == False  # noqa: E712
 
             # hybrid search data after alter ttl
             sub_search1 = AnnSearchRequest(search_vectors, vec_field, {"level": 1}, 20, expr="visible==False")

@@ -65,7 +65,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
             try:
                 downstream_partitions = downstream_client.list_partitions(collection_name)
                 return partition_name in downstream_partitions
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(check_partition, sync_timeout, f"create partition {partition_name}")
@@ -95,7 +95,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                 return downstream_client.has_collection(
                     collection_name
                 ) and partition_name in downstream_client.list_partitions(collection_name)
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(
@@ -116,7 +116,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
             try:
                 downstream_partitions = downstream_client.list_partitions(collection_name)
                 return partition_name not in downstream_partitions
-            except:
+            except Exception:
                 return True  # If error, assume partition is dropped
 
         assert self.wait_for_sync(check_drop, sync_timeout, f"drop partition {partition_name}")
@@ -151,7 +151,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                 return downstream_client.has_collection(
                     collection_name
                 ) and partition_name in downstream_client.list_partitions(collection_name)
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(
@@ -223,7 +223,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                     output_fields=[],
                 )
                 return True
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(check_setup, sync_timeout, f"setup and load partition {partition_name}")
@@ -250,7 +250,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                 print(f"DEBUG: released partition {partition_name} can still be searched: {res}")
                 print(f"DEBUG: released partition {partition_name} can still be searched")
                 return False
-            except:
+            except Exception:
                 print(f"DEBUG: released partition {partition_name} cannot be searched")
                 return True
 
@@ -269,7 +269,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                 )
                 print(f"DEBUG: released partition {partition_name} can still be searched")
                 return False
-            except:
+            except Exception:
                 print(f"DEBUG: released partition {partition_name} cannot be searched")
                 return True
 
@@ -306,7 +306,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                 return downstream_client.has_collection(
                     collection_name
                 ) and partition_name in downstream_client.list_partitions(collection_name)
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(
@@ -335,7 +335,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                 )
                 count = result[0]["count(*)"] if result else 0
                 return count >= inserted_count
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(check_data, sync_timeout, f"insert data to partition {partition_name}")
@@ -372,7 +372,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                 return downstream_client.has_collection(
                     collection_name
                 ) and partition_name in downstream_client.list_partitions(collection_name)
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(
@@ -397,7 +397,7 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                 )
                 count = result[0]["count(*)"] if result else 0
                 return count >= 100
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(check_data, sync_timeout, f"initial data sync to partition {partition_name}")

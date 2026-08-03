@@ -19,16 +19,13 @@ ignore = [
     "E501",  # line-too-long handled by formatter
     "E741",  # ambiguous variable names (l, I, O) common in test code
 
-    # The rules below cannot be satisfied without editing test behaviour, so they
-    # are disabled rather than left permanently red. Everything mechanical
-    # (whitespace, import hygiene, formatting) is enforced, and F401/F811/F821
-    # stay on so new code cannot reintroduce dead or undefined names.
-    "F841",  # assigned-but-unused: tests keep call results on purpose
-    "E722",  # bare `except:` is widespread in teardown/cleanup paths
-    "E402",  # imports after sys.path manipulation
-    "E712",  # `== True` / `== False`: rewriting to a truth test would change
-             # behaviour for None (e.g. `hit.get(field) == False`)
-    "UP031",  # printf-style formatting: mechanical rewrite, but it is a code change
+    # Only these two stay off. Everything else pyflakes/pycodestyle checks is
+    # enforced, including F401/F811/F821, so new code cannot introduce dead,
+    # duplicate or undefined names.
+    "F841",  # assigned-but-unused: tests deliberately keep call results, and the
+             # cases that were genuinely missing an assertion have been fixed
+    "UP031",  # printf-style formatting: a pure style rewrite that catches no bugs,
+              # and 27 of the sites use `% (...)` tuples where it is not equivalent
 ]
 
 [lint.per-file-ignores]

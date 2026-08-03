@@ -330,7 +330,7 @@ class TestQueryOperation(TestcaseBase):
         _, check_res = collection_w.search(
             vectors_s[: ct.default_nq], ct.default_float_vec_field_name, ct.default_search_params, limit, multi_exprs
         )
-        assert check_res == True
+        assert check_res is True
 
 
 class TestQueryString(TestcaseBase):

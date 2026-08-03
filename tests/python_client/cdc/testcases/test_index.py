@@ -68,7 +68,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
             try:
                 downstream_indexes = downstream_client.list_indexes(collection_name)
                 return len(downstream_indexes) > 0
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(check_index, sync_timeout, f"create index on {collection_name}")
@@ -106,7 +106,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     downstream_client.has_collection(collection_name)
                     and len(downstream_client.list_indexes(collection_name)) > 0
                 )
-            except:
+            except Exception:
                 return False
 
         assert self.wait_for_sync(check_setup, sync_timeout, f"setup collection and index {collection_name}")
@@ -119,7 +119,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
             try:
                 downstream_indexes = downstream_client.list_indexes(collection_name)
                 return len(downstream_indexes) == 0
-            except:
+            except Exception:
                 return True  # If error, assume index is dropped
 
         assert self.wait_for_sync(check_drop, sync_timeout, f"drop index on {collection_name}")
@@ -258,7 +258,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                         try:
                             downstream_indexes = downstream_client.list_indexes(collection_name)
                             return len(downstream_indexes) > 0
-                        except:
+                        except Exception:
                             return False
 
                     assert self.wait_for_sync(
@@ -425,7 +425,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                         try:
                             downstream_indexes = downstream_client.list_indexes(collection_name)
                             return len(downstream_indexes) > 0
-                        except:
+                        except Exception:
                             return False
 
                     assert self.wait_for_sync(
@@ -656,7 +656,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                         try:
                             downstream_indexes = downstream_client.list_indexes(collection_name)
                             return len(downstream_indexes) > 0
-                        except:
+                        except Exception:
                             return False
 
                     assert self.wait_for_sync(

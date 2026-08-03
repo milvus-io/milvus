@@ -983,7 +983,7 @@ class TestMilvusClientHasPartitionInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim)
         # 2. create partition
         result = self.has_partition(client, collection_name, partition_name)[0]
-        assert result == False
+        assert result is False
 
 
 class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):

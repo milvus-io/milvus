@@ -10,15 +10,14 @@ from common.common_type import CaseLabel
 from common.milvus_sys import MilvusSys
 from customize.milvus_operator import MilvusOperator
 from pymilvus import Collection, connections, utility
+from rich.console import Console
+from rich.table import Table
 from utils.util_birdwatcher import BirdWatcher
 from utils.util_k8s import get_querynode_id_pod_pairs
 from utils.util_log import test_log as log
 
 namespace = "chaos-testing"
 prefix = "test_rg"
-
-from rich.console import Console
-from rich.table import Table
 
 
 def display_segment_distribution_info(collection_name, release_name, segment_info=None):
