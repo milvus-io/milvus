@@ -1091,8 +1091,9 @@ VortexColumn::VortexColumn(
 
     const auto& group_files = column_group_->files();
     files_.reserve(group_files.size());
-    for (const auto& group_file : group_files) {
-        files_.emplace_back(BuildFileState(group_file));
+    for (size_t file_index = 0; file_index < group_files.size(); ++file_index) {
+        files_.emplace_back(
+            BuildFileState(file_index, group_files[file_index]));
     }
 
     num_rows_until_chunk_ = column_group_->num_rows_until_chunk();
@@ -1103,12 +1104,16 @@ VortexColumn::~VortexColumn() = default;
 
 void
 VortexColumn::ManualEvictCache() const {
-    column_group_->ManualEvictCache();
+    if (!IsInMultiFieldColumnGroup()) {
+        column_group_->ManualEvictCache();
+    }
 }
 
 void
 VortexColumn::CancelWarmup() {
-    column_group_->CancelWarmup();
+    if (!IsInMultiFieldColumnGroup()) {
+        column_group_->CancelWarmup();
+    }
 }
 
 bool
@@ -1211,13 +1216,13 @@ VortexColumn::PrefetchChunks(milvus::OpContext* op_ctx,
     for (auto chunk_id : chunk_ids) {
         CheckChunkId(chunk_id);
         const auto& file = files_[chunk_id];
-        std::vector<cachinglayer::cid_t> cell_ids;
+        std::vector<uint64_t> cell_ids;
         cell_ids.reserve(file.planner->num_cells());
         for (size_t cell_id = 0; cell_id < file.planner->num_cells();
              ++cell_id) {
-            cell_ids.emplace_back(static_cast<cachinglayer::cid_t>(cell_id));
+            cell_ids.emplace_back(cell_id);
         }
-        cachinglayer::SemiInlineGet(file.slot->PinCells(op_ctx, cell_ids));
+        column_group_->PinCells(op_ctx, chunk_id, cell_ids);
     }
 }
 
@@ -1244,11 +1249,8 @@ VortexColumn::CellsLoaded(const int64_t* offsets, int64_t count) const {
 
         const auto& file = files_[chunk_id];
         auto plan = PlanOffsets(file, chunk_offsets);
-        for (auto cell_id : plan.cell_ids) {
-            if (!file.slot->IsCached(
-                    static_cast<cachinglayer::cid_t>(cell_id))) {
-                return false;
-            }
+        if (!column_group_->CellsLoaded(chunk_id, plan.cell_ids)) {
+            return false;
         }
     }
     return true;
@@ -1687,35 +1689,6 @@ VortexColumn::MakeVortexReaderProperties(
     return reader_properties;
 }
 
-std::shared_ptr<milvus_storage::vortex::VortexPlanner>
-VortexColumn::MakeFilePlanner(
-    const VortexColumnGroup::FileState& group_file) const {
-    auto cell_metas_result = milvus_storage::vortex::BuildVortexCellMetas(
-        group_file.footer_reader, field_name_);
-    if (!cell_metas_result.ok()) {
-        ThrowVortexStatus(
-            cell_metas_result.status(),
-            ErrorCode::DataFormatBroken,
-            fmt::format(
-                "failed to build vortex cell metas for field {} file {}",
-                field_id_.get(),
-                group_file.path));
-    }
-    auto planner_result = milvus_storage::vortex::VortexPlanner::Make(
-        group_file.footer_reader,
-        field_name_,
-        std::move(cell_metas_result).ValueOrDie());
-    if (!planner_result.ok()) {
-        ThrowVortexStatus(
-            planner_result.status(),
-            ErrorCode::DataFormatBroken,
-            fmt::format("failed to create vortex planner for field {} file {}",
-                        field_id_.get(),
-                        group_file.path));
-    }
-    return std::move(planner_result).ValueOrDie();
-}
-
 std::shared_ptr<milvus_storage::vortex::VortexFormatReader>
 VortexColumn::BuildFileReader(
     const VortexColumnGroup::FileState& group_file) const {
@@ -1781,7 +1754,7 @@ VortexColumn::ValidateFileState(
 
 VortexColumn::FileState
 VortexColumn::BuildFileState(
-    const VortexColumnGroup::FileState& group_file) const {
+    size_t file_index, const VortexColumnGroup::FileState& group_file) const {
     FileState state;
     const auto file_schema = group_file.footer_reader->file_schema();
     if (file_schema == nullptr) {
@@ -1808,8 +1781,7 @@ VortexColumn::BuildFileState(
                   arrow_field->type()->ToString());
     }
     state.direct_data_scan = compatibility.direct_data_scan;
-    state.planner = MakeFilePlanner(group_file);
-    state.slot = group_file.slot;
+    state.planner = column_group_->FieldPlanner(file_index, field_name_);
     state.rows = static_cast<int64_t>(state.planner->rows());
     ValidateFileState(state, group_file);
     return state;
@@ -1866,14 +1838,9 @@ VortexColumn::CheckChunkId(int64_t chunk_id) const {
 std::shared_ptr<
     cachinglayer::CellAccessor<milvus_storage::vortex::VortexCellGuard>>
 VortexColumn::PinPlanCells(milvus::OpContext* op_ctx,
-                           const FileState& file,
+                           size_t file_index,
                            const std::vector<uint64_t>& cell_ids) const {
-    std::vector<cachinglayer::cid_t> cids;
-    cids.reserve(cell_ids.size());
-    for (auto cell_id : cell_ids) {
-        cids.emplace_back(static_cast<cachinglayer::cid_t>(cell_id));
-    }
-    return cachinglayer::SemiInlineGet(file.slot->PinCells(op_ctx, cids));
+    return column_group_->PinCells(op_ctx, file_index, cell_ids);
 }
 
 milvus_storage::vortex::VortexPlan
@@ -1965,7 +1932,7 @@ VortexColumn::OpenDataScanForFile(milvus::OpContext* op_ctx,
     auto plan = PlanRowRange(file,
                              static_cast<uint64_t>(start_offset),
                              static_cast<uint64_t>(start_offset + length));
-    auto pin = PinPlanCells(op_ctx, file, plan.cell_ids);
+    auto pin = PinPlanCells(op_ctx, chunk_id, plan.cell_ids);
     auto vortex_reader = BuildFileReader(column_group_->files()[chunk_id]);
     auto stream_result = vortex_reader->read_with_plan(plan.read_plan);
     if (!stream_result.ok()) {
@@ -2008,7 +1975,7 @@ VortexColumn::OpenRowIdScanForFile(milvus::OpContext* op_ctx,
                              static_cast<uint64_t>(start_offset),
                              static_cast<uint64_t>(start_offset + length),
                              predicate);
-    auto pin = PinPlanCells(op_ctx, file, plan.cell_ids);
+    auto pin = PinPlanCells(op_ctx, chunk_id, plan.cell_ids);
     auto vortex_reader = BuildFileReader(column_group_->files()[chunk_id]);
     auto stream_result = vortex_reader->read_row_ids_with_plan(plan.read_plan);
     if (!stream_result.ok()) {
@@ -2067,7 +2034,7 @@ VortexColumn::ScanStringLikeViewsFromFile(
     auto plan = PlanRowRange(file,
                              static_cast<uint64_t>(start),
                              static_cast<uint64_t>(start + length));
-    auto pin = PinPlanCells(op_ctx, file, plan.cell_ids);
+    auto pin = PinPlanCells(op_ctx, chunk_id, plan.cell_ids);
     auto vortex_reader = BuildFileReader(column_group_->files()[chunk_id]);
     auto stream_result = vortex_reader->read_with_plan(plan.read_plan);
     if (!stream_result.ok()) {
@@ -2141,7 +2108,7 @@ VortexColumn::TakeArrowFromFile(milvus::OpContext* op_ctx,
                                 const std::vector<int64_t>& offsets) const {
     const auto& file = files_[chunk_id];
     auto plan = PlanOffsets(file, offsets);
-    auto pin = PinPlanCells(op_ctx, file, plan.cell_ids);
+    auto pin = PinPlanCells(op_ctx, chunk_id, plan.cell_ids);
     auto vortex_reader = BuildFileReader(column_group_->files()[chunk_id]);
     auto stream_result = vortex_reader->read_with_plan(plan.read_plan);
     if (!stream_result.ok()) {

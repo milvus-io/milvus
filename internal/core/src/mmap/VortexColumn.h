@@ -237,9 +237,6 @@ class VortexColumn final : public ChunkedColumnInterface {
 
     struct FileState {
         std::shared_ptr<milvus_storage::vortex::VortexPlanner> planner;
-        std::shared_ptr<
-            cachinglayer::CacheSlot<milvus_storage::vortex::VortexCellGuard>>
-            slot;
         int64_t rows = 0;
         bool direct_data_scan = false;
     };
@@ -271,9 +268,6 @@ class VortexColumn final : public ChunkedColumnInterface {
     MakeVortexReaderProperties(
         const std::shared_ptr<milvus_storage::api::Properties>& properties);
 
-    std::shared_ptr<milvus_storage::vortex::VortexPlanner>
-    MakeFilePlanner(const VortexColumnGroup::FileState& group_file) const;
-
     std::shared_ptr<milvus_storage::vortex::VortexFormatReader>
     BuildFileReader(const VortexColumnGroup::FileState& group_file) const;
 
@@ -282,7 +276,8 @@ class VortexColumn final : public ChunkedColumnInterface {
                       const VortexColumnGroup::FileState& group_file) const;
 
     FileState
-    BuildFileState(const VortexColumnGroup::FileState& group_file) const;
+    BuildFileState(size_t file_index,
+                   const VortexColumnGroup::FileState& group_file) const;
 
     bool
     SupportsDirectDataScan() const;
@@ -299,7 +294,7 @@ class VortexColumn final : public ChunkedColumnInterface {
     std::shared_ptr<
         cachinglayer::CellAccessor<milvus_storage::vortex::VortexCellGuard>>
     PinPlanCells(milvus::OpContext* op_ctx,
-                 const FileState& file,
+                 size_t file_index,
                  const std::vector<uint64_t>& cell_ids) const;
 
     milvus_storage::vortex::VortexPlan

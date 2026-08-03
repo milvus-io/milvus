@@ -16,6 +16,7 @@
 
 #include "mmap/VortexColumnGroup.h"
 
+#include <algorithm>
 #include <memory>
 #include <string_view>
 #include <utility>
@@ -25,6 +26,7 @@
 #include "arrow/filesystem/filesystem.h"
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
+#include "cachinglayer/Utils.h"
 #include "common/EasyAssert.h"
 #include "common/OpContext.h"
 #include "mmap/SparseVortexFileSystem.h"
@@ -132,6 +134,75 @@ VortexColumnGroup::VortexColumnGroup(
         }
         auto planner = std::move(planner_result).ValueOrDie();
 
+        state.field_planners.reserve(field_names.size());
+        for (const auto& field_name : field_names) {
+            if (state.field_planners.find(field_name) !=
+                state.field_planners.end()) {
+                continue;
+            }
+            auto field_cell_metas_result =
+                milvus_storage::vortex::BuildVortexCellMetas(
+                    state.footer_reader, field_name);
+            if (!field_cell_metas_result.ok()) {
+                ThrowVortexStatus(field_cell_metas_result.status(),
+                                  ErrorCode::DataFormatBroken,
+                                  fmt::format("failed to build vortex cell "
+                                              "metas for field {} file {}",
+                                              field_name,
+                                              file.path));
+            }
+            auto field_planner_result =
+                milvus_storage::vortex::VortexPlanner::Make(
+                    state.footer_reader,
+                    field_name,
+                    std::move(field_cell_metas_result).ValueOrDie());
+            if (!field_planner_result.ok()) {
+                ThrowVortexStatus(
+                    field_planner_result.status(),
+                    ErrorCode::DataFormatBroken,
+                    fmt::format(
+                        "failed to create vortex planner for field {} file {}",
+                        field_name,
+                        file.path));
+            }
+            auto field_planner = std::move(field_planner_result).ValueOrDie();
+            AssertInfo(field_planner->rows() == planner->rows(),
+                       "vortex field {} rows {} does not match column group "
+                       "rows {} for file {}",
+                       field_name,
+                       field_planner->rows(),
+                       planner->rows(),
+                       file.path);
+            const auto& field_cells = field_planner->cell_metas();
+            const auto& group_cells = planner->cell_metas();
+            AssertInfo(field_cells.size() == group_cells.size(),
+                       "vortex field {} cells {} does not match column group "
+                       "cells {} for file {}",
+                       field_name,
+                       field_cells.size(),
+                       group_cells.size(),
+                       file.path);
+            for (size_t cell_id = 0; cell_id < field_cells.size(); ++cell_id) {
+                AssertInfo(
+                    field_cells[cell_id].row_offset ==
+                            group_cells[cell_id].row_offset &&
+                        field_cells[cell_id].row_count ==
+                            group_cells[cell_id].row_count,
+                    "vortex field {} cell {} row range [{}, {}) does not "
+                    "match column group [{}, {}) for file {}",
+                    field_name,
+                    cell_id,
+                    field_cells[cell_id].row_offset,
+                    field_cells[cell_id].row_offset +
+                        field_cells[cell_id].row_count,
+                    group_cells[cell_id].row_offset,
+                    group_cells[cell_id].row_offset +
+                        group_cells[cell_id].row_count,
+                    file.path);
+            }
+            state.field_planners.emplace(field_name, std::move(field_planner));
+        }
+
         auto translater_result = milvus_storage::vortex::VortexTranslater::Make(
             std::move(cell_metas),
             state.source_fs,
@@ -189,6 +260,53 @@ VortexColumnGroup::CancelWarmup() {
     for (const auto& file : files_) {
         file.slot->CancelWarmup();
     }
+}
+
+const std::shared_ptr<milvus_storage::vortex::VortexPlanner>&
+VortexColumnGroup::FieldPlanner(size_t file_index,
+                                std::string_view field_name) const {
+    AssertInfo(file_index < files_.size(),
+               "vortex file index {} out of range {}",
+               file_index,
+               files_.size());
+    const auto& field_planners = files_[file_index].field_planners;
+    auto it = field_planners.find(std::string(field_name));
+    AssertInfo(it != field_planners.end(),
+               "vortex field {} has no planner in file {}",
+               field_name,
+               files_[file_index].path);
+    return it->second;
+}
+
+std::shared_ptr<
+    cachinglayer::CellAccessor<milvus_storage::vortex::VortexCellGuard>>
+VortexColumnGroup::PinCells(milvus::OpContext* op_ctx,
+                            size_t file_index,
+                            const std::vector<uint64_t>& cell_ids) const {
+    AssertInfo(file_index < files_.size(),
+               "vortex file index {} out of range {}",
+               file_index,
+               files_.size());
+    std::vector<cachinglayer::cid_t> cids;
+    cids.reserve(cell_ids.size());
+    for (auto cell_id : cell_ids) {
+        cids.emplace_back(static_cast<cachinglayer::cid_t>(cell_id));
+    }
+    return cachinglayer::SemiInlineGet(
+        files_[file_index].slot->PinCells(op_ctx, cids));
+}
+
+bool
+VortexColumnGroup::CellsLoaded(size_t file_index,
+                               const std::vector<uint64_t>& cell_ids) const {
+    AssertInfo(file_index < files_.size(),
+               "vortex file index {} out of range {}",
+               file_index,
+               files_.size());
+    const auto& slot = files_[file_index].slot;
+    return std::all_of(cell_ids.begin(), cell_ids.end(), [&](uint64_t cell_id) {
+        return slot->IsCached(static_cast<cachinglayer::cid_t>(cell_id));
+    });
 }
 
 const std::vector<VortexColumnGroup::FileState>&

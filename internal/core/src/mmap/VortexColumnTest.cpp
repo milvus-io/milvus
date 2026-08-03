@@ -1001,6 +1001,13 @@ TEST(VortexColumnTest, MultiFieldColumnsShareColumnGroup) {
                                  std::to_string(kStringFieldId)},
         CacheWarmupPolicy::CacheWarmupPolicy_Disable,
         nullptr);
+    ASSERT_EQ(column_group->files().size(), 1);
+    EXPECT_EQ(column_group->files()[0].field_planners.size(), 2);
+    EXPECT_EQ(
+        column_group->FieldPlanner(0, std::to_string(kIntFieldId))->rows(), 16);
+    EXPECT_EQ(
+        column_group->FieldPlanner(0, std::to_string(kStringFieldId))->rows(),
+        16);
 
     FieldMeta int_meta(FieldName("int_field"),
                        FieldId(kIntFieldId),
@@ -1019,6 +1026,8 @@ TEST(VortexColumnTest, MultiFieldColumnsShareColumnGroup) {
     VortexColumn string_column(
         FieldId(kStringFieldId), string_meta, properties, column_group);
 
+    EXPECT_TRUE(int_column.IsInMultiFieldColumnGroup());
+    EXPECT_TRUE(string_column.IsInMultiFieldColumnGroup());
     EXPECT_EQ(int_column.NumRows(), 16);
     EXPECT_EQ(string_column.NumRows(), 16);
     EXPECT_EQ(CollectIntScanValues(int_column, 4, 4),
@@ -1035,6 +1044,16 @@ TEST(VortexColumnTest, MultiFieldColumnsShareColumnGroup) {
     EXPECT_FALSE(int_column.SupportsScanPushdown(filter_options));
     EXPECT_THROW(CollectFilteredRowIdPayload(int_column, filter_options),
                  std::exception);
+
+    const int64_t loaded_offset = 4;
+    EXPECT_TRUE(int_column.CellsLoaded(&loaded_offset, 1));
+    EXPECT_TRUE(string_column.CellsLoaded(&loaded_offset, 1));
+    int_column.ManualEvictCache();
+    EXPECT_TRUE(int_column.CellsLoaded(&loaded_offset, 1));
+    EXPECT_TRUE(string_column.CellsLoaded(&loaded_offset, 1));
+    column_group->ManualEvictCache();
+    EXPECT_FALSE(int_column.CellsLoaded(&loaded_offset, 1));
+    EXPECT_FALSE(string_column.CellsLoaded(&loaded_offset, 1));
 
     std::filesystem::remove_all(dir);
 }

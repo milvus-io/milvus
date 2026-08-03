@@ -19,6 +19,8 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "common/Types.h"
@@ -39,6 +41,9 @@ namespace milvus {
 class OpContext;
 
 namespace cachinglayer {
+template <typename T>
+class CellAccessor;
+
 template <typename T>
 class CacheSlot;
 }  // namespace cachinglayer
@@ -64,6 +69,10 @@ class VortexColumnGroup {
         std::shared_ptr<milvus_storage::vortex::VortexFooterReader>
             footer_reader;
         std::shared_ptr<milvus_storage::vortex::VortexPlanner> planner;
+        std::unordered_map<
+            std::string,
+            std::shared_ptr<milvus_storage::vortex::VortexPlanner>>
+            field_planners;
         std::shared_ptr<
             cachinglayer::CacheSlot<milvus_storage::vortex::VortexCellGuard>>
             slot;
@@ -85,6 +94,18 @@ class VortexColumnGroup {
 
     void
     CancelWarmup();
+
+    const std::shared_ptr<milvus_storage::vortex::VortexPlanner>&
+    FieldPlanner(size_t file_index, std::string_view field_name) const;
+
+    std::shared_ptr<
+        cachinglayer::CellAccessor<milvus_storage::vortex::VortexCellGuard>>
+    PinCells(milvus::OpContext* op_ctx,
+             size_t file_index,
+             const std::vector<uint64_t>& cell_ids) const;
+
+    bool
+    CellsLoaded(size_t file_index, const std::vector<uint64_t>& cell_ids) const;
 
     const std::vector<FileState>&
     files() const;

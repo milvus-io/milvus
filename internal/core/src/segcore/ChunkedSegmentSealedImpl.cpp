@@ -2197,11 +2197,25 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
             }
         }
 
-        if (!eager_fields.empty()) {
-            tasks.push_back({cg_index, std::move(eager_fields), true});
-        }
-        for (const auto& fid : lazy_fields) {
-            tasks.push_back({cg_index, {fid}, false});
+        const bool is_vortex_group =
+            ResolveVortexColumnGroupLocalFormat(column_groups->at(cg_index),
+                                                schema_snapshot) ==
+            VortexColumnGroupLocalFormat::Vortex;
+        if (is_vortex_group) {
+            // Vortex resources are owned by the physical column group. Keep
+            // all field proxies on one VortexColumnGroup even when field
+            // warmup policies differ; the aggregated group policy controls
+            // whether its shared cells are warmed.
+            if (!all_fields.empty()) {
+                tasks.push_back({cg_index, all_fields, !eager_fields.empty()});
+            }
+        } else {
+            if (!eager_fields.empty()) {
+                tasks.push_back({cg_index, eager_fields, true});
+            }
+            for (const auto& fid : lazy_fields) {
+                tasks.push_back({cg_index, {fid}, false});
+            }
         }
         LOG_INFO(
             "[LoadColumnGroups] segment {} cg {} fields={} eager_fields={} "
@@ -7253,10 +7267,72 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                                              PublishedSegmentState&) mutable {
                     runtime.reader = std::move(reader);
                 });
-            if (!diff.column_groups_to_load.empty()) {
+
+            auto column_groups_to_load = diff.column_groups_to_load;
+            auto column_groups_to_lazyload = diff.column_groups_to_lazyload;
+            auto column_groups_to_replace = diff.column_groups_to_replace;
+            auto column_groups_to_lazyreplace =
+                diff.column_groups_to_lazyreplace;
+
+            struct VortexGroupLoadTask {
+                bool eager_load = false;
+                bool is_replace = false;
+            };
+            std::map<int, VortexGroupLoadTask> vortex_group_tasks;
+            auto collect_vortex_groups =
+                [&](std::vector<std::pair<int, std::vector<FieldId>>>& entries,
+                    bool eager_load,
+                    bool is_replace) {
+                    for (auto it = entries.begin(); it != entries.end();) {
+                        const auto cg_index = it->first;
+                        AssertInfo(
+                            cg_index >= 0 && cg_index < column_groups->size(),
+                            "vortex column group index {} out of range {}",
+                            cg_index,
+                            column_groups->size());
+                        if (ResolveVortexColumnGroupLocalFormat(
+                                column_groups->at(cg_index), schema_snapshot) !=
+                            VortexColumnGroupLocalFormat::Vortex) {
+                            ++it;
+                            continue;
+                        }
+                        auto& task = vortex_group_tasks[cg_index];
+                        task.eager_load = task.eager_load || eager_load;
+                        task.is_replace = task.is_replace || is_replace;
+                        it = entries.erase(it);
+                    }
+                };
+            collect_vortex_groups(column_groups_to_load, true, false);
+            collect_vortex_groups(column_groups_to_lazyload, false, false);
+            collect_vortex_groups(column_groups_to_replace, true, true);
+            collect_vortex_groups(column_groups_to_lazyreplace, false, true);
+
+            for (const auto& [cg_index, task] : vortex_group_tasks) {
+                std::vector<FieldId> all_fields;
+                for (const auto& column :
+                     column_groups->at(cg_index)->columns) {
+                    auto field_id =
+                        schema_snapshot->ResolveColumnFieldId(column);
+                    if (schema_snapshot->has_field(field_id)) {
+                        all_fields.emplace_back(field_id);
+                    }
+                }
+                if (all_fields.empty()) {
+                    continue;
+                }
+                auto& target =
+                    task.is_replace
+                        ? (task.eager_load ? column_groups_to_replace
+                                           : column_groups_to_lazyreplace)
+                        : (task.eager_load ? column_groups_to_load
+                                           : column_groups_to_lazyload);
+                target.emplace_back(cg_index, std::move(all_fields));
+            }
+
+            if (!column_groups_to_load.empty()) {
                 LoadColumnGroups(column_groups,
                                  properties,
-                                 diff.column_groups_to_load,
+                                 column_groups_to_load,
                                  segment_load_info,
                                  schema_snapshot,
                                  true,
@@ -7264,10 +7340,10 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                                  false,
                                  committer);
             }
-            if (!diff.column_groups_to_lazyload.empty()) {
+            if (!column_groups_to_lazyload.empty()) {
                 LoadColumnGroups(column_groups,
                                  properties,
-                                 diff.column_groups_to_lazyload,
+                                 column_groups_to_lazyload,
                                  segment_load_info,
                                  schema_snapshot,
                                  false,
@@ -7275,10 +7351,10 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                                  false,
                                  committer);
             }
-            if (!diff.column_groups_to_replace.empty()) {
+            if (!column_groups_to_replace.empty()) {
                 LoadColumnGroups(column_groups,
                                  properties,
-                                 diff.column_groups_to_replace,
+                                 column_groups_to_replace,
                                  segment_load_info,
                                  schema_snapshot,
                                  true,
@@ -7286,10 +7362,10 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                                  true,
                                  committer);
             }
-            if (!diff.column_groups_to_lazyreplace.empty()) {
+            if (!column_groups_to_lazyreplace.empty()) {
                 LoadColumnGroups(column_groups,
                                  properties,
-                                 diff.column_groups_to_lazyreplace,
+                                 column_groups_to_lazyreplace,
                                  segment_load_info,
                                  schema_snapshot,
                                  false,
