@@ -115,6 +115,57 @@ TEST(FieldMetaTest, LocalFormatRoundTrip) {
     EXPECT_EQ(reparsed.get_max_len(), 128);
 }
 
+TEST(FieldMetaTest, DecimalEnumMirrorsProto) {
+    // Proto->internal conversion casts the raw enum value (see
+    // FieldMeta::ParseFrom and the static_casts in query/PlanProto.cpp), so
+    // the internal value must mirror schema.proto exactly. A drift here makes
+    // every `case DataType::DECIMAL` branch silently unreachable.
+    EXPECT_EQ(static_cast<int>(DataType::DECIMAL),
+              static_cast<int>(milvus::proto::schema::DataType::Decimal));
+}
+
+TEST(FieldMetaTest, DecimalParseFromRoundTrip) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(204);
+    proto.set_name("price");
+    proto.set_data_type(milvus::proto::schema::DataType::Decimal);
+    proto.set_nullable(true);
+    auto* precision = proto.add_type_params();
+    precision->set_key(DECIMAL_PRECISION);
+    precision->set_value("18");
+    auto* scale = proto.add_type_params();
+    scale->set_key(DECIMAL_SCALE);
+    scale->set_value("4");
+
+    auto field = FieldMeta::ParseFrom(proto);
+    EXPECT_EQ(field.get_data_type(), DataType::DECIMAL);
+    EXPECT_EQ(field.get_decimal_precision(), 18);
+    EXPECT_EQ(field.get_decimal_scale(), 4);
+    EXPECT_TRUE(field.is_nullable());
+
+    auto serialized = field.ToProto();
+    EXPECT_EQ(serialized.data_type(),
+              milvus::proto::schema::DataType::Decimal);
+    int precision_count = 0;
+    int scale_count = 0;
+    for (const auto& param : serialized.type_params()) {
+        if (param.key() == DECIMAL_PRECISION) {
+            ++precision_count;
+            EXPECT_EQ(param.value(), "18");
+        } else if (param.key() == DECIMAL_SCALE) {
+            ++scale_count;
+            EXPECT_EQ(param.value(), "4");
+        }
+    }
+    EXPECT_EQ(precision_count, 1);
+    EXPECT_EQ(scale_count, 1);
+
+    auto reparsed = FieldMeta::ParseFrom(serialized);
+    EXPECT_EQ(reparsed.get_data_type(), DataType::DECIMAL);
+    EXPECT_EQ(reparsed.get_decimal_precision(), 18);
+    EXPECT_EQ(reparsed.get_decimal_scale(), 4);
+}
+
 TEST(FieldMetaTest, RawLocalFormatIsDefaultAndNotSerialized) {
     milvus::proto::schema::FieldSchema proto;
     proto.set_fieldid(203);

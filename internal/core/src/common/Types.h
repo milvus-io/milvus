@@ -85,7 +85,7 @@ enum class DataType {
     GEOMETRY = 24,
     TEXT = 25,
     TIMESTAMPTZ = 26,  // Timestamp with timezone, stored as int64
-    DECIMAL = 27,  // Fixed-point exact numeric, stored as its unscaled int64
+    DECIMAL = 30,  // Fixed-point exact numeric, stored as its unscaled int64
                    // representation (e.g. "19.99" at scale 4 -> 199900)
 
     // Some special Data type, start from after 50
