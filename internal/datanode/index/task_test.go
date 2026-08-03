@@ -322,7 +322,7 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 
 	var captured *clusteringpb.AnalyzeInfo
 	patch := mockey.Mock(analyzecgowrapper.Analyze).To(
-		func(_ context.Context, info *clusteringpb.AnalyzeInfo) (analyzecgowrapper.CodecAnalyze, error) {
+		func(_ context.Context, info *clusteringpb.AnalyzeInfo, _ *indexcgopb.StoragePluginContext) (analyzecgowrapper.CodecAnalyze, error) {
 			captured = info
 			return nil, nil
 		}).Build()
