@@ -843,22 +843,32 @@ class PhyCompareFilterExpr : public Expr {
                         length,
                         ChunkedColumnInterface::ScanProjection::Data,
                         DataScanValueKind<U>());
-                left_data_cursor_ =
-                    left_data_column_->Scan(op_ctx_, left_options);
-                right_data_cursor_ =
-                    right_data_column_->Scan(op_ctx_, right_options);
-                if (left_data_cursor_ == nullptr ||
-                    right_data_cursor_ == nullptr) {
-                    left_data_cursor_.reset();
-                    right_data_cursor_.reset();
+                left_prepared_scan_ =
+                    left_data_column_->PrepareScan(op_ctx_, left_options);
+                right_prepared_scan_ =
+                    right_data_column_->PrepareScan(op_ctx_, right_options);
+                if (left_prepared_scan_ == nullptr ||
+                    right_prepared_scan_ == nullptr) {
+                    left_prepared_scan_.reset();
+                    right_prepared_scan_.reset();
                     left_data_column_.reset();
                     right_data_column_.reset();
                     return -1;
                 }
             }
         }
-        if (left_data_cursor_ == nullptr || right_data_cursor_ == nullptr) {
+        if (left_prepared_scan_ == nullptr || right_prepared_scan_ == nullptr) {
             return -1;
+        }
+
+        if (left_data_cursor_ == nullptr || right_data_cursor_ == nullptr) {
+            const auto position = GetCurrentRows();
+            left_data_cursor_ = left_prepared_scan_->Seek(position);
+            right_data_cursor_ = right_prepared_scan_->Seek(position);
+            AssertInfo(left_data_cursor_ != nullptr &&
+                           right_data_cursor_ != nullptr,
+                       "prepared compare scans cannot seek to row {}",
+                       position);
         }
 
         int64_t processed_size = 0;
@@ -967,10 +977,12 @@ class PhyCompareFilterExpr : public Expr {
     std::vector<PinWrapper<const index::IndexBase*>> pinned_index_left_;
     std::vector<PinWrapper<const index::IndexBase*>> pinned_index_right_;
     bool data_scan_initialized_{false};
-    // ScanCursor implementations retain raw column pointers. Keep both
-    // published column generations alive until their cursors are reset.
+    // Prepared scans and their cursors retain raw column pointers. Keep both
+    // published column generations alive for the expression lifetime.
     std::shared_ptr<ChunkedColumnInterface> left_data_column_{nullptr};
     std::shared_ptr<ChunkedColumnInterface> right_data_column_{nullptr};
+    ChunkedColumnInterface::PreparedScanResult left_prepared_scan_{nullptr};
+    ChunkedColumnInterface::PreparedScanResult right_prepared_scan_{nullptr};
     std::unique_ptr<ChunkedColumnInterface::ScanCursor> left_data_cursor_{
         nullptr};
     std::unique_ptr<ChunkedColumnInterface::ScanCursor> right_data_cursor_{
@@ -982,11 +994,8 @@ class PhyCompareFilterExpr : public Expr {
 
     void
     ResetDataScanCursors() {
-        data_scan_initialized_ = false;
         left_data_cursor_.reset();
         right_data_cursor_.reset();
-        left_data_column_.reset();
-        right_data_column_.reset();
         left_data_batch_ = ChunkedColumnInterface::ScanBatch{};
         right_data_batch_ = ChunkedColumnInterface::ScanBatch{};
         left_data_batch_pos_ = 0;
