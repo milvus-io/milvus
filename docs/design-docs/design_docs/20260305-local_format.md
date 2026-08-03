@@ -418,6 +418,13 @@ This is the current path for examples such as `LIKE`, `IN`, JSON path
 expressions, and array predicates when they cannot be represented as a Vortex
 predicate.
 
+`VortexColumn::Scan` prepares every file range covered by the scan before it
+returns the cursor: it creates the read plan, pins the plan's cell ids, and
+opens the reader under that pin. Nullable row-id scans prepare both the
+predicate plan and the validity plan, union their cell ids, and share one pin
+between the two readers. The cursor only consumes these prepared readers and
+never calls the planner or cache layer from `Next()`.
+
 The expression layer keeps only its segment-global execution position. Normal
 evaluation consumes complete cursor batches and advances that position. If a
 conjunction short-circuits an execution batch, the expression advances its

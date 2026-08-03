@@ -157,6 +157,10 @@ class VortexColumn final : public ChunkedColumnInterface {
     GetChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const override;
 
     std::vector<PinWrapper<Chunk*>>
+    PinChunks(milvus::OpContext* op_ctx,
+              const std::vector<int64_t>& chunk_ids) const override;
+
+    std::vector<PinWrapper<Chunk*>>
     GetAllChunks(milvus::OpContext* op_ctx) const override;
 
     void
@@ -323,11 +327,25 @@ class VortexColumn final : public ChunkedColumnInterface {
                         int64_t length) const;
 
     PinWrapper<std::shared_ptr<arrow::RecordBatchReader>>
+    OpenDataScanWithPlan(
+        int64_t chunk_id,
+        const milvus_storage::vortex::VortexPlan& plan,
+        const std::shared_ptr<cachinglayer::CellAccessor<
+            milvus_storage::vortex::VortexCellGuard>>& pin) const;
+
+    PinWrapper<std::shared_ptr<arrow::RecordBatchReader>>
     OpenRowIdScanForFile(milvus::OpContext* op_ctx,
                          int64_t chunk_id,
                          int64_t start_offset,
                          int64_t length,
                          const std::string& predicate) const;
+
+    PinWrapper<std::shared_ptr<arrow::RecordBatchReader>>
+    OpenRowIdScanWithPlan(
+        int64_t chunk_id,
+        const milvus_storage::vortex::VortexPlan& plan,
+        const std::shared_ptr<cachinglayer::CellAccessor<
+            milvus_storage::vortex::VortexCellGuard>>& pin) const;
 
     std::pair<std::shared_ptr<ArrowStringViewHolder>,
               std::pair<std::vector<std::string_view>, FixedVector<bool>>>

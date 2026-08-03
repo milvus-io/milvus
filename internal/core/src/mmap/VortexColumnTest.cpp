@@ -952,10 +952,23 @@ TEST(VortexColumnTest, MultiFileTakeAndScan) {
     auto scan_values = CollectIntScanValues(int_column, 18, 4);
     EXPECT_EQ(scan_values, (std::vector<int32_t>{180, 190, 200, 210}));
 
+    int_column.ManualEvictCache();
+    EXPECT_FALSE(int_column.CellsLoaded(first_file_offset, 1));
+    EXPECT_FALSE(int_column.CellsLoaded(second_file_offset, 1));
+    auto all_valid_cursor = int_column.Scan(
+        nullptr, ChunkedColumnInterface::ScanOptions::ForNoData(14, 5));
+    ASSERT_NE(all_valid_cursor, nullptr);
+    EXPECT_FALSE(int_column.CellsLoaded(first_file_offset, 1));
+    EXPECT_FALSE(int_column.CellsLoaded(second_file_offset, 1));
+    ChunkedColumnInterface::ScanBatch all_valid_batch;
+    while (all_valid_cursor->Next(kScanBatchRows, &all_valid_batch)) {
+        EXPECT_EQ(all_valid_batch.validity, nullptr);
+    }
     auto cross_chunk_options =
         ChunkedColumnInterface::ScanOptions::ForData(14, 5);
     auto scan_result = int_column.Scan(nullptr, cross_chunk_options);
     ASSERT_NE(scan_result, nullptr);
+    EXPECT_TRUE(int_column.CellsLoaded(cross_file_offsets, 2));
 
     std::vector<int64_t> batch_starts;
     std::vector<int64_t> batch_sizes;
@@ -1307,6 +1320,60 @@ TEST(VortexColumnTest, RejectsMismatchedScanValueKind) {
         ChunkedColumnInterface::ScanProjection::Data,
         ChunkedColumnInterface::ScanValueKind::StringView);
     EXPECT_THROW(column.Scan(nullptr, options), std::exception);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST(VortexColumnTest, ScanPinsPlannedCellsBeforeCursorCreation) {
+    auto schema = MakeNullableSchema();
+    auto properties =
+        std::make_shared<milvus_storage::api::Properties>(MakeProperties());
+    auto dir =
+        std::filesystem::temp_directory_path() /
+        ("milvus_vortex_column_pin_plan_test_" + std::to_string(::getpid()) +
+         "_" + std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
+    std::filesystem::create_directories(dir);
+    auto file_info = WriteNullableVortexFile(
+        (dir / "pin_plan.vx").string(), schema, *properties);
+
+    const auto types = NullableLocalVortexTypes();
+    const auto string_it =
+        std::find(types.begin(), types.end(), DataType::VARCHAR);
+    ASSERT_NE(string_it, types.end());
+    const FieldId field_id(kNullableFieldIdBase +
+                           std::distance(types.begin(), string_it));
+    auto column_group = MakeColumnGroup(
+        {file_info}, properties, {std::to_string(field_id.get())});
+    VortexColumn column(field_id,
+                        MakeNullableFieldMeta(field_id, DataType::VARCHAR),
+                        properties,
+                        column_group);
+
+    const int64_t planned_offsets[]{0, kNullableRows - 1};
+    column.ManualEvictCache();
+    EXPECT_FALSE(column.CellsLoaded(planned_offsets, 2));
+    auto validity_cursor = column.Scan(
+        nullptr,
+        ChunkedColumnInterface::ScanOptions::ForNoData(0, kNullableRows));
+    ASSERT_NE(validity_cursor, nullptr);
+    EXPECT_TRUE(column.CellsLoaded(planned_offsets, 2));
+    ChunkedColumnInterface::ScanBatch batch;
+    while (validity_cursor->Next(2, &batch)) {
+    }
+
+    const auto predicate = StringValue(ExpectedString(DataType::VARCHAR, 8));
+    const auto row_id_options = ChunkedColumnInterface::ScanOptions::ForUnary(
+        0, kNullableRows, proto::plan::OpType::Equal, predicate);
+    validity_cursor.reset();
+    column.ManualEvictCache();
+    EXPECT_FALSE(column.CellsLoaded(planned_offsets, 2));
+    auto row_id_cursor = column.Scan(nullptr, row_id_options);
+    ASSERT_NE(row_id_cursor, nullptr);
+    // Predicate and validity readers use different plans, but their cell ids
+    // are unioned into one pin for this file range.
+    EXPECT_TRUE(column.CellsLoaded(planned_offsets, 2));
+    while (row_id_cursor->Next(2, &batch)) {
+    }
 
     std::filesystem::remove_all(dir);
 }
