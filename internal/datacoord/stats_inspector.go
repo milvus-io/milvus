@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -197,7 +196,7 @@ func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted
 }
 
 func canBuildExternalJSONKeyIndex(segment *SegmentInfo) bool {
-	return segment.GetStorageVersion() == storage.StorageV3 && segment.GetManifestPath() != ""
+	return supportsFieldProjection(segment)
 }
 
 func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
@@ -460,17 +459,16 @@ func statsTaskFieldIDs(schema *schemapb.CollectionSchema, subJobType indexpb.Sta
 // estimateStatsTaskSize returns the data size the stats task handles, which
 // drives the task slot estimation.
 //
-// The json key index and text index tasks only read the columns they index,
-// while the segment size covers every column. This is worst for external
-// segments, which report one synthetic column group holding all of them. Any
-// other stats task reads the whole segment. The segment size is kept whenever
-// the estimation is not possible, which is the previous (over-estimating but
-// safe) behavior.
+// Manifest-backed StorageV3 json key index and text index tasks project the
+// columns they index, while the segment size covers every column. This is worst
+// for external segments, which report one synthetic column group holding all
+// of them. StorageV2 and any other stats task read conservatively as the whole
+// segment. The segment size is also kept whenever estimation is not possible.
 func (si *statsInspector) estimateStatsTaskSize(coll *collectionInfo, segment *SegmentInfo, subJobType indexpb.StatsSubJob) int64 {
 	segmentSize := segment.getSegmentSize()
 
 	readSize := segmentSize
-	if coll != nil {
+	if coll != nil && supportsFieldProjection(segment) {
 		if fieldIDs := statsTaskFieldIDs(coll.Schema, subJobType); len(fieldIDs) > 0 {
 			fieldsSize, err := estimateFieldsReadSize(coll.Schema, segment, fieldIDs)
 			if err != nil {

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -644,14 +645,15 @@ func segmentColumnGroups(segment *SegmentInfo) map[int64]*columnGroup {
 // estimateFieldsReadSize estimates how much data a task reads for fieldIDs of a
 // segment.
 //
-// Both the index build and the json/text stats tasks read a single column at a
-// time: for storage v3 the reader is built with a schema holding only the target
-// column, so parquet only touches that column inside the column group file (see
-// GetFieldDatasFromStorageV2 in internal/core/src/storage/Util.cpp). The binlog
-// size however is recorded per column group, so a field sharing a group with
-// others gets charged for all of them. This is worst for external collections,
-// whose segments carry one synthetic group holding every column at once (see
-// buildFakeBinlogs in internal/datanode/external).
+// Both the index build and the json/text stats tasks request a single column at
+// a time. Per-field attribution is safe only for a StorageV3 segment with a
+// manifest: GetFieldDatasFromManifest asks the reader for the target column,
+// while GetFieldDatasFromStorageV2 materializes every column of the selected
+// column group. The binlog size however is recorded per column group, so a
+// projected field sharing a group with others otherwise gets charged for all of
+// them. This is worst for external collections, whose segments carry one
+// synthetic group holding every column at once (see buildFakeBinlogs in
+// internal/datanode/external).
 //
 // The group size is the measured truth for the group as a whole, so it is used
 // as the budget: fields whose schema gives an exact size take exactly that, and
@@ -670,6 +672,12 @@ func estimateFieldsReadSize(schema *schemapb.CollectionSchema, segment *SegmentI
 	numRows := segment.GetNumOfRows()
 	if numRows <= 0 {
 		return 0, nil
+	}
+	if !supportsFieldProjection(segment) {
+		// Callers gate this optimization on supportsFieldProjection. Reaching
+		// this branch means an internal contract was violated, not bad input.
+		return 0, merr.WrapErrServiceInternalMsg(
+			"segment %d does not have a StorageV3 manifest for projected field reads", segment.GetID())
 	}
 
 	groups := segmentColumnGroups(segment)
@@ -692,6 +700,14 @@ func estimateFieldsReadSize(schema *schemapb.CollectionSchema, segment *SegmentI
 		total += size
 	}
 	return total, nil
+}
+
+// supportsFieldProjection matches the actual reader selection in the index and
+// stats workers. A non-empty manifest selects GetFieldDatasFromManifest, which
+// projects the requested column. StorageV2 files without a manifest are read by
+// GetFieldDatasFromStorageV2, which materializes the whole column group.
+func supportsFieldProjection(segment *SegmentInfo) bool {
+	return segment.GetStorageVersion() == storage.StorageV3 && segment.GetManifestPath() != ""
 }
 
 // estimateGroupFieldsSize attributes the measured size of one column group to
@@ -719,6 +735,10 @@ func estimateGroupFieldsSize(schema *schemapb.CollectionSchema, group *columnGro
 	estimates := make(map[int64]fieldEstimate, len(group.fields))
 	var fixedPerRecord int64
 	var hasVariableField bool
+	var externalColumnResolver *typeutil.StorageColumnResolver
+	if typeutil.IsExternalCollection(schema) {
+		externalColumnResolver = typeutil.NewStorageColumnResolver(schema)
+	}
 	for _, fieldID := range group.fields {
 		size, exact, err := fieldSizePerRecord(schema, fieldID)
 		if err != nil {
@@ -733,7 +753,17 @@ func estimateGroupFieldsSize(schema *schemapb.CollectionSchema, group *columnGro
 		}
 		estimates[fieldID] = fieldEstimate{sizePerRecord: size, exact: exact}
 		if exact {
-			fixedPerRecord += size
+			measured := true
+			if externalColumnResolver != nil {
+				field := typeutil.GetFieldByID(schema, fieldID)
+				_, measured = externalColumnResolver.SourceDataColumnName(field)
+				// Refresh adds generated function outputs to MemorySize after
+				// sampling the source columns, so they are measured too.
+				measured = measured || typeutil.IsFunctionOutputField(schema, field)
+			}
+			if measured {
+				fixedPerRecord += size
+			}
 			continue
 		}
 		hasVariableField = true
