@@ -570,11 +570,13 @@ func canMergeSort(plan *datapb.CompactionPlan, params compaction.Params) bool {
 	if !params.UseMergeSort {
 		return false
 	}
-	// The two sorted flags record which of the two orders sort compaction wrote a
-	// segment in. This plan merges by [pk] or [partitionKey, pk] under the same
-	// schema setting, so the flag that must be set is the matching one, not
-	// either one. namespaceEnabled is read from the same expression that
-	// internal/datanode/services.go uses to derive sortByFieldIDs.
+	// The two sorted flags record which order the compactors that write sorted
+	// output used. datanode/services.go derives this plan's merge key from the
+	// same EnableNamespace setting -- [pk], or [partitionKey, pk] -- so the flag
+	// that must be set is the matching one, not either one. It also rejects the
+	// plan outright when a namespace-enabled collection has no partition key
+	// (namespace.mode=partition), which is why reading the setting is enough
+	// here rather than inspecting the merge key itself.
 	namespaceEnabled := plan.GetSchema().GetEnableNamespace()
 	for _, segment := range plan.GetSegmentBinlogs() {
 		sortedByMergeKey := segment.GetIsSorted()
