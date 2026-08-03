@@ -3616,6 +3616,108 @@ class TestHybridSearchVector(TestBase):
         assert rsp["code"] == 0
         assert len(rsp["data"]) == 10
 
+    @pytest.mark.parametrize("dim", [128])
+    def test_hybrid_search_struct_array_vector_returns_element_offset(self, dim):
+        """
+        target: test element offsets in REST v2 Struct Array hybrid search results
+        method: hybrid search an ArrayOfVector sub-field and group hits by the row primary key
+        expected: each row-level hit returns the offset of its selected Struct Array element
+        """
+        # create a collection
+        name = gen_collection_name()
+        self.name = name
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True},
+                ],
+                "structFields": [
+                    {
+                        "fieldName": "objects",
+                        "typeParams": {"max_capacity": "2"},
+                        "fields": [
+                            {
+                                "fieldName": "embedding",
+                                "dataType": "ArrayOfVector",
+                                "elementDataType": "FloatVector",
+                                "elementTypeParams": {
+                                    "dim": f"{dim}",
+                                    "max_capacity": "2",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+            "indexParams": [
+                {
+                    "fieldName": "objects[embedding]",
+                    "indexName": "objects_embedding",
+                    "indexType": "HNSW",
+                    "metricType": "COSINE",
+                    "params": {"M": 8, "efConstruction": 64},
+                }
+            ],
+            "params": {"consistencyLevel": "Strong"},
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp["code"] == 0
+        self.wait_load_completed(name, timeout=60)
+
+        # insert data
+        query_vector = [1.0] + [0.0] * (dim - 1)
+        negative_vector = [-1.0] + [0.0] * (dim - 1)
+        orthogonal_vector = [0.0, 1.0] + [0.0] * (dim - 2)
+        data = [
+            {
+                "book_id": 1,
+                "objects": [
+                    {"embedding": negative_vector},
+                    {"embedding": query_vector},
+                ],
+            },
+            {
+                "book_id": 2,
+                "objects": [
+                    {"embedding": orthogonal_vector},
+                ],
+            },
+        ]
+        rsp = self.vector_client.vector_insert({"collectionName": name, "data": data})
+        assert rsp["code"] == 0
+        assert rsp["data"]["insertCount"] == len(data)
+
+        rsp = self.collection_client.flush(name)
+        assert rsp["code"] == 0
+
+        # hybrid search with Struct Array vector sub-field
+        search = {
+            "data": [query_vector],
+            "annsField": "objects[embedding]",
+            "metricType": "COSINE",
+            "limit": 3,
+            "params": {"ef": 32},
+        }
+        payload = {
+            "collectionName": name,
+            "search": [search, search],
+            "rerank": {
+                "strategy": "weighted",
+                "params": {"weights": [0.5, 0.5], "norm_score": True},
+            },
+            "limit": 2,
+            "outputFields": ["book_id"],
+            "groupingField": "book_id",
+            "consistencyLevel": "Strong",
+        }
+        rsp = self.vector_client.vector_hybrid_search(payload)
+        assert rsp["code"] == 0
+        assert rsp["topks"] == [2]
+        assert [(hit["book_id"], hit["offset"]) for hit in rsp["data"]] == [(1, 1), (2, 0)]
+
     @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/50396")
     def test_minhash_hybrid_search_with_partition(self):
         """
