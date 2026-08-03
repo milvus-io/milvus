@@ -1080,15 +1080,3 @@ func TestWriteTxnRetry(t *testing.T) {
 		assert.True(t, retry.IsRecoverable(err))
 	})
 }
-
-func TestSortedMapKeysDoesNotExposeValues(t *testing.T) {
-	valueSentinel := "$2a$10$TIKV_VALUE_SENTINEL"
-	keys := sortedMapKeys(map[string]string{
-		"credential/users/test-user": valueSentinel,
-		"collections/100":            "EXTERNAL_SPEC_SECRET_SENTINEL",
-	})
-
-	assert.Equal(t, []string{"collections/100", "credential/users/test-user"}, keys)
-	assert.NotContains(t, fmt.Sprint(keys), valueSentinel)
-	assert.NotContains(t, fmt.Sprint(keys), "EXTERNAL_SPEC_SECRET_SENTINEL")
-}

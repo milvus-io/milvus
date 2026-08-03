@@ -179,7 +179,7 @@ func ValidateExternalSource(source string) error {
 	}
 	u, err := url.Parse(source)
 	if err != nil {
-		return merr.WrapErrParameterInvalidErr(err, "external_source is not a valid URL")
+		return merr.Wrap(err, "invalid external_source URL")
 	}
 	scheme := strings.ToLower(u.Scheme)
 	if scheme == "" {

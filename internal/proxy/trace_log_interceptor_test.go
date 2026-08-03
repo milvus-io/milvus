@@ -124,6 +124,7 @@ func TestTraceLogInterceptor(t *testing.T) {
 		})
 		assert.NotContains(t, fmt.Sprint(f5.Interface), hashSentinel)
 		assert.Contains(t, fmt.Sprint(f5.Interface), "restore-user")
+		assert.Contains(t, fmt.Sprint(f5.Interface), sensitiveMark)
 	}
 
 	_ = paramtable.Get().Save(paramtable.Get().CommonCfg.TraceLogMode.Key, "3")

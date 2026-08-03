@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/samber/lo"
@@ -51,12 +50,6 @@ type etcdKV struct {
 	rootPath string
 
 	requestTimeout time.Duration
-}
-
-func sortedMapKeys[V any](values map[string]V) []string {
-	keys := lo.Keys(values)
-	sort.Strings(keys)
-	return keys
 }
 
 // MaxTxnOps returns etcd's configured per-transaction operation limit
@@ -403,7 +396,7 @@ func (kv *etcdKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 	CheckTnxStringValueSizeAndWarn(ctx, kvs)
 	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
-		mlog.Warn(ctx, "Etcd MultiSave error", mlog.Strings("keys", sortedMapKeys(kvs)), mlog.Int("len", len(kvs)), mlog.Err(err))
+		mlog.Warn(ctx, "Etcd MultiSave error", mlog.Strings("keys", lo.Keys(kvs)), mlog.Int("len", len(kvs)), mlog.Err(err))
 	}
 	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi save", mlog.Strings("keys", keys))
 	return err
@@ -425,7 +418,7 @@ func (kv *etcdKV) MultiSaveBytes(ctx context.Context, kvs map[string][]byte) err
 	CheckTnxBytesValueSizeAndWarn(ctx, kvs)
 	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
-		mlog.Warn(ctx, "Etcd MultiSaveBytes err", mlog.Strings("keys", sortedMapKeys(kvs)), mlog.Int("len", len(kvs)), mlog.Err(err))
+		mlog.Warn(ctx, "Etcd MultiSaveBytes err", mlog.Strings("keys", lo.Keys(kvs)), mlog.Int("len", len(kvs)), mlog.Err(err))
 	}
 	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi save", mlog.Strings("keys", keys))
 	return err
@@ -503,7 +496,7 @@ func (kv *etcdKV) MultiSaveAndRemove(ctx context.Context, saves map[string]strin
 	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx1, cmps...), ops...)
 	if err != nil {
 		mlog.Warn(ctx, "Etcd MultiSaveAndRemove error",
-			mlog.Strings("saveKeys", sortedMapKeys(saves)),
+			mlog.Strings("saveKeys", lo.Keys(saves)),
 			mlog.Strings("removes", removals),
 			mlog.Int("saveLength", len(saves)),
 			mlog.Int("removeLength", len(removals)),
@@ -538,7 +531,7 @@ func (kv *etcdKV) MultiSaveBytesAndRemove(ctx context.Context, saves map[string]
 	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
 		mlog.Warn(ctx, "Etcd MultiSaveBytesAndRemove error",
-			mlog.Strings("saveKeys", sortedMapKeys(saves)),
+			mlog.Strings("saveKeys", lo.Keys(saves)),
 			mlog.Strings("removes", removals),
 			mlog.Int("saveLength", len(saves)),
 			mlog.Int("removeLength", len(removals)),
@@ -600,7 +593,7 @@ func (kv *etcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[st
 	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx1, cmps...), ops...)
 	if err != nil {
 		mlog.Warn(ctx, "Etcd MultiSaveAndRemoveWithPrefix error",
-			mlog.Strings("saveKeys", sortedMapKeys(saves)),
+			mlog.Strings("saveKeys", lo.Keys(saves)),
 			mlog.Strings("removes", removals),
 			mlog.Int("saveLength", len(saves)),
 			mlog.Int("removeLength", len(removals)),
@@ -634,7 +627,7 @@ func (kv *etcdKV) MultiSaveBytesAndRemoveWithPrefix(ctx context.Context, saves m
 	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx1), ops...)
 	if err != nil {
 		mlog.Warn(ctx, "Etcd MultiSaveBytesAndRemoveWithPrefix error",
-			mlog.Strings("saveKeys", sortedMapKeys(saves)),
+			mlog.Strings("saveKeys", lo.Keys(saves)),
 			mlog.Strings("removes", removals),
 			mlog.Int("saveLength", len(saves)),
 			mlog.Int("removeLength", len(removals)),

@@ -215,7 +215,7 @@ func TestValidateSourceAndSpec(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "SOURCE_PARSE_ERROR_SENTINEL")
 		assert.Contains(t, err.Error(), "external_source is invalid")
-		assert.Contains(t, err.Error(), "not a valid URL")
+		assert.Contains(t, err.Error(), "invalid external_source URL")
 	})
 
 	t.Run("invalid_spec_includes_parse_error", func(t *testing.T) {

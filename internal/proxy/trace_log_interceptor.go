@@ -160,7 +160,7 @@ func redactRestoreRBACRequestForLog(req *milvuspb.RestoreRBACMetaRequest) *milvu
 	redacted := proto.Clone(req).(*milvuspb.RestoreRBACMetaRequest)
 	for _, user := range redacted.GetRBACMeta().GetUsers() {
 		if user != nil {
-			user.Password = ""
+			user.Password = sensitiveMark
 		}
 	}
 	return redacted

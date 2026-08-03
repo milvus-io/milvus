@@ -246,16 +246,12 @@ func redactBuildIndexParamsForLog(params *indexcgopb.BuildIndexInfo) *indexcgopb
 
 	redacted := proto.Clone(params).(*indexcgopb.BuildIndexInfo)
 	if config := redacted.GetStorageConfig(); config != nil {
-		for _, secret := range []*string{
+		redactStorageCredentialsForLog(
 			&config.AccessKeyID,
 			&config.SecretAccessKey,
 			&config.SslCACert,
 			&config.GcpCredentialJSON,
-		} {
-			if *secret != "" {
-				*secret = "<redacted>"
-			}
-		}
+		)
 	}
 	redacted.ExternalSource = externalspec.RedactExternalSource(redacted.GetExternalSource())
 	redacted.ExternalSpec = externalspec.RedactExternalSpecForLog(redacted.GetExternalSpec())

@@ -147,22 +147,26 @@ func (st *statsTask) IsVectorIndex() bool {
 	return false
 }
 
+func redactStorageCredentialsForLog(accessKeyID, secretAccessKey, sslCACert, gcpCredentialJSON *string) {
+	for _, secret := range []*string{accessKeyID, secretAccessKey, sslCACert, gcpCredentialJSON} {
+		if *secret != "" {
+			*secret = "<redacted>"
+		}
+	}
+}
+
 func redactStorageConfigForLog(config *indexpb.StorageConfig) *indexpb.StorageConfig {
 	if config == nil {
 		return nil
 	}
 
 	redacted := proto.Clone(config).(*indexpb.StorageConfig)
-	for _, secret := range []*string{
+	redactStorageCredentialsForLog(
 		&redacted.AccessKeyID,
 		&redacted.SecretAccessKey,
 		&redacted.SslCACert,
 		&redacted.GcpCredentialJSON,
-	} {
-		if *secret != "" {
-			*secret = "<redacted>"
-		}
-	}
+	)
 	return redacted
 }
 

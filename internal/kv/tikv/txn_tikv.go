@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sort"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -158,12 +157,6 @@ type txnTiKV struct {
 	rootPath string
 
 	requestTimeout time.Duration
-}
-
-func sortedMapKeys[V any](values map[string]V) []string {
-	keys := lo.Keys(values)
-	sort.Strings(keys)
-	return keys
 }
 
 // MaxTxnOps returns the per-transaction op count TiKV applies atomically.
@@ -401,7 +394,7 @@ func (kv *txnTiKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSave() error", mlog.Strings("keys", sortedMapKeys(kvs)), mlog.Int("len", len(kvs)))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSave() error", mlog.Strings("keys", lo.Keys(kvs)), mlog.Int("len", len(kvs)))
 
 	loggingErr = kv.runWriteTxnWithRetry(ctx, "MultiSave()", func(txn *transaction.KVTxn) error {
 		for key, value := range kvs {
@@ -421,7 +414,7 @@ func (kv *txnTiKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 	if loggingErr != nil {
 		return loggingErr
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV MultiSave() operation", mlog.Strings("keys", sortedMapKeys(kvs)))
+	CheckElapseAndWarn(start, "Slow txnTiKV MultiSave() operation", mlog.Strings("keys", lo.Keys(kvs)))
 	return nil
 }
 
@@ -491,7 +484,7 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemove error", mlog.Strings("saveKeys", sortedMapKeys(saves)), mlog.Strings("removes", removals), mlog.Int("saveLength", len(saves)), mlog.Int("removeLength", len(removals)))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemove error", mlog.Strings("saveKeys", lo.Keys(saves)), mlog.Strings("removes", removals), mlog.Int("saveLength", len(saves)), mlog.Int("removeLength", len(removals)))
 
 	// use complement to remove keys that are not in saves
 	saveKeys := typeutil.NewSet(lo.Keys(saves)...)
@@ -536,7 +529,7 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 	if loggingErr != nil {
 		return loggingErr
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemove() operation", mlog.Strings("saveKeys", sortedMapKeys(saves)), mlog.Strings("removals", removals))
+	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemove() operation", mlog.Strings("saveKeys", lo.Keys(saves)), mlog.Strings("removals", removals))
 	return nil
 }
 
@@ -547,7 +540,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 	defer cancel()
 
 	var loggingErr error
-	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemoveWithPrefix() error", mlog.Strings("saveKeys", sortedMapKeys(saves)), mlog.Strings("removes", removals), mlog.Int("saveLength", len(saves)), mlog.Int("removeLength", len(removals)))
+	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemoveWithPrefix() error", mlog.Strings("saveKeys", lo.Keys(saves)), mlog.Strings("removes", removals), mlog.Int("saveLength", len(saves)), mlog.Int("removeLength", len(removals)))
 
 	loggingErr = kv.runWriteTxnWithRetry(ctx, "MultiSaveAndRemoveWithPrefix", func(txn *transaction.KVTxn) error {
 		for _, pred := range preds {
@@ -614,7 +607,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 	if loggingErr != nil {
 		return loggingErr
 	}
-	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemoveWithPrefix() operation", mlog.Strings("saveKeys", sortedMapKeys(saves)), mlog.Strings("removals", removals))
+	CheckElapseAndWarn(start, "Slow txnTiKV MultiSaveAndRemoveWithPrefix() operation", mlog.Strings("saveKeys", lo.Keys(saves)), mlog.Strings("removals", removals))
 	return nil
 }
 
