@@ -524,15 +524,21 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
         // RTreeIndex::Load recomputes the row count from the deserialized
         // tree, so an index built before empty/unparseable geometries were
         // kept as placeholder entries under-reports the segment row space.
-        // Treat the missing tail as candidates and let exact refinement settle
-        // it. The INDEX validity bitmap cannot be padded, though: Count() is an
-        // entry count while null offsets are absolute row ids, so a genuine
-        // NULL in the truncated tail is absent from IsNotNull(). Filling that
-        // tail with true would turn NULL into non-NULL and make NOT ST_* return
-        // it as a match. Ask the index to project its absolute null offsets
-        // into the segment row space instead.
+        // Those old builders advanced absolute_offset even when they dropped
+        // a row, so the missing entries can be interior holes rather than a
+        // trailing suffix. Count() reveals how many entries are missing, not
+        // where they were. Once the index is short, therefore, no bit in its
+        // candidate bitmap is trustworthy as a negative: promote the entire
+        // active row space to candidates and let exact refinement settle it.
         //
-        // Padding beats asserting here: this is an expected upgrade state,
+        // The INDEX validity bitmap cannot be filled with true, though:
+        // Count() is an entry count while null offsets are absolute row ids, so
+        // a genuine NULL beyond Count() is absent from parameterless
+        // IsNotNull(). Filling it with true would turn NULL into non-NULL and
+        // make NOT ST_* return it as a match. Ask the index to project its
+        // absolute null offsets into the segment row space instead.
+        //
+        // Full refinement beats asserting here: this is an expected upgrade state,
         // not a Milvus bug, and failing every geometry query on the segment
         // until someone manually rebuilds the index is a far worse outcome
         // than a slightly slower correct answer.
@@ -542,8 +548,9 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
             if (ShouldLogGeometryThrottled(last_short_index_log_us)) {
                 LOG_WARN(
                     "R-Tree index for field {} reports {} rows but the "
-                    "segment holds {}; treating the {} unindexed rows as "
-                    "candidates for exact refinement. This index predates "
+                    "segment holds {}; treating all segment rows as "
+                    "candidates for exact refinement because the {} missing "
+                    "entries may be interior holes. This index predates "
                     "placeholder-MBR indexing of empty/unparseable "
                     "geometries -- rebuild it to avoid the extra refinement "
                     "(further occurrences suppressed briefly).",
@@ -552,12 +559,13 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                     active_count_,
                     active_count_ - coarse_rows);
             }
-            coarse_global_.resize(active_count_, true);
+            coarse_global_ = TargetBitmap(active_count_, true);
 
             // null_offset_ uses absolute segment row ids, while Count() on a
             // legacy index can under-report after older builders dropped
             // non-null empty/corrupt rows. Ask the R-Tree to lay validity out
-            // directly in the segment row space so tail NULL offsets survive.
+            // directly in the segment row space so every absolute NULL offset
+            // survives independently of the short entry count.
             coarse_valid_global_ = idx_ptr->IsNotNull(active_count_);
         } else {
             coarse_valid_global_ = idx_ptr->IsNotNull();
@@ -677,8 +685,8 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
             std::min(size_per_chunk_ - data_pos, batch_size_ - processed_rows);
 
         // Backstop only. The known cause of a short coarse bitmap -- a
-        // legacy index that under-reports its row count -- is padded up to
-        // active_count_ where the bitmap is built, so reaching this means
+        // legacy index that under-reports its row count -- is expanded to the
+        // full active row space where the bitmap is built, so reaching this means
         // something else is wrong. TargetBitmap::append range-checks only its
         // start offset, never start + count, so an unchecked short bitmap
         // would be read past the end.

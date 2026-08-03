@@ -1256,12 +1256,15 @@ TEST_F(RTreeIndexTest, GIS_Index_Refine_ToleratesUnparseableCandidate) {
     CleanupIndexFiles(stats->GetIndexFiles(), "GIS bad-refine test");
 }
 
-// Regression for the legacy-short-index self-heal: old builders dropped a
-// non-null corrupt/empty geometry but still persisted absolute null offsets.
-// Count() is then smaller than the segment row space, and a tail NULL offset is
-// outside the bitmap returned by parameterless IsNotNull(). Padding that bitmap
-// with true makes NOT ST_* select the NULL row.
-TEST_F(RTreeIndexTest, GIS_LegacyShortIndexPreservesTailNullUnderNot) {
+// Regression for the legacy-short-index self-heal: old builders advanced the
+// absolute row offset even when GEOS parsing failed, so a transient parse OOM
+// could drop a valid geometry at an interior offset while later rows kept their
+// original offsets. Count() then under-reports the row space but does not reveal
+// where the hole is. The fallback must refine the whole segment, not only pad a
+// presumed missing suffix. Absolute null offsets must still preserve SQL
+// three-valued logic under NOT ST_*.
+TEST_F(RTreeIndexTest,
+       GIS_LegacyShortIndexRecoversInteriorHoleAndPreservesTailNull) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
@@ -1280,7 +1283,6 @@ TEST_F(RTreeIndexTest, GIS_LegacyShortIndexPreservesTailNullUnderNot) {
         CreateSealedWithFieldDataLoaded(schema, full_ds, false, {geo_id.get()});
 
     std::vector<std::string> segment_wkbs(N, CreateWkbFromWkt("POINT(0 0)"));
-    segment_wkbs[N - 2].clear();  // legacy builder dropped this non-null row
     segment_wkbs[N - 1].clear();  // payload for the genuine NULL tail row
     const uint8_t valid_bitmap[] = {0x1F};
     auto geo_field_data =
@@ -1295,10 +1297,12 @@ TEST_F(RTreeIndexTest, GIS_LegacyShortIndexPreservesTailNullUnderNot) {
         1, 1, 1, geo_id.get(), {geo_field_data}, cm);
     sealed->LoadFieldData(load_info);
 
-    // Persist the exact legacy shape: rows 0..3 have tree entries, row 4 was a
-    // non-null corrupt/empty geometry dropped by the old builder, and row 5 is
-    // NULL. AddGeometry records the absolute null offset 5, but after reload
-    // Count() is reconstructed as four entries + one NULL = 5.
+    // Persist the exact legacy shape: valid row 1 is absent from the tree (as
+    // if GEOSWKBReader_read_r transiently returned nullptr), later valid rows
+    // retain absolute offsets 2..4, and row 5 is NULL. AddGeometry records the
+    // absolute null offset 5, but after reload Count() is reconstructed as four
+    // tree entries + one NULL = 5. The missing valid row is therefore an
+    // interior hole below Count(), not the suffix bit that resize() would add.
     milvus::storage::FieldDataMeta short_field_meta{1, 1, 1, 500};
     short_field_meta.field_schema.set_data_type(
         ::milvus::proto::schema::DataType::Geometry);
@@ -1308,7 +1312,11 @@ TEST_F(RTreeIndexTest, GIS_LegacyShortIndexPreservesTailNullUnderNot) {
         short_field_meta, short_index_meta, chunk_manager_, fs_);
     auto rtree_index =
         std::make_unique<milvus::index::RTreeIndex<std::string>>(fm_ctx);
-    rtree_index->BuildWithRawDataForUT(4, segment_wkbs.data(), {});
+    rtree_index->InitForBuildIndex(false);
+    rtree_index->AddGeometry(segment_wkbs[0], 0, true);
+    for (int i = 2; i < N - 1; ++i) {
+        rtree_index->AddGeometry(segment_wkbs[i], i, true);
+    }
     rtree_index->AddGeometry(segment_wkbs[N - 1], N - 1, false);
     ASSERT_EQ(rtree_index->Count(), N);
     auto stats = rtree_index->UploadUnified({});
@@ -1337,6 +1345,24 @@ TEST_F(RTreeIndexTest, GIS_LegacyShortIndexPreservesTailNullUnderNot) {
     info.cache_index =
         CreateTestCacheIndex("rtree_legacy_short_key", std::move(rtree_index));
     sealed->LoadIndex(info);
+
+    // The short coarse bitmap has no bit for row 1. A tail-only resize leaves
+    // that interior bit false and silently loses a valid match; the full-scan
+    // fallback must recover it through exact refinement.
+    auto origin_intersects =
+        std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+            milvus::expr::ColumnInfo(geo_id, DataType::GEOMETRY, {}, true),
+            proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+            "POINT(0 0)");
+    auto intersects_plan = std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, origin_intersects);
+    auto intersects_bits =
+        ExecuteQueryExpr(intersects_plan, sealed.get(), N, MAX_TIMESTAMP);
+    ASSERT_EQ(intersects_bits.size(), static_cast<size_t>(N));
+    for (int i = 0; i < N - 1; ++i) {
+        EXPECT_TRUE(intersects_bits[i]) << "valid row " << i;
+    }
+    EXPECT_FALSE(intersects_bits[N - 1]) << "NULL tail row must not match";
 
     auto intersects = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
         milvus::expr::ColumnInfo(geo_id, DataType::GEOMETRY, {}, true),
