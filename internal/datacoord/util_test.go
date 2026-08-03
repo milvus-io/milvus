@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -178,9 +179,11 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 	newSegment := func(groups ...*datapb.FieldBinlog) *SegmentInfo {
 		return &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:        1,
-				NumOfRows: numRows,
-				Binlogs:   groups,
+				ID:             1,
+				NumOfRows:      numRows,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   "manifest.json",
+				Binlogs:        groups,
 			},
 		}
 	}
@@ -276,6 +279,26 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 		suite.Equal((vecSize+pkSize)*numRows, size)
 	})
 
+	suite.Run("segment without a projecting reader is rejected", func() {
+		for name, configure := range map[string]func(*SegmentInfo){
+			"storage v2": func(segment *SegmentInfo) {
+				segment.StorageVersion = storage.StorageV2
+				segment.ManifestPath = ""
+			},
+			"storage v3 without manifest": func(segment *SegmentInfo) {
+				segment.StorageVersion = storage.StorageV3
+				segment.ManifestPath = ""
+			},
+		} {
+			suite.Run(name, func() {
+				segment := newSegment(group((pkSize+jsonSize)*numRows, pkField, jsonField))
+				configure(segment)
+				_, err := estimateFieldsReadSize(schema, segment, []int64{jsonField})
+				suite.Error(err)
+			})
+		}
+	})
+
 	suite.Run("empty segment", func() {
 		segment := newSegment(group(vecSize*numRows, vecField))
 		segment.NumOfRows = 0
@@ -333,13 +356,11 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 		suite.Equal(vecSize*numRows, size)
 	})
 
-	suite.Run("system fields of a group are charged as fixed width", func() {
-		// real external segments list RowID(0) and Timestamp(1) in ChildFields,
-		// both Int64 in the persisted schema
+	suite.Run("regular system fields of a group are charged as fixed width", func() {
 		sysSchema := &schemapb.CollectionSchema{
 			Fields: append([]*schemapb.FieldSchema{
-				{FieldID: 0, Name: "row_id", DataType: schemapb.DataType_Int64},
-				{FieldID: 1, Name: "timestamp", DataType: schemapb.DataType_Int64},
+				{FieldID: 0, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+				{FieldID: 1, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
 			}, schema.Fields...),
 		}
 		residualPerRow := jsonSize * 4
@@ -350,10 +371,47 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 		suite.NoError(err)
 		suite.Equal(int64(8)*numRows, size)
 
-		// the two system columns eat 16B/row out of the json residual
+		// Regular StorageV3 manifests measure these materialized columns, so
+		// they consume 16B/row of the group budget.
 		size, err = estimateFieldsReadSize(sysSchema, segment, []int64{jsonField})
 		suite.NoError(err)
 		suite.Equal(residualPerRow*numRows, size)
+	})
+
+	suite.Run("external system and virtual fields do not reduce measured residual", func() {
+		const (
+			virtualPKField      = int64(105)
+			functionOutputField = int64(106)
+		)
+		externalSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 0, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+				{FieldID: 1, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+				{FieldID: virtualPKField, Name: common.VirtualPKFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
+				{FieldID: functionOutputField, Name: "generated", DataType: schemapb.DataType_Int64, IsFunctionOutput: true},
+				{FieldID: jsonField, Name: "json", DataType: schemapb.DataType_JSON, ExternalField: "json_col"},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{OutputFieldIds: []int64{functionOutputField}},
+			},
+		}
+		residualPerRow := jsonSize * 4
+		// External refresh samples pk_col and json_col, then explicitly adds
+		// generated function outputs. RowID, Timestamp, and VirtualPK still
+		// appear in ChildFields but are absent from the measured group size.
+		groupSize := (pkSize + 8 + residualPerRow) * numRows
+		segment := newSegment(group(groupSize, 0, 1, virtualPKField, pkField, functionOutputField, jsonField))
+
+		size, err := estimateFieldsReadSize(externalSchema, segment, []int64{jsonField})
+		suite.NoError(err)
+		suite.Equal(residualPerRow*numRows, size)
+
+		// Unmeasured generated fields retain their schema-derived estimate when
+		// requested, but do not consume the sampled source-column budget.
+		size, err = estimateFieldsReadSize(externalSchema, segment, []int64{virtualPKField})
+		suite.NoError(err)
+		suite.Equal(int64(8)*numRows, size)
 	})
 
 	suite.Run("unrecognized data type", func() {

@@ -90,10 +90,6 @@ func TestIndexInspector_inspect(t *testing.T) {
 		}
 
 		inspector := newIndexInspector(ctx, notifyChan, meta, scheduler, alloc, handler, storage, versionManager)
-		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(
-			func(_ context.Context, collectionID int64) (*collectionInfo, error) {
-				return meta.GetCollection(collectionID), nil
-			}).Maybe()
 
 		// Register all expectations before Start(): the inspector goroutine
 		// (reloadFromMeta, the ticker, and the notify channel) may invoke the
@@ -339,10 +335,12 @@ func TestIndexInspector_ReloadFromMetaResolvesCollectionThroughHandler(t *testin
 	for _, segmentID := range []UniqueID{1, 2} {
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           segmentID,
-				CollectionID: collID,
-				NumOfRows:    numRows,
-				State:        commonpb.SegmentState_Flushed,
+				ID:             segmentID,
+				CollectionID:   collID,
+				NumOfRows:      numRows,
+				State:          commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   "manifest.json",
 				Binlogs: []*datapb.FieldBinlog{
 					{
 						FieldID:     0,
@@ -921,9 +919,11 @@ func TestIndexInspector_estimateIndexFieldSize(t *testing.T) {
 	// field in ChildFields, so getFieldBinlogSize reports the whole segment.
 	externalSegment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
-			ID:           1,
-			CollectionID: collID,
-			NumOfRows:    numRows,
+			ID:             1,
+			CollectionID:   collID,
+			NumOfRows:      numRows,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   "manifest.json",
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					FieldID:     0,
@@ -966,12 +966,36 @@ func TestIndexInspector_estimateIndexFieldSize(t *testing.T) {
 		m.collections.Insert(collID, &collectionInfo{ID: collID, Schema: externalSchema})
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           2,
-				CollectionID: collID,
-				NumOfRows:    numRows,
+				ID:             2,
+				CollectionID:   collID,
+				NumOfRows:      numRows,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   "manifest.json",
 				Binlogs: []*datapb.FieldBinlog{
 					{
 						FieldID: vecField,
+						Binlogs: []*datapb.Binlog{
+							{EntriesNum: numRows, MemorySize: groupSize},
+						},
+					},
+				},
+			},
+		}
+		assert.Equal(t, groupSize, inspector.estimateIndexFieldSize(ctx, m.GetCollection(collID), segment, vecField))
+	})
+
+	t.Run("storage v2 shared group falls back to the group size", func(t *testing.T) {
+		m.collections.Insert(collID, &collectionInfo{ID: collID, Schema: externalSchema})
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             3,
+				CollectionID:   collID,
+				NumOfRows:      numRows,
+				StorageVersion: storage.StorageV2,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID:     0,
+						ChildFields: []int64{100, vecField},
 						Binlogs: []*datapb.Binlog{
 							{EntriesNum: numRows, MemorySize: groupSize},
 						},
@@ -1057,12 +1081,14 @@ func TestIndexInspector_CreateIndexForSegment_ExternalTaskSlot(t *testing.T) {
 
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
-			ID:           1,
-			CollectionID: collID,
-			PartitionID:  3,
-			NumOfRows:    numRows,
-			State:        commonpb.SegmentState_Flushed,
-			Level:        datapb.SegmentLevel_L1,
+			ID:             1,
+			CollectionID:   collID,
+			PartitionID:    3,
+			NumOfRows:      numRows,
+			State:          commonpb.SegmentState_Flushed,
+			Level:          datapb.SegmentLevel_L1,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   "manifest.json",
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					FieldID:     0,
@@ -1094,7 +1120,8 @@ func TestIndexInspector_CreateIndexForSegment_ExternalTaskSlot(t *testing.T) {
 
 	// 128 dim float vector over 3000 rows is ~1.5MB, the smallest slot bucket,
 	// instead of the whole 2GB column group.
-	expected := calculateIndexTaskSlot(int64(128*4)*numRows, true)
+	indexParams := m.indexMeta.indexes[collID][indexID].IndexParams
+	expected := calculateIndexTaskSlot(int64(128*4)*numRows, numRows, indexParams)
 	assert.Equal(t, expected, enqueuedSlot)
-	assert.Less(t, enqueuedSlot, calculateIndexTaskSlot(groupSize, true))
+	assert.Less(t, enqueuedSlot, calculateIndexTaskSlot(groupSize, numRows, indexParams))
 }
