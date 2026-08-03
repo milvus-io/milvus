@@ -118,7 +118,8 @@ ParsePksFromFieldData(std::vector<PkType>& pks, DataArray& data) {
             std::copy_n(source_data, pks.size(), pks.data());
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::UUID: {
             auto* src_data =
                 data.mutable_scalars()->mutable_string_data()->mutable_data();
             for (size_t i = 0; i < pks.size(); i++) {
@@ -150,7 +151,8 @@ ParsePksFromFieldData(DataType data_type,
                             pks.data() + offset);
                 break;
             }
-            case DataType::VARCHAR: {
+            case DataType::VARCHAR:
+            case DataType::UUID: {
                 std::copy_n(static_cast<const std::string*>(field_data->Data()),
                             row_count,
                             pks.data() + offset);
@@ -176,7 +178,8 @@ ParsePksFromIDs(std::vector<PkType>& pks,
             std::copy_n(source_data, pks.size(), pks.data());
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::UUID: {
             auto& source_data = data.str_id().data();
             std::copy(source_data.begin(), source_data.end(), pks.begin());
             break;
@@ -214,7 +217,8 @@ GetRawDataSizeOfDataArray(const DataArray* data,
         switch (data_type) {
             case DataType::STRING:
             case DataType::VARCHAR:
-            case DataType::TEXT: {
+            case DataType::TEXT:
+            case DataType::UUID: {
                 auto& string_data = FIELD_DATA(data, string);
                 for (auto& str : string_data) {
                     result += str.size();
@@ -285,7 +289,8 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                     }
                     case DataType::VARCHAR:
                     case DataType::STRING:
-                    case DataType::TEXT: {
+                    case DataType::TEXT:
+                    case DataType::UUID: {
                         for (auto& array_bytes : array_data) {
                             auto element_num =
                                 array_bytes.string_data().data_size();
@@ -446,7 +451,8 @@ SetUpScalarFieldData(milvus::proto::schema::ScalarField*& scalar_array,
         }
         case DataType::VARCHAR:
         case DataType::STRING:
-        case DataType::TEXT: {
+        case DataType::TEXT:
+        case DataType::UUID: {
             auto obj = scalar_array->mutable_string_data();
             obj->mutable_data()->Reserve(count);
             for (auto i = 0; i < count; i++) {
@@ -650,7 +656,8 @@ CreateScalarDataArrayFrom(const void* data_raw,
         }
         case DataType::STRING:
         case DataType::VARCHAR:
-        case DataType::TEXT: {
+        case DataType::TEXT:
+        case DataType::UUID: {
             auto data = reinterpret_cast<const std::string*>(data_raw);
             auto obj = scalar_array->mutable_string_data();
             for (auto i = 0; i < count; i++) {
@@ -1028,7 +1035,8 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             }
             case DataType::STRING:
             case DataType::VARCHAR:
-            case DataType::TEXT: {
+            case DataType::TEXT:
+            case DataType::UUID: {
                 auto* mutable_src = src_field_data->mutable_scalars()
                                         ->mutable_string_data()
                                         ->mutable_data();
@@ -1254,7 +1262,8 @@ ReverseDataFromIndex(const index::IndexBase* index,
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::UUID: {
             using IndexType = index::ScalarIndex<std::string>;
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<std::string> raw_data(count);
@@ -1701,7 +1710,8 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
         }
         case milvus::DataType::STRING:
         case milvus::DataType::VARCHAR:
-        case milvus::DataType::TEXT: {
+        case milvus::DataType::TEXT:
+        case milvus::DataType::UUID: {
             FixedVector<std::string> vec(count);
             segment->bulk_subscript(op_ctx,
                                     fieldId,

@@ -57,11 +57,14 @@ schema.add_field("uuid_field", DataType.UUID)
 UUID fields accept filtering expressions:
 ```
 id == "550e8400-e29b-41d4-a716-446655440000"
-id in ["uuid-1", "uuid-2", "uuid-3"]
+id in ["550e8400-e29b-41d4-a716-446655440000", "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"]
 id != "550e8400-e29b-41d4-a716-446655440000"
 ```
 
-Range expressions (`>`, `<`, `>=`, `<=`) are not supported for UUID fields.
+Range semantics for UUID fields:
+
+- **Two-sided ranges** (`a <= id <= b`) are not supported and rejected at parse time with a clear error ("range operations are not supported on uuid field").
+- **Single-sided ranges** (`id > x`, `id < x`, `id >= x`, `id <= x`) **are** supported. They are well-defined because UUIDs are stored as canonical lowercase strings, and the canonical hex string sorts identically to the underlying 16-byte unsigned order. The query iterator relies on single-sided ranges (`pk > lastPk`) to advance its pagination predicate between batches.
 
 Auto-id is not supported for UUID primary keys in this phase. Users must provide UUID values explicitly.
 
@@ -95,8 +98,9 @@ UUID fields support the following index types:
 | INVERTED | ✅ | Inverted index for equality lookups |
 | STL_SORT | ✅ | Sorted index for ordered iteration |
 | BITMAP | ✅ | Bitmap index for multi-value filtering |
+| AUTOINDEX | ✅ | Resolves to HYBRID, which builds like VarChar |
 
-Indexes work on the string representation (same as VarChar).
+Indexes work on the string representation (same as VarChar). Both the Go index-param checkers and the C++ index factories accept `DataType_UUID`.
 
 ### Type Classification
 
@@ -120,8 +124,8 @@ The implementation uses `github.com/google/uuid v1.6.0` for UUID parsing, format
 - **Go client SDK**: FieldTypeUUID constants, name/string/PbFieldType; ColumnUUID creation/slice; FieldDataColumn UUID deserialization from BytesData
 - **Go typeutil**: IsUUIDType, IsPrimaryFieldType-UUID, GetPKSize-UUID; HashKey2Partitions UUID partitioning
 - **Go parser**: UUID type comparison, range value casting, template value generation, plan parsing
-- **Go index**: All four index checkers accept UUID
-- **C++**: Enum value, IsStringDataType(false), ToProtoDataType mapping, InitScalarFieldData, Schema.AddDebugField
+- **Go index**: All index checkers (TRIE, INVERTED, STL_SORT, BITMAP, AUTOINDEX) accept UUID
+- **C++**: Enum value, IsStringDataType(true), ToProtoDataType mapping, InitScalarFieldData, Schema.AddDebugField
 
 ### Integration Tests (Python SDK)
 

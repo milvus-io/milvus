@@ -28,11 +28,11 @@ TEST(UuidTest, EnumValue) {
     ASSERT_EQ(static_cast<int>(DataType::UUID), 31);
 }
 
-// Verify that UUID is not treated as a string data type internally.
-// UUID is stored as a string-like type in FieldData but is not grouped
-// with VARCHAR/STRING/TEXT for schema handling purposes.
-TEST(UuidTest, IsNotStringDataType) {
-    ASSERT_FALSE(IsStringDataType(DataType::UUID));
+// Verify that UUID is treated as a string data type for storage purposes.
+// UUID is stored as a canonical string at the storage layer, reusing the
+// string/VarChar path (PayloadWriter string payloads, Arrow string builders).
+TEST(UuidTest, IsStringDataType) {
+    ASSERT_TRUE(IsStringDataType(DataType::UUID));
 }
 
 // Verify ToProtoDataType maps internal DataType::UUID to proto DataType::UUID.
@@ -60,8 +60,8 @@ TEST(UuidTest, InitScalarFieldDataWithLength) {
 }
 
 // Verify that a UUID field can be added to a Schema via AddDebugField.
-// UUID is not a string type per IsStringDataType, so it goes through the
-// non-string path (no max_length requirement).
+// IsStringDataType(UUID) is true, but UUID carries no max_length type param;
+// FieldMeta defaults it to the fixed 36-char canonical length.
 TEST(UuidTest, SchemaAddField) {
     auto schema = std::make_shared<Schema>();
     auto field_id = schema->AddDebugField("uuid_field", DataType::UUID);

@@ -166,6 +166,18 @@ func (stats *PrimaryKeyStats) UpdateByMsgs(msgs FieldData) {
 			stats.UpdateMinMax(pk)
 			stats.BF.AddString(str)
 		}
+	case schemapb.DataType_UUID:
+		data := msgs.(*StringFieldData).Data
+		if len(data) < 1 {
+			// return error: msgs must has one element at least
+			return
+		}
+
+		for _, str := range data {
+			pk := NewVarCharPrimaryKey(str)
+			stats.UpdateMinMax(pk)
+			stats.BF.AddString(str)
+		}
 	default:
 		// TODO::
 	}
@@ -180,6 +192,9 @@ func (stats *PrimaryKeyStats) Update(pk PrimaryKey) {
 		common.Endian.PutUint64(b, uint64(data))
 		stats.BF.Add(b)
 	case schemapb.DataType_VarChar:
+		data := pk.GetValue().(string)
+		stats.BF.AddString(data)
+	case schemapb.DataType_UUID:
 		data := pk.GetValue().(string)
 		stats.BF.AddString(data)
 	default:

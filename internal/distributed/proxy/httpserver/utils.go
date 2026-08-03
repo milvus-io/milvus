@@ -308,6 +308,9 @@ func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (
 			if stringID == "" {
 				return nil, merr.WrapErrParameterInvalidMsg("empty string id at index %d", i)
 			}
+			if pkField.DataType == schemapb.DataType_UUID {
+				stringID = strings.ToLower(stringID)
+			}
 			stringIDs = append(stringIDs, stringID)
 		}
 		return &schemapb.IDs{

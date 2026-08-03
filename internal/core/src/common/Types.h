@@ -247,6 +247,7 @@ GetArrowDataType(DataType data_type, int dim = 1) {
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT:
+        case DataType::UUID:
             return arrow::utf8();
         case DataType::ARRAY:
         case DataType::JSON:
@@ -342,6 +343,8 @@ GetDataTypeName(DataType data_type) {
             return "json";
         case DataType::TEXT:
             return "text";
+        case DataType::UUID:
+            return "uuid";
         case DataType::GEOMETRY:
             return "geometry";
         case DataType::VECTOR_FLOAT:
@@ -473,7 +476,8 @@ using GISFunctionType = proto::plan::GISFunctionFilterExpr_GISOp;
 
 inline bool
 IsPrimaryKeyDataType(DataType data_type) {
-    return data_type == DataType::INT64 || data_type == DataType::VARCHAR;
+    return data_type == DataType::INT64 || data_type == DataType::VARCHAR ||
+           data_type == DataType::UUID;
 }
 
 inline bool
@@ -512,6 +516,7 @@ IsStringDataType(DataType data_type) {
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT:
+        case DataType::UUID:
             return true;
         default:
             return false;
@@ -552,6 +557,7 @@ IsPrimitiveType(proto::schema::DataType type) {
         case proto::schema::DataType::String:
         case proto::schema::DataType::VarChar:
         case proto::schema::DataType::Timestamptz:
+        case proto::schema::DataType::UUID:
             return true;
         default:
             return false;

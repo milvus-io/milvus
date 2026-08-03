@@ -452,6 +452,11 @@ func validateDimension(field *schemapb.FieldSchema) error {
 }
 
 func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema) error {
+	// UUID is fixed-length: canonical form is exactly 36 bytes,
+	// so no max_length type param is required.
+	if typeutil.IsUUIDType(field.DataType) || typeutil.IsUUIDType(field.ElementType) {
+		return nil
+	}
 	exist := false
 	for _, param := range field.TypeParams {
 		if param.Key != common.MaxLengthKey {
@@ -639,7 +644,9 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	// valid max length per row parameters
 	// if max_length not specified, return error
 	if field.DataType == schemapb.DataType_VarChar ||
-		(field.GetDataType() == schemapb.DataType_Array && field.GetElementType() == schemapb.DataType_VarChar) {
+		field.DataType == schemapb.DataType_UUID ||
+		(field.GetDataType() == schemapb.DataType_Array &&
+			(field.GetElementType() == schemapb.DataType_VarChar || field.GetElementType() == schemapb.DataType_UUID)) {
 		err = validateMaxLengthPerRow(schema.Name, field)
 		if err != nil {
 			return err
@@ -710,7 +717,7 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 
 	// valid max length per row parameters
 	// if max_length not specified, return error
-	if field.ElementType == schemapb.DataType_VarChar {
+	if field.ElementType == schemapb.DataType_VarChar || field.ElementType == schemapb.DataType_UUID {
 		err = validateMaxLengthPerRow(schema.Name, field)
 		if err != nil {
 			return err

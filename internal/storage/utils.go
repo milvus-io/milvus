@@ -855,7 +855,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				Nullable:  field.GetNullable(),
 			}
 
-		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
+		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_UUID:
 			srcData := srcField.GetScalars().GetStringData().GetData()
 			validData := srcField.GetValidData()
 
@@ -1325,7 +1325,7 @@ func GetPkFromInsertData(collSchema *schemapb.CollectionSchema, data *InsertData
 	switch pf.DataType {
 	case schemapb.DataType_Int64:
 		realPfData, ok = pfData.(*Int64FieldData)
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		realPfData, ok = pfData.(*StringFieldData)
 	default:
 		// TODO
@@ -1808,7 +1808,7 @@ func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 		return fieldSchema.GetDefaultValue().GetFloatData()
 	case schemapb.DataType_Double:
 		return fieldSchema.GetDefaultValue().GetDoubleData()
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_UUID:
 		return fieldSchema.GetDefaultValue().GetStringData()
 	case schemapb.DataType_Timestamptz:
 		return fieldSchema.GetDefaultValue().GetTimestamptzData()

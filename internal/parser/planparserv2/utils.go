@@ -281,6 +281,9 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 		return value, nil
 	}
 	if dataType == schemapb.DataType_UUID && IsString(value) {
+		// Normalize UUID literals to canonical lowercase so query/delete
+		// expressions match the canonical form stored at insert time.
+		value.GetVal().(*planpb.GenericValue_StringVal).StringVal = strings.ToLower(value.GetStringVal())
 		return value, nil
 	}
 	if typeutil.IsTimestamptzType(dataType) {

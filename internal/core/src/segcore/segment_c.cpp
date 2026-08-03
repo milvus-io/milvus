@@ -1543,7 +1543,8 @@ BuildArrayForChunk(const FieldInfo& field_info,
                 global_offset);
 
         case milvus::DataType::VARCHAR:
-        case milvus::DataType::STRING: {
+        case milvus::DataType::STRING:
+        case milvus::DataType::UUID: {
             auto string_vec = dynamic_cast<
                 const milvus::segcore::ConcurrentVector<std::string>*>(
                 field_info.vec_base);
@@ -1824,7 +1825,8 @@ GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
                 break;
             }
             case milvus::DataType::VARCHAR:
-            case milvus::DataType::STRING: {
+            case milvus::DataType::STRING:
+            case milvus::DataType::UUID: {
                 auto pk_vec = insert_record.get_data<std::string>(field_id);
                 std::vector<std::string_view> views;
                 views.reserve(result->num_primary_keys);

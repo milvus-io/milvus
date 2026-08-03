@@ -49,6 +49,10 @@ type rowParser struct {
 	dynamicField         *schemapb.FieldSchema
 	allowInsertAutoID    bool
 
+	// rowNum is the 1-based index of the data row currently being parsed,
+	// used to locate invalid values (e.g. malformed UUIDs) in error messages.
+	rowNum int64
+
 	timezone string
 }
 
@@ -225,6 +229,7 @@ func (r *rowParser) reconstructArrayForStructArray(structName string, subFieldsM
 }
 
 func (r *rowParser) Parse(strArr []string) (Row, error) {
+	r.rowNum++
 	if len(strArr) != len(r.header) {
 		return nil, merr.WrapErrImportFailed("the number of fields in the row is not equal to the header")
 	}
@@ -472,7 +477,7 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string, useElem
 		return num, typeutil.VerifyFloats64([]float64{num})
 	case schemapb.DataType_Text:
 		return obj, nil
-	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_UUID:
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		maxLength, err := parameterutil.GetMaxLength(field)
 		if err != nil {
 			return nil, err
@@ -481,6 +486,8 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string, useElem
 			return nil, err
 		}
 		return obj, nil
+	case schemapb.DataType_UUID:
+		return common.ValidateAndNormalizeUUID(field.GetName(), r.rowNum, obj)
 	case schemapb.DataType_BinaryVector:
 		var vec []byte
 		err := json.Unmarshal([]byte(obj), &vec)
@@ -725,7 +732,7 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 				},
 			},
 		}, nil
-	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_UUID:
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		values := make([]string, len(arr))
 		for i, v := range arr {
 			value, ok := v.(string)
@@ -737,6 +744,26 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 				return nil, err
 			}
 			if err := common.CheckValidString(value, maxLength, field); err != nil {
+				return nil, err
+			}
+			values[i] = value
+		}
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{
+					Data: values,
+				},
+			},
+		}, nil
+	case schemapb.DataType_UUID:
+		values := make([]string, len(arr))
+		for i, v := range arr {
+			value, ok := v.(string)
+			if !ok {
+				return nil, r.wrapArrayValueTypeError(arr, eleType)
+			}
+			value, err := common.ValidateAndNormalizeUUID(field.GetName(), r.rowNum, value)
+			if err != nil {
 				return nil, err
 			}
 			values[i] = value

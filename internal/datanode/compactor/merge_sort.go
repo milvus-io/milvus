@@ -128,6 +128,20 @@ func mergeSortMultipleSegments(ctx context.Context,
 			}
 			return !segmentFilters[ri].Filtered(pk, uint64(ts), expireTs)
 		}
+	case schemapb.DataType_UUID:
+		predicate = func(r storage.Record, ri, i int) bool {
+			segmentTotalRows[ri]++
+			pk := r.Column(pkField.FieldID).(*array.String).Value(i)
+			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
+			expireTs := int64(-1)
+			if hasTTLField {
+				col := r.Column(ttlFieldID).(*array.Int64)
+				if col.IsValid(i) {
+					expireTs = col.Value(i)
+				}
+			}
+			return !segmentFilters[ri].Filtered(pk, uint64(ts), expireTs)
+		}
 	default:
 		log.Warn(ctx, "compaction only support int64 and varchar pk field")
 	}

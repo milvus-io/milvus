@@ -86,6 +86,9 @@ func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFiel
 		// Text type does not require max_length, use the same estimate as JSON/Array fields
 	case schemapb.DataType_Text:
 		return GetDynamicFieldEstimateLength(), nil
+		// UUID is stored as a 36-char canonical string in Phase 1
+	case schemapb.DataType_UUID:
+		return 36, nil
 		// geometry field max length now consider the same as json field, which is 512 bytes
 	case schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_Geometry:
 		return GetDynamicFieldEstimateLength(), nil
@@ -156,9 +159,7 @@ func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLe
 			res += 4
 		case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_Timestamptz:
 			res += 8
-		case schemapb.DataType_UUID:
-			res += 16
-		case schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_Geometry:
+		case schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_UUID, schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_Geometry:
 			maxLengthPerRow, err := getVarFieldLength(fs, policy)
 			if err != nil {
 				return 0, err
@@ -799,7 +800,7 @@ func IsVariableDataType(dataType schemapb.DataType) bool {
 }
 
 func IsPrimitiveType(dataType schemapb.DataType) bool {
-	return IsArithmetic(dataType) || IsStringType(dataType) || IsBoolType(dataType) || IsTimestamptzType(dataType)
+	return IsArithmetic(dataType) || IsStringType(dataType) || IsBoolType(dataType) || IsTimestamptzType(dataType) || IsUUIDType(dataType)
 }
 
 // PrepareResultFieldData construct this slice fo FieldData for final result reduce

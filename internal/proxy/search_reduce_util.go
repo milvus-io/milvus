@@ -773,7 +773,7 @@ func setupIdListForSearchResult(searchResult *milvuspb.SearchResults, pkType sch
 				Data: make([]int64, 0, capacity),
 			},
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		searchResult.GetResults().Ids.IdField = &schemapb.IDs_StrId{
 			StrId: &schemapb.StringArray{
 				Data: make([]string, 0, capacity),
