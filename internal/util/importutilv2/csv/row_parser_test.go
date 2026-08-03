@@ -1157,3 +1157,89 @@ func TestParseTextFieldValue(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, longText, val)
 }
+
+func TestParseUUIDFieldValue(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+				AutoID:       true,
+			},
+			{
+				FieldID:  101,
+				Name:     "uuid",
+				DataType: schemapb.DataType_UUID,
+			},
+		},
+	}
+
+	header := []string{"uuid"}
+	parser, err := NewRowParser(schema, header, "")
+	assert.NoError(t, err)
+
+	t.Run("valid uuid parsed and normalized to lowercase", func(t *testing.T) {
+		result, err := parser.Parse([]string{"550E8400-E29B-41D4-A716-446655440000"})
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+
+		val, ok := result[int64(101)]
+		assert.True(t, ok)
+		assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", val)
+	})
+
+	t.Run("malformed uuid rejected", func(t *testing.T) {
+		_, err := parser.Parse([]string{"not-a-uuid"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid UUID format")
+	})
+}
+
+func TestParseUUIDArrayFieldValue(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+				AutoID:       true,
+			},
+			{
+				FieldID:     101,
+				Name:        "uuid_array",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_UUID,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.MaxCapacityKey,
+						Value: "8",
+					},
+				},
+			},
+		},
+	}
+
+	header := []string{"uuid_array"}
+	parser, err := NewRowParser(schema, header, "")
+	assert.NoError(t, err)
+
+	t.Run("valid uuid array parsed and normalized", func(t *testing.T) {
+		result, err := parser.Parse([]string{"[\"550E8400-E29B-41D4-A716-446655440000\", \"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11\"]"})
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+
+		val, ok := result[int64(101)]
+		assert.True(t, ok)
+		sf, ok := val.(*schemapb.ScalarField)
+		assert.True(t, ok)
+		assert.Equal(t, []string{"550e8400-e29b-41d4-a716-446655440000", "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"}, sf.GetStringData().GetData())
+	})
+
+	t.Run("malformed uuid element rejected", func(t *testing.T) {
+		_, err := parser.Parse([]string{"[\"not-a-uuid\"]"})
+		assert.Error(t, err)
+	})
+}

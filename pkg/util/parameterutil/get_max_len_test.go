@@ -57,6 +57,50 @@ func TestGetMaxLength(t *testing.T) {
 	})
 }
 
+func TestGetMaxLength_UUID(t *testing.T) {
+	t.Run("uuid without max_length returns 36", func(t *testing.T) {
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_UUID,
+		}
+		maxLength, err := GetMaxLength(f)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(36), maxLength)
+	})
+
+	t.Run("array of uuid element without max_length returns 36", func(t *testing.T) {
+		f := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_UUID,
+		}
+		maxLength, err := GetMaxLength(f)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(36), maxLength)
+	})
+
+	t.Run("uuid with explicit max_length honors it", func(t *testing.T) {
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_UUID,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "50",
+				},
+			},
+		}
+		maxLength, err := GetMaxLength(f)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(50), maxLength)
+	})
+
+	t.Run("uuid not rejected as string type", func(t *testing.T) {
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_UUID,
+		}
+		_, err := GetMaxLength(f)
+		assert.NoError(t, err)
+	})
+}
+
 func TestGetMaxCapacity(t *testing.T) {
 	t.Run("not array type", func(t *testing.T) {
 		f := &schemapb.FieldSchema{

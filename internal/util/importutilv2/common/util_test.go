@@ -261,3 +261,30 @@ func TestUtil_CheckValidUTF8_WithSafeError(t *testing.T) {
 	err = CheckValidUTF8("valid string", fieldSchema)
 	assert.NoError(t, err)
 }
+
+func TestUtil_ValidateAndNormalizeUUID(t *testing.T) {
+	t.Run("lowercase canonical passes through", func(t *testing.T) {
+		normalized, err := ValidateAndNormalizeUUID("uuid", 1, "550e8400-e29b-41d4-a716-446655440000")
+		assert.NoError(t, err)
+		assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", normalized)
+	})
+
+	t.Run("uppercase is normalized to lowercase", func(t *testing.T) {
+		normalized, err := ValidateAndNormalizeUUID("uuid", 1, "550E8400-E29B-41D4-A716-446655440000")
+		assert.NoError(t, err)
+		assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", normalized)
+	})
+
+	t.Run("malformed uuid is rejected with field and row info", func(t *testing.T) {
+		_, err := ValidateAndNormalizeUUID("uuid", 3, "not-a-uuid")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid UUID format")
+		assert.Contains(t, err.Error(), "uuid")
+		assert.Contains(t, err.Error(), "row 3")
+	})
+
+	t.Run("empty string is rejected", func(t *testing.T) {
+		_, err := ValidateAndNormalizeUUID("uuid", 1, "")
+		assert.Error(t, err)
+	})
+}
