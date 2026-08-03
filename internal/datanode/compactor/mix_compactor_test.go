@@ -1488,3 +1488,48 @@ func TestCanMergeSort(t *testing.T) {
 		assert.False(t, canMergeSort(plan, params))
 	})
 }
+
+func TestCanMergeSortMatchesMergeKey(t *testing.T) {
+	params := compaction.Params{UseMergeSort: true, MaxSegmentMergeSort: 30}
+
+	t.Run("namespace enabled rejects pk-only sorted segment", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: &schemapb.CollectionSchema{EnableNamespace: true},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSorted: true, IsSortedByNamespace: false},
+			},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
+
+	t.Run("namespace enabled accepts namespace-sorted segment", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: &schemapb.CollectionSchema{EnableNamespace: true},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSorted: false, IsSortedByNamespace: true},
+			},
+		}
+		assert.True(t, canMergeSort(plan, params))
+	})
+
+	t.Run("namespace disabled rejects namespace-sorted segment", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: &schemapb.CollectionSchema{EnableNamespace: false},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSorted: false, IsSortedByNamespace: true},
+			},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
+
+	t.Run("mixed flags rejected when one does not match", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema: &schemapb.CollectionSchema{EnableNamespace: true},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1, IsSortedByNamespace: true},
+				{SegmentID: 2, IsSorted: true},
+			},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
+}

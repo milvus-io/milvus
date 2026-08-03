@@ -564,15 +564,24 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 // canMergeSort reports whether this plan is eligible for storage.MergeSort,
 // which merges without sorting and so requires every input to already be
-// ordered by the plan's merge key. This checks that each segment carries a
-// sort flag from sort compaction; it does not yet check that the flag
-// corresponds to this plan's merge key.
+// ordered by the plan's merge key. A plan that is not eligible falls back to
+// mergeSplit, which does not assume ordering.
 func canMergeSort(plan *datapb.CompactionPlan, params compaction.Params) bool {
 	if !params.UseMergeSort {
 		return false
 	}
+	// The two sorted flags record which of the two orders sort compaction wrote a
+	// segment in. This plan merges by [pk] or [partitionKey, pk] under the same
+	// schema setting, so the flag that must be set is the matching one, not
+	// either one. namespaceEnabled is read from the same expression that
+	// internal/datanode/services.go uses to derive sortByFieldIDs.
+	namespaceEnabled := plan.GetSchema().GetEnableNamespace()
 	for _, segment := range plan.GetSegmentBinlogs() {
-		if !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
+		sortedByMergeKey := segment.GetIsSorted()
+		if namespaceEnabled {
+			sortedByMergeKey = segment.GetIsSortedByNamespace()
+		}
+		if !sortedByMergeKey {
 			return false
 		}
 	}
