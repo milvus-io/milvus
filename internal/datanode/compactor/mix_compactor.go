@@ -480,7 +480,10 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams,
 			writerOpts, t.lobContext, t.sortByFieldIDs)
 		if err != nil {
-			mlog.Warn(context.TODO(), "compact wrong, fail to merge sort segments", mlog.Err(err))
+			mlog.Warn(ctx, "compact wrong, fail to merge sort segments",
+				mlog.Int64("planID", t.GetPlanID()),
+				mlog.Int64("collectionID", t.collectionID),
+				mlog.Err(err))
 			return nil, err
 		}
 	} else {
