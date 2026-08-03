@@ -570,6 +570,65 @@ func TestMarkStreamingHasEnabledWaitsForListenersBeforePublishing(t *testing.T) 
 	assert.True(t, m.IsStreamingEnabledOnce())
 }
 
+func TestMarkStreamingHasEnabledWakesParkedWaiters(t *testing.T) {
+	ctx := context.Background()
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+
+	m, err := RecoverChannelManager(ctx, "test-channel")
+	require.NoError(t, err)
+
+	n := syncutil.NewAsyncTaskNotifier[struct{}]()
+	m.RegisterStreamingEnabledNotifier(n)
+
+	listenerCanceled := make(chan struct{})
+	releaseListener := make(chan struct{})
+	go func() {
+		<-n.Context().Done()
+		close(listenerCanceled)
+		<-releaseListener
+		n.Finish(struct{}{})
+	}()
+
+	m.cond.L.Lock()
+	parkedWaiter := m.cond.WaitChan()
+
+	markDone := make(chan error, 1)
+	go func() {
+		markDone <- m.MarkStreamingHasEnabled(ctx)
+	}()
+	<-listenerCanceled
+
+	select {
+	case <-parkedWaiter:
+		close(releaseListener)
+		require.NoError(t, <-markDone)
+		t.Fatal("streaming enable waiter was woken before listener completion")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseListener)
+	require.NoError(t, <-markDone)
+
+	select {
+	case <-parkedWaiter:
+	case <-time.After(time.Second):
+		t.Fatal("streaming enable waiter was not woken after listener completion")
+	}
+}
+
 func TestChannelManagerWatch(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
