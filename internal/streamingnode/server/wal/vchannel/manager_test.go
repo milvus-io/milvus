@@ -111,38 +111,32 @@ func TestPChannelRecoveryManagerReleasesInitialState(t *testing.T) {
 	}
 	vchannelMetas := map[string]*streamingpb.VChannelMeta{"v1": vchannelMeta}
 	segments := map[int64]*streamingpb.SegmentAssignmentMeta{101: segmentMeta}
-	versionSummary := &streamingpb.SegmentDataVersionSummary{
-		DataVersion: &viewpb.DataVersion{StreamingVersion: 10, CompactVersion: 20},
-	}
+	vchannelMeta.SegmentDataVersionSummary = &viewpb.DataVersion{StreamingVersion: 10, CompactVersion: 20}
 	transformLogMeta := &streamingpb.VChannelTransformLogMeta{CheckpointTimeTick: 30}
-	versionSummaries := map[string]*streamingpb.SegmentDataVersionSummary{"v1": versionSummary}
 	transformLogMetas := map[string]*streamingpb.VChannelTransformLogMeta{"v1": transformLogMeta}
 
 	manager, err := NewPChannelRecoveryManager(PChannelManagerConfig{
-		PChannel:                  "p1",
-		VChannelMetas:             vchannelMetas,
-		Segments:                  segments,
-		SegmentDataVersionSummary: versionSummaries,
-		TransformLogMetas:         transformLogMetas,
+		PChannel:          "p1",
+		VChannelMetas:     vchannelMetas,
+		Segments:          segments,
+		TransformLogMetas: transformLogMetas,
 	})
 	require.NoError(t, err)
 	t.Cleanup(manager.Close)
 
 	assert.Nil(t, manager.config.VChannelMetas)
 	assert.Nil(t, manager.config.Segments)
-	assert.Nil(t, manager.config.SegmentDataVersionSummary)
 	assert.Nil(t, manager.config.TransformLogMetas)
 	assert.Nil(t, manager.segmentsByVChannel)
 	require.Same(t, vchannelMeta, vchannelMetas["v1"])
 	require.Same(t, segmentMeta, segments[101])
-	require.Same(t, versionSummary, versionSummaries["v1"])
 	require.Same(t, transformLogMeta, transformLogMetas["v1"])
 
 	module := manager.Module("v1")
 	require.NotNil(t, module)
 	require.Same(t, vchannelMeta, module.vchannelView.meta)
 	require.True(t, proto.Equal(vchannelMeta, module.vchannelView.AssignmentMeta()))
-	require.True(t, proto.Equal(versionSummary, module.segmentDataVersionSummary))
+	assert.Equal(t, qviews.DataVersion{StreamingVersion: 10, CompactVersion: 20}, module.vchannelView.SegmentDataVersionSummary())
 	require.True(t, proto.Equal(transformLogMeta, module.transformLog.SnapshotMeta()))
 	require.Contains(t, module.segments, int64(101))
 	segmentID, vchannel := module.segments[101].IDAndVChannel()
@@ -177,6 +171,16 @@ func TestPChannelRecoveryManagerSeedsPersistedTombstoneCleanup(t *testing.T) {
 	t.Cleanup(manager.Close)
 
 	assert.True(t, manager.HasPendingCleanup())
+	assert.Empty(t, manager.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
+		MetaPhysicalTimeTick: 101,
+		DataPhysicalTimeTick: 101,
+	}))
+
+	upserts := manager.ConsumeDirtySnapshots()
+	require.Len(t, upserts, 1)
+	assert.Equal(t, moduleapi.SnapshotOpUpsertBase, upserts[0].Op())
+	upserts[0].MarkPersisted()
+
 	snapshots := manager.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
 		MetaPhysicalTimeTick: 101,
 		DataPhysicalTimeTick: 101,

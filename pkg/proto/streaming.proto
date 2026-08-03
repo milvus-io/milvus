@@ -857,10 +857,7 @@ message VChannelMeta {
     CollectionInfoOfVChannel collection_info = 3; // if the channel is belong to a collection, the collection info will be setup.
     uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
     uint64 tombstone_time_tick = 6; // The timetick this retained vchannel meta starts filtering replay.
-}
-
-message SegmentDataVersionSummary {
-    view.DataVersion data_version = 1;
+    view.DataVersion segment_data_version_summary = 7; // The greatest sealed data version retained after segment assignment cleanup.
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.

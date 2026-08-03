@@ -81,8 +81,7 @@ func (*VChannelModuleSnapshot) ModuleName() ModuleName {
 }
 
 type SegmentModuleSnapshot struct {
-	Segments             map[int64]*streamingpb.SegmentAssignmentMeta
-	DataVersionSummaries map[string]*streamingpb.SegmentDataVersionSummary
+	Segments map[int64]*streamingpb.SegmentAssignmentMeta
 }
 
 func (*SegmentModuleSnapshot) ModuleName() ModuleName {
@@ -134,6 +133,7 @@ type SnapshotOp int
 
 const (
 	SnapshotOpUpsert SnapshotOp = iota
+	SnapshotOpUpsertBase
 	SnapshotOpDelete
 )
 

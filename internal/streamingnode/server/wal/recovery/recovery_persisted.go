@@ -63,17 +63,6 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		return struct{}{}, nil
 	})
 
-	var segmentDataVersionSummaries map[string]*streamingpb.SegmentDataVersionSummary
-	fSegmentDataVersionSummary := conc.Go(func() (struct{}, error) {
-		var err error
-		segmentDataVersionSummaries, err = catalog.ListSegmentDataVersionSummaries(ctx, channelInfo.Name)
-		if err != nil {
-			return struct{}{}, errors.Wrap(err, "failed to get segment data version summary from catalog")
-		}
-		r.Logger().Info(context.TODO(), "recover segment data version summary done", mlog.Int("summaries", len(segmentDataVersionSummaries)))
-		return struct{}{}, nil
-	})
-
 	var transformLogMetas map[string]*streamingpb.VChannelTransformLogMeta
 	fTransformLog := conc.Go(func() (struct{}, error) {
 		metas, err := catalog.ListTransformLogMeta(ctx, channelInfo.Name)
@@ -85,7 +74,7 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		return struct{}{}, nil
 	})
 
-	if err := conc.BlockOnAll(fVChannel, fSegment, fSegmentDataVersionSummary, fTransformLog); err != nil {
+	if err := conc.BlockOnAll(fVChannel, fSegment, fTransformLog); err != nil {
 		return err
 	}
 	if err := r.ensureDataCheckpoint(); err != nil {
@@ -95,7 +84,7 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		return err
 	}
 	r.Logger().Info(context.TODO(), "recover segment info done", mlog.Int("segments", len(segmentMetas)))
-	return r.initRecoveryModules(ctx, vchannelMetas, segmentMetas, segmentDataVersionSummaries, transformLogMetas)
+	return r.initRecoveryModules(ctx, vchannelMetas, segmentMetas, transformLogMetas)
 }
 
 func vchannelMetaMap(vchannels []*streamingpb.VChannelMeta) (map[string]*streamingpb.VChannelMeta, error) {

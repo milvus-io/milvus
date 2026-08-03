@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // isDirty checks if the recovery storage mem state is not consistent with the persisted recovery storage.
@@ -175,6 +176,12 @@ func (rs *recoveryStorageImpl) persistModuleDirtySnapshot(ctx context.Context, s
 					return errors.New("vchannel dirty snapshot payload is not VChannelMeta")
 				}
 				return catalog.SaveVChannels(ctx, key.PChannel, map[string]*streamingpb.VChannelMeta{key.VChannel: meta})
+			case moduleapi.SnapshotOpUpsertBase:
+				meta, ok := snapshot.Payload().(*streamingpb.VChannelMeta)
+				if !ok || meta == nil {
+					return merr.WrapErrServiceInternalMsg("vchannel base dirty snapshot payload is not VChannelMeta")
+				}
+				return catalog.SaveVChannelBaseMetas(ctx, key.PChannel, map[string]*streamingpb.VChannelMeta{key.VChannel: meta})
 			case moduleapi.SnapshotOpDelete:
 				meta, _ := snapshot.Payload().(*streamingpb.VChannelMeta)
 				if meta == nil {
@@ -187,20 +194,11 @@ func (rs *recoveryStorageImpl) persistModuleDirtySnapshot(ctx context.Context, s
 		case moduleapi.ModuleNameSegment:
 			switch snapshot.Op() {
 			case moduleapi.SnapshotOpUpsert:
-				switch payload := snapshot.Payload().(type) {
-				case *streamingpb.SegmentAssignmentMeta:
-					if payload == nil {
-						return errors.New("segment dirty snapshot payload is nil SegmentAssignmentMeta")
-					}
-					return catalog.SaveSegmentAssignments(ctx, key.PChannel, map[int64]*streamingpb.SegmentAssignmentMeta{key.SegmentID: payload})
-				case *streamingpb.SegmentDataVersionSummary:
-					if payload == nil {
-						return errors.New("segment dirty snapshot payload is nil SegmentDataVersionSummary")
-					}
-					return catalog.SaveSegmentDataVersionSummaries(ctx, key.PChannel, map[string]*streamingpb.SegmentDataVersionSummary{key.VChannel: payload})
-				default:
-					return errors.New("segment dirty snapshot payload is not SegmentAssignmentMeta or SegmentDataVersionSummary")
+				payload, ok := snapshot.Payload().(*streamingpb.SegmentAssignmentMeta)
+				if !ok || payload == nil {
+					return merr.WrapErrServiceInternalMsg("segment dirty snapshot payload is not SegmentAssignmentMeta")
 				}
+				return catalog.SaveSegmentAssignments(ctx, key.PChannel, map[int64]*streamingpb.SegmentAssignmentMeta{key.SegmentID: payload})
 			case moduleapi.SnapshotOpDelete:
 				return catalog.DropSegmentAssignments(ctx, key.PChannel, []int64{key.SegmentID})
 			default:

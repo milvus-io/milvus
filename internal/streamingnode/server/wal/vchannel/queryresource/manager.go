@@ -112,6 +112,13 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 	m.submitCallback(req.OnDropped)
 }
 
+// Reject completes an acquisition that cannot be reconstructed without
+// registering a QueryView reference. The callback is submitted to the node
+// scheduler to preserve the asynchronous ResourceManager contract.
+func (m *Manager) Reject(req snview.AcquireResource) {
+	m.submitCallback(req.OnUnrecoverable)
+}
+
 func (m *Manager) QueryRuntime(key qviews.QueryViewKey) (*QueryRuntime, bool) {
 	if m == nil {
 		return nil, false

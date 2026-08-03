@@ -11,7 +11,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -64,6 +66,10 @@ func TestSegmentCleanupWaitsForPhysicalCheckpointsAndCatalogDelete(t *testing.T)
 	module, err := NewModule(ModuleConfig{
 		PChannel: "p1",
 		VChannel: "v1",
+		VChannelMeta: &streamingpb.VChannelMeta{
+			Vchannel:       "v1",
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{},
+		},
 		Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
 			10: {
 				SegmentId:              10,
@@ -83,26 +89,126 @@ func TestSegmentCleanupWaitsForPhysicalCheckpointsAndCatalogDelete(t *testing.T)
 	module.mu.Unlock()
 
 	upserts := module.ConsumeDirtySnapshots()
-	require.Len(t, upserts, 1)
-	assert.Equal(t, moduleapi.SnapshotOpUpsert, upserts[0].Op())
-	upserts[0].MarkPersisted()
+	require.Len(t, upserts, 2)
+	assert.Equal(t, moduleapi.SnapshotOpUpsertBase, upserts[0].Op())
+	assert.IsType(t, &streamingpb.VChannelMeta{}, upserts[0].Payload())
+	assert.Equal(t, moduleapi.SnapshotOpUpsert, upserts[1].Op())
+	upserts[1].MarkPersisted()
 	require.True(t, module.HasCleanupCandidates())
 
 	assert.Empty(t, module.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
 		MetaPhysicalTimeTick: 20,
 		DataPhysicalTimeTick: 20,
 	}))
-	deletes := module.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
+	assert.Empty(t, module.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
+		MetaPhysicalTimeTick: 21,
+		DataPhysicalTimeTick: 21,
+	}))
+
+	upserts[0].MarkPersisted()
+	cleanupSnapshots := module.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
 		MetaPhysicalTimeTick: 21,
 		DataPhysicalTimeTick: 21,
 	})
-	require.Len(t, deletes, 1)
-	assert.Equal(t, moduleapi.SnapshotOpDelete, deletes[0].Op())
+	require.Len(t, cleanupSnapshots, 1)
+	assert.Equal(t, moduleapi.SnapshotOpDelete, cleanupSnapshots[0].Op())
 	assert.Contains(t, module.segments, int64(10))
 
-	deletes[0].MarkPersisted()
+	cleanupSnapshots[0].MarkPersisted()
 	assert.NotContains(t, module.segments, int64(10))
 	assert.False(t, module.HasCleanupCandidates())
+}
+
+func TestRecoveredTombstonedSegmentPersistsDataVersionSummaryBeforeCleanup(t *testing.T) {
+	module, err := NewModule(ModuleConfig{
+		PChannel: "p1",
+		VChannel: "v1",
+		VChannelMeta: &streamingpb.VChannelMeta{
+			Vchannel:                  "v1",
+			CollectionInfo:            &streamingpb.CollectionInfoOfVChannel{},
+			SegmentDataVersionSummary: &viewpb.DataVersion{StreamingVersion: 3},
+		},
+		Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
+			10: {
+				SegmentId:              10,
+				Vchannel:               "v1",
+				State:                  streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
+				CheckpointTimeTick:     10,
+				DataCheckpointTimeTick: 10,
+				TombstoneTimeTick:      10,
+				SealedAtDataVersion: &viewpb.DataVersion{
+					StreamingVersion: 5,
+					CompactVersion:   1,
+				},
+				Stat: &streamingpb.SegmentAssignmentStat{},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, qviews.DataVersion{StreamingVersion: 5, CompactVersion: 1}, module.vchannelView.SegmentDataVersionSummary())
+	assert.Empty(t, module.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
+		MetaPhysicalTimeTick: 11,
+		DataPhysicalTimeTick: 11,
+	}))
+
+	upserts := module.ConsumeDirtySnapshots()
+	require.Len(t, upserts, 1)
+	assert.Equal(t, moduleapi.SnapshotOpUpsertBase, upserts[0].Op())
+	upserts[0].MarkPersisted()
+
+	snapshots := module.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
+		MetaPhysicalTimeTick: 11,
+		DataPhysicalTimeTick: 11,
+	})
+	require.Len(t, snapshots, 1)
+	assert.Equal(t, moduleapi.SnapshotOpDelete, snapshots[0].Op())
+	assert.Equal(t, int64(10), snapshots[0].Key().SegmentID)
+}
+
+func TestAcquireQueryResourceRejectsDataVersionOlderThanSummary(t *testing.T) {
+	scheduler := &recordingScheduler{}
+	module, err := NewModule(ModuleConfig{
+		PChannel: "p1",
+		VChannel: "v1",
+		VChannelMeta: &streamingpb.VChannelMeta{
+			Vchannel:                  "v1",
+			CollectionInfo:            &streamingpb.CollectionInfoOfVChannel{},
+			SegmentDataVersionSummary: &viewpb.DataVersion{StreamingVersion: 5, CompactVersion: 1},
+		},
+		NodeScheduler: scheduler,
+	})
+	require.NoError(t, err)
+	version := qviews.QueryViewVersion{
+		DataVersion:  qviews.DataVersion{StreamingVersion: 4, CompactVersion: 9},
+		QueryVersion: 1,
+	}
+	key := qviews.QueryViewKey{
+		ShardID:          qviews.ShardID{VChannel: "v1"},
+		QueryViewVersion: version,
+	}
+	ready := false
+	unrecoverable := false
+
+	module.AcquireQueryResource(snview.AcquireResource{
+		Key:  key,
+		Meta: &viewpb.QueryViewMeta{Vchannel: "v1", Version: version.IntoProto()},
+		OnReady: func() {
+			ready = true
+		},
+		OnUnrecoverable: func() {
+			unrecoverable = true
+		},
+	})
+
+	require.Len(t, scheduler.tasks, 1)
+	assert.False(t, ready)
+	assert.False(t, unrecoverable)
+	require.NoError(t, scheduler.tasks[0].Execute(context.Background()))
+	assert.False(t, ready)
+	assert.True(t, unrecoverable)
+	_, acquired := module.queryResources.OldestDataVersion()
+	assert.False(t, acquired)
 }
 
 func TestVChannelRecoveryModuleRecoveryBarrierFlushesOwnedTransformLog(t *testing.T) {
