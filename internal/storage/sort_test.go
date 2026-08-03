@@ -701,5 +701,33 @@ func TestMergeSortUnsortedInputReturnsError(t *testing.T) {
 	}, []int64{common.RowIDField})
 	assert.ErrorContains(t, err, "not sorted by the merge key")
 	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
-	assert.ErrorContains(t, err, "reader 0")
+	assert.ErrorContains(t, err, "reader 0 record 0 row 2 out of order")
+}
+
+// The disorder in TestMergeSortUnsortedInputReturnsError falls in the reader's
+// first record, so a reported record number of 0 does not prove that number
+// was actually computed rather than hardcoded. This variant keeps the first
+// record in order and puts the offending row in the second record, so the
+// reported record number must be non-zero to be correct.
+func TestMergeSortUnsortedInputReportsLaterRecord(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: "rowid", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+
+	r0 := &sliceRecordReader{recs: []Record{
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {10, 20, 30}}, nil),
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {5, 40}}, nil),
+	}}
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	_, err := MergeSort(1024, schema, []RecordReader{r0}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField})
+	assert.ErrorContains(t, err, "not sorted by the merge key")
+	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.ErrorContains(t, err, "reader 0 record 1 row 0 out of order")
 }

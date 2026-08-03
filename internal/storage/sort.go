@@ -369,6 +369,13 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 	}
 	// pos[ri] is the next row of that record to consider.
 	pos := make([]int32, len(rr))
+	// recNo[ri] counts the records that reader has produced. It turns an
+	// out-of-order row into a (record, row) coordinate, since pos -- and so
+	// idx.i -- restarts at zero on every record.
+	recNo := make([]int32, len(rr))
+	for i := range recNo {
+		recNo[i] = -1
+	}
 
 	extractKeys := func(ri int) error {
 		cols := keys[ri]
@@ -392,6 +399,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 			return err
 		}
 		pos[ri] = 0
+		recNo[ri]++
 		return extractKeys(ri)
 	}
 
@@ -542,8 +550,8 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 
 		if hasLast && compareWithLast(idx) < 0 {
 			return 0, merr.WrapErrDataIntegrityMsg(
-				"input record is not sorted by the merge key: reader %d row %d out of order, merge key fields %v",
-				idx.ri, idx.i, sortedByFieldIDs)
+				"input record is not sorted by the merge key: reader %d record %d row %d out of order, merge key fields %v",
+				idx.ri, recNo[idx.ri], idx.i, sortedByFieldIDs)
 		}
 		saveLast(idx)
 
