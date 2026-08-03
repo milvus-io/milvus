@@ -2388,9 +2388,9 @@ TEST(Growing, MultipleFieldsResourceEstimation) {
 // 2N+i and read back the all-false backfill -- rows silently dropped by ST_*
 // predicates, returned as null, and matched by IS NULL, permanently.
 //
-// backfill_data_raw() writes at absolute offsets, so re-running it is a
-// no-op. This pins that directly rather than through a fault-injected
-// Reopen, which segcore has no hook for.
+// The offset-addressed set_data_raw() overload writes the backfill at [0, N),
+// so re-running it is a no-op. This pins that directly rather than through a
+// fault-injected Reopen, which segcore has no hook for.
 TEST(Growing, BackfillValidDataIsIdempotentAcrossRetries) {
     constexpr int64_t kRows = 100;
     constexpr int64_t kSizePerChunk = 32;
@@ -2414,12 +2414,12 @@ TEST(Growing, BackfillValidDataIsIdempotentAcrossRetries) {
     milvus::segcore::ThreadSafeValidData valid_data(kSizePerChunk);
     const auto& field_meta = schema->operator[](field_id);
 
-    valid_data.backfill_data_raw(kRows, data.get(), field_meta);
+    valid_data.set_data_raw(0, kRows, data.get(), field_meta);
     ASSERT_EQ(valid_data.get_data().size(), static_cast<size_t>(kRows));
 
     // The retry after a failed reopen re-runs the same backfill. Length must
     // not grow, or every subsequent row's validity bit lands past its data.
-    valid_data.backfill_data_raw(kRows, data.get(), field_meta);
+    valid_data.set_data_raw(0, kRows, data.get(), field_meta);
     EXPECT_EQ(valid_data.get_data().size(), static_cast<size_t>(kRows));
     for (int64_t i = 0; i < kRows; ++i) {
         EXPECT_TRUE(valid_data.is_valid(i)) << "row " << i;
