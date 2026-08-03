@@ -312,6 +312,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		Region:            it.req.GetStorageConfig().GetRegion(),
 		CloudProvider:     it.req.GetStorageConfig().GetCloudProvider(),
 		RequestTimeoutMs:  it.req.GetStorageConfig().GetRequestTimeoutMs(),
+		MaxConnections:    it.req.GetStorageConfig().GetMaxConnections(),
 		SslCACert:         it.req.GetStorageConfig().GetSslCACert(),
 		GcpCredentialJSON: it.req.GetStorageConfig().GetGcpCredentialJSON(),
 		SslTlsMinVersion:  it.req.GetStorageConfig().GetSslTlsMinVersion(),
