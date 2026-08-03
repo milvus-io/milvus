@@ -586,9 +586,6 @@ class SegmentExpr : public Expr {
                    "data scan cursor opened at {}, expected {}",
                    data_scan_cursor_->Position(),
                    current_data_global_pos_);
-        if (projection != ChunkedColumnInterface::ScanProjection::NoData) {
-            PrefetchRawDataChunksForScanIfNeeded(data_scan_column_.get());
-        }
         return true;
     }
 
@@ -611,30 +608,6 @@ class SegmentExpr : public Expr {
                    data_scan_cursor_->Position(),
                    position);
         return true;
-    }
-
-    void
-    PrefetchRawDataChunksForScanIfNeeded(const ChunkedColumnInterface* column) {
-        if (column == nullptr || prefetched_ || !segment_->is_chunked()) {
-            return;
-        }
-        const auto num_chunks = column->num_chunks();
-        int64_t first_chunk = num_chunks;
-        if (current_data_global_pos_ < active_count_) {
-            first_chunk =
-                column->GetChunkIDByOffset(current_data_global_pos_).first;
-        }
-        AssertInfo(first_chunk >= 0 && first_chunk <= num_chunks,
-                   "scan prefetch chunk {} out of range {}",
-                   first_chunk,
-                   num_chunks);
-        std::vector<int64_t> chunk_ids;
-        chunk_ids.reserve(num_chunks - first_chunk);
-        for (int64_t i = first_chunk; i < num_chunks; i++) {
-            chunk_ids.push_back(i);
-        }
-        column->PrefetchChunks(op_ctx_, chunk_ids);
-        prefetched_ = true;
     }
 
     static void
