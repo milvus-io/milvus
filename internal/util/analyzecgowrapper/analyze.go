@@ -54,9 +54,10 @@ var (
 )
 
 type analyzeRequest struct {
-	info   *clusteringpb.AnalyzeInfo
-	ctx    context.Context
-	result chan analyzeResult
+	info          *clusteringpb.AnalyzeInfo
+	ctx           context.Context
+	pluginContext *indexcgopb.StoragePluginContext
+	result        chan analyzeResult
 }
 
 type analyzeResult struct {
@@ -65,13 +66,14 @@ type analyzeResult struct {
 }
 
 // Analyze serializes calls to C.Analyze on a dedicated OS thread
-func Analyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo) (CodecAnalyze, error) {
+func Analyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo, pluginContext *indexcgopb.StoragePluginContext) (CodecAnalyze, error) {
 	initAnalyzeWorker()
 
 	req := analyzeRequest{
-		info:   analyzeInfo,
-		ctx:    ctx,
-		result: make(chan analyzeResult, 1),
+		info:          analyzeInfo,
+		ctx:           ctx,
+		pluginContext: pluginContext,
+		result:        make(chan analyzeResult, 1),
 	}
 
 	// send request to the worker
@@ -96,7 +98,7 @@ func initAnalyzeWorker() {
 			defer runtime.UnlockOSThread()
 
 			for req := range analyzeQueue {
-				res := runAnalyze(req.ctx, req.info)
+				res := runAnalyze(req.ctx, req.info, req.pluginContext)
 				req.result <- res
 			}
 		}()
@@ -104,7 +106,7 @@ func initAnalyzeWorker() {
 }
 
 // runAnalyze performs the actual C.Analyze call
-func runAnalyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo) analyzeResult {
+func runAnalyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo, pluginContext *indexcgopb.StoragePluginContext) analyzeResult {
 	analyzeInfoBlob, err := proto.Marshal(analyzeInfo)
 	if err != nil {
 		mlog.Warn(ctx, "marshal analyzeInfo failed",
@@ -112,12 +114,25 @@ func runAnalyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo) anal
 			mlog.Err(err))
 		return analyzeResult{err: err}
 	}
-
+	var pluginContextPtr *C.CPluginContext
+	if pluginContext != nil {
+		// Analyze is synchronous; C++ copies the key before this function
+		// returns and retains only the encryption-zone and collection IDs.
+		key := C.CString(pluginContext.GetEncryptionKey())
+		defer C.free(unsafe.Pointer(key))
+		cPluginContext := C.CPluginContext{
+			ez_id:         C.int64_t(pluginContext.GetEncryptionZoneId()),
+			collection_id: C.int64_t(pluginContext.GetCollectionId()),
+			key:           key,
+		}
+		pluginContextPtr = &cPluginContext
+	}
 	var analyzePtr C.CAnalyze
 	status := C.Analyze(
 		&analyzePtr,
 		(*C.uint8_t)(unsafe.Pointer(&analyzeInfoBlob[0])),
 		(C.uint64_t)(len(analyzeInfoBlob)),
+		pluginContextPtr,
 	)
 
 	if err := HandleCStatus(&status, "failed to analyze task"); err != nil {
