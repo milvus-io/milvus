@@ -618,6 +618,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		return err
 	}
 	rr = newMaterializedRecordReader(rr, materializer)
+	rr = wrapReaderWithTimestampOverwrite(rr, segment.GetCommitTimestamp())
 	defer rr.Close()
 
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
@@ -657,12 +658,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 			}
 			if entityFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp), expireTs) {
 				continue
-			}
-
-			// Normalize import segment timestamps: overwrite to commit_ts
-			// so the output segment becomes a normal segment (commit_ts = 0).
-			if commitTs := segment.GetCommitTimestamp(); commitTs != 0 {
-				v.Timestamp = int64(commitTs)
 			}
 
 			clusteringKey := row[t.clusteringKeyField.FieldID]
