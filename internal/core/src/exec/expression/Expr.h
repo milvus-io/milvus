@@ -1063,20 +1063,52 @@ class SegmentExpr : public Expr {
     }
 
     // Visit selected physical ARRAY rows while keeping their backing storage
-    // pinned. The row callback is identical for growing/sealed and for
-    // scalar/recursive ARRAY storage.
-    template <typename ElementType, typename RowVisitor>
-    void
-    VisitElementLevelRowsByOffsets(int64_t chunk_id,
-                                   const FixedVector<int32_t>& row_offsets,
-                                   RowVisitor&& visit_row) {
+    // pinned, then expose each selected run through the common batch-evaluator
+    // contract.
+    template <typename ElementType,
+              typename BatchEvaluator,
+              typename... ValTypes>
+    size_t
+    VisitElementLevelRowsByOffsets(
+        int64_t chunk_id,
+        const FixedVector<int32_t>& row_offsets,
+        const FixedVector<int32_t>& first_elem_indices,
+        const FixedVector<int32_t>& run_lengths,
+        BatchEvaluator& evaluate_batch,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        std::vector<ElementType>& value_buffer,
+        FixedVector<bool>& valid_buffer,
+        const ValTypes&... values) {
+        size_t batch_pos = 0;
         auto emit_rows = [&](const auto* rows,
                              const bool* valid_data,
                              auto&& index_at) {
             for (size_t i = 0; i < row_offsets.size(); ++i) {
                 const auto index = index_at(i);
-                visit_row(
-                    rows[index], valid_data == nullptr || valid_data[index], i);
+                AssertInfo(valid_data == nullptr || valid_data[index],
+                           "ArrayOffsets references an element in null "
+                           "ARRAY row {}",
+                           row_offsets[i]);
+                VisitArrayElementRun<ElementType>(
+                    rows[index],
+                    first_elem_indices[i],
+                    run_lengths[i],
+                    value_buffer,
+                    valid_buffer,
+                    [&](const ElementType* data,
+                        const bool* valid_data,
+                        int size) {
+                        evaluate_batch.template operator()<FilterType::random>(
+                            data,
+                            valid_data,
+                            nullptr,
+                            size,
+                            res + batch_pos,
+                            valid_res + batch_pos,
+                            values...);
+                        batch_pos += static_cast<size_t>(size);
+                    });
             }
         };
 
@@ -1109,19 +1141,48 @@ class SegmentExpr : public Expr {
                 return static_cast<size_t>(row_offsets[i]);
             });
         }
+        return batch_pos;
     }
 
-    template <typename ElementType, typename RowVisitor>
-    void
+    template <typename ElementType,
+              typename BatchEvaluator,
+              typename... ValTypes>
+    int64_t
     VisitElementLevelRows(int64_t chunk_id,
                           int64_t start_offset,
                           int64_t length,
-                          RowVisitor&& visit_row) {
+                          BatchEvaluator& evaluate_batch,
+                          TargetBitmapView res,
+                          TargetBitmapView valid_res,
+                          std::vector<ElementType>& value_buffer,
+                          FixedVector<bool>& valid_buffer,
+                          const ValTypes&... values) {
+        int64_t processed_elems = 0;
         auto emit_rows = [&](const auto* rows, const bool* valid_data) {
             for (int64_t i = 0; i < length; ++i) {
-                visit_row(rows[i],
-                          valid_data == nullptr || valid_data[i],
-                          static_cast<size_t>(i));
+                if (valid_data != nullptr && !valid_data[i]) {
+                    continue;
+                }
+                const auto& row = rows[i];
+                const auto row_size = GetArrayRowSize(row);
+                VisitArrayElementRun<ElementType>(
+                    row,
+                    0,
+                    static_cast<int32_t>(row_size),
+                    value_buffer,
+                    valid_buffer,
+                    [&](const ElementType* data,
+                        const bool* valid_data,
+                        int batch_size) {
+                        evaluate_batch(data,
+                                       valid_data,
+                                       nullptr,
+                                       batch_size,
+                                       res + processed_elems,
+                                       valid_res + processed_elems,
+                                       values...);
+                        processed_elems += batch_size;
+                    });
             }
         };
 
@@ -1156,6 +1217,7 @@ class SegmentExpr : public Expr {
                 chunk.data() + start_offset,
                 valid_data == nullptr ? nullptr : valid_data + start_offset);
         }
+        return processed_elems;
     }
 
     // Process element-level data by element IDs. Consecutive element IDs from
@@ -1275,36 +1337,17 @@ class SegmentExpr : public Expr {
 
             // Fetch one physical ARRAY row per run, then expose each run's
             // logical elements through the common batch-evaluator contract.
-            size_t batch_pos = 0;
-            VisitElementLevelRowsByOffsets<ElementType>(
+            const auto batch_pos = VisitElementLevelRowsByOffsets<ElementType>(
                 chunk_id,
                 offsets,
-                [&](const auto& row, bool row_valid, size_t run_index) {
-                    AssertInfo(row_valid,
-                               "ArrayOffsets references an element in null "
-                               "ARRAY row {}",
-                               offsets[run_index]);
-                    VisitArrayElementRun<ElementType>(
-                        row,
-                        first_elem_indices[run_index],
-                        run_lengths[run_index],
-                        value_buffer,
-                        valid_buffer,
-                        [&](const ElementType* data,
-                            const bool* valid_data,
-                            int size) {
-                            evaluate_batch
-                                .template operator()<FilterType::random>(
-                                    data,
-                                    valid_data,
-                                    nullptr,
-                                    size,
-                                    res + processed_size + batch_pos,
-                                    valid_res + processed_size + batch_pos,
-                                    values...);
-                            batch_pos += static_cast<size_t>(size);
-                        });
-                });
+                first_elem_indices,
+                run_lengths,
+                evaluate_batch,
+                res + processed_size,
+                valid_res + processed_size,
+                value_buffer,
+                valid_buffer,
+                values...);
             AssertInfo(batch_pos == batch_size,
                        "ARRAY element batch size mismatch: {} vs {}",
                        batch_pos,
@@ -1407,37 +1450,17 @@ class SegmentExpr : public Expr {
                 }
                 processed_elems += element_count;
             } else {
-                int64_t chunk_processed_elems = 0;
-                VisitElementLevelRows<ElementType>(
-                    i,
-                    data_pos,
-                    size,
-                    [&](const auto& row, bool row_valid, size_t) {
-                        if (!row_valid) {
-                            return;
-                        }
-                        const auto row_size = GetArrayRowSize(row);
-                        VisitArrayElementRun<ElementType>(
-                            row,
-                            0,
-                            static_cast<int32_t>(row_size),
-                            value_buffer,
-                            valid_buffer,
-                            [&](const ElementType* data,
-                                const bool* valid_data,
-                                int batch_size) {
-                                evaluate_batch(data,
-                                               valid_data,
-                                               nullptr,
-                                               batch_size,
-                                               res + processed_elems +
-                                                   chunk_processed_elems,
-                                               valid_res + processed_elems +
-                                                   chunk_processed_elems,
-                                               values...);
-                                chunk_processed_elems += batch_size;
-                            });
-                    });
+                const auto chunk_processed_elems =
+                    VisitElementLevelRows<ElementType>(
+                        i,
+                        data_pos,
+                        size,
+                        evaluate_batch,
+                        res + processed_elems,
+                        valid_res + processed_elems,
+                        value_buffer,
+                        valid_buffer,
+                        values...);
                 const auto element_count = get_element_count();
                 AssertInfo(chunk_processed_elems == element_count,
                            "ARRAY element count mismatch: {} vs {}",

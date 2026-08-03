@@ -304,6 +304,16 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
                   "ArrayViews only supported for ArrayChunkedColumn");
     }
 
+    PinWrapper<std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    ArrayValueViews(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "ArrayValueViews only supported for recursive ARRAY "
+                  "columns");
+    }
+
     PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
     VectorArrayViews(
         milvus::OpContext* op_ctx,
@@ -336,6 +346,16 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
                         const FixedVector<int32_t>& offsets) const override {
         ThrowInfo(ErrorCode::Unsupported,
                   "viewsbyoffsets only supported for ArrayColumn");
+    }
+
+    PinWrapper<std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    ArrayValueViewsByOffsets(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const override {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "ArrayValueViewsByOffsets only supported for recursive "
+                  "ARRAY columns");
     }
 
     std::pair<size_t, size_t>
@@ -736,8 +756,7 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
         AssertInfo(chunk != nullptr,
                    "recursive ARRAY chunk {} must use ColumnarArrayChunk",
                    chunk_id);
-        auto content = chunked_column_detail::BuildArrayValueViews(
-            *chunk, nullable_, offset_len);
+        auto content = chunk->Views(offset_len);
         return PinWrapper<
             std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>(
             std::move(ca), std::move(content));
@@ -774,8 +793,7 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
         AssertInfo(chunk != nullptr,
                    "recursive ARRAY chunk {} must use ColumnarArrayChunk",
                    chunk_id);
-        auto content = chunked_column_detail::BuildArrayValueViewsByOffsets(
-            *chunk, nullable_, offsets);
+        auto content = chunk->ViewsByOffsets(offsets);
         return PinWrapper<
             std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>(
             std::move(ca), std::move(content));

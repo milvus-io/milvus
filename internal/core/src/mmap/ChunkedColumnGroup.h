@@ -423,8 +423,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                    "[StorageV2] recursive ARRAY chunk {} must use "
                    "ColumnarArrayChunk",
                    chunk_id);
-        auto content = chunked_column_detail::BuildArrayValueViews(
-            *array_chunk, field_meta_.is_nullable(), offset_len);
+        auto content = array_chunk->Views(offset_len);
         return PinWrapper<
             std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>(
             std::move(chunk_wrapper), std::move(content));
@@ -514,8 +513,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                    "[StorageV2] recursive ARRAY chunk {} must use "
                    "ColumnarArrayChunk",
                    chunk_id);
-        auto content = chunked_column_detail::BuildArrayValueViewsByOffsets(
-            *array_chunk, field_meta_.is_nullable(), offsets);
+        auto content = array_chunk->ViewsByOffsets(offsets);
         return PinWrapper<
             std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>(
             std::move(chunk_wrapper), std::move(content));
