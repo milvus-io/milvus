@@ -418,11 +418,12 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 			if err != nil {
 				return nil, merr.WrapErrImportFailedMsg("failed to decode utf32 bytes, error: %v", err)
 			}
-			if c.field.DataType == schemapb.DataType_VarChar {
+			switch c.field.DataType {
+			case schemapb.DataType_VarChar:
 				if err = common.CheckVarcharLength(str, maxLength, c.field); err != nil {
 					return nil, err
 				}
-			} else if c.field.DataType == schemapb.DataType_UUID {
+			case schemapb.DataType_UUID:
 				if str, err = common.ValidateAndNormalizeUUID(c.field.GetName(), int64(len(data)), str); err != nil {
 					return nil, err
 				}
