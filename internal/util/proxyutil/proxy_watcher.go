@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
-	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -31,9 +30,11 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -116,33 +117,78 @@ func (p *ProxyWatcher) WatchProxy(ctx context.Context) error {
 }
 
 func (p *ProxyWatcher) startWatchEtcd(ctx context.Context, eventCh clientv3.WatchChan) {
-	log.Info("start to watch etcd")
+	logger := log.Ctx(ctx)
+	logger.Info("start to watch etcd")
 	for {
 		select {
 		case <-ctx.Done():
-			log.Warn("stop watching etcd loop")
+			logger.Warn("stop watching etcd loop")
 			return
 
 		case <-p.closeCh.CloseCh():
-			log.Warn("stop watching etcd loop")
+			logger.Warn("stop watching etcd loop")
 			return
 
 		case event, ok := <-eventCh:
 			if !ok {
-				log.Warn("stop watching etcd loop due to closed etcd event channel")
+				logger.Warn("stop watching etcd loop due to closed etcd event channel")
 				panic("stop watching etcd loop due to closed etcd event channel")
 			}
 			if err := event.Err(); err != nil {
-				if err == v3rpc.ErrCompacted {
-					err2 := p.WatchProxy(ctx)
+				// Recoverable watch errors (compaction, or auth-token
+				// invalidation when etcd auth is enabled) are handled by
+				// re-establishing the watch instead of crashing. Re-watching
+				// issues a unary request that refreshes the etcd auth token, so
+				// the new watch stream recovers. See etcd.IsRetriableWatchErr.
+				if etcd.IsRetriableWatchErr(err) {
+					logger.Warn("proxy watch hit a recoverable error, re-establishing watch", zap.Error(err))
+					// Re-watch with a bounded retry/backoff. WatchProxy first issues
+					// a unary Get (getSessionsOnEtcd), which goes through clientv3's
+					// unary retry interceptor and refreshes the etcd auth token before
+					// a fresh watch stream is opened. retry.Do is bounded by its
+					// default attempt count and backoff; only transient errors are
+					// retried, a non-transient failure aborts immediately.
+					//
+					// On success WatchProxy spawns a new startWatchEtcd goroutine, so
+					// this goroutine returns and hands the watch over to it (not a
+					// recursive call that would accumulate goroutines).
+					//
+					// The retry must observe the watcher lifetime, not just the
+					// component ctx: Stop() closes closeCh and then blocks in
+					// wg.Wait(), so a retry bound only to ctx would stall Stop()
+					// and could re-establish a watch after the watcher stopped.
+					// Bridge closeCh into a child ctx that gates the retry (and
+					// its backoff sleeps); WatchProxy itself still runs on the
+					// component ctx so a successfully re-established watch is not
+					// torn down when the bridge is released.
+					reCtx, reCancel := context.WithCancel(ctx)
+					go func() {
+						defer reCancel()
+						select {
+						case <-p.closeCh.CloseCh():
+						case <-reCtx.Done():
+						}
+					}()
+					err2 := retry.Do(reCtx, func() error {
+						if p.closeCh.IsClosed() {
+							return merr.WrapErrServiceInternal("proxy watcher is stopped")
+						}
+						return p.WatchProxy(ctx)
+					}, retry.RetryErr(etcd.IsRetriableWatchErr))
+					reCancel()
 					if err2 != nil {
-						log.Error("re watch proxy fails when etcd has a compaction error",
-							zap.Error(err), zap.Error(err2))
+						if ctx.Err() != nil || p.closeCh.IsClosed() {
+							logger.Warn("stop re-watching proxy due to shutdown", zap.Error(err2))
+							return
+						}
+						logger.Error("re watch proxy failed after retries, exit",
+							zap.NamedError("watchErr", err),
+							zap.NamedError("reWatchErr", err2))
 						panic("failed to handle etcd request, exit..")
 					}
 					return
 				}
-				log.Error("Watch proxy service failed", zap.Error(err))
+				logger.Error("Watch proxy service failed", zap.Error(err))
 				panic(err)
 			}
 			for _, e := range event.Events {
@@ -154,7 +200,7 @@ func (p *ProxyWatcher) startWatchEtcd(ctx context.Context, eventCh clientv3.Watc
 					err = p.handleDeleteEvent(e)
 				}
 				if err != nil {
-					log.Warn("failed to handle proxy event", zap.Any("event", e), zap.Error(err))
+					logger.Warn("failed to handle proxy event", zap.Any("event", e), zap.Error(err))
 				}
 			}
 		}

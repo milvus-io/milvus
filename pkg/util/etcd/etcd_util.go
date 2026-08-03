@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +39,66 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
+
+// IsRetriableWatchErr reports whether an etcd watch error can be recovered by
+// re-establishing the watch.
+//
+// It returns true for:
+//   - ErrCompacted: the watched revision has been compacted; re-watch from a
+//     fresh revision (pre-existing behavior).
+//   - auth-token errors (ErrInvalidAuthToken, ErrUserEmpty, ErrAuthOldRevision):
+//     with etcd auth enabled, the auth token held by a client can be
+//     invalidated server-side (the default "simple" token is GC'd after idle
+//     TTL, is member-local, and is lost on member restart). A long-idle standby
+//     coordinator hits this on promotion. clientv3 treats the resulting
+//     Unauthenticated error on an already-established watch stream as a halt
+//     error (see isHaltErr) and tears the stream down WITHOUT refreshing the
+//     token, so the watch owner must re-watch. Re-watching issues a unary
+//     request first, which goes through clientv3's unary retry interceptor and
+//     refreshes the auth token, so the new watch stream recovers.
+//
+// Genuine authorization failures (permission denied, bad credentials) carry
+// different codes (PermissionDenied, InvalidArgument, FailedPrecondition) and
+// are deliberately NOT retriable. We match the etcd sentinels via errors.Is
+// rather than the raw gRPC Unauthenticated code: clientv3 maps watch errors
+// back to these sentinels (v3rpc.Error), and ErrInvalidAuthToken is the only
+// source of Unauthenticated, so matching the sentinel is both sufficient and
+// narrower than trusting the code.
+//
+// Callers should wrap the re-watch in a bounded retry (retry.Attempts) so a
+// genuinely persistent failure does not loop forever.
+func IsRetriableWatchErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, rpctypes.ErrCompacted) ||
+		errors.Is(err, rpctypes.ErrInvalidAuthToken) ||
+		errors.Is(err, rpctypes.ErrUserEmpty) ||
+		errors.Is(err, rpctypes.ErrAuthOldRevision) {
+		return true
+	}
+	// A server-side watch cancellation loses the sentinel identity: etcd's
+	// serverWatchStream puts ErrGRPC*.Error() — the full "rpc error: code =
+	// Unauthenticated desc = ..." string — into WatchResponse.CancelReason, and
+	// clientv3 rebuilds it via errors.New / status.Error before v3rpc.Error,
+	// whose lookup table is keyed by the bare description only. The rebuilt
+	// error therefore never maps back to a sentinel and errors.Is above is
+	// false. Match the sentinel descriptions inside the message to cover this
+	// transport shape (including the substream path that nests it inside a
+	// FailedPrecondition status).
+	msg := err.Error()
+	for _, sentinel := range []error{
+		rpctypes.ErrGRPCCompacted,
+		rpctypes.ErrGRPCInvalidAuthToken,
+		rpctypes.ErrGRPCUserEmpty,
+		rpctypes.ErrGRPCAuthOldRevision,
+	} {
+		if strings.Contains(msg, rpctypes.ErrorDesc(sentinel)) {
+			return true
+		}
+	}
+	return false
+}
 
 type ClientOption func(*clientv3.Config)
 
