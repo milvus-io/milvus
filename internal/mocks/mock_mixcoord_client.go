@@ -1658,6 +1658,302 @@ func (_c *MockMixCoordClient_BroadcastAlteredCollection_Call) RunAndReturn(run f
 	return _c
 }
 
+// CatalogTransferAbort provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) CatalogTransferAbort(ctx context.Context, in *rootcoordpb.CatalogTransferAbortRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CatalogTransferAbort")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferAbortRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferAbortRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.CatalogTransferAbortRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_CatalogTransferAbort_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CatalogTransferAbort'
+type MockMixCoordClient_CatalogTransferAbort_Call struct {
+	*mock.Call
+}
+
+// CatalogTransferAbort is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *rootcoordpb.CatalogTransferAbortRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) CatalogTransferAbort(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_CatalogTransferAbort_Call {
+	return &MockMixCoordClient_CatalogTransferAbort_Call{Call: _e.mock.On("CatalogTransferAbort",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_CatalogTransferAbort_Call) Run(run func(ctx context.Context, in *rootcoordpb.CatalogTransferAbortRequest, opts ...grpc.CallOption)) *MockMixCoordClient_CatalogTransferAbort_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*rootcoordpb.CatalogTransferAbortRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_CatalogTransferAbort_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_CatalogTransferAbort_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_CatalogTransferAbort_Call) RunAndReturn(run func(context.Context, *rootcoordpb.CatalogTransferAbortRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_CatalogTransferAbort_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CatalogTransferApply provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) CatalogTransferApply(ctx context.Context, in *rootcoordpb.CatalogTransferApplyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CatalogTransferApply")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferApplyRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferApplyRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.CatalogTransferApplyRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_CatalogTransferApply_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CatalogTransferApply'
+type MockMixCoordClient_CatalogTransferApply_Call struct {
+	*mock.Call
+}
+
+// CatalogTransferApply is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *rootcoordpb.CatalogTransferApplyRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) CatalogTransferApply(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_CatalogTransferApply_Call {
+	return &MockMixCoordClient_CatalogTransferApply_Call{Call: _e.mock.On("CatalogTransferApply",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_CatalogTransferApply_Call) Run(run func(ctx context.Context, in *rootcoordpb.CatalogTransferApplyRequest, opts ...grpc.CallOption)) *MockMixCoordClient_CatalogTransferApply_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*rootcoordpb.CatalogTransferApplyRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_CatalogTransferApply_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_CatalogTransferApply_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_CatalogTransferApply_Call) RunAndReturn(run func(context.Context, *rootcoordpb.CatalogTransferApplyRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_CatalogTransferApply_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CatalogTransferDeactivate provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) CatalogTransferDeactivate(ctx context.Context, in *rootcoordpb.CatalogTransferDeactivateRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CatalogTransferDeactivate")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferDeactivateRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferDeactivateRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.CatalogTransferDeactivateRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_CatalogTransferDeactivate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CatalogTransferDeactivate'
+type MockMixCoordClient_CatalogTransferDeactivate_Call struct {
+	*mock.Call
+}
+
+// CatalogTransferDeactivate is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *rootcoordpb.CatalogTransferDeactivateRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) CatalogTransferDeactivate(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_CatalogTransferDeactivate_Call {
+	return &MockMixCoordClient_CatalogTransferDeactivate_Call{Call: _e.mock.On("CatalogTransferDeactivate",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_CatalogTransferDeactivate_Call) Run(run func(ctx context.Context, in *rootcoordpb.CatalogTransferDeactivateRequest, opts ...grpc.CallOption)) *MockMixCoordClient_CatalogTransferDeactivate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*rootcoordpb.CatalogTransferDeactivateRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_CatalogTransferDeactivate_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_CatalogTransferDeactivate_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_CatalogTransferDeactivate_Call) RunAndReturn(run func(context.Context, *rootcoordpb.CatalogTransferDeactivateRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_CatalogTransferDeactivate_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CatalogTransferPrepare provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) CatalogTransferPrepare(ctx context.Context, in *rootcoordpb.CatalogTransferPrepareRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CatalogTransferPrepare")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferPrepareRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferPrepareRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.CatalogTransferPrepareRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_CatalogTransferPrepare_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CatalogTransferPrepare'
+type MockMixCoordClient_CatalogTransferPrepare_Call struct {
+	*mock.Call
+}
+
+// CatalogTransferPrepare is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *rootcoordpb.CatalogTransferPrepareRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) CatalogTransferPrepare(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_CatalogTransferPrepare_Call {
+	return &MockMixCoordClient_CatalogTransferPrepare_Call{Call: _e.mock.On("CatalogTransferPrepare",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_CatalogTransferPrepare_Call) Run(run func(ctx context.Context, in *rootcoordpb.CatalogTransferPrepareRequest, opts ...grpc.CallOption)) *MockMixCoordClient_CatalogTransferPrepare_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*rootcoordpb.CatalogTransferPrepareRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_CatalogTransferPrepare_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_CatalogTransferPrepare_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_CatalogTransferPrepare_Call) RunAndReturn(run func(context.Context, *rootcoordpb.CatalogTransferPrepareRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_CatalogTransferPrepare_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CheckBalanceStatus provides a mock function with given fields: ctx, in, opts
 func (_m *MockMixCoordClient) CheckBalanceStatus(ctx context.Context, in *querypb.CheckBalanceStatusRequest, opts ...grpc.CallOption) (*querypb.CheckBalanceStatusResponse, error) {
 	_va := make([]interface{}, len(opts))

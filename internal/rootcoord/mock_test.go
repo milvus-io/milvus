@@ -106,6 +106,7 @@ type mockMetaTable struct {
 	ListPrivilegeGroupsFunc          func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error)
 	OperatePrivilegeGroupFunc        func(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error
 	GetPrivilegeGroupRolesFunc       func(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error)
+	ApplyTransferredCollectionFunc   func(ctx context.Context, coll *model.Collection) error
 }
 
 func (m mockMetaTable) GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error) {
@@ -122,6 +123,10 @@ func (m mockMetaTable) ListCollections(ctx context.Context, dbName string, ts Ti
 
 func (m mockMetaTable) AddCollection(ctx context.Context, coll *model.Collection) error {
 	return m.AddCollectionFunc(ctx, coll)
+}
+
+func (m mockMetaTable) ApplyTransferredCollection(ctx context.Context, coll *model.Collection) error {
+	return m.ApplyTransferredCollectionFunc(ctx, coll)
 }
 
 func (m mockMetaTable) GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
@@ -416,6 +421,7 @@ func newTestCore(opts ...Opt) *Core {
 		metricsRequest:   metricsinfo.NewMetricsRequest(),
 		session:          &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}},
 		tombstoneSweeper: tombstoneSweeper,
+		transferGate:     newTransferGate(),
 	}
 	for _, opt := range opts {
 		opt(c)

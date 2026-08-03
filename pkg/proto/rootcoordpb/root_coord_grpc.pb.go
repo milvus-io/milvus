@@ -59,6 +59,10 @@ const (
 	RootCoord_AllocID_FullMethodName                       = "/milvus.proto.rootcoord.RootCoord/AllocID"
 	RootCoord_UpdateChannelTimeTick_FullMethodName         = "/milvus.proto.rootcoord.RootCoord/UpdateChannelTimeTick"
 	RootCoord_InvalidateCollectionMetaCache_FullMethodName = "/milvus.proto.rootcoord.RootCoord/InvalidateCollectionMetaCache"
+	RootCoord_CatalogTransferPrepare_FullMethodName        = "/milvus.proto.rootcoord.RootCoord/CatalogTransferPrepare"
+	RootCoord_CatalogTransferDeactivate_FullMethodName     = "/milvus.proto.rootcoord.RootCoord/CatalogTransferDeactivate"
+	RootCoord_CatalogTransferApply_FullMethodName          = "/milvus.proto.rootcoord.RootCoord/CatalogTransferApply"
+	RootCoord_CatalogTransferAbort_FullMethodName          = "/milvus.proto.rootcoord.RootCoord/CatalogTransferAbort"
 	RootCoord_ShowConfigurations_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/ShowConfigurations"
 	RootCoord_GetMetrics_FullMethodName                    = "/milvus.proto.rootcoord.RootCoord/GetMetrics"
 	RootCoord_CreateCredential_FullMethodName              = "/milvus.proto.rootcoord.RootCoord/CreateCredential"
@@ -210,6 +214,10 @@ type RootCoordClient interface {
 	AllocID(ctx context.Context, in *AllocIDRequest, opts ...grpc.CallOption) (*AllocIDResponse, error)
 	UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg, opts ...grpc.CallOption) (*commonpb.Status, error)
 	InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	CatalogTransferPrepare(ctx context.Context, in *CatalogTransferPrepareRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	CatalogTransferDeactivate(ctx context.Context, in *CatalogTransferDeactivateRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	CatalogTransferApply(ctx context.Context, in *CatalogTransferApplyRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	CatalogTransferAbort(ctx context.Context, in *CatalogTransferAbortRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
 	GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error)
@@ -583,6 +591,42 @@ func (c *rootCoordClient) UpdateChannelTimeTick(ctx context.Context, in *interna
 func (c *rootCoordClient) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, RootCoord_InvalidateCollectionMetaCache_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) CatalogTransferPrepare(ctx context.Context, in *CatalogTransferPrepareRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_CatalogTransferPrepare_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) CatalogTransferDeactivate(ctx context.Context, in *CatalogTransferDeactivateRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_CatalogTransferDeactivate_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) CatalogTransferApply(ctx context.Context, in *CatalogTransferApplyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_CatalogTransferApply_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) CatalogTransferAbort(ctx context.Context, in *CatalogTransferAbortRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_CatalogTransferAbort_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1050,6 +1094,10 @@ type RootCoordServer interface {
 	AllocID(context.Context, *AllocIDRequest) (*AllocIDResponse, error)
 	UpdateChannelTimeTick(context.Context, *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error)
 	InvalidateCollectionMetaCache(context.Context, *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
+	CatalogTransferPrepare(context.Context, *CatalogTransferPrepareRequest) (*commonpb.Status, error)
+	CatalogTransferDeactivate(context.Context, *CatalogTransferDeactivateRequest) (*commonpb.Status, error)
+	CatalogTransferApply(context.Context, *CatalogTransferApplyRequest) (*commonpb.Status, error)
+	CatalogTransferAbort(context.Context, *CatalogTransferAbortRequest) (*commonpb.Status, error)
 	ShowConfigurations(context.Context, *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
 	GetMetrics(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
@@ -1208,6 +1256,18 @@ func (UnimplementedRootCoordServer) UpdateChannelTimeTick(context.Context, *inte
 }
 func (UnimplementedRootCoordServer) InvalidateCollectionMetaCache(context.Context, *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InvalidateCollectionMetaCache not implemented")
+}
+func (UnimplementedRootCoordServer) CatalogTransferPrepare(context.Context, *CatalogTransferPrepareRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CatalogTransferPrepare not implemented")
+}
+func (UnimplementedRootCoordServer) CatalogTransferDeactivate(context.Context, *CatalogTransferDeactivateRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CatalogTransferDeactivate not implemented")
+}
+func (UnimplementedRootCoordServer) CatalogTransferApply(context.Context, *CatalogTransferApplyRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CatalogTransferApply not implemented")
+}
+func (UnimplementedRootCoordServer) CatalogTransferAbort(context.Context, *CatalogTransferAbortRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CatalogTransferAbort not implemented")
 }
 func (UnimplementedRootCoordServer) ShowConfigurations(context.Context, *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ShowConfigurations not implemented")
@@ -1982,6 +2042,78 @@ func _RootCoord_InvalidateCollectionMetaCache_Handler(srv interface{}, ctx conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RootCoordServer).InvalidateCollectionMetaCache(ctx, req.(*proxypb.InvalidateCollMetaCacheRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_CatalogTransferPrepare_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CatalogTransferPrepareRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).CatalogTransferPrepare(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_CatalogTransferPrepare_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).CatalogTransferPrepare(ctx, req.(*CatalogTransferPrepareRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_CatalogTransferDeactivate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CatalogTransferDeactivateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).CatalogTransferDeactivate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_CatalogTransferDeactivate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).CatalogTransferDeactivate(ctx, req.(*CatalogTransferDeactivateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_CatalogTransferApply_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CatalogTransferApplyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).CatalogTransferApply(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_CatalogTransferApply_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).CatalogTransferApply(ctx, req.(*CatalogTransferApplyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_CatalogTransferAbort_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CatalogTransferAbortRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).CatalogTransferAbort(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_CatalogTransferAbort_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).CatalogTransferAbort(ctx, req.(*CatalogTransferAbortRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2838,6 +2970,22 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "InvalidateCollectionMetaCache",
 			Handler:    _RootCoord_InvalidateCollectionMetaCache_Handler,
+		},
+		{
+			MethodName: "CatalogTransferPrepare",
+			Handler:    _RootCoord_CatalogTransferPrepare_Handler,
+		},
+		{
+			MethodName: "CatalogTransferDeactivate",
+			Handler:    _RootCoord_CatalogTransferDeactivate_Handler,
+		},
+		{
+			MethodName: "CatalogTransferApply",
+			Handler:    _RootCoord_CatalogTransferApply_Handler,
+		},
+		{
+			MethodName: "CatalogTransferAbort",
+			Handler:    _RootCoord_CatalogTransferAbort_Handler,
 		},
 		{
 			MethodName: "ShowConfigurations",

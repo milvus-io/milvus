@@ -1332,6 +1332,242 @@ func (_c *MixCoord_BroadcastAlteredCollection_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// CatalogTransferAbort provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) CatalogTransferAbort(_a0 context.Context, _a1 *rootcoordpb.CatalogTransferAbortRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CatalogTransferAbort")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferAbortRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferAbortRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.CatalogTransferAbortRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CatalogTransferAbort_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CatalogTransferAbort'
+type MixCoord_CatalogTransferAbort_Call struct {
+	*mock.Call
+}
+
+// CatalogTransferAbort is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.CatalogTransferAbortRequest
+func (_e *MixCoord_Expecter) CatalogTransferAbort(_a0 interface{}, _a1 interface{}) *MixCoord_CatalogTransferAbort_Call {
+	return &MixCoord_CatalogTransferAbort_Call{Call: _e.mock.On("CatalogTransferAbort", _a0, _a1)}
+}
+
+func (_c *MixCoord_CatalogTransferAbort_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.CatalogTransferAbortRequest)) *MixCoord_CatalogTransferAbort_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rootcoordpb.CatalogTransferAbortRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CatalogTransferAbort_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_CatalogTransferAbort_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CatalogTransferAbort_Call) RunAndReturn(run func(context.Context, *rootcoordpb.CatalogTransferAbortRequest) (*commonpb.Status, error)) *MixCoord_CatalogTransferAbort_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CatalogTransferApply provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) CatalogTransferApply(_a0 context.Context, _a1 *rootcoordpb.CatalogTransferApplyRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CatalogTransferApply")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferApplyRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferApplyRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.CatalogTransferApplyRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CatalogTransferApply_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CatalogTransferApply'
+type MixCoord_CatalogTransferApply_Call struct {
+	*mock.Call
+}
+
+// CatalogTransferApply is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.CatalogTransferApplyRequest
+func (_e *MixCoord_Expecter) CatalogTransferApply(_a0 interface{}, _a1 interface{}) *MixCoord_CatalogTransferApply_Call {
+	return &MixCoord_CatalogTransferApply_Call{Call: _e.mock.On("CatalogTransferApply", _a0, _a1)}
+}
+
+func (_c *MixCoord_CatalogTransferApply_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.CatalogTransferApplyRequest)) *MixCoord_CatalogTransferApply_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rootcoordpb.CatalogTransferApplyRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CatalogTransferApply_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_CatalogTransferApply_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CatalogTransferApply_Call) RunAndReturn(run func(context.Context, *rootcoordpb.CatalogTransferApplyRequest) (*commonpb.Status, error)) *MixCoord_CatalogTransferApply_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CatalogTransferDeactivate provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) CatalogTransferDeactivate(_a0 context.Context, _a1 *rootcoordpb.CatalogTransferDeactivateRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CatalogTransferDeactivate")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferDeactivateRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferDeactivateRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.CatalogTransferDeactivateRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CatalogTransferDeactivate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CatalogTransferDeactivate'
+type MixCoord_CatalogTransferDeactivate_Call struct {
+	*mock.Call
+}
+
+// CatalogTransferDeactivate is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.CatalogTransferDeactivateRequest
+func (_e *MixCoord_Expecter) CatalogTransferDeactivate(_a0 interface{}, _a1 interface{}) *MixCoord_CatalogTransferDeactivate_Call {
+	return &MixCoord_CatalogTransferDeactivate_Call{Call: _e.mock.On("CatalogTransferDeactivate", _a0, _a1)}
+}
+
+func (_c *MixCoord_CatalogTransferDeactivate_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.CatalogTransferDeactivateRequest)) *MixCoord_CatalogTransferDeactivate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rootcoordpb.CatalogTransferDeactivateRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CatalogTransferDeactivate_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_CatalogTransferDeactivate_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CatalogTransferDeactivate_Call) RunAndReturn(run func(context.Context, *rootcoordpb.CatalogTransferDeactivateRequest) (*commonpb.Status, error)) *MixCoord_CatalogTransferDeactivate_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CatalogTransferPrepare provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) CatalogTransferPrepare(_a0 context.Context, _a1 *rootcoordpb.CatalogTransferPrepareRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CatalogTransferPrepare")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferPrepareRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.CatalogTransferPrepareRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.CatalogTransferPrepareRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CatalogTransferPrepare_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CatalogTransferPrepare'
+type MixCoord_CatalogTransferPrepare_Call struct {
+	*mock.Call
+}
+
+// CatalogTransferPrepare is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.CatalogTransferPrepareRequest
+func (_e *MixCoord_Expecter) CatalogTransferPrepare(_a0 interface{}, _a1 interface{}) *MixCoord_CatalogTransferPrepare_Call {
+	return &MixCoord_CatalogTransferPrepare_Call{Call: _e.mock.On("CatalogTransferPrepare", _a0, _a1)}
+}
+
+func (_c *MixCoord_CatalogTransferPrepare_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.CatalogTransferPrepareRequest)) *MixCoord_CatalogTransferPrepare_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rootcoordpb.CatalogTransferPrepareRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CatalogTransferPrepare_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_CatalogTransferPrepare_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CatalogTransferPrepare_Call) RunAndReturn(run func(context.Context, *rootcoordpb.CatalogTransferPrepareRequest) (*commonpb.Status, error)) *MixCoord_CatalogTransferPrepare_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CheckBalanceStatus provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) CheckBalanceStatus(_a0 context.Context, _a1 *querypb.CheckBalanceStatusRequest) (*querypb.CheckBalanceStatusResponse, error) {
 	ret := _m.Called(_a0, _a1)

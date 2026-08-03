@@ -177,6 +177,8 @@ type Core struct {
 
 	// telemetry manager for client telemetry collection and command management
 	telemetryMgr *telemetry.TelemetryManager
+
+	transferGate *transferGate
 }
 
 type FileResourceObserver interface {
@@ -197,6 +199,7 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 		cancel:         cancel,
 		factory:        factory,
 		metricsRequest: metricsinfo.NewMetricsRequest(),
+		transferGate:   newTransferGate(),
 	}
 
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)

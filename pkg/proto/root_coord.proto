@@ -150,6 +150,10 @@ service RootCoord {
     rpc AllocID(AllocIDRequest) returns (AllocIDResponse) {}
     rpc UpdateChannelTimeTick(internal.ChannelTimeTickMsg) returns (common.Status) {}
     rpc InvalidateCollectionMetaCache(proxy.InvalidateCollMetaCacheRequest) returns (common.Status) {}
+    rpc CatalogTransferPrepare(CatalogTransferPrepareRequest) returns (common.Status) {}
+    rpc CatalogTransferDeactivate(CatalogTransferDeactivateRequest) returns (common.Status) {}
+    rpc CatalogTransferApply(CatalogTransferApplyRequest) returns (common.Status) {}
+    rpc CatalogTransferAbort(CatalogTransferAbortRequest) returns (common.Status) {}
 
     rpc ShowConfigurations(internal.ShowConfigurationsRequest) returns (internal.ShowConfigurationsResponse){}
     // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
@@ -331,4 +335,42 @@ message ShowCollectionIDsResponse {
 message CreatePartitionResponse {
   common.Status status = 1;
   int64 partitionID = 2;
+}
+
+message CatalogTransferPrepareRequest {
+  common.MsgBase base = 1;
+  string transfer_id = 2;
+  int64 transfer_epoch = 3;
+  int64 collection_id = 4;
+  string db_name = 5;
+  string collection_name = 6;
+  int64 drain_timeout_ms = 7;
+}
+
+message CatalogTransferDeactivateRequest {
+  common.MsgBase base = 1;
+  string transfer_id = 2;
+  int64 transfer_epoch = 3;
+  int64 collection_id = 4;
+  string db_name = 5;
+  string collection_name = 6;
+  repeated string aliases = 7;
+  uint64 cache_expire_ts = 8;
+}
+
+message CatalogTransferApplyRequest {
+  common.MsgBase base = 1;
+  string transfer_id = 2;
+  int64 transfer_epoch = 3;
+  etcd.CollectionInfo collection = 4;
+  repeated etcd.PartitionInfo partitions = 5;
+  repeated etcd.AliasInfo aliases = 6;
+  uint64 cache_expire_ts = 7;
+}
+
+message CatalogTransferAbortRequest {
+  common.MsgBase base = 1;
+  string transfer_id = 2;
+  int64 transfer_epoch = 3;
+  int64 collection_id = 4;
 }
