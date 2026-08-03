@@ -233,7 +233,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "req_count",
 			Help:      "count of operation executed",
-		}, []string{nodeIDLabelName, functionLabelName, statusLabelName, databaseLabelName, collectionName})
+		}, []string{nodeIDLabelName, functionLabelName, statusLabelName, causeLabelName, databaseLabelName, collectionName})
 
 	// ProxyReqLatency records the latency for each grpc request.
 	ProxyGRPCLatency = prometheus.NewHistogramVec(
@@ -243,7 +243,7 @@ var (
 			Name:      "grpc_latency",
 			Help:      "latency of each grpc request",
 			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, functionLabelName, statusLabelName})
+		}, []string{nodeIDLabelName, functionLabelName, statusLabelName, causeLabelName})
 
 	// ProxyReqLatency records the latency that for all requests, like "CreateCollection".
 	ProxyReqLatency = prometheus.NewHistogramVec(

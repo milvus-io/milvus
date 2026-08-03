@@ -124,6 +124,39 @@ SortLegacyAuxBytes(int64_t num_rows) {
 }
 
 uint64_t
+SaturatingAdd(uint64_t lhs, uint64_t rhs) {
+    if (lhs > std::numeric_limits<uint64_t>::max() - rhs) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return lhs + rhs;
+}
+
+uint64_t
+SaturatingMul(uint64_t lhs, uint64_t rhs) {
+    if (lhs != 0 && rhs > std::numeric_limits<uint64_t>::max() / lhs) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return lhs * rhs;
+}
+
+uint64_t
+OffsetMappingMmapDiskCost(const Config& config, int64_t num_rows) {
+    if (num_rows <= 0) {
+        return 0;
+    }
+
+    const auto enable_mmap_o2i =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP_O2I_MAP).value_or(false);
+    const auto enable_mmap_i2o =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP_I2O_MAP).value_or(false);
+    if (!enable_mmap_o2i && !enable_mmap_i2o) {
+        return 0;
+    }
+
+    return SaturatingMul(static_cast<uint64_t>(num_rows), sizeof(int32_t));
+}
+
+uint64_t
 MarisaLegacyCsrBytes(int64_t num_rows, uint64_t arrays_per_row) {
     if (num_rows <= 0) {
         return 0;
@@ -554,6 +587,14 @@ IndexFactory::VecIndexLoadResource(
     } else {
         request.max_disk_cost = 0;
         request.max_memory_cost = 2 * res.memoryCost;
+    }
+    if (knowhere::UseDiskLoad(index_type, index_version)) {
+        const auto offset_mapping_disk_cost =
+            OffsetMappingMmapDiskCost(config, num_rows);
+        request.final_disk_cost =
+            SaturatingAdd(request.final_disk_cost, offset_mapping_disk_cost);
+        request.max_disk_cost =
+            SaturatingAdd(request.max_disk_cost, offset_mapping_disk_cost);
     }
     return request;
 }

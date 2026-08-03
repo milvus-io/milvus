@@ -268,10 +268,10 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		return nil, err
 	}
 	rr = newMaterializedRecordReader(rr, materializer)
-	defer rr.Close()
 	initReaderCost := time.Since(phaseStart)
 
 	rr = wrapReaderWithTimestampOverwrite(rr, t.plan.GetSegmentBinlogs()[0].GetCommitTimestamp())
+	defer rr.Close()
 	rrs := []storage.RecordReader{rr}
 	numValidRows, sortTimings, err := storage.Sort(t.compactionParams.BinLogMaxSize, writerSchema, rrs, srw, predicate, t.sortByFieldIDs)
 	if err != nil {

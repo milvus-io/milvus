@@ -22,7 +22,9 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -333,4 +335,47 @@ func TestRecordBuilderNullableDenseVectorPreservesDimMetadata(t *testing.T) {
 	dim, ok := field.Metadata.GetValue("dim")
 	assert.True(t, ok)
 	assert.Equal(t, "4", dim)
+}
+
+func TestRecordBuilderBuildReleasesCreatorRefs(t *testing.T) {
+	alloc := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	original := memory.DefaultAllocator
+	memory.DefaultAllocator = alloc
+	defer func() { memory.DefaultAllocator = original }()
+
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+	}}
+
+	func() {
+		ints := array.NewInt64Builder(alloc)
+		defer ints.Release()
+		ints.AppendValues([]int64{1, 2, 3}, nil)
+		intArr := ints.NewInt64Array()
+		defer intArr.Release()
+		strs := array.NewStringBuilder(alloc)
+		defer strs.Release()
+		strs.AppendValues([]string{"a", "b", "c"}, nil)
+		strArr := strs.NewStringArray()
+		defer strArr.Release()
+
+		src := NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema([]arrow.Field{
+			{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+			{Name: "text", Type: arrow.BinaryTypes.String},
+		}, nil), []arrow.Array{intArr, strArr}, 3), map[FieldID]int{100: 0, 101: 1})
+		defer src.Release()
+
+		rb := NewRecordBuilder(schema)
+		defer rb.Release()
+		require.NoError(t, rb.Append(src, 0, 3))
+
+		// Build hands back the sole owner of its columns: a single Release
+		// must return every column buffer to the allocator.
+		rec := rb.Build()
+		require.Equal(t, 3, rec.Column(100).Len())
+		require.Equal(t, 3, rec.Column(101).Len())
+		rec.Release()
+	}()
+	alloc.AssertSize(t, 0)
 }

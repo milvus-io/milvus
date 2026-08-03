@@ -35,6 +35,7 @@
 #include "folly/ScopeGuard.h"
 #include "glog/logging.h"
 #include "log/Log.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/format/parquet/file_reader.h"
@@ -582,9 +583,13 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                                                    batch.rg_count,
                                                    reader_memory_limit,
                                                    read_parallelism);
-            AssertInfo(tables_result.ok(),
-                       "[StorageV2] Failed to read batch: " +
-                           tables_result.status().ToString());
+            if (!tables_result.ok()) {
+                auto error =
+                    milvus_storage::ToSegcoreError(tables_result.status());
+                ThrowInfo(error.get_error_code(),
+                          "[StorageV2] Failed to read batch: {}",
+                          error.what());
+            }
             auto all_tables = std::move(tables_result).ValueOrDie();
             AssertInfo(all_tables.size() == static_cast<size_t>(batch.rg_count),
                        "reader returns less tables than expected, batch rg "

@@ -45,6 +45,7 @@ func NewColumnJSONBytes(name string, values [][]byte) *ColumnJSONBytes {
 func (c *ColumnJSONBytes) Slice(start, end int) Column {
 	return &ColumnJSONBytes{
 		genericColumnBase: c.genericColumnBase.slice(start, end),
+		isDynamic:         c.isDynamic,
 	}
 }
 

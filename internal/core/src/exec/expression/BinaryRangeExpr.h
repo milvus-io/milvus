@@ -336,7 +336,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
     template <typename T>
     VectorPtr
-    ExecRangeVisitorImplForIndex();
+    ExecRangeVisitorImplForIndex(OffsetVector* input = nullptr);
 
     template <typename T>
     VectorPtr
@@ -351,7 +351,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
     template <typename ValueType>
     VectorPtr
-    ExecRangeVisitorImplForJsonStats();
+    ExecRangeVisitorImplForJsonStats(OffsetVector* input = nullptr);
 
     template <typename ValueType>
     VectorPtr

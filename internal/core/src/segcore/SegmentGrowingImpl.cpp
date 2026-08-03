@@ -60,6 +60,7 @@
 #include "log/Log.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/format/parquet/file_reader.h"
@@ -714,36 +715,42 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 &insert_record_proto->fields_data(data_offset),
                 field_meta);
         }
-        // Growing-source flush reads raw data from insert_record_. Keep it
-        // populated even when the interim index can also serve raw vector data.
-        // Otherwise later inserts after index sync would be visible by row count
-        // but missing from field chunks during FlushGrowingSegmentData.
-        if (field_meta.get_data_type() == DataType::TEXT) {
-            auto spillover = GetTextLobSpillover(field_id);
-            AssertInfo(spillover != nullptr, "TEXT field must have spillover");
-            const auto& field_data =
-                insert_record_proto->fields_data(data_offset);
-            const auto& string_data = field_data.scalars().string_data();
+        // A synchronized vector interim index that owns raw data consumes
+        // later batches directly. Do not repopulate chunks reclaimed by
+        // try_remove_chunks. Scalar indexes do not take over raw-data
+        // ownership from ConcurrentVector.
+        const bool index_owns_raw_data =
+            IsVectorDataType(field_meta.get_data_type()) &&
+            indexing_record_.HasRawData(field_id);
+        if (!index_owns_raw_data) {
+            if (field_meta.get_data_type() == DataType::TEXT) {
+                auto spillover = GetTextLobSpillover(field_id);
+                AssertInfo(spillover != nullptr,
+                           "TEXT field must have spillover");
+                const auto& field_data =
+                    insert_record_proto->fields_data(data_offset);
+                const auto& string_data = field_data.scalars().string_data();
 
-            std::vector<std::string> ref_strings(num_rows);
-            for (int64_t i = 0; i < num_rows; i++) {
-                const auto& text = string_data.data(i);
-                ref_strings[i] = spillover->WriteAndEncode(text);
+                std::vector<std::string> ref_strings(num_rows);
+                for (int64_t i = 0; i < num_rows; i++) {
+                    const auto& text = string_data.data(i);
+                    ref_strings[i] = spillover->WriteAndEncode(text);
+                }
+
+                auto* vec_base = insert_record_.get_data_base(field_id);
+                auto* string_vec =
+                    dynamic_cast<ConcurrentVector<std::string>*>(vec_base);
+                AssertInfo(string_vec != nullptr,
+                           "TEXT field must use ConcurrentVector<std::string>");
+                string_vec->set_data_raw(
+                    reserved_offset, ref_strings.data(), num_rows);
+            } else {
+                insert_record_.get_data_base(field_id)->set_data_raw(
+                    reserved_offset,
+                    num_rows,
+                    &insert_record_proto->fields_data(data_offset),
+                    field_meta);
             }
-
-            auto* vec_base = insert_record_.get_data_base(field_id);
-            auto* string_vec =
-                dynamic_cast<ConcurrentVector<std::string>*>(vec_base);
-            AssertInfo(string_vec != nullptr,
-                       "TEXT field must use ConcurrentVector<std::string>");
-            string_vec->set_data_raw(
-                reserved_offset, ref_strings.data(), num_rows);
-        } else {
-            insert_record_.get_data_base(field_id)->set_data_raw(
-                reserved_offset,
-                num_rows,
-                &insert_record_proto->fields_data(data_offset),
-                field_meta);
         }
 
         //insert vector data into index
@@ -975,13 +982,19 @@ SegmentGrowingImpl::load_field_data_common(
 
     auto field_meta = (*schema_)[field_id];
 
-    // Growing-source flush reads raw data from insert_record_. Keep it
-    // populated even when an interim index can provide raw vector data.
     if (insert_record_.is_valid_data_exist(field_id)) {
         insert_record_.get_valid_data(field_id)->set_data_raw(field_data);
     }
-    insert_record_.get_data_base(field_id)->set_data_raw(reserved_offset,
-                                                         field_data);
+    // Keep the load path aligned with Insert: once a vector interim index owns
+    // raw data, append the loaded batch to the index without rebuilding raw
+    // chunks. Scalar indexes do not take over raw-data ownership.
+    const bool index_owns_raw_data =
+        IsVectorDataType(field_meta.get_data_type()) &&
+        indexing_record_.HasRawData(field_id);
+    if (!index_owns_raw_data) {
+        insert_record_.get_data_base(field_id)->set_data_raw(reserved_offset,
+                                                             field_data);
+    }
     if (segcore_config_.get_enable_interim_segment_index()) {
         auto offset = reserved_offset;
         for (auto& data : field_data) {
@@ -2864,12 +2877,16 @@ SegmentGrowingImpl::LoadColumnGroup(
     LOG_INFO("Loading segment {} column group {}", id_, index);
 
     auto chunk_reader_result = reader_->get_chunk_reader(index);
-    AssertInfo(chunk_reader_result.ok(),
-               "get chunk reader failed, segment {}, column group index {}, "
-               "error: {}",
-               get_segment_id(),
-               index,
-               chunk_reader_result.status().ToString());
+    if (!chunk_reader_result.ok()) {
+        auto error =
+            milvus_storage::ToSegcoreError(chunk_reader_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "get chunk reader failed, segment {}, column group index "
+                  "{}, error: {}",
+                  get_segment_id(),
+                  index,
+                  error.what());
+    }
 
     auto chunk_reader = std::move(chunk_reader_result.ValueOrDie());
 
@@ -2880,12 +2897,15 @@ SegmentGrowingImpl::LoadColumnGroup(
                "load column group row limit should be non-negative, got {}",
                row_limit);
     auto chunk_rows_result = chunk_reader->get_chunk_rows();
-    AssertInfo(chunk_rows_result.ok(),
-               "get chunk rows failed, segment {}, column group index {}, "
-               "error: {}",
-               get_segment_id(),
-               index,
-               chunk_rows_result.status().ToString());
+    if (!chunk_rows_result.ok()) {
+        auto error = milvus_storage::ToSegcoreError(chunk_rows_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "get chunk rows failed, segment {}, column group index {}, "
+                  "error: {}",
+                  get_segment_id(),
+                  index,
+                  error.what());
+    }
 
     auto chunk_rows = std::move(chunk_rows_result).ValueOrDie();
     std::vector<int64_t> row_groups_to_load;
@@ -2921,7 +2941,13 @@ SegmentGrowingImpl::LoadColumnGroup(
                 std::iota(chunk_ids.begin(), chunk_ids.end(), part.offset);
 
                 auto result = chunk_reader->get_chunks(chunk_ids, 1);
-                AssertInfo(result.ok(), "get chunks failed");
+                if (!result.ok()) {
+                    auto error =
+                        milvus_storage::ToSegcoreError(result.status());
+                    ThrowInfo(error.get_error_code(),
+                              "get chunks failed: {}",
+                              error.what());
+                }
                 return result.ValueOrDie();
             }));
     }

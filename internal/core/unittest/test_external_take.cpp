@@ -3071,6 +3071,41 @@ TEST(InjectExtfsAllowlist, AzurePublicCloudWithExplicitRegion) {
               "azure");
 }
 
+TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 42;
+    std::string spec = R"({
+        "format":"parquet",
+        "extfs":{
+            "access_key_id":"myacct",
+            "cloud_provider":"azure",
+            "region":"westus3",
+            "azure_client_id":"client",
+            "azure_tenant_id":"tenant",
+            "azure_credential_endpoint":"https://broker.example.com/v1/credentials/assume-role"
+        }
+    })";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "azure://core.windows.net/container/path", spec);
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+              "core.windows.net");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+              "container");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.access_key_id")),
+              "myacct");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.azure_client_id")),
+              "client");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.azure_tenant_id")),
+              "tenant");
+    EXPECT_EQ(
+        std::get<std::string>(props.at("extfs.42.azure_credential_endpoint")),
+        "https://broker.example.com/v1/credentials/assume-role");
+    EXPECT_EQ(props.count("extfs.42.access_key_value"), 0u);
+    EXPECT_EQ(props.count("extfs.42.request_timeout_ms"), 0u);
+}
+
 TEST(InjectExtfsAllowlist, AzureSovereignCloudEndpoints) {
     struct Case {
         std::string region;

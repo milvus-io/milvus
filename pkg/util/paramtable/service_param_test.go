@@ -126,10 +126,15 @@ func TestServiceParam(t *testing.T) {
 
 		assert.Equal(t, wpCfg.AppendQueueSize.GetAsInt(), 10000)
 		assert.Equal(t, wpCfg.AppendMaxRetries.GetAsInt(), 3)
+		assert.Equal(t, wpCfg.AppendMaxBatchEntries.GetAsInt(), 1000)
+		assert.Equal(t, wpCfg.AppendMaxBatchBytes.GetAsSize(), int64(2000000))
 		assert.Equal(t, wpCfg.SegmentRollingMaxSize.GetAsSize(), int64(256*1024*1024))
 		assert.Equal(t, wpCfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds(), float64(600))
 		assert.Equal(t, wpCfg.SegmentRollingMaxBlocks.GetAsInt64(), int64(1000))
 		assert.Equal(t, wpCfg.AuditorMaxInterval.GetAsDurationByParse().Seconds(), float64(10))
+		assert.True(t, wpCfg.DirectReadEnabled.GetAsBool())
+		assert.Equal(t, int64(16*1024*1024), wpCfg.DirectReadMaxBatchSize.GetAsSize())
+		assert.Equal(t, 4, wpCfg.DirectReadMaxFetchThreads.GetAsInt())
 
 		// Test default quorum configuration values
 		// Buffer pools (should be empty by default)
@@ -145,6 +150,7 @@ func TestServiceParam(t *testing.T) {
 
 		assert.Equal(t, wpCfg.SyncMaxInterval.GetAsDurationByParse().Milliseconds(), int64(200))
 		assert.Equal(t, wpCfg.SyncMaxIntervalForLocalStorage.GetAsDurationByParse().Milliseconds(), int64(10))
+		assert.Equal(t, wpCfg.SyncMaxIntervalForService.GetAsDurationByParse().Milliseconds(), int64(10))
 		assert.Equal(t, wpCfg.SyncMaxEntries.GetAsInt(), 10000)
 		assert.Equal(t, wpCfg.SyncMaxBytes.GetAsSize(), int64(256*1024*1024))
 		assert.Equal(t, wpCfg.FlushMaxRetries.GetAsInt(), 5)
