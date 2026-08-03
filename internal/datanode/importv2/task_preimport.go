@@ -185,6 +185,54 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 	return futures
 }
 
+type numRowsReader interface {
+	NumRows() (int64, bool)
+}
+
+func (t *PreImportTask) canUseMetadataFastPath() bool {
+	if len(t.partitionIDs) != 1 || len(t.vchannels) == 0 {
+		return false
+	}
+	if !isFixedSizeImportSchema(t.GetSchema()) {
+		return false
+	}
+	if _, err := typeutil.GetPartitionKeyFieldSchema(t.GetSchema()); err == nil {
+		return false
+	}
+	pkField, err := typeutil.GetPrimaryFieldSchema(t.GetSchema())
+	if err != nil {
+		return false
+	}
+	return pkField.GetAutoID() || len(t.vchannels) == 1
+}
+
+func isFixedSizeImportSchema(schema *schemapb.CollectionSchema) bool {
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		if field.GetNullable() {
+			return false
+		}
+		switch field.GetDataType() {
+		case schemapb.DataType_Bool,
+			schemapb.DataType_Int8,
+			schemapb.DataType_Int16,
+			schemapb.DataType_Int32,
+			schemapb.DataType_Int64,
+			schemapb.DataType_Float,
+			schemapb.DataType_Double,
+			schemapb.DataType_Timestamptz,
+			schemapb.DataType_BinaryVector,
+			schemapb.DataType_FloatVector,
+			schemapb.DataType_Float16Vector,
+			schemapb.DataType_BFloat16Vector,
+			schemapb.DataType_Int8Vector:
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (t *PreImportTask) readFileStat(reader importutilv2.Reader, fileIdx int) error {
 	fileSize, err := reader.Size()
 	if err != nil {
@@ -195,6 +243,56 @@ func (t *PreImportTask) readFileStat(reader importutilv2.Reader, fileIdx int) er
 		return merr.WrapErrParameterInvalidMsg(
 			"The import file size has reached the maximum limit allowed for importing, "+
 				"fileSize=%d, maxSize=%d", fileSize, int64(maxSize))
+	}
+
+	if nrReader, ok := reader.(numRowsReader); ok && t.canUseMetadataFastPath() {
+		numRows, ok := nrReader.NumRows()
+		if ok && numRows >= 0 {
+			sizePerRecord, err := typeutil.EstimateSizePerRecord(t.GetSchema())
+			if err != nil {
+				return err
+			}
+			totalMemorySize := int64(sizePerRecord) * numRows
+			partitionID := t.partitionIDs[0]
+			channelNum := int64(len(t.vchannels))
+			hashedStats := make(map[string]*datapb.PartitionImportStats, len(t.vchannels))
+			assignedRows := int64(0)
+			assignedSize := int64(0)
+			for i, channel := range t.vchannels {
+				rowsForChannel := numRows / channelNum
+				if int64(i) < numRows%channelNum {
+					rowsForChannel++
+				}
+				sizeForChannel := int64(0)
+				if i == len(t.vchannels)-1 {
+					sizeForChannel = totalMemorySize - assignedSize
+				} else if numRows > 0 {
+					sizeForChannel = totalMemorySize * rowsForChannel / numRows
+				}
+				assignedRows += rowsForChannel
+				assignedSize += sizeForChannel
+				hashedStats[channel] = &datapb.PartitionImportStats{
+					PartitionRows:     map[int64]int64{partitionID: rowsForChannel},
+					PartitionDataSize: map[int64]int64{partitionID: sizeForChannel},
+				}
+			}
+			if assignedRows != numRows {
+				return merr.WrapErrImportFailed("preimport metadata fast path row assignment mismatch")
+			}
+			stat := &datapb.ImportFileStats{
+				FileSize:        fileSize,
+				TotalRows:       numRows,
+				TotalMemorySize: totalMemorySize,
+				HashedStats:     hashedStats,
+			}
+			t.manager.Update(t.GetTaskID(), UpdateFileStat(fileIdx, stat))
+			mlog.Info(t.ctx, "preimport fast path used file metadata", WrapLogFields(t,
+				mlog.Int64("numRows", numRows),
+				mlog.Int64("totalMemorySize", totalMemorySize),
+				mlog.Int("vchannelNum", len(t.vchannels)),
+			)...)
+			return nil
+		}
 	}
 
 	totalRows := 0

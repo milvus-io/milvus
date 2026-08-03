@@ -51,10 +51,10 @@ func EstimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema
 	if sizePerRecord <= 0 || bufferSize <= 0 {
 		return 0, merr.WrapErrParameterInvalidMsg("invalid size, sizePerRecord=%d, bufferSize=%d", sizePerRecord, bufferSize)
 	}
-	if 1000*sizePerRecord <= bufferSize {
-		return 1000, nil
-	}
-	ret := int64(bufferSize) / int64(sizePerRecord)
+	// Import keeps more than the reader-side payload in memory: later stages add
+	// system fields and hash rows into new InsertData objects. Use half of the
+	// task buffer for one read batch to leave headroom for that working set.
+	ret := int64(bufferSize) / int64(sizePerRecord) / 2
 	if ret <= 0 {
 		return 1, nil
 	}

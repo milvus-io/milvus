@@ -18,6 +18,7 @@ package numpy
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"github.com/samber/lo"
@@ -26,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type reader struct {
@@ -37,8 +39,9 @@ type reader struct {
 	fileSize *atomic.Int64
 	paths    []string
 
-	count int64
-	frs   map[int64]*FieldReader // fieldID -> FieldReader
+	count   int64
+	numRows int64
+	frs     map[int64]*FieldReader // fieldID -> FieldReader
 }
 
 func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string, bufferSize int) (*reader, error) {
@@ -55,10 +58,24 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		return nil, err
 	}
 	timezone := common.GetSchemaTimezone(schema)
+	numRows := int64(-1)
 	for fieldID, r := range readers {
 		cr, err := NewFieldReader(r, fields[fieldID], timezone)
 		if err != nil {
+			for _, cmr := range readers {
+				cmr.Close()
+			}
 			return nil, err
+		}
+		fieldRows := cr.NumRows()
+		if numRows < 0 {
+			numRows = fieldRows
+		} else if fieldRows != numRows {
+			for _, cmr := range readers {
+				cmr.Close()
+			}
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("numpy row count mismatch, fieldID=%d, rowCount=%d, expected=%d", fieldID, fieldRows, numRows))
 		}
 		crs[fieldID] = cr
 	}
@@ -71,6 +88,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		fileSize: atomic.NewInt64(0),
 		paths:    paths,
 		count:    count,
+		numRows:  numRows,
 		frs:      crs,
 	}, nil
 }
@@ -107,6 +125,10 @@ func (r *reader) Size() (int64, error) {
 	}
 	r.fileSize.Store(size)
 	return size, nil
+}
+
+func (r *reader) NumRows() (int64, bool) {
+	return r.numRows, r.numRows >= 0
 }
 
 func (r *reader) Close() {

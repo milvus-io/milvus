@@ -219,6 +219,9 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	size2, err := reader.Size() // size is cached
 	suite.NoError(err)
 	suite.Equal(size, size2)
+	numRows, ok := reader.NumRows()
+	suite.True(ok)
+	suite.Equal(int64(suite.numRows), numRows)
 
 	checkFn := func(actualInsertData *storage.InsertData, offsetBegin, expectRows int) {
 		expectInsertData := insertData

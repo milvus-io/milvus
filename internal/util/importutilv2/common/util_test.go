@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestUtil_EstimateReadCountPerBatch(t *testing.T) {
@@ -52,7 +53,10 @@ func TestUtil_EstimateReadCountPerBatch(t *testing.T) {
 	}
 	count, err := EstimateReadCountPerBatch(16*1024*1024, schema)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(1000), count)
+	sizePerRecord, err := typeutil.EstimateMaxSizePerRecord(schema)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(16*1024*1024/sizePerRecord/2), count)
+	assert.Greater(t, count, int64(1000))
 
 	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 		FieldID:  102,

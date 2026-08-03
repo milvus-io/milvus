@@ -142,6 +142,18 @@ func (c *FieldReader) logicalRowCount(readCount int64) int64 {
 	}
 }
 
+func (c *FieldReader) NumRows() int64 {
+	shape := c.npyReader.Header.Descr.Shape
+	if len(shape) == 0 {
+		return 0
+	}
+	total := int64(1)
+	for _, dim := range shape {
+		total *= int64(dim)
+	}
+	return c.logicalRowCount(total)
+}
+
 func (c *FieldReader) Next(count int64) (any, any, error) {
 	readCount := c.getCount(count)
 	if readCount == 0 {

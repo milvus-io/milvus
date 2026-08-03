@@ -155,6 +155,10 @@ func (r *reader) Size() (int64, error) {
 	return size, nil
 }
 
+func (r *reader) NumRows() (int64, bool) {
+	return r.r.NumRows(), true
+}
+
 func (r *reader) Close() {
 	err := r.r.Close()
 	if err != nil {

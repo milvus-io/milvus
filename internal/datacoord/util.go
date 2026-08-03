@@ -400,6 +400,7 @@ func createStorageConfig() *indexpb.StorageConfig {
 			GcpCredentialJSON: Params.MinioCfg.GcpCredentialJSON.GetValue(),
 			SslTlsMinVersion:  Params.MinioCfg.SslTLSMinVersion.GetValue(),
 			UseCrc32CChecksum: Params.MinioCfg.UseCRC32C.GetAsBool(),
+			MaxConnections:    uint32(Params.MinioCfg.MaxConnections.GetAsInt()),
 		}
 	}
 
