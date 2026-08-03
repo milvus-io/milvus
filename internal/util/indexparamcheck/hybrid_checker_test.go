@@ -58,7 +58,7 @@ func Test_HybridIndexChecker_CheckValidDataTypeUUID(t *testing.T) {
 	// UUID is accepted as a main type (C++ IndexFactory accepts it for HYBRID index).
 	assert.NoError(t, c.CheckValidDataType(IndexHybrid, &schemapb.FieldSchema{DataType: schemapb.DataType_UUID}))
 
-	assert.Error(t, c.CheckValidDataType(IndexHybrid, &schemapb.FieldSchema{DataType: schemapb.DataType_VectorFloat}))
+	assert.Error(t, c.CheckValidDataType(IndexHybrid, &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}))
 	assert.Error(t, c.CheckValidDataType(IndexHybrid, &schemapb.FieldSchema{DataType: schemapb.DataType_BinaryVector}))
 	assert.Error(t, c.CheckValidDataType(IndexHybrid, &schemapb.FieldSchema{DataType: schemapb.DataType_None}))
 }
