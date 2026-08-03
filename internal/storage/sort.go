@@ -541,7 +541,9 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		idx := h.pop()
 
 		if hasLast && compareWithLast(idx) < 0 {
-			return 0, merr.WrapErrStorageMsg("input record is not sorted by the merge key")
+			return 0, merr.WrapErrDataIntegrityMsg(
+				"input record is not sorted by the merge key: reader %d row %d out of order, merge key fields %v",
+				idx.ri, idx.i, sortedByFieldIDs)
 		}
 		saveLast(idx)
 

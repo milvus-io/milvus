@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type oneShotRecordReader struct {
@@ -699,4 +700,6 @@ func TestMergeSortUnsortedInputReturnsError(t *testing.T) {
 		return true
 	}, []int64{common.RowIDField})
 	assert.ErrorContains(t, err, "not sorted by the merge key")
+	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.ErrorContains(t, err, "reader 0")
 }
