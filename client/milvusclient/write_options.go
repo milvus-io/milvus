@@ -239,6 +239,12 @@ func (opt *columnBasedDataOption) WithVarcharColumn(colName string, data []strin
 	return opt.WithColumns(column)
 }
 
+// WithTextColumn appends a native TEXT column to the write request.
+func (opt *columnBasedDataOption) WithTextColumn(colName string, data []string) *columnBasedDataOption {
+	column := column.NewColumnText(colName, data)
+	return opt.WithColumns(column)
+}
+
 func (opt *columnBasedDataOption) WithFloatVectorColumn(colName string, dim int, data [][]float32) *columnBasedDataOption {
 	column := column.NewColumnFloatVector(colName, dim, data)
 	return opt.WithColumns(column)

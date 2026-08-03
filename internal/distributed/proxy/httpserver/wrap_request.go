@@ -151,6 +151,38 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 				},
 			},
 		}
+	case schemapb.DataType_Text:
+		values := []*string{}
+		err := json.Unmarshal(raw, &values)
+		if err != nil {
+			return nil, newFieldDataError(f.FieldName, err)
+		}
+		data := make([]string, 0, len(values))
+		validData := make([]bool, len(values))
+		hasNull := false
+		for i, value := range values {
+			if value == nil {
+				hasNull = true
+				continue
+			}
+			data = append(data, *value)
+			validData[i] = true
+		}
+		// This wrapper does not have the collection schema, so only emit ValidData
+		// when the payload actually contains null. Proxy fills an all-true bitmap
+		// for nullable fields without nulls and requires no bitmap for non-nullable fields.
+		if hasNull {
+			ret.ValidData = validData
+		}
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: data,
+					},
+				},
+			},
+		}
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 		data := []int32{}
 		err := json.Unmarshal(raw, &data)
