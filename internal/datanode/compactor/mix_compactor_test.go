@@ -1430,3 +1430,41 @@ func BenchmarkMixCompactor(b *testing.B) {
 
 	s.TearDownTest()
 }
+
+func TestCanMergeSort(t *testing.T) {
+	params := compaction.Params{UseMergeSort: true, MaxSegmentMergeSort: 30}
+	emptySchema := &schemapb.CollectionSchema{}
+
+	t.Run("disabled by param", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema:         emptySchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1, IsSorted: true}},
+		}
+		assert.False(t, canMergeSort(plan, compaction.Params{UseMergeSort: false, MaxSegmentMergeSort: 30}))
+	})
+
+	t.Run("unsorted segment rejected", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema:         emptySchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1}},
+		}
+		assert.False(t, canMergeSort(plan, params))
+	})
+
+	t.Run("single sorted segment allowed", func(t *testing.T) {
+		plan := &datapb.CompactionPlan{
+			Schema:         emptySchema,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1, IsSorted: true}},
+		}
+		assert.True(t, canMergeSort(plan, params))
+	})
+
+	t.Run("too many segments rejected", func(t *testing.T) {
+		segs := make([]*datapb.CompactionSegmentBinlogs, params.MaxSegmentMergeSort+1)
+		for i := range segs {
+			segs[i] = &datapb.CompactionSegmentBinlogs{SegmentID: int64(i), IsSorted: true}
+		}
+		plan := &datapb.CompactionPlan{Schema: emptySchema, SegmentBinlogs: segs}
+		assert.False(t, canMergeSort(plan, params))
+	})
+}

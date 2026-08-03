@@ -469,24 +469,11 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, err
 	}
 
-	sortMergeAppicable := t.compactionParams.UseMergeSort
-	if sortMergeAppicable {
-		for _, segment := range t.plan.GetSegmentBinlogs() {
-			if !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
-				sortMergeAppicable = false
-				break
-			}
-		}
-
-		if len(t.plan.GetSegmentBinlogs()) > t.compactionParams.MaxSegmentMergeSort {
-			// sort merge is not applicable if there is only one segment or too many segments
-			sortMergeAppicable = false
-		}
-	}
+	useMergeSort := canMergeSort(t.plan, t.compactionParams)
 
 	var res []*datapb.CompactionSegment
 	var err error
-	if sortMergeAppicable {
+	if useMergeSort {
 		mlog.Info(context.TODO(), "compact by merge sort")
 		writerOpts := t.buildWriterOptions(ctx)
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
@@ -573,6 +560,24 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		Type:     t.plan.GetType(),
 	}
 	return planResult, nil
+}
+
+// canMergeSort reports whether this plan's segments can be merged by
+// storage.MergeSort, which requires every input to be physically ordered by the
+// plan's merge key.
+func canMergeSort(plan *datapb.CompactionPlan, params compaction.Params) bool {
+	if !params.UseMergeSort {
+		return false
+	}
+	for _, segment := range plan.GetSegmentBinlogs() {
+		if !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
+			return false
+		}
+	}
+	// Merge sort holds one record per reader, so the reader count is capped. A
+	// single segment is allowed: merge sort keeps the output flagged sorted,
+	// whereas mergeSplit emits it unsorted and needs a follow-up sort compaction.
+	return len(plan.GetSegmentBinlogs()) <= params.MaxSegmentMergeSort
 }
 
 func (t *mixCompactionTask) Complete() {
