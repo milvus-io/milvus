@@ -58,6 +58,11 @@ class InspectableSegmentExpr : public SegmentExpr {
         return data_scan_cursor_.get();
     }
 
+    bool
+    HasPreparedDataScan() const {
+        return data_prepared_scan_ != nullptr;
+    }
+
     int64_t
     CurrentDataChunkPosition() const {
         return current_data_chunk_pos_;
@@ -915,6 +920,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
                                                 TargetBitmapView(first_res),
                                                 TargetBitmapView(first_valid)),
             4);
+        EXPECT_TRUE(seg_expr.HasPreparedDataScan());
 
         sealed_->DropFieldData(i64_fid_);
         ASSERT_FALSE(sealed_->HasFieldData(i64_fid_));
@@ -926,6 +932,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
         // the segment for its now-missing field again.
         seg_expr.MoveCursor();
         EXPECT_EQ(seg_expr.DataScanCursor(), nullptr);
+        EXPECT_TRUE(seg_expr.HasPreparedDataScan());
         EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 8);
 
         TargetBitmap second_res(4, false);

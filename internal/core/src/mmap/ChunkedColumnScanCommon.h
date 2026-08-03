@@ -96,6 +96,24 @@ class ScanCursor {
     Next(int64_t max_rows, ScanBatch* out) = 0;
 };
 
+// PreparedScan owns the storage resources selected for one logical scan,
+// including cache pins. Cursors only own position and reader state, so callers
+// may discard a cursor after short-circuiting and seek to a new position
+// without planning or pinning the same cells again.
+class PreparedScan {
+ public:
+    virtual ~PreparedScan() = default;
+
+    virtual int64_t
+    Start() const = 0;
+
+    virtual int64_t
+    End() const = 0;
+
+    virtual std::unique_ptr<ScanCursor>
+    Seek(int64_t position) const = 0;
+};
+
 enum class ScanProjection {
     // Return ScanBatch::values.
     Data,
@@ -139,5 +157,6 @@ struct ScanOptions {
 };
 
 using ScanResult = std::unique_ptr<ScanCursor>;
+using PreparedScanResult = std::shared_ptr<PreparedScan>;
 
 }  // namespace milvus

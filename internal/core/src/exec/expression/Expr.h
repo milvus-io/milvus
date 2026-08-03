@@ -529,14 +529,11 @@ class SegmentExpr : public Expr {
                    static_cast<int>(data_access_mode_));
         AssertInfo(data_scan_column_ != nullptr,
                    "data scan column is not initialized");
-        auto options = ChunkedColumnInterface::ScanOptions::ForData(
-            position,
-            active_count_ - position,
-            data_scan_projection_,
-            data_scan_value_kind_);
-        data_scan_cursor_ = data_scan_column_->Scan(op_ctx_, options);
+        AssertInfo(data_prepared_scan_ != nullptr,
+                   "prepared data scan is not initialized");
+        data_scan_cursor_ = data_prepared_scan_->Seek(position);
         AssertInfo(data_scan_cursor_ != nullptr,
-                   "data scan backend cannot reopen field {} at row {}",
+                   "data scan backend cannot seek field {} to row {}",
                    field_id_.get(),
                    position);
         AssertInfo(data_scan_cursor_->Position() == position,
@@ -574,13 +571,19 @@ class SegmentExpr : public Expr {
             active_count_ - current_data_global_pos_,
             projection,
             value_kind);
-        data_scan_cursor_ = data_scan_column_->Scan(op_ctx_, options);
-        if (data_scan_cursor_ == nullptr) {
+        data_prepared_scan_ =
+            data_scan_column_->PrepareScan(op_ctx_, options);
+        if (data_prepared_scan_ == nullptr) {
             data_scan_skip_index_.reset();
             data_scan_column_.reset();
             data_access_mode_ = DataAccessMode::Chunk;
             return false;
         }
+        data_scan_cursor_ = data_prepared_scan_->Seek(current_data_global_pos_);
+        AssertInfo(data_scan_cursor_ != nullptr,
+                   "prepared data scan cannot seek field {} to row {}",
+                   field_id_.get(),
+                   current_data_global_pos_);
         data_access_mode_ = DataAccessMode::Scan;
         AssertInfo(data_scan_cursor_->Position() == current_data_global_pos_,
                    "data scan cursor opened at {}, expected {}",
@@ -3229,9 +3232,13 @@ class SegmentExpr : public Expr {
     DataAccessMode data_access_mode_{DataAccessMode::Uninitialized};
     // ScanCursor implementations retain a raw column pointer. Once Scan is
     // selected, keep the captured column generation for the expression's full
-    // lifetime so short-circuit reopen never observes a replacement column.
+    // lifetime so a short-circuit seek never observes a replacement column.
     std::shared_ptr<ChunkedColumnInterface> data_scan_column_{nullptr};
     std::shared_ptr<const SkipIndex> data_scan_skip_index_{nullptr};
+    // Owns the planned/pinned scan input independently from the active cursor.
+    // A conjunction short-circuit may discard the cursor and later seek while
+    // keeping this prepared scan alive, so seeking never pins cells again.
+    ChunkedColumnInterface::PreparedScanResult data_prepared_scan_{nullptr};
     std::unique_ptr<ChunkedColumnInterface::ScanCursor> data_scan_cursor_{
         nullptr};
     ChunkedColumnInterface::ScanProjection data_scan_projection_{

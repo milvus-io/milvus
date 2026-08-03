@@ -837,6 +837,40 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,
+           PreparedScanSeeksWithoutRepinningChunks) {
+    ColumnSpec spec{{3, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto prepared = fx.column->PrepareScan(
+        nullptr, ChunkedColumnInterface::ScanOptions::ForData(0, 5));
+    ASSERT_NE(prepared, nullptr);
+    ASSERT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ(fx.pin_requests->front(), (std::vector<int64_t>{0, 1}));
+
+    auto first = prepared->Seek(0);
+    ASSERT_NE(first, nullptr);
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(first->Next(2, &batch));
+    EXPECT_EQ(batch.row_id_start, 0);
+    EXPECT_EQ(batch.size, 2);
+    first.reset();
+
+    auto resumed = prepared->Seek(2);
+    ASSERT_NE(resumed, nullptr);
+    ASSERT_TRUE(resumed->Next(2, &batch));
+    EXPECT_EQ(batch.row_id_start, 2);
+    EXPECT_EQ(batch.size, 1);
+    ASSERT_TRUE(resumed->Next(2, &batch));
+    EXPECT_EQ(batch.row_id_start, 3);
+    EXPECT_EQ(batch.size, 2);
+    EXPECT_FALSE(resumed->Next(2, &batch));
+
+    EXPECT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ(*fx.fetched, (std::set<cachinglayer::cid_t>{0, 1}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
            NonNullableNoDataScanDoesNotFetchPayload) {
     ColumnSpec spec{{3, 2}, {}, /*nullable=*/false};
     spec.data_type = DataType::INT32;

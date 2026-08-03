@@ -40,9 +40,11 @@ class ChunkedColumnInterface {
     using ValueView = milvus::ValueView;
     using ScanBatch = milvus::ScanBatch;
     using ScanCursor = milvus::ScanCursor;
+    using PreparedScan = milvus::PreparedScan;
     using ScanProjection = milvus::ScanProjection;
     using ScanOptions = milvus::ScanOptions;
     using ScanResult = milvus::ScanResult;
+    using PreparedScanResult = milvus::PreparedScanResult;
 
     virtual ~ChunkedColumnInterface() = default;
 
@@ -211,6 +213,9 @@ class ChunkedColumnInterface {
 
     virtual ScanResult
     Scan(milvus::OpContext* op_ctx, const ScanOptions& options) const;
+
+    virtual PreparedScanResult
+    PrepareScan(milvus::OpContext* op_ctx, const ScanOptions& options) const;
 
     // Get number of rows before a specific chunk
     virtual int64_t

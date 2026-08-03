@@ -459,14 +459,79 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
     int64_t scan_end_;
 };
 
-inline std::unique_ptr<ChunkedColumnInterface::ScanCursor>
-MakeFixedWidthDataScanCursor(const ChunkedColumnInterface* column,
-                             milvus::OpContext* op_ctx,
-                             int64_t start_offset,
-                             int64_t length,
-                             DataType data_type,
-                             ChunkedColumnInterface::ScanProjection projection,
-                             ChunkedColumnInterface::ScanValueKind value_kind) {
+class PreparedDataScan final : public ChunkedColumnInterface::PreparedScan {
+ public:
+    PreparedDataScan(const ChunkedColumnInterface* column,
+                     std::shared_ptr<PinnedScanInput> input,
+                     int64_t start_offset,
+                     int64_t length,
+                     DataType data_type,
+                     ChunkedColumnInterface::ScanProjection projection,
+                     ChunkedColumnInterface::ScanValueKind value_kind)
+        : column_(column),
+          input_(std::move(input)),
+          start_(start_offset),
+          end_(start_offset + length),
+          data_type_(data_type),
+          projection_(projection),
+          value_kind_(value_kind) {
+    }
+
+    int64_t
+    Start() const override {
+        return start_;
+    }
+
+    int64_t
+    End() const override {
+        return end_;
+    }
+
+    std::unique_ptr<ChunkedColumnInterface::ScanCursor>
+    Seek(int64_t position) const override {
+        AssertInfo(position >= start_ && position <= end_,
+                   "data scan cursor position {} outside prepared range [{}, {})",
+                   position,
+                   start_,
+                   end_);
+        const auto length = end_ - position;
+        if (value_kind_ ==
+            ChunkedColumnInterface::ScanValueKind::FixedWidth) {
+            return std::make_unique<FixedWidthDataScanCursor>(column_,
+                                                              input_,
+                                                              position,
+                                                              length,
+                                                              data_type_,
+                                                              projection_,
+                                                              value_kind_);
+        }
+        return std::make_unique<ViewDataScanCursor>(column_,
+                                                    input_,
+                                                    position,
+                                                    length,
+                                                    data_type_,
+                                                    projection_,
+                                                    value_kind_);
+    }
+
+ private:
+    const ChunkedColumnInterface* column_;
+    std::shared_ptr<PinnedScanInput> input_;
+    int64_t start_;
+    int64_t end_;
+    DataType data_type_;
+    ChunkedColumnInterface::ScanProjection projection_;
+    ChunkedColumnInterface::ScanValueKind value_kind_;
+};
+
+inline ChunkedColumnInterface::PreparedScanResult
+PrepareDataScan(const ChunkedColumnInterface* column,
+                milvus::OpContext* op_ctx,
+                int64_t start_offset,
+                int64_t length,
+                DataType data_type,
+                ChunkedColumnInterface::ScanProjection projection,
+                ChunkedColumnInterface::ScanValueKind value_kind) {
     AssertInfo(
         start_offset >= 0 && length >= 0 &&
             start_offset + length <= static_cast<int64_t>(column->NumRows()),
@@ -474,27 +539,6 @@ MakeFixedWidthDataScanCursor(const ChunkedColumnInterface* column,
         start_offset,
         start_offset + length,
         column->NumRows());
-    if (!ChunkedColumnInterface::IsPrimitiveDataType(data_type)) {
-        return nullptr;
-    }
-    auto input = PinScanInput(column, op_ctx, start_offset, length, projection);
-    return std::make_unique<FixedWidthDataScanCursor>(column,
-                                                      std::move(input),
-                                                      start_offset,
-                                                      length,
-                                                      data_type,
-                                                      projection,
-                                                      value_kind);
-}
-
-inline std::unique_ptr<ChunkedColumnInterface::ScanCursor>
-MakeDataScanCursor(const ChunkedColumnInterface* column,
-                   milvus::OpContext* op_ctx,
-                   int64_t start_offset,
-                   int64_t length,
-                   DataType data_type,
-                   ChunkedColumnInterface::ScanProjection projection,
-                   ChunkedColumnInterface::ScanValueKind value_kind) {
     std::optional<ChunkedColumnInterface::ScanValueKind> column_kind;
     if (ChunkedColumnInterface::IsPrimitiveDataType(data_type)) {
         column_kind = ChunkedColumnInterface::ScanValueKind::FixedWidth;
@@ -529,13 +573,18 @@ MakeDataScanCursor(const ChunkedColumnInterface* column,
                static_cast<int>(*column_kind));
 
     if (resolved_kind == ChunkedColumnInterface::ScanValueKind::FixedWidth) {
-        return MakeFixedWidthDataScanCursor(column,
-                                            op_ctx,
-                                            start_offset,
-                                            length,
-                                            data_type,
-                                            projection,
-                                            resolved_kind);
+        if (!ChunkedColumnInterface::IsPrimitiveDataType(data_type)) {
+            return nullptr;
+        }
+        auto input =
+            PinScanInput(column, op_ctx, start_offset, length, projection);
+        return std::make_shared<PreparedDataScan>(column,
+                                                  std::move(input),
+                                                  start_offset,
+                                                  length,
+                                                  data_type,
+                                                  projection,
+                                                  resolved_kind);
     }
 
     if (resolved_kind == ChunkedColumnInterface::ScanValueKind::StringView ||
@@ -543,22 +592,15 @@ MakeDataScanCursor(const ChunkedColumnInterface* column,
         resolved_kind == ChunkedColumnInterface::ScanValueKind::ArrayView ||
         resolved_kind ==
             ChunkedColumnInterface::ScanValueKind::VectorArrayView) {
-        AssertInfo(start_offset >= 0 && length >= 0 &&
-                       start_offset + length <=
-                           static_cast<int64_t>(column->NumRows()),
-                   "data scan range [{}, {}) out of rows {}",
-                   start_offset,
-                   start_offset + length,
-                   column->NumRows());
         auto input =
             PinScanInput(column, op_ctx, start_offset, length, projection);
-        return std::make_unique<ViewDataScanCursor>(column,
-                                                    std::move(input),
-                                                    start_offset,
-                                                    length,
-                                                    data_type,
-                                                    projection,
-                                                    resolved_kind);
+        return std::make_shared<PreparedDataScan>(column,
+                                                  std::move(input),
+                                                  start_offset,
+                                                  length,
+                                                  data_type,
+                                                  projection,
+                                                  resolved_kind);
     }
 
     return nullptr;
@@ -569,18 +611,25 @@ MakeDataScanCursor(const ChunkedColumnInterface* column,
 ChunkedColumnInterface::ScanResult
 ChunkedColumnInterface::Scan(milvus::OpContext* op_ctx,
                              const ScanOptions& options) const {
+    auto prepared = PrepareScan(op_ctx, options);
+    return prepared == nullptr ? nullptr : prepared->Seek(options.start_offset);
+}
+
+ChunkedColumnInterface::PreparedScanResult
+ChunkedColumnInterface::PrepareScan(milvus::OpContext* op_ctx,
+                                    const ScanOptions& options) const {
     auto data_type = GetDefaultScanDataType();
     if (!data_type.has_value()) {
         return nullptr;
     }
 
-    return detail::MakeDataScanCursor(this,
-                                      op_ctx,
-                                      options.start_offset,
-                                      options.length,
-                                      *data_type,
-                                      options.projection,
-                                      options.value_kind);
+    return detail::PrepareDataScan(this,
+                                   op_ctx,
+                                   options.start_offset,
+                                   options.length,
+                                   *data_type,
+                                   options.projection,
+                                   options.value_kind);
 }
 
 }  // namespace milvus
