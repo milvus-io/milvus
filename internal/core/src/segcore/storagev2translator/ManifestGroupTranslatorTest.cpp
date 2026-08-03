@@ -32,8 +32,12 @@
 #include "gtest/gtest.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "pb/common.pb.h"
+#include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
+#include "storage/EntryStreamUtils.h"
+#include "storage/LoadOverheadController.h"
+#include "storage/ThreadPools.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/ManifestTestUtil.h"
@@ -257,6 +261,38 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
 
     auto use_mmap = GetParam();
     auto translator = MakeTranslator(/*cg_index=*/0, use_mmap);
+
+    auto executor_workers = milvus::ThreadPools::GetLoadExecutorWorkers();
+    auto memory_group =
+        milvus::storage::LoadMemoryOverheadController::GetInstance()
+            .GetOrCreate(executor_workers);
+    ASSERT_TRUE(translator->meta()->loading_overhead_config.has_value());
+    ASSERT_TRUE(
+        translator->meta()->loading_overhead_config->memory.has_value());
+    EXPECT_EQ(translator->meta()->loading_overhead_config->memory->group,
+              memory_group);
+    ASSERT_TRUE(
+        translator->meta()
+            ->loading_overhead_config->memory->max_runtime_unit.has_value());
+    EXPECT_GE(
+        *translator->meta()->loading_overhead_config->memory->max_runtime_unit,
+        FieldDataLoadBatchTargetBytes());
+    if (use_mmap) {
+        ASSERT_TRUE(
+            translator->meta()->loading_overhead_config->file.has_value());
+        EXPECT_EQ(translator->meta()->loading_overhead_config->file->group,
+                  milvus::storage::LoadFileOverheadController::GetInstance()
+                      .GetOrCreate(executor_workers));
+        ASSERT_TRUE(
+            translator->meta()
+                ->loading_overhead_config->file->max_runtime_unit.has_value());
+        EXPECT_GE(*translator->meta()
+                       ->loading_overhead_config->file->max_runtime_unit,
+                  FieldDataLoadBatchTargetBytes());
+    } else {
+        EXPECT_FALSE(
+            translator->meta()->loading_overhead_config->file.has_value());
+    }
 
     // Verify scalar group field metas
     auto field_metas = test_data_->GetFieldMetas(0);
