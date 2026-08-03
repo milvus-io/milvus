@@ -124,14 +124,17 @@ func (f *FieldData) makePbFloat16OrBfloat16Array(raw json.RawMessage, serializeF
 // The two halves of that rule are gated differently, for the same reason they
 // are one level up. A vector has no per-element validity anywhere in the
 // system, so a null coordinate has no representation to fall back to and the
-// refusal is unconditional. A scalar column can be nullable, and it is only
-// this wire format that cannot say so -- FieldData carries no valid_data --
-// so the refusal there is an improvement on storing a zero rather than the
-// only possible answer, and compatibilityMode restores the zero for a client
-// that has not been corrected yet.
+// refusal is unconditional. A scalar column can be nullable, and this wire
+// format cannot say so for the legacy scalar decoders. TEXT is the exception:
+// its decoder below derives ValidData from null elements. For the other scalar
+// types, compatibilityMode restores the previous zero-value behavior for a
+// client that has not been corrected yet.
 func rejectNullInFieldPayload(dataType schemapb.DataType, fieldName string, raw json.RawMessage) error {
 	if len(raw) == 0 {
 		// absent; the typed decoder reports its own error
+		return nil
+	}
+	if dataType == schemapb.DataType_Text {
 		return nil
 	}
 	if !typeutil.IsVectorType(dataType) && paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool() {
@@ -194,6 +197,38 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 		err := json.Unmarshal(raw, &data)
 		if err != nil {
 			return nil, newFieldDataError(f.FieldName, err)
+		}
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: data,
+					},
+				},
+			},
+		}
+	case schemapb.DataType_Text:
+		values := []*string{}
+		err := json.Unmarshal(raw, &values)
+		if err != nil {
+			return nil, newFieldDataError(f.FieldName, err)
+		}
+		data := make([]string, 0, len(values))
+		validData := make([]bool, len(values))
+		hasNull := false
+		for i, value := range values {
+			if value == nil {
+				hasNull = true
+				continue
+			}
+			data = append(data, *value)
+			validData[i] = true
+		}
+		// This wrapper does not have the collection schema, so only emit ValidData
+		// when the payload actually contains null. Proxy fills an all-true bitmap
+		// for nullable fields without nulls and requires no bitmap for non-nullable fields.
+		if hasNull {
+			ret.ValidData = validData
 		}
 		ret.Field = &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{

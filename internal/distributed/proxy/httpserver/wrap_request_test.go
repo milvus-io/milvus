@@ -49,6 +49,45 @@ func TestFieldData_AsSchemapb(t *testing.T) {
 		_, err := fieldData.AsSchemapb()
 		assert.Error(t, err)
 	})
+	t.Run("text_ok", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_Text,
+			Field: []byte(`["a", "b", "c"]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		result, err := fieldData.AsSchemapb()
+		assert.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_Text, result.GetType())
+		assert.Equal(t, []string{"a", "b", "c"}, result.GetScalars().GetStringData().GetData())
+		assert.Empty(t, result.GetValidData())
+	})
+	t.Run("text_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_Text,
+			Field: []byte("[1, 2, 3]"),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("text_nullable", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:      schemapb.DataType_Text,
+			FieldName: "nullable_text",
+			Field:     []byte(`["a", null, ""]`),
+		}
+		raw, err := json.Marshal(fieldData)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(raw, &fieldData))
+
+		result, err := fieldData.AsSchemapb()
+		require.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_Text, result.GetType())
+		assert.Equal(t, []string{"a", ""}, result.GetScalars().GetStringData().GetData())
+		assert.Equal(t, []bool{true, false, true}, result.GetValidData())
+	})
 	t.Run("bool_ok", func(t *testing.T) {
 		fieldData := FieldData{
 			Type:  schemapb.DataType_Bool,
