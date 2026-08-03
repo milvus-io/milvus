@@ -17,13 +17,16 @@
 package rootcoord
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func Test_expireCacheConfig_apply(t *testing.T) {
@@ -35,4 +38,58 @@ func Test_expireCacheConfig_apply(t *testing.T) {
 	opt(&c)
 	c.Apply(req)
 	assert.Equal(t, commonpb.MsgType_DropCollection, req.GetBase().GetMsgType())
+}
+
+func TestCoreExpireTransferMetaCacheInvalidatesCollectionAliasesAndID(t *testing.T) {
+	const (
+		dbName       = "db"
+		collectionID = int64(100)
+	)
+
+	ctx := context.Background()
+	core := newTestCore()
+	core.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
+
+	var invalidatedNames []string
+	proxy := newMockProxy()
+	proxy.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, req *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+		require.Equal(t, dbName, req.GetDbName())
+		require.Equal(t, collectionID, req.GetCollectionID())
+		invalidatedNames = append(invalidatedNames, req.GetCollectionName())
+		return merr.Success(), nil
+	}
+	core.proxyClientManager.GetProxyClients().Insert(TestProxyID, proxy)
+
+	err := core.ExpireTransferMetaCache(
+		ctx,
+		dbName,
+		"collection",
+		[]string{"alias_1", "alias_2", "alias_1", "collection"},
+		collectionID,
+		123,
+	)
+	require.NoError(t, err)
+	require.Equal(t, []string{"collection", "alias_1", "alias_2"}, invalidatedNames)
+}
+
+func TestCoreExpireTransferMetaCacheInvalidatesByIDWithoutNames(t *testing.T) {
+	const collectionID = int64(100)
+
+	ctx := context.Background()
+	core := newTestCore()
+	core.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
+
+	var requests []*proxypb.InvalidateCollMetaCacheRequest
+	proxy := newMockProxy()
+	proxy.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, req *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+		requests = append(requests, req)
+		return merr.Success(), nil
+	}
+	core.proxyClientManager.GetProxyClients().Insert(TestProxyID, proxy)
+
+	err := core.ExpireTransferMetaCache(ctx, "db", "", nil, collectionID, 123)
+	require.NoError(t, err)
+	require.Len(t, requests, 1)
+	require.Empty(t, requests[0].GetCollectionName())
+	require.Equal(t, collectionID, requests[0].GetCollectionID())
 }
