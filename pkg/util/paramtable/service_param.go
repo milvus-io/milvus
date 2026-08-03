@@ -572,6 +572,13 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		DefaultValue: "64",
 		Doc:          `maximum number of operations in a single etcd transaction`,
 		Export:       true,
+		Formatter: func(value string) string {
+			maxTxnNum := getAsInt(value)
+			if maxTxnNum < 1 {
+				return "64"
+			}
+			return strconv.Itoa(maxTxnNum)
+		},
 	}
 	p.MaxEtcdTxnNum.Init(base.mgr)
 

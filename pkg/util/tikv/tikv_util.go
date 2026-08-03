@@ -24,12 +24,17 @@ import (
 )
 
 func GetTiKVClient(cfg *paramtable.TiKVConfig) (*txnkv.Client, error) {
-	if cfg.TiKVUseSSL.GetAsBool() {
-		f := func(conf *config.Config) {
-			conf.Security = config.NewSecurity(cfg.TiKVTLSCACert.GetValue(), cfg.TiKVTLSCert.GetValue(), cfg.TiKVTLSKey.GetValue(), []string{})
-		}
-		config.UpdateGlobal(f)
-		return txnkv.NewClient([]string{cfg.Endpoints.GetValue()})
-	}
+	config.UpdateGlobal(func(conf *config.Config) {
+		applyTiKVClientConfig(cfg, conf)
+	})
+
 	return txnkv.NewClient([]string{cfg.Endpoints.GetValue()})
+}
+
+func applyTiKVClientConfig(cfg *paramtable.TiKVConfig, conf *config.Config) {
+	if cfg.TiKVUseSSL.GetAsBool() {
+		conf.Security = config.NewSecurity(cfg.TiKVTLSCACert.GetValue(), cfg.TiKVTLSCert.GetValue(), cfg.TiKVTLSKey.GetValue(), []string{})
+	}
+	conf.Enable1PC = true
+	conf.EnableAsyncCommit = false
 }

@@ -21,6 +21,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
 #include "common/OffsetMapping.h"
+#include "common/SealedOffsetMapping.h"
 #include "common/bson_view.h"
 namespace milvus {
 
