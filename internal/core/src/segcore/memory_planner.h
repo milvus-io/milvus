@@ -158,13 +158,13 @@ struct CellSpec {
         0;  // transient overhead budget; 0 = memory_size
 };
 
-// Result of loading a single cell: cid + either the loaded Arrow tables or the
-// finalized group chunk when a cell finalizer is provided.
+// Result of loading a single cell: cid + the loaded Arrow tables. Consumers
+// build the final GroupChunk on their own thread so the shared load pool
+// stays IO/decode-only (see #48060).
 struct CellLoadResult {
     int64_t cid;
     size_t budget_bytes{0};
     std::vector<std::shared_ptr<arrow::Table>> tables;
-    std::unique_ptr<milvus::GroupChunk> chunk;
 };
 
 using CellReaderChannel = milvus::Channel<std::shared_ptr<CellLoadResult>>;
@@ -185,15 +185,14 @@ using BatchReaderFactory =
         int64_t reader_memory_limit,
         uint64_t read_parallelism)>;
 
-using CellFinalizeFunc = std::function<std::unique_ptr<milvus::GroupChunk>(
-    const std::vector<std::shared_ptr<arrow::Table>>& tables, int64_t cid)>;
-
 /**
  * Load cells in batches using a pluggable reader factory. Cells are sorted by
  * (file_idx, local_rg_offset) and grouped into IO-merged batches.
- * Each completed cell is pushed to the channel immediately. When finalize_cell
- * is provided, the batch task converts Arrow tables into the final GroupChunk
- * before pushing and releases the transient Arrow budget immediately.
+ * Each completed cell is pushed to the channel immediately as raw Arrow
+ * tables; the consumer finalizes cells on its own thread. Batch tasks must
+ * stay IO/decode-only: running CPU-heavy finalization on the shared load
+ * pool can occupy the container CPU quota and starve the Go runtime's etcd
+ * keepalive (#48060).
  *
  * @param op_ctx operation context for cancellation
  * @param cell_specs cell specifications (sorted internally)
@@ -211,8 +210,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    std::shared_ptr<CellReaderChannel>& channel,
                    int64_t memory_limit,
                    milvus::proto::common::LoadPriority priority =
-                       milvus::proto::common::LoadPriority::HIGH,
-                   CellFinalizeFunc finalize_cell = nullptr);
+                       milvus::proto::common::LoadPriority::HIGH);
 
 void
 ReleaseCellLoadResultBudget(
