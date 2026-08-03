@@ -18,12 +18,16 @@ type testSnapshotSource struct {
 	afterCapture func()
 }
 
-func (s *testSnapshotSource) Build(context.Context) *BalancerSnapshot {
+func (s *testSnapshotSource) build(context.Context, triggerBatch) (*BalancerSnapshot, []qviews.ShardID) {
 	snapshot := s.snapshot
 	if s.afterCapture != nil {
 		s.afterCapture()
 	}
-	return snapshot
+	shards := make([]qviews.ShardID, 0, len(snapshot.ShardStatsMap()))
+	for shardID := range snapshot.ShardStatsMap() {
+		shards = append(shards, shardID)
+	}
+	return snapshot, shards
 }
 
 func TestBalancer_ReconcileDirtyShardAppliesPrepare(t *testing.T) {

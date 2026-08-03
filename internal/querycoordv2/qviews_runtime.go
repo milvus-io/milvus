@@ -255,19 +255,47 @@ type mixCoordDataViewProvider struct {
 }
 
 func (p *mixCoordDataViewProvider) DataViewSnapshot(ctx context.Context) *balancer.DataViewSnapshot {
-	source, ok := p.mixCoord.(dataViewProviderSource)
-	if !ok {
-		return balancer.NewDataViewSnapshot(0, nil, nil)
-	}
-	provider := source.DataViewProvider()
+	provider := p.provider()
 	if provider == nil {
 		return balancer.NewDataViewSnapshot(0, nil, nil)
 	}
 	return provider.DataViewSnapshot(ctx)
 }
 
+func (p *mixCoordDataViewProvider) DataViewSnapshotForCollections(ctx context.Context, collectionIDs map[int64]struct{}) *balancer.DataViewSnapshot {
+	provider := p.provider()
+	if provider == nil {
+		return balancer.NewDataViewSnapshot(0, nil, nil)
+	}
+	return provider.DataViewSnapshotForCollections(ctx, collectionIDs)
+}
+
+func (p *mixCoordDataViewProvider) SegmentSnapshot(ctx context.Context, segmentIDs []int64) balancer.SegmentSnapshot {
+	provider := p.provider()
+	if provider == nil {
+		return nil
+	}
+	return provider.SegmentSnapshot(ctx, segmentIDs)
+}
+
+func (p *mixCoordDataViewProvider) provider() balancer.DataViewProvider {
+	source, ok := p.mixCoord.(dataViewProviderSource)
+	if !ok {
+		return nil
+	}
+	return source.DataViewProvider()
+}
+
 type emptyDataViewProvider struct{}
 
 func (emptyDataViewProvider) DataViewSnapshot(context.Context) *balancer.DataViewSnapshot {
 	return balancer.NewDataViewSnapshot(0, nil, nil)
+}
+
+func (emptyDataViewProvider) DataViewSnapshotForCollections(context.Context, map[int64]struct{}) *balancer.DataViewSnapshot {
+	return balancer.NewDataViewSnapshot(0, nil, nil)
+}
+
+func (emptyDataViewProvider) SegmentSnapshot(context.Context, []int64) balancer.SegmentSnapshot {
+	return nil
 }

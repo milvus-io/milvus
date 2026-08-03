@@ -66,6 +66,8 @@ func (s *NodeSnapshot) Range(fn func(int64, *NodeInfo) bool) {
 // dataview.Manager.Snapshot(ctx, collectionIDs).
 type DataViewProvider interface {
 	DataViewSnapshot(ctx context.Context) *DataViewSnapshot
+	DataViewSnapshotForCollections(ctx context.Context, collectionIDs map[int64]struct{}) *DataViewSnapshot
+	SegmentSnapshot(ctx context.Context, segmentIDs []int64) SegmentSnapshot
 }
 
 type (

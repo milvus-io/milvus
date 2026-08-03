@@ -43,6 +43,17 @@ func assignmentsFromBuilder(builder *qviews.QueryViewAtCoordBuilder) map[int64]i
 	return flattenAssignments(builder.Build())
 }
 
+func setTestShardRows(snap *BalancerSnapshot, shardID qviews.ShardID, rowsByNode map[int64]int64) {
+	if snap.ShardRowStatsSnapshot == nil {
+		snap.ShardRowStatsSnapshot = make(map[qviews.ShardID]ShardRowStats)
+	}
+	rowStats := make(ShardRowStats, len(rowsByNode))
+	for nodeID, rows := range rowsByNode {
+		rowStats[nodeID] = NodeRowStats{UpRowCount: rows}
+	}
+	snap.ShardRowStatsSnapshot[shardID] = rowStats
+}
+
 func upStats(version qviews.DataVersion, partitions []int64, fields []int64, placements ...testSegmentPlacement) *coordview.ShardStats {
 	return testShardStats(
 		&qviews.QueryViewVersion{DataVersion: version, QueryVersion: 1},
@@ -213,6 +224,7 @@ func TestDefaultBalancePolicy_ReusedShardRowsAreNotDoubleCounted(t *testing.T) {
 		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 100_000},
 		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 150_000},
 	}
+	setTestShardRows(snap, shardA, map[int64]int64{1: 100_000})
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardB, shardA})
 
@@ -231,7 +243,6 @@ func TestDefaultBalancePolicy_ReleasedShardRowsAreRemovedBeforeAllocation(t *tes
 	snap := baseSnap(cfg, loadShard)
 	snap.Config = policyTestConfig()
 	setTestDataSnapshot(snap, collectionID, qviews.DataVersion{StreamingVersion: 1}, newMapSegmentSnapshot(map[int64]*SegmentInfo{
-		101: {SegmentID: 101, PartitionID: 1, RowNum: 100_000},
 		201: {SegmentID: 201, PartitionID: 1, RowNum: 50_000},
 	}), shardDataView("v0", 1, 201))
 	snap.ShardStatsMap()[releaseShard] = upStats(
@@ -244,6 +255,7 @@ func TestDefaultBalancePolicy_ReleasedShardRowsAreRemovedBeforeAllocation(t *tes
 		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 200_000},
 		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 150_000},
 	}
+	setTestShardRows(snap, releaseShard, map[int64]int64{1: 100_000})
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{loadShard, releaseShard})
 
@@ -268,6 +280,7 @@ func TestDefaultBalancePolicy_OptionalOptimizationRequiresMovement(t *testing.T)
 		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 100},
 		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 100},
 	}
+	setTestShardRows(snap, shardID, map[int64]int64{1: 100})
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
 
@@ -289,6 +302,7 @@ func TestDefaultBalancePolicy_OptionalOptimizationAcceptedWhenWorthCost(t *testi
 		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 900},
 		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1"},
 	}
+	setTestShardRows(snap, shardID, map[int64]int64{1: 10})
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
 
@@ -311,6 +325,7 @@ func TestDefaultBalancePolicy_OptionalChangedAssignmentEmitsWithoutPlanLevelThre
 		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 900},
 		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1"},
 	}
+	setTestShardRows(snap, shardID, map[int64]int64{1: 10})
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
 
@@ -331,7 +346,8 @@ func TestDefaultBalancePolicy_LowBenefitScaleOutDoesNotOpenBeyondFanoutBudget(t 
 		103: {SegmentID: 103, PartitionID: 1, RowNum: 20_000},
 		104: {SegmentID: 104, PartitionID: 1, RowNum: 10_000},
 	}), shardDataView("v0", 1, 101, 102, 103, 104))
-	snap.ShardStatsMap()[shardID] = upStats(version, []int64{1}, nil,
+	snap.ShardStatsMap()[shardID] = upStats(
+		version, []int64{1}, nil,
 		placement(101, 1, 1, coordview.SegmentStateUp),
 		placement(102, 1, 2, coordview.SegmentStateUp),
 		placement(103, 1, 2, coordview.SegmentStateUp),
@@ -342,6 +358,7 @@ func TestDefaultBalancePolicy_LowBenefitScaleOutDoesNotOpenBeyondFanoutBudget(t 
 		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 70_000},
 		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1"},
 	}
+	setTestShardRows(snap, shardID, map[int64]int64{1: 80_000, 2: 70_000})
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
 
@@ -375,6 +392,7 @@ func TestDefaultBalancePolicy_HighBenefitScaleOutUsesNewNodeWithinFanoutBudget(t
 		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 500_000},
 		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1"},
 	}
+	setTestShardRows(snap, shardID, map[int64]int64{1: 500_000, 2: 500_000})
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
 
@@ -403,6 +421,7 @@ func TestDefaultBalancePolicy_SaturatedStickinessIsMaximumOptionalMoveCost(t *te
 		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 101_000_000},
 		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1"},
 	}
+	setTestShardRows(snap, shardID, map[int64]int64{1: 1_000_000})
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
 
@@ -433,6 +452,7 @@ func TestDefaultBalancePolicy_DefaultFanoutBudgetRejectsPureLoadOnlyOverflow(t *
 		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1"},
 		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1"},
 	}
+	setTestShardRows(snap, shardID, map[int64]int64{1: 100_000})
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
 
@@ -466,6 +486,7 @@ func TestDefaultBalancePolicy_SmallSpreadShardConsolidates(t *testing.T) {
 		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: rowsByNode[2]},
 		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1", UpRowCount: rowsByNode[3]},
 	}
+	setTestShardRows(snap, shardID, rowsByNode)
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
 
@@ -497,6 +518,7 @@ func TestDefaultBalancePolicy_AppliedOptionalCandidateIsStable(t *testing.T) {
 		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 30_000},
 		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1", UpRowCount: 30_000},
 	}
+	setTestShardRows(snap, shardID, map[int64]int64{1: 40_000, 2: 30_000, 3: 30_000})
 
 	first := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
 	require.Contains(t, first.Prepares, shardID)
@@ -511,9 +533,12 @@ func TestDefaultBalancePolicy_AppliedOptionalCandidateIsStable(t *testing.T) {
 	for _, node := range snap.Nodes {
 		node.UpRowCount = 0
 	}
+	appliedRows := make(map[int64]int64)
 	for _, nodeID := range assignments {
 		snap.Nodes[nodeID].UpRowCount += 10_000
+		appliedRows[nodeID] += 10_000
 	}
+	setTestShardRows(snap, shardID, appliedRows)
 
 	second := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
 
@@ -542,6 +567,7 @@ func TestDefaultBalancePolicy_NodeLossPreservesSurvivingReusableSegments(t *test
 		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 100_000},
 		3: {NodeID: 3, Alive: true, ResourceGroup: "rg1"},
 	}
+	setTestShardRows(snap, shardID, map[int64]int64{1: 100_000, 2: 100_000})
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
 
@@ -570,6 +596,7 @@ func TestDefaultBalancePolicy_MandatorySameAssignmentStillEmits(t *testing.T) {
 		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1", UpRowCount: 100_000},
 		2: {NodeID: 2, Alive: true, ResourceGroup: "rg1", UpRowCount: 200_000},
 	}
+	setTestShardRows(snap, shardID, map[int64]int64{1: 100_000})
 
 	plan := NewDefaultBalancePolicy().Plan(snap, []qviews.ShardID{shardID})
 
