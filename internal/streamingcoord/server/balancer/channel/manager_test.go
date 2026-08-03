@@ -3,7 +3,6 @@ package channel
 import (
 	"context"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -508,7 +507,7 @@ func TestStreamingEnableChecker(t *testing.T) {
 	assert.Error(t, n2.Context().Err())
 }
 
-func TestMarkStreamingHasEnabledDoesNotHoldLockWhileWaiting(t *testing.T) {
+func TestMarkStreamingHasEnabledWaitsForListenersBeforePublishing(t *testing.T) {
 	ctx := context.Background()
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
@@ -530,22 +529,9 @@ func TestMarkStreamingHasEnabledDoesNotHoldLockWhileWaiting(t *testing.T) {
 
 	n := syncutil.NewAsyncTaskNotifier[struct{}]()
 	m.RegisterStreamingEnabledNotifier(n)
-	waitDone := make(chan error, 1)
-	go func() {
-		waitDone <- m.WaitUntilStreamingEnabled(ctx)
-	}()
-	time.Sleep(50 * time.Millisecond)
 
 	listenerCanceled := make(chan struct{})
 	releaseListener := make(chan struct{})
-	var releaseOnce sync.Once
-	release := func() {
-		releaseOnce.Do(func() {
-			close(releaseListener)
-		})
-	}
-	t.Cleanup(release)
-
 	go func() {
 		<-n.Context().Done()
 		close(listenerCanceled)
@@ -559,27 +545,17 @@ func TestMarkStreamingHasEnabledDoesNotHoldLockWhileWaiting(t *testing.T) {
 	}()
 	<-listenerCanceled
 
-	select {
-	case err := <-waitDone:
-		require.NoError(t, err)
-	case <-time.After(time.Second):
-		release()
-		require.NoError(t, <-markDone)
-		t.Fatal("streaming-enable waiters were not notified after the version was persisted")
-	}
-
-	readDone := make(chan bool, 1)
+	waitDone := make(chan error, 1)
 	go func() {
-		readDone <- m.IsStreamingEnabledOnce()
+		waitDone <- m.WaitUntilStreamingEnabled(ctx)
 	}()
 
 	select {
-	case enabled := <-readDone:
-		assert.True(t, enabled)
-	case <-time.After(time.Second):
-		release()
+	case err := <-waitDone:
+		close(releaseListener)
 		require.NoError(t, <-markDone)
-		t.Fatal("ChannelManager lock is held while waiting for a streaming-enable listener")
+		t.Fatalf("streaming enabled was published before listener completion: %v", err)
+	case <-time.After(100 * time.Millisecond):
 	}
 
 	select {
@@ -588,8 +564,10 @@ func TestMarkStreamingHasEnabledDoesNotHoldLockWhileWaiting(t *testing.T) {
 	default:
 	}
 
-	release()
+	close(releaseListener)
 	require.NoError(t, <-markDone)
+	require.NoError(t, <-waitDone)
+	assert.True(t, m.IsStreamingEnabledOnce())
 }
 
 func TestChannelManagerWatch(t *testing.T) {

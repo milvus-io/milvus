@@ -330,9 +330,9 @@ func (cm *ChannelManager) TriggerWatchUpdate() {
 // MarkStreamingHasEnabled marks the streaming service has been enabled.
 func (cm *ChannelManager) MarkStreamingHasEnabled(ctx context.Context) error {
 	cm.cond.L.Lock()
+	defer cm.cond.L.Unlock()
 
 	if cm.streamingVersion != nil {
-		cm.cond.L.Unlock()
 		return nil
 	}
 
@@ -342,23 +342,18 @@ func (cm *ChannelManager) MarkStreamingHasEnabled(ctx context.Context) error {
 
 	if err := resource.Resource().StreamingCatalog().SaveVersion(ctx, cm.streamingVersion); err != nil {
 		cm.Logger().Error("failed to save streaming version", zap.Error(err))
-		cm.cond.L.Unlock()
 		return err
 	}
 
-	notifiers := cm.streamingEnableNotifiers
-	cm.streamingEnableNotifiers = nil
-	cm.cond.UnsafeBroadcast()
-	cm.cond.L.Unlock()
-
 	// notify all notifiers that the streaming service has been enabled.
-	for _, notifier := range notifiers {
+	for _, notifier := range cm.streamingEnableNotifiers {
 		notifier.Cancel()
 	}
 	// and block until the listener of notifiers are finished.
-	for _, notifier := range notifiers {
+	for _, notifier := range cm.streamingEnableNotifiers {
 		notifier.BlockUntilFinish()
 	}
+	cm.streamingEnableNotifiers = nil
 	return nil
 }
 
