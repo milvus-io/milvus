@@ -15,6 +15,9 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <string>
+
+#include "common/type_c.h"
 #include "log/Log.h"
 #include "storage/plugin/PluginInterface.h"
 #include "common/EasyAssert.h"
@@ -106,6 +109,32 @@ class PluginLoader {
         }
         return std::dynamic_pointer_cast<
             milvus::storage::plugin::ICipherPlugin>(p);
+    }
+
+    std::shared_ptr<CPluginContext>
+    registerCipherPluginContext(int64_t ez_id,
+                                int64_t collection_id,
+                                const std::string& key) {
+        return registerCipherPluginContext(
+            ez_id, collection_id, key, getCipherPlugin());
+    }
+
+    std::shared_ptr<CPluginContext>
+    registerCipherPluginContext(
+        int64_t ez_id,
+        int64_t collection_id,
+        const std::string& key,
+        const std::shared_ptr<plugin::ICipherPlugin>& cipher_plugin) {
+        AssertInfo(cipher_plugin != nullptr, "failed to get cipher plugin");
+        cipher_plugin->Update(ez_id, collection_id, key);
+
+        // The plugin owns the key copy. Storage operations retain only the IDs
+        // needed for later encryptor/decryptor lookups.
+        auto context = std::make_shared<CPluginContext>();
+        context->ez_id = ez_id;
+        context->collection_id = collection_id;
+        context->key = nullptr;
+        return context;
     }
 
     std::shared_ptr<milvus::storage::plugin::IPlugin>
