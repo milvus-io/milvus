@@ -108,6 +108,15 @@ func (s *dataViewSegmentStore) GetSegment(ctx context.Context, segmentID int64) 
 	return newDataViewSegment(s.meta.GetSegment(ctx, segmentID))
 }
 
+func (s *dataViewSegmentStore) GetSegments(_ context.Context, segmentIDs []int64) []*dataview.Segment {
+	segments := s.meta.GetSegmentInfos(segmentIDs)
+	result := make([]*dataview.Segment, 0, len(segments))
+	for _, segment := range segments {
+		result = append(result, newDataViewSegment(segment))
+	}
+	return result
+}
+
 func (s *dataViewSegmentStore) SelectSegments(ctx context.Context, collectionID int64) []*dataview.Segment {
 	segments := s.meta.SelectSegments(ctx, WithCollection(collectionID))
 	result := make([]*dataview.Segment, 0, len(segments))

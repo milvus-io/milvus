@@ -1,11 +1,13 @@
 package balancer
 
 import (
-	"sort"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
 // TriggerScope describes the external event scope that dirtied the Balancer.
@@ -38,8 +40,146 @@ type triggerBatch struct {
 	dirtyColls  map[int64]struct{}
 }
 
+// reconcileScope is the scoped DataView-read and Policy-planning boundary
+// resolved from one trigger batch.
+type reconcileScope struct {
+	// collectionIDs selects collections whose DataViews are fetched.
+	collectionIDs map[int64]struct{}
+
+	// collectionWideIDs selects collections whose DataView shards are all
+	// expanded into Policy targets.
+	collectionWideIDs map[int64]struct{}
+
+	// targetShards is the exact ShardStats scope and final Policy input.
+	targetShards map[qviews.ShardID]struct{}
+}
+
 func (b triggerBatch) empty() bool {
 	return !b.full && len(b.dirtyNodes) == 0 && len(b.dirtyShards) == 0 && len(b.dirtyColls) == 0
+}
+
+// resolveScope converts queued collection and shard events into scoped reads
+// and Policy targets. Collection events include resident residual shards;
+// malformed shard channels conservatively fall back to a full reconcile.
+func (b triggerBatch) resolveScope(
+	loadSnapshot *loadmgr.LoadConfigSnapshot,
+	registry *coordview.ShardViewRegistry,
+) reconcileScope {
+	if b.full {
+		return fullReconcileScope(loadSnapshot, registry)
+	}
+
+	scope := newReconcileScope()
+	for collectionID := range b.dirtyColls {
+		scope.collectionIDs[collectionID] = struct{}{}
+		scope.collectionWideIDs[collectionID] = struct{}{}
+		if registry != nil {
+			scope.addShards(registry.CollectionShards(collectionID))
+		}
+	}
+
+	for nodeID := range b.dirtyNodes {
+		if registry == nil {
+			return fullReconcileScope(loadSnapshot, registry)
+		}
+		for _, shardID := range registry.NodeShards(nodeID) {
+			collectionID, ok := parseShardCollection(shardID)
+			if !ok {
+				return fullReconcileScope(loadSnapshot, registry)
+			}
+			scope.collectionIDs[collectionID] = struct{}{}
+			scope.targetShards[shardID] = struct{}{}
+		}
+	}
+
+	for shardID := range b.dirtyShards {
+		collectionID, ok := parseShardCollection(shardID)
+		if !ok {
+			return fullReconcileScope(loadSnapshot, registry)
+		}
+		scope.collectionIDs[collectionID] = struct{}{}
+		scope.targetShards[shardID] = struct{}{}
+	}
+
+	return scope
+}
+
+// AddDataViewShards expands collection-triggered scope into replica-by-vchannel
+// targets from the latest DataView. Direct dirty-shard scope is not expanded.
+func (s *reconcileScope) AddDataViewShards(
+	loadSnapshot *loadmgr.LoadConfigSnapshot,
+	dataSnapshot *DataViewSnapshot,
+) {
+	for collectionID := range s.collectionWideIDs {
+		cfg := loadSnapshot.ConfigsMap()[collectionID]
+		if cfg == nil {
+			continue
+		}
+		dataSnapshot.RangeShards(collectionID, func(shard *viewpb.DataViewOfShard) bool {
+			if shard == nil {
+				return true
+			}
+			for _, replica := range cfg.Replicas {
+				if replica == nil {
+					continue
+				}
+				s.targetShards[qviews.ShardID{
+					ReplicaID: replica.ReplicaID,
+					VChannel:  shard.GetVchannel(),
+				}] = struct{}{}
+			}
+			return true
+		})
+	}
+}
+
+func newReconcileScope() reconcileScope {
+	return reconcileScope{
+		collectionIDs:     make(map[int64]struct{}),
+		collectionWideIDs: make(map[int64]struct{}),
+		targetShards:      make(map[qviews.ShardID]struct{}),
+	}
+}
+
+// fullReconcileScope combines configured collections with all resident shards,
+// so residual views remain visible after their load config has been removed.
+func fullReconcileScope(
+	loadSnapshot *loadmgr.LoadConfigSnapshot,
+	registry *coordview.ShardViewRegistry,
+) reconcileScope {
+	scope := newReconcileScope()
+	if loadSnapshot != nil {
+		for collectionID := range loadSnapshot.ConfigsMap() {
+			scope.collectionIDs[collectionID] = struct{}{}
+			scope.collectionWideIDs[collectionID] = struct{}{}
+		}
+	}
+	if registry != nil {
+		shardIDs := registry.ShardIDs()
+		scope.addShards(shardIDs)
+		for _, shardID := range shardIDs {
+			if collectionID, ok := parseShardCollection(shardID); ok {
+				scope.collectionIDs[collectionID] = struct{}{}
+			}
+		}
+	}
+	return scope
+}
+
+func (s *reconcileScope) addShards(shardIDs []qviews.ShardID) {
+	for _, shardID := range shardIDs {
+		s.targetShards[shardID] = struct{}{}
+	}
+}
+
+// parseShardCollection extracts the collection ID encoded in a shard vchannel.
+// resolveScope uses a false result to fall back to a full reconcile.
+func parseShardCollection(shardID qviews.ShardID) (int64, bool) {
+	channel, err := metautil.ParseChannel(shardID.VChannel, metautil.NewDynChannelMapper())
+	if err != nil {
+		return 0, false
+	}
+	return channel.CollectionID(), true
 }
 
 func newTriggerQueue() *triggerQueue {
@@ -89,41 +229,6 @@ func (q *triggerQueue) signalCh() <-chan struct{} {
 	return q.signal
 }
 
-func (b triggerBatch) expand(snap *BalancerSnapshot) []qviews.ShardID {
-	if snap == nil {
-		return nil
-	}
-
-	out := make(map[qviews.ShardID]struct{})
-	if b.full {
-		for _, shardID := range allSnapshotShards(snap) {
-			out[shardID] = struct{}{}
-		}
-	}
-	for shardID := range b.dirtyShards {
-		out[shardID] = struct{}{}
-	}
-	for nodeID := range b.dirtyNodes {
-		for _, shardID := range snapshotShardsByNode(snap, nodeID) {
-			out[shardID] = struct{}{}
-		}
-	}
-	for collectionID := range b.dirtyColls {
-		for _, shardID := range snapshotShardsByCollection(snap, collectionID) {
-			out[shardID] = struct{}{}
-		}
-	}
-
-	shards := make([]qviews.ShardID, 0, len(out))
-	for shardID := range out {
-		shards = append(shards, shardID)
-	}
-	sort.Slice(shards, func(i, j int) bool {
-		return shardLess(shards[i], shards[j])
-	})
-	return shards
-}
-
 func (q *triggerQueue) takePending() triggerBatch {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -140,68 +245,4 @@ func (q *triggerQueue) takePending() triggerBatch {
 	q.dirtyShards = make(map[qviews.ShardID]struct{})
 	q.dirtyColls = make(map[int64]struct{})
 	return pending
-}
-
-func allSnapshotShards(snap *BalancerSnapshot) []qviews.ShardID {
-	seen := make(map[qviews.ShardID]struct{})
-	for shardID := range snap.ShardStatsMap() {
-		seen[shardID] = struct{}{}
-	}
-	for collectionID := range snap.ConfigsMap() {
-		snap.RangeDataShards(collectionID, func(shardID qviews.ShardID) bool {
-			seen[shardID] = struct{}{}
-			return true
-		})
-	}
-	out := make([]qviews.ShardID, 0, len(seen))
-	for shardID := range seen {
-		out = append(out, shardID)
-	}
-	return out
-}
-
-func snapshotShardsByNode(snap *BalancerSnapshot, nodeID int64) []qviews.ShardID {
-	seen := make(map[qviews.ShardID]struct{})
-	for shardID, stats := range snap.ShardStatsMap() {
-		if stats == nil {
-			continue
-		}
-		for _, segment := range stats.Segments {
-			if _, ok := segment.Nodes[nodeID]; ok {
-				seen[shardID] = struct{}{}
-				break
-			}
-		}
-	}
-	out := make([]qviews.ShardID, 0, len(seen))
-	for shardID := range seen {
-		out = append(out, shardID)
-	}
-	return out
-}
-
-func snapshotShardsByCollection(snap *BalancerSnapshot, collectionID int64) []qviews.ShardID {
-	seen := make(map[qviews.ShardID]struct{})
-	for shardID := range snap.ShardStatsMap() {
-		cfg := snap.ConfigForShard(shardID)
-		if cfg != nil && cfg.CollectionID == collectionID {
-			seen[shardID] = struct{}{}
-			continue
-		}
-		// ReleaseCollection removes the load config before triggering the
-		// collection reconcile. Recover the collection from the vchannel so
-		// residual shard views are released without waiting for a full scan.
-		if cfg == nil && funcutil.GetCollectionIDFromVChannel(shardID.VChannel) == collectionID {
-			seen[shardID] = struct{}{}
-		}
-	}
-	snap.RangeDataShards(collectionID, func(shardID qviews.ShardID) bool {
-		seen[shardID] = struct{}{}
-		return true
-	})
-	out := make([]qviews.ShardID, 0, len(seen))
-	for shardID := range seen {
-		out = append(out, shardID)
-	}
-	return out
 }

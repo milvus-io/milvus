@@ -34,6 +34,7 @@ import (
 
 type SegmentStore interface {
 	GetSegment(ctx context.Context, segID int64) *Segment
+	GetSegments(ctx context.Context, segIDs []int64) []*Segment
 	SelectSegments(ctx context.Context, collectionID int64) []*Segment
 }
 
@@ -67,6 +68,8 @@ type Manager interface {
 	LatestVisibleDataView(ctx context.Context, collectionID int64) (*viewpb.DataViewOfCollection, error)
 	Snapshot(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewOfCollection, error)
 	DataViewSnapshot(ctx context.Context) *balancerapi.DataViewSnapshot
+	DataViewSnapshotForCollections(ctx context.Context, collectionIDs map[int64]struct{}) *balancerapi.DataViewSnapshot
+	SegmentSnapshot(ctx context.Context, segmentIDs []int64) balancerapi.SegmentSnapshot
 	ShardTimeTicks(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewShardTimeTick, error)
 	IsSegmentReferenced(ctx context.Context, collectionID int64, segmentID int64) (bool, error)
 	GarbageCollect(ctx context.Context, collectionID int64, protected []*viewpb.DataVersion, retainLatest int) error
@@ -663,8 +666,7 @@ func (m *dataViewManager) Snapshot(ctx context.Context, collectionIDs []int64) (
 }
 
 func (m *dataViewManager) DataViewSnapshot(ctx context.Context) *balancerapi.DataViewSnapshot {
-	views, _ := m.Snapshot(ctx, nil)
-	return balancerapi.NewDataViewSnapshot(0, views, m.segmentSnapshot(ctx, views))
+	return m.DataViewSnapshotForCollections(ctx, nil)
 }
 
 type segmentSnapshot map[int64]*balancerapi.SegmentInfo
@@ -674,30 +676,111 @@ func (s segmentSnapshot) Get(segmentID int64) (*balancerapi.SegmentInfo, bool) {
 	return info, ok
 }
 
-func (m *dataViewManager) segmentSnapshot(ctx context.Context, views []*viewpb.DataViewOfCollection) balancerapi.SegmentSnapshot {
-	segments := make(segmentSnapshot)
-	for _, view := range views {
-		for _, shard := range view.GetShards() {
-			for _, partition := range shard.GetPartitions() {
-				for _, segmentID := range partition.GetSegmentIds() {
-					if _, ok := segments[segmentID]; ok {
-						continue
-					}
-					segment := m.segments.GetSegment(ctx, segmentID)
-					if segment == nil {
-						continue
-					}
-					segments[segmentID] = &balancerapi.SegmentInfo{
-						SegmentID:   segment.GetID(),
-						PartitionID: segment.GetPartitionID(),
-						MemSize:     segment.GetMemSize(),
-						RowNum:      segment.GetNumOfRows(),
-					}
-				}
+// DataViewSnapshotForCollections builds an immutable snapshot from the latest
+// visible DataViews in the requested collection scope.
+func (m *dataViewManager) DataViewSnapshotForCollections(ctx context.Context, collectionIDs map[int64]struct{}) *balancerapi.DataViewSnapshot {
+	states := make([]*collectionDataViewState, 0, len(collectionIDs))
+	if collectionIDs == nil {
+		states = m.listStates()
+	} else {
+		for collectionID := range collectionIDs {
+			if state := m.getState(collectionID); state != nil {
+				states = append(states, state)
 			}
 		}
 	}
+
+	views := make([]*viewpb.DataViewOfCollection, 0, len(states))
+	segmentIDs := make([]int64, 0)
+	seenSegments := make(map[int64]struct{})
+	for _, state := range states {
+		state.mu.RLock()
+		if !state.dropped && state.latestVisible != nil {
+			view := canonicalDataViewClone(state.latestVisible)
+			views = append(views, view)
+			for _, partition := range dataViewPartitions(view) {
+				for _, segmentID := range partition.GetSegmentIds() {
+					if _, ok := seenSegments[segmentID]; ok {
+						continue
+					}
+					seenSegments[segmentID] = struct{}{}
+					segmentIDs = append(segmentIDs, segmentID)
+				}
+			}
+		}
+		state.mu.RUnlock()
+	}
+
+	segments := m.getSegments(ctx, segmentIDs)
+	setDataViewDeleteTimeticks(views, segments)
+	return balancerapi.NewDataViewSnapshot(0, views, newSegmentSnapshot(segmentIDs, segments))
+}
+
+// SegmentSnapshot looks up arbitrary segment metadata without requiring the
+// segments to belong to the latest visible DataViews.
+func (m *dataViewManager) SegmentSnapshot(ctx context.Context, segmentIDs []int64) balancerapi.SegmentSnapshot {
+	return newSegmentSnapshot(segmentIDs, m.getSegments(ctx, segmentIDs))
+}
+
+func (m *dataViewManager) getSegments(ctx context.Context, segmentIDs []int64) map[int64]*Segment {
+	segments := make(map[int64]*Segment, len(segmentIDs))
+	if len(segmentIDs) == 0 {
+		return segments
+	}
+	for _, segment := range m.segments.GetSegments(ctx, segmentIDs) {
+		if segment != nil {
+			segments[segment.GetID()] = segment
+		}
+	}
 	return segments
+}
+
+func newSegmentSnapshot(segmentIDs []int64, segmentsByID map[int64]*Segment) balancerapi.SegmentSnapshot {
+	segments := make(segmentSnapshot, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		segment := segmentsByID[segmentID]
+		if segment == nil {
+			continue
+		}
+		segments[segmentID] = &balancerapi.SegmentInfo{
+			SegmentID:   segment.GetID(),
+			PartitionID: segment.GetPartitionID(),
+			MemSize:     segment.GetMemSize(),
+			RowNum:      segment.GetNumOfRows(),
+		}
+	}
+	return segments
+}
+
+// setDataViewDeleteTimeticks derives each shard's minimum transform-start
+// timetick from the prefetched segments. Empty shards or any missing member use
+// zero so consumers do not advance beyond unknown metadata.
+func setDataViewDeleteTimeticks(views []*viewpb.DataViewOfCollection, segments map[int64]*Segment) {
+	for _, view := range views {
+		for _, shard := range view.GetShards() {
+			minTs := uint64(math.MaxUint64)
+			hasSegment := false
+			missingSegment := false
+			for _, partition := range shard.GetPartitions() {
+				for _, segmentID := range partition.GetSegmentIds() {
+					hasSegment = true
+					segment := segments[segmentID]
+					if segment == nil {
+						missingSegment = true
+						continue
+					}
+					if ts := segmentTransformStartAfterTimetick(segment); ts < minTs {
+						minTs = ts
+					}
+				}
+			}
+			if !hasSegment || missingSegment {
+				shard.TransformStartAfterTimetick = 0
+			} else {
+				shard.TransformStartAfterTimetick = minTs
+			}
+		}
+	}
 }
 
 func (m *dataViewManager) ShardTimeTicks(ctx context.Context, collectionIDs []int64) ([]*viewpb.DataViewShardTimeTick, error) {

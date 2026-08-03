@@ -140,6 +140,16 @@ func (s *fakeDataViewSegmentStore) GetSegment(ctx context.Context, segID int64) 
 	return s.segments[segID]
 }
 
+func (s *fakeDataViewSegmentStore) GetSegments(ctx context.Context, segIDs []int64) []*Segment {
+	segments := make([]*Segment, 0, len(segIDs))
+	for _, segmentID := range segIDs {
+		if segment := s.segments[segmentID]; segment != nil {
+			segments = append(segments, segment)
+		}
+	}
+	return segments
+}
+
 func (s *fakeDataViewSegmentStore) SelectSegments(ctx context.Context, collectionID int64) []*Segment {
 	segments := make([]*Segment, 0, len(s.segments))
 	for _, segment := range s.segments {
@@ -527,6 +537,100 @@ func TestDataViewManagerDataViewSnapshotForBalancer(t *testing.T) {
 	require.Equal(t, int64(11), segment.RowNum)
 }
 
+func TestDataViewManagerDataViewSnapshotForCollectionsScope(t *testing.T) {
+	ctx := context.Background()
+	manager, _, store := newTestDataViewManager()
+	store.segments[100] = newDataViewTestSegment(1, 10, 100, "ch-1", 1000)
+	store.segments[101] = newDataViewTestSegment(1, 10, 101, "ch-1", 1100)
+	store.segments[101].IsInvisible = true
+	store.segments[200] = newDataViewTestSegment(2, 20, 200, "ch-2", 1200)
+	require.NoError(t, noErrorVersion(manager.OnFlush(ctx, FlushDataViewEvent{CollectionID: 1, SegmentIDs: []int64{100}})))
+	require.NoError(t, noErrorVersion(manager.OnFlush(ctx, FlushDataViewEvent{
+		CollectionID:         1,
+		SegmentIDs:           []int64{101},
+		TemporaryUnavailable: true,
+	})))
+	require.NoError(t, noErrorVersion(manager.OnFlush(ctx, FlushDataViewEvent{CollectionID: 2, SegmentIDs: []int64{200}})))
+
+	tests := []struct {
+		name  string
+		scope map[int64]struct{}
+		has1  bool
+		has2  bool
+	}{
+		{name: "all", scope: nil, has1: true, has2: true},
+		{name: "empty", scope: map[int64]struct{}{}},
+		{name: "selected", scope: map[int64]struct{}{1: {}}, has1: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot := manager.DataViewSnapshotForCollections(ctx, test.scope)
+			_, has1 := snapshot.DataVersion(1)
+			_, has2 := snapshot.DataVersion(2)
+			require.Equal(t, test.has1, has1)
+			require.Equal(t, test.has2, has2)
+		})
+	}
+
+	snapshot := manager.DataViewSnapshotForCollections(ctx, map[int64]struct{}{1: {}})
+	shard, ok := snapshot.ShardView(1, "ch-1")
+	require.True(t, ok)
+	require.Equal(t, []int64{100}, shard.GetPartitions()[0].GetSegmentIds())
+	shard.Partitions[0].SegmentIds[0] = 999
+
+	snapshot = manager.DataViewSnapshotForCollections(ctx, map[int64]struct{}{1: {}})
+	shard, ok = snapshot.ShardView(1, "ch-1")
+	require.True(t, ok)
+	require.Equal(t, []int64{100}, shard.GetPartitions()[0].GetSegmentIds())
+}
+
+func TestDataViewManagerDataViewSnapshotForCollectionsTimeticks(t *testing.T) {
+	ctx := context.Background()
+	manager, _, store := newTestDataViewManager()
+	store.segments[100] = newDataViewTestSegment(1, 10, 100, "ch-shared", 900)
+	store.segments[101] = newDataViewTestSegment(1, 11, 101, "ch-shared", 700)
+	store.segments[200] = newDataViewTestSegment(1, 12, 200, "ch-missing", 600)
+
+	sharedShard := newTestDataViewShard("ch-shared", 10, 100)
+	sharedShard.Partitions = append(sharedShard.Partitions,
+		&viewpb.DataViewOfPartition{PartitionId: 11, SegmentIds: []int64{101}})
+	manager.states[1] = &collectionDataViewState{
+		collectionID: 1,
+		latestVisible: newTestDataView(
+			1, 1, 0,
+			sharedShard,
+			newTestDataViewShard("ch-missing", 12, 200, 999),
+			&viewpb.DataViewOfShard{Vchannel: "ch-empty"},
+		),
+	}
+
+	snapshot := manager.DataViewSnapshotForCollections(ctx, map[int64]struct{}{1: {}})
+	shared, ok := snapshot.ShardView(1, "ch-shared")
+	require.True(t, ok)
+	require.Equal(t, uint64(700), shared.GetTransformStartAfterTimetick())
+	missing, ok := snapshot.ShardView(1, "ch-missing")
+	require.True(t, ok)
+	require.Zero(t, missing.GetTransformStartAfterTimetick())
+	empty, ok := snapshot.ShardView(1, "ch-empty")
+	require.True(t, ok)
+	require.Zero(t, empty.GetTransformStartAfterTimetick())
+}
+
+func TestDataViewManagerSegmentSnapshot(t *testing.T) {
+	ctx := context.Background()
+	manager, _, store := newTestDataViewManager()
+	store.segments[100] = newDataViewTestSegment(1, 10, 100, "ch-1", 900)
+	store.segments[100].NumOfRows = 11
+
+	snapshot := manager.SegmentSnapshot(ctx, []int64{100, 999})
+	segment, ok := snapshot.Get(100)
+	require.True(t, ok)
+	require.Equal(t, int64(10), segment.PartitionID)
+	require.Equal(t, int64(11), segment.RowNum)
+	_, ok = snapshot.Get(999)
+	require.False(t, ok)
+}
+
 func TestDataViewManagerCompactPendingOutputIsNoopUntilVisible(t *testing.T) {
 	ctx := context.Background()
 	manager, catalog, store := newTestDataViewManager()
@@ -795,7 +899,8 @@ func TestDataViewManagerRecoverDoesNotReaddHistoricallyRemovedSegments(t *testin
 	manager, catalog, store := newTestDataViewManager()
 	store.segments[100] = newDataViewTestSegment(1, 10, 100, "ch-1", 1000)
 	store.segments[101] = newDataViewTestSegment(1, 11, 101, "ch-1", 1100)
-	catalog.views = append(catalog.views,
+	catalog.views = append(
+		catalog.views,
 		&viewpb.DataViewOfCollection{
 			CollectionId: 1,
 			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 0},
@@ -841,7 +946,8 @@ func TestDataViewManagerRepairCollectionsUsesCatalogDataViews(t *testing.T) {
 	store.segments[101] = newDataViewTestSegment(1, 10, 101, "ch-1", 1100)
 	store.segments[200] = newDataViewTestSegment(2, 20, 200, "ch-2", 2000)
 
-	catalog.views = append(catalog.views,
+	catalog.views = append(
+		catalog.views,
 		newTestDataView(1, 1, 0, newTestDataViewShard("ch-1", 10, 100)),
 		newTestDataView(2, 1, 0, newTestDataViewShard("ch-2", 20, 200)),
 	)
@@ -915,7 +1021,8 @@ func TestDataViewManagerRecoverDoesNotReaddTruncatedSegments(t *testing.T) {
 	manager, catalog, store := newTestDataViewManager()
 	store.segments[100] = newDataViewTestSegment(1, 10, 100, "ch-1", 1000)
 	store.segments[101] = newDataViewTestSegment(1, 10, 101, "ch-1", 1100)
-	catalog.views = append(catalog.views,
+	catalog.views = append(
+		catalog.views,
 		&viewpb.DataViewOfCollection{
 			CollectionId: 1,
 			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 0},
@@ -1086,7 +1193,8 @@ func TestDataViewManagerRecoverKeepsTemporaryFlushResidentUnavailable(t *testing
 	temp := newDataViewTestSegment(1, 10, 101, "ch-1", 1100)
 	temp.IsInvisible = true
 	store.segments[101] = temp
-	catalog.views = append(catalog.views,
+	catalog.views = append(
+		catalog.views,
 		&viewpb.DataViewOfCollection{
 			CollectionId: 1,
 			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 0},
@@ -1201,7 +1309,8 @@ func TestDataViewManagerDropCollectionDropsStateAndCatalog(t *testing.T) {
 func TestDataViewManagerSegmentReferenceUsesRetainedViews(t *testing.T) {
 	ctx := context.Background()
 	manager, catalog, _ := newTestDataViewManager()
-	catalog.views = append(catalog.views,
+	catalog.views = append(
+		catalog.views,
 		&viewpb.DataViewOfCollection{
 			CollectionId: 1,
 			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 0},
@@ -1240,7 +1349,8 @@ func TestDataViewManagerSegmentReferenceUsesRetainedViews(t *testing.T) {
 func TestDataViewManagerGarbageCollectRetainsLatestAndProtectedViews(t *testing.T) {
 	ctx := context.Background()
 	manager, catalog, _ := newTestDataViewManager()
-	catalog.views = append(catalog.views,
+	catalog.views = append(
+		catalog.views,
 		&viewpb.DataViewOfCollection{
 			CollectionId: 1,
 			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 0},
@@ -1311,7 +1421,8 @@ func TestDataViewManagerDoesNotBlockOtherCollections(t *testing.T) {
 func TestDataViewManagerGarbageCollectDoesNotBlockOtherCollections(t *testing.T) {
 	ctx := context.Background()
 	manager, catalog, store := newTestDataViewManager()
-	catalog.views = append(catalog.views,
+	catalog.views = append(
+		catalog.views,
 		&viewpb.DataViewOfCollection{
 			CollectionId: 1,
 			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 0},
