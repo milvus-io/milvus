@@ -24,6 +24,9 @@ const (
 	hnswMKey           = `M`
 	hsnwEfConstruction = `efConstruction`
 	hnswEfKey          = `ef`
+	hnswSQTypeKey      = `sq_type`
+	hnswRefineKey      = `refine`
+	hnswRefineTypeKey  = `refine_type`
 )
 
 var _ Index = hnswIndex{}
@@ -52,6 +55,51 @@ func NewHNSWIndex(metricType MetricType, m int, efConstruction int) Index {
 		},
 		m:              m,
 		efConstruction: efConstruction,
+	}
+}
+
+var _ Index = (*hnswSQIndex)(nil)
+
+type hnswSQIndex struct {
+	baseIndex
+
+	m              int
+	efConstruction int
+	sqType         string
+	refine         bool
+	refineType     string
+}
+
+func (idx *hnswSQIndex) Params() map[string]string {
+	result := map[string]string{
+		MetricTypeKey:      string(idx.metricType),
+		IndexTypeKey:       string(HNSWSQ),
+		hnswMKey:           strconv.Itoa(idx.m),
+		hsnwEfConstruction: strconv.Itoa(idx.efConstruction),
+		hnswSQTypeKey:      idx.sqType,
+	}
+	if idx.refine {
+		result[hnswRefineKey] = strconv.FormatBool(idx.refine)
+		result[hnswRefineTypeKey] = idx.refineType
+	}
+	return result
+}
+
+func (idx *hnswSQIndex) WithRefineType(refineType string) *hnswSQIndex {
+	idx.refine = true
+	idx.refineType = refineType
+	return idx
+}
+
+func NewHNSWSQIndex(metricType MetricType, m int, efConstruction int, sqType string) *hnswSQIndex {
+	return &hnswSQIndex{
+		baseIndex: baseIndex{
+			metricType: metricType,
+			indexType:  HNSWSQ,
+		},
+		m:              m,
+		efConstruction: efConstruction,
+		sqType:         sqType,
 	}
 }
 
