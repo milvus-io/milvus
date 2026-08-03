@@ -497,16 +497,8 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	mapStart := time.Now()
 	futures := make([]*conc.Future[any], 0, len(inputSegments))
 	for _, segment := range inputSegments {
-		segmentClone := &datapb.CompactionSegmentBinlogs{
-			SegmentID: segment.SegmentID,
-			// only FieldBinlogs and deltalogs needed
-			Deltalogs:      segment.Deltalogs,
-			FieldBinlogs:   segment.FieldBinlogs,
-			StorageVersion: segment.StorageVersion,
-			Manifest:       segment.GetManifest(),
-		}
 		future := t.mappingPool.Submit(func() (any, error) {
-			err := t.mappingSegment(ctx, segmentClone)
+			err := t.mappingSegment(ctx, segment)
 			return struct{}{}, err
 		})
 		futures = append(futures, future)
