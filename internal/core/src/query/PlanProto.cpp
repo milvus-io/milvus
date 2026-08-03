@@ -1267,8 +1267,17 @@ ProtoParser::ParseBinaryArithOpEvalRangeExprs(
 
     if (column_info.is_element_level()) {
         Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() ==
-               static_cast<DataType>(column_info.element_type()));
+        if (field.has_element_schema()) {
+            Assert(expr_pb.arith_op() == proto::plan::ArithOpType::ArrayLength);
+            Assert(static_cast<DataType>(column_info.data_type()) ==
+                   DataType::ARRAY);
+            Assert(static_cast<DataType>(column_info.element_type()) ==
+                   DataType::ARRAY);
+            Assert(column_info.nested_path().empty());
+        } else {
+            Assert(field.get_element_type() ==
+                   static_cast<DataType>(column_info.element_type()));
+        }
     } else {
         Assert(data_type == static_cast<DataType>(column_info.data_type()));
     }
@@ -1307,9 +1316,18 @@ ProtoParser::ParseJsonContainsExprs(
 
     if (columnInfo.is_element_level()) {
         Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
+        Assert(static_cast<DataType>(columnInfo.data_type()) ==
+               DataType::ARRAY);
+        Assert(field.has_element_schema());
+        const auto& logical_element =
+            field.get_element_schema().array_element();
+        Assert(logical_element.has_leaf_type() &&
+               IsPrimitiveType(logical_element.leaf_type()));
+        Assert(static_cast<DataType>(logical_element.leaf_type()) ==
+               static_cast<DataType>(columnInfo.element_type()));
     } else {
         Assert(data_type == (DataType)columnInfo.data_type());
+        Assert(!field.has_element_schema());
     }
     std::vector<::milvus::proto::plan::GenericValue> values;
     values.reserve(expr_pb.elements_size());

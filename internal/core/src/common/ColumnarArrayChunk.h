@@ -140,8 +140,8 @@ class ColumnarArrayChunk final : public Chunk {
         return isValid(static_cast<int>(row));
     }
 
-    // ViewType is intentionally dependent because ArrayValueView is only
-    // completed after this header has been parsed.
+    // ViewType is intentionally dependent in these accessors because
+    // ArrayValueView is only completed after this header has been parsed.
     template <typename ViewType = ArrayValueView>
     ViewType
     View(size_t row) const {
@@ -154,6 +154,72 @@ class ColumnarArrayChunk final : public Chunk {
                                        offsets_[row],
                                        offsets_[row + 1],
                                        !isValid(static_cast<int>(row)));
+    }
+
+    template <typename ViewType = ArrayValueView>
+    std::pair<std::vector<ViewType>, FixedVector<bool>>
+    Views(std::optional<std::pair<int64_t, int64_t>> offset_len =
+              std::nullopt) const {
+        int64_t start_offset = 0;
+        int64_t len = row_nums_;
+        if (offset_len.has_value()) {
+            start_offset = offset_len->first;
+            len = offset_len->second;
+            AssertInfo(
+                start_offset >= 0 && start_offset < row_nums_,
+                "Retrieve array value views with out-of-bound offset:{}, "
+                "len:{}, wrong",
+                start_offset,
+                len);
+            AssertInfo(
+                len > 0 && len <= row_nums_,
+                "Retrieve array value views with out-of-bound offset:{}, "
+                "len:{}, wrong",
+                start_offset,
+                len);
+            AssertInfo(
+                start_offset + len <= row_nums_,
+                "Retrieve array value views with out-of-bound offset:{}, "
+                "len:{}, wrong",
+                start_offset,
+                len);
+        }
+
+        std::vector<ViewType> views;
+        views.reserve(len);
+        const auto end_offset = start_offset + len;
+        for (auto i = start_offset; i < end_offset; ++i) {
+            views.emplace_back(View<ViewType>(i));
+        }
+        if (nullable_) {
+            FixedVector<bool> valid_data(valid_.begin() + start_offset,
+                                         valid_.begin() + end_offset);
+            return {std::move(views), std::move(valid_data)};
+        }
+        return {std::move(views), {}};
+    }
+
+    template <typename ViewType = ArrayValueView>
+    std::pair<std::vector<ViewType>, FixedVector<bool>>
+    ViewsByOffsets(const FixedVector<int32_t>& offsets) const {
+        std::vector<ViewType> views;
+        views.reserve(offsets.size());
+        FixedVector<bool> valid_data;
+        if (nullable_) {
+            valid_data.reserve(offsets.size());
+        }
+        for (auto offset : offsets) {
+            AssertInfo(offset >= 0 && offset < row_nums_,
+                       "Retrieve array value view with out-of-bound offset:{} "
+                       "for chunk rows:{}",
+                       offset,
+                       row_nums_);
+            views.emplace_back(View<ViewType>(offset));
+            if (nullable_) {
+                valid_data.push_back(isValid(offset));
+            }
+        }
+        return {std::move(views), std::move(valid_data)};
     }
 
     void
@@ -419,7 +485,15 @@ class ColumnarArrayChunk final : public Chunk {
         const auto element_type = GetElementType(type);
         using ValueType = std::decay_t<T>;
 
-        if constexpr (std::is_same_v<ValueType, bool>) {
+        if constexpr (std::is_same_v<ValueType, std::string_view> ||
+                      std::is_same_v<ValueType, std::string>) {
+            AssertInfo(IsStringDataType(element_type),
+                       "requested string from array element type {}",
+                       element_type);
+            const auto& chunk = static_cast<const StringChunk&>(child);
+            const auto value = chunk[static_cast<int>(index)];
+            return T(value.data(), value.size());
+        } else if constexpr (std::is_same_v<ValueType, bool>) {
             AssertInfo(element_type == DataType::BOOL,
                        "requested bool from array element type {}",
                        element_type);
@@ -427,46 +501,34 @@ class ColumnarArrayChunk final : public Chunk {
             return *reinterpret_cast<const uint8_t*>(
                        chunk.ValueAt(static_cast<int64_t>(index))) != 0;
         } else if constexpr (std::is_same_v<ValueType, int> ||
+                             std::is_same_v<ValueType, int64_t> ||
                              std::is_same_v<ValueType, int8_t> ||
                              std::is_same_v<ValueType, int16_t> ||
-                             std::is_same_v<ValueType, int32_t>) {
-            AssertInfo(element_type == DataType::INT8 ||
-                           element_type == DataType::INT16 ||
-                           element_type == DataType::INT32,
-                       "requested int from array element type {}",
-                       element_type);
+                             std::is_same_v<ValueType, int32_t> ||
+                             std::is_same_v<ValueType, float> ||
+                             std::is_same_v<ValueType, double>) {
             const auto& chunk = static_cast<const FixedWidthChunk&>(child);
-            return static_cast<T>(*reinterpret_cast<const int32_t*>(
-                chunk.ValueAt(static_cast<int64_t>(index))));
-        } else if constexpr (std::is_same_v<ValueType, int64_t>) {
-            AssertInfo(element_type == DataType::INT64,
-                       "requested int64 from array element type {}",
-                       element_type);
-            const auto& chunk = static_cast<const FixedWidthChunk&>(child);
-            return *reinterpret_cast<const int64_t*>(
-                chunk.ValueAt(static_cast<int64_t>(index)));
-        } else if constexpr (std::is_same_v<ValueType, float>) {
-            AssertInfo(element_type == DataType::FLOAT,
-                       "requested float from array element type {}",
-                       element_type);
-            const auto& chunk = static_cast<const FixedWidthChunk&>(child);
-            return *reinterpret_cast<const float*>(
-                chunk.ValueAt(static_cast<int64_t>(index)));
-        } else if constexpr (std::is_same_v<ValueType, double>) {
-            AssertInfo(element_type == DataType::DOUBLE,
-                       "requested double from array element type {}",
-                       element_type);
-            const auto& chunk = static_cast<const FixedWidthChunk&>(child);
-            return *reinterpret_cast<const double*>(
-                chunk.ValueAt(static_cast<int64_t>(index)));
-        } else if constexpr (std::is_same_v<ValueType, std::string_view> ||
-                             std::is_same_v<ValueType, std::string>) {
-            AssertInfo(IsStringDataType(element_type),
-                       "requested string from array element type {}",
-                       element_type);
-            const auto& chunk = static_cast<const StringChunk&>(child);
-            const auto value = chunk[static_cast<int>(index)];
-            return T(value.data(), value.size());
+            const auto* value = chunk.ValueAt(static_cast<int64_t>(index));
+            switch (element_type) {
+                case DataType::INT8:
+                case DataType::INT16:
+                case DataType::INT32:
+                    return static_cast<T>(
+                        *reinterpret_cast<const int32_t*>(value));
+                case DataType::INT64:
+                    return static_cast<T>(
+                        *reinterpret_cast<const int64_t*>(value));
+                case DataType::FLOAT:
+                    return static_cast<T>(
+                        *reinterpret_cast<const float*>(value));
+                case DataType::DOUBLE:
+                    return static_cast<T>(
+                        *reinterpret_cast<const double*>(value));
+                default:
+                    ThrowInfo(Unsupported,
+                              "unsupported array element type {}",
+                              element_type);
+            }
         } else {
             static_assert(AlwaysFalse<T>,
                           "unsupported ArrayValueView value type");

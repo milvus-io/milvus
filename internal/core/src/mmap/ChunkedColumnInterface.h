@@ -19,6 +19,7 @@
 #include <mutex>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/ArrayValue.h"
 #include "common/Chunk.h"
 #include "common/OffsetMapping.h"
 #include "common/bson_view.h"
@@ -108,6 +109,15 @@ class ChunkedColumnInterface {
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
+    // ArrayValueView is non-owning. The returned PinWrapper keeps the backing
+    // ColumnarArrayChunk alive for the lifetime of the views.
+    virtual PinWrapper<
+        std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    ArrayValueViews(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
+
     virtual PinWrapper<
         std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
     VectorArrayViews(
@@ -128,6 +138,12 @@ class ChunkedColumnInterface {
     ArrayViewsByOffsets(milvus::OpContext* op_ctx,
                         int64_t chunk_id,
                         const FixedVector<int32_t>& offsets) const = 0;
+
+    virtual PinWrapper<
+        std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    ArrayValueViewsByOffsets(milvus::OpContext* op_ctx,
+                             int64_t chunk_id,
+                             const FixedVector<int32_t>& offsets) const = 0;
 
     // Convert a global offset to (chunk_id, offset_in_chunk) pair
     virtual std::pair<size_t, size_t>
