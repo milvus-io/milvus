@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/antlr4-go/antlr/v4"
+	"github.com/google/uuid"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/samber/lo"
 
@@ -540,6 +541,11 @@ func CreateRequeryPlan(pkField *schemapb.FieldSchema, ids *schemapb.IDs) *planpb
 		})
 	case *schemapb.IDs_StrId:
 		values = lo.Map(ids.GetStrId().GetData(), func(id string, _ int) *planpb.GenericValue {
+			if pkField.GetDataType() == schemapb.DataType_UUID {
+				if u, err := uuid.Parse(id); err == nil {
+					id = u.String()
+				}
+			}
 			return &planpb.GenericValue{
 				Val: &planpb.GenericValue_StringVal{
 					StringVal: id,

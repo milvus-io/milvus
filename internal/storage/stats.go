@@ -99,6 +99,10 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 	case schemapb.DataType_VarChar:
 		stats.MaxPk = &VarCharPrimaryKey{}
 		stats.MinPk = &VarCharPrimaryKey{}
+	case schemapb.DataType_UUID:
+		// UUID PKs are canonical strings, so they deserialize as VarChar.
+		stats.MaxPk = &VarCharPrimaryKey{}
+		stats.MinPk = &VarCharPrimaryKey{}
 	default:
 		return merr.WrapErrServiceInternalMsg("Invalid PK Data Type")
 	}

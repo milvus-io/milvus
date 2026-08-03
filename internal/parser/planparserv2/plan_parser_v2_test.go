@@ -4746,3 +4746,28 @@ func TestExpr_BooleanLiteral(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestCreateRequeryPlan_UUID(t *testing.T) {
+	upperUUID := "3F2504E0-4F89-41D3-9A0C-0305E82C3301"
+	lowerUUID := "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "uuid_pk",
+		DataType:     schemapb.DataType_UUID,
+		IsPrimaryKey: true,
+	}
+	ids := &schemapb.IDs{
+		IdField: &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{Data: []string{upperUUID}},
+		},
+	}
+
+	plan := CreateRequeryPlan(pkField, ids)
+	termExpr := plan.GetQuery().GetPredicates().GetTermExpr()
+	require.NotNil(t, termExpr)
+	require.Len(t, termExpr.GetValues(), 1)
+	assert.Equal(t, schemapb.DataType_UUID, termExpr.GetColumnInfo().GetDataType())
+	assert.Equal(t, lowerUUID, termExpr.GetValues()[0].GetStringVal())
+	assert.Equal(t, "3f2504e0-4f89-41d3-9a0c-0305e82c3301", termExpr.GetValues()[0].GetStringVal())
+}

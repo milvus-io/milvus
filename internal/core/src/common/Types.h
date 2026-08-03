@@ -849,6 +849,12 @@ struct TypeTraits<DataType::TEXT> : public TypeTraits<DataType::VARCHAR> {
 };
 
 template <>
+struct TypeTraits<DataType::UUID> : public TypeTraits<DataType::VARCHAR> {
+    static constexpr DataType TypeKind = DataType::UUID;
+    static constexpr const char* Name = "UUID";
+};
+
+template <>
 struct TypeTraits<DataType::ARRAY> {
     using NativeType = void;
     static constexpr DataType TypeKind = DataType::ARRAY;
@@ -1598,6 +1604,8 @@ using RowTypePtr = std::shared_ptr<const RowType>;
                 return PREFIX<milvus::DataType::VARCHAR> SUFFIX(__VA_ARGS__); \
             case milvus::DataType::STRING:                                    \
                 return PREFIX<milvus::DataType::STRING> SUFFIX(__VA_ARGS__);  \
+            case milvus::DataType::UUID:                                      \
+                return PREFIX<milvus::DataType::UUID> SUFFIX(__VA_ARGS__);    \
             case milvus::DataType::JSON:                                      \
                 return PREFIX<milvus::DataType::JSON> SUFFIX(__VA_ARGS__);    \
             case milvus::DataType::ARRAY:                                     \

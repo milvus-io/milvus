@@ -35,6 +35,14 @@ TEST(UuidTest, IsStringDataType) {
     ASSERT_TRUE(IsStringDataType(DataType::UUID));
 }
 
+// Verify that UUID is not a fixed-size type. UUID is variable-width
+// (string-backed), so IsFixedSizeType must return false, matching the
+// IsStringDataType(UUID)==true assertion above and allowing RowContainer
+// and other variable-width paths to allocate pointers instead of inline data.
+TEST(UuidTest, IsFixedSizeType) {
+    ASSERT_FALSE(IsFixedSizeType(DataType::UUID));
+}
+
 // Verify ToProtoDataType maps internal DataType::UUID to proto DataType::UUID.
 TEST(UuidTest, ToProtoDataTypeMapping) {
     auto proto_type = ToProtoDataType(DataType::UUID);

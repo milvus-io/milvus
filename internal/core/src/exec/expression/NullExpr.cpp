@@ -81,7 +81,8 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<int64_t>(input);
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::UUID: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()
                      .GetMmapConfig()

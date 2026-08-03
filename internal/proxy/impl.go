@@ -3512,6 +3512,10 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			for _, pk := range pkFieldData.GetScalars().GetStringData().GetData() {
 				returnedPKSet[pk] = struct{}{}
 			}
+		case schemapb.DataType_UUID:
+			for _, pk := range pkFieldData.GetScalars().GetStringData().GetData() {
+				returnedPKSet[pk] = struct{}{}
+			}
 		}
 
 		var missingIDs []interface{}
