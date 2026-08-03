@@ -488,14 +488,26 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 		if data.Type == gjson.JSON {
 			for _, structField := range collSchema.StructArrayFields {
 				rawValue := gjson.Get(data.Raw, structField.GetName())
-				if partialUpdate && !rawValue.Exists() {
-					continue
-				}
-				if structField.GetNullable() {
-					if rawValue.Type == gjson.Null {
+				if !rawValue.Exists() {
+					if partialUpdate {
+						continue
+					}
+					if structField.GetNullable() {
 						validDataMap[structField.GetName()] = append(validDataMap[structField.GetName()], false)
 						continue
 					}
+					return reallyDataArray, validDataMap, merr.WrapErrParameterMissingMsg(
+						"field %s is required", structField.GetName())
+				}
+				if rawValue.Type == gjson.Null {
+					if structField.GetNullable() {
+						validDataMap[structField.GetName()] = append(validDataMap[structField.GetName()], false)
+						continue
+					}
+					return reallyDataArray, validDataMap, merr.WrapErrParameterInvalidMsg(
+						"field %s is not nullable", structField.GetName())
+				}
+				if structField.GetNullable() {
 					validDataMap[structField.GetName()] = append(validDataMap[structField.GetName()], true)
 				}
 				structRow, err := parseStructArrayRow(rawValue.Raw, structField)

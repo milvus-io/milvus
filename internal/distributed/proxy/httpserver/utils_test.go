@@ -4963,6 +4963,16 @@ func TestCheckAndSetDataStructArrayRows(t *testing.T) {
 
 	_, _, err = checkAndSetData([]byte(`{"data": [{"id": 1, "vec": [0.1,0.2,0.3,0.4], "my_struct": [1]}]}`), schema, false)
 	assert.Error(t, err)
+
+	_, _, err = checkAndSetData([]byte(`{"data": [{"id": 1, "vec": [0.1,0.2,0.3,0.4]}]}`), schema, false)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterMissing)
+	assert.Contains(t, err.Error(), "field my_struct is required")
+
+	_, _, err = checkAndSetData([]byte(`{"data": [{"id": 1, "vec": [0.1,0.2,0.3,0.4], "my_struct": null}]}`), schema, false)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "field my_struct is not nullable")
 }
 
 func TestParseStructArrayRowQualifiedSchemaNames(t *testing.T) {
