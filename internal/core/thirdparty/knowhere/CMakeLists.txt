@@ -14,10 +14,9 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-# zilliztech/knowhere#1699 (iterator error-code interface) that this segcore
-# adaptation depends on has landed on knowhere main and is included in the
-# v3.0.6 release tag, so pin to the tagged release instead of a raw commit.
-set( KNOWHERE_VERSION v3.0.6 )
+# Pin zilliztech/knowhere#1745 until the next release; v3.0.6 still pins
+# Cardinal v3.0.3 and an older milvus-common revision.
+set( KNOWHERE_VERSION 16a71a3d )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")

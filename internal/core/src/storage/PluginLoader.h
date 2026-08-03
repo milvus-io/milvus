@@ -125,6 +125,14 @@ class PluginLoader {
         return names;
     }
 
+#ifdef MILVUS_UNIT_TEST
+    void
+    addPluginForTest(std::shared_ptr<milvus::storage::plugin::IPlugin> plugin) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        plugins_[plugin->getPluginName()] = std::move(plugin);
+    }
+#endif
+
     void
     unload(const std::string& name) {
         std::lock_guard<std::mutex> lock(mutex_);
