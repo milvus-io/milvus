@@ -1499,6 +1499,7 @@ func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
 func VerifyAPIKey(rawToken string) (string, error) {
 	user, err := hookutil.GetHook().VerifyAPIKey(rawToken)
 	if err != nil {
+		mlog.Warn(context.TODO(), "fail to verify apikey with hook", mlog.Err(err))
 		return "", merr.WrapErrParameterInvalidMsg("invalid API key")
 	}
 	return user, nil

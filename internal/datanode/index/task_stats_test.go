@@ -253,7 +253,7 @@ func (s *TaskStatsSuite) TestPreExecuteDoesNotLogStorageCredentials() {
 			SslCACert:         caCert,
 			GcpCredentialJSON: statsLogCredentialJSON(gcpCredential),
 		},
-	}, manager, s.mockChunkManager)
+	}, manager, s.mockChunkManager, nil)
 
 	err := task.PreExecute(ctx)
 	s.Require().NoError(err)

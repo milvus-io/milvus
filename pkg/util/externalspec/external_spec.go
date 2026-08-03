@@ -220,21 +220,40 @@ func RedactExternalSource(source string) string {
 		return ""
 	}
 	u, err := url.Parse(source)
-	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+	if err != nil || u.Opaque != "" || u.RawQuery != "" || u.Fragment != "" || ValidateExternalSource(source) != nil {
 		return "<redacted>"
 	}
 	return source
 }
 
-// RedactExternalSpecForLog fully elides non-empty external specs. Unlike the
-// user-facing RedactExternalSpec helper, this logging boundary intentionally
-// preserves no fields: newly added or rejected extension keys may contain
-// credentials before the server knows how to classify them.
+// RedactExternalSpecForLog preserves approved top-level metadata while
+// replacing the complete extfs authentication/configuration object. Unknown
+// top-level fields are dropped because future extensions may carry secrets.
 func RedactExternalSpecForLog(specStr string) string {
 	if specStr == "" {
 		return ""
 	}
-	return "<redacted>"
+
+	var spec map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
+		return "<redacted>"
+	}
+
+	redacted := make(map[string]json.RawMessage, 4)
+	for _, key := range []string{"format", "columns", "snapshot_id"} {
+		if value, ok := spec[key]; ok {
+			redacted[key] = value
+		}
+	}
+	if _, ok := spec["extfs"]; ok {
+		redacted["extfs"] = json.RawMessage(`"***"`)
+	}
+
+	out, err := json.Marshal(redacted)
+	if err != nil {
+		return "<redacted>"
+	}
+	return string(out)
 }
 
 // ValidateExtfsComplete requires spec.extfs to be self-sufficient: exactly one

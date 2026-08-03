@@ -111,6 +111,10 @@ func GetRequestFieldWithoutSensitiveInfo(req interface{}) mlog.Field {
 			ModifiedUtcTimestamps: updateCredentialReq.ModifiedUtcTimestamps,
 		})
 	}
+	restoreRBACReq, ok := req.(*milvuspb.RestoreRBACMetaRequest)
+	if ok {
+		return mlog.Any("request", redactRestoreRBACRequestForLog(restoreRBACReq))
+	}
 	createCollectionReq, ok := req.(*milvuspb.CreateCollectionRequest)
 	if ok {
 		return mlog.Any("request", redactCreateCollectionRequestForLog(createCollectionReq))
@@ -128,13 +132,13 @@ func GetRequestFieldWithoutSensitiveInfo(req interface{}) mlog.Field {
 	restoreExternalSnapshotReq, ok := req.(*milvuspb.RestoreExternalSnapshotRequest)
 	if ok {
 		redactedReq := proto.Clone(restoreExternalSnapshotReq).(*milvuspb.RestoreExternalSnapshotRequest)
-		redactedReq.ExternalSpec = externalspec.RedactExternalSpec(redactedReq.GetExternalSpec())
+		redactedReq.ExternalSpec = externalspec.RedactExternalSpecForLog(redactedReq.GetExternalSpec())
 		return mlog.Any("request", redactedReq)
 	}
 	exportSnapshotReq, ok := req.(*milvuspb.ExportSnapshotRequest)
 	if ok {
 		redactedReq := proto.Clone(exportSnapshotReq).(*milvuspb.ExportSnapshotRequest)
-		redactedReq.ExternalSpec = externalspec.RedactExternalSpec(redactedReq.GetExternalSpec())
+		redactedReq.ExternalSpec = externalspec.RedactExternalSpecForLog(redactedReq.GetExternalSpec())
 		return mlog.Any("request", redactedReq)
 	}
 	// expression-template values are user-supplied data (and a bloom_match
@@ -147,6 +151,19 @@ func GetRequestFieldWithoutSensitiveInfo(req interface{}) mlog.Field {
 		return mlog.Stringer("request", wrapped)
 	}
 	return mlog.Any("request", req)
+}
+
+func redactRestoreRBACRequestForLog(req *milvuspb.RestoreRBACMetaRequest) *milvuspb.RestoreRBACMetaRequest {
+	if req == nil {
+		return nil
+	}
+	redacted := proto.Clone(req).(*milvuspb.RestoreRBACMetaRequest)
+	for _, user := range redacted.GetRBACMeta().GetUsers() {
+		if user != nil {
+			user.Password = ""
+		}
+	}
+	return redacted
 }
 
 func redactCreateCollectionRequestForLog(req *milvuspb.CreateCollectionRequest) *milvuspb.CreateCollectionRequest {

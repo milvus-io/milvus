@@ -171,6 +171,10 @@ func TestRedactExternalSource(t *testing.T) {
 		{name: "query", source: "s3://bucket/path?token=QUERY_SECRET_SENTINEL", want: "<redacted>"},
 		{name: "fragment", source: "s3://bucket/path#FRAGMENT_SECRET_SENTINEL", want: "<redacted>"},
 		{name: "malformed", source: "s3://MALFORMED_SECRET_SENTINEL bad/path", want: "<redacted>"},
+		{name: "opaque URI", source: "s3:ACCESS_SENTINEL:SECRET_SENTINEL@bucket/path", want: "<redacted>"},
+		{name: "scheme-less URI", source: "ACCESS_SENTINEL:SECRET_SENTINEL@bucket/path", want: "<redacted>"},
+		{name: "host-less URI", source: "s3:///ACCESS_SENTINEL/SECRET_SENTINEL", want: "<redacted>"},
+		{name: "unsupported scheme", source: "ftp://ACCESS_SENTINEL:" + "SECRET_SENTINEL@host/path", want: "<redacted>"},
 	}
 
 	for _, testCase := range testCases {
@@ -449,8 +453,20 @@ func TestRedactExternalSpec(t *testing.T) {
 
 func TestRedactExternalSpecForLog(t *testing.T) {
 	assert.Equal(t, "", RedactExternalSpecForLog(""))
-	assert.Equal(t, "<redacted>", RedactExternalSpecForLog(`{"format":"parquet"}`))
-	assert.Equal(t, "<redacted>", RedactExternalSpecForLog(`{"extfs":{"future_password":"FUTURE_SECRET_SENTINEL"}}`))
+	redacted := RedactExternalSpecForLog(`{
+		"format":"parquet",
+		"columns":["id","vector"],
+		"snapshot_id":"123",
+		"future_top_level":"TOP_LEVEL_SECRET_SENTINEL",
+		"extfs":{
+			"cloud_provider":"aws",
+			"region":"us-west-2",
+			"future_password":"FUTURE_SECRET_SENTINEL"
+		}
+	}`)
+	assert.JSONEq(t, `{"format":"parquet","columns":["id","vector"],"snapshot_id":"123","extfs":"***"}`, redacted)
+	assert.NotContains(t, redacted, "TOP_LEVEL_SECRET_SENTINEL")
+	assert.NotContains(t, redacted, "FUTURE_SECRET_SENTINEL")
 	assert.Equal(t, "<redacted>", RedactExternalSpecForLog(`{malformed SECRET_SENTINEL`))
 }
 

@@ -351,6 +351,28 @@ func TestProxyRoleDescriptionValidation(t *testing.T) {
 	assert.NotEqual(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 }
 
+func TestRestoreRBACDoesNotLogPasswordHash(t *testing.T) {
+	logs := captureProxyLogs(t)
+	node := &Proxy{mixCoord: NewMixCoordMock()}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	hashSentinel := "$2a$10$RESTORE_RBAC_DIRECT_LOG_SENTINEL"
+	req := &milvuspb.RestoreRBACMetaRequest{
+		RBACMeta: &milvuspb.RBACMeta{
+			Users: []*milvuspb.UserInfo{{
+				User:     "restore-user",
+				Password: hashSentinel,
+			}},
+		},
+	}
+
+	status, err := node.RestoreRBAC(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	assert.Equal(t, hashSentinel, req.GetRBACMeta().GetUsers()[0].GetPassword())
+	assert.NotContains(t, logs.String(), hashSentinel)
+	assert.Contains(t, logs.String(), "restore-user")
+}
+
 func TestProxyRoleDescriptionForwarding(t *testing.T) {
 	paramtable.Init()
 	mixCoord := mocks.NewMockMixCoordClient(t)
@@ -3345,8 +3367,8 @@ func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
 		{"ftp scheme rejected", "ftp://internal/data", `{"format":"parquet"}`, "external_source is invalid", nil},
 		{"unknown scheme rejected", "xyz://nope/", `{"format":"parquet"}`, "external_source is invalid", nil},
 		{"userinfo rejected", "s3://ak:sk@bucket/prefix", `{"format":"parquet"}`, "external_source is invalid", nil},
-		{"invalid format value redacted", "s3://bucket/prefix", `{"format":"FORMAT_REFRESH_SECRET_SENTINEL"}`, "external_spec is invalid", []string{"FORMAT_REFRESH_SECRET_SENTINEL"}},
-		{"invalid extfs value redacted", "s3://bucket/prefix", `{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"cloud_provider_refresh_secret_sentinel"}}`, "external_spec is invalid", []string{"cloud_provider_refresh_secret_sentinel"}},
+		{"invalid format includes validation detail", "s3://bucket/prefix", `{"format":"FORMAT_REFRESH_SECRET_SENTINEL"}`, "external_spec is invalid", nil},
+		{"invalid extfs includes validation detail", "s3://bucket/prefix", `{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"cloud_provider_refresh_secret_sentinel"}}`, "external_spec is invalid", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

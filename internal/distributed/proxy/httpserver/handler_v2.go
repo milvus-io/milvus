@@ -510,14 +510,14 @@ func getTraceLogRequestFieldWithoutSensitiveInfo(req any) mlog.Field {
 			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
 		}
 		redactedReq := *request
-		redactedReq.ExternalSpec = externalspec.RedactExternalSpec(request.ExternalSpec)
+		redactedReq.ExternalSpec = externalspec.RedactExternalSpecForLog(request.ExternalSpec)
 		return mlog.Any("request", &redactedReq)
 	case *ExportSnapshotReq:
 		if request == nil {
 			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
 		}
 		redactedReq := *request
-		redactedReq.ExternalSpec = externalspec.RedactExternalSpec(request.ExternalSpec)
+		redactedReq.ExternalSpec = externalspec.RedactExternalSpecForLog(request.ExternalSpec)
 		return mlog.Any("request", &redactedReq)
 	default:
 		return proxy.GetRequestFieldWithoutSensitiveInfo(req)

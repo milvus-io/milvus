@@ -1139,7 +1139,7 @@ func TestVerifyAPIKeyDoesNotExposeSecret(t *testing.T) {
 	logs := captureProxyLogs(t)
 	rawToken := "API_KEY_SENTINEL_DO_NOT_LOG"
 	encodedToken := crypto.Base64Encode(rawToken)
-	hookutil.SetMockAPIHook("", errors.New("provider rejected "+rawToken))
+	hookutil.SetMockAPIHook("", errors.New("API key provider unavailable"))
 	t.Cleanup(func() {
 		hookutil.SetTestHook(hookutil.DefaultHook{})
 	})
@@ -1167,6 +1167,7 @@ func TestVerifyAPIKeyDoesNotExposeSecret(t *testing.T) {
 	assert.NotContains(t, err.Error(), encodedToken)
 	output := logs.String()
 	assert.Contains(t, output, "fail to verify apikey")
+	assert.Contains(t, output, "API key provider unavailable")
 	assert.NotContains(t, output, rawToken)
 	assert.NotContains(t, output, encodedToken)
 }

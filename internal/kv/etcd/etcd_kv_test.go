@@ -1024,3 +1024,15 @@ func TestRetryInterval(t *testing.T) {
 		t.Fatalf("expected elapsed time around %v, got %v", expectedMin, elapsed)
 	}
 }
+
+func TestSortedMapKeysDoesNotExposeValues(t *testing.T) {
+	valueSentinel := "ETCD_EXTERNAL_SPEC_SECRET_SENTINEL"
+	keys := sortedMapKeys(map[string]string{
+		"collections/100": valueSentinel,
+		"collections/200": "another-secret",
+	})
+
+	assert.Equal(t, []string{"collections/100", "collections/200"}, keys)
+	assert.NotContains(t, fmt.Sprint(keys), valueSentinel)
+	assert.NotContains(t, fmt.Sprint(keys), "another-secret")
+}

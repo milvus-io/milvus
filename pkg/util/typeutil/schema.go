@@ -2653,7 +2653,7 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		var err error
 		isMilvusTable, err = isMilvusTableExternalSpec(schema.GetExternalSpec())
 		if err != nil {
-			return merr.WrapErrParameterInvalidMsg("external_spec is invalid")
+			return err
 		}
 	}
 	allowRealPrimaryKey := hasUserPrimaryKey(schema) && isMilvusTable

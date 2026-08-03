@@ -5679,7 +5679,7 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RestoreRBAC")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "RestoreRBAC", mlog.Any("req", req))
+	mlog.Debug(ctx, "RestoreRBAC", mlog.Any("req", redactRestoreRBACRequestForLog(req)))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}

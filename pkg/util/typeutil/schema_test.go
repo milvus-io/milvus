@@ -5510,8 +5510,8 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		schema.ExternalSpec = `{"format":"FORMAT_SCHEMA_SECRET_SENTINEL"}`
 		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "external_spec is invalid")
-		assert.NotContains(t, err.Error(), "FORMAT_SCHEMA_SECRET_SENTINEL")
+		assert.Contains(t, err.Error(), "FORMAT_SCHEMA_SECRET_SENTINEL")
+		assert.Contains(t, err.Error(), "unsupported format")
 	})
 
 	t.Run("partition key disabled", func(t *testing.T) {

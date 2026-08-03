@@ -130,7 +130,7 @@ func sendReqAndVerify(t *testing.T, testEngine *gin.Engine, testName, method str
 }
 
 func TestTraceLogRequestFieldRedactsRESTSnapshotExternalSpec(t *testing.T) {
-	externalSpec := `{"extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","region":"us-west-2"}}`
+	externalSpec := `{"format":"parquet","extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","future_password":"FUTURE_SECRET_SENTINEL","region":"us-west-2"}}`
 	testCases := []struct {
 		name string
 		req  any
@@ -162,7 +162,9 @@ func TestTraceLogRequestFieldRedactsRESTSnapshotExternalSpec(t *testing.T) {
 			request := fmt.Sprint(field.Interface)
 			assert.NotContains(t, request, "AKIAEXAMPLE")
 			assert.NotContains(t, request, "SUPERSECRET")
+			assert.NotContains(t, request, "FUTURE_SECRET_SENTINEL")
 			assert.Contains(t, request, "***")
+			assert.Contains(t, request, "parquet")
 		})
 	}
 }
@@ -259,7 +261,7 @@ func TestCreateExternalCollectionValidationDoesNotLogExternalSpec(t *testing.T) 
 			assert.NotContains(t, output, "AKIA_LOG_SENTINEL")
 			assert.NotContains(t, output, "SECRET_LOG_SENTINEL")
 			assert.NotContains(t, output, "FUTURE_LOG_SECRET_SENTINEL")
-			assert.Contains(t, output, "redacted")
+			assert.Contains(t, output, "***")
 		})
 	}
 }

@@ -87,7 +87,7 @@ func TestTraceLogInterceptor(t *testing.T) {
 		})
 		assert.NotContains(t, strings.ToLower(fmt.Sprint(f2.Interface)), "password")
 
-		externalSpec := `{"extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","region":"us-west-2"}}`
+		externalSpec := `{"format":"parquet","extfs":{"cloud_provider":"aws","access_key_id":"AKIAEXAMPLE","access_key_value":"SUPERSECRET","future_password":"FUTURE_SECRET_SENTINEL","region":"us-west-2"}}`
 		f3 := GetRequestFieldWithoutSensitiveInfo(&milvuspb.RestoreExternalSnapshotRequest{
 			DbName:               "db",
 			TargetCollectionName: "restored",
@@ -96,7 +96,9 @@ func TestTraceLogInterceptor(t *testing.T) {
 		})
 		assert.NotContains(t, fmt.Sprint(f3.Interface), "AKIAEXAMPLE")
 		assert.NotContains(t, fmt.Sprint(f3.Interface), "SUPERSECRET")
+		assert.NotContains(t, fmt.Sprint(f3.Interface), "FUTURE_SECRET_SENTINEL")
 		assert.Contains(t, fmt.Sprint(f3.Interface), "***")
+		assert.Contains(t, fmt.Sprint(f3.Interface), "parquet")
 
 		f4 := GetRequestFieldWithoutSensitiveInfo(&milvuspb.ExportSnapshotRequest{
 			DbName:         "db",
@@ -107,7 +109,21 @@ func TestTraceLogInterceptor(t *testing.T) {
 		})
 		assert.NotContains(t, fmt.Sprint(f4.Interface), "AKIAEXAMPLE")
 		assert.NotContains(t, fmt.Sprint(f4.Interface), "SUPERSECRET")
+		assert.NotContains(t, fmt.Sprint(f4.Interface), "FUTURE_SECRET_SENTINEL")
 		assert.Contains(t, fmt.Sprint(f4.Interface), "***")
+		assert.Contains(t, fmt.Sprint(f4.Interface), "parquet")
+
+		hashSentinel := "$2a$10$RESTORE_RBAC_HASH_SENTINEL"
+		f5 := GetRequestFieldWithoutSensitiveInfo(&milvuspb.RestoreRBACMetaRequest{
+			RBACMeta: &milvuspb.RBACMeta{
+				Users: []*milvuspb.UserInfo{{
+					User:     "restore-user",
+					Password: hashSentinel,
+				}},
+			},
+		})
+		assert.NotContains(t, fmt.Sprint(f5.Interface), hashSentinel)
+		assert.Contains(t, fmt.Sprint(f5.Interface), "restore-user")
 	}
 
 	_ = paramtable.Get().Save(paramtable.Get().CommonCfg.TraceLogMode.Key, "3")
