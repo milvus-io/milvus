@@ -5,7 +5,14 @@ from pymilvus import connections
 sys.path.append("..")
 sys.path.append("../..")
 from common.milvus_sys import MilvusSys
-from utils import *
+from utils import (
+    NUM_REPLICAS,
+    create_collections_and_insert_data,
+    create_index,
+    get_collections,
+    load_and_search,
+    logger,
+)
 
 
 def task_1(data_size, host):

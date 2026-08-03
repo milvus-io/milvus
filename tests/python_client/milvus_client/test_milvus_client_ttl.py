@@ -9,7 +9,6 @@ from common.common_type import CaseLabel, CheckTasks
 from pymilvus import AnnSearchRequest, DataType, WeightedRanker
 from pymilvus.orm.types import CONSISTENCY_BOUNDED, CONSISTENCY_EVENTUALLY, CONSISTENCY_SESSION, CONSISTENCY_STRONG
 from utils.util_log import test_log as log
-from utils.util_pymilvus import *
 
 default_nb = ct.default_nb
 default_dim = ct.default_dim

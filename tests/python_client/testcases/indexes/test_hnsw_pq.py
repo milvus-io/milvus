@@ -4,7 +4,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from idx_hnsw_pq import HNSW_PQ
-from utils.util_pymilvus import *
+from pymilvus import DataType
 
 index_type = "HNSW_PQ"
 success = "success"

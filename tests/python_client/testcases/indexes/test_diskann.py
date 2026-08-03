@@ -4,7 +4,8 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from idx_diskann import DISKANN
-from utils.util_pymilvus import *
+from pymilvus import DataType
+from utils.util_pymilvus import default_dim
 
 index_type = "DISKANN"
 success = "success"

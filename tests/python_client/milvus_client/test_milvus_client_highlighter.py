@@ -6,7 +6,6 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from pymilvus import DataType, Function, FunctionType, LexicalHighlighter
-from utils.util_pymilvus import *
 
 prefix = "client_insert"
 epsilon = ct.epsilon

@@ -1,9 +1,11 @@
+import time
+
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
+from pymilvus import DataType
 
 prefix = "client_insert"
 epsilon = ct.epsilon

@@ -9,7 +9,6 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from pymilvus import DataType
 from utils.util_log import test_log as log
-from utils.util_pymilvus import *
 
 # Test parameters
 default_nb = ct.default_nb

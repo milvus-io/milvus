@@ -9,7 +9,7 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from pymilvus import DataType
 from utils.util_log import test_log as log
-from utils.util_pymilvus import *
+from utils.util_pymilvus import default_dim, default_float_vec_field_name, default_top_k, gen_vectors
 
 prefix = "collection"
 exp_name = "name"

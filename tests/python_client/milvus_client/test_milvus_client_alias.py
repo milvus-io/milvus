@@ -1,10 +1,10 @@
+import numpy as np
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from pymilvus import DataType
-from utils.util_pymilvus import *
 
 prefix = "client_alias"
 epsilon = ct.epsilon

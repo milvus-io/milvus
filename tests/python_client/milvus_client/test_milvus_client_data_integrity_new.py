@@ -4,8 +4,8 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel
+from pymilvus import DataType
 from utils.util_log import test_log as log
-from utils.util_pymilvus import *
 
 prefix = "milvus_client_api_query"
 epsilon = ct.epsilon
@@ -186,22 +186,25 @@ class TestStaticFieldNoIndexAllExpr(TestMilvusClientV2Base):
                     log.info("binbin_debug1")
                     log.info(field)
                     if (
-                        (int8 is None)
-                        or (int16 is None)
-                        or (int32 is None)
-                        or (int64 is None)
+                        # These names are injected into globals() by the loop above, so static analysis
+                        # cannot see them. See the follow-up issue: this block also has a `float is None`
+                        # check against the builtin and an always-true `if "is null" or ...` below.
+                        (int8 is None)  # noqa: F821
+                        or (int16 is None)  # noqa: F821
+                        or (int32 is None)  # noqa: F821
+                        or (int64 is None)  # noqa: F821
                         or (float is None)
-                        or (double is None)
-                        or (varchar is None)
-                        or (bool_field is None)
-                        or (int8_array is None)
-                        or (int16_array is None)
-                        or (int32_array is None)
-                        or (int64_array is None)
-                        or (bool_array is None)
-                        or (float_array is None)
-                        or (double_array is None)
-                        or (string_array is None)
+                        or (double is None)  # noqa: F821
+                        or (varchar is None)  # noqa: F821
+                        or (bool_field is None)  # noqa: F821
+                        or (int8_array is None)  # noqa: F821
+                        or (int16_array is None)  # noqa: F821
+                        or (int32_array is None)  # noqa: F821
+                        or (int64_array is None)  # noqa: F821
+                        or (bool_array is None)  # noqa: F821
+                        or (float_array is None)  # noqa: F821
+                        or (double_array is None)  # noqa: F821
+                        or (string_array is None)  # noqa: F821
                     ):
                         if "is null" or "IS NULL" in expression:
                             compare_dict[field][f"{i}"][field].append(rows_list[j][field])

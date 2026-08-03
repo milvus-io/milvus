@@ -1,9 +1,12 @@
+import random
+
 import pytest
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
+from pymilvus import DataType
+from utils.util_pymilvus import gen_vectors
 
 
 @pytest.mark.skip(reason="field partial load behavior changing @congqixia")

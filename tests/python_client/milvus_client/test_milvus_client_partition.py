@@ -1,13 +1,14 @@
 import threading
 
+import numpy as np
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from pymilvus import DataType
 from pymilvus.client.types import LoadState
 from utils.util_log import test_log as log
-from utils.util_pymilvus import *
 
 prefix = "milvus_client_api_partition"
 partition_prefix = "milvus_client_api_partition"

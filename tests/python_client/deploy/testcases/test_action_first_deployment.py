@@ -1,3 +1,5 @@
+import random
+
 import pymilvus
 import pytest
 from common import common_func as cf
@@ -7,7 +9,6 @@ from common.milvus_sys import MilvusSys
 from deploy.base import TestDeployBase
 from deploy.common import gen_index_param, gen_search_param
 from utils.util_log import test_log as log
-from utils.util_pymilvus import *
 
 pymilvus_version = pymilvus.__version__
 

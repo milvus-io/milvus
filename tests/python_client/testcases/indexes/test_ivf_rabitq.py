@@ -4,7 +4,8 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from idx_ivf_rabitq import IVF_RABITQ
-from utils.util_pymilvus import *
+from pymilvus import DataType
+from utils.util_pymilvus import default_dim
 
 index_type = "IVF_RABITQ"
 success = "success"

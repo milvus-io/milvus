@@ -5,10 +5,9 @@ from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from common.constants import *
+from customize.milvus_operator import MilvusOperator
 from utils.util_k8s import read_pod_log
 from utils.util_log import test_log as log
-from utils.util_pymilvus import *
 from utils.util_pymilvus import get_latest_tag
 
 prefix = "rate_limit_collection"
@@ -59,7 +58,7 @@ class TestRateLimit(TestcaseBase):
         # 3. create maximum numbers of collections in one two limit periods
         for period in range(2):
             log.info("test_rate_limit_create_collection: starting to check rate limit period %d" % (period + 1))
-            for collection_num in range(collectionRateLimit):
+            for collection_num in range(int(collection_rate_limit)):
                 log.info("test_rate_limit_create_collection: creating collection %d" % (collection_num + 1))
                 c_name = cf.gen_unique_str(prefix)
                 collection_w = self.init_collection_wrap(
@@ -98,4 +97,4 @@ class TestRateLimit(TestcaseBase):
         read_pod_log(namespace=NAMESPACE, label_selector=label, release_name=release_name)
 
         # 9. uninstall milvus
-        mil.uninstall(release_name, namespace=NAMESPACE)
+        MilvusOperator().uninstall(release_name, namespace=NAMESPACE)

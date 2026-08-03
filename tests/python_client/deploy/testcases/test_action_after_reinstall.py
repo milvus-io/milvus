@@ -8,7 +8,8 @@ from common.milvus_sys import MilvusSys
 from deploy import common as dc
 from deploy.base import TestDeployBase
 from deploy.common import gen_index_param, gen_search_param
-from utils.util_pymilvus import *
+from utils.util_log import test_log as log
+from utils.util_pymilvus import default_binary_vec_field_name
 
 default_nb = ct.default_nb
 default_nq = ct.default_nq

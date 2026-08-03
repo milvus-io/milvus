@@ -1,5 +1,12 @@
 from pymilvus import connections
-from utils import *
+from utils import (
+    create_collections_and_insert_data,
+    create_index,
+    get_collections,
+    load_and_search,
+    logger,
+    release_collection,
+)
 
 
 def task_1(data_size, host):

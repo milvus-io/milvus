@@ -10,7 +10,7 @@ from common.milvus_sys import MilvusSys
 from deploy.base import TestDeployBase
 from deploy.common import gen_index_param, gen_search_param, get_deploy_test_collections
 from utils.util_log import test_log as log
-from utils.util_pymilvus import *
+from utils.util_pymilvus import gen_unique_str
 
 default_nb = ct.default_nb
 default_nq = ct.default_nq
