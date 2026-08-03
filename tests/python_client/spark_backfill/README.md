@@ -11,6 +11,7 @@
 
 - 普通 pytest、PR CI 和常规 E2E 默认完全不收集本目录。
 - 只有显式传入 `--run-spark-backfill` 才会收集用例。
+- 所有用例使用独立 `SparkBackfill` tag，不属于普通 Nightly 的 `L0 L1 L2 ClusterOnly` 选择范围。
 - 禁止 pytest-xdist；运行时使用 `-n 0` 或不传 `-n`。
 - 每个用例创建独立 Collection、Snapshot、对象存储 prefix 和 Result 路径。
 - `job` 模式由 pytest 创建、等待、取日志和删除 Spark Job。
@@ -71,6 +72,7 @@ export SPARK_BACKFILL_S3_SECRET_KEY="$(
 python3 -m pytest -p no:rerunfailures \
   'tests/python_client/spark_backfill/test_v3_backfill_e2e.py::test_v3_backfill_modes_publish_and_become_visible[coalesce]' \
   --run-spark-backfill \
+  --tags SparkBackfill \
   --spark-runner-mode toolbox \
   --uri http://127.0.0.1:19530 \
   --token 'root:Milvus' \
@@ -178,6 +180,7 @@ rules:
 ```bash
 python3 -m pytest -p no:rerunfailures tests/python_client/spark_backfill \
   --run-spark-backfill \
+  --tags SparkBackfill \
   --spark-runner-mode job \
   --host <milvus-host> \
   --port 19530 \
@@ -216,6 +219,7 @@ dataCoord:
 ```bash
 python3 -m pytest -p no:rerunfailures tests/python_client/spark_backfill \
   --run-spark-backfill \
+  --tags SparkBackfill \
   <与上面相同的环境参数> \
   -m "spark_backfill_v2 and spark_backfill_core" \
   -n 0 -v --tb=short
@@ -249,6 +253,8 @@ ${CI_LOG_PATH:-/tmp/ci_logs}/spark_backfill/<job-name>/
 两种模式正常结束都会删除测试 Collection、Snapshot 和对象 prefix。Job 模式额外删除 ConfigMap、临时 Secret 和 Job；Toolbox 模式始终保留 Toolbox Pod。传 `--spark-keep-failed-job` 只影响 Job 模式。
 
 ## Nightly 接入
+
+DevOps/Jenkins 接入和交接清单见 [PIPELINE_HANDOFF.md](PIPELINE_HANDOFF.md)。
 
 Nightly 不应依赖 spark-milvus Release 每日发布。推荐分成两个阶段：
 

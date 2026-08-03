@@ -377,6 +377,7 @@ Spark Backfill pytest 支持通过 Kubernetes exec 复用本 Pod，不需要 Con
 python3 -m pytest -p no:rerunfailures \
   'tests/python_client/spark_backfill/test_v3_backfill_e2e.py::test_v3_backfill_modes_publish_and_become_visible[coalesce]' \
   --run-spark-backfill \
+  --tags SparkBackfill \
   --spark-runner-mode toolbox \
   --spark-k8s-context my-vcluster \
   --spark-k8s-namespace default \
