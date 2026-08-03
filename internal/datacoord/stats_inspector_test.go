@@ -1010,9 +1010,11 @@ func (s *statsInspectorSuite) TestEstimateStatsTaskSize() {
 	newSegment := func(collID UniqueID) *SegmentInfo {
 		return &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           30,
-				CollectionID: collID,
-				NumOfRows:    numRows,
+				ID:             30,
+				CollectionID:   collID,
+				NumOfRows:      numRows,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   "manifest.json",
 				// external segments report one synthetic column group holding
 				// every column at once
 				Binlogs: []*datapb.FieldBinlog{
@@ -1047,6 +1049,14 @@ func (s *statsInspectorSuite) TestEstimateStatsTaskSize() {
 		expected := residual * numRows
 		s.Equal(expected, s.inspector.estimateStatsTaskSize(s.mt.GetCollection(segment.GetCollectionID()), segment, indexpb.StatsSubJob_TextIndexJob))
 		s.Less(expected, segment.getSegmentSize())
+	})
+
+	s.Run("storage v2 falls back to the whole segment", func() {
+		segment := newSegment(collectionID)
+		segment.StorageVersion = storage.StorageV2
+		segment.ManifestPath = ""
+		s.Equal(segment.getSegmentSize()*2, s.inspector.estimateStatsTaskSize(
+			s.mt.GetCollection(segment.GetCollectionID()), segment, indexpb.StatsSubJob_JsonKeyIndexJob))
 	})
 
 	s.Run("collection without the indexed column falls back to segment size", func() {

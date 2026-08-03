@@ -211,7 +211,10 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	indexType := GetIndexType(indexParams)
 	isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 	fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, indexID)
-	fieldSize := i.estimateIndexFieldSize(ctx, resolveCollection(ctx, i.handler, segment.GetCollectionID()), segment, fieldID)
+	fieldSize := segment.getFieldBinlogSize(fieldID)
+	if supportsFieldProjection(segment) {
+		fieldSize = i.estimateIndexFieldSize(ctx, resolveCollection(ctx, i.handler, segment.GetCollectionID()), segment, fieldID)
+	}
 	taskSlot := calculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
 
 	// rewrite the index type if needed, and this final index type will be persisted in the meta
@@ -267,11 +270,15 @@ func (i *indexInspector) isExternalCollection(collectionID int64) bool {
 // estimateIndexFieldSize returns the amount of data the index build task reads
 // for fieldID, which drives the task slot estimation.
 //
-// The index build only reads the indexed column, while the binlog size covers
-// the whole column group holding it. On any unresolvable schema the binlog size
-// is used, which keeps the previous (over-estimating but safe) behavior.
+// A manifest-backed StorageV3 index build projects the indexed column, while
+// the binlog size covers the whole column group holding it. StorageV2 reads the
+// whole group and therefore keeps the binlog size. An unresolvable schema also
+// keeps that previous conservative behavior.
 func (i *indexInspector) estimateIndexFieldSize(ctx context.Context, coll *collectionInfo, segment *SegmentInfo, fieldID int64) int64 {
 	binlogSize := segment.getFieldBinlogSize(fieldID)
+	if !supportsFieldProjection(segment) {
+		return binlogSize
+	}
 	if coll == nil {
 		mlog.Warn(ctx, "cannot resolve collection, fallback to binlog size for index task slot",
 			mlog.FieldCollectionID(segment.GetCollectionID()),
