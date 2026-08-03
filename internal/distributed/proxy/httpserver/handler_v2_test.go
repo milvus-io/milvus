@@ -3761,6 +3761,136 @@ func TestQueryOrderByFields(t *testing.T) {
 	assert.Equal(t, []string{"word_count:desc,book_id:asc"}, orderByValues)
 }
 
+func TestQueryGroupByFields(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(6)
+
+	queryParams := make([]map[string]string, 0, 6)
+	mp.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		params := make(map[string]string, len(req.GetQueryParams()))
+		for _, pair := range req.GetQueryParams() {
+			params[pair.GetKey()] = pair.GetValue()
+		}
+		queryParams = append(queryParams, params)
+		return &milvuspb.QueryResults{Status: commonSuccessStatus, OutputFields: []string{}, FieldsData: []*schemapb.FieldData{}}, nil
+	}).Times(6)
+
+	testEngine := initHTTPServerV2(mp, false)
+	validateTestCases(t, testEngine, []requestBodyTestCase{
+		{
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"], "groupByFields": ["word_count", "book_id"]}`),
+		},
+		{
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"], "groupByFields": ["word_count"], "limit": 10, "offset": 2}`),
+		},
+		{
+			// Preserve the master REST behavior for a global lone count(*).
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"], "limit": 10}`),
+		},
+		{
+			// Global mixed count aggregates keep master behavior: REST forwards its
+			// default limit and Proxy rejects count(*) pagination.
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)", "sum(word_count)"]}`),
+		},
+		{
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)", "sum(word_count)"], "groupByFields": ["word_count"], "limit": 10}`),
+		},
+		{
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"], "groupByFields": ["word_count"], "orderByFields": ["word_count:asc"]}`),
+		},
+	}, false)
+
+	require.Len(t, queryParams, 6)
+	assert.Equal(t, "word_count,book_id", queryParams[0][proxy.GroupByFieldsKey])
+	assert.Equal(t, "100", queryParams[0][proxy.LimitKey])
+	assert.Equal(t, "word_count", queryParams[1][proxy.GroupByFieldsKey])
+	assert.Equal(t, "10", queryParams[1][proxy.LimitKey])
+	assert.Equal(t, "2", queryParams[1][proxy.OffsetKey])
+	assert.NotContains(t, queryParams[2], proxy.GroupByFieldsKey)
+	assert.NotContains(t, queryParams[2], proxy.LimitKey)
+	assert.NotContains(t, queryParams[3], proxy.GroupByFieldsKey)
+	assert.Equal(t, "100", queryParams[3][proxy.LimitKey])
+	assert.Equal(t, "word_count", queryParams[4][proxy.GroupByFieldsKey])
+	assert.Equal(t, "10", queryParams[4][proxy.LimitKey])
+	assert.Equal(t, "word_count", queryParams[5][proxy.GroupByFieldsKey])
+	assert.Equal(t, "word_count:asc", queryParams[5][proxy.OrderByFieldsKey])
+}
+
+func TestSearchOrderByFields(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(6)
+
+	orderByValues := []string{}
+	mp.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		for _, pair := range req.GetSearchParams() {
+			if pair.GetKey() == proxy.OrderByFieldsKey {
+				orderByValues = append(orderByValues, pair.GetValue())
+			}
+		}
+		return &milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil
+	}).Times(4)
+
+	testEngine := initHTTPServerV2(mp, false)
+	searchAggregation := `"searchAggregation": {"fields": ["word_count"], "size": 1}`
+	validateTestCases(t, testEngine, []requestBodyTestCase{
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "limit": 4, "orderByFields": ["word_count:desc", "book_id:asc"]}`),
+		},
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "limit": 4}`),
+		},
+		{
+			// The legacy searchParams passthrough remains unchanged.
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "limit": 4, "searchParams": {"order_by_fields": "book_id:asc"}}`),
+		},
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "limit": 4, "orderByFields": ["word_count:desc"], "searchParams": {"order_by_fields": "book_id:asc"}}`),
+			errCode:     1100,
+			errMsg:      "ambiguous order by: use either orderByFields or searchParams.order_by_fields, not both",
+		},
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "limit": 4, "orderByFields": ["word_count:desc"], ` + searchAggregation + `}`),
+			errCode:     1100,
+			errMsg:      "orderByFields and searchAggregation cannot be used simultaneously",
+		},
+		{
+			// This legacy combination was accepted by master, so it must stay accepted.
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "limit": 4, "searchParams": {"order_by_fields": "book_id:asc"}, ` + searchAggregation + `}`),
+		},
+	}, false)
+	assert.Equal(t, []string{"word_count:desc,book_id:asc", "book_id:asc", "book_id:asc"}, orderByValues)
+}
+
 func TestAllowInt64(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
