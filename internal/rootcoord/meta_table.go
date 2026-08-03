@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -588,22 +589,9 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 		return nil
 	}
 
-	mt.collID2Meta[coll.CollectionID] = coll.Clone()
-	mt.names.insert(coll.DBName, coll.Name, coll.CollectionID)
-	// Build partition name index for the new collection
-	mt.partitionName2ID[coll.CollectionID] = make(map[string]int64)
-	for _, partition := range coll.Partitions {
-		if partition.Available() {
-			mt.partitionName2ID[coll.CollectionID][partition.PartitionName] = partition.PartitionID
-		}
+	if err := mt.applyCollectionLiveLocked(ctx, coll, false, false, false); err != nil {
+		return err
 	}
-
-	pn := coll.GetPartitionNum(true)
-	mt.generalCnt += pn * int(coll.ShardsNum)
-	metrics.RootCoordNumOfCollections.WithLabelValues(coll.DBName).Inc()
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(pn))
-
-	channel.StaticPChannelStatsManager.MustGet().AddVChannel(coll.VirtualChannelNames...)
 	mlog.Info(ctx, "add collection to meta table",
 		mlog.Int64("dbID", coll.DBID),
 		mlog.String("collection", coll.Name),
@@ -611,6 +599,277 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 		mlog.Uint64("ts", coll.CreateTime),
 	)
 	return nil
+}
+
+// ApplyTransferredCollection loads collection metadata that was already
+// persisted by Catalog Service into the target RootCoord live MetaTable.
+func (mt *MetaTable) ApplyTransferredCollection(ctx context.Context, coll *model.Collection) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	return mt.applyCollectionLiveLocked(ctx, coll, true, true, true)
+}
+
+func (mt *MetaTable) applyCollectionLiveLocked(ctx context.Context, coll *model.Collection, includeAliases bool, includeFileResourceRefs bool, validateDatabase bool) error {
+	if coll == nil {
+		return merr.WrapErrServiceInternalMsg("collection meta is nil")
+	}
+	if coll.State != pb.CollectionState_CollectionCreated {
+		return merr.WrapErrServiceInternalMsg("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
+	}
+	mt.initLiveCollectionIndexesLocked()
+
+	dbName := coll.DBName
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
+	if validateDatabase {
+		db, ok := mt.dbName2Meta[dbName]
+		if !ok {
+			return merr.WrapErrDatabaseNotFound(dbName)
+		}
+		if db.ID != coll.DBID {
+			return merr.WrapErrServiceInternalMsg("collection database id mismatch while applying collection, db: %s, expected id: %d, incoming id: %d", dbName, db.ID, coll.DBID)
+		}
+	}
+	if existingID, ok := mt.names.get(dbName, coll.Name); ok && existingID != coll.CollectionID {
+		return merr.WrapErrServiceInternalMsg("collection name conflict while applying collection, db: %s, collection: %s, existing id: %d, incoming id: %d", dbName, coll.Name, existingID, coll.CollectionID)
+	}
+	if existingID, ok := mt.aliases.get(dbName, coll.Name); ok && existingID != coll.CollectionID {
+		return merr.WrapErrServiceInternalMsg("collection name conflicts with alias while applying collection, db: %s, collection: %s, existing id: %d, incoming id: %d", dbName, coll.Name, existingID, coll.CollectionID)
+	}
+	if includeAliases {
+		for _, alias := range coll.Aliases {
+			if existingID, ok := mt.names.get(dbName, alias); ok && existingID != coll.CollectionID {
+				return merr.WrapErrServiceInternalMsg("collection alias conflicts with existing collection while applying collection, db: %s, alias: %s, existing id: %d, incoming id: %d", dbName, alias, existingID, coll.CollectionID)
+			}
+			if existingID, ok := mt.aliases.get(dbName, alias); ok && existingID != coll.CollectionID {
+				return merr.WrapErrServiceInternalMsg("collection alias conflict while applying collection, db: %s, alias: %s, existing id: %d, incoming id: %d", dbName, alias, existingID, coll.CollectionID)
+			}
+		}
+	}
+
+	incoming := canonicalCollectionForLiveApply(coll, dbName)
+	if existing, ok := mt.collID2Meta[coll.CollectionID]; ok {
+		if err := validateCollectionLiveApplyIdentity(existing, incoming); err != nil {
+			return err
+		}
+		mlog.Info(ctx, "collection already loaded in meta table, skip live apply", mlog.Int64("collectionID", coll.CollectionID))
+		return nil
+	}
+
+	clone := incoming
+	mt.collID2Meta[clone.CollectionID] = clone
+	mt.names.insert(dbName, clone.Name, clone.CollectionID)
+	if includeAliases {
+		for _, alias := range clone.Aliases {
+			mt.aliases.insert(dbName, alias, clone.CollectionID)
+		}
+	}
+
+	mt.partitionName2ID[clone.CollectionID] = make(map[string]int64)
+	for _, partition := range clone.Partitions {
+		if partition.Available() {
+			mt.partitionName2ID[clone.CollectionID][partition.PartitionName] = partition.PartitionID
+		}
+	}
+	if includeFileResourceRefs {
+		for _, fileResourceID := range clone.FileResourceIds {
+			mt.fileResourceRefCnt[fileResourceID]++
+		}
+	}
+
+	pn := clone.GetPartitionNum(true)
+	mt.generalCnt += pn * int(clone.ShardsNum)
+	metrics.RootCoordNumOfCollections.WithLabelValues(dbName).Inc()
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(pn))
+	channel.StaticPChannelStatsManager.MustGet().AddVChannel(clone.VirtualChannelNames...)
+	return nil
+}
+
+func canonicalCollectionForLiveApply(coll *model.Collection, dbName string) *model.Collection {
+	clone := coll.Clone()
+	clone.DBName = dbName
+	ensureCollectionMaxFieldIDProperty(clone)
+	return clone
+}
+
+func validateCollectionLiveApplyIdentity(existing *model.Collection, incoming *model.Collection) error {
+	if existing == nil {
+		return merr.WrapErrServiceInternalMsg("existing collection meta is nil, incoming collection id: %d", incoming.CollectionID)
+	}
+	existingCanonical := canonicalCollectionForLiveApply(existing, existing.DBName)
+	if !collectionLiveApplyEquivalent(existingCanonical, incoming) {
+		return merr.WrapErrServiceInternalMsg(
+			"collection metadata conflict while applying collection, existing db: %s, existing name: %s, existing id: %d, incoming db: %s, incoming name: %s, incoming id: %d",
+			existingCanonical.DBName, existingCanonical.Name, existingCanonical.CollectionID, incoming.DBName, incoming.Name, incoming.CollectionID,
+		)
+	}
+	return nil
+}
+
+func collectionLiveApplyEquivalent(a *model.Collection, b *model.Collection) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.TenantID != b.TenantID ||
+		a.DBID != b.DBID ||
+		a.CollectionID != b.CollectionID ||
+		a.Name != b.Name ||
+		a.DBName != b.DBName ||
+		a.Description != b.Description ||
+		a.AutoID != b.AutoID ||
+		a.ShardsNum != b.ShardsNum ||
+		a.CreateTime != b.CreateTime ||
+		a.ConsistencyLevel != b.ConsistencyLevel ||
+		a.State != b.State ||
+		a.EnableDynamicField != b.EnableDynamicField ||
+		a.EnableNamespace != b.EnableNamespace ||
+		a.UpdateTimestamp != b.UpdateTimestamp ||
+		a.SchemaVersion != b.SchemaVersion ||
+		a.ExternalSource != b.ExternalSource ||
+		a.ExternalSpec != b.ExternalSpec {
+		return false
+	}
+	return equalPartitionsForLiveApply(a.Partitions, b.Partitions) &&
+		model.CheckFieldsEqual(a.Fields, b.Fields) &&
+		model.CheckStructArrayFieldsEqual(a.StructArrayFields, b.StructArrayFields) &&
+		equalFunctionsForLiveApply(a.Functions, b.Functions) &&
+		common.KeyDataPairs(a.StartPositions).Equal(b.StartPositions) &&
+		common.KeyValuePairs(a.Properties).Equal(b.Properties) &&
+		equalStringSet(a.VirtualChannelNames, b.VirtualChannelNames) &&
+		equalStringSet(a.PhysicalChannelNames, b.PhysicalChannelNames) &&
+		equalStringSet(a.Aliases, b.Aliases) &&
+		equalInt64Set(a.FileResourceIds, b.FileResourceIds) &&
+		equalShardInfosForLiveApply(a.ShardInfos, b.ShardInfos)
+}
+
+func equalPartitionsForLiveApply(a []*model.Partition, b []*model.Partition) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	byName := make(map[string]*model.Partition, len(a))
+	for _, partition := range a {
+		if partition == nil {
+			return false
+		}
+		byName[partition.PartitionName] = partition
+	}
+	for _, partition := range b {
+		if partition == nil {
+			return false
+		}
+		other, ok := byName[partition.PartitionName]
+		if !ok ||
+			other.PartitionID != partition.PartitionID ||
+			other.PartitionCreatedTimestamp != partition.PartitionCreatedTimestamp ||
+			other.CollectionID != partition.CollectionID ||
+			other.State != partition.State {
+			return false
+		}
+	}
+	return true
+}
+
+func equalFunctionsForLiveApply(a []*model.Function, b []*model.Function) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	byID := make(map[int64]*model.Function, len(a))
+	for _, function := range a {
+		if function == nil {
+			return false
+		}
+		byID[function.ID] = function
+	}
+	for _, function := range b {
+		if function == nil {
+			return false
+		}
+		other, ok := byID[function.ID]
+		if !ok ||
+			other.Name != function.Name ||
+			other.Description != function.Description ||
+			other.Type != function.Type ||
+			!slices.Equal(other.InputFieldIDs, function.InputFieldIDs) ||
+			!slices.Equal(other.InputFieldNames, function.InputFieldNames) ||
+			!slices.Equal(other.OutputFieldIDs, function.OutputFieldIDs) ||
+			!slices.Equal(other.OutputFieldNames, function.OutputFieldNames) ||
+			!common.KeyValuePairs(other.Params).Equal(function.Params) {
+			return false
+		}
+	}
+	return true
+}
+
+func equalShardInfosForLiveApply(a map[string]*model.ShardInfo, b map[string]*model.ShardInfo) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for name, shardInfo := range a {
+		other, ok := b[name]
+		if !ok {
+			return false
+		}
+		if shardInfo == nil || other == nil {
+			return shardInfo == other
+		}
+		if shardInfo.PChannelName != other.PChannelName ||
+			shardInfo.VChannelName != other.VChannelName ||
+			shardInfo.LastTruncateTimeTick != other.LastTruncateTimeTick {
+			return false
+		}
+	}
+	return true
+}
+
+func equalStringSet(a []string, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	a = slices.Clone(a)
+	b = slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(a, b)
+}
+
+func equalInt64Set(a []int64, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	a = slices.Clone(a)
+	b = slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(a, b)
+}
+
+func (mt *MetaTable) initLiveCollectionIndexesLocked() {
+	if mt.dbName2Meta == nil {
+		mt.dbName2Meta = make(map[string]*model.Database)
+	}
+	if mt.collID2Meta == nil {
+		mt.collID2Meta = make(map[UniqueID]*model.Collection)
+	}
+	if mt.partitionName2ID == nil {
+		mt.partitionName2ID = make(map[int64]map[string]int64)
+	}
+	if mt.fileResourceRefCnt == nil {
+		mt.fileResourceRefCnt = make(map[int64]int)
+	}
+	if mt.fileResourceRefHolds == nil {
+		mt.fileResourceRefHolds = make(map[int64]map[int64]int)
+	}
+	if mt.names == nil {
+		mt.names = newNameDb()
+	}
+	if mt.aliases == nil {
+		mt.aliases = newNameDb()
+	}
+	for dbName := range mt.dbName2Meta {
+		mt.names.createDbIfNotExist(dbName)
+		mt.aliases.createDbIfNotExist(dbName)
+	}
 }
 
 func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
