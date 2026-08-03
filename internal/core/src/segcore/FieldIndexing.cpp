@@ -223,6 +223,12 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
     : FieldIndexing(field_meta, segcore_config),
       built_(false),
       sync_with_index_(false),
+      // Snapshot the async switch exactly once, at construction: this is
+      // what makes "a hot toggle only affects growing segments created
+      // afterwards" true, and it keeps the per-dispatch read race-free
+      // regardless of concurrent config-watcher stores to the atomic source.
+      async_build_enabled_(
+          segcore_config.get_enable_async_growing_index_build()),
       config_(std::make_unique<VecIndexConfig>(
           segment_max_row_count,
           field_index_meta,
@@ -233,6 +239,14 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
 }
 
 VectorFieldIndexing::~VectorFieldIndexing() {
+    // Lifetime precondition: the caller guarantees no Insert (and thus no
+    // AppendSegmentIndex*) is concurrently in flight for this field while the
+    // segment is being destroyed -- that is why build_ctrl_ (assigned only
+    // under append_mutex_ in StartBuildLocked) may be read here without the
+    // lock. Every other member access in this class rests on the same
+    // implicit contract; SegmentGrowingImpl provides it by fencing reads and
+    // writes off through its ptrLock before release.
+    //
     // Queued task: abandon it, no wait -- once scheduled it exits after
     // reading only the shared control block (the FinishGuard and TryStart both
     // touch ctrl only, never `this`). Running task: join it; worst case one
@@ -673,7 +687,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
                "field_raw_data can't cast to "
                "ConcurrentVector<SparseFloatVector> type");
 
-    if (!segcore_config_.get_enable_async_growing_index_build()) {
+    if (!async_build_enabled_) {
         // Legacy synchronous path, byte-for-byte the pre-change behavior.
         if (!built_) {
             try {
@@ -704,7 +718,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
             // pending_upto_ is written after this batch's set_data_raw
             // completed (SegmentGrowingImpl::Insert step ordering), so it is
             // an exact raw-data watermark for the catch-up task.
-            pending_upto_.store(reserved_offset + size);
+            AdvanceWatermarkLocked(reserved_offset + size);
             break;
         case GrowingIndexState::kSynced:
             AddBatchSparse(reserved_offset,
@@ -730,7 +744,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                "VECTOR_FLOAT16,VECTOR_BFLOAT16)");
     AssertInfo(ConcurrentDenseVectorCheck(field_raw_data, get_data_type()),
                "vec_base can't cast to ConcurrentVector type");
-    if (!segcore_config_.get_enable_async_growing_index_build()) {
+    if (!async_build_enabled_) {
         // Legacy synchronous path, byte-for-byte the pre-change behavior.
         if (!built_) {
             try {
@@ -754,7 +768,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                 field_raw_data, reserved_offset + size, /*new_data_dim=*/0);
             break;
         case GrowingIndexState::kBuilding:
-            pending_upto_.store(reserved_offset + size);
+            AdvanceWatermarkLocked(reserved_offset + size);
             break;
         case GrowingIndexState::kSynced:
             AddBatchDense(reserved_offset, size, field_raw_data, data_source);
@@ -772,7 +786,7 @@ VectorFieldIndexing::StartBuildLocked(const VectorBase* field_raw_data,
     // another thread immediately and drive state_ all the way to kSynced, and
     // a later store of kBuilding here would be a back edge.
     state_.store(GrowingIndexState::kBuilding);
-    pending_upto_.store(upto);
+    AdvanceWatermarkLocked(upto);
     build_ctrl_ = std::make_shared<BuildTaskCtrl>();
     try {
         build_task_ = GrowingIndexBuildPool().Submit(

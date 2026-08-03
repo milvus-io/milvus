@@ -12,6 +12,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <atomic>
 #include <string>
 #include <unordered_set>
 
@@ -196,12 +197,14 @@ class SegcoreConfig {
 
     void
     set_enable_async_growing_index_build(bool value) {
-        enable_async_growing_index_build_ = value;
+        enable_async_growing_index_build_.store(value,
+                                                std::memory_order_relaxed);
     }
 
     bool
     get_enable_async_growing_index_build() const {
-        return enable_async_growing_index_build_;
+        return enable_async_growing_index_build_.load(
+            std::memory_order_relaxed);
     }
 
     void
@@ -289,20 +292,15 @@ class SegcoreConfig {
         knowhere::RefineType::DATA_VIEW;
     inline static bool refine_with_quant_flag_ = false;
     inline static bool enable_geometry_cache_ = false;
-    // Async first build of the growing interim index (spec:
-    // docs/superpowers/specs/2026-07-30-growing-index-async-build-design.md).
-    // SegmentGrowingImpl copies SegcoreConfig by value at segment creation, so
-    // the per-segment copy is immutable for that segment's whole life and a
-    // hot toggle only affects segments created afterwards. The singleton's
-    // field itself is NOT synchronized: the Go config watcher writes
-    // default_config()'s copy while segment construction reads it, a formal
-    // data race on a non-atomic bool. That is the same shape as every
-    // inline-static switch above (existing repo precedent) and benign in
-    // practice on the platforms we ship -- a racing reader observes either the
-    // old or the new value, both of which are self-consistent whole-segment
-    // choices. Deliberately NOT std::atomic: that would delete SegcoreConfig's
-    // copy constructor, which SegmentGrowingImpl's by-value copy relies on.
-    bool enable_async_growing_index_build_ = true;
+    // Async first build of the growing interim index. The hot-updatable
+    // source of truth: the Go config watcher stores here concurrently with
+    // segment construction loading it, hence std::atomic. inline static so
+    // it does not participate in SegcoreConfig's (defaulted) copy
+    // constructor. The "a toggle only affects growing segments created
+    // afterwards" contract is provided by VectorFieldIndexing snapshotting
+    // this value once at construction (async_build_enabled_), not by the
+    // per-segment SegcoreConfig copy.
+    inline static std::atomic<bool> enable_async_growing_index_build_{true};
     // Capacity ratio (x CPU) of the background build pool; mirrors
     // queryNode.segcore.interimIndex.buildParallelRate so this layer never
     // out-submits the knowhere build pool. inline static because the pool is

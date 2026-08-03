@@ -14,6 +14,7 @@
 #include <assert.h>
 #include <index/Index.h>
 #include <index/ScalarIndex.h>
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -460,6 +461,20 @@ class VectorFieldIndexing : public FieldIndexing {
                      int64_t upto,
                      int64_t new_data_dim);
 
+    // Advances the raw-data watermark consumed by the catch-up task. Caller
+    // holds append_mutex_. Deliberately a max-store, not a plain store:
+    // catch-up completeness ("the index covers every row whose
+    // AppendingIndex returned") would otherwise rest entirely on the
+    // unenforced invariant that Insert calls into one segment are strictly
+    // ordered (single writer). The legacy AddBatch* offset arithmetic shares
+    // that assumption and is NOT protected here; the max only makes the
+    // async watermark self-healing against reordered inserts instead of
+    // silently dropping rows from the published index.
+    void
+    AdvanceWatermarkLocked(int64_t upto) {
+        pending_upto_.store(std::max(pending_upto_.load(), upto));
+    }
+
     // Background task body: first build, then catch up, then publish. Any
     // failure lands in kDisabled — never retried.
     void
@@ -552,6 +567,12 @@ class VectorFieldIndexing : public FieldIndexing {
     // searched.
     std::atomic<bool> sync_with_index_;
     // Write-side state machine; see GrowingIndexState.
+    // Per-field snapshot of SegcoreConfig's atomic asyncGrowingBuild switch,
+    // taken once at construction. Immutable afterwards, so the per-dispatch
+    // read is race-free and a hot toggle only affects growing segments
+    // created later.
+    const bool async_build_enabled_;
+
     std::atomic<GrowingIndexState> state_{GrowingIndexState::kNotBuilt};
     // Monotonic logical raw-data watermark: the largest reserved_offset + size
     // whose set_data_raw has completed. Written under append_mutex_ by insert,

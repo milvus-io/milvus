@@ -1423,6 +1423,106 @@ TEST(GrowingIndexAsyncBuildTest, BuildOffInsertPathAndCatchesUp) {
     EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k);
 }
 
+// Watermark-monotonicity regression: SegmentGrowingImpl::Insert takes only a
+// shared lock on sch_mutex_, so the segcore API permits two pre-reserved
+// inserts to reach AppendingIndex out of offset order. With a plain
+// pending_upto_ store the lower batch would REGRESS the watermark, the
+// finalize would target the regressed value, and the published index would
+// silently miss the higher batch's rows (its AppendingIndex already
+// returned). AdvanceWatermarkLocked's max-store is the defense; this test
+// reproduces the reordering deterministically in a single thread: reserve
+// two ranges up front, insert the HIGHER range first, then the lower one,
+// with the background task parked at kBeforeBuild so both updates land in
+// the kBuilding arm as pure watermark writes.
+TEST(GrowingIndexAsyncBuildTest, OutOfOrderInsertsKeepWatermarkMonotonic) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ApplyAsyncBuildConfig(config);
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    std::promise<void> parked;
+    auto parked_future = parked.get_future();
+    std::atomic<bool> release{false};
+    ScopedBuildHook hook([&](VectorFieldIndexing::GrowingBuildPhase phase) {
+        if (phase == VectorFieldIndexing::GrowingBuildPhase::kBeforeBuild) {
+            parked.set_value();
+            while (!release.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+    });
+    ScopedFlagOnExit release_on_exit(release);
+
+    // Cross the threshold in one batch; the background task parks at
+    // kBeforeBuild, freezing the segment in kBuilding.
+    constexpr int64_t trigger_rows = kAsyncBuildThreshold + 302;  // 23000
+    InsertAsyncBatch(segment.get(), fixture.schema, trigger_rows, /*seed=*/42);
+    parked_future.wait();
+
+    // Reserve both ranges first, then insert them in reverse offset order.
+    constexpr int64_t batch_rows = 2000;
+    auto low_offset = segment->PreInsert(batch_rows);   // [23000, 25000)
+    auto high_offset = segment->PreInsert(batch_rows);  // [25000, 27000)
+    ASSERT_EQ(low_offset + batch_rows, high_offset);
+
+    // Seeds spaced so every vector in the segment stays unique (DataGen
+    // seeds row n with seed + n).
+    auto high_data = DataGen(fixture.schema, batch_rows, /*seed=*/100000);
+    auto low_data = DataGen(fixture.schema, batch_rows, /*seed=*/60000);
+    segment->Insert(high_offset,
+                    batch_rows,
+                    high_data.row_ids_.data(),
+                    high_data.timestamps_.data(),
+                    high_data.raw_);
+    segment->Insert(low_offset,
+                    batch_rows,
+                    low_data.row_ids_.data(),
+                    low_data.timestamps_.data(),
+                    low_data.raw_);
+
+    release.store(true);
+    ASSERT_TRUE(WaitSynced(segment_impl, fixture.vec, /*timeout_ms=*/60000));
+
+    // Everything the two out-of-order batches wrote must be in the index.
+    EXPECT_EQ(IndexedRowCount(segment_impl, fixture.vec),
+              trigger_rows + 2 * batch_rows);
+
+    // The high batch's tail row is the discriminator: with a plain-store
+    // watermark the finalize target would have regressed to low_offset +
+    // batch_rows and rows [25000, 27000) would be missing from the
+    // published index.
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        fixture.schema, fixture.plan_str.data(), fixture.plan_str.size());
+    constexpr int64_t probe_row = batch_rows - 1;
+    auto probe_vectors = high_data.get_col<float>(fixture.vec);
+    ASSERT_EQ(probe_vectors.size(), batch_rows * kAsyncDim);
+    auto probe_ph = MakeSingleDensePlaceholder(
+        plan.get(), probe_vectors.data() + probe_row * kAsyncDim);
+    auto probe_sr = segment->Search(plan.get(), probe_ph.get(), 1000000);
+    ASSERT_EQ(probe_sr->total_nq_, 1);
+    ASSERT_GE(probe_sr->seg_offsets_.size(), 1);
+    EXPECT_EQ(probe_sr->seg_offsets_[0], high_offset + probe_row);
+    EXPECT_NEAR(probe_sr->distances_[0], 0.0f, 1e-5);
+
+    // And a low-batch row for completeness.
+    auto low_probe_vectors = low_data.get_col<float>(fixture.vec);
+    auto low_probe_ph =
+        MakeSingleDensePlaceholder(plan.get(), low_probe_vectors.data());
+    auto low_probe_sr =
+        segment->Search(plan.get(), low_probe_ph.get(), 1000000);
+    EXPECT_EQ(low_probe_sr->seg_offsets_[0], low_offset);
+    EXPECT_NEAR(low_probe_sr->distances_[0], 0.0f, 1e-5);
+}
+
 // The dividing assertion against async semantics: with async first build
 // turned off, the batch that crosses the build threshold must leave the
 // index fully synced *before* Insert returns -- no WaitSynced polling
