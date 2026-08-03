@@ -40,6 +40,11 @@ import (
 // others.
 const copySegmentDropConcurrency = 8
 
+type untrackedCopySegmentDrop struct {
+	nodeID int64
+	taskID int64
+}
+
 // Copy Segment Task Inspector
 //
 // The inspector is responsible for task-level scheduling and failure handling during
@@ -97,12 +102,14 @@ type copySegmentInspector struct {
 	// up to DataCoordCfg.RequestTimeoutSeconds (default 600s), and inspect()
 	// walks every job and task in one goroutine, so a single black-holing
 	// DataNode would otherwise freeze dispatch and cleanup for everything else.
-	dropPool        *conc.Pool[struct{}]
-	droppingTask    *typeutil.ConcurrentSet[int64] // taskIDs with a drop in flight
-	dropCtx         context.Context
-	dropCancel      context.CancelFunc
-	dropLifecycleMu sync.RWMutex
-	dropClosed      bool
+	dropPool          *conc.Pool[struct{}]
+	droppingTask      *typeutil.ConcurrentSet[int64] // taskIDs with a drop in flight
+	untrackedDrops    *typeutil.ConcurrentSet[untrackedCopySegmentDrop]
+	droppingUntracked *typeutil.ConcurrentSet[untrackedCopySegmentDrop]
+	dropCtx           context.Context
+	dropCancel        context.CancelFunc
+	dropLifecycleMu   sync.RWMutex
+	dropClosed        bool
 
 	closeOnce sync.Once     // Ensures Close is idempotent
 	closeChan chan struct{} // Channel to signal inspector shutdown
@@ -132,7 +139,7 @@ func NewCopySegmentInspector(
 	cluster session.Cluster,
 ) CopySegmentInspector {
 	dropCtx, dropCancel := context.WithCancel(ctx) //nolint:gosec // dropCancel is stored on the inspector and called in Close()
-	return &copySegmentInspector{
+	inspector := &copySegmentInspector{
 		ctx:       ctx,
 		meta:      meta,
 		copyMeta:  copyMeta,
@@ -140,11 +147,17 @@ func NewCopySegmentInspector(
 		cluster:   cluster,
 		dropPool: conc.NewPool[struct{}](copySegmentDropConcurrency,
 			conc.WithExpiryDuration(time.Minute), conc.WithNonBlocking(true)),
-		droppingTask: typeutil.NewConcurrentSet[int64](),
-		dropCtx:      dropCtx,
-		dropCancel:   dropCancel,
-		closeChan:    make(chan struct{}),
+		droppingTask:      typeutil.NewConcurrentSet[int64](),
+		untrackedDrops:    typeutil.NewConcurrentSet[untrackedCopySegmentDrop](),
+		droppingUntracked: typeutil.NewConcurrentSet[untrackedCopySegmentDrop](),
+		dropCtx:           dropCtx,
+		dropCancel:        dropCancel,
+		closeChan:         make(chan struct{}),
 	}
+	if meta, ok := copyMeta.(*copySegmentMeta); ok {
+		meta.setUntrackedDropHandler(inspector.enqueueUntrackedDrop)
+	}
+	return inspector
 }
 
 // ===========================================================================================
@@ -259,6 +272,8 @@ func (s *copySegmentInspector) reloadFromMeta() {
 // - Failed tasks need prompt cleanup to prevent orphaned segments
 // - Periodic inspection ensures no tasks are missed during state transitions
 func (s *copySegmentInspector) inspect() {
+	s.processUntrackedDrops()
+
 	// Retrieve all jobs (no filters)
 	jobs := s.copyMeta.GetJobBy(s.ctx)
 	sort.Slice(jobs, func(i, j int) bool {
@@ -299,6 +314,71 @@ func (s *copySegmentInspector) inspect() {
 				s.processTerminal(task)
 			}
 		}
+	}
+}
+
+// enqueueUntrackedDrop records the exact worker-side task that metadata could
+// not safely represent. The first attempt is submitted immediately; subsequent
+// failures remain in untrackedDrops and retry on every inspection round.
+func (s *copySegmentInspector) enqueueUntrackedDrop(nodeID, taskID int64) bool {
+	drop := untrackedCopySegmentDrop{nodeID: nodeID, taskID: taskID}
+	s.dropLifecycleMu.RLock()
+	if s.dropClosed {
+		s.dropLifecycleMu.RUnlock()
+		return false
+	}
+	inserted := s.untrackedDrops.Insert(drop)
+	s.dropLifecycleMu.RUnlock()
+	if inserted {
+		s.processUntrackedDrop(drop)
+	}
+	return true
+}
+
+func (s *copySegmentInspector) processUntrackedDrops() {
+	for _, drop := range s.untrackedDrops.Collect() {
+		s.processUntrackedDrop(drop)
+	}
+}
+
+func (s *copySegmentInspector) processUntrackedDrop(drop untrackedCopySegmentDrop) {
+	s.dropLifecycleMu.RLock()
+	if s.dropClosed {
+		s.dropLifecycleMu.RUnlock()
+		return
+	}
+	if !s.droppingUntracked.Insert(drop) {
+		s.dropLifecycleMu.RUnlock()
+		return
+	}
+
+	future := s.dropPool.Submit(func() (struct{}, error) {
+		defer s.droppingUntracked.Remove(drop)
+		err := s.cluster.DropCopySegment(s.dropCtx, drop.nodeID, drop.taskID, true)
+		if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
+			mlog.RatedWarn(s.dropCtx, 1, "failed to drop untracked copy segment task on datanode, retrying",
+				mlog.FieldTaskID(drop.taskID), mlog.FieldNodeID(drop.nodeID), mlog.Err(err))
+			return struct{}{}, nil
+		}
+
+		s.untrackedDrops.Remove(drop)
+		mlog.Info(s.dropCtx, "dropped untracked copy segment task on datanode",
+			mlog.FieldTaskID(drop.taskID), mlog.FieldNodeID(drop.nodeID))
+		return struct{}{}, nil
+	})
+	s.dropLifecycleMu.RUnlock()
+
+	// The pool is non-blocking. A saturated submission never runs the closure,
+	// so release its in-flight marker and leave the pending entry for the next
+	// inspection round.
+	select {
+	case <-future.Inner():
+		if err := future.Err(); err != nil {
+			s.droppingUntracked.Remove(drop)
+			mlog.RatedWarn(s.ctx, 1, "copy segment drop pool is full, retry untracked task in next inspection round",
+				mlog.FieldTaskID(drop.taskID), mlog.FieldNodeID(drop.nodeID), mlog.Err(err))
+		}
+	default:
 	}
 }
 

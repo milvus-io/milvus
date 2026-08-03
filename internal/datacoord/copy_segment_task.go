@@ -349,7 +349,7 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to commit copy segment task dispatch, dropping untracked worker task",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
-		dropUntrackedCopySegmentTask(cluster, nodeID, t.GetTaskId())
+		t.dropUntrackedCopySegmentTask(cluster, nodeID)
 		return
 	}
 
@@ -369,7 +369,7 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	case taskDispatchCleanupUntracked:
 		mlog.Info(context.TODO(), "copy segment task dispatch no longer matches metadata, dropping accepted worker task",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
-		dropUntrackedCopySegmentTask(cluster, nodeID, t.GetTaskId())
+		t.dropUntrackedCopySegmentTask(cluster, nodeID)
 		return
 	case taskDispatchApplied:
 		// Continue below and report the pending -> executing transition.
@@ -383,10 +383,24 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 			mlog.Duration("taskTimeCost/pending", pendingDuration))...)
 }
 
-// dropUntrackedCopySegmentTask removes a worker task that was accepted after
-// metadata moved elsewhere and therefore cannot be retried through NodeID.
-// ErrNodeNotFound is success-equivalent: the worker-side task is already gone.
-func dropUntrackedCopySegmentTask(cluster session.Cluster, nodeID, taskID int64) {
+// dropUntrackedCopySegmentTask schedules removal of a worker task that was
+// accepted after metadata moved elsewhere and therefore cannot be retried
+// through the task's single NodeID field. The copy-segment inspector keeps the
+// exact (nodeID, taskID) pair until DropCopySegment succeeds or the node is
+// confirmed gone for the lifetime of the current DataCoord ownership.
+func (t *copySegmentTask) dropUntrackedCopySegmentTask(cluster session.Cluster, nodeID int64) {
+	taskID := t.GetTaskId()
+	if meta, ok := t.copyMeta.(*copySegmentMeta); ok && meta.enqueueUntrackedDrop(nodeID, taskID) {
+		mlog.Info(context.TODO(), "queued untracked copy segment task for worker-side cleanup",
+			mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID))
+		return
+	}
+
+	// Production registers the retry handler before the scheduler starts. Keep a
+	// synchronous fallback for isolated task implementations and tests so an
+	// alternate CopySegmentMeta cannot silently skip cleanup altogether.
+	mlog.Warn(context.TODO(), "untracked copy segment drop retry handler unavailable, dropping synchronously",
+		mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID))
 	err := cluster.DropCopySegment(context.TODO(), nodeID, taskID, true)
 	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
 		mlog.Warn(context.TODO(), "failed to drop untracked copy segment task on datanode",

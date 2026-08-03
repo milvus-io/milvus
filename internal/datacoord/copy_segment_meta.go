@@ -254,6 +254,26 @@ type copySegmentMeta struct {
 	meta         *meta                      // Segment metadata for task execution
 	snapshotMeta *snapshotMeta              // Snapshot metadata for reading source data
 	alloc        allocator.Allocator        // For allocating new build IDs in copy segment tasks
+
+	// A worker task accepted after metadata moved elsewhere cannot be represented
+	// by the task's single NodeID field. The inspector registers this handler so
+	// dispatch can hand the exact (nodeID, taskID) cleanup target to its retry
+	// loop instead of taking one synchronous, lossy attempt.
+	untrackedDropMu      lock.RWMutex
+	untrackedDropHandler func(nodeID, taskID int64) bool
+}
+
+func (m *copySegmentMeta) setUntrackedDropHandler(handler func(nodeID, taskID int64) bool) {
+	m.untrackedDropMu.Lock()
+	defer m.untrackedDropMu.Unlock()
+	m.untrackedDropHandler = handler
+}
+
+func (m *copySegmentMeta) enqueueUntrackedDrop(nodeID, taskID int64) bool {
+	m.untrackedDropMu.RLock()
+	handler := m.untrackedDropHandler
+	m.untrackedDropMu.RUnlock()
+	return handler != nil && handler(nodeID, taskID)
 }
 
 // ===========================================================================================

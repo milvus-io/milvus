@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -379,8 +380,86 @@ func (s *CopySegmentInspectorSuite) addTerminalTaskWithAssignment(
 // assertions that follow a processTerminal/inspect call need this barrier.
 func (s *CopySegmentInspectorSuite) waitDropsSettled() {
 	s.Eventually(func() bool {
-		return len(s.inspector.droppingTask.Collect()) == 0
+		return len(s.inspector.droppingTask.Collect()) == 0 &&
+			len(s.inspector.droppingUntracked.Collect()) == 0
 	}, 10*time.Second, 5*time.Millisecond)
+}
+
+func (s *CopySegmentInspectorSuite) TestUntrackedDropRetriesUntilCleanupConverges() {
+	drop := untrackedCopySegmentDrop{nodeID: 10, taskID: 1001}
+
+	// The accepted task cannot be represented in metadata. A transient failure
+	// must leave the exact worker target queued for a later inspection round.
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, drop.nodeID, drop.taskID, true).
+		Return(errors.New("rpc timeout")).Once()
+	s.True(s.inspector.enqueueUntrackedDrop(drop.nodeID, drop.taskID))
+	s.waitDropsSettled()
+	s.True(s.inspector.untrackedDrops.Contain(drop))
+
+	// Once the worker is reachable, the retry succeeds and removes the pending
+	// entry. A later round must not issue another RPC.
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, drop.nodeID, drop.taskID, true).Return(nil).Once()
+	s.inspector.processUntrackedDrops()
+	s.waitDropsSettled()
+	s.False(s.inspector.untrackedDrops.Contain(drop))
+
+	s.inspector.processUntrackedDrops()
+	s.waitDropsSettled()
+}
+
+func (s *CopySegmentInspectorSuite) TestUntrackedDropNodeGoneConverges() {
+	drop := untrackedCopySegmentDrop{nodeID: 11, taskID: 1002}
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, drop.nodeID, drop.taskID, true).
+		Return(merr.WrapErrNodeNotFound(drop.nodeID)).Once()
+
+	s.True(s.inspector.enqueueUntrackedDrop(drop.nodeID, drop.taskID))
+	s.waitDropsSettled()
+	s.False(s.inspector.untrackedDrops.Contain(drop))
+}
+
+func (s *CopySegmentInspectorSuite) TestUntrackedDropDoesNotBlockOrDuplicate() {
+	drop := untrackedCopySegmentDrop{nodeID: 12, taskID: 1003}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+
+	s.cluster.EXPECT().DropCopySegment(mock.Anything, drop.nodeID, drop.taskID, true).RunAndReturn(
+		func(context.Context, int64, int64, bool) error {
+			close(entered)
+			<-release
+			return nil
+		}).Once()
+
+	done := make(chan bool, 1)
+	go func() {
+		done <- s.inspector.enqueueUntrackedDrop(drop.nodeID, drop.taskID)
+	}()
+	select {
+	case accepted := <-done:
+		s.True(accepted)
+	case <-time.After(5 * time.Second):
+		s.Fail("enqueueUntrackedDrop blocked on the worker RPC")
+	}
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		s.Fail("untracked drop was never dispatched")
+	}
+
+	// Duplicate enqueue and an inspection retry while the RPC is in flight must
+	// not stack another call for the same node/task pair.
+	s.True(s.inspector.enqueueUntrackedDrop(drop.nodeID, drop.taskID))
+	s.inspector.processUntrackedDrops()
+
+	close(release)
+	released = true
+	s.waitDropsSettled()
+	s.False(s.inspector.untrackedDrops.Contain(drop))
 }
 
 // TestProcessTerminal_DropDoesNotBlockInspectLoop is the liveness regression

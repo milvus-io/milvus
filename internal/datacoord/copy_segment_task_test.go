@@ -1727,6 +1727,72 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_DoesNotResurrectTerminalTa
 		copyMeta.GetJob(ctx, task.GetJobId()).GetState())
 }
 
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_QueuesUntrackedWorkerDrop() {
+	ctx := context.Background()
+	cluster := session.NewMockCluster(s.T())
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(copyMeta.UpdateTask(ctx, task.GetTaskId(),
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+		UpdateCopyTaskNodeID(NullNodeID)))
+
+	assembleMock := mockey.Mock(AssembleCopySegmentRequest).
+		Return(&datapb.CopySegmentRequest{TaskID: task.GetTaskId()}, nil).Build()
+	defer assembleMock.UnPatch()
+
+	var queuedNodeID, queuedTaskID int64
+	copyMeta.(*copySegmentMeta).setUntrackedDropHandler(func(nodeID, taskID int64) bool {
+		queuedNodeID = nodeID
+		queuedTaskID = taskID
+		return true
+	})
+
+	cluster.EXPECT().CreateCopySegment(int64(10), mock.Anything, int64(100)).RunAndReturn(
+		func(int64, *datapb.CopySegmentRequest, int64) error {
+			// Another dispatch becomes authoritative while this RPC is in flight.
+			// Node 10 therefore cannot be stored in the task's single NodeID field.
+			return copyMeta.UpdateTask(ctx, task.GetTaskId(),
+				UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskInProgress),
+				UpdateCopyTaskNodeID(20))
+		}).Once()
+
+	// No DropCopySegment expectation: cleanup must be handed to the inspector's
+	// retry queue instead of consuming its only chance synchronously here.
+	task.CreateTaskOnWorker(10, cluster)
+
+	s.EqualValues(10, queuedNodeID)
+	s.EqualValues(task.GetTaskId(), queuedTaskID)
+	s.EqualValues(20, copyMeta.GetTask(ctx, task.GetTaskId()).GetNodeId())
+}
+
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_QueuesUntrackedWorkerDropAfterCommitFailure() {
+	cluster := session.NewMockCluster(s.T())
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+
+	assembleMock := mockey.Mock(AssembleCopySegmentRequest).
+		Return(&datapb.CopySegmentRequest{TaskID: task.GetTaskId()}, nil).Build()
+	defer assembleMock.UnPatch()
+	commitMock := mockey.Mock((*copySegmentMeta).CommitTaskDispatch).
+		Return(taskDispatchCleanupUntracked, errors.New("etcd unavailable")).Build()
+	defer commitMock.UnPatch()
+
+	var queuedNodeID, queuedTaskID int64
+	copyMeta.(*copySegmentMeta).setUntrackedDropHandler(func(nodeID, taskID int64) bool {
+		queuedNodeID = nodeID
+		queuedTaskID = taskID
+		return true
+	})
+	cluster.EXPECT().CreateCopySegment(int64(10), mock.Anything, int64(100)).Return(nil).Once()
+
+	// The accepted worker task still needs retryable cleanup when the metadata
+	// commit itself fails; no direct DropCopySegment call is expected here.
+	task.CreateTaskOnWorker(10, cluster)
+
+	s.EqualValues(10, queuedNodeID)
+	s.EqualValues(task.GetTaskId(), queuedTaskID)
+}
+
 // TestQueryTaskOnWorker_StaleCompletedResultDiscardedAfterJobFailed is the
 // regression for the stale-result race: for a restore split across tasks A and
 // B, A fails -> markTaskAndJobFailed puts the job in Failed -> the next checker
