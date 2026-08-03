@@ -129,7 +129,7 @@ class MilvusConan(ConanFile):
         # azure-sdk-for-cpp is a transitive dep of Arrow, but must be declared
         # as a direct dep so CMakeDeps generates standalone cmake config files.
         # Without this, find_package(Azure) can't find include directories.
-        self.requires("azure-sdk-for-cpp/1.16.0@milvus/dev#9e2475502f8ee3b284c9e0731a3370c6", force=True)
+        self.requires("azure-sdk-for-cpp/1.16.4@milvus/dev#7c95e3df67cfea28b3cf6dbd60fbf137", force=True)
         self.requires("aws-sdk-cpp/1.11.842@milvus/dev#363556887f622db23a10168c108dd55d", force=True)
         # Force snappy/lz4 versions to override Arrow's older transitive deps
         # (arrow/*:with_snappy and arrow/*:with_lz4 are enabled for Parquet decoding)
