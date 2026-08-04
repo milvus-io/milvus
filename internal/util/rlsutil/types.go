@@ -178,23 +178,23 @@ const (
 func (action PolicyAction) String() string {
 	switch action {
 	case PolicyActionQuery:
-		return "RowPolicyActionQuery"
-	case PolicyActionQueryIterator:
-		return "RowPolicyActionQueryIterator"
+		return "Query"
 	case PolicyActionSearch:
-		return "RowPolicyActionSearch"
-	case PolicyActionSearchIterator:
-		return "RowPolicyActionSearchIterator"
-	case PolicyActionHybridSearch:
-		return "RowPolicyActionHybridSearch"
-	case PolicyActionDelete:
-		return "RowPolicyActionDelete"
+		return "Search"
 	case PolicyActionInsert:
-		return "RowPolicyActionInsert"
+		return "Insert"
+	case PolicyActionDelete:
+		return "Delete"
 	case PolicyActionUpsert:
-		return "RowPolicyActionUpsert"
+		return "Upsert"
+	case PolicyActionQueryIterator:
+		return "QueryIterator"
+	case PolicyActionSearchIterator:
+		return "SearchIterator"
+	case PolicyActionHybridSearch:
+		return "HybridSearch"
 	default:
-		return "RowPolicyActionUnknown"
+		return "Unknown"
 	}
 }
 

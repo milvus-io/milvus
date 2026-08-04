@@ -215,3 +215,33 @@ func TestRankParamsCarryJSONGroupAttributes(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "/brand", searchInfo.planInfo.GetJsonPath())
 }
+
+func TestConvertHybridSearchToSearchUsesTopLevelRLS(t *testing.T) {
+	searchReq := convertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+		RlsPrincipal: "top-level-principal",
+		SkipRls:      true,
+		Requests: []*milvuspb.SearchRequest{
+			{
+				RlsPrincipal: "nested-principal",
+				SkipRls:      false,
+			},
+		},
+	})
+
+	assert.Equal(t, "top-level-principal", searchReq.GetRlsPrincipal())
+	assert.True(t, searchReq.GetSkipRls())
+}
+
+func TestConvertHybridSearchToSearchDoesNotFallbackToNestedRLS(t *testing.T) {
+	searchReq := convertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+		Requests: []*milvuspb.SearchRequest{
+			{
+				RlsPrincipal: "nested-principal",
+				SkipRls:      true,
+			},
+		},
+	})
+
+	assert.Empty(t, searchReq.GetRlsPrincipal())
+	assert.False(t, searchReq.GetSkipRls())
+}
