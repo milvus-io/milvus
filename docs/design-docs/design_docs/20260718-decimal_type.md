@@ -129,8 +129,8 @@ Filter expressions carry decimal literals as text (`price > 19.99`), because the
 
 | File | Change |
 | --- | --- |
-| `schema.proto` | `Decimal = 30` added to `DataType` enum (merged, `0fb0d5b`) |
-| `schema.proto` | `BytesArray` / `Decimal` comments define the canonical 8-byte little-endian wire encoding (`doc/decimal-wire-format`) |
+| `schema.proto` | `Decimal = 30` added to `DataType` enum ([PR #630](https://github.com/milvus-io/milvus-proto/pull/630), `0fb0d5b`) |
+| `schema.proto` | `BytesArray` / `Decimal` comments define the canonical 8-byte little-endian wire encoding ([PR #650](https://github.com/milvus-io/milvus-proto/pull/650), `c45eae9`) |
 
 ### Go — Type System & Validation
 

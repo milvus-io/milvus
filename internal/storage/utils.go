@@ -1555,6 +1555,27 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 				},
 				ValidData: rawData.ValidData,
 			}
+		case *DecimalFieldData:
+			// Values are stored as unscaled int64 internally, but the proto
+			// carries the canonical 8-byte little-endian wire form.
+			bytesData := make([][]byte, 0, len(rawData.Data))
+			for _, unscaled := range rawData.Data {
+				bytesData = append(bytesData, parameterutil.EncodeUnscaledBytes(unscaled))
+			}
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Decimal,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BytesData{
+							BytesData: &schemapb.BytesArray{
+								Data: bytesData,
+							},
+						},
+					},
+				},
+				ValidData: rawData.ValidData,
+			}
 		case *StringFieldData:
 			fieldData = &schemapb.FieldData{
 				Type:    schemapb.DataType_VarChar,
