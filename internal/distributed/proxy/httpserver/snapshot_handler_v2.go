@@ -65,7 +65,7 @@ func (h *HandlersV2) dropSnapshot(ctx context.Context, c *gin.Context, anyReq an
 }
 
 func (h *HandlersV2) listSnapshots(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	httpReq := anyReq.(*OptionalCollectionNameReq)
+	httpReq := anyReq.(*CollectionNameReq)
 	req := &milvuspb.ListSnapshotsRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
