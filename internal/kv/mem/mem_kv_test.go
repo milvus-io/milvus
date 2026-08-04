@@ -250,10 +250,11 @@ func TestHasPrefix(t *testing.T) {
 func TestPredicates(t *testing.T) {
 	kv := NewMemoryKV()
 
-	// predicates not supported for mem kv for now
-	err := kv.MultiSaveAndRemove(context.TODO(), map[string]string{}, []string{}, predicates.ValueEqual("a", "b"))
+	err := kv.MultiSaveAndRemove(context.TODO(), map[string]string{"a": "b"}, []string{}, predicates.KeyNotExists("a"))
+	assert.NoError(t, err)
+
+	err = kv.MultiSaveAndRemove(context.TODO(), map[string]string{}, []string{}, predicates.ValueEqual("a", "c"))
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 
 	err = kv.MultiSaveAndRemoveWithPrefix(context.TODO(), map[string]string{}, []string{}, predicates.ValueEqual("a", "b"))
 	assert.Error(t, err)

@@ -30,6 +30,14 @@ type transferredCollectionApplier interface {
 	ApplyTransferredCollection(ctx context.Context, coll *model.Collection) error
 }
 
+type transferredCollectionDeactivator interface {
+	DeactivateTransferredCollection(ctx context.Context, collectionID int64) error
+}
+
+type transferredCollectionVerifier interface {
+	VerifyTransferredCollection(ctx context.Context, coll *model.Collection) error
+}
+
 func (c *Core) CatalogTransferPrepare(ctx context.Context, req *rootcoordpb.CatalogTransferPrepareRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -41,6 +49,11 @@ func (c *Core) CatalogTransferPrepare(ctx context.Context, req *rootcoordpb.Cata
 		return merr.Status(err), nil
 	}
 
+	closeLocks, err := c.drainCatalogTransferBroadcastLocks(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	defer closeLocks()
 	if err := c.transferGate.FreezeWithDrain(
 		req.GetCollectionId(),
 		req.GetTransferId(),
@@ -50,6 +63,19 @@ func (c *Core) CatalogTransferPrepare(ctx context.Context, req *rootcoordpb.Cata
 		return merr.Status(err), nil
 	}
 	return merr.Success(), nil
+}
+
+func (c *Core) drainCatalogTransferBroadcastLocks(ctx context.Context, dbName string, collectionName string) (func(), error) {
+	if dbName == "" || collectionName == "" {
+		return func() {}, nil
+	}
+	dbLock, err := startBroadcastWithDatabaseLock(ctx, dbName)
+	if err != nil {
+		return nil, err
+	}
+	return func() {
+		dbLock.Close()
+	}, nil
 }
 
 func (c *Core) CatalogTransferDeactivate(ctx context.Context, req *rootcoordpb.CatalogTransferDeactivateRequest) (*commonpb.Status, error) {
@@ -65,6 +91,11 @@ func (c *Core) CatalogTransferDeactivate(ctx context.Context, req *rootcoordpb.C
 
 	if err := c.transferGate.Deactivate(req.GetCollectionId(), req.GetTransferId(), req.GetTransferEpoch()); err != nil {
 		return merr.Status(err), nil
+	}
+	if deactivator, ok := c.meta.(transferredCollectionDeactivator); ok {
+		if err := deactivator.DeactivateTransferredCollection(ctx, req.GetCollectionId()); err != nil {
+			return merr.Status(err), nil
+		}
 	}
 	if err := c.ExpireTransferMetaCache(
 		ctx,
@@ -119,6 +150,11 @@ func (c *Core) CatalogTransferApply(ctx context.Context, req *rootcoordpb.Catalo
 		}
 	}
 
+	if verifier, ok := c.meta.(transferredCollectionVerifier); ok {
+		if err := verifier.VerifyTransferredCollection(ctx, coll); err != nil {
+			return merr.Status(err), nil
+		}
+	}
 	applier, ok := c.meta.(transferredCollectionApplier)
 	if !ok {
 		return merr.Status(merr.WrapErrServiceInternalMsg("rootcoord meta does not support transferred collection apply")), nil

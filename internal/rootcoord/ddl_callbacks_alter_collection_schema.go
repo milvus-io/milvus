@@ -67,6 +67,11 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 	if err != nil {
 		return err
 	}
+	done, err := c.beginTransferProtectedCollectionOperation(coll.CollectionID)
+	if err != nil {
+		return err
+	}
+	defer done()
 
 	switch action.GetOp().(type) {
 	case *milvuspb.AlterCollectionSchemaRequest_Action_AddRequest:

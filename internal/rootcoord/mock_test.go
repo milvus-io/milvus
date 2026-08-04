@@ -63,50 +63,52 @@ var _ IMetaTable = &mockMetaTable{}
 // TODO: remove mockMetaTable, use mockery instead
 type mockMetaTable struct {
 	IMetaTable
-	ListDatabasesFunc                func(ctx context.Context, ts Timestamp) ([]*model.Database, error)
-	ListCollectionsFunc              func(ctx context.Context, ts Timestamp) ([]*model.Collection, error)
-	AddCollectionFunc                func(ctx context.Context, coll *model.Collection) error
-	GetCollectionByNameFunc          func(ctx context.Context, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
-	GetCollectionByIDFunc            func(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
-	ChangeCollectionStateFunc        func(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error
-	RemoveCollectionFunc             func(ctx context.Context, collectionID UniqueID, ts Timestamp) error
-	AddPartitionFunc                 func(ctx context.Context, partition *model.Partition) error
-	ChangePartitionStateFunc         func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error
-	RemovePartitionFunc              func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
-	AlterAliasFunc                   func(ctx context.Context, result message.BroadcastResultAlterAliasMessageV2) error
-	DropAliasFunc                    func(ctx context.Context, result message.BroadcastResultDropAliasMessageV2) error
-	IsAliasFunc                      func(ctx context.Context, dbName, name string) bool
-	DescribeAliasFunc                func(ctx context.Context, dbName, alias string, ts Timestamp) (string, error)
-	ListAliasesFunc                  func(ctx context.Context, dbName, collectionName string, ts Timestamp) ([]string, error)
-	ListAliasesByIDFunc              func(ctx context.Context, collID UniqueID) []string
-	GetCollectionIDByNameFunc        func(name string) (UniqueID, error)
-	GetPartitionByNameFunc           func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error)
-	GetCollectionVirtualChannelsFunc func(ctx context.Context, colID int64) []string
-	AlterCollectionFunc              func(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error
-	RenameCollectionFunc             func(ctx context.Context, oldName string, newName string, ts Timestamp) error
-	AddCredentialFunc                func(ctx context.Context, credInfo *internalpb.CredentialInfo) error
-	GetCredentialFunc                func(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
-	DeleteCredentialFunc             func(ctx context.Context, msg message.BroadcastResultDropUserMessageV2) error
-	AlterCredentialFunc              func(ctx context.Context, msg message.BroadcastResultAlterUserMessageV2) error
-	ListCredentialUsernamesFunc      func(ctx context.Context) (*milvuspb.ListCredUsersResponse, error)
-	CreateRoleFunc                   func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
-	DropRoleFunc                     func(ctx context.Context, tenant string, roleName string) error
-	OperateUserRoleFunc              func(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error
-	SelectRoleFunc                   func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error)
-	SelectUserFunc                   func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error)
-	OperatePrivilegeFunc             func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
-	SelectGrantFunc                  func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
-	DropGrantFunc                    func(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error
-	ListPolicyFunc                   func(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error)
-	ListUserRoleFunc                 func(ctx context.Context, tenant string) ([]string, error)
-	DescribeDatabaseFunc             func(ctx context.Context, dbName string) (*model.Database, error)
-	CreatePrivilegeGroupFunc         func(ctx context.Context, groupName string) error
-	DropPrivilegeGroupFunc           func(ctx context.Context, groupName string) error
-	IsCustomPrivilegeGroupFunc       func(ctx context.Context, groupName string) (bool, error)
-	ListPrivilegeGroupsFunc          func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error)
-	OperatePrivilegeGroupFunc        func(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error
-	GetPrivilegeGroupRolesFunc       func(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error)
-	ApplyTransferredCollectionFunc   func(ctx context.Context, coll *model.Collection) error
+	ListDatabasesFunc                   func(ctx context.Context, ts Timestamp) ([]*model.Database, error)
+	ListCollectionsFunc                 func(ctx context.Context, ts Timestamp) ([]*model.Collection, error)
+	AddCollectionFunc                   func(ctx context.Context, coll *model.Collection) error
+	GetCollectionByNameFunc             func(ctx context.Context, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
+	GetCollectionByIDFunc               func(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
+	ChangeCollectionStateFunc           func(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error
+	RemoveCollectionFunc                func(ctx context.Context, collectionID UniqueID, ts Timestamp) error
+	AddPartitionFunc                    func(ctx context.Context, partition *model.Partition) error
+	ChangePartitionStateFunc            func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error
+	RemovePartitionFunc                 func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
+	AlterAliasFunc                      func(ctx context.Context, result message.BroadcastResultAlterAliasMessageV2) error
+	DropAliasFunc                       func(ctx context.Context, result message.BroadcastResultDropAliasMessageV2) error
+	IsAliasFunc                         func(ctx context.Context, dbName, name string) bool
+	DescribeAliasFunc                   func(ctx context.Context, dbName, alias string, ts Timestamp) (string, error)
+	ListAliasesFunc                     func(ctx context.Context, dbName, collectionName string, ts Timestamp) ([]string, error)
+	ListAliasesByIDFunc                 func(ctx context.Context, collID UniqueID) []string
+	GetCollectionIDByNameFunc           func(name string) (UniqueID, error)
+	GetPartitionByNameFunc              func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error)
+	GetCollectionVirtualChannelsFunc    func(ctx context.Context, colID int64) []string
+	AlterCollectionFunc                 func(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error
+	RenameCollectionFunc                func(ctx context.Context, oldName string, newName string, ts Timestamp) error
+	AddCredentialFunc                   func(ctx context.Context, credInfo *internalpb.CredentialInfo) error
+	GetCredentialFunc                   func(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
+	DeleteCredentialFunc                func(ctx context.Context, msg message.BroadcastResultDropUserMessageV2) error
+	AlterCredentialFunc                 func(ctx context.Context, msg message.BroadcastResultAlterUserMessageV2) error
+	ListCredentialUsernamesFunc         func(ctx context.Context) (*milvuspb.ListCredUsersResponse, error)
+	CreateRoleFunc                      func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
+	DropRoleFunc                        func(ctx context.Context, tenant string, roleName string) error
+	OperateUserRoleFunc                 func(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error
+	SelectRoleFunc                      func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error)
+	SelectUserFunc                      func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error)
+	OperatePrivilegeFunc                func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
+	SelectGrantFunc                     func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
+	DropGrantFunc                       func(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error
+	ListPolicyFunc                      func(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error)
+	ListUserRoleFunc                    func(ctx context.Context, tenant string) ([]string, error)
+	DescribeDatabaseFunc                func(ctx context.Context, dbName string) (*model.Database, error)
+	CreatePrivilegeGroupFunc            func(ctx context.Context, groupName string) error
+	DropPrivilegeGroupFunc              func(ctx context.Context, groupName string) error
+	IsCustomPrivilegeGroupFunc          func(ctx context.Context, groupName string) (bool, error)
+	ListPrivilegeGroupsFunc             func(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error)
+	OperatePrivilegeGroupFunc           func(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error
+	GetPrivilegeGroupRolesFunc          func(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error)
+	ApplyTransferredCollectionFunc      func(ctx context.Context, coll *model.Collection) error
+	VerifyTransferredCollectionFunc     func(ctx context.Context, coll *model.Collection) error
+	DeactivateTransferredCollectionFunc func(ctx context.Context, collectionID int64) error
 }
 
 func (m mockMetaTable) GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error) {
@@ -127,6 +129,17 @@ func (m mockMetaTable) AddCollection(ctx context.Context, coll *model.Collection
 
 func (m mockMetaTable) ApplyTransferredCollection(ctx context.Context, coll *model.Collection) error {
 	return m.ApplyTransferredCollectionFunc(ctx, coll)
+}
+
+func (m mockMetaTable) VerifyTransferredCollection(ctx context.Context, coll *model.Collection) error {
+	if m.VerifyTransferredCollectionFunc == nil {
+		return nil
+	}
+	return m.VerifyTransferredCollectionFunc(ctx, coll)
+}
+
+func (m mockMetaTable) DeactivateTransferredCollection(ctx context.Context, collectionID int64) error {
+	return m.DeactivateTransferredCollectionFunc(ctx, collectionID)
 }
 
 func (m mockMetaTable) GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {

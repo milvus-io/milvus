@@ -6,6 +6,7 @@ type PredicateTarget int32
 const (
 	// PredTargetValue is predicate target for key-value perid
 	PredTargetValue PredicateTarget = iota + 1
+	PredTargetExists
 )
 
 type PredicateType int32
@@ -26,6 +27,11 @@ type Predicate interface {
 type valuePredicate struct {
 	k, v string
 	pt   PredicateType
+}
+
+type existsPredicate struct {
+	k      string
+	exists bool
 }
 
 func (p *valuePredicate) Target() PredicateTarget {
@@ -70,4 +76,29 @@ func ValueEqual(k, v string) Predicate {
 		v:  v,
 		pt: PredTypeEqual,
 	}
+}
+
+func KeyNotExists(k string) Predicate {
+	return &existsPredicate{k: k}
+}
+
+func (p *existsPredicate) Target() PredicateTarget {
+	return PredTargetExists
+}
+
+func (p *existsPredicate) Type() PredicateType {
+	return PredTypeEqual
+}
+
+func (p *existsPredicate) IsTrue(target any) bool {
+	exists, ok := target.(bool)
+	return ok && exists == p.exists
+}
+
+func (p *existsPredicate) Key() string {
+	return p.k
+}
+
+func (p *existsPredicate) TargetValue() any {
+	return p.exists
 }

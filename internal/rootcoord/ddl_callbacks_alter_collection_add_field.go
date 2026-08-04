@@ -31,6 +31,11 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	if err != nil {
 		return err
 	}
+	done, err := c.beginTransferProtectedCollectionOperation(coll.CollectionID)
+	if err != nil {
+		return err
+	}
+	defer done()
 
 	// check if the field schema is illegal.
 	fieldSchema := &schemapb.FieldSchema{}

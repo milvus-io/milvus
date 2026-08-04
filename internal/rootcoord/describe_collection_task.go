@@ -46,6 +46,10 @@ func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	if err := t.core.transferGate.AllowUserOperation(coll.CollectionID, 0); err != nil {
+		t.Rsp.Status = merr.Status(err)
+		return err
+	}
 
 	if t.Req.GetCollectionName() != "" {
 		visibleCollections, err := t.core.getCurrentUserVisibleCollections(ctx, t.Req.GetDbName())

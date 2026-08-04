@@ -194,6 +194,10 @@ func (m *GrpcRootCoordClient) CatalogTransferAbort(ctx context.Context, in *root
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) RootCoordCatalogCutover(ctx context.Context, in *rootcoordpb.RootCoordCatalogCutoverRequest, opts ...grpc.CallOption) (*rootcoordpb.RootCoordCatalogCutoverResponse, error) {
+	return &rootcoordpb.RootCoordCatalogCutoverResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

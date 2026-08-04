@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"slices"
 	"sync"
 	"time"
@@ -206,6 +207,10 @@ func (mt *MetaTable) reload() error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
+	return mt.reloadLocked()
+}
+
+func (mt *MetaTable) reloadLocked() error {
 	record := timerecord.NewTimeRecorder("rootcoord")
 	mt.dbName2Meta = make(map[string]*model.Database)
 	mt.collID2Meta = make(map[UniqueID]*model.Collection)
@@ -336,6 +341,36 @@ func (mt *MetaTable) reload() error {
 
 	mlog.Info(mt.ctx, "RootCoord meta table reload done", mlog.Duration("duration", record.ElapseSpan()))
 	return nil
+}
+
+func (mt *MetaTable) CutoverCatalog(ctx context.Context, target metastore.RootCoordCatalog, ts typeutil.Timestamp) (rootCoordCatalogMigrationResult, error) {
+	var result rootCoordCatalogMigrationResult
+	if isNilRootCoordCatalog(target) {
+		return result, merr.WrapErrParameterInvalidMsg("target catalog is required")
+	}
+
+	mt.ddLock.RLock()
+	source := mt.catalog
+	mt.ddLock.RUnlock()
+	if isNilRootCoordCatalog(source) {
+		return result, merr.WrapErrServiceInternalMsg("source rootcoord catalog is nil")
+	}
+
+	result, err := migrateRootCoordCatalogSnapshot(ctx, source, target, ts)
+	if err != nil {
+		return result, err
+	}
+
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	oldCatalog := mt.catalog
+	mt.catalog = target
+	if err := mt.reloadLocked(); err != nil {
+		mt.catalog = oldCatalog
+		_ = mt.reloadLocked()
+		return result, err
+	}
+	return result, nil
 }
 
 // insert into default database if the collections doesn't inside some database
@@ -604,9 +639,156 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 // ApplyTransferredCollection loads collection metadata that was already
 // persisted by Catalog Service into the target RootCoord live MetaTable.
 func (mt *MetaTable) ApplyTransferredCollection(ctx context.Context, coll *model.Collection) error {
+	if err := mt.ensureTransferredDatabaseLive(ctx, coll); err != nil {
+		return err
+	}
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	return mt.applyCollectionLiveLocked(ctx, coll, true, true, true)
+}
+
+func (mt *MetaTable) ensureTransferredDatabaseLive(ctx context.Context, coll *model.Collection) error {
+	if coll == nil {
+		return merr.WrapErrServiceInternalMsg("collection meta is nil")
+	}
+	dbName := coll.DBName
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
+
+	mt.ddLock.RLock()
+	db, ok := mt.dbName2Meta[dbName]
+	mt.ddLock.RUnlock()
+	if ok {
+		if db.ID != coll.DBID {
+			return merr.WrapErrServiceInternalMsg("collection database id mismatch while applying collection, db: %s, expected id: %d, incoming id: %d", dbName, db.ID, coll.DBID)
+		}
+		return nil
+	}
+	if isNilRootCoordCatalog(mt.catalog) {
+		return merr.WrapErrDatabaseNotFound(dbName)
+	}
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	dbs, err := mt.catalog.ListDatabases(ctx1, typeutil.MaxTimestamp)
+	if err != nil {
+		return err
+	}
+	var durable *model.Database
+	for _, candidate := range dbs {
+		if candidate == nil || candidate.Name != dbName {
+			continue
+		}
+		if candidate.ID != coll.DBID {
+			return merr.WrapErrServiceInternalMsg("target database id mismatch while applying transferred collection, db: %s, expected id: %d, durable id: %d", dbName, coll.DBID, candidate.ID)
+		}
+		durable = candidate.Clone()
+		break
+	}
+	if durable == nil {
+		return merr.WrapErrDatabaseNotFound(dbName)
+	}
+
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	if existing, ok := mt.dbName2Meta[dbName]; ok {
+		if existing.ID != coll.DBID {
+			return merr.WrapErrServiceInternalMsg("collection database id mismatch while applying collection, db: %s, expected id: %d, incoming id: %d", dbName, existing.ID, coll.DBID)
+		}
+		return nil
+	}
+	mt.names.createDbIfNotExist(dbName)
+	mt.aliases.createDbIfNotExist(dbName)
+	mt.dbName2Meta[dbName] = durable
+	metrics.RootCoordNumOfDatabases.Inc()
+	mlog.Info(ctx, "loaded transferred database into meta table", mlog.String("db", dbName), mlog.Int64("dbID", durable.ID))
+	return nil
+}
+
+func isNilRootCoordCatalog(catalog metastore.RootCoordCatalog) bool {
+	if catalog == nil {
+		return true
+	}
+	value := reflect.ValueOf(catalog)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func (mt *MetaTable) VerifyTransferredCollection(ctx context.Context, coll *model.Collection) error {
+	if coll == nil {
+		return merr.WrapErrServiceInternalMsg("collection meta is nil")
+	}
+	dbName := coll.DBName
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	durable, err := mt.catalog.GetCollectionByName(ctx1, coll.DBID, dbName, coll.Name, typeutil.MaxTimestamp)
+	if err != nil {
+		return err
+	}
+	if durable == nil {
+		return merr.WrapErrCollectionNotFoundWithDB(dbName, coll.Name)
+	}
+	aliases, err := mt.catalog.ListAliases(ctx1, coll.DBID, typeutil.MaxTimestamp)
+	if err != nil {
+		return err
+	}
+	durable.Aliases = durable.Aliases[:0]
+	for _, alias := range aliases {
+		if alias != nil && alias.CollectionID == durable.CollectionID && alias.Available() {
+			durable.Aliases = append(durable.Aliases, alias.Name)
+		}
+	}
+	if !transferredCollectionsEquivalent(durable, coll) {
+		return merr.WrapErrServiceInternalMsg("transferred collection does not match durable target catalog, db: %s, collection: %s, collection id: %d", dbName, coll.Name, coll.CollectionID)
+	}
+	return nil
+}
+
+// DeactivateTransferredCollection removes a collection that Catalog Service
+// already moved out of this namespace from RootCoord's live MetaTable only.
+// Persistent metadata deletion is owned by Catalog Service transfer, so this
+// method must not call RootCoordCatalog.
+func (mt *MetaTable) DeactivateTransferredCollection(ctx context.Context, collectionID UniqueID) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok || coll == nil {
+		return nil
+	}
+	dbName := coll.DBName
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
+	aliases := mt.listAliasesByID(collectionID)
+	allNames := common.CloneStringList(aliases)
+	allNames = append(allNames, coll.Name)
+
+	for _, fileResourceID := range coll.FileResourceIds {
+		if mt.fileResourceRefCnt[fileResourceID] > 0 {
+			mt.fileResourceRefCnt[fileResourceID]--
+		}
+	}
+	pn := coll.GetPartitionNum(true)
+	mt.generalCnt -= pn * int(coll.ShardsNum)
+	if mt.generalCnt < 0 {
+		mt.generalCnt = 0
+	}
+	channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(coll.VirtualChannelNames...)
+	if _, ok := mt.dbName2Meta[dbName]; ok {
+		metrics.RootCoordNumOfCollections.WithLabelValues(dbName).Dec()
+		metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(pn))
+	}
+
+	mt.removeAllNamesIfMatchedInternal(ctx, collectionID, allNames)
+	mt.removeCollectionByIDInternal(ctx, collectionID)
+	return nil
 }
 
 func (mt *MetaTable) applyCollectionLiveLocked(ctx context.Context, coll *model.Collection, includeAliases bool, includeFileResourceRefs bool, validateDatabase bool) error {
@@ -691,6 +873,17 @@ func canonicalCollectionForLiveApply(coll *model.Collection, dbName string) *mod
 	clone.DBName = dbName
 	ensureCollectionMaxFieldIDProperty(clone)
 	return clone
+}
+
+func transferredCollectionsEquivalent(a, b *model.Collection) bool {
+	a = canonicalCollectionForLiveApply(a, a.DBName)
+	b = canonicalCollectionForLiveApply(b, b.DBName)
+	slices.Sort(a.Aliases)
+	slices.Sort(b.Aliases)
+	return reflect.DeepEqual(
+		model.MarshalCollectionModelWithOption(a, model.WithFields(), model.WithStructArrayFields(), model.WithPartitions()),
+		model.MarshalCollectionModelWithOption(b, model.WithFields(), model.WithStructArrayFields(), model.WithPartitions()),
+	) && reflect.DeepEqual(a.Aliases, b.Aliases)
 }
 
 func validateCollectionLiveApplyIdentity(existing *model.Collection, incoming *model.Collection) error {

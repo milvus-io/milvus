@@ -5918,6 +5918,40 @@ func (_c *MockRootCoordClient_UpdateCredential_Call) RunAndReturn(run func(conte
 	return _c
 }
 
+// RootCoordCatalogCutover provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) RootCoordCatalogCutover(ctx context.Context, in *rootcoordpb.RootCoordCatalogCutoverRequest, opts ...grpc.CallOption) (*rootcoordpb.RootCoordCatalogCutoverResponse, error) {
+	_va := []interface{}{ctx, in}
+	for _, a := range opts {
+		_va = append(_va, a)
+	}
+	ret := _m.Called(_va...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RootCoordCatalogCutover")
+	}
+
+	var r0 *rootcoordpb.RootCoordCatalogCutoverResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.RootCoordCatalogCutoverRequest, ...grpc.CallOption) (*rootcoordpb.RootCoordCatalogCutoverResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.RootCoordCatalogCutoverRequest, ...grpc.CallOption) *rootcoordpb.RootCoordCatalogCutoverResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.RootCoordCatalogCutoverResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.RootCoordCatalogCutoverRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // NewMockRootCoordClient creates a new instance of MockRootCoordClient. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockRootCoordClient(t interface {

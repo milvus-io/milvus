@@ -60,12 +60,22 @@ func (g *transferGate) FreezeWithDrain(collectionID int64, transferID string, ep
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	_, existed := g.collections[collectionID]
 	if err := g.freezeLocked(collectionID, transferID, epoch); err != nil {
 		return err
 	}
 	for g.inFlight[collectionID] > 0 {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
+			if !existed {
+				if current, ok := g.collections[collectionID]; ok &&
+					current.transferID == transferID &&
+					current.epoch == epoch &&
+					current.state == transferStateTransferringOut {
+					delete(g.collections, collectionID)
+					g.cond.Broadcast()
+				}
+			}
 			return errCollectionHasInFlightOperations
 		}
 		timer := time.AfterFunc(remaining, func() {
@@ -173,7 +183,7 @@ func (g *transferGate) Deactivate(collectionID int64, transferID string, epoch i
 
 	current, ok := g.collections[collectionID]
 	if !ok {
-		return errTransferMismatch
+		return nil
 	}
 	if current.transferID != transferID {
 		return errTransferMismatch

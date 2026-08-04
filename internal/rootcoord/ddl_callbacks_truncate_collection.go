@@ -43,6 +43,11 @@ func (c *Core) broadcastTruncateCollection(ctx context.Context, req *milvuspb.Tr
 	if err != nil {
 		return err
 	}
+	done, err := c.beginTransferProtectedCollectionOperation(coll.CollectionID)
+	if err != nil {
+		return err
+	}
+	defer done()
 
 	header := &messagespb.TruncateCollectionMessageHeader{
 		DbId:         coll.DBID,

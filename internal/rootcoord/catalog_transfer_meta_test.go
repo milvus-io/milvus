@@ -111,6 +111,54 @@ func TestMetaTableApplyTransferredCollectionLoadsLiveIndexes(t *testing.T) {
 	catalog.AssertNotCalled(t, "AlterCollection")
 }
 
+func TestMetaTableDeactivateTransferredCollectionRemovesLiveIndexesWithoutCatalogWrite(t *testing.T) {
+	const (
+		collectionID = int64(100)
+		partitionID  = int64(200)
+		resourceID   = int64(300)
+	)
+
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+	catalog := mocks.NewRootCoordCatalog(t)
+	meta := newTransferMetaTableForTest(catalog)
+	coll := &model.Collection{
+		DBID:                util.DefaultDBID,
+		DBName:              util.DefaultDBName,
+		CollectionID:        collectionID,
+		Name:                "source_collection",
+		State:               pb.CollectionState_CollectionCreated,
+		ShardsNum:           1,
+		VirtualChannelNames: []string{"source-vchan"},
+		FileResourceIds:     []int64{resourceID},
+		Aliases:             []string{"source_alias"},
+		Partitions: []*model.Partition{
+			{
+				PartitionID:   partitionID,
+				PartitionName: "p_source",
+				State:         pb.PartitionState_PartitionCreated,
+			},
+		},
+	}
+	require.NoError(t, meta.ApplyTransferredCollection(context.Background(), coll))
+
+	require.NoError(t, meta.DeactivateTransferredCollection(context.Background(), collectionID))
+
+	_, err := meta.GetCollectionByName(context.Background(), util.DefaultDBName, "source_collection", typeutil.MaxTimestamp, false)
+	require.Error(t, err)
+	_, err = meta.GetCollectionByName(context.Background(), util.DefaultDBName, "source_alias", typeutil.MaxTimestamp, false)
+	require.Error(t, err)
+	_, err = meta.GetCollectionByID(context.Background(), util.DefaultDBName, collectionID, typeutil.MaxTimestamp, false)
+	require.Error(t, err)
+	_, ok := meta.GetPartitionIDByName(collectionID, "p_source")
+	require.False(t, ok)
+	require.Zero(t, meta.fileResourceRefCnt[resourceID])
+	require.Zero(t, meta.GetGeneralCount(context.Background()))
+	catalog.AssertNotCalled(t, "DropCollection")
+	catalog.AssertNotCalled(t, "AlterCollection")
+	catalog.AssertNotCalled(t, "Update")
+}
+
 func TestMetaTableApplyTransferredCollectionRejectsCollectionIDIdentityChange(t *testing.T) {
 	const collectionID = int64(100)
 
@@ -180,6 +228,44 @@ func TestMetaTableApplyTransferredCollectionRejectsUnknownDatabaseWithoutSideEff
 	require.Empty(t, meta.fileResourceRefCnt)
 	require.Zero(t, meta.GetGeneralCount(context.Background()))
 	require.Equal(t, InvalidCollectionID, meta.GetCollectionID(context.Background(), "missing_db", "missing_db_collection"))
+}
+
+func TestMetaTableApplyTransferredCollectionLoadsMissingDatabaseFromCatalog(t *testing.T) {
+	const collectionID = int64(100)
+	const dbID = int64(999)
+
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+	catalog := mocks.NewRootCoordCatalog(t)
+	meta := newTransferMetaTableForTest(catalog)
+	catalog.EXPECT().ListDatabases(mock.Anything, typeutil.MaxTimestamp).Return([]*model.Database{
+		{ID: dbID, Name: "target_db", State: pb.DatabaseState_DatabaseCreated},
+	}, nil)
+
+	err := meta.ApplyTransferredCollection(context.Background(), &model.Collection{
+		DBID:         dbID,
+		DBName:       "target_db",
+		CollectionID: collectionID,
+		Name:         "target_collection",
+		State:        pb.CollectionState_CollectionCreated,
+		ShardsNum:    1,
+		Partitions: []*model.Partition{
+			{
+				PartitionID:   200,
+				PartitionName: "p",
+				State:         pb.PartitionState_PartitionCreated,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	db, err := meta.GetDatabaseByName(context.Background(), "target_db", typeutil.MaxTimestamp)
+	require.NoError(t, err)
+	require.Equal(t, dbID, db.ID)
+	byName, err := meta.GetCollectionByName(context.Background(), "target_db", "target_collection", typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.Equal(t, collectionID, byName.CollectionID)
+	catalog.AssertNotCalled(t, "CreateDatabase")
 }
 
 func TestMetaTableApplyTransferredCollectionRejectsOperationalMetadataChange(t *testing.T) {

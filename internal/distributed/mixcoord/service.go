@@ -419,6 +419,10 @@ func (s *Server) CatalogTransferAbort(ctx context.Context, in *rootcoordpb.Catal
 	return s.mixCoord.CatalogTransferAbort(ctx, in)
 }
 
+func (s *Server) RootCoordCatalogCutover(ctx context.Context, in *rootcoordpb.RootCoordCatalogCutoverRequest) (*rootcoordpb.RootCoordCatalogCutoverResponse, error) {
+	return s.mixCoord.RootCoordCatalogCutover(ctx, in)
+}
+
 func (s *Server) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
 	return s.mixCoord.AddCollectionField(ctx, in)
 }

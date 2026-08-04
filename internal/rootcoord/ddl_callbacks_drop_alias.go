@@ -45,6 +45,15 @@ func (c *Core) broadcastDropAlias(ctx context.Context, req *milvuspb.DropAliasRe
 	if err := c.meta.CheckIfAliasDroppable(ctx, req.GetDbName(), req.GetAlias()); err != nil {
 		return err
 	}
+	collection, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetAlias(), typeutil.MaxTimestamp, true)
+	if err != nil {
+		return err
+	}
+	done, err := c.beginTransferProtectedCollectionOperation(collection.CollectionID)
+	if err != nil {
+		return err
+	}
+	defer done()
 	msg := message.NewDropAliasMessageBuilderV2().
 		WithHeader(&message.DropAliasMessageHeader{
 			DbId:   db.ID,

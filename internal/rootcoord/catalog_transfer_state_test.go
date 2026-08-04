@@ -91,6 +91,13 @@ func TestTransferGateDeactivateIsIdempotentForMatchingTransfer(t *testing.T) {
 	}
 }
 
+func TestTransferGateDeactivateIsIdempotentAfterRestoreLost(t *testing.T) {
+	gate := newTransferGate()
+	if err := gate.Deactivate(100, "transfer-1", 7); err != nil {
+		t.Fatalf("deactivate without in-memory gate should be idempotent after restart: %v", err)
+	}
+}
+
 func TestTransferGateFreezeRejectsWhileUserOperationInFlight(t *testing.T) {
 	gate := newTransferGate()
 	done, err := gate.BeginUserOperation(100, 0)
@@ -127,6 +134,25 @@ func TestTransferGateFreezeWaitsForInFlightDrain(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatalf("freeze did not finish after in-flight operation drained")
 	}
+}
+
+func TestTransferGateFreezeWithDrainRollsBackFreezeOnTimeout(t *testing.T) {
+	gate := newTransferGate()
+	done, err := gate.BeginUserOperation(100, 0)
+	if err != nil {
+		t.Fatalf("begin user operation: %v", err)
+	}
+	defer done()
+
+	if err := gate.FreezeWithDrain(100, "transfer-1", 7, time.Millisecond); !errors.Is(err, errCollectionHasInFlightOperations) {
+		t.Fatalf("freeze timeout should report in-flight operation, got %v", err)
+	}
+
+	nextDone, err := gate.BeginUserOperation(100, 0)
+	if err != nil {
+		t.Fatalf("source should not remain frozen after timeout: %v", err)
+	}
+	nextDone()
 }
 
 func TestTransferGateAbortReleasesSourceFence(t *testing.T) {

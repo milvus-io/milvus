@@ -154,6 +154,7 @@ service RootCoord {
     rpc CatalogTransferDeactivate(CatalogTransferDeactivateRequest) returns (common.Status) {}
     rpc CatalogTransferApply(CatalogTransferApplyRequest) returns (common.Status) {}
     rpc CatalogTransferAbort(CatalogTransferAbortRequest) returns (common.Status) {}
+    rpc RootCoordCatalogCutover(RootCoordCatalogCutoverRequest) returns (RootCoordCatalogCutoverResponse) {}
 
     rpc ShowConfigurations(internal.ShowConfigurationsRequest) returns (internal.ShowConfigurationsResponse){}
     // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
@@ -373,4 +374,21 @@ message CatalogTransferAbortRequest {
   string transfer_id = 2;
   int64 transfer_epoch = 3;
   int64 collection_id = 4;
+}
+
+message RootCoordCatalogCutoverRequest {
+  common.MsgBase base = 1;
+  string catalog_service_address = 2;
+  string catalog_service_namespace = 3;
+  uint64 cutover_ts = 4;
+  int64 drain_timeout_ms = 5;
+  uint64 cache_expire_ts = 6;
+}
+
+message RootCoordCatalogCutoverResponse {
+  common.Status status = 1;
+  int32 databases = 2;
+  int32 collections = 3;
+  int32 aliases = 4;
+  int32 file_resources = 5;
 }

@@ -368,6 +368,17 @@ func (c *Client) CatalogTransferAbort(ctx context.Context, in *rootcoordpb.Catal
 	})
 }
 
+func (c *Client) RootCoordCatalogCutover(ctx context.Context, in *rootcoordpb.RootCoordCatalogCutoverRequest, opts ...grpc.CallOption) (*rootcoordpb.RootCoordCatalogCutoverResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*rootcoordpb.RootCoordCatalogCutoverResponse, error) {
+		return client.RootCoordCatalogCutover(ctx, in)
+	})
+}
+
 func (c *Client) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	request = typeutil.Clone(request)
 	commonpbutil.UpdateMsgBase(

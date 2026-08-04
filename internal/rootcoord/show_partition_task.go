@@ -56,6 +56,10 @@ func (t *showPartitionTask) Execute(ctx context.Context) error {
 		t.Rsp.Status = merr.Status(err)
 		return err
 	}
+	if err := t.core.transferGate.AllowUserOperation(coll.CollectionID, 0); err != nil {
+		t.Rsp.Status = merr.Status(err)
+		return err
+	}
 
 	for _, part := range coll.Partitions {
 		t.Rsp.PartitionIDs = append(t.Rsp.PartitionIDs, part.PartitionID)

@@ -534,10 +534,12 @@ It is recommended to change this parameter before starting Milvus for the first 
 }
 
 type MetaStoreConfig struct {
-	MetaStoreType   ParamItem `refreshable:"false"`
-	PaginationSize  ParamItem `refreshable:"true"`
-	ReadConcurrency ParamItem `refreshable:"true"`
-	MaxEtcdTxnNum   ParamItem `refreshable:"true"`
+	MetaStoreType           ParamItem `refreshable:"false"`
+	CatalogServiceAddress   ParamItem `refreshable:"false"`
+	CatalogServiceNamespace ParamItem `refreshable:"false"`
+	PaginationSize          ParamItem `refreshable:"true"`
+	ReadConcurrency         ParamItem `refreshable:"true"`
+	MaxEtcdTxnNum           ParamItem `refreshable:"true"`
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
@@ -545,10 +547,28 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Key:          "metastore.type",
 		Version:      "2.2.0",
 		DefaultValue: util.MetaStoreTypeEtcd,
-		Doc:          `Default value: etcd, Valid values: [etcd, tikv]`,
+		Doc:          `Default value: etcd, Valid values: [etcd, tikv, catalogservice]. catalogservice only moves persistent metadata catalog; session, lease, election, discovery, and allocator remain on their legacy paths.`,
 		Export:       true,
 	}
 	p.MetaStoreType.Init(base.mgr)
+
+	p.CatalogServiceAddress = ParamItem{
+		Key:          "catalogService.address",
+		Version:      "2.7.0",
+		DefaultValue: "",
+		Doc:          `Catalog Service gRPC address used when metastore.type=catalogservice.`,
+		Export:       true,
+	}
+	p.CatalogServiceAddress.Init(base.mgr)
+
+	p.CatalogServiceNamespace = ParamItem{
+		Key:          "catalogService.namespace",
+		Version:      "2.7.0",
+		DefaultValue: "",
+		Doc:          `Catalog Service namespace used when metastore.type=catalogservice. Defaults to common.clusterName when empty.`,
+		Export:       true,
+	}
+	p.CatalogServiceNamespace.Init(base.mgr)
 
 	p.PaginationSize = ParamItem{
 		Key:          "metastore.paginationSize",
