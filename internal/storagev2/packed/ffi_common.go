@@ -163,9 +163,22 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	keys = append(keys, PropertyFSUseCustomPartUpload)
 	values = append(values, "true") // hardcoded to true as in the original code
 
-	// Add integer field
+	// Add integer fields
 	keys = append(keys, PropertyFSRequestTimeoutMS)
 	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
+	// 0 means "not set by the producer" — leave the key absent so
+	// milvus-storage applies its registered default (100). Emitting "0"
+	// instead would clobber that default: the registry only falls back when
+	// the key is missing, and s3_client_builder takes
+	// max(max(io_capacity, 25), max_connections), so an explicit 0 lowers the
+	// connection cap. It would also change ArrowFileSystemConfig's cache key
+	// and split the filesystem cache against producers that do set it. Same
+	// convention as ChunkManager.cpp / MinioChunkManager.cpp, which apply the
+	// value only when > 0.
+	if maxConns := storageConfig.GetMaxConnections(); maxConns > 0 {
+		keys = append(keys, PropertyFSMaxConnections)
+		values = append(values, strconv.FormatUint(uint64(maxConns), 10))
+	}
 
 	// Add TLS min version (skip "default" — consistent with C++ layer filtering)
 	if v := storageConfig.GetSslTlsMinVersion(); v != "" && v != "default" {

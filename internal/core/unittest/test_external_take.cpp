@@ -2946,6 +2946,110 @@ TEST(InjectExtfsAllowlist, NoBaselineLeakFromFsProperties) {
               "MILVUS_INTERNAL_AK");
 }
 
+// minio.maxConnections must reach the external read path. milvus-storage
+// builds each external filesystem from its extfs.<name>.* keys alone, with no
+// fs.* fallback, so without this mirroring the setting is a silent no-op on
+// every external read and the library's built-in default applies instead.
+// The Go FFI path (loon_properties_inject_external_spec) rebuilds the map from
+// a flat LoonProperties, so fs.max_connections arrives as a std::string.
+TEST(InjectExtfsInheritedFields, MaxConnectionsMirroredFromStringVariant) {
+    milvus_storage::api::Properties props;
+    props["fs.max_connections"] = std::string("237");
+
+    ::InjectExternalSpecProperties(props, 42, "s3://my-bucket/key", "");
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.max_connections")),
+              "237");
+    // The fs.* baseline is left intact for the Milvus-internal bucket.
+    EXPECT_EQ(std::get<std::string>(props.at("fs.max_connections")), "237");
+}
+
+// The C++ index-build path goes through MakeInternalPropertiesFromStorageConfig
+// -> api::SetValue, which resolves fs.max_connections against the registry and
+// stores it as UINT32 rather than a string.
+TEST(InjectExtfsInheritedFields, MaxConnectionsMirroredFromTypedVariant) {
+    milvus_storage::api::Properties props;
+    ASSERT_EQ(
+        milvus_storage::api::SetValue(props, PROPERTY_FS_MAX_CONNECTIONS, "64"),
+        std::nullopt);
+    ASSERT_TRUE(
+        std::holds_alternative<uint32_t>(props.at("fs.max_connections")))
+        << "precondition: the registry types fs.max_connections as UINT32";
+
+    ::InjectExternalSpecProperties(props, 7, "s3://my-bucket/key", "");
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.7.max_connections")), "64");
+}
+
+// Nothing to inherit: the key stays absent so milvus-storage applies its own
+// default instead of a bogus zero.
+TEST(InjectExtfsInheritedFields, MaxConnectionsAbsentWhenUnset) {
+    milvus_storage::api::Properties props;
+
+    ::InjectExternalSpecProperties(props, 42, "s3://my-bucket/key", "");
+
+    EXPECT_EQ(props.count("extfs.42.max_connections"), 0u);
+}
+
+// Present-but-zero must be treated as unset, in both variant shapes. A
+// producer that leaves MaxConnections at 0 -- a pre-upgrade DataCoord, or
+// common.storageType=local while the external data lives on S3 -- would
+// otherwise have that 0 mirrored into the extfs scope, where it *overrides*
+// milvus-storage's registered default of 100 and caps the external S3 client
+// at max(io_capacity, 25). Leaving the key absent keeps the 100.
+TEST(InjectExtfsInheritedFields, MaxConnectionsZeroTreatedAsUnset) {
+    {
+        milvus_storage::api::Properties props;
+        props["fs.max_connections"] = std::string("0");
+
+        ::InjectExternalSpecProperties(props, 42, "s3://my-bucket/key", "");
+
+        EXPECT_EQ(props.count("extfs.42.max_connections"), 0u)
+            << "string \"0\" must not be mirrored";
+    }
+    {
+        milvus_storage::api::Properties props;
+        props["fs.max_connections"] = uint32_t(0);
+
+        ::InjectExternalSpecProperties(props, 42, "s3://my-bucket/key", "");
+
+        EXPECT_EQ(props.count("extfs.42.max_connections"), 0u)
+            << "integral 0 must not be mirrored either";
+    }
+}
+
+// The producers themselves must not emit fs.max_connections when unset, so the
+// zero never reaches the extfs mirror (or the internal bucket's S3 client) in
+// the first place.
+TEST(MakePropertiesFromStorageConfig, MaxConnectionsZeroOmitted) {
+    CStorageConfig config{};
+    config.max_connections = 0;
+    auto props = MakeInternalPropertiesFromStorageConfig(config);
+    ASSERT_NE(props, nullptr);
+    EXPECT_EQ(props->count(PROPERTY_FS_MAX_CONNECTIONS), 0u);
+
+    config.max_connections = 237;
+    auto props_set = MakeInternalPropertiesFromStorageConfig(config);
+    ASSERT_NE(props_set, nullptr);
+    ASSERT_EQ(props_set->count(PROPERTY_FS_MAX_CONNECTIONS), 1u);
+    EXPECT_EQ(std::get<uint32_t>(props_set->at(PROPERTY_FS_MAX_CONNECTIONS)),
+              uint32_t(237));
+}
+
+// max_connections is server-side capacity config, not part of the external
+// source's identity: a user-supplied external_spec must not be able to set it.
+TEST(InjectExtfsInheritedFields, MaxConnectionsNotOverridableBySpec) {
+    milvus_storage::api::Properties props;
+    props["fs.max_connections"] = std::string("100");
+    std::string spec =
+        R"({"format":"parquet","extfs":{"max_connections":"9999"}})";
+
+    ::InjectExternalSpecProperties(props, 42, "s3://my-bucket/key", spec);
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.max_connections")),
+              "100");
+}
+
 // Azure endpoint derivation: AWS-form URI with cp=azure + region resolves via
 // DeriveEndpoint to the sovereign-cloud bare authority. Swap relocates URI
 // host (container) into bucket_name. AzureFileSystemProducer requires

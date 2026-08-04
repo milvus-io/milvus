@@ -240,6 +240,8 @@ type commonConfig struct {
 	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"true"`
 	ArrowReaderHoleSizeLimitBytes       ParamItem `refreshable:"true"`
 	ArrowReaderRangeSizeLimitBytes      ParamItem `refreshable:"true"`
+	StorageReaderThreadPoolSize         ParamItem `refreshable:"true"`
+	IndexBuildReadWindowBytes           ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -780,6 +782,68 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: false,
 	}
 	p.ArrowReaderRangeSizeLimitBytes.Init(base.mgr)
+
+	p.StorageReaderThreadPoolSize = ParamItem{
+		Key:          "common.storage.readerThreadPoolSize",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Size of milvus-storage's global reader thread pool. When > 0, chunk ` +
+			`(row-group) reads issued by one storage-v3/external reader may be ` +
+			`fanned out across this pool. 0 keeps the pre-existing sequential ` +
+			`behavior. ` +
+			`Only DataNode's segcore init creates the pool, but the pool itself ` +
+			`is a process-wide singleton in milvus-storage. In a cluster ` +
+			`deployment QueryNode runs in its own process, never creates one, ` +
+			`and keeps parallelism 1 no matter what this is set to. In ` +
+			`standalone all roles share one process, so QueryNode readers ` +
+			`opened after DataNode's segcore init pick up this pool too and ` +
+			`fan out on it — size it with the co-located search traffic in ` +
+			`mind. ` +
+			`IMPORTANT: milvus-storage splits a round's chunks into contiguous ` +
+			`blocks and merges them without limit when the chunk count does not ` +
+			`exceed the pool size, so a round whose chunks are contiguous and ` +
+			`fewer than or equal to this value is submitted as a SINGLE task and ` +
+			`gains no fan-out. To get real per-chunk parallelism the number of ` +
+			`chunks per round must exceed this value — see ` +
+			`common.storage.indexBuildReadWindowBytes. Range-level parallelism ` +
+			`from arrow's parquet prebuffer (common.arrow.ioThreadPoolCoefficient) ` +
+			`is independent of this pool. ` +
+			`Values > 0 resize the pool in both directions at runtime. Setting ` +
+			`0 after the pool exists is a no-op — the pool cannot be destroyed, ` +
+			`so disabling it entirely requires a restart. A reader latches the ` +
+			`parallelism it observed at open only as an on/off gate: opened ` +
+			`with <= 1 it stays sequential for its lifetime, while opened ` +
+			`with > 1 it follows the pool's current size on each subsequent ` +
+			`round — so a runtime resize also affects the later rounds of ` +
+			`already-open readers. Max 1024.`,
+		Export: false,
+	}
+	p.StorageReaderThreadPoolSize.Init(base.mgr)
+
+	p.IndexBuildReadWindowBytes = ParamItem{
+		Key:          "common.storage.indexBuildReadWindowBytes",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Per-round read window in bytes (milvus-storage reader.record_batch_max_size) ` +
+			`for index-build manifest reads. The default window (0 = milvus-storage's ` +
+			`32MB) admits a single 64MB-class parquet row group per prefetch round, ` +
+			`serializing the raw-data download to one object-storage range read at a ` +
+			`time. Set to N x row-group-size so one round spans multiple row groups, ` +
+			`whose column chunks are then prefetched in parallel by arrow ` +
+			`(common.arrow.ioThreadPoolCoefficient). ` +
+			`If you also want per-chunk fan-out on the milvus-storage reader pool, ` +
+			`N must be strictly greater than common.storage.readerThreadPoolSize: ` +
+			`at or below the pool size, contiguous chunks are merged into one task ` +
+			`(e.g. a 1GB window over 64MB row groups is 16 chunks, which a 16-thread ` +
+			`pool executes as a single task). Memory cost: up to this many bytes ` +
+			`buffered per running build task, on top of the decode window. Max 4GB. ` +
+			`Only affects index build; query-node loads keep the default window. ` +
+			`Batch decode for these reads runs on the segcore LOW-priority pool ` +
+			`(common.threadCoreCoefficient.lowPriority), deliberately not the ` +
+			`MIDDLE pool that serves search reduce.`,
+		Export: false,
+	}
+	p.IndexBuildReadWindowBytes.Init(base.mgr)
 
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",

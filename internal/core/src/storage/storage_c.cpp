@@ -33,6 +33,7 @@
 #include "storage/KeyRetriever.h"
 #include "storage/Types.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "milvus-storage/thread_pool.h"
 
 CStatus
 GetLocalUsedSize(const char* c_dir, int64_t* size) {
@@ -193,6 +194,62 @@ InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
         milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
             .SetArrowReaderConfig(c_arrow_reader_config.hole_size_limit_bytes,
                                   c_arrow_reader_config.range_size_limit_bytes);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+InitLoonReaderThreadPool(int32_t num_threads) {
+    try {
+        if (num_threads < 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "loon reader thread pool size must be non-negative");
+        }
+        // 0 = leave the pool uninitialized (loon reads stay sequential,
+        // the pre-existing behavior). Non-zero values resize an existing
+        // pool in either direction, but 0 cannot destroy it, so a rollback
+        // to 0 is a no-op — callers must surface
+        // GetLoonReaderThreadPoolSize() rather than the requested value,
+        // otherwise the rollback looks applied while the old pool is still
+        // serving reads.
+        if (num_threads == 0) {
+            return milvus::SuccessCStatus();
+        }
+        milvus_storage::ThreadPoolHolder::WithSingleton(num_threads);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+int32_t
+GetLoonReaderThreadPoolSize() {
+    return static_cast<int32_t>(
+        milvus_storage::ThreadPoolHolder::GetParallelism());
+}
+
+CStatus
+InitIndexBuildReadWindow(int64_t window_bytes) {
+    try {
+        if (window_bytes < 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "index build read window must be non-negative");
+        }
+        // milvus-storage validates reader.record_batch_max_size in
+        // [1, 4GB]; reject out-of-range here so a bad config fails at
+        // init/update time instead of at the first build task.
+        constexpr int64_t kMaxWindowBytes = 4LL * 1024 * 1024 * 1024;
+        if (window_bytes > kMaxWindowBytes) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "index build read window must not exceed 4GB");
+        }
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetIndexBuildReadWindow(window_bytes);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
