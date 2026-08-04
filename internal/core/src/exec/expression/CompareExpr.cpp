@@ -30,6 +30,7 @@ namespace exec {
 
 bool
 PhyCompareFilterExpr::CanUseBothDataCompare(OffsetVector* input) const {
+    (void)input;
     const auto is_supported_compare_op = [&]() {
         switch (expr_->op_type_) {
             case OpType::Equal:
@@ -58,10 +59,6 @@ PhyCompareFilterExpr::CanUseBothDataCompare(OffsetVector* input) const {
         const auto is_right_string =
             can_compare_string_type(expr_->right_data_type_);
         if (!is_left_string || !is_right_string) {
-            return false;
-        }
-        if (input != nullptr &&
-            !IsDenseOffsetInputForScan(input)) {
             return false;
         }
         return segment_chunk_reader_.segment_->GetChunkedColumn(left_field_) !=

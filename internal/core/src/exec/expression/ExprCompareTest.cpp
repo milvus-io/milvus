@@ -1100,6 +1100,23 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
         ASSERT_EQ(offset_view[i], left_values[offset] < right_values[offset])
             << "offset input position " << i << " row " << offset;
     }
+
+    auto varchar_expr = build_expr(DataType::VARCHAR);
+    auto varchar_plan = std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, varchar_expr);
+    auto varchar_offset_result = milvus::test::gen_filter_res(
+        varchar_plan.get(), seg.get(), N, MAX_TIMESTAMP, &offsets);
+    BitsetTypeView varchar_offset_view(varchar_offset_result->GetRawData(),
+                                       varchar_offset_result->size());
+    auto left_strings = raw_data.get_col<std::string>(str2_fid);
+    auto right_strings = raw_data.get_col<std::string>(str3_fid);
+    ASSERT_EQ(varchar_offset_view.size(), offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        const auto offset = offsets[i];
+        ASSERT_EQ(varchar_offset_view[i],
+                  left_strings[offset] < right_strings[offset])
+            << "varchar offset input position " << i << " row " << offset;
+    }
 }
 
 TEST_P(ExprTest, TestReorder) {
