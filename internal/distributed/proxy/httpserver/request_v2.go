@@ -401,6 +401,18 @@ func (req *SnapshotReq) GetDbName() string { return req.DbName }
 
 func (req *SnapshotReq) GetCollectionName() string { return req.CollectionName }
 
+type RestoreSnapshotReq struct {
+	SourceDbName         string `json:"sourceDbName"`
+	SourceCollectionName string `json:"sourceCollectionName" binding:"required"`
+	TargetDbName         string `json:"targetDbName"`
+	TargetCollectionName string `json:"targetCollectionName" binding:"required"`
+	SnapshotName         string `json:"snapshotName" binding:"required"`
+}
+
+func (req *RestoreSnapshotReq) GetDbName() string { return req.SourceDbName }
+
+func (req *RestoreSnapshotReq) GetCollectionName() string { return req.SourceCollectionName }
+
 type RestoreExternalSnapshotReq struct {
 	DbName               string `json:"dbName"`
 	TargetCollectionName string `json:"targetCollectionName" binding:"required"`

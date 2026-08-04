@@ -2795,6 +2795,7 @@ type externalCollectionRESTProxy struct {
 	dropSnapshotReq            *milvuspb.DropSnapshotRequest
 	listSnapshotsReq           *milvuspb.ListSnapshotsRequest
 	describeSnapshotReq        *milvuspb.DescribeSnapshotRequest
+	restoreSnapshotReq         *milvuspb.RestoreSnapshotRequest
 }
 
 func (m *externalCollectionRESTProxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
@@ -2965,6 +2966,14 @@ func (m *externalCollectionRESTProxy) DescribeSnapshot(ctx context.Context, requ
 		PartitionNames: []string{"_default"},
 		CreateTs:       100,
 		S3Location:     "s3://bucket/snapshot_1",
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) RestoreSnapshot(ctx context.Context, request *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
+	m.restoreSnapshotReq = request
+	return &milvuspb.RestoreSnapshotResponse{
+		Status: merr.Success(),
+		JobId:  200,
 	}, nil
 }
 
@@ -3232,6 +3241,35 @@ func TestSnapshotCRUDRESTV2(t *testing.T) {
 	assert.Equal(t, "default", proxy.dropSnapshotReq.GetDbName())
 	assert.Equal(t, "source_books", proxy.dropSnapshotReq.GetCollectionName())
 	assert.Equal(t, "snapshot_1", proxy.dropSnapshotReq.GetName())
+}
+
+func TestRestoreSnapshotRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, RestoreAction), bytes.NewReader([]byte(`{
+		"sourceDbName": "source_db",
+		"sourceCollectionName": "source_books",
+		"targetDbName": "target_db",
+		"targetCollectionName": "restored_books",
+		"snapshotName": "snapshot_1"
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, int64(200), gjson.Get(w.Body.String(), "data.jobId").Int())
+	assert.Equal(t, "source_db", proxy.restoreSnapshotReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.restoreSnapshotReq.GetCollectionName())
+	assert.Equal(t, "target_db", proxy.restoreSnapshotReq.GetTargetDbName())
+	assert.Equal(t, "restored_books", proxy.restoreSnapshotReq.GetTargetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.restoreSnapshotReq.GetName())
+	assert.False(t, proxy.restoreSnapshotReq.GetRewriteData())
 }
 
 func TestRestoreExternalSnapshotRESTV2(t *testing.T) {
