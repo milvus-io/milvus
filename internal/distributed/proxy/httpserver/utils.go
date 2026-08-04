@@ -2876,6 +2876,14 @@ func buildSearchResp(results *schemapb.SearchResultData, enableInt64 bool, colle
 		)
 	}
 
+	for _, row := range rows {
+		if _, ok := row[HTTPReturnElementOffset]; ok {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"field %q conflicts with the reserved REST search element offset field",
+				HTTPReturnElementOffset,
+			)
+		}
+	}
 	for i, offset := range elementOffsets {
 		rows[i][HTTPReturnElementOffset] = offset
 	}
