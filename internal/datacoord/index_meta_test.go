@@ -284,6 +284,74 @@ func TestMeta_ScalarAutoIndex(t *testing.T) {
 	})
 }
 
+// TestMeta_CanCreateIndex_BoundAutoIndexEquivalence: the add-function-field DDL
+// persists an AutoIndex-resolved bound index in the create_index convention
+// (UserIndexParams = AUTOINDEX + final metric); a later create_index(AUTOINDEX)
+// on the same field must dedupe as idempotent instead of hitting the
+// one-distinct-index-per-field conflict.
+func TestMeta_CanCreateIndex_BoundAutoIndexEquivalence(t *testing.T) {
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("CreateIndex", mock.Anything, mock.Anything).Return(nil)
+	m := newSegmentIndexMeta(catalog)
+
+	resolvedIndexParams := []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "SPARSE_INVERTED_INDEX"},
+		{Key: common.MetricTypeKey, Value: "BM25"},
+		{Key: "bm25_k1", Value: "1.2"},
+		{Key: "bm25_b", Value: "0.75"},
+		{Key: "bm25_avgdl", Value: "100"},
+	}
+	autoIndexUserParams := []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+		{Key: common.MetricTypeKey, Value: "BM25"},
+	}
+	// Shape persisted by rootcoord prepareBoundFieldIndex on the AutoIndex path.
+	boundIndex := &model.Index{
+		CollectionID:    UniqueID(1),
+		FieldID:         UniqueID(101),
+		IndexID:         UniqueID(10),
+		IndexName:       "sparse",
+		IndexParams:     resolvedIndexParams,
+		UserIndexParams: autoIndexUserParams,
+		IsAutoIndex:     false,
+	}
+	err := m.CreateIndex(context.TODO(), boundIndex)
+	assert.NoError(t, err)
+
+	// What proxy sends for a later create_index(AUTOINDEX, metric_type=BM25).
+	req := &indexpb.CreateIndexRequest{
+		CollectionID:                     UniqueID(1),
+		FieldID:                          UniqueID(101),
+		IndexName:                        "sparse",
+		IndexParams:                      resolvedIndexParams,
+		UserIndexParams:                  autoIndexUserParams,
+		IsAutoIndex:                      false,
+		UserAutoindexMetricTypeSpecified: true,
+	}
+	tmpIndexID, err := m.CanCreateIndex(req, false)
+	assert.ErrorIs(t, err, errIndexOperationIgnored)
+	assert.Zero(t, tmpIndexID)
+
+	// A different explicit index on the same field remains a conflict.
+	conflictReq := &indexpb.CreateIndexRequest{
+		CollectionID: UniqueID(1),
+		FieldID:      UniqueID(101),
+		IndexName:    "sparse",
+		IndexParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "SPARSE_WAND"},
+			{Key: common.MetricTypeKey, Value: "IP"},
+		},
+		UserIndexParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "SPARSE_WAND"},
+			{Key: common.MetricTypeKey, Value: "IP"},
+		},
+	}
+	tmpIndexID, err = m.CanCreateIndex(conflictReq, false)
+	assert.Error(t, err)
+	assert.NotErrorIs(t, err, errIndexOperationIgnored)
+	assert.Zero(t, tmpIndexID)
+}
+
 func TestMeta_CanCreateIndex(t *testing.T) {
 	var (
 		collID = UniqueID(1)

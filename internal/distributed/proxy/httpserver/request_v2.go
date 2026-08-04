@@ -138,7 +138,9 @@ type CollectionAddFunctionField struct {
 	CollectionName string         `json:"collectionName" binding:"required"`
 	Function       FunctionSchema `json:"function" binding:"required"`
 	OutputField    FieldSchema    `json:"outputField" binding:"required"`
-	IndexParam     IndexParam     `json:"indexParams" binding:"required"`
+	// Optional: when omitted, the bound index of the output field is resolved
+	// via the AutoIndex config on the server side.
+	IndexParam *IndexParam `json:"indexParams"`
 }
 
 func (req *CollectionAddFunctionField) GetDbName() string { return req.DbName }

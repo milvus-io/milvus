@@ -12,7 +12,6 @@ from pymilvus import (
     FieldSchema,
     Function,
     FunctionType,
-    MilvusException,
     RRFRanker,
     WeightedRanker,
 )
@@ -491,7 +490,8 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
 
         target: verify invalid BM25 add_function_field requests are rejected without partial schema mutation
         method: send invalid field/function combinations and compare schema before/after each failure
-        expected: each invalid request fails clearly; schema_version, fields, functions, and max_field_id stay unchanged
+        expected: each invalid request fails clearly; schema_version, fields, functions, and max_field_id stay
+                  unchanged; a request without index params succeeds via server-side AutoIndex resolution
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -754,9 +754,15 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             },
         )
 
-        # Case b: AUTOINDEX index_type is rejected; the bound index requires an explicit index_type.
+        # Case b: AUTOINDEX only tolerates an additional metric_type; any other
+        # build param is rejected, mirroring the create_index AUTOINDEX rule.
         autoindex_params = client.prepare_index_params()
-        autoindex_params.add_index(field_name="sparse_bound_neg", index_type="AUTOINDEX", metric_type="BM25")
+        autoindex_params.add_index(
+            field_name="sparse_bound_neg",
+            index_type="AUTOINDEX",
+            metric_type="BM25",
+            drop_ratio_build="0.2",
+        )
         self.add_function_field(
             client,
             collection_name,
@@ -766,18 +772,9 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items={
                 ct.err_code: 1100,
-                ct.err_msg: "an explicit index_type is required for the bound index of function output field",
+                ct.err_msg: "only metric type can be passed when use AutoIndex",
             },
         )
-
-        # Case c: the server mandates bound index params for vector function output fields;
-        # a raw alter_collection_schema without index params must be rejected.
-        with pytest.raises(MilvusException, match="index params are required"):
-            client._get_connection().alter_collection_schema(
-                collection_name=collection_name,
-                field_schema=bound_params_field,
-                func=bound_params_function,
-            )
 
         # Bound index params failures must not partially mutate schema either.
         after_desc = client.describe_collection(collection_name)
@@ -875,6 +872,32 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         desc = client.describe_collection(collection_name)
         assert "sparse" in [field["name"] for field in desc["fields"]]
         assert "bm25_fn" in [func["name"] for func in desc.get("functions", [])]
+
+        # Step 7: A raw alter_collection_schema WITHOUT index params succeeds —
+        # the bound index resolves via AutoIndex on the server (concrete build
+        # type from the sparse autoindex config, metric forced to BM25 by the
+        # function type). describe_index reports the normalized user params, so
+        # index_type surfaces as AUTOINDEX (same as a create_index AUTOINDEX);
+        # the concrete SPARSE_INVERTED_INDEX lives only in the internal build params.
+        auto_field = FieldSchema(name="sparse_auto", dtype=DataType.SPARSE_FLOAT_VECTOR)
+        auto_function = Function(
+            name="bm25_auto_fn",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["sparse_auto"],
+        )
+        client._get_connection().alter_collection_schema(
+            collection_name=collection_name,
+            field_schema=auto_field,
+            func=auto_function,
+        )
+        desc = client.describe_collection(collection_name)
+        assert "sparse_auto" in [field["name"] for field in desc["fields"]]
+        assert "bm25_auto_fn" in [func["name"] for func in desc.get("functions", [])]
+        auto_index_info = client.describe_index(collection_name, index_name="sparse_auto")
+        assert auto_index_info is not None
+        assert auto_index_info["index_type"] == "AUTOINDEX"
+        assert auto_index_info["metric_type"] == "BM25"
 
         self.drop_collection(client, duplicate_name_collection)
         self.drop_collection(client, collection_name)
