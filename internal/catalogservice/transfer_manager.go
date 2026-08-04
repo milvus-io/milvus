@@ -297,6 +297,12 @@ func (m *TransferManager) StartCollectionTransfer(ctx context.Context, req Start
 		}
 	}
 
+	if job.State == TransferStateCommitUncertain {
+		if err := m.advance(ctx, job, TransferStateSourceDropped); err != nil {
+			return nil, err
+		}
+	}
+
 	prepared := job.State == TransferStatePrepared ||
 		job.State == TransferStateSourceDropped ||
 		job.State == TransferStateCatalogMoved ||
@@ -319,9 +325,6 @@ func (m *TransferManager) StartCollectionTransfer(ctx context.Context, req Start
 			return nil, m.failJob(ctx, job, err, srcRoot)
 		}
 		targetPreflightDone = true
-		if err := srcCatalog.Update(ctx, req.CommitTs, metastore.DropCollection(preparedColl.Clone())); err != nil {
-			return nil, m.failJob(ctx, job, err, srcRoot)
-		}
 		if err := m.advance(ctx, job, TransferStateSourceDropped); err != nil {
 			return nil, err
 		}
@@ -332,6 +335,9 @@ func (m *TransferManager) StartCollectionTransfer(ctx context.Context, req Start
 	}
 
 	if job.State == TransferStateSourceDropped {
+		if err := m.dropSourceCatalogIfPresent(ctx, srcCatalog, req, preparedColl); err != nil {
+			return nil, m.markCommitUncertain(ctx, job, err)
+		}
 		if err := m.createTargetCatalog(ctx, dstCatalog, preparedDB, preparedColl, req, targetPreflightDone, targetDatabaseExists, targetCollectionExists); err != nil {
 			return nil, m.markCommitUncertain(ctx, job, err)
 		}
@@ -498,6 +504,27 @@ func (m *TransferManager) ensureSourceStillMatchesSnapshot(ctx context.Context, 
 		return merr.WrapErrServiceInternalMsg("source collection changed during transfer prepare, collection id: %d", expected.CollectionID)
 	}
 	return nil
+}
+
+func (m *TransferManager) dropSourceCatalogIfPresent(ctx context.Context, catalog metastore.RootCoordCatalog, req StartCollectionTransferRequest, expected *model.Collection) error {
+	coll, err := catalog.GetCollectionByName(ctx, expected.DBID, req.DBName, req.CollectionName, m.maxReadTs)
+	if err != nil {
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			return nil
+		}
+		return err
+	}
+	if coll == nil {
+		return nil
+	}
+	coll, err = m.hydrateCollectionAliases(ctx, catalog, coll.Clone())
+	if err != nil {
+		return err
+	}
+	if !collectionsEquivalent(coll, expected) {
+		return merr.WrapErrServiceInternalMsg("source collection changed before source drop, collection id: %d", expected.CollectionID)
+	}
+	return catalog.Update(ctx, req.CommitTs, metastore.DropCollection(expected.Clone()))
 }
 
 func (m *TransferManager) hydrateCollectionAliases(ctx context.Context, catalog metastore.RootCoordCatalog, coll *model.Collection) (*model.Collection, error) {
@@ -679,6 +706,7 @@ func buildApplyRequest(req StartCollectionTransferRequest, coll *model.Collectio
 			coll,
 			model.WithFields(),
 			model.WithStructArrayFields(),
+			model.WithFunctions(),
 		),
 		CacheExpireTs: req.CacheExpireTs,
 	}
@@ -700,8 +728,8 @@ func collectionsEquivalent(a, b *model.Collection) bool {
 	a = normalizeCollectionForTransfer(a)
 	b = normalizeCollectionForTransfer(b)
 	return reflect.DeepEqual(
-		model.MarshalCollectionModelWithOption(a, model.WithFields(), model.WithStructArrayFields(), model.WithPartitions()),
-		model.MarshalCollectionModelWithOption(b, model.WithFields(), model.WithStructArrayFields(), model.WithPartitions()),
+		model.MarshalCollectionModelWithOption(a, model.WithFields(), model.WithStructArrayFields(), model.WithFunctions(), model.WithPartitions()),
+		model.MarshalCollectionModelWithOption(b, model.WithFields(), model.WithStructArrayFields(), model.WithFunctions(), model.WithPartitions()),
 	) && reflect.DeepEqual(a.Aliases, b.Aliases)
 }
 

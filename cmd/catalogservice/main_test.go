@@ -22,8 +22,39 @@ func TestDefaultCatalogServiceMetastoreTypeIsTiKV(t *testing.T) {
 	require.Equal(t, util.MetaStoreTypeTiKV, defaultCatalogServiceMetastoreType())
 }
 
+func TestValidateCatalogServiceListenAddressRejectsWildcardWithoutOverride(t *testing.T) {
+	require.Error(t, validateCatalogServiceListenAddress("0.0.0.0:19540", false))
+	require.Error(t, validateCatalogServiceListenAddress(":19540", false))
+	require.Error(t, validateCatalogServiceListenAddress("[::]:19540", false))
+}
+
+func TestValidateCatalogServiceListenAddressAllowsLoopback(t *testing.T) {
+	require.NoError(t, validateCatalogServiceListenAddress("127.0.0.1:19540", false))
+	require.NoError(t, validateCatalogServiceListenAddress("[::1]:19540", false))
+	require.NoError(t, validateCatalogServiceListenAddress("localhost:19540", false))
+}
+
+func TestValidateCatalogServiceListenAddressAllowsExplicitOverride(t *testing.T) {
+	require.NoError(t, validateCatalogServiceListenAddress("0.0.0.0:19540", true))
+}
+
 func TestNamespaceMetaRootMatchesMilvusMetaSubPath(t *testing.T) {
-	require.Equal(t, "by-dev/catalog/milvus1/meta", namespaceMetaRoot("by-dev/catalog", "milvus1", "meta"))
-	require.Equal(t, "by-dev/catalog/milvus2/custom-meta", namespaceMetaRoot("by-dev/catalog/", "/milvus2/", "/custom-meta/"))
-	require.Equal(t, "by-dev/catalog/milvus3", namespaceMetaRoot("by-dev/catalog", "milvus3", ""))
+	root, err := namespaceMetaRoot("by-dev/catalog", "milvus1", "meta")
+	require.NoError(t, err)
+	require.Equal(t, "by-dev/catalog/milvus1/meta", root)
+
+	root, err = namespaceMetaRoot("by-dev/catalog/", "milvus2", "/custom-meta/")
+	require.NoError(t, err)
+	require.Equal(t, "by-dev/catalog/milvus2/custom-meta", root)
+
+	root, err = namespaceMetaRoot("by-dev/catalog", "milvus3", "")
+	require.NoError(t, err)
+	require.Equal(t, "by-dev/catalog/milvus3", root)
+}
+
+func TestNamespaceMetaRootRejectsUnsafeNamespace(t *testing.T) {
+	for _, namespace := range []string{"", "../milvus1", "milvus/one", "milvus one"} {
+		_, err := namespaceMetaRoot("by-dev/catalog", namespace, "meta")
+		require.Error(t, err)
+	}
 }

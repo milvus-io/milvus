@@ -67,6 +67,56 @@ func TestServiceBackedRootCoordCatalogDatabaseAndCollection(t *testing.T) {
 	require.False(t, remoteCatalog.CollectionExists(ctx, 10, 1000, typeutil.MaxTimestamp))
 }
 
+func TestServiceBackedRootCoordCatalogPreservesCollectionFunctions(t *testing.T) {
+	ctx := context.Background()
+	localCatalog := kvrootcoord.NewCatalog(memkv.NewMemoryKV())
+	client, cleanup := newBufconnRootCatalogClient(t, localCatalog)
+	defer cleanup()
+
+	remoteCatalog := catalogrootcoord.NewCatalog(client, "ns1")
+	require.NoError(t, remoteCatalog.CreateDatabase(ctx, &model.Database{ID: 10, Name: "db1"}, 100))
+
+	coll := &model.Collection{
+		CollectionID: 1000,
+		DBID:         10,
+		DBName:       "db1",
+		Name:         "coll1",
+		Fields: []*model.Field{{
+			FieldID:  100,
+			Name:     "text",
+			DataType: schemapb.DataType_VarChar,
+		}, {
+			FieldID:  101,
+			Name:     "sparse",
+			DataType: schemapb.DataType_SparseFloatVector,
+		}},
+		Functions: []*model.Function{{
+			ID:               200,
+			Name:             "bm25",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldIDs:    []int64{100},
+			InputFieldNames:  []string{"text"},
+			OutputFieldIDs:   []int64{101},
+			OutputFieldNames: []string{"sparse"},
+		}},
+		Partitions: []*model.Partition{{
+			PartitionID:   2000,
+			PartitionName: "_default",
+			CollectionID:  1000,
+			State:         etcdpb.PartitionState_PartitionCreated,
+		}},
+		State: etcdpb.CollectionState_CollectionCreated,
+	}
+	require.NoError(t, remoteCatalog.CreateCollection(ctx, coll, 101))
+
+	got, err := remoteCatalog.GetCollectionByName(ctx, 10, "db1", "coll1", typeutil.MaxTimestamp)
+	require.NoError(t, err)
+	require.Len(t, got.Functions, 1)
+	require.Equal(t, "bm25", got.Functions[0].Name)
+	require.Equal(t, []int64{100}, got.Functions[0].InputFieldIDs)
+	require.Equal(t, []int64{101}, got.Functions[0].OutputFieldIDs)
+}
+
 func newBufconnRootCatalogClient(t *testing.T, catalog metastore.RootCoordCatalog) (catalogpb.RootCatalogServiceClient, func()) {
 	t.Helper()
 

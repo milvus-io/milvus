@@ -10,10 +10,31 @@ import (
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	kvrootcoord "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/rootcoord/catalogmigration"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestDefaultCutoverTimestampUsesRootCoordTSO(t *testing.T) {
+	require.Zero(t, defaultCutoverTimestamp())
+}
+
+func TestValidateCutoverOptionsRequiresTimestampForOfflineMigration(t *testing.T) {
+	err := validateCutoverOptions(cutoverOptions{
+		SourceRootPath:  "by-dev/milvus/meta",
+		TargetNamespace: "milvus2",
+	})
+	require.ErrorContains(t, err, "--ts is required")
+}
+
+func TestValidateCutoverOptionsAllowsZeroTimestampForOnlineCutover(t *testing.T) {
+	err := validateCutoverOptions(cutoverOptions{
+		RootCoordAddress: "127.0.0.1:53100",
+		TargetNamespace:  "milvus2",
+	})
+	require.NoError(t, err)
+}
 
 func TestMigrateRootCoordCatalogSnapshotCopiesRootCoordMetadata(t *testing.T) {
 	ctx := context.Background()
@@ -47,9 +68,9 @@ func TestMigrateRootCoordCatalogSnapshotCopiesRootCoordMetadata(t *testing.T) {
 	}, 102))
 	require.NoError(t, source.SaveFileResource(ctx, &internalpb.FileResourceInfo{Id: 300, Name: "resource"}, 1))
 
-	result, err := migrateRootCoordCatalogSnapshot(ctx, source, target, 200)
+	result, err := catalogmigration.Snapshot(ctx, source, target, 200)
 	require.NoError(t, err)
-	require.Equal(t, migrationResult{Databases: 1, Collections: 1, Aliases: 1, FileResources: 1}, result)
+	require.Equal(t, catalogmigration.Result{Databases: 1, Collections: 1, Aliases: 1, FileResources: 1}, result)
 
 	got, err := target.GetCollectionByName(ctx, 10, "db", "coll", typeutil.MaxTimestamp)
 	require.NoError(t, err)

@@ -27,6 +27,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 )
 
+func TestKVTransferJobStoreRejectsUnsafeTransferID(t *testing.T) {
+	ctx := context.Background()
+	kv := mocks.NewMetaKv(t)
+	store := NewKVTransferJobStore(kv, "catalog/transfer")
+
+	for _, transferID := range []string{"", "../transfer-1", "tenant/transfer-1", "transfer 1"} {
+		_, err := store.Get(ctx, transferID)
+		require.ErrorIs(t, err, ErrInvalidCatalogPathSegment)
+
+		err = store.Save(ctx, &TransferJob{TransferID: transferID, State: TransferStatePending})
+		require.ErrorIs(t, err, ErrInvalidCatalogPathSegment)
+
+		err = store.CompareAndSave(ctx, nil, &TransferJob{TransferID: transferID, State: TransferStatePending})
+		require.ErrorIs(t, err, ErrInvalidCatalogPathSegment)
+	}
+}
+
 func TestKVTransferJobStorePersistsJob(t *testing.T) {
 	ctx := context.Background()
 	kv := mocks.NewMetaKv(t)

@@ -56,7 +56,6 @@ func TestMetaTableApplyTransferredCollectionLoadsLiveIndexes(t *testing.T) {
 		resourceID   = int64(300)
 	)
 
-	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
 	catalog := mocks.NewRootCoordCatalog(t)
 	meta := newTransferMetaTableForTest(catalog)
@@ -118,7 +117,6 @@ func TestMetaTableDeactivateTransferredCollectionRemovesLiveIndexesWithoutCatalo
 		resourceID   = int64(300)
 	)
 
-	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
 	catalog := mocks.NewRootCoordCatalog(t)
 	meta := newTransferMetaTableForTest(catalog)
@@ -162,7 +160,6 @@ func TestMetaTableDeactivateTransferredCollectionRemovesLiveIndexesWithoutCatalo
 func TestMetaTableApplyTransferredCollectionRejectsCollectionIDIdentityChange(t *testing.T) {
 	const collectionID = int64(100)
 
-	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
 	meta := newTransferMetaTableForTest(nil)
 
@@ -200,7 +197,6 @@ func TestMetaTableApplyTransferredCollectionRejectsCollectionIDIdentityChange(t 
 func TestMetaTableApplyTransferredCollectionRejectsUnknownDatabaseWithoutSideEffects(t *testing.T) {
 	const collectionID = int64(100)
 
-	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
 	meta := newTransferMetaTableForTest(nil)
 
@@ -234,7 +230,6 @@ func TestMetaTableApplyTransferredCollectionLoadsMissingDatabaseFromCatalog(t *t
 	const collectionID = int64(100)
 	const dbID = int64(999)
 
-	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
 	catalog := mocks.NewRootCoordCatalog(t)
 	meta := newTransferMetaTableForTest(catalog)
@@ -271,7 +266,6 @@ func TestMetaTableApplyTransferredCollectionLoadsMissingDatabaseFromCatalog(t *t
 func TestMetaTableApplyTransferredCollectionRejectsOperationalMetadataChange(t *testing.T) {
 	const collectionID = int64(100)
 
-	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
 	meta := newTransferMetaTableForTest(nil)
 
@@ -321,7 +315,6 @@ func TestMetaTableApplyTransferredCollectionRejectsOperationalMetadataChange(t *
 func TestMetaTableApplyTransferredCollectionAllowsCanonicalEquivalentRetry(t *testing.T) {
 	const collectionID = int64(100)
 
-	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
 	meta := newTransferMetaTableForTest(nil)
 
@@ -371,7 +364,6 @@ func TestMetaTableAddCollectionDoesNotDoubleCountReservedFileResourceRefs(t *tes
 		resourceID   = int64(300)
 	)
 
-	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
 	catalog := mocks.NewRootCoordCatalog(t)
 	catalog.On("CreateCollection", mock.Anything, mock.Anything, mock.Anything).Return(nil)

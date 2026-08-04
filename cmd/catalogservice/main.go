@@ -46,6 +46,7 @@ import (
 
 func main() {
 	listen := flag.String("listen", "127.0.0.1:19540", "Catalog Service gRPC listen address")
+	allowInsecureRemoteListen := flag.Bool("allow-insecure-remote-listen", false, "allow plaintext Catalog Service gRPC to listen on non-loopback addresses")
 	metastoreType := flag.String("metastore", defaultCatalogServiceMetastoreType(), "metadata backend: etcd or tikv")
 	etcdEndpoints := flag.String("etcd", "127.0.0.1:2379", "comma-separated etcd endpoints")
 	tikvPD := flag.String("tikv-pd", "127.0.0.1:2389", "comma-separated TiKV PD endpoints")
@@ -57,6 +58,9 @@ func main() {
 
 	paramtable.Init()
 
+	if err := validateCatalogServiceListenAddress(*listen, *allowInsecureRemoteListen); err != nil {
+		log.Fatalf("invalid catalog service listen address: %v", err)
+	}
 	lis, err := net.Listen("tcp", *listen)
 	if err != nil {
 		log.Fatalf("listen catalog service failed, listen=%s: %v", *listen, err)
@@ -94,6 +98,24 @@ func main() {
 
 func defaultCatalogServiceMetastoreType() string {
 	return util.MetaStoreTypeTiKV
+}
+
+func validateCatalogServiceListenAddress(listen string, allowInsecureRemote bool) error {
+	if allowInsecureRemote {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		return err
+	}
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("plaintext listen address %q is not loopback; set --allow-insecure-remote-listen only for isolated test environments", listen)
 }
 
 type backendFactory struct {
@@ -145,27 +167,30 @@ func newNamespaceCatalogResolver(backend *backendFactory, metaSubPath string) *n
 }
 
 func (r *namespaceCatalogResolver) RootCoordCatalog(namespace string) (metastore.RootCoordCatalog, error) {
-	if namespace == "" {
-		return nil, fmt.Errorf("namespace is required")
+	root, err := namespaceMetaRoot(r.backend.rootPrefix, namespace, r.metaSubPath)
+	if err != nil {
+		return nil, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if catalog, ok := r.catalogs[namespace]; ok {
 		return catalog, nil
 	}
-	catalog := kvrootcoord.NewCatalog(r.backend.kv(namespaceMetaRoot(r.backend.rootPrefix, namespace, r.metaSubPath)))
+	catalog := kvrootcoord.NewCatalog(r.backend.kv(root))
 	r.catalogs[namespace] = catalog
 	return catalog, nil
 }
 
-func namespaceMetaRoot(rootPrefix string, namespace string, metaSubPath string) string {
+func namespaceMetaRoot(rootPrefix string, namespace string, metaSubPath string) (string, error) {
+	if err := catalogservice.ValidateCatalogPathSegment("namespace", namespace); err != nil {
+		return "", err
+	}
 	rootPrefix = strings.Trim(rootPrefix, "/")
-	namespace = strings.Trim(namespace, "/")
 	metaSubPath = strings.Trim(metaSubPath, "/")
 	if metaSubPath == "" {
-		return path.Join(rootPrefix, namespace)
+		return path.Join(rootPrefix, namespace), nil
 	}
-	return path.Join(rootPrefix, namespace, metaSubPath)
+	return path.Join(rootPrefix, namespace, metaSubPath), nil
 }
 
 type staticRootCoordResolver struct {

@@ -22,21 +22,14 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/metastore"
 	catalogrootcoord "github.com/milvus-io/milvus/internal/metastore/catalogservice/rootcoord"
 	kvrootcoord "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
+	"github.com/milvus-io/milvus/internal/rootcoord/catalogmigration"
 	"github.com/milvus-io/milvus/pkg/v3/proto/catalogpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-type migrationResult struct {
-	Databases     int
-	Collections   int
-	Aliases       int
-	FileResources int
-}
 
 func main() {
 	rootCoordAddress := flag.String("rootcoord-address", "", "RootCoord gRPC address for online cutover without restarting RootCoord")
@@ -44,13 +37,19 @@ func main() {
 	sourceRootPath := flag.String("source-root-path", "", "source etcd meta root path, for example by-dev/milvus1/meta")
 	catalogAddress := flag.String("catalog-address", "127.0.0.1:19540", "Catalog Service gRPC address")
 	targetNamespace := flag.String("target-namespace", "", "target Catalog Service namespace")
-	ts := flag.Uint64("ts", uint64(time.Now().UnixNano()), "target catalog commit timestamp")
+	ts := flag.Uint64("ts", defaultCutoverTimestamp(), "target catalog commit timestamp; 0 lets RootCoord allocate a Milvus hybrid timestamp for online cutover")
 	drainTimeoutMs := flag.Int64("drain-timeout-ms", 30000, "online cutover metadata write drain timeout in milliseconds")
 	cacheExpireTs := flag.Uint64("cache-expire-ts", 0, "proxy metadata cache expiration timestamp for online cutover")
 	flag.Parse()
 
-	if *targetNamespace == "" {
-		fmt.Fprintln(os.Stderr, "--target-namespace is required")
+	opts := cutoverOptions{
+		RootCoordAddress: *rootCoordAddress,
+		SourceRootPath:   *sourceRootPath,
+		TargetNamespace:  *targetNamespace,
+		Ts:               *ts,
+	}
+	if err := validateCutoverOptions(opts); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
 
@@ -109,7 +108,7 @@ func main() {
 	defer conn.Close()
 	target := catalogrootcoord.NewCatalog(catalogpb.NewRootCatalogServiceClient(conn), *targetNamespace)
 
-	result, err := migrateRootCoordCatalogSnapshot(ctx, source, target, typeutil.Timestamp(*ts))
+	result, err := catalogmigration.Snapshot(ctx, source, target, typeutil.Timestamp(*ts))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cutover migration failed: %v\n", err)
 		os.Exit(1)
@@ -118,72 +117,29 @@ func main() {
 		*targetNamespace, result.Databases, result.Collections, result.Aliases, result.FileResources)
 }
 
-func migrateRootCoordCatalogSnapshot(ctx context.Context, source metastore.RootCoordCatalog, target metastore.RootCoordCatalog, ts typeutil.Timestamp) (migrationResult, error) {
-	var result migrationResult
+func defaultCutoverTimestamp() uint64 {
+	return 0
+}
 
-	dbs, err := source.ListDatabases(ctx, typeutil.MaxTimestamp)
-	if err != nil {
-		return result, err
-	}
-	for _, db := range dbs {
-		if err := target.CreateDatabase(ctx, db, ts); err != nil {
-			return result, err
-		}
-		result.Databases++
+type cutoverOptions struct {
+	RootCoordAddress string
+	SourceRootPath   string
+	TargetNamespace  string
+	Ts               uint64
+}
 
-		collections, err := source.ListCollections(ctx, db.ID, typeutil.MaxTimestamp)
-		if err != nil {
-			return result, err
-		}
-		for _, coll := range collections {
-			if err := target.CreateCollection(ctx, coll, ts); err != nil {
-				return result, err
-			}
-			result.Collections++
-		}
-
-		aliases, err := source.ListAliases(ctx, db.ID, typeutil.MaxTimestamp)
-		if err != nil {
-			return result, err
-		}
-		for _, alias := range aliases {
-			if err := target.CreateAlias(ctx, alias, ts); err != nil {
-				return result, err
-			}
-			result.Aliases++
-		}
+func validateCutoverOptions(opts cutoverOptions) error {
+	if opts.TargetNamespace == "" {
+		return fmt.Errorf("--target-namespace is required")
 	}
-
-	legacyCollections, err := source.ListCollections(ctx, 0, typeutil.MaxTimestamp)
-	if err != nil {
-		return result, err
+	if opts.RootCoordAddress != "" {
+		return nil
 	}
-	for _, coll := range legacyCollections {
-		if err := target.CreateCollection(ctx, coll, ts); err != nil {
-			return result, err
-		}
-		result.Collections++
+	if opts.SourceRootPath == "" {
+		return fmt.Errorf("--source-root-path is required")
 	}
-	legacyAliases, err := source.ListAliases(ctx, 0, typeutil.MaxTimestamp)
-	if err != nil {
-		return result, err
+	if opts.Ts == 0 {
+		return fmt.Errorf("--ts is required for offline cutover and must be a Milvus hybrid timestamp")
 	}
-	for _, alias := range legacyAliases {
-		if err := target.CreateAlias(ctx, alias, ts); err != nil {
-			return result, err
-		}
-		result.Aliases++
-	}
-
-	resources, version, err := source.ListFileResource(ctx)
-	if err != nil {
-		return result, err
-	}
-	for _, resource := range resources {
-		if err := target.SaveFileResource(ctx, resource, version); err != nil {
-			return result, err
-		}
-		result.FileResources++
-	}
-	return result, nil
+	return nil
 }

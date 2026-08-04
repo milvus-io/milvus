@@ -49,6 +49,7 @@ func rootCatalogCollectionFromModel(coll *model.Collection) *catalogpb.RootCatal
 			coll,
 			model.WithFields(),
 			model.WithStructArrayFields(),
+			model.WithFunctions(),
 		),
 		Partitions: make([]*etcdpb.PartitionInfo, 0, len(coll.Partitions)),
 	}

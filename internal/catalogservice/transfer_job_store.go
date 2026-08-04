@@ -41,6 +41,9 @@ func NewKVTransferJobStore(kv kv.BaseKV, prefix string) TransferJobStore {
 }
 
 func (s *kvTransferJobStore) Get(ctx context.Context, transferID string) (*TransferJob, error) {
+	if err := ValidateCatalogPathSegment("transfer id", transferID); err != nil {
+		return nil, err
+	}
 	value, err := s.kv.Load(ctx, s.key(transferID))
 	if err != nil {
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
@@ -57,6 +60,12 @@ func (s *kvTransferJobStore) Get(ctx context.Context, transferID string) (*Trans
 }
 
 func (s *kvTransferJobStore) Save(ctx context.Context, job *TransferJob) error {
+	if job == nil {
+		return merr.WrapErrParameterInvalidMsg("transfer job is required")
+	}
+	if err := ValidateCatalogPathSegment("transfer id", job.TransferID); err != nil {
+		return err
+	}
 	if job.Version == 0 {
 		job.Version = 1
 	}
@@ -69,6 +78,12 @@ func (s *kvTransferJobStore) Save(ctx context.Context, job *TransferJob) error {
 }
 
 func (s *kvTransferJobStore) CompareAndSave(ctx context.Context, expected *TransferJob, job *TransferJob) error {
+	if job == nil {
+		return merr.WrapErrParameterInvalidMsg("transfer job is required")
+	}
+	if err := ValidateCatalogPathSegment("transfer id", job.TransferID); err != nil {
+		return err
+	}
 	if expected == nil {
 		job.Version = 1
 	} else {

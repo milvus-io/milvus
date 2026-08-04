@@ -64,8 +64,7 @@ func TestBroadcastCreateAlias_MarksNoOldTargetSentinel(t *testing.T) {
 
 		wal := mock_streaming.NewMockWALAccesser(t)
 		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Once()
-		streaming.SetWALForTest(wal)
-		defer streaming.SetWALForTest(nil)
+		mockey.Mock(streaming.WAL).Return(wal).Build()
 
 		err := core.broadcastCreateAlias(context.Background(), &milvuspb.CreateAliasRequest{
 			DbName:         "db",
@@ -106,8 +105,7 @@ func TestBroadcastAlterAlias_ForwardsResolvedOldTarget(t *testing.T) {
 
 		wal := mock_streaming.NewMockWALAccesser(t)
 		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Once()
-		streaming.SetWALForTest(wal)
-		defer streaming.SetWALForTest(nil)
+		mockey.Mock(streaming.WAL).Return(wal).Build()
 
 		err := core.broadcastAlterAlias(context.Background(), &milvuspb.AlterAliasRequest{
 			DbName:         "db",
@@ -148,8 +146,7 @@ func TestBroadcastAlterAlias_LeavesZeroWhenOldTargetUnresolvable(t *testing.T) {
 
 		wal := mock_streaming.NewMockWALAccesser(t)
 		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Once()
-		streaming.SetWALForTest(wal)
-		defer streaming.SetWALForTest(nil)
+		mockey.Mock(streaming.WAL).Return(wal).Build()
 
 		err := core.broadcastAlterAlias(context.Background(), &milvuspb.AlterAliasRequest{
 			DbName:         "db",

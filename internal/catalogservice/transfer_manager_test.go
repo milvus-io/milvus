@@ -40,6 +40,7 @@ func TestTransferManagerMovesCollectionThroughRootCoordGate(t *testing.T) {
 	expectTargetAliases(dst, nil)
 	var calls []string
 	root := newRecordingTransferRootCoord(&calls)
+	store := NewMemoryTransferJobStore()
 
 	src.EXPECT().ListDatabases(mock.Anything, typeutil.MaxTimestamp).RunAndReturn(func(context.Context, typeutil.Timestamp) ([]*model.Database, error) {
 		calls = append(calls, "src-list-db")
@@ -48,13 +49,16 @@ func TestTransferManagerMovesCollectionThroughRootCoordGate(t *testing.T) {
 	readCount := 0
 	src.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).RunAndReturn(func(context.Context, int64, string, string, typeutil.Timestamp) (*model.Collection, error) {
 		readCount++
-		if readCount == 1 {
+		switch readCount {
+		case 1:
 			calls = append(calls, "src-read-before-prepare")
-		} else {
+		case 2:
 			calls = append(calls, "src-read-after-prepare")
+		default:
+			calls = append(calls, "src-read-before-drop")
 		}
 		return coll.Clone(), nil
-	}).Twice()
+	}).Times(3)
 	dst.EXPECT().ListDatabases(mock.Anything, typeutil.MaxTimestamp).RunAndReturn(func(context.Context, typeutil.Timestamp) ([]*model.Database, error) {
 		calls = append(calls, "dst-list-db")
 		return []*model.Database{{ID: 10, Name: "db"}}, nil
@@ -75,7 +79,10 @@ func TestTransferManagerMovesCollectionThroughRootCoordGate(t *testing.T) {
 	})
 	src.EXPECT().Update(mock.Anything, uint64(99), mock.MatchedBy(func(action metastore.UpdateAction) bool {
 		return action.Type == metastore.ActionDelete
-	})).RunAndReturn(func(_ context.Context, _ typeutil.Timestamp, _ ...metastore.UpdateAction) error {
+	})).RunAndReturn(func(ctx context.Context, _ typeutil.Timestamp, _ ...metastore.UpdateAction) error {
+		job, err := store.Get(ctx, "transfer-1")
+		require.NoError(t, err)
+		require.Equal(t, TransferStateSourceDropped, job.State)
 		calls = append(calls, "src-drop")
 		return nil
 	})
@@ -89,7 +96,7 @@ func TestTransferManagerMovesCollectionThroughRootCoordGate(t *testing.T) {
 			"milvus1": root,
 			"milvus2": root,
 		}),
-		NewMemoryTransferJobStore(),
+		store,
 	)
 	resp, err := mgr.StartCollectionTransfer(ctx, StartCollectionTransferRequest{
 		TransferID:      "transfer-1",
@@ -111,6 +118,7 @@ func TestTransferManagerMovesCollectionThroughRootCoordGate(t *testing.T) {
 		"root-prepare",
 		"src-read-after-prepare",
 		"dst-list-db",
+		"src-read-before-drop",
 		"src-drop",
 		"dst-create",
 		"dst-create-alias",
@@ -200,7 +208,7 @@ func TestTransferManagerCreatesTargetDatabaseWhenMissing(t *testing.T) {
 	root := newRecordingTransferRootCoord(&calls)
 
 	src.EXPECT().ListDatabases(mock.Anything, typeutil.MaxTimestamp).Return([]*model.Database{{ID: 10, Name: "db"}}, nil)
-	src.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(coll.Clone(), nil).Twice()
+	src.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(coll.Clone(), nil).Times(3)
 	dst.EXPECT().ListDatabases(mock.Anything, typeutil.MaxTimestamp).RunAndReturn(func(context.Context, typeutil.Timestamp) ([]*model.Database, error) {
 		calls = append(calls, "dst-list-db")
 		return []*model.Database{{ID: 1, Name: "default"}}, nil
@@ -387,7 +395,7 @@ func TestTransferManagerRetriesTargetApplyFromStoredSnapshotAfterSourceDrop(t *t
 	store := NewMemoryTransferJobStore()
 
 	src.EXPECT().ListDatabases(mock.Anything, typeutil.MaxTimestamp).Return([]*model.Database{{ID: 10, Name: "db"}}, nil).Once()
-	src.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(coll.Clone(), nil).Twice()
+	src.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(coll.Clone(), nil).Times(3)
 	dst.EXPECT().ListDatabases(mock.Anything, typeutil.MaxTimestamp).Return([]*model.Database{{ID: 10, Name: "db"}}, nil).Once()
 	dst.EXPECT().GetCollectionByID(mock.Anything, int64(10), typeutil.MaxTimestamp, int64(100)).Return(nil, nil).Once()
 	dst.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(nil, nil).Once()
@@ -454,6 +462,7 @@ func TestTransferManagerRetriesFromSourceDroppedUsingStoredSnapshot(t *testing.T
 		State:           TransferStateSourceDropped,
 	}))
 
+	src.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(nil, nil).Once()
 	dst.EXPECT().ListDatabases(mock.Anything, typeutil.MaxTimestamp).Return([]*model.Database{{ID: 10, Name: "db"}}, nil).Once()
 	dst.EXPECT().GetCollectionByID(mock.Anything, int64(10), typeutil.MaxTimestamp, int64(100)).Return(nil, nil).Once()
 	dst.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(nil, nil).Once()
@@ -486,6 +495,123 @@ func TestTransferManagerRetriesFromSourceDroppedUsingStoredSnapshot(t *testing.T
 	require.NotNil(t, root.deactivate)
 }
 
+func TestTransferManagerRetriesSourceDropWhenSourceDroppedStateButSourceStillPresent(t *testing.T) {
+	ctx := context.Background()
+	coll := testTransferCollection()
+	src := mocks.NewRootCoordCatalog(t)
+	dst := mocks.NewRootCoordCatalog(t)
+	expectSourceAliases(src, coll)
+	expectTargetAliases(dst, nil)
+	root := newRecordingTransferRootCoord(nil)
+	store := NewMemoryTransferJobStore()
+	require.NoError(t, store.Save(ctx, &TransferJob{
+		TransferID:      "transfer-1",
+		TransferEpoch:   11,
+		SourceNamespace: "milvus1",
+		TargetNamespace: "milvus2",
+		DBName:          "db",
+		CollectionName:  "coll",
+		CommitTs:        99,
+		CacheExpireTs:   100,
+		DrainTimeoutMs:  2000,
+		CollectionID:    coll.CollectionID,
+		Collection:      coll.Clone(),
+		State:           TransferStateSourceDropped,
+	}))
+
+	src.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(coll.Clone(), nil).Once()
+	src.EXPECT().Update(mock.Anything, uint64(99), mock.MatchedBy(func(action metastore.UpdateAction) bool {
+		return action.Type == metastore.ActionDelete
+	})).Return(nil).Once()
+	dst.EXPECT().ListDatabases(mock.Anything, typeutil.MaxTimestamp).Return([]*model.Database{{ID: 10, Name: "db"}}, nil).Once()
+	dst.EXPECT().GetCollectionByID(mock.Anything, int64(10), typeutil.MaxTimestamp, int64(100)).Return(nil, nil).Once()
+	dst.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(nil, nil).Once()
+	dst.EXPECT().Update(mock.Anything, uint64(99), mock.MatchedBy(func(action metastore.UpdateAction) bool {
+		return action.Type == metastore.ActionAdd
+	})).Return(nil).Once()
+	dst.EXPECT().CreateAlias(mock.Anything, mock.MatchedBy(func(alias *model.Alias) bool {
+		return alias.Name == "alias1" && alias.CollectionID == coll.CollectionID && alias.DbID == coll.DBID
+	}), uint64(99)).Return(nil).Once()
+
+	mgr := NewTransferManager(
+		StaticRootCoordCatalogResolver(map[string]metastore.RootCoordCatalog{"milvus1": src, "milvus2": dst}),
+		StaticTransferRootCoordResolver(map[string]TransferRootCoord{"milvus1": root, "milvus2": root}),
+		store,
+	)
+	resp, err := mgr.StartCollectionTransfer(ctx, StartCollectionTransferRequest{
+		TransferID:      "transfer-1",
+		TransferEpoch:   11,
+		SourceNamespace: "milvus1",
+		TargetNamespace: "milvus2",
+		DBName:          "db",
+		CollectionName:  "coll",
+		CommitTs:        99,
+		CacheExpireTs:   100,
+		DrainTimeoutMs:  2000,
+	})
+	require.NoError(t, err)
+	require.Equal(t, TransferStateDone, resp.State)
+	require.NotNil(t, root.deactivate)
+	require.NotNil(t, root.apply)
+}
+
+func TestTransferManagerRetriesCommitUncertainFromStoredSnapshot(t *testing.T) {
+	ctx := context.Background()
+	coll := testTransferCollection()
+	src := mocks.NewRootCoordCatalog(t)
+	dst := mocks.NewRootCoordCatalog(t)
+	expectTargetAliases(dst, nil)
+	root := newRecordingTransferRootCoord(nil)
+	store := NewMemoryTransferJobStore()
+	require.NoError(t, store.Save(ctx, &TransferJob{
+		TransferID:      "transfer-1",
+		TransferEpoch:   11,
+		SourceNamespace: "milvus1",
+		TargetNamespace: "milvus2",
+		DBName:          "db",
+		CollectionName:  "coll",
+		CommitTs:        99,
+		CacheExpireTs:   100,
+		DrainTimeoutMs:  2000,
+		CollectionID:    coll.CollectionID,
+		Collection:      coll.Clone(),
+		State:           TransferStateCommitUncertain,
+		LastError:       "previous target write was uncertain",
+	}))
+
+	src.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(nil, nil).Once()
+	dst.EXPECT().ListDatabases(mock.Anything, typeutil.MaxTimestamp).Return([]*model.Database{{ID: 10, Name: "db"}}, nil).Once()
+	dst.EXPECT().GetCollectionByID(mock.Anything, int64(10), typeutil.MaxTimestamp, int64(100)).Return(nil, nil).Once()
+	dst.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(nil, nil).Once()
+	dst.EXPECT().Update(mock.Anything, uint64(99), mock.MatchedBy(func(action metastore.UpdateAction) bool {
+		return action.Type == metastore.ActionAdd
+	})).Return(nil).Once()
+	dst.EXPECT().CreateAlias(mock.Anything, mock.MatchedBy(func(alias *model.Alias) bool {
+		return alias.Name == "alias1" && alias.CollectionID == coll.CollectionID && alias.DbID == coll.DBID
+	}), uint64(99)).Return(nil).Once()
+
+	mgr := NewTransferManager(
+		StaticRootCoordCatalogResolver(map[string]metastore.RootCoordCatalog{"milvus1": src, "milvus2": dst}),
+		StaticTransferRootCoordResolver(map[string]TransferRootCoord{"milvus1": root, "milvus2": root}),
+		store,
+	)
+	resp, err := mgr.StartCollectionTransfer(ctx, StartCollectionTransferRequest{
+		TransferID:      "transfer-1",
+		TransferEpoch:   11,
+		SourceNamespace: "milvus1",
+		TargetNamespace: "milvus2",
+		DBName:          "db",
+		CollectionName:  "coll",
+		CommitTs:        99,
+		CacheExpireTs:   100,
+		DrainTimeoutMs:  2000,
+	})
+	require.NoError(t, err)
+	require.Equal(t, TransferStateDone, resp.State)
+	require.NotNil(t, root.deactivate)
+	require.NotNil(t, root.apply)
+}
+
 func TestTransferManagerRetrySkipsExistingTargetAliasForSameCollection(t *testing.T) {
 	ctx := context.Background()
 	coll := testTransferCollection()
@@ -508,6 +634,7 @@ func TestTransferManagerRetrySkipsExistingTargetAliasForSameCollection(t *testin
 		State:           TransferStateSourceDropped,
 	}))
 
+	src.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(nil, nil).Once()
 	dst.EXPECT().ListDatabases(mock.Anything, typeutil.MaxTimestamp).Return([]*model.Database{{ID: 10, Name: "db"}}, nil).Once()
 	dst.EXPECT().GetCollectionByID(mock.Anything, int64(10), typeutil.MaxTimestamp, int64(100)).Return(coll.Clone(), nil).Once()
 	dst.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(coll.Clone(), nil).Once()
@@ -563,6 +690,7 @@ func TestTransferManagerMarksCommitUncertainAfterPointOfNoReturnFailure(t *testi
 		State:           TransferStateSourceDropped,
 	}))
 
+	src.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(nil, nil).Once()
 	dst.EXPECT().ListDatabases(mock.Anything, typeutil.MaxTimestamp).Return([]*model.Database{{ID: 10, Name: "db"}}, nil).Once()
 	dst.EXPECT().GetCollectionByID(mock.Anything, int64(10), typeutil.MaxTimestamp, int64(100)).Return(nil, nil).Once()
 	dst.EXPECT().GetCollectionByName(mock.Anything, int64(10), "db", "coll", typeutil.MaxTimestamp).Return(nil, nil).Once()

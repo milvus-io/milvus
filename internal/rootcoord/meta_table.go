@@ -881,8 +881,8 @@ func transferredCollectionsEquivalent(a, b *model.Collection) bool {
 	slices.Sort(a.Aliases)
 	slices.Sort(b.Aliases)
 	return reflect.DeepEqual(
-		model.MarshalCollectionModelWithOption(a, model.WithFields(), model.WithStructArrayFields(), model.WithPartitions()),
-		model.MarshalCollectionModelWithOption(b, model.WithFields(), model.WithStructArrayFields(), model.WithPartitions()),
+		model.MarshalCollectionModelWithOption(a, model.WithFields(), model.WithStructArrayFields(), model.WithFunctions(), model.WithPartitions()),
+		model.MarshalCollectionModelWithOption(b, model.WithFields(), model.WithStructArrayFields(), model.WithFunctions(), model.WithPartitions()),
 	) && reflect.DeepEqual(a.Aliases, b.Aliases)
 }
 

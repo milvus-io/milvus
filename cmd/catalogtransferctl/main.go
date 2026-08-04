@@ -33,20 +33,35 @@ import (
 func main() {
 	address := flag.String("address", "127.0.0.1:19540", "Catalog Service gRPC address")
 	transferID := flag.String("transfer-id", "", "transfer id")
-	transferEpoch := flag.Int64("transfer-epoch", time.Now().UnixNano(), "transfer fencing epoch")
+	transferEpoch := flag.Int64("transfer-epoch", defaultTransferEpoch(), "transfer fencing epoch")
 	sourceNamespace := flag.String("source-namespace", "", "source namespace")
 	targetNamespace := flag.String("target-namespace", "", "target namespace")
 	dbName := flag.String("db", "default", "database name")
 	collectionName := flag.String("collection", "", "collection name")
-	commitTs := flag.Uint64("commit-ts", uint64(time.Now().UnixNano()), "catalog commit timestamp")
-	cacheExpireTs := flag.Uint64("cache-expire-ts", uint64(time.Now().UnixNano()), "proxy cache expiration timestamp")
+	commitTs := flag.Uint64("commit-ts", defaultTransferCommitTs(), "catalog commit Milvus hybrid timestamp")
+	cacheExpireTs := flag.Uint64("cache-expire-ts", defaultTransferCacheExpireTs(), "proxy cache expiration Milvus hybrid timestamp; 0 reuses commit timestamp")
 	drainTimeoutMs := flag.Int64("drain-timeout-ms", 30000, "source RootCoord drain timeout in milliseconds")
 	getOnly := flag.Bool("get", false, "get transfer state instead of starting transfer")
+	confirm := flag.Bool("confirm", false, "confirm starting a destructive collection transfer")
 	flag.Parse()
 
-	if *transferID == "" {
-		fmt.Fprintln(os.Stderr, "--transfer-id is required")
+	opts := transferOptions{
+		TransferID:      *transferID,
+		TransferEpoch:   *transferEpoch,
+		SourceNamespace: *sourceNamespace,
+		TargetNamespace: *targetNamespace,
+		CollectionName:  *collectionName,
+		CommitTs:        *commitTs,
+		CacheExpireTs:   *cacheExpireTs,
+		GetOnly:         *getOnly,
+		ConfirmStart:    *confirm,
+	}
+	if err := validateTransferOptions(opts); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
+	}
+	if !*getOnly && *cacheExpireTs == 0 {
+		*cacheExpireTs = *commitTs
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -87,4 +102,56 @@ func main() {
 	}
 	fmt.Printf("transfer_id=%s state=%s collection_id=%d\n",
 		resp.GetTransferId(), resp.GetState().String(), resp.GetCollectionId())
+}
+
+func defaultTransferEpoch() int64 {
+	return 0
+}
+
+func defaultTransferCommitTs() uint64 {
+	return 0
+}
+
+func defaultTransferCacheExpireTs() uint64 {
+	return 0
+}
+
+type transferOptions struct {
+	TransferID      string
+	TransferEpoch   int64
+	SourceNamespace string
+	TargetNamespace string
+	CollectionName  string
+	CommitTs        uint64
+	CacheExpireTs   uint64
+	GetOnly         bool
+	ConfirmStart    bool
+}
+
+func validateTransferOptions(opts transferOptions) error {
+	if opts.TransferID == "" {
+		return fmt.Errorf("--transfer-id is required")
+	}
+	if opts.GetOnly {
+		return nil
+	}
+	if !opts.ConfirmStart {
+		return fmt.Errorf("--confirm is required to start collection transfer")
+	}
+	if opts.TransferEpoch <= 0 {
+		return fmt.Errorf("--transfer-epoch is required")
+	}
+	if opts.SourceNamespace == "" {
+		return fmt.Errorf("--source-namespace is required")
+	}
+	if opts.TargetNamespace == "" {
+		return fmt.Errorf("--target-namespace is required")
+	}
+	if opts.CollectionName == "" {
+		return fmt.Errorf("--collection is required")
+	}
+	if opts.CommitTs == 0 {
+		return fmt.Errorf("--commit-ts is required and must be a Milvus hybrid timestamp")
+	}
+	return nil
 }
