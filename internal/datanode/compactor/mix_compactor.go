@@ -171,6 +171,7 @@ func (t *mixCompactionTask) buildWriterOptions(ctx context.Context) []storage.Rw
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
 		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
+		storage.WithMultiPartUploadSize(paramtable.Get().DataNodeCfg.MultiPartUploadSize.GetAsInt64()),
 	}
 
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {

@@ -188,14 +188,16 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 
 	chunkSize := w.binLogMaxSize
 
-	w.rwOption = append(w.rwOption,
+	opts := make([]storage.RwOption, len(w.rwOption), len(w.rwOption)+2)
+	copy(opts, w.rwOption)
+	opts = append(opts,
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return w.binlogIO.Upload(ctx, kvs)
 		}),
 		storage.WithVersion(w.storageVersion),
 	)
 	rw, err := storage.NewBinlogRecordWriter(w.ctx, w.collectionID, w.partitionID, newSegmentID,
-		w.schema, w.allocator.logIDAlloc, chunkSize, w.maxRows, w.rwOption...,
+		w.schema, w.allocator.logIDAlloc, chunkSize, w.maxRows, opts...,
 	)
 	if err != nil {
 		return err
