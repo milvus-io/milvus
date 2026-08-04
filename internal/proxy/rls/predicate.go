@@ -67,6 +67,102 @@ func (m *manager) resolveCheckPredicate(ctx context.Context, collectionID Unique
 	return m.resolvePredicate(ctx, collectionID, principalName, action, checkExprKind, schema)
 }
 
+// ResolveUpsertPredicates resolves USING and CHECK from one policy generation
+// and one principal-tag snapshot.
+func ResolveUpsertPredicates(ctx context.Context, collectionID UniqueID, principalName string, schema *typeutil.SchemaHelper) (*planpb.Expr, *planpb.Expr, error) {
+	return defaultManager.resolveUpsertPredicates(ctx, collectionID, principalName, schema)
+}
+
+func (m *manager) resolveUpsertPredicates(ctx context.Context, collectionID UniqueID, principalName string, schema *typeutil.SchemaHelper) (*planpb.Expr, *planpb.Expr, error) {
+	if m == nil {
+		return nil, nil, merr.WrapErrServiceInternalMsg("failed to resolve RLS predicates without metadata manager")
+	}
+	if collectionID == 0 {
+		return nil, nil, merr.WrapErrServiceInternalMsg("failed to resolve RLS predicates with empty collection id")
+	}
+	if _, _, err := ResolveRuntimePrincipal(true, principalName, "upsert"); err != nil {
+		return nil, nil, err
+	}
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		if err := m.ensurePoliciesFresh(ctx, collectionID); err != nil {
+			return nil, nil, merr.Wrapf(err, "failed to validate RLS metadata for collection %d", collectionID)
+		}
+		state := m.getCollectionState(collectionID)
+		if state == nil {
+			return nil, nil, merr.WrapErrServiceUnavailableMsg("RLS metadata is unavailable for collection %d", collectionID)
+		}
+		state.mu.RLock()
+		generation := state.policyGeneration
+		state.mu.RUnlock()
+
+		usingCompiled, err := state.getCompiledExpression(rlsutil.PolicyActionUpsert, usingExprKind, schema)
+		if err != nil {
+			if !m.policyRefreshCurrent(collectionID, state, generation) {
+				continue
+			}
+			return nil, nil, err
+		}
+		checkCompiled, err := state.getCompiledExpression(rlsutil.PolicyActionUpsert, checkExprKind, schema)
+		if !m.policyRefreshCurrent(collectionID, state, generation) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		if checkCompiled == nil {
+			return nil, nil, denyNoApplicableRLSPolicy(rlsutil.PolicyActionUpsert, checkExprKind)
+		}
+
+		var tags map[string]rlsutil.TagValue
+		if (usingCompiled != nil && usingCompiled.needsTags) || (checkCompiled != nil && checkCompiled.needsTags) {
+			tags, err = m.ensurePrincipalTags(ctx, collectionID, principalName)
+			if !m.policyRefreshCurrent(collectionID, state, generation) {
+				continue
+			}
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+
+		// A missing USING policy denies existing rows. New-only upserts never
+		// evaluate USING and remain governed by CHECK.
+		using := alwaysFalsePredicate()
+		if usingCompiled != nil {
+			using, err = usingCompiled.Instantiate(principalName, tags)
+			if !m.policyRefreshCurrent(collectionID, state, generation) {
+				continue
+			}
+			if err != nil {
+				return nil, nil, err
+			}
+			if using == nil {
+				using = alwaysFalsePredicate()
+			}
+		}
+		check, err := checkCompiled.Instantiate(principalName, tags)
+		if !m.policyRefreshCurrent(collectionID, state, generation) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		if check == nil {
+			return nil, nil, denyNoApplicableRLSPolicy(rlsutil.PolicyActionUpsert, checkExprKind)
+		}
+		if rewriter.IsAlwaysTrueExpr(using) {
+			using = nil
+		}
+		if rewriter.IsAlwaysTrueExpr(check) {
+			check = nil
+		}
+		return using, check, nil
+	}
+}
+
 func (m *manager) resolvePredicate(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, kind exprKind, schema *typeutil.SchemaHelper) (*planpb.Expr, error) {
 	if m == nil {
 		return nil, merr.WrapErrServiceInternalMsg("failed to resolve RLS predicate without metadata manager")

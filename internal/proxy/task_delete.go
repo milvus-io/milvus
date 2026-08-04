@@ -17,10 +17,12 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -55,6 +57,7 @@ type deleteTask struct {
 
 	// delete info
 	primaryKeys  *schemapb.IDs
+	schema       *schemaInfo
 	collectionID UniqueID
 	partitionID  UniqueID
 	dbID         UniqueID
@@ -133,11 +136,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	if dt.req.Namespace == nil {
 		return nil
 	}
-	schema, err := dt.GetMetaCache().GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
-	if err != nil {
-		return err
-	}
-	return common.CheckNamespace(schema.CollectionSchema, dt.req.Namespace)
+	return common.CheckNamespace(dt.schema.CollectionSchema, dt.req.Namespace)
 }
 
 func (dt *deleteTask) PostExecute(ctx context.Context) error {
@@ -347,11 +346,28 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection id", err)
 	}
-
-	dr.schema, err = dr.GetMetaCache().GetCollectionSchema(ctx, dr.req.GetDbName(), collName)
+	colInfo, err := dr.GetMetaCache().GetCollectionInfo(ctx, dr.req.GetDbName(), collName, dr.collectionID)
 	if err != nil {
-		return ErrWithLog(log, "Failed to get collection schema", err)
+		return ErrWithLog(log, "Failed to get collection info", err)
 	}
+	canonicalDBName := colInfo.DBName
+	if canonicalDBName == "" {
+		canonicalDBName = dr.req.GetDbName()
+	}
+	rlsEnabled := colInfo.RlsEnabled
+	if rlsEnabled && dr.req.GetSkipRls() {
+		rlsEnabled, err = resolveRLSEnforcement(ctx, dr.GetMetaCache(), rlsEnabled, colInfo.RlsForce, true,
+			canonicalDBName, colInfo.Schema.GetName(), "delete")
+		if err != nil {
+			return err
+		}
+	}
+	principalName, enforceRLS, err := rls.ResolveRuntimePrincipal(rlsEnabled, dr.req.GetRlsPrincipal(), "delete")
+	if err != nil {
+		return err
+	}
+
+	dr.schema = colInfo.Schema
 	if err := validateTextStorageV3Enabled(dr.schema.CollectionSchema); err != nil {
 		return ErrWithLog(log, "TEXT field requires StorageV3", err)
 	}
@@ -363,23 +379,37 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		dr.req.PartitionName = partitionName
 	}
 
-	colInfo, err := dr.GetMetaCache().GetCollectionInfo(ctx, dr.req.GetDbName(), collName, dr.collectionID)
-	if err != nil {
-		return ErrWithLog(log, "Failed to get collection info", err)
-	}
 	colTimezone := getColTimezone(colInfo)
 	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone}
 
-	start := time.Now()
-	dr.plan, err = planparserv2.CreateRetrievePlanArgs(dr.schema.SchemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues(), visitorArgs)
-	if err != nil {
-		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-		return merr.WrapErrAsInputError(WrapPlanCreationError(err, "failed to create delete plan"))
+	parseDeletePlan := func(expr string) (*planpb.PlanNode, error) {
+		start := time.Now()
+		plan, err := planparserv2.CreateRetrievePlanArgs(dr.schema.SchemaHelper, expr, dr.req.GetExprTemplateValues(), visitorArgs)
+		if err != nil {
+			metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
+			return nil, merr.WrapErrAsInputError(WrapPlanCreationError(err, "failed to create delete plan"))
+		}
+		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
+		return plan, nil
 	}
-	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 
-	if planparserv2.IsAlwaysTruePlan(dr.plan) {
+	userPlan, err := parseDeletePlan(dr.req.GetExpr())
+	if err != nil {
+		return err
+	}
+	if planparserv2.IsAlwaysTruePlan(userPlan) {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
+	}
+	dr.plan = userPlan
+
+	if enforceRLS {
+		predicate, err := rls.ResolveUsingPredicate(ctx, dr.collectionID, principalName, rlsutil.PolicyActionDelete, dr.schema.SchemaHelper)
+		if err != nil {
+			return err
+		}
+		if err := rls.MergePredicateToPlan(dr.plan, predicate); err != nil {
+			return err
+		}
 	}
 
 	// Approximate membership_match filters carrying an MBF1 blob must not drive
@@ -399,7 +429,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		if len(partName) > 0 {
 			return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if namespace is used")
 		}
-		hashedPartitionNames, err := assignNamespacePartitionKey(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), dr.req.Namespace)
+		hashedPartitionNames, err := assignNamespacePartitionKey(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), dr.schema.CollectionSchema, dr.req.Namespace)
 		if err != nil {
 			return err
 		}
@@ -416,7 +446,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 			return err
 		}
 		partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-		hashedPartitionNames, err := assignPartitionKeys(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), partitionKeys)
+		hashedPartitionNames, err := assignPartitionKeys(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), dr.schema.CollectionSchema, partitionKeys)
 		if err != nil {
 			return err
 		}
@@ -482,6 +512,7 @@ func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, 
 		req:          dr.req,
 		idAllocator:  dr.idAllocator,
 		chMgr:        dr.chMgr,
+		schema:       dr.schema,
 		collectionID: dr.collectionID,
 		partitionID:  partitionID,
 		vChannels:    dr.vChannels,

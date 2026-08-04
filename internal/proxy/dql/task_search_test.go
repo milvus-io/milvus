@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/types"
@@ -92,6 +93,7 @@ func TestSearchTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 	schema := mustNewSchemaInfo(newTextSchemaForStorageV3Test(collectionName))
 	cache := newTestCache()
 	mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema}, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
 
 	task := &SearchTask{
@@ -136,6 +138,7 @@ func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
 
 		mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
 		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{
+			Schema:           schema,
 			UpdateTimestamp:  100,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
 		}, nil)
@@ -176,6 +179,47 @@ func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
 	})
 }
 
+func TestSearchTaskPreExecutePreservesPresetRLSPredicate(t *testing.T) {
+	mockey.PatchConvey("preset RLS predicate is not resolved again", t, func() {
+		const (
+			collectionName = "search_by_pk_collection"
+			collectionID   = int64(101)
+		)
+		schema := mustNewSchemaInfo(constructCollectionSchema("id", testFloatVecField, 2, collectionName))
+		predicate, err := planparserv2.ParseExpr(schema.SchemaHelper, "id == 1", nil)
+		require.NoError(t, err)
+
+		mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
+		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema, RlsEnabled: true}, nil)
+		mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
+		mockTest(t, isIgnoreGrowing, false, nil)
+		mockTest(t, (*SearchTask).checkNq, int64(1), nil)
+		mockey.Mock((*SearchTask).resolveRLSUsingPredicate).To(func(*SearchTask, string, bool) (*planpb.Expr, error) {
+			return nil, errors.New("preset RLS predicate must not be resolved again")
+		}).Build()
+
+		task := &SearchTask{
+			baseTask:      baseTask{MetaCache: newTestCache()},
+			Condition:     NewTaskCondition(context.Background()),
+			SearchRequest: &internalpb.SearchRequest{},
+			ctx:           context.Background(),
+			request: &milvuspb.SearchRequest{
+				CollectionName: collectionName,
+				Nq:             1,
+				SearchParams:   getValidSearchParams(),
+			},
+			result: &milvuspb.SearchResults{Status: merr.Success()},
+		}
+		task.SetResolvedRLSPredicate(predicate)
+		require.NoError(t, task.OnEnqueue())
+		require.NoError(t, task.PreExecute(context.Background()))
+
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		require.True(t, proto.Equal(predicate, plan.GetVectorAnns().GetPredicates()))
+	})
+}
+
 func TestSearchTask_PostExecute(t *testing.T) {
 	var err error
 	ctx := context.TODO()
@@ -195,7 +239,9 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		}
 		return si, nil
 	})
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: 1000}, nil)
+	mockTestTo(t, (*metacache.MetaCache).GetCollectionInfo, func(_ *metacache.MetaCache, _ context.Context, _, collName string, _ int64) (*collectionInfo, error) {
+		return &collectionInfo{CollID: 1000, Schema: schemaByColl[collName]}, nil
+	})
 	mockTest(t, (*metacache.MetaCache).GetPartitions, map[string]int64{"_default": 1}, nil)
 
 	registerColl := func(collName string, schema *schemapb.CollectionSchema) {
@@ -888,7 +934,9 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		}
 		return si, nil
 	})
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: 1000, UpdateTimestamp: 999}, nil)
+	mockTestTo(t, (*metacache.MetaCache).GetCollectionInfo, func(_ *metacache.MetaCache, _ context.Context, _, collName string, _ int64) (*collectionInfo, error) {
+		return &collectionInfo{CollID: 1000, Schema: schemaByColl[collName], UpdateTimestamp: 999}, nil
+	})
 	mockTest(t, (*metacache.MetaCache).GetPartitions, map[string]int64{"_default": 1}, nil)
 
 	registerColl := func(collName string, schema *schemapb.CollectionSchema) {
@@ -1479,7 +1527,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 	mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, info, nil)
 	mockTest(t, (*metacache.MetaCache).GetPartitions, map[string]int64{"_default": UniqueID(1)}, nil)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{}, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: info}, nil)
 
 	getSearchTask := func(t *testing.T, collName string, data []string, withRerank bool) *SearchTask {
 		placeholderValue := &commonpb.PlaceholderValue{
@@ -1686,9 +1734,10 @@ func TestSearchTaskV2_Execute(t *testing.T) {
 	collectionName := t.Name() + funcutil.GenRandomStr()
 
 	cache := newTestCache()
-	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, mustNewSchemaInfo(constructCollectionSchema(testInt64Field, testFloatVecField, testVecDim, collectionName)), nil)
+	schema := mustNewSchemaInfo(constructCollectionSchema(testInt64Field, testFloatVecField, testVecDim, collectionName))
+	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionID, UniqueID(1000), nil)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: 1000}, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: 1000, Schema: schema}, nil)
 
 	task := &SearchTask{
 		baseTask: baseTask{MetaCache: cache},
@@ -4616,6 +4665,7 @@ type MaterializedViewTestSuite struct {
 	dbName          string
 	colName         string
 	colID           UniqueID
+	collectionInfo  *collectionInfo
 	fieldName2Types map[string]schemapb.DataType
 }
 
@@ -4638,13 +4688,13 @@ func (s *MaterializedViewTestSuite) TearDownSuite() {
 func (s *MaterializedViewTestSuite) SetupTest() {
 	s.mockMetaCache = newTestCache()
 	s.patches = nil
+	s.collectionInfo = &collectionInfo{
+		CollID:                s.colID,
+		PartitionKeyIsolation: true,
+	}
 	s.patches = append(s.patches,
 		mockTest(s.T(), (*metacache.MetaCache).GetCollectionID, s.colID, nil),
-		mockTest(s.T(), (*metacache.MetaCache).GetCollectionInfo,
-			&collectionInfo{
-				CollID:                s.colID,
-				PartitionKeyIsolation: true,
-			}, nil),
+		mockTest(s.T(), (*metacache.MetaCache).GetCollectionInfo, s.collectionInfo, nil),
 	)
 }
 
@@ -4716,7 +4766,7 @@ func (s *MaterializedViewTestSuite) TestMvNotEnabledWithNoPartitionKey() {
 
 	schema := constructCollectionSchemaByDataType(s.colName, s.fieldName2Types, testInt64Field, false)
 	schemaInfo := mustNewSchemaInfo(schema)
-	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil))
+	s.collectionInfo.Schema = schemaInfo
 
 	err := task.PreExecute(s.ctx)
 	s.NoError(err)
@@ -4731,7 +4781,7 @@ func (s *MaterializedViewTestSuite) TestMvNotEnabledWithPartitionKey() {
 	task.request.Dsl = testInt64Field + " == 1"
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testInt64Field, false)
 	schemaInfo := mustNewSchemaInfo(schema)
-	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil))
+	s.collectionInfo.Schema = schemaInfo
 	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetPartitionsIndex, []string{"partition_1", "partition_2"}, nil))
 	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetPartitions, map[string]int64{"partition_1": 1, "partition_2": 2}, nil))
 
@@ -4747,7 +4797,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledNoPartitionKey() {
 	task.enableMaterializedView = true
 	schema := constructCollectionSchemaByDataType(s.colName, s.fieldName2Types, testInt64Field, false)
 	schemaInfo := mustNewSchemaInfo(schema)
-	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil))
+	s.collectionInfo.Schema = schemaInfo
 
 	err := task.PreExecute(s.ctx)
 	s.NoError(err)
@@ -4762,7 +4812,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnInt64() {
 	task.request.Dsl = testInt64Field + " == 1"
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testInt64Field, false)
 	schemaInfo := mustNewSchemaInfo(schema)
-	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil))
+	s.collectionInfo.Schema = schemaInfo
 	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetPartitionsIndex, []string{"partition_1", "partition_2"}, nil))
 	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetPartitions, map[string]int64{"partition_1": 1, "partition_2": 2}, nil))
 
@@ -4779,7 +4829,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
 	task.request.Dsl = testVarCharField + " == \"a\""
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 	schemaInfo := mustNewSchemaInfo(schema)
-	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil))
+	s.collectionInfo.Schema = schemaInfo
 	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetPartitionsIndex, []string{"partition_1", "partition_2"}, nil))
 	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetPartitions, map[string]int64{"partition_1": 1, "partition_2": 2}, nil))
 
@@ -4793,7 +4843,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolation() {
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 	schemaInfo := mustNewSchemaInfo(schema)
-	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil))
+	s.collectionInfo.Schema = schemaInfo
 	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetPartitionsIndex, []string{"partition_1", "partition_2"}, nil))
 	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetPartitions, map[string]int64{"partition_1": 1, "partition_2": 2}, nil))
 
@@ -4814,7 +4864,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolationInvalid() {
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 	schemaInfo := mustNewSchemaInfo(schema)
-	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil))
+	s.collectionInfo.Schema = schemaInfo
 
 	isAdanceds := []bool{true, false}
 	for _, isAdvanced := range isAdanceds {
@@ -4829,7 +4879,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 func (s *MaterializedViewTestSuite) TestHybridSearchPartitionKeyIsolationWithoutMaterializedView() {
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 	schemaInfo := mustNewSchemaInfo(schema)
-	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil))
+	s.collectionInfo.Schema = schemaInfo
 	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetPartitionsIndex, []string{"partition_1", "partition_2"}, nil))
 	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetPartitions, map[string]int64{"partition_1": 1, "partition_2": 2}, nil))
 
@@ -4863,7 +4913,7 @@ func (s *MaterializedViewTestSuite) TestHybridSearchPartitionKeyIsolationWithout
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolationInvalidOr() {
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 	schemaInfo := mustNewSchemaInfo(schema)
-	s.mockCache(mockTest(s.T(), (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil))
+	s.collectionInfo.Schema = schemaInfo
 
 	isAdanceds := []bool{true, false}
 	for _, isAdvanced := range isAdanceds {
@@ -7503,6 +7553,57 @@ func TestParseElementScope(t *testing.T) {
 	assert.Equal(t, 0, cfg.TopK)
 	assert.NotContains(t, sanitized, elementScopeKey)
 	assert.Contains(t, sanitized, "nprobe")
+}
+
+func TestHybridSearchResolvesRLSPredicateOnce(t *testing.T) {
+	const (
+		collectionID   = int64(991006)
+		collectionName = "rls_hybrid_collection"
+	)
+	ctx := context.Background()
+	schema := mustNewSchemaInfo(constructCollectionSchema("id", "vector", 2, collectionName))
+	predicate, err := planparserv2.ParseExpr(schema.SchemaHelper, "id < 10", nil)
+	require.NoError(t, err)
+
+	resolveCount := 0
+	m := mockey.Mock((*SearchTask).resolveRLSUsingPredicate).To(func(_ *SearchTask, operation string, isIterator bool) (*planpb.Expr, error) {
+		resolveCount++
+		require.Equal(t, "hybrid search", operation)
+		require.False(t, isIterator)
+		return predicate, nil
+	}).Build()
+	defer m.UnPatch()
+
+	rankParams, err := parseRankParams([]*commonpb.KeyValuePair{{Key: LimitKey, Value: "10"}}, schema.CollectionSchema, false)
+	require.NoError(t, err)
+	subSearchParams := getValidSearchParams()
+	resetSearchParamsValue(subSearchParams, AnnsFieldKey, "vector")
+
+	task := &SearchTask{
+		ctx:            ctx,
+		collectionName: collectionName,
+		SearchRequest:  &internalpb.SearchRequest{CollectionID: collectionID},
+		request: &milvuspb.SearchRequest{
+			DbName:         "default",
+			CollectionName: collectionName,
+		},
+		schema:     schema,
+		rankParams: rankParams,
+	}
+	task.IsAdvanced = true
+
+	firstPlan, _, _, _, _, _, err := task.tryGeneratePlan(subSearchParams, "", nil, nil, false)
+	require.NoError(t, err)
+	secondPlan, _, _, _, _, _, err := task.tryGeneratePlan(subSearchParams, "", nil, nil, false)
+	require.NoError(t, err)
+	require.Equal(t, 1, resolveCount)
+
+	firstPredicate := firstPlan.GetVectorAnns().GetPredicates()
+	secondPredicate := secondPlan.GetVectorAnns().GetPredicates()
+	require.NotNil(t, firstPredicate)
+	require.NotNil(t, secondPredicate)
+	require.True(t, proto.Equal(firstPredicate, secondPredicate))
+	require.NotSame(t, firstPredicate, secondPredicate)
 }
 
 func TestSearchTask_SearchRequeryPolicy(t *testing.T) {

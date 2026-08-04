@@ -518,8 +518,7 @@ func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 	schema := mustNewSchemaInfo(newTextSchemaForStorageV3Test(collectionName))
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(int64(100), nil)
-	cache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, int64(100)).Return(&collectionInfo{}, nil)
-	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil)
+	cache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, int64(100)).Return(&collectionInfo{Schema: schema}, nil)
 	task := &insertTask{
 		ctx: context.Background(),
 		insertMsg: &BaseInsertTask{
@@ -885,7 +884,6 @@ func TestMaxInsertSize(t *testing.T) {
 		cache := NewMockCache(t)
 		cache.On("GetCollectionID", mock.Anything, dbName, collectionName).Return(UniqueID(100), nil)
 		cache.On("GetCollectionInfo", mock.Anything, dbName, collectionName, UniqueID(100)).Return(&collectionInfo{Schema: schema}, nil)
-		cache.On("GetCollectionSchema", mock.Anything, dbName, collectionName).Return(schema, nil)
 		it := insertTask{
 			baseTask: baseTask{MetaCache: cache},
 			ctx:      context.Background(),
@@ -1037,13 +1035,6 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 	).Return(collectionID, nil)
 
 	cache.On(
-		"GetCollectionSchema",
-		mock.Anything, // context.Context
-		mock.AnythingOfType("string"),
-		mock.AnythingOfType("string"),
-	).Return(info, nil)
-
-	cache.On(
 		"GetCollectionInfo",
 		mock.Anything,
 		mock.Anything,
@@ -1173,13 +1164,6 @@ func TestInsertTask_Function(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
-
-	cache.On(
-		"GetCollectionSchema",
-		mock.Anything, // context.Context
-		mock.AnythingOfType("string"),
-		mock.AnythingOfType("string"),
-	).Return(info, nil)
 
 	cache.On(
 		"GetPartitionInfo",

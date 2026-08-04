@@ -44,6 +44,7 @@ const (
 	GroupByFieldsKey       = dql.GroupByFieldsKey
 	GroupSizeKey           = dql.GroupSizeKey
 	IgnoreGrowingKey       = dql.IgnoreGrowingKey
+	IteratorField          = dql.IteratorField
 	LimitKey               = dql.LimitKey
 	MetricTypeKey          = dql.MetricTypeKey
 	NQKey                  = dql.NQKey

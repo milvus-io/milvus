@@ -60,6 +60,26 @@ func ValidateRequestTarget(dbName, collectionName string) error {
 	return validateTransportIdentifier("collection name", collectionName)
 }
 
+// ValidatePolicyRoles rejects the deprecated role-scoped policy contract.
+// RLS principals, rather than Milvus RBAC roles, are the only runtime policy identity.
+func ValidatePolicyRoles(roles []string) error {
+	if len(roles) > 0 {
+		return merr.WrapErrParameterInvalidMsg("role-scoped RLS policies are not supported; roles must be empty")
+	}
+	return nil
+}
+
+// ValidatePolicyActionCount bounds the raw action list before conversion.
+func ValidatePolicyActionCount(actionCount int) error {
+	if actionCount == 0 {
+		return merr.WrapErrParameterInvalidMsg("RLS policy actions is empty")
+	}
+	if actionCount > maxSupportedPolicyActions {
+		return merr.WrapErrParameterInvalidMsg("RLS policy actions exceeds max count %d", maxSupportedPolicyActions)
+	}
+	return nil
+}
+
 // ValidatePolicyName validates the required policy name without applying the
 // creation limit, so existing policies remain addressable after a limit change.
 func ValidatePolicyName(policyName string) error {
@@ -108,11 +128,8 @@ func validatePolicy(policyName string, policyType PolicyType, actions []PolicyAc
 	default:
 		return merr.WrapErrParameterInvalidMsg("invalid RLS policy type: %s", policyType.String())
 	}
-	if len(actions) == 0 {
-		return merr.WrapErrParameterInvalidMsg("RLS policy actions is empty")
-	}
-	if len(actions) > maxSupportedPolicyActions {
-		return merr.WrapErrParameterInvalidMsg("RLS policy actions exceeds max count %d", maxSupportedPolicyActions)
+	if err := ValidatePolicyActionCount(len(actions)); err != nil {
+		return err
 	}
 	usingExprEmpty := strings.TrimSpace(usingExpr) == ""
 	checkExprEmpty := strings.TrimSpace(checkExpr) == ""
@@ -186,6 +203,23 @@ func ValidatePrincipalName(principalName string) error {
 		return merr.WrapErrParameterInvalidMsg("RLS principal name is empty")
 	}
 	return validateTransportIdentifier("principal name", principalName)
+}
+
+// ValidatePrincipalTagsTransportSize bounds raw principal-tag requests before
+// JSON decoding. The refreshable cache byte limit and fixed identifier limit
+// form one combined principal-name-plus-tags budget.
+func ValidatePrincipalTagsTransportSize(principalName, payload string) error {
+	usedBytes := int64(len(principalName)) + int64(len(payload))
+	identifierBytes := int64(MaxTransportIdentifierLength)
+	tagBytes := paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.GetAsInt64()
+	if usedBytes > identifierBytes && usedBytes-identifierBytes > tagBytes {
+		return merr.WrapErrParameterTooLarge(fmt.Sprintf(
+			"RLS principal name and tags exceed transport budget of %d identifier bytes plus %d tag bytes",
+			identifierBytes,
+			tagBytes,
+		))
+	}
+	return nil
 }
 
 // ValidatePrincipalNameWithLimit validates a principal name for create or update.

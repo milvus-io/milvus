@@ -353,6 +353,39 @@ func TestManagerTypedPrincipalTagMatching(t *testing.T) {
 	}
 }
 
+func TestCompilePolicyExprCachesTagVariableDataTypes(t *testing.T) {
+	helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "age", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float},
+	}})
+	require.NoError(t, err)
+
+	for _, test := range []struct {
+		name     string
+		expr     string
+		expected schemapb.DataType
+	}{
+		{name: "scalar", expr: "age == $current_principal_tags['value']", expected: schemapb.DataType_Int64},
+		{name: "array element", expr: "array_contains(scores, $current_principal_tags['value'])", expected: schemapb.DataType_Float},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			templates, _ := preparePolicyExprTemplates([]*rlsutil.RowPolicy{{
+				PolicyName: "typed",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  test.expr,
+			}}, rlsutil.PolicyActionQuery, usingExprKind)
+			compiled, err := compileExprTemplates(helper, templates, "", usingExprKind)
+			require.NoError(t, err)
+			require.Len(t, compiled.permissive, 1)
+
+			policy := compiled.permissive[0]
+			variable := policy.tagVariables["value"]
+			require.Equal(t, []schemapb.DataType{test.expected}, policy.tagVariableDataTypes[variable])
+		})
+	}
+}
+
 func TestManagerRejectsInexactDoubleToFloatTag(t *testing.T) {
 	ctx := context.Background()
 	schema := &schemapb.CollectionSchema{
@@ -1103,6 +1136,39 @@ func TestResolvePredicateRequiresPrincipal(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 }
 
+func TestResolveUpsertPredicatesStayOnOneSnapshot(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+	const collectionID = UniqueID(100)
+
+	require.True(t, setPolicySnapshotForTest(manager, collectionID, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+		PolicyName: "old",
+		PolicyType: rlsutil.PolicyTypePermissive,
+		Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
+		UsingExpr:  "id == 1",
+		CheckExpr:  "id == 1",
+	}}}))
+	using, check, err := manager.resolveUpsertPredicates(ctx, collectionID, "alice", helper)
+	require.NoError(t, err)
+
+	require.True(t, setPolicySnapshotForTest(manager, collectionID, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+		PolicyName: "new",
+		PolicyType: rlsutil.PolicyTypePermissive,
+		Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
+		UsingExpr:  "id == 2",
+		CheckExpr:  "id == 2",
+	}}}))
+	fields := managerTestFieldsDataWithID(1, "sales")
+	require.NoError(t, ValidateRowsByPredicate(ctx, fields, 1, using, "upsert", "using"))
+	require.NoError(t, ValidateRowsByPredicate(ctx, fields, 1, check, "upsert", "check"))
+
+	currentUsing, currentCheck, err := manager.resolveUpsertPredicates(ctx, collectionID, "alice", helper)
+	require.NoError(t, err)
+	require.Error(t, ValidateRowsByPredicate(ctx, fields, 1, currentUsing, "upsert", "using"))
+	require.Error(t, ValidateRowsByPredicate(ctx, fields, 1, currentCheck, "upsert", "check"))
+}
+
 func TestValidateCheckForWriteUsesSchemaTimezone(t *testing.T) {
 	ctx := context.Background()
 	const collectionID = int64(987654322)
@@ -1481,6 +1547,32 @@ func TestMergePredicateToPlan(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, MergePredicateToPlan(searchPlan, rlsPredicate))
 	assertPredicateMerged(t, searchPlan.GetVectorAnns().GetPredicates())
+
+	randomSamplePlan, err := planparserv2.CreateRetrievePlanArgs(helper, "age > 18 && random_sample(0.5)", nil, visitorArgs)
+	require.NoError(t, err)
+	randomSample := randomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr()
+	require.NotNil(t, randomSample)
+	require.NoError(t, MergePredicateToPlan(randomSamplePlan, rlsPredicate))
+	require.Same(t, randomSample, randomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr())
+	assert.InDelta(t, 0.5, randomSample.GetSampleFactor(), 0.0001)
+	assertPredicateMerged(t, randomSample.GetPredicate())
+
+	elementExpr := alwaysTruePredicate()
+	elementPredicate, err := planparserv2.ParseExpr(helper, "age > 18", nil)
+	require.NoError(t, err)
+	elementFilter := &planpb.ElementFilterExpr{
+		ElementExpr: elementExpr,
+		StructName:  "items",
+		Predicate:   elementPredicate,
+	}
+	searchPlan.GetVectorAnns().Predicates = &planpb.Expr{
+		Expr: &planpb.Expr_ElementFilterExpr{ElementFilterExpr: elementFilter},
+	}
+	require.NoError(t, MergePredicateToPlan(searchPlan, rlsPredicate))
+	require.Same(t, elementFilter, searchPlan.GetVectorAnns().GetPredicates().GetElementFilterExpr())
+	require.Same(t, elementExpr, elementFilter.GetElementExpr())
+	assert.Equal(t, "items", elementFilter.GetStructName())
+	assertPredicateMerged(t, elementFilter.GetPredicate())
 }
 
 func assertPredicateMerged(t *testing.T, expr *planpb.Expr) {

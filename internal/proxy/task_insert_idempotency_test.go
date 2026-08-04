@@ -241,10 +241,8 @@ func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, propert
 	info := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 		CollID: 100, DBName: "db", Schema: schema, Properties: properties,
 	}, nil).Build()
-	fields := mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 	t.Cleanup(func() { id.UnPatch() })
 	t.Cleanup(func() { info.UnPatch() })
-	t.Cleanup(func() { fields.UnPatch() })
 	return cache
 }
 

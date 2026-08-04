@@ -30,12 +30,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 
 	var collectionSchema *schemapb.CollectionSchema
 	if dt.req.Namespace != nil || hookutil.IsClusterEncryptionEnabled() {
-		schema, err := dt.GetMetaCache().GetCollectionSchema(ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
-		if err != nil {
-			mlog.Warn(ctx, "get collection schema from meta cache failed", mlog.String("collectionName", dt.req.GetCollectionName()), mlog.Err(err))
-			return err
-		}
-		collectionSchema = schema.CollectionSchema
+		collectionSchema = dt.schema.CollectionSchema
 	}
 
 	result, numRows, err := repackDeleteMsgByHash(

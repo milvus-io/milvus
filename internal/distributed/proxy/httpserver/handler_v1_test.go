@@ -715,6 +715,68 @@ func genGetRequest() *http.Request {
 	return req
 }
 
+func TestRESTV1ForwardsRLSFields(t *testing.T) {
+	paramtable.Init()
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key))
+	})
+
+	matchesRLS := func(req interface {
+		GetRlsPrincipal() string
+		GetSkipRls() bool
+	}) bool {
+		return req.GetRlsPrincipal() == "alice" && req.GetSkipRls()
+	}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&DefaultDescCollectionResp, nil).Times(4)
+	mp.EXPECT().Query(mock.Anything, mock.MatchedBy(func(req *milvuspb.QueryRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.QueryResults{Status: &StatusSuccess}, nil).Twice()
+	mp.EXPECT().Delete(mock.Anything, mock.MatchedBy(func(req *milvuspb.DeleteRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.MutationResult{Status: &StatusSuccess}, nil).Once()
+	mp.EXPECT().Insert(mock.Anything, mock.MatchedBy(func(req *milvuspb.InsertRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.MutationResult{
+		Status: &StatusSuccess, IDs: genIDs(schemapb.DataType_Int64), InsertCnt: 1,
+	}, nil).Once()
+	mp.EXPECT().Upsert(mock.Anything, mock.MatchedBy(func(req *milvuspb.UpsertRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.MutationResult{
+		Status: &StatusSuccess, IDs: genIDs(schemapb.DataType_Int64), UpsertCnt: 1,
+	}, nil).Once()
+	mp.EXPECT().Search(mock.Anything, mock.MatchedBy(func(req *milvuspb.SearchRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.SearchResults{
+		Status: &StatusSuccess, Results: &schemapb.SearchResultData{},
+	}, nil).Once()
+
+	engine := initHTTPServer(mp, false)
+	send := func(path, body string) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, versional(path), strings.NewReader(body)))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	}
+	row := generateSearchResult(schemapb.DataType_Int64)[0]
+	data, err := json.Marshal(map[string]interface{}{
+		HTTPCollectionName: DefaultCollectionName,
+		HTTPReturnData:     row,
+		"rlsPrincipal":     "alice",
+		"skipRls":          true,
+	})
+	require.NoError(t, err)
+
+	send(VectorQueryPath, `{"collectionName":"book","filter":"book_id > 0","rlsPrincipal":"alice","skipRls":true}`)
+	send(VectorGetPath, `{"collectionName":"book","id":[1],"rlsPrincipal":"alice","skipRls":true}`)
+	send(VectorDeletePath, `{"collectionName":"book","filter":"book_id in [1]","rlsPrincipal":"alice","skipRls":true}`)
+	// Object-form data exercises the single-row Insert/Upsert fallback copies.
+	send(VectorInsertPath, string(data))
+	send(VectorUpsertPath, string(data))
+	send(VectorSearchPath, `{"collectionName":"book","vector":[0.1,0.2],"rlsPrincipal":"alice","skipRls":true}`)
+}
+
 func TestDelete(t *testing.T) {
 	paramtable.Init()
 	testCases := []testCase{}
