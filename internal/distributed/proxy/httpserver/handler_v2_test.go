@@ -3016,6 +3016,11 @@ func TestSnapshotRESTV2Validation(t *testing.T) {
 			body:   `{"collectionName":"source_books"}`,
 		},
 		{
+			name:   "missing collection name for list",
+			action: ListAction,
+			body:   `{}`,
+		},
+		{
 			name:   "negative compaction protection",
 			action: CreateAction,
 			body:   `{"collectionName":"source_books","snapshotName":"snapshot_1","compactionProtectionSeconds":-1}`,
