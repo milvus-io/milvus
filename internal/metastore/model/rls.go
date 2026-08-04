@@ -118,6 +118,17 @@ type RLSPrincipal struct {
 	Tags          map[string]string
 }
 
+// RLSMetadata is a point-in-time view of the RLS metadata cached for a
+// collection. Callers must receive cloned policies and principals so they
+// cannot mutate the MetaTable cache through this model.
+type RLSMetadata struct {
+	DBName         string
+	CollectionName string
+	CollectionID   int64
+	Policies       []*RLSPolicy
+	Principals     []*RLSPrincipal
+}
+
 func MarshalRLSPrincipalModel(principal *RLSPrincipal) *rootcoordpb.RLSPrincipalInfo {
 	if principal == nil {
 		return nil
