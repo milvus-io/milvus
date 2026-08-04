@@ -1,0 +1,111 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package httpserver
+
+import (
+	"context"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
+
+func (h *HandlersV2) createSnapshot(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CreateSnapshotReq)
+	req := &milvuspb.CreateSnapshotRequest{
+		DbName:                      dbName,
+		CollectionName:              httpReq.CollectionName,
+		Name:                        httpReq.SnapshotName,
+		Description:                 httpReq.Description,
+		CompactionProtectionSeconds: httpReq.CompactionProtectionSeconds,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateSnapshot", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.CreateSnapshot(reqCtx, req.(*milvuspb.CreateSnapshotRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) dropSnapshot(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*SnapshotReq)
+	req := &milvuspb.DropSnapshotRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		Name:           httpReq.SnapshotName,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropSnapshot", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.DropSnapshot(reqCtx, req.(*milvuspb.DropSnapshotRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) listSnapshots(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*OptionalCollectionNameReq)
+	req := &milvuspb.ListSnapshotsRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ListSnapshots", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ListSnapshots(reqCtx, req.(*milvuspb.ListSnapshotsRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnList(resp.(*milvuspb.ListSnapshotsResponse).GetSnapshots()))
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) describeSnapshot(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*SnapshotReq)
+	req := &milvuspb.DescribeSnapshotRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		Name:           httpReq.SnapshotName,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DescribeSnapshot", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.DescribeSnapshot(reqCtx, req.(*milvuspb.DescribeSnapshotRequest))
+	})
+	if err == nil {
+		snapshot := resp.(*milvuspb.DescribeSnapshotResponse)
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{
+				"snapshotName":   snapshot.GetName(),
+				"description":    snapshot.GetDescription(),
+				"collectionName": snapshot.GetCollectionName(),
+				"partitionNames": snapshot.GetPartitionNames(),
+				"createTs":       snapshot.GetCreateTs(),
+				"s3Location":     snapshot.GetS3Location(),
+			},
+		})
+	}
+	return resp, err
+}
