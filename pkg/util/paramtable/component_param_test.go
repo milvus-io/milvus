@@ -93,6 +93,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(1048576), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
 		assert.Equal(t, int64(67108864), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())
 
+		assert.Equal(t, int32(0), Params.StorageReaderThreadPoolSize.GetAsInt32())
+		assert.Equal(t, int64(0), Params.IndexBuildReadWindowBytes.GetAsInt64())
+		params.Save(Params.StorageReaderThreadPoolSize.Key, "16")
+		params.Save(Params.IndexBuildReadWindowBytes.Key, "536870912")
+		assert.Equal(t, int32(16), Params.StorageReaderThreadPoolSize.GetAsInt32())
+		assert.Equal(t, int64(536870912), Params.IndexBuildReadWindowBytes.GetAsInt64())
+
 		assert.Equal(t, Params.GracefulTime.GetAsInt64(), int64(DefaultGracefulTime))
 		t.Logf("default grafeful time = %d", Params.GracefulTime.GetAsInt64())
 
@@ -516,6 +523,15 @@ func TestComponentParam(t *testing.T) {
 
 		nprobe := Params.InterimIndexNProbe.GetAsInt64()
 		assert.Equal(t, int64(16), nprobe)
+
+		// enableGISSplitFusion defaults to true: the GIS coarse/refine split and
+		// same-column fusion rewrite is on unless explicitly disabled.
+		assert.True(t, Params.EnableGISSplitFusion.GetAsBool())
+		assert.Equal(t, "true", Params.EnableGISSplitFusion.DefaultValue)
+		params.Save(Params.EnableGISSplitFusion.Key, "false")
+		assert.False(t, Params.EnableGISSplitFusion.GetAsBool())
+		params.Reset(Params.EnableGISSplitFusion.Key)
+		assert.True(t, Params.EnableGISSplitFusion.GetAsBool())
 
 		assert.Equal(t, int32(1024), Params.MaxUnsolvedQueueSize.GetAsInt32())
 		assert.Equal(t, "1024", Params.MaxUnsolvedQueueSize.DefaultValue)

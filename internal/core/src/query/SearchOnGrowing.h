@@ -13,6 +13,7 @@
 
 #include <stdint.h>
 #include <cstddef>
+#include <functional>
 
 #include "common/BitsetView.h"
 #include "common/OpContext.h"
@@ -22,6 +23,16 @@
 #include "segcore/SegmentGrowingImpl.h"
 
 namespace milvus::query {
+
+// Test-only synchronization hook invoked immediately after the growing vector
+// column's chunk snapshot is acquired. Production never sets it. Tests use it
+// to place a concurrent insert precisely between snapshot acquisition and the
+// rest of the search path.
+using SearchOnGrowingAfterChunkSnapshotHook = std::function<void()>;
+
+void
+SetSearchOnGrowingAfterChunkSnapshotHookForTest(
+    SearchOnGrowingAfterChunkSnapshotHook hook);
 
 void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,

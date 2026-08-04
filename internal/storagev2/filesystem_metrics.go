@@ -93,6 +93,7 @@ var (
 	propUseVirtualHost      = C.GoString(C.loon_properties_fs_use_virtual_host)
 	propUseCustomPartUpload = C.GoString(C.loon_properties_fs_use_custom_part_upload)
 	propRequestTimeoutMS    = C.GoString(C.loon_properties_fs_request_timeout_ms)
+	propMaxConnections      = C.GoString(C.loon_properties_fs_max_connections)
 	propTLSMinVersion       = C.GoString(C.loon_properties_fs_tls_min_version)
 	propUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
 )
@@ -161,6 +162,13 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 
 	keys = append(keys, propRequestTimeoutMS)
 	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
+	// Absent when unset, so milvus-storage's registered default applies. See
+	// the same guard in packed.MakePropertiesFromStorageConfig for why an
+	// explicit "0" is not equivalent.
+	if maxConns := storageConfig.GetMaxConnections(); maxConns > 0 {
+		keys = append(keys, propMaxConnections)
+		values = append(values, strconv.FormatUint(uint64(maxConns), 10))
+	}
 
 	if v := storageConfig.GetSslTlsMinVersion(); v != "" && v != "default" {
 		keys = append(keys, propTLSMinVersion)
@@ -267,6 +275,9 @@ func PublishDefaultFilesystemMetrics() (*FilesystemMetrics, error) {
 		storageConfig = &indexpb.StorageConfig{
 			RootPath:    params.LocalStorageCfg.Path.GetValue(),
 			StorageType: params.CommonCfg.StorageType.GetValue(),
+			// External collections may reference an s3:// source even when the
+			// primary storage is local, so the connection cap still applies.
+			MaxConnections: uint32(params.MinioCfg.MaxConnections.GetAsInt()),
 		}
 	} else {
 		storageConfig = &indexpb.StorageConfig{
@@ -284,6 +295,7 @@ func PublishDefaultFilesystemMetrics() (*FilesystemMetrics, error) {
 			UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
 			CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
 			RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+			MaxConnections:    uint32(params.MinioCfg.MaxConnections.GetAsInt()),
 			GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
 			SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
 			UseCrc32CChecksum: params.MinioCfg.UseCRC32C.GetAsBool(),

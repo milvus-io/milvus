@@ -19,6 +19,7 @@ package paramtable
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"strconv"
@@ -246,6 +247,8 @@ type commonConfig struct {
 	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"true"`
 	ArrowReaderHoleSizeLimitBytes       ParamItem `refreshable:"true"`
 	ArrowReaderRangeSizeLimitBytes      ParamItem `refreshable:"true"`
+	StorageReaderThreadPoolSize         ParamItem `refreshable:"true"`
+	IndexBuildReadWindowBytes           ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -319,8 +322,8 @@ type commonConfig struct {
 	StorageReadRetryAttempts ParamItem `refreshable:"true"`
 
 	TraceLogMode              ParamItem `refreshable:"true"`
-	VisibilityFilterEnabled   ParamItem `refreshable:"false"`
 	BloomFilterEnabled        ParamItem `refreshable:"false"`
+	VisibilityFilterEnabled   ParamItem `refreshable:"false"`
 	BloomFilterSize           ParamItem `refreshable:"true"`
 	BloomFilterType           ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
@@ -787,6 +790,68 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.ArrowReaderRangeSizeLimitBytes.Init(base.mgr)
 
+	p.StorageReaderThreadPoolSize = ParamItem{
+		Key:          "common.storage.readerThreadPoolSize",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Size of milvus-storage's global reader thread pool. When > 0, chunk ` +
+			`(row-group) reads issued by one storage-v3/external reader may be ` +
+			`fanned out across this pool. 0 keeps the pre-existing sequential ` +
+			`behavior. ` +
+			`Only DataNode's segcore init creates the pool, but the pool itself ` +
+			`is a process-wide singleton in milvus-storage. In a cluster ` +
+			`deployment QueryNode runs in its own process, never creates one, ` +
+			`and keeps parallelism 1 no matter what this is set to. In ` +
+			`standalone all roles share one process, so QueryNode readers ` +
+			`opened after DataNode's segcore init pick up this pool too and ` +
+			`fan out on it — size it with the co-located search traffic in ` +
+			`mind. ` +
+			`IMPORTANT: milvus-storage splits a round's chunks into contiguous ` +
+			`blocks and merges them without limit when the chunk count does not ` +
+			`exceed the pool size, so a round whose chunks are contiguous and ` +
+			`fewer than or equal to this value is submitted as a SINGLE task and ` +
+			`gains no fan-out. To get real per-chunk parallelism the number of ` +
+			`chunks per round must exceed this value — see ` +
+			`common.storage.indexBuildReadWindowBytes. Range-level parallelism ` +
+			`from arrow's parquet prebuffer (common.arrow.ioThreadPoolCoefficient) ` +
+			`is independent of this pool. ` +
+			`Values > 0 resize the pool in both directions at runtime. Setting ` +
+			`0 after the pool exists is a no-op — the pool cannot be destroyed, ` +
+			`so disabling it entirely requires a restart. A reader latches the ` +
+			`parallelism it observed at open only as an on/off gate: opened ` +
+			`with <= 1 it stays sequential for its lifetime, while opened ` +
+			`with > 1 it follows the pool's current size on each subsequent ` +
+			`round — so a runtime resize also affects the later rounds of ` +
+			`already-open readers. Max 1024.`,
+		Export: false,
+	}
+	p.StorageReaderThreadPoolSize.Init(base.mgr)
+
+	p.IndexBuildReadWindowBytes = ParamItem{
+		Key:          "common.storage.indexBuildReadWindowBytes",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `Per-round read window in bytes (milvus-storage reader.record_batch_max_size) ` +
+			`for index-build manifest reads. The default window (0 = milvus-storage's ` +
+			`32MB) admits a single 64MB-class parquet row group per prefetch round, ` +
+			`serializing the raw-data download to one object-storage range read at a ` +
+			`time. Set to N x row-group-size so one round spans multiple row groups, ` +
+			`whose column chunks are then prefetched in parallel by arrow ` +
+			`(common.arrow.ioThreadPoolCoefficient). ` +
+			`If you also want per-chunk fan-out on the milvus-storage reader pool, ` +
+			`N must be strictly greater than common.storage.readerThreadPoolSize: ` +
+			`at or below the pool size, contiguous chunks are merged into one task ` +
+			`(e.g. a 1GB window over 64MB row groups is 16 chunks, which a 16-thread ` +
+			`pool executes as a single task). Memory cost: up to this many bytes ` +
+			`buffered per running build task, on top of the decode window. Max 4GB. ` +
+			`Only affects index build; query-node loads keep the default window. ` +
+			`Batch decode for these reads runs on the segcore LOW-priority pool ` +
+			`(common.threadCoreCoefficient.lowPriority), deliberately not the ` +
+			`MIDDLE pool that serves search reduce.`,
+		Export: false,
+	}
+	p.IndexBuildReadWindowBytes.Init(base.mgr)
+
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",
 		Version:      "2.6.0",
@@ -1201,15 +1266,6 @@ The default value is 1, which is enough for most cases.`,
 	}
 	p.TraceLogMode.Init(base.mgr)
 
-	p.VisibilityFilterEnabled = ParamItem{
-		Key:          "common.visibilityFilterEnabled",
-		Version:      "3.0.0",
-		DefaultValue: "true",
-		Doc:          "whether to apply row visibility filtering (timestamp, delete, and TTL) on querynode. When disabled, all rows are returned regardless of insert/delete timestamps.",
-		Export:       true,
-	}
-	p.VisibilityFilterEnabled.Init(base.mgr)
-
 	p.BloomFilterEnabled = ParamItem{
 		Key:          "common.bloomFilterEnabled",
 		Version:      "3.0.0",
@@ -1218,6 +1274,16 @@ The default value is 1, which is enough for most cases.`,
 		Export:       true,
 	}
 	p.BloomFilterEnabled.Init(base.mgr)
+
+	p.VisibilityFilterEnabled = ParamItem{
+		Key:          "common.visibilityFilterEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc: "Deprecated: row visibility filtering (timestamp, delete, and TTL) is always enforced and can no longer be disabled. " +
+			"The key is kept so existing configurations stay recognized; setting it to false fails querynode startup with an explicit error.",
+		Export: false,
+	}
+	p.VisibilityFilterEnabled.Init(base.mgr)
 
 	p.BloomFilterSize = ParamItem{
 		Key:          "common.bloomFilterSize",
@@ -2265,19 +2331,32 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.MaxBloomFilterSize = ParamItem{
 		Key: "proxy.maxBloomFilterSize",
-		// 32 MiB. Budgets the SBBF body; the fixed 32-byte MBF1 header is allowed
-		// on top (see validateBloomFilterBlob). The body is always a power of two,
-		// so a full 32 MiB body fits under this cap and admits ~24M int64 members
-		// at the default FPR — budgeting the whole blob at 32 MiB would instead
-		// reject a 32 MiB body and halve the ceiling to a 16 MiB body.
-		DefaultValue: "33554432",
+		// 64 MiB. Budgets the SBBF body; the fixed 32-byte MBF1 header is allowed
+		// on top, so the gate is `len(blob) > maxSize + mbf1HeaderSize` and a
+		// full 64 MiB body passes exactly (see validateBloomFilterBlob). Because
+		// SBBF bodies are powers of two, any value in [64 MiB, 128 MiB) admits
+		// the same set of filters; 64 MiB is chosen as the smallest of those, so
+		// the number states the real ceiling rather than implying headroom that
+		// does not exist.
+		//
+		// A 64 MiB body admits ~48.6M int64 members at the default fpr=0.005 and
+		// ~55.4M at fpr=0.01. Raised from 32 MiB (~24M members) so 50M-member
+		// filters become expressible — but only at a raised fpr: 50M at the
+		// default 0.005 wants 65.77 MiB of bits, and the power-of-two round-up
+		// takes that to a 128 MiB body. The smallest fpr that keeps 50M inside
+		// 64 MiB is ~0.0058; oversizedBlobHint computes that bound per request
+		// and reports it in the rejection.
+		DefaultValue: "67108864",
 		Version:      "3.0.0",
 		Doc: "The maximum byte size of the SBBF body in a client pre-built bloom_match " +
 			"filter blob accepted by the proxy (the fixed 32-byte MBF1 header is allowed on " +
 			"top). The blob is embedded into the query plan and fanned out to every QueryNode, " +
 			"so this bounds per-request memory/network amplification. Must not exceed the MBF1 " +
-			"format cap (128 MiB); the default admits ~24M int64 members at the default FPR " +
-			"while staying under the default gRPC receive limit.",
+			"format cap (128 MiB). SBBF bodies are powers of two, so the default admits bodies " +
+			"up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. " +
+			"Raising the member count past a tier boundary requires raising the fpr too, not " +
+			"only this limit. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of " +
+			"the request.",
 		Export: true,
 	}
 	p.MaxBloomFilterSize.Init(base.mgr)
@@ -3608,6 +3687,7 @@ type queryNodeConfig struct {
 	KnowhereFetchThreadPoolSize   ParamItem `refreshable:"true"`
 	KnowhereThreadPoolSize        ParamItem `refreshable:"true"`
 	ChunkRows                     ParamItem `refreshable:"false"`
+	FmindexCostRatio              ParamItem `refreshable:"false"`
 	EnableInterminSegmentIndex    ParamItem `refreshable:"false"`
 	InterimIndexNlist             ParamItem `refreshable:"false"`
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
@@ -4234,6 +4314,31 @@ If set to 0, time based eviction is disabled.`,
 	}
 	p.ChunkRows.Init(base.mgr)
 
+	p.FmindexCostRatio = ParamItem{
+		Key:          "queryNode.fmindexCostRatio",
+		Version:      "3.0.0",
+		DefaultValue: "0.001",
+		Formatter: func(v string) string {
+			// The value is pushed to segcore as a C float (float32), and the C++
+			// setter asserts it is in (0, 1]. Validate the NARROWED value so a
+			// bad config never crashes the query node at init:
+			//   - NaN must be rejected explicitly (ParseFloat accepts "NaN", and
+			//     both NaN<=0 and NaN>1 are false, so it would slip through);
+			//   - a tiny-but-positive float64 like 1e-50 underflows to 0.0f as a
+			//     float32 and would trip the `ratio > 0` assert — checking the
+			//     float32 value (not the float64) catches it.
+			ratio := getAsFloat(v)
+			f := float32(ratio)
+			if math.IsNaN(ratio) || math.IsInf(ratio, 0) || f <= 0 || f > 1 {
+				return "0.001"
+			}
+			return v
+		},
+		Doc:    `FM-index count-first guard threshold. An FMINDEX-accelerated LIKE prefix/infix/suffix runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (both paths are exact, this only picks the cheaper one). Normalized by tokens (bytes), not rows, so it is row-length invariant. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.`,
+		Export: true,
+	}
+	p.FmindexCostRatio.Init(base.mgr)
+
 	p.EnableInterminSegmentIndex = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.enableIndex",
 		Version:      "2.0.0",
@@ -4330,7 +4435,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.EnableGISSplitFusion = ParamItem{
 		Key:          "queryNode.segcore.enableGISSplitFusion",
 		Version:      "2.6.6",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "Enable GIS filter coarse/refine split + same-column fusion optimization",
 		Export:       true,
 	}

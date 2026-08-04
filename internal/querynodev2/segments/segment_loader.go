@@ -1572,6 +1572,9 @@ func createStorageConfig() *indexpb.StorageConfig {
 		return &indexpb.StorageConfig{
 			RootPath:    params.LocalStorageCfg.Path.GetValue(),
 			StorageType: params.CommonCfg.StorageType.GetValue(),
+			// External collections may reference an s3:// source even when the
+			// primary storage is local, so the connection cap still applies.
+			MaxConnections: uint32(params.MinioCfg.MaxConnections.GetAsInt()),
 		}
 	}
 	return &indexpb.StorageConfig{
@@ -1589,6 +1592,7 @@ func createStorageConfig() *indexpb.StorageConfig {
 		UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
 		CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
 		RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		MaxConnections:    uint32(params.MinioCfg.MaxConnections.GetAsInt()),
 		GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
 		SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
 		UseCrc32CChecksum: params.MinioCfg.UseCRC32C.GetAsBool(),

@@ -39,6 +39,8 @@ func (s *ScalarIndexSuite) TestConstructors() {
 		{tag: "Sorted", input: NewSortedIndex(), expectIndexType: Sorted},
 		{tag: "Inverted", input: NewInvertedIndex(), expectIndexType: Inverted},
 		{tag: "Bitmap", input: NewBitmapIndex(), expectIndexType: BITMAP},
+		{tag: "Ngram", input: NewNgramIndex(2, 3), expectIndexType: NGRAM},
+		{tag: "FMIndex", input: NewFMIndex(), expectIndexType: FMINDEX},
 	}
 
 	for _, tc := range testcases {
@@ -56,6 +58,36 @@ func (s *ScalarIndexSuite) TestConstructors() {
 			}
 		})
 	}
+}
+
+func (s *ScalarIndexSuite) TestNgramParams() {
+	// Both bounds are mandatory server-side, so they must always be emitted.
+	params := NewNgramIndex(2, 4).Params()
+	s.Equal("2", params[ngramMinGramKey])
+	s.Equal("4", params[ngramMaxGramKey])
+}
+
+func (s *ScalarIndexSuite) TestFMIndexInvalidValuesAreSentVerbatim() {
+	// An explicitly invalid argument must reach the server, which rejects it,
+	// rather than being swallowed and silently building with the default.
+	params := NewFMIndex().WithSaSampleRate(-1).WithBlockBytes(0).Params()
+	s.Equal("-1", params[fmIndexSaSampleRateKey])
+	s.Equal("0", params[fmIndexBlockBytesKey])
+}
+
+func (s *ScalarIndexSuite) TestFMIndexParams() {
+	// Unset build params must stay absent so the server applies its defaults
+	// instead of receiving a zero.
+	params := NewFMIndex().Params()
+	s.NotContains(params, fmIndexSaSampleRateKey)
+	s.NotContains(params, fmIndexBlockBytesKey)
+
+	idx := NewFMIndex().WithSaSampleRate(16).WithBlockBytes(32).WithIndexName("fm_idx")
+	params = idx.Params()
+	s.Equal("16", params[fmIndexSaSampleRateKey])
+	s.Equal("32", params[fmIndexBlockBytesKey])
+	s.EqualValues(FMINDEX, params[IndexTypeKey])
+	s.Equal("fm_idx", idx.Name())
 }
 
 func TestScalarIndexes(t *testing.T) {

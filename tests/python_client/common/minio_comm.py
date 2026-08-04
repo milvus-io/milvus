@@ -1,4 +1,5 @@
 import os
+
 from minio import Minio
 from minio.error import S3Error
 from utils.util_log import test_log as log
@@ -18,7 +19,7 @@ def copy_files_to_bucket(client, r_source, target_files, bucket_name, force=Fals
         try:
             result = client.stat_object(bucket_name, target_file)
             found = True
-        except S3Error as exc:
+        except S3Error:
             pass
 
         if force or not found:
@@ -28,8 +29,9 @@ def copy_files_to_bucket(client, r_source, target_files, bucket_name, force=Fals
             log.info(f"skip copy {target_file} to minio")
 
 
-def copy_files_to_minio(host, r_source, files, bucket_name, access_key="minioadmin", secret_key="minioadmin",
-                        secure=False, force=False):
+def copy_files_to_minio(
+    host, r_source, files, bucket_name, access_key="minioadmin", secret_key="minioadmin", secure=False, force=False
+):
     client = Minio(
         host,
         access_key=access_key,
@@ -40,4 +42,3 @@ def copy_files_to_minio(host, r_source, files, bucket_name, access_key="minioadm
         copy_files_to_bucket(client, r_source=r_source, target_files=files, bucket_name=bucket_name, force=force)
     except S3Error as exc:
         log.error("fail to copy files to minio", exc)
-

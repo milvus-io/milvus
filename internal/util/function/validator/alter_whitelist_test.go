@@ -50,6 +50,18 @@ func TestCheckFunctionAlterAllowed(t *testing.T) {
 		assert.NoError(t, CheckFunctionAlterAllowed(old, newFn))
 	})
 
+	t.Run("change integration_id -> ok", func(t *testing.T) {
+		oldFn := embFn(kv("model_name", "m1"), kv("dim", "8"), kv("integration_id", "itg-a"))
+		newFn := embFn(kv("model_name", "m1"), kv("dim", "8"), kv("integration_id", "itg-b"))
+		assert.NoError(t, CheckFunctionAlterAllowed(oldFn, newFn))
+	})
+
+	t.Run("change model_deployment_id -> ok", func(t *testing.T) {
+		oldFn := embFn(kv("model_deployment_id", "dep-a"))
+		newFn := embFn(kv("model_deployment_id", "dep-b"))
+		assert.NoError(t, CheckFunctionAlterAllowed(oldFn, newFn))
+	})
+
 	t.Run("remove whitelisted param -> ok", func(t *testing.T) {
 		newFn := embFn(kv("model_name", "m1"), kv("dim", "8"))
 		assert.NoError(t, CheckFunctionAlterAllowed(old, newFn))

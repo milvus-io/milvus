@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <map>
 #include <optional>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -81,12 +82,43 @@ class FlushGrowingSegmentTest : public ::testing::Test {
         std::string manifest_json =
             "{\"base_path\":\"" + segment_path +
             "\",\"ver\":" + std::to_string(result.committed_version) + "}";
-        return storage::GetFieldDatasFromManifest(manifest_json,
-                                                  properties,
-                                                  field_meta,
-                                                  data_type,
-                                                  dim,
-                                                  element_type);
+        auto field_datas = storage::GetFieldDatasFromManifest(manifest_json,
+                                                              properties,
+                                                              field_meta,
+                                                              data_type,
+                                                              dim,
+                                                              element_type);
+
+        // Contract check for the streaming variant every caller of this
+        // helper implicitly covers: IterateFieldDataFromManifest must
+        // deliver identical batches, in order, on the calling thread, even
+        // though decode runs on a thread pool.
+        std::vector<FieldDataPtr> streamed;
+        auto caller_tid = std::this_thread::get_id();
+        storage::IterateFieldDataFromManifest(
+            manifest_json,
+            properties,
+            field_meta,
+            data_type,
+            dim,
+            element_type,
+            std::nullopt,
+            [&](FieldDataPtr fd) {
+                EXPECT_EQ(std::this_thread::get_id(), caller_tid);
+                streamed.push_back(std::move(fd));
+            });
+        EXPECT_EQ(streamed.size(), field_datas.size());
+        for (size_t i = 0; i < std::min(streamed.size(), field_datas.size());
+             ++i) {
+            EXPECT_EQ(streamed[i]->get_num_rows(),
+                      field_datas[i]->get_num_rows());
+            for (int64_t r = 0; r < streamed[i]->get_num_rows(); ++r) {
+                EXPECT_EQ(streamed[i]->is_valid(r),
+                          field_datas[i]->is_valid(r));
+            }
+        }
+
+        return field_datas;
     }
 
     void
@@ -2904,4 +2936,231 @@ TEST_F(FlushGrowingSegmentTest, FlushSealedSegmentFails) {
 
     EXPECT_NE(status.error_code, Success);
     free(const_cast<char*>(status.error_msg));
+}
+
+// Nullable embedding list with a null row, a valid-but-empty row, and a row
+// holding one vector. The column uses mapping/compact storage, so flush's
+// BuildVectorArrayForChunk must re-derive null rows and physical offsets
+// from the offset mapping while writing logical rows out.
+TEST_F(FlushGrowingSegmentTest, FlushNullableEmbListMixedRows) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    constexpr int dim = 4;
+    auto vec_fid = schema->AddDebugVectorArrayField(
+        "structA[array_vec]", DataType::VECTOR_FLOAT, dim, "L2", true);
+    schema->set_primary_field_id(pk_fid);
+
+    constexpr int64_t N = 3;
+    VectorFieldProto expected_empty;
+    expected_empty.set_dim(dim);
+    expected_empty.mutable_float_vector();
+    VectorFieldProto expected_target;
+    expected_target.set_dim(dim);
+    for (int d = 0; d < dim; ++d) {
+        expected_target.mutable_float_vector()->add_data(1.0f + d);
+    }
+
+    auto dataset = DataGen(schema, N, 42, 0, 1, 1);
+    for (int i = 0; i < dataset.raw_->fields_data_size(); ++i) {
+        auto* field_data = dataset.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != vec_fid.get()) {
+            continue;
+        }
+        auto* rows = field_data->mutable_vectors()
+                         ->mutable_vector_array()
+                         ->mutable_data();
+        rows->Clear();
+        // row 0: null placeholder; row 1: valid but empty; row 2: payload.
+        *rows->Add() = expected_empty;
+        *rows->Add() = expected_empty;
+        *rows->Add() = expected_target;
+        field_data->mutable_valid_data()->Clear();
+        field_data->add_valid_data(false);
+        field_data->add_valid_data(true);
+        field_data->add_valid_data(true);
+        break;
+    }
+
+    // chunk_rows=1: the two physically stored rows land in separate physical
+    // chunks, so the flush walk crosses a chunk boundary in compact storage
+    // while the logical walk still sees three rows.
+    SegcoreConfig segcore_config;
+    segcore_config.set_chunk_rows(1);
+    auto segment =
+        CreateGrowingSegment(schema, empty_index_meta, 1, segcore_config);
+    ASSERT_NE(segment, nullptr);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
+    std::string segment_path = test_dir_ + "/segment_nullable_emblist";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = nullptr;
+    config.text_lob_paths = nullptr;
+    config.num_text_columns = 0;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+
+    // Read the column back and pin down the exact content: the null row must
+    // stay null (not become an empty list), the valid-but-empty row must stay
+    // a valid zero-length list (not become null), and the payload row must
+    // land at its own offset with its data intact.
+    auto field_datas = ReadFlushedFieldData(segment_path,
+                                            result,
+                                            vec_fid,
+                                            DataType::VECTOR_ARRAY,
+                                            /*nullable=*/true,
+                                            dim,
+                                            DataType::VECTOR_FLOAT);
+    ASSERT_EQ(field_datas.size(), 1);
+    ASSERT_EQ(field_datas[0]->get_num_rows(), N);
+    ASSERT_EQ(field_datas[0]->get_valid_rows(), 2);
+    EXPECT_FALSE(field_datas[0]->is_valid(0));
+    EXPECT_TRUE(field_datas[0]->is_valid(1));
+    EXPECT_TRUE(field_datas[0]->is_valid(2));
+
+    auto vector_array_data =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::VectorArray>>(
+            field_datas[0]);
+    ASSERT_NE(vector_array_data, nullptr);
+    // value_at indexes the compacted valid rows: 0 -> logical row 1 (the
+    // valid-but-empty list), 1 -> logical row 2 (the payload). Structural
+    // asserts rather than proto byte comparison, so an absent-vs-empty
+    // float_vector presence bit cannot mask a real mismatch.
+    const auto empty_out = vector_array_data->value_at(0)->output_data();
+    EXPECT_EQ(empty_out.dim(), dim);
+    EXPECT_EQ(empty_out.float_vector().data_size(), 0);
+    const auto target_out = vector_array_data->value_at(1)->output_data();
+    EXPECT_EQ(target_out.dim(), dim);
+    ASSERT_EQ(target_out.float_vector().data_size(), dim);
+    for (int d = 0; d < dim; ++d) {
+        EXPECT_FLOAT_EQ(target_out.float_vector().data(d), 1.0f + d);
+    }
+
+    FreeFlushResult(&result);
+}
+
+// The streaming reader decodes batches on a thread pool and delivers them on
+// the calling thread. Comparing it against GetFieldDatasFromManifest would be
+// circular (that helper now delegates to it), and single-batch cases cannot
+// expose ordering bugs at all. This test forces multiple record batches by
+// inserting well past loon's per-batch row limit (reader.record_batch_max_rows
+// defaults to 8192) and validates the concatenated result against the values
+// that were originally inserted, in order.
+TEST_F(FlushGrowingSegmentTest,
+       IterateFieldDataFromManifestMultiBatchOrdering) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto val_fid = schema->AddDebugField("val", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    // > 2x the default 8192-row batch limit, so the reader must produce
+    // several batches and their delivery order becomes observable.
+    const int N = 20000;
+    auto dataset = DataGen(schema, N);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
+    std::string segment_path = test_dir_ + "/segment_multibatch";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+
+    auto properties =
+        storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    ASSERT_NE(properties, nullptr);
+    auto field_meta = gen_field_meta(
+        1, 2, 3, val_fid.get(), DataType::INT64, DataType::NONE, false);
+    std::string manifest_json =
+        "{\"base_path\":\"" + segment_path +
+        "\",\"ver\":" + std::to_string(result.committed_version) + "}";
+
+    std::vector<FieldDataPtr> streamed;
+    auto caller_tid = std::this_thread::get_id();
+    storage::IterateFieldDataFromManifest(
+        manifest_json,
+        properties,
+        field_meta,
+        DataType::INT64,
+        0,
+        DataType::NONE,
+        std::nullopt,
+        [&](FieldDataPtr fd) {
+            EXPECT_EQ(std::this_thread::get_id(), caller_tid);
+            streamed.push_back(std::move(fd));
+        });
+
+    // The point of the test: this must actually span multiple batches,
+    // otherwise ordering is trivially satisfied and nothing is verified.
+    ASSERT_GT(streamed.size(), 1u)
+        << "expected multiple record batches for " << N << " rows";
+
+    // Compare values against the originally inserted column, in order.
+    auto expected = dataset.get_col<int64_t>(val_fid);
+    ASSERT_EQ(expected.size(), static_cast<size_t>(N));
+    int64_t seen = 0;
+    for (const auto& fd : streamed) {
+        for (int64_t i = 0; i < fd->get_num_rows(); ++i) {
+            ASSERT_LT(seen, N);
+            EXPECT_EQ(*static_cast<const int64_t*>(fd->RawValue(i)),
+                      expected[seen])
+                << "value mismatch at row " << seen;
+            ++seen;
+        }
+    }
+    EXPECT_EQ(seen, N);
+
+    // The in-flight budget is a throughput/memory knob, never a correctness
+    // one: accumulating callers pass kAccumulatingInflightBytes so the window
+    // does not add half a gigabyte of pinned arrow batches on top of a column
+    // they retain anyway. A budget small enough that every batch exceeds it
+    // must still deliver every batch, in the same order — the loop keeps one
+    // batch in flight unconditionally, so it cannot stall.
+    std::vector<FieldDataPtr> tiny_window;
+    storage::IterateFieldDataFromManifest(
+        manifest_json,
+        properties,
+        field_meta,
+        DataType::INT64,
+        0,
+        DataType::NONE,
+        std::nullopt,
+        [&](FieldDataPtr fd) { tiny_window.push_back(std::move(fd)); },
+        /*max_inflight_bytes=*/1);
+
+    ASSERT_EQ(tiny_window.size(), streamed.size());
+    for (size_t b = 0; b < tiny_window.size(); ++b) {
+        ASSERT_EQ(tiny_window[b]->get_num_rows(), streamed[b]->get_num_rows());
+        for (int64_t i = 0; i < tiny_window[b]->get_num_rows(); ++i) {
+            EXPECT_EQ(*static_cast<const int64_t*>(tiny_window[b]->RawValue(i)),
+                      *static_cast<const int64_t*>(streamed[b]->RawValue(i)))
+                << "batch " << b << " row " << i;
+        }
+    }
+
+    FreeFlushResult(&result);
 }

@@ -6509,6 +6509,7 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	router.GET(http.TelemetryClientsPath+"/:clientId/config", telemetryAuth, getTelemetryClientConfig(node))
 	router.GET(http.TelemetryClientHistoryPath, telemetryAuth, getTelemetryClientHistory(node))
 	router.POST(http.TelemetryCommandsPath, telemetryAuth, postTelemetryCommand(node))
+	router.GET(http.TelemetryCommandReplyPath, telemetryAuth, getTelemetryCommandReply(node))
 	router.DELETE(http.TelemetryCommandsPath+"/:commandId", telemetryAuth, deleteTelemetryCommand(node))
 }
 

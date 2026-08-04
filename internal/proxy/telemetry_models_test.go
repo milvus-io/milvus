@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -247,4 +248,39 @@ func TestConvertClientTelemetryResponseWithCommandReplies(t *testing.T) {
 	assert.Equal(t, "get_config", reply.CommandType)
 	assert.True(t, reply.Success)
 	assert.Equal(t, `{"user_config":{"address":"localhost"}}`, reply.Payload)
+}
+
+// TestClientMetricsAlwaysEmitsCollections pins the JSON shape an operator or script sees.
+// An idle client reports no metrics for that heartbeat window, and that must look like an
+// empty list -- not a missing field, and not null, both of which are indistinguishable from
+// something being broken.
+func TestClientMetricsAlwaysEmitsCollections(t *testing.T) {
+	resp := ConvertClientTelemetryResponse(&milvuspb.GetClientTelemetryResponse{
+		Clients: []*milvuspb.ClientTelemetry{
+			{
+				ClientInfo: &commonpb.ClientInfo{
+					Reserved: map[string]string{"client_id": "idle-client"},
+				},
+				Status: "active",
+				// No metrics, no databases, no replies: an idle but healthy client.
+			},
+		},
+	})
+
+	encoded, err := json.Marshal(resp)
+	require.NoError(t, err)
+
+	var decoded map[string]interface{}
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	client := decoded["clients"].([]interface{})[0].(map[string]interface{})
+
+	for _, field := range []string{"metrics", "databases", "command_replies"} {
+		value, present := client[field]
+		assert.True(t, present, "%s must always be present", field)
+		assert.NotNil(t, value, "%s must be [] rather than null", field)
+		assert.Empty(t, value, "%s must be an empty list for an idle client", field)
+	}
+
+	assert.Contains(t, string(encoded), `"metrics":[]`)
+	assert.Contains(t, string(encoded), `"databases":[]`)
 }
