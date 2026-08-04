@@ -7691,16 +7691,14 @@ Increasing this value raises the maximum single-object size allowed by S3 multip
 		Formatter: func(v string) string {
 			size := getAsInt64(v)
 			const (
-				// 10MiB — must equal packed.DefaultMultiPartUploadSize, but paramtable (pkg/v2 module)
-				// cannot import internal/storagev2/packed, so the value is duplicated here intentionally.
 				defaultPartSize int64 = 10 * 1024 * 1024
 				minPartSize     int64 = 5 * 1024 * 1024        // S3 minimum part size
 				maxPartSize     int64 = 5 * 1024 * 1024 * 1024 // S3 maximum part size
 			)
 			if size < minPartSize || size > maxPartSize {
-				log.Warn("invalid multipart upload size, reset to default",
-					zap.String("value", v),
-					zap.Int64("effective", defaultPartSize))
+				mlog.Warn(context.TODO(), "invalid multipart upload size, reset to default",
+					mlog.String("value", v),
+					mlog.Int64("effective", defaultPartSize))
 				return strconv.FormatInt(defaultPartSize, 10)
 			}
 			return strconv.FormatInt(size, 10)
