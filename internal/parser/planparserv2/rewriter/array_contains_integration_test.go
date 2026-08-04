@@ -47,6 +47,13 @@ func TestRewriteArrayContainsChains(t *testing.T) {
 			values:   []int64{4, 1, 3, 2},
 		},
 		{
+			name: "or deduplicates preserving first order",
+			expr: `array_contains(ArrayInt, 2) or ` +
+				`array_contains_any(ArrayInt, [2, 1, 1]) or array_contains(ArrayInt, 1)`,
+			expected: planpb.JSONContainsExpr_ContainsAny,
+			values:   []int64{2, 1},
+		},
+		{
 			name:     "and two contains",
 			expr:     `array_contains(ArrayInt, 1) and array_contains(ArrayInt, 2)`,
 			expected: planpb.JSONContainsExpr_ContainsAll,

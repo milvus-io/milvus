@@ -10,8 +10,17 @@ import (
 type arrayContainsGroup struct {
 	columnInfo  *planpb.ColumnInfo
 	elements    []*planpb.GenericValue
+	seen        map[arrayContainsElementKey]struct{}
 	firstIndex  int
 	sourceCount int
+}
+
+type arrayContainsElementKey struct {
+	dataType  schemapb.DataType
+	boolVal   bool
+	int64Val  int64
+	floatVal  float64
+	stringVal string
 }
 
 // combineArrayContains merges compatible ARRAY contains predicates on the same
@@ -35,11 +44,22 @@ func combineArrayContains(parts []*planpb.Expr, targetOp planpb.JSONContainsExpr
 		if group == nil {
 			group = &arrayContainsGroup{
 				columnInfo: contains.GetColumnInfo(),
+				seen:       make(map[arrayContainsElementKey]struct{}),
 				firstIndex: index,
 			}
 			groups[key] = group
 		}
-		group.elements = append(group.elements, contains.GetElements()...)
+		for _, element := range contains.GetElements() {
+			elementKey, ok := arrayContainsDedupKey(group.columnInfo, element)
+			if !ok {
+				continue
+			}
+			if _, exists := group.seen[elementKey]; exists {
+				continue
+			}
+			group.seen[elementKey] = struct{}{}
+			group.elements = append(group.elements, element)
+		}
 		group.sourceCount++
 		memberships[index] = group
 	}
@@ -106,6 +126,44 @@ func arrayContainsElementsSameType(elements []*planpb.GenericValue) bool {
 		}
 	}
 	return true
+}
+
+// arrayContainsDedupKey builds a stable-comparable key. FLOAT and DOUBLE
+// targets are canonicalized using the executor's numeric conversions, while
+// the first encountered GenericValue is retained in the merged plan.
+func arrayContainsDedupKey(column *planpb.ColumnInfo, value *planpb.GenericValue) (arrayContainsElementKey, bool) {
+	valueType, ok := arrayContainsValueType(value)
+	if !ok {
+		return arrayContainsElementKey{}, false
+	}
+
+	key := arrayContainsElementKey{dataType: valueType}
+	switch valueType {
+	case schemapb.DataType_Bool:
+		key.boolVal = value.GetBoolVal()
+	case schemapb.DataType_Int64:
+		switch column.GetElementType() {
+		case schemapb.DataType_Float:
+			key.dataType = schemapb.DataType_Double
+			key.floatVal = float64(float32(value.GetInt64Val()))
+		case schemapb.DataType_Double:
+			key.dataType = schemapb.DataType_Double
+			key.floatVal = float64(value.GetInt64Val())
+		default:
+			key.int64Val = value.GetInt64Val()
+		}
+	case schemapb.DataType_Double:
+		if column.GetElementType() == schemapb.DataType_Float {
+			key.floatVal = float64(float32(value.GetFloatVal()))
+		} else {
+			key.floatVal = value.GetFloatVal()
+		}
+	case schemapb.DataType_VarChar:
+		key.stringVal = value.GetStringVal()
+	default:
+		return arrayContainsElementKey{}, false
+	}
+	return key, true
 }
 
 func arrayContainsValueType(value *planpb.GenericValue) (schemapb.DataType, bool) {
