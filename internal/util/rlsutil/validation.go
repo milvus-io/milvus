@@ -60,6 +60,15 @@ func ValidateRequestTarget(dbName, collectionName string) error {
 	return validateTransportIdentifier("collection name", collectionName)
 }
 
+// ValidatePolicyRoles rejects the deprecated role-scoped policy contract.
+// RLS principals, rather than Milvus RBAC roles, are the only runtime policy identity.
+func ValidatePolicyRoles(roles []string) error {
+	if len(roles) > 0 {
+		return merr.WrapErrParameterInvalidMsg("role-scoped RLS policies are not supported; roles must be empty")
+	}
+	return nil
+}
+
 // ValidatePolicyName validates the required policy name without applying the
 // creation limit, so existing policies remain addressable after a limit change.
 func ValidatePolicyName(policyName string) error {
