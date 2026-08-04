@@ -763,11 +763,17 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 				return merr.WrapErrParameterInvalid(numRows, len(field.GetValidData()), msg)
 			}
 			defaultValue := fieldSchema.GetDefaultValue().GetBytesData()
-			precision, scale, err := parameterutil.GetPrecisionAndScale(fieldSchema)
+			precision, _, err := parameterutil.GetPrecisionAndScale(fieldSchema)
 			if err != nil {
 				return err
 			}
-			if err := parameterutil.ValidateDecimalString(string(defaultValue), precision, scale); err != nil {
+			// The default value uses the same canonical wire form as inserted
+			// values: an 8-byte little-endian unscaled int64.
+			unscaled, err := parameterutil.DecodeUnscaledBytes(defaultValue)
+			if err != nil {
+				return err
+			}
+			if err := parameterutil.ValidateUnscaledValue(unscaled, precision); err != nil {
 				return err
 			}
 			sd.BytesData.Data, err = fillWithDefaultValueImpl(sd.BytesData.Data, defaultValue, field.GetValidData())
@@ -1036,12 +1042,26 @@ func (v *validateUtil) checkDecimalFieldData(field *schemapb.FieldData, fieldSch
 		return merr.WrapErrParameterInvalid("need decimal array", "got nil", msg)
 	}
 
-	precision, scale, err := parameterutil.GetPrecisionAndScale(fieldSchema)
+	precision, _, err := parameterutil.GetPrecisionAndScale(fieldSchema)
 	if err != nil {
 		return err
 	}
-	for _, b := range decimalArr {
-		if err := parameterutil.ValidateDecimalString(string(b), precision, scale); err != nil {
+	// Values arrive as the canonical 8-byte little-endian unscaled int64; scale
+	// is already baked into that integer, so only precision is checked here.
+	validData := field.GetValidData()
+	for i, b := range decimalArr {
+		// This check runs before fillWithValue, so the array is normally compact
+		// (real values only) and validData is longer. Only when the caller already
+		// sent an expanded array do the lengths match, and then valid_data is the
+		// authority over which entries are null placeholders rather than values.
+		if len(validData) == len(decimalArr) && !validData[i] {
+			continue
+		}
+		unscaled, err := parameterutil.DecodeUnscaledBytes(b)
+		if err != nil {
+			return err
+		}
+		if err := parameterutil.ValidateUnscaledValue(unscaled, precision); err != nil {
 			return err
 		}
 	}

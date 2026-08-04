@@ -437,11 +437,15 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				}
 				defVal := fieldSchema.GetDefaultValue().GetBytesData()
 				if dtype == schemapb.DataType_Decimal {
-					precision, scale, err := parameterutil.GetPrecisionAndScale(fieldSchema)
+					precision, _, err := parameterutil.GetPrecisionAndScale(fieldSchema)
 					if err != nil {
 						return err
 					}
-					if err := parameterutil.ValidateDecimalString(string(defVal), precision, scale); err != nil {
+					unscaled, err := parameterutil.DecodeUnscaledBytes(defVal)
+					if err != nil {
+						return err
+					}
+					if err := parameterutil.ValidateUnscaledValue(unscaled, precision); err != nil {
 						return err
 					}
 					break

@@ -6006,11 +6006,10 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::DECIMAL: {
-            // Client-facing value is decimal text, unlike every other case
-            // here — fetch the raw unscaled int64 values into a temp buffer,
-            // then encode each back to text (mirror of the decode done once
-            // at insert time).
-            auto scale = field_meta.get_decimal_scale();
+            // Wire value is bytes_data, unlike every other case here — fetch
+            // the raw unscaled int64 values into a temp buffer, then encode
+            // each back into the canonical 8-byte little-endian form (mirror
+            // of the decode done once at insert time).
             std::vector<int64_t> raw_values(count);
             column->BulkPrimitiveValueAt(op_ctx,
                                          static_cast<void*>(raw_values.data()),
@@ -6020,7 +6019,7 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
             auto dst =
                 ret->mutable_scalars()->mutable_bytes_data()->mutable_data();
             for (int64_t i = 0; i < count; ++i) {
-                dst->at(i) = EncodeDecimalText(raw_values[i], scale);
+                dst->at(i) = EncodeDecimalBytes(raw_values[i]);
             }
             break;
         }

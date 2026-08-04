@@ -857,19 +857,19 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 		case schemapb.DataType_Decimal:
-			precision, scale, err := parameterutil.GetPrecisionAndScale(field)
-			if err != nil {
-				return nil, err
-			}
 			srcData := srcField.GetScalars().GetBytesData().GetData()
+			validData := srcField.GetValidData()
 			decoded := make([]int64, len(srcData))
 			for i, b := range srcData {
-				decoded[i], err = parameterutil.EncodeUnscaledInt64(string(b), precision, scale)
+				if len(validData) == len(srcData) && !validData[i] {
+					continue
+				}
+				unscaled, err := parameterutil.DecodeUnscaledBytes(b)
 				if err != nil {
 					return nil, err
 				}
+				decoded[i] = unscaled
 			}
-			validData := srcField.GetValidData()
 
 			fieldData = &DecimalFieldData{
 				Data:      decoded,

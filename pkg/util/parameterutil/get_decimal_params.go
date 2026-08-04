@@ -1,6 +1,7 @@
 package parameterutil
 
 import (
+	"encoding/binary"
 	"fmt"
 	"strconv"
 	"strings"
@@ -14,6 +15,54 @@ import (
 // MaxDecimalPrecision is the largest precision supported in v1, bounded by the
 // int64 unscaled-value storage representation (up to 18 safe decimal digits).
 const MaxDecimalPrecision = 18
+
+// DecimalBytesLen is the exact width of the canonical Decimal wire encoding.
+//
+// A Decimal value travels in ScalarField.bytes_data as its signed unscaled
+// integer (value * 10^scale) encoded as exactly 8 bytes, little-endian, two's
+// complement — never as decimal text. Because MaxDecimalPrecision is 18, every
+// representable value fits an int64, so the width is fixed rather than 8-or-16.
+// This is a public contract shared with every SDK; see the BytesArray comment
+// in milvus-proto schema.proto, and the C++ mirror in common/Decimal.h.
+const DecimalBytesLen = 8
+
+// EncodeUnscaledBytes encodes an unscaled int64 into the canonical wire form.
+func EncodeUnscaledBytes(unscaled int64) []byte {
+	b := make([]byte, DecimalBytesLen)
+	binary.LittleEndian.PutUint64(b, uint64(unscaled))
+	return b
+}
+
+// DecodeUnscaledBytes decodes the canonical wire form back into its unscaled
+// int64 value. Null rows carry an empty placeholder and must be filtered out by
+// the caller via valid_data before reaching here.
+func DecodeUnscaledBytes(b []byte) (int64, error) {
+	if len(b) != DecimalBytesLen {
+		return 0, merr.WrapErrParameterInvalidMsg(
+			"decimal value must be exactly %d bytes (little-endian unscaled int64), got %d", DecimalBytesLen, len(b))
+	}
+	return int64(binary.LittleEndian.Uint64(b)), nil
+}
+
+// MaxUnscaledValue returns the largest absolute unscaled value representable at
+// the given precision, i.e. 10^precision - 1.
+func MaxUnscaledValue(precision int64) int64 {
+	limit := int64(1)
+	for i := int64(0); i < precision; i++ {
+		limit *= 10
+	}
+	return limit - 1
+}
+
+// ValidateUnscaledValue checks that an unscaled value carries no more than
+// `precision` significant digits.
+func ValidateUnscaledValue(unscaled, precision int64) error {
+	limit := MaxUnscaledValue(precision)
+	if unscaled > limit || unscaled < -limit {
+		return merr.WrapErrParameterInvalidMsg("decimal unscaled value %d exceeds precision %d", unscaled, precision)
+	}
+	return nil
+}
 
 // GetPrecisionAndScale gets the precision and scale of a Decimal field from its type params.
 func GetPrecisionAndScale(field *schemapb.FieldSchema) (precision int64, scale int64, err error) {
@@ -75,13 +124,18 @@ func ValidateDecimalString(s string, precision, scale int64) error {
 		return merr.WrapErrParameterInvalidMsg("decimal value %q exceeds scale %d", s, scale)
 	}
 
-	trimmedInt := strings.TrimLeft(intPart, "0")
-	if trimmedInt == "" {
-		trimmedInt = "0"
-	}
-	totalDigits := int64(len(trimmedInt) + len(fracPart))
-	if totalDigits > precision {
-		return merr.WrapErrParameterInvalidMsg("decimal value %q exceeds precision %d", s, precision)
+	// DECIMAL(p, s) admits at most p total significant digits of which s are
+	// fractional, so the integer part is bounded by p - s independently of how
+	// many fractional digits the literal actually spells out. Counting only the
+	// digits present would both admit over-precision values (DECIMAL(5,2) would
+	// accept "12345", which scales up to 1234500 — seven digits) and reject
+	// legal ones (DECIMAL(3,3) would refuse "0.001"). Leading zeros are not
+	// significant, so "0.5" has zero integer digits.
+	intDigits := int64(len(strings.TrimLeft(intPart, "0")))
+	if intDigits > precision-scale {
+		return merr.WrapErrParameterInvalidMsg(
+			"decimal value %q exceeds precision %d with scale %d: at most %d digits are allowed before the decimal point",
+			s, precision, scale, precision-scale)
 	}
 
 	return nil

@@ -1883,11 +1883,6 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::DECIMAL: {
-            // Unlike every other case here, the client-facing value is text
-            // ("19.99"), not the internal unscaled int64 ("199900") — encode
-            // back before returning, the mirror image of the decode done once
-            // at insert time in ConcurrentVector::set_data_raw.
-            auto scale = field_meta.get_decimal_scale();
             auto vec = dynamic_cast<const ConcurrentVector<int64_t>*>(vec_ptr);
             AssertInfo(vec, "Pointer of vec_ptr is nullptr for DECIMAL field");
             auto dst =
@@ -1896,7 +1891,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 auto offset = seg_offsets[i];
                 if (offset != INVALID_SEG_OFFSET) {
                     auto value = vec->get_element(offset);
-                    dst->at(i) = value ? EncodeDecimalText(*value, scale) : "";
+                    dst->at(i) = value ? EncodeDecimalBytes(*value) : "";
                 } else {
                     dst->at(i) = "";
                 }

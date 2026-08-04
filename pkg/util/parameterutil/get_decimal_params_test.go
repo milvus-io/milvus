@@ -1,9 +1,14 @@
 package parameterutil
 
 import (
+	"encoding/hex"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -150,4 +155,108 @@ func TestEncodeUnscaledInt64(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestUnscaledBytesRoundTrip(t *testing.T) {
+	values := []int64{
+		0, 1, -1, 199900, -199900, 12345,
+		MaxUnscaledValue(MaxDecimalPrecision),
+		-MaxUnscaledValue(MaxDecimalPrecision),
+	}
+	for _, v := range values {
+		b := EncodeUnscaledBytes(v)
+		assert.Len(t, b, DecimalBytesLen, "wire encoding must be fixed-width")
+		got, err := DecodeUnscaledBytes(b)
+		assert.NoError(t, err)
+		assert.Equal(t, v, got)
+	}
+}
+
+func TestDecodeUnscaledBytesRejectsWrongWidth(t *testing.T) {
+	// Null rows carry an empty placeholder; callers must filter them via
+	// valid_data rather than relying on the decoder to tolerate them.
+	for _, b := range [][]byte{{}, {1}, make([]byte, 7), make([]byte, 9), make([]byte, 16)} {
+		_, err := DecodeUnscaledBytes(b)
+		assert.Error(t, err, "width %d must be rejected", len(b))
+	}
+}
+
+func TestValidateUnscaledValue(t *testing.T) {
+	// precision 5 admits at most 5 significant digits, i.e. |unscaled| <= 99999.
+	assert.NoError(t, ValidateUnscaledValue(99999, 5))
+	assert.NoError(t, ValidateUnscaledValue(-99999, 5))
+	assert.Error(t, ValidateUnscaledValue(100000, 5))
+	assert.Error(t, ValidateUnscaledValue(-100000, 5))
+
+	limit := MaxUnscaledValue(MaxDecimalPrecision)
+	assert.Equal(t, int64(999999999999999999), limit)
+	assert.NoError(t, ValidateUnscaledValue(limit, MaxDecimalPrecision))
+	assert.Error(t, ValidateUnscaledValue(limit+1, MaxDecimalPrecision))
+}
+
+// TestDecimalGoldenVectors pins the canonical wire encoding against the shared
+// cross-language fixture. The C++ side consumes an identical copy at
+// internal/core/unittest/testdata/decimal/golden_vectors.json; if these two ever
+// disagree, Go and C++ would silently exchange different values for the same
+// decimal literal.
+func TestDecimalGoldenVectors(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "decimal_golden_vectors.json"))
+	require.NoError(t, err)
+
+	var fixture struct {
+		Cases []struct {
+			Name       string `json:"name"`
+			Literal    string `json:"literal"`
+			Precision  int64  `json:"precision"`
+			Scale      int64  `json:"scale"`
+			Unscaled   int64  `json:"unscaled"`
+			BytesLEHex string `json:"bytes_le_hex"`
+		} `json:"cases"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &fixture))
+	require.NotEmpty(t, fixture.Cases)
+
+	for _, tc := range fixture.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			// literal -> unscaled (the SDK-facing conversion)
+			unscaled, err := EncodeUnscaledInt64(tc.Literal, tc.Precision, tc.Scale)
+			require.NoError(t, err)
+			assert.Equal(t, tc.Unscaled, unscaled)
+
+			// unscaled -> canonical bytes (what goes on the wire)
+			wantBytes, err := hex.DecodeString(tc.BytesLEHex)
+			require.NoError(t, err)
+			assert.Equal(t, wantBytes, EncodeUnscaledBytes(unscaled))
+
+			// bytes -> unscaled (what the server decodes)
+			decoded, err := DecodeUnscaledBytes(wantBytes)
+			require.NoError(t, err)
+			assert.Equal(t, tc.Unscaled, decoded)
+
+			assert.NoError(t, ValidateUnscaledValue(unscaled, tc.Precision))
+		})
+	}
+}
+
+// TestValidateDecimalStringPrecisionScaleInvariant pins the DECIMAL(p, s)
+// invariant integer_digits <= p - s. Both cases below were mis-handled when
+// validation counted only the fractional digits actually present in the input
+// rather than the digits after padding to the field scale.
+func TestValidateDecimalStringPrecisionScaleInvariant(t *testing.T) {
+	// "12345" at DECIMAL(5,2) scales up to 1234500 — seven significant digits,
+	// well past the declared precision of five — so it must be rejected.
+	assert.Error(t, ValidateDecimalString("12345", 5, 2))
+	assert.NoError(t, ValidateDecimalString("123.45", 5, 2))
+	assert.NoError(t, ValidateDecimalString("123", 5, 2))
+	assert.Error(t, ValidateDecimalString("1234", 5, 2))
+
+	// "0.001" at DECIMAL(3,3) is legal: no significant integer digits, and
+	// three fractional digits exactly fills the scale.
+	assert.NoError(t, ValidateDecimalString("0.001", 3, 3))
+	assert.NoError(t, ValidateDecimalString("0.999", 3, 3))
+	assert.Error(t, ValidateDecimalString("1.001", 3, 3))
+
+	// Leading zeros are not significant digits.
+	assert.NoError(t, ValidateDecimalString("0007.12", 4, 2))
+	assert.Error(t, ValidateDecimalString("0.9999", 3, 3))
 }

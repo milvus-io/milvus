@@ -138,14 +138,17 @@ VectorBase::set_data_raw(ssize_t element_offset,
                                 element_count);
         }
         case DataType::DECIMAL: {
-            // Wire values are decimal-literal text (e.g. "19.99"), unlike every
-            // other case here which already receives typed data — decode to the
-            // unscaled int64 representation before storing, exactly once, here.
             auto& bytes_data = FIELD_DATA(data, bytes);
-            auto scale = field_meta.get_decimal_scale();
+            bool has_valid_data =
+                field_meta.is_nullable() &&
+                data->valid_data_size() == bytes_data.size();
             std::vector<int64_t> data_raw(bytes_data.size());
             for (int i = 0; i < bytes_data.size(); ++i) {
-                data_raw[i] = DecodeDecimalUnscaled(bytes_data[i], scale);
+                if (has_valid_data && !data->valid_data(i)) {
+                    data_raw[i] = 0;
+                    continue;
+                }
+                data_raw[i] = DecodeDecimalBytes(bytes_data[i]);
             }
             return set_data_raw(element_offset, data_raw.data(), element_count);
         }
