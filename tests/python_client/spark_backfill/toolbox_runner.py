@@ -40,9 +40,7 @@ class ToolboxRuntimeConfig:
 PodExec = Callable[..., str]
 
 
-def stream_pod_exec(
-    core_api, *, pod_name: str, namespace: str, container: str, command: str
-) -> str:
+def stream_pod_exec(core_api, *, pod_name: str, namespace: str, container: str, command: str) -> str:
     result = stream(
         core_api.connect_get_namespaced_pod_exec,
         pod_name,
@@ -95,9 +93,7 @@ class ToolboxSparkRunner:
         )
 
         if pod_name not in self._prepared_pods:
-            prepared_logs, prepared_exit = self._execute_shell(
-                pod_name, self._build_prepare_command()
-            )
+            prepared_logs, prepared_exit = self._execute_shell(pod_name, self._build_prepare_command())
             if prepared_exit != 0:
                 result = SparkJobResult(
                     job_name=run_name,
@@ -114,11 +110,7 @@ class ToolboxSparkRunner:
             self._prepared_pods.add(pod_name)
 
         logs, exit_code = self._execute_shell(pod_name, command)
-        reason = (
-            "Completed"
-            if exit_code == 0
-            else "TimedOut" if exit_code == 124 else "Error"
-        )
+        reason = "Completed" if exit_code == 0 else "TimedOut" if exit_code == 124 else "Error"
         result = SparkJobResult(
             job_name=run_name,
             pod_name=pod_name,
@@ -131,16 +123,12 @@ class ToolboxSparkRunner:
         (evidence_dir / "pod.log").write_text(logs, encoding="utf-8")
         self._write_json(evidence_dir / "result.json", result.__dict__)
         if exit_code == 124:
-            raise TimeoutError(
-                f"Spark Toolbox execution {run_name} timed out after {self.runtime.timeout_seconds}s"
-            )
+            raise TimeoutError(f"Spark Toolbox execution {run_name} timed out after {self.runtime.timeout_seconds}s")
         return result
 
     def _resolve_pod_name(self) -> str:
         if self.runtime.pod_name:
-            pod = self.core_api.read_namespaced_pod(
-                self.runtime.pod_name, self.runtime.namespace
-            )
+            pod = self.core_api.read_namespaced_pod(self.runtime.pod_name, self.runtime.namespace)
             if not self._is_ready(pod):
                 raise RuntimeError(
                     f"Toolbox Pod {self.runtime.pod_name!r} is not Running with ready container "
@@ -154,10 +142,7 @@ class ToolboxSparkRunner:
         ).items
         ready = [pod for pod in pods if self._is_ready(pod)]
         if len(ready) != 1:
-            names = [
-                getattr(getattr(pod, "metadata", None), "name", "<unknown>")
-                for pod in ready
-            ]
+            names = [getattr(getattr(pod, "metadata", None), "name", "<unknown>") for pod in ready]
             raise RuntimeError(
                 f"Expected exactly one Ready Toolbox Pod for label {self.runtime.pod_label!r}; "
                 f"found {len(ready)}: {names}"
@@ -183,14 +168,10 @@ class ToolboxSparkRunner:
         ]
         for filename, content in sorted(self.support_files.items()):
             if PurePosixPath(filename).name != filename:
-                raise ValueError(
-                    f"Toolbox support filename must be a basename: {filename!r}"
-                )
+                raise ValueError(f"Toolbox support filename must be a basename: {filename!r}")
             encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
             destination = f"{workspace}/{filename}"
-            commands.append(
-                f"printf %s {shlex.quote(encoded)} | base64 -d > {shlex.quote(destination)}"
-            )
+            commands.append(f"printf %s {shlex.quote(encoded)} | base64 -d > {shlex.quote(destination)}")
         return "set -euo pipefail\n" + "\n".join(commands)
 
     def _build_operation_command(self, request: SparkJobRequest) -> str:
@@ -231,9 +212,7 @@ class ToolboxSparkRunner:
                 'export SPARK_BACKFILL_MILVUS_TOKEN="${MILVUS_TOKEN:-}"',
                 'export SPARK_BACKFILL_S3_ACCESS_KEY="${S3_ACCESS_KEY:-}"',
                 'export SPARK_BACKFILL_S3_SECRET_KEY="${S3_SECRET_KEY:-}"',
-                *self._redacted_pipeline(
-                    shlex.join([self.runtime.wrapper_path, read_probe])
-                ),
+                *self._redacted_pipeline(shlex.join([self.runtime.wrapper_path, read_probe])),
             ]
         )
 
@@ -296,6 +275,4 @@ class ToolboxSparkRunner:
 
     @staticmethod
     def _write_json(path: Path, value: Any) -> None:
-        path.write_text(
-            json.dumps(value, indent=2, sort_keys=True, default=str), encoding="utf-8"
-        )
+        path.write_text(json.dumps(value, indent=2, sort_keys=True, default=str), encoding="utf-8")
