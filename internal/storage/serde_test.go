@@ -28,6 +28,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/bitutil"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -36,6 +37,24 @@ import (
 type MockRecordWriter struct {
 	writefn func(Record) error
 	closefn func() error
+}
+
+type reallocationCountingAllocator struct {
+	delegate      memory.Allocator
+	reallocations int
+}
+
+func (a *reallocationCountingAllocator) Allocate(size int) []byte {
+	return a.delegate.Allocate(size)
+}
+
+func (a *reallocationCountingAllocator) Reallocate(size int, b []byte) []byte {
+	a.reallocations++
+	return a.delegate.Reallocate(size, b)
+}
+
+func (a *reallocationCountingAllocator) Free(b []byte) {
+	a.delegate.Free(b)
 }
 
 var _ RecordWriter = (*MockRecordWriter)(nil)
@@ -50,6 +69,85 @@ func (w *MockRecordWriter) Close() error {
 
 func (w *MockRecordWriter) GetWrittenUncompressed() uint64 {
 	return 0
+}
+
+func TestBuildRecordFloatVectorReservesAndUsesSourceBytes(t *testing.T) {
+	const dim = 4
+	tests := []struct {
+		name      string
+		nullable  bool
+		data      []float32
+		validData []bool
+		expected  [][]float32
+	}{
+		{
+			name:     "non-nullable",
+			data:     []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+			expected: [][]float32{{1, 2, 3, 4}, {5, 6, 7, 8}, {9, 10, 11, 12}},
+		},
+		{
+			name:      "nullable",
+			nullable:  true,
+			data:      []float32{1, 2, 3, 4, 9, 10, 11, 12},
+			validData: []bool{true, false, true},
+			expected:  [][]float32{{1, 2, 3, 4}, nil, {9, 10, 11, 12}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					Name:     "vector",
+					DataType: schemapb.DataType_FloatVector,
+					Nullable: test.nullable,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: fmt.Sprintf("%d", dim)},
+					},
+				},
+			}}
+			insertData := &InsertData{Data: map[FieldID]FieldData{
+				100: &FloatVectorFieldData{
+					Data:      test.data,
+					ValidData: test.validData,
+					Dim:       dim,
+					Nullable:  test.nullable,
+				},
+			}}
+
+			arrowSchema, err := ConvertToArrowSchema(schema, false)
+			require.NoError(t, err)
+			allocator := &reallocationCountingAllocator{delegate: memory.NewGoAllocator()}
+			builder := array.NewRecordBuilder(allocator, arrowSchema)
+			defer builder.Release()
+
+			require.NoError(t, BuildRecord(builder, insertData, schema))
+			assert.Zero(t, allocator.reallocations)
+
+			record := builder.NewRecord()
+			defer record.Release()
+			column := record.Column(0)
+			assert.Equal(t, len(test.expected), column.Len())
+			for i, expected := range test.expected {
+				if expected == nil {
+					assert.True(t, column.IsNull(i))
+					continue
+				}
+				assert.True(t, column.IsValid(i))
+				var value []byte
+				switch typedColumn := column.(type) {
+				case *array.FixedSizeBinary:
+					value = typedColumn.Value(i)
+				case *array.Binary:
+					value = typedColumn.Value(i)
+				default:
+					assert.FailNow(t, "unexpected float vector arrow array", "%T", column)
+				}
+				assert.Equal(t, expected, arrow.Float32Traits.CastFromBytes(value))
+			}
+		})
+	}
 }
 
 func TestSerDe(t *testing.T) {
