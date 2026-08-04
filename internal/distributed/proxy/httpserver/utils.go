@@ -2865,10 +2865,11 @@ func buildSearchResp(results *schemapb.SearchResultData, enableInt64 bool, colle
 		return nil, err
 	}
 
-	elementOffsets := results.GetElementIndices().GetData()
-	if len(elementOffsets) == 0 {
+	elementIndices := results.GetElementIndices()
+	if elementIndices == nil {
 		return rows, nil
 	}
+	elementOffsets := elementIndices.GetData()
 	if len(elementOffsets) != len(rows) {
 		return nil, merr.WrapErrServiceInternalMsg(
 			"search result element_indices length (%d) does not match row count (%d)",
@@ -2876,6 +2877,12 @@ func buildSearchResp(results *schemapb.SearchResultData, enableInt64 bool, colle
 		)
 	}
 
+	if containsString(results.GetOutputFields(), HTTPReturnElementOffset) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"field %q conflicts with the reserved REST search element offset field",
+			HTTPReturnElementOffset,
+		)
+	}
 	for _, row := range rows {
 		if _, ok := row[HTTPReturnElementOffset]; ok {
 			return nil, merr.WrapErrParameterInvalidMsg(
