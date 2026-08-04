@@ -1259,6 +1259,8 @@ func TestPrepareInsertWithUUIDPK(t *testing.T) {
 	assert.Len(t, result, 1)
 	assert.Equal(t, int64(3), result[0].rowNum)
 	assert.NotNil(t, result[0].strPKTs, "UUID PKs must be tracked in strPKTs")
-	assert.True(t, result[0].pkExists(storage.NewVarCharPrimaryKey("uuid-2"), 1002))
-	assert.False(t, result[0].pkExists(storage.NewVarCharPrimaryKey("uuid-2"), 1001))
+	// The insert message carries per-row timestamps {1,1,1}, so uuid-2 was
+	// last seen at ts=1. A later timestamp is a duplicate, an earlier one is not.
+	assert.True(t, result[0].pkExists(storage.NewVarCharPrimaryKey("uuid-2"), 2))
+	assert.False(t, result[0].pkExists(storage.NewVarCharPrimaryKey("uuid-2"), 0))
 }
