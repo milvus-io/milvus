@@ -172,7 +172,7 @@ Phase 1 supports:
 Phase 1 explicitly does **not** support, and rejects at the relevant boundary:
 - 16-byte `FixedSizeBinary(16)` storage and the `IDs_UuidId` wire field (deferred to the follow-up)
 - `ARRAY<UUID>` element type — rejected at schema validation (import readers, insert validation, capacity, SDK construction, and result deserialization are all string-only in this phase)
-- Field-to-field comparison (`uuid_a == uuid_b`) — rejected at parse time; UUID literals are only comparable against constant values, matching the range-operator restriction
+- Field-to-field comparison (`uuid_a == uuid_b`) — supported via the string comparison path (UUID is `IsStringDataType`, so `CompareExpr` executes it like VARCHAR)
 - `StorageV1` (legacy codec) for UUID — rejected with a clear error; UUID requires the V2 storage format
 - Auto-generated UUID primary keys
 
@@ -190,7 +190,7 @@ Tracked as a follow-up issue (to be created once the storage scope is confirmed 
 - Store UUID as `FixedSizeBinary(16)` in Parquet/deltalog
 - Switch PK wire transport from `str_id` to the already-merged `IDs_UuidId` / `UUIDArray` (milvus-proto #639)
 - 16-byte PK comparisons, dedup, bloom filter
-- Enable sort/mix/schema-bump compaction, `ARRAY<UUID>`, field-to-field comparison, and StorageV1 paths for UUID
+- Enable sort/mix/schema-bump compaction, `ARRAY<UUID>`, and StorageV1 paths for UUID
 
 ## References
 

@@ -4802,8 +4802,9 @@ func TestExpr_UUIDFieldToFieldComparison(t *testing.T) {
 	schema := newTestSchemaHelper(t)
 
 	// Both UUIDTestField (fid 135) and the auto-generated UUIDField (fid 231)
-	// exist in the test schema.
-	rejected := []string{
+	// exist in the test schema. UUID is string-backed, so field-to-field
+	// comparison is supported via the string comparison path (like VARCHAR).
+	fieldToField := []string{
 		`UUIDField == UUIDTestField`,
 		`UUIDField != UUIDTestField`,
 		`UUIDField < UUIDTestField`,
@@ -4812,13 +4813,14 @@ func TestExpr_UUIDFieldToFieldComparison(t *testing.T) {
 		`UUIDField >= UUIDTestField`,
 		`UUIDTestField == UUIDField`,
 	}
-	for _, expr := range rejected {
-		_, err := ParseExpr(schema, expr, nil)
-		require.ErrorIs(t, err, merr.ErrQueryPlan, expr)
-		assert.Contains(t, err.Error(), "field-to-field comparison on uuid field is not supported", expr)
+	for _, expr := range fieldToField {
+		plan, err := ParseExpr(schema, expr, nil)
+		assert.NoError(t, err, expr)
+		require.NotNil(t, plan, expr)
+		assert.NotNil(t, plan.GetCompareExpr(), expr)
 	}
 
-	// Field-vs-literal comparisons and IN lists must still parse, including
+	// Field-vs-literal comparisons and IN lists must also parse, including
 	// the non-canonical literal forms insert accepts.
 	valid := []string{
 		`UUIDTestField == "550e8400-e29b-41d4-a716-446655440000"`,

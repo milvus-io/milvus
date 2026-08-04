@@ -496,14 +496,6 @@ func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*
 		return nil, merr.WrapErrQueryPlanMsg("two column comparison with JSON type is not supported")
 	}
 
-	// CompareExpr's executor only supports VARCHAR as a string expression
-	// operand, so a field-to-field comparison involving a UUID column would
-	// fail at execution. Reject it at parse time; field-vs-literal
-	// comparisons (e.g. uuid == "550e8400-...") are unaffected.
-	if typeutil.IsUUIDType(leftColumnInfo.GetDataType()) || typeutil.IsUUIDType(rightColumnInfo.GetDataType()) {
-		return nil, merr.WrapErrQueryPlanMsg("field-to-field comparison on uuid field is not supported")
-	}
-
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_CompareExpr{
 			CompareExpr: &planpb.CompareExpr{
