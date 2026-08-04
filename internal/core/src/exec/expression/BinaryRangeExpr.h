@@ -378,10 +378,6 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
     bool row_id_scan_initialized_{false};
     std::shared_ptr<ChunkedColumnInterface> row_id_scan_column_{nullptr};
-    std::unique_ptr<ChunkedColumnInterface::ScanCursor> row_id_scan_cursor_{
-        nullptr};
-    ChunkedColumnInterface::ScanBatch row_id_scan_batch_;
-    std::deque<RowIdScanEntry> buffered_scan_entries_;
 };
 }  //namespace exec
 }  // namespace milvus

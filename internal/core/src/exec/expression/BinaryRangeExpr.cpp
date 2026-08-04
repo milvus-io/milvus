@@ -653,30 +653,51 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
                     auto options =
                         ChunkedColumnInterface::ScanOptions::ForBinaryRange(
                             current_data_global_pos_,
-                            active_count_ - current_data_global_pos_,
+                            real_batch_size,
                             make_scan_value(val1),
                             lower_inclusive,
                             make_scan_value(val2),
                             upper_inclusive);
-                    if (row_id_scan_column_->SupportsScanPushdown(options)) {
-                        row_id_scan_cursor_ =
-                            row_id_scan_column_->Scan(op_ctx_, options);
-                        AssertInfo(row_id_scan_cursor_ != nullptr,
-                                   "row id scan cursor is null for field {}",
-                                   field_id_.get());
-                    } else {
+                    if (!row_id_scan_column_->SupportsScanPushdown(options)) {
                         row_id_scan_column_.reset();
                     }
                 }
             }
-            if (row_id_scan_cursor_ != nullptr) {
-                auto bitmaps = RowIdScanToBitmaps(row_id_scan_cursor_.get(),
-                                                  buffered_scan_entries_,
-                                                  row_id_scan_batch_,
+            if (row_id_scan_column_ != nullptr) {
+                auto options =
+                    ChunkedColumnInterface::ScanOptions::ForBinaryRange(
+                        current_data_global_pos_,
+                        real_batch_size,
+                        make_scan_value(val1),
+                        lower_inclusive,
+                        make_scan_value(val2),
+                        upper_inclusive);
+                auto row_id_scan_cursor =
+                    row_id_scan_column_->Scan(op_ctx_, options);
+                AssertInfo(
+                    row_id_scan_cursor != nullptr,
+                    "row id scan cursor is null for field {} window [{}, {})",
+                    field_id_.get(),
+                    current_data_global_pos_,
+                    current_data_global_pos_ + real_batch_size);
+                std::deque<RowIdScanEntry> buffered_scan_entries;
+                ChunkedColumnInterface::ScanBatch row_id_scan_batch;
+                auto bitmaps = RowIdScanToBitmaps(row_id_scan_cursor.get(),
+                                                  buffered_scan_entries,
+                                                  row_id_scan_batch,
                                                   current_data_global_pos_,
                                                   real_batch_size,
                                                   bitmap_input,
                                                   false);
+                AssertInfo(buffered_scan_entries.empty() &&
+                               row_id_scan_cursor->Position() ==
+                                   current_data_global_pos_ + real_batch_size,
+                           "row id scan did not finish window [{}, {}), cursor "
+                           "{}, buffered {}",
+                           current_data_global_pos_,
+                           current_data_global_pos_ + real_batch_size,
+                           row_id_scan_cursor->Position(),
+                           buffered_scan_entries.size());
                 MoveCursor();
                 return std::make_shared<ColumnVector>(
                     std::move(bitmaps.result), std::move(bitmaps.validity));
