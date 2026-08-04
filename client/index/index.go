@@ -81,3 +81,49 @@ func NewGenericIndex(name string, params map[string]string) GenericIndex {
 		params: params,
 	}
 }
+
+var _ Index = extraParamIndex{}
+
+// Keys the extra-param wrapper refuses to touch: they define which index is
+// being built, and letting them be overridden would put Params() and
+// IndexType() into disagreement.
+var reservedIndexParamKeys = map[string]struct{}{
+	IndexTypeKey:  {},
+	MetricTypeKey: {},
+}
+
+type extraParamIndex struct {
+	Index
+	extra map[string]string
+}
+
+func (idx extraParamIndex) Params() map[string]string {
+	result := idx.Index.Params()
+	for k, v := range idx.extra {
+		if _, reserved := reservedIndexParamKeys[k]; reserved {
+			continue
+		}
+		result[k] = v
+	}
+	return result
+}
+
+// WithExtraIndexParams merges additional raw build params into whatever `idx`
+// produces. index_type and metric_type are reserved and silently ignored:
+// overriding them would make Params() disagree with IndexType(), so use the
+// constructor for the index you actually want. Any other key overrides.
+//
+// The typed constructors model the params each index most needs, not every one
+// the engine accepts, and they necessarily trail the engine as it gains new
+// ones. This is the escape hatch for the rest — the build-side counterpart of
+// baseAnnParam.WithExtraParam — so reaching for a param the constructor does
+// not expose does not mean giving up the constructor for NewGenericIndex and a
+// hand-built map.
+//
+// Params are forwarded verbatim; the server validates names and ranges.
+func WithExtraIndexParams(idx Index, extra map[string]string) Index {
+	return extraParamIndex{
+		Index: idx,
+		extra: extra,
+	}
+}
