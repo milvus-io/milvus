@@ -7179,7 +7179,7 @@ type dataNodeConfig struct {
 
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
-	StorageFormat  ParamItem `refreshable:"false"`
+	StorageFormat ParamItem `refreshable:"false"`
 
 	// storage
 	MultiPartUploadSize ParamItem `refreshable:"true"`

@@ -52,12 +52,12 @@ type TextColumnConfig struct {
 // writer is concerned only with file output; manifest-level concerns
 // (version, retry) live in CommitManifestUpdates.
 type SegmentWriterConfig struct {
-	SegmentPath        string
-	TextColumns        []TextColumnConfig
-	ColumnGroups       []storagecommon.ColumnGroup
-	WriterFormat       string
-	SchemaBasedPattern string
-	SchemaBasedFormats []string
+	SegmentPath         string
+	TextColumns         []TextColumnConfig
+	ColumnGroups        []storagecommon.ColumnGroup
+	WriterFormat        string
+	SchemaBasedPattern  string
+	SchemaBasedFormats  []string
 	MultiPartUploadSize int64
 }
 

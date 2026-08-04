@@ -59,10 +59,10 @@ var (
 	PropertyFSTLSMinVersion       = C.GoString(C.loon_properties_fs_tls_min_version)
 	PropertyFSUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
 
-	PropertyWriterPolicy             = C.GoString(C.loon_properties_writer_policy)
-	PropertyWriterFormat             = C.GoString(C.loon_properties_writer_format)
-	PropertyWriterSchemaBasedPattern = C.GoString(C.loon_properties_writer_schema_base_patterns)
-	PropertyWriterSchemaBasedFormats = "writer.split.schema_based.formats"
+	PropertyWriterPolicy              = C.GoString(C.loon_properties_writer_policy)
+	PropertyWriterFormat              = C.GoString(C.loon_properties_writer_format)
+	PropertyWriterSchemaBasedPattern  = C.GoString(C.loon_properties_writer_schema_base_patterns)
+	PropertyWriterSchemaBasedFormats  = "writer.split.schema_based.formats"
 	PropertyWriterMultiPartUploadSize = "writer.multi_part_upload_size"
 
 	// CMEK (Customer Managed Encryption Keys) writer properties
