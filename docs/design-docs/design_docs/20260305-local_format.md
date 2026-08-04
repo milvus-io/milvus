@@ -330,8 +330,10 @@ required by the current window and constructs cursors over the pinned input.
 Validity and data are currently stored in the same Cell. A nullable scan that
 needs field validity therefore pins every Cell intersecting the current window,
 including planner-NoMatch ranges. A non-nullable scan may omit planner-skipped
-Cells. Validity-only scans use the same Cell pin semantics but omit value
-parsing; non-nullable validity-only scans have an empty cell plan.
+Cells. Validity-only scans use the same Cell pin semantics and omit values from
+the public `ScanBatch`; a backend may still need to decode the combined physical
+representation to recover validity. Non-nullable validity-only scans have an
+empty cell plan.
 
 `Next(max_rows)` does not pin cells. Dense data batches contain at most
 `max_rows` evaluated rows and cannot cross a NoMatch range or backend batch
@@ -465,19 +467,22 @@ read reconstructs it from the segment-global execution position.
 Offset-input execution is used when expression evaluation is restricted to a
 known set of segment offsets.
 
-The initial Vortex local format implementation handles dense sorted offsets by
-scanning one continuous range:
+Offset input uses positional `Take`, not a dense range `Scan`:
 
 ```text
 ProcessDataByOffsets
-  -> ProcessSortedDataByOffsetsByScan
-  -> scan [min_offset, max_offset + 1)
-  -> expression layer checks the offset bitmap
+  -> ChunkedColumnInterface::Take(offsets)
+  -> consume one or more TakeBatch values
+  -> evaluate exactly the requested rows in input order
 ```
 
-Bitmap or selection pushdown into `ChunkedColumnInterface::Scan` is left as
-future work. The current strategy avoids many small reads while keeping
-semantics simple.
+The public contract preserves input order and duplicate offsets. Raw keeps the
+request order and streams consecutive runs from the same raw chunk;
+fixed-width values use a pinned payload plus selection, while variable-width
+types build views only for requested rows. Vortex may sort, group, and
+deduplicate offsets internally to reduce reader work, materializes the request,
+and restores the original order before exposing batches. Internal result
+positions and physical grouping do not cross the `TakeBatch` boundary.
 
 ### Retrieve and Requery
 
@@ -487,18 +492,19 @@ selected row offsets.
 ```text
 FillTargetEntry / Retrieve output
   -> bulk_subscript
-  -> ChunkedColumnInterface positional take
-  -> VortexColumn::BulkPrimitiveValueAt / BulkRawStringAt / BulkArrayAt
-  -> TakeOwn / TakeStringLikeViews
-  -> VortexPlanner::PlanForOffsets
-  -> pin planned cells
-  -> VortexFormatReader::read_with_plan(row indices)
-  -> restore requested output order
+  -> ChunkedColumnInterface::Take(offsets)
+  -> Raw ordered chunk-run cursor, or Vortex ordered materialized cursor
+  -> copy or serialize into the final owned result while each TakeBatch owner
+     is alive
 ```
 
-The planner disables predicate semantics for take because retrieve output is
-positional. Random requery over long strings can still touch many cells; this is
-tracked as a separate performance area from filter pushdown.
+For Vortex, `PlanForOffsets` selects and pins Cells only while the reader imports
+and materializes the requested data. The returned cursor owns the materialized
+Arrow/copied result rather than retaining Cell pins. Raw read-only expression
+Take keeps raw chunk pins in the batch owner; retrieve/requery copies or
+serializes into its final owned result before that owner is released. Random
+requery over long strings can still touch many cells and remains a separate
+performance area from filter pushdown.
 
 ### Nullable and Validity
 
@@ -609,7 +615,8 @@ Performance validation:
 
 ## Future Work
 
-- Push offset bitmaps or row selections into `ChunkedColumnInterface::Scan`.
+- Add a specialized monotonic-offset Vortex Take path if benchmarks show that a
+  true streaming reader materially improves ordered requests.
 - Expand Vortex predicate construction for more scalar types and expression
   forms.
 - Optimize long string, JSON, and ARRAY retrieve/take conversion paths.
