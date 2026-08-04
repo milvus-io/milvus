@@ -1005,6 +1005,10 @@ func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileRe
 	return s.mixCoord.ListFileResources(ctx, req)
 }
 
+func (s *Server) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	return s.mixCoord.GetRLSMetadata(ctx, req)
+}
+
 // TruncateCollection truncate a collection
 func (s *Server) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
 	return s.mixCoord.TruncateCollection(ctx, in)

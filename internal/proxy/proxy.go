@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -154,6 +155,7 @@ func (node *Proxy) Register() error {
 	node.session.Register()
 	metrics.NumNodes.WithLabelValues(paramtable.GetStringNodeID(), typeutil.ProxyRole).Inc()
 	mlog.Info(node.ctx, "Proxy Register Finished")
+
 	// TODO Reset the logger
 	// Params.initLogCfg()
 	return nil
@@ -241,6 +243,12 @@ func (node *Proxy) Init() error {
 		return err
 	}
 	mlog.Debug(node.ctx, "init meta cache done", mlog.String("role", typeutil.ProxyRole))
+
+	if err := rls.DefaultManager().Init(node.ctx, node.mixCoord, node.tsoAllocator.AllocOne); err != nil {
+		mlog.Warn(node.ctx, "failed to init RLS metadata manager", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
+		return err
+	}
+	mlog.Debug(node.ctx, "init RLS metadata manager done", mlog.String("role", typeutil.ProxyRole))
 
 	node.shardMgr = shardclient.NewShardClientMgr(node.mixCoord)
 	node.lbPolicy = shardclient.NewLBPolicyImpl(node.shardMgr)
