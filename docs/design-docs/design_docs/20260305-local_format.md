@@ -441,6 +441,14 @@ pins planner-pruned Cells because their validity is still needed. Non-nullable
 row-id scans can omit predicate-pruned Cells. Vortex does not run the legacy
 payload-dependent Raw SkipIndex path.
 
+The prepared scan retains those plans and reuses them when opening the normal
+full-window cursor, so pin selection and reader execution consume the same
+planner result. A cursor may consume the Arrow stream incrementally, but the
+reader and its Cell pins remain scoped to that one operator window and are
+destroyed before the next window. The scan path does not concatenate the window
+through `IntoArray`; subrange reopen is allowed to replan within the already
+pinned Cell set.
+
 The expression layer keeps only its segment-global execution position. Normal
 evaluation prepares, consumes, and destroys one complete window before moving
 to the next. If a conjunction short-circuits an execution window, it advances
