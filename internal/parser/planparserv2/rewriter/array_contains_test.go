@@ -193,20 +193,87 @@ func TestCombineArrayContainsRecomputesTypeAndClearsTemplateMetadata(t *testing.
 	require.Equal(t, "second", second.GetJsonContainsExpr().GetTemplateVariableName())
 }
 
-func TestCombineArrayContainsKeepsDuplicateElements(t *testing.T) {
-	column := arrayContainsTestColumn(201, schemapb.DataType_Int64)
-	parts := []*planpb.Expr{
-		arrayContainsTestExpr(column, planpb.JSONContainsExpr_Contains, arrayContainsTestInt(2)),
-		arrayContainsTestExpr(column, planpb.JSONContainsExpr_ContainsAny,
-			arrayContainsTestInt(2), arrayContainsTestInt(1)),
-		arrayContainsTestExpr(column, planpb.JSONContainsExpr_Contains, arrayContainsTestInt(1)),
+func TestCombineArrayContainsDeduplicatesElementsPreservingOrder(t *testing.T) {
+	testcases := []struct {
+		name       string
+		targetOp   planpb.JSONContainsExpr_JSONOp
+		combinedOp planpb.JSONContainsExpr_JSONOp
+	}{
+		{
+			name:       "contains any",
+			targetOp:   planpb.JSONContainsExpr_ContainsAny,
+			combinedOp: planpb.JSONContainsExpr_ContainsAny,
+		},
+		{
+			name:       "contains all",
+			targetOp:   planpb.JSONContainsExpr_ContainsAll,
+			combinedOp: planpb.JSONContainsExpr_ContainsAll,
+		},
 	}
 
-	result := combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAny)
-	require.Len(t, result, 1)
-	merged := result[0].GetJsonContainsExpr()
-	require.NotNil(t, merged)
-	require.Equal(t, []int64{2, 2, 1, 1}, arrayContainsTestIntValues(merged.GetElements()))
+	for _, testcase := range testcases {
+		t.Run(testcase.name, func(t *testing.T) {
+			column := arrayContainsTestColumn(201, schemapb.DataType_Int64)
+			parts := []*planpb.Expr{
+				arrayContainsTestExpr(column, planpb.JSONContainsExpr_Contains, arrayContainsTestInt(2)),
+				arrayContainsTestExpr(column, testcase.combinedOp,
+					arrayContainsTestInt(2), arrayContainsTestInt(1)),
+				arrayContainsTestExpr(column, planpb.JSONContainsExpr_Contains, arrayContainsTestInt(1)),
+			}
+
+			result := combineArrayContains(parts, testcase.targetOp)
+			require.Len(t, result, 1)
+			merged := result[0].GetJsonContainsExpr()
+			require.NotNil(t, merged)
+			require.Equal(t, []int64{2, 1}, arrayContainsTestIntValues(merged.GetElements()))
+		})
+	}
+}
+
+func TestCombineArrayContainsDeduplicatesAfterNumericCast(t *testing.T) {
+	testcases := []struct {
+		name           string
+		elementType    schemapb.DataType
+		first          *planpb.GenericValue
+		equivalent     *planpb.GenericValue
+		distinct       *planpb.GenericValue
+		distinctSecond *planpb.GenericValue
+	}{
+		{
+			name:           "float32",
+			elementType:    schemapb.DataType_Float,
+			first:          arrayContainsTestInt(16_777_217),
+			equivalent:     arrayContainsTestFloat(16_777_216),
+			distinct:       arrayContainsTestFloat(16_777_218),
+			distinctSecond: arrayContainsTestInt(16_777_218),
+		},
+		{
+			name:           "float64",
+			elementType:    schemapb.DataType_Double,
+			first:          arrayContainsTestInt(9_007_199_254_740_993),
+			equivalent:     arrayContainsTestFloat(9_007_199_254_740_992),
+			distinct:       arrayContainsTestFloat(9_007_199_254_740_994),
+			distinctSecond: arrayContainsTestInt(9_007_199_254_740_994),
+		},
+	}
+
+	for _, testcase := range testcases {
+		t.Run(testcase.name, func(t *testing.T) {
+			column := arrayContainsTestColumn(201, testcase.elementType)
+			parts := []*planpb.Expr{
+				arrayContainsTestExpr(column, planpb.JSONContainsExpr_Contains, testcase.first),
+				arrayContainsTestExpr(column, planpb.JSONContainsExpr_ContainsAny,
+					testcase.equivalent, testcase.distinct, testcase.distinctSecond),
+			}
+
+			result := combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAny)
+			require.Len(t, result, 1)
+			elements := result[0].GetJsonContainsExpr().GetElements()
+			require.Len(t, elements, 2)
+			require.Same(t, testcase.first, elements[0])
+			require.Same(t, testcase.distinct, elements[1])
+		})
+	}
 }
 
 func TestCombineArrayContainsRequiresAtLeastTwoSources(t *testing.T) {

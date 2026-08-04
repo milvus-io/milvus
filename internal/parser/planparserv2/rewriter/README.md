@@ -51,7 +51,7 @@ The rewriter can be configured via the following parameter (refreshable at runti
 - AND on the same physical ARRAY column:
   - `array_contains(a, x) AND array_contains(a, y)` → `array_contains_all(a, [x, y])`
   - Existing `array_contains_all` nodes are absorbed, so arbitrarily long and nested AND chains close into one node.
-- At least two compatible source nodes are required. Values retain encounter order without sorting or deduplication, and the merged node is emitted at the group's first position.
+- At least two compatible source nodes are required. Values retain first-encounter order, duplicates are removed without sorting, and the merged node is emitted at the group's first position.
 - The rule is keyed by `ColumnInfo`, including nested path and element-level identity. Different fields and the opposite Any/All operator remain separate.
 - Only `ColumnInfo.DataType == Array` participates. JSON columns remain unchanged even though ARRAY and JSON predicates share `JSONContainsExpr` and either function spelling may be used on an ARRAY column.
 - Nil, array-valued, unknown, and NaN elements are excluded from merging. `ElementsSameType` is recomputed and consumed template metadata is cleared on the merged node.
