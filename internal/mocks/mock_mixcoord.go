@@ -2453,6 +2453,65 @@ func (_c *MixCoord_CreateRole_Call) RunAndReturn(run func(context.Context, *milv
 	return _c
 }
 
+// CreateRowPolicy provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) CreateRowPolicy(_a0 context.Context, _a1 *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateRowPolicy")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateRowPolicyRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateRowPolicyRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CreateRowPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateRowPolicy'
+type MixCoord_CreateRowPolicy_Call struct {
+	*mock.Call
+}
+
+// CreateRowPolicy is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateRowPolicyRequest
+func (_e *MixCoord_Expecter) CreateRowPolicy(_a0 interface{}, _a1 interface{}) *MixCoord_CreateRowPolicy_Call {
+	return &MixCoord_CreateRowPolicy_Call{Call: _e.mock.On("CreateRowPolicy", _a0, _a1)}
+}
+
+func (_c *MixCoord_CreateRowPolicy_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateRowPolicyRequest)) *MixCoord_CreateRowPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreateRowPolicyRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CreateRowPolicy_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_CreateRowPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CreateRowPolicy_Call) RunAndReturn(run func(context.Context, *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error)) *MixCoord_CreateRowPolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateSnapshot provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) CreateSnapshot(_a0 context.Context, _a1 *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -2685,6 +2744,65 @@ func (_c *MixCoord_DeleteCredential_Call) Return(_a0 *commonpb.Status, _a1 error
 }
 
 func (_c *MixCoord_DeleteCredential_Call) RunAndReturn(run func(context.Context, *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error)) *MixCoord_DeleteCredential_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteRLSPrincipalTags provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) DeleteRLSPrincipalTags(_a0 context.Context, _a1 *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteRLSPrincipalTags")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_DeleteRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteRLSPrincipalTags'
+type MixCoord_DeleteRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// DeleteRLSPrincipalTags is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DeleteRLSPrincipalTagsRequest
+func (_e *MixCoord_Expecter) DeleteRLSPrincipalTags(_a0 interface{}, _a1 interface{}) *MixCoord_DeleteRLSPrincipalTags_Call {
+	return &MixCoord_DeleteRLSPrincipalTags_Call{Call: _e.mock.On("DeleteRLSPrincipalTags", _a0, _a1)}
+}
+
+func (_c *MixCoord_DeleteRLSPrincipalTags_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DeleteRLSPrincipalTagsRequest)) *MixCoord_DeleteRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DeleteRLSPrincipalTagsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_DeleteRLSPrincipalTags_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_DeleteRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_DeleteRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error)) *MixCoord_DeleteRLSPrincipalTags_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3629,6 +3747,65 @@ func (_c *MixCoord_DropRole_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCo
 }
 
 func (_c *MixCoord_DropRole_Call) RunAndReturn(run func(context.Context, *milvuspb.DropRoleRequest) (*commonpb.Status, error)) *MixCoord_DropRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropRowPolicy provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) DropRowPolicy(_a0 context.Context, _a1 *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropRowPolicy")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropRowPolicyRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropRowPolicyRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_DropRowPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropRowPolicy'
+type MixCoord_DropRowPolicy_Call struct {
+	*mock.Call
+}
+
+// DropRowPolicy is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropRowPolicyRequest
+func (_e *MixCoord_Expecter) DropRowPolicy(_a0 interface{}, _a1 interface{}) *MixCoord_DropRowPolicy_Call {
+	return &MixCoord_DropRowPolicy_Call{Call: _e.mock.On("DropRowPolicy", _a0, _a1)}
+}
+
+func (_c *MixCoord_DropRowPolicy_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropRowPolicyRequest)) *MixCoord_DropRowPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DropRowPolicyRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_DropRowPolicy_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_DropRowPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_DropRowPolicy_Call) RunAndReturn(run func(context.Context, *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error)) *MixCoord_DropRowPolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -5819,6 +5996,65 @@ func (_c *MixCoord_GetQuotaMetrics_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// GetRLSPrincipalTags provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetRLSPrincipalTags(_a0 context.Context, _a1 *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRLSPrincipalTags")
+	}
+
+	var r0 *milvuspb.GetRLSPrincipalTagsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest) *milvuspb.GetRLSPrincipalTagsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetRLSPrincipalTagsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRLSPrincipalTags'
+type MixCoord_GetRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// GetRLSPrincipalTags is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetRLSPrincipalTagsRequest
+func (_e *MixCoord_Expecter) GetRLSPrincipalTags(_a0 interface{}, _a1 interface{}) *MixCoord_GetRLSPrincipalTags_Call {
+	return &MixCoord_GetRLSPrincipalTags_Call{Call: _e.mock.On("GetRLSPrincipalTags", _a0, _a1)}
+}
+
+func (_c *MixCoord_GetRLSPrincipalTags_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetRLSPrincipalTagsRequest)) *MixCoord_GetRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetRLSPrincipalTagsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetRLSPrincipalTags_Call) Return(_a0 *milvuspb.GetRLSPrincipalTagsResponse, _a1 error) *MixCoord_GetRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error)) *MixCoord_GetRLSPrincipalTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetRecoveryInfo provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) GetRecoveryInfo(_a0 context.Context, _a1 *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -7666,6 +7902,65 @@ func (_c *MixCoord_ListQueryNode_Call) RunAndReturn(run func(context.Context, *q
 	return _c
 }
 
+// ListRLSPrincipals provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) ListRLSPrincipals(_a0 context.Context, _a1 *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRLSPrincipals")
+	}
+
+	var r0 *milvuspb.ListRLSPrincipalsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRLSPrincipalsRequest) *milvuspb.ListRLSPrincipalsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListRLSPrincipalsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListRLSPrincipalsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_ListRLSPrincipals_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRLSPrincipals'
+type MixCoord_ListRLSPrincipals_Call struct {
+	*mock.Call
+}
+
+// ListRLSPrincipals is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListRLSPrincipalsRequest
+func (_e *MixCoord_Expecter) ListRLSPrincipals(_a0 interface{}, _a1 interface{}) *MixCoord_ListRLSPrincipals_Call {
+	return &MixCoord_ListRLSPrincipals_Call{Call: _e.mock.On("ListRLSPrincipals", _a0, _a1)}
+}
+
+func (_c *MixCoord_ListRLSPrincipals_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListRLSPrincipalsRequest)) *MixCoord_ListRLSPrincipals_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListRLSPrincipalsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_ListRLSPrincipals_Call) Return(_a0 *milvuspb.ListRLSPrincipalsResponse, _a1 error) *MixCoord_ListRLSPrincipals_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_ListRLSPrincipals_Call) RunAndReturn(run func(context.Context, *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error)) *MixCoord_ListRLSPrincipals_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListRefreshExternalCollectionJobs provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) ListRefreshExternalCollectionJobs(_a0 context.Context, _a1 *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -7839,6 +8134,65 @@ func (_c *MixCoord_ListRestoreSnapshotJobs_Call) Return(_a0 *datapb.ListRestoreS
 }
 
 func (_c *MixCoord_ListRestoreSnapshotJobs_Call) RunAndReturn(run func(context.Context, *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error)) *MixCoord_ListRestoreSnapshotJobs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListRowPolicies provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) ListRowPolicies(_a0 context.Context, _a1 *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRowPolicies")
+	}
+
+	var r0 *milvuspb.ListRowPoliciesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRowPoliciesRequest) *milvuspb.ListRowPoliciesResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListRowPoliciesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListRowPoliciesRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_ListRowPolicies_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRowPolicies'
+type MixCoord_ListRowPolicies_Call struct {
+	*mock.Call
+}
+
+// ListRowPolicies is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListRowPoliciesRequest
+func (_e *MixCoord_Expecter) ListRowPolicies(_a0 interface{}, _a1 interface{}) *MixCoord_ListRowPolicies_Call {
+	return &MixCoord_ListRowPolicies_Call{Call: _e.mock.On("ListRowPolicies", _a0, _a1)}
+}
+
+func (_c *MixCoord_ListRowPolicies_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListRowPoliciesRequest)) *MixCoord_ListRowPolicies_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListRowPoliciesRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_ListRowPolicies_Call) Return(_a0 *milvuspb.ListRowPoliciesResponse, _a1 error) *MixCoord_ListRowPolicies_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_ListRowPolicies_Call) RunAndReturn(run func(context.Context, *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error)) *MixCoord_ListRowPolicies_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -9649,6 +10003,65 @@ func (_c *MixCoord_SetMixCoordClient_Call) RunAndReturn(run func(types.MixCoordC
 	return _c
 }
 
+// SetRLSPrincipalTags provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) SetRLSPrincipalTags(_a0 context.Context, _a1 *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetRLSPrincipalTags")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_SetRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetRLSPrincipalTags'
+type MixCoord_SetRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// SetRLSPrincipalTags is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.SetRLSPrincipalTagsRequest
+func (_e *MixCoord_Expecter) SetRLSPrincipalTags(_a0 interface{}, _a1 interface{}) *MixCoord_SetRLSPrincipalTags_Call {
+	return &MixCoord_SetRLSPrincipalTags_Call{Call: _e.mock.On("SetRLSPrincipalTags", _a0, _a1)}
+}
+
+func (_c *MixCoord_SetRLSPrincipalTags_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.SetRLSPrincipalTagsRequest)) *MixCoord_SetRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.SetRLSPrincipalTagsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_SetRLSPrincipalTags_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_SetRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_SetRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error)) *MixCoord_SetRLSPrincipalTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetSegmentState provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) SetSegmentState(_a0 context.Context, _a1 *datapb.SetSegmentStateRequest) (*datapb.SetSegmentStateResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -11125,6 +11538,65 @@ func (_c *MixCoord_UpdateResourceGroups_Call) Return(_a0 *commonpb.Status, _a1 e
 }
 
 func (_c *MixCoord_UpdateResourceGroups_Call) RunAndReturn(run func(context.Context, *querypb.UpdateResourceGroupsRequest) (*commonpb.Status, error)) *MixCoord_UpdateResourceGroups_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateRowPolicy provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) UpdateRowPolicy(_a0 context.Context, _a1 *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateRowPolicy")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateRowPolicyRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.UpdateRowPolicyRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_UpdateRowPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateRowPolicy'
+type MixCoord_UpdateRowPolicy_Call struct {
+	*mock.Call
+}
+
+// UpdateRowPolicy is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.UpdateRowPolicyRequest
+func (_e *MixCoord_Expecter) UpdateRowPolicy(_a0 interface{}, _a1 interface{}) *MixCoord_UpdateRowPolicy_Call {
+	return &MixCoord_UpdateRowPolicy_Call{Call: _e.mock.On("UpdateRowPolicy", _a0, _a1)}
+}
+
+func (_c *MixCoord_UpdateRowPolicy_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.UpdateRowPolicyRequest)) *MixCoord_UpdateRowPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.UpdateRowPolicyRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_UpdateRowPolicy_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_UpdateRowPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_UpdateRowPolicy_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error)) *MixCoord_UpdateRowPolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }

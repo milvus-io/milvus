@@ -11,6 +11,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -37,6 +39,10 @@ type insertTask struct {
 	partitionKeys   *schemapb.FieldData
 	schemaTimestamp uint64
 	collectionID    int64
+	rlsEnabled      bool
+	rlsForce        bool
+	rlsPrincipal    string
+	skipRLS         bool
 	schemaVersion   int32
 }
 
@@ -141,6 +147,8 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
 	}
+	it.rlsEnabled = colInfo.RlsEnabled
+	it.rlsForce = colInfo.RlsForce
 
 	if it.schemaTimestamp != 0 {
 		if it.schemaTimestamp != colInfo.UpdateTimestamp {
@@ -293,6 +301,21 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
 		Validate(it.insertMsg.GetFieldsData(), schema.SchemaHelper, it.insertMsg.NRows()); err != nil {
 		return merr.WrapErrAsInputError(err)
+	}
+
+	it.rlsEnabled, err = resolveRLSEnforcement(ctx, it.getMetaCache(), it.rlsEnabled, it.rlsForce, it.skipRLS,
+		it.insertMsg.GetDbName(), it.insertMsg.GetCollectionName(), "insert")
+	if err != nil {
+		return err
+	}
+	principalName, enforceRLS, err := rls.ResolveRuntimePrincipal(it.rlsEnabled, it.rlsPrincipal, "insert")
+	if err != nil {
+		return err
+	}
+	if err := rls.ValidateCheckForWrite(ctx, it.collectionID, principalName,
+		rlsutil.PolicyActionInsert, enforceRLS, it.insertMsg.GetFieldsData(), schema.SchemaHelper, int(it.insertMsg.NRows()), "insert"); err != nil {
+		log.Warn(ctx, "RLS check expression validation failed for insert", mlog.Err(err))
+		return err
 	}
 
 	log.Debug(ctx, "Proxy Insert PreExecute done")

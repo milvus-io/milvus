@@ -705,15 +705,8 @@ func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
 				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSEnabledKey)
 			}
 			seen[RLSEnabledKey] = struct{}{}
-			enabled, err := IsRLSEnabled(kv)
-			if err != nil {
+			if _, err := IsRLSEnabled(kv); err != nil {
 				return err
-			}
-			// The management plane lands before the data-plane enforcement in
-			// the stacked rollout. Keep the public switch fail-closed until the
-			// enforcement slice removes this temporary gate.
-			if enabled {
-				return merr.WrapErrParameterInvalidMsg("RLS runtime enforcement is not available yet; %s cannot be enabled", RLSEnabledKey)
 			}
 		case RLSForceKey:
 			if _, ok := seen[RLSForceKey]; ok {

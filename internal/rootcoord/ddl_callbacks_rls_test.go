@@ -163,7 +163,7 @@ func TestRLSMetadataCacheInvalidationIsSynchronous(t *testing.T) {
 		WithHeader(&message.AlterRLSMetadataMessageHeader{
 			DbId:             10,
 			CollectionId:     20,
-			CacheExpirations: newRLSCacheExpirations("db1", "coll1", 20, rlsutil.MsgTypeUpdateRowPolicy),
+			CacheExpirations: newRLSCacheExpirations("db1", "coll1", 20, commonpb.MsgType_UpdateRowPolicy),
 		}).
 		WithBody(&message.AlterRLSMetadataMessageBody{
 			Metadata: &messagespb.AlterRLSMetadataMessageBody_Policy{Policy: &messagespb.RLSPolicyMetadata{
@@ -182,7 +182,7 @@ func TestRLSMetadataCacheInvalidationIsSynchronous(t *testing.T) {
 	}()
 	select {
 	case req := <-invalidationStarted:
-		require.Equal(t, commonpb.MsgType(rlsutil.MsgTypeUpdateRowPolicy), req.GetBase().GetMsgType())
+		require.Equal(t, commonpb.MsgType(commonpb.MsgType_UpdateRowPolicy), req.GetBase().GetMsgType())
 		require.Equal(t, int64(20), req.GetCollectionID())
 	case <-time.After(time.Second):
 		require.Fail(t, "Proxy cache invalidation was not started")

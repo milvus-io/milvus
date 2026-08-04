@@ -117,6 +117,8 @@ type CollectionInfo struct {
 	ConsistencyLevel      commonpb.ConsistencyLevel
 	PartitionKeyIsolation bool
 	QueryMode             string
+	RlsEnabled            bool
+	RlsForce              bool
 	UpdateTimestamp       uint64
 	CollectionTTL         uint64
 	NumPartitions         int64
@@ -543,6 +545,15 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	}
 	queryMode := common.GetQueryMode(collection.Properties...)
 
+	rlsEnabled, err := common.IsRLSEnabled(collection.Properties...)
+	if err != nil {
+		return nil, err
+	}
+	rlsForce, err := common.IsRLSForce(collection.Properties...)
+	if err != nil {
+		return nil, err
+	}
+
 	schemaInfo, err := NewSchemaInfo(collection.Schema)
 	if err != nil {
 		return nil, err
@@ -557,13 +568,13 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			// the response uncached instead of inventing a compat mechanism for
 			// an upgrade-window-only entry class -- repeat lookups just
 			// re-describe until the rootcoords are upgraded.
-			return newCollectionInfo(collection, schemaInfo, isolation, queryMode), nil
+			return newCollectionInfo(collection, schemaInfo, isolation, queryMode, rlsEnabled, rlsForce), nil
 		}
 		// By-name lookup: the request database is authoritative.
 		bucketDB = normalizeDBName(database)
 	}
 
-	info := newCollectionInfo(collection, schemaInfo, isolation, queryMode)
+	info := newCollectionInfo(collection, schemaInfo, isolation, queryMode, rlsEnabled, rlsForce)
 	if info.DBName == "" {
 		info.DBName = bucketDB // authoritative for by-name fills
 	}
@@ -617,6 +628,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		mlog.String("actual collection Name", collection.Schema.GetName()), mlog.Int64("collectionID", collection.CollectionID),
 		mlog.Uint64("version", collection.GetRequestTime()), mlog.Any("Aliases", collection.Aliases),
 		mlog.Bool("partition key isolation", isolation), mlog.String("QueryMode", queryMode),
+		mlog.Bool("rlsEnabled", rlsEnabled), mlog.Bool("rlsForce", rlsForce),
 	)
 
 	return info, nil
@@ -639,7 +651,7 @@ func NormalizeDBName(database string) string {
 // newCollectionInfo builds a CollectionInfo from a describe response. It does
 // not touch any cache map, so it is safe to use for entries that are returned
 // without being cached.
-func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaInfo *SchemaInfo, isolation bool, queryMode string) *CollectionInfo {
+func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaInfo *SchemaInfo, isolation bool, queryMode string, rlsEnabled, rlsForce bool) *CollectionInfo {
 	return &CollectionInfo{
 		CollID:                collection.CollectionID,
 		DBID:                  collection.GetDbId(),
@@ -650,6 +662,8 @@ func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaIn
 		ConsistencyLevel:      collection.ConsistencyLevel,
 		PartitionKeyIsolation: isolation,
 		QueryMode:             queryMode,
+		RlsEnabled:            rlsEnabled,
+		RlsForce:              rlsForce,
 		UpdateTimestamp:       collection.UpdateTimestamp,
 		CollectionTTL:         GetCollectionTTL(schemaInfo.GetProperties()),
 		VChannels:             collection.VirtualChannelNames,

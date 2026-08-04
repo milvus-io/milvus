@@ -3617,7 +3617,7 @@ func (c *Core) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClie
 	}, nil
 }
 
-func (c *Core) CreateRowPolicy(ctx context.Context, req *rlsutil.CreateRowPolicyRequest) (*commonpb.Status, error) {
+func (c *Core) createRowPolicy(ctx context.Context, req *rlsutil.CreateRowPolicyRequest) (*commonpb.Status, error) {
 	method := "CreateRowPolicy"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
@@ -3647,7 +3647,7 @@ func (c *Core) CreateRowPolicy(ctx context.Context, req *rlsutil.CreateRowPolicy
 	return merr.Success(), nil
 }
 
-func (c *Core) UpdateRowPolicy(ctx context.Context, req *rlsutil.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+func (c *Core) updateRowPolicy(ctx context.Context, req *rlsutil.UpdateRowPolicyRequest) (*commonpb.Status, error) {
 	method := "UpdateRowPolicy"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
@@ -3676,7 +3676,7 @@ func (c *Core) UpdateRowPolicy(ctx context.Context, req *rlsutil.UpdateRowPolicy
 	return merr.Success(), nil
 }
 
-func (c *Core) DropRowPolicy(ctx context.Context, req *rlsutil.DropRowPolicyRequest) (*commonpb.Status, error) {
+func (c *Core) dropRowPolicy(ctx context.Context, req *rlsutil.DropRowPolicyRequest) (*commonpb.Status, error) {
 	method := "DropRowPolicy"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
@@ -3705,7 +3705,7 @@ func (c *Core) DropRowPolicy(ctx context.Context, req *rlsutil.DropRowPolicyRequ
 	return merr.Success(), nil
 }
 
-func (c *Core) ListRowPolicies(ctx context.Context, req *rlsutil.ListRowPoliciesRequest) (*rlsutil.ListRowPoliciesResponse, error) {
+func (c *Core) listRowPolicies(ctx context.Context, req *rlsutil.ListRowPoliciesRequest) (*rlsutil.ListRowPoliciesResponse, error) {
 	method := "ListRowPolicies"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
@@ -3745,7 +3745,7 @@ func (c *Core) ListRowPolicies(ctx context.Context, req *rlsutil.ListRowPolicies
 	}, nil
 }
 
-func (c *Core) SetRLSPrincipalTags(ctx context.Context, req *rlsutil.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+func (c *Core) setRLSPrincipalTags(ctx context.Context, req *rlsutil.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
 	method := "SetRLSPrincipalTags"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
@@ -3774,7 +3774,7 @@ func (c *Core) SetRLSPrincipalTags(ctx context.Context, req *rlsutil.SetRLSPrinc
 	return merr.Success(), nil
 }
 
-func (c *Core) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (*rlsutil.GetRLSPrincipalTagsResponse, error) {
+func (c *Core) getRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (*rlsutil.GetRLSPrincipalTagsResponse, error) {
 	method := "GetRLSPrincipalTags"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
@@ -3817,7 +3817,7 @@ func (c *Core) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrinc
 	}, nil
 }
 
-func (c *Core) ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) (*rlsutil.ListRLSPrincipalsResponse, error) {
+func (c *Core) listRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) (*rlsutil.ListRLSPrincipalsResponse, error) {
 	method := "ListRLSPrincipals"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
@@ -3903,7 +3903,7 @@ func (c *Core) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetada
 	}, nil
 }
 
-func (c *Core) DeleteRLSPrincipalTags(ctx context.Context, req *rlsutil.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+func (c *Core) deleteRLSPrincipalTags(ctx context.Context, req *rlsutil.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
 	method := "DeleteRLSPrincipalTags"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
