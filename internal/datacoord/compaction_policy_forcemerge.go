@@ -119,7 +119,7 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 	topology.NumShards = len(collection.VChannelNames)
 
 	views := []CompactionView{}
-	for label, groups := range groupByPartitionChannel(GetViewsByInfo(segments...)) {
+	for label, groups := range groupByPartitionChannel(segments) {
 		view := &ForceMergeSegmentView{
 			label:         label,
 			segments:      groups,
@@ -137,25 +137,21 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 	return views, triggerID, nil
 }
 
-func groupByPartitionChannel(segments []*SegmentView) map[*CompactionGroupLabel][]*SegmentView {
-	result := make(map[*CompactionGroupLabel][]*SegmentView)
-
+func groupByPartitionChannel(segments []*SegmentInfo) map[*CompactionGroupLabel][]*SegmentInfo {
+	groups := make(map[CompactionGroupLabel][]*SegmentInfo)
 	for _, seg := range segments {
-		label := seg.label
-		key := label.Key()
-
-		var foundLabel *CompactionGroupLabel
-		for l := range result {
-			if l.Key() == key {
-				foundLabel = l
-				break
-			}
+		label := CompactionGroupLabel{
+			CollectionID: seg.GetCollectionID(),
+			PartitionID:  seg.GetPartitionID(),
+			Channel:      seg.GetInsertChannel(),
 		}
-		if foundLabel == nil {
-			foundLabel = label
-		}
+		groups[label] = append(groups[label], seg)
+	}
 
-		result[foundLabel] = append(result[foundLabel], seg)
+	result := make(map[*CompactionGroupLabel][]*SegmentInfo, len(groups))
+	for label, group := range groups {
+		label := label
+		result[&label] = group
 	}
 
 	return result
