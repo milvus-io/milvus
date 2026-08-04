@@ -146,7 +146,7 @@ func (w *roWALAdaptorImpl) resolveReadWAL(ctx context.Context, opts wal.ReadOpti
 		return &resolvedReadWAL{wal: w.roWALImpls, deliverPolicy: opts.DeliverPolicy}, nil
 	}
 	if msgWALName == message.WALNameUnknown || msgWALName.String() == "" {
-		return nil, status.NewWALNameMismatchError(w.WALName().String(), "unknown")
+		return w.fallbackToCurrentWAL(ctx, msgWALName, "invalid historical WAL name", nil), nil
 	}
 
 	deliverPolicy, exclusiveStartMessageID, err := prepareHistoricalDeliverPolicy(opts.DeliverPolicy)
@@ -155,18 +155,20 @@ func (w *roWALAdaptorImpl) resolveReadWAL(ctx context.Context, opts wal.ReadOpti
 			mlog.Stringer("historicalWALName", msgWALName),
 			mlog.Stringer("currentWALName", w.WALName()),
 			mlog.Err(err))
-		return nil, status.NewWALNameMismatchError(w.WALName().String(), msgWALName.String())
+		return w.fallbackToCurrentWAL(ctx, msgWALName, "invalid historical WAL position", err), nil
 	}
 
 	if w.historicalWALOpener == nil {
-		w.Logger().Info(ctx, "WAL name mismatch",
-			mlog.String("msgIDWALName", msgWALName.String()),
-			mlog.String("currentWALName", w.WALName().String()))
-		return nil, status.NewWALNameMismatchError(w.WALName().String(), msgWALName.String())
+		return w.fallbackToCurrentWAL(ctx, msgWALName, "historical WAL opener unavailable", nil), nil
 	}
 
 	historicalWAL, err := w.openHistoricalWALWithFallback(ctx, msgWALName, w.Channel())
 	if err != nil {
+		if status.AsStreamingError(err).IsWALNameMismatch() {
+			// WAL mismatch is only an internal signal from the historical opener.
+			// Resolve it on StreamingNode so it never crosses the consumer boundary.
+			return w.fallbackToCurrentWAL(ctx, msgWALName, "historical WAL unavailable", nil), nil
+		}
 		return nil, err
 	}
 	w.Logger().Info(ctx, "open historical WAL for existing reader",
@@ -177,6 +179,27 @@ func (w *roWALAdaptorImpl) resolveReadWAL(ctx context.Context, opts wal.ReadOpti
 		deliverPolicy:           deliverPolicy,
 		exclusiveStartMessageID: exclusiveStartMessageID,
 	}, nil
+}
+
+func (w *roWALAdaptorImpl) fallbackToCurrentWAL(
+	ctx context.Context,
+	historicalWALName message.WALName,
+	reason string,
+	err error,
+) *resolvedReadWAL {
+	fields := []mlog.Field{
+		mlog.Stringer("historicalWALName", historicalWALName),
+		mlog.Stringer("currentWALName", w.WALName()),
+		mlog.String("reason", reason),
+	}
+	if err != nil {
+		fields = append(fields, mlog.Err(err))
+	}
+	w.Logger().Warn(ctx, "historical WAL reader falls back to current WAL", fields...)
+	return &resolvedReadWAL{
+		wal:           w.roWALImpls,
+		deliverPolicy: options.DeliverPolicyAll(),
+	}
 }
 
 func prepareHistoricalDeliverPolicy(deliverPolicy options.DeliverPolicy) (options.DeliverPolicy, message.MessageID, error) {
