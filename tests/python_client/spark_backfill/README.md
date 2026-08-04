@@ -254,8 +254,6 @@ ${CI_LOG_PATH:-/tmp/ci_logs}/spark_backfill/<job-name>/
 
 ## Nightly 接入
 
-DevOps/Jenkins 接入和交接清单见 [PIPELINE_HANDOFF.md](PIPELINE_HANDOFF.md)。
-
 Nightly 不应依赖 spark-milvus Release 每日发布。推荐分成两个阶段：
 
 ```text
