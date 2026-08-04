@@ -413,6 +413,21 @@ func (req *RestoreSnapshotReq) GetDbName() string { return req.SourceDbName }
 
 func (req *RestoreSnapshotReq) GetCollectionName() string { return req.SourceCollectionName }
 
+type PinSnapshotDataReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	SnapshotName   string `json:"snapshotName" binding:"required"`
+	TTLSeconds     int64  `json:"ttlSeconds" binding:"gte=0"`
+}
+
+func (req *PinSnapshotDataReq) GetDbName() string { return req.DbName }
+
+func (req *PinSnapshotDataReq) GetCollectionName() string { return req.CollectionName }
+
+type UnpinSnapshotDataReq struct {
+	PinID int64 `json:"pinId" binding:"required,gt=0"`
+}
+
 type RestoreExternalSnapshotReq struct {
 	DbName               string `json:"dbName"`
 	TargetCollectionName string `json:"targetCollectionName" binding:"required"`
