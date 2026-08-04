@@ -927,7 +927,7 @@ TEST(VortexColumnTest, ScanAndTake) {
         nullptr, values.data(), offsets.data(), offsets.size(), false);
     EXPECT_EQ(values, (std::vector<int32_t>{70, 10, 70, 150}));
 
-    int_column.ManualEvictCache();
+    column_group->ManualEvictCache();
     EXPECT_FALSE(int_column.CellsLoaded(offsets.data(), offsets.size()));
     auto take_cursor =
         int_column.Take(nullptr,
@@ -937,8 +937,8 @@ TEST(VortexColumnTest, ScanAndTake) {
                             ChunkedColumnInterface::ScanValueKind::FixedWidth});
     ASSERT_NE(take_cursor, nullptr);
     EXPECT_TRUE(int_column.CellsLoaded(offsets.data(), offsets.size()));
-    int_column.ManualEvictCache();
-    EXPECT_TRUE(int_column.CellsLoaded(offsets.data(), offsets.size()));
+    column_group->ManualEvictCache();
+    EXPECT_FALSE(int_column.CellsLoaded(offsets.data(), offsets.size()));
     ChunkedColumnInterface::TakeBatch take_batch;
     ASSERT_TRUE(take_cursor->Next(2, &take_batch));
     EXPECT_EQ(take_batch.position, 0);
@@ -954,7 +954,7 @@ TEST(VortexColumnTest, ScanAndTake) {
     EXPECT_EQ(take_batch.values.data_as<int32_t>()[1], 150);
     EXPECT_FALSE(take_cursor->Next(2, &take_batch));
     take_cursor.reset();
-    int_column.ManualEvictCache();
+    column_group->ManualEvictCache();
     EXPECT_FALSE(int_column.CellsLoaded(offsets.data(), offsets.size()));
 
     auto scan_values = CollectIntScanValues(int_column, 3, 5);

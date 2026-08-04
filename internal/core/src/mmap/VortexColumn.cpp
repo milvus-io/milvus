@@ -363,9 +363,6 @@ FinalizeAllValidRowIdPayloadOutput(ChunkedColumnInterface::ScanBatch* out) {
 }  // namespace
 
 struct VortexColumn::ArrowTakeResult {
-    std::shared_ptr<
-        cachinglayer::CellAccessor<milvus_storage::vortex::VortexCellGuard>>
-        pin;
     std::shared_ptr<arrow::Table> table;
 };
 
@@ -378,9 +375,6 @@ struct VortexColumn::ArrowStringViewHolder {
 };
 
 struct VortexColumn::OrderedTakeOwner {
-    std::vector<std::shared_ptr<
-        cachinglayer::CellAccessor<milvus_storage::vortex::VortexCellGuard>>>
-        pins;
     std::vector<std::shared_ptr<arrow::Table>> tables;
     std::vector<std::shared_ptr<arrow::Array>> normalized_arrays;
 
@@ -2315,6 +2309,8 @@ VortexColumn::TakeArrowFromFile(milvus::OpContext* op_ctx,
                                 const std::vector<int64_t>& offsets) const {
     const auto& file = files_[chunk_id];
     auto plan = PlanOffsets(file, offsets);
+    // Take fully materializes decoded Arrow buffers. The cell pin only needs
+    // to protect the reader through import and is released on return.
     auto pin = PinPlanCells(op_ctx, chunk_id, plan.cell_ids);
     auto vortex_reader = BuildFileReader(column_group_->files()[chunk_id]);
     auto stream_result = vortex_reader->read_with_plan(plan.read_plan);
@@ -2361,7 +2357,6 @@ VortexColumn::TakeArrowFromFile(milvus::OpContext* op_ctx,
                         chunk_id));
     }
     ArrowTakeResult result;
-    result.pin = std::move(pin);
     result.table = table_result.ValueOrDie();
     AssertInfo(result.table->num_columns() == 1,
                "vortex take field {} expected one column, got {}",
@@ -2545,7 +2540,6 @@ VortexColumn::Take(milvus::OpContext* op_ctx,
 
     auto retain_take = [&](ArrowTakeResult&& take,
                            const std::shared_ptr<arrow::Table>& table) {
-        owner->pins.emplace_back(std::move(take.pin));
         owner->tables.emplace_back(std::move(take.table));
         if (table != owner->tables.back()) {
             owner->tables.emplace_back(table);
