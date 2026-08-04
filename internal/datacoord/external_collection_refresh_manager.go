@@ -55,6 +55,10 @@ func newNonRetriableJobError(format string, args ...interface{}) error {
 
 var errMilvusTableRefreshSchemaInvalid = errors.New("milvus-table refresh schema invalid")
 
+// Bound DataCoord's job-level manifest reads without multiplying the per-task
+// object-storage concurrency already used by DataNodes.
+const externalRefreshManifestReadConcurrency = 16
+
 // exploreTempDirForJob returns the root directory for every Explore attempt of
 // one refresh job. Terminal cleanup removes this root and all attempt manifests.
 func exploreTempDirForJob(jobID int64) string {
@@ -218,7 +222,7 @@ func NewExternalCollectionRefreshManager(
 	// as a safety net for missed events (e.g., after a DataCoord restart).
 	// forgetJob cleans up the notifiedJobs dedup map when the checker GC's
 	// a job, preventing unbounded growth.
-	m.inspector = newRefreshInspector(ctx, refreshMeta, mt, scheduler, allocator, closeChan)
+	m.inspector = newRefreshInspector(ctx, refreshMeta, scheduler, closeChan)
 	m.checker = newRefreshChecker(ctx, refreshMeta, closeChan, m.handleJobFinished, m.applyFinishedJobSegments, m.handleJobFailed, m.forgetJob, m.ensureTasksForInitJob)
 	m.inspector.wrapTask = m.wrapTask
 
@@ -855,18 +859,30 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 		SegmentFilterFunc(isSegmentHealthy),
 	)
 	baselineSegments := make([]*datapb.SegmentInfo, 0, len(currentSegments))
+	baselineManifestSegments := 0
 	for _, segment := range currentSegments {
 		baselineSegments = append(baselineSegments, segment.SegmentInfo)
+		if segment.GetManifestPath() != "" {
+			baselineManifestSegments++
+		}
 	}
 
-	segmentFragments, err := packed.BuildCurrentSegmentFragments(
+	manifestReadStart := time.Now()
+	segmentFragments, err := packed.BuildCurrentSegmentFragmentsConcurrently(
+		ctx,
 		baselineSegments,
 		createStorageConfig(),
 		nil,
+		externalRefreshManifestReadConcurrency,
 	)
 	if err != nil {
 		return nil, merr.Wrap(err, "read external refresh baseline manifests")
 	}
+	log.Info(ctx, "read external refresh baseline manifests",
+		mlog.Int("baselineSegments", len(baselineSegments)),
+		mlog.Int("manifestSegments", baselineManifestSegments),
+		mlog.Int("maxConcurrency", externalRefreshManifestReadConcurrency),
+		mlog.Duration("duration", time.Since(manifestReadStart)))
 
 	filesPerTask := paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.GetAsInt64()
 	taskPlans, ownershipSummary, err := planExternalRefreshOwnership(

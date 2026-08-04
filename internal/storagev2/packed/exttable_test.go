@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
@@ -659,6 +660,71 @@ func TestBuildCurrentSegmentFragments_ManifestErrorsAndEmptyResult(t *testing.T)
 	require.Len(t, result[1], 1)
 	assert.Equal(t, int64(1), result[1][0].FragmentID)
 	assert.Equal(t, int64(500), result[1][0].RowCount)
+}
+
+func TestBuildCurrentSegmentFragmentsConcurrently_BoundsManifestReads(t *testing.T) {
+	storageConfig := &indexpb.StorageConfig{RootPath: "files", StorageType: "local"}
+	segments := make([]*datapb.SegmentInfo, 5)
+	for i := range segments {
+		segments[i] = &datapb.SegmentInfo{
+			ID:           int64(i + 1),
+			ManifestPath: fmt.Sprintf("manifest-%d", i+1),
+		}
+	}
+
+	var active int32
+	var maxActive int32
+	mockRead := mockey.Mock(ReadFragmentsFromManifest).
+		To(func(manifestPath string, _ *indexpb.StorageConfig, _ []string) ([]Fragment, error) {
+			current := atomic.AddInt32(&active, 1)
+			for {
+				observed := atomic.LoadInt32(&maxActive)
+				if current <= observed || atomic.CompareAndSwapInt32(&maxActive, observed, current) {
+					break
+				}
+			}
+			time.Sleep(20 * time.Millisecond)
+			atomic.AddInt32(&active, -1)
+			return []Fragment{{FilePath: manifestPath, RowCount: 1}}, nil
+		}).Build()
+	defer mockRead.UnPatch()
+
+	result, err := BuildCurrentSegmentFragmentsConcurrently(
+		context.Background(),
+		segments,
+		storageConfig,
+		nil,
+		2,
+	)
+	require.NoError(t, err)
+	require.Len(t, result, len(segments))
+	assert.Equal(t, int32(2), atomic.LoadInt32(&maxActive))
+	for i := range segments {
+		require.Equal(t, fmt.Sprintf("manifest-%d", i+1), result[int64(i+1)][0].FilePath)
+	}
+}
+
+func TestBuildCurrentSegmentFragmentsConcurrently_CanceledBeforeRead(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var called int32
+	mockRead := mockey.Mock(ReadFragmentsFromManifest).
+		To(func(string, *indexpb.StorageConfig, []string) ([]Fragment, error) {
+			atomic.AddInt32(&called, 1)
+			return nil, nil
+		}).Build()
+	defer mockRead.UnPatch()
+
+	_, err := BuildCurrentSegmentFragmentsConcurrently(
+		ctx,
+		[]*datapb.SegmentInfo{{ID: 1, ManifestPath: "manifest-1"}},
+		&indexpb.StorageConfig{},
+		nil,
+		2,
+	)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int32(0), atomic.LoadInt32(&called))
 }
 
 func TestReadFragmentsFromManifest_FiltersColumns(t *testing.T) {
@@ -1814,7 +1880,7 @@ func TestFetchRowCountsConcurrently_CtxPreCancelled(t *testing.T) {
 }
 
 // TestFetchRowCountsConcurrently_CtxCancelledDuringRun verifies the
-// post-AwaitAll ctx.Err() guard: workers ignore ctx and return success, but
+// post-BlockOnAll ctx.Err() guard: workers ignore ctx and return success, but
 // the ctx is canceled mid-run — the function must still return ctx.Err()
 // rather than a half-filled rowCounts slice.
 func TestFetchRowCountsConcurrently_CtxCancelledDuringRun(t *testing.T) {

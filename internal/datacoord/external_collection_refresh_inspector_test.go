@@ -70,10 +70,9 @@ func TestExternalCollectionRefreshInspector_NewInspector(t *testing.T) {
 	assert.NoError(t, err)
 
 	scheduler := newStubScheduler()
-	alloc := &stubAllocator{}
 	closeChan := make(chan struct{})
 
-	inspector := newRefreshInspector(ctx, refreshMeta, nil, scheduler, alloc, closeChan)
+	inspector := newRefreshInspector(ctx, refreshMeta, scheduler, closeChan)
 	assert.NotNil(t, inspector)
 }
 
@@ -93,10 +92,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -119,10 +117,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -145,10 +142,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -171,10 +167,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -197,10 +192,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -226,10 +220,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -253,10 +246,9 @@ func TestExternalCollectionRefreshInspector_Inspect(t *testing.T) {
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -285,10 +277,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -311,10 +302,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -345,10 +335,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -377,10 +366,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -403,10 +391,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -433,10 +420,9 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 
 		refreshMeta, _ := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		scheduler := newStubScheduler()
-		alloc := &stubAllocator{}
 		closeChan := make(chan struct{})
 
-		inspector := newRefreshInspector(context.Background(), refreshMeta, nil, scheduler, alloc, closeChan)
+		inspector := newRefreshInspector(context.Background(), refreshMeta, scheduler, closeChan)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {
 			return &refreshExternalCollectionTask{ExternalCollectionRefreshTask: t}
 		}
@@ -468,9 +454,7 @@ func TestExternalCollectionRefreshInspector_ReloadFromMeta(t *testing.T) {
 		inspector := newRefreshInspector(
 			ctx,
 			refreshMeta,
-			nil,
 			scheduler,
-			&stubAllocator{},
 			make(chan struct{}),
 		)
 		inspector.wrapTask = func(t *datapb.ExternalCollectionRefreshTask) *refreshExternalCollectionTask {

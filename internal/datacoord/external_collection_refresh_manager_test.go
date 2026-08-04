@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -86,9 +87,42 @@ func addManagerOwnershipTask(
 	task *datapb.ExternalCollectionRefreshTask,
 	ownedSegmentIDs ...int64,
 ) {
-	task.OwnershipPlanVersion = externalRefreshOwnershipPlanVersionV1
-	task.OwnedSegmentIds = ownedSegmentIDs
-	assert.NoError(t, refreshMeta.AddTask(task))
+	t.Helper()
+	task = proto.Clone(task).(*datapb.ExternalCollectionRefreshTask)
+	state := task.GetState()
+	failReason := task.GetFailReason()
+	resultReady := task.GetResultReady()
+	keptSegments := append([]int64(nil), task.GetKeptSegments()...)
+	updatedSegments := cloneProtoSegments(task.GetUpdatedSegments())
+
+	task.OwnershipPlanVersion = externalRefreshOwnershipPlanVersion
+	task.OwnedSegmentIds = append([]int64(nil), ownedSegmentIDs...)
+	task.KeptSegments = nil
+	task.UpdatedSegments = nil
+	task.ResultReady = false
+	task.ResultStorageVersion = 0
+	task.ResultPath = ""
+	task.ResultChecksum = nil
+	if resultReady {
+		if refreshMeta.resultStore == nil {
+			resultStore, _ := createMetaTestRefreshResultStore(t)
+			refreshMeta.resultStore = resultStore
+		}
+		task.State = indexpb.JobState_JobStateInProgress
+		task.FailReason = ""
+		task.Progress = 0
+	}
+
+	require.NoError(t, refreshMeta.AddTask(task))
+	if resultReady {
+		require.NoError(t, refreshMeta.UpdateTaskResult(
+			task.GetTaskId(),
+			state,
+			failReason,
+			keptSegments,
+			updatedSegments,
+		))
+	}
 }
 
 func testCollectionGetter(mt *meta) func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
