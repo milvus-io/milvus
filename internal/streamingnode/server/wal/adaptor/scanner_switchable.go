@@ -28,7 +28,7 @@ var (
 	_ switchableScanner = (*switchableScannerAdaptorImpl)(nil)
 )
 
-type readWALOpener func(
+type underlyingROWALImplsOpener func(
 	ctx context.Context,
 	walName message.WALName,
 	channel types.PChannelInfo,
@@ -42,7 +42,7 @@ func newSwitchableScanner(
 	writeAheadBuffer wab.ROWriteAheadBuffer,
 	deliverPolicy options.DeliverPolicy,
 	msgChan chan<- message.ImmutableMessage,
-	readWALOpener readWALOpener,
+	underlyingROWALImplsOpener underlyingROWALImplsOpener,
 	onReaderSwitch func(message.WALName, string),
 ) switchableScanner {
 	impl := switchableScannerImpl{
@@ -68,11 +68,11 @@ func newSwitchableScanner(
 	}
 
 	return &switchableScannerAdaptorImpl{
-		switchableScannerImpl: impl,
-		readWALOpener:         readWALOpener,
-		walName:               startWALName,
-		deliverPolicy:         normalizedPolicy,
-		excludedMessageID:     excludedMessageID,
+		switchableScannerImpl:      impl,
+		underlyingROWALImplsOpener: underlyingROWALImplsOpener,
+		walName:                    startWALName,
+		deliverPolicy:              normalizedPolicy,
+		excludedMessageID:          excludedMessageID,
 	}
 }
 
@@ -144,7 +144,7 @@ func (t *oldVersionLastConfirmedTracker) Track(msgID message.MessageID) message.
 // the WAL encoded in the initial consumer position to the current WAL.
 type switchableScannerAdaptorImpl struct {
 	switchableScannerImpl
-	readWALOpener                  readWALOpener
+	underlyingROWALImplsOpener     underlyingROWALImplsOpener
 	walName                        message.WALName
 	deliverPolicy                  options.DeliverPolicy
 	cutTs                          uint64
@@ -158,7 +158,7 @@ func (s *switchableScannerAdaptorImpl) Do(ctx context.Context) (switchableScanne
 			return nil, ctx.Err()
 		}
 
-		readWAL, err := s.openReadWAL(ctx)
+		underlyingWAL, err := s.openUnderlyingROWALImpls(ctx)
 		if err != nil {
 			if isReadWALUnavailable(err) {
 				return s.newCurrentCatchupScanner(ctx, "WAL reader unavailable"), nil
@@ -166,8 +166,8 @@ func (s *switchableScannerAdaptorImpl) Do(ctx context.Context) (switchableScanne
 			return nil, err
 		}
 
-		switchedScanner, err := s.consumeWAL(ctx, readWAL)
-		readWAL.Close()
+		switchedScanner, err := s.consumeWAL(ctx, underlyingWAL)
+		underlyingWAL.Close()
 		if err == nil {
 			if switchedScanner != nil {
 				return switchedScanner, nil
@@ -185,9 +185,9 @@ func (s *switchableScannerAdaptorImpl) Do(ctx context.Context) (switchableScanne
 
 func (s *switchableScannerAdaptorImpl) consumeWAL(
 	ctx context.Context,
-	readWAL walimpls.ROWALImpls,
+	underlyingWAL walimpls.ROWALImpls,
 ) (switchableScanner, error) {
-	scanner, err := s.createReaderWithBackoff(ctx, readWAL, s.deliverPolicy, true)
+	scanner, err := s.createReaderWithBackoff(ctx, underlyingWAL, s.deliverPolicy, true)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +215,7 @@ func (s *switchableScannerAdaptorImpl) consumeWAL(
 				lastConfirmedMessageID := s.oldVersionLastConfirmedTracker.Track(msg.MessageID())
 				messageID := msg.MessageID()
 				var err error
-				msg, err = newOldVersionImmutableMessage(ctx, readWAL.Channel().Name, lastConfirmedMessageID, msg)
+				msg, err = newOldVersionImmutableMessage(ctx, underlyingWAL.Channel().Name, lastConfirmedMessageID, msg)
 				if errors.Is(err, vchantempstore.ErrNotFound) {
 					s.logger.Info(ctx, "skip the old version message because vchannel not found", mlog.Stringer("messageID", messageID))
 					continue
@@ -282,20 +282,20 @@ func (s *switchableScannerAdaptorImpl) switchTo(
 	return nil
 }
 
-func (s *switchableScannerAdaptorImpl) openReadWAL(ctx context.Context) (walimpls.ROWALImpls, error) {
-	if s.readWALOpener == nil {
+func (s *switchableScannerAdaptorImpl) openUnderlyingROWALImpls(ctx context.Context) (walimpls.ROWALImpls, error) {
+	if s.underlyingROWALImplsOpener == nil {
 		return nil, status.NewWALNameMismatchError(s.innerWAL.WALName().String(), s.walName.String())
 	}
-	readWAL, err := s.readWALOpener(ctx, s.walName, s.innerWAL.Channel())
+	underlyingWAL, err := s.underlyingROWALImplsOpener(ctx, s.walName, s.innerWAL.Channel())
 	if err != nil {
 		return nil, err
 	}
-	if readWAL.WALName() != s.walName {
-		actualWALName := readWAL.WALName()
-		readWAL.Close()
+	if underlyingWAL.WALName() != s.walName {
+		actualWALName := underlyingWAL.WALName()
+		underlyingWAL.Close()
 		return nil, status.NewWALNameMismatchError(actualWALName.String(), s.walName.String())
 	}
-	return readWAL, nil
+	return underlyingWAL, nil
 }
 
 func (s *switchableScannerAdaptorImpl) newCurrentCatchupScanner(ctx context.Context, reason string) switchableScanner {
@@ -460,7 +460,7 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 
 func (s *switchableScannerImpl) createReaderWithBackoff(
 	ctx context.Context,
-	readWAL walimpls.ROWALImpls,
+	underlyingWAL walimpls.ROWALImpls,
 	deliverPolicy options.DeliverPolicy,
 	stopOnUnavailable bool,
 ) (walimpls.ScannerImpls, error) {
@@ -470,7 +470,7 @@ func (s *switchableScannerImpl) createReaderWithBackoff(
 		if bufSize < 0 {
 			bufSize = 0
 		}
-		innerScanner, err := readWAL.Read(ctx, walimpls.ReadOption{
+		innerScanner, err := underlyingWAL.Read(ctx, walimpls.ReadOption{
 			Name:                s.scannerName,
 			DeliverPolicy:       deliverPolicy,
 			ReadAheadBufferSize: bufSize,
@@ -487,7 +487,7 @@ func (s *switchableScannerImpl) createReaderWithBackoff(
 		}
 		waker, nextInterval := backoffTimer.NextTimer()
 		s.logger.Warn(ctx, "create underlying scanner for wal scanner, start a backoff",
-			mlog.Stringer("walName", readWAL.WALName()),
+			mlog.Stringer("walName", underlyingWAL.WALName()),
 			mlog.Duration("nextInterval", nextInterval),
 			mlog.Err(err),
 		)
