@@ -35,7 +35,7 @@ type gracefulCloseFunc func()
 func adaptImplsToROWAL(
 	basicWAL walimpls.WALImpls,
 	cleanup func(),
-	readWALOpener readWALOpener,
+	underlyingROWALImplsOpener underlyingROWALImplsOpener,
 ) *roWALAdaptorImpl {
 	logger := resource.Resource().Logger().With(
 		mlog.FieldComponent("wal"),
@@ -45,12 +45,12 @@ func adaptImplsToROWAL(
 	roWAL := &roWALAdaptorImpl{
 		WALRateLimitComponent: rate.NewWALRateLimitComponent(basicWAL.Channel()),
 
-		roWALImpls:      basicWAL,
-		readWALOpener:   readWALOpener,
-		lifetime:        typeutil.NewLifetime(),
-		availableCtx:    ctx,
-		availableCancel: cancel,
-		idAllocator:     typeutil.NewIDAllocator(),
+		roWALImpls:                 basicWAL,
+		underlyingROWALImplsOpener: underlyingROWALImplsOpener,
+		lifetime:                   typeutil.NewLifetime(),
+		availableCtx:               ctx,
+		availableCancel:            cancel,
+		idAllocator:                typeutil.NewIDAllocator(),
 		scannerRegistry: scannerRegistry{
 			channel:     basicWAL.Channel(),
 			idAllocator: typeutil.NewIDAllocator(),

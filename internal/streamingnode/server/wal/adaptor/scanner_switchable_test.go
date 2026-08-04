@@ -69,12 +69,12 @@ func newTestReadWAL(
 	scanner.EXPECT().Chan().Return(messageCh).Maybe()
 	scanner.EXPECT().Close().Return(nil).Once()
 
-	readWAL := mock_walimpls.NewMockWALImpls(t)
-	readWAL.EXPECT().WALName().Return(walName).Maybe()
-	readWAL.EXPECT().Channel().Return(channel).Maybe()
-	readWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner, nil).Once()
-	readWAL.EXPECT().Close().Return().Once()
-	return readWAL
+	underlyingWAL := mock_walimpls.NewMockWALImpls(t)
+	underlyingWAL.EXPECT().WALName().Return(walName).Maybe()
+	underlyingWAL.EXPECT().Channel().Return(channel).Maybe()
+	underlyingWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner, nil).Once()
+	underlyingWAL.EXPECT().Close().Return().Once()
+	return underlyingWAL
 }
 
 func newTestCurrentWAL(t *testing.T, channel types.PChannelInfo) walimpls.ROWALImpls {

@@ -189,8 +189,8 @@ func (o *openerAdaptorImpl) getOrCreateOpenerImpl(ctx context.Context, walName m
 	return opener, nil
 }
 
-// openReadWAL opens the requested WAL backend in read-only mode.
-func (o *openerAdaptorImpl) openReadWAL(
+// openUnderlyingROWALImpls opens the requested underlying WAL implementation in read-only mode.
+func (o *openerAdaptorImpl) openUnderlyingROWALImpls(
 	ctx context.Context,
 	walName message.WALName,
 	channel types.PChannelInfo,
@@ -208,7 +208,7 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	id := o.idAllocator.Allocate()
 	roWAL := adaptImplsToROWAL(l, func() {
 		o.walInstances.Remove(id)
-	}, o.openReadWAL)
+	}, o.openUnderlyingROWALImpls)
 	resources := &walOpenResources{roWAL: roWAL}
 	defer resources.Close()
 
@@ -521,7 +521,7 @@ func (o *openerAdaptorImpl) openROWAL(l walimpls.WALImpls) (wal.WAL, error) {
 	id := o.idAllocator.Allocate()
 	wal := adaptImplsToROWAL(l, func() {
 		o.walInstances.Remove(id)
-	}, o.openReadWAL)
+	}, o.openUnderlyingROWALImpls)
 	o.walInstances.Insert(id, wal)
 	return wal, nil
 }
