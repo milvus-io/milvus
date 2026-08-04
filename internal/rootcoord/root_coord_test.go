@@ -1788,8 +1788,16 @@ func TestCore_RLSAPIs(t *testing.T) {
 		if msg.IsUnreplicable() {
 			return false
 		}
-		return msg.MessageType() == message.MessageTypeAlterRLSMetadata ||
-			msg.MessageType() == message.MessageTypeDropRLSMetadata
+		switch msg.MessageType() {
+		case message.MessageTypeAlterRLSMetadata:
+			rlsMsg, err := message.AsBroadcastAlterRLSMetadataMessageV2(msg)
+			return err == nil && len(rlsMsg.Header().GetCacheExpirations().GetCacheExpirations()) == 1
+		case message.MessageTypeDropRLSMetadata:
+			rlsMsg, err := message.AsBroadcastDropRLSMetadataMessageV2(msg)
+			return err == nil && len(rlsMsg.Header().GetCacheExpirations().GetCacheExpirations()) == 1
+		default:
+			return false
+		}
 	})).Return(nil, nil).Times(5)
 	policyLock.EXPECT().Close().Times(6)
 	lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(policyLock, nil).Build()
@@ -1910,6 +1918,37 @@ func TestCore_RLSAPIs(t *testing.T) {
 	assert.True(t, merr.Ok(listPrincipalsResp.Status))
 	assert.Equal(t, []string{"alice", "bob"}, listPrincipalsResp.PrincipalNames)
 
+	meta.EXPECT().GetRLSMetadata(mock.Anything, int64(20), rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL, "").Return(&model.RLSMetadata{
+		DBName:         "db1",
+		CollectionName: "coll1",
+		CollectionID:   20,
+		Policies:       []*model.RLSPolicy{{PolicyName: "policy1"}},
+		Principals: []*model.RLSPrincipal{
+			{
+				DBID:          10,
+				CollectionID:  20,
+				PrincipalName: "alice",
+				Tags: map[string]rlsutil.TagValue{
+					"dept":  rlsutil.NewStringTagValue("sales"),
+					"level": rlsutil.NewInt64TagValue(3),
+					"score": rlsutil.NewDoubleTagValue(0.75),
+				},
+			},
+		},
+	}, nil).Once()
+	metadataResp, err := c.GetRLSMetadata(ctx, &rootcoordpb.GetRLSMetadataRequest{
+		CollectionId: 20,
+		Kind:         rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL,
+	})
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(metadataResp.GetStatus()))
+	assert.Equal(t, "db1", metadataResp.GetDbName())
+	assert.Equal(t, "coll1", metadataResp.GetCollectionName())
+	assert.Equal(t, int64(20), metadataResp.GetCollectionId())
+	require.Len(t, metadataResp.GetPolicies(), 1)
+	require.Len(t, metadataResp.GetPrincipals(), 1)
+	assert.JSONEq(t, `{"dept":"sales","level":3,"score":0.75}`, metadataResp.GetPrincipals()[0].GetTags())
+
 	deleteTagsReq := &rlsutil.DeleteRLSPrincipalTagsRequest{DbName: "db1", CollectionName: "coll1", PrincipalName: "alice", TagKeys: []string{"dept"}}
 	meta.EXPECT().PrepareDeleteRLSPrincipalTags(mock.Anything, deleteTagsReq).Return(&model.RLSPrincipal{
 		DBID:          10,
@@ -1919,6 +1958,29 @@ func TestCore_RLSAPIs(t *testing.T) {
 	status, err = c.DeleteRLSPrincipalTags(ctx, deleteTagsReq)
 	require.NoError(t, err)
 	assert.True(t, merr.Ok(status))
+}
+
+func TestCore_GetRLSMetadataRejectsInvalidPrincipalState(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().GetRLSMetadata(mock.Anything, int64(20), rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL, "").Return(&model.RLSMetadata{
+		CollectionID: 20,
+		Principals: []*model.RLSPrincipal{{
+			CollectionID:  20,
+			PrincipalName: "alice",
+			Tags: map[string]rlsutil.TagValue{
+				"invalid": {Kind: rlsutil.TagValueKindUnknown},
+			},
+		}},
+	}, nil).Once()
+	c := newTestCore(withHealthyCode(), withMeta(meta))
+
+	resp, err := c.GetRLSMetadata(context.Background(), &rootcoordpb.GetRLSMetadataRequest{
+		CollectionId: 20,
+		Kind:         rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL,
+	})
+	require.NoError(t, err)
+	require.Error(t, merr.Error(resp.GetStatus()))
+	require.Empty(t, resp.GetPrincipals())
 }
 
 func TestCore_RLSAPIsRejectNilRequest(t *testing.T) {
@@ -1958,6 +2020,10 @@ func TestCore_RLSAPIsRejectNilRequest(t *testing.T) {
 	listPrincipalsResp, err := c.ListRLSPrincipals(ctx, nil)
 	require.NoError(t, err)
 	assertParameterInvalidStatus(t, listPrincipalsResp.Status)
+
+	metadataResp, err := c.GetRLSMetadata(ctx, nil)
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(metadataResp.GetStatus()), merr.ErrServiceInternal)
 
 	status, err = c.DeleteRLSPrincipalTags(ctx, nil)
 	require.NoError(t, err)
