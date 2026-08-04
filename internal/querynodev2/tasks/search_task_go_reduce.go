@@ -38,6 +38,101 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
+type reduceRange struct {
+	NQOffset   int
+	NQCount    int
+	ReduceTopK int64
+	OutputTopK int64
+}
+
+type reduceLayout struct {
+	NQ               int
+	GroupSize        int64
+	PerRequestReduce bool
+	Ranges           []reduceRange
+}
+
+func hasMixedTopK(topks []int64) bool {
+	if len(topks) <= 1 {
+		return false
+	}
+	first := topks[0]
+	for _, topk := range topks[1:] {
+		if topk != first {
+			return true
+		}
+	}
+	return false
+}
+
+func requiresPerRequestReduce(groupByOpts *groupByOptions, topks []int64, hasL1 bool) bool {
+	if !hasMixedTopK(topks) {
+		return false
+	}
+	if hasL1 {
+		return true
+	}
+	return groupByOpts != nil && groupByOpts.GroupSize > 1
+}
+
+// buildReduceLayout describes the request-level NQ ranges in a merged task.
+// Group-by reduction with group_size > 1 cannot share a max-TopK reduce when
+// the merged requests have different TopKs: group acceptance depends on the
+// request's own TopK, so those ranges must be reduced independently. L1 also
+// requires independent ranges for mixed TopKs so each request sees its own
+// candidate window before reranking.
+func (t *SearchTask) buildReduceLayout(groupByOpts *groupByOptions, hasL1 bool) (*reduceLayout, error) {
+	if len(t.originNqs) != len(t.originTopks) {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"reduce layout: origin NQ count %d does not match origin TopK count %d",
+			len(t.originNqs), len(t.originTopks))
+	}
+
+	layout := &reduceLayout{
+		NQ:               int(t.nq),
+		GroupSize:        1,
+		PerRequestReduce: requiresPerRequestReduce(groupByOpts, t.originTopks, hasL1),
+		Ranges:           make([]reduceRange, len(t.originNqs)),
+	}
+	if int64(layout.NQ) != t.nq || t.nq < 0 {
+		return nil, merr.WrapErrServiceInternalMsg("reduce layout: invalid merged NQ %d", t.nq)
+	}
+	if groupByOpts != nil && groupByOpts.GroupSize > 1 {
+		layout.GroupSize = groupByOpts.GroupSize
+	}
+
+	nqOffset := 0
+	for i, originNQ := range t.originNqs {
+		nqCount := int(originNQ)
+		if originNQ < 0 || int64(nqCount) != originNQ {
+			return nil, merr.WrapErrServiceInternalMsg("reduce layout: invalid origin NQ %d at index %d", originNQ, i)
+		}
+		if t.originTopks[i] < 0 {
+			return nil, merr.WrapErrServiceInternalMsg("reduce layout: invalid origin TopK %d at index %d", t.originTopks[i], i)
+		}
+		reduceTopK := t.topk
+		if layout.PerRequestReduce {
+			reduceTopK = t.originTopks[i]
+		}
+		if reduceTopK < 0 {
+			return nil, merr.WrapErrServiceInternalMsg("reduce layout: invalid reduce TopK %d at index %d", reduceTopK, i)
+		}
+		layout.Ranges[i] = reduceRange{
+			NQOffset:   nqOffset,
+			NQCount:    nqCount,
+			ReduceTopK: reduceTopK,
+			OutputTopK: t.originTopks[i],
+		}
+		nqOffset += nqCount
+	}
+	if nqOffset != layout.NQ {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"reduce layout: origin NQ sum %d does not match merged NQ %d",
+			nqOffset, layout.NQ)
+	}
+	return layout, nil
+}
+
 // exportSearchResultsAsArrow exports per-segment SearchResults as Arrow DataFrames
 // via the Arrow C Stream Interface (one RecordBatch per NQ).
 // Each DataFrame contains $id, $score, $seg_offset columns, optional $group_by
@@ -99,112 +194,92 @@ func (t *SearchTask) exportSearchResultsAsArrow(
 	return segDFs, nil
 }
 
-// executeGoReduce performs the search reduce pipeline entirely in Go:
-//  1. heapMergeReduce (k-way merge with PK dedup, optionally GroupBy-aware)
-//  2. Late Materialization (read output fields from segments)
-//  3. Marshal to SearchResultData proto
-//
-// segDFs are the per-segment DataFrames from exportSearchResultsAsArrow.
+func resolveGroupByOptions(segDFs []*chain.DataFrame, results []*segments.SearchResult) *groupByOptions {
+	if len(segDFs) == 0 || len(results) == 0 {
+		return nil
+	}
+	groupByColumns := groupByColumnNames(segDFs[0])
+	if len(groupByColumns) == 0 {
+		return nil
+	}
+	return &groupByOptions{
+		GroupSize: resolveGroupSizeFromSearchResults(results),
+		Columns:   groupByColumns,
+	}
+}
+
+// executeGoReduce only performs cross-segment reduction. L1 rerank, late
+// materialization, and result encoding are separate stages in SearchTask.Execute.
 func (t *SearchTask) executeGoReduce(
 	segDFs []*chain.DataFrame,
-	results []*segments.SearchResult,
-	searchReq *segcore.SearchRequest,
-	metricType string,
-	tr *timerecord.TimeRecorder,
-	relatedDataSize int64,
-	allSearchCount int64,
-) error {
-	plan := searchReq.Plan()
-
-	// Group-by is enabled iff the C++ Arrow exporter emitted one or more
-	// $group_by_<fieldID> columns.
-	var groupByOpts *groupByOptions
-	if len(segDFs) > 0 && len(results) > 0 {
-		groupByColumns := groupByColumnNames(segDFs[0])
-		if len(groupByColumns) > 0 {
-			groupByOpts = &groupByOptions{
-				GroupSize: resolveGroupSizeFromSearchResults(results),
-				Columns:   groupByColumns,
-			}
-		}
-	}
-
-	if !requiresPerSliceReduce(groupByOpts, t.originTopks) {
-		return t.executeGoReduceFastPath(segDFs, results, plan, metricType, tr, relatedDataSize, allSearchCount, groupByOpts)
-	}
-
-	nqOffset := 0
-	for i := range t.originNqs {
-		nq := int(t.originNqs[i])
-		reduceResult, err := heapMergeReduceRange(defaultAllocator, segDFs, t.originTopks[i], groupByOpts, nqOffset, nq)
-		if err != nil {
-			mlog.Warn(t.ctx, "failed to heapMergeReduce", mlog.Err(err))
-			return err
-		}
-
-		err = t.buildReducedResult(i, reduceResult, results, plan, metricType, tr, relatedDataSize, allSearchCount)
-		if reduceResult.DF != nil {
-			reduceResult.DF.Release()
-		}
-		if err != nil {
-			return err
-		}
-		nqOffset += nq
-	}
-
-	t.attributeStorageCost(results)
-	return nil
-}
-
-func (t *SearchTask) executeGoReduceFastPath(
-	segDFs []*chain.DataFrame,
-	results []*segments.SearchResult,
-	plan *segcore.SearchPlan,
-	metricType string,
-	tr *timerecord.TimeRecorder,
-	relatedDataSize int64,
-	allSearchCount int64,
+	topK int64,
 	groupByOpts *groupByOptions,
-) error {
-	// plan.GetTopK() may be reduced by the delegator optimizer. t.topk is the
-	// task's unity topK across merged slices, preserving the worker reduce
-	// contract based on the original request topK.
-	reduceResult, err := heapMergeReduce(defaultAllocator, segDFs, t.topk, groupByOpts)
+	nqOffset int,
+	nq int,
+) (*mergeResult, error) {
+	result, err := heapMergeReduceRange(defaultAllocator, segDFs, topK, groupByOpts, nqOffset, nq)
 	if err != nil {
 		mlog.Warn(t.ctx, "failed to heapMergeReduce", mlog.Err(err))
-		return err
+		return nil, err
 	}
-	defer reduceResult.DF.Release()
-
-	var groupSize int64 = 1
-	if groupByOpts != nil && groupByOpts.GroupSize > 1 {
-		groupSize = groupByOpts.GroupSize
-	}
-
-	nqOffset := 0
-	for i := range t.originNqs {
-		nq := int(t.originNqs[i])
-		if err := t.buildSlicedResult(i, nqOffset, nq, groupSize, reduceResult, results, plan, metricType, tr, relatedDataSize, allSearchCount); err != nil {
-			return err
-		}
-		nqOffset += nq
-	}
-
-	t.attributeStorageCost(results)
-	return nil
+	return result, nil
 }
 
-func requiresPerSliceReduce(groupByOpts *groupByOptions, topks []int64) bool {
-	if groupByOpts == nil || groupByOpts.GroupSize <= 1 || len(topks) <= 1 {
-		return false
+func (t *SearchTask) applyL1RerankResult(
+	reduced *mergeResult,
+	results []*segments.SearchResult,
+	plan *segcore.SearchPlan,
+	prepared *preparedL1FunctionChain,
+) (*mergeResult, error) {
+	if prepared == nil {
+		return reduced, nil
 	}
-	first := topks[0]
-	for _, topk := range topks[1:] {
-		if topk != first {
-			return true
+
+	reranked, err := t.applyL1Rerank(reduced, results, plan, prepared)
+	if err != nil {
+		return reduced, err
+	}
+	if reranked != reduced && reduced.DF != nil {
+		reduced.DF.Release()
+	}
+	return reranked, nil
+}
+
+func (t *SearchTask) processReducedSlice(
+	i int,
+	reduced *mergeResult,
+	results []*segments.SearchResult,
+	plan *segcore.SearchPlan,
+	prepared *preparedL1FunctionChain,
+	metricType string,
+	tr *timerecord.TimeRecorder,
+	relatedDataSize int64,
+	allSearchCount int64,
+) error {
+	if reduced == nil {
+		return merr.WrapErrServiceInternalMsg("process reduced slice %d: result is nil", i)
+	}
+	defer func() {
+		if reduced.DF != nil {
+			reduced.DF.Release()
 		}
+	}()
+
+	var err error
+	reduced, err = t.applyL1RerankResult(reduced, results, plan, prepared)
+	if err != nil {
+		return err
 	}
-	return false
+	return t.materializeAndAssignResult(
+		i,
+		reduced,
+		results,
+		plan,
+		metricType,
+		tr,
+		relatedDataSize,
+		allSearchCount,
+	)
 }
 
 func resolveGroupSizeFromSearchResults(results []*segments.SearchResult) int64 {
@@ -253,19 +328,14 @@ func (t *SearchTask) attributeStorageCost(results []*segments.SearchResult) {
 	}
 }
 
-func (t *SearchTask) buildReducedResult(
+func (t *SearchTask) marshalReducedResult(
 	i int,
-	reduceResult *mergeResult,
-	results []*segments.SearchResult,
-	plan *segcore.SearchPlan,
-	metricType string,
-	tr *timerecord.TimeRecorder,
-	relatedDataSize int64,
+	reduced *mergeResult,
 	allSearchCount int64,
-) error {
-	searchResultData, err := marshalReduceResult(reduceResult)
+) (*schemapb.SearchResultData, error) {
+	searchResultData, err := marshalReduceResult(reduced)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Force SearchResultData.TopK to the requested topK. The chain converter
 	// derives TopK from the max chunk size, which is 0 on empty results and
@@ -275,12 +345,43 @@ func (t *SearchTask) buildReducedResult(
 	// set_top_k(slice_topKs_[slice_index])).
 	searchResultData.TopK = t.originTopks[i]
 	searchResultData.AllSearchCount = allSearchCount
+	return searchResultData, nil
+}
 
-	if err := lateMaterializeOutputFields(t.ctx, results, plan, reduceResult.Sources, searchResultData); err != nil {
+func (t *SearchTask) materializeAndAssignResult(
+	i int,
+	reduced *mergeResult,
+	results []*segments.SearchResult,
+	plan *segcore.SearchPlan,
+	metricType string,
+	tr *timerecord.TimeRecorder,
+	relatedDataSize int64,
+	allSearchCount int64,
+) error {
+	searchResultData, err := t.marshalReducedResult(i, reduced, allSearchCount)
+	if err != nil {
 		return err
 	}
+	if err := lateMaterializeOutputFields(t.ctx, results, plan, reduced.Sources, searchResultData); err != nil {
+		return err
+	}
+	return t.encodeAndAssignReducedResult(i, searchResultData, metricType, tr, relatedDataSize)
+}
 
-	searchResults, err := segments.EncodeSearchResultData(t.ctx, searchResultData, t.originNqs[i], t.originTopks[i], metricType)
+func (t *SearchTask) encodeAndAssignReducedResult(
+	i int,
+	searchResultData *schemapb.SearchResultData,
+	metricType string,
+	tr *timerecord.TimeRecorder,
+	relatedDataSize int64,
+) error {
+	searchResults, err := segments.EncodeSearchResultData(
+		t.ctx,
+		searchResultData,
+		t.originNqs[i],
+		t.originTopks[i],
+		metricType,
+	)
 	if err != nil {
 		return err
 	}
@@ -297,33 +398,6 @@ func (t *SearchTask) buildReducedResult(
 	task := t.subTaskAt(i)
 	task.result = searchResults
 	return nil
-}
-
-// buildSlicedResult extracts the i-th sub-task's slice from the merged reduce
-// result, runs Late Materialization, and assigns the serialized blob to that
-// task. This is the common fast path: one max-topK reduce, then per-slice
-// slicing. For mixed-topK group-by with groupSize > 1, executeGoReduce uses
-// per-slice reduce instead because row truncation is not group-aware.
-func (t *SearchTask) buildSlicedResult(
-	i, nqOffset, nq int,
-	groupSize int64,
-	reduceResult *mergeResult,
-	results []*segments.SearchResult,
-	plan *segcore.SearchPlan,
-	metricType string,
-	tr *timerecord.TimeRecorder,
-	relatedDataSize int64,
-	allSearchCount int64,
-) error {
-	rowLimit := t.originTopks[i] * groupSize
-	sliceResult, err := extractSlice(reduceResult, nqOffset, nq, rowLimit)
-	if err != nil {
-		return err
-	}
-	if sliceResult != reduceResult && sliceResult.DF != nil {
-		defer sliceResult.DF.Release()
-	}
-	return t.buildReducedResult(i, sliceResult, results, plan, metricType, tr, relatedDataSize, allSearchCount)
 }
 
 // lateMaterializeOutputFields reads output fields from C++ segments in a single

@@ -12,6 +12,10 @@
 #include <arrow/api.h>
 #include <arrow/c/abi.h>
 #include <arrow/c/bridge.h>
+
+#include <folly/CancellationToken.h>
+
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -1144,6 +1148,367 @@ TEST(SearchResultExport, ExportSearchResultAsArrowRecordBatch_ExtraFieldIds) {
     EXPECT_EQ(extra_field->name(), "extra_i64");
 }
 
+TEST(SearchResultExport,
+     FillFieldsOrderedAsArrowRecordBatch_EmptyRowsPreserveSchema) {
+    using namespace milvus;
+
+    auto schema = std::make_shared<Schema>();
+    auto int8_fid = schema->AddDebugField("empty_i8", DataType::INT8);
+    auto int64_fid = schema->AddDebugField("empty_i64", DataType::INT64);
+    auto string_fid = schema->AddDebugField("empty_string", DataType::VARCHAR);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto raw_data = milvus::segcore::DataGen(schema, 1, /*seed=*/1);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/1);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_bytes.data(), plan_bytes.size());
+    SearchResult result;
+    AttachSealedRequestLease(result, segment.get());
+    std::vector<CSearchResult> c_results = {
+        reinterpret_cast<CSearchResult>(&result)};
+    int64_t field_ids[] = {int8_fid.get(), int64_fid.get(), string_fid.get()};
+    ArrowSchema out_schema{};
+    ArrowArray out_array{};
+
+    auto status = FillFieldsOrderedAsArrowRecordBatch(
+        c_results.data(),
+        c_results.size(),
+        reinterpret_cast<CSearchPlan>(plan.get()),
+        field_ids,
+        3,
+        nullptr,
+        nullptr,
+        0,
+        &out_schema,
+        &out_array,
+        nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto batch_result = ImportExportedRecordBatch(&out_array, &out_schema);
+    ASSERT_TRUE(batch_result.ok()) << batch_result.status().ToString();
+    ASSERT_NE(*batch_result, nullptr);
+    ASSERT_EQ((*batch_result)->num_rows(), 0);
+    ASSERT_EQ((*batch_result)->num_columns(), 3);
+    EXPECT_TRUE(
+        (*batch_result)->schema()->field(0)->type()->Equals(arrow::int32()));
+    EXPECT_TRUE(
+        (*batch_result)->schema()->field(1)->type()->Equals(arrow::int64()));
+    EXPECT_TRUE(
+        (*batch_result)->schema()->field(2)->type()->Equals(arrow::utf8()));
+    EXPECT_EQ((*batch_result)->schema()->field(0)->name(), "empty_i8");
+    EXPECT_EQ((*batch_result)->schema()->field(1)->name(), "empty_i64");
+    EXPECT_EQ((*batch_result)->schema()->field(2)->name(), "empty_string");
+}
+
+TEST(SearchResultExport,
+     FillFieldsOrderedAsArrowRecordBatch_PreservesFieldOrderAndMetadata) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto int64_fid = schema->AddDebugField("ordered_i64", DataType::INT64);
+    auto string_fid =
+        schema->AddDebugField("ordered_string", DataType::VARCHAR);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto raw_data = DataGen(schema, 3, /*seed=*/1);
+    auto int64_values = raw_data.get_col<int64_t>(int64_fid);
+    auto string_values = raw_data.get_col<std::string>(string_fid);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/2);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_bytes.data(), plan_bytes.size());
+    SearchResult result;
+    AttachSealedRequestLease(result, segment.get());
+    std::vector<CSearchResult> c_results = {
+        reinterpret_cast<CSearchResult>(&result)};
+    int64_t field_ids[] = {string_fid.get(), int64_fid.get()};
+    int32_t segment_indices[] = {0, 0};
+    int64_t segment_offsets[] = {2, 0};
+    ArrowSchema out_schema{};
+    ArrowArray out_array{};
+
+    auto status = FillFieldsOrderedAsArrowRecordBatch(
+        c_results.data(),
+        c_results.size(),
+        reinterpret_cast<CSearchPlan>(plan.get()),
+        field_ids,
+        2,
+        segment_indices,
+        segment_offsets,
+        2,
+        &out_schema,
+        &out_array,
+        nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto batch_result = ImportExportedRecordBatch(&out_array, &out_schema);
+    ASSERT_TRUE(batch_result.ok()) << batch_result.status().ToString();
+    ASSERT_NE(*batch_result, nullptr);
+    ASSERT_EQ((*batch_result)->num_columns(), 2);
+    EXPECT_EQ((*batch_result)->schema()->field(0)->name(), "ordered_string");
+    EXPECT_EQ((*batch_result)->schema()->field(1)->name(), "ordered_i64");
+    EXPECT_EQ((*batch_result)->schema()->field(0)->type()->id(),
+              arrow::Type::STRING);
+    EXPECT_EQ((*batch_result)->schema()->field(1)->type()->id(),
+              arrow::Type::INT64);
+    for (int i = 0; i < 2; ++i) {
+        const auto& field = (*batch_result)->schema()->field(i);
+        ASSERT_NE(field->metadata(), nullptr);
+        auto field_id_result = field->metadata()->Get("milvus.field_id");
+        ASSERT_TRUE(field_id_result.ok())
+            << field_id_result.status().ToString();
+        auto data_type_result = field->metadata()->Get("milvus.data_type");
+        ASSERT_TRUE(data_type_result.ok())
+            << data_type_result.status().ToString();
+        if (i == 0) {
+            EXPECT_EQ(*field_id_result, std::to_string(string_fid.get()));
+            EXPECT_EQ(*data_type_result,
+                      std::to_string(static_cast<int32_t>(DataType::VARCHAR)));
+        } else {
+            EXPECT_EQ(*field_id_result, std::to_string(int64_fid.get()));
+            EXPECT_EQ(*data_type_result,
+                      std::to_string(static_cast<int32_t>(DataType::INT64)));
+        }
+    }
+    auto strings = std::static_pointer_cast<arrow::StringArray>(
+        (*batch_result)->column(0));
+    auto ints =
+        std::static_pointer_cast<arrow::Int64Array>((*batch_result)->column(1));
+    EXPECT_EQ(strings->GetString(0), string_values[2]);
+    EXPECT_EQ(strings->GetString(1), string_values[0]);
+    EXPECT_EQ(ints->Value(0), int64_values[2]);
+    EXPECT_EQ(ints->Value(1), int64_values[0]);
+}
+
+TEST(SearchResultExport,
+     FillFieldsOrderedAsArrowRecordBatch_InterleavesSegments) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto field_fid = schema->AddDebugField("ordered_i64", DataType::INT64);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+
+    auto raw_data_a = DataGen(schema, 4, /*seed=*/1);
+    auto raw_data_b = DataGen(schema, 4, /*seed=*/2);
+    auto values_a = raw_data_a.get_col<int64_t>(field_fid);
+    auto values_b = raw_data_b.get_col<int64_t>(field_fid);
+    auto segment_a = CreateSealedWithFieldDataLoaded(schema, raw_data_a);
+    auto segment_b = CreateSealedWithFieldDataLoaded(schema, raw_data_b);
+
+    auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/3);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_bytes.data(), plan_bytes.size());
+
+    SearchResult result_a;
+    AttachSealedRequestLease(result_a, segment_a.get());
+    SearchResult result_b;
+    AttachSealedRequestLease(result_b, segment_b.get());
+    std::vector<CSearchResult> c_results = {
+        reinterpret_cast<CSearchResult>(&result_a),
+        reinterpret_cast<CSearchResult>(&result_b)};
+
+    int64_t field_ids[] = {field_fid.get()};
+    int32_t seg_indices[] = {1, 0, 1};
+    int64_t seg_offsets[] = {2, 1, 0};
+    ArrowSchema out_schema{};
+    ArrowArray out_array{};
+    auto status = FillFieldsOrderedAsArrowRecordBatch(
+        c_results.data(),
+        c_results.size(),
+        reinterpret_cast<CSearchPlan>(plan.get()),
+        field_ids,
+        1,
+        seg_indices,
+        seg_offsets,
+        3,
+        &out_schema,
+        &out_array,
+        nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+
+    auto batch_result = ImportExportedRecordBatch(&out_array, &out_schema);
+    ASSERT_TRUE(batch_result.ok()) << batch_result.status().ToString();
+    ASSERT_NE(*batch_result, nullptr);
+    ASSERT_EQ((*batch_result)->num_rows(), 3);
+    ASSERT_EQ((*batch_result)->num_columns(), 1);
+    EXPECT_EQ((*batch_result)->schema()->field(0)->name(), "ordered_i64");
+
+    auto values =
+        std::static_pointer_cast<arrow::Int64Array>((*batch_result)->column(0));
+    EXPECT_EQ(values->Value(0), values_b[2]);
+    EXPECT_EQ(values->Value(1), values_a[1]);
+    EXPECT_EQ(values->Value(2), values_b[0]);
+}
+
+TEST(SearchResultExport,
+     FillFieldsOrderedAsArrowRecordBatch_NullableValuesFollowInterleavedRows) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto nullable_fid =
+        schema->AddDebugField("nullable_i64", DataType::INT64, true);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto raw_data_a = DataGen(schema, 4, /*seed=*/1);
+    auto raw_data_b = DataGen(schema, 4, /*seed=*/2);
+    auto values_a = raw_data_a.get_col<int64_t>(nullable_fid);
+    auto values_b = raw_data_b.get_col<int64_t>(nullable_fid);
+    auto valid_a = raw_data_a.get_col_valid(nullable_fid);
+    auto valid_b = raw_data_b.get_col_valid(nullable_fid);
+    auto segment_a = CreateSealedWithFieldDataLoaded(schema, raw_data_a);
+    auto segment_b = CreateSealedWithFieldDataLoaded(schema, raw_data_b);
+    auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/3);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_bytes.data(), plan_bytes.size());
+    SearchResult result_a;
+    AttachSealedRequestLease(result_a, segment_a.get());
+    SearchResult result_b;
+    AttachSealedRequestLease(result_b, segment_b.get());
+    std::vector<CSearchResult> c_results = {
+        reinterpret_cast<CSearchResult>(&result_a),
+        reinterpret_cast<CSearchResult>(&result_b)};
+    ASSERT_TRUE(valid_a[0]);
+    ASSERT_TRUE(valid_a[2]);
+    ASSERT_FALSE(valid_a[1]);
+    ASSERT_TRUE(valid_b[0]);
+    ASSERT_FALSE(valid_b[1]);
+    ASSERT_TRUE(valid_b[2]);
+    int64_t field_ids[] = {nullable_fid.get()};
+    int32_t segment_indices[] = {1, 0, 1, 0, 1, 0};
+    int64_t segment_offsets[] = {1, 0, 2, 2, 0, 1};
+    ArrowSchema out_schema{};
+    ArrowArray out_array{};
+    auto status = FillFieldsOrderedAsArrowRecordBatch(
+        c_results.data(),
+        c_results.size(),
+        reinterpret_cast<CSearchPlan>(plan.get()),
+        field_ids,
+        1,
+        segment_indices,
+        segment_offsets,
+        4,
+        &out_schema,
+        &out_array,
+        nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto batch_result = ImportExportedRecordBatch(&out_array, &out_schema);
+    ASSERT_TRUE(batch_result.ok()) << batch_result.status().ToString();
+    ASSERT_NE(*batch_result, nullptr);
+    auto values =
+        std::static_pointer_cast<arrow::Int64Array>((*batch_result)->column(0));
+    ASSERT_EQ(values->length(), 4);
+    const std::vector<int64_t> expected_values = {
+        values_b[1], values_a[0], values_b[2], values_a[2]};
+    const std::vector<bool> expected_valid = {
+        valid_b[1], valid_a[0], valid_b[2], valid_a[2]};
+    for (int i = 0; i < 4; ++i) {
+        EXPECT_EQ(values->IsValid(i), expected_valid[i]);
+        if (expected_valid[i]) {
+            EXPECT_EQ(values->Value(i), expected_values[i]);
+        }
+    }
+    EXPECT_EQ(values->null_count(),
+              static_cast<int64_t>(4 - std::count(expected_valid.begin(),
+                                                  expected_valid.end(),
+                                                  true)));
+}
+
+TEST(SearchResultExport,
+     FillFieldsOrderedAsArrowRecordBatch_InvalidSegmentIndexReturnsError) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto field_fid = schema->AddDebugField("ordered_i64", DataType::INT64);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto raw_data = DataGen(schema, 1, /*seed=*/1);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/1);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_bytes.data(), plan_bytes.size());
+    SearchResult result;
+    AttachSealedRequestLease(result, segment.get());
+    std::vector<CSearchResult> c_results = {
+        reinterpret_cast<CSearchResult>(&result)};
+    int64_t field_ids[] = {field_fid.get()};
+    int32_t segment_indices[] = {1};
+    int64_t segment_offsets[] = {0};
+    ArrowSchema out_schema{};
+    ArrowArray out_array{};
+    auto status = FillFieldsOrderedAsArrowRecordBatch(
+        c_results.data(),
+        c_results.size(),
+        reinterpret_cast<CSearchPlan>(plan.get()),
+        field_ids,
+        1,
+        segment_indices,
+        segment_offsets,
+        1,
+        &out_schema,
+        &out_array,
+        nullptr);
+    EXPECT_NE(status.error_code, 0);
+    EXPECT_EQ(out_schema.release, nullptr);
+    EXPECT_EQ(out_array.release, nullptr);
+    ASSERT_NE(status.error_msg, nullptr);
+    free(const_cast<char*>(status.error_msg));
+}
+
+TEST(SearchResultExport,
+     FillFieldsOrderedAsArrowRecordBatch_CancellationReturnsFollyCancel) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto field_fid = schema->AddDebugField("ordered_i64", DataType::INT64);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto raw_data = DataGen(schema, 1, /*seed=*/1);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/1);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_bytes.data(), plan_bytes.size());
+    SearchResult result;
+    AttachSealedRequestLease(result, segment.get());
+    std::vector<CSearchResult> c_results = {
+        reinterpret_cast<CSearchResult>(&result)};
+    int64_t field_ids[] = {field_fid.get()};
+    int32_t segment_indices[] = {0};
+    int64_t segment_offsets[] = {0};
+    folly::CancellationSource cancellation_source;
+    cancellation_source.requestCancellation();
+    ArrowSchema out_schema{};
+    ArrowArray out_array{};
+    auto status = FillFieldsOrderedAsArrowRecordBatch(
+        c_results.data(),
+        c_results.size(),
+        reinterpret_cast<CSearchPlan>(plan.get()),
+        field_ids,
+        1,
+        segment_indices,
+        segment_offsets,
+        1,
+        &out_schema,
+        &out_array,
+        &cancellation_source);
+    EXPECT_EQ(status.error_code, milvus::FollyCancel);
+    EXPECT_NE(status.error_code, 0);
+    EXPECT_EQ(out_schema.release, nullptr);
+    EXPECT_EQ(out_array.release, nullptr);
+    ASSERT_NE(status.error_msg, nullptr);
+    free(const_cast<char*>(status.error_msg));
+}
+
 TEST(SearchResultExport, FillOutputFieldsOrdered_Basic) {
     using namespace milvus;
     using namespace milvus::segcore;
@@ -1195,6 +1560,48 @@ TEST(SearchResultExport, FillOutputFieldsOrdered_Basic) {
     EXPECT_EQ(result_data.fields_data(1).scalars().long_data().data_size(), 2);
 
     free(const_cast<void*>(c_proto.proto_blob));
+}
+
+TEST(SearchResultExport,
+     FillOutputFieldsOrdered_CancellationReturnsFollyCancel) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto output_fid = schema->AddDebugField("output_i64", DataType::INT64);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto raw_data = DataGen(schema, 1, /*seed=*/1);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/1);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_bytes.data(), plan_bytes.size());
+    plan->target_entries_.push_back(output_fid);
+    SearchResult result;
+    AttachSealedRequestLease(result, segment.get());
+    std::vector<CSearchResult> c_results = {
+        reinterpret_cast<CSearchResult>(&result)};
+    int32_t segment_indices[] = {0};
+    int64_t segment_offsets[] = {0};
+    folly::CancellationSource cancellation_source;
+    cancellation_source.requestCancellation();
+    CProto c_proto{};
+    auto status =
+        FillOutputFieldsOrdered(c_results.data(),
+                                c_results.size(),
+                                reinterpret_cast<CSearchPlan>(plan.get()),
+                                segment_indices,
+                                segment_offsets,
+                                /*total_rows=*/1,
+                                &c_proto,
+                                &cancellation_source);
+    EXPECT_EQ(status.error_code, milvus::FollyCancel) << status.error_msg;
+    EXPECT_EQ(c_proto.proto_blob, nullptr);
+    EXPECT_EQ(c_proto.proto_size, 0);
+    ASSERT_NE(status.error_msg, nullptr);
+    free(const_cast<char*>(status.error_msg));
 }
 
 TEST(SearchResultExport, HasTargetEntries) {
@@ -1320,6 +1727,31 @@ TEST(SearchResultExport, PrepareSearchResultsForExport_NumSegmentsZero) {
                                                 &all_search_count,
                                                 nullptr);
     EXPECT_NE(status.error_code, 0);
+    free(const_cast<char*>(status.error_msg));
+}
+
+TEST(SearchResultExport,
+     PrepareSearchResultsForExport_CancellationReturnsFollyCancel) {
+    int64_t slice_nqs[] = {1};
+    int64_t slice_topks[] = {1};
+    CTraceContext trace{0, 0, 0};
+    int64_t all_search_count = 0;
+    folly::CancellationSource cancellation_source;
+    cancellation_source.requestCancellation();
+    CSearchResult c_result = nullptr;
+    auto status = PrepareSearchResultsForExport(trace,
+                                                nullptr,
+                                                nullptr,
+                                                &c_result,
+                                                /*num_segments=*/1,
+                                                slice_nqs,
+                                                /*num_slices=*/1,
+                                                slice_topks,
+                                                &all_search_count,
+                                                &cancellation_source);
+    EXPECT_EQ(status.error_code, milvus::FollyCancel);
+    EXPECT_EQ(all_search_count, 0);
+    ASSERT_NE(status.error_msg, nullptr);
     free(const_cast<char*>(status.error_msg));
 }
 
