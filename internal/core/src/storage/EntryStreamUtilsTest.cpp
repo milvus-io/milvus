@@ -16,10 +16,14 @@
 
 #include "storage/EntryStreamUtils.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cstddef>
+#include <memory>
 #include <thread>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "folly/CancellationToken.h"
 #include "folly/OperationCancelled.h"
@@ -325,6 +329,78 @@ TEST_F(TransientMemoryBudgetAsyncTest,
     waiting_lease.Release();
     EXPECT_TRUE(budget_.TryAcquire(1));
     budget_.Release(1);
+}
+
+TEST_F(TransientMemoryBudgetAsyncTest, PendingQueueOperationsScaleLinearly) {
+    auto measure_queue_operations = [this](size_t waiter_count) {
+        budget_.SetCapacityBytes(1);
+        auto running = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+        auto running_lease = folly::coro::blockingWait(std::move(running));
+        std::vector<folly::coro::Future<TransientBudgetLease>> waiters;
+        waiters.reserve(waiter_count);
+        std::vector<std::unique_ptr<folly::CancellationSource>>
+            cancellation_sources;
+        cancellation_sources.reserve(waiter_count);
+
+        const auto registration_start = std::chrono::steady_clock::now();
+        for (size_t i = 0; i < waiter_count; ++i) {
+            auto cancellation_source =
+                std::make_unique<folly::CancellationSource>();
+            waiters.push_back(
+                budget_.AcquireAsync(1,
+                                     TransientBudgetPriority::High,
+                                     cancellation_source->getToken()));
+            cancellation_sources.push_back(std::move(cancellation_source));
+        }
+        const auto registration_elapsed =
+            std::chrono::steady_clock::now() - registration_start;
+
+        const auto cancellation_start = std::chrono::steady_clock::now();
+        for (const auto& cancellation_source : cancellation_sources) {
+            cancellation_source->requestCancellation();
+        }
+        const auto cancellation_elapsed =
+            std::chrono::steady_clock::now() - cancellation_start;
+
+        EXPECT_TRUE(
+            std::all_of(waiters.begin(), waiters.end(), [](const auto& waiter) {
+                return waiter.isReady();
+            }));
+        waiters.clear();
+        running_lease.Release();
+        return std::pair{registration_elapsed, cancellation_elapsed};
+    };
+
+    constexpr size_t kSmallWaiterCount = 1024;
+    constexpr size_t kLargeWaiterCount = 8192;
+    const auto [small_registration, small_cancellation] =
+        measure_queue_operations(kSmallWaiterCount);
+    const auto [large_registration, large_cancellation] =
+        measure_queue_operations(kLargeWaiterCount);
+    const auto scheduling_slack = std::chrono::milliseconds(2);
+
+    EXPECT_LT(large_registration, small_registration * 24 + scheduling_slack)
+        << "registering 8x pending admissions should not repeatedly scan all "
+           "existing waiters; small="
+        << std::chrono::duration_cast<std::chrono::microseconds>(
+               small_registration)
+               .count()
+        << "us large="
+        << std::chrono::duration_cast<std::chrono::microseconds>(
+               large_registration)
+               .count()
+        << "us";
+    EXPECT_LT(large_cancellation, small_cancellation * 24 + scheduling_slack)
+        << "cancelling 8x pending admissions should unlink each waiter "
+           "directly; small="
+        << std::chrono::duration_cast<std::chrono::microseconds>(
+               small_cancellation)
+               .count()
+        << "us large="
+        << std::chrono::duration_cast<std::chrono::microseconds>(
+               large_cancellation)
+               .count()
+        << "us";
 }
 
 }  // namespace

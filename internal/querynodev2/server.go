@@ -287,16 +287,7 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 			mlog.Info(node.ctx, "queryNode.segcore.storageV2.cellTargetSizeBytes updated",
 				mlog.Int64("bytes", newBytes))
 		}))
-	pt.Watch(pt.QueryNodeCfg.StorageV2EnableAsyncLoad.Key,
-		config.NewHandler("queryNode.segcore.storageV2.enableAsyncLoad", func(evt *config.Event) {
-			if !evt.HasUpdated {
-				return
-			}
-			enabled := paramtable.Get().QueryNodeCfg.StorageV2EnableAsyncLoad.GetAsBool()
-			initcore.UpdateStorageV2AsyncLoadEnabled(enabled)
-			mlog.Info(node.ctx, "queryNode.segcore.storageV2.enableAsyncLoad updated",
-				mlog.Bool("enabled", enabled))
-		}))
+	initcore.RegisterStorageV2AsyncLoadEnabledWatcher(node.ctx, pt, "querynode")
 	initcore.RegisterArrowReaderConfigWatchers(pt, "querynode")
 }
 

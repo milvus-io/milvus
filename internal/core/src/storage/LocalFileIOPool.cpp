@@ -17,6 +17,7 @@
 #include "storage/LocalFileIOPool.h"
 
 #include <algorithm>
+#include <exception>
 #include <thread>
 #include <utility>
 
@@ -83,13 +84,6 @@ LocalFileIOPool::Configure(int worker_count) {
     worker_count = ClampWorkerCount(worker_count);
     std::lock_guard configure_lock(configure_mutex_);
 
-    {
-        std::lock_guard permit_lock(permit_mutex_);
-        write_concurrency_limit_.store(static_cast<size_t>(worker_count),
-                                       std::memory_order_release);
-    }
-    permit_cv_.notify_all();
-
     std::shared_ptr<Executor> executor_to_resize;
     std::shared_ptr<Executor> retired_executor;
     {
@@ -97,10 +91,11 @@ LocalFileIOPool::Configure(int worker_count) {
         if (worker_count == 0) {
             retired_executor = std::move(executor_);
         } else if (executor_ == nullptr) {
-            executor_ = std::make_shared<Executor>(
+            auto new_executor = std::make_shared<Executor>(
                 worker_count,
                 Executor::makeDefaultPriorityQueue(2),
                 std::make_shared<folly::NamedThreadFactory>("MILVUS_LF_IO_"));
+            executor_ = std::move(new_executor);
         } else {
             executor_to_resize = executor_;
         }
@@ -108,11 +103,32 @@ LocalFileIOPool::Configure(int worker_count) {
 
     if (executor_to_resize != nullptr &&
         executor_to_resize->numThreads() != static_cast<size_t>(worker_count)) {
-        executor_to_resize->setNumThreads(worker_count);
+        auto old_worker_count = executor_to_resize->numThreads();
+        try {
+            executor_to_resize->setNumThreads(worker_count);
+        } catch (...) {
+            auto resize_error = std::current_exception();
+            try {
+                executor_to_resize->setNumThreads(old_worker_count);
+            } catch (const std::exception& rollback_error) {
+                LOG_ERROR(
+                    "Failed to restore local file I/O worker count to {}: {}",
+                    old_worker_count,
+                    rollback_error.what());
+            }
+            std::rethrow_exception(resize_error);
+        }
     }
     if (retired_executor != nullptr) {
         retired_executor->join();
     }
+
+    {
+        std::lock_guard permit_lock(permit_mutex_);
+        write_concurrency_limit_.store(static_cast<size_t>(worker_count),
+                                       std::memory_order_release);
+    }
+    permit_cv_.notify_all();
 
     LOG_INFO("Set local file I/O worker count to {}", worker_count);
 }

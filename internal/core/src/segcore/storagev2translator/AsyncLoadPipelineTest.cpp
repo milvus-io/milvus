@@ -322,12 +322,6 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
         return std::vector<uint64_t>(32, 1);
     }
 
-    arrow::Result<std::vector<uint64_t>>
-    get_chunk_column_estimated_size(
-        const std::string& /*field_name*/) override {
-        return std::vector<uint64_t>(32, 1);
-    }
-
     arrow::Result<std::vector<std::vector<uint64_t>>>
     get_chunk_column_estimated_size() override {
         return std::vector<std::vector<uint64_t>>{std::vector<uint64_t>(32, 1)};
@@ -748,6 +742,38 @@ TEST_F(AsyncLoadPipelineTest, ReleasesBudgetWhenStorageFutureFails) {
     ASSERT_TRUE(next_budget.isReady());
     auto next_lease = folly::coro::blockingWait(std::move(next_budget));
     next_lease.Release();
+}
+
+TEST_F(AsyncLoadPipelineTest, CancelsPendingWindowsAfterFirstReadFailure) {
+    budget_.SetCapacityBytes(1);
+    auto reader = std::make_shared<FakeChunkReader>(&executor_);
+    reader->SetStatus(arrow::Status::IOError("read failed"));
+    std::vector<CellSpec> cells{
+        {.cid = 0,
+         .file_idx = 0,
+         .local_rg_offset = 0,
+         .rg_count = 1,
+         .memory_size = 1},
+        {.cid = 1,
+         .file_idx = 0,
+         .local_rg_offset = 1,
+         .rg_count = 1,
+         .memory_size = 1},
+    };
+    auto options = Options();
+    options.read_window_bytes = 1;
+
+    try {
+        Run(LoadCellsAsync(nullptr,
+                           std::move(cells),
+                           reader,
+                           Finalizer(),
+                           std::move(options)));
+        FAIL() << "expected read failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::StorageError);
+    }
+    EXPECT_EQ(reader->AsyncCalls(), 1);
 }
 
 TEST_F(AsyncLoadPipelineTest, CapturesExecutorKeepAliveBeforeTaskStarts) {
