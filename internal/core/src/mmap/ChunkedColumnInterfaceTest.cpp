@@ -458,6 +458,20 @@ IsScanRowValid(const ChunkedColumnInterface::ScanBatch& batch, int64_t offset) {
     return batch.validity == nullptr || batch.validity[offset];
 }
 
+int64_t
+TakeValueOffset(const ChunkedColumnInterface::TakeBatch& batch,
+                int64_t logical_offset) {
+    return batch.selection == nullptr ? logical_offset
+                                      : batch.selection[logical_offset];
+}
+
+bool
+IsTakeRowValid(const ChunkedColumnInterface::TakeBatch& batch,
+               int64_t logical_offset) {
+    return batch.validity == nullptr ||
+           batch.validity[TakeValueOffset(batch, logical_offset)];
+}
+
 }  // namespace
 
 template <typename Factory>
@@ -917,6 +931,71 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,
+           FixedWidthTakePreservesOrderDuplicatesAndChunkRuns) {
+    ColumnSpec spec{{3, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    const FixedVector<int32_t> offsets{2, 0, 0, 4, 3, 1};
+    auto cursor = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::ScanValueKind::FixedWidth});
+    ASSERT_NE(cursor, nullptr);
+
+    std::vector<int32_t> actual;
+    std::vector<int64_t> batch_positions;
+    std::vector<int64_t> batch_sizes;
+    std::vector<int64_t> source_chunks;
+    ChunkedColumnInterface::TakeBatch batch;
+    while (cursor->Next(4, &batch)) {
+        batch_positions.emplace_back(batch.position);
+        batch_sizes.emplace_back(batch.size);
+        source_chunks.emplace_back(batch.source_chunk_id);
+        ASSERT_NE(batch.owner, nullptr);
+        ASSERT_NE(batch.selection, nullptr);
+        const auto* values = batch.values.data_as<int32_t>();
+        for (int64_t i = 0; i < batch.size; ++i) {
+            actual.emplace_back(values[TakeValueOffset(batch, i)]);
+            EXPECT_TRUE(IsTakeRowValid(batch, i));
+        }
+    }
+
+    EXPECT_EQ(actual, (std::vector<int32_t>{2, 0, 0, 4, 3, 1}));
+    EXPECT_EQ(batch_positions, (std::vector<int64_t>{0, 3, 5}));
+    EXPECT_EQ(batch_sizes, (std::vector<int64_t>{3, 2, 1}));
+    EXPECT_EQ(source_chunks, (std::vector<int64_t>{0, 1, 0}));
+    EXPECT_EQ(cursor->Position(), static_cast<int64_t>(offsets.size()));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           FixedWidthTakeIndexesValidityThroughSelection) {
+    ColumnSpec spec{{4}, {{true, false, true, false}}, /*nullable=*/true};
+    spec.data_type = DataType::INT32;
+    spec.dense_nullable_payload = true;
+    auto fx = TypeParam::Create(spec);
+
+    const FixedVector<int32_t> offsets{3, 0, 1, 2};
+    auto cursor = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::ScanValueKind::FixedWidth});
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::TakeBatch batch;
+    ASSERT_TRUE(cursor->Next(4, &batch));
+    ASSERT_EQ(batch.size, 4);
+    EXPECT_FALSE(IsTakeRowValid(batch, 0));
+    EXPECT_TRUE(IsTakeRowValid(batch, 1));
+    EXPECT_FALSE(IsTakeRowValid(batch, 2));
+    EXPECT_TRUE(IsTakeRowValid(batch, 3));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
            FixedWidthDataScanRejectsMismatchedValueKind) {
     ColumnSpec spec{{3}, {}, /*nullable=*/false};
     spec.data_type = DataType::INT32;
@@ -980,6 +1059,54 @@ TEST(ChunkedColumnInterfaceTest, VarcharPrimaryKeyUsesStringViewScanCursor) {
         EXPECT_EQ(scanned[i], values[i]);
     }
     EXPECT_FALSE(cursor->Next(static_cast<int64_t>(values.size()), &batch));
+}
+
+TEST(ChunkedColumnInterfaceTest, VarcharTakeBuildsOnlyRequestedOrderedViews) {
+    const std::vector<std::string> values{"alpha", "beta", "gamma", "delta"};
+    auto buffer = BuildStringChunkBuffer(values);
+    auto guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    chunks.push_back(
+        std::make_unique<StringChunk>(static_cast<int32_t>(values.size()),
+                                      buffer.data(),
+                                      buffer.size(),
+                                      /*nullable=*/false,
+                                      std::move(guard)));
+    auto translator = std::make_unique<TestChunkTranslator>(
+        std::vector<int64_t>{static_cast<int64_t>(values.size())},
+        "varchar_take",
+        std::move(chunks));
+    FieldMeta field_meta(FieldName("varchar"),
+                         FieldId(kTestFieldId),
+                         DataType::VARCHAR,
+                         /*nullable=*/false,
+                         std::nullopt);
+    auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+        std::move(translator), nullptr);
+    auto pin_requests = std::make_shared<std::vector<std::vector<int64_t>>>();
+    auto column = std::make_shared<ScanCountingStringColumn>(
+        std::move(slot), field_meta, pin_requests);
+
+    const FixedVector<int32_t> offsets{3, 1, 1, 0};
+    auto cursor = column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::ScanValueKind::StringView});
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::TakeBatch batch;
+    ASSERT_TRUE(cursor->Next(10, &batch));
+    EXPECT_EQ(batch.position, 0);
+    EXPECT_EQ(batch.size, 4);
+    EXPECT_EQ(batch.selection, nullptr);
+    const auto* taken = batch.values.data_as<std::string_view>();
+    EXPECT_EQ(taken[0], "delta");
+    EXPECT_EQ(taken[1], "beta");
+    EXPECT_EQ(taken[2], "beta");
+    EXPECT_EQ(taken[3], "alpha");
+    EXPECT_FALSE(cursor->Next(10, &batch));
 }
 
 TEST(ChunkedColumnInterfaceTest,

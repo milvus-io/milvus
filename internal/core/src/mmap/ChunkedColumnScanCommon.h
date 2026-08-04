@@ -41,6 +41,46 @@ enum class ValueEncoding {
     VectorArrayView,
 };
 
+enum class OffsetElementType {
+    Int32,
+    Int64,
+};
+
+// A non-owning view over positional row offsets. Callers must keep the
+// underlying array alive for the lifetime of the TakeCursor. Supporting both
+// widths lets expression evaluation use its existing int32 offsets without a
+// widening copy while retrieve/requery can pass segment int64 offsets.
+struct OffsetView {
+    const void* data = nullptr;
+    int64_t size = 0;
+    OffsetElementType element_type = OffsetElementType::Int32;
+
+    static OffsetView
+    From(const int32_t* offsets, int64_t count) {
+        return OffsetView{offsets, count, OffsetElementType::Int32};
+    }
+
+    static OffsetView
+    From(const int64_t* offsets, int64_t count) {
+        return OffsetView{offsets, count, OffsetElementType::Int64};
+    }
+
+    int64_t
+    operator[](int64_t index) const {
+        AssertInfo(index >= 0 && index < size,
+                   "take offset index {} out of range {}",
+                   index,
+                   size);
+        AssertInfo(data != nullptr,
+                   "take offsets are null with non-empty size {}",
+                   size);
+        if (element_type == OffsetElementType::Int32) {
+            return static_cast<const int32_t*>(data)[index];
+        }
+        return static_cast<const int64_t*>(data)[index];
+    }
+};
+
 struct ValueView {
     ValueEncoding encoding = ValueEncoding::Empty;
     ScanValueKind kind = ScanValueKind::Default;
@@ -77,6 +117,50 @@ struct ScanBatch {
     std::shared_ptr<void> owner;
     int64_t row_id_start = 0;
     int64_t size = 0;
+};
+
+struct TakeBatch {
+    // Take preserves the caller's offset order. values is a backend-native
+    // addressable collection and selection maps each logical output item to
+    // one value in that collection. A null selection means identity indexing.
+    //
+    // Raw fixed-width batches expose a pinned Chunk span plus chunk-local
+    // selection offsets. Reader-backed formats may return already ordered,
+    // dense decoded values with a null selection.
+    ValueView values;
+    const int32_t* selection = nullptr;
+    // Validity uses the same indexing as values: selection[i] when selection
+    // is present, otherwise i. nullptr means every logical item is valid.
+    const bool* validity = nullptr;
+    std::shared_ptr<void> owner;
+    // Logical position in the input OffsetView of the first returned item.
+    int64_t position = 0;
+    int64_t size = 0;
+    // Raw batches identify their physical source chunk so expression skip
+    // statistics can remain chunk-aware. Reader-backed ordered results may
+    // combine sources and leave this as -1.
+    int64_t source_chunk_id = -1;
+};
+
+class TakeCursor {
+ public:
+    virtual ~TakeCursor() = default;
+
+    // Number of input offsets already returned.
+    virtual int64_t
+    Position() const = 0;
+
+    // Return the next ordered positional batch. Concatenating all successful
+    // batches must produce exactly the input offset order, including duplicate
+    // offsets. max_rows limits the logical items exposed to the caller; a
+    // backend may physically read/materialize more data once and slice it here.
+    virtual bool
+    Next(int64_t max_rows, TakeBatch* out) = 0;
+};
+
+struct TakeOptions {
+    OffsetView offsets;
+    ScanValueKind value_kind = ScanValueKind::Default;
 };
 
 class ScanCursor {
@@ -158,5 +242,6 @@ struct ScanOptions {
 
 using ScanResult = std::unique_ptr<ScanCursor>;
 using PreparedScanResult = std::shared_ptr<PreparedScan>;
+using TakeResult = std::unique_ptr<TakeCursor>;
 
 }  // namespace milvus

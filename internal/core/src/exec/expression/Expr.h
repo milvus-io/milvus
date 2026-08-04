@@ -259,29 +259,6 @@ class Expr : public std::enable_shared_from_this<Expr> {
     }
 
  protected:
-    static bool
-    IsSortedOffsetInput(const OffsetVector* input) {
-        for (size_t i = 1; i < input->size(); ++i) {
-            if ((*input)[i - 1] > (*input)[i]) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    static bool
-    IsDenseOffsetInputForScan(const OffsetVector* input) {
-        if (input == nullptr || input->empty()) {
-            return false;
-        }
-        if (!IsSortedOffsetInput(input)) {
-            return false;
-        }
-        const auto span = static_cast<int64_t>((*input)[input->size() - 1]) -
-                          static_cast<int64_t>((*input)[0]) + 1;
-        return span <= 4 * static_cast<int64_t>(input->size());
-    }
-
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
@@ -571,8 +548,7 @@ class SegmentExpr : public Expr {
             active_count_ - current_data_global_pos_,
             projection,
             value_kind);
-        data_prepared_scan_ =
-            data_scan_column_->PrepareScan(op_ctx_, options);
+        data_prepared_scan_ = data_scan_column_->PrepareScan(op_ctx_, options);
         if (data_prepared_scan_ == nullptr) {
             data_scan_skip_index_.reset();
             data_scan_column_.reset();
@@ -624,23 +600,6 @@ class SegmentExpr : public Expr {
         }
         for (int64_t i = 0; i < size; ++i) {
             if (!batch.validity[batch_pos + i]) {
-                res[i] = false;
-                valid_res[i] = false;
-            }
-        }
-    }
-
-    static void
-    ApplyScanValidityByOffsets(const ChunkedColumnInterface::ScanBatch& batch,
-                               const int32_t* offsets,
-                               TargetBitmapView res,
-                               TargetBitmapView valid_res,
-                               int64_t size) {
-        if (batch.validity == nullptr) {
-            return;
-        }
-        for (int64_t i = 0; i < size; ++i) {
-            if (!batch.validity[offsets[i]]) {
                 res[i] = false;
                 valid_res[i] = false;
             }
@@ -1142,11 +1101,26 @@ class SegmentExpr : public Expr {
         }
     }
 
-    // accept sorted offsets array and process with one continuous Scan.
-    // TODO: push the offset selection into Scan when the interface supports it.
+    static void
+    ApplyTakeValidity(const ChunkedColumnInterface::TakeBatch& batch,
+                      TargetBitmapView res,
+                      TargetBitmapView valid_res) {
+        if (batch.validity == nullptr) {
+            return;
+        }
+        for (int64_t i = 0; i < batch.size; ++i) {
+            const auto value_offset =
+                batch.selection == nullptr ? i : batch.selection[i];
+            if (!batch.validity[value_offset]) {
+                res[i] = false;
+                valid_res[i] = false;
+            }
+        }
+    }
+
     template <typename T, typename FUNC, typename... ValTypes>
     int64_t
-    ProcessSortedDataByOffsetsByScan(
+    ProcessDataByOffsetsByTake(
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         OffsetVector* input,
@@ -1157,145 +1131,67 @@ class SegmentExpr : public Expr {
         if (column == nullptr) {
             return -1;
         }
-        if (input->empty()) {
-            return 0;
-        }
-
-        const auto scan_start = static_cast<int64_t>((*input)[0]);
-        const auto scan_end =
-            static_cast<int64_t>((*input)[input->size() - 1]) + 1;
-        const auto scan_length = scan_end - scan_start;
-        AssertInfo(scan_length > 0,
-                   "invalid offset scan range [{}, {})",
-                   scan_start,
-                   scan_end);
-
-        TargetBitmap offset_bitmap(scan_length, false);
-        for (auto offset : *input) {
-            offset_bitmap[static_cast<size_t>(static_cast<int64_t>(offset) -
-                                              scan_start)] = true;
-        }
-
-        auto options = ChunkedColumnInterface::ScanOptions::ForData(
-            scan_start,
-            scan_length,
-            ChunkedColumnInterface::ScanProjection::Data,
-            DataScanValueKind<T>());
-        auto cursor = column->Scan(op_ctx_, options);
+        auto cursor = column->Take(
+            op_ctx_,
+            ChunkedColumnInterface::TakeOptions{
+                ChunkedColumnInterface::OffsetView::From(
+                    input->data(), static_cast<int64_t>(input->size())),
+                DataScanValueKind<T>()});
         if (cursor == nullptr) {
             return -1;
         }
 
-        size_t processed_offsets = 0;
-        std::vector<int32_t> batch_offsets;
-        batch_offsets.reserve(std::min<int64_t>(batch_size_, input->size()));
-
-        ChunkedColumnInterface::ScanBatch batch;
-        while (processed_offsets < input->size() &&
-               cursor->Next(batch_size_, &batch)) {
+        int64_t processed_size = 0;
+        ChunkedColumnInterface::TakeBatch batch;
+        while (cursor->Next(batch_size_, &batch)) {
+            AssertInfo(batch.position == processed_size,
+                       "take batch position {}, expected {}",
+                       batch.position,
+                       processed_size);
             AssertInfo(!batch.values.empty() && batch.size > 0,
-                       "invalid offset data scan batch");
-            const auto* valid_data = batch.validity;
+                       "invalid take data batch");
+            AssertInfo(processed_size + batch.size <=
+                           static_cast<int64_t>(input->size()),
+                       "take returned {} rows after {}, input size {}",
+                       batch.size,
+                       processed_size,
+                       input->size());
 
-            int64_t batch_pos = 0;
-            while (batch_pos < batch.size &&
-                   processed_offsets < input->size()) {
-                const auto interval_start = batch.row_id_start + batch_pos;
-                const auto batch_end = batch.row_id_start + batch.size;
-                if (static_cast<int64_t>((*input)[processed_offsets]) >=
-                    batch_end) {
-                    break;
-                }
-
-                auto [chunk_id, _] = column->GetChunkIDByOffset(interval_start);
-                const auto chunk_end = column->GetNumRowsUntilChunk(chunk_id) +
-                                       column->chunk_row_nums(chunk_id);
-                const auto interval_end = std::min(batch_end, chunk_end);
-                if (static_cast<int64_t>((*input)[processed_offsets]) >=
-                    interval_end) {
-                    batch_pos += interval_end - interval_start;
-                    continue;
-                }
-
-                const bool skipped =
-                    skip_func && skip_func(*skip_index, field_id_, chunk_id);
-                const auto group_start = processed_offsets;
-                batch_offsets.clear();
-                for (int64_t row = interval_start;
-                     row < interval_end && processed_offsets < input->size();
-                     ++row) {
-                    const auto bitmap_pos = row - scan_start;
-                    if (!offset_bitmap[static_cast<size_t>(bitmap_pos)]) {
-                        continue;
-                    }
-                    while (processed_offsets < input->size() &&
-                           static_cast<int64_t>((*input)[processed_offsets]) ==
-                               row) {
-                        batch_offsets.push_back(
-                            static_cast<int32_t>(row - batch.row_id_start));
-                        ++processed_offsets;
-                    }
-                }
-
-                const auto group_size =
-                    static_cast<int64_t>(processed_offsets - group_start);
-                if (group_size > 0) {
-                    if (!skipped) {
-                        const auto* data = batch.values.data_as<T>();
-                        func.template operator()<FilterType::random>(
-                            data,
-                            valid_data,
-                            batch_offsets.data(),
-                            static_cast<int>(group_size),
-                            res + group_start,
-                            valid_res + group_start,
-                            values...);
-                    } else {
-                        ApplyScanValidityByOffsets(batch,
-                                                   batch_offsets.data(),
-                                                   res + group_start,
-                                                   valid_res + group_start,
-                                                   group_size);
-                        // Keep callback-local state (for example the
-                        // bitmap_input processed_cursor) aligned with every
-                        // logical candidate, even when SkipIndex already
-                        // decided the result for this chunk.
-                        func.template operator()<FilterType::random>(
-                            nullptr,
-                            nullptr,
-                            nullptr,
-                            static_cast<int>(group_size),
-                            res + group_start,
-                            valid_res + group_start,
-                            values...);
-                    }
-                }
-
-                batch_pos += interval_end - interval_start;
+            const bool skipped =
+                batch.source_chunk_id >= 0 && skip_func &&
+                skip_index != nullptr &&
+                skip_func(*skip_index, field_id_, batch.source_chunk_id);
+            if (!skipped) {
+                func.template operator()<FilterType::random>(
+                    batch.values.data_as<T>(),
+                    batch.validity,
+                    batch.selection,
+                    static_cast<int>(batch.size),
+                    res + processed_size,
+                    valid_res + processed_size,
+                    values...);
+            } else {
+                ApplyTakeValidity(
+                    batch, res + processed_size, valid_res + processed_size);
+                // Keep callback-local state aligned with every logical
+                // candidate even when SkipIndex decides this raw chunk.
+                func.template operator()<FilterType::random>(
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    static_cast<int>(batch.size),
+                    res + processed_size,
+                    valid_res + processed_size,
+                    values...);
             }
+            processed_size += batch.size;
         }
 
-        AssertInfo(processed_offsets == input->size(),
-                   "offset scan processed {} offsets, expected {}",
-                   processed_offsets,
+        AssertInfo(processed_size == static_cast<int64_t>(input->size()),
+                   "take processed {} offsets, expected {}",
+                   processed_size,
                    input->size());
-        return input->size();
-    }
-
-    template <typename T, typename FUNC, typename... ValTypes>
-    int64_t
-    ProcessDataByOffsetsByScan(
-        FUNC func,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        OffsetVector* input,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
-        if (IsDenseOffsetInputForScan(input)) {
-            return ProcessSortedDataByOffsetsByScan<T>(
-                func, skip_func, input, res, valid_res, values...);
-        }
-        return -1;
+        return processed_size;
     }
 
     template <typename T, typename FUNC, typename... ValTypes>
@@ -1315,7 +1211,7 @@ class SegmentExpr : public Expr {
             }
         }
 
-        const auto processed_size = ProcessDataByOffsetsByScan<T>(
+        const auto processed_size = ProcessDataByOffsetsByTake<T>(
             func, skip_func, input, res, valid_res, values...);
         if (processed_size >= 0) {
             return processed_size;

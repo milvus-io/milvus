@@ -45,7 +45,6 @@ namespace {
 
 class InspectableSegmentExpr : public SegmentExpr {
  public:
-    using SegmentExpr::IsDenseOffsetInputForScan;
     using SegmentExpr::SegmentExpr;
 
     bool
@@ -174,8 +173,7 @@ template <typename T>
 void
 VerifySkipCursorContract(SegmentExpr& segment_expr,
                          OffsetVector* input,
-                         int skipped_chunk_id,
-                         bool use_sorted_scan = false) {
+                         int skipped_chunk_id) {
     TargetBitmap bitmap_input(input->size(), false);
     for (size_t i = input->size() / 2; i < input->size(); ++i) {
         bitmap_input[i] = true;
@@ -211,18 +209,11 @@ VerifySkipCursorContract(SegmentExpr& segment_expr,
     TargetBitmap res(input->size(), false);
     TargetBitmap valid(input->size(), true);
     const auto processed =
-        use_sorted_scan
-            ? segment_expr.ProcessSortedDataByOffsetsByScan<T>(
-                  evaluate_batch,
-                  skip_chunk,
-                  input,
-                  TargetBitmapView(res),
-                  TargetBitmapView(valid))
-            : segment_expr.ProcessDataByOffsets<T>(evaluate_batch,
-                                                   skip_chunk,
-                                                   input,
-                                                   TargetBitmapView(res),
-                                                   TargetBitmapView(valid));
+        segment_expr.ProcessDataByOffsets<T>(evaluate_batch,
+                                             skip_chunk,
+                                             input,
+                                             TargetBitmapView(res),
+                                             TargetBitmapView(valid));
 
     EXPECT_EQ(processed, int64_t(input->size()));
     EXPECT_EQ(processed_cursor, int64_t(input->size()));
@@ -646,10 +637,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
     }
 }
 
-// Pin the dense sorted scan path directly: candidates from the skipped first
-// binlog must still advance the callback cursor before the second binlog.
 TEST_F(OffsetsEvalCorrectnessTest,
-       SealedDenseOffsetScanSkipKeepsBitmapCursorAligned) {
+       SealedOffsetTakeSkipKeepsBitmapCursorAligned) {
     auto query_context = std::make_shared<QueryContext>(
         DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
     auto seg_expr = MakeDirectSegmentExpr(
@@ -659,8 +648,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
         offsets.emplace_back(offset);
     }
 
-    VerifySkipCursorContract<int64_t>(
-        *seg_expr, &offsets, 0, /*use_sorted_scan=*/true);
+    VerifySkipCursorContract<int64_t>(*seg_expr, &offsets, 0);
 }
 
 TEST_F(OffsetsEvalCorrectnessTest, SequentialScanCursorOwnsItsLogicalPosition) {
@@ -947,21 +935,6 @@ TEST_F(OffsetsEvalCorrectnessTest,
     }
 
     EXPECT_TRUE(weak_column.expired());
-}
-
-TEST(OffsetScanDensityTest, RejectsBatchSizedSparseRange) {
-    OffsetVector sparse_offsets;
-    sparse_offsets.emplace_back(0);
-    sparse_offsets.emplace_back(8191);
-    EXPECT_FALSE(
-        InspectableSegmentExpr::IsDenseOffsetInputForScan(&sparse_offsets));
-
-    OffsetVector dense_offsets;
-    for (int32_t offset = 0; offset < 8; ++offset) {
-        dense_offsets.emplace_back(offset);
-    }
-    EXPECT_TRUE(
-        InspectableSegmentExpr::IsDenseOffsetInputForScan(&dense_offsets));
 }
 
 // Exercise the production expression stack used by iterative filtering:

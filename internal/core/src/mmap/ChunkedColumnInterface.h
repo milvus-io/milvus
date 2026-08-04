@@ -45,6 +45,11 @@ class ChunkedColumnInterface {
     using ScanOptions = milvus::ScanOptions;
     using ScanResult = milvus::ScanResult;
     using PreparedScanResult = milvus::PreparedScanResult;
+    using OffsetView = milvus::OffsetView;
+    using TakeBatch = milvus::TakeBatch;
+    using TakeCursor = milvus::TakeCursor;
+    using TakeOptions = milvus::TakeOptions;
+    using TakeResult = milvus::TakeResult;
 
     virtual ~ChunkedColumnInterface() = default;
 
@@ -216,6 +221,13 @@ class ChunkedColumnInterface {
 
     virtual PreparedScanResult
     PrepareScan(milvus::OpContext* op_ctx, const ScanOptions& options) const;
+
+    // Positional access. The returned logical values must follow the input
+    // offset order exactly and preserve duplicates. Backends are free to sort,
+    // group, deduplicate, or materialize internally as long as those details
+    // do not cross the TakeBatch boundary.
+    virtual TakeResult
+    Take(milvus::OpContext* op_ctx, const TakeOptions& options) const;
 
     // Get number of rows before a specific chunk
     virtual int64_t
