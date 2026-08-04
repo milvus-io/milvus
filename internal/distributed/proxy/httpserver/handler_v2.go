@@ -353,7 +353,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(SnapshotJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listRestoreSnapshotJobs))))
 	router.POST(SnapshotCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &CreateSnapshotReq{} }, wrapperTraceLog(h.createSnapshot))))
 	router.POST(SnapshotCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &SnapshotReq{} }, wrapperTraceLog(h.dropSnapshot))))
-	router.POST(SnapshotCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listSnapshots))))
+	router.POST(SnapshotCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.listSnapshots))))
 	router.POST(SnapshotCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &SnapshotReq{} }, wrapperTraceLog(h.describeSnapshot))))
 	router.POST(SnapshotCategory+RestoreAction, timeoutMiddleware(wrapperPost(func() any { return &RestoreSnapshotReq{} }, wrapperTraceLog(h.restoreSnapshot))))
 	router.POST(SnapshotCategory+PinAction, timeoutMiddleware(wrapperPost(func() any { return &PinSnapshotDataReq{} }, wrapperTraceLog(h.pinSnapshotData))))
