@@ -52,14 +52,9 @@ class InspectableSegmentExpr : public SegmentExpr {
         return data_access_mode_ != DataAccessMode::Uninitialized;
     }
 
-    const ChunkedColumnInterface::ScanCursor*
-    DataScanCursor() const {
-        return data_scan_cursor_.get();
-    }
-
     bool
-    HasPreparedDataScan() const {
-        return data_prepared_scan_ != nullptr;
+    HasRetainedDataScanColumn() const {
+        return data_scan_column_ != nullptr;
     }
 
     int64_t
@@ -651,7 +646,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
     VerifySkipCursorContract<int64_t>(*seg_expr, &offsets, 0);
 }
 
-TEST_F(OffsetsEvalCorrectnessTest, SequentialScanCursorOwnsItsLogicalPosition) {
+TEST_F(OffsetsEvalCorrectnessTest,
+       SequentialScanAdvancesByWindowWithoutRetainingCursor) {
     auto query_context = std::make_shared<QueryContext>(
         DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
     InspectableSegmentExpr seg_expr(std::vector<ExprPtr>{},
@@ -682,9 +678,7 @@ TEST_F(OffsetsEvalCorrectnessTest, SequentialScanCursorOwnsItsLogicalPosition) {
                                             TargetBitmapView(first_valid)),
         4);
     ASSERT_TRUE(seg_expr.DataScanInitialized());
-    const auto* cursor = seg_expr.DataScanCursor();
-    ASSERT_NE(cursor, nullptr);
-    EXPECT_EQ(cursor->Position(), 4);
+    EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
     EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 4);
     EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 0);
 
@@ -696,8 +690,7 @@ TEST_F(OffsetsEvalCorrectnessTest, SequentialScanCursorOwnsItsLogicalPosition) {
                                             TargetBitmapView(second_res),
                                             TargetBitmapView(second_valid)),
         4);
-    EXPECT_EQ(seg_expr.DataScanCursor(), cursor);
-    EXPECT_EQ(cursor->Position(), 8);
+    EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
     EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 8);
     EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 0);
 }
@@ -738,8 +731,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
                                                   TargetBitmapView(valid)),
               20);
     EXPECT_EQ(callback_sizes, (std::vector<int64_t>{16, 4}));
-    ASSERT_NE(seg_expr.DataScanCursor(), nullptr);
-    EXPECT_EQ(seg_expr.DataScanCursor()->Position(), 20);
+    EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
     EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 20);
     EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 0);
 }
@@ -908,19 +900,18 @@ TEST_F(OffsetsEvalCorrectnessTest,
                                                 TargetBitmapView(first_res),
                                                 TargetBitmapView(first_valid)),
             4);
-        EXPECT_TRUE(seg_expr.HasPreparedDataScan());
+        EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
 
         sealed_->DropFieldData(i64_fid_);
         ASSERT_FALSE(sealed_->HasFieldData(i64_fid_));
         ASSERT_FALSE(weak_column.expired())
-            << "the active scan cursor must retain its source column";
+            << "the expression must retain its selected source column";
 
         // Skip one execution batch after the live segment drops the field.
-        // Reopening must use the retained column generation instead of asking
-        // the segment for its now-missing field again.
+        // The next window must prepare from the retained column generation
+        // instead of asking the segment for its now-missing field again.
         seg_expr.MoveCursor();
-        EXPECT_EQ(seg_expr.DataScanCursor(), nullptr);
-        EXPECT_TRUE(seg_expr.HasPreparedDataScan());
+        EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
         EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 8);
 
         TargetBitmap second_res(4, false);
@@ -1118,28 +1109,27 @@ TEST_F(OffsetsEvalCorrectnessTest,
     process_batch();
     EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 4);
     EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 0);
-
-    ASSERT_NE(seg_expr.DataScanCursor(), nullptr);
+    EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
 
     // Simulate a conjunction short-circuit: skip the second expression batch
-    // and reset the active scan without evaluating it.
+    // without preparing scan resources for that window.
     seg_expr.MoveCursor();
     EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 8);
     EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 0);
-    EXPECT_EQ(seg_expr.DataScanCursor(), nullptr);
+    EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
 
     // A second consecutive short-circuit must advance only the execution
-    // position. There is no cursor generation or chunk geometry to reuse.
+    // position. There is no cursor or prepared scan state to reuse.
     seg_expr.MoveCursor();
     EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 12);
     EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 0);
-    EXPECT_EQ(seg_expr.DataScanCursor(), nullptr);
+    EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
 
     // Recreate the VECTOR_ARRAY scan at the post-skip global position.
     process_batch();
     EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 16);
     EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 0);
-    EXPECT_NE(seg_expr.DataScanCursor(), nullptr);
+    EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
 }
 
 TEST_F(OffsetsEvalCorrectnessTest,
