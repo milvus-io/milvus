@@ -19,6 +19,7 @@ package httpserver
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -95,6 +96,7 @@ func (h *HandlersV2) describeSnapshot(ctx context.Context, c *gin.Context, anyRe
 	})
 	if err == nil {
 		snapshot := resp.(*milvuspb.DescribeSnapshotResponse)
+		allowInt64, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		HTTPReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode: merr.Code(nil),
 			HTTPReturnData: gin.H{
@@ -102,7 +104,7 @@ func (h *HandlersV2) describeSnapshot(ctx context.Context, c *gin.Context, anyRe
 				"description":    snapshot.GetDescription(),
 				"collectionName": snapshot.GetCollectionName(),
 				"partitionNames": snapshot.GetPartitionNames(),
-				"createTs":       snapshot.GetCreateTs(),
+				"createTs":       formatRESTInt64(snapshot.GetCreateTs(), allowInt64),
 				"s3Location":     snapshot.GetS3Location(),
 			},
 		})
@@ -125,10 +127,11 @@ func (h *HandlersV2) restoreSnapshot(ctx context.Context, c *gin.Context, anyReq
 		return h.proxy.RestoreSnapshot(reqCtx, req.(*milvuspb.RestoreSnapshotRequest))
 	})
 	if err == nil {
+		allowInt64, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		HTTPReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode: merr.Code(nil),
 			HTTPReturnData: gin.H{
-				"jobId": resp.(*milvuspb.RestoreSnapshotResponse).GetJobId(),
+				"jobId": formatRESTInt64(resp.(*milvuspb.RestoreSnapshotResponse).GetJobId(), allowInt64),
 			},
 		})
 	}
@@ -149,10 +152,11 @@ func (h *HandlersV2) pinSnapshotData(ctx context.Context, c *gin.Context, anyReq
 		return h.proxy.PinSnapshotData(reqCtx, req.(*milvuspb.PinSnapshotDataRequest))
 	})
 	if err == nil {
+		allowInt64, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		HTTPReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode: merr.Code(nil),
 			HTTPReturnData: gin.H{
-				"pinId": resp.(*milvuspb.PinSnapshotDataResponse).GetPinId(),
+				"pinId": formatRESTInt64(resp.(*milvuspb.PinSnapshotDataResponse).GetPinId(), allowInt64),
 			},
 		})
 	}
@@ -161,8 +165,14 @@ func (h *HandlersV2) pinSnapshotData(ctx context.Context, c *gin.Context, anyReq
 
 func (h *HandlersV2) unpinSnapshotData(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*UnpinSnapshotDataReq)
+	pinID, err := strconv.ParseInt(httpReq.PinID, 10, 64)
+	if err != nil || pinID <= 0 {
+		paramErr := merr.WrapErrParameterInvalidMsg("pinId must be a positive decimal int64, got %q", httpReq.PinID)
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
+		return nil, paramErr
+	}
 	req := &milvuspb.UnpinSnapshotDataRequest{
-		PinId: httpReq.PinID,
+		PinId: pinID,
 	}
 	c.Set(ContextRequest, req)
 

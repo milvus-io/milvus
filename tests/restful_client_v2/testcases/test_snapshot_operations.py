@@ -53,7 +53,8 @@ class TestSnapshotOperations(TestBase):
         assert rsp["data"]["collectionName"] == source_collection, rsp
         assert rsp["data"]["description"] == create_payload["description"], rsp
         assert isinstance(rsp["data"]["partitionNames"], list), rsp
-        assert rsp["data"]["createTs"] > 0, rsp
+        create_ts = rsp["data"]["createTs"]
+        assert isinstance(create_ts, str) and int(create_ts) > 0, rsp
         assert rsp["data"]["s3Location"], rsp
 
         rsp = self.snapshot_client.snapshot_export(
@@ -77,7 +78,7 @@ class TestSnapshotOperations(TestBase):
         rsp = self.snapshot_client.snapshot_pin({**snapshot_payload, "ttlSeconds": 60})
         assert rsp["code"] == 0, rsp
         pin_id = rsp["data"]["pinId"]
-        assert isinstance(pin_id, int) and pin_id > 0, rsp
+        assert isinstance(pin_id, str) and int(pin_id) > 0, rsp
 
         rsp = self.snapshot_client.snapshot_unpin({"pinId": pin_id})
         assert rsp["code"] == 0, rsp
@@ -91,7 +92,7 @@ class TestSnapshotOperations(TestBase):
         )
         assert rsp["code"] == 0, rsp
         job_id = rsp["data"]["jobId"]
-        assert isinstance(job_id, int) and job_id > 0, rsp
+        assert isinstance(job_id, str) and int(job_id) > 0, rsp
 
         deadline = time.time() + 180
         while time.time() < deadline:
