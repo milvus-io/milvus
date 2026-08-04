@@ -231,12 +231,10 @@ class VortexColumn final : public ChunkedColumnInterface {
     PrepareScan(milvus::OpContext* op_ctx,
                 const ScanOptions& options) const override;
 
- private:
-    struct TakeResult {
-        std::vector<std::shared_ptr<Chunk>> chunks;
-        std::vector<int64_t> offsets;
-    };
+    TakeResult
+    Take(milvus::OpContext* op_ctx, const TakeOptions& options) const override;
 
+ private:
     std::optional<DataType>
     GetDefaultScanDataType() const override;
 
@@ -248,6 +246,7 @@ class VortexColumn final : public ChunkedColumnInterface {
 
     struct ArrowTakeResult;
     struct ArrowStringViewHolder;
+    struct OrderedTakeOwner;
     class ArrowStringLikeColumn;
 
     static std::shared_ptr<arrow::Schema>
@@ -355,48 +354,21 @@ class VortexColumn final : public ChunkedColumnInterface {
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const;
 
-    std::shared_ptr<Chunk>
-    TakeFromFile(milvus::OpContext* op_ctx,
-                 int64_t chunk_id,
-                 const std::vector<int64_t>& offsets) const;
-
-    TakeResult
-    TakeOwn(milvus::OpContext* op_ctx,
-            const int64_t* offsets,
-            int64_t count) const;
-
     ArrowTakeResult
     TakeArrowFromFile(milvus::OpContext* op_ctx,
                       int64_t chunk_id,
                       const std::vector<int64_t>& offsets) const;
 
-    std::pair<std::shared_ptr<ArrowStringViewHolder>,
-              std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    TakeStringLikeViews(milvus::OpContext* op_ctx,
-                        const int64_t* offsets,
-                        int64_t count) const;
-
     template <typename ArrowArrayT,
               typename SrcT,
               typename RawDstT,
               typename WidenDstT>
     void
-    CopyArrowPrimitiveValues(
-        void* dst,
-        const std::shared_ptr<arrow::Table>& table,
-        const std::vector<std::vector<int64_t>>& original_indices_by_unique,
-        bool small_int_raw_type) const;
-
-    template <typename ArrowArrayT,
-              typename SrcT,
-              typename RawDstT,
-              typename WidenDstT>
-    void
-    BulkPrimitiveValueAtFromArrow(milvus::OpContext* op_ctx,
-                                  void* dst,
-                                  const int64_t* offsets,
-                                  int64_t count,
-                                  bool small_int_raw_type) const;
+    CopyArrowPrimitiveValues(void* dst,
+                             const std::shared_ptr<arrow::Table>& table,
+                             const std::vector<int64_t>& original_positions,
+                             const std::vector<int64_t>& original_position_ends,
+                             bool small_int_raw_type) const;
 
     void
     BulkStringLikeAt(

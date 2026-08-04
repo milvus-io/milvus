@@ -20,6 +20,7 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 
 #include <fmt/format.h>
@@ -69,14 +70,12 @@ IsArrowStringLikeType(arrow::Type::type type) {
     return type == arrow::Type::STRING || type == arrow::Type::BINARY ||
            type == arrow::Type::LARGE_STRING ||
            type == arrow::Type::LARGE_BINARY ||
-           type == arrow::Type::STRING_VIEW ||
-           type == arrow::Type::BINARY_VIEW;
+           type == arrow::Type::STRING_VIEW || type == arrow::Type::BINARY_VIEW;
 }
 
 bool
 IsArrowBinaryLikeType(arrow::Type::type type) {
-    return type == arrow::Type::BINARY ||
-           type == arrow::Type::LARGE_BINARY ||
+    return type == arrow::Type::BINARY || type == arrow::Type::LARGE_BINARY ||
            type == arrow::Type::BINARY_VIEW;
 }
 
@@ -203,11 +202,9 @@ struct PreparedVortexScanSource {
     VortexCellPin pin;
 };
 
-class CallbackPreparedScan final
-    : public ChunkedColumnInterface::PreparedScan {
+class CallbackPreparedScan final : public ChunkedColumnInterface::PreparedScan {
  public:
-    using SeekFunc =
-        std::function<ChunkedColumnInterface::ScanResult(int64_t)>;
+    using SeekFunc = std::function<ChunkedColumnInterface::ScanResult(int64_t)>;
 
     CallbackPreparedScan(int64_t start, int64_t end, SeekFunc seek)
         : start_(start), end_(end), seek_(std::move(seek)) {
@@ -225,11 +222,12 @@ class CallbackPreparedScan final
 
     ChunkedColumnInterface::ScanResult
     Seek(int64_t position) const override {
-        AssertInfo(position >= start_ && position <= end_,
-                   "vortex scan cursor position {} outside prepared range [{}, {})",
-                   position,
-                   start_,
-                   end_);
+        AssertInfo(
+            position >= start_ && position <= end_,
+            "vortex scan cursor position {} outside prepared range [{}, {})",
+            position,
+            start_,
+            end_);
         return seek_(position);
     }
 
@@ -379,6 +377,83 @@ struct VortexColumn::ArrowStringViewHolder {
     std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
 };
 
+struct VortexColumn::OrderedTakeOwner {
+    std::vector<std::shared_ptr<
+        cachinglayer::CellAccessor<milvus_storage::vortex::VortexCellGuard>>>
+        pins;
+    std::vector<std::shared_ptr<arrow::Table>> tables;
+    std::vector<std::shared_ptr<arrow::Array>> normalized_arrays;
+
+    std::vector<int8_t> int8_values;
+    std::vector<int16_t> int16_values;
+    std::vector<int32_t> int32_values;
+    std::vector<int64_t> int64_values;
+    std::vector<float> float_values;
+    std::vector<double> double_values;
+    FixedVector<bool> bool_values;
+    FixedVector<bool> validity;
+
+    std::vector<std::string_view> string_views;
+    std::vector<Json> json_values;
+    std::vector<Array> arrays;
+    std::vector<ArrayView> array_views;
+};
+
+class VortexOrderedTakeCursor final
+    : public ChunkedColumnInterface::TakeCursor {
+ public:
+    VortexOrderedTakeCursor(ChunkedColumnInterface::ValueView values,
+                            const bool* validity,
+                            std::shared_ptr<void> owner,
+                            int64_t size)
+        : values_(values),
+          validity_(validity),
+          owner_(std::move(owner)),
+          size_(size) {
+    }
+
+    int64_t
+    Position() const override {
+        return position_;
+    }
+
+    bool
+    Next(int64_t max_rows, ChunkedColumnInterface::TakeBatch* out) override {
+        AssertInfo(out != nullptr, "vortex take output batch is null");
+        AssertInfo(max_rows > 0,
+                   "vortex take max rows must be positive, got {}",
+                   max_rows);
+        out->values = ChunkedColumnInterface::ValueView{};
+        out->selection = nullptr;
+        out->validity = nullptr;
+        out->owner.reset();
+        out->position = 0;
+        out->size = 0;
+        out->source_chunk_id = -1;
+        if (position_ >= size_) {
+            return false;
+        }
+
+        const auto rows = std::min(max_rows, size_ - position_);
+        out->values = values_;
+        out->values.offset += position_;
+        out->values.size = rows;
+        out->validity = validity_ == nullptr ? nullptr : validity_ + position_;
+        out->owner = owner_;
+        out->position = position_;
+        out->size = rows;
+        position_ += rows;
+        return true;
+    }
+
+ private:
+    ChunkedColumnInterface::ValueView values_;
+    const bool* validity_;
+    std::shared_ptr<void> owner_;
+    int64_t size_;
+    int64_t position_{0};
+};
+
 class VortexColumn::ArrowStringLikeColumn {
  public:
     explicit ArrowStringLikeColumn(const std::shared_ptr<arrow::Table>& table) {
@@ -493,8 +568,7 @@ class VortexRowIdScanCursor final : public ChunkedColumnInterface::ScanCursor {
                           int64_t start_offset,
                           int64_t length,
                           std::vector<VortexRowIdScanSource>&& sources)
-        : scan_pos_(start_offset),
-          sources_(std::move(sources)) {
+        : scan_pos_(start_offset), sources_(std::move(sources)) {
         AssertInfo(start_offset >= 0 && length >= 0 &&
                        start_offset + length <=
                            static_cast<int64_t>(column->NumRows()),
@@ -941,8 +1015,7 @@ class VortexDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
                       "vortex data scan field {} expected Arrow {}, got {}",
                       column_->field_id_.get(),
                       GetArrowDataType(column_->data_type_)->ToString(),
-                      array == nullptr ? "<null>"
-                                       : array->type()->ToString());
+                      array == nullptr ? "<null>" : array->type()->ToString());
         }
         return typed->raw_values();
     }
@@ -1420,7 +1493,6 @@ VortexColumn::StringViewsByOffsets(milvus::OpContext* op_ctx,
                   "variable fields");
     }
     CheckChunkId(chunk_id);
-    auto holder = std::make_shared<ArrowStringViewHolder>();
     std::pair<std::vector<std::string_view>, FixedVector<bool>> views;
     views.first.resize(offsets.size());
     views.second.resize(offsets.size());
@@ -1430,61 +1502,51 @@ VortexColumn::StringViewsByOffsets(milvus::OpContext* op_ctx,
             std::move(views));
     }
 
-    std::vector<std::pair<int64_t, int64_t>> entries;
-    entries.reserve(offsets.size());
-    for (int64_t i = 0; i < static_cast<int64_t>(offsets.size()); ++i) {
-        auto offset = offsets[i];
+    std::vector<int64_t> global_offsets(offsets.size());
+    const auto chunk_start = GetNumRowsUntilChunk(chunk_id);
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        const auto offset = offsets[i];
         AssertInfo(offset >= 0 && offset < files_[chunk_id].rows,
                    "vortex chunk-local offset {} out of chunk {} rows {}",
                    offset,
                    chunk_id,
                    files_[chunk_id].rows);
-        entries.emplace_back(offset, i);
-    }
-    std::sort(entries.begin(), entries.end());
-    std::vector<int64_t> unique_offsets;
-    unique_offsets.reserve(entries.size());
-    for (const auto& [offset, _] : entries) {
-        if (unique_offsets.empty() || unique_offsets.back() != offset) {
-            unique_offsets.emplace_back(offset);
-        }
+        global_offsets[i] = chunk_start + offset;
     }
 
-    if (!SupportsDirectDataScan()) {
-        auto chunk = TakeFromFile(op_ctx, chunk_id, unique_offsets);
-        auto unique_views =
-            static_cast<StringChunk*>(chunk.get())->StringViews(std::nullopt);
-        for (const auto& [offset, original_index] : entries) {
-            auto it = std::lower_bound(
-                unique_offsets.begin(), unique_offsets.end(), offset);
-            auto take_offset = std::distance(unique_offsets.begin(), it);
-            views.first[original_index] = unique_views.first[take_offset];
-            views.second[original_index] =
-                field_meta_.is_nullable() ? unique_views.second[take_offset]
-                                          : true;
+    const auto value_kind = data_type_ == DataType::JSON
+                                ? ScanValueKind::JsonView
+                                : ScanValueKind::StringView;
+    auto cursor = Take(op_ctx,
+                       TakeOptions{OffsetView::From(global_offsets.data(),
+                                                    global_offsets.size()),
+                                   value_kind});
+    AssertInfo(cursor != nullptr,
+               "vortex string view take is unsupported for type {}",
+               data_type_);
+    TakeBatch batch;
+    AssertInfo(cursor->Next(offsets.size(), &batch),
+               "vortex string view take returned no data");
+    AssertInfo(batch.size == static_cast<int64_t>(offsets.size()),
+               "vortex string view take returned {} rows, expected {}",
+               batch.size,
+               offsets.size());
+    if (data_type_ == DataType::JSON) {
+        const auto* data = batch.values.data_as<Json>();
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            views.first[i] = data[i];
+            views.second[i] = batch.validity == nullptr || batch.validity[i];
         }
-        return PinWrapper<
-            std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
-            chunk, std::move(views));
+    } else {
+        const auto* data = batch.values.data_as<std::string_view>();
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            views.first[i] = data[i];
+            views.second[i] = batch.validity == nullptr || batch.validity[i];
+        }
     }
-
-    auto take = TakeArrowFromFile(op_ctx, chunk_id, unique_offsets);
-    ArrowStringLikeColumn column(take.table);
-    auto unique_views = BuildStringViewsFromArrow(
-        column, std::nullopt, field_meta_.is_nullable());
-    for (const auto& [offset, original_index] : entries) {
-        auto it = std::lower_bound(
-            unique_offsets.begin(), unique_offsets.end(), offset);
-        auto take_offset = std::distance(unique_offsets.begin(), it);
-        views.first[original_index] = unique_views.first[take_offset];
-        views.second[original_index] =
-            field_meta_.is_nullable() ? unique_views.second[take_offset] : true;
-    }
-    holder->pins.emplace_back(std::move(take.pin));
-    holder->tables.emplace_back(std::move(take.table));
     return PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
-        std::move(holder), std::move(views));
+        std::move(batch.owner), std::move(views));
 }
 
 PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
@@ -1505,38 +1567,37 @@ VortexColumn::ArrayViewsByOffsets(milvus::OpContext* op_ctx,
             std::move(views));
     }
 
-    std::vector<std::pair<int64_t, int64_t>> entries;
-    entries.reserve(offsets.size());
-    for (int64_t i = 0; i < static_cast<int64_t>(offsets.size()); ++i) {
-        auto offset = offsets[i];
+    std::vector<int64_t> global_offsets(offsets.size());
+    const auto chunk_start = GetNumRowsUntilChunk(chunk_id);
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        const auto offset = offsets[i];
         AssertInfo(offset >= 0 && offset < files_[chunk_id].rows,
                    "vortex chunk-local offset {} out of chunk {} rows {}",
                    offset,
                    chunk_id,
                    files_[chunk_id].rows);
-        entries.emplace_back(offset, i);
-    }
-    std::sort(entries.begin(), entries.end());
-    std::vector<int64_t> unique_offsets;
-    unique_offsets.reserve(entries.size());
-    for (const auto& [offset, _] : entries) {
-        if (unique_offsets.empty() || unique_offsets.back() != offset) {
-            unique_offsets.emplace_back(offset);
-        }
+        global_offsets[i] = chunk_start + offset;
     }
 
-    auto chunk = TakeFromFile(op_ctx, chunk_id, unique_offsets);
-    auto array_chunk = static_cast<ArrayChunk*>(chunk.get());
-    for (const auto& [offset, original_index] : entries) {
-        auto it = std::lower_bound(
-            unique_offsets.begin(), unique_offsets.end(), offset);
-        auto take_offset =
-            static_cast<int>(std::distance(unique_offsets.begin(), it));
-        views.first[original_index] = array_chunk->View(take_offset);
-        views.second[original_index] = array_chunk->isValid(take_offset);
+    auto cursor = Take(op_ctx,
+                       TakeOptions{OffsetView::From(global_offsets.data(),
+                                                    global_offsets.size()),
+                                   ScanValueKind::ArrayView});
+    AssertInfo(cursor != nullptr, "vortex array view take is unsupported");
+    TakeBatch batch;
+    AssertInfo(cursor->Next(offsets.size(), &batch),
+               "vortex array view take returned no data");
+    AssertInfo(batch.size == static_cast<int64_t>(offsets.size()),
+               "vortex array view take returned {} rows, expected {}",
+               batch.size,
+               offsets.size());
+    const auto* data = batch.values.data_as<ArrayView>();
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        views.first[i] = data[i];
+        views.second[i] = batch.validity == nullptr || batch.validity[i];
     }
     return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
-        chunk, std::move(views));
+        std::move(batch.owner), std::move(views));
 }
 
 std::pair<size_t, size_t>
@@ -1653,10 +1714,33 @@ VortexColumn::BulkValueAt(milvus::OpContext* op_ctx,
                           std::function<void(const char*, size_t)> fn,
                           const int64_t* offsets,
                           int64_t count) {
-    auto result = TakeOwn(op_ctx, offsets, count);
-    for (int64_t i = 0; i < count; ++i) {
-        fn(result.chunks[i]->ValueAt(result.offsets[i]), i);
+    if (count == 0) {
+        return;
     }
+    auto cursor = Take(op_ctx,
+                       TakeOptions{OffsetView::From(offsets, count),
+                                   ScanValueKind::FixedWidth});
+    AssertInfo(cursor != nullptr,
+               "vortex bulk value take is unsupported for type {}",
+               data_type_);
+    TakeBatch batch;
+    int64_t output_index = 0;
+    while (cursor->Next(count - output_index, &batch)) {
+        AssertInfo(batch.values.encoding == ValueEncoding::FixedWidth,
+                   "vortex bulk value expected fixed-width take, got {}",
+                   static_cast<int>(batch.values.encoding));
+        const auto* data = static_cast<const char*>(batch.values.data);
+        for (int64_t i = 0; i < batch.size; ++i) {
+            const auto value_index = batch.selection == nullptr
+                                         ? batch.values.offset + i
+                                         : batch.selection[i];
+            fn(data + value_index * batch.values.byte_width, output_index++);
+        }
+    }
+    AssertInfo(output_index == count,
+               "vortex bulk value take returned {} rows, expected {}",
+               output_index,
+               count);
 }
 
 std::optional<DataType>
@@ -2224,14 +2308,6 @@ VortexColumn::ScanStringLikeViewsFromFile(
     return {std::move(holder), std::move(views)};
 }
 
-std::shared_ptr<Chunk>
-VortexColumn::TakeFromFile(milvus::OpContext* op_ctx,
-                           int64_t chunk_id,
-                           const std::vector<int64_t>& offsets) const {
-    auto take = TakeArrowFromFile(op_ctx, chunk_id, offsets);
-    return ChunkFromTable(take.table);
-}
-
 VortexColumn::ArrowTakeResult
 VortexColumn::TakeArrowFromFile(milvus::OpContext* op_ctx,
                                 int64_t chunk_id,
@@ -2297,67 +2373,6 @@ VortexColumn::TakeArrowFromFile(milvus::OpContext* op_ctx,
     return result;
 }
 
-std::pair<std::shared_ptr<VortexColumn::ArrowStringViewHolder>,
-          std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-VortexColumn::TakeStringLikeViews(milvus::OpContext* op_ctx,
-                                  const int64_t* offsets,
-                                  int64_t count) const {
-    auto holder = std::make_shared<ArrowStringViewHolder>();
-    std::pair<std::vector<std::string_view>, FixedVector<bool>> views;
-    views.first.resize(count);
-    views.second.resize(count);
-    if (count == 0) {
-        return {std::move(holder), std::move(views)};
-    }
-    AssertInfo(offsets != nullptr,
-               "vortex string-like take requires explicit row offsets");
-
-    std::unordered_map<int64_t, std::vector<std::pair<int64_t, int64_t>>>
-        chunk_entries;
-    for (int64_t i = 0; i < count; ++i) {
-        auto [chunk_id, chunk_offset] = GetChunkIDByOffset(offsets[i]);
-        chunk_entries[static_cast<int64_t>(chunk_id)].push_back(
-            {static_cast<int64_t>(chunk_offset), i});
-    }
-
-    holder->pins.reserve(chunk_entries.size());
-    holder->tables.reserve(chunk_entries.size());
-    for (auto& [chunk_id, entries] : chunk_entries) {
-        std::sort(entries.begin(), entries.end());
-        std::vector<int64_t> unique_offsets;
-        unique_offsets.reserve(entries.size());
-        for (const auto& [chunk_offset, _] : entries) {
-            if (unique_offsets.empty() ||
-                unique_offsets.back() != chunk_offset) {
-                unique_offsets.emplace_back(chunk_offset);
-            }
-        }
-
-        auto take = TakeArrowFromFile(op_ctx, chunk_id, unique_offsets);
-        ArrowStringLikeColumn column(take.table);
-        auto unique_views = BuildStringViewsFromArrow(
-            column, std::nullopt, field_meta_.is_nullable());
-        AssertInfo(static_cast<int64_t>(unique_views.first.size()) ==
-                       static_cast<int64_t>(unique_offsets.size()),
-                   "vortex string-like take returned {} rows, expected {}",
-                   unique_views.first.size(),
-                   unique_offsets.size());
-        for (const auto& [chunk_offset, original_index] : entries) {
-            auto it = std::lower_bound(
-                unique_offsets.begin(), unique_offsets.end(), chunk_offset);
-            auto take_offset = std::distance(unique_offsets.begin(), it);
-            views.first[original_index] = unique_views.first[take_offset];
-            views.second[original_index] =
-                field_meta_.is_nullable() ? unique_views.second[take_offset]
-                                          : true;
-        }
-        holder->pins.emplace_back(std::move(take.pin));
-        holder->tables.emplace_back(std::move(take.table));
-    }
-
-    return {std::move(holder), std::move(views)};
-}
-
 template <typename ArrowArrayT,
           typename SrcT,
           typename RawDstT,
@@ -2366,7 +2381,8 @@ void
 VortexColumn::CopyArrowPrimitiveValues(
     void* dst,
     const std::shared_ptr<arrow::Table>& table,
-    const std::vector<std::vector<int64_t>>& original_indices_by_unique,
+    const std::vector<int64_t>& original_positions,
+    const std::vector<int64_t>& original_position_ends,
     bool small_int_raw_type) const {
     AssertInfo(table != nullptr, "vortex primitive take table is null");
     AssertInfo(table->num_columns() == 1,
@@ -2374,11 +2390,11 @@ VortexColumn::CopyArrowPrimitiveValues(
                table->num_columns());
     auto column = table->column(0);
     AssertInfo(column != nullptr, "vortex primitive take column is null");
-    AssertInfo(static_cast<int64_t>(original_indices_by_unique.size()) ==
-                   column->length(),
-               "vortex primitive take returned {} rows, expected {}",
-               column->length(),
-               original_indices_by_unique.size());
+    AssertInfo(
+        static_cast<int64_t>(original_position_ends.size()) == column->length(),
+        "vortex primitive take returned {} rows, expected {}",
+        column->length(),
+        original_position_ends.size());
 
     auto raw_dst = static_cast<RawDstT*>(dst);
     auto widen_dst = static_cast<WidenDstT*>(dst);
@@ -2392,11 +2408,15 @@ VortexColumn::CopyArrowPrimitiveValues(
                    data_type_,
                    chunk ? chunk->type()->ToString() : "<null>");
         for (int64_t i = 0; i < array->length(); ++i) {
-            const auto& output_indices =
-                original_indices_by_unique[static_cast<size_t>(table_offset +
-                                                               i)];
+            const auto unique_index = table_offset + i;
+            const auto position_start =
+                unique_index == 0 ? 0
+                                  : original_position_ends[unique_index - 1];
+            const auto position_end = original_position_ends[unique_index];
             auto value = static_cast<SrcT>(array->Value(i));
-            for (auto output_index : output_indices) {
+            for (auto position = position_start; position < position_end;
+                 ++position) {
+                const auto output_index = original_positions[position];
                 if (small_int_raw_type) {
                     raw_dst[output_index] = static_cast<RawDstT>(value);
                 } else {
@@ -2408,49 +2428,368 @@ VortexColumn::CopyArrowPrimitiveValues(
     }
 }
 
-template <typename ArrowArrayT,
-          typename SrcT,
-          typename RawDstT,
-          typename WidenDstT>
-void
-VortexColumn::BulkPrimitiveValueAtFromArrow(milvus::OpContext* op_ctx,
-                                            void* dst,
-                                            const int64_t* offsets,
-                                            int64_t count,
-                                            bool small_int_raw_type) const {
-    if (count == 0) {
-        return;
-    }
-    AssertInfo(offsets != nullptr,
-               "vortex primitive take requires explicit row offsets");
-
-    std::unordered_map<int64_t, std::vector<std::pair<int64_t, int64_t>>>
-        chunk_entries;
-    for (int64_t i = 0; i < count; ++i) {
-        auto [chunk_id, chunk_offset] = GetChunkIDByOffset(offsets[i]);
-        chunk_entries[static_cast<int64_t>(chunk_id)].push_back(
-            {static_cast<int64_t>(chunk_offset), i});
+ChunkedColumnInterface::TakeResult
+VortexColumn::Take(milvus::OpContext* op_ctx,
+                   const TakeOptions& options) const {
+    AssertInfo(options.offsets.size >= 0,
+               "vortex take offset count must be non-negative, got {}",
+               options.offsets.size);
+    if (options.offsets.size > 0) {
+        AssertInfo(options.offsets.data != nullptr,
+                   "vortex take offsets are null with count {}",
+                   options.offsets.size);
     }
 
-    for (auto& [chunk_id, entries] : chunk_entries) {
-        std::sort(entries.begin(), entries.end());
+    ScanValueKind expected_kind;
+    if (IsPrimitiveDataType(data_type_)) {
+        expected_kind = ScanValueKind::FixedWidth;
+    } else if (data_type_ == DataType::JSON) {
+        expected_kind = ScanValueKind::JsonView;
+    } else if (IsChunkedVariableColumnDataType(data_type_)) {
+        expected_kind = ScanValueKind::StringView;
+    } else if (IsChunkedArrayColumnDataType(data_type_)) {
+        expected_kind = ScanValueKind::ArrayView;
+    } else {
+        return nullptr;
+    }
+    const auto value_kind = options.value_kind == ScanValueKind::Default
+                                ? expected_kind
+                                : options.value_kind;
+    AssertInfo(value_kind == expected_kind,
+               "vortex take value kind {} does not match column type {}, "
+               "expected {}",
+               static_cast<int>(value_kind),
+               data_type_,
+               static_cast<int>(expected_kind));
+
+    struct OffsetEntry {
+        int64_t chunk_id;
+        int64_t local_offset;
+        int64_t original_position;
+    };
+    struct OffsetGroup {
+        int64_t chunk_id;
         std::vector<int64_t> unique_offsets;
-        std::vector<std::vector<int64_t>> original_indices_by_offset;
-        unique_offsets.reserve(entries.size());
-        original_indices_by_offset.reserve(entries.size());
-        for (const auto& [chunk_offset, original_index] : entries) {
-            if (unique_offsets.empty() ||
-                unique_offsets.back() != chunk_offset) {
-                unique_offsets.emplace_back(chunk_offset);
-                original_indices_by_offset.emplace_back();
-            }
-            original_indices_by_offset.back().emplace_back(original_index);
-        }
+        std::vector<int64_t> original_positions;
+        std::vector<int64_t> original_position_ends;
+    };
 
-        auto take = TakeArrowFromFile(op_ctx, chunk_id, unique_offsets);
-        CopyArrowPrimitiveValues<ArrowArrayT, SrcT, RawDstT, WidenDstT>(
-            dst, take.table, original_indices_by_offset, small_int_raw_type);
+    std::vector<OffsetEntry> entries;
+    entries.reserve(options.offsets.size);
+    for (int64_t i = 0; i < options.offsets.size; ++i) {
+        auto [chunk_id, local_offset] = GetChunkIDByOffset(options.offsets[i]);
+        entries.emplace_back(OffsetEntry{static_cast<int64_t>(chunk_id),
+                                         static_cast<int64_t>(local_offset),
+                                         i});
     }
+    std::sort(entries.begin(),
+              entries.end(),
+              [](const OffsetEntry& left, const OffsetEntry& right) {
+                  return std::tie(left.chunk_id,
+                                  left.local_offset,
+                                  left.original_position) <
+                         std::tie(right.chunk_id,
+                                  right.local_offset,
+                                  right.original_position);
+              });
+
+    std::vector<OffsetGroup> groups;
+    for (const auto& entry : entries) {
+        if (groups.empty() || groups.back().chunk_id != entry.chunk_id) {
+            groups.emplace_back(OffsetGroup{entry.chunk_id, {}, {}, {}});
+        }
+        auto& group = groups.back();
+        if (group.unique_offsets.empty() ||
+            group.unique_offsets.back() != entry.local_offset) {
+            group.unique_offsets.emplace_back(entry.local_offset);
+            group.original_position_ends.emplace_back();
+        }
+        group.original_positions.emplace_back(entry.original_position);
+        group.original_position_ends.back() = group.original_positions.size();
+    }
+
+    auto for_each_original_position = [](const OffsetGroup& group,
+                                         size_t unique_index,
+                                         auto&& fn) {
+        const auto position_start =
+            unique_index == 0 ? 0
+                              : group.original_position_ends[unique_index - 1];
+        const auto position_end = group.original_position_ends[unique_index];
+        for (auto position = position_start; position < position_end;
+             ++position) {
+            fn(group.original_positions[position]);
+        }
+    };
+
+    auto owner = std::make_shared<OrderedTakeOwner>();
+    if (IsNullable()) {
+        owner->validity.resize(options.offsets.size);
+        std::fill(owner->validity.begin(), owner->validity.end(), true);
+    }
+
+    auto normalize_table = [&](const std::shared_ptr<arrow::Table>& table) {
+        std::vector<std::shared_ptr<arrow::Array>> arrays;
+        arrays.reserve(table->column(0)->num_chunks());
+        for (const auto& array : table->column(0)->chunks()) {
+            arrays.emplace_back(
+                storage::NormalizeExternalArrow(array, field_meta_));
+        }
+        owner->normalized_arrays.insert(
+            owner->normalized_arrays.end(), arrays.begin(), arrays.end());
+        auto chunked = std::make_shared<arrow::ChunkedArray>(arrays);
+        auto schema = arrow::schema(
+            {arrow::field(field_name_, chunked->type(), IsNullable())});
+        return arrow::Table::Make(schema, {std::move(chunked)});
+    };
+
+    auto retain_take = [&](ArrowTakeResult&& take,
+                           const std::shared_ptr<arrow::Table>& table) {
+        owner->pins.emplace_back(std::move(take.pin));
+        owner->tables.emplace_back(std::move(take.table));
+        if (table != owner->tables.back()) {
+            owner->tables.emplace_back(table);
+        }
+    };
+
+    auto copy_validity = [&](const std::shared_ptr<arrow::Table>& table,
+                             const OffsetGroup& group) {
+        if (!IsNullable()) {
+            return;
+        }
+        int64_t unique_index = 0;
+        for (const auto& array : table->column(0)->chunks()) {
+            for (int64_t i = 0; i < array->length(); ++i) {
+                const auto valid = array->IsValid(i);
+                for_each_original_position(
+                    group, unique_index, [&](auto original_position) {
+                        owner->validity[original_position] = valid;
+                    });
+                ++unique_index;
+            }
+        }
+        AssertInfo(
+            unique_index == static_cast<int64_t>(group.unique_offsets.size()),
+            "vortex take validity returned {} rows, expected {}",
+            unique_index,
+            group.unique_offsets.size());
+    };
+
+    auto fill_primitive =
+        [&]<typename ArrowArrayT, typename ValueT, typename ContainerT>(
+            ContainerT& output, bool normalize) {
+            output.resize(options.offsets.size);
+            for (const auto& group : groups) {
+                auto take = TakeArrowFromFile(
+                    op_ctx, group.chunk_id, group.unique_offsets);
+                auto table =
+                    normalize ? normalize_table(take.table) : take.table;
+                CopyArrowPrimitiveValues<ArrowArrayT, ValueT, ValueT, ValueT>(
+                    output.data(),
+                    table,
+                    group.original_positions,
+                    group.original_position_ends,
+                    true);
+                copy_validity(table, group);
+                retain_take(std::move(take), table);
+            }
+        };
+
+    ValueView values;
+    values.physical_type = data_type_;
+    values.logical_type = data_type_;
+    values.offset = 0;
+    values.size = options.offsets.size;
+
+    switch (data_type_) {
+        case DataType::INT8:
+            fill_primitive.template operator()<arrow::Int8Array, int8_t>(
+                owner->int8_values, false);
+            values.data = owner->int8_values.data();
+            values.byte_width = sizeof(int8_t);
+            break;
+        case DataType::INT16:
+            fill_primitive.template operator()<arrow::Int16Array, int16_t>(
+                owner->int16_values, false);
+            values.data = owner->int16_values.data();
+            values.byte_width = sizeof(int16_t);
+            break;
+        case DataType::INT32:
+            fill_primitive.template operator()<arrow::Int32Array, int32_t>(
+                owner->int32_values, false);
+            values.data = owner->int32_values.data();
+            values.byte_width = sizeof(int32_t);
+            break;
+        case DataType::INT64:
+            fill_primitive.template operator()<arrow::Int64Array, int64_t>(
+                owner->int64_values, false);
+            values.data = owner->int64_values.data();
+            values.byte_width = sizeof(int64_t);
+            break;
+        case DataType::TIMESTAMPTZ:
+            fill_primitive.template operator()<arrow::Int64Array, int64_t>(
+                owner->int64_values, !SupportsDirectDataScan());
+            values.data = owner->int64_values.data();
+            values.byte_width = sizeof(int64_t);
+            break;
+        case DataType::FLOAT:
+            fill_primitive.template operator()<arrow::FloatArray, float>(
+                owner->float_values, false);
+            values.data = owner->float_values.data();
+            values.byte_width = sizeof(float);
+            break;
+        case DataType::DOUBLE:
+            fill_primitive.template operator()<arrow::DoubleArray, double>(
+                owner->double_values, false);
+            values.data = owner->double_values.data();
+            values.byte_width = sizeof(double);
+            break;
+        case DataType::BOOL:
+            fill_primitive.template operator()<arrow::BooleanArray, bool>(
+                owner->bool_values, false);
+            values.data = owner->bool_values.data();
+            values.byte_width = sizeof(bool);
+            break;
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+        case DataType::JSON:
+        case DataType::GEOMETRY: {
+            owner->string_views.resize(options.offsets.size);
+            for (const auto& group : groups) {
+                auto take = TakeArrowFromFile(
+                    op_ctx, group.chunk_id, group.unique_offsets);
+                auto table = !SupportsDirectDataScan()
+                                 ? normalize_table(take.table)
+                                 : take.table;
+                ArrowStringLikeColumn column(table);
+                auto unique_views = BuildStringViewsFromArrow(
+                    column, std::nullopt, IsNullable());
+                AssertInfo(
+                    unique_views.first.size() == group.unique_offsets.size(),
+                    "vortex take returned {} string-like rows, "
+                    "expected {}",
+                    unique_views.first.size(),
+                    group.unique_offsets.size());
+                for (size_t i = 0; i < group.unique_offsets.size(); ++i) {
+                    const auto valid = !IsNullable() || unique_views.second[i];
+                    for_each_original_position(
+                        group, i, [&](auto original_position) {
+                            owner->string_views[original_position] =
+                                unique_views.first[i];
+                            if (IsNullable()) {
+                                owner->validity[original_position] = valid;
+                            }
+                        });
+                }
+                retain_take(std::move(take), table);
+            }
+            if (data_type_ == DataType::JSON) {
+                owner->json_values.reserve(owner->string_views.size());
+                for (const auto& value : owner->string_views) {
+                    owner->json_values.emplace_back(value);
+                }
+                values.encoding = ValueEncoding::JsonView;
+                values.kind = ScanValueKind::JsonView;
+                values.logical_type = DataType::JSON;
+                values.data = owner->json_values.data();
+                values.byte_width = sizeof(Json);
+            } else {
+                values.encoding = ValueEncoding::StringView;
+                values.kind = ScanValueKind::StringView;
+                values.data = owner->string_views.data();
+                values.byte_width = sizeof(std::string_view);
+            }
+            break;
+        }
+        case DataType::ARRAY: {
+            size_t unique_count = 0;
+            for (const auto& group : groups) {
+                unique_count += group.unique_offsets.size();
+            }
+            owner->arrays.reserve(unique_count);
+            std::vector<int64_t> ordered_array_indices(options.offsets.size,
+                                                       -1);
+            for (const auto& group : groups) {
+                auto take = TakeArrowFromFile(
+                    op_ctx, group.chunk_id, group.unique_offsets);
+                auto table = normalize_table(take.table);
+                ArrowStringLikeColumn column(table);
+                auto serialized = BuildStringViewsFromArrow(
+                    column, std::nullopt, IsNullable());
+                AssertInfo(
+                    serialized.first.size() == group.unique_offsets.size(),
+                    "vortex take returned {} array rows, expected {}",
+                    serialized.first.size(),
+                    group.unique_offsets.size());
+                for (size_t i = 0; i < group.unique_offsets.size(); ++i) {
+                    const auto array_index =
+                        static_cast<int64_t>(owner->arrays.size());
+                    const auto valid = !IsNullable() || serialized.second[i];
+                    if (valid) {
+                        ScalarFieldProto proto;
+                        const auto& value = serialized.first[i];
+                        AssertInfo(
+                            proto.ParseFromArray(
+                                value.data(), static_cast<int>(value.size())),
+                            "failed to parse vortex array take row");
+                        owner->arrays.emplace_back(proto);
+                    } else {
+                        owner->arrays.emplace_back();
+                    }
+                    for_each_original_position(
+                        group, i, [&](auto original_position) {
+                            ordered_array_indices[original_position] =
+                                array_index;
+                            if (IsNullable()) {
+                                owner->validity[original_position] = valid;
+                            }
+                        });
+                }
+                retain_take(std::move(take), table);
+            }
+
+            owner->array_views.resize(options.offsets.size);
+            for (int64_t i = 0; i < options.offsets.size; ++i) {
+                if (IsNullable() && !owner->validity[i]) {
+                    continue;
+                }
+                const auto array_index = ordered_array_indices[i];
+                AssertInfo(array_index >= 0 &&
+                               array_index <
+                                   static_cast<int64_t>(owner->arrays.size()),
+                           "vortex array take mapping {} out of range {}",
+                           array_index,
+                           owner->arrays.size());
+                auto& array = owner->arrays[array_index];
+                if (array.length() == 0) {
+                    continue;
+                }
+                owner->array_views[i] =
+                    ArrayView(const_cast<char*>(array.data()),
+                              array.length(),
+                              array.byte_size(),
+                              array.get_element_type(),
+                              array.get_offsets_data());
+            }
+            values.encoding = ValueEncoding::ArrayView;
+            values.kind = ScanValueKind::ArrayView;
+            values.logical_type = DataType::ARRAY;
+            values.data = owner->array_views.data();
+            values.byte_width = sizeof(ArrayView);
+            break;
+        }
+        default:
+            return nullptr;
+    }
+
+    if (values.encoding == ValueEncoding::Empty) {
+        values.encoding = ValueEncoding::FixedWidth;
+        values.kind = ScanValueKind::FixedWidth;
+    }
+    const bool* validity =
+        owner->validity.empty() ? nullptr : owner->validity.data();
+    return std::make_unique<VortexOrderedTakeCursor>(
+        values, validity, std::move(owner), options.offsets.size);
 }
 
 void
@@ -2459,80 +2798,69 @@ VortexColumn::BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
                                    const int64_t* offsets,
                                    int64_t count,
                                    bool small_int_raw_type) {
-    if (!SupportsDirectDataScan()) {
-        AssertInfo(data_type_ == DataType::TIMESTAMPTZ,
-                   "non-direct primitive take is only supported for "
-                   "TIMESTAMPTZ, got {}",
-                   data_type_);
-        BulkValueAt(
-            op_ctx,
-            [dst](const char* value, size_t index) {
-                std::memcpy(static_cast<int64_t*>(dst) + index,
-                            value,
-                            sizeof(int64_t));
-            },
-            offsets,
-            count);
+    if (count == 0) {
         return;
     }
+    auto cursor = Take(op_ctx,
+                       TakeOptions{OffsetView::From(offsets, count),
+                                   ScanValueKind::FixedWidth});
+    AssertInfo(cursor != nullptr,
+               "vortex primitive take is unsupported for type {}",
+               data_type_);
+
+    auto copy_values = [&]<typename SrcT, typename DstT>() {
+        TakeBatch batch;
+        int64_t output_index = 0;
+        while (cursor->Next(count - output_index, &batch)) {
+            AssertInfo(batch.values.encoding == ValueEncoding::FixedWidth,
+                       "vortex primitive expected fixed-width take, got {}",
+                       static_cast<int>(batch.values.encoding));
+            const auto* values = static_cast<const SrcT*>(batch.values.data);
+            auto* output = static_cast<DstT*>(dst);
+            for (int64_t i = 0; i < batch.size; ++i) {
+                const auto value_index = batch.selection == nullptr
+                                             ? batch.values.offset + i
+                                             : batch.selection[i];
+                output[output_index++] = static_cast<DstT>(values[value_index]);
+            }
+        }
+        AssertInfo(output_index == count,
+                   "vortex primitive take returned {} rows, expected {}",
+                   output_index,
+                   count);
+    };
+
     switch (data_type_) {
-        case DataType::INT8: {
-            BulkPrimitiveValueAtFromArrow<arrow::Int8Array,
-                                          int8_t,
-                                          int8_t,
-                                          int32_t>(
-                op_ctx, dst, offsets, count, small_int_raw_type);
+        case DataType::INT8:
+            if (small_int_raw_type) {
+                copy_values.template operator()<int8_t, int8_t>();
+            } else {
+                copy_values.template operator()<int8_t, int32_t>();
+            }
             break;
-        }
-        case DataType::INT16: {
-            BulkPrimitiveValueAtFromArrow<arrow::Int16Array,
-                                          int16_t,
-                                          int16_t,
-                                          int32_t>(
-                op_ctx, dst, offsets, count, small_int_raw_type);
+        case DataType::INT16:
+            if (small_int_raw_type) {
+                copy_values.template operator()<int16_t, int16_t>();
+            } else {
+                copy_values.template operator()<int16_t, int32_t>();
+            }
             break;
-        }
-        case DataType::INT32: {
-            BulkPrimitiveValueAtFromArrow<arrow::Int32Array,
-                                          int32_t,
-                                          int32_t,
-                                          int32_t>(
-                op_ctx, dst, offsets, count, true);
+        case DataType::INT32:
+            copy_values.template operator()<int32_t, int32_t>();
             break;
-        }
         case DataType::INT64:
-        case DataType::TIMESTAMPTZ: {
-            BulkPrimitiveValueAtFromArrow<arrow::Int64Array,
-                                          int64_t,
-                                          int64_t,
-                                          int64_t>(
-                op_ctx, dst, offsets, count, true);
+        case DataType::TIMESTAMPTZ:
+            copy_values.template operator()<int64_t, int64_t>();
             break;
-        }
-        case DataType::FLOAT: {
-            BulkPrimitiveValueAtFromArrow<arrow::FloatArray,
-                                          float,
-                                          float,
-                                          float>(
-                op_ctx, dst, offsets, count, true);
+        case DataType::FLOAT:
+            copy_values.template operator()<float, float>();
             break;
-        }
-        case DataType::DOUBLE: {
-            BulkPrimitiveValueAtFromArrow<arrow::DoubleArray,
-                                          double,
-                                          double,
-                                          double>(
-                op_ctx, dst, offsets, count, true);
+        case DataType::DOUBLE:
+            copy_values.template operator()<double, double>();
             break;
-        }
-        case DataType::BOOL: {
-            BulkPrimitiveValueAtFromArrow<arrow::BooleanArray,
-                                          bool,
-                                          bool,
-                                          bool>(
-                op_ctx, dst, offsets, count, true);
+        case DataType::BOOL:
+            copy_values.template operator()<bool, bool>();
             break;
-        }
         default:
             ThrowInfo(ErrorCode::Unsupported,
                       "VortexColumn::BulkPrimitiveValueAt unsupported data "
@@ -2621,12 +2949,25 @@ VortexColumn::BulkArrayAt(milvus::OpContext* op_ctx,
         ThrowInfo(ErrorCode::Unsupported,
                   "VortexColumn::BulkArrayAt only supports array fields");
     }
-    auto result = TakeOwn(op_ctx, offsets, count);
-    for (int64_t i = 0; i < count; ++i) {
-        auto view = static_cast<ArrayChunk*>(result.chunks[i].get())
-                        ->View(result.offsets[i]);
-        fn(view, i);
+    if (count == 0) {
+        return;
     }
+    auto cursor = Take(op_ctx,
+                       TakeOptions{OffsetView::From(offsets, count),
+                                   ScanValueKind::ArrayView});
+    AssertInfo(cursor != nullptr, "vortex array take is unsupported");
+    TakeBatch batch;
+    int64_t output_index = 0;
+    while (cursor->Next(count - output_index, &batch)) {
+        const auto* values = batch.values.data_as<ArrayView>();
+        for (int64_t i = 0; i < batch.size; ++i) {
+            fn(values[i], output_index++);
+        }
+    }
+    AssertInfo(output_index == count,
+               "vortex array take returned {} rows, expected {}",
+               output_index,
+               count);
 }
 
 void
@@ -2644,8 +2985,8 @@ VortexColumn::BulkStringLikeAt(
     const std::function<void(std::string_view, size_t, bool)>& fn,
     const int64_t* offsets,
     int64_t count) const {
-    if (!SupportsDirectDataScan()) {
-        if (offsets == nullptr) {
+    if (offsets == nullptr) {
+        if (!SupportsDirectDataScan()) {
             int64_t global_offset = 0;
             for (int64_t chunk_id = 0; chunk_id < num_chunks(); ++chunk_id) {
                 auto chunk = MaterializeChunk(op_ctx, chunk_id);
@@ -2662,18 +3003,6 @@ VortexColumn::BulkStringLikeAt(
             }
             return;
         }
-
-        auto result = TakeOwn(op_ctx, offsets, count);
-        for (int64_t i = 0; i < count; ++i) {
-            auto chunk = static_cast<StringChunk*>(result.chunks[i].get());
-            fn((*chunk)[result.offsets[i]],
-               i,
-               chunk->isValid(result.offsets[i]));
-        }
-        return;
-    }
-
-    if (offsets == nullptr) {
         int64_t global_offset = 0;
         for (int64_t chunk_id = 0; chunk_id < num_chunks(); ++chunk_id) {
             auto scan =
@@ -2712,55 +3041,42 @@ VortexColumn::BulkStringLikeAt(
         return;
     }
 
-    auto [holder, views] = TakeStringLikeViews(op_ctx, offsets, count);
-    (void)holder;
-    for (int64_t i = 0; i < count; ++i) {
-        fn(views.first[i], i, views.second[i]);
-    }
-}
-
-VortexColumn::TakeResult
-VortexColumn::TakeOwn(milvus::OpContext* op_ctx,
-                      const int64_t* offsets,
-                      int64_t count) const {
-    TakeResult result;
-    result.chunks.resize(count);
-    result.offsets.resize(count);
     if (count == 0) {
-        return result;
+        return;
     }
-    AssertInfo(offsets != nullptr, "vortex take requires explicit row offsets");
-
-    std::unordered_map<int64_t, std::vector<std::pair<int64_t, int64_t>>>
-        chunk_entries;
-    for (int64_t i = 0; i < count; ++i) {
-        auto [chunk_id, chunk_offset] = GetChunkIDByOffset(offsets[i]);
-        chunk_entries[static_cast<int64_t>(chunk_id)].push_back(
-            {static_cast<int64_t>(chunk_offset), i});
-    }
-
-    for (auto& [chunk_id, entries] : chunk_entries) {
-        std::sort(entries.begin(), entries.end());
-        std::vector<int64_t> unique_offsets;
-        unique_offsets.reserve(entries.size());
-        for (const auto& [chunk_offset, _] : entries) {
-            if (unique_offsets.empty() ||
-                unique_offsets.back() != chunk_offset) {
-                unique_offsets.emplace_back(chunk_offset);
+    const auto value_kind = data_type_ == DataType::JSON
+                                ? ScanValueKind::JsonView
+                                : ScanValueKind::StringView;
+    auto cursor =
+        Take(op_ctx, TakeOptions{OffsetView::From(offsets, count), value_kind});
+    AssertInfo(cursor != nullptr,
+               "vortex string-like take is unsupported for type {}",
+               data_type_);
+    TakeBatch batch;
+    int64_t output_index = 0;
+    while (cursor->Next(count - output_index, &batch)) {
+        if (data_type_ == DataType::JSON) {
+            const auto* values = batch.values.data_as<Json>();
+            for (int64_t i = 0; i < batch.size; ++i) {
+                fn(values[i],
+                   output_index,
+                   batch.validity == nullptr || batch.validity[i]);
+                ++output_index;
+            }
+        } else {
+            const auto* values = batch.values.data_as<std::string_view>();
+            for (int64_t i = 0; i < batch.size; ++i) {
+                fn(values[i],
+                   output_index,
+                   batch.validity == nullptr || batch.validity[i]);
+                ++output_index;
             }
         }
-
-        auto chunk = TakeFromFile(op_ctx, chunk_id, unique_offsets);
-        for (const auto& [chunk_offset, original_index] : entries) {
-            auto it = std::lower_bound(
-                unique_offsets.begin(), unique_offsets.end(), chunk_offset);
-            result.chunks[original_index] = chunk;
-            result.offsets[original_index] =
-                std::distance(unique_offsets.begin(), it);
-        }
     }
-
-    return result;
+    AssertInfo(output_index == count,
+               "vortex string-like take returned {} rows, expected {}",
+               output_index,
+               count);
 }
 
 ChunkedColumnInterface::PreparedScanResult
@@ -2821,8 +3137,8 @@ VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
                  scan_end,
                  projection = options.projection,
                  value_kind,
-                 prepared_sources = std::move(prepared_sources)](
-                    int64_t position) {
+                 prepared_sources =
+                     std::move(prepared_sources)](int64_t position) {
                     std::vector<VortexDataScanSource> sources;
                     for (const auto& prepared : prepared_sources) {
                         if (prepared.range.range_end <= position) {
@@ -2838,8 +3154,8 @@ VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
                         AssertCellsCovered(plan.cell_ids, prepared.cell_ids);
                         auto reader = OpenDataScanWithPlan(
                             range.chunk_id, plan, prepared.pin);
-                        sources.emplace_back(VortexDataScanSource{
-                            range, std::move(reader)});
+                        sources.emplace_back(
+                            VortexDataScanSource{range, std::move(reader)});
                     }
                     return std::make_unique<VortexDataScanCursor>(
                         this,
@@ -2913,12 +3229,11 @@ VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
                 const auto& file = files_[range.chunk_id];
                 const auto row_start =
                     static_cast<uint64_t>(range.local_offset);
-                const auto row_end = static_cast<uint64_t>(
-                    range.local_offset + range.length);
+                const auto row_end =
+                    static_cast<uint64_t>(range.local_offset + range.length);
                 auto matched_plan =
                     PlanRowRange(file, row_start, row_end, predicate);
-                std::optional<milvus_storage::vortex::VortexPlan>
-                    validity_plan;
+                std::optional<milvus_storage::vortex::VortexPlan> validity_plan;
                 auto cell_ids = matched_plan.cell_ids;
                 if (IsNullable()) {
                     validity_plan = PlanRowRange(file, row_start, row_end);
@@ -2935,10 +3250,10 @@ VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
                     validity_reader = OpenDataScanWithPlan(
                         range.chunk_id, *validity_plan, prepared.pin);
                 }
-                sources.emplace_back(VortexRowIdScanSource{
-                    range,
-                    std::move(matched_reader),
-                    std::move(validity_reader)});
+                sources.emplace_back(
+                    VortexRowIdScanSource{range,
+                                          std::move(matched_reader),
+                                          std::move(validity_reader)});
             }
             return std::make_unique<VortexRowIdScanCursor>(
                 this, position, scan_end - position, std::move(sources));

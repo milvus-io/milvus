@@ -794,6 +794,103 @@ CheckDataScan(VortexColumn& column, DataType type) {
     EXPECT_EQ(seen, kNullableRows);
 }
 
+void
+CheckOrderedTake(VortexColumn& column, DataType type) {
+    const std::vector<int64_t> offsets{15, 1, 8, 1, 0};
+    auto cursor = column.Take(nullptr,
+                              ChunkedColumnInterface::TakeOptions{
+                                  ChunkedColumnInterface::OffsetView::From(
+                                      offsets.data(), offsets.size()),
+                                  ScanKindForType(type)});
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::TakeBatch batch;
+    int64_t seen = 0;
+    while (cursor->Next(2, &batch)) {
+        ASSERT_GT(batch.size, 0);
+        EXPECT_EQ(batch.position, seen);
+        EXPECT_EQ(batch.selection, nullptr);
+        EXPECT_EQ(batch.source_chunk_id, -1);
+        EXPECT_NE(batch.owner, nullptr);
+        for (int64_t i = 0; i < batch.size; ++i) {
+            const auto row = offsets[seen + i];
+            const auto valid = batch.validity == nullptr || batch.validity[i];
+            EXPECT_EQ(valid, ExpectedValid(row)) << row;
+            if (!valid) {
+                continue;
+            }
+            switch (type) {
+                case DataType::BOOL:
+                    EXPECT_EQ(batch.values.data_as<bool>()[i], row % 2 == 0)
+                        << row;
+                    break;
+                case DataType::INT8:
+                    EXPECT_EQ(batch.values.data_as<int8_t>()[i],
+                              static_cast<int8_t>(row - 8))
+                        << row;
+                    break;
+                case DataType::INT16:
+                    EXPECT_EQ(batch.values.data_as<int16_t>()[i],
+                              static_cast<int16_t>(row * 10))
+                        << row;
+                    break;
+                case DataType::INT32:
+                    EXPECT_EQ(batch.values.data_as<int32_t>()[i],
+                              static_cast<int32_t>(row * 100))
+                        << row;
+                    break;
+                case DataType::INT64:
+                    EXPECT_EQ(batch.values.data_as<int64_t>()[i], row * 1000)
+                        << row;
+                    break;
+                case DataType::TIMESTAMPTZ:
+                    EXPECT_EQ(batch.values.data_as<int64_t>()[i],
+                              1700000000000000LL + row)
+                        << row;
+                    break;
+                case DataType::FLOAT:
+                    EXPECT_NEAR(batch.values.data_as<float>()[i],
+                                static_cast<float>(row) * 1.5f,
+                                1e-5)
+                        << row;
+                    break;
+                case DataType::DOUBLE:
+                    EXPECT_NEAR(batch.values.data_as<double>()[i],
+                                static_cast<double>(row) * 2.25,
+                                1e-9)
+                        << row;
+                    break;
+                case DataType::STRING:
+                case DataType::VARCHAR:
+                case DataType::TEXT:
+                case DataType::GEOMETRY:
+                    EXPECT_EQ(batch.values.data_as<std::string_view>()[i],
+                              ExpectedString(type, row))
+                        << row;
+                    break;
+                case DataType::JSON: {
+                    std::string_view value = batch.values.data_as<Json>()[i];
+                    EXPECT_EQ(value, ExpectedString(type, row)) << row;
+                    break;
+                }
+                case DataType::ARRAY: {
+                    const auto& value = batch.values.data_as<ArrayView>()[i];
+                    EXPECT_EQ(value.length(), 3) << row;
+                    EXPECT_EQ(value.get_data<int64_t>(0), row) << row;
+                    EXPECT_EQ(value.get_data<int64_t>(1), row + 1) << row;
+                    EXPECT_EQ(value.get_data<int64_t>(2), row + 2) << row;
+                    break;
+                }
+                default:
+                    FAIL() << "unexpected take data type";
+            }
+        }
+        seen += batch.size;
+    }
+    EXPECT_EQ(seen, static_cast<int64_t>(offsets.size()));
+    EXPECT_EQ(cursor->Position(), static_cast<int64_t>(offsets.size()));
+}
+
 }  // namespace
 
 TEST(VortexColumnTest, ScanAndTake) {
@@ -830,6 +927,36 @@ TEST(VortexColumnTest, ScanAndTake) {
         nullptr, values.data(), offsets.data(), offsets.size(), false);
     EXPECT_EQ(values, (std::vector<int32_t>{70, 10, 70, 150}));
 
+    int_column.ManualEvictCache();
+    EXPECT_FALSE(int_column.CellsLoaded(offsets.data(), offsets.size()));
+    auto take_cursor =
+        int_column.Take(nullptr,
+                        ChunkedColumnInterface::TakeOptions{
+                            ChunkedColumnInterface::OffsetView::From(
+                                offsets.data(), offsets.size()),
+                            ChunkedColumnInterface::ScanValueKind::FixedWidth});
+    ASSERT_NE(take_cursor, nullptr);
+    EXPECT_TRUE(int_column.CellsLoaded(offsets.data(), offsets.size()));
+    int_column.ManualEvictCache();
+    EXPECT_TRUE(int_column.CellsLoaded(offsets.data(), offsets.size()));
+    ChunkedColumnInterface::TakeBatch take_batch;
+    ASSERT_TRUE(take_cursor->Next(2, &take_batch));
+    EXPECT_EQ(take_batch.position, 0);
+    EXPECT_EQ(take_batch.size, 2);
+    EXPECT_EQ(take_batch.selection, nullptr);
+    EXPECT_EQ(take_batch.source_chunk_id, -1);
+    EXPECT_EQ(take_batch.values.data_as<int32_t>()[0], 70);
+    EXPECT_EQ(take_batch.values.data_as<int32_t>()[1], 10);
+    ASSERT_TRUE(take_cursor->Next(2, &take_batch));
+    EXPECT_EQ(take_batch.position, 2);
+    EXPECT_EQ(take_batch.size, 2);
+    EXPECT_EQ(take_batch.values.data_as<int32_t>()[0], 70);
+    EXPECT_EQ(take_batch.values.data_as<int32_t>()[1], 150);
+    EXPECT_FALSE(take_cursor->Next(2, &take_batch));
+    take_cursor.reset();
+    int_column.ManualEvictCache();
+    EXPECT_FALSE(int_column.CellsLoaded(offsets.data(), offsets.size()));
+
     auto scan_values = CollectIntScanValues(int_column, 3, 5);
     EXPECT_EQ(scan_values, (std::vector<int32_t>{30, 40, 50, 60, 70}));
 
@@ -852,6 +979,20 @@ TEST(VortexColumnTest, ScanAndTake) {
         offsets.data(),
         offsets.size());
     EXPECT_EQ(strings, (std::vector<std::string>{"v7", "v1", "v7", "v15"}));
+
+    take_cursor = string_column.Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(offsets.data(),
+                                                     offsets.size()),
+            ChunkedColumnInterface::ScanValueKind::StringView});
+    ASSERT_NE(take_cursor, nullptr);
+    ASSERT_TRUE(take_cursor->Next(offsets.size(), &take_batch));
+    const auto* taken_strings = take_batch.values.data_as<std::string_view>();
+    EXPECT_EQ(taken_strings[0], "v7");
+    EXPECT_EQ(taken_strings[1], "v1");
+    EXPECT_EQ(taken_strings[2], "v7");
+    EXPECT_EQ(taken_strings[3], "v15");
 
     std::filesystem::remove_all(dir);
 }
@@ -948,6 +1089,22 @@ TEST(VortexColumnTest, MultiFileTakeAndScan) {
     int_column.BulkPrimitiveValueAt(
         nullptr, values.data(), offsets.data(), offsets.size(), false);
     EXPECT_EQ(values, (std::vector<int32_t>{0, 150, 160, 170, 310, 160}));
+
+    auto take_cursor =
+        int_column.Take(nullptr,
+                        ChunkedColumnInterface::TakeOptions{
+                            ChunkedColumnInterface::OffsetView::From(
+                                offsets.data(), offsets.size()),
+                            ChunkedColumnInterface::ScanValueKind::FixedWidth});
+    ASSERT_NE(take_cursor, nullptr);
+    ChunkedColumnInterface::TakeBatch take_batch;
+    ASSERT_TRUE(take_cursor->Next(offsets.size(), &take_batch));
+    EXPECT_EQ(take_batch.selection, nullptr);
+    EXPECT_EQ(take_batch.source_chunk_id, -1);
+    const auto* taken_values = take_batch.values.data_as<int32_t>();
+    EXPECT_EQ(
+        std::vector<int32_t>(taken_values, taken_values + take_batch.size),
+        (std::vector<int32_t>{0, 150, 160, 170, 310, 160}));
 
     auto scan_values = CollectIntScanValues(int_column, 18, 4);
     EXPECT_EQ(scan_values, (std::vector<int32_t>{180, 190, 200, 210}));
@@ -1075,17 +1232,16 @@ TEST(VortexColumnTest, RejectsIncompatibleArrowTypeAtConstruction) {
     auto schema = MakeSchema();
     auto properties =
         std::make_shared<milvus_storage::api::Properties>(MakeProperties());
-    auto dir =
-        std::filesystem::temp_directory_path() /
-        ("milvus_vortex_column_type_mismatch_test_" +
-         std::to_string(::getpid()) + "_" +
-         std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
+    auto dir = std::filesystem::temp_directory_path() /
+               ("milvus_vortex_column_type_mismatch_test_" +
+                std::to_string(::getpid()) + "_" +
+                std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
     std::filesystem::create_directories(dir);
 
     auto file_info = WriteVortexFile(
         (dir / "type_mismatch.vx").string(), schema, *properties);
-    auto column_group = MakeColumnGroup(
-        {file_info}, properties, {std::to_string(kIntFieldId)});
+    auto column_group =
+        MakeColumnGroup({file_info}, properties, {std::to_string(kIntFieldId)});
     FieldMeta mismatched_meta(FieldName("int_field"),
                               FieldId(kIntFieldId),
                               DataType::INT64,
@@ -1093,10 +1249,8 @@ TEST(VortexColumnTest, RejectsIncompatibleArrowTypeAtConstruction) {
                               std::nullopt);
 
     try {
-        VortexColumn column(FieldId(kIntFieldId),
-                            mismatched_meta,
-                            properties,
-                            column_group);
+        VortexColumn column(
+            FieldId(kIntFieldId), mismatched_meta, properties, column_group);
         FAIL() << "expected incompatible Arrow type to be rejected";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
@@ -1109,11 +1263,10 @@ TEST(VortexColumnTest, RejectsNullRowsForNonNullableField) {
     auto schema = MakeNullableSchema();
     auto properties =
         std::make_shared<milvus_storage::api::Properties>(MakeProperties());
-    auto dir =
-        std::filesystem::temp_directory_path() /
-        ("milvus_vortex_column_nullability_mismatch_test_" +
-         std::to_string(::getpid()) + "_" +
-         std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
+    auto dir = std::filesystem::temp_directory_path() /
+               ("milvus_vortex_column_nullability_mismatch_test_" +
+                std::to_string(::getpid()) + "_" +
+                std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
     std::filesystem::create_directories(dir);
 
     auto file_info = WriteNullableVortexFile(
@@ -1126,8 +1279,7 @@ TEST(VortexColumnTest, RejectsNullRowsForNonNullableField) {
                                 DataType::INT64,
                                 false,
                                 std::nullopt);
-    VortexColumn column(
-        field_id, non_nullable_meta, properties, column_group);
+    VortexColumn column(field_id, non_nullable_meta, properties, column_group);
 
     std::vector<int64_t> offsets{0, 1, 2, 3};
     std::vector<int64_t> values(offsets.size());
@@ -1140,7 +1292,8 @@ TEST(VortexColumnTest, RejectsNullRowsForNonNullableField) {
     }
 
     auto cursor = column.Scan(
-        nullptr, ChunkedColumnInterface::ScanOptions::ForData(0, kNullableRows));
+        nullptr,
+        ChunkedColumnInterface::ScanOptions::ForData(0, kNullableRows));
     ASSERT_NE(cursor, nullptr);
 
     ChunkedColumnInterface::ScanBatch batch;
@@ -1160,9 +1313,8 @@ TEST(VortexColumnTest, PreservesMaterializedNormalizationForDataScan) {
     constexpr int64_t geometry_field_id = kNormalizedFieldIdBase + 1;
     const auto timestamp_type = arrow::timestamp(arrow::TimeUnit::MILLI);
     auto schema = arrow::schema(
-        {arrow::field(std::to_string(timestamp_field_id),
-                      timestamp_type,
-                      false),
+        {arrow::field(
+             std::to_string(timestamp_field_id), timestamp_type, false),
          arrow::field(
              std::to_string(geometry_field_id), arrow::utf8(), false)});
 
@@ -1170,9 +1322,8 @@ TEST(VortexColumnTest, PreservesMaterializedNormalizationForDataScan) {
                                               arrow::default_memory_pool());
     arrow::StringBuilder geometry_builder;
     const std::vector<int64_t> timestamp_millis{1700000000000LL,
-                                                 1700000000123LL};
-    const std::vector<std::string> geometry_wkt{"POINT (1 2)",
-                                                 "POINT (3 4)"};
+                                                1700000000123LL};
+    const std::vector<std::string> geometry_wkt{"POINT (1 2)", "POINT (3 4)"};
     for (size_t i = 0; i < timestamp_millis.size(); ++i) {
         ASSERT_TRUE(timestamp_builder.Append(timestamp_millis[i]).ok());
         ASSERT_TRUE(geometry_builder.Append(geometry_wkt[i]).ok());
@@ -1181,35 +1332,30 @@ TEST(VortexColumnTest, PreservesMaterializedNormalizationForDataScan) {
     std::shared_ptr<arrow::Array> geometries;
     ASSERT_TRUE(timestamp_builder.Finish(&timestamps).ok());
     ASSERT_TRUE(geometry_builder.Finish(&geometries).ok());
-    auto batch = arrow::RecordBatch::Make(schema,
-                                          timestamp_millis.size(),
-                                          {timestamps, geometries});
+    auto batch = arrow::RecordBatch::Make(
+        schema, timestamp_millis.size(), {timestamps, geometries});
 
     auto properties =
         std::make_shared<milvus_storage::api::Properties>(MakeProperties());
-    auto dir =
-        std::filesystem::temp_directory_path() /
-        ("milvus_vortex_column_normalization_test_" +
-         std::to_string(::getpid()) + "_" +
-         std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
+    auto dir = std::filesystem::temp_directory_path() /
+               ("milvus_vortex_column_normalization_test_" +
+                std::to_string(::getpid()) + "_" +
+                std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
     std::filesystem::create_directories(dir);
     auto file_info = WriteVortexBatches(
         (dir / "normalization.vx").string(), schema, *properties, {batch});
-    auto column_group = MakeColumnGroup(
-        {file_info},
-        properties,
-        {std::to_string(timestamp_field_id),
-         std::to_string(geometry_field_id)});
+    auto column_group = MakeColumnGroup({file_info},
+                                        properties,
+                                        {std::to_string(timestamp_field_id),
+                                         std::to_string(geometry_field_id)});
 
     FieldMeta timestamp_meta(FieldName("timestamp_field"),
                              FieldId(timestamp_field_id),
                              DataType::TIMESTAMPTZ,
                              false,
                              std::nullopt);
-    VortexColumn timestamp_column(FieldId(timestamp_field_id),
-                                  timestamp_meta,
-                                  properties,
-                                  column_group);
+    VortexColumn timestamp_column(
+        FieldId(timestamp_field_id), timestamp_meta, properties, column_group);
     auto timestamp_scan = timestamp_column.Scan(
         nullptr, ChunkedColumnInterface::ScanOptions::ForData(0, 2));
     ASSERT_NE(timestamp_scan, nullptr);
@@ -1229,16 +1375,28 @@ TEST(VortexColumnTest, PreservesMaterializedNormalizationForDataScan) {
     EXPECT_EQ(taken_timestamps,
               (std::vector<int64_t>{timestamp_millis[1] * 1000,
                                     timestamp_millis[0] * 1000}));
+    auto timestamp_take = timestamp_column.Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(timestamp_offsets.data(),
+                                                     timestamp_offsets.size()),
+            ChunkedColumnInterface::ScanValueKind::FixedWidth});
+    ASSERT_NE(timestamp_take, nullptr);
+    ChunkedColumnInterface::TakeBatch normalized_take_batch;
+    ASSERT_TRUE(
+        timestamp_take->Next(timestamp_offsets.size(), &normalized_take_batch));
+    const auto* normalized_timestamps =
+        normalized_take_batch.values.data_as<int64_t>();
+    EXPECT_EQ(normalized_timestamps[0], timestamp_millis[1] * 1000);
+    EXPECT_EQ(normalized_timestamps[1], timestamp_millis[0] * 1000);
 
     FieldMeta geometry_meta(FieldName("geometry_field"),
                             FieldId(geometry_field_id),
                             DataType::GEOMETRY,
                             false,
                             std::nullopt);
-    VortexColumn geometry_column(FieldId(geometry_field_id),
-                                 geometry_meta,
-                                 properties,
-                                 column_group);
+    VortexColumn geometry_column(
+        FieldId(geometry_field_id), geometry_meta, properties, column_group);
     const auto geometry_values = CollectStringScanValues(geometry_column, 0, 2);
     ASSERT_EQ(geometry_values.size(), geometry_wkt.size());
     auto ctx = GetThreadLocalGEOSContext();
@@ -1248,8 +1406,8 @@ TEST(VortexColumnTest, PreservesMaterializedNormalizationForDataScan) {
     }
 
     FixedVector<int32_t> geometry_offsets{1, 0};
-    auto offset_views = geometry_column.StringViewsByOffsets(
-        nullptr, 0, geometry_offsets);
+    auto offset_views =
+        geometry_column.StringViewsByOffsets(nullptr, 0, geometry_offsets);
     ASSERT_EQ(offset_views.get().first.size(), geometry_offsets.size());
     EXPECT_EQ(offset_views.get().first[0],
               Geometry(ctx, geometry_wkt[1].c_str()).to_wkb_string());
@@ -1288,6 +1446,22 @@ TEST(VortexColumnTest, PreservesMaterializedNormalizationForDataScan) {
                   Geometry(ctx, geometry_wkt[1].c_str()).to_wkb_string(),
                   Geometry(ctx, geometry_wkt[0].c_str()).to_wkb_string()}));
 
+    auto geometry_take = geometry_column.Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                taken_geometry_offsets.data(), taken_geometry_offsets.size()),
+            ChunkedColumnInterface::ScanValueKind::StringView});
+    ASSERT_NE(geometry_take, nullptr);
+    ASSERT_TRUE(geometry_take->Next(taken_geometry_offsets.size(),
+                                    &normalized_take_batch));
+    const auto* normalized_geometries =
+        normalized_take_batch.values.data_as<std::string_view>();
+    EXPECT_EQ(normalized_geometries[0],
+              Geometry(ctx, geometry_wkt[1].c_str()).to_wkb_string());
+    EXPECT_EQ(normalized_geometries[1],
+              Geometry(ctx, geometry_wkt[0].c_str()).to_wkb_string());
+
     std::filesystem::remove_all(dir);
 }
 
@@ -1297,15 +1471,14 @@ TEST(VortexColumnTest, RejectsMismatchedScanValueKind) {
         std::make_shared<milvus_storage::api::Properties>(MakeProperties());
     auto dir =
         std::filesystem::temp_directory_path() /
-        ("milvus_vortex_column_scan_kind_test_" +
-         std::to_string(::getpid()) + "_" +
-         std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
+        ("milvus_vortex_column_scan_kind_test_" + std::to_string(::getpid()) +
+         "_" + std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
     std::filesystem::create_directories(dir);
 
-    auto file_info = WriteVortexFile(
-        (dir / "scan_kind.vx").string(), schema, *properties);
-    auto column_group = MakeColumnGroup(
-        {file_info}, properties, {std::to_string(kIntFieldId)});
+    auto file_info =
+        WriteVortexFile((dir / "scan_kind.vx").string(), schema, *properties);
+    auto column_group =
+        MakeColumnGroup({file_info}, properties, {std::to_string(kIntFieldId)});
     FieldMeta field_meta(FieldName("int_field"),
                          FieldId(kIntFieldId),
                          DataType::INT32,
@@ -1320,6 +1493,15 @@ TEST(VortexColumnTest, RejectsMismatchedScanValueKind) {
         ChunkedColumnInterface::ScanProjection::Data,
         ChunkedColumnInterface::ScanValueKind::StringView);
     EXPECT_THROW(column.Scan(nullptr, options), std::exception);
+
+    const std::vector<int64_t> offsets{0};
+    EXPECT_THROW(
+        column.Take(nullptr,
+                    ChunkedColumnInterface::TakeOptions{
+                        ChunkedColumnInterface::OffsetView::From(
+                            offsets.data(), offsets.size()),
+                        ChunkedColumnInterface::ScanValueKind::StringView}),
+        std::exception);
 
     std::filesystem::remove_all(dir);
 }
@@ -1412,6 +1594,7 @@ TEST(VortexColumnTest, NullableAllScalarTypesScanCorrectness) {
         CheckNoDataScan(column);
         CheckApplyValidDataInChunk(column);
         CheckDataScan(column, type);
+        CheckOrderedTake(column, type);
         if (type == DataType::STRING) {
             EXPECT_NO_THROW(column.BulkRawBsonAt(
                 nullptr,
