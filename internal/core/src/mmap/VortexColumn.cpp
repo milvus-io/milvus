@@ -1725,7 +1725,8 @@ VortexColumn::BulkValueAt(milvus::OpContext* op_ctx,
                data_type_);
     TakeBatch batch;
     int64_t output_index = 0;
-    while (cursor->Next(count - output_index, &batch)) {
+    while (output_index < count &&
+           cursor->Next(count - output_index, &batch)) {
         AssertInfo(batch.values.encoding == ValueEncoding::FixedWidth,
                    "vortex bulk value expected fixed-width take, got {}",
                    static_cast<int>(batch.values.encoding));
@@ -2811,7 +2812,8 @@ VortexColumn::BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
     auto copy_values = [&]<typename SrcT, typename DstT>() {
         TakeBatch batch;
         int64_t output_index = 0;
-        while (cursor->Next(count - output_index, &batch)) {
+        while (output_index < count &&
+               cursor->Next(count - output_index, &batch)) {
             AssertInfo(batch.values.encoding == ValueEncoding::FixedWidth,
                        "vortex primitive expected fixed-width take, got {}",
                        static_cast<int>(batch.values.encoding));
@@ -2958,7 +2960,8 @@ VortexColumn::BulkArrayAt(milvus::OpContext* op_ctx,
     AssertInfo(cursor != nullptr, "vortex array take is unsupported");
     TakeBatch batch;
     int64_t output_index = 0;
-    while (cursor->Next(count - output_index, &batch)) {
+    while (output_index < count &&
+           cursor->Next(count - output_index, &batch)) {
         const auto* values = batch.values.data_as<ArrayView>();
         for (int64_t i = 0; i < batch.size; ++i) {
             fn(values[i], output_index++);
@@ -3054,7 +3057,8 @@ VortexColumn::BulkStringLikeAt(
                data_type_);
     TakeBatch batch;
     int64_t output_index = 0;
-    while (cursor->Next(count - output_index, &batch)) {
+    while (output_index < count &&
+           cursor->Next(count - output_index, &batch)) {
         if (data_type_ == DataType::JSON) {
             const auto* values = batch.values.data_as<Json>();
             for (int64_t i = 0; i < batch.size; ++i) {
