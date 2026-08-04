@@ -1813,6 +1813,12 @@ func inputDeleteCoverageTs(seg *SegmentInfo) (ts uint64, known bool) {
 // start_position (minTs). The result is a lower bound on the true coverage:
 // replaying deletes from it can only re-apply already-applied deletes
 // (idempotent), never skip a live one.
+//
+// Compaction completion currently passes clones of the live input metadata.
+// They match the plan snapshot for delete coverage because the compaction
+// inspector keeps L0 compaction mutually exclusive with Mix, Sort, and
+// Clustering compaction on the same channel while the task is executing, and
+// each input segment remains marked compacting until completion.
 func computeDeleteCoveredPosition(channel string, inputs []*SegmentInfo) *msgpb.MsgPosition {
 	var minTs uint64
 	ok := false
@@ -1912,6 +1918,9 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			Level:               datapb.SegmentLevel_L2,
 			StartPosition:       startPos,
 			DmlPosition:         dmlPos,
+			// deletes <= this are already baked into the output by this
+			// compaction; lets the delegator replay only the tail (#49435).
+			DeleteCoveredPosition: computeDeleteCoveredPosition(t.GetChannel(), compactFromSegInfos),
 			// visible after stats and index
 			IsInvisible:    true,
 			StorageVersion: seg.GetStorageVersion(),

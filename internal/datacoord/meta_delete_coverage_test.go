@@ -17,11 +17,15 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
@@ -108,4 +112,111 @@ func TestComputeDeleteCoveredPosition(t *testing.T) {
 			assert.EqualValues(t, 77, p.GetTimestamp())
 		}
 	})
+}
+
+func TestClusteringDeleteCoveragePropagation(t *testing.T) {
+	const channel = "by-dev-rootcoord-dml_0_v0"
+
+	segments := NewSegmentsInfo()
+	segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:                    1,
+		CollectionID:          100,
+		PartitionID:           10,
+		InsertChannel:         channel,
+		State:                 commonpb.SegmentState_Flushed,
+		Level:                 datapb.SegmentLevel_L1,
+		NumOfRows:             2,
+		DeleteCoveredPosition: &msgpb.MsgPosition{ChannelName: channel, Timestamp: 150},
+	}))
+	segments.SetSegment(2, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            2,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: channel,
+		State:         commonpb.SegmentState_Flushed,
+		Level:         datapb.SegmentLevel_L1,
+		NumOfRows:     2,
+		Deltalogs: []*datapb.FieldBinlog{{
+			Binlogs: []*datapb.Binlog{{TimestampTo: 200}},
+		}},
+	}))
+
+	m := &meta{
+		catalog:  &catalogkv.Catalog{MetaKv: NewMetaMemoryKV()},
+		segments: segments,
+	}
+
+	clustered, _, err := m.CompleteCompactionMutation(context.Background(), &datapb.CompactionTask{
+		InputSegments: []int64{1, 2},
+		Type:          datapb.CompactionType_ClusteringCompaction,
+		Channel:       channel,
+	}, &datapb.CompactionPlanResult{
+		Segments: []*datapb.CompactionSegment{
+			{SegmentID: 3, NumOfRows: 2},
+			{SegmentID: 4, NumOfRows: 2},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, clustered, 2)
+	for _, segment := range clustered {
+		require.NotNil(t, segment.GetDeleteCoveredPosition())
+		assert.EqualValues(t, 150, segment.GetDeleteCoveredPosition().GetTimestamp())
+		assert.Equal(t, channel, segment.GetDeleteCoveredPosition().GetChannelName())
+	}
+
+	// Clustering outputs are normally processed by sort compaction before they
+	// become visible. The coverage must survive that second compaction step.
+	sorted, _, err := m.CompleteCompactionMutation(context.Background(), &datapb.CompactionTask{
+		InputSegments: []int64{3},
+		Type:          datapb.CompactionType_SortCompaction,
+		Channel:       channel,
+	}, &datapb.CompactionPlanResult{
+		Segments: []*datapb.CompactionSegment{{SegmentID: 5, NumOfRows: 2}},
+	})
+	require.NoError(t, err)
+	require.Len(t, sorted, 1)
+	require.NotNil(t, sorted[0].GetDeleteCoveredPosition())
+	assert.EqualValues(t, 150, sorted[0].GetDeleteCoveredPosition().GetTimestamp())
+	assert.Equal(t, channel, sorted[0].GetDeleteCoveredPosition().GetChannelName())
+}
+
+func TestClusteringDeleteCoverageUnknownInput(t *testing.T) {
+	const channel = "by-dev-rootcoord-dml_0_v0"
+
+	segments := NewSegmentsInfo()
+	segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:                    1,
+		CollectionID:          100,
+		PartitionID:           10,
+		InsertChannel:         channel,
+		State:                 commonpb.SegmentState_Flushed,
+		Level:                 datapb.SegmentLevel_L1,
+		NumOfRows:             2,
+		DeleteCoveredPosition: &msgpb.MsgPosition{ChannelName: channel, Timestamp: 150},
+	}))
+	segments.SetSegment(2, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            2,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: channel,
+		State:         commonpb.SegmentState_Flushed,
+		Level:         datapb.SegmentLevel_L1,
+		NumOfRows:     2,
+	}))
+
+	m := &meta{
+		catalog:  &catalogkv.Catalog{MetaKv: NewMetaMemoryKV()},
+		segments: segments,
+	}
+
+	clustered, _, err := m.CompleteCompactionMutation(context.Background(), &datapb.CompactionTask{
+		InputSegments: []int64{1, 2},
+		Type:          datapb.CompactionType_ClusteringCompaction,
+		Channel:       channel,
+	}, &datapb.CompactionPlanResult{
+		Segments: []*datapb.CompactionSegment{{SegmentID: 3, NumOfRows: 4}},
+	})
+	require.NoError(t, err)
+	require.Len(t, clustered, 1)
+	assert.Nil(t, clustered[0].GetDeleteCoveredPosition())
 }
