@@ -545,6 +545,26 @@
                 "MessageType": "MessageTypeRefreshExternalCollection",
                 "Version": 2
             }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterRLSMetadataMessageHeader",
+                "BodyType": "messagespb.AlterRLSMetadataMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterRLSMetadata",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropRLSMetadataMessageHeader",
+                "BodyType": "messagespb.DropRLSMetadataMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropRLSMetadata",
+                "Version": 2
+            }
         }
     ]
 }
