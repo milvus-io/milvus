@@ -83,8 +83,7 @@ type Options []*commonpb.KeyValuePair
 // funcutil.KeyValuePair2Map, where the LAST value wins. A duplicate key
 // therefore lets a request be validated under one value and executed under
 // another: options=[{backup,false},{backup,true}] passes as an ordinary import,
-// skipping the ImportBinlog privilege check and the enableBinlogImport switch,
-// then runs as a binlog import.
+// skipping the ImportBinlog privilege check, then runs as a binlog import.
 //
 // Call this before any option is read.
 func ValidateNoDuplicateKeys(options Options) error {
