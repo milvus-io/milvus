@@ -752,29 +752,16 @@ func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
 				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSEnabledKey)
 			}
 			seen[RLSEnabledKey] = struct{}{}
-			enabled, err := IsRLSEnabled(kv)
-			if err != nil {
+			if _, err := IsRLSEnabled(kv); err != nil {
 				return err
-			}
-			// The management plane lands before the data-plane enforcement in
-			// the stacked rollout. Keep the public switch fail-closed until the
-			// enforcement slice removes this temporary gate.
-			if enabled {
-				return merr.WrapErrParameterInvalidMsg("RLS runtime enforcement is not available yet; %s cannot be enabled", RLSEnabledKey)
 			}
 		case RLSForceKey:
 			if _, ok := seen[RLSForceKey]; ok {
 				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSForceKey)
 			}
 			seen[RLSForceKey] = struct{}{}
-			force, err := IsRLSForce(kv)
-			if err != nil {
+			if _, err := IsRLSForce(kv); err != nil {
 				return err
-			}
-			// rls.force only affects runtime enforcement. Reject it together
-			// with rls.enabled while the enforcement slice is not available.
-			if force {
-				return merr.WrapErrParameterInvalidMsg("RLS runtime enforcement is not available yet; %s cannot be enabled", RLSForceKey)
 			}
 		default:
 			for _, key := range []string{RLSEnabledKey, RLSForceKey} {
@@ -783,6 +770,23 @@ func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// ValidateRLSForceRequiresEnabled rejects an effective collection property set
+// that enables rls.force without enabling RLS itself.
+func ValidateRLSForceRequiresEnabled(kvs ...*commonpb.KeyValuePair) error {
+	force, err := IsRLSForce(kvs...)
+	if err != nil || !force {
+		return err
+	}
+	enabled, err := IsRLSEnabled(kvs...)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return merr.WrapErrParameterInvalidMsg("%s=true requires %s=true", RLSForceKey, RLSEnabledKey)
 	}
 	return nil
 }

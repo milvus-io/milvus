@@ -41,10 +41,6 @@ func TestConvertHybridSearchToSearchKeepsNamespace(t *testing.T) {
 	assert.Equal(t, namespace, searchReq.GetNamespace())
 }
 
-// A group-by field name used to resolve to a field id with no look at the
-// type: grouping by a vector field was accepted here and silently degenerated
-// or failed deep in the query. The supported list mirrors the switch in
-// SearchGroupByOperator.cpp.
 func TestParseGroupByFieldChecksFieldType(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Name: "coll",
@@ -133,4 +129,34 @@ func TestRankParamsCarryJSONGroupAttributes(t *testing.T) {
 	searchInfo, err := parseSearchInfo(getValidSearchParams(), schema, parsed, false)
 	assert.NoError(t, err)
 	assert.Equal(t, "/brand", searchInfo.planInfo.GetJsonPath())
+}
+
+func TestConvertHybridSearchToSearchUsesTopLevelRLS(t *testing.T) {
+	searchReq := convertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+		RlsPrincipal: "top-level-principal",
+		SkipRls:      true,
+		Requests: []*milvuspb.SearchRequest{
+			{
+				RlsPrincipal: "nested-principal",
+				SkipRls:      false,
+			},
+		},
+	})
+
+	assert.Equal(t, "top-level-principal", searchReq.GetRlsPrincipal())
+	assert.True(t, searchReq.GetSkipRls())
+}
+
+func TestConvertHybridSearchToSearchDoesNotFallbackToNestedRLS(t *testing.T) {
+	searchReq := convertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+		Requests: []*milvuspb.SearchRequest{
+			{
+				RlsPrincipal: "nested-principal",
+				SkipRls:      true,
+			},
+		},
+	})
+
+	assert.Empty(t, searchReq.GetRlsPrincipal())
+	assert.False(t, searchReq.GetSkipRls())
 }

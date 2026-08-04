@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 )
 
@@ -36,11 +35,11 @@ func TestProxyRLSInvalidateRemovesSnapshots(t *testing.T) {
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	for _, msgType := range []commonpb.MsgType{
-		rlsutil.MsgTypeCreateRowPolicy,
-		rlsutil.MsgTypeUpdateRowPolicy,
-		rlsutil.MsgTypeDropRowPolicy,
-		rlsutil.MsgTypeSetRLSPrincipalTags,
-		rlsutil.MsgTypeDeleteRLSPrincipalTags,
+		commonpb.MsgType_CreateRowPolicy,
+		commonpb.MsgType_UpdateRowPolicy,
+		commonpb.MsgType_DropRowPolicy,
+		commonpb.MsgType_SetRLSPrincipalTags,
+		commonpb.MsgType_DeleteRLSPrincipalTags,
 	} {
 		status, err := node.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
 			Base:           &commonpb.MsgBase{MsgType: msgType, Timestamp: 10},
