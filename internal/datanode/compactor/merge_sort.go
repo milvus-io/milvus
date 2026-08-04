@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -143,7 +144,10 @@ func mergeSortMultipleSegments(ctx context.Context,
 			return !segmentFilters[ri].Filtered(pk, uint64(ts), expireTs)
 		}
 	default:
-		log.Warn(ctx, "compaction only support int64 and varchar pk field")
+		if closeErr := writer.Close(); closeErr != nil {
+			log.Warn(ctx, "failed to close writer after unsupported pk type", mlog.Err(closeErr))
+		}
+		return nil, merr.WrapErrServiceInternalMsg("merge sort compaction unsupported pk type %s", pkField.GetDataType().String())
 	}
 
 	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, writerSchema, segmentReaders, writer, predicate, sortByFields); err != nil {

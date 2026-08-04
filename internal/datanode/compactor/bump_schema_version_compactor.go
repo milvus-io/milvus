@@ -344,6 +344,12 @@ func selectFullRewriteRecord(record storage.Record, pkField *schemapb.FieldSchem
 			return nil, nil, merr.WrapErrServiceInternal("varchar primary key field not found in full schema rewrite record")
 		}
 		pkAt = func(i int) any { return stringArray.Value(i) }
+	case schemapb.DataType_UUID:
+		stringArray, ok := pkArray.(*array.String)
+		if !ok {
+			return nil, nil, merr.WrapErrServiceInternal("uuid primary key field not found in full schema rewrite record")
+		}
+		pkAt = func(i int) any { return stringArray.Value(i) }
 	default:
 		return nil, nil, merr.WrapErrServiceInternal("invalid primary key data type for full schema rewrite")
 	}

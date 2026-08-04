@@ -695,6 +695,7 @@ func TestValidateFieldType(t *testing.T) {
 		dt       schemapb.DataType
 		et       schemapb.DataType
 		validate bool
+		expected string
 	}
 	cases := []testCase{
 		{
@@ -815,6 +816,12 @@ func TestValidateFieldType(t *testing.T) {
 			et:       schemapb.DataType_BinaryVector,
 			validate: false,
 		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_UUID,
+			validate: false,
+			expected: "UUID",
+		},
 	}
 
 	for _, tc := range cases {
@@ -832,6 +839,9 @@ func TestValidateFieldType(t *testing.T) {
 				assert.NoError(t, err)
 			} else {
 				assert.Error(t, err)
+				if tc.expected != "" {
+					assert.Contains(t, err.Error(), tc.expected)
+				}
 			}
 		})
 	}

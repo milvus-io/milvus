@@ -319,6 +319,11 @@ func (s *FillExpressionValueSuite) TestUnaryRange() {
 				"target": generateTemplateValue(schemapb.DataType_Int64, int64(11)),
 			}},
 			{`UUIDTestField == "550e8400-e29b-41d4-a716-446655440000"`, nil},
+			{`UUIDTestField == "550E8400-E29B-41D4-A716-446655440000"`, nil},
+			{`UUIDTestField == "550e8400e29b41d4a716446655440000"`, nil},
+			{`UUIDTestField == "{550e8400-e29b-41d4-a716-446655440000}"`, nil},
+			{`UUIDTestField == "urn:uuid:550e8400-e29b-41d4-a716-446655440000"`, nil},
+			{`UUIDTestField in ["550e8400e29b41d4a716446655440000", "{550e8400-e29b-41d4-a716-446655440000}"]`, nil},
 			{`UUIDTestField != {uuid}`, map[string]*schemapb.TemplateValue{
 				"uuid": generateTemplateValue(schemapb.DataType_String, "550e8400-e29b-41d4-a716-446655440000"),
 			}},

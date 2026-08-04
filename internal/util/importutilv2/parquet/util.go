@@ -336,8 +336,7 @@ func isFixedSizeListImportTarget(field *schemapb.FieldSchema) bool {
 			schemapb.DataType_Float,
 			schemapb.DataType_Double,
 			schemapb.DataType_VarChar,
-			schemapb.DataType_String,
-			schemapb.DataType_UUID:
+			schemapb.DataType_String:
 			return true
 		default:
 			return false

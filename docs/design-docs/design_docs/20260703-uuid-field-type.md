@@ -2,7 +2,7 @@
 
 - **Created:** 2026-07-03
 - **Author(s):** @BlackPool25
-- **Status:** Implementation Complete (Phase 1)
+- **Status:** Phase 1: string-backed (16-byte storage deferred to follow-up)
 - **Component:** Proxy / Client SDK / Type System
 - **Related Issues:** [#50957](https://github.com/milvus-io/milvus/issues/50957)
 
@@ -156,15 +156,41 @@ Upgrade path: New collections can use UUID fields immediately after upgrade. Exi
 
 ### 16-byte Binary Storage (Phase 2 — deferred)
 The original design stored UUIDs as `FixedSizeBinary(16)` at the storage layer for space efficiency. This is deferred to a follow-up PR because:
-- A UUID stored as a canonical string is semantically equivalent to VarChar for ordering, dedup, and delete
-- The storage optimization is purely space/perf and can land later without a breaking schema change
-- Scoping Phase 1 to VarChar-backed UUID reduces the PR surface and lets the type ship sooner
+ - A UUID stored as a canonical string is semantically equivalent to VarChar for ordering, dedup, and delete
+ - The storage optimization is purely space/perf and can land later without a breaking schema change
+ - Scoping Phase 1 to VarChar-backed UUID reduces the PR surface and lets the type ship sooner
+
+## Phase 1 Scope (string-backed)
+
+This phase delivers **type safety and input validation only** — it does **not** provide any storage or lookup-efficiency improvement over `VarChar`. A UUID field stored as a canonical 36-char string consumes the same space as a VarChar of the same length, and PK lookups use the same string index paths.
+
+Phase 1 supports:
+- `UUID` as a scalar field and as a collection primary key (with `Int64` and `VarChar`)
+- `==`, `!=`, `IN`, single-sided ranges; validation + canonicalization at the proxy boundary
+- String-backed storage (`StringData` / `VarCharPrimaryKey` / string indexes), consistent with the maintainer-agreed scope
+
+Phase 1 explicitly does **not** support, and rejects at the relevant boundary:
+- 16-byte `FixedSizeBinary(16)` storage and the `IDs_UuidId` wire field (deferred to the follow-up)
+- `ARRAY<UUID>` element type — rejected at schema validation (import readers, insert validation, capacity, SDK construction, and result deserialization are all string-only in this phase)
+- Field-to-field comparison (`uuid_a == uuid_b`) — rejected at parse time; UUID literals are only comparable against constant values, matching the range-operator restriction
+- `StorageV1` (legacy codec) for UUID — rejected with a clear error; UUID requires the V2 storage format
+- Auto-generated UUID primary keys
+
+Compaction (sort, mix/merge, schema-bump full rewrite, clustering) **supports** UUID PKs: UUID values are canonical strings, so all compaction paths treat them via the VarChar/string branch and never panic. The 16-byte follow-up will switch compaction comparisons to the binary form.
 
 ### Int64 PK with separate UUID column
 Forces a synthetic integer key and a secondary lookup, defeating the purpose of a natural UUID identifier. Increases application complexity with no storage benefit.
 
 ### UUID auto-generation (v4/v7)
 While a future enhancement could add automatic UUID generation for auto-id fields, this first implementation requires clients to provide UUID values. Auto-generation is tracked as a follow-up feature.
+
+## Follow-up: 16-byte Binary Storage
+
+Tracked as a follow-up issue (to be created once the storage scope is confirmed on #51038). Milestones:
+- Store UUID as `FixedSizeBinary(16)` in Parquet/deltalog
+- Switch PK wire transport from `str_id` to the already-merged `IDs_UuidId` / `UUIDArray` (milvus-proto #639)
+- 16-byte PK comparisons, dedup, bloom filter
+- Enable sort/mix/schema-bump compaction, `ARRAY<UUID>`, field-to-field comparison, and StorageV1 paths for UUID
 
 ## References
 

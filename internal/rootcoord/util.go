@@ -347,6 +347,10 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 			msg := fmt.Sprintf("ArrayOfVector is only supported in struct array field, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 			return merr.WrapErrParameterInvalidMsg(msg)
 		}
+		if fieldSchema.GetDataType() == schemapb.DataType_Array && fieldSchema.GetElementType() == schemapb.DataType_UUID {
+			msg := fmt.Sprintf("array element type UUID is not supported in this phase, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg(msg)
+		}
 		if fieldSchema.GetNullable() && fieldSchema.IsPrimaryKey {
 			msg := fmt.Sprintf("primary field not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 			return merr.WrapErrParameterInvalidMsg(msg)

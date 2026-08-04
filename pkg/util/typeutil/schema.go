@@ -3236,7 +3236,9 @@ func HasPartitionKey(schema *schemapb.CollectionSchema) bool {
 }
 
 func IsFieldDataTypeSupportMaterializedView(fieldSchema *schemapb.FieldSchema) bool {
-	return IsIntegerType(fieldSchema.DataType) || IsStringType(fieldSchema.DataType)
+	return IsIntegerType(fieldSchema.DataType) ||
+		IsStringType(fieldSchema.DataType) ||
+		IsUUIDType(fieldSchema.DataType)
 }
 
 // HasClusterKey check if a collection schema has ClusterKey field

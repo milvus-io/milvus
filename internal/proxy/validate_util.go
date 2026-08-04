@@ -6,7 +6,6 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/google/uuid"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -947,11 +946,11 @@ func (v *validateUtil) checkUUIDFieldData(field *schemapb.FieldData, fieldSchema
 
 	// Validate each UUID string format and normalize to lowercase
 	for i, s := range strArr {
-		u, err := uuid.Parse(s)
+		normalized, err := typeutil.NormalizeUUID(s)
 		if err != nil {
 			return merr.WrapErrParameterInvalidMsg("invalid UUID format for field %s at row %d: %s", fieldSchema.GetName(), i, s)
 		}
-		strArr[i] = u.String()
+		strArr[i] = normalized
 	}
 
 	return nil

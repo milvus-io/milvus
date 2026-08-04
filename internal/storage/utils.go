@@ -90,6 +90,10 @@ func WriteFile(filepath string, data []byte, perm fs.FileMode) error {
 // ValidateStorageV1InsertWritableSchema validates schema constraints required by V1 insert binlogs.
 func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_UUID {
+			return merr.WrapErrParameterInvalidMsg("UUID field type is not supported in V1 storage format, please use the default storage format, fieldName=%s",
+				field.GetName())
+		}
 		if isNullableArrayOfVectorField(field) {
 			return merr.WrapErrParameterInvalidMsg("nullable ArrayOfVector is not supported in V1 storage format, fieldName=%s", field.GetName())
 		}
@@ -97,6 +101,10 @@ func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) er
 
 	for _, structField := range schema.GetStructArrayFields() {
 		for _, field := range structField.GetFields() {
+			if field.GetDataType() == schemapb.DataType_UUID {
+				return merr.WrapErrParameterInvalidMsg("UUID field type is not supported in V1 storage format, please use the default storage format, structName=%s, fieldName=%s",
+					structField.GetName(), field.GetName())
+			}
 			if isNullableArrayOfVectorField(field) {
 				return merr.WrapErrParameterInvalidMsg("nullable ArrayOfVector is not supported in V1 storage format, structName=%s, fieldName=%s",
 					structField.GetName(), field.GetName())

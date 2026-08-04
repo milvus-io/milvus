@@ -21,8 +21,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/google/uuid"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -43,12 +41,12 @@ func CheckVarcharLength(str string, maxLength int64, field *schemapb.FieldSchema
 // upper-case or malformed values are rejected with an error naming the field, the
 // row number, and the offending value.
 func ValidateAndNormalizeUUID(fieldName string, row int64, s string) (string, error) {
-	u, err := uuid.Parse(s)
+	normalized, err := typeutil.NormalizeUUID(s)
 	if err != nil {
 		return "", merr.WrapErrImportFailedMsg(
 			"invalid UUID format for field '%s' at row %d, value='%s'", fieldName, row, s)
 	}
-	return u.String(), nil
+	return normalized, nil
 }
 
 func CheckArrayCapacity(arrLength int, maxCapacity int64, field *schemapb.FieldSchema) error {

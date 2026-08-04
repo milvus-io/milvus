@@ -283,7 +283,12 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 	if dataType == schemapb.DataType_UUID && IsString(value) {
 		// Normalize UUID literals to canonical lowercase so query/delete
 		// expressions match the canonical form stored at insert time.
-		value.GetVal().(*planpb.GenericValue_StringVal).StringVal = strings.ToLower(value.GetStringVal())
+		// Malformed literals are rejected here instead of silently missed.
+		normalized, err := typeutil.NormalizeUUID(value.GetStringVal())
+		if err != nil {
+			return nil, merr.WrapErrQueryPlanMsg("cannot cast value to %s, value: %s", dataType.String(), value)
+		}
+		value.GetVal().(*planpb.GenericValue_StringVal).StringVal = normalized
 		return value, nil
 	}
 	if typeutil.IsTimestamptzType(dataType) {
@@ -489,6 +494,14 @@ func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*
 	// Check if both left and right are non-JSON types
 	if typeutil.IsJSONType(leftColumnInfo.GetDataType()) || typeutil.IsJSONType(rightColumnInfo.GetDataType()) {
 		return nil, merr.WrapErrQueryPlanMsg("two column comparison with JSON type is not supported")
+	}
+
+	// CompareExpr's executor only supports VARCHAR as a string expression
+	// operand, so a field-to-field comparison involving a UUID column would
+	// fail at execution. Reject it at parse time; field-vs-literal
+	// comparisons (e.g. uuid == "550e8400-...") are unaffected.
+	if typeutil.IsUUIDType(leftColumnInfo.GetDataType()) || typeutil.IsUUIDType(rightColumnInfo.GetDataType()) {
+		return nil, merr.WrapErrQueryPlanMsg("field-to-field comparison on uuid field is not supported")
 	}
 
 	expr := &planpb.Expr{

@@ -570,6 +570,8 @@ func validateElementType(dataType schemapb.DataType) error {
 		return nil
 	case schemapb.DataType_String:
 		return merr.WrapErrParameterInvalidMsg("string data type not supported yet, please use VarChar type instead")
+	case schemapb.DataType_UUID:
+		return merr.WrapErrParameterInvalidMsg("array element type UUID is not supported in this phase")
 	case schemapb.DataType_None:
 		return merr.WrapErrParameterInvalidMsg("element data type None is not valid")
 	}

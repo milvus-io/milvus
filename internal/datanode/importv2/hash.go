@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -60,6 +61,11 @@ func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
 
 	f1 := hashByVChannel(int64(channelNum), pkField)
 	f2 := hashByPartition(int64(partitionNum), partKeyField)
+	if f1 == nil || f2 == nil {
+		return nil, merr.WrapErrImportFailedMsg(
+			"unsupported data type for import hashing, primary key type: %s, partition key type: %s",
+			pkField.GetDataType().String(), partKeyField.GetDataType().String())
+	}
 
 	res, err := newHashedData(schema, channelNum, partitionNum)
 	if err != nil {
@@ -89,6 +95,11 @@ func HashDeleteData(task Task, delData *storage.DeleteData) ([]*storage.DeleteDa
 	}
 
 	f1 := hashByVChannel(int64(channelNum), pkField)
+	if f1 == nil {
+		return nil, merr.WrapErrImportFailedMsg(
+			"unsupported data type for import hashing, primary key type: %s",
+			pkField.GetDataType().String())
+	}
 
 	res := make([]*storage.DeleteData, channelNum)
 	for i := 0; i < channelNum; i++ {
@@ -154,6 +165,11 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 	rowNum, _ := GetInsertDataRowCount(rows, schema)
 	if pkField.GetAutoID() {
 		fn := hashByPartition(int64(partitionNum), partKeyField)
+		if fn == nil {
+			return nil, merr.WrapErrImportFailedMsg(
+				"unsupported data type for import hashing, partition key type: %s",
+				partKeyField.GetDataType().String())
+		}
 		rows.Data = lo.PickBy(rows.Data, func(fieldID int64, _ storage.FieldData) bool {
 			return fieldID != pkField.GetFieldID()
 		})
@@ -176,6 +192,11 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 	} else {
 		f1 := hashByVChannel(int64(channelNum), pkField)
 		f2 := hashByPartition(int64(partitionNum), partKeyField)
+		if f1 == nil || f2 == nil {
+			return nil, merr.WrapErrImportFailedMsg(
+				"unsupported data type for import hashing, primary key type: %s, partition key type: %s",
+				pkField.GetDataType().String(), partKeyField.GetDataType().String())
+		}
 		for i := 0; i < rowNum; i++ {
 			row := getRowFromInsertData(rows, i)
 			p1, p2 := f1(row[id1]), f2(row[id2])
@@ -214,6 +235,11 @@ func GetDeleteStats(task Task, delData *storage.DeleteData) (map[string]*datapb.
 	}
 
 	f1 := hashByVChannel(int64(channelNum), pkField)
+	if f1 == nil {
+		return nil, merr.WrapErrImportFailedMsg(
+			"unsupported data type for import hashing, primary key type: %s",
+			pkField.GetDataType().String())
+	}
 
 	hashRowsCount := make([][]int, channelNum)
 	hashDataSize := make([][]int, channelNum)
@@ -256,7 +282,7 @@ func hashByVChannel(channelNum int64, pkField *schemapb.FieldSchema) func(pk any
 			hash, _ := typeutil.Hash32Int64(pk.(int64))
 			return int64(hash) % channelNum
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		return func(pk any) int64 {
 			hash := typeutil.HashString2Uint32(pk.(string))
 			return int64(hash) % channelNum
@@ -278,7 +304,7 @@ func hashByPartition(partitionNum int64, partField *schemapb.FieldSchema) func(k
 			hash, _ := typeutil.Hash32Int64(key.(int64))
 			return int64(hash) % partitionNum
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		return func(key any) int64 {
 			hash := typeutil.HashString2Uint32(key.(string))
 			return int64(hash) % partitionNum

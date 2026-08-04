@@ -1260,7 +1260,7 @@ func NewInsertData(segmentID, partitionID int64, cap int, pkType schemapb.DataTy
 	switch pkType {
 	case schemapb.DataType_Int64:
 		data.intPKTs = make(map[int64]int64)
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		data.strPKTs = make(map[string]int64)
 	}
 
@@ -1284,6 +1284,14 @@ func (id *InsertData) Append(data *storage.InsertData, pkFieldData storage.Field
 			}
 		}
 	case schemapb.DataType_VarChar:
+		pks := pkFieldData.GetDataRows().([]string)
+		for idx, pk := range pks {
+			ts, ok := id.strPKTs[pk]
+			if !ok || timestamps[idx] < ts {
+				id.strPKTs[pk] = timestamps[idx]
+			}
+		}
+	case schemapb.DataType_UUID:
 		pks := pkFieldData.GetDataRows().([]string)
 		for idx, pk := range pks {
 			ts, ok := id.strPKTs[pk]
@@ -1721,7 +1729,7 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 		switch pkField.GetDataType() {
 		case schemapb.DataType_Int64:
 			inData.intPKTs = make(map[int64]int64)
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 			inData.strPKTs = make(map[string]int64)
 		}
 
@@ -1769,6 +1777,14 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 					}
 				}
 			case schemapb.DataType_VarChar:
+				pks := pkFieldData.GetDataRows().([]string)
+				for idx, pk := range pks {
+					ts, ok := inData.strPKTs[pk]
+					if !ok || timestamps[idx] < ts {
+						inData.strPKTs[pk] = timestamps[idx]
+					}
+				}
+			case schemapb.DataType_UUID:
 				pks := pkFieldData.GetDataRows().([]string)
 				for idx, pk := range pks {
 					ts, ok := inData.strPKTs[pk]

@@ -1732,9 +1732,6 @@ func ReadStringArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, err
 		}
 		err = readStringListLikeData(pcr.field, listReader, func(val string) (string, error) {
-			if pcr.field.GetElementType() == schemapb.DataType_UUID {
-				return common.ValidateAndNormalizeUUID(pcr.field.GetName(), row, val)
-			}
 			if err := common.CheckValidString(val, maxLength, pcr.field); err != nil {
 				return val, err
 			}
@@ -1778,9 +1775,6 @@ func ReadNullableStringArrayData(pcr *FieldReader, count int64) (any, []bool, er
 				return nil, nil, err
 			}
 			err = readStringListLikeData(pcr.field, listReader, func(val string) (string, error) {
-				if pcr.field.GetElementType() == schemapb.DataType_UUID {
-					return common.ValidateAndNormalizeUUID(pcr.field.GetName(), row, val)
-				}
 				if err := common.CheckValidString(val, maxLength, pcr.field); err != nil {
 					return val, err
 				}
@@ -1981,7 +1975,7 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 				},
 			})
 		}
-	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_UUID:
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		stringArray, err := ReadStringArrayData(pcr, count)
 		if err != nil {
 			return nil, err
@@ -2184,7 +2178,7 @@ func ReadNullableArrayData(pcr *FieldReader, count int64) (any, []bool, error) {
 			})
 		}
 		return data, validData, nil
-	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_UUID:
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		stringArray, validData, err := ReadNullableStringArrayData(pcr, count)
 		if err != nil {
 			return nil, nil, err

@@ -755,26 +755,6 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 				},
 			},
 		}, nil
-	case schemapb.DataType_UUID:
-		values := make([]string, len(arr))
-		for i, v := range arr {
-			value, ok := v.(string)
-			if !ok {
-				return nil, r.wrapArrayValueTypeError(arr, eleType)
-			}
-			value, err := common.ValidateAndNormalizeUUID(field.GetName(), r.rowNum, value)
-			if err != nil {
-				return nil, err
-			}
-			values[i] = value
-		}
-		return &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_StringData{
-				StringData: &schemapb.StringArray{
-					Data: values,
-				},
-			},
-		}, nil
 	default:
 		return nil, merr.WrapErrImportFailed(
 			fmt.Sprintf("parse csv failed, unsupported array data type: %s", eleType.String()))

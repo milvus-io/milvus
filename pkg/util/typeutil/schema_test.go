@@ -1702,6 +1702,16 @@ func TestIsUUIDType(t *testing.T) {
 	assert.False(t, IsUUIDType(schemapb.DataType_Float))
 }
 
+func TestIsFieldDataTypeSupportMaterializedView(t *testing.T) {
+	assert.True(t, IsFieldDataTypeSupportMaterializedView(&schemapb.FieldSchema{DataType: schemapb.DataType_UUID}))
+	assert.True(t, IsFieldDataTypeSupportMaterializedView(&schemapb.FieldSchema{DataType: schemapb.DataType_Int64}))
+	assert.True(t, IsFieldDataTypeSupportMaterializedView(&schemapb.FieldSchema{DataType: schemapb.DataType_VarChar}))
+	assert.True(t, IsFieldDataTypeSupportMaterializedView(&schemapb.FieldSchema{DataType: schemapb.DataType_String}))
+	assert.False(t, IsFieldDataTypeSupportMaterializedView(&schemapb.FieldSchema{DataType: schemapb.DataType_Float}))
+	assert.False(t, IsFieldDataTypeSupportMaterializedView(&schemapb.FieldSchema{DataType: schemapb.DataType_JSON}))
+	assert.False(t, IsFieldDataTypeSupportMaterializedView(&schemapb.FieldSchema{DataType: schemapb.DataType_Array}))
+}
+
 func TestIsPrimaryFieldType_WithUUID(t *testing.T) {
 	assert.True(t, IsPrimaryFieldType(schemapb.DataType_UUID))
 	assert.True(t, IsPrimaryFieldType(schemapb.DataType_Int64))
