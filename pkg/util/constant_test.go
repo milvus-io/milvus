@@ -46,3 +46,33 @@ func TestExprPrivilegeDefinition(t *testing.T) {
 	assert.True(t, IsPrivilegeNameDefined("Expr"))
 	assert.Equal(t, milvuspb.PrivilegeLevel_Cluster.String(), GetPrivilegeLevel("Expr"))
 }
+
+func TestSkipRLSPrivilegeDefinition(t *testing.T) {
+	privilegeName := MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSkipRLS.String())
+	assert.Equal(t, "SkipRLS", privilegeName)
+	assert.Equal(t, commonpb.ObjectType_Collection.String(), GetObjectType(privilegeName))
+	assert.Equal(t, commonpb.ObjectPrivilege_PrivilegeSkipRLS.String(), PrivilegeNameForMetastore(privilegeName))
+	assert.True(t, IsPrivilegeNameDefined(privilegeName))
+	assert.Equal(t, milvuspb.PrivilegeLevel_Collection.String(), GetPrivilegeLevel(privilegeName))
+	assert.Contains(t, CollectionAdminPrivileges, privilegeName)
+	assert.Contains(t, AdminPrivilegeGroup, commonpb.ObjectPrivilege_PrivilegeSkipRLS.String())
+	assert.NotContains(t, ReadWritePrivilegeGroup, commonpb.ObjectPrivilege_PrivilegeSkipRLS.String())
+}
+
+func TestRLSManagementPrivilegeDefinitions(t *testing.T) {
+	for _, privilege := range []commonpb.ObjectPrivilege{
+		commonpb.ObjectPrivilege_PrivilegeViewRLS,
+		commonpb.ObjectPrivilege_PrivilegeManageRLS,
+	} {
+		privilegeName := MetaStore2API(privilege.String())
+		assert.Equal(t, commonpb.ObjectType_Collection.String(), GetObjectType(privilegeName))
+		assert.Equal(t, privilege.String(), PrivilegeNameForMetastore(privilegeName))
+		assert.True(t, IsPrivilegeNameDefined(privilegeName))
+		assert.Equal(t, milvuspb.PrivilegeLevel_Collection.String(), GetPrivilegeLevel(privilegeName))
+		assert.NotContains(t, CollectionReadOnlyPrivileges, privilegeName)
+		assert.NotContains(t, CollectionReadWritePrivileges, privilegeName)
+		assert.Contains(t, CollectionAdminPrivileges, privilegeName)
+		assert.Contains(t, AdminPrivilegeGroup, privilege.String())
+		assert.NotContains(t, ReadWritePrivilegeGroup, privilege.String())
+	}
+}
