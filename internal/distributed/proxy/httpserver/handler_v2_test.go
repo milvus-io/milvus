@@ -27,6 +27,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -44,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
@@ -1077,41 +1079,82 @@ func TestSearchV2RejectsElementOffsetFieldCollision(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
-	mp := mocks.NewMockProxy(t)
-	testEngine := initHTTPServerV2(mp, false)
-	schema := generateCollectionSchema(schemapb.DataType_Int64, false, false)
-	schema.Fields[0].Name = HTTPReturnElementOffset
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionName: DefaultCollectionName,
-		Schema:         schema,
-		ShardsNum:      ShardNumDefault,
-		Status:         &StatusSuccess,
-	}, nil).Once()
-	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
-		Status: commonSuccessStatus,
-		Results: &schemapb.SearchResultData{
-			NumQueries:     1,
-			TopK:           1,
-			Topks:          []int64{1},
-			Ids:            generateIDs(schemapb.DataType_Int64, 1),
-			Scores:         DefaultScores[:1],
-			ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+	testCases := []struct {
+		name        string
+		path        string
+		requestBody string
+		method      string
+		hybrid      bool
+	}{
+		{
+			name:        "search",
+			path:        versionalV2(EntityCategory, SearchAction),
+			requestBody: `{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":1}`,
+			method:      "Search",
 		},
-	}, nil).Once()
+		{
+			name: "hybrid search",
+			path: versionalV2(EntityCategory, HybridSearchAction),
+			requestBody: `{"collectionName":"book","search":[` +
+				`{"data":[[0.1,0.2]],"annsField":"book_intro","metricType":"L2","limit":1},` +
+				`{"data":[[0.1,0.2]],"annsField":"book_intro","metricType":"L2","limit":1}],` +
+				`"rerank":{"strategy":"weighted","params":{"weights":[0.5,0.5]}},"limit":1}`,
+			method: "HybridSearch",
+			hybrid: true,
+		},
+	}
 
-	req := httptest.NewRequest(
-		http.MethodPost,
-		versionalV2(EntityCategory, SearchAction),
-		bytes.NewReader([]byte(`{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":1}`)),
-	)
-	w := httptest.NewRecorder()
-	testEngine.ServeHTTP(w, req)
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			mp := mocks.NewMockProxy(t)
+			testEngine := initHTTPServerV2(mp, false)
+			schema := generateCollectionSchema(schemapb.DataType_Int64, false, false)
+			schema.Fields[0].Name = HTTPReturnElementOffset
+			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+				CollectionName: DefaultCollectionName,
+				Schema:         schema,
+				ShardsNum:      ShardNumDefault,
+				Status:         &StatusSuccess,
+			}, nil).Once()
+			searchResult := &milvuspb.SearchResults{
+				Status: commonSuccessStatus,
+				Results: &schemapb.SearchResultData{
+					NumQueries:     1,
+					TopK:           1,
+					Topks:          []int64{1},
+					Ids:            generateIDs(schemapb.DataType_Int64, 1),
+					Scores:         DefaultScores[:1],
+					ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+				},
+			}
+			if testCase.hybrid {
+				mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(searchResult, nil).Once()
+			} else {
+				mp.EXPECT().Search(mock.Anything, mock.Anything).Return(searchResult, nil).Once()
+			}
 
-	require.Equal(t, http.StatusOK, w.Code)
-	var response ReturnErrMsg
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-	require.Equal(t, merr.Code(merr.ErrInvalidSearchResult), response.Code)
-	require.Contains(t, response.Message, `field "offset" conflicts with the reserved REST search element offset field`)
+			failureCounter := metrics.ProxyFunctionCall.WithLabelValues(
+				paramtable.GetStringNodeID(),
+				testCase.method,
+				metrics.RejectedLabel,
+				metrics.CauseUser,
+				DefaultDbName,
+				DefaultCollectionName,
+			)
+			beforeFailures := testutil.ToFloat64(failureCounter)
+
+			req := httptest.NewRequest(http.MethodPost, testCase.path, bytes.NewReader([]byte(testCase.requestBody)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			var response ReturnErrMsg
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+			require.Equal(t, merr.Code(merr.ErrInvalidSearchResult), response.Code)
+			require.Contains(t, response.Message, `field "offset" conflicts with the reserved REST search element offset field`)
+			require.Equal(t, beforeFailures+1, testutil.ToFloat64(failureCounter))
+		})
+	}
 }
 
 func TestDocInDocOutSearch(t *testing.T) {
