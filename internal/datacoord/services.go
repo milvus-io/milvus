@@ -1344,15 +1344,19 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		)
 	}
 	if err != nil {
-		mlog.Error(context.TODO(), "failed to trigger manual compaction", mlog.Err(err))
+		mlog.Error(ctx, "failed to trigger manual compaction", mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
 	if isTargetBasedManualRewriteCompactionRequest(req) {
-		resp.CompactionID = id
+		targetID := id
+		// Manual rewrite records a durable target first. The reconciler later
+		// uses the same target ID as the trigger ID for generated compaction tasks,
+		// so the legacy compactionID response remains the polling handle.
+		resp.CompactionID = targetID
 		resp.CompactionPlanCount = 0
-		log.Info("success to record manual rewrite compaction target", zap.Int64("compactionID", id))
+		mlog.Info(ctx, "success to record manual rewrite compaction target", mlog.Int64("targetID", targetID))
 		return resp, nil
 	}
 
@@ -1365,7 +1369,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		resp.CompactionPlanCount = int32(taskCnt)
 	}
 
-	mlog.Info(context.TODO(), "success to trigger manual compaction", mlog.Bool("isL0Compaction", req.GetL0Compaction()),
+	mlog.Info(ctx, "success to trigger manual compaction", mlog.Bool("isL0Compaction", req.GetL0Compaction()),
 		mlog.Bool("isMajorCompaction", req.GetMajorCompaction()), mlog.Int64("targetSize", req.GetTargetSize()), mlog.Int64("compactionID", id), mlog.Int("taskNum", taskCnt))
 	return resp, nil
 }

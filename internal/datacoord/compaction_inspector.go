@@ -567,7 +567,7 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 	taskCreateTS, err := c.allocator.AllocTimestamp(context.TODO())
 	if err != nil {
 		c.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
-		log.Warn("Failed to enqueue compaction task, unable to allocate task create timestamp", zap.Error(err))
+		log.Warn(context.TODO(), "Failed to enqueue compaction task, unable to allocate task create timestamp", mlog.Err(err))
 		return err
 	}
 	startTime := tsoutil.PhysicalTime(taskCreateTS).Unix()

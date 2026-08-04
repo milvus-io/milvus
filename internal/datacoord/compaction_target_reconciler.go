@@ -4,9 +4,7 @@ import (
 	"context"
 	"sort"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -79,20 +77,19 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 			satisfiedTargets = append(satisfiedTargets, record)
 			continue
 		}
-		for _, segment := range reconciler.filterSelectable(ctx, compactionType, matches) {
-			if view := compactionTargetView(record, compactionType, segment); view != nil {
-				events[TriggerTypeTarget] = append(events[TriggerTypeTarget], view)
-			}
-		}
+		events[TriggerTypeTarget] = append(
+			events[TriggerTypeTarget],
+			reconciler.compactionViews(ctx, record, compactionType, matches)...,
+		)
 	}
 
 	for _, record := range satisfiedTargets {
 		if err := targetMeta.UpdateCompactionTargetState(ctx, record.GetTargetID(), datapb.TargetState_TARGET_STATE_INACTIVE); err != nil {
 			return events, err
 		}
-		log.Ctx(ctx).Info("compaction target satisfied",
-			zap.Int64("targetID", record.GetTargetID()),
-			zap.Int64("collectionID", record.GetCollectionID()))
+		mlog.Info(ctx, "compaction target satisfied",
+			mlog.Int64("targetID", record.GetTargetID()),
+			mlog.FieldCollectionID(record.GetCollectionID()))
 	}
 	sortCompactionTargetViews(events[TriggerTypeTarget])
 	return events, nil
@@ -105,11 +102,12 @@ func compactionTypeForTarget(record *datapb.CompactionTarget) (datapb.Compaction
 	return 0, false
 }
 
-func (reconciler *compactionTargetReconciler) filterSelectable(
+func (reconciler *compactionTargetReconciler) compactionViews(
 	ctx context.Context,
+	record *datapb.CompactionTarget,
 	compactionType datapb.CompactionType,
 	matches []*SegmentInfo,
-) []*SegmentInfo {
+) []CompactionView {
 	blockedCollections := make(map[int64]bool)
 	sharedSelectable := make([]*SegmentInfo, 0, len(matches))
 	for _, segment := range matches {
@@ -127,7 +125,17 @@ func (reconciler *compactionTargetReconciler) filterSelectable(
 
 	switch compactionType {
 	case datapb.CompactionType_MixCompaction:
-		return reconciler.filterMixCompactionSelectable(ctx, sharedSelectable)
+		selectable := reconciler.filterMixCompactionSelectable(ctx, sharedSelectable)
+		views := make([]CompactionView, 0, len(selectable))
+		for _, segment := range selectable {
+			segmentViews := GetViewsByInfo(segment)
+			views = append(views, &MixSegmentView{
+				label:     segmentViews[0].label,
+				segments:  segmentViews,
+				triggerID: record.GetTargetID(),
+			})
+		}
+		return views
 	default:
 		return nil
 	}
@@ -147,24 +155,6 @@ func (reconciler *compactionTargetReconciler) filterMixCompactionSelectable(
 		return FilterInIndexedSegments(ctx, reconciler.handler, reconciler.meta, true, selectable...)
 	}
 	return selectable
-}
-
-func compactionTargetView(
-	record *datapb.CompactionTarget,
-	compactionType datapb.CompactionType,
-	segment *SegmentInfo,
-) CompactionView {
-	switch compactionType {
-	case datapb.CompactionType_MixCompaction:
-		segmentViews := GetViewsByInfo(segment)
-		return &MixSegmentView{
-			label:     segmentViews[0].label,
-			segments:  segmentViews,
-			triggerID: record.GetTargetID(),
-		}
-	default:
-		return nil
-	}
 }
 
 func sortCompactionTargetViews(views []CompactionView) {
