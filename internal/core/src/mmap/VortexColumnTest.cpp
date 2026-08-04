@@ -1510,6 +1510,14 @@ TEST(VortexColumnTest, ScanPinsPlannedCellsBeforeCursorCreation) {
     auto schema = MakeNullableSchema();
     auto properties =
         std::make_shared<milvus_storage::api::Properties>(MakeProperties());
+    milvus_storage::api::SetValue(
+        *properties, PROPERTY_WRITER_VORTEX_FORMAT_VERSION, "2");
+    milvus_storage::api::SetValue(
+        *properties, PROPERTY_WRITER_VORTEX_ENABLE_STATISTICS, "true");
+    milvus_storage::api::SetValue(
+        *properties,
+        PROPERTY_WRITER_VORTEX_V2_ROW_GROUP_MAX_SIZE,
+        std::to_string(128 * 1024).c_str());
     auto dir =
         std::filesystem::temp_directory_path() /
         ("milvus_vortex_column_pin_plan_test_" + std::to_string(::getpid()) +
@@ -1554,7 +1562,10 @@ TEST(VortexColumnTest, ScanPinsPlannedCellsBeforeCursorCreation) {
     while (validity_cursor->Next(2, &batch)) {
     }
 
-    const auto predicate = StringValue(ExpectedString(DataType::VARCHAR, 8));
+    // Use a value outside every row-group zonemap so the predicate plan is
+    // deterministically empty. The nullable validity plan must still pin and
+    // read the complete window because data and validity share the same Cells.
+    const auto predicate = StringValue("zzzzzzzz");
     const auto row_id_options = ChunkedColumnInterface::ScanOptions::ForUnary(
         0, kNullableRows, proto::plan::OpType::Equal, predicate);
     validity_cursor.reset();
@@ -1563,15 +1574,23 @@ TEST(VortexColumnTest, ScanPinsPlannedCellsBeforeCursorCreation) {
     EXPECT_FALSE(column.CellsLoaded(planned_offsets, 2));
     auto row_id_scan = column.PrepareScan(nullptr, row_id_options);
     ASSERT_NE(row_id_scan, nullptr);
-    EXPECT_FALSE(row_id_scan->Plan().skip_ranges.empty());
+    ASSERT_EQ(row_id_scan->Plan().skip_ranges.size(), 1);
+    EXPECT_EQ(row_id_scan->Plan().skip_ranges[0].start, 0);
+    EXPECT_EQ(row_id_scan->Plan().skip_ranges[0].end, kNullableRows);
     auto row_id_cursor = row_id_scan->Open(
         row_id_scan->Plan(), ChunkedColumnInterface::ScanProjection::NoData);
     ASSERT_NE(row_id_cursor, nullptr);
     // Predicate and validity readers use different plans, but their cell ids
     // are unioned into one pin for this file range.
     EXPECT_TRUE(column.CellsLoaded(planned_offsets, 2));
+    std::vector<int64_t> unknown_rows;
     while (row_id_cursor->Next(2, &batch)) {
+        for (size_t i = 0; i < batch.row_ids.size(); ++i) {
+            EXPECT_FALSE(IsScanRowValid(batch, static_cast<int64_t>(i)));
+            unknown_rows.emplace_back(batch.row_ids[i]);
+        }
     }
+    EXPECT_EQ(unknown_rows, (std::vector<int64_t>{1, 5, 9, 13}));
 
     std::filesystem::remove_all(dir);
 }
