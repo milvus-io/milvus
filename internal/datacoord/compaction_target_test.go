@@ -174,8 +174,8 @@ func (s *CompactionTargetMetaSuite) TestMaterializesTargetsOnRecordMutation() {
 
 	activeTargets := meta.GetActiveCompactionTargets()
 	s.Require().Len(activeTargets, 1)
-	s.Equal(int64(10), activeTargets[0].Clone().GetTargetID())
-	oldTarget := activeTargets[0]
+	s.Contains(activeTargets, int64(10))
+	oldTarget := activeTargets[10]
 	probe := targetSegmentWithDataTS(1, 100, 10, "ch-1", 1500, 1500, false)
 	s.False(targetMatchesSegment(oldTarget, probe))
 
@@ -184,7 +184,7 @@ func (s *CompactionTargetMetaSuite) TestMaterializesTargetsOnRecordMutation() {
 	s.Require().NoError(meta.SaveCompactionTarget(s.ctx, updatedRecord))
 	activeTargets = meta.GetActiveCompactionTargets()
 	s.Require().Len(activeTargets, 1)
-	s.True(targetMatchesSegment(activeTargets[0], probe))
+	s.True(targetMatchesSegment(activeTargets[10], probe))
 	s.False(targetMatchesSegment(oldTarget, probe))
 
 	s.Require().NoError(meta.UpdateCompactionTargetState(s.ctx, 10, datapb.TargetState_TARGET_STATE_INACTIVE))
@@ -433,15 +433,15 @@ func mustNewCompactionTarget(t testing.TB, record *datapb.CompactionTarget) *com
 	return target
 }
 
-func targetSatisfied(target *compactionTarget, segments ...*SegmentInfo) bool {
+func targetSatisfied(target compactionTargetEvaluator, segments ...*SegmentInfo) bool {
 	return target.Satisfied(filterTargetMatches(target, segments...))
 }
 
-func targetMatchesSegment(target *compactionTarget, segment *SegmentInfo) bool {
+func targetMatchesSegment(target compactionTargetEvaluator, segment *SegmentInfo) bool {
 	return len(filterTargetMatches(target, segment)) == 1
 }
 
-func filterTargetMatches(target *compactionTarget, segments ...*SegmentInfo) []*SegmentInfo {
+func filterTargetMatches(target compactionTargetEvaluator, segments ...*SegmentInfo) []*SegmentInfo {
 	filters := target.MatchFilters()
 	matches := make([]*SegmentInfo, 0, len(segments))
 	for _, segment := range segments {

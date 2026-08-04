@@ -59,16 +59,30 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		return events, nil
 	}
 
+	targetIDs := make([]int64, 0, len(targets))
+	for targetID := range targets {
+		targetIDs = append(targetIDs, targetID)
+	}
+	sort.Slice(targetIDs, func(i, j int) bool {
+		return targetIDs[i] < targetIDs[j]
+	})
 	satisfiedTargets := make([]*datapb.CompactionTarget, 0)
-	for _, target := range targets {
-		record := target.Clone()
+	for _, targetID := range targetIDs {
+		target := targets[targetID]
+		record := targetMeta.GetCompactionTarget(targetID)
+		compactionType, supported := compactionTypeForTarget(record)
+		if !supported {
+			continue
+		}
 		matches := reconciler.meta.SelectSegments(ctx, target.MatchFilters()...)
 		if target.Satisfied(matches) {
 			satisfiedTargets = append(satisfiedTargets, record)
 			continue
 		}
-		for _, segment := range reconciler.filterSelectable(ctx, matches) {
-			events[TriggerTypeTarget] = append(events[TriggerTypeTarget], compactionTargetView(record, segment))
+		for _, segment := range reconciler.filterSelectable(ctx, compactionType, matches) {
+			if view := compactionTargetView(record, compactionType, segment); view != nil {
+				events[TriggerTypeTarget] = append(events[TriggerTypeTarget], view)
+			}
 		}
 	}
 
@@ -84,9 +98,20 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	return events, nil
 }
 
-func (reconciler *compactionTargetReconciler) filterSelectable(ctx context.Context, matches []*SegmentInfo) []*SegmentInfo {
+func compactionTypeForTarget(record *datapb.CompactionTarget) (datapb.CompactionType, bool) {
+	if record.GetIntent() == datapb.TargetIntent_INTENT_REWRITE {
+		return datapb.CompactionType_MixCompaction, true
+	}
+	return 0, false
+}
+
+func (reconciler *compactionTargetReconciler) filterSelectable(
+	ctx context.Context,
+	compactionType datapb.CompactionType,
+	matches []*SegmentInfo,
+) []*SegmentInfo {
 	blockedCollections := make(map[int64]bool)
-	selectable := make([]*SegmentInfo, 0, len(matches))
+	sharedSelectable := make([]*SegmentInfo, 0, len(matches))
 	for _, segment := range matches {
 		collectionID := segment.GetCollectionID()
 		blocked, checked := blockedCollections[collectionID]
@@ -94,12 +119,29 @@ func (reconciler *compactionTargetReconciler) filterSelectable(ctx context.Conte
 			blocked = reconciler.meta.isCollectionCompactionBlocked(collectionID)
 			blockedCollections[collectionID] = blocked
 		}
-		if blocked ||
-			!isSharedCompactionSelectable(reconciler.meta, segment) ||
-			!isMixCompactionSelectable(segment) {
+		if blocked || !isSharedCompactionSelectable(reconciler.meta, segment) {
 			continue
 		}
-		selectable = append(selectable, segment)
+		sharedSelectable = append(sharedSelectable, segment)
+	}
+
+	switch compactionType {
+	case datapb.CompactionType_MixCompaction:
+		return reconciler.filterMixCompactionSelectable(ctx, sharedSelectable)
+	default:
+		return nil
+	}
+}
+
+func (reconciler *compactionTargetReconciler) filterMixCompactionSelectable(
+	ctx context.Context,
+	segments []*SegmentInfo,
+) []*SegmentInfo {
+	selectable := make([]*SegmentInfo, 0, len(segments))
+	for _, segment := range segments {
+		if isMixCompactionSelectable(segment) {
+			selectable = append(selectable, segment)
+		}
 	}
 	if paramtable.Get().DataCoordCfg.IndexBasedCompaction.GetAsBool() {
 		return FilterInIndexedSegments(ctx, reconciler.handler, reconciler.meta, true, selectable...)
@@ -107,12 +149,21 @@ func (reconciler *compactionTargetReconciler) filterSelectable(ctx context.Conte
 	return selectable
 }
 
-func compactionTargetView(record *datapb.CompactionTarget, segment *SegmentInfo) CompactionView {
-	segmentViews := GetViewsByInfo(segment)
-	return &MixSegmentView{
-		label:     segmentViews[0].label,
-		segments:  segmentViews,
-		triggerID: record.GetTargetID(),
+func compactionTargetView(
+	record *datapb.CompactionTarget,
+	compactionType datapb.CompactionType,
+	segment *SegmentInfo,
+) CompactionView {
+	switch compactionType {
+	case datapb.CompactionType_MixCompaction:
+		segmentViews := GetViewsByInfo(segment)
+		return &MixSegmentView{
+			label:     segmentViews[0].label,
+			segments:  segmentViews,
+			triggerID: record.GetTargetID(),
+		}
+	default:
+		return nil
 	}
 }
 

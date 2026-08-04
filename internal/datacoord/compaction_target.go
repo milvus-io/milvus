@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"sort"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -103,19 +102,16 @@ func (m *compactionTargetMeta) GetCompactionTargets() map[int64]*datapb.Compacti
 	return targets
 }
 
-func (m *compactionTargetMeta) GetActiveCompactionTargets() []*compactionTarget {
+func (m *compactionTargetMeta) GetActiveCompactionTargets() map[int64]compactionTargetEvaluator {
 	m.RLock()
 	defer m.RUnlock()
 
-	active := make([]*compactionTarget, 0, len(m.targets))
-	for _, target := range m.targets {
+	active := make(map[int64]compactionTargetEvaluator)
+	for targetID, target := range m.targets {
 		if target.active() {
-			active = append(active, target)
+			active[targetID] = target
 		}
 	}
-	sort.Slice(active, func(i, j int) bool {
-		return active[i].GetTargetID() < active[j].GetTargetID()
-	})
 	return active
 }
 
@@ -264,11 +260,18 @@ type matchRule interface {
 	Match(segment *SegmentInfo) bool
 }
 
+type compactionTargetEvaluator interface {
+	MatchFilters() []SegmentFilter
+	Satisfied(matches []*SegmentInfo) bool
+}
+
 type compactionTarget struct {
 	*datapb.CompactionTarget
 	segmentIDs []int64
 	rule       matchRule
 }
+
+var _ compactionTargetEvaluator = (*compactionTarget)(nil)
 
 func newCompactionTarget(target *datapb.CompactionTarget) (*compactionTarget, error) {
 	if target == nil {
