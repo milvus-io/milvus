@@ -178,6 +178,7 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/snapshots/drop":                    "DropSnapshot",
 	"/v2/vectordb/snapshots/list":                    "ListSnapshots",
 	"/v2/vectordb/snapshots/describe":                "DescribeSnapshot",
+	"/v2/vectordb/snapshots/restore":                 "RestoreSnapshot",
 	"/v2/vectordb/jobs/external_collection/refresh":  "RefreshExternalCollection",
 	"/v2/vectordb/jobs/external_collection/describe": "GetRefreshExternalCollectionProgress",
 	"/v2/vectordb/jobs/external_collection/list":     "ListRefreshExternalCollectionJobs",
@@ -348,6 +349,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(SnapshotCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &SnapshotReq{} }, wrapperTraceLog(h.dropSnapshot))))
 	router.POST(SnapshotCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listSnapshots))))
 	router.POST(SnapshotCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &SnapshotReq{} }, wrapperTraceLog(h.describeSnapshot))))
+	router.POST(SnapshotCategory+RestoreAction, timeoutMiddleware(wrapperPost(func() any { return &RestoreSnapshotReq{} }, wrapperTraceLog(h.restoreSnapshot))))
 	router.POST(ExternalCollectionJobCategory+RefreshAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionReq{} }, wrapperTraceLog(h.refreshExternalCollection))))
 	router.POST(ExternalCollectionJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionProgressReq{} }, wrapperTraceLog(h.getRefreshExternalCollectionProgress))))
 	router.POST(ExternalCollectionJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listRefreshExternalCollectionJobs))))

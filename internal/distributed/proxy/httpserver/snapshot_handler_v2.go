@@ -109,3 +109,28 @@ func (h *HandlersV2) describeSnapshot(ctx context.Context, c *gin.Context, anyRe
 	}
 	return resp, err
 }
+
+func (h *HandlersV2) restoreSnapshot(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*RestoreSnapshotReq)
+	req := &milvuspb.RestoreSnapshotRequest{
+		Name:                 httpReq.SnapshotName,
+		DbName:               dbName,
+		CollectionName:       httpReq.SourceCollectionName,
+		TargetDbName:         httpReq.TargetDbName,
+		TargetCollectionName: httpReq.TargetCollectionName,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/RestoreSnapshot", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.RestoreSnapshot(reqCtx, req.(*milvuspb.RestoreSnapshotRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{
+				"jobId": resp.(*milvuspb.RestoreSnapshotResponse).GetJobId(),
+			},
+		})
+	}
+	return resp, err
+}
