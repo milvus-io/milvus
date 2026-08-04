@@ -446,7 +446,6 @@ proxy:
   maxSearchAggregationResultEntries: 10000
   rls:
     maxPoliciesPerCollection: 100 # Maximum number of row policies allowed on one collection.
-    maxPrincipalsPerCollection: 1000 # Maximum number of RLS principals allowed on one collection.
     maxTagsPerPrincipal: 50 # Maximum number of tags allowed on one collection-scoped RLS principal.
     maxExpressionLength: 4096 # Maximum length of one RLS using_expr or check_expr in bytes.
     maxCombinedExpressionLength: 16384 # Maximum length of the final combined RLS expression in bytes.
@@ -456,6 +455,8 @@ proxy:
     maxTagKeyLength: 128 # Maximum RLS principal tag key length in bytes.
     maxTagValueLength: 1024 # Maximum RLS principal tag value length in bytes.
     maxArrayLiteralElements: 1024 # Maximum literal elements for RLS in and array_contains* predicates.
+    maxPrincipalCacheEntries: 65536 # Maximum number of principal-tag entries cached per RLS collection or materialized by one non-paginated principal list.
+    maxPrincipalCacheBytes: 67108864 # Maximum logical bytes of principal names, tag keys, and tag values cached per RLS collection or materialized by one non-paginated principal list.
     metaRefreshInterval: 3600 # Maximum policy-cache age before request-time refresh, and principal-cache age before periodic eviction and refresh on next use, in seconds.
   accessLog:
     enable: false # Whether to enable the access log feature.

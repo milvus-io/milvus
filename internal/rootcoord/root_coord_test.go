@@ -2027,6 +2027,29 @@ func TestCore_GetRLSMetadataRejectsInvalidPrincipalState(t *testing.T) {
 	require.Empty(t, resp.GetPrincipals())
 }
 
+func TestCore_RLSListQuotaStatus(t *testing.T) {
+	ctx := context.Background()
+	meta := mockrootcoord.NewIMetaTable(t)
+	c := newTestCore(withHealthyCode(), withMeta(meta))
+	quotaErr := merr.WrapErrServiceQuotaExceededMsg("list too large")
+
+	listReq := &rlsutil.ListRLSPrincipalsRequest{DbName: "db1", CollectionName: "coll1"}
+	meta.EXPECT().ListRLSPrincipals(mock.Anything, listReq).Return(nil, quotaErr).Once()
+	listResp, err := c.ListRLSPrincipals(ctx, listReq)
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(listResp.Status), merr.ErrServiceQuotaExceeded)
+
+	for _, kind := range []rootcoordpb.RLSMetadataKind{
+		rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL,
+		rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS,
+	} {
+		meta.EXPECT().GetRLSMetadata(mock.Anything, int64(20), kind, "").Return(nil, quotaErr).Once()
+		resp, err := c.GetRLSMetadata(ctx, &rootcoordpb.GetRLSMetadataRequest{CollectionId: 20, Kind: kind})
+		require.NoError(t, err)
+		require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceQuotaExceeded)
+	}
+}
+
 func TestCore_RLSAPIsRejectNilRequest(t *testing.T) {
 	ctx := context.Background()
 	c := newTestCore(withHealthyCode())

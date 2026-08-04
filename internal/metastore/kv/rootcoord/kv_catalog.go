@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -46,6 +47,12 @@ type Catalog struct {
 
 	pool *conc.Pool[any]
 }
+
+type prefixWalker interface {
+	WalkWithPrefix(context.Context, string, int, func([]byte, []byte) error) error
+}
+
+const rlsPrincipalScanBatchSize = 128
 
 func NewCatalog(metaKV kv.TxnKV) metastore.RootCoordCatalog {
 	ioPool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
@@ -698,19 +705,16 @@ func (kc *Catalog) AlterAlias(ctx context.Context, alias *model.Alias, ts typeut
 }
 
 func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error {
-	// Delegate to the composite Update, which owns the atomic-or-ordered
-	// commit. When the child metadata keys plus the collection key fit one
-	// etcd txn, they are removed atomically; otherwise Update flushes the
-	// child removals first and the collection key (the CommitRemove
-	// visibility marker) last. If RootCoord crashes mid-flush, the collection
-	// stays in Dropping state and the tombstone sweeper retries on next
-	// startup.
+	// Delegate to the composite Update, which removes child metadata before
+	// the collection key (the visibility marker). If RootCoord crashes
+	// mid-flush, the collection stays in Dropping state and the tombstone
+	// sweeper retries on next startup.
 	return kc.Update(ctx, ts, metastore.DropCollection(collectionInfo))
 }
 
 // buildDropCollectionKeys computes the collection key and the child
 // metadata keys (aliases, partitions, fields, struct array fields,
-// functions) removed when dropping a collection. Factored out so both
+// functions and RLS policies) removed when dropping a collection. Factored out so both
 // Catalog.DropCollection (which now delegates to the composite Update) and
 // Catalog.Update's CollectionEntry/ActionDelete type-switch case
 // (accumulated into a single txn.Builder) apply the exact same key set.
@@ -745,12 +749,6 @@ func buildDropCollectionKeys(collectionInfo *model.Collection) (string, []string
 			continue
 		}
 		delMetakeysSnap = append(delMetakeysSnap, BuildRLSPolicyKey(collectionInfo.CollectionID, policy.PolicyID))
-	}
-	for _, principal := range collectionInfo.RLSPrincipals {
-		if principal == nil {
-			continue
-		}
-		delMetakeysSnap = append(delMetakeysSnap, buildRLSPrincipalKey(collectionInfo.CollectionID, principal.PrincipalName))
 	}
 	// delMetakeysSnap = append(delMetakeysSnap, buildPartitionPrefix(collectionInfo.CollectionID))
 	// delMetakeysSnap = append(delMetakeysSnap, buildFieldPrefix(collectionInfo.CollectionID))
@@ -2439,21 +2437,41 @@ func (kc *Catalog) DropRLSPrincipal(ctx context.Context, collectionID int64, pri
 }
 
 func (kc *Catalog) ListRLSPrincipals(ctx context.Context, collectionID int64) ([]*model.RLSPrincipal, error) {
-	_, values, err := kc.Txn.LoadWithPrefix(ctx, BuildRLSPrincipalPrefix(collectionID))
-	if err != nil {
-		return nil, err
+	walker, ok := kc.Txn.(prefixWalker)
+	if !ok {
+		return nil, merr.Wrapf(merr.ErrServiceUnimplemented, "metadata store does not support bounded RLS principal scans")
 	}
-	principals := make([]*model.RLSPrincipal, 0, len(values))
-	for _, value := range values {
+	maxEntries := paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheEntries.GetAsInt()
+	maxBytes := paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.GetAsInt64()
+	principals := make([]*model.RLSPrincipal, 0, min(maxEntries, rlsPrincipalScanBatchSize))
+	var totalBytes int64
+	// TODO: Add cursor pagination so callers can enumerate collections that
+	// exceed the non-paginated list limits.
+	err := walker.WalkWithPrefix(ctx, BuildRLSPrincipalPrefix(collectionID), rlsPrincipalScanBatchSize, func(_, value []byte) error {
+		if len(principals) >= maxEntries {
+			return merr.WrapErrServiceQuotaExceededMsg("RLS principal list exceeds the %d-entry limit", maxEntries)
+		}
 		info := &rootcoordpb.RLSPrincipalInfo{}
-		if err := proto.Unmarshal([]byte(value), info); err != nil {
-			return nil, merr.WrapErrDataIntegrity(err, "unmarshal RLS principal info")
+		if err := proto.Unmarshal(value, info); err != nil {
+			return merr.WrapErrDataIntegrity(err, "unmarshal RLS principal info")
 		}
 		principal, err := model.UnmarshalRLSPrincipalModel(info)
 		if err != nil {
-			return nil, merr.WrapErrDataIntegrity(err, "decode RLS principal tags")
+			return merr.WrapErrDataIntegrity(err, "decode RLS principal tags")
 		}
+		entryBytes, err := rlsutil.PrincipalTagsSize(principal.PrincipalName, principal.Tags)
+		if err != nil {
+			return err
+		}
+		if entryBytes > maxBytes-totalBytes {
+			return merr.WrapErrServiceQuotaExceededMsg("RLS principal list exceeds the %d-byte limit", maxBytes)
+		}
+		totalBytes += entryBytes
 		principals = append(principals, principal)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	sort.Slice(principals, func(i, j int) bool {
 		return principals[i].PrincipalName < principals[j].PrincipalName

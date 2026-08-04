@@ -25,14 +25,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type snapshotTestCoord struct {
@@ -117,8 +121,8 @@ func setPrincipalTagsForTest(m *manager, key principalKey, entry *principalTagsE
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	delete(state.principalRefreshTokens, key.principalName)
-	delete(state.principalBackoffs, key.principalName)
-	state.principalTags[key.principalName] = entry
+	state.removePrincipalBackoffLocked(key.principalName)
+	state.putPrincipalTagsLocked(key.principalName, entry)
 	return true
 }
 
@@ -267,6 +271,43 @@ func TestManagerInitDoesNotLoadMetadata(t *testing.T) {
 	require.NoError(t, m.init(context.Background(), coord))
 	require.Zero(t, coord.metadataCalls.Load())
 	require.NotContains(t, m.collections, UniqueID(100))
+}
+
+func TestManagerPrincipalTagsRejectInvalidState(t *testing.T) {
+	var nilManager *manager
+	_, err := nilManager.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+
+	m := newManager()
+	_, err = m.ensurePrincipalTags(context.Background(), 0, "alice")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	_, err = m.ensurePrincipalTags(context.Background(), 100, "")
+	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+}
+
+func TestMetadataRefreshErrorClassification(t *testing.T) {
+	for _, err := range []error{
+		context.Canceled,
+		context.DeadlineExceeded,
+		status.Error(codes.Canceled, "canceled"),
+		status.Error(codes.DeadlineExceeded, "deadline exceeded"),
+		status.Error(codes.Unavailable, "unavailable"),
+	} {
+		wrapped := wrapMetadataRefreshError(err, "refresh failed")
+		require.ErrorIs(t, wrapped, merr.ErrServiceUnavailable)
+		require.True(t, merr.IsRetryableErr(wrapped))
+	}
+
+	typed := merr.WrapErrDataIntegrity(context.DeadlineExceeded, "corrupted metadata")
+	wrapped := wrapMetadataRefreshError(typed, "refresh failed")
+	require.ErrorIs(t, wrapped, merr.ErrDataIntegrity)
+	require.False(t, merr.IsRetryableErr(wrapped))
+
+	raw := errors.New("raw dependency failure")
+	wrapped = wrapMetadataRefreshError(raw, "refresh failed")
+	require.ErrorIs(t, wrapped, merr.ErrServiceInternal)
+	require.ErrorIs(t, wrapped, raw)
+	require.False(t, merr.IsRetryableErr(wrapped))
 }
 
 func TestManagerFailsClosedBeforeInitialization(t *testing.T) {
@@ -667,6 +708,133 @@ func TestManagerPrincipalRefreshFailureBacksOff(t *testing.T) {
 	require.Equal(t, int32(2), coord.principalCalls.Load())
 }
 
+func TestManagerPrincipalRefreshFailureRetainsExponentialBackoffUntilIdleTTL(t *testing.T) {
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMetaRefreshInterval.Key, "1"))
+	t.Cleanup(func() {
+		require.NoError(t, params.Reset(params.ProxyCfg.RLSMetaRefreshInterval.Key))
+	})
+	oldConfig := metadataRefreshBackoffConfig
+	metadataRefreshBackoffConfig = typeutil.BackoffTimerConfig{
+		Backoff: typeutil.BackoffConfig{
+			InitialInterval: time.Millisecond,
+			Multiplier:      2,
+			MaxInterval:     time.Second,
+		},
+	}
+	t.Cleanup(func() { metadataRefreshBackoffConfig = oldConfig })
+
+	m := newManager()
+	coord := &metadataTestCoord{principalErr: merr.WrapErrServiceUnavailableMsg("principal metadata unavailable")}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.refreshPolicies(100))
+	_, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+
+	state := m.getCollectionState(100)
+	state.mu.RLock()
+	firstBackoff := state.principalBackoffs["alice"].backoff
+	firstInstant := firstBackoff.NextInstant()
+	state.mu.RUnlock()
+	require.Eventually(t, func() bool {
+		_, _ = m.ensurePrincipalTags(context.Background(), 100, "alice")
+		return coord.principalCalls.Load() == 2
+	}, time.Second, time.Millisecond)
+
+	state.mu.RLock()
+	require.Same(t, firstBackoff, state.principalBackoffs["alice"].backoff)
+	secondInstant := state.principalBackoffs["alice"].backoff.NextInstant()
+	lastFailureAt := state.principalBackoffs["alice"].lastFailureAt
+	require.True(t, secondInstant.After(firstInstant))
+	state.mu.RUnlock()
+
+	m.expirePrincipalTags(secondInstant.Add(time.Millisecond))
+	state.mu.RLock()
+	require.Same(t, firstBackoff, state.principalBackoffs["alice"].backoff)
+	state.mu.RUnlock()
+
+	m.expirePrincipalTags(lastFailureAt.Add(time.Second))
+	state.mu.RLock()
+	require.NotContains(t, state.principalBackoffs, "alice")
+	state.mu.RUnlock()
+}
+
+func TestManagerPrincipalRefreshBackoffsAreBounded(t *testing.T) {
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key, "2"))
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key, "5"))
+	t.Cleanup(func() {
+		require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key))
+		require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key))
+	})
+
+	m := newManager()
+	coord := &metadataTestCoord{principalErr: merr.WrapErrServiceUnavailableMsg("principal metadata unavailable")}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.refreshPolicies(100))
+	for _, principalName := range []string{"a", "b", "c"} {
+		_, err := m.ensurePrincipalTags(context.Background(), 100, principalName)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	}
+	require.Equal(t, int32(3), coord.principalCalls.Load())
+
+	state := m.getCollectionState(100)
+	state.mu.RLock()
+	require.NotContains(t, state.principalBackoffs, "a")
+	require.Contains(t, state.principalBackoffs, "b")
+	require.Contains(t, state.principalBackoffs, "c")
+	require.Equal(t, 2, state.principalBackoffOrder.Len())
+	require.Equal(t, int64(2), state.principalBackoffBytes)
+	state.mu.RUnlock()
+
+	_, err := m.ensurePrincipalTags(context.Background(), 100, "c")
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, int32(3), coord.principalCalls.Load(), "retained failures must still back off")
+
+	_, err = m.ensurePrincipalTags(context.Background(), 100, "longer")
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, int32(4), coord.principalCalls.Load())
+	state.mu.RLock()
+	require.Empty(t, state.principalBackoffs)
+	require.Zero(t, state.principalBackoffOrder.Len())
+	require.Zero(t, state.principalBackoffBytes)
+	state.mu.RUnlock()
+}
+
+func TestManagerPrincipalRefreshFailureKeepsNewestBackoffWhenCacheIsFull(t *testing.T) {
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key, "1"))
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key, "1024"))
+	t.Cleanup(func() {
+		require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key))
+		require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key))
+	})
+
+	m := newManager()
+	coord := &metadataTestCoord{principalTags: map[string]map[string]string{
+		"cached": {"tenant": "acme"},
+	}}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.refreshPolicies(100))
+	_, err := m.ensurePrincipalTags(context.Background(), 100, "cached")
+	require.NoError(t, err)
+
+	coord.principalErr = merr.WrapErrServiceUnavailableMsg("principal metadata unavailable")
+	_, err = m.ensurePrincipalTags(context.Background(), 100, "failed")
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, int32(2), coord.principalCalls.Load())
+
+	state := m.getCollectionState(100)
+	state.mu.RLock()
+	require.NotContains(t, state.principalTags, "cached")
+	require.Contains(t, state.principalBackoffs, "failed")
+	state.mu.RUnlock()
+
+	_, err = m.ensurePrincipalTags(context.Background(), 100, "failed")
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, int32(2), coord.principalCalls.Load(), "retained backoff must suppress another refresh")
+}
+
 func TestManagerPrincipalRefreshCoalescesConcurrentLookups(t *testing.T) {
 	m := newManager()
 	coord := &blockingPrincipalCoord{
@@ -723,6 +891,9 @@ func TestManagerPrincipalRefreshUsesManagerContext(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("principal refresh did not start")
 	}
+	deadline, ok := refreshCtx.Deadline()
+	require.True(t, ok)
+	require.WithinDuration(t, time.Now().Add(metadataRefreshTimeout), deadline, time.Second)
 	cancelRequest()
 	require.NoError(t, refreshCtx.Err())
 	select {
@@ -736,6 +907,37 @@ func TestManagerPrincipalRefreshUsesManagerContext(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return m.getPrincipalTagsEntry(principalKey{collectionID: 100, principalName: "alice"}) != nil
 	}, time.Second, time.Millisecond)
+}
+
+func TestManagerPrincipalRefreshLimitFailsClosed(t *testing.T) {
+	m := newManager()
+	m.principalRefreshSlots = make(chan struct{}, 1)
+	coord := &blockingPrincipalCoord{
+		metadataTestCoord: &metadataTestCoord{},
+		started:           make(chan struct{}),
+		release:           make(chan struct{}),
+	}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.refreshPolicies(100))
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+		firstDone <- err
+	}()
+	select {
+	case <-coord.started:
+	case <-time.After(time.Second):
+		t.Fatal("principal refresh did not start")
+	}
+
+	_, err := m.ensurePrincipalTags(context.Background(), 100, "bob")
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, int32(1), coord.principalCalls.Load())
+
+	close(coord.release)
+	require.NoError(t, <-firstDone)
+	require.Empty(t, m.principalRefreshSlots)
 }
 
 func TestManagerPrincipalInvalidationWinsOverInflightRefresh(t *testing.T) {
@@ -833,7 +1035,7 @@ func TestManagerPrincipalRefreshInvalidationIsPrincipalScoped(t *testing.T) {
 	require.NotNil(t, m.getPrincipalTagsEntry(principalKey{collectionID: 100, principalName: "alice"}))
 }
 
-func TestManagerPrincipalTTLScannerEvictsExpiredEntries(t *testing.T) {
+func TestManagerPrincipalTTLRefreshesExpiredEntriesOnLookup(t *testing.T) {
 	m := newManager()
 	coord := &metadataTestCoord{
 		principalTags: map[string]map[string]string{
@@ -854,20 +1056,15 @@ func TestManagerPrincipalTTLScannerEvictsExpiredEntries(t *testing.T) {
 
 	aliceTags, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
 	require.NoError(t, err)
-	require.Equal(t, rlsutil.NewStringTagValue("old"), aliceTags["tenant"])
+	require.Equal(t, rlsutil.NewStringTagValue("new"), aliceTags["tenant"])
 	bobTags, err := m.ensurePrincipalTags(context.Background(), 100, "bob")
 	require.NoError(t, err)
 	require.Equal(t, rlsutil.NewStringTagValue("unchanged"), bobTags["tenant"])
-	require.Zero(t, coord.principalCalls.Load())
+	require.Equal(t, int32(1), coord.principalCalls.Load())
 
 	m.expirePrincipalTags(time.Now())
-	require.NotContains(t, m.collections[100].principalTags, "alice")
+	require.Contains(t, m.collections[100].principalTags, "alice")
 	require.Contains(t, m.collections[100].principalTags, "bob")
-
-	aliceTags, err = m.ensurePrincipalTags(context.Background(), 100, "alice")
-	require.NoError(t, err)
-	require.Equal(t, rlsutil.NewStringTagValue("new"), aliceTags["tenant"])
-	require.Equal(t, int32(1), coord.principalCalls.Load())
 }
 
 func TestManagerPrincipalCacheScannerDeletesExpiredEntries(t *testing.T) {
@@ -903,10 +1100,53 @@ func TestManagerPrincipalCacheScannerDeletesExpiredEntries(t *testing.T) {
 	state := m.getCollectionState(100)
 	state.mu.RLock()
 	require.Contains(t, state.invalidationRevisions, uint64(10))
+	require.Zero(t, state.principalCacheBytes)
+	require.Zero(t, state.positivePrincipalCacheOrder.Len())
+	require.Zero(t, state.negativePrincipalCacheOrder.Len())
 	state.mu.RUnlock()
 }
 
-func TestManagerMissingPrincipalIsNotCached(t *testing.T) {
+func TestManagerPrincipalCacheScannerExpiresOrderedQueuePrefixes(t *testing.T) {
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMetaRefreshInterval.Key, "3600"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMetaRefreshInterval.Key))
+	})
+	m := newManager()
+	getOrCreateCollectionStateForTest(m, 100)
+	now := time.Now()
+	entries := []struct {
+		principalName string
+		refreshedAt   time.Time
+		missing       bool
+	}{
+		{principalName: "expired-positive", refreshedAt: now.Add(-2 * time.Hour)},
+		{principalName: "fresh-positive", refreshedAt: now},
+		{principalName: "expired-negative", refreshedAt: now.Add(-2 * time.Hour), missing: true},
+		{principalName: "fresh-negative", refreshedAt: now, missing: true},
+	}
+	for _, entry := range entries {
+		require.True(t, setPrincipalTagsForTest(m, principalKey{collectionID: 100, principalName: entry.principalName}, &principalTagsEntry{
+			refreshedAt: entry.refreshedAt,
+			tags:        map[string]rlsutil.TagValue{},
+			missing:     entry.missing,
+		}))
+	}
+
+	m.expirePrincipalTags(now)
+
+	state := m.getCollectionState(100)
+	state.mu.RLock()
+	require.NotContains(t, state.principalTags, "expired-positive")
+	require.NotContains(t, state.principalTags, "expired-negative")
+	require.Contains(t, state.principalTags, "fresh-positive")
+	require.Contains(t, state.principalTags, "fresh-negative")
+	require.Equal(t, 1, state.positivePrincipalCacheOrder.Len())
+	require.Equal(t, 1, state.negativePrincipalCacheOrder.Len())
+	require.Equal(t, int64(len("fresh-positive")+len("fresh-negative")), state.principalCacheBytes)
+	state.mu.RUnlock()
+}
+
+func TestManagerMissingPrincipalIsCachedUntilInvalidated(t *testing.T) {
 	m := newManager()
 	coord := &metadataTestCoord{principalTags: map[string]map[string]string{}}
 	require.NoError(t, m.init(context.Background(), coord))
@@ -914,14 +1154,117 @@ func TestManagerMissingPrincipalIsNotCached(t *testing.T) {
 
 	tags, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
 	require.NoError(t, err)
+	require.NotNil(t, tags)
 	require.Empty(t, tags)
-	require.NotContains(t, m.collections[100].principalTags, "alice")
+	require.Contains(t, m.collections[100].principalTags, "alice")
+	require.Equal(t, int32(1), coord.principalCalls.Load())
+
+	tags, err = m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.NoError(t, err)
+	require.Empty(t, tags)
+	require.Equal(t, int32(1), coord.principalCalls.Load())
 
 	coord.principalTags["alice"] = map[string]string{"tenant": "acme"}
+	m.invalidatePrincipalTags(100, "alice", 1)
 	tags, err = m.ensurePrincipalTags(context.Background(), 100, "alice")
 	require.NoError(t, err)
 	require.Equal(t, rlsutil.NewStringTagValue("acme"), tags["tenant"])
 	require.Equal(t, int32(2), coord.principalCalls.Load())
+}
+
+func TestManagerPrincipalCacheLimits(t *testing.T) {
+	t.Run("entries", func(t *testing.T) {
+		params := paramtable.Get()
+		require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key, "3"))
+		require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key, "1024"))
+		t.Cleanup(func() {
+			require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key))
+			require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key))
+		})
+
+		m := newManager()
+		coord := &metadataTestCoord{principalTags: map[string]map[string]string{}}
+		require.NoError(t, m.init(context.Background(), coord))
+		require.NoError(t, m.refreshPolicies(100))
+		for _, principalName := range []string{"a", "b", "c"} {
+			tags, err := m.ensurePrincipalTags(context.Background(), 100, principalName)
+			require.NoError(t, err)
+			require.Empty(t, tags)
+		}
+		require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key, "2"))
+		m.expirePrincipalTags(time.Now())
+
+		state := m.getCollectionState(100)
+		state.mu.RLock()
+		require.NotContains(t, state.principalTags, "a")
+		require.Contains(t, state.principalTags, "b")
+		require.Contains(t, state.principalTags, "c")
+		require.Equal(t, int64(2), state.principalCacheBytes)
+		require.Zero(t, state.positivePrincipalCacheOrder.Len())
+		require.Equal(t, 2, state.negativePrincipalCacheOrder.Len())
+		state.mu.RUnlock()
+
+		_, err := m.ensurePrincipalTags(context.Background(), 100, "a")
+		require.NoError(t, err)
+		require.Equal(t, int32(4), coord.principalCalls.Load())
+	})
+
+	t.Run("bytes", func(t *testing.T) {
+		params := paramtable.Get()
+		require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key, "10"))
+		require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key, "10"))
+		t.Cleanup(func() {
+			require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key))
+			require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key))
+		})
+
+		m := newManager()
+		coord := &metadataTestCoord{principalTags: map[string]map[string]string{
+			"alice": {"k": "1234"},
+			"bob":   {"k": "1"},
+			"empty": {},
+		}}
+		require.NoError(t, m.init(context.Background(), coord))
+		require.NoError(t, m.refreshPolicies(100))
+		aliceTags, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+		require.NoError(t, err)
+		require.Equal(t, rlsutil.NewStringTagValue("1234"), aliceTags["k"])
+		bobTags, err := m.ensurePrincipalTags(context.Background(), 100, "bob")
+		require.NoError(t, err)
+		require.Equal(t, rlsutil.NewStringTagValue("1"), bobTags["k"])
+
+		state := m.getCollectionState(100)
+		state.mu.RLock()
+		require.NotContains(t, state.principalTags, "alice")
+		require.Contains(t, state.principalTags, "bob")
+		require.Equal(t, int64(len("bob")+len("k")+len("1")), state.principalCacheBytes)
+		state.mu.RUnlock()
+		emptyTags, err := m.ensurePrincipalTags(context.Background(), 100, "empty")
+		require.NoError(t, err)
+		require.Empty(t, emptyTags)
+
+		missingTags, err := m.ensurePrincipalTags(context.Background(), 100, "missed")
+		require.NoError(t, err)
+		require.Empty(t, missingTags)
+		state.mu.RLock()
+		require.NotContains(t, state.principalTags, "missed")
+		require.Contains(t, state.principalTags, "bob")
+		require.Contains(t, state.principalTags, "empty")
+		require.False(t, state.principalTags["empty"].missing)
+		require.Equal(t, 2, state.positivePrincipalCacheOrder.Len())
+		require.Zero(t, state.negativePrincipalCacheOrder.Len())
+		require.Equal(t, int64(len("bob")+len("k")+len("1")+len("empty")), state.principalCacheBytes)
+		state.mu.RUnlock()
+
+		m.invalidatePrincipalTags(100, "bob", 0)
+		m.invalidatePrincipalTags(100, "empty", 0)
+		state.mu.RLock()
+		require.Empty(t, state.principalTags)
+		require.Zero(t, state.principalCacheBytes)
+		require.Zero(t, state.positivePrincipalCacheOrder.Len())
+		require.Zero(t, state.negativePrincipalCacheOrder.Len())
+		state.mu.RUnlock()
+	})
 }
 
 func TestManagerPrincipalInvalidationIsPrincipalScoped(t *testing.T) {
@@ -963,11 +1306,11 @@ func TestManagerInvalidationsAreIdempotent(t *testing.T) {
 		m.invalidatePolicies(100, 10)
 		state := m.getCollectionState(100)
 		require.Contains(t, state.policies, "fresh")
-		require.Equal(t, uint64(1), state.policyGeneration)
+		require.Equal(t, uint64(2), state.policyGeneration)
 
 		m.invalidatePolicies(100, 9)
 		require.Empty(t, state.policies)
-		require.Equal(t, uint64(2), state.policyGeneration)
+		require.Equal(t, uint64(3), state.policyGeneration)
 		require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{
 			Policies: []*rlsutil.RowPolicy{{PolicyName: "fresh"}},
 		}))
@@ -976,7 +1319,7 @@ func TestManagerInvalidationsAreIdempotent(t *testing.T) {
 
 		m.invalidatePolicies(100, 11)
 		require.Empty(t, state.policies)
-		require.Equal(t, uint64(3), state.policyGeneration)
+		require.Equal(t, uint64(5), state.policyGeneration)
 	})
 
 	t.Run("principal", func(t *testing.T) {
@@ -1223,5 +1566,27 @@ func TestManagerCollectionStateLocksAreIndependent(t *testing.T) {
 		require.True(t, updated)
 	case <-time.After(time.Second):
 		t.Fatal("updating one collection waited for another collection's state lock")
+	}
+}
+
+func TestManagerPolicyInvalidationDoesNotWaitForCompilation(t *testing.T) {
+	m := newManager()
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{{PolicyName: "policy"}},
+	}))
+	state := m.getCollectionState(100)
+	require.NotNil(t, state)
+	state.policyCompileMu.Lock()
+	defer state.policyCompileMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		m.invalidatePolicies(100, 0)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RLS policy invalidation waited for policy compilation")
 	}
 }
