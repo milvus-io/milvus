@@ -209,9 +209,7 @@ def spark_job_runner(spark_backfill_settings, spark_k8s_apis, spark_support_reso
 def spark_minio_client(spark_backfill_settings, spark_storage_credentials):
     access_key, secret_key = spark_storage_credentials
     if not access_key:
-        pytest.fail(
-            "Static S3 credentials are required by the local MinIO client for the Spark Backfill suite"
-        )
+        pytest.fail("Static S3 credentials are required by the local MinIO client for the Spark Backfill suite")
     return Minio(
         spark_backfill_settings.local_minio_endpoint,
         access_key=access_key,
@@ -334,6 +332,7 @@ def backfill_case_factory(spark_backfill_case_factory):
         return spark_backfill_case_factory(expected_storage_kind="v3", **kwargs)
 
     return factory
+
 
 @pytest.fixture
 def backfill_v2_case_factory(spark_backfill_case_factory):
