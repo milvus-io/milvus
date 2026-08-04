@@ -618,6 +618,8 @@ void tantivy_set_log_callback(TantivyLogCallback callback);
 
 void tantivy_set_log_level(const char *level);
 
+bool tantivy_test_log_from_background_thread();
+
 void free_rust_string(const char *ptr);
 
 void *tantivy_create_token_stream(void *tokenizer, const char *text);

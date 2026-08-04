@@ -29,6 +29,7 @@ extern "C" {
     fn tantivy_index_exist(path: *const c_char) -> bool;
     fn tantivy_set_log_callback(callback: TantivyLogCallback);
     fn tantivy_set_log_level(level: *const c_char);
+    fn tantivy_test_log_from_background_thread() -> bool;
 }
 
 #[derive(Debug)]
@@ -79,15 +80,7 @@ fn forwards_all_severities_from_background_thread() {
         assert!(!tantivy_index_exist(path.as_ptr()));
     }
 
-    std::thread::spawn(|| {
-        log::trace!(target: "tantivy::background", "bridge trace");
-        log::debug!(target: "tantivy::background", "bridge debug");
-        log::info!(target: "tantivy::background", "bridge info");
-        log::warn!(target: "tantivy::background", "bridge warn");
-        log::error!(target: "tantivy::background", "bridge error");
-    })
-    .join()
-    .unwrap();
+    assert!(unsafe { tantivy_test_log_from_background_thread() });
 
     unsafe {
         tantivy_set_log_level(c"info".as_ptr());
@@ -111,7 +104,7 @@ fn forwards_all_severities_from_background_thread() {
         .all(|record| record.target == "tantivy::background"));
     assert!(records
         .iter()
-        .all(|record| record.file.ends_with("tests/log_bridge.rs") && record.line > 0));
+        .all(|record| record.file.ends_with("src/log_c.rs") && record.line > 0));
     assert!(!all_records
         .iter()
         .any(|record| record.message == "filtered debug"));
