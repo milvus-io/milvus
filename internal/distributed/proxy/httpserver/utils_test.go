@@ -1886,6 +1886,36 @@ func TestBuildSearchResp(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
 		require.ErrorContains(t, err, "element_indices length (1) does not match row count (2)")
 	})
+
+	t.Run("primary key named offset", func(t *testing.T) {
+		_, err := buildSearchResp(&schemapb.SearchResultData{
+			Ids:            generateIDs(schemapb.DataType_Int64, 1),
+			Scores:         DefaultScores[:1],
+			ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+		}, true, &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{Name: HTTPReturnElementOffset, IsPrimaryKey: true},
+		}})
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, `field "offset" conflicts with the reserved REST search element offset field`)
+	})
+
+	t.Run("output field named offset", func(t *testing.T) {
+		_, err := buildSearchResp(&schemapb.SearchResultData{
+			OutputFields: []string{HTTPReturnElementOffset},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: HTTPReturnElementOffset,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{42}}},
+					}},
+				},
+			},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+		}, true, nil)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, `field "offset" conflicts with the reserved REST search element offset field`)
+	})
 }
 
 func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {

@@ -1072,6 +1072,48 @@ func TestSearchV2ReturnsElementOffsets(t *testing.T) {
 	}
 }
 
+func TestSearchV2RejectsElementOffsetFieldCollision(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	schema := generateCollectionSchema(schemapb.DataType_Int64, false, false)
+	schema.Fields[0].Name = HTTPReturnElementOffset
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         schema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
+		Status: commonSuccessStatus,
+		Results: &schemapb.SearchResultData{
+			NumQueries:     1,
+			TopK:           1,
+			Topks:          []int64{1},
+			Ids:            generateIDs(schemapb.DataType_Int64, 1),
+			Scores:         DefaultScores[:1],
+			ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+		},
+	}, nil).Once()
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		versionalV2(EntityCategory, SearchAction),
+		bytes.NewReader([]byte(`{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":1}`)),
+	)
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var response ReturnErrMsg
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Equal(t, merr.Code(merr.ErrInvalidSearchResult), response.Code)
+	require.Contains(t, response.Message, `field "offset" conflicts with the reserved REST search element offset field`)
+}
+
 func TestDocInDocOutSearch(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
