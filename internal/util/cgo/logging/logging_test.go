@@ -17,15 +17,74 @@
 package logging
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
+
+type capturedLogEntry struct {
+	Level   string `json:"level"`
+	Name    string `json:"name"`
+	Caller  string `json:"caller"`
+	Message string `json:"message"`
+}
+
+func captureMlogEntries(t *testing.T, level string) func() []capturedLogEntry {
+	t.Helper()
+
+	logDir := t.TempDir()
+	logFile := filepath.Join(logDir, "tantivy.log")
+	logger, props, err := mlog.InitLogger(&mlog.Config{
+		Level:             level,
+		Format:            "json",
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+		File: mlog.FileLogConfig{
+			RootPath: logDir,
+			Filename: "tantivy.log",
+		},
+	})
+	require.NoError(t, err)
+	mlog.ReplaceGlobals(logger, props)
+	t.Cleanup(func() {
+		require.NoError(t, logger.Sync())
+		restoreLogger, restoreProps, err := mlog.InitTestLogger(t, &mlog.Config{
+			Level:             "info",
+			DisableTimestamp:  true,
+			DisableCaller:     true,
+			DisableStacktrace: true,
+		})
+		require.NoError(t, err)
+		mlog.ReplaceGlobals(restoreLogger, restoreProps)
+	})
+
+	return func() []capturedLogEntry {
+		t.Helper()
+		require.NoError(t, logger.Sync())
+		content, err := os.ReadFile(logFile)
+		require.NoError(t, err)
+
+		trimmed := strings.TrimSpace(string(content))
+		if trimmed == "" {
+			return nil
+		}
+
+		lines := strings.Split(trimmed, "\n")
+		entries := make([]capturedLogEntry, 0, len(lines))
+		for _, line := range lines {
+			var entry capturedLogEntry
+			require.NoError(t, json.Unmarshal([]byte(line), &entry))
+			entries = append(entries, entry)
+		}
+		return entries
+	}
+}
 
 func TestLogging(t *testing.T) {
 	require.Equal(t, mlog.InfoLevel, mapGlogSeverity(0))
@@ -45,10 +104,7 @@ func TestMapTantivySeverity(t *testing.T) {
 }
 
 func TestLogTantivyRecord(t *testing.T) {
-	oldLogger := mlog.L()
-	core, observed := observer.New(zapcore.DebugLevel)
-	mlog.ReplaceGlobals(zap.New(core), nil)
-	t.Cleanup(func() { mlog.ReplaceGlobals(oldLogger, nil) })
+	readEntries := captureMlogEntries(t, "debug")
 
 	logTantivyRecord(
 		tantivyDebug,
@@ -58,22 +114,21 @@ func TestLogTantivyRecord(t *testing.T) {
 		"merge completed",
 	)
 
-	entries := observed.AllUntimed()
+	entries := readEntries()
 	require.Len(t, entries, 1)
-	require.Equal(t, zapcore.DebugLevel, entries[0].Level)
-	require.Equal(t, "Tantivy/tantivy::indexer::segment_updater", entries[0].LoggerName)
+	require.Equal(t, "DEBUG", entries[0].Level)
+	require.Equal(t, "Tantivy/tantivy::indexer::segment_updater", entries[0].Name)
 	require.Equal(t, "merge completed", entries[0].Message)
-	require.True(t, entries[0].Caller.Defined)
-	require.Equal(t, "tantivy/src/indexer/segment_updater.rs", entries[0].Caller.File)
-	require.Equal(t, 42, entries[0].Caller.Line)
+	require.True(t, strings.HasSuffix(entries[0].Caller, "indexer/segment_updater.rs:42"))
 }
 
 func TestLogTantivyRecordRespectsCoreLevel(t *testing.T) {
-	oldLogger := mlog.L()
-	core, observed := observer.New(zapcore.InfoLevel)
-	mlog.ReplaceGlobals(zap.New(core), nil)
-	t.Cleanup(func() { mlog.ReplaceGlobals(oldLogger, nil) })
+	readEntries := captureMlogEntries(t, "info")
 
 	logTantivyRecord(tantivyDebug, "tantivy::background", "", 0, "hidden")
-	require.Equal(t, 0, observed.Len())
+	logTantivyRecord(tantivyInfo, "tantivy::background", "", 0, "visible")
+
+	entries := readEntries()
+	require.Len(t, entries, 1)
+	require.Equal(t, "visible", entries[0].Message)
 }

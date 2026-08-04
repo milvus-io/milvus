@@ -24,27 +24,22 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zaptest/observer"
-
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func TestTantivyLoggingBridge(t *testing.T) {
-	oldLogger := mlog.L()
-	core, observed := observer.New(zapcore.InfoLevel)
-	mlog.ReplaceGlobals(zap.New(core), nil)
-	t.Cleanup(func() { mlog.ReplaceGlobals(oldLogger, nil) })
+	readEntries := captureMlogEntries(t, "info")
 
 	InitGoogleLoggingWithZapSink()
 	require.False(t, tantivyIndexExist("/nonexistent/path/to/tantivy-index"))
 
-	entries := observed.FilterMessageSnippet("failed to open directory").AllUntimed()
-	require.Len(t, entries, 1)
-	require.Equal(t, zapcore.InfoLevel, entries[0].Level)
-	require.Equal(t, "Tantivy/tantivy_binding::util", entries[0].LoggerName)
-	require.True(t, entries[0].Caller.Defined)
-	require.True(t, strings.HasSuffix(entries[0].Caller.File, "src/util.rs"))
-	require.Positive(t, entries[0].Caller.Line)
+	var matchingEntries []capturedLogEntry
+	for _, entry := range readEntries() {
+		if strings.Contains(entry.Message, "failed to open directory") {
+			matchingEntries = append(matchingEntries, entry)
+		}
+	}
+	require.Len(t, matchingEntries, 1)
+	require.Equal(t, "INFO", matchingEntries[0].Level)
+	require.Equal(t, "Tantivy/tantivy_binding::util", matchingEntries[0].Name)
+	require.Regexp(t, `src/util\.rs:\d+$`, matchingEntries[0].Caller)
 }
