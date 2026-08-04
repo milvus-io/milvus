@@ -31,15 +31,36 @@ func TestTantivyLoggingBridge(t *testing.T) {
 
 	InitGoogleLoggingWithZapSink()
 	require.False(t, tantivyIndexExist("/nonexistent/path/to/tantivy-index"))
+	require.True(t, tantivyTestLogFromBackgroundThread())
 
 	var matchingEntries []capturedLogEntry
+	var backgroundEntries []capturedLogEntry
 	for _, entry := range readEntries() {
 		if strings.Contains(entry.Message, "failed to open directory") {
 			matchingEntries = append(matchingEntries, entry)
+		}
+		if strings.HasPrefix(entry.Message, "bridge ") {
+			backgroundEntries = append(backgroundEntries, entry)
 		}
 	}
 	require.Len(t, matchingEntries, 1)
 	require.Equal(t, "INFO", matchingEntries[0].Level)
 	require.Equal(t, "Tantivy/tantivy_binding::util", matchingEntries[0].Name)
 	require.Regexp(t, `src/util\.rs:\d+$`, matchingEntries[0].Caller)
+
+	require.Len(t, backgroundEntries, 3)
+	require.Equal(t, []string{"bridge info", "bridge warn", "bridge error"}, []string{
+		backgroundEntries[0].Message,
+		backgroundEntries[1].Message,
+		backgroundEntries[2].Message,
+	})
+	require.Equal(t, []string{"INFO", "WARN", "ERROR"}, []string{
+		backgroundEntries[0].Level,
+		backgroundEntries[1].Level,
+		backgroundEntries[2].Level,
+	})
+	for _, entry := range backgroundEntries {
+		require.Equal(t, "Tantivy/tantivy::background", entry.Name)
+		require.Regexp(t, `src/log_c\.rs:\d+$`, entry.Caller)
+	}
 }
