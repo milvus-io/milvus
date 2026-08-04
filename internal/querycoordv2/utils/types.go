@@ -85,17 +85,17 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 		IndexInfos:    indexes,
 		StartPosition: segment.GetStartPosition(),
 		DeltaPosition: channelCheckpoint,
-		// DeleteCoveredPosition: deletes with ts <= this are already baked into
-		// the segment by compaction, so the delegator replays only the tail
-		// after it instead of from start_position/minTs (issue #49435). Nil for
-		// segments without it -> delegator falls back to start_position.
-		DeleteCoveredPosition: segment.GetDeleteCoveredPosition(),
-		Level:                 segment.GetLevel(),
-		StorageVersion:        segment.GetStorageVersion(),
-		IsSorted:              segment.GetIsSorted(),
-		TextStatsLogs:         segment.GetTextStatsLogs(),
-		JsonKeyStatsLogs:      segment.GetJsonKeyStats(),
-		ManifestPath:          segment.GetManifestPath(),
+		// DeleteCoveredTs: WAL ts up to which deletes are already baked into the
+		// segment by compaction; the delegator replays only the tail after it
+		// instead of from start_position/minTs (issue #49435). 0 for segments
+		// without it -> delegator falls back to start_position.
+		DeleteCoveredTs:  segment.GetDeleteCoveredTs(),
+		Level:            segment.GetLevel(),
+		StorageVersion:   segment.GetStorageVersion(),
+		IsSorted:         segment.GetIsSorted(),
+		TextStatsLogs:    segment.GetTextStatsLogs(),
+		JsonKeyStatsLogs: segment.GetJsonKeyStats(),
+		ManifestPath:     segment.GetManifestPath(),
 	}
 	return loadInfo
 }

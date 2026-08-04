@@ -426,13 +426,13 @@ message SegmentInfo {
   // and we could keep the possiblity that manifest stores out side of collection/partition/segment path
   string manifest_path = 32;
 
-  // delete_covered_position is the WAL position up to which deletes are already
-  // applied (baked) into this segment's data. It is set by compaction, which
-  // reads the input segments' deltalogs and drops deleted rows. It is optional:
-  // when unset (nil) the delegator falls back to start_position (minTs). When
-  // set, segment load replays only the un-covered delete tail after this
-  // position instead of the entire delete history (issue #49435).
-  msg.MsgPosition delete_covered_position = 33;
+  // delete_covered_ts is the WAL timestamp up to which deletes are already
+  // applied (baked) into this segment's data by compaction. When set (non-zero)
+  // segment load replays only the delete tail after this timestamp instead of
+  // from start_position (minTs); 0 means unknown -> fall back to start_position.
+  // It is a plain TSO timestamp (not a seekable MsgPosition): it is only used to
+  // filter the delete buffer by time on load (issue #49435).
+  uint64 delete_covered_ts = 39;
 }
 
 message SegmentStartPosition {
@@ -1129,6 +1129,12 @@ message CompactionTask{
   int64 max_size = 26;
   repeated int64 tmpSegments = 27;
   IDRange pre_allocated_segmentIDs = 28;
+  // delete_covered_ts is computed at plan-build time from the input segments'
+  // snapshotted deltalogs (exactly what the datanode bakes) and carried to
+  // completion, so the output segment's coverage matches the baked snapshot
+  // rather than live meta a concurrent L0 compaction may have advanced past the
+  // snapshot (issue #49435). 0 = unknown.
+  uint64 delete_covered_ts = 30;
 }
 
 message PartitionStatsInfo {

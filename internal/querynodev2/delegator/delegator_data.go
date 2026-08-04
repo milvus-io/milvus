@@ -811,14 +811,14 @@ type segDeleteSnapshot struct {
 
 // segmentDeleteReplayStartTs returns the WAL timestamp from which the delegator
 // must replay buffered deletes for a segment on load. It prefers the segment's
-// delete_covered_position — deletes with ts <= it are already baked into the
-// segment's data by compaction, so only the tail after it needs replay (issue
-// #49435) — and falls back to start_position (minTs) when that position is
-// absent (nil), which preserves the pre-existing behavior for segments that
-// carry no coverage info. Because replaying from an earlier ts only re-applies
-// already-applied deletes (idempotent), the fallback can never lose a delete.
+// delete_covered_ts — deletes with ts <= it are already baked into the segment's
+// data by compaction, so only the tail after it needs replay (issue #49435) —
+// and falls back to start_position (minTs) when it is unset (0), preserving the
+// pre-existing behavior for segments with no coverage info. Because replaying
+// from an earlier ts only re-applies already-applied deletes (idempotent), the
+// fallback can never lose a delete.
 func segmentDeleteReplayStartTs(info *querypb.SegmentLoadInfo) uint64 {
-	if covered := info.GetDeleteCoveredPosition().GetTimestamp(); covered > 0 {
+	if covered := info.GetDeleteCoveredTs(); covered > 0 {
 		return covered
 	}
 	return info.GetStartPosition().GetTimestamp()

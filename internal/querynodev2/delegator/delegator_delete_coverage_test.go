@@ -26,25 +26,17 @@ import (
 )
 
 func TestSegmentDeleteReplayStartTs(t *testing.T) {
-	t.Run("prefers_delete_covered_position", func(t *testing.T) {
+	t.Run("prefers_delete_covered_ts", func(t *testing.T) {
 		info := &querypb.SegmentLoadInfo{
-			StartPosition:         &msgpb.MsgPosition{Timestamp: 10},
-			DeleteCoveredPosition: &msgpb.MsgPosition{Timestamp: 100},
+			StartPosition:   &msgpb.MsgPosition{Timestamp: 10},
+			DeleteCoveredTs: 100,
 		}
 		assert.EqualValues(t, 100, segmentDeleteReplayStartTs(info))
 	})
 
-	t.Run("falls_back_to_start_position_when_nil", func(t *testing.T) {
+	t.Run("falls_back_to_start_position_when_unset", func(t *testing.T) {
 		info := &querypb.SegmentLoadInfo{
 			StartPosition: &msgpb.MsgPosition{Timestamp: 10},
-		}
-		assert.EqualValues(t, 10, segmentDeleteReplayStartTs(info))
-	})
-
-	t.Run("falls_back_when_covered_ts_is_zero", func(t *testing.T) {
-		info := &querypb.SegmentLoadInfo{
-			StartPosition:         &msgpb.MsgPosition{Timestamp: 10},
-			DeleteCoveredPosition: &msgpb.MsgPosition{Timestamp: 0},
 		}
 		assert.EqualValues(t, 10, segmentDeleteReplayStartTs(info))
 	})

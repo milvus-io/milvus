@@ -1785,12 +1785,17 @@ func getMaxPosition(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
 
 // inputDeleteCoverageTs returns the WAL timestamp up to which deletes are
 // provably applied into seg's data, and whether that is known. It is the newest
-// of (a) seg's own delete_covered_position (set when seg was itself produced by
-// a prior compaction) and (b) the max TimestampTo across seg's deltalogs (the
-// deletes attached to seg that the current compaction bakes into its output).
-// known is false when neither is available, i.e. coverage is unknown.
+// of (a) seg's own delete_covered_ts (set when seg was itself produced by a
+// prior compaction) and (b) the max TimestampTo across seg's deltalogs. known is
+// false when neither is available, i.e. coverage is unknown.
+//
+// This MUST be evaluated at plan-build time, on the same segment metadata that
+// is snapshotted into the compaction plan, NOT at completion on live metadata:
+// a concurrent L0 compaction can attach newer deltalogs to an input after the
+// plan is built but before completion, which would over-state coverage and
+// silently drop the deletes in that gap (issue #49435).
 func inputDeleteCoverageTs(seg *SegmentInfo) (ts uint64, known bool) {
-	if covered := seg.GetDeleteCoveredPosition().GetTimestamp(); covered > 0 {
+	if covered := seg.GetDeleteCoveredTs(); covered > 0 {
 		ts, known = covered, true
 	}
 	for _, fieldDelta := range seg.GetDeltalogs() {
@@ -1804,37 +1809,32 @@ func inputDeleteCoverageTs(seg *SegmentInfo) (ts uint64, known bool) {
 	return ts, known
 }
 
-// computeDeleteCoveredPosition returns the delete_covered_position for a
-// compaction OUTPUT segment built from inputs (issue #49435). Compaction applies
-// every input's deltalogs to every output row, but a row that came from an input
-// is only trustworthy up to THAT input's delete coverage, so the output's single
-// covered position is the MIN coverage across inputs. If ANY input's coverage is
-// unknown it returns nil, so the delegator conservatively falls back to
-// start_position (minTs). The result is a lower bound on the true coverage:
-// replaying deletes from it can only re-apply already-applied deletes
+// computeDeleteCoveredTs returns the delete_covered_ts for a compaction OUTPUT
+// segment built from inputs (issue #49435), or 0 when coverage is unknown.
+// Compaction applies every input's deltalogs to every output row, but a row that
+// came from an input is only trustworthy up to THAT input's delete coverage, so
+// the output's single covered ts is the MIN coverage across inputs. If ANY
+// input's coverage is unknown it returns 0, so the delegator conservatively
+// falls back to start_position (minTs). The result is a lower bound on the true
+// coverage: replaying deletes from it can only re-apply already-applied deletes
 // (idempotent), never skip a live one.
 //
-// Compaction completion currently passes clones of the live input metadata.
-// They match the plan snapshot for delete coverage because the compaction
-// inspector keeps L0 compaction mutually exclusive with Mix, Sort, and
-// Clustering compaction on the same channel while the task is executing, and
-// each input segment remains marked compacting until completion.
-func computeDeleteCoveredPosition(channel string, inputs []*SegmentInfo) *msgpb.MsgPosition {
+// Callers MUST pass the input segments as snapshotted into the compaction plan
+// (plan-build time) so the value matches the deltalog set the datanode bakes;
+// completion then reads it back from CompactionTask.delete_covered_ts.
+func computeDeleteCoveredTs(inputs []*SegmentInfo) uint64 {
 	var minTs uint64
 	ok := false
 	for _, in := range inputs {
 		ts, known := inputDeleteCoverageTs(in)
 		if !known {
-			return nil
+			return 0
 		}
 		if !ok || ts < minTs {
 			minTs, ok = ts, true
 		}
 	}
-	if !ok {
-		return nil
-	}
-	return &msgpb.MsgPosition{ChannelName: channel, Timestamp: minTs}
+	return minTs
 }
 
 // recalculateSegmentPosition recalculates StartPosition and DmlPosition from
@@ -1920,7 +1920,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			DmlPosition:         dmlPos,
 			// deletes <= this are already baked into the output by this
 			// compaction; lets the delegator replay only the tail (#49435).
-			DeleteCoveredPosition: computeDeleteCoveredPosition(t.GetChannel(), compactFromSegInfos),
+			DeleteCoveredTs: t.GetDeleteCoveredTs(),
 			// visible after stats and index
 			IsInvisible:    true,
 			StorageVersion: seg.GetStorageVersion(),
@@ -2040,9 +2040,9 @@ func (m *meta) completeMixCompactionMutation(
 				DmlPosition:         dmlPos,
 				// deletes <= this are already baked into the output by this
 				// compaction; lets the delegator replay only the tail (#49435).
-				DeleteCoveredPosition: computeDeleteCoveredPosition(t.GetChannel(), compactFromSegInfos),
-				IsSorted:              compactToSegment.GetIsSorted(),
-				ManifestPath:          compactToSegment.GetManifest(),
+				DeleteCoveredTs: t.GetDeleteCoveredTs(),
+				IsSorted:        compactToSegment.GetIsSorted(),
+				ManifestPath:    compactToSegment.GetManifest(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -2535,7 +2535,7 @@ func (m *meta) completeSortCompactionMutation(
 		DmlPosition:    dmlPos,
 		// deletes <= this are already baked into the output by this compaction;
 		// lets the delegator replay only the tail on load (issue #49435).
-		DeleteCoveredPosition:     computeDeleteCoveredPosition(oldSegment.GetInsertChannel(), []*SegmentInfo{oldSegment}),
+		DeleteCoveredTs:           t.GetDeleteCoveredTs(),
 		IsImporting:               oldSegment.GetIsImporting(),
 		State:                     commonpb.SegmentState_Flushed,
 		Level:                     oldSegment.GetLevel(),

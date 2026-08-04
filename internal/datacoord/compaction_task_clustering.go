@@ -368,11 +368,13 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 	}
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 
+	segments := make([]*SegmentInfo, 0, len(taskProto.GetInputSegments()))
 	for _, segID := range taskProto.GetInputSegments() {
 		segInfo := t.meta.GetHealthySegment(context.TODO(), segID)
 		if segInfo == nil {
 			return nil, merr.WrapErrSegmentNotFound(segID)
 		}
+		segments = append(segments, segInfo)
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			SegmentID:           segID,
 			CollectionID:        segInfo.GetCollectionID(),
@@ -386,6 +388,11 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			StorageVersion:      segInfo.GetStorageVersion(),
 			Manifest:            segInfo.GetManifestPath(),
 		})
+	}
+	// Persist delete coverage from the plan snapshot so completion stamps the
+	// output consistent with what the datanode bakes, not live meta (issue #49435).
+	if err := t.updateAndSaveTaskMeta(setDeleteCoveredTs(computeDeleteCoveredTs(segments))); err != nil {
+		return nil, err
 	}
 	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
 	log.Info("Compaction handler build clustering compaction plan", zap.Any("PreAllocatedLogIDs", logIDRange))
