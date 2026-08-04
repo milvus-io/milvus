@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -349,6 +350,39 @@ func TestManagerTypedPrincipalTagMatching(t *testing.T) {
 			} else {
 				require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 			}
+		})
+	}
+}
+
+func TestCompilePolicyExprCachesTagVariableDataTypes(t *testing.T) {
+	helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "age", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float},
+	}})
+	require.NoError(t, err)
+
+	for _, test := range []struct {
+		name     string
+		expr     string
+		expected schemapb.DataType
+	}{
+		{name: "scalar", expr: "age == $current_principal_tags['value']", expected: schemapb.DataType_Int64},
+		{name: "array element", expr: "array_contains(scores, $current_principal_tags['value'])", expected: schemapb.DataType_Float},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			templates, _ := preparePolicyExprTemplates([]*rlsutil.RowPolicy{{
+				PolicyName: "typed",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  test.expr,
+			}}, rlsutil.PolicyActionQuery, usingExprKind)
+			compiled, err := compileExprTemplates(helper, templates, "", usingExprKind)
+			require.NoError(t, err)
+			require.Len(t, compiled.permissive, 1)
+
+			policy := compiled.permissive[0]
+			variable := policy.tagVariables["value"]
+			require.Equal(t, []schemapb.DataType{test.expected}, policy.tagVariableDataTypes[variable])
 		})
 	}
 }
@@ -1103,6 +1137,39 @@ func TestResolvePredicateRequiresPrincipal(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 }
 
+func TestResolveUpsertPredicatesStayOnOneSnapshot(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+	const collectionID = UniqueID(100)
+
+	require.True(t, setPolicySnapshotForTest(manager, collectionID, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+		PolicyName: "old",
+		PolicyType: rlsutil.PolicyTypePermissive,
+		Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
+		UsingExpr:  "id == 1",
+		CheckExpr:  "id == 1",
+	}}}))
+	using, check, err := manager.resolveUpsertPredicates(ctx, collectionID, "alice", helper)
+	require.NoError(t, err)
+
+	require.True(t, setPolicySnapshotForTest(manager, collectionID, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+		PolicyName: "new",
+		PolicyType: rlsutil.PolicyTypePermissive,
+		Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
+		UsingExpr:  "id == 2",
+		CheckExpr:  "id == 2",
+	}}}))
+	fields := managerTestFieldsDataWithID(1, "sales")
+	require.NoError(t, ValidateRowsByPredicate(ctx, fields, 1, using, "upsert", "using"))
+	require.NoError(t, ValidateRowsByPredicate(ctx, fields, 1, check, "upsert", "check"))
+
+	currentUsing, currentCheck, err := manager.resolveUpsertPredicates(ctx, collectionID, "alice", helper)
+	require.NoError(t, err)
+	require.Error(t, ValidateRowsByPredicate(ctx, fields, 1, currentUsing, "upsert", "using"))
+	require.Error(t, ValidateRowsByPredicate(ctx, fields, 1, currentCheck, "upsert", "check"))
+}
+
 func TestValidateCheckForWriteUsesSchemaTimezone(t *testing.T) {
 	ctx := context.Background()
 	const collectionID = int64(987654322)
@@ -1481,6 +1548,56 @@ func TestMergePredicateToPlan(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, MergePredicateToPlan(searchPlan, rlsPredicate))
 	assertPredicateMerged(t, searchPlan.GetVectorAnns().GetPredicates())
+
+	normalizedPlan, err := planparserv2.CreateRetrievePlanArgs(helper, "age in [18, 21, 30]", nil, visitorArgs)
+	require.NoError(t, err)
+	normalizedRLS, err := planparserv2.ParseExpr(helper, "age in [21, 30, 40]", nil)
+	require.NoError(t, err)
+	expectedPlan := proto.Clone(normalizedPlan).(*planpb.PlanNode)
+	require.NoError(t, MergePredicateToPlan(expectedPlan, proto.Clone(normalizedRLS).(*planpb.Expr)))
+	userPredicate := normalizedPlan.GetQuery().GetPredicates()
+	userBefore := proto.Clone(userPredicate).(*planpb.Expr)
+	rlsBefore := proto.Clone(normalizedRLS).(*planpb.Expr)
+	require.NoError(t, MergeNormalizedPredicateToPlan(normalizedPlan, normalizedRLS))
+	require.True(t, proto.Equal(expectedPlan.GetQuery().GetPredicates(), normalizedPlan.GetQuery().GetPredicates()))
+	require.True(t, proto.Equal(userBefore, userPredicate))
+	require.True(t, proto.Equal(rlsBefore, normalizedRLS))
+
+	randomSamplePlan, err := planparserv2.CreateRetrievePlanArgs(helper, "age > 18 && random_sample(0.5)", nil, visitorArgs)
+	require.NoError(t, err)
+	randomSample := randomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr()
+	require.NotNil(t, randomSample)
+	expectedRandomSamplePlan := proto.Clone(randomSamplePlan).(*planpb.PlanNode)
+	normalizedRandomSamplePlan := proto.Clone(randomSamplePlan).(*planpb.PlanNode)
+	require.NoError(t, MergePredicateToPlan(expectedRandomSamplePlan, proto.Clone(rlsPredicate).(*planpb.Expr)))
+	require.NoError(t, MergeNormalizedPredicateToPlan(normalizedRandomSamplePlan, rlsPredicate))
+	require.True(t, proto.Equal(expectedRandomSamplePlan, normalizedRandomSamplePlan))
+	require.NoError(t, MergePredicateToPlan(randomSamplePlan, rlsPredicate))
+	require.Same(t, randomSample, randomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr())
+	assert.InDelta(t, 0.5, randomSample.GetSampleFactor(), 0.0001)
+	assertPredicateMerged(t, randomSample.GetPredicate())
+
+	elementExpr := alwaysTruePredicate()
+	elementPredicate, err := planparserv2.ParseExpr(helper, "age > 18", nil)
+	require.NoError(t, err)
+	elementFilter := &planpb.ElementFilterExpr{
+		ElementExpr: elementExpr,
+		StructName:  "items",
+		Predicate:   elementPredicate,
+	}
+	searchPlan.GetVectorAnns().Predicates = &planpb.Expr{
+		Expr: &planpb.Expr_ElementFilterExpr{ElementFilterExpr: elementFilter},
+	}
+	expectedElementPlan := proto.Clone(searchPlan).(*planpb.PlanNode)
+	normalizedElementPlan := proto.Clone(searchPlan).(*planpb.PlanNode)
+	require.NoError(t, MergePredicateToPlan(expectedElementPlan, proto.Clone(rlsPredicate).(*planpb.Expr)))
+	require.NoError(t, MergeNormalizedPredicateToPlan(normalizedElementPlan, rlsPredicate))
+	require.True(t, proto.Equal(expectedElementPlan, normalizedElementPlan))
+	require.NoError(t, MergePredicateToPlan(searchPlan, rlsPredicate))
+	require.Same(t, elementFilter, searchPlan.GetVectorAnns().GetPredicates().GetElementFilterExpr())
+	require.Same(t, elementExpr, elementFilter.GetElementExpr())
+	assert.Equal(t, "items", elementFilter.GetStructName())
+	assertPredicateMerged(t, elementFilter.GetPredicate())
 }
 
 func assertPredicateMerged(t *testing.T, expr *planpb.Expr) {
@@ -1679,12 +1796,11 @@ func TestNullableArrayUsesFieldSpecificValidData(t *testing.T) {
 	red := &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"red"}}}}
 	blue := &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"blue"}}}}
 	for _, storage := range []struct {
-		name       string
-		values     []*schemapb.ScalarField
-		mappedRows bool
+		name   string
+		values []*schemapb.ScalarField
 	}{
 		{name: "dense", values: []*schemapb.ScalarField{red, {}, blue}},
-		{name: "compact", values: []*schemapb.ScalarField{red, blue}, mappedRows: true},
+		{name: "compact", values: []*schemapb.ScalarField{red, blue}},
 	} {
 		t.Run(storage.name, func(t *testing.T) {
 			fieldData := &schemapb.FieldData{
@@ -1700,11 +1816,6 @@ func TestNullableArrayUsesFieldSpecificValidData(t *testing.T) {
 				}},
 			}
 			rows := newRowData([]*schemapb.FieldData{fieldData}, []int64{101})
-			if storage.mappedRows {
-				require.NotEmpty(t, rows.fields[101].arrayDataIndices)
-			} else {
-				require.Empty(t, rows.fields[101].arrayDataIndices)
-			}
 			for rowIdx, expected := range []truthValue{truthFalse, truthUnknown, truthTrue} {
 				actual, err := evalExpr(expr, rows, rowIdx)
 				require.NoError(t, err)
@@ -1712,6 +1823,44 @@ func TestNullableArrayUsesFieldSpecificValidData(t *testing.T) {
 			}
 			err := ValidateRowsByPredicate(context.Background(), []*schemapb.FieldData{fieldData}, 3, expr, "upsert", "check")
 			require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+		})
+	}
+}
+
+func TestFieldReaderNullableScalarCursor(t *testing.T) {
+	column := &planpb.ColumnInfo{FieldId: 101}
+	for _, storage := range []struct {
+		name   string
+		values []string
+	}{
+		{name: "compact", values: []string{"first", "third"}},
+		{name: "full_size", values: []string{"first", "", "third"}},
+	} {
+		t.Run(storage.name, func(t *testing.T) {
+			rows := newRowData([]*schemapb.FieldData{{
+				FieldId:   101,
+				FieldName: "owner",
+				Type:      schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					ValidData: []bool{true, false, true},
+					Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: storage.values}},
+				}},
+			}}, []int64{101})
+
+			for _, test := range []struct {
+				row      int
+				expected any
+			}{
+				{row: 0, expected: "first"},
+				{row: 0, expected: "first"},
+				{row: 2, expected: "third"},
+				{row: 1, expected: nil},
+				{row: 2, expected: "third"},
+			} {
+				value, err := rows.value(column, test.row)
+				require.NoError(t, err)
+				require.Equal(t, test.expected, value)
+			}
 		})
 	}
 }

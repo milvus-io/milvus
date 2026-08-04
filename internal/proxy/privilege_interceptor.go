@@ -251,6 +251,48 @@ func isSelectMyRoleGrants(req interface{}, roleNames []string) bool {
 	return funcutil.SliceContain(roleNames, roleName)
 }
 
+func checkSkipRLSPrivilege(ctx context.Context, metaCache Cache, dbName, collectionName, operation string) error {
+	permitted, err := isCurrentUserPermitted(ctx, metaCache, dbName, commonpb.ObjectType_Collection.String(), collectionName, commonpb.ObjectPrivilege_PrivilegeSkipRLS.String())
+	if err != nil {
+		return err
+	}
+	if permitted {
+		return nil
+	}
+	return merr.WrapErrPrivilegeNotPermitted("%s operation denied by RLS: skip_rls requires SkipRLS privilege on collection %s", operation, collectionName)
+}
+
+func checkManageRLSPrivilege(ctx context.Context, metaCache Cache, req *milvuspb.AlterCollectionRequest, dbName, collectionName string) error {
+	privilegeName := commonpb.ObjectPrivilege_PrivilegeManageRLS.String()
+	permitted, err := isCurrentUserPermitted(ctx, metaCache, dbName, commonpb.ObjectType_Collection.String(), collectionName, privilegeName)
+	if err != nil || permitted {
+		return err
+	}
+	err = merr.WrapErrPrivilegeNotPermitted("%s is required", privilegeName)
+	hookutil.GetExtension().ReportAction(ctx, req, &milvuspb.BoolResponse{
+		Status: merr.Status(err),
+	}, err, milvuspb.MilvusService_AlterCollection_FullMethodName, hookutil.ActionAuthorize)
+	return err
+}
+
+// resolveRLSEnforcement returns whether RLS remains enabled after processing a
+// request-scoped bypass. rls.force takes precedence over both authorization
+// configuration and SkipRLS privileges.
+func resolveRLSEnforcement(ctx context.Context, metaCache Cache, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error) {
+	if !rlsEnabled || !skipRLS {
+		return rlsEnabled, nil
+	}
+	if rlsForce {
+		return false, merr.WrapErrPrivilegeNotPermitted(
+			"%s operation denied by RLS: skip_rls is not allowed when rls.force is enabled on collection %s",
+			operation, collectionName)
+	}
+	if err := checkSkipRLSPrivilege(ctx, metaCache, dbName, collectionName, operation); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
 func resolveRBACObjectName(ctx context.Context, metaCache Cache, dbName, objectType, objectName string) string {
 	if !Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() || objectType != commonpb.ObjectType_Collection.String() || objectName == util.AnyWord || objectName == "" {
 		return objectName

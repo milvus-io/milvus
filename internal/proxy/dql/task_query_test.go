@@ -33,7 +33,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -48,6 +50,37 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestQueryTaskPreservesRawTimestamptzForInternalRLS(t *testing.T) {
+	const timestamp = int64(1735689600000000)
+	fieldData := &schemapb.FieldData{
+		FieldId:   101,
+		FieldName: "ts",
+		Type:      schemapb.DataType_Timestamptz,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_TimestamptzData{
+			TimestamptzData: &schemapb.TimestamptzArray{Data: []int64{timestamp}},
+		}}},
+	}
+	task := &QueryTask{
+		result:              &milvuspb.QueryResults{FieldsData: []*schemapb.FieldData{fieldData}},
+		queryParams:         &queryParams{},
+		resolvedTimezoneStr: "UTC",
+		preserveRawFields:   true,
+	}
+	require.NoError(t, task.formatTimeFields(context.Background()))
+	require.Equal(t, []int64{timestamp}, fieldData.GetScalars().GetTimestamptzData().GetData())
+
+	helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "ts", DataType: schemapb.DataType_Timestamptz},
+		},
+	})
+	require.NoError(t, err)
+	predicate, err := planparserv2.ParseExpr(helper, `ts == ISO '2025-01-01 00:00:00'`, nil)
+	require.NoError(t, err)
+	require.NoError(t, rls.ValidateRowsByPredicate(context.Background(), []*schemapb.FieldData{fieldData}, 1, predicate, "upsert", "using"))
+}
 
 // Exercise real preprocessing: Strong and ordinary queries honor schema fences,
 // while iterator continuations and Search requery retain their own snapshots.

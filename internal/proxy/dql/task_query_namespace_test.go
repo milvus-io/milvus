@@ -55,24 +55,22 @@ func expectedNamespacePartitionID(namespace string, partitionNames []string, par
 func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 	mockey.PatchConvey("TestQueryTask_PlanNamespace_AfterPreExecute", t, func() {
 		cache := newTestCache()
+		schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+			},
+			EnableNamespace: true,
+		})
 		mockTest(t, (*metacache.MetaCache).GetCollectionID, int64(1001), nil)
-		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil)
+		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema, UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil)
 		mockTest(t, isPartitionKeyMode, false, nil)
 		mockTest(t, validatePartitionTag, nil)
 		mockTest(t, isIgnoreGrowing, false, nil)
 
 		// Schema with namespace enabled
-		mockTestTo(t, (*metacache.MetaCache).GetCollectionSchema, func(_ *metacache.MetaCache, _ context.Context, _ string, _ string) (*schemaInfo, error) {
-			schema := &schemapb.CollectionSchema{
-				Name: "test_collection",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
-					{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
-				},
-				EnableNamespace: true,
-			}
-			return mustNewSchemaInfo(schema), nil
-		})
+		mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
 
 		// Capture plan to verify namespace by mocking plan creation inside createPlan
 		var capturedPlan *planpb.PlanNode
@@ -127,8 +125,9 @@ func TestQueryTask_NamespaceSetsPartitionIDs(t *testing.T) {
 		)
 
 		mockTest(t, (*metacache.MetaCache).GetCollectionID, int64(1001), nil)
-		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil)
-		mockTest(t, (*metacache.MetaCache).GetCollectionSchema, mustNewSchemaInfo(schema), nil)
+		schemaInfo := mustNewSchemaInfo(schema)
+		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schemaInfo, UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil)
+		mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil)
 		mockTest(t, (*metacache.MetaCache).GetPartitionsIndex, partitionNames, nil)
 		mockTest(t, (*metacache.MetaCache).GetPartitions, partitionIDs, nil)
 		mockTest(t, validatePartitionTag, nil)

@@ -78,6 +78,7 @@ func TestPrivilegeImportBinlogRegistration(t *testing.T) {
 func TestRLSManagementPrivilegeDefinitions(t *testing.T) {
 	for _, privilege := range []commonpb.ObjectPrivilege{
 		commonpb.ObjectPrivilege_PrivilegeViewRLS,
+		commonpb.ObjectPrivilege_PrivilegeSkipRLS,
 		commonpb.ObjectPrivilege_PrivilegeManageRLS,
 	} {
 		privilegeName := MetaStore2API(privilege.String())
