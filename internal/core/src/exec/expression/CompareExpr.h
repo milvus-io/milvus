@@ -230,7 +230,7 @@ class PhyCompareFilterExpr : public Expr {
     }
 
     void
-    MoveCursorInternal(bool preserve_data_scan_cursors) {
+    MoveCursorInternal() {
         if (!has_offset_input_) {
             if (segment_chunk_reader_.segment_->is_chunked()) {
                 if (left_use_index_data_) {
@@ -260,15 +260,12 @@ class PhyCompareFilterExpr : public Expr {
                     num_chunk_,
                     batch_size_);
             }
-            if (!preserve_data_scan_cursors) {
-                ResetDataScanCursors();
-            }
         }
     }
 
     void
     MoveCursor() override {
-        MoveCursorInternal(false);
+        MoveCursorInternal();
     }
 
     std::string
@@ -836,65 +833,67 @@ class PhyCompareFilterExpr : public Expr {
                 segment_chunk_reader_.segment_->GetChunkedColumn(left_field_);
             right_data_column_ =
                 segment_chunk_reader_.segment_->GetChunkedColumn(right_field_);
-            if (left_data_column_ != nullptr && right_data_column_ != nullptr) {
-                const auto start = GetCurrentRows();
-                const auto length = segment_chunk_reader_.active_count_ - start;
-                auto left_options =
-                    ChunkedColumnInterface::ScanOptions::ForData(
-                        start,
-                        length,
-                        ChunkedColumnInterface::ScanProjection::Data,
-                        DataScanValueKind<T>());
-                auto right_options =
-                    ChunkedColumnInterface::ScanOptions::ForData(
-                        start,
-                        length,
-                        ChunkedColumnInterface::ScanProjection::Data,
-                        DataScanValueKind<U>());
-                left_prepared_scan_ =
-                    left_data_column_->PrepareScan(op_ctx_, left_options);
-                right_prepared_scan_ =
-                    right_data_column_->PrepareScan(op_ctx_, right_options);
-                if (left_prepared_scan_ == nullptr ||
-                    right_prepared_scan_ == nullptr) {
-                    left_prepared_scan_.reset();
-                    right_prepared_scan_.reset();
-                    left_data_column_.reset();
-                    right_data_column_.reset();
-                    return -1;
-                }
-            }
         }
-        if (left_prepared_scan_ == nullptr || right_prepared_scan_ == nullptr) {
+        if (left_data_column_ == nullptr || right_data_column_ == nullptr) {
             return -1;
         }
 
-        if (left_data_cursor_ == nullptr || right_data_cursor_ == nullptr) {
-            const auto position = GetCurrentRows();
-            left_data_cursor_ = left_prepared_scan_->Seek(position);
-            right_data_cursor_ = right_prepared_scan_->Seek(position);
-            AssertInfo(
-                left_data_cursor_ != nullptr && right_data_cursor_ != nullptr,
-                "prepared compare scans cannot seek to row {}",
-                position);
+        const auto window_start = GetCurrentRows();
+        auto left_options = ChunkedColumnInterface::ScanOptions::ForData(
+            window_start,
+            real_batch_size,
+            ChunkedColumnInterface::ScanProjection::Data,
+            DataScanValueKind<T>());
+        auto right_options = ChunkedColumnInterface::ScanOptions::ForData(
+            window_start,
+            real_batch_size,
+            ChunkedColumnInterface::ScanProjection::Data,
+            DataScanValueKind<U>());
+        auto left_prepared_scan =
+            left_data_column_->PrepareScan(op_ctx_, left_options);
+        auto right_prepared_scan =
+            right_data_column_->PrepareScan(op_ctx_, right_options);
+        if (left_prepared_scan == nullptr || right_prepared_scan == nullptr) {
+            AssertInfo(!data_scan_supported_,
+                       "compare data scan backend stopped supporting a field");
+            data_scan_supported_ = false;
+            left_data_column_.reset();
+            right_data_column_.reset();
+            return -1;
         }
+        data_scan_supported_ = true;
+        auto left_data_cursor = left_prepared_scan->Open(
+            ChunkedColumnInterface::ScanPlan::Full(window_start,
+                                                   real_batch_size),
+            ChunkedColumnInterface::ScanProjection::Data);
+        auto right_data_cursor = right_prepared_scan->Open(
+            ChunkedColumnInterface::ScanPlan::Full(window_start,
+                                                   real_batch_size),
+            ChunkedColumnInterface::ScanProjection::Data);
+        AssertInfo(left_data_cursor != nullptr && right_data_cursor != nullptr,
+                   "prepared compare scans cannot open window [{}, {})",
+                   window_start,
+                   window_start + real_batch_size);
+        ChunkedColumnInterface::ScanBatch left_data_batch;
+        ChunkedColumnInterface::ScanBatch right_data_batch;
+        int64_t left_data_batch_pos = 0;
+        int64_t right_data_batch_pos = 0;
 
         int64_t processed_size = 0;
         while (processed_size < real_batch_size) {
-            if (!EnsureDataScanBatch(left_data_cursor_,
-                                     left_data_batch_,
-                                     left_data_batch_pos_) ||
-                !EnsureDataScanBatch(right_data_cursor_,
-                                     right_data_batch_,
-                                     right_data_batch_pos_)) {
+            if (!EnsureDataScanBatch(
+                    left_data_cursor, left_data_batch, left_data_batch_pos) ||
+                !EnsureDataScanBatch(right_data_cursor,
+                                     right_data_batch,
+                                     right_data_batch_pos)) {
                 break;
             }
 
             const auto left_row =
-                left_data_batch_.row_id_start + left_data_batch_pos_;
+                left_data_batch.row_id_start + left_data_batch_pos;
             const auto right_row =
-                right_data_batch_.row_id_start + right_data_batch_pos_;
-            const auto expected_row = GetCurrentRows() + processed_size;
+                right_data_batch.row_id_start + right_data_batch_pos;
+            const auto expected_row = window_start + processed_size;
             AssertInfo(left_row == expected_row && right_row == expected_row,
                        "compare data scan row mismatch, left {}, right {}, "
                        "expected {}",
@@ -904,12 +903,12 @@ class PhyCompareFilterExpr : public Expr {
 
             auto size = std::min<int64_t>(
                 {real_batch_size - processed_size,
-                 left_data_batch_.size - left_data_batch_pos_,
-                 right_data_batch_.size - right_data_batch_pos_});
+                 left_data_batch.size - left_data_batch_pos,
+                 right_data_batch.size - right_data_batch_pos});
             const auto* left_data =
-                left_data_batch_.values.data_as<T>() + left_data_batch_pos_;
+                left_data_batch.values.data_as<T>() + left_data_batch_pos;
             const auto* right_data =
-                right_data_batch_.values.data_as<U>() + right_data_batch_pos_;
+                right_data_batch.values.data_as<U>() + right_data_batch_pos;
 
             func(left_data,
                  right_data,
@@ -919,29 +918,29 @@ class PhyCompareFilterExpr : public Expr {
                  values...);
 
             for (int64_t i = 0; i < size; ++i) {
-                if (left_data_batch_.validity != nullptr &&
-                    !left_data_batch_.validity[left_data_batch_pos_ + i]) {
+                if (left_data_batch.validity != nullptr &&
+                    !left_data_batch.validity[left_data_batch_pos + i]) {
                     res[processed_size + i] = false;
                     valid_res[processed_size + i] = false;
                     continue;
                 }
-                if (right_data_batch_.validity != nullptr &&
-                    !right_data_batch_.validity[right_data_batch_pos_ + i]) {
+                if (right_data_batch.validity != nullptr &&
+                    !right_data_batch.validity[right_data_batch_pos + i]) {
                     res[processed_size + i] = false;
                     valid_res[processed_size + i] = false;
                 }
             }
 
             processed_size += size;
-            left_data_batch_pos_ += size;
-            right_data_batch_pos_ += size;
+            left_data_batch_pos += size;
+            right_data_batch_pos += size;
         }
 
         AssertInfo(processed_size == real_batch_size,
                    "compare data scan processed {} rows, expected {}",
                    processed_size,
                    real_batch_size);
-        MoveCursorInternal(true);
+        MoveCursorInternal();
         return processed_size;
     }
 
@@ -985,30 +984,12 @@ class PhyCompareFilterExpr : public Expr {
     std::vector<PinWrapper<const index::IndexBase*>> pinned_index_left_;
     std::vector<PinWrapper<const index::IndexBase*>> pinned_index_right_;
     bool data_scan_initialized_{false};
-    // Prepared scans and their cursors retain raw column pointers. Keep both
-    // published column generations alive for the expression lifetime.
+    bool data_scan_supported_{false};
+    // Keep both published column generations alive for the expression
+    // lifetime. Prepared scans/pins are created only for the current operator
+    // window.
     std::shared_ptr<ChunkedColumnInterface> left_data_column_{nullptr};
     std::shared_ptr<ChunkedColumnInterface> right_data_column_{nullptr};
-    ChunkedColumnInterface::PreparedScanResult left_prepared_scan_{nullptr};
-    ChunkedColumnInterface::PreparedScanResult right_prepared_scan_{nullptr};
-    std::unique_ptr<ChunkedColumnInterface::ScanCursor> left_data_cursor_{
-        nullptr};
-    std::unique_ptr<ChunkedColumnInterface::ScanCursor> right_data_cursor_{
-        nullptr};
-    ChunkedColumnInterface::ScanBatch left_data_batch_;
-    ChunkedColumnInterface::ScanBatch right_data_batch_;
-    int64_t left_data_batch_pos_{0};
-    int64_t right_data_batch_pos_{0};
-
-    void
-    ResetDataScanCursors() {
-        left_data_cursor_.reset();
-        right_data_cursor_.reset();
-        left_data_batch_ = ChunkedColumnInterface::ScanBatch{};
-        right_data_batch_ = ChunkedColumnInterface::ScanBatch{};
-        left_data_batch_pos_ = 0;
-        right_data_batch_pos_ = 0;
-    }
 
     bool
     EnsureDataScanBatch(
