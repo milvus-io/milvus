@@ -425,7 +425,7 @@ func (req *PinSnapshotDataReq) GetDbName() string { return req.DbName }
 func (req *PinSnapshotDataReq) GetCollectionName() string { return req.CollectionName }
 
 type UnpinSnapshotDataReq struct {
-	PinID int64 `json:"pinId" binding:"required,gt=0"`
+	PinID string `json:"pinId" binding:"required"`
 }
 
 type RestoreExternalSnapshotReq struct {
