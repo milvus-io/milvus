@@ -27,34 +27,13 @@ import (
 const compactionTargetPropertySegmentIDs = "segment_ids"
 
 type rewriteRule struct {
-	segmentIDs []int64
 	expectedTS uint64
 }
 
-func newRewriteRule(target *datapb.CompactionTarget) (rewriteRule, error) {
-	segmentIDs, err := parseCompactionTargetSegmentIDs(target)
-	if err != nil {
-		return rewriteRule{}, err
-	}
+func newRewriteRule(target *datapb.CompactionTarget) rewriteRule {
 	return rewriteRule{
-		segmentIDs: segmentIDs,
 		expectedTS: target.GetExpectedTS(),
-	}, nil
-}
-
-func (rule rewriteRule) ScopeIn(segment *SegmentInfo) bool {
-	if segment == nil {
-		return false
 	}
-	if len(rule.segmentIDs) == 0 {
-		return true
-	}
-	for _, segmentID := range rule.segmentIDs {
-		if segment.GetID() == segmentID {
-			return true
-		}
-	}
-	return false
 }
 
 func (rule rewriteRule) Match(segment *SegmentInfo) bool {

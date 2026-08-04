@@ -261,13 +261,13 @@ func (target *manualRewriteCompactionTarget) Properties() map[string]string {
 }
 
 type matchRule interface {
-	ScopeIn(segment *SegmentInfo) bool
 	Match(segment *SegmentInfo) bool
 }
 
 type compactionTarget struct {
 	*datapb.CompactionTarget
-	rule matchRule
+	segmentIDs []int64
+	rule       matchRule
 }
 
 func newCompactionTarget(target *datapb.CompactionTarget) (*compactionTarget, error) {
@@ -279,11 +279,12 @@ func newCompactionTarget(target *datapb.CompactionTarget) (*compactionTarget, er
 	}
 	switch target.GetIntent() {
 	case datapb.TargetIntent_INTENT_REWRITE:
-		rule, err := newRewriteRule(runtimeTarget.CompactionTarget)
+		segmentIDs, err := parseCompactionTargetSegmentIDs(runtimeTarget.CompactionTarget)
 		if err != nil {
 			return runtimeTarget, err
 		}
-		runtimeTarget.rule = rule
+		runtimeTarget.segmentIDs = segmentIDs
+		runtimeTarget.rule = newRewriteRule(runtimeTarget.CompactionTarget)
 		return runtimeTarget, nil
 	default:
 		return runtimeTarget, errUnsupportedCompactionTarget
@@ -308,15 +309,24 @@ func (target *compactionTarget) finite() bool {
 	return target.GetTailLimit() >= 0
 }
 
-func (target *compactionTarget) ScopeIn(segment *SegmentInfo) bool {
+func (target *compactionTarget) scopeIn(segment *SegmentInfo) bool {
 	if target == nil || target.CompactionTarget == nil || target.rule == nil || segment == nil {
 		return false
 	}
 	if target.GetCollectionID() != 0 && segment.GetCollectionID() != target.GetCollectionID() {
 		return false
 	}
-	if !target.rule.ScopeIn(segment) {
-		return false
+	if len(target.segmentIDs) > 0 {
+		inSegmentScope := false
+		for _, segmentID := range target.segmentIDs {
+			if segment.GetID() == segmentID {
+				inSegmentScope = true
+				break
+			}
+		}
+		if !inSegmentScope {
+			return false
+		}
 	}
 	if target.finite() && segment.GetDmlPosition().GetTimestamp() > target.GetExpectedTS() {
 		return false
@@ -324,13 +334,17 @@ func (target *compactionTarget) ScopeIn(segment *SegmentInfo) bool {
 	return true
 }
 
-func (target *compactionTarget) Match(segment *SegmentInfo) bool {
-	return target.ScopeIn(segment) && target.rule != nil && target.rule.Match(segment)
+func (target *compactionTarget) match(segment *SegmentInfo) bool {
+	return target.scopeIn(segment) && target.rule.Match(segment)
 }
 
-// SegmentFilters returns the authoritative semantic match filter for the target.
-func (target *compactionTarget) SegmentFilters() []SegmentFilter {
-	return []SegmentFilter{SegmentFilterFunc(target.Match)}
+// MatchFilters returns the complete authoritative semantic match filters for the target.
+func (target *compactionTarget) MatchFilters() []SegmentFilter {
+	filters := make([]SegmentFilter, 0, 2)
+	if target != nil && target.CompactionTarget != nil && target.GetCollectionID() != 0 {
+		filters = append(filters, WithCollection(target.GetCollectionID()))
+	}
+	return append(filters, SegmentFilterFunc(target.match))
 }
 
 func (target *compactionTarget) Satisfied(matches []*SegmentInfo) bool {

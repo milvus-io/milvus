@@ -177,15 +177,15 @@ func (s *CompactionTargetMetaSuite) TestMaterializesTargetsOnRecordMutation() {
 	s.Equal(int64(10), activeTargets[0].Clone().GetTargetID())
 	oldTarget := activeTargets[0]
 	probe := targetSegmentWithDataTS(1, 100, 10, "ch-1", 1500, 1500, false)
-	s.False(oldTarget.Match(probe))
+	s.False(targetMatchesSegment(oldTarget, probe))
 
 	updatedRecord := proto.Clone(activeRecord).(*datapb.CompactionTarget)
 	updatedRecord.ExpectedTS = 2000
 	s.Require().NoError(meta.SaveCompactionTarget(s.ctx, updatedRecord))
 	activeTargets = meta.GetActiveCompactionTargets()
 	s.Require().Len(activeTargets, 1)
-	s.True(activeTargets[0].Match(probe))
-	s.False(oldTarget.Match(probe))
+	s.True(targetMatchesSegment(activeTargets[0], probe))
+	s.False(targetMatchesSegment(oldTarget, probe))
 
 	s.Require().NoError(meta.UpdateCompactionTargetState(s.ctx, 10, datapb.TargetState_TARGET_STATE_INACTIVE))
 	s.Empty(meta.GetActiveCompactionTargets())
@@ -226,7 +226,7 @@ func TestCompactionTargetFactoryKeepsUnsupportedIntentInert(t *testing.T) {
 	require.ErrorIs(t, err, errUnsupportedCompactionTarget)
 	require.NotNil(t, target)
 	require.False(t, target.active())
-	require.False(t, target.ScopeIn(targetSegment(1, 0, 10, "ch-1", 0, false)))
+	require.False(t, targetMatchesSegment(target, targetSegment(1, 0, 10, "ch-1", 0, false)))
 }
 
 func TestCompactionTargetFactoryKeepsInvalidRewriteTargetInert(t *testing.T) {
@@ -241,7 +241,7 @@ func TestCompactionTargetFactoryKeepsInvalidRewriteTargetInert(t *testing.T) {
 	require.Error(t, err)
 	require.NotNil(t, target)
 	require.False(t, target.active())
-	require.False(t, target.ScopeIn(targetSegment(1, 0, 10, "ch-1", 0, false)))
+	require.False(t, targetMatchesSegment(target, targetSegment(1, 0, 10, "ch-1", 0, false)))
 }
 
 func TestFiniteCompactionTargetMatchUsesRewriteBoundaryPredicate(t *testing.T) {
@@ -254,13 +254,12 @@ func TestFiniteCompactionTargetMatchUsesRewriteBoundaryPredicate(t *testing.T) {
 	target := mustNewCompactionTarget(t, record)
 
 	outOfScope := targetSegment(1, 200, 10, "ch-1", 900, false)
-	require.False(t, target.ScopeIn(outOfScope))
-	require.False(t, target.Match(outOfScope))
-	require.True(t, target.Match(targetSegmentWithDataTS(2, 100, 10, "ch-1", 0, 999, false)))
-	require.False(t, target.Match(targetSegmentWithDataTS(3, 100, 10, "ch-1", 1000, 999, false)))
-	require.True(t, target.Match(targetSegmentWithDataTS(4, 100, 10, "ch-1", 999, 1000, false)))
-	require.False(t, target.Match(targetSegmentWithDataTS(5, 100, 10, "ch-1", 999, 1001, false)))
-	require.True(t, target.Match(targetSegmentWithDataTS(6, 100, 10, "ch-1", 999, 999, false)))
+	require.False(t, targetMatchesSegment(target, outOfScope))
+	require.True(t, targetMatchesSegment(target, targetSegmentWithDataTS(2, 100, 10, "ch-1", 0, 999, false)))
+	require.False(t, targetMatchesSegment(target, targetSegmentWithDataTS(3, 100, 10, "ch-1", 1000, 999, false)))
+	require.True(t, targetMatchesSegment(target, targetSegmentWithDataTS(4, 100, 10, "ch-1", 999, 1000, false)))
+	require.False(t, targetMatchesSegment(target, targetSegmentWithDataTS(5, 100, 10, "ch-1", 999, 1001, false)))
+	require.True(t, targetMatchesSegment(target, targetSegmentWithDataTS(6, 100, 10, "ch-1", 999, 999, false)))
 }
 
 func TestCompactionTargetUsesCollectionOnly(t *testing.T) {
@@ -272,9 +271,9 @@ func TestCompactionTargetUsesCollectionOnly(t *testing.T) {
 	}
 	target := mustNewCompactionTarget(t, record)
 
-	require.True(t, target.ScopeIn(targetSegment(1, 100, 10, "ch-1", 900, false)))
-	require.True(t, target.ScopeIn(targetSegment(2, 100, 20, "ch-2", 900, false)))
-	require.False(t, target.ScopeIn(targetSegment(3, 200, 10, "ch-1", 900, false)))
+	require.True(t, targetMatchesSegment(target, targetSegment(1, 100, 10, "ch-1", 900, false)))
+	require.True(t, targetMatchesSegment(target, targetSegment(2, 100, 20, "ch-2", 900, false)))
+	require.False(t, targetMatchesSegment(target, targetSegment(3, 200, 10, "ch-1", 900, false)))
 }
 
 func TestFiniteCompactionTargetSatisfiedUsesAbsenceOfRewriteMatch(t *testing.T) {
@@ -357,8 +356,8 @@ func TestRewriteCompactionTargetSegmentIDScopeUsesExactLiveSegmentID(t *testing.
 	oldSegment := targetSegment(1, 100, 10, "ch-1", 900, false)
 	replacement := targetSegment(10, 100, 10, "ch-1", 0, false, 1)
 
-	require.True(t, target.ScopeIn(oldSegment))
-	require.False(t, target.ScopeIn(replacement))
+	require.True(t, targetMatchesSegment(target, oldSegment))
+	require.False(t, targetMatchesSegment(target, replacement))
 	require.False(t, targetSatisfied(target,
 		oldSegment,
 	))
@@ -375,13 +374,29 @@ func mustNewCompactionTarget(t testing.TB, record *datapb.CompactionTarget) *com
 }
 
 func targetSatisfied(target *compactionTarget, segments ...*SegmentInfo) bool {
+	return target.Satisfied(filterTargetMatches(target, segments...))
+}
+
+func targetMatchesSegment(target *compactionTarget, segment *SegmentInfo) bool {
+	return len(filterTargetMatches(target, segment)) == 1
+}
+
+func filterTargetMatches(target *compactionTarget, segments ...*SegmentInfo) []*SegmentInfo {
+	filters := target.MatchFilters()
 	matches := make([]*SegmentInfo, 0, len(segments))
 	for _, segment := range segments {
-		if target.Match(segment) {
+		matched := true
+		for _, filter := range filters {
+			if !filter.Match(segment) {
+				matched = false
+				break
+			}
+		}
+		if matched {
 			matches = append(matches, segment)
 		}
 	}
-	return target.Satisfied(matches)
+	return matches
 }
 
 type compactionTargetCatalogUpdate struct {

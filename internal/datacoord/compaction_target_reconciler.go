@@ -69,7 +69,7 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	satisfiedTargets := make([]*datapb.CompactionTarget, 0)
 	for _, target := range targets {
 		record := target.Clone()
-		filters := append([]SegmentFilter{matchCandidateFilter}, target.SegmentFilters()...)
+		filters := append([]SegmentFilter{matchCandidateFilter}, target.MatchFilters()...)
 		matches := reconciler.meta.SelectSegments(ctx, filters...)
 		if target.Satisfied(matches) {
 			satisfiedTargets = append(satisfiedTargets, record)
