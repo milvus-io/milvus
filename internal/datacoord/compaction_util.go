@@ -105,18 +105,20 @@ func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, 
 }
 
 func isNormalManualCompactionCandidate(meta *meta, segment *SegmentInfo) bool {
-	return isSegmentHealthy(segment) &&
-		isFlushed(segment) &&
-		!segment.isCompacting &&
-		!segment.GetIsImporting() &&
-		segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		segment.GetLevel() != datapb.SegmentLevel_L2 &&
-		!segment.GetIsInvisible() &&
-		(segment.GetIsSorted() || segment.GetIsSortedByNamespace()) &&
-		!meta.isSegmentCompactionProtected(segment.GetID())
+	return isNormalManualCompactionSegment(segment) &&
+		isSharedCompactionSelectable(meta, segment) &&
+		isMixCompactionSelectable(segment)
 }
 
-func isCompactionSelectable(meta *meta, segment *SegmentInfo) bool {
+func isNormalManualCompactionSegment(segment *SegmentInfo) bool {
+	return isSegmentHealthy(segment) &&
+		isFlushed(segment) &&
+		!segment.GetIsImporting() &&
+		segment.GetLevel() != datapb.SegmentLevel_L0 &&
+		segment.GetLevel() != datapb.SegmentLevel_L2
+}
+
+func isSharedCompactionSelectable(meta *meta, segment *SegmentInfo) bool {
 	return !segment.isCompacting && !meta.isSegmentCompactionProtected(segment.GetID())
 }
 

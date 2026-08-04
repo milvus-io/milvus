@@ -147,7 +147,7 @@ func TestCompactionCandidateAndSelectability(t *testing.T) {
 			}
 
 			require.Equal(t, test.wantCandidate, isNormalManualCompactionCandidate(meta, segment))
-			require.Equal(t, test.wantShared, isCompactionSelectable(meta, segment))
+			require.Equal(t, test.wantShared, isSharedCompactionSelectable(meta, segment))
 			require.Equal(t, test.wantMix, isMixCompactionSelectable(segment))
 		})
 	}

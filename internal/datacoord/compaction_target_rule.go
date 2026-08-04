@@ -38,11 +38,7 @@ func newRewriteRule(target *datapb.CompactionTarget) rewriteRule {
 
 func (rule rewriteRule) Match(segment *SegmentInfo) bool {
 	return segment != nil &&
-		isSegmentHealthy(segment) &&
-		isFlushed(segment) &&
-		!segment.GetIsImporting() &&
-		segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		segment.GetLevel() != datapb.SegmentLevel_L2 &&
+		isNormalManualCompactionSegment(segment) &&
 		segment.GetCreateTs() < rule.expectedTS
 }
 

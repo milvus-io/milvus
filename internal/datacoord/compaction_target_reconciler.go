@@ -95,7 +95,7 @@ func (reconciler *compactionTargetReconciler) filterSelectable(ctx context.Conte
 			blockedCollections[collectionID] = blocked
 		}
 		if blocked ||
-			!isCompactionSelectable(reconciler.meta, segment) ||
+			!isSharedCompactionSelectable(reconciler.meta, segment) ||
 			!isMixCompactionSelectable(segment) {
 			continue
 		}
