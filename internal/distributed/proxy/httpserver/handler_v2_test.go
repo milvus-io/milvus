@@ -3258,6 +3258,117 @@ func TestSnapshotCRUDRESTV2(t *testing.T) {
 	assert.Equal(t, "snapshot_1", proxy.dropSnapshotReq.GetName())
 }
 
+func TestSnapshotRESTV2FormatsInt64Values(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	const largeInt64 int64 = 9007199254740993
+	testCases := []struct {
+		name         string
+		path         string
+		body         string
+		responsePath string
+		setup        func(*mocks.MockProxy)
+	}{
+		{
+			name:         "describe snapshot create timestamp",
+			path:         versionalV2(SnapshotCategory, DescribeAction),
+			body:         `{"collectionName":"source_books","snapshotName":"snapshot_1"}`,
+			responsePath: "data.createTs",
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().DescribeSnapshot(mock.Anything, mock.Anything).Return(&milvuspb.DescribeSnapshotResponse{
+					Status:   merr.Success(),
+					CreateTs: largeInt64,
+				}, nil).Once()
+			},
+		},
+		{
+			name:         "restore snapshot job ID",
+			path:         versionalV2(SnapshotCategory, RestoreAction),
+			body:         `{"sourceCollectionName":"source_books","targetCollectionName":"restored_books","snapshotName":"snapshot_1"}`,
+			responsePath: "data.jobId",
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().RestoreSnapshot(mock.Anything, mock.Anything).Return(&milvuspb.RestoreSnapshotResponse{
+					Status: merr.Success(),
+					JobId:  largeInt64,
+				}, nil).Once()
+			},
+		},
+		{
+			name:         "pin snapshot ID",
+			path:         versionalV2(SnapshotCategory, PinAction),
+			body:         `{"collectionName":"source_books","snapshotName":"snapshot_1"}`,
+			responsePath: "data.pinId",
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().PinSnapshotData(mock.Anything, mock.Anything).Return(&milvuspb.PinSnapshotDataResponse{
+					Status: merr.Success(),
+					PinId:  largeInt64,
+				}, nil).Once()
+			},
+		},
+		{
+			name:         "restore external snapshot job ID",
+			path:         versionalV2(SnapshotJobCategory, RestoreExternalAction),
+			body:         `{"targetCollectionName":"restored_books","snapshotMetadataURI":"s3://bucket/snapshot.json"}`,
+			responsePath: "data.jobId",
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().RestoreExternalSnapshot(mock.Anything, mock.Anything).Return(&milvuspb.RestoreExternalSnapshotResponse{
+					Status: merr.Success(),
+					JobId:  largeInt64,
+				}, nil).Once()
+			},
+		},
+		{
+			name:         "describe restore job ID",
+			path:         versionalV2(SnapshotJobCategory, DescribeAction),
+			body:         `{"jobId":"9007199254740993"}`,
+			responsePath: "data.jobId",
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().GetRestoreSnapshotState(mock.Anything, mock.Anything).Return(&milvuspb.GetRestoreSnapshotStateResponse{
+					Status: merr.Success(),
+					Info:   &milvuspb.RestoreSnapshotInfo{JobId: largeInt64},
+				}, nil).Once()
+			},
+		},
+		{
+			name:         "list restore job ID",
+			path:         versionalV2(SnapshotJobCategory, ListAction),
+			body:         `{}`,
+			responsePath: "data.records.0.jobId",
+			setup: func(proxy *mocks.MockProxy) {
+				proxy.EXPECT().ListRestoreSnapshotJobs(mock.Anything, mock.Anything).Return(&milvuspb.ListRestoreSnapshotJobsResponse{
+					Status: merr.Success(),
+					Jobs:   []*milvuspb.RestoreSnapshotInfo{{JobId: largeInt64}},
+				}, nil).Once()
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		for _, allowInt64 := range []bool{false, true} {
+			name := fmt.Sprintf("%s/allow_int64_%t", testCase.name, allowInt64)
+			t.Run(name, func(t *testing.T) {
+				proxy := mocks.NewMockProxy(t)
+				testCase.setup(proxy)
+				server := initHTTPServerV2(proxy, false)
+
+				req := httptest.NewRequest(http.MethodPost, testCase.path, bytes.NewBufferString(testCase.body))
+				req.Header.Set(HTTPHeaderAllowInt64, fmt.Sprintf("%t", allowInt64))
+				recorder := httptest.NewRecorder()
+				server.ServeHTTP(recorder, req)
+
+				require.Equal(t, http.StatusOK, recorder.Code)
+				expectedRaw := `"9007199254740993"`
+				if allowInt64 {
+					expectedRaw = "9007199254740993"
+				}
+				assert.Equal(t, expectedRaw, gjson.Get(recorder.Body.String(), testCase.responsePath).Raw)
+			})
+		}
+	}
+}
+
 func TestRestoreSnapshotRESTV2(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
@@ -3313,14 +3424,14 @@ func TestPinSnapshotDataRESTV2(t *testing.T) {
 	assert.Equal(t, int64(3600), proxy.pinSnapshotDataReq.GetTtlSeconds())
 
 	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, UnpinAction), bytes.NewReader([]byte(`{
-		"pinId": 300
+		"pinId": "9007199254740993"
 	}`)))
 	w = httptest.NewRecorder()
 	testEngine.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
-	assert.Equal(t, int64(300), proxy.unpinSnapshotDataReq.GetPinId())
+	assert.Equal(t, int64(9007199254740993), proxy.unpinSnapshotDataReq.GetPinId())
 }
 
 func TestSnapshotRESTV2Validation(t *testing.T) {
@@ -3356,7 +3467,17 @@ func TestSnapshotRESTV2Validation(t *testing.T) {
 		{
 			name:   "invalid pin ID",
 			action: UnpinAction,
-			body:   `{"pinId":0}`,
+			body:   `{"pinId":"0"}`,
+		},
+		{
+			name:   "malformed pin ID",
+			action: UnpinAction,
+			body:   `{"pinId":"not-an-int64"}`,
+		},
+		{
+			name:   "numeric pin ID",
+			action: UnpinAction,
+			body:   `{"pinId":300}`,
 		},
 	}
 
@@ -3394,7 +3515,7 @@ func TestRestoreExternalSnapshotRESTV2(t *testing.T) {
 	assert.Equal(t, "restored_books", proxy.restoreReq.GetTargetCollectionName())
 	assert.Equal(t, "s3://bucket/files/snapshots/meta.json", proxy.restoreReq.GetSnapshotMetadataUri())
 	assert.Equal(t, `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`, proxy.restoreReq.GetExternalSpec())
-	assert.Contains(t, w.Body.String(), `"jobId":2001`)
+	assert.Contains(t, w.Body.String(), `"jobId":"2001"`)
 }
 
 func TestExportSnapshotRESTV2(t *testing.T) {
