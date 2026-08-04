@@ -81,6 +81,7 @@ const (
 	RootCoord_DropPrivilegeGroup_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/DropPrivilegeGroup"
 	RootCoord_ListPrivilegeGroups_FullMethodName           = "/milvus.proto.rootcoord.RootCoord/ListPrivilegeGroups"
 	RootCoord_OperatePrivilegeGroup_FullMethodName         = "/milvus.proto.rootcoord.RootCoord/OperatePrivilegeGroup"
+	RootCoord_GetRLSMetadata_FullMethodName                = "/milvus.proto.rootcoord.RootCoord/GetRLSMetadata"
 	RootCoord_CheckHealth_FullMethodName                   = "/milvus.proto.rootcoord.RootCoord/CheckHealth"
 	RootCoord_RenameCollection_FullMethodName              = "/milvus.proto.rootcoord.RootCoord/RenameCollection"
 	RootCoord_CreateDatabase_FullMethodName                = "/milvus.proto.rootcoord.RootCoord/CreateDatabase"
@@ -237,6 +238,8 @@ type RootCoordClient interface {
 	DropPrivilegeGroup(ctx context.Context, in *milvuspb.DropPrivilegeGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ListPrivilegeGroups(ctx context.Context, in *milvuspb.ListPrivilegeGroupsRequest, opts ...grpc.CallOption) (*milvuspb.ListPrivilegeGroupsResponse, error)
 	OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePrivilegeGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// Internal collection-scoped snapshot API used by Proxy RLS caches.
+	GetRLSMetadata(ctx context.Context, in *GetRLSMetadataRequest, opts ...grpc.CallOption) (*GetRLSMetadataResponse, error)
 	CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error)
 	RenameCollection(ctx context.Context, in *milvuspb.RenameCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -789,6 +792,15 @@ func (c *rootCoordClient) OperatePrivilegeGroup(ctx context.Context, in *milvusp
 	return out, nil
 }
 
+func (c *rootCoordClient) GetRLSMetadata(ctx context.Context, in *GetRLSMetadataRequest, opts ...grpc.CallOption) (*GetRLSMetadataResponse, error) {
+	out := new(GetRLSMetadataResponse)
+	err := c.cc.Invoke(ctx, RootCoord_GetRLSMetadata_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *rootCoordClient) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
 	out := new(milvuspb.CheckHealthResponse)
 	err := c.cc.Invoke(ctx, RootCoord_CheckHealth_FullMethodName, in, out, opts...)
@@ -1087,6 +1099,8 @@ type RootCoordServer interface {
 	DropPrivilegeGroup(context.Context, *milvuspb.DropPrivilegeGroupRequest) (*commonpb.Status, error)
 	ListPrivilegeGroups(context.Context, *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error)
 	OperatePrivilegeGroup(context.Context, *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error)
+	// Internal collection-scoped snapshot API used by Proxy RLS caches.
+	GetRLSMetadata(context.Context, *GetRLSMetadataRequest) (*GetRLSMetadataResponse, error)
 	CheckHealth(context.Context, *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
 	RenameCollection(context.Context, *milvuspb.RenameCollectionRequest) (*commonpb.Status, error)
 	CreateDatabase(context.Context, *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error)
@@ -1286,6 +1300,9 @@ func (UnimplementedRootCoordServer) ListPrivilegeGroups(context.Context, *milvus
 }
 func (UnimplementedRootCoordServer) OperatePrivilegeGroup(context.Context, *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method OperatePrivilegeGroup not implemented")
+}
+func (UnimplementedRootCoordServer) GetRLSMetadata(context.Context, *GetRLSMetadataRequest) (*GetRLSMetadataResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetRLSMetadata not implemented")
 }
 func (UnimplementedRootCoordServer) CheckHealth(context.Context, *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CheckHealth not implemented")
@@ -2397,6 +2414,24 @@ func _RootCoord_OperatePrivilegeGroup_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_GetRLSMetadata_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRLSMetadataRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).GetRLSMetadata(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_GetRLSMetadata_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).GetRLSMetadata(ctx, req.(*GetRLSMetadataRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RootCoord_CheckHealth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(milvuspb.CheckHealthRequest)
 	if err := dec(in); err != nil {
@@ -2959,6 +2994,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "OperatePrivilegeGroup",
 			Handler:    _RootCoord_OperatePrivilegeGroup_Handler,
+		},
+		{
+			MethodName: "GetRLSMetadata",
+			Handler:    _RootCoord_GetRLSMetadata_Handler,
 		},
 		{
 			MethodName: "CheckHealth",

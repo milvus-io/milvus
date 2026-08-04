@@ -143,6 +143,16 @@ func CloneTags(tags map[string]TagValue) map[string]TagValue {
 
 type PolicyType int32
 
+// Internal message type values reserved by the RLS proto change. Keep these
+// local until the public milvus-proto dependency is upgraded in the final PR.
+const (
+	MsgTypeCreateRowPolicy        commonpb.MsgType = 2400
+	MsgTypeDropRowPolicy          commonpb.MsgType = 2401
+	MsgTypeUpdateRowPolicy        commonpb.MsgType = 2403
+	MsgTypeSetRLSPrincipalTags    commonpb.MsgType = 2404
+	MsgTypeDeleteRLSPrincipalTags commonpb.MsgType = 2407
+)
+
 const (
 	PolicyTypeUnknown     PolicyType = 0
 	PolicyTypePermissive  PolicyType = 1

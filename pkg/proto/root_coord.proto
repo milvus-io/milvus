@@ -180,6 +180,9 @@ service RootCoord {
     rpc ListPrivilegeGroups(milvus.ListPrivilegeGroupsRequest) returns (milvus.ListPrivilegeGroupsResponse) {}
     rpc OperatePrivilegeGroup(milvus.OperatePrivilegeGroupRequest) returns (common.Status) {}
 
+    // Internal collection-scoped snapshot API used by Proxy RLS caches.
+    rpc GetRLSMetadata(GetRLSMetadataRequest) returns (GetRLSMetadataResponse) {}
+
     rpc CheckHealth(milvus.CheckHealthRequest) returns (milvus.CheckHealthResponse) {}
 
     rpc RenameCollection(milvus.RenameCollectionRequest) returns (common.Status) {}
@@ -368,4 +371,25 @@ message ShowCollectionIDsResponse {
 message CreatePartitionResponse {
   common.Status status = 1;
   int64 partitionID = 2;
+}
+
+enum RLSMetadataKind {
+  RLS_METADATA_KIND_ALL = 0;
+  RLS_METADATA_KIND_POLICIES = 1;
+  RLS_METADATA_KIND_PRINCIPALS = 2;
+}
+
+message GetRLSMetadataRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  RLSMetadataKind kind = 3;
+}
+
+message GetRLSMetadataResponse {
+  common.Status status = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  int64 collection_id = 4;
+  repeated RLSPolicyInfo policies = 5;
+  repeated RLSPrincipalInfo principals = 6;
 }

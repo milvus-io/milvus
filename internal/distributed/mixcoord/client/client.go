@@ -2232,6 +2232,17 @@ func (c *Client) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	})
 }
 
+func (c *Client) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest, opts ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*rootcoordpb.GetRLSMetadataResponse, error) {
+		return client.GetRLSMetadata(ctx, req)
+	})
+}
+
 // ClientHeartbeat handles client telemetry heartbeat requests
 func (c *Client) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest, opts ...grpc.CallOption) (*milvuspb.ClientHeartbeatResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.ClientHeartbeatResponse, error) {

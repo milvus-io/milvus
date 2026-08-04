@@ -522,6 +522,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 128, Params.RLSMaxTagKeyLength.GetAsInt())
 		assert.Equal(t, 1024, Params.RLSMaxTagValueLength.GetAsInt())
 		assert.Equal(t, 1024, Params.RLSMaxArrayLiteralElements.GetAsInt())
+		assert.Equal(t, time.Hour, Params.RLSMetaRefreshInterval.GetAsDuration(time.Second))
 		params.Save(Params.RLSMaxPoliciesPerCollection.Key, "2")
 		assert.Equal(t, 2, Params.RLSMaxPoliciesPerCollection.GetAsInt())
 		params.Save(Params.RLSMaxPoliciesPerCollection.Key, "0")
@@ -532,6 +533,9 @@ func TestComponentParam(t *testing.T) {
 		params.Save(Params.RLSMaxPrincipalsPerCollection.Key, "0")
 		assert.Equal(t, 1000, Params.RLSMaxPrincipalsPerCollection.GetAsInt())
 		params.Reset(Params.RLSMaxPrincipalsPerCollection.Key)
+		params.Save(Params.RLSMetaRefreshInterval.Key, "60")
+		assert.Equal(t, time.Minute, Params.RLSMetaRefreshInterval.GetAsDuration(time.Second))
+		params.Reset(Params.RLSMetaRefreshInterval.Key)
 
 		assert.Equal(t, int64(16), Params.DDLConcurrency.GetAsInt64())
 		assert.Equal(t, int64(16), Params.DCLConcurrency.GetAsInt64())

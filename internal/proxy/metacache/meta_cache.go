@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -1507,6 +1508,9 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	evicted := 0
 	for start := 0; start < len(ids); start += removeBatch {
 		end := min(start+removeBatch, len(ids))
+		for _, id := range ids[start:end] {
+			rls.RemoveCollection(ctx, id)
+		}
 		m.mu.Lock()
 		for _, id := range ids[start:end] {
 			// Unified eviction, not a raw delete: if a fill racing this walk has
