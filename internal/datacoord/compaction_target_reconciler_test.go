@@ -194,16 +194,6 @@ func TestCompactionTargetReconcilerOutsideManualMatchDomainDoesNotHoldTargetActi
 				segment.Level = datapb.SegmentLevel_L2
 			},
 		},
-		{
-			name: "snapshot protected",
-			mutate: func(meta *meta, segment *SegmentInfo) {
-				meta.snapshotMeta = &snapshotMeta{
-					segmentProtectionUntil: map[int64]uint64{
-						segment.GetID(): uint64(time.Now().Add(time.Hour).Unix()),
-					},
-				}
-			},
-		},
 	}
 
 	for _, test := range tests {
@@ -230,6 +220,41 @@ func TestCompactionTargetReconcilerOutsideManualMatchDomainDoesNotHoldTargetActi
 			require.Equal(t, datapb.TargetState_TARGET_STATE_INACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 		})
 	}
+}
+
+func TestCompactionTargetReconcilerPausesAndResumesSnapshotProtectedSegment(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	ctx := context.Background()
+	record := &datapb.CompactionTarget{
+		TargetID:     100,
+		CollectionID: 1,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS:   200,
+		TailLimit:    0,
+		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
+	}
+	targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
+	segment := sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false)
+	meta := newCompactionTargetReconcilerTestMeta(targetMeta, segment)
+	meta.snapshotMeta = &snapshotMeta{
+		segmentProtectionUntil: map[int64]uint64{
+			segment.GetID(): uint64(time.Now().Add(time.Hour).Unix()),
+		},
+	}
+
+	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
+
+	require.NoError(t, err)
+	require.Empty(t, events[TriggerTypeTarget])
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
+
+	delete(meta.snapshotMeta.segmentProtectionUntil, segment.GetID())
+	events, err = newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
+
+	require.NoError(t, err)
+	require.Len(t, events[TriggerTypeTarget], 1)
+	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
 func TestCompactionTargetReconcilerKeepsTemporarilyBlockedMatchActive(t *testing.T) {
@@ -350,7 +375,7 @@ func TestCompactionTargetReconcilerGlobalTargetContinuesUnblockedCollections(t *
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
-func TestCompactionTargetReconcilerGlobalTargetExcludesExternalCollections(t *testing.T) {
+func TestCompactionTargetReconcilerDoesNotAddCollectionTypeMatchFilter(t *testing.T) {
 	enableCompactionTargetReconciler(t)
 	ctx := context.Background()
 	record := &datapb.CompactionTarget{
@@ -374,8 +399,9 @@ func TestCompactionTargetReconcilerGlobalTargetExcludesExternalCollections(t *te
 	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	require.Empty(t, events[TriggerTypeTarget])
-	require.Equal(t, datapb.TargetState_TARGET_STATE_INACTIVE, targetMeta.GetCompactionTarget(100).GetState())
+	require.Len(t, events[TriggerTypeTarget], 1)
+	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
 func TestCompactionTargetReconcilerUsesManualIndexReadinessFilter(t *testing.T) {

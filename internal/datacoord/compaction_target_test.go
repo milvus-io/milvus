@@ -262,6 +262,66 @@ func TestFiniteCompactionTargetMatchUsesRewriteBoundaryPredicate(t *testing.T) {
 	require.True(t, targetMatchesSegment(target, targetSegmentWithDataTS(6, 100, 10, "ch-1", 999, 999, false)))
 }
 
+func TestRewriteCompactionTargetMatchFiltersOwnManualSegmentDomain(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*SegmentInfo)
+		want   bool
+	}{
+		{
+			name: "healthy flushed L1 segment",
+			want: true,
+		},
+		{
+			name: "flushing segment",
+			mutate: func(segment *SegmentInfo) {
+				segment.State = commonpb.SegmentState_Flushing
+			},
+		},
+		{
+			name: "dropped segment",
+			mutate: func(segment *SegmentInfo) {
+				segment.State = commonpb.SegmentState_Dropped
+			},
+		},
+		{
+			name: "importing segment",
+			mutate: func(segment *SegmentInfo) {
+				segment.IsImporting = true
+			},
+		},
+		{
+			name: "L0 segment",
+			mutate: func(segment *SegmentInfo) {
+				segment.Level = datapb.SegmentLevel_L0
+			},
+		},
+		{
+			name: "L2 segment",
+			mutate: func(segment *SegmentInfo) {
+				segment.Level = datapb.SegmentLevel_L2
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := mustNewCompactionTarget(t, &datapb.CompactionTarget{
+				CollectionID: 100,
+				Intent:       datapb.TargetIntent_INTENT_REWRITE,
+				ExpectedTS:   1000,
+				TailLimit:    0,
+			})
+			segment := targetSegment(1, 100, 10, "ch-1", 999, false)
+			if test.mutate != nil {
+				test.mutate(segment)
+			}
+
+			require.Equal(t, test.want, targetMatchesSegment(target, segment))
+		})
+	}
+}
+
 func TestCompactionTargetUsesCollectionOnly(t *testing.T) {
 	record := &datapb.CompactionTarget{
 		CollectionID: 100,

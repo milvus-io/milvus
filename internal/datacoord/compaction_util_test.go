@@ -26,56 +26,70 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
-func TestNormalManualCompactionCandidateStages(t *testing.T) {
+func TestCompactionCandidateAndSelectability(t *testing.T) {
 	tests := []struct {
 		name          string
 		mutate        func(*meta, *SegmentInfo)
-		wantMatch     bool
-		wantExecution bool
+		wantCandidate bool
+		wantShared    bool
+		wantMix       bool
 	}{
 		{
 			name:          "flushed sorted L1 segment",
-			wantMatch:     true,
-			wantExecution: true,
+			wantCandidate: true,
+			wantShared:    true,
+			wantMix:       true,
 		},
 		{
-			name: "flushing segment is outside match domain",
+			name: "flushing segment is not a normal manual candidate",
 			mutate: func(_ *meta, segment *SegmentInfo) {
 				segment.State = commonpb.SegmentState_Flushing
 			},
+			wantShared: true,
+			wantMix:    true,
 		},
 		{
-			name: "growing segment is outside match domain",
+			name: "growing segment is not a normal manual candidate",
 			mutate: func(_ *meta, segment *SegmentInfo) {
 				segment.State = commonpb.SegmentState_Growing
 			},
+			wantShared: true,
+			wantMix:    true,
 		},
 		{
-			name: "dropped segment is outside match domain",
+			name: "dropped segment is not a normal manual candidate",
 			mutate: func(_ *meta, segment *SegmentInfo) {
 				segment.State = commonpb.SegmentState_Dropped
 			},
+			wantShared: true,
+			wantMix:    true,
 		},
 		{
-			name: "importing segment is outside match domain",
+			name: "importing segment is not a normal manual candidate",
 			mutate: func(_ *meta, segment *SegmentInfo) {
 				segment.IsImporting = true
 			},
+			wantShared: true,
+			wantMix:    true,
 		},
 		{
-			name: "L0 segment is outside match domain",
+			name: "L0 segment is not a normal manual candidate",
 			mutate: func(_ *meta, segment *SegmentInfo) {
 				segment.Level = datapb.SegmentLevel_L0
 			},
+			wantShared: true,
+			wantMix:    true,
 		},
 		{
-			name: "L2 segment is outside match domain",
+			name: "L2 segment is not a normal manual candidate",
 			mutate: func(_ *meta, segment *SegmentInfo) {
 				segment.Level = datapb.SegmentLevel_L2
 			},
+			wantShared: true,
+			wantMix:    true,
 		},
 		{
-			name: "snapshot protected segment is outside match domain",
+			name: "snapshot protection is a shared selectability blocker",
 			mutate: func(meta *meta, segment *SegmentInfo) {
 				meta.snapshotMeta = &snapshotMeta{
 					segmentProtectionUntil: map[int64]uint64{
@@ -83,27 +97,28 @@ func TestNormalManualCompactionCandidateStages(t *testing.T) {
 					},
 				}
 			},
+			wantMix: true,
 		},
 		{
-			name: "compacting segment remains a match",
+			name: "compacting is a shared selectability blocker",
 			mutate: func(_ *meta, segment *SegmentInfo) {
 				segment.isCompacting = true
 			},
-			wantMatch: true,
+			wantMix: true,
 		},
 		{
-			name: "invisible segment remains a match",
+			name: "invisible is a mix selectability blocker",
 			mutate: func(_ *meta, segment *SegmentInfo) {
 				segment.IsInvisible = true
 			},
-			wantMatch: true,
+			wantShared: true,
 		},
 		{
-			name: "unsorted segment remains a match",
+			name: "unsorted is a mix selectability blocker",
 			mutate: func(_ *meta, segment *SegmentInfo) {
 				segment.IsSorted = false
 			},
-			wantMatch: true,
+			wantShared: true,
 		},
 		{
 			name: "namespace sorted segment is executable",
@@ -111,8 +126,9 @@ func TestNormalManualCompactionCandidateStages(t *testing.T) {
 				segment.IsSorted = false
 				segment.IsSortedByNamespace = true
 			},
-			wantMatch:     true,
-			wantExecution: true,
+			wantCandidate: true,
+			wantShared:    true,
+			wantMix:       true,
 		},
 	}
 
@@ -130,9 +146,9 @@ func TestNormalManualCompactionCandidateStages(t *testing.T) {
 				test.mutate(meta, segment)
 			}
 
-			require.Equal(t, test.wantMatch, isNormalManualCompactionMatchCandidate(meta, segment))
-			require.Equal(t, test.wantExecution, isNormalManualCompactionExecutionCandidate(meta, segment))
-			require.Equal(t, isNormalManualCompactionCandidate(meta, segment), isNormalManualCompactionExecutionCandidate(meta, segment))
+			require.Equal(t, test.wantCandidate, isNormalManualCompactionCandidate(meta, segment))
+			require.Equal(t, test.wantShared, isCompactionSelectable(meta, segment))
+			require.Equal(t, test.wantMix, isMixCompactionSelectable(segment))
 		})
 	}
 }

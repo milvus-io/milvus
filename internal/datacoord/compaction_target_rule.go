@@ -37,7 +37,13 @@ func newRewriteRule(target *datapb.CompactionTarget) rewriteRule {
 }
 
 func (rule rewriteRule) Match(segment *SegmentInfo) bool {
-	return segment != nil && segment.GetCreateTs() < rule.expectedTS
+	return segment != nil &&
+		isSegmentHealthy(segment) &&
+		isFlushed(segment) &&
+		!segment.GetIsImporting() &&
+		segment.GetLevel() != datapb.SegmentLevel_L0 &&
+		segment.GetLevel() != datapb.SegmentLevel_L2 &&
+		segment.GetCreateTs() < rule.expectedTS
 }
 
 func sortedCompactionTargetSegmentIDs(segmentIDs []int64) []int64 {

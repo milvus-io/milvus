@@ -59,23 +59,15 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		return events, nil
 	}
 
-	matchCandidateFilter := SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		if !isNormalManualCompactionMatchCandidate(reconciler.meta, segment) {
-			return false
-		}
-		collection := reconciler.meta.GetCollection(segment.GetCollectionID())
-		return collection == nil || !collection.IsExternal()
-	})
 	satisfiedTargets := make([]*datapb.CompactionTarget, 0)
 	for _, target := range targets {
 		record := target.Clone()
-		filters := append([]SegmentFilter{matchCandidateFilter}, target.MatchFilters()...)
-		matches := reconciler.meta.SelectSegments(ctx, filters...)
+		matches := reconciler.meta.SelectSegments(ctx, target.MatchFilters()...)
 		if target.Satisfied(matches) {
 			satisfiedTargets = append(satisfiedTargets, record)
 			continue
 		}
-		for _, segment := range reconciler.filterExecutable(ctx, matches) {
+		for _, segment := range reconciler.filterSelectable(ctx, matches) {
 			events[TriggerTypeTarget] = append(events[TriggerTypeTarget], compactionTargetView(record, segment))
 		}
 	}
@@ -92,9 +84,9 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	return events, nil
 }
 
-func (reconciler *compactionTargetReconciler) filterExecutable(ctx context.Context, matches []*SegmentInfo) []*SegmentInfo {
+func (reconciler *compactionTargetReconciler) filterSelectable(ctx context.Context, matches []*SegmentInfo) []*SegmentInfo {
 	blockedCollections := make(map[int64]bool)
-	executable := make([]*SegmentInfo, 0, len(matches))
+	selectable := make([]*SegmentInfo, 0, len(matches))
 	for _, segment := range matches {
 		collectionID := segment.GetCollectionID()
 		blocked, checked := blockedCollections[collectionID]
@@ -102,15 +94,17 @@ func (reconciler *compactionTargetReconciler) filterExecutable(ctx context.Conte
 			blocked = reconciler.meta.isCollectionCompactionBlocked(collectionID)
 			blockedCollections[collectionID] = blocked
 		}
-		if blocked || !isNormalManualCompactionExecutionCandidate(reconciler.meta, segment) {
+		if blocked ||
+			!isCompactionSelectable(reconciler.meta, segment) ||
+			!isMixCompactionSelectable(segment) {
 			continue
 		}
-		executable = append(executable, segment)
+		selectable = append(selectable, segment)
 	}
 	if paramtable.Get().DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-		return FilterInIndexedSegments(ctx, reconciler.handler, reconciler.meta, true, executable...)
+		return FilterInIndexedSegments(ctx, reconciler.handler, reconciler.meta, true, selectable...)
 	}
-	return executable
+	return selectable
 }
 
 func compactionTargetView(record *datapb.CompactionTarget, segment *SegmentInfo) CompactionView {
