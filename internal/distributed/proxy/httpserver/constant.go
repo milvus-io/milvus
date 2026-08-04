@@ -35,6 +35,7 @@ const (
 	AliasCategory                 = "/aliases/"
 	ImportJobCategory             = "/jobs/import/"
 	SnapshotJobCategory           = "/jobs/snapshot/"
+	SnapshotCategory              = "/snapshots/"
 	ExternalCollectionJobCategory = "/jobs/external_collection/"
 	PrivilegeGroupCategory        = "/privilege_groups/"
 	CollectionFieldCategory       = "/collections/fields/"
