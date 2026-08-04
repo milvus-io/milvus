@@ -1258,6 +1258,66 @@ TEST_F(FileWriterTest, ShrinkingLocalFileIOPoolDrainsQueuedTasks) {
     EXPECT_EQ(completed->load(), queued.size());
 }
 
+TEST_F(FileWriterTest, PublishesWriteLimitAfterExecutorResizeCompletes) {
+    auto& pool = LocalFileIOPool::GetInstance();
+    pool.Configure(2);
+    auto executor = pool.GetExecutor();
+    ASSERT_TRUE(executor);
+
+    auto release_tasks_promise = std::make_shared<std::promise<void>>();
+    auto release_tasks = release_tasks_promise->get_future().share();
+    bool tasks_released = false;
+    auto release_guard = folly::makeGuard([&]() {
+        if (!tasks_released) {
+            release_tasks_promise->set_value();
+        }
+    });
+    auto first_started_promise = std::make_shared<std::promise<void>>();
+    auto first_started = first_started_promise->get_future();
+    auto second_started_promise = std::make_shared<std::promise<void>>();
+    auto second_started = second_started_promise->get_future();
+    executor->add([first_started_promise, release_tasks]() {
+        first_started_promise->set_value();
+        release_tasks.wait();
+    });
+    executor->add([second_started_promise, release_tasks]() {
+        second_started_promise->set_value();
+        release_tasks.wait();
+    });
+    ASSERT_EQ(first_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    ASSERT_EQ(second_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+
+    auto first_permit = pool.AcquireWritePermit();
+    auto configure_started_promise = std::make_shared<std::promise<void>>();
+    auto configure_started = configure_started_promise->get_future();
+    auto configure =
+        std::async(std::launch::async, [&pool, configure_started_promise]() {
+            configure_started_promise->set_value();
+            pool.Configure(1);
+        });
+    ASSERT_EQ(configure_started.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    EXPECT_EQ(configure.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+
+    auto second_permit = std::async(
+        std::launch::async, [&pool]() { return pool.AcquireWritePermit(); });
+    auto second_status = second_permit.wait_for(std::chrono::milliseconds(100));
+    EXPECT_EQ(second_status, std::future_status::ready);
+
+    release_tasks_promise->set_value();
+    tasks_released = true;
+    release_guard.dismiss();
+    configure.get();
+    first_permit = {};
+    ASSERT_EQ(second_permit.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    auto acquired_permit = second_permit.get();
+    (void)acquired_permit;
+}
+
 TEST_F(FileWriterTest, ConfiguredLimitPreservesWriteErrors) {
     if (access("/dev/full", W_OK) != 0) {
         GTEST_SKIP() << "/dev/full is unavailable";

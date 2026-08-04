@@ -21,9 +21,9 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <exception>
 #include <limits>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -154,20 +154,20 @@ class TransientMemoryBudget {
         }
 
         bool admitted = false;
-        std::vector<std::shared_ptr<PendingAdmission>> cleanup;
         {
             std::lock_guard<std::mutex> lock(mu_);
-            CleanupCancelledLocked(cleanup);
-            if (pending->state == PendingAdmission::State::Cancelled) {
-                cleanup.push_back(pending);
-            } else if (CanAdmitImmediatelyLocked(priority, bytes)) {
-                MarkAdmittedLocked(pending);
-                admitted = true;
-            } else {
-                auto& queue = priority == TransientBudgetPriority::High
-                                  ? high_pending_
-                                  : low_pending_;
-                queue.push_back(pending);
+            if (pending->state != PendingAdmission::State::Cancelled) {
+                if (CanAdmitImmediatelyLocked(priority, bytes)) {
+                    MarkAdmittedLocked(pending);
+                    admitted = true;
+                } else {
+                    auto& queue = priority == TransientBudgetPriority::High
+                                      ? high_pending_
+                                      : low_pending_;
+                    auto position = queue.insert(queue.end(), pending);
+                    pending->queue = &queue;
+                    pending->queue_position = position;
+                }
             }
         }
 
@@ -289,6 +289,9 @@ class TransientMemoryBudget {
     }
 
  private:
+    struct PendingAdmission;
+    using PendingQueue = std::list<std::shared_ptr<PendingAdmission>>;
+
     struct PendingAdmission {
         enum class State {
             Pending,
@@ -300,11 +303,13 @@ class TransientMemoryBudget {
         folly::coro::Promise<TransientBudgetLease> promise;
         std::unique_ptr<folly::CancellationCallback> cancellation_callback;
         State state{State::Pending};
+        // Queue membership and this iterator are protected by mu_.
+        PendingQueue* queue{nullptr};
+        PendingQueue::iterator queue_position{};
     };
 
     struct PendingResolution {
         std::vector<std::shared_ptr<PendingAdmission>> admitted;
-        std::vector<std::shared_ptr<PendingAdmission>> cleanup;
     };
 
     TransientMemoryBudget() = default;
@@ -332,19 +337,9 @@ class TransientMemoryBudget {
     }
 
     bool
-    HasPendingLocked() const {
-        auto has_pending = [](const auto& queue) {
-            return std::any_of(
-                queue.begin(), queue.end(), [](const auto& admission) {
-                    return admission->state == PendingAdmission::State::Pending;
-                });
-        };
-        return has_pending(high_pending_) || has_pending(low_pending_);
-    }
-
-    bool
     CanLegacyAcquireLocked(size_t bytes) const {
-        return !HasPendingLocked() && CanAcquireCapacityLocked(bytes);
+        return high_pending_.empty() && low_pending_.empty() &&
+               CanAcquireCapacityLocked(bytes);
     }
 
     bool
@@ -365,28 +360,9 @@ class TransientMemoryBudget {
         inflight_bytes_ += pending->bytes;
     }
 
-    void
-    CleanupCancelledLocked(
-        std::vector<std::shared_ptr<PendingAdmission>>& cleanup) {
-        auto cleanup_queue = [&cleanup](auto& queue) {
-            auto it = queue.begin();
-            while (it != queue.end()) {
-                if ((*it)->state == PendingAdmission::State::Cancelled) {
-                    cleanup.push_back(std::move(*it));
-                    it = queue.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-        };
-        cleanup_queue(high_pending_);
-        cleanup_queue(low_pending_);
-    }
-
     PendingResolution
     TakeAdmittedLocked() {
         PendingResolution resolution;
-        CleanupCancelledLocked(resolution.cleanup);
 
         auto admit_queue = [this, &resolution](auto& queue) {
             while (!queue.empty()) {
@@ -396,6 +372,7 @@ class TransientMemoryBudget {
                 }
                 auto admitted = std::move(pending);
                 queue.pop_front();
+                admitted->queue = nullptr;
                 MarkAdmittedLocked(admitted);
                 resolution.admitted.push_back(std::move(admitted));
             }
@@ -419,7 +396,6 @@ class TransientMemoryBudget {
         for (auto& pending : resolution.admitted) {
             FulfillAdmission(std::move(pending));
         }
-        resolution.cleanup.clear();
     }
 
     void
@@ -430,6 +406,10 @@ class TransientMemoryBudget {
             std::lock_guard<std::mutex> lock(mu_);
             if (pending->state == PendingAdmission::State::Pending) {
                 pending->state = PendingAdmission::State::Cancelled;
+                if (pending->queue != nullptr) {
+                    pending->queue->erase(pending->queue_position);
+                    pending->queue = nullptr;
+                }
                 cancelled = true;
                 resolution = TakeAdmittedLocked();
             }
@@ -446,8 +426,8 @@ class TransientMemoryBudget {
     std::condition_variable cv_;
     size_t inflight_bytes_{0};
     size_t capacity_bytes_{0};
-    std::deque<std::shared_ptr<PendingAdmission>> high_pending_;
-    std::deque<std::shared_ptr<PendingAdmission>> low_pending_;
+    PendingQueue high_pending_;
+    PendingQueue low_pending_;
 };
 
 inline TransientBudgetLease::TransientBudgetLease(
