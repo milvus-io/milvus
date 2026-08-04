@@ -4,57 +4,34 @@ import (
 	"context"
 	"time"
 
-	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ wal.WAL = (*roWALAdaptorImpl)(nil)
 
-const defaultHistoricalWALFallbackTimeout = 30 * time.Second
-
-type historicalWALOpener func(
-	ctx context.Context,
-	walName message.WALName,
-	channel types.PChannelInfo,
-) (walimpls.ROWALImpls, error)
-
-type resolvedReadWAL struct {
-	wal                     walimpls.ROWALImpls
-	deliverPolicy           options.DeliverPolicy
-	exclusiveStartMessageID message.MessageID
-}
-
 type roWALAdaptorImpl struct {
 	*rate.WALRateLimitComponent
 	mlog.Binder
 
-	lifetime            *typeutil.Lifetime
-	availableCtx        context.Context
-	availableCancel     context.CancelFunc
-	idAllocator         *typeutil.IDAllocator
-	roWALImpls          walimpls.ROWALImpls
-	historicalWALOpener historicalWALOpener
-	// historicalWALFallbackTimeout bounds retries against an old backend that
-	// may already have been decommissioned. Zero uses the production default.
-	historicalWALFallbackTimeout time.Duration
-	scannerRegistry              scannerRegistry
-	scanners                     *typeutil.ConcurrentMap[int64, wal.Scanner]
-	cleanup                      func()
-	scanMetrics                  *metricsutil.ScanMetrics
-	forceRecovery                bool
+	lifetime        *typeutil.Lifetime
+	availableCtx    context.Context
+	availableCancel context.CancelFunc
+	idAllocator     *typeutil.IDAllocator
+	roWALImpls      walimpls.ROWALImpls
+	readWALOpener   readWALOpener
+	scannerRegistry scannerRegistry
+	scanners        *typeutil.ConcurrentMap[int64, wal.Scanner]
+	cleanup         func()
+	scanMetrics     *metricsutil.ScanMetrics
+	forceRecovery   bool
 }
 
 func (w *roWALAdaptorImpl) WALName() message.WALName {
@@ -107,18 +84,8 @@ func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.S
 	}
 	defer w.lifetime.Done()
 
-	resolved, err := w.resolveReadWAL(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-	readWAL := resolved.wal
-	opts.DeliverPolicy = resolved.deliverPolicy
-
 	name, err := w.scannerRegistry.AllocateScannerName()
 	if err != nil {
-		if readWAL.WALName() != w.WALName() {
-			readWAL.Close()
-		}
 		return nil, err
 	}
 	// wrap the scanner with cleanup function.
@@ -126,195 +93,13 @@ func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.S
 	s := newScannerAdaptor(
 		name,
 		w.roWALImpls,
-		readWAL,
 		opts,
-		switchableScannerOptions{
-			historicalWALOpener:               w.openHistoricalWALWithFallback,
-			historicalWALFallbackTimeout:      w.getHistoricalWALFallbackTimeout(),
-			historicalStartExclusiveMessageID: resolved.exclusiveStartMessageID,
-		},
+		w.readWALOpener,
 		w.scanMetrics.NewScannerMetrics(),
 		func() { w.scanners.Remove(id) },
 		w.forceRecovery)
 	w.scanners.Insert(id, s)
 	return s, nil
-}
-
-func (w *roWALAdaptorImpl) resolveReadWAL(ctx context.Context, opts wal.ReadOption) (*resolvedReadWAL, error) {
-	msgWALName, ok := getDeliverPolicyWALName(opts.DeliverPolicy)
-	if !ok || msgWALName == w.WALName() {
-		return &resolvedReadWAL{wal: w.roWALImpls, deliverPolicy: opts.DeliverPolicy}, nil
-	}
-	if msgWALName == message.WALNameUnknown || msgWALName.String() == "" {
-		return w.fallbackToCurrentWAL(ctx, msgWALName, "invalid historical WAL name", nil), nil
-	}
-
-	deliverPolicy, exclusiveStartMessageID, err := prepareHistoricalDeliverPolicy(opts.DeliverPolicy)
-	if err != nil {
-		w.Logger().Info(ctx, "invalid historical WAL position",
-			mlog.Stringer("historicalWALName", msgWALName),
-			mlog.Stringer("currentWALName", w.WALName()),
-			mlog.Err(err))
-		return w.fallbackToCurrentWAL(ctx, msgWALName, "invalid historical WAL position", err), nil
-	}
-
-	if w.historicalWALOpener == nil {
-		return w.fallbackToCurrentWAL(ctx, msgWALName, "historical WAL opener unavailable", nil), nil
-	}
-
-	historicalWAL, err := w.openHistoricalWALWithFallback(ctx, msgWALName, w.Channel())
-	if err != nil {
-		if status.AsStreamingError(err).IsWALNameMismatch() {
-			// WAL mismatch is only an internal signal from the historical opener.
-			// Resolve it on StreamingNode so it never crosses the consumer boundary.
-			return w.fallbackToCurrentWAL(ctx, msgWALName, "historical WAL unavailable", nil), nil
-		}
-		return nil, err
-	}
-	w.Logger().Info(ctx, "open historical WAL for existing reader",
-		mlog.Stringer("historicalWALName", msgWALName),
-		mlog.Stringer("currentWALName", w.WALName()))
-	return &resolvedReadWAL{
-		wal:                     historicalWAL,
-		deliverPolicy:           deliverPolicy,
-		exclusiveStartMessageID: exclusiveStartMessageID,
-	}, nil
-}
-
-func (w *roWALAdaptorImpl) fallbackToCurrentWAL(
-	ctx context.Context,
-	historicalWALName message.WALName,
-	reason string,
-	err error,
-) *resolvedReadWAL {
-	fields := []mlog.Field{
-		mlog.Stringer("historicalWALName", historicalWALName),
-		mlog.Stringer("currentWALName", w.WALName()),
-		mlog.String("reason", reason),
-	}
-	if err != nil {
-		fields = append(fields, mlog.Err(err))
-	}
-	w.Logger().Warn(ctx, "historical WAL reader falls back to current WAL", fields...)
-	return &resolvedReadWAL{
-		wal:           w.roWALImpls,
-		deliverPolicy: options.DeliverPolicyAll(),
-	}
-}
-
-func prepareHistoricalDeliverPolicy(deliverPolicy options.DeliverPolicy) (options.DeliverPolicy, message.MessageID, error) {
-	switch policy := deliverPolicy.GetPolicy().(type) {
-	case *streamingpb.DeliverPolicy_StartFrom:
-		_, err := message.UnmarshalMessageID(policy.StartFrom)
-		return deliverPolicy, nil, err
-	case *streamingpb.DeliverPolicy_StartAfter:
-		messageID, err := message.UnmarshalMessageID(policy.StartAfter)
-		if err != nil {
-			return nil, nil, err
-		}
-		// Historical readers need to inspect the excluded message because it may
-		// itself be the AlterWAL boundary. The scanner filters this message from
-		// user output while still applying its control semantics.
-		return options.DeliverPolicyStartFrom(messageID), messageID, nil
-	default:
-		return deliverPolicy, nil, nil
-	}
-}
-
-func (w *roWALAdaptorImpl) openHistoricalWALWithFallback(
-	ctx context.Context,
-	walName message.WALName,
-	channel types.PChannelInfo,
-) (walimpls.ROWALImpls, error) {
-	if w.historicalWALOpener == nil {
-		return nil, status.NewWALNameMismatchError(w.WALName().String(), walName.String())
-	}
-
-	timeout := w.getHistoricalWALFallbackTimeout()
-	timeoutTimer := time.NewTimer(timeout)
-	defer timeoutTimer.Stop()
-	backoffTimer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
-		Default: time.Second,
-		Backoff: typeutil.BackoffConfig{
-			InitialInterval: 100 * time.Millisecond,
-			Multiplier:      2,
-			MaxInterval:     5 * time.Second,
-		},
-	})
-	backoffTimer.EnableBackoff()
-
-	for {
-		historicalWAL, err := w.historicalWALOpener(ctx, walName, channel)
-		if err == nil {
-			actualWALName := historicalWAL.WALName()
-			if actualWALName != walName {
-				historicalWAL.Close()
-				w.Logger().Warn(ctx, "historical WAL opener returned unexpected WAL",
-					mlog.Stringer("expectedWALName", walName),
-					mlog.Stringer("actualWALName", actualWALName))
-				return nil, status.NewWALNameMismatchError(w.WALName().String(), walName.String())
-			}
-			return historicalWAL, nil
-		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if isHistoricalWALUnavailable(err) {
-			w.Logger().Warn(ctx, "historical WAL is permanently unavailable, falling back to current WAL",
-				mlog.Stringer("historicalWALName", walName),
-				mlog.Stringer("currentWALName", w.WALName()),
-				mlog.Err(err))
-			return nil, status.NewWALNameMismatchError(w.WALName().String(), walName.String())
-		}
-
-		waker, nextInterval := backoffTimer.NextTimer()
-		w.Logger().Warn(ctx, "failed to open historical WAL, retrying before fallback",
-			mlog.Stringer("historicalWALName", walName),
-			mlog.Duration("nextInterval", nextInterval),
-			mlog.Err(err))
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-timeoutTimer.C:
-			w.Logger().Warn(ctx, "historical WAL open retry timed out, falling back to current WAL",
-				mlog.Stringer("historicalWALName", walName),
-				mlog.Stringer("currentWALName", w.WALName()),
-				mlog.Duration("timeout", timeout),
-				mlog.Err(err))
-			return nil, status.NewWALNameMismatchError(w.WALName().String(), walName.String())
-		case <-waker:
-		}
-	}
-}
-
-func (w *roWALAdaptorImpl) getHistoricalWALFallbackTimeout() time.Duration {
-	if w.historicalWALFallbackTimeout > 0 {
-		return w.historicalWALFallbackTimeout
-	}
-	return defaultHistoricalWALFallbackTimeout
-}
-
-func isHistoricalWALUnavailable(err error) bool {
-	return status.AsStreamingError(err).IsWALNameMismatch() || errors.Is(err, merr.ErrMqTopicNotFound)
-}
-
-func getDeliverPolicyWALName(deliverPolicy options.DeliverPolicy) (message.WALName, bool) {
-	if deliverPolicy == nil {
-		return message.WALNameUnknown, false
-	}
-	var msgID *commonpb.MessageID
-	switch policy := deliverPolicy.GetPolicy().(type) {
-	case *streamingpb.DeliverPolicy_StartFrom:
-		msgID = policy.StartFrom
-	case *streamingpb.DeliverPolicy_StartAfter:
-		msgID = policy.StartAfter
-	default:
-		return message.WALNameUnknown, false
-	}
-	if msgID == nil {
-		return message.WALNameUnknown, false
-	}
-	return message.WALName(msgID.WALName), true
 }
 
 // IsAvailable returns whether the wal is available.
