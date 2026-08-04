@@ -488,6 +488,11 @@ func (helper *SchemaHelper) GetTimezone() string {
 	return helper.timezone
 }
 
+// GetVersion returns the version of the collection schema used to build this helper.
+func (helper *SchemaHelper) GetVersion() int32 {
+	return helper.schema.GetVersion()
+}
+
 // GetPrimaryKeyField returns the schema of the primary key
 func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) {
 	if helper.primaryKeyOffset == -1 {
