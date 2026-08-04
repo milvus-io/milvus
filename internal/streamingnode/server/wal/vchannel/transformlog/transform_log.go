@@ -395,11 +395,11 @@ func (t *TransformLog) hasFlushWork() bool {
 	return !t.buffer.IsEmpty() || t.buffer.IsFlushing()
 }
 
-func (t *TransformLog) shouldMaterialize() bool {
+func (t *TransformLog) shouldMaterialize(ctx context.Context) bool {
 	t.mu.Lock()
 	targetTimeTick := t.meta.GetCheckpointTimeTick()
 	t.mu.Unlock()
-	rows, bytes, err := t.pendingMaterializeStats(context.TODO(), targetTimeTick)
+	rows, bytes, err := t.pendingMaterializeStats(ctx, targetTimeTick)
 	if err != nil {
 		return false
 	}

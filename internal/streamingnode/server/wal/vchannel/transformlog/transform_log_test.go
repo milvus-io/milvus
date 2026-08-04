@@ -460,9 +460,9 @@ func TestShouldMaterializeUsesUnmaterializedRowsAndBytes(t *testing.T) {
 		Entries: []*streamingpb.TransformLogEntry{testTransformLogDeleteEntry(10, 1, 2)},
 	})}
 
-	assert.True(t, transformLog.shouldMaterialize())
+	assert.True(t, transformLog.shouldMaterialize(context.Background()))
 	transformLog.meta.MaterializedTimeTick = 10
-	assert.False(t, transformLog.shouldMaterialize())
+	assert.False(t, transformLog.shouldMaterialize(context.Background()))
 }
 
 func TestSplitMaterializeGroupsSplitsSingleBlockByRowLimit(t *testing.T) {
