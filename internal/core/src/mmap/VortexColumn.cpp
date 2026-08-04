@@ -216,10 +216,10 @@ class CallbackPreparedScan final : public ChunkedColumnInterface::PreparedScan {
         const ChunkedColumnInterface::ScanPlan&,
         ChunkedColumnInterface::ScanProjection)>;
 
-    CallbackPreparedScan(int64_t start, int64_t end, OpenFunc open)
-        : start_(start),
-          end_(end),
-          plan_(ChunkedColumnInterface::ScanPlan::Full(start, end - start)),
+    CallbackPreparedScan(ChunkedColumnInterface::ScanPlan plan, OpenFunc open)
+        : start_(plan.requested_range.start),
+          end_(plan.requested_range.end),
+          plan_(std::move(plan)),
           open_(std::move(open)) {
     }
 
@@ -249,9 +249,19 @@ class CallbackPreparedScan final : public ChunkedColumnInterface::PreparedScan {
                    plan.requested_range.end,
                    start_,
                    end_);
-        AssertInfo(
-            plan.skip_ranges.empty(),
-            "vortex callback scan does not yet accept external skip ranges");
+        const auto uses_prepared_plan =
+            plan.requested_range.start == plan_.requested_range.start &&
+            plan.requested_range.end == plan_.requested_range.end &&
+            plan.skip_ranges.size() == plan_.skip_ranges.size() &&
+            std::equal(plan.skip_ranges.begin(),
+                       plan.skip_ranges.end(),
+                       plan_.skip_ranges.begin(),
+                       [](const auto& left, const auto& right) {
+                           return left.start == right.start &&
+                                  left.end == right.end;
+                       });
+        AssertInfo(plan.skip_ranges.empty() || uses_prepared_plan,
+                   "vortex callback scan does not accept external skip ranges");
         return open_(plan, projection);
     }
 
@@ -273,6 +283,55 @@ MergeCellIds(const std::vector<uint64_t>& left,
     cell_ids.erase(std::unique(cell_ids.begin(), cell_ids.end()),
                    cell_ids.end());
     return cell_ids;
+}
+
+void
+AppendSkipRange(
+    std::vector<ChunkedColumnInterface::ScanRowRange>* skip_ranges,
+    int64_t start,
+    int64_t end) {
+    AssertInfo(skip_ranges != nullptr, "vortex skip range output is null");
+    AssertInfo(start < end,
+               "invalid vortex planner skip range [{}, {})",
+               start,
+               end);
+    if (!skip_ranges->empty() && skip_ranges->back().end == start) {
+        skip_ranges->back().end = end;
+        return;
+    }
+    skip_ranges->emplace_back(
+        ChunkedColumnInterface::ScanRowRange{start, end});
+}
+
+void
+AppendPlannerSkipRanges(
+    const std::shared_ptr<milvus_storage::vortex::VortexPlanner>& planner,
+    int64_t chunk_start,
+    int64_t local_start,
+    int64_t local_end,
+    const std::vector<uint64_t>& kept_cell_ids,
+    std::vector<ChunkedColumnInterface::ScanRowRange>* skip_ranges) {
+    AssertInfo(planner != nullptr, "vortex field planner is null");
+    AssertInfo(local_start >= 0 && local_start <= local_end,
+               "invalid vortex planner local range [{}, {})",
+               local_start,
+               local_end);
+    AssertInfo(std::is_sorted(kept_cell_ids.begin(), kept_cell_ids.end()),
+               "vortex planner returned unsorted cell ids");
+    for (const auto& cell : planner->cell_metas()) {
+        const auto cell_start = static_cast<int64_t>(cell.row_offset);
+        const auto cell_end = static_cast<int64_t>(cell.row_offset +
+                                                   cell.row_count);
+        const auto start = std::max(local_start, cell_start);
+        const auto end = std::min(local_end, cell_end);
+        if (start >= end ||
+            std::binary_search(kept_cell_ids.begin(),
+                               kept_cell_ids.end(),
+                               cell.cell_id)) {
+            continue;
+        }
+        AppendSkipRange(skip_ranges, chunk_start + start, chunk_start + end);
+    }
 }
 
 void
@@ -3152,8 +3211,8 @@ VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
                 plan_pos = range->range_end;
             }
             return std::make_shared<CallbackPreparedScan>(
-                options.start_offset,
-                scan_end,
+                ChunkedColumnInterface::ScanPlan::Full(
+                    options.start_offset, options.length),
                 [this,
                  projection = options.projection,
                  value_kind,
@@ -3230,6 +3289,8 @@ VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
     // RowId scan and its optional validity side-stream share one unioned cell
     // pin per file range. All sources are prepared before cursor creation.
     std::vector<PreparedVortexRowIdScanSource> prepared_sources;
+    auto scan_plan = ChunkedColumnInterface::ScanPlan::Full(
+        options.start_offset, options.length);
     auto plan_pos = options.start_offset;
     const auto scan_end = options.start_offset + options.length;
     while (auto range = NextVortexReaderRange(this, &plan_pos, scan_end)) {
@@ -3238,6 +3299,12 @@ VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
         const auto row_end =
             static_cast<uint64_t>(range->local_offset + range->length);
         auto matched_plan = PlanRowRange(file, row_start, row_end, *predicate);
+        AppendPlannerSkipRanges(file.planner,
+                                range->chunk_start,
+                                range->local_offset,
+                                range->local_offset + range->length,
+                                matched_plan.cell_ids,
+                                &scan_plan.skip_ranges);
         std::optional<milvus_storage::vortex::VortexPlan> validity_plan;
         auto cell_ids = matched_plan.cell_ids;
         if (IsNullable()) {
@@ -3255,8 +3322,7 @@ VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
         plan_pos = range->range_end;
     }
     return std::make_shared<CallbackPreparedScan>(
-        options.start_offset,
-        scan_end,
+        std::move(scan_plan),
         [this,
          predicate = std::move(*predicate),
          prepared_sources = std::move(prepared_sources)](

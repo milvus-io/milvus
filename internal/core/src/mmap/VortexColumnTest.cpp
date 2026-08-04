@@ -1561,7 +1561,11 @@ TEST(VortexColumnTest, ScanPinsPlannedCellsBeforeCursorCreation) {
     validity_scan.reset();
     column.ManualEvictCache();
     EXPECT_FALSE(column.CellsLoaded(planned_offsets, 2));
-    auto row_id_cursor = column.Scan(nullptr, row_id_options);
+    auto row_id_scan = column.PrepareScan(nullptr, row_id_options);
+    ASSERT_NE(row_id_scan, nullptr);
+    EXPECT_FALSE(row_id_scan->Plan().skip_ranges.empty());
+    auto row_id_cursor = row_id_scan->Open(
+        row_id_scan->Plan(), ChunkedColumnInterface::ScanProjection::NoData);
     ASSERT_NE(row_id_cursor, nullptr);
     // Predicate and validity readers use different plans, but their cell ids
     // are unioned into one pin for this file range.
