@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tidwall/gjson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -2486,6 +2487,10 @@ type externalCollectionRESTProxy struct {
 	exportReq                  *milvuspb.ExportSnapshotRequest
 	getRestoreSnapshotStateReq *milvuspb.GetRestoreSnapshotStateRequest
 	listRestoreSnapshotJobsReq *milvuspb.ListRestoreSnapshotJobsRequest
+	createSnapshotReq          *milvuspb.CreateSnapshotRequest
+	dropSnapshotReq            *milvuspb.DropSnapshotRequest
+	listSnapshotsReq           *milvuspb.ListSnapshotsRequest
+	describeSnapshotReq        *milvuspb.DescribeSnapshotRequest
 }
 
 func (m *externalCollectionRESTProxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
@@ -2606,6 +2611,37 @@ func (m *externalCollectionRESTProxy) ListRestoreSnapshotJobs(ctx context.Contex
 			State:          milvuspb.RestoreSnapshotState_RestoreSnapshotPending,
 			Progress:       10,
 		}},
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) CreateSnapshot(ctx context.Context, request *milvuspb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	m.createSnapshotReq = request
+	return merr.Success(), nil
+}
+
+func (m *externalCollectionRESTProxy) DropSnapshot(ctx context.Context, request *milvuspb.DropSnapshotRequest) (*commonpb.Status, error) {
+	m.dropSnapshotReq = request
+	return merr.Success(), nil
+}
+
+func (m *externalCollectionRESTProxy) ListSnapshots(ctx context.Context, request *milvuspb.ListSnapshotsRequest) (*milvuspb.ListSnapshotsResponse, error) {
+	m.listSnapshotsReq = request
+	return &milvuspb.ListSnapshotsResponse{
+		Status:    merr.Success(),
+		Snapshots: []string{"snapshot_1", "snapshot_2"},
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) DescribeSnapshot(ctx context.Context, request *milvuspb.DescribeSnapshotRequest) (*milvuspb.DescribeSnapshotResponse, error) {
+	m.describeSnapshotReq = request
+	return &milvuspb.DescribeSnapshotResponse{
+		Status:         merr.Success(),
+		Name:           request.GetName(),
+		Description:    "daily backup",
+		CollectionName: request.GetCollectionName(),
+		PartitionNames: []string{"_default"},
+		CreateTs:       100,
+		S3Location:     "s3://bucket/snapshot_1",
 	}, nil
 }
 
@@ -2800,6 +2836,79 @@ func TestExternalCollectionJobRoutesRESTV2(t *testing.T) {
 	assert.Equal(t, "external_books", proxy.listReq.GetCollectionName())
 	assert.Contains(t, w.Body.String(), `"state":"RefreshCompleted"`)
 	assert.Contains(t, w.Body.String(), `"externalSpec":"{\"format\":\"parquet\"}"`)
+}
+
+func TestSnapshotCRUDRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, CreateAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books",
+		"snapshotName": "snapshot_1",
+		"description": "daily backup",
+		"compactionProtectionSeconds": 3600
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, "default", proxy.createSnapshotReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.createSnapshotReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.createSnapshotReq.GetName())
+	assert.Equal(t, "daily backup", proxy.createSnapshotReq.GetDescription())
+	assert.Equal(t, int64(3600), proxy.createSnapshotReq.GetCompactionProtectionSeconds())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, ListAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books"
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "default", proxy.listSnapshotsReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.listSnapshotsReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", gjson.Get(w.Body.String(), "data.0").String())
+	assert.Equal(t, "snapshot_2", gjson.Get(w.Body.String(), "data.1").String())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, DescribeAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books",
+		"snapshotName": "snapshot_1"
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "default", proxy.describeSnapshotReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.describeSnapshotReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.describeSnapshotReq.GetName())
+	assert.Equal(t, "snapshot_1", gjson.Get(w.Body.String(), "data.snapshotName").String())
+	assert.Equal(t, "daily backup", gjson.Get(w.Body.String(), "data.description").String())
+	assert.Equal(t, "source_books", gjson.Get(w.Body.String(), "data.collectionName").String())
+	assert.Equal(t, "_default", gjson.Get(w.Body.String(), "data.partitionNames.0").String())
+	assert.Equal(t, int64(100), gjson.Get(w.Body.String(), "data.createTs").Int())
+	assert.Equal(t, "s3://bucket/snapshot_1", gjson.Get(w.Body.String(), "data.s3Location").String())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, DropAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books",
+		"snapshotName": "snapshot_1"
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, "default", proxy.dropSnapshotReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.dropSnapshotReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.dropSnapshotReq.GetName())
 }
 
 func TestRestoreExternalSnapshotRESTV2(t *testing.T) {
