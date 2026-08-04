@@ -115,6 +115,31 @@ func TestCompactionTargetReconcilerReconcilesMultipleTargetsIndependently(t *tes
 	require.Equal(t, []int64{2}, segmentIDsFromViews(views[1].GetSegmentsView()))
 }
 
+func TestCompactionTargetReconcilerAppliesTargetCollectionScope(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	ctx := context.Background()
+	record := &datapb.CompactionTarget{
+		TargetID:     100,
+		CollectionID: 1,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS:   200,
+		TailLimit:    0,
+		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
+	}
+	targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
+	meta := newCompactionTargetReconcilerTestMeta(targetMeta,
+		sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false),
+		sortedTargetSegment(2, 2, 10, "ch-1", 0, 199, false),
+	)
+
+	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
+
+	require.NoError(t, err)
+	require.Len(t, events[TriggerTypeTarget], 1)
+	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
+}
+
 func TestCompactionTargetReconcilerInactivatesRewriteTargetWhenNoMatchRemains(t *testing.T) {
 	enableCompactionTargetReconciler(t)
 	ctx := context.Background()
@@ -416,53 +441,77 @@ func TestCompactionTargetReconcilerUsesManualIndexReadinessFilter(t *testing.T) 
 		vectorFieldID = int64(100)
 		indexID       = int64(1000)
 	)
-	ctx := context.Background()
-	record := &datapb.CompactionTarget{
-		TargetID:     100,
-		CollectionID: collectionID,
-		Intent:       datapb.TargetIntent_INTENT_REWRITE,
-		ExpectedTS:   200,
-		TailLimit:    0,
-		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
-	}
-	targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
-	meta := newCompactionTargetReconcilerTestMeta(targetMeta,
-		sortedTargetSegment(1, collectionID, 10, "ch-1", 0, 199, false),
-		sortedTargetSegment(2, collectionID, 10, "ch-1", 0, 199, false),
-	)
-	meta.collections.Insert(collectionID, &collectionInfo{
-		ID: collectionID,
-		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-			{FieldID: vectorFieldID, DataType: schemapb.DataType_FloatVector},
-		}},
-	})
-	meta.indexMeta = &indexMeta{
-		indexes: map[UniqueID]map[UniqueID]*model.Index{
-			collectionID: {
-				indexID: {
-					CollectionID: collectionID,
-					FieldID:      vectorFieldID,
-					IndexID:      indexID,
-				},
-			},
+	tests := []struct {
+		name               string
+		finishedSegmentIDs []int64
+		wantSegmentIDs     []int64
+	}{
+		{
+			name:               "emits only index-ready matches",
+			finishedSegmentIDs: []int64{1},
+			wantSegmentIDs:     []int64{1},
 		},
-		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		{
+			name: "keeps target active when every match is index-rejected",
+		},
 	}
-	finishedIndexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
-	finishedIndexes.Insert(indexID, &model.SegmentIndex{
-		CollectionID: collectionID,
-		SegmentID:    1,
-		IndexID:      indexID,
-		IndexState:   commonpb.IndexState_Finished,
-	})
-	meta.indexMeta.segmentIndexes.Insert(1, finishedIndexes)
 
-	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			record := &datapb.CompactionTarget{
+				TargetID:     100,
+				CollectionID: collectionID,
+				Intent:       datapb.TargetIntent_INTENT_REWRITE,
+				ExpectedTS:   200,
+				TailLimit:    0,
+				State:        datapb.TargetState_TARGET_STATE_ACTIVE,
+			}
+			targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
+			meta := newCompactionTargetReconcilerTestMeta(targetMeta,
+				sortedTargetSegment(1, collectionID, 10, "ch-1", 0, 199, false),
+				sortedTargetSegment(2, collectionID, 10, "ch-1", 0, 199, false),
+			)
+			meta.collections.Insert(collectionID, &collectionInfo{
+				ID: collectionID,
+				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+					{FieldID: vectorFieldID, DataType: schemapb.DataType_FloatVector},
+				}},
+			})
+			meta.indexMeta = &indexMeta{
+				indexes: map[UniqueID]map[UniqueID]*model.Index{
+					collectionID: {
+						indexID: {
+							CollectionID: collectionID,
+							FieldID:      vectorFieldID,
+							IndexID:      indexID,
+						},
+					},
+				},
+				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+			}
+			for _, segmentID := range test.finishedSegmentIDs {
+				finishedIndexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+				finishedIndexes.Insert(indexID, &model.SegmentIndex{
+					CollectionID: collectionID,
+					SegmentID:    segmentID,
+					IndexID:      indexID,
+					IndexState:   commonpb.IndexState_Finished,
+				})
+				meta.indexMeta.segmentIndexes.Insert(segmentID, finishedIndexes)
+			}
 
-	require.NoError(t, err)
-	require.Len(t, events[TriggerTypeTarget], 1)
-	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
-	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
+			events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
+
+			require.NoError(t, err)
+			views := events[TriggerTypeTarget]
+			require.Len(t, views, len(test.wantSegmentIDs))
+			for i, segmentID := range test.wantSegmentIDs {
+				require.Equal(t, []int64{segmentID}, segmentIDsFromViews(views[i].GetSegmentsView()))
+			}
+			require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
+		})
+	}
 }
 
 func TestCompactionTargetReconcilerSkipsManualIndexFilterWhenDisabled(t *testing.T) {

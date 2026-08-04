@@ -323,6 +323,14 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 }
 
 func (s *CompactionTriggerManagerSuite) TestManualTriggerSkipExternal() {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.Key)
+
+	catalog, records, _, _ := newCompactionTargetTestCatalog(s.T())
+	targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
+	s.Require().NoError(err)
+	s.meta.compactionTargetMeta = targetMeta
+
 	handler := NewNMockHandler(s.T())
 	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&collectionInfo{
 		ID: 1,
@@ -340,12 +348,14 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerSkipExternal() {
 	}, nil)
 	s.triggerManager.handler = handler
 
-	_, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
-		CollectionID:    1,
-		MajorCompaction: true,
+	targetID, err := s.triggerManager.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
+		CollectionID: 1,
 	})
+
 	s.Error(err)
 	s.Contains(err.Error(), "external collection")
+	s.Zero(targetID)
+	s.Empty(records)
 }
 
 func (s *CompactionTriggerManagerSuite) TestManualTriggerRecordsRewriteTargetWhenGuardEnabled() {
