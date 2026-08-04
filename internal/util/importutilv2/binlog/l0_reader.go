@@ -130,7 +130,7 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 				switch r.pkField.DataType {
 				case schemapb.DataType_Int64:
 					pk = storage.NewInt64PrimaryKey(rec.Column(0).(*array.Int64).Value(i))
-				case schemapb.DataType_VarChar:
+				case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 					pk = storage.NewVarCharPrimaryKey(rec.Column(0).(*array.String).Value(i))
 				}
 				ts := typeutil.Timestamp(rec.Column(1).(*array.Int64).Value(i))

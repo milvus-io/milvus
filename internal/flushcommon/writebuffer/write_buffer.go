@@ -1283,15 +1283,7 @@ func (id *InsertData) Append(data *storage.InsertData, pkFieldData storage.Field
 				id.intPKTs[pk] = timestamps[idx]
 			}
 		}
-	case schemapb.DataType_VarChar:
-		pks := pkFieldData.GetDataRows().([]string)
-		for idx, pk := range pks {
-			ts, ok := id.strPKTs[pk]
-			if !ok || timestamps[idx] < ts {
-				id.strPKTs[pk] = timestamps[idx]
-			}
-		}
-	case schemapb.DataType_UUID:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		pks := pkFieldData.GetDataRows().([]string)
 		for idx, pk := range pks {
 			ts, ok := id.strPKTs[pk]
@@ -1320,7 +1312,7 @@ func (id *InsertData) pkExists(pk storage.PrimaryKey, ts uint64) bool {
 	switch pk.Type() {
 	case schemapb.DataType_Int64:
 		minTs, ok = id.intPKTs[pk.GetValue().(int64)]
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		minTs, ok = id.strPKTs[pk.GetValue().(string)]
 	}
 
@@ -1341,7 +1333,7 @@ func (id *InsertData) batchPkExists(pks []storage.PrimaryKey, tss []uint64, hits
 				hits[i] = ok && tss[i] > uint64(minTs)
 			}
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		for i := range pks {
 			if !hits[i] {
 				minTs, ok := id.strPKTs[pks[i].GetValue().(string)]
@@ -1776,15 +1768,7 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 						inData.intPKTs[pk] = timestamps[idx]
 					}
 				}
-			case schemapb.DataType_VarChar:
-				pks := pkFieldData.GetDataRows().([]string)
-				for idx, pk := range pks {
-					ts, ok := inData.strPKTs[pk]
-					if !ok || timestamps[idx] < ts {
-						inData.strPKTs[pk] = timestamps[idx]
-					}
-				}
-			case schemapb.DataType_UUID:
+			case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 				pks := pkFieldData.GetDataRows().([]string)
 				for idx, pk := range pks {
 					ts, ok := inData.strPKTs[pk]
