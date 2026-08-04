@@ -1,0 +1,1674 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        --paper: #0e161d;
+        --panel: #111d27;
+        --card: #15222d;
+        --card-2: #132a3a;
+        --ink: #dce8f1;
+        --muted: #91a5b5;
+        --line: #2c4152;
+        --accent: #4fb3e8;
+        --accent-soft: #15334a;
+        --green: #4dbfae;
+        --green-soft: #143a37;
+        --amber: #d3a057;
+        --amber-soft: #3a2e19;
+        --purple: #a993dd;
+        --purple-soft: #302a49;
+        --pink: #d98aa2;
+        --pink-soft: #422733;
+        --red: #e57b79;
+        --red-soft: #402526;
+        --mono: "Noto Sans Mono CJK SC", "SFMono-Regular", Consolas, monospace;
+        --sans:
+          "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1184px;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--sans);
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      .diagram {
+        width: 1184px;
+        height: 100vh;
+        padding: 12px;
+        background: var(--paper);
+      }
+
+      .frame {
+        width: 100%;
+        height: 100%;
+        border: 1px solid var(--line);
+        background: #101b24;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .head {
+        min-height: 68px;
+        border-bottom: 1px solid var(--line);
+        padding: 14px 22px 12px;
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+
+      .head .eyebrow {
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        white-space: nowrap;
+      }
+
+      .head h1 {
+        margin: 0;
+        font-size: 22px;
+        line-height: 1.25;
+        font-weight: 700;
+      }
+
+      .head .sub {
+        margin-left: auto;
+        color: var(--muted);
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      .body {
+        flex: 1;
+        min-height: 0;
+        padding: 18px 22px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .mono {
+        font-family: var(--mono);
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .accent {
+        color: var(--accent);
+      }
+
+      .green-text {
+        color: var(--green);
+      }
+
+      .amber-text {
+        color: var(--amber);
+      }
+
+      .pink-text {
+        color: var(--pink);
+      }
+
+      .tag {
+        display: inline-block;
+        padding: 2px 7px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--muted);
+        border-radius: 3px;
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.5;
+        white-space: nowrap;
+      }
+
+      .tag.accent {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--accent-soft);
+      }
+
+      .tag.green {
+        border-color: var(--green);
+        color: var(--green);
+        background: var(--green-soft);
+      }
+
+      .tag.amber {
+        border-color: var(--amber);
+        color: var(--amber);
+        background: var(--amber-soft);
+      }
+
+      .tag.red {
+        border-color: var(--red);
+        color: var(--red);
+        background: var(--red-soft);
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        background: var(--card);
+        padding: 12px 14px;
+        min-width: 0;
+      }
+
+      .card.accent-card {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+      }
+
+      .card.green-card {
+        border-color: var(--green);
+        background: var(--green-soft);
+      }
+
+      .card.amber-card {
+        border-color: var(--amber);
+        background: var(--amber-soft);
+      }
+
+      .card.red-card {
+        border-color: var(--red);
+        background: var(--red-soft);
+      }
+
+      .card.purple-card {
+        border-color: var(--purple);
+        background: var(--purple-soft);
+      }
+
+      .card .title {
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1.35;
+        margin-bottom: 5px;
+      }
+
+      .card .desc {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.65;
+      }
+
+      .card .desc strong {
+        color: var(--ink);
+        font-weight: 650;
+      }
+
+      .arrow {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 22px;
+        text-align: center;
+        flex: none;
+      }
+
+      .down {
+        color: var(--muted);
+        text-align: center;
+        font-size: 20px;
+        line-height: 1;
+      }
+
+      .callout {
+        border-left: 4px solid var(--accent);
+        background: var(--accent-soft);
+        padding: 9px 13px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .callout strong {
+        color: var(--ink);
+      }
+
+      .callout.amber {
+        border-left-color: var(--amber);
+        background: var(--amber-soft);
+      }
+
+      .callout.red {
+        border-left-color: var(--red);
+        background: var(--red-soft);
+      }
+
+      .footer {
+        border-top: 1px dashed var(--line);
+        padding: 10px 22px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .footer strong {
+        color: var(--ink);
+      }
+
+      .chips {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .chip {
+        min-width: 29px;
+        padding: 3px 7px;
+        text-align: center;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        font-family: var(--mono);
+        font-size: 12px;
+        border-radius: 3px;
+      }
+
+      .chip.b0 {
+        color: var(--accent);
+        border-color: var(--accent);
+        background: var(--accent-soft);
+      }
+
+      .chip.b1 {
+        color: var(--green);
+        border-color: var(--green);
+        background: var(--green-soft);
+      }
+
+      .chip.b2 {
+        color: var(--purple);
+        border-color: var(--purple);
+        background: var(--purple-soft);
+      }
+
+      .chip.b3 {
+        color: var(--pink);
+        border-color: var(--pink);
+        background: var(--pink-soft);
+      }
+
+      .small {
+        font-size: 12px;
+      }
+
+      .section-label {
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+
+      .section-label.path-case {
+        letter-spacing: 0.04em;
+        text-transform: none;
+      }
+
+      /* Legacy flow */
+      .lane-head {
+        display: grid;
+        grid-template-columns: 230px 34px 300px 34px 1fr;
+        align-items: center;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+        text-align: center;
+      }
+
+      .lane-head span:first-child,
+      .lane-head span:nth-child(3),
+      .lane-head span:nth-child(5) {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 7px;
+      }
+
+      .phase {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        padding: 12px;
+      }
+
+      .phase-title {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin-bottom: 10px;
+      }
+
+      .phase-title strong {
+        font-size: 15px;
+      }
+
+      .flowline {
+        display: grid;
+        grid-template-columns: 230px 34px 300px 34px 1fr;
+        align-items: stretch;
+      }
+
+      .flowline .arrow {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .return-line {
+        margin: 9px 0 0 598px;
+        color: var(--green);
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      .regroup {
+        border: 1px dashed var(--accent);
+        padding: 9px 12px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      /* Fragmentation */
+      .task-row {
+        display: grid;
+        grid-template-columns: 190px 36px 290px 36px 1fr;
+        align-items: stretch;
+      }
+
+      .task-row .arrow {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .file-stack {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        align-content: flex-start;
+      }
+
+      .file {
+        border: 1px solid var(--line);
+        background: var(--card);
+        padding: 6px 9px;
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      .bucket-output {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 7px;
+      }
+
+      .bucket-box {
+        border: 1px solid var(--line);
+        background: var(--card);
+        padding: 8px;
+        min-width: 0;
+      }
+
+      .bucket-box .bn {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 5px;
+      }
+
+      .segment-bar {
+        height: 13px;
+        border-radius: 2px;
+        margin-bottom: 5px;
+        opacity: 0.95;
+      }
+
+      .segment-bar.b0 {
+        width: 55%;
+        background: var(--accent);
+      }
+
+      .segment-bar.b1 {
+        width: 78%;
+        background: var(--green);
+      }
+
+      .segment-bar.b2 {
+        width: 42%;
+        background: var(--purple);
+      }
+
+      .segment-bar.b3 {
+        width: 67%;
+        background: var(--pink);
+      }
+
+      /* Layout */
+      .compare {
+        display: grid;
+        grid-template-columns: 1fr 64px 1.2fr;
+        gap: 12px;
+        align-items: stretch;
+        flex: 1;
+      }
+
+      .compare > .arrow {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 30px;
+      }
+
+      .file-row,
+      .run-row {
+        display: grid;
+        grid-template-columns: 105px 1fr;
+        gap: 10px;
+        align-items: center;
+        margin: 9px 0;
+      }
+
+      .run-pills {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .run {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        padding: 5px 8px;
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      /* Overall */
+      .stage-row {
+        display: grid;
+        grid-template-columns: 1fr 34px 1fr 34px 1fr;
+        align-items: stretch;
+      }
+
+      .stage-row .arrow {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .stage {
+        border: 1px solid var(--line);
+        background: var(--card);
+        padding: 12px 13px;
+        min-width: 0;
+      }
+
+      .stage .n {
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 11px;
+        margin-bottom: 6px;
+      }
+
+      .stage .st {
+        font-size: 15px;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+
+      .stage .sd {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .stage.optional {
+        border-style: dashed;
+        border-color: var(--purple);
+        background: var(--purple-soft);
+      }
+
+      /* Reader */
+      .reader-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        flex: 1;
+      }
+
+      .queue {
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+        margin: 9px 0;
+      }
+
+      .reader-active {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .reader-box {
+        flex: 1;
+        border: 1px solid var(--accent);
+        background: var(--accent-soft);
+        padding: 9px;
+        text-align: center;
+        font-size: 12px;
+      }
+
+      .head-row {
+        display: grid;
+        grid-template-columns: 1fr 26px 1fr;
+        align-items: center;
+        margin: 8px 0;
+      }
+
+      /* AutoID */
+      .range-row {
+        display: grid;
+        grid-template-columns: 92px 1fr 360px;
+        gap: 12px;
+        align-items: center;
+        margin: 12px 0;
+      }
+
+      .range-bar {
+        height: 34px;
+        border: 1px solid var(--accent);
+        background: var(--accent-soft);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0 9px;
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      /* Storage */
+      .authority-grid {
+        display: grid;
+        grid-template-columns: 1.45fr 0.8fr;
+        gap: 16px;
+        flex: 1;
+      }
+
+      .tree-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .tree-item {
+        border: 1px solid var(--line);
+        background: var(--card);
+        padding: 8px 10px;
+      }
+
+      .tree-item .path {
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 11px;
+        margin-bottom: 3px;
+      }
+
+      .tree-item .what {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .catalog-list {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        margin-top: 9px;
+      }
+
+      .catalog-item {
+        border-left: 3px solid var(--green);
+        background: var(--green-soft);
+        padding: 7px 9px;
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.45;
+      }
+
+      /* Attempts */
+      .attempt-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        flex: 1;
+      }
+
+      .timeline {
+        position: relative;
+        padding-left: 23px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .timeline::before {
+        content: "";
+        position: absolute;
+        top: 5px;
+        bottom: 5px;
+        left: 7px;
+        width: 1px;
+        background: var(--line);
+      }
+
+      .event {
+        position: relative;
+        border: 1px solid var(--line);
+        background: var(--card);
+        padding: 8px 10px;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .event::before {
+        content: "";
+        position: absolute;
+        left: -21px;
+        top: 13px;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--muted);
+        border: 2px solid var(--paper);
+      }
+
+      .event.winner {
+        border-color: var(--green);
+        background: var(--green-soft);
+      }
+
+      .event.winner::before {
+        background: var(--green);
+      }
+
+      .event.loser {
+        border-color: var(--amber);
+        background: var(--amber-soft);
+      }
+
+      .event.loser::before {
+        background: var(--amber);
+      }
+
+      /* Verified read */
+      .verified-flow {
+        display: grid;
+        grid-template-columns: 1fr 28px 1fr 28px 1fr 28px 1fr 28px 1fr;
+        align-items: stretch;
+        flex: 1;
+      }
+
+      .verified-flow .arrow {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .gate-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+      }
+
+      /* GC */
+      .gc-flow {
+        display: grid;
+        grid-template-columns: 1fr 24px 1.15fr 24px 0.9fr 24px 1fr 24px 1fr 24px 0.75fr;
+        align-items: stretch;
+      }
+
+      .gc-flow .arrow {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+      }
+
+      .gc-state {
+        border: 1px solid var(--line);
+        background: var(--card);
+        padding: 10px;
+        min-width: 0;
+      }
+
+      .gc-state .gs {
+        font-family: var(--mono);
+        color: var(--accent);
+        font-size: 11px;
+        margin-bottom: 6px;
+      }
+
+      .gc-state .gd {
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.5;
+      }
+
+      .gc-notes {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="diagram" id="legacy-import-flow">
+      <div class="frame">
+        <div class="head">
+          <span class="eyebrow">当前流程</span>
+          <h1>当前 Import：同一批源文件在不同阶段重复读取</h1>
+          <span class="sub"
+            >控制面等待两个全局阶段，DataNode 不复用第一次解析结果</span
+          >
+        </div>
+        <div class="body">
+          <div class="lane-head">
+            <span>源文件 / 对象存储</span><span></span><span>DataCoord</span
+            ><span></span><span>DataNode</span>
+          </div>
+
+          <div class="phase">
+            <div class="phase-title">
+              <span class="tag amber">阶段 1</span>
+              <strong>PreImport</strong>
+              <span class="tag"
+                >dataCoord.import.filesPerPreImportTask = 2</span
+              >
+            </div>
+            <div class="flowline">
+              <div class="card">
+                <div class="title mono">ImportFiles</div>
+                <div class="desc">JSON / CSV / Parquet / NumPy</div>
+              </div>
+              <div class="arrow">→</div>
+              <div class="card amber-card">
+                <div class="title">创建 PreImportTask</div>
+                <div class="desc">按文件分组并派发</div>
+              </div>
+              <div class="arrow">→</div>
+              <div class="card amber-card">
+                <div class="title">完整读取 #1</div>
+                <div class="desc">
+                  <strong>解析 / 校验 / 路由哈希 / 统计</strong><br />返回
+                  FileStats / hashed_stats；解析后的行不保留
+                </div>
+              </div>
+            </div>
+            <div class="return-line">← FileStats / hashed_stats</div>
+          </div>
+
+          <div class="regroup">
+            <strong>全局阶段边界：</strong>等待全部 PreImport 完成 → 根据
+            <span class="mono">TotalMemorySize</span> 重新分组 → 分配 Importing
+            segment
+          </div>
+
+          <div class="phase">
+            <div class="phase-title">
+              <span class="tag accent">阶段 2</span>
+              <strong>Import</strong>
+            </div>
+            <div class="flowline">
+              <div class="card">
+                <div class="title mono">同一批 ImportFiles</div>
+                <div class="desc">再次按原源文件身份打开</div>
+              </div>
+              <div class="arrow">→</div>
+              <div class="card accent-card">
+                <div class="title">创建 ImportTask</div>
+                <div class="desc">携带 DataCoord 已分配的 segment</div>
+              </div>
+              <div class="arrow">→</div>
+              <div class="card accent-card">
+                <div class="title">完整读取 #2</div>
+                <div class="desc">
+                  <strong>解析 / 规范化 / 路由</strong><br />写入预分配的
+                  Importing segment
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="callout amber">
+            <strong>可选第三次数据读写：</strong>启用且需要 sort compaction
+            时，再读取 Importing segment，排序并重写。
+          </div>
+        </div>
+        <div class="footer">
+          <strong>核心问题：</strong>PreImport
+          已完成第一次完整解析，但没有留下可供正式 Import 直接消费的规范化数据。
+        </div>
+      </div>
+    </section>
+
+    <section class="diagram" id="current-fragmentation">
+      <div class="frame">
+        <div class="head">
+          <span class="eyebrow">任务边界</span>
+          <h1>当前 ImportTask 边界会重复切开同一个 routing bucket</h1>
+          <span class="sub">每个任务只看到自己的文件组</span>
+        </div>
+        <div class="body">
+          <div class="task-row">
+            <div class="card">
+              <div class="section-label">文件组 A</div>
+              <div class="file-stack">
+                <span class="file">file_1</span><span class="file">file_2</span
+                ><span class="file">…</span>
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="card amber-card">
+              <div class="title">ImportTask A</div>
+              <div class="desc">
+                二次读文件 / 路由 / 写入 DataCoord 预分配的 segment
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="bucket-output">
+              <div class="bucket-box">
+                <div class="bn accent">b0</div>
+                <div class="segment-bar b0"></div>
+                <span class="tag">尾段 A0</span>
+              </div>
+              <div class="bucket-box">
+                <div class="bn green-text">b1</div>
+                <div class="segment-bar b1"></div>
+                <span class="tag">A1</span>
+              </div>
+              <div class="bucket-box">
+                <div class="bn" style="color: var(--purple)">b2</div>
+                <div class="segment-bar b2"></div>
+                <span class="tag">尾段 A2</span>
+              </div>
+              <div class="bucket-box">
+                <div class="bn pink-text">b3</div>
+                <div class="segment-bar b3"></div>
+                <span class="tag">A3…</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="task-row">
+            <div class="card">
+              <div class="section-label">文件组 B</div>
+              <div class="file-stack">
+                <span class="file">file_3</span><span class="file">file_4</span
+                ><span class="file">…</span>
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="card amber-card">
+              <div class="title">ImportTask B</div>
+              <div class="desc">
+                同样只能在自己的文件组内填充已分配的 segment
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="bucket-output">
+              <div class="bucket-box">
+                <div class="bn accent">b0</div>
+                <div class="segment-bar b0" style="width: 43%"></div>
+                <span class="tag">尾段 B0</span>
+              </div>
+              <div class="bucket-box">
+                <div class="bn green-text">b1</div>
+                <div class="segment-bar b1" style="width: 51%"></div>
+                <span class="tag">尾段 B1</span>
+              </div>
+              <div class="bucket-box">
+                <div class="bn" style="color: var(--purple)">b2</div>
+                <div class="segment-bar b2" style="width: 88%"></div>
+                <span class="tag">B2</span>
+              </div>
+              <div class="bucket-box">
+                <div class="bn pink-text">b3</div>
+                <div class="segment-bar b3" style="width: 39%"></div>
+                <span class="tag">尾段 B3</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="callout red">
+            <strong>同一 bucket 无法跨任务统一装箱：</strong>例如 b0 的 A0 与 B0
+            分属不同 ImportTask，任务边界会留下两个独立尾段。
+          </div>
+        </div>
+        <div class="footer">
+          每个任务可能触达最多 <strong>B</strong> 个 bucket；每个 bucket 可对应
+          0、1 或多个 segment。<strong>T × B</strong>
+          只是任务与 bucket 的组合上界，不是 segment 数等式。
+        </div>
+      </div>
+    </section>
+
+    <section class="diagram" id="data-layout">
+      <div class="frame">
+        <div class="head">
+          <span class="eyebrow">数据布局</span>
+          <h1>第一次读取按 bucket 写出内部有序的临时 fragment</h1>
+          <span class="sub"
+            >fragment 内部有序；不同 fragment 之间不要求有序</span
+          >
+        </div>
+        <div class="body">
+          <div class="compare">
+            <div class="card">
+              <div class="section-label">源文件</div>
+              <div class="desc">行与 bucket 无关，任意交错</div>
+              <div class="file-row">
+                <span class="mono muted">file_1</span>
+                <div class="chips">
+                  <span class="chip b2">b2</span><span class="chip b0">b0</span
+                  ><span class="chip b3">b3</span><span class="chip b0">b0</span
+                  ><span class="chip b1">b1</span><span class="chip">…</span>
+                </div>
+              </div>
+              <div class="file-row">
+                <span class="mono muted">file_2</span>
+                <div class="chips">
+                  <span class="chip b1">b1</span><span class="chip b3">b3</span
+                  ><span class="chip b2">b2</span><span class="chip b0">b0</span
+                  ><span class="chip">…</span>
+                </div>
+              </div>
+              <div class="file-row">
+                <span class="mono muted">file_3</span>
+                <div class="chips">
+                  <span class="chip b3">b3</span><span class="chip b1">b1</span
+                  ><span class="chip b0">b0</span><span class="chip b2">b2</span
+                  ><span class="chip">…</span>
+                </div>
+              </div>
+            </div>
+            <div class="arrow">⇒</div>
+            <div class="card accent-card">
+              <div class="section-label">路由 + 有界排序</div>
+              <div class="run-row">
+                <span class="mono accent">b0 / 任务 A</span>
+                <div class="run-pills">
+                  <span class="run">fragment 0</span
+                  ><span class="run">fragment 1</span
+                  ><span class="tag accent">各自内部有序</span>
+                </div>
+              </div>
+              <div class="run-row">
+                <span class="mono accent">b0 / 任务 B</span>
+                <div class="run-pills">
+                  <span class="run">fragment 0</span
+                  ><span class="tag">独立输入</span>
+                </div>
+              </div>
+              <div class="run-row">
+                <span class="mono green-text">b1 / 任务 A</span>
+                <div class="run-pills">
+                  <span class="run">fragment 2</span
+                  ><span class="run">fragment 3</span>
+                </div>
+              </div>
+              <div class="run-row">
+                <span class="mono" style="color: var(--purple)"
+                  >b2 / 任务 A</span
+                >
+                <div class="run-pills">
+                  <span class="run">fragment 4</span><span class="tag">…</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="callout">
+            每次上传前，按
+            <span class="mono">dataCoord.import.reshardFragmentSizeInMB</span>
+            （缺省 128 MiB）的目标，对单 bucket 数据排序并写成一个
+            fragment。DataCoord 按完整 fragment 分配；Import 阶段 task
+            再做归并。
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="diagram" id="spill-sort-upload">
+      <div class="frame">
+        <div class="head">
+          <span class="eyebrow">SPILL + SORT</span>
+          <h1>内存桶或本地 spill 每取一批可安全排序的数据，再打包上传</h1>
+        </div>
+        <div class="body">
+          <div class="card">
+            <div class="section-label">读取与路由</div>
+            <div class="title">源文件 → 规范化 / 物化 PK → 按 bucket 归位</div>
+            <div class="desc">
+              只为实际出现数据的 bucket 建状态；
+              <span class="mono"
+                >dataCoord.import.reshardFragmentSizeInMB=128</span
+              >
+              MiB 是软目标，实际批大小还受 attempt 内存预留限制。
+            </div>
+          </div>
+          <div class="down">↓</div>
+          <div class="reader-grid">
+            <div class="card accent-card">
+              <div class="section-label">内存路径</div>
+              <div class="title">bucket 达到有效 fragment 大小</div>
+              <div class="desc">
+                先取得排序令牌和字节额度，再取走当前批次；按 SortSpec
+                排序，writer 关闭并校验成功后释放额度。
+              </div>
+            </div>
+            <div class="card amber-card">
+              <div class="section-label">本地 SPILL 路径</div>
+              <div class="title">bucket 总量装不进专用内存额度</div>
+              <div class="desc">
+                内存仍够时只反压 reader，不写磁盘。确认再接收就会超额后，暂停
+                reader、 排空路由队列，再把未交给 sorter 的数据写入 spill；EOF
+                后回放。
+              </div>
+            </div>
+          </div>
+          <div class="down">↓ 两条路径汇合</div>
+          <div class="stage-row">
+            <div class="stage">
+              <div class="n">01 · SORT</div>
+              <div class="st">fragment 内部有序</div>
+              <div class="sd">
+                使用当前 sort compaction 的排序键；相同键不额外定序，不同
+                fragment 之间不要求有序。
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="stage">
+              <div class="n">02 · PACK</div>
+              <div class="st">一个 fragment = 一个对象</div>
+              <div class="sd">
+                单 bucket、单 column group、显式对象键；关闭 writer
+                内部自动切换。
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="stage green-card">
+              <div class="n">03 · UPLOAD</div>
+              <div class="st">PUT + 校验 + manifest</div>
+              <div class="sd">
+                全部 fragment 上传并校验完成后，才发布本 attempt 的
+                ReshardManifest。
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="footer">
+          spill file 本身无序且不进入 manifest；Import 阶段 task 对同一 segment
+          计划中的 fragment 做归并排序。
+        </div>
+      </div>
+    </section>
+
+    <section class="diagram" id="overall-flow">
+      <div class="frame">
+        <div class="head">
+          <span class="eyebrow">RE-SHARD V1</span>
+          <h1>
+            从 ImportJob 到可见 segment：task 输入和 attempt 结果都有明确边界
+          </h1>
+        </div>
+        <div class="body">
+          <div class="stage-row">
+            <div class="stage">
+              <div class="n">01 · DATACOORD</div>
+              <div class="st">准备 Re-shard task</div>
+              <div class="sd">
+                复用 ImportJob 的 schema / partition / vchannel /
+                DataTs；记录源身份、每文件 RowID 范围、SortSpec 和每个
+                ImportTaskPlan
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="stage">
+              <div class="n">02 · DATANODE</div>
+              <div class="st">Re-shard</div>
+              <div class="sd">
+                解析 → 规范化 → 路由 → 上传前排序 → 内部有序的 fragment；每个
+                attempt 写独立前缀，最后发布不可变 manifest
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="stage accent-card">
+              <div class="n">03 · DATACOORD</div>
+              <div class="st">Barrier + 规划</div>
+              <div class="sd">
+                读取 catalog 选中的 manifest 精确引用和摘要；校验
+                manifest、源覆盖与 fragment 的 HEAD/Size；发布 segment
+                规划快照和 K
+              </div>
+            </div>
+          </div>
+
+          <div class="down">↓ 每个完整 fragment 只进入一个 segment 计划</div>
+
+          <div class="stage-row">
+            <div class="stage">
+              <div class="n">04 · DATACOORD</div>
+              <div class="st">创建 Import 阶段 task</div>
+              <div class="sd">
+                读取一次当前 collection schema / 属性；无法继续则整作业失败；
+                可执行时保存准确输入、K、转换和 writer 规则
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="stage">
+              <div class="n">05 · DATANODE</div>
+              <div class="st">Import 阶段</div>
+              <div class="sd">
+                输入 &gt; K 时 attempt
+                内多轮归并；最后一轮执行时间戳、删除/TTL、函数、TEXT/统计信息 →
+                segment + ImportResultManifest
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="stage green-card">
+              <div class="n">06 · DATACOORD</div>
+              <div class="st">校验 + 提交</div>
+              <div class="sd">
+                持久化 RESULT_VALIDATED → 幂等提交 SegmentInfo/binlog/manifest
+                元数据 → 任务 COMPLETED；作业继续 IndexBuilding → Uncommitted /
+                Committing → Completed
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="diagram" id="reader-model">
+      <div class="frame">
+        <div class="head">
+          <span class="eyebrow">读取并发</span>
+          <h1>源文件读取并发和归并输入数分开控制</h1>
+        </div>
+        <div class="body">
+          <div class="reader-grid">
+            <div class="card">
+              <div class="section-label">RE-SHARD IMPORT TASK</div>
+              <div class="title">文件归属和实际读取并发分开</div>
+              <div class="desc">
+                <span class="mono">filesPerReshardTask</span> 决定任务
+                最多拥有多少 ImportFile；文件先进入有界队列。
+              </div>
+              <div class="queue">
+                <span class="file">文件 1</span><span class="file">文件 2</span
+                ><span class="file">文件 3</span><span class="file">…</span
+                ><span class="file">文件 N</span>
+              </div>
+              <div class="down">↓</div>
+              <div class="reader-active">
+                <div class="reader-box">
+                  正在工作的 reader<br /><span class="muted"
+                    >当前源数据批次</span
+                  >
+                </div>
+                <div class="reader-box" style="border-style: dashed">…</div>
+                <div class="reader-box" style="border-style: dashed">
+                  ≤ 配置上限
+                </div>
+              </div>
+              <div class="callout" style="margin-top: 10px">
+                <span class="mono"
+                  >dataNode.import.reshardSourceReaderConcurrency</span
+                >，缺省 <strong>2</strong>，与当前 PreImport 保持一致。
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="section-label">IMPORT STAGE</div>
+              <div class="title">每路有序输入只向堆中放一个当前项</div>
+              <div class="head-row">
+                <div class="reader-box">
+                  reader 1<br /><span class="muted">当前批次</span>
+                </div>
+                <div class="arrow">→</div>
+                <div class="reader-box">一个当前项</div>
+              </div>
+              <div class="head-row">
+                <div class="reader-box">
+                  reader 2<br /><span class="muted">当前批次</span>
+                </div>
+                <div class="arrow">→</div>
+                <div class="reader-box">一个当前项</div>
+              </div>
+              <div class="head-row">
+                <div class="reader-box">… reader K</div>
+                <div class="arrow">→</div>
+                <div class="reader-box">一个当前项</div>
+              </div>
+              <div class="callout" style="margin-top: 10px">
+                <span class="mono">dataCoord.import.maxImportMergeFanIn</span>
+                的缺省上限是 <strong>16</strong>；K 再按节点总容量固定。
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="footer">
+          两者都是 <strong>单任务上限</strong>；DataNode 的全节点 reader
+          总数还必须通过原子 <span class="mono">ResourceReservation</span>。
+        </div>
+      </div>
+    </section>
+
+    <section class="diagram" id="autoid-ranges">
+      <div class="frame">
+        <div class="head">
+          <span class="eyebrow">PK / ROWID</span>
+          <h1>每个 ImportFile 持久化独立 RowID 范围</h1>
+          <span class="sub"
+            >同一集群内，重试 / 重新分组 / DataCoord 故障恢复后仍得到相同的生成
+            ID</span
+          >
+        </div>
+        <div class="body">
+          <div class="range-row">
+            <span class="mono muted">file_0</span>
+            <div class="range-bar" style="width: 32%">
+              <span>[r0.begin</span><span>r0.end)</span>
+            </div>
+            <div class="muted">
+              源文件中偏移为 <span class="mono">r</span> 的记录 →
+              <span class="mono accent">generated_id = r0.begin + r</span
+              ><br /><span class="mono">RowID = generated_id</span>；没有源 PK
+              时
+              <span class="mono">PK = generated_id</span>
+            </div>
+          </div>
+          <div class="range-row">
+            <span class="mono muted">file_1</span>
+            <div class="range-bar" style="width: 29%; margin-left: 34%">
+              <span>[r1.begin</span><span>r1.end)</span>
+            </div>
+            <div class="muted">
+              RowID 范围随 ImportFile 持久化；任务重新分组不改变范围起点
+            </div>
+          </div>
+          <div class="range-row">
+            <span class="mono muted">file_2</span>
+            <div class="range-bar" style="width: 34%; margin-left: 66%">
+              <span>[r2.begin</span><span>r2.end)</span>
+            </div>
+            <div class="muted">
+              各范围互不重叠；单文件宽度受 ID 分配器和协议边界保护
+            </div>
+          </div>
+          <div class="callout red">
+            <strong>直接失败：</strong
+            ><span class="mono">r ≥ 范围宽度</span
+            >、缺范围或缺所需能力时直接失败；不能回退 DataNode 本地 ID 分配器。
+          </div>
+        </div>
+        <div class="footer">
+          <span class="mono">allow_insert_auto_id=true</span> 且 reader 返回源
+          PK 时保留它；否则按范围生成 PK。范围始终用于 RowID。
+        </div>
+      </div>
+    </section>
+
+    <section class="diagram" id="storage-authority">
+      <div class="frame">
+        <div class="head">
+          <span class="eyebrow">存储契约</span>
+          <h1>对象存储保存不可变产物；catalog 保存唯一依据</h1>
+          <span class="sub"
+            >reader 只按精确引用读取，不通过 LIST 猜选中结果</span
+          >
+        </div>
+        <div class="body">
+          <div class="authority-grid">
+            <div class="card">
+              <div class="section-label path-case">
+                R = .../import_reshard/v1/collections/c=.../jobs/j=.../
+              </div>
+              <div class="tree-grid">
+                <div class="tree-item">
+                  <div class="path">task-plans/</div>
+                  <div class="what">
+                    Re-shard ImportTaskPlan；catalog 保存准确引用
+                  </div>
+                </div>
+                <div class="tree-item" style="border-color: var(--amber)">
+                  <div class="path amber-text">import/.../a=1/</div>
+                  <div class="what">
+                    内部有序的 fragment + M1；未选中 attempt 仍不可变
+                  </div>
+                </div>
+                <div class="tree-item" style="border-color: var(--green)">
+                  <div class="path green-text">import/.../a=2/</div>
+                  <div class="what">
+                    内部有序的 fragment + M2；catalog 中当前选中结果
+                  </div>
+                </div>
+                <div class="tree-item">
+                  <div class="path">plans/generations/g=.../</div>
+                  <div class="what">
+                    规划快照 + ImportStageTaskPlan + 精确索引
+                  </div>
+                </div>
+                <div class="tree-item">
+                  <div class="path">import-stage/.../a=.../work/</div>
+                  <div class="what">
+                    attempt 内多轮归并的临时 fragment；不进 catalog
+                  </div>
+                </div>
+                <div class="tree-item">
+                  <div class="path">results/import-stage/.../a=.../</div>
+                  <div class="what">仅保存 ImportResultManifest</div>
+                </div>
+                <div class="tree-item red-card">
+                  <div class="path" style="color: var(--red)">
+                    禁止共享任务 manifest 键
+                  </div>
+                  <div class="what">attempt 之间不能覆盖同一对象</div>
+                </div>
+              </div>
+              <div class="callout" style="margin-top: 10px">
+                正式 segment 数据不写入 R；它沿用正常 insert/stats/Storage V3
+                路径，并使用该 Import attempt 新分配的物理 segment ID。
+              </div>
+            </div>
+
+            <div class="card green-card">
+              <div class="section-label">DATACOORD CATALOG</div>
+              <div class="title">唯一选中结果 / 恢复依据</div>
+              <div class="catalog-list">
+                <div class="catalog-item">current_attempt_id = 2</div>
+                <div class="catalog-item">
+                  选中 manifest = M2 精确引用 + 摘要
+                </div>
+                <div class="catalog-item">
+                  规划快照 / Import 计划索引 = 精确引用 + 摘要
+                </div>
+                <div class="catalog-item">
+                  已校验 ImportResult = 精确引用 + 摘要
+                </div>
+                <div class="catalog-item">
+                  attempt_history 记录未选中临时数据和 segment 的归属
+                </div>
+              </div>
+              <div class="callout amber" style="margin-top: 10px">
+                <strong>LIST 只用于 GC / 诊断。</strong
+                ><br />Barrier、规划器、reader 与故障恢复都不得扫描前缀
+                选择“最新”对象。
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="footer">
+          <strong>隔离边界：</strong>作业 → 任务 → attempt → routing bucket →
+          临时 fragment。每个 attempt 前缀不可变；选中结果由已持久化的 attempt
+          ID 和 catalog 精确引用决定。
+        </div>
+      </div>
+    </section>
+
+    <section class="diagram" id="attempt-isolation">
+      <div class="frame">
+        <div class="head">
+          <span class="eyebrow">旧 ATTEMPT 防护</span>
+          <h1>
+            旧 writer 可以迟到，但不能覆盖选中结果；Import 阶段重试必须更换物理
+            segment ID
+          </h1>
+        </div>
+        <div class="body">
+          <div class="attempt-grid">
+            <div class="card">
+              <div class="section-label">RE-SHARD TASK</div>
+              <div class="title">catalog 先持久化新 attempt，再派发</div>
+              <div class="timeline">
+                <div class="event loser">
+                  <strong>a=1</strong> 派发并写
+                  <span class="mono">.../attempts/a=1/</span>
+                </div>
+                <div class="event">
+                  a=1 超时；DataCoord 持久化
+                  <span class="mono">current_attempt_id=2</span>
+                </div>
+                <div class="event winner">
+                  <strong>a=2</strong> 派发并写独立前缀；发布 M2
+                </div>
+                <div class="event winner">
+                  DataCoord 验证 M2 精确引用和摘要，a=2 成为已提交结果
+                </div>
+                <div class="event loser">
+                  a=1 的旧任务稍后发布 M1；因
+                  <span class="mono">1 &lt; current_attempt_id</span>
+                  被拒绝，只交给 GC 管理
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="section-label">IMPORT 阶段任务重试</div>
+              <div class="title">
+                逻辑 segment 计划稳定，物理 segment 属于 attempt
+              </div>
+              <div class="card amber-card" style="margin: 10px 0">
+                <div class="title mono">logical_segment_ordinal = 7</div>
+                <div class="desc">ImportStageTaskPlan 不变</div>
+              </div>
+              <div class="flowline" style="grid-template-columns: 1fr 28px 1fr">
+                <div class="card red-card">
+                  <div class="title">a=1 → segment 1001</div>
+                  <div class="desc">
+                    失败 / 过期<br /><span class="tag red">Dropped</span>
+                  </div>
+                </div>
+                <div class="arrow">→</div>
+                <div class="card green-card">
+                  <div class="title">a=2 → segment 1057</div>
+                  <div class="desc">
+                    选中结果 → ImportResult<br /><span class="tag green"
+                      >RESULT_VALIDATED</span
+                    >
+                  </div>
+                </div>
+              </div>
+              <div class="down">↓</div>
+              <div class="callout">
+                ImportResult 精确引用 → 幂等提交 SegmentInfo/binlog/manifest
+                元数据 → 任务 COMPLETED
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="footer">
+          相同 attempt + 相同摘要是幂等；相同 attempt + 不同摘要是
+          数据完整性错误。旧 Drop / Update 只能作用于自己的 attempt。
+        </div>
+      </div>
+    </section>
+
+    <section class="diagram" id="verified-read">
+      <div class="frame">
+        <div class="head">
+          <span class="eyebrow">校验后打开临时 fragment</span>
+          <h1>校验和覆盖对象存储中的原始字节；解密由本地 packed reader 完成</h1>
+        </div>
+        <div class="body">
+          <div class="verified-flow">
+            <div class="card">
+              <div class="section-label">01</div>
+              <div class="title">manifest 精确引用</div>
+              <div class="desc">
+                校验 manifest 摘要、fragment 引用和上下文引用
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="card">
+              <div class="section-label">02</div>
+              <div class="title">ChunkManager.Reader</div>
+              <div class="desc">
+                顺序下载对象存储中的原始字节；不负责 CMEK 解密
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="card accent-card">
+              <div class="section-label">03</div>
+              <div class="title">SHA-256 + 大小</div>
+              <div class="desc">
+                <span class="mono">CHUNK_MANAGER_STORED_BYTES_V1</span>；必须与
+                manifest 完全一致
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="card">
+              <div class="section-label">04</div>
+              <div class="title">已校验的本地缓存</div>
+              <div class="desc">
+                保存原始对象；每个 reader 最多保留当前一个 fragment
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="card green-card">
+              <div class="section-label">05</div>
+              <div class="title">本地 packed reader</div>
+              <div class="desc">
+                使用指定版本的
+                <span class="mono">TEMP_RESHARD_FRAGMENT_<br />READ_WRITE</span>
+                密钥上下文解密、解析并校验单调性
+              </div>
+            </div>
+          </div>
+          <div class="gate-row">
+            <div class="callout red">
+              <strong>摘要 / 字节数不一致：</strong>立即失败
+              attempt，不把损坏对象交给归并流程。
+            </div>
+            <div class="callout amber">
+              <strong>不能作为校验和：</strong>存储服务的分段上传 ETag 不能替代
+              SHA-256。
+            </div>
+            <div class="callout">
+              <strong>不做第二次对象存储 GET：</strong>packed reader
+              从已校验的本地缓存读取。
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="diagram" id="gc-lifecycle">
+      <div class="frame">
+        <div class="head">
+          <span class="eyebrow">GC 生命周期</span>
+          <h1>先停止 writer，再经过保留期和静默窗口删除完整作业根目录</h1>
+        </div>
+        <div class="body">
+          <div class="gc-flow">
+            <div class="gc-state">
+              <div class="gs">RUNNING</div>
+              <div class="gd">
+                保留选中和未选中结果、attempt 内工作对象、计划与结果 manifest
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="gc-state" style="border-color: var(--amber)">
+              <div class="gs amber-text">TERMINAL / QUIESCING</div>
+              <div class="gd">
+                Completed / Failed 后立即保存清理记录，并精确 Drop 当前 attempt
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="gc-state">
+              <div class="gs">RETENTION</div>
+              <div class="gd">
+                <span class="mono">taskRetention</span> 只延迟对象和 catalog
+                删除，便于诊断
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="gc-state red-card">
+              <div class="gs" style="color: var(--red)">DELETING</div>
+              <div class="gd">
+                对带结尾斜线的完整数字作业根目录幂等执行 RemoveWithPrefix
+              </div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="gc-state">
+              <div class="gs">VERIFYING</div>
+              <div class="gd">保留清理记录；周期性 LIST/Walk + 重复清扫</div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="gc-state green-card">
+              <div class="gs green-text">DONE</div>
+              <div class="gd">
+                完整
+                <span class="mono">missingTolerance</span>
+                静默窗口内未再观察到对象
+              </div>
+            </div>
+          </div>
+
+          <div class="callout red">
+            <strong>若 VERIFYING 又看到迟到写入的对象：</strong>回到 DELETING
+            并重新开始静默窗口；不能只靠对象 mtime 猜测已安全。
+          </div>
+
+          <div class="gc-notes">
+            <div class="card">
+              <div class="title">R 下临时对象</div>
+              <div class="desc">由 import_reshard 存活集合扫描器管理</div>
+            </div>
+            <div class="card">
+              <div class="title">未选中的正式 segment</div>
+              <div class="desc">
+                按 SegmentInfo 归属字段标为 Dropped，走现有 segment GC
+              </div>
+            </div>
+            <div class="card green-card">
+              <div class="title">选中的 segment</div>
+              <div class="desc">
+                不位于 R；正常提交后不属于 Import 临时数据 GC
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <script>
+      const wanted = new URLSearchParams(window.location.search).get("diagram");
+      const diagrams = Array.from(document.querySelectorAll(".diagram"));
+      diagrams.forEach((diagram) => {
+        diagram.hidden = diagram.id !== wanted;
+      });
+      if (!wanted || !document.getElementById(wanted)) {
+        document.body.innerHTML =
+          '<div style="padding:40px;color:#e57b79;font-family:sans-serif">Unknown diagram</div>';
+      }
+    </script>
+  </body>
+</html>
