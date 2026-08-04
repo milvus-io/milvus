@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -121,6 +122,24 @@ func (node *Proxy) GetStatisticsChannel(ctx context.Context, req *internalpb.Get
 		Status: merr.Success(),
 		Value:  "",
 	}, nil
+}
+
+func (node *Proxy) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	if err := fileresource.Sync(context.TODO(), req.GetVersion(), req.GetResources()); err != nil {
+		mlog.Warn(ctx, "sync file resource failed",
+			mlog.Uint64("version", req.GetVersion()),
+			mlog.Int("resourceCount", len(req.GetResources())),
+			mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	mlog.Info(ctx, "sync file resource completed",
+		mlog.Uint64("version", req.GetVersion()),
+		mlog.Int("resourceCount", len(req.GetResources())))
+	return merr.Success(), nil
 }
 
 // InvalidateCollectionMetaCache invalidate the meta cache of specific collection.

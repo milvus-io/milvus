@@ -36,8 +36,10 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -288,6 +290,43 @@ func (s *statsInspectorSuite) TestStart() {
 
 	s.inspector.Stop()
 	s.False(s.inspector.ctx.Done() == nil, "Context should be canceled")
+}
+
+func (s *statsInspectorSuite) TestTriggerTextStatsTaskFileResourcesByMode() {
+	resources := []*internalpb.FileResourceInfo{
+		{Id: 7, Name: "dict", Path: "dict.jieba"},
+	}
+	collection := s.mt.GetCollection(1)
+	collection.Schema.FileResourceIds = []int64{7}
+	s.Require().NoError(s.mt.UpdateFileResources(s.ctx, resources, 1))
+
+	for _, testCase := range []struct {
+		name            string
+		mode            string
+		expectResources bool
+	}{
+		{name: "ref", mode: "ref", expectResources: true},
+		{name: "sync", mode: "sync", expectResources: false},
+	} {
+		s.Run(testCase.name, func() {
+			paramtable.Get().Save(Params.CommonCfg.DNFileResourceMode.Key, testCase.mode)
+			s.T().Cleanup(func() {
+				paramtable.Get().Reset(Params.CommonCfg.DNFileResourceMode.Key)
+			})
+			s.mt.statsTaskMeta.tasks = typeutil.NewConcurrentMap[int64, *indexpb.StatsTask]()
+			s.mt.statsTaskMeta.segmentID2Tasks = typeutil.NewConcurrentMap[string, *indexpb.StatsTask]()
+
+			s.inspector.triggerTextStatsTask()
+
+			task := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob)
+			s.Require().NotNil(task)
+			if testCase.expectResources {
+				s.Equal(resources, task.GetFileResources())
+			} else {
+				s.Empty(task.GetFileResources())
+			}
+		})
+	}
 }
 
 func (s *statsInspectorSuite) TestSubmitStatsTask() {

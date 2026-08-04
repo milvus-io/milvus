@@ -535,7 +535,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	eg, egCtx := errgroup.WithContext(ctx)
 
 	var analyzerExtraInfo string
-	if len(st.req.GetFileResources()) > 0 {
+	if len(st.req.GetFileResources()) > 0 && fileresource.GlobalFileManager.Mode() == fileresource.RefMode {
 		err := fileresource.GlobalFileManager.Download(ctx, st.cm, st.req.GetFileResources()...)
 		if err != nil {
 			return err
