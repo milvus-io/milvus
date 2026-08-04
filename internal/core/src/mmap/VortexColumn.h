@@ -231,6 +231,11 @@ class VortexColumn final : public ChunkedColumnInterface {
     PrepareScan(milvus::OpContext* op_ctx,
                 const ScanOptions& options) const override;
 
+    bool
+    UseLegacyDataSkipIndex() const override {
+        return false;
+    }
+
     TakeResult
     Take(milvus::OpContext* op_ctx, const TakeOptions& options) const override;
 

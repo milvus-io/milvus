@@ -204,10 +204,15 @@ struct PreparedVortexScanSource {
 
 class CallbackPreparedScan final : public ChunkedColumnInterface::PreparedScan {
  public:
-    using SeekFunc = std::function<ChunkedColumnInterface::ScanResult(int64_t)>;
+    using OpenFunc = std::function<ChunkedColumnInterface::ScanResult(
+        const ChunkedColumnInterface::ScanPlan&,
+        ChunkedColumnInterface::ScanProjection)>;
 
-    CallbackPreparedScan(int64_t start, int64_t end, SeekFunc seek)
-        : start_(start), end_(end), seek_(std::move(seek)) {
+    CallbackPreparedScan(int64_t start, int64_t end, OpenFunc open)
+        : start_(start),
+          end_(end),
+          plan_(ChunkedColumnInterface::ScanPlan::Full(start, end - start)),
+          open_(std::move(open)) {
     }
 
     int64_t
@@ -220,21 +225,33 @@ class CallbackPreparedScan final : public ChunkedColumnInterface::PreparedScan {
         return end_;
     }
 
+    const ChunkedColumnInterface::ScanPlan&
+    Plan() const override {
+        return plan_;
+    }
+
     ChunkedColumnInterface::ScanResult
-    Seek(int64_t position) const override {
+    Open(const ChunkedColumnInterface::ScanPlan& plan,
+         ChunkedColumnInterface::ScanProjection projection) const override {
+        AssertInfo(plan.requested_range.start >= start_ &&
+                       plan.requested_range.start <= plan.requested_range.end &&
+                       plan.requested_range.end <= end_,
+                   "vortex scan range [{}, {}) outside prepared range [{}, {})",
+                   plan.requested_range.start,
+                   plan.requested_range.end,
+                   start_,
+                   end_);
         AssertInfo(
-            position >= start_ && position <= end_,
-            "vortex scan cursor position {} outside prepared range [{}, {})",
-            position,
-            start_,
-            end_);
-        return seek_(position);
+            plan.skip_ranges.empty(),
+            "vortex callback scan does not yet accept external skip ranges");
+        return open_(plan, projection);
     }
 
  private:
     int64_t start_;
     int64_t end_;
-    SeekFunc seek_;
+    ChunkedColumnInterface::ScanPlan plan_;
+    OpenFunc open_;
 };
 
 std::vector<uint64_t>
@@ -1719,8 +1736,7 @@ VortexColumn::BulkValueAt(milvus::OpContext* op_ctx,
                data_type_);
     TakeBatch batch;
     int64_t output_index = 0;
-    while (output_index < count &&
-           cursor->Next(count - output_index, &batch)) {
+    while (output_index < count && cursor->Next(count - output_index, &batch)) {
         AssertInfo(batch.values.encoding == ValueEncoding::FixedWidth,
                    "vortex bulk value expected fixed-width take, got {}",
                    static_cast<int>(batch.values.encoding));
@@ -2954,8 +2970,7 @@ VortexColumn::BulkArrayAt(milvus::OpContext* op_ctx,
     AssertInfo(cursor != nullptr, "vortex array take is unsupported");
     TakeBatch batch;
     int64_t output_index = 0;
-    while (output_index < count &&
-           cursor->Next(count - output_index, &batch)) {
+    while (output_index < count && cursor->Next(count - output_index, &batch)) {
         const auto* values = batch.values.data_as<ArrayView>();
         for (int64_t i = 0; i < batch.size; ++i) {
             fn(values[i], output_index++);
@@ -3051,8 +3066,7 @@ VortexColumn::BulkStringLikeAt(
                data_type_);
     TakeBatch batch;
     int64_t output_index = 0;
-    while (output_index < count &&
-           cursor->Next(count - output_index, &batch)) {
+    while (output_index < count && cursor->Next(count - output_index, &batch)) {
         if (data_type_ == DataType::JSON) {
             const auto* values = batch.values.data_as<Json>();
             for (int64_t i = 0; i < batch.size; ++i) {
@@ -3132,17 +3146,28 @@ VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
                 options.start_offset,
                 scan_end,
                 [this,
-                 scan_end,
                  projection = options.projection,
                  value_kind,
-                 prepared_sources =
-                     std::move(prepared_sources)](int64_t position) {
+                 prepared_sources = std::move(prepared_sources)](
+                    const ChunkedColumnInterface::ScanPlan& scan_plan,
+                    ChunkedColumnInterface::ScanProjection open_projection) {
+                    AssertInfo(projection == ScanProjection::Data ||
+                                   open_projection == ScanProjection::NoData,
+                               "validity-only vortex scan cannot return data");
+                    const auto position = scan_plan.requested_range.start;
+                    const auto open_end = scan_plan.requested_range.end;
                     std::vector<VortexDataScanSource> sources;
                     for (const auto& prepared : prepared_sources) {
-                        if (prepared.range.range_end <= position) {
+                        if (prepared.range.range_end <= position ||
+                            prepared.range.range_start >= open_end) {
                             continue;
                         }
                         auto range = TrimReaderRange(prepared.range, position);
+                        if (range.range_end > open_end) {
+                            const auto trimmed = range.range_end - open_end;
+                            range.length -= trimmed;
+                            range.range_end = open_end;
+                        }
                         const auto& file = files_[range.chunk_id];
                         auto plan = PlanRowRange(
                             file,
@@ -3158,8 +3183,8 @@ VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
                     return std::make_unique<VortexDataScanCursor>(
                         this,
                         position,
-                        scan_end - position,
-                        projection,
+                        open_end - position,
+                        open_projection,
                         value_kind,
                         std::move(sources));
                 });
@@ -3215,15 +3240,26 @@ VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
         options.start_offset,
         scan_end,
         [this,
-         scan_end,
          predicate = std::move(*predicate),
-         prepared_sources = std::move(prepared_sources)](int64_t position) {
+         prepared_sources = std::move(prepared_sources)](
+            const ChunkedColumnInterface::ScanPlan& scan_plan,
+            ChunkedColumnInterface::ScanProjection open_projection) {
+            AssertInfo(open_projection == ScanProjection::NoData,
+                       "vortex row-id scan cannot return dense data");
+            const auto position = scan_plan.requested_range.start;
+            const auto open_end = scan_plan.requested_range.end;
             std::vector<VortexRowIdScanSource> sources;
             for (const auto& prepared : prepared_sources) {
-                if (prepared.range.range_end <= position) {
+                if (prepared.range.range_end <= position ||
+                    prepared.range.range_start >= open_end) {
                     continue;
                 }
                 auto range = TrimReaderRange(prepared.range, position);
+                if (range.range_end > open_end) {
+                    const auto trimmed = range.range_end - open_end;
+                    range.length -= trimmed;
+                    range.range_end = open_end;
+                }
                 const auto& file = files_[range.chunk_id];
                 const auto row_start =
                     static_cast<uint64_t>(range.local_offset);
@@ -3254,7 +3290,7 @@ VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
                                           std::move(validity_reader)});
             }
             return std::make_unique<VortexRowIdScanCursor>(
-                this, position, scan_end - position, std::move(sources));
+                this, position, open_end - position, std::move(sources));
         });
 }
 

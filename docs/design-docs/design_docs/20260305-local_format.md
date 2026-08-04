@@ -292,10 +292,11 @@ The interface covers two operation groups:
 - scan operations for expression evaluation;
 - positional take/output operations for retrieve, requery, and bulk_subscript.
 
-`PrepareScan` returns a prepared scan that owns the planned cell set and its
-cache pins. Cursors of `ScanBatch` values are opened from that prepared scan.
-The convenience `Scan` method prepares the input and immediately opens the
-initial cursor.
+`PrepareScan` returns a window-local prepared scan that owns the planner result,
+selected cell set, and cache pins for one leaf operator execution window.
+Cursors of `ScanBatch` values are opened from that prepared scan. The
+convenience `Scan` method prepares the input and immediately opens its planned
+cursor.
 
 Scan outputs:
 
@@ -320,15 +321,26 @@ Vortex converts the current Arrow slice's validity bitmap into a
 `FixedVector<bool>`, and `ScanBatch::owner` keeps that mask and the values alive
 for the batch lifetime.
 
-Scan preparation first plans the cells required by the requested row range and
-projection, pins that complete cell set, and then constructs cursors over the
-pinned input. Validity-only scans use the same flow but omit value parsing;
-non-nullable validity-only scans have an empty cell plan. `Next(max_rows)` never
-loads or pins cells. It only returns a complete batch starting at `Position()`,
-bounded by both `max_rows` and the current column chunk, and advances the cursor
-position. `ScanBatch::owner` shares the prepared scan's pinned input (plus any
-batch-local materialization) so returned pointers remain valid even if the
-cursor advances or is closed.
+Scan preparation first uses footer/statistics metadata loaded with the segment
+to produce segment-offset Evaluate/NoMatch ranges. Payload-dependent legacy Raw
+SkipIndex decisions are not planner input; they run after Raw batches are
+available and only skip predicate computation. The backend then pins the cells
+required by the current window and constructs cursors over the pinned input.
+
+Validity and data are currently stored in the same Cell. A nullable scan that
+needs field validity therefore pins every Cell intersecting the current window,
+including planner-NoMatch ranges. A non-nullable scan may omit planner-skipped
+Cells. Validity-only scans use the same Cell pin semantics but omit value
+parsing; non-nullable validity-only scans have an empty cell plan.
+
+`Next(max_rows)` does not pin cells. Dense data batches contain at most
+`max_rows` evaluated rows and cannot cross a NoMatch range or backend batch
+boundary; adjacent returned batches may have a segment-offset gap. The
+expression fills that gap as NoMatch and, for nullable fields, obtains validity
+through a validity-only cursor opened from the same prepared scan. The complete
+window result remains row aligned. `ScanBatch::owner` shares the prepared
+scan's pinned input (plus any batch-local materialization) so returned pointers
+remain valid for the batch lifetime.
 
 Row-id scan supports:
 
@@ -421,20 +433,19 @@ This is the current path for examples such as `LIKE`, `IN`, JSON path
 expressions, and array predicates when they cannot be represented as a Vortex
 predicate.
 
-`VortexColumn::PrepareScan` prepares every file range covered by the scan before
-it returns: it creates the read plan and pins the plan's cell ids. Opening a
-cursor creates readers under those retained pins. Nullable row-id scans prepare
-both the predicate plan and the validity plan, union their cell ids, and share
-one pin between the two readers. The cursor only consumes these prepared
-readers and never calls the planner or cache layer from `Next()`.
+`VortexColumn::PrepareScan` is called once per evaluated operator window. It
+creates the window read plan and pins its cells before returning. Nullable
+row-id scans prepare both the predicate plan and the full validity plan, union
+their cell ids, and share one pin between the two readers; this intentionally
+pins planner-pruned Cells because their validity is still needed. Non-nullable
+row-id scans can omit predicate-pruned Cells. Vortex does not run the legacy
+payload-dependent Raw SkipIndex path.
 
 The expression layer keeps only its segment-global execution position. Normal
-evaluation consumes complete cursor batches and advances that position. The
-prepared scan retains the selected column generation, plans, and cell pins. If
-a conjunction short-circuits an execution batch, the expression advances its
-logical position and closes only the active cursor. The next real read reopens
-a cursor at the new position from the same prepared scan, without pinning cells
-again.
+evaluation prepares, consumes, and destroys one complete window before moving
+to the next. If a conjunction short-circuits an execution window, it advances
+the logical position without creating that leaf's planner, pins, or reader.
+Readers and pins are not retained across expression windows.
 Legacy Chunk access follows the same position rule: chunk id and in-chunk offset
 are derived caches. A short-circuit invalidates that cache, and the next Chunk
 read reconstructs it from the segment-global execution position.

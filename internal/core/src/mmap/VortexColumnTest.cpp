@@ -1538,7 +1538,8 @@ TEST(VortexColumnTest, ScanPinsPlannedCellsBeforeCursorCreation) {
         nullptr,
         ChunkedColumnInterface::ScanOptions::ForNoData(0, kNullableRows));
     ASSERT_NE(validity_scan, nullptr);
-    auto validity_cursor = validity_scan->Seek(0);
+    auto validity_cursor = validity_scan->Open(
+        validity_scan->Plan(), ChunkedColumnInterface::ScanProjection::NoData);
     ASSERT_NE(validity_cursor, nullptr);
     EXPECT_TRUE(column.CellsLoaded(planned_offsets, 2));
     ChunkedColumnInterface::ScanBatch batch;
@@ -1546,7 +1547,9 @@ TEST(VortexColumnTest, ScanPinsPlannedCellsBeforeCursorCreation) {
     validity_cursor.reset();
     column.ManualEvictCache();
     EXPECT_TRUE(column.CellsLoaded(planned_offsets, 2));
-    validity_cursor = validity_scan->Seek(2);
+    validity_cursor = validity_scan->Open(
+        ChunkedColumnInterface::ScanPlan::Full(2, kNullableRows - 2),
+        ChunkedColumnInterface::ScanProjection::NoData);
     ASSERT_NE(validity_cursor, nullptr);
     while (validity_cursor->Next(2, &batch)) {
     }

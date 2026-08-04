@@ -287,11 +287,10 @@ ResolveDataScanValueKind(DataType data_type,
     AssertInfo(column_kind.has_value(),
                "data scan does not support column type {}",
                data_type);
-    const auto resolved_kind =
-        projection == ScanProjection::NoData ||
-                requested_kind == ScanValueKind::Default
-            ? *column_kind
-            : requested_kind;
+    const auto resolved_kind = projection == ScanProjection::NoData ||
+                                       requested_kind == ScanValueKind::Default
+                                   ? *column_kind
+                                   : requested_kind;
     AssertInfo(resolved_kind == *column_kind,
                "data scan kind {} does not match column type {}, expected {}",
                static_cast<int>(resolved_kind),
