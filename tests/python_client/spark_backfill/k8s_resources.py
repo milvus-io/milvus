@@ -49,9 +49,7 @@ def decode_storage_credentials(secret_data: Mapping[str, str]) -> tuple[str, str
         if not access_key and not secret_key:
             continue
         if not access_key or not secret_key:
-            raise ValueError(
-                f"Kubernetes Secret must contain both {access_key_name!r} and {secret_key_name!r}"
-            )
+            raise ValueError(f"Kubernetes Secret must contain both {access_key_name!r} and {secret_key_name!r}")
         try:
             return (
                 base64.b64decode(access_key, validate=True).decode("utf-8"),
@@ -59,9 +57,7 @@ def decode_storage_credentials(secret_data: Mapping[str, str]) -> tuple[str, str
             )
         except (ValueError, UnicodeDecodeError) as exc:
             raise ValueError("Kubernetes Secret contains invalid storage credentials") from exc
-    raise ValueError(
-        "Kubernetes Secret does not contain a supported storage credential key pair"
-    )
+    raise ValueError("Kubernetes Secret does not contain a supported storage credential key pair")
 
 
 def read_storage_credentials(core_api, namespace: str, secret_name: str) -> tuple[str, str]:
