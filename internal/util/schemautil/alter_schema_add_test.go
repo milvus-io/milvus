@@ -50,7 +50,7 @@ func TestValidateAlterSchemaAddFunctionPlan_EmptyIndexParamsAllowed(t *testing.T
 			OutputFieldNames: []string{"sparse"},
 		},
 	}
-	assert.NoError(t, ValidateAlterSchemaAddFunctionPlan(plan))
+	assert.NoError(t, ValidateAlterSchemaAddFunctionPlan(plan, false))
 }
 
 func TestCheckNoFunctionCascade(t *testing.T) {
