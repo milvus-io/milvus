@@ -785,8 +785,7 @@ func normalizeStorageKey(key string) string {
 //
 // Binlog import (backup=true) and L0 import are exempt: reading insert_log and
 // delta_log is exactly what they do. They are gated instead by the cluster-level
-// ImportBinlog privilege (checked in the proxy) and by
-// dataCoord.import.enableBinlogImport.
+// ImportBinlog privilege, checked in the proxy.
 func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
 	if importutilv2.IsBackup(options) || importutilv2.IsL0Import(options) {
 		return nil

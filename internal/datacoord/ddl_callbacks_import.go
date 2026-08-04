@@ -103,31 +103,14 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 		return err
 	}
 
-	// Binlog import (backup=true) and L0 import read Milvus's own internal
-	// storage layout, so they can be switched off cluster-wide in addition to
-	// the ImportBinlog privilege the proxy requires. Checked before the binlog
-	// listing below so a cluster with the capability disabled never performs
-	// the prefix walk.
-	//
-	// NOTE: deliberately NOT re-checked in createImportJobFromAck, unlike the
-	// L0 gate there. That callback also runs on CDC secondary clusters, where
-	// rejecting an import the primary already accepted would diverge the two
-	// clusters. Enforcement is on the primary, which is the only path a client
-	// can reach. See issue #51883.
-	if (importutilv2.IsBackup(options) || importutilv2.IsL0Import(options)) &&
-		!Params.DataCoordCfg.EnableBinlogImport.GetAsBool() {
-		return merr.WrapErrImportFailed("binlog import is disabled on this cluster " +
-			"(dataCoord.import.enableBinlogImport=false)")
-	}
-
 	// Keep ordinary imports out of Milvus's own storage directories.
 	//
-	// Also not re-checked in createImportJobFromAck, but for a different reason
-	// than the gate above: this one is root-relative. It denies paths under
-	// THIS cluster's ChunkManager.RootPath(), and nothing ties a CDC pair's
-	// storage roots together (ReplicateConfiguration carries connection params
-	// and pchannels only). With the same root on both sides -- the default, and
-	// the normal deployment -- the primary's check covers the secondary exactly;
+	// Deliberately NOT re-checked in createImportJobFromAck, unlike the L0 gate
+	// there, because this check is root-relative. It denies paths under THIS
+	// cluster's ChunkManager.RootPath(), and nothing ties a CDC pair's storage
+	// roots together (ReplicateConfiguration carries connection params and
+	// pchannels only). With the same root on both sides -- the default, and the
+	// normal deployment -- the primary's check covers the secondary exactly;
 	// only under differing roots does the same key mean something different on
 	// each side. Recorded in the PR's Known limitations rather than guarded
 	// here, since reaching it also requires enableInReplicatingCluster=true,
