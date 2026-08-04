@@ -877,7 +877,7 @@ func (m *externalCollectionRefreshMeta) UpdateTaskResult(
 
 	storeExternally := false
 	switch currentTask.GetOwnershipPlanVersion() {
-	case 0, externalRefreshOwnershipPlanVersionV1:
+	case 0:
 		// Version zero is retained for legacy test fixtures. Runtime tasks with
 		// no ownership plan are rejected before worker dispatch.
 	case externalRefreshOwnershipPlanVersion:

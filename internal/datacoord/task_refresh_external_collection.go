@@ -207,38 +207,10 @@ func (t *refreshExternalCollectionTask) UpdateResultWithMeta(
 	return nil
 }
 
-func applyExternalCollectionSegmentUpdate(
-	ctx context.Context,
-	mt *meta,
-	collectionID int64,
-	keptSegmentIDs []int64,
-	updatedSegments []*datapb.SegmentInfo,
-	logFields ...mlog.Field,
-) error {
-	baselineSegmentIDs := make([]int64, 0)
-	if mt != nil {
-		for _, segment := range mt.SelectSegments(ctx, CollectionFilter(collectionID)) {
-			if segment.GetState() != commonpb.SegmentState_Dropped {
-				baselineSegmentIDs = append(baselineSegmentIDs, segment.GetID())
-			}
-		}
-	}
-	return applyExternalCollectionSegmentUpdateForBaseline(
-		ctx,
-		mt,
-		collectionID,
-		baselineSegmentIDs,
-		keptSegmentIDs,
-		updatedSegments,
-		logFields...,
-	)
-}
-
 // applyExternalCollectionSegmentUpdateForBaseline applies a caller-supplied
 // immutable baseline: baseline IDs may be kept, patched, or removed, while IDs
 // outside the baseline may only be added as new segments. The job-level path
-// passes the published ownership baseline; the wrapper above snapshots current
-// active segments for direct task callers.
+// passes the published ownership baseline.
 func applyExternalCollectionSegmentUpdateForBaseline(
 	ctx context.Context,
 	mt *meta,
@@ -657,18 +629,6 @@ func getExternalRefreshSegmentSnapshots(mt *meta, segmentIDs []int64) []*Segment
 		}
 	}
 	return result
-}
-
-// SetJobInfo processes a complete job-level response and updates segment information atomically.
-func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *datapb.RefreshExternalCollectionTaskResponse) error {
-	return applyExternalCollectionSegmentUpdate(
-		ctx,
-		t.mt,
-		t.GetCollectionId(),
-		resp.GetKeptSegments(),
-		resp.GetUpdatedSegments(),
-		mlog.Int64("taskID", t.GetTaskId()),
-	)
 }
 
 func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {

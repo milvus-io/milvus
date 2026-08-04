@@ -24,20 +24,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// externalRefreshOwnershipPlanVersion identifies the current persisted task
-// contract. Version 1 introduced exclusive segment ownership and inline task
-// results. Version 2 keeps the ownership contract and stores task results in
-// object storage so etcd metadata remains bounded. Accepting both versions
-// lets new DataCoord instances recover version 1 jobs, while old instances
-// reject version 2 instead of interpreting an external result as empty.
-const (
-	externalRefreshOwnershipPlanVersionV1 = int32(1)
-	externalRefreshOwnershipPlanVersion   = int32(2)
-)
+// externalRefreshOwnershipPlanVersion identifies the persisted task contract:
+// exclusive segment ownership with task results stored in object storage so
+// etcd metadata remains bounded.
+const externalRefreshOwnershipPlanVersion = int32(2)
 
 func isSupportedExternalRefreshOwnershipPlanVersion(version int32) bool {
-	return version == externalRefreshOwnershipPlanVersionV1 ||
-		version == externalRefreshOwnershipPlanVersion
+	return version == externalRefreshOwnershipPlanVersion
 }
 
 // externalRefreshOwnershipTaskPlan is the immutable ownership assigned to one

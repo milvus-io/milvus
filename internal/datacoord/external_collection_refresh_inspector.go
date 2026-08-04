@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -40,9 +39,7 @@ import (
 type externalCollectionRefreshInspector struct {
 	ctx         context.Context
 	refreshMeta *externalCollectionRefreshMeta
-	mt          *meta // meta for task operations (CreateTaskOnWorker, SetJobInfo)
 	scheduler   task.GlobalScheduler
-	allocator   allocator.Allocator
 	closeChan   chan struct{}
 	// wrapTask builds a scheduler-facing task wrapper with all callbacks
 	// wired (processFinishedJob → checker.processJobByID). The manager owns
@@ -55,17 +52,13 @@ type externalCollectionRefreshInspector struct {
 func newRefreshInspector(
 	ctx context.Context,
 	refreshMeta *externalCollectionRefreshMeta,
-	mt *meta,
 	scheduler task.GlobalScheduler,
-	allocator allocator.Allocator,
 	closeChan chan struct{},
 ) *externalCollectionRefreshInspector {
 	return &externalCollectionRefreshInspector{
 		ctx:         ctx,
 		refreshMeta: refreshMeta,
-		mt:          mt,
 		scheduler:   scheduler,
-		allocator:   allocator,
 		closeChan:   closeChan,
 	}
 }
