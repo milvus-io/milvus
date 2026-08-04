@@ -183,6 +183,7 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 	if err := rejectExternalCollectionFunctionMutation(oldColl.ToCollectionSchemaPB()); err != nil {
 		return err
 	}
+	oldFn := findRLSFunctionByName(oldColl, req.GetFunctionSchema().GetName())
 
 	// Only whitelisted params may be altered; function identity (type, name,
 	// input/output fields) is immutable. Skip when the function is absent so the
@@ -198,6 +199,15 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 
 	newColl := oldColl.Clone()
 	if err := alterFunctionGenNewCollection(ctx, req.FunctionSchema, newColl); err != nil {
+		return err
+	}
+	newFn := findRLSFunctionByName(newColl, req.GetFunctionSchema().GetName())
+	if !rlsFunctionKeepsOutputShape(oldFn, newFn) {
+		if err := validateRLSFunctionOutputNotReferenced(ctx, c.meta, req.GetDbName(), req.GetCollectionName(), oldColl, oldFn, "altered"); err != nil {
+			return err
+		}
+	}
+	if err := validateRLSPoliciesWithSchema(ctx, c.meta, req.GetDbName(), req.GetCollectionName(), newColl.ToCollectionSchemaPB()); err != nil {
 		return err
 	}
 

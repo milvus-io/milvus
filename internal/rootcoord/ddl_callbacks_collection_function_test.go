@@ -363,6 +363,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
 		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
+		mockMeta.EXPECT().ListRLSPolicies(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 		suite.core.meta = mockMeta
 
 		req := &milvuspb.AlterCollectionFunctionRequest{

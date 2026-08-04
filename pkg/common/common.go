@@ -346,6 +346,10 @@ const (
 	// namespace sharding
 	NamespaceShardingEnabledKey = "namespace.sharding.enabled"
 
+	// row level security
+	RLSEnabledKey = "rls.enabled"
+	RLSForceKey   = "rls.force"
+
 	// warmup related
 	WarmupKey            = "warmup"
 	WarmupScalarFieldKey = "warmup.scalarField"
@@ -645,6 +649,76 @@ func ValidateNamespaceShardingEnabledNotAltered(properties []*commonpb.KeyValueP
 		}
 		if strings.EqualFold(key, NamespaceShardingEnabledKey) {
 			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, NamespaceShardingEnabledKey)
+		}
+	}
+	return nil
+}
+
+// IsRLSEnabled extracts rls.enabled from collection properties.
+// Returns false if not set.
+func IsRLSEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	return getBoolCollectionProperty(RLSEnabledKey, kvs...)
+}
+
+// IsRLSForce extracts rls.force from collection properties.
+// Returns false if not set.
+func IsRLSForce(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	return getBoolCollectionProperty(RLSForceKey, kvs...)
+}
+
+func getBoolCollectionProperty(key string, kvs ...*commonpb.KeyValuePair) (bool, error) {
+	for _, kv := range kvs {
+		if kv.GetKey() != key {
+			continue
+		}
+		switch kv.GetValue() {
+		case "true":
+			return true, nil
+		case "false":
+			return false, nil
+		default:
+			return false, merr.WrapErrParameterInvalidMsg("invalid %s value %q, valid values: [true,false]", key, kv.GetValue())
+		}
+	}
+	return false, nil
+}
+
+// ValidateRLSProperties validates collection-level RLS properties.
+// Returns nil if the values are valid or if RLS properties are not set. Also
+// rejects case-variant keys that would be silently ignored.
+func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
+	seen := make(map[string]struct{}, 2)
+	for _, kv := range kvs {
+		switch kv.GetKey() {
+		case RLSEnabledKey:
+			if _, ok := seen[RLSEnabledKey]; ok {
+				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSEnabledKey)
+			}
+			seen[RLSEnabledKey] = struct{}{}
+			enabled, err := IsRLSEnabled(kv)
+			if err != nil {
+				return err
+			}
+			// The management plane lands before the data-plane enforcement in
+			// the stacked rollout. Keep the public switch fail-closed until the
+			// enforcement slice removes this temporary gate.
+			if enabled {
+				return merr.WrapErrParameterInvalidMsg("RLS runtime enforcement is not available yet; %s cannot be enabled", RLSEnabledKey)
+			}
+		case RLSForceKey:
+			if _, ok := seen[RLSForceKey]; ok {
+				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSForceKey)
+			}
+			seen[RLSForceKey] = struct{}{}
+			if _, err := IsRLSForce(kv); err != nil {
+				return err
+			}
+		default:
+			for _, key := range []string{RLSEnabledKey, RLSForceKey} {
+				if strings.EqualFold(kv.GetKey(), key) {
+					return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.GetKey(), key)
+				}
+			}
 		}
 	}
 	return nil

@@ -110,6 +110,38 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 
+	// rls.enabled only accepts exact lowercase boolean values.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "True"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// rls.enabled delete key must use the exact property key casing.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		DeleteKeys:     []string{"RLS.Enabled"},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// rls.force only accepts exact lowercase boolean values.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "True"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// rls.force delete key must use the exact property key casing.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		DeleteKeys:     []string{"RLS.Force"},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
 	// Alter a database that does not exist should return error.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
@@ -133,6 +165,15 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	// atler a property of a collection.
 	createCollectionAndAliasForTest(t, ctx, core, dbName, collectionName)
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 1)
+
+	// RLS can only be enabled when the collection is created.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+	})
+	alterErr := merr.CheckRPCCall(resp, err)
+	require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
 
 	for _, tc := range []struct {
 		name       string
@@ -905,6 +946,39 @@ func TestDDLCallbacksAlterCollectionProperties_MixedExternalAndRegular(t *testin
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 2)
+}
+
+func TestValidateRLSEnabledTransition(t *testing.T) {
+	properties := func(value string) []*commonpb.KeyValuePair {
+		if value == "" {
+			return nil
+		}
+		return []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: value}}
+	}
+
+	for _, tc := range []struct {
+		name       string
+		oldValue   string
+		newValue   string
+		wantReject bool
+	}{
+		{name: "missing to enabled", newValue: "true", wantReject: true},
+		{name: "disabled to enabled", oldValue: "false", newValue: "true", wantReject: true},
+		{name: "enabled stays enabled", oldValue: "true", newValue: "true"},
+		{name: "enabled to disabled", oldValue: "true", newValue: "false"},
+		{name: "enabled property deleted", oldValue: "true"},
+		{name: "disabled stays disabled", oldValue: "false", newValue: "false"},
+		{name: "missing to explicit disabled", newValue: "false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateRLSEnabledTransition(properties(tc.oldValue), properties(tc.newValue))
+			if tc.wantReject {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }
 
 func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string) {
