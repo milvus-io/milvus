@@ -35,7 +35,7 @@ TEST(DecimalSegcore, GrowingSegmentInsertAndBulkSubscript) {
     schema->set_primary_field_id(pk_fid);
 
     SegcoreConfig config = SegcoreConfig::default_config();
-    auto segment = CreateGrowingSegment(schema, nullptr, config);
+    auto segment = CreateGrowingSegment(schema, nullptr, 0, config);
 
     const int64_t num_rows = 3;
     auto insert_record = std::make_unique<segcorepb::InsertRecord>();
@@ -56,8 +56,8 @@ TEST(DecimalSegcore, GrowingSegmentInsertAndBulkSubscript) {
     dec_data->set_type(schemapb::DataType::Decimal);
     auto dec_bytes = dec_data->mutable_scalars()->mutable_bytes_data();
     dec_bytes->add_data(EncodeDecimalBytes(199900));  // 19.99
-    dec_bytes->add_data("");                           // Null placeholder
-    dec_bytes->add_data(EncodeDecimalBytes(-50));      // -0.005
+    dec_bytes->add_data("");                          // Null placeholder
+    dec_bytes->add_data(EncodeDecimalBytes(-50));     // -0.005
     dec_data->add_valid_data(true);
     dec_data->add_valid_data(false);
     dec_data->add_valid_data(true);
@@ -82,14 +82,14 @@ TEST(DecimalSegcore, GrowingSegmentInsertAndBulkSubscript) {
     ASSERT_EQ(reserved_offset, 0);
     segment->Insert(reserved_offset,
                     num_rows,
-                    insert_record->timestamps().data(),
                     insert_record->row_ids().data(),
+                    insert_record->timestamps().data(),
                     insert_record.get());
 
     // Retrieve via bulk_subscript
-    SegOffset seg_offsets[] = {SegOffset(0), SegOffset(1), SegOffset(2)};
-    auto field_data =
-        segment->bulk_subscript(decimal_fid, seg_offsets, num_rows);
+    int64_t seg_offsets[] = {0, 1, 2};
+    auto field_data = segment->bulk_subscript(
+        /*op_ctx=*/nullptr, decimal_fid, seg_offsets, num_rows);
     ASSERT_NE(field_data, nullptr);
 
     auto result_bytes = field_data->scalars().bytes_data().data();

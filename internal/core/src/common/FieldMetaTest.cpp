@@ -139,8 +139,7 @@ TEST(FieldMetaTest, DecimalParseFromRoundTrip) {
     EXPECT_TRUE(field.is_nullable());
 
     auto serialized = field.ToProto();
-    EXPECT_EQ(serialized.data_type(),
-              milvus::proto::schema::DataType::Decimal);
+    EXPECT_EQ(serialized.data_type(), milvus::proto::schema::DataType::Decimal);
     int precision_count = 0;
     int scale_count = 0;
     for (const auto& param : serialized.type_params()) {

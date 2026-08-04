@@ -139,9 +139,8 @@ VectorBase::set_data_raw(ssize_t element_offset,
         }
         case DataType::DECIMAL: {
             auto& bytes_data = FIELD_DATA(data, bytes);
-            bool has_valid_data =
-                field_meta.is_nullable() &&
-                data->valid_data_size() == bytes_data.size();
+            bool has_valid_data = field_meta.is_nullable() &&
+                                  data->valid_data_size() == bytes_data.size();
             std::vector<int64_t> data_raw(bytes_data.size());
             for (int i = 0; i < bytes_data.size(); ++i) {
                 if (has_valid_data && !data->valid_data(i)) {
@@ -150,8 +149,7 @@ VectorBase::set_data_raw(ssize_t element_offset,
                 }
                 data_raw[i] = DecodeDecimalBytes(bytes_data[i]);
             }
-            return set_data_raw(
-                element_offset, data_raw.data(), element_count);
+            return set_data_raw(element_offset, data_raw.data(), element_count);
         }
         case DataType::STRING:
         case DataType::VARCHAR:

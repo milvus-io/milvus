@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -3439,8 +3440,9 @@ func TestUpsertTask_queryPreExecute_DecimalField(t *testing.T) {
 		},
 	}
 
-	mockQueryResult := &retrieveresult.RetrieveResult{
-		AllFieldsData: []*schemapb.FieldData{
+	mockQueryResult := &milvuspb.QueryResults{
+		Status: merr.Success(),
+		FieldsData: []*schemapb.FieldData{
 			{
 				FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}},
