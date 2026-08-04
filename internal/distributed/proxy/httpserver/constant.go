@@ -90,6 +90,8 @@ const (
 	GetProgressAction               = "get_progress" // deprecated, keep it for compatibility, use `/v2/vectordb/jobs/import/describe` instead
 	RestoreExternalAction           = "restore_external"
 	RestoreAction                   = "restore"
+	PinAction                       = "pin"
+	UnpinAction                     = "unpin"
 	ExportAction                    = "export"
 	DescribeExportAction            = "export/describe"
 	RefreshAction                   = "refresh"

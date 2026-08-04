@@ -134,3 +134,43 @@ func (h *HandlersV2) restoreSnapshot(ctx context.Context, c *gin.Context, anyReq
 	}
 	return resp, err
 }
+
+func (h *HandlersV2) pinSnapshotData(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*PinSnapshotDataReq)
+	req := &milvuspb.PinSnapshotDataRequest{
+		Name:           httpReq.SnapshotName,
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		TtlSeconds:     httpReq.TTLSeconds,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/PinSnapshotData", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.PinSnapshotData(reqCtx, req.(*milvuspb.PinSnapshotDataRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{
+				"pinId": resp.(*milvuspb.PinSnapshotDataResponse).GetPinId(),
+			},
+		})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) unpinSnapshotData(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*UnpinSnapshotDataReq)
+	req := &milvuspb.UnpinSnapshotDataRequest{
+		PinId: httpReq.PinID,
+	}
+	c.Set(ContextRequest, req)
+
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/UnpinSnapshotData", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.UnpinSnapshotData(reqCtx, req.(*milvuspb.UnpinSnapshotDataRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}

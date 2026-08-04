@@ -2796,6 +2796,8 @@ type externalCollectionRESTProxy struct {
 	listSnapshotsReq           *milvuspb.ListSnapshotsRequest
 	describeSnapshotReq        *milvuspb.DescribeSnapshotRequest
 	restoreSnapshotReq         *milvuspb.RestoreSnapshotRequest
+	pinSnapshotDataReq         *milvuspb.PinSnapshotDataRequest
+	unpinSnapshotDataReq       *milvuspb.UnpinSnapshotDataRequest
 }
 
 func (m *externalCollectionRESTProxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
@@ -2975,6 +2977,19 @@ func (m *externalCollectionRESTProxy) RestoreSnapshot(ctx context.Context, reque
 		Status: merr.Success(),
 		JobId:  200,
 	}, nil
+}
+
+func (m *externalCollectionRESTProxy) PinSnapshotData(ctx context.Context, request *milvuspb.PinSnapshotDataRequest) (*milvuspb.PinSnapshotDataResponse, error) {
+	m.pinSnapshotDataReq = request
+	return &milvuspb.PinSnapshotDataResponse{
+		Status: merr.Success(),
+		PinId:  300,
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) UnpinSnapshotData(ctx context.Context, request *milvuspb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	m.unpinSnapshotDataReq = request
+	return merr.Success(), nil
 }
 
 func TestFieldSchemaGetProtoWithExternalField(t *testing.T) {
@@ -3270,6 +3285,86 @@ func TestRestoreSnapshotRESTV2(t *testing.T) {
 	assert.Equal(t, "restored_books", proxy.restoreSnapshotReq.GetTargetCollectionName())
 	assert.Equal(t, "snapshot_1", proxy.restoreSnapshotReq.GetName())
 	assert.False(t, proxy.restoreSnapshotReq.GetRewriteData())
+}
+
+func TestPinSnapshotDataRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, PinAction), bytes.NewReader([]byte(`{
+		"dbName": "default",
+		"collectionName": "source_books",
+		"snapshotName": "snapshot_1",
+		"ttlSeconds": 3600
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, int64(300), gjson.Get(w.Body.String(), "data.pinId").Int())
+	assert.Equal(t, "default", proxy.pinSnapshotDataReq.GetDbName())
+	assert.Equal(t, "source_books", proxy.pinSnapshotDataReq.GetCollectionName())
+	assert.Equal(t, "snapshot_1", proxy.pinSnapshotDataReq.GetName())
+	assert.Equal(t, int64(3600), proxy.pinSnapshotDataReq.GetTtlSeconds())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, UnpinAction), bytes.NewReader([]byte(`{
+		"pinId": 300
+	}`)))
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+	assert.Equal(t, int64(300), proxy.unpinSnapshotDataReq.GetPinId())
+}
+
+func TestSnapshotRESTV2Validation(t *testing.T) {
+	paramtable.Init()
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+
+	tests := []struct {
+		name   string
+		action string
+		body   string
+	}{
+		{
+			name:   "missing snapshot name",
+			action: CreateAction,
+			body:   `{"collectionName":"source_books"}`,
+		},
+		{
+			name:   "negative compaction protection",
+			action: CreateAction,
+			body:   `{"collectionName":"source_books","snapshotName":"snapshot_1","compactionProtectionSeconds":-1}`,
+		},
+		{
+			name:   "negative pin TTL",
+			action: PinAction,
+			body:   `{"collectionName":"source_books","snapshotName":"snapshot_1","ttlSeconds":-1}`,
+		},
+		{
+			name:   "invalid pin ID",
+			action: UnpinAction,
+			body:   `{"pinId":0}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, test.action), bytes.NewReader([]byte(test.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.NotEqual(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+		})
+	}
 }
 
 func TestRestoreExternalSnapshotRESTV2(t *testing.T) {
