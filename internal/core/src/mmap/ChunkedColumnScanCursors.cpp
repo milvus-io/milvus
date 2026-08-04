@@ -25,6 +25,33 @@ namespace milvus {
 
 namespace detail {
 
+void
+ValidateScanPlan(const ChunkedColumnInterface::ScanPlan& plan,
+                 int64_t prepared_start,
+                 int64_t prepared_end) {
+    const auto& requested = plan.requested_range;
+    AssertInfo(requested.start >= prepared_start &&
+                   requested.start <= requested.end &&
+                   requested.end <= prepared_end,
+               "scan plan range [{}, {}) outside prepared range [{}, {})",
+               requested.start,
+               requested.end,
+               prepared_start,
+               prepared_end);
+    auto previous_end = requested.start;
+    for (const auto& range : plan.skip_ranges) {
+        AssertInfo(range.start >= previous_end && range.start < range.end &&
+                       range.end <= requested.end,
+                   "invalid scan skip range [{}, {}) after {} in [{}, {})",
+                   range.start,
+                   range.end,
+                   previous_end,
+                   requested.start,
+                   requested.end);
+        previous_end = range.end;
+    }
+}
+
 class PinnedScanInput final {
  public:
     PinnedScanInput(int64_t first_chunk_id,
@@ -81,24 +108,25 @@ PinScanInput(const ChunkedColumnInterface* column,
 class FixedWidthDataScanCursor final
     : public ChunkedColumnInterface::ScanCursor {
  public:
-    FixedWidthDataScanCursor(const ChunkedColumnInterface* column,
-                             std::shared_ptr<PinnedScanInput> input,
-                             int64_t start_offset,
-                             int64_t length,
-                             DataType data_type,
-                             ChunkedColumnInterface::ScanProjection projection,
-                             ChunkedColumnInterface::ScanValueKind value_kind)
+    FixedWidthDataScanCursor(
+        const ChunkedColumnInterface* column,
+        std::shared_ptr<PinnedScanInput> input,
+        int64_t start_offset,
+        int64_t length,
+        DataType data_type,
+        ChunkedColumnInterface::ScanProjection projection,
+        ChunkedColumnInterface::ScanValueKind value_kind,
+        std::vector<ChunkedColumnInterface::ScanRowRange> skip_ranges)
         : column_(column),
           input_(std::move(input)),
           data_type_(data_type),
           projection_(projection),
           value_kind_(value_kind),
           scan_pos_(start_offset),
-          scan_end_(start_offset + length) {
+          scan_end_(start_offset + length),
+          skip_ranges_(std::move(skip_ranges)) {
         if (start_offset < scan_end_) {
-            auto [chunk_id, offset] = column_->GetChunkIDByOffset(start_offset);
-            current_chunk_id_ = static_cast<int64_t>(chunk_id);
-            current_chunk_offset_ = static_cast<int64_t>(offset);
+            SetChunkPosition(start_offset);
         }
     }
 
@@ -123,6 +151,10 @@ class FixedWidthDataScanCursor final
         }
 
         while (scan_pos_ < scan_end_) {
+            AdvancePastSkippedRanges();
+            if (scan_pos_ >= scan_end_) {
+                return false;
+            }
             const auto rows = column_->chunk_row_nums(current_chunk_id_);
             if (current_chunk_offset_ >= rows) {
                 ++current_chunk_id_;
@@ -132,8 +164,17 @@ class FixedWidthDataScanCursor final
 
             const auto rows_left_in_chunk = rows - current_chunk_offset_;
             const auto rows_left_in_scan = scan_end_ - scan_pos_;
-            const auto rows_to_return = std::min<int64_t>(
-                {rows_left_in_chunk, rows_left_in_scan, max_rows});
+            const auto rows_before_skip =
+                skip_index_ < skip_ranges_.size()
+                    ? skip_ranges_[skip_index_].start - scan_pos_
+                    : rows_left_in_scan;
+            const auto rows_to_return = std::min<int64_t>({rows_left_in_chunk,
+                                                           rows_left_in_scan,
+                                                           rows_before_skip,
+                                                           max_rows});
+            AssertInfo(rows_to_return > 0,
+                       "invalid fixed-width scan batch at row {}",
+                       scan_pos_);
 
             if (projection_ == ChunkedColumnInterface::ScanProjection::NoData &&
                 !column_->IsNullable()) {
@@ -189,6 +230,34 @@ class FixedWidthDataScanCursor final
     }
 
  private:
+    void
+    SetChunkPosition(int64_t position) {
+        auto [chunk_id, offset] = column_->GetChunkIDByOffset(position);
+        current_chunk_id_ = static_cast<int64_t>(chunk_id);
+        current_chunk_offset_ = static_cast<int64_t>(offset);
+    }
+
+    void
+    AdvancePastSkippedRanges() {
+        bool advanced = false;
+        while (skip_index_ < skip_ranges_.size()) {
+            const auto& range = skip_ranges_[skip_index_];
+            if (range.end <= scan_pos_) {
+                ++skip_index_;
+                continue;
+            }
+            if (range.start > scan_pos_) {
+                break;
+            }
+            scan_pos_ = range.end;
+            ++skip_index_;
+            advanced = true;
+        }
+        if (advanced && scan_pos_ < scan_end_) {
+            SetChunkPosition(scan_pos_);
+        }
+    }
+
     const ChunkedColumnInterface* column_;
     std::shared_ptr<PinnedScanInput> input_;
     DataType data_type_;
@@ -196,26 +265,31 @@ class FixedWidthDataScanCursor final
     ChunkedColumnInterface::ScanValueKind value_kind_;
     int64_t scan_pos_;
     int64_t scan_end_;
+    std::vector<ChunkedColumnInterface::ScanRowRange> skip_ranges_;
+    size_t skip_index_{0};
     int64_t current_chunk_id_{0};
     int64_t current_chunk_offset_{0};
 };
 
 class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
  public:
-    ViewDataScanCursor(const ChunkedColumnInterface* column,
-                       std::shared_ptr<PinnedScanInput> input,
-                       int64_t start_offset,
-                       int64_t length,
-                       DataType data_type,
-                       ChunkedColumnInterface::ScanProjection projection,
-                       ChunkedColumnInterface::ScanValueKind value_kind)
+    ViewDataScanCursor(
+        const ChunkedColumnInterface* column,
+        std::shared_ptr<PinnedScanInput> input,
+        int64_t start_offset,
+        int64_t length,
+        DataType data_type,
+        ChunkedColumnInterface::ScanProjection projection,
+        ChunkedColumnInterface::ScanValueKind value_kind,
+        std::vector<ChunkedColumnInterface::ScanRowRange> skip_ranges)
         : column_(column),
           input_(std::move(input)),
           data_type_(data_type),
           projection_(projection),
           value_kind_(value_kind),
           scan_pos_(start_offset),
-          scan_end_(start_offset + length) {
+          scan_end_(start_offset + length),
+          skip_ranges_(std::move(skip_ranges)) {
     }
 
     int64_t
@@ -234,10 +308,19 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
             return false;
         }
 
+        AdvancePastSkippedRanges();
+        if (scan_pos_ >= scan_end_) {
+            return false;
+        }
+
         auto [chunk_id, offset] = column_->GetChunkIDByOffset(scan_pos_);
         const auto chunk_rows = column_->chunk_row_nums(chunk_id);
         auto rows_to_return = std::min<int64_t>(
             chunk_rows - static_cast<int64_t>(offset), scan_end_ - scan_pos_);
+        if (skip_index_ < skip_ranges_.size()) {
+            rows_to_return = std::min(
+                rows_to_return, skip_ranges_[skip_index_].start - scan_pos_);
+        }
         rows_to_return = std::min(rows_to_return, max_rows);
         AssertInfo(rows_to_return > 0,
                    "invalid view data scan batch at offset {}",
@@ -329,6 +412,22 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
         out->owner.reset();
         out->row_id_start = 0;
         out->size = 0;
+    }
+
+    void
+    AdvancePastSkippedRanges() {
+        while (skip_index_ < skip_ranges_.size()) {
+            const auto& range = skip_ranges_[skip_index_];
+            if (range.end <= scan_pos_) {
+                ++skip_index_;
+                continue;
+            }
+            if (range.start > scan_pos_) {
+                break;
+            }
+            scan_pos_ = range.end;
+            ++skip_index_;
+        }
     }
 
     void
@@ -457,6 +556,8 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
     ChunkedColumnInterface::ScanValueKind value_kind_;
     int64_t scan_pos_;
     int64_t scan_end_;
+    std::vector<ChunkedColumnInterface::ScanRowRange> skip_ranges_;
+    size_t skip_index_{0};
 };
 
 class PreparedDataScan final : public ChunkedColumnInterface::PreparedScan {
@@ -472,6 +573,7 @@ class PreparedDataScan final : public ChunkedColumnInterface::PreparedScan {
           input_(std::move(input)),
           start_(start_offset),
           end_(start_offset + length),
+          plan_(ChunkedColumnInterface::ScanPlan::Full(start_offset, length)),
           data_type_(data_type),
           projection_(projection),
           value_kind_(value_kind) {
@@ -487,31 +589,39 @@ class PreparedDataScan final : public ChunkedColumnInterface::PreparedScan {
         return end_;
     }
 
+    const ChunkedColumnInterface::ScanPlan&
+    Plan() const override {
+        return plan_;
+    }
+
     std::unique_ptr<ChunkedColumnInterface::ScanCursor>
-    Seek(int64_t position) const override {
-        AssertInfo(position >= start_ && position <= end_,
-                   "data scan cursor position {} outside prepared range [{}, {})",
-                   position,
-                   start_,
-                   end_);
-        const auto length = end_ - position;
-        if (value_kind_ ==
-            ChunkedColumnInterface::ScanValueKind::FixedWidth) {
+    Open(const ChunkedColumnInterface::ScanPlan& plan,
+         ChunkedColumnInterface::ScanProjection projection) const override {
+        ValidateScanPlan(plan, start_, end_);
+        AssertInfo(
+            projection_ == ChunkedColumnInterface::ScanProjection::Data ||
+                projection == ChunkedColumnInterface::ScanProjection::NoData,
+            "validity-only prepared scan cannot open a data cursor");
+        const auto start = plan.requested_range.start;
+        const auto length = plan.requested_range.end - start;
+        if (value_kind_ == ChunkedColumnInterface::ScanValueKind::FixedWidth) {
             return std::make_unique<FixedWidthDataScanCursor>(column_,
                                                               input_,
-                                                              position,
+                                                              start,
                                                               length,
                                                               data_type_,
-                                                              projection_,
-                                                              value_kind_);
+                                                              projection,
+                                                              value_kind_,
+                                                              plan.skip_ranges);
         }
         return std::make_unique<ViewDataScanCursor>(column_,
                                                     input_,
-                                                    position,
+                                                    start,
                                                     length,
                                                     data_type_,
-                                                    projection_,
-                                                    value_kind_);
+                                                    projection,
+                                                    value_kind_,
+                                                    plan.skip_ranges);
     }
 
  private:
@@ -519,6 +629,7 @@ class PreparedDataScan final : public ChunkedColumnInterface::PreparedScan {
     std::shared_ptr<PinnedScanInput> input_;
     int64_t start_;
     int64_t end_;
+    ChunkedColumnInterface::ScanPlan plan_;
     DataType data_type_;
     ChunkedColumnInterface::ScanProjection projection_;
     ChunkedColumnInterface::ScanValueKind value_kind_;
@@ -612,7 +723,9 @@ ChunkedColumnInterface::ScanResult
 ChunkedColumnInterface::Scan(milvus::OpContext* op_ctx,
                              const ScanOptions& options) const {
     auto prepared = PrepareScan(op_ctx, options);
-    return prepared == nullptr ? nullptr : prepared->Seek(options.start_offset);
+    return prepared == nullptr
+               ? nullptr
+               : prepared->Open(prepared->Plan(), options.projection);
 }
 
 ChunkedColumnInterface::PreparedScanResult

@@ -377,11 +377,6 @@ class SegmentExpr : public Expr {
     }
 
     void
-    CloseDataScanCursor() {
-        data_scan_cursor_.reset();
-    }
-
-    void
     InvalidateDataChunkCursor() {
         data_chunk_cursor_global_pos_ = -1;
     }
@@ -430,12 +425,10 @@ class SegmentExpr : public Expr {
         current_data_global_pos_ +=
             std::min(batch_size_, active_count_ - current_data_global_pos_);
         // MoveCursor() means this expression was short-circuited for the
-        // current execution batch. The global position is authoritative;
-        // backend-specific cursors are caches and are rebuilt on the next read.
+        // current execution batch. No scan resources were opened for the
+        // skipped operator window; the next evaluated window prepares its own
+        // plan/pins/cursor.
         InvalidateDataChunkCursor();
-        if (data_access_mode_ == DataAccessMode::Scan) {
-            CloseDataScanCursor();
-        }
     }
 
     void
@@ -499,94 +492,45 @@ class SegmentExpr : public Expr {
         return segment_->GetDataScanResources(field_id_);
     }
 
-    void
-    OpenDataScanCursor(int64_t position) {
-        AssertInfo(data_access_mode_ == DataAccessMode::Scan,
-                   "cannot open data scan cursor in mode {}",
-                   static_cast<int>(data_access_mode_));
-        AssertInfo(data_scan_column_ != nullptr,
-                   "data scan column is not initialized");
-        AssertInfo(data_prepared_scan_ != nullptr,
-                   "prepared data scan is not initialized");
-        data_scan_cursor_ = data_prepared_scan_->Seek(position);
-        AssertInfo(data_scan_cursor_ != nullptr,
-                   "data scan backend cannot seek field {} to row {}",
-                   field_id_.get(),
-                   position);
-        AssertInfo(data_scan_cursor_->Position() == position,
-                   "data scan cursor opened at {}, expected {}",
-                   data_scan_cursor_->Position(),
-                   position);
-    }
-
     template <typename T>
-    bool
-    EnsureDataScanBackend(ChunkedColumnInterface::ScanProjection projection =
+    ChunkedColumnInterface::PreparedScanResult
+    PrepareDataScanWindow(int64_t start,
+                          int64_t length,
+                          ChunkedColumnInterface::ScanProjection projection =
                               ChunkedColumnInterface::ScanProjection::Data) {
         const auto value_kind = DataScanValueKind<T>();
         if (data_access_mode_ == DataAccessMode::Chunk) {
-            return false;
+            return nullptr;
         }
         if (data_access_mode_ == DataAccessMode::Scan) {
             AssertInfo(data_scan_projection_ == projection &&
                            data_scan_value_kind_ == value_kind,
                        "data scan contract changed after backend selection");
-            return true;
+        } else {
+            std::tie(data_scan_column_, data_scan_skip_index_) =
+                CaptureDataScanResources();
+            if (data_scan_column_ == nullptr) {
+                data_access_mode_ = DataAccessMode::Chunk;
+                return nullptr;
+            }
+            data_scan_projection_ = projection;
+            data_scan_value_kind_ = value_kind;
         }
 
-        std::tie(data_scan_column_, data_scan_skip_index_) =
-            CaptureDataScanResources();
-        if (data_scan_column_ == nullptr) {
-            data_access_mode_ = DataAccessMode::Chunk;
-            return false;
-        }
-
-        data_scan_projection_ = projection;
-        data_scan_value_kind_ = value_kind;
         auto options = ChunkedColumnInterface::ScanOptions::ForData(
-            current_data_global_pos_,
-            active_count_ - current_data_global_pos_,
-            projection,
-            value_kind);
-        data_prepared_scan_ = data_scan_column_->PrepareScan(op_ctx_, options);
-        if (data_prepared_scan_ == nullptr) {
+            start, length, projection, value_kind);
+        auto prepared = data_scan_column_->PrepareScan(op_ctx_, options);
+        if (prepared == nullptr) {
+            AssertInfo(data_access_mode_ != DataAccessMode::Scan,
+                       "data scan backend stopped supporting field {}",
+                       field_id_.get());
             data_scan_skip_index_.reset();
             data_scan_column_.reset();
             data_access_mode_ = DataAccessMode::Chunk;
-            return false;
+            return nullptr;
         }
-        data_scan_cursor_ = data_prepared_scan_->Seek(current_data_global_pos_);
-        AssertInfo(data_scan_cursor_ != nullptr,
-                   "prepared data scan cannot seek field {} to row {}",
-                   field_id_.get(),
-                   current_data_global_pos_);
         data_access_mode_ = DataAccessMode::Scan;
-        AssertInfo(data_scan_cursor_->Position() == current_data_global_pos_,
-                   "data scan cursor opened at {}, expected {}",
-                   data_scan_cursor_->Position(),
-                   current_data_global_pos_);
-        return true;
-    }
-
-    template <typename T>
-    bool
-    EnsureDataScanCursorAt(int64_t position,
-                           ChunkedColumnInterface::ScanProjection projection =
-                               ChunkedColumnInterface::ScanProjection::Data) {
-        if (!EnsureDataScanBackend<T>(projection)) {
-            return false;
-        }
-        if (data_scan_cursor_ == nullptr) {
-            OpenDataScanCursor(position);
-        } else if (data_scan_cursor_->Position() < position) {
-            CloseDataScanCursor();
-            OpenDataScanCursor(position);
-        }
-        AssertInfo(data_scan_cursor_->Position() == position,
-                   "data scan cursor at {}, expected {}",
-                   data_scan_cursor_->Position(),
-                   position);
-        return true;
+        return prepared;
     }
 
     static void
@@ -1867,119 +1811,177 @@ class SegmentExpr : public Expr {
         TargetBitmapView res,
         TargetBitmapView valid_res,
         const ValTypes&... values) {
-        if (!EnsureDataScanBackend<T>()) {
+        const auto real_batch_size = GetNextBatchSize();
+        const auto window_start = current_data_global_pos_;
+        const auto window_end = window_start + real_batch_size;
+        auto prepared = PrepareDataScanWindow<T>(
+            window_start,
+            real_batch_size,
+            ChunkedColumnInterface::ScanProjection::Data);
+        if (prepared == nullptr) {
             return -1;
         }
+        const auto& plan = prepared->Plan();
+        AssertInfo(plan.requested_range.start == window_start &&
+                       plan.requested_range.end == window_end,
+                   "prepared scan plan [{}, {}) does not match window [{}, {})",
+                   plan.requested_range.start,
+                   plan.requested_range.end,
+                   window_start,
+                   window_end);
+        auto cursor =
+            prepared->Open(plan, ChunkedColumnInterface::ScanProjection::Data);
+        AssertInfo(cursor != nullptr,
+                   "prepared data scan cannot open field {} window [{}, {})",
+                   field_id_.get(),
+                   window_start,
+                   window_end);
 
-        int64_t processed_size = 0;
-        const auto real_batch_size = GetNextBatchSize();
-        AssertInfo(data_scan_skip_index_ != nullptr,
-                   "data scan skip index is not initialized");
-
-        while (processed_size < real_batch_size) {
-            const auto expected_row = current_data_global_pos_ + processed_size;
-            AssertInfo(EnsureDataScanCursorAt<T>(expected_row),
-                       "data scan backend changed while processing");
-            ChunkedColumnInterface::ScanBatch batch;
-            const auto remaining = real_batch_size - processed_size;
-            if (!data_scan_cursor_->Next(remaining, &batch)) {
-                break;
-            }
-            AssertInfo(batch.size > 0 && batch.size <= remaining,
-                       "invalid data scan batch size {}, remaining {}",
-                       batch.size,
-                       remaining);
-            const auto row = batch.row_id_start;
-            AssertInfo(row == expected_row,
-                       "data scan row mismatch, got {}, expected {}",
-                       row,
-                       expected_row);
-
-            const auto size = batch.size;
-            auto [chunk_id, _] = data_scan_column_->GetChunkIDByOffset(row);
-            const auto chunk_end =
-                data_scan_column_->GetNumRowsUntilChunk(chunk_id) +
-                data_scan_column_->chunk_row_nums(chunk_id);
-            AssertInfo(row + size <= chunk_end,
-                       "data scan batch [{}, {}) crosses chunk {} end {}",
-                       row,
-                       row + size,
-                       chunk_id,
-                       chunk_end);
-            const auto* data = batch.values.data_as<T>();
-            const auto* valid_data = batch.validity;
-            const bool skipped =
-                skip_func &&
-                skip_func(*data_scan_skip_index_, field_id_, chunk_id);
-
-            auto make_segment_offsets = [&]() {
+        const auto evaluate_batch = [&](const T* data,
+                                        const bool* valid_data,
+                                        int64_t row,
+                                        int64_t size) {
+            const auto output_offset = row - window_start;
+            AssertInfo(
+                output_offset >= 0 && output_offset + size <= real_batch_size,
+                "scan output range [{}, {}) outside window [{}, {})",
+                row,
+                row + size,
+                window_start,
+                window_end);
+            if constexpr (NeedSegmentOffsets) {
                 std::vector<int32_t> segment_offsets_array(size);
                 for (int64_t i = 0; i < size; ++i) {
                     segment_offsets_array[i] = static_cast<int32_t>(row + i);
                 }
-                return segment_offsets_array;
-            };
-
-            if (!skipped) {
-                if constexpr (NeedSegmentOffsets) {
-                    auto segment_offsets_array = make_segment_offsets();
-                    func(data,
-                         valid_data,
-                         nullptr,
-                         segment_offsets_array.data(),
-                         size,
-                         res + processed_size,
-                         valid_res + processed_size,
-                         values...);
-                } else {
-                    func(data,
-                         valid_data,
-                         nullptr,
-                         size,
-                         res + processed_size,
-                         valid_res + processed_size,
-                         values...);
-                }
+                func(data,
+                     valid_data,
+                     nullptr,
+                     segment_offsets_array.data(),
+                     size,
+                     res + output_offset,
+                     valid_res + output_offset,
+                     values...);
             } else {
+                func(data,
+                     valid_data,
+                     nullptr,
+                     size,
+                     res + output_offset,
+                     valid_res + output_offset,
+                     values...);
+            }
+        };
+
+        const auto evaluate_no_match = [&](int64_t start, int64_t end) {
+            AssertInfo(start < end,
+                       "invalid no-match scan range [{}, {})",
+                       start,
+                       end);
+            auto validity_cursor = prepared->Open(
+                ChunkedColumnInterface::ScanPlan::Full(start, end - start),
+                ChunkedColumnInterface::ScanProjection::NoData);
+            AssertInfo(validity_cursor != nullptr,
+                       "prepared scan cannot open validity range [{}, {})",
+                       start,
+                       end);
+            auto position = start;
+            ChunkedColumnInterface::ScanBatch validity_batch;
+            while (validity_cursor->Next(end - position, &validity_batch)) {
+                AssertInfo(validity_batch.row_id_start == position &&
+                               validity_batch.size > 0 &&
+                               position + validity_batch.size <= end,
+                           "invalid no-match validity batch [{}, {}) at {}",
+                           validity_batch.row_id_start,
+                           validity_batch.row_id_start + validity_batch.size,
+                           position);
+                const auto output_offset = position - window_start;
+                ApplyScanValidity(validity_batch,
+                                  0,
+                                  res + output_offset,
+                                  valid_res + output_offset,
+                                  validity_batch.size);
+                evaluate_batch(nullptr, nullptr, position, validity_batch.size);
+                position += validity_batch.size;
+            }
+            AssertInfo(position == end && validity_cursor->Position() == end,
+                       "no-match validity scan stopped at {}, expected {}",
+                       position,
+                       end);
+        };
+
+        auto logical_position = window_start;
+        while (logical_position < window_end) {
+            ChunkedColumnInterface::ScanBatch batch;
+            if (!cursor->Next(window_end - logical_position, &batch)) {
+                AssertInfo(
+                    cursor->Position() >= logical_position &&
+                        cursor->Position() <= window_end,
+                    "data scan cursor stopped at {}, logical position {}",
+                    cursor->Position(),
+                    logical_position);
+                if (cursor->Position() > logical_position) {
+                    evaluate_no_match(logical_position, cursor->Position());
+                    logical_position = cursor->Position();
+                }
+                break;
+            }
+            AssertInfo(batch.size > 0 &&
+                           batch.row_id_start >= logical_position &&
+                           batch.row_id_start + batch.size <= window_end,
+                       "invalid data scan batch [{}, {}) after {}",
+                       batch.row_id_start,
+                       batch.row_id_start + batch.size,
+                       logical_position);
+            if (batch.row_id_start > logical_position) {
+                evaluate_no_match(logical_position, batch.row_id_start);
+            }
+            AssertInfo(!batch.values.empty(),
+                       "evaluated data scan batch [{}, {}) has no values",
+                       batch.row_id_start,
+                       batch.row_id_start + batch.size);
+            bool legacy_skipped = false;
+            if (data_scan_column_->UseLegacyDataSkipIndex() && skip_func) {
+                AssertInfo(data_scan_skip_index_ != nullptr,
+                           "legacy data skip index is not initialized");
+                auto [chunk_id, _] =
+                    data_scan_column_->GetChunkIDByOffset(batch.row_id_start);
+                const auto chunk_end =
+                    data_scan_column_->GetNumRowsUntilChunk(chunk_id) +
+                    data_scan_column_->chunk_row_nums(chunk_id);
+                AssertInfo(batch.row_id_start + batch.size <= chunk_end,
+                           "legacy skip batch [{}, {}) crosses chunk {} end {}",
+                           batch.row_id_start,
+                           batch.row_id_start + batch.size,
+                           chunk_id,
+                           chunk_end);
+                legacy_skipped =
+                    skip_func(*data_scan_skip_index_, field_id_, chunk_id);
+            }
+            if (legacy_skipped) {
+                const auto output_offset = batch.row_id_start - window_start;
                 ApplyScanValidity(batch,
                                   0,
-                                  res + processed_size,
-                                  valid_res + processed_size,
-                                  size);
-                if constexpr (NeedSegmentOffsets) {
-                    auto segment_offsets_array = make_segment_offsets();
-                    func(nullptr,
-                         nullptr,
-                         nullptr,
-                         segment_offsets_array.data(),
-                         size,
-                         res + processed_size,
-                         valid_res + processed_size,
-                         values...);
-                } else {
-                    func(nullptr,
-                         nullptr,
-                         nullptr,
-                         size,
-                         res + processed_size,
-                         valid_res + processed_size,
-                         values...);
-                }
+                                  res + output_offset,
+                                  valid_res + output_offset,
+                                  batch.size);
+                evaluate_batch(
+                    nullptr, nullptr, batch.row_id_start, batch.size);
+            } else {
+                evaluate_batch(batch.values.data_as<T>(),
+                               batch.validity,
+                               batch.row_id_start,
+                               batch.size);
             }
-
-            processed_size += size;
+            logical_position = batch.row_id_start + batch.size;
         }
 
-        AssertInfo(processed_size == real_batch_size,
-                   "data scan processed {} rows, expected {}",
-                   processed_size,
-                   real_batch_size);
-        current_data_global_pos_ += processed_size;
-        AssertInfo(data_scan_cursor_->Position() == current_data_global_pos_,
-                   "data scan cursor at {}, execution at {}",
-                   data_scan_cursor_->Position(),
-                   current_data_global_pos_);
-        return processed_size;
+        AssertInfo(logical_position == window_end,
+                   "data scan processed through {}, expected {}",
+                   logical_position,
+                   window_end);
+        current_data_global_pos_ = window_end;
+        return real_batch_size;
     }
 
     template <typename T,
@@ -2542,24 +2544,33 @@ class SegmentExpr : public Expr {
         const auto batch_size = GetNextBatchSize();
         TargetBitmap valid_result(batch_size);
         valid_result.set();
-        if (!EnsureDataScanBackend<T>(
-                ChunkedColumnInterface::ScanProjection::NoData)) {
+        const auto window_start = current_data_global_pos_;
+        auto prepared = PrepareDataScanWindow<T>(
+            window_start,
+            batch_size,
+            ChunkedColumnInterface::ScanProjection::NoData);
+        if (prepared == nullptr) {
             AssertInfo(!segment_->is_chunked(),
                        "sealed field {} does not provide a validity scan "
                        "cursor",
                        field_id_.get());
             return ProcessGrowingDataChunksForValid();
         }
+        auto cursor = prepared->Open(
+            ChunkedColumnInterface::ScanPlan::Full(window_start, batch_size),
+            ChunkedColumnInterface::ScanProjection::NoData);
+        AssertInfo(
+            cursor != nullptr,
+            "prepared validity scan cannot open field {} window [{}, {})",
+            field_id_.get(),
+            window_start,
+            window_start + batch_size);
         int64_t processed_size = 0;
         while (processed_size < batch_size) {
-            const auto expected_row = current_data_global_pos_ + processed_size;
-            AssertInfo(EnsureDataScanCursorAt<T>(
-                           expected_row,
-                           ChunkedColumnInterface::ScanProjection::NoData),
-                       "validity scan backend changed while processing");
+            const auto expected_row = window_start + processed_size;
             ChunkedColumnInterface::ScanBatch batch;
             const auto remaining = batch_size - processed_size;
-            if (!data_scan_cursor_->Next(remaining, &batch)) {
+            if (!cursor->Next(remaining, &batch)) {
                 break;
             }
             AssertInfo(batch.row_id_start == expected_row && batch.size > 0 &&
@@ -2580,10 +2591,10 @@ class SegmentExpr : public Expr {
                    "validity scan processed {} rows, expected {}",
                    processed_size,
                    batch_size);
-        current_data_global_pos_ += processed_size;
-        AssertInfo(data_scan_cursor_->Position() == current_data_global_pos_,
+        current_data_global_pos_ = window_start + processed_size;
+        AssertInfo(cursor->Position() == current_data_global_pos_,
                    "validity scan cursor at {}, execution at {}",
-                   data_scan_cursor_->Position(),
+                   cursor->Position(),
                    current_data_global_pos_);
         return valid_result;
     }
@@ -3128,15 +3139,10 @@ class SegmentExpr : public Expr {
     DataAccessMode data_access_mode_{DataAccessMode::Uninitialized};
     // ScanCursor implementations retain a raw column pointer. Once Scan is
     // selected, keep the captured column generation for the expression's full
-    // lifetime so a short-circuit seek never observes a replacement column.
+    // lifetime, while each evaluated operator window owns its own prepared
+    // pins/cursor.
     std::shared_ptr<ChunkedColumnInterface> data_scan_column_{nullptr};
     std::shared_ptr<const SkipIndex> data_scan_skip_index_{nullptr};
-    // Owns the planned/pinned scan input independently from the active cursor.
-    // A conjunction short-circuit may discard the cursor and later seek while
-    // keeping this prepared scan alive, so seeking never pins cells again.
-    ChunkedColumnInterface::PreparedScanResult data_prepared_scan_{nullptr};
-    std::unique_ptr<ChunkedColumnInterface::ScanCursor> data_scan_cursor_{
-        nullptr};
     ChunkedColumnInterface::ScanProjection data_scan_projection_{
         ChunkedColumnInterface::ScanProjection::Data};
     ChunkedColumnInterface::ScanValueKind data_scan_value_kind_{

@@ -851,9 +851,12 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,
-           PreparedScanSeeksWithoutRepinningChunks) {
-    ColumnSpec spec{{3, 2}, {}, /*nullable=*/false};
+           PreparedScanSkipsPlannedRangesAndReusesPinsForValidity) {
+    ColumnSpec spec{{3, 2},
+                    {{true, false, true}, {false, true}},
+                    /*nullable=*/true};
     spec.data_type = DataType::INT32;
+    spec.dense_nullable_payload = true;
     auto fx = TypeParam::Create(spec);
 
     auto prepared = fx.column->PrepareScan(
@@ -862,26 +865,66 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     ASSERT_EQ(fx.pin_requests->size(), 1u);
     EXPECT_EQ(fx.pin_requests->front(), (std::vector<int64_t>{0, 1}));
 
-    auto first = prepared->Seek(0);
-    ASSERT_NE(first, nullptr);
+    auto plan = ChunkedColumnInterface::ScanPlan::Full(0, 5);
+    plan.skip_ranges = {
+        ChunkedColumnInterface::ScanRowRange{1, 4},
+    };
+    auto cursor =
+        prepared->Open(plan, ChunkedColumnInterface::ScanProjection::Data);
+    ASSERT_NE(cursor, nullptr);
     ChunkedColumnInterface::ScanBatch batch;
-    ASSERT_TRUE(first->Next(2, &batch));
+    ASSERT_TRUE(cursor->Next(5, &batch));
     EXPECT_EQ(batch.row_id_start, 0);
-    EXPECT_EQ(batch.size, 2);
-    first.reset();
-
-    auto resumed = prepared->Seek(2);
-    ASSERT_NE(resumed, nullptr);
-    ASSERT_TRUE(resumed->Next(2, &batch));
-    EXPECT_EQ(batch.row_id_start, 2);
     EXPECT_EQ(batch.size, 1);
-    ASSERT_TRUE(resumed->Next(2, &batch));
-    EXPECT_EQ(batch.row_id_start, 3);
+    EXPECT_TRUE(IsScanRowValid(batch, 0));
+
+    ASSERT_TRUE(cursor->Next(5, &batch));
+    EXPECT_EQ(batch.row_id_start, 4);
+    EXPECT_EQ(batch.size, 1);
+    EXPECT_TRUE(IsScanRowValid(batch, 0));
+    EXPECT_FALSE(cursor->Next(5, &batch));
+    EXPECT_EQ(cursor->Position(), 5);
+
+    auto validity_cursor =
+        prepared->Open(ChunkedColumnInterface::ScanPlan::Full(1, 3),
+                       ChunkedColumnInterface::ScanProjection::NoData);
+    ASSERT_NE(validity_cursor, nullptr);
+    ASSERT_TRUE(validity_cursor->Next(5, &batch));
+    EXPECT_EQ(batch.row_id_start, 1);
     EXPECT_EQ(batch.size, 2);
-    EXPECT_FALSE(resumed->Next(2, &batch));
+    EXPECT_FALSE(IsScanRowValid(batch, 0));
+    EXPECT_TRUE(IsScanRowValid(batch, 1));
+    ASSERT_TRUE(validity_cursor->Next(5, &batch));
+    EXPECT_EQ(batch.row_id_start, 3);
+    EXPECT_EQ(batch.size, 1);
+    EXPECT_FALSE(IsScanRowValid(batch, 0));
+    EXPECT_FALSE(validity_cursor->Next(5, &batch));
 
     EXPECT_EQ(fx.pin_requests->size(), 1u);
     EXPECT_EQ(*fx.fetched, (std::set<cachinglayer::cid_t>{0, 1}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           PreparedScanAllSkippedAdvancesWithoutReturningData) {
+    ColumnSpec spec{{3, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto prepared = fx.column->PrepareScan(
+        nullptr, ChunkedColumnInterface::ScanOptions::ForData(0, 5));
+    ASSERT_NE(prepared, nullptr);
+    auto plan = ChunkedColumnInterface::ScanPlan::Full(0, 5);
+    plan.skip_ranges = {
+        ChunkedColumnInterface::ScanRowRange{0, 5},
+    };
+    auto cursor =
+        prepared->Open(plan, ChunkedColumnInterface::ScanProjection::Data);
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    EXPECT_FALSE(cursor->Next(5, &batch));
+    EXPECT_EQ(cursor->Position(), 5);
+    EXPECT_EQ(fx.pin_requests->size(), 1u);
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,

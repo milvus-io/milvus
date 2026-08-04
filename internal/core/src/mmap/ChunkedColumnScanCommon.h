@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
@@ -167,23 +168,46 @@ class ScanCursor {
  public:
     virtual ~ScanCursor() = default;
 
-    // The next dense row that has not yet been returned to the caller.
+    // The next logical source row that has neither been returned nor skipped
+    // by the scan plan.
     virtual int64_t
     Position() const = 0;
 
-    // Return the next dense batch from the underlying source. A successful
-    // call starts at Position(), returns at most max_rows without crossing a
-    // column chunk boundary, and advances Position() by the returned size.
-    // Callers consume the returned batch as a whole; physical reader and
-    // buffered-batch positions remain private to the cursor.
+    // Return the next evaluated batch from the underlying source. A batch is
+    // always one continuous logical range, contains at most max_rows rows, and
+    // never crosses a skipped range or backend batch boundary. Position() may
+    // advance across skipped ranges before the next batch is returned, so
+    // adjacent batches are allowed to have a logical row gap.
     virtual bool
     Next(int64_t max_rows, ScanBatch* out) = 0;
 };
 
-// PreparedScan owns the storage resources selected for one logical scan,
-// including cache pins. Cursors only own position and reader state, so callers
-// may discard a cursor after short-circuiting and seek to a new position
-// without planning or pinning the same cells again.
+struct ScanRowRange {
+    int64_t start = 0;
+    int64_t end = 0;
+};
+
+struct ScanPlan {
+    static ScanPlan
+    Full(int64_t start, int64_t length) {
+        return ScanPlan{ScanRowRange{start, start + length}, {}};
+    }
+
+    ScanRowRange requested_range;
+    // Sorted, non-overlapping segment-offset ranges that the data cursor must
+    // not return. Expressions still produce result/validity for these logical
+    // rows, using a validity-only cursor over the same PreparedScan when the
+    // source column is nullable.
+    std::vector<ScanRowRange> skip_ranges;
+};
+
+enum class ScanProjection;
+
+// PreparedScan owns the storage resources selected for one operator/expression
+// window, including cache pins. Open() may create a data cursor that applies a
+// skip plan or a validity-only cursor over a subrange; both reuse the same
+// window-local resources. PreparedScan must not be retained across expression
+// windows.
 class PreparedScan {
  public:
     virtual ~PreparedScan() = default;
@@ -194,8 +218,15 @@ class PreparedScan {
     virtual int64_t
     End() const = 0;
 
+    // Backend planner result for this prepared operator window. The plan is
+    // computed before data pinning from metadata that was loaded with the
+    // segment. Payload-dependent legacy Raw SkipIndex decisions are not part
+    // of this plan.
+    virtual const ScanPlan&
+    Plan() const = 0;
+
     virtual std::unique_ptr<ScanCursor>
-    Seek(int64_t position) const = 0;
+    Open(const ScanPlan& plan, ScanProjection projection) const = 0;
 };
 
 enum class ScanProjection {
