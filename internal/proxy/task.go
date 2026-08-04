@@ -1085,9 +1085,10 @@ type alterCollectionSchemaTask struct {
 	Condition
 	*milvuspb.AlterCollectionSchemaRequest
 	*milvuspb.AlterCollectionSchemaResponse
-	ctx       context.Context
-	mixCoord  types.MixCoordClient
-	oldSchema *schemapb.CollectionSchema
+	ctx                  context.Context
+	mixCoord             types.MixCoordClient
+	oldSchema            *schemapb.CollectionSchema
+	collectionProperties []*commonpb.KeyValuePair
 }
 
 func (t *alterCollectionSchemaTask) TraceCtx() context.Context {
@@ -1187,10 +1188,11 @@ func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 
 	// Validate the bound index params against the new field, mirroring the
 	// create_index path (index name rules, checker existence, data-type
-	// compatibility, train params, dimension filling). Validation-only: the
-	// request keeps the user's original params so the persisted UserIndexParams
-	// match the create_index convention; rootcoord independently derives the
-	// normalized IndexParams at prepare.
+	// compatibility, train params, dimension filling, AUTOINDEX resolution when
+	// index_type is omitted). Validation-only: the request keeps the user's
+	// original params so the persisted UserIndexParams match the create_index
+	// convention; rootcoord independently derives the normalized IndexParams at
+	// prepare.
 	if plan.Kind == schemautil.AlterSchemaAddFunctionField {
 		if err := validateIndexName(plan.IndexName); err != nil {
 			return err
@@ -1198,8 +1200,8 @@ func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 		if err := indexparamcheck.ValidateIndexParamsSize(plan.IndexExtraParams...); err != nil {
 			return err
 		}
-		indexParamsMap, err := indexparamcheck.PrepareFunctionOutputIndexParams(
-			plan.Function.GetType(), plan.Field.GetName(), plan.IndexExtraParams)
+		indexParamsMap, _, err := indexparamcheck.PrepareFunctionOutputIndexParams(
+			plan.Function.GetType(), plan.Field, t.collectionProperties, plan.IndexExtraParams)
 		if err != nil {
 			return err
 		}

@@ -1060,17 +1060,31 @@ func (h *HandlersV2) dropCollectionFunction(ctx context.Context, c *gin.Context,
 // A function is coupled to its output field, so both are added in one request.
 func (h *HandlersV2) addCollectionFunctionField(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionAddFunctionField)
-	// The index always targets the newly-added output field; reject a mismatched
-	// indexParams.fieldName rather than silently building the index on outputField.
-	if httpReq.IndexParam.FieldName != httpReq.OutputField.FieldName {
-		err := merr.WrapErrParameterInvalidMsg(
-			"indexParams.fieldName %q must match outputField.fieldName %q",
-			httpReq.IndexParam.FieldName, httpReq.OutputField.FieldName)
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
-			HTTPReturnMessage: err.Error(),
-		})
-		return nil, err
+	var indexName string
+	var extraParams []*commonpb.KeyValuePair
+	if httpReq.IndexParam != nil {
+		// The index always targets the newly-added output field; reject a mismatched
+		// indexParams.fieldName rather than silently building the index on outputField.
+		if httpReq.IndexParam.FieldName != httpReq.OutputField.FieldName {
+			err := merr.WrapErrParameterInvalidMsg(
+				"indexParams.fieldName %q must match outputField.fieldName %q",
+				httpReq.IndexParam.FieldName, httpReq.OutputField.FieldName)
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+		var err error
+		extraParams, err = convertToExtraParams(*httpReq.IndexParam)
+		if err != nil {
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+		indexName = httpReq.IndexParam.IndexName
 	}
 	fSchema, err := genFunctionSchema(ctx, &httpReq.Function)
 	if err != nil {
@@ -1088,14 +1102,6 @@ func (h *HandlersV2) addCollectionFunctionField(ctx context.Context, c *gin.Cont
 		})
 		return nil, err
 	}
-	extraParams, err := convertToExtraParams(httpReq.IndexParam)
-	if err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
-			HTTPReturnMessage: err.Error(),
-		})
-		return nil, err
-	}
 	req := &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
@@ -1105,7 +1111,7 @@ func (h *HandlersV2) addCollectionFunctionField(ctx context.Context, c *gin.Cont
 					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
 						{
 							FieldSchema: fieldSchema,
-							IndexName:   httpReq.IndexParam.IndexName,
+							IndexName:   indexName,
 							ExtraParams: extraParams,
 						},
 					},
