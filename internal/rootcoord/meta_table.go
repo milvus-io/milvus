@@ -176,6 +176,7 @@ type IMetaTable interface {
 	ApplyDropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error
 	GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error)
 	ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) ([]string, error)
+	GetRLSMetadata(ctx context.Context, collectionID int64, kind rootcoordpb.RLSMetadataKind, principalName string) (*model.RLSMetadata, error)
 
 	AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error
 	RemoveFileResource(ctx context.Context, name string) (error, bool)
@@ -3408,6 +3409,61 @@ func (mt *MetaTable) ListRLSPolicies(ctx context.Context, req *rlsutil.ListRowPo
 		policies = append(policies, policy.ToRowPolicy())
 	}
 	return policies, nil
+}
+
+func (mt *MetaTable) GetRLSMetadata(ctx context.Context, collectionID int64, kind rootcoordpb.RLSMetadataKind, principalName string) (*model.RLSMetadata, error) {
+	if collectionID == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("failed to get RLS metadata with empty collection id")
+	}
+
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	coll := mt.collID2Meta[collectionID]
+	if coll == nil || !coll.Available() {
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
+	}
+	dbName := coll.DBName
+	if dbName == "" {
+		db, err := mt.getDatabaseByIDInternal(ctx, coll.DBID, typeutil.MaxTimestamp)
+		if err != nil {
+			return nil, err
+		}
+		dbName = db.Name
+	}
+
+	metadata := &model.RLSMetadata{
+		DBName:         dbName,
+		CollectionName: coll.Name,
+		CollectionID:   coll.CollectionID,
+	}
+	switch kind {
+	case rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL:
+		if principalName != "" {
+			return nil, merr.WrapErrServiceInternalMsg("RLS principal filter is only supported for principal metadata")
+		}
+		metadata.Policies = model.RLSPolicyMapToSlice(coll.RLSPolicies)
+		metadata.Principals = model.CloneRLSPrincipals(coll.RLSPrincipals)
+	case rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES:
+		if principalName != "" {
+			return nil, merr.WrapErrServiceInternalMsg("RLS principal filter is only supported for principal metadata")
+		}
+		metadata.Policies = model.RLSPolicyMapToSlice(coll.RLSPolicies)
+	case rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS:
+		if principalName == "" {
+			metadata.Principals = model.CloneRLSPrincipals(coll.RLSPrincipals)
+			break
+		}
+		for _, principal := range coll.RLSPrincipals {
+			if principal.PrincipalName == principalName {
+				metadata.Principals = []*model.RLSPrincipal{model.CloneRLSPrincipal(principal)}
+				break
+			}
+		}
+	default:
+		return nil, merr.WrapErrServiceInternalMsg("unsupported RLS metadata kind %s", kind.String())
+	}
+	return metadata, nil
 }
 
 func validateRLSPrincipalName(principalName string) error {
