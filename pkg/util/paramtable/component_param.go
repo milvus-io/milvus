@@ -7684,7 +7684,7 @@ if this parameter <= 0, will set it as 10`,
 		DefaultValue: "10485760",
 		Doc: `The size of each part in multipart upload to object storage.
 Unit: Byte. Valid range: 5MiB (5242880) ~ 5GiB (5368709120).
-Only affects StorageV2 writers; in-progress multipart uploads are not affected by hot updates.
+Affects StorageV2 (packed Parquet) and StorageV3 writers; in-progress multipart uploads are not affected by hot updates.
 Increasing this value raises the maximum single-object size allowed by S3 multipart upload
 (max 10000 parts), but may increase memory usage and per-part retry cost.`,
 		Export: true,

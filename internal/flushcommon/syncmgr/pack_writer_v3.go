@@ -447,6 +447,7 @@ func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack, base
 		ctx, pack.collectionID, pack.partitionID, pack.segmentID, logID, pkField.DataType, deltaPath,
 		storage.WithVersion(storage.StorageV2),
 		storage.WithStorageConfig(bw.storageConfig),
+		storage.WithMultiPartUploadSize(bw.multiPartUploadSize),
 	)
 	if err != nil {
 		return nil, nil, merr.Wrap(err, "failed to create deltalog writer")
