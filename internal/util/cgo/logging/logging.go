@@ -46,8 +46,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
-const cgoLoggerName = "CGO"
-const tantivyLoggerName = "Tantivy"
+const (
+	cgoLoggerName     = "CGO"
+	tantivyLoggerName = "Tantivy"
+)
 
 const (
 	glogInfo    glogSeverity = 0
