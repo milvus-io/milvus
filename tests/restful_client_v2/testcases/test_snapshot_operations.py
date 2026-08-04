@@ -22,6 +22,7 @@ class TestSnapshotOperations(TestBase):
     def test_snapshot_lifecycle_and_restore(self):
         source_collection = gen_collection_name(prefix="rest_snapshot_src")
         target_collection = gen_collection_name(prefix="rest_snapshot_dst")
+        external_target_collection = gen_collection_name(prefix="rest_snapshot_external_dst")
         snapshot_name = f"rest_snapshot_{uuid4().hex}"
         snapshot_payload = {
             "collectionName": source_collection,
@@ -29,6 +30,7 @@ class TestSnapshotOperations(TestBase):
         }
         self.init_collection(source_collection, dim=8, nb=10)
         self.collection_client.name_list.append(("default", target_collection))
+        self.collection_client.name_list.append(("default", external_target_collection))
         rsp = self.collection_client.flush(source_collection)
         assert rsp["code"] == 0, rsp
 
@@ -53,6 +55,24 @@ class TestSnapshotOperations(TestBase):
         assert isinstance(rsp["data"]["partitionNames"], list), rsp
         assert rsp["data"]["createTs"] > 0, rsp
         assert rsp["data"]["s3Location"], rsp
+
+        rsp = self.snapshot_client.snapshot_export(
+            {
+                **snapshot_payload,
+                "targetS3Path": "s3://snapshot-export-test/export-root",
+            }
+        )
+        assert rsp["code"] != 0, rsp
+        assert "not implemented" in rsp["message"].lower(), rsp
+
+        rsp = self.snapshot_client.snapshot_restore_external(
+            {
+                "targetCollectionName": external_target_collection,
+                "snapshotMetadataURI": "s3://snapshot-export-test/snapshots/metadata.json",
+            }
+        )
+        assert rsp["code"] != 0, rsp
+        assert "not implemented" in rsp["message"].lower(), rsp
 
         rsp = self.snapshot_client.snapshot_pin({**snapshot_payload, "ttlSeconds": 60})
         assert rsp["code"] == 0, rsp
@@ -84,6 +104,18 @@ class TestSnapshotOperations(TestBase):
             time.sleep(2)
         else:
             pytest.fail(f"snapshot restore did not complete: {rsp}")
+
+        assert rsp["data"]["jobId"] == job_id, rsp
+        assert rsp["data"]["snapshotName"] == snapshot_name, rsp
+        assert rsp["data"]["collectionName"] == target_collection, rsp
+
+        rsp = self.snapshot_client.list_restore_snapshot_jobs({"collectionName": target_collection})
+        assert rsp["code"] == 0, rsp
+        matching_jobs = [record for record in rsp["data"]["records"] if record["jobId"] == job_id]
+        assert len(matching_jobs) == 1, rsp
+        assert matching_jobs[0]["snapshotName"] == snapshot_name, rsp
+        assert matching_jobs[0]["collectionName"] == target_collection, rsp
+        assert matching_jobs[0]["state"] == "RestoreSnapshotCompleted", rsp
 
         rsp = self.collection_client.collection_has(collection_name=target_collection)
         assert rsp["code"] == 0 and rsp["data"]["has"], rsp
