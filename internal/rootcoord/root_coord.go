@@ -3855,6 +3855,52 @@ func (c *Core) ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrinci
 	}, nil
 }
 
+func (c *Core) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	method := "GetRLSMetadata"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	if req == nil {
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		return &rootcoordpb.GetRLSMetadataResponse{
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("%s request is nil", method)),
+		}, nil
+	}
+
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.GetRLSMetadataResponse{
+			Status:       merr.Status(err),
+			CollectionId: req.GetCollectionId(),
+		}, nil
+	}
+
+	metadata, err := c.meta.GetRLSMetadata(ctx, req.GetCollectionId(), req.GetKind())
+	if err != nil {
+		mlog.Warn(ctx, "failed to get RLS metadata",
+			mlog.FieldCollectionID(req.GetCollectionId()),
+			mlog.Err(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		return &rootcoordpb.GetRLSMetadataResponse{
+			Status:       merr.Status(err),
+			CollectionId: req.GetCollectionId(),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &rootcoordpb.GetRLSMetadataResponse{
+		Status:         merr.Success(),
+		DbName:         metadata.DBName,
+		CollectionName: metadata.CollectionName,
+		CollectionId:   metadata.CollectionID,
+		Policies: lo.Map(metadata.Policies, func(policy *model.RLSPolicy, _ int) *rootcoordpb.RLSPolicyInfo {
+			return model.MarshalRLSPolicyModel(policy)
+		}),
+		Principals: lo.Map(metadata.Principals, func(principal *model.RLSPrincipal, _ int) *rootcoordpb.RLSPrincipalInfo {
+			return model.MarshalRLSPrincipalModel(principal)
+		}),
+	}, nil
+}
+
 func (c *Core) DeleteRLSPrincipalTags(ctx context.Context, req *rlsutil.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
 	method := "DeleteRLSPrincipalTags"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()

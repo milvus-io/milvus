@@ -2934,6 +2934,66 @@ func (_c *IMetaTable_GetPrivilegeGroupRoles_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// GetRLSMetadata provides a mock function with given fields: ctx, collectionID, kind
+func (_m *IMetaTable) GetRLSMetadata(ctx context.Context, collectionID int64, kind rootcoordpb.RLSMetadataKind) (*model.RLSMetadata, error) {
+	ret := _m.Called(ctx, collectionID, kind)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRLSMetadata")
+	}
+
+	var r0 *model.RLSMetadata
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, rootcoordpb.RLSMetadataKind) (*model.RLSMetadata, error)); ok {
+		return rf(ctx, collectionID, kind)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, rootcoordpb.RLSMetadataKind) *model.RLSMetadata); ok {
+		r0 = rf(ctx, collectionID, kind)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model.RLSMetadata)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, rootcoordpb.RLSMetadataKind) error); ok {
+		r1 = rf(ctx, collectionID, kind)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_GetRLSMetadata_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRLSMetadata'
+type IMetaTable_GetRLSMetadata_Call struct {
+	*mock.Call
+}
+
+// GetRLSMetadata is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - kind rootcoordpb.RLSMetadataKind
+func (_e *IMetaTable_Expecter) GetRLSMetadata(ctx interface{}, collectionID interface{}, kind interface{}) *IMetaTable_GetRLSMetadata_Call {
+	return &IMetaTable_GetRLSMetadata_Call{Call: _e.mock.On("GetRLSMetadata", ctx, collectionID, kind)}
+}
+
+func (_c *IMetaTable_GetRLSMetadata_Call) Run(run func(ctx context.Context, collectionID int64, kind rootcoordpb.RLSMetadataKind)) *IMetaTable_GetRLSMetadata_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(rootcoordpb.RLSMetadataKind))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetRLSMetadata_Call) Return(_a0 *model.RLSMetadata, _a1 error) *IMetaTable_GetRLSMetadata_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_GetRLSMetadata_Call) RunAndReturn(run func(context.Context, int64, rootcoordpb.RLSMetadataKind) (*model.RLSMetadata, error)) *IMetaTable_GetRLSMetadata_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetRLSPrincipalTags provides a mock function with given fields: ctx, req
 func (_m *IMetaTable) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error) {
 	ret := _m.Called(ctx, req)

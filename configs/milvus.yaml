@@ -442,6 +442,7 @@ proxy:
     maxTagKeyLength: 128 # Maximum RLS principal tag key length in bytes.
     maxTagValueLength: 1024 # Maximum RLS principal tag value length in bytes.
     maxArrayLiteralElements: 1024 # Maximum literal elements for RLS in and array_contains* predicates.
+    metaRefreshInterval: 3600 # Maximum age in seconds of cached RLS metadata before an RLS-enforced request refreshes it from RootCoord.
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
