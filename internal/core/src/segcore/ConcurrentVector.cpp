@@ -150,7 +150,8 @@ VectorBase::set_data_raw(ssize_t element_offset,
                 }
                 data_raw[i] = DecodeDecimalBytes(bytes_data[i]);
             }
-            return set_data_raw(element_offset, data_raw.data(), element_count);
+            return set_data_raw(
+                element_offset, data_raw.data(), element_count);
         }
         case DataType::STRING:
         case DataType::VARCHAR:
