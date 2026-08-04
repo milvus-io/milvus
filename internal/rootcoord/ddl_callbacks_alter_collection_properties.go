@@ -55,6 +55,16 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	if err := common.ValidateNamespaceShardingEnabledNotAltered(req.GetProperties(), req.GetDeleteKeys()); err != nil {
 		return err
 	}
+	if err := common.ValidateRLSProperties(req.GetProperties()...); err != nil {
+		return err
+	}
+	for _, key := range req.GetDeleteKeys() {
+		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
+			if strings.EqualFold(key, expected) && key != expected {
+				return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, expected)
+			}
+		}
+	}
 
 	if err := validateNamespaceModeImmutable(req.GetProperties(), req.GetDeleteKeys()); err != nil {
 		return err
@@ -148,6 +158,9 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 
 	// Check if the properties are changed.
 	newPropsKeyValuePairs := common.NewKeyValuePairs(newProperties)
+	if err := validateRLSEnabledTransition(coll.Properties, newPropsKeyValuePairs); err != nil {
+		return err
+	}
 	if !newPropsKeyValuePairs.Equal(coll.Properties) {
 		udpates.Properties = newPropsKeyValuePairs
 		header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionProperties)
@@ -212,6 +225,24 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateRLSEnabledTransition(oldProperties, newProperties []*commonpb.KeyValuePair) error {
+	oldEnabled, err := common.IsRLSEnabled(oldProperties...)
+	if err != nil {
+		return err
+	}
+	newEnabled, err := common.IsRLSEnabled(newProperties...)
+	if err != nil {
+		return err
+	}
+	if !oldEnabled && newEnabled {
+		return merr.WrapErrParameterInvalidMsg(
+			"dynamically enabling RLS is not supported; set %s to true when creating the collection",
+			common.RLSEnabledKey,
+		)
 	}
 	return nil
 }

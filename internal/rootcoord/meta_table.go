@@ -19,25 +19,34 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"slices"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/exp/maps"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -61,6 +70,8 @@ var (
 
 	errAlterCollectionNotFound = errors.New("alter collection not found") // alter collection not found, so it can be ignored.
 )
+
+const rlsRecoveryConcurrency = 32
 
 type MetaTableChecker interface {
 	RBACChecker
@@ -152,6 +163,19 @@ type IMetaTable interface {
 	ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error)
 	OperatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error
 	GetPrivilegeGroupRoles(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error)
+
+	PrepareCreateRLSPolicy(ctx context.Context, req *rlsutil.CreateRowPolicyRequest, policyID int64) (*model.RLSPolicy, error)
+	PrepareUpdateRLSPolicy(ctx context.Context, req *rlsutil.UpdateRowPolicyRequest) (*model.RLSPolicy, error)
+	PrepareDropRLSPolicy(ctx context.Context, req *rlsutil.DropRowPolicyRequest) (*model.RLSPolicy, error)
+	ApplyAlterRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error
+	ApplyDropRLSPolicy(ctx context.Context, collectionID int64, policyName string) error
+	ListRLSPolicies(ctx context.Context, req *rlsutil.ListRowPoliciesRequest) ([]*rlsutil.RowPolicy, error)
+	PrepareSetRLSPrincipalTags(ctx context.Context, req *rlsutil.SetRLSPrincipalTagsRequest) (*model.RLSPrincipal, error)
+	PrepareDeleteRLSPrincipalTags(ctx context.Context, req *rlsutil.DeleteRLSPrincipalTagsRequest) (*model.RLSPrincipal, bool, error)
+	ApplyAlterRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error
+	ApplyDropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error
+	GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]string, error)
+	ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) ([]string, error)
 
 	AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error
 	RemoveFileResource(ctx context.Context, name string) (error, bool)
@@ -263,6 +287,9 @@ func (mt *MetaTable) reload() error {
 		if err != nil {
 			return err
 		}
+		if err := mt.reloadCollectionsRLSMetadata(mt.ctx, collections); err != nil {
+			return err
+		}
 		for _, collection := range collections {
 			if collection.DBName != "" && collection.DBName != dbName {
 				mlog.Warn(mt.ctx,
@@ -350,6 +377,9 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 	partitionNum := int64(0)
 	oldCollections, err := mt.catalog.ListCollections(mt.ctx, util.NonDBID, typeutil.MaxTimestamp)
 	if err != nil {
+		return err
+	}
+	if err := mt.reloadCollectionsRLSMetadata(mt.ctx, oldCollections); err != nil {
 		return err
 	}
 
@@ -762,6 +792,9 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		Partitions:        model.ClonePartitions(coll.Partitions),
 		Fields:            model.CloneFields(coll.Fields),
 		StructArrayFields: model.CloneStructArrayFields(coll.StructArrayFields),
+		Functions:         model.CloneFunctions(coll.Functions),
+		RLSPolicies:       model.CloneRLSPolicies(coll.RLSPolicies),
+		RLSPrincipals:     model.CloneRLSPrincipals(coll.RLSPrincipals),
 		Aliases:           aliases,
 		DBID:              coll.DBID,
 	}
@@ -2524,6 +2557,992 @@ func (mt *MetaTable) GetPrivilegeGroupRoles(ctx context.Context, groupName strin
 		}
 	}
 	return lo.Keys(rolesMap), nil
+}
+
+func (mt *MetaTable) resolveRLSCollection(ctx context.Context, dbName string, collectionName string) (*model.Collection, error) {
+	if funcutil.IsEmptyString(collectionName) {
+		return nil, merr.WrapErrParameterInvalidMsg("collection name is empty")
+	}
+	if funcutil.IsEmptyString(dbName) {
+		dbName = util.DefaultDBName
+	}
+	return mt.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+}
+
+func (mt *MetaTable) reloadCollectionRLSMetadata(ctx context.Context, collection *model.Collection) error {
+	if collection == nil {
+		return nil
+	}
+	policies, err := mt.catalog.ListRLSPolicies(ctx, collection.CollectionID)
+	if err != nil {
+		return merr.Wrapf(err, "failed to reload RLS policies for collection %d", collection.CollectionID)
+	}
+	principals, err := mt.catalog.ListRLSPrincipals(ctx, collection.CollectionID)
+	if err != nil {
+		return merr.Wrapf(err, "failed to reload RLS principals for collection %d", collection.CollectionID)
+	}
+	collection.RLSPolicies = model.CloneRLSPolicies(policies)
+	collection.RLSPrincipals = model.CloneRLSPrincipals(principals)
+	return nil
+}
+
+func (mt *MetaTable) reloadCollectionsRLSMetadata(ctx context.Context, collections []*model.Collection) error {
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(rlsRecoveryConcurrency)
+	for _, collection := range collections {
+		collection := collection
+		group.Go(func() error {
+			return mt.reloadCollectionRLSMetadata(groupCtx, collection)
+		})
+	}
+	return group.Wait()
+}
+
+func upsertCollectionRLSPolicy(collection *model.Collection, policy *model.RLSPolicy) {
+	if collection == nil || policy == nil {
+		return
+	}
+	cloned := model.CloneRLSPolicy(policy)
+	for i, cached := range collection.RLSPolicies {
+		if cached != nil && cached.PolicyName == policy.PolicyName {
+			collection.RLSPolicies[i] = cloned
+			return
+		}
+	}
+	collection.RLSPolicies = append(collection.RLSPolicies, cloned)
+}
+
+func removeCollectionRLSPolicy(collection *model.Collection, policyName string) {
+	if collection == nil {
+		return
+	}
+	collection.RLSPolicies = lo.Filter(collection.RLSPolicies, func(policy *model.RLSPolicy, _ int) bool {
+		return policy == nil || policy.PolicyName != policyName
+	})
+}
+
+func upsertCollectionRLSPrincipal(collection *model.Collection, principal *model.RLSPrincipal) {
+	if collection == nil || principal == nil {
+		return
+	}
+	cloned := model.CloneRLSPrincipal(principal)
+	for i, cached := range collection.RLSPrincipals {
+		if cached != nil && cached.PrincipalName == principal.PrincipalName {
+			collection.RLSPrincipals[i] = cloned
+			return
+		}
+	}
+	collection.RLSPrincipals = append(collection.RLSPrincipals, cloned)
+}
+
+func removeCollectionRLSPrincipal(collection *model.Collection, principalName string) {
+	if collection == nil {
+		return
+	}
+	collection.RLSPrincipals = lo.Filter(collection.RLSPrincipals, func(principal *model.RLSPrincipal, _ int) bool {
+		return principal == nil || principal.PrincipalName != principalName
+	})
+}
+
+func validateRLSPolicy(policyName string, policyType rlsutil.PolicyType, actions []rlsutil.PolicyAction, usingExpr string, checkExpr string) error {
+	return rlsutil.ValidatePolicy(policyName, policyType, actions, usingExpr, checkExpr)
+}
+
+func validateRLSPolicyForUpdate(policyName string, policyType rlsutil.PolicyType, actions []rlsutil.PolicyAction, usingExpr string, checkExpr string) error {
+	return rlsutil.ValidatePolicyForUpdate(policyName, policyType, actions, usingExpr, checkExpr)
+}
+
+func validateRLSPolicyDescription(description string) error {
+	return rlsutil.ValidatePolicyDescription(description)
+}
+
+func validateRLSCombinedExpressionLength(policies []*model.RLSPolicy) error {
+	maxExpressionLength := Params.ProxyCfg.RLSMaxCombinedExpressionLength.GetAsInt()
+	actionSet := make(map[rlsutil.PolicyAction]struct{})
+	for _, policy := range policies {
+		if policy == nil {
+			continue
+		}
+		for _, action := range policy.Actions {
+			actionSet[action] = struct{}{}
+		}
+	}
+	actions := make([]rlsutil.PolicyAction, 0, len(actionSet))
+	for action := range actionSet {
+		actions = append(actions, action)
+	}
+	sort.Slice(actions, func(i, j int) bool {
+		return actions[i] < actions[j]
+	})
+
+	for _, action := range actions {
+		for _, expression := range []struct {
+			kind     string
+			selector func(*model.RLSPolicy) string
+			applies  func(rlsutil.PolicyAction) bool
+		}{
+			{
+				kind:     "using",
+				selector: func(policy *model.RLSPolicy) string { return policy.UsingExpr },
+				applies:  rlsActionUsesUsingExpression,
+			},
+			{
+				kind:     "check",
+				selector: func(policy *model.RLSPolicy) string { return policy.CheckExpr },
+				applies:  rlsActionUsesCheckExpression,
+			},
+		} {
+			if !expression.applies(action) {
+				continue
+			}
+			combined := combineRLSPolicyExpressions(policies, action, expression.selector)
+			if len(combined) > maxExpressionLength {
+				return merr.WrapErrServiceQuotaExceededMsg(
+					"combined RLS %s expression for action %s exceeds max length %d",
+					expression.kind,
+					action.String(),
+					maxExpressionLength,
+				)
+			}
+		}
+	}
+	return nil
+}
+
+func rlsActionUsesUsingExpression(action rlsutil.PolicyAction) bool {
+	switch action {
+	case rlsutil.PolicyActionQuery,
+		rlsutil.PolicyActionQueryIterator,
+		rlsutil.PolicyActionSearch,
+		rlsutil.PolicyActionSearchIterator,
+		rlsutil.PolicyActionHybridSearch,
+		rlsutil.PolicyActionDelete,
+		rlsutil.PolicyActionUpsert:
+		return true
+	default:
+		return false
+	}
+}
+
+func rlsActionUsesCheckExpression(action rlsutil.PolicyAction) bool {
+	return action == rlsutil.PolicyActionInsert || action == rlsutil.PolicyActionUpsert
+}
+
+func combineRLSPolicyExpressions(policies []*model.RLSPolicy, action rlsutil.PolicyAction, selector func(*model.RLSPolicy) string) string {
+	permissiveExprs := make([]string, 0)
+	restrictiveExprs := make([]string, 0)
+	for _, policy := range policies {
+		if policy == nil || !rlsPolicyMatchesAction(policy, action) {
+			continue
+		}
+		expr := strings.TrimSpace(selector(policy))
+		if expr == "" {
+			continue
+		}
+		templateExpr := toRLSCombinedTemplateExpr(expr)
+		switch policy.PolicyType {
+		case rlsutil.PolicyTypePermissive:
+			permissiveExprs = append(permissiveExprs, templateExpr)
+		case rlsutil.PolicyTypeRestrictive:
+			restrictiveExprs = append(restrictiveExprs, templateExpr)
+		}
+	}
+
+	if len(permissiveExprs) == 0 {
+		if len(restrictiveExprs) > 0 {
+			return "false"
+		}
+		return ""
+	}
+	groups := []string{joinRLSPolicyExpressions(permissiveExprs, "or")}
+	if len(restrictiveExprs) > 0 {
+		groups = append(groups, joinRLSPolicyExpressions(restrictiveExprs, "and"))
+	}
+	return joinRLSPolicyExpressions(groups, "and")
+}
+
+func toRLSCombinedTemplateExpr(expr string) string {
+	templateExpr, _, _ := funcutil.ConvertRLSTemplateVariables(strings.TrimSpace(expr))
+	return templateExpr
+}
+
+func rlsPolicyMatchesAction(policy *model.RLSPolicy, action rlsutil.PolicyAction) bool {
+	for _, policyAction := range policy.Actions {
+		if policyAction == action {
+			return true
+		}
+	}
+	return false
+}
+
+func joinRLSPolicyExpressions(expressions []string, operator string) string {
+	nonEmpty := make([]string, 0, len(expressions))
+	for _, expression := range expressions {
+		expression = strings.TrimSpace(expression)
+		if expression != "" {
+			nonEmpty = append(nonEmpty, "("+expression+")")
+		}
+	}
+	return strings.Join(nonEmpty, " "+operator+" ")
+}
+
+func upsertRLSPolicyList(policies []*model.RLSPolicy, replacement *model.RLSPolicy) []*model.RLSPolicy {
+	prospective := model.CloneRLSPolicies(policies)
+	for index, policy := range prospective {
+		if policy != nil && policy.PolicyName == replacement.PolicyName {
+			prospective[index] = model.CloneRLSPolicy(replacement)
+			return prospective
+		}
+	}
+	return append(prospective, model.CloneRLSPolicy(replacement))
+}
+
+func validateRLSPolicyExpressions(coll *model.Collection, usingExpr string, checkExpr string) error {
+	for _, expr := range []string{usingExpr, checkExpr} {
+		_, _, tagVariables := funcutil.ConvertRLSTemplateVariables(expr)
+		for tagKey := range tagVariables {
+			if err := rlsutil.ValidateTagKeyWithLimit(tagKey); err != nil {
+				return err
+			}
+		}
+	}
+	return validateRLSPolicyExpressionsWithSchema(coll.ToCollectionSchemaPB(), usingExpr, checkExpr)
+}
+
+func validateRLSPolicyExpressionsWithSchema(schema *schemapb.CollectionSchema, usingExpr string, checkExpr string) error {
+	return validateRLSPolicyExpressionsWithSchemaOptions(schema, usingExpr, checkExpr, true)
+}
+
+func validateRLSPolicyExpressionsWithSchemaOptions(schema *schemapb.CollectionSchema, usingExpr string, checkExpr string, enforceArrayLiteralLimit bool) error {
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return merr.Wrap(err, "failed to build schema helper for RLS policy")
+	}
+	if err := validateRLSPolicyExpression(schemaHelper, "using", usingExpr, enforceArrayLiteralLimit); err != nil {
+		return err
+	}
+	return validateRLSPolicyExpression(schemaHelper, "check", checkExpr, enforceArrayLiteralLimit)
+}
+
+func validateRLSPoliciesWithSchema(policies []*model.RLSPolicy, schema *schemapb.CollectionSchema) error {
+	for _, policy := range policies {
+		if policy == nil {
+			continue
+		}
+		// Existing policies are grandfathered when refreshable creation quotas
+		// are lowered. Schema DDL only checks whether their fields and expression
+		// shapes remain compatible with the proposed schema.
+		if err := validateRLSPolicyExpressionsWithSchemaOptions(schema, policy.UsingExpr, policy.CheckExpr, false); err != nil {
+			return merr.Wrapf(err, "RLS policy %q is incompatible with schema change", policy.PolicyName)
+		}
+	}
+	return nil
+}
+
+func collectRLSPolicyFieldRefs(coll *model.Collection) (map[int64][]string, error) {
+	fieldRefs := make(map[int64][]string)
+	schemaHelper, err := typeutil.CreateSchemaHelper(coll.ToCollectionSchemaPB())
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to build schema helper for RLS policy dependency check")
+	}
+	for _, policy := range coll.RLSPolicies {
+		if policy == nil {
+			continue
+		}
+		for _, expr := range []string{policy.UsingExpr, policy.CheckExpr} {
+			refs, err := collectRLSPolicyExprFieldRefs(schemaHelper, expr)
+			if err != nil {
+				return nil, merr.Wrapf(err, "failed to inspect RLS policy %q dependencies", policy.PolicyName)
+			}
+			for fieldID := range refs {
+				fieldRefs[fieldID] = append(fieldRefs[fieldID], policy.PolicyName)
+			}
+		}
+	}
+	return fieldRefs, nil
+}
+
+func collectRLSPolicyExprFieldRefs(schemaHelper *typeutil.SchemaHelper, expr string) (map[int64]struct{}, error) {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return nil, nil
+	}
+	templateExpr, _, err := toRLSPolicyTemplateExpr(expr)
+	if err != nil {
+		return nil, err
+	}
+	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: schemaHelper.GetTimezone()}
+	parsedExpr, err := planparserv2.ParseExprTemplate(schemaHelper, templateExpr, visitorArgs)
+	if err != nil {
+		return nil, err
+	}
+	fieldRefs := make(map[int64]struct{})
+	collectRLSParsedExprFieldRefs(parsedExpr, fieldRefs)
+	return fieldRefs, nil
+}
+
+func collectRLSParsedExprFieldRefs(expr *planpb.Expr, fieldRefs map[int64]struct{}) {
+	if expr == nil {
+		return
+	}
+	switch node := expr.GetExpr().(type) {
+	case *planpb.Expr_UnaryExpr:
+		collectRLSParsedExprFieldRefs(node.UnaryExpr.GetChild(), fieldRefs)
+	case *planpb.Expr_BinaryExpr:
+		collectRLSParsedExprFieldRefs(node.BinaryExpr.GetLeft(), fieldRefs)
+		collectRLSParsedExprFieldRefs(node.BinaryExpr.GetRight(), fieldRefs)
+	case *planpb.Expr_UnaryRangeExpr:
+		addRLSColumnFieldRef(node.UnaryRangeExpr.GetColumnInfo(), fieldRefs)
+	case *planpb.Expr_TermExpr:
+		addRLSColumnFieldRef(node.TermExpr.GetColumnInfo(), fieldRefs)
+	case *planpb.Expr_JsonContainsExpr:
+		addRLSColumnFieldRef(node.JsonContainsExpr.GetColumnInfo(), fieldRefs)
+	case *planpb.Expr_BinaryRangeExpr:
+		addRLSColumnFieldRef(node.BinaryRangeExpr.GetColumnInfo(), fieldRefs)
+	}
+}
+
+func addRLSColumnFieldRef(column *planpb.ColumnInfo, fieldRefs map[int64]struct{}) {
+	if column == nil {
+		return
+	}
+	fieldRefs[column.GetFieldId()] = struct{}{}
+}
+
+func validateRLSNoReferencedFieldDropped(coll *model.Collection, droppedFieldIDs []int64) error {
+	if len(droppedFieldIDs) == 0 {
+		return nil
+	}
+	fieldRefs, err := collectRLSPolicyFieldRefs(coll)
+	if err != nil {
+		return err
+	}
+	for _, fieldID := range droppedFieldIDs {
+		if policies := fieldRefs[fieldID]; len(policies) > 0 {
+			sort.Strings(policies)
+			return merr.WrapErrParameterInvalidMsg("field %d is referenced by RLS policies %v and cannot be dropped", fieldID, policies)
+		}
+	}
+	return nil
+}
+
+func validateRLSFunctionOutputNotReferenced(coll *model.Collection, fn *model.Function, operation string) error {
+	if fn == nil || len(fn.OutputFieldIDs) == 0 {
+		return nil
+	}
+	fieldRefs, err := collectRLSPolicyFieldRefs(coll)
+	if err != nil {
+		return err
+	}
+	for _, fieldID := range fn.OutputFieldIDs {
+		if policies := fieldRefs[fieldID]; len(policies) > 0 {
+			sort.Strings(policies)
+			return merr.WrapErrParameterInvalidMsg("function %q cannot be %s because output field %d is referenced by RLS policies %v", fn.Name, operation, fieldID, policies)
+		}
+	}
+	return nil
+}
+
+func findRLSFunctionByName(coll *model.Collection, functionName string) *model.Function {
+	for _, fn := range coll.Functions {
+		if fn.Name == functionName {
+			return fn
+		}
+	}
+	return nil
+}
+
+func rlsFunctionKeepsOutputShape(oldFn *model.Function, newFn *model.Function) bool {
+	if oldFn == nil || newFn == nil {
+		return false
+	}
+	if oldFn.Type != newFn.Type {
+		return false
+	}
+	if len(oldFn.OutputFieldIDs) != len(newFn.OutputFieldIDs) {
+		return false
+	}
+	for i := range oldFn.OutputFieldIDs {
+		if oldFn.OutputFieldIDs[i] != newFn.OutputFieldIDs[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func validateRLSPolicyExpression(schemaHelper *typeutil.SchemaHelper, exprKind string, expr string, enforceArrayLiteralLimit bool) error {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return nil
+	}
+	templateExpr, allowedTemplateVariables, err := toRLSPolicyTemplateExpr(expr)
+	if err != nil {
+		return err
+	}
+	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: schemaHelper.GetTimezone()}
+	parsedExpr, err := planparserv2.ParseExprTemplate(schemaHelper, templateExpr, visitorArgs)
+	if err != nil {
+		return merr.WrapErrParameterInvalidErr(err, "invalid RLS %s expression", exprKind)
+	}
+	if err := validateRLSParsedExpr(parsedExpr, allowedTemplateVariables); err != nil {
+		return merr.Wrapf(err, "invalid RLS %s expression", exprKind)
+	}
+	if enforceArrayLiteralLimit {
+		if err := validateRLSArrayLiteralLimit(parsedExpr); err != nil {
+			return merr.Wrapf(err, "invalid RLS %s expression", exprKind)
+		}
+	}
+	return nil
+}
+
+func toRLSPolicyTemplateExpr(expr string) (string, map[string]struct{}, error) {
+	if err := rejectRawRLSTemplatePlaceholders(expr); err != nil {
+		return "", nil, err
+	}
+	templateExpr, needsPrincipal, tagVariables := funcutil.ConvertRLSTemplateVariables(expr)
+	allowedTemplateVariables := make(map[string]struct{}, len(tagVariables)+1)
+	if needsPrincipal {
+		allowedTemplateVariables[funcutil.RLSPrincipalTemplateName] = struct{}{}
+	}
+	for tagKey, templateVariable := range tagVariables {
+		if err := validateRLSTagKey(tagKey); err != nil {
+			return "", nil, err
+		}
+		allowedTemplateVariables[templateVariable] = struct{}{}
+	}
+	return templateExpr, allowedTemplateVariables, nil
+}
+
+func rejectRawRLSTemplatePlaceholders(expr string) error {
+	// RLS adds its generated template variables after this check. Braces in
+	// string literals are data; braces outside literals are user-supplied raw
+	// template syntax that Proxy cannot populate at runtime.
+	var quote byte
+	escaped := false
+	for i := 0; i < len(expr); i++ {
+		ch := expr[i]
+		if quote != 0 {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+
+		switch ch {
+		case '\'', '"':
+			quote = ch
+		case '{', '}':
+			return merr.WrapErrParameterInvalidMsg("RLS policy expressions do not support raw template placeholders; use $current_principal or $current_principal_tags['key']")
+		}
+	}
+	return nil
+}
+
+func validateRLSParsedExpr(expr *planpb.Expr, allowedTemplateVariables map[string]struct{}) error {
+	if expr == nil {
+		return merr.WrapErrParameterInvalidMsg("RLS expression is empty")
+	}
+	if rewriter.IsAlwaysFalseExpr(expr) {
+		return nil
+	}
+	switch node := expr.GetExpr().(type) {
+	case *planpb.Expr_AlwaysTrueExpr:
+		return nil
+	case *planpb.Expr_ValueExpr:
+		if _, ok := node.ValueExpr.GetValue().GetVal().(*planpb.GenericValue_BoolVal); !ok {
+			return merr.WrapErrParameterInvalidMsg("RLS value expression must be boolean")
+		}
+		return nil
+	case *planpb.Expr_UnaryExpr:
+		return merr.WrapErrParameterInvalidMsg("compound RLS expressions are not supported for RLS policy validation")
+	case *planpb.Expr_UnaryRangeExpr:
+		return validateRLSUnaryRangeExpr(node.UnaryRangeExpr, allowedTemplateVariables)
+	case *planpb.Expr_TermExpr:
+		return validateRLSTermExpr(node.TermExpr, allowedTemplateVariables)
+	case *planpb.Expr_JsonContainsExpr:
+		return validateRLSJSONContainsExpr(node.JsonContainsExpr, allowedTemplateVariables)
+	case *planpb.Expr_BinaryExpr:
+		return merr.WrapErrParameterInvalidMsg("compound RLS expressions are not supported for RLS policy validation")
+	default:
+		return merr.WrapErrParameterInvalidMsg("unsupported RLS policy expression node %T", node)
+	}
+}
+
+func validateRLSUnaryRangeExpr(expr *planpb.UnaryRangeExpr, allowedTemplateVariables map[string]struct{}) error {
+	if expr.GetOp() != planpb.OpType_Equal {
+		return merr.WrapErrParameterInvalidMsg("RLS policy expression only supports equality comparison")
+	}
+	if expr.GetValue() == nil && expr.GetTemplateVariableName() == "" {
+		return merr.WrapErrParameterInvalidMsg("RLS equality comparison requires a value or principal variable")
+	}
+	if err := validateRLSTemplateVariable(expr.GetTemplateVariableName(), allowedTemplateVariables); err != nil {
+		return err
+	}
+	if err := validateRLSScalarColumn(expr.GetColumnInfo()); err != nil {
+		return err
+	}
+	if expr.GetTemplateVariableName() != "" && !typeutil.IsStringType(expr.GetColumnInfo().GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg("RLS principal variables can only be compared with string fields")
+	}
+	return nil
+}
+
+func validateRLSTermExpr(expr *planpb.TermExpr, allowedTemplateVariables map[string]struct{}) error {
+	if expr.GetIsInField() {
+		return merr.WrapErrParameterInvalidMsg("RLS policy expression does not support field-to-field IN")
+	}
+	if err := validateRLSTemplateVariable(expr.GetTemplateVariableName(), allowedTemplateVariables); err != nil {
+		return err
+	}
+	if expr.GetTemplateVariableName() != "" {
+		return merr.WrapErrParameterInvalidMsg("RLS principal variables cannot be used as IN-list templates")
+	}
+	return validateRLSScalarColumn(expr.GetColumnInfo())
+}
+
+func validateRLSJSONContainsExpr(expr *planpb.JSONContainsExpr, allowedTemplateVariables map[string]struct{}) error {
+	if err := validateRLSTemplateVariable(expr.GetTemplateVariableName(), allowedTemplateVariables); err != nil {
+		return err
+	}
+	column := expr.GetColumnInfo()
+	if err := validateRLSTopLevelColumn(column); err != nil {
+		return err
+	}
+	if !typeutil.IsArrayType(column.GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg("RLS policy expression only supports array_contains on array fields")
+	}
+	if !typeutil.IsPrimitiveType(column.GetElementType()) {
+		return merr.WrapErrParameterInvalidMsg("RLS policy expression only supports primitive array element fields")
+	}
+	switch expr.GetOp() {
+	case planpb.JSONContainsExpr_Contains:
+	case planpb.JSONContainsExpr_ContainsAll, planpb.JSONContainsExpr_ContainsAny:
+		if expr.GetTemplateVariableName() != "" {
+			return merr.WrapErrParameterInvalidMsg("RLS principal variables can only be used with array_contains")
+		}
+	default:
+		return merr.WrapErrParameterInvalidMsg("unsupported RLS array_contains operator %s", expr.GetOp().String())
+	}
+	if expr.GetTemplateVariableName() != "" && !typeutil.IsStringType(column.GetElementType()) {
+		return merr.WrapErrParameterInvalidMsg("RLS principal variables can only be compared with string array fields")
+	}
+	return nil
+}
+
+func validateRLSArrayLiteralLimit(expr *planpb.Expr) error {
+	maxElements := Params.ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt()
+	var elements int
+	switch node := expr.GetExpr().(type) {
+	case *planpb.Expr_TermExpr:
+		elements = len(node.TermExpr.GetValues())
+	case *planpb.Expr_JsonContainsExpr:
+		elements = len(node.JsonContainsExpr.GetElements())
+	}
+	if elements > maxElements {
+		return merr.WrapErrParameterInvalidMsg("RLS policy expression exceeds max array literal elements %d", maxElements)
+	}
+	return nil
+}
+
+func validateRLSTemplateVariable(templateVariable string, allowedTemplateVariables map[string]struct{}) error {
+	if templateVariable == "" {
+		return nil
+	}
+	if _, ok := allowedTemplateVariables[templateVariable]; !ok {
+		return merr.WrapErrParameterInvalidMsg("RLS policy expression contains unsupported template variable %q", templateVariable)
+	}
+	return nil
+}
+
+func validateRLSScalarColumn(column *planpb.ColumnInfo) error {
+	if err := validateRLSTopLevelColumn(column); err != nil {
+		return err
+	}
+	if !typeutil.IsPrimitiveType(column.GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg("RLS policy expression only supports top-level scalar fields")
+	}
+	return nil
+}
+
+func validateRLSTopLevelColumn(column *planpb.ColumnInfo) error {
+	if column == nil {
+		return merr.WrapErrParameterInvalidMsg("RLS policy expression has empty column info")
+	}
+	if common.IsSystemField(column.GetFieldId()) {
+		return merr.WrapErrParameterInvalidMsg("RLS policy expression does not support system fields")
+	}
+	if len(column.GetNestedPath()) > 0 || column.GetIsElementLevel() {
+		return merr.WrapErrParameterInvalidMsg("RLS policy expression does not support nested or element-level fields")
+	}
+	if typeutil.IsVectorType(column.GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg("RLS policy expression does not support vector fields")
+	}
+	if typeutil.IsJSONType(column.GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg("RLS policy expression does not support JSON fields")
+	}
+	return nil
+}
+
+func (mt *MetaTable) PrepareCreateRLSPolicy(ctx context.Context, req *rlsutil.CreateRowPolicyRequest, policyID int64) (*model.RLSPolicy, error) {
+	if req == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("create RLS policy request is nil")
+	}
+	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
+		return nil, err
+	}
+	// Validate only the stable lookup bound before checking uniqueness. A
+	// duplicate name is rejected regardless of whether its definition matches
+	// or refreshable creation limits have changed since the original create.
+	if err := rlsutil.ValidatePolicyName(req.GetPolicyName()); err != nil {
+		return nil, err
+	}
+
+	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = mt.catalog.GetRLSPolicy(ctx, coll.CollectionID, req.GetPolicyName())
+	if err == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("RLS policy [%s] already exists", req.GetPolicyName())
+	} else if !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, merr.Wrap(err, "failed to get RLS policy")
+	}
+
+	if err := validateRLSPolicy(req.GetPolicyName(), req.GetPolicyType(), req.GetActions(), req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
+		return nil, err
+	}
+	if err := validateRLSPolicyDescription(req.GetDescription()); err != nil {
+		return nil, err
+	}
+	if err := validateRLSPolicyExpressions(coll, req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
+		return nil, err
+	}
+
+	policies := coll.RLSPolicies
+	if len(policies) >= Params.ProxyCfg.RLSMaxPoliciesPerCollection.GetAsInt() {
+		return nil, merr.WrapErrServiceQuotaExceeded("unable to create RLS policy because the number of policies has reached the limit")
+	}
+
+	policy := &model.RLSPolicy{
+		DBID:         coll.DBID,
+		CollectionID: coll.CollectionID,
+		PolicyID:     policyID,
+		PolicyName:   req.GetPolicyName(),
+		PolicyType:   req.GetPolicyType(),
+		Actions:      slices.Clone(req.GetActions()),
+		UsingExpr:    req.GetUsingExpr(),
+		CheckExpr:    req.GetCheckExpr(),
+		Description:  req.GetDescription(),
+	}
+	if err := validateRLSCombinedExpressionLength(upsertRLSPolicyList(policies, policy)); err != nil {
+		return nil, err
+	}
+	return policy, nil
+}
+
+func (mt *MetaTable) PrepareUpdateRLSPolicy(ctx context.Context, req *rlsutil.UpdateRowPolicyRequest) (*model.RLSPolicy, error) {
+	if req == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("update RLS policy request is nil")
+	}
+	if err := validateRLSPolicyForUpdate(req.GetPolicyName(), req.GetPolicyType(), req.GetActions(), req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
+		return nil, err
+	}
+	if err := validateRLSPolicyDescription(req.GetDescription()); err != nil {
+		return nil, err
+	}
+
+	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return nil, err
+	}
+	if err := validateRLSPolicyExpressions(coll, req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
+		return nil, err
+	}
+
+	oldPolicy, err := mt.catalog.GetRLSPolicy(ctx, coll.CollectionID, req.GetPolicyName())
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return nil, merr.WrapErrParameterInvalidMsg("RLS policy [%s] does not exist", req.GetPolicyName())
+		}
+		return nil, merr.Wrap(err, "failed to get RLS policy")
+	}
+
+	policy := &model.RLSPolicy{
+		DBID:         coll.DBID,
+		CollectionID: coll.CollectionID,
+		PolicyID:     oldPolicy.PolicyID,
+		PolicyName:   req.GetPolicyName(),
+		PolicyType:   req.GetPolicyType(),
+		Actions:      slices.Clone(req.GetActions()),
+		UsingExpr:    req.GetUsingExpr(),
+		CheckExpr:    req.GetCheckExpr(),
+		Description:  req.GetDescription(),
+	}
+	return policy, nil
+}
+
+func (mt *MetaTable) PrepareDropRLSPolicy(ctx context.Context, req *rlsutil.DropRowPolicyRequest) (*model.RLSPolicy, error) {
+	if req == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("drop RLS policy request is nil")
+	}
+	if err := rlsutil.ValidatePolicyName(req.GetPolicyName()); err != nil {
+		return nil, err
+	}
+
+	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return nil, err
+	}
+
+	policy, err := mt.catalog.GetRLSPolicy(ctx, coll.CollectionID, req.GetPolicyName())
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return &model.RLSPolicy{
+				DBID:         coll.DBID,
+				CollectionID: coll.CollectionID,
+				PolicyName:   req.GetPolicyName(),
+			}, nil
+		}
+		return nil, merr.Wrap(err, "failed to get RLS policy")
+	}
+	policy = model.CloneRLSPolicy(policy)
+	policy.DBID = coll.DBID
+	policy.CollectionID = coll.CollectionID
+	return policy, nil
+}
+
+func (mt *MetaTable) ApplyAlterRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error {
+	if policy == nil {
+		return merr.WrapErrServiceInternalMsg("RLS policy is nil")
+	}
+	if err := mt.catalog.SaveRLSPolicy(ctx, policy); err != nil {
+		return merr.Wrap(err, "failed to save RLS policy")
+	}
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	upsertCollectionRLSPolicy(mt.collID2Meta[policy.CollectionID], policy)
+	return nil
+}
+
+func (mt *MetaTable) ApplyDropRLSPolicy(ctx context.Context, collectionID int64, policyName string) error {
+	if err := mt.catalog.DropRLSPolicy(ctx, collectionID, policyName); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return merr.Wrap(err, "failed to drop RLS policy")
+	}
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	removeCollectionRLSPolicy(mt.collID2Meta[collectionID], policyName)
+	return nil
+}
+
+func (mt *MetaTable) ListRLSPolicies(ctx context.Context, req *rlsutil.ListRowPoliciesRequest) ([]*rlsutil.RowPolicy, error) {
+	if req == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("list RLS policies request is nil")
+	}
+	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return nil, err
+	}
+
+	policies := lo.Map(coll.RLSPolicies, func(policy *model.RLSPolicy, _ int) *rlsutil.RowPolicy {
+		return policy.ToRowPolicy()
+	})
+	sort.Slice(policies, func(i, j int) bool {
+		return policies[i].GetPolicyName() < policies[j].GetPolicyName()
+	})
+	return policies, nil
+}
+
+func validateRLSPrincipalName(principalName string) error {
+	return rlsutil.ValidatePrincipalName(principalName)
+}
+
+func validateRLSPrincipalNameForSet(principalName string) error {
+	return rlsutil.ValidatePrincipalNameWithLimit(principalName)
+}
+
+func validateRLSTagKey(tagKey string) error {
+	return rlsutil.ValidateTagKey(tagKey)
+}
+
+func validateRLSTags(tags map[string]string) error {
+	return rlsutil.ValidateTags(tags)
+}
+
+func validateAndDeduplicateRLSTagKeys(tagKeys []string) ([]string, error) {
+	return rlsutil.ValidateAndDeduplicateTagKeys(tagKeys)
+}
+
+func cloneRLSTags(tags map[string]string) map[string]string {
+	if tags == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(tags))
+	for key, value := range tags {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func (mt *MetaTable) PrepareSetRLSPrincipalTags(ctx context.Context, req *rlsutil.SetRLSPrincipalTagsRequest) (*model.RLSPrincipal, error) {
+	if req == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("set RLS principal tags request is nil")
+	}
+	if err := validateRLSPrincipalName(req.GetPrincipalName()); err != nil {
+		return nil, err
+	}
+	if err := validateRLSTags(req.GetTags()); err != nil {
+		return nil, err
+	}
+
+	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = mt.catalog.GetRLSPrincipal(ctx, coll.CollectionID, req.GetPrincipalName())
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		if err := validateRLSPrincipalNameForSet(req.GetPrincipalName()); err != nil {
+			return nil, err
+		}
+		if len(coll.RLSPrincipals) >= Params.ProxyCfg.RLSMaxPrincipalsPerCollection.GetAsInt() {
+			return nil, merr.WrapErrServiceQuotaExceeded("unable to create RLS principal because the number of principals has reached the limit")
+		}
+	} else if err != nil {
+		return nil, merr.Wrap(err, "failed to get RLS principal")
+	}
+
+	principal := &model.RLSPrincipal{
+		DBID:          coll.DBID,
+		CollectionID:  coll.CollectionID,
+		PrincipalName: req.GetPrincipalName(),
+		Tags:          cloneRLSTags(req.GetTags()),
+	}
+	return principal, nil
+}
+
+func (mt *MetaTable) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]string, error) {
+	if req == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("get RLS principal tags request is nil")
+	}
+	if err := validateRLSPrincipalName(req.GetPrincipalName()); err != nil {
+		return nil, err
+	}
+	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return nil, err
+	}
+
+	principal, err := mt.catalog.GetRLSPrincipal(ctx, coll.CollectionID, req.GetPrincipalName())
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return nil, merr.WrapErrParameterInvalidMsg("RLS principal [%s] does not exist", req.GetPrincipalName())
+		}
+		return nil, merr.Wrap(err, "failed to get RLS principal")
+	}
+	return cloneRLSTags(principal.Tags), nil
+}
+
+func (mt *MetaTable) ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) ([]string, error) {
+	if req == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("list RLS principals request is nil")
+	}
+	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return nil, err
+	}
+
+	names := lo.Map(coll.RLSPrincipals, func(principal *model.RLSPrincipal, _ int) string {
+		return principal.PrincipalName
+	})
+	sort.Strings(names)
+	return names, nil
+}
+
+func (mt *MetaTable) PrepareDeleteRLSPrincipalTags(ctx context.Context, req *rlsutil.DeleteRLSPrincipalTagsRequest) (*model.RLSPrincipal, bool, error) {
+	if req == nil {
+		return nil, false, merr.WrapErrParameterInvalidMsg("delete RLS principal tags request is nil")
+	}
+	if err := validateRLSPrincipalName(req.GetPrincipalName()); err != nil {
+		return nil, false, err
+	}
+	tagKeys, err := validateAndDeduplicateRLSTagKeys(req.GetTagKeys())
+	if err != nil {
+		return nil, false, err
+	}
+
+	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return nil, false, err
+	}
+
+	principal, err := mt.catalog.GetRLSPrincipal(ctx, coll.CollectionID, req.GetPrincipalName())
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return &model.RLSPrincipal{
+				DBID:          coll.DBID,
+				CollectionID:  coll.CollectionID,
+				PrincipalName: req.GetPrincipalName(),
+			}, true, nil
+		}
+		return nil, false, merr.Wrap(err, "failed to get RLS principal")
+	}
+	if len(tagKeys) == 0 {
+		principal = model.CloneRLSPrincipal(principal)
+		principal.DBID = coll.DBID
+		principal.CollectionID = coll.CollectionID
+		return principal, true, nil
+	}
+
+	tags := cloneRLSTags(principal.Tags)
+	for _, key := range tagKeys {
+		delete(tags, key)
+	}
+	if len(tags) == 0 {
+		principal = model.CloneRLSPrincipal(principal)
+		principal.DBID = coll.DBID
+		principal.CollectionID = coll.CollectionID
+		return principal, true, nil
+	}
+	principal = model.CloneRLSPrincipal(principal)
+	principal.DBID = coll.DBID
+	principal.CollectionID = coll.CollectionID
+	principal.Tags = tags
+	return principal, false, nil
+}
+
+func (mt *MetaTable) ApplyAlterRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error {
+	if principal == nil {
+		return merr.WrapErrServiceInternalMsg("RLS principal is nil")
+	}
+	if err := mt.catalog.SaveRLSPrincipal(ctx, principal); err != nil {
+		return merr.Wrap(err, "failed to save RLS principal")
+	}
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	upsertCollectionRLSPrincipal(mt.collID2Meta[principal.CollectionID], principal)
+	return nil
+}
+
+func (mt *MetaTable) ApplyDropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error {
+	if err := mt.catalog.DropRLSPrincipal(ctx, collectionID, principalName); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return merr.Wrap(err, "failed to drop RLS principal")
+	}
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	removeCollectionRLSPrincipal(mt.collID2Meta[collectionID], principalName)
+	return nil
 }
 
 func (mt *MetaTable) AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error {

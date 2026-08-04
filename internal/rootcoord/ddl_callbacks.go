@@ -83,6 +83,8 @@ func (c *DDLCallback) registerCollectionCallbacks() {
 
 	registry.RegisterTruncateCollectionV2AckCallback(c.truncateCollectionV2AckCallback)
 	registry.RegisterTruncateCollectionV2AckOnceCallback(c.truncateCollectionV2AckOnceCallback)
+	registry.RegisterAlterRLSMetadataV2AckCallback(c.alterRLSMetadataV2AckCallback)
+	registry.RegisterDropRLSMetadataV2AckCallback(c.dropRLSMetadataV2AckCallback)
 }
 
 // registerPartitionCallbacks registers the partition callbacks.

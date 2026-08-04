@@ -418,6 +418,18 @@ proxy:
   # If the number of derived result entries exceeds this limit, the search aggregation request will be rejected.
   # Disabled if the value is less or equal to 0.
   maxSearchAggregationResultEntries: 10000
+  rls:
+    maxPoliciesPerCollection: 100 # Maximum number of row policies allowed on one collection.
+    maxPrincipalsPerCollection: 1000 # Maximum number of RLS principals allowed on one collection.
+    maxTagsPerPrincipal: 50 # Maximum number of tags allowed on one collection-scoped RLS principal.
+    maxExpressionLength: 4096 # Maximum length of one RLS using_expr or check_expr in bytes.
+    maxCombinedExpressionLength: 16384 # Maximum length of the final combined RLS expression in bytes.
+    maxPolicyNameLength: 255 # Maximum RLS policy name length in bytes.
+    maxPolicyDescriptionLength: 1024 # Maximum RLS policy description length in bytes.
+    maxPrincipalNameLength: 255 # Maximum RLS principal name length in bytes.
+    maxTagKeyLength: 128 # Maximum RLS principal tag key length in bytes.
+    maxTagValueLength: 1024 # Maximum RLS principal tag value length in bytes.
+    maxArrayLiteralElements: 1024 # Maximum literal elements for RLS in and array_contains* predicates.
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
