@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -102,11 +101,13 @@ func TestResolveReadWALFallsBackWhenHistoricalWALIsMissing(t *testing.T) {
 	}
 	roWAL.SetLogger(mlog.With())
 
-	_, err := roWAL.resolveReadWAL(context.Background(), wal.ReadOption{
+	resolved, err := roWAL.resolveReadWAL(context.Background(), wal.ReadOption{
 		DeliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
 	})
-	require.Error(t, err)
-	assert.True(t, status.AsStreamingError(err).IsWALNameMismatch())
+	require.NoError(t, err)
+	assert.Same(t, currentWAL, resolved.wal)
+	_, ok := resolved.deliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
+	assert.True(t, ok)
 	assert.Equal(t, 1, openCount)
 }
 
@@ -127,12 +128,34 @@ func TestResolveReadWALBoundsTransientHistoricalOpenRetries(t *testing.T) {
 	}
 	roWAL.SetLogger(mlog.With())
 
-	_, err := roWAL.resolveReadWAL(context.Background(), wal.ReadOption{
+	resolved, err := roWAL.resolveReadWAL(context.Background(), wal.ReadOption{
 		DeliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
 	})
-	require.Error(t, err)
-	assert.True(t, status.AsStreamingError(err).IsWALNameMismatch())
+	require.NoError(t, err)
+	assert.Same(t, currentWAL, resolved.wal)
+	_, ok := resolved.deliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
+	assert.True(t, ok)
 	assert.GreaterOrEqual(t, openCount, 1)
+}
+
+func TestResolveReadWALFallsBackInsideStreamingNode(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel", Term: 10, AccessMode: types.AccessModeRW}
+	currentWAL := mock_walimpls.NewMockWALImpls(t)
+	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
+	currentWAL.EXPECT().Channel().Return(channel).Maybe()
+
+	roWAL := &roWALAdaptorImpl{
+		roWALImpls: currentWAL,
+	}
+	roWAL.SetLogger(mlog.With())
+
+	resolved, err := roWAL.resolveReadWAL(context.Background(), wal.ReadOption{
+		DeliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
+	})
+	require.NoError(t, err)
+	assert.Same(t, currentWAL, resolved.wal)
+	_, ok := resolved.deliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
+	assert.True(t, ok)
 }
 
 func TestResolveReadWALKeepsCurrentBackend(t *testing.T) {
