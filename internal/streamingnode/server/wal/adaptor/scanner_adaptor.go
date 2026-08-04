@@ -70,7 +70,6 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 		logger:          logger,
 		recovery:        true,
 		innerWAL:        l,
-		initialWAL:      l,
 		readOption:      readOption,
 		filterFunc:      func(message.ImmutableMessage) bool { return true },
 		reorderBuffer:   utility.NewReOrderBuffer(),
@@ -89,10 +88,9 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 // newScannerAdaptor creates a new scanner adaptor.
 func newScannerAdaptor(
 	name string,
-	currentWAL walimpls.ROWALImpls,
-	initialWAL walimpls.ROWALImpls,
+	innerWAL walimpls.ROWALImpls,
 	readOption wal.ReadOption,
-	switchOptions switchableScannerOptions,
+	readWALOpener readWALOpener,
 	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
 	recovery bool,
@@ -104,15 +102,14 @@ func newScannerAdaptor(
 	logger := resource.Resource().Logger().With(
 		mlog.FieldComponent("scanner"),
 		mlog.String("name", name),
-		mlog.String("channel", currentWAL.Channel().Name),
+		mlog.String("channel", innerWAL.Channel().Name),
 	)
 	s := &scannerAdaptorImpl{
 		logger:          logger,
 		recovery:        recovery,
-		innerWAL:        currentWAL,
-		initialWAL:      initialWAL,
+		innerWAL:        innerWAL,
 		readOption:      readOption,
-		switchOptions:   switchOptions,
+		readWALOpener:   readWALOpener,
 		filterFunc:      options.GetFilterFunc(readOption.MessageFilter),
 		reorderBuffer:   utility.NewReOrderBuffer(),
 		pendingQueue:    utility.NewPendingQueue(),
@@ -122,11 +119,13 @@ func newScannerAdaptor(
 		metrics:         scanMetrics,
 		readRateCounter: utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
+	readerWALName := innerWAL.WALName()
 	readerRole := metrics.WALReaderRoleCurrent
-	if initialWAL.WALName() != currentWAL.WALName() {
+	if startWALName, ok := getDeliverPolicyWALName(readOption.DeliverPolicy); ok && startWALName != innerWAL.WALName() {
+		readerWALName = startWALName
 		readerRole = metrics.WALReaderRoleHistorical
 	}
-	s.metrics.SetReaderInfo(initialWAL.WALName(), readerRole)
+	s.metrics.SetReaderInfo(readerWALName, readerRole)
 	go s.execute()
 	return s
 }
@@ -137,9 +136,8 @@ type scannerAdaptorImpl struct {
 	recovery      bool
 	logger        *mlog.Logger
 	innerWAL      walimpls.ROWALImpls
-	initialWAL    walimpls.ROWALImpls
 	readOption    wal.ReadOption
-	switchOptions switchableScannerOptions
+	readWALOpener readWALOpener
 	filterFunc    func(message.ImmutableMessage) bool
 	reorderBuffer *utility.ReOrderByTimeTickBuffer // support time tick reorder.
 	pendingQueue  *utility.PendingQueue
@@ -244,15 +242,14 @@ func (s *scannerAdaptorImpl) produceEventLoop(ctx context.Context, msgChan chan<
 		wb = resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).WriteAheadBuffer()
 	}
 
-	scanner := newSwithableScanner(
+	scanner := newSwitchableScanner(
 		s.Name(),
 		s.logger,
 		s.innerWAL,
-		s.initialWAL,
 		wb,
 		s.readOption.DeliverPolicy,
 		msgChan,
-		s.switchOptions,
+		s.readWALOpener,
 		func(walName message.WALName, role string) {
 			s.metrics.SwitchReaderInfo(walName, role)
 		},
@@ -265,7 +262,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(ctx context.Context, msgChan chan<
 			// so we need to enter slowdown mode to protect the wal from being overloaded.
 			// 2. when the scanner is working at tailing mode, the write operation is slow than the consume operation,
 			// so we enter into recovery mode to speed up the rate limit.
-			if _, ok := scanner.(*catchupScanner); ok {
+			if getScannerModel(scanner) == metrics.WALScannerModelCatchup {
 				// Create a checker that returns false when read rate > append rate.
 				// This indicates the scanner has caught up and slowdown should stop.
 				checker := s.createSlowdownChecker()

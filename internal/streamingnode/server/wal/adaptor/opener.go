@@ -172,7 +172,7 @@ func (o *openerAdaptorImpl) getOrCreateOpenerImpl(ctx context.Context, walName m
 		return opener, nil
 	}
 
-	// Build and cache new opener. WAL names in a historical consumer position
+	// Build and cache new opener. WAL names in a consumer position
 	// may come from an untrusted wire enum, so never use the panicking lookup on
 	// this path.
 	builderImpl, ok := registry.GetBuilder(walName)
@@ -189,9 +189,8 @@ func (o *openerAdaptorImpl) getOrCreateOpenerImpl(ctx context.Context, walName m
 	return opener, nil
 }
 
-// openHistoricalWAL opens a previous WAL backend in read-only mode for an
-// existing consumer that still holds a position from that backend.
-func (o *openerAdaptorImpl) openHistoricalWAL(
+// openReadWAL opens the requested WAL backend in read-only mode.
+func (o *openerAdaptorImpl) openReadWAL(
 	ctx context.Context,
 	walName message.WALName,
 	channel types.PChannelInfo,
@@ -209,7 +208,7 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	id := o.idAllocator.Allocate()
 	roWAL := adaptImplsToROWAL(l, func() {
 		o.walInstances.Remove(id)
-	}, o.openHistoricalWAL)
+	}, o.openReadWAL)
 	resources := &walOpenResources{roWAL: roWAL}
 	defer resources.Close()
 
@@ -522,7 +521,7 @@ func (o *openerAdaptorImpl) openROWAL(l walimpls.WALImpls) (wal.WAL, error) {
 	id := o.idAllocator.Allocate()
 	wal := adaptImplsToROWAL(l, func() {
 		o.walInstances.Remove(id)
-	}, o.openHistoricalWAL)
+	}, o.openReadWAL)
 	o.walInstances.Insert(id, wal)
 	return wal, nil
 }

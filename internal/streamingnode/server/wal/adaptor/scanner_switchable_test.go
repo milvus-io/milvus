@@ -3,7 +3,6 @@ package adaptor
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -12,19 +11,16 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
 	mock_message "github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
-	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
-	walregistry "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/registry"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -59,161 +55,153 @@ func newTestTimeTickMessage(
 		IntoImmutableMessage(messageID)
 }
 
-func TestHistoricalScannerSwitchesAfterAlterWALTimeTick(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func newTestReadWAL(
+	t *testing.T,
+	walName message.WALName,
+	channel types.PChannelInfo,
+	messages ...message.ImmutableMessage,
+) walimpls.ROWALImpls {
+	messageCh := make(chan message.ImmutableMessage, len(messages))
+	for _, msg := range messages {
+		messageCh <- msg
+	}
+	scanner := mock_walimpls.NewMockScannerImpls(t)
+	scanner.EXPECT().Chan().Return(messageCh).Maybe()
+	scanner.EXPECT().Close().Return(nil).Once()
 
+	readWAL := mock_walimpls.NewMockWALImpls(t)
+	readWAL.EXPECT().WALName().Return(walName).Maybe()
+	readWAL.EXPECT().Channel().Return(channel).Maybe()
+	readWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner, nil).Once()
+	readWAL.EXPECT().Close().Return().Once()
+	return readWAL
+}
+
+func newTestCurrentWAL(t *testing.T, channel types.PChannelInfo) walimpls.ROWALImpls {
 	currentWAL := mock_walimpls.NewMockWALImpls(t)
 	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
-	currentWAL.EXPECT().Channel().Return(types.PChannelInfo{Name: "test-channel"}).Maybe()
+	currentWAL.EXPECT().Channel().Return(channel).Maybe()
+	return currentWAL
+}
 
-	historicalWAL := mock_walimpls.NewMockWALImpls(t)
-	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
-	historicalWAL.EXPECT().Close().Return().Once()
+func TestNewSwitchableScannerUsesCurrentWALDirectly(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	currentWAL := newTestCurrentWAL(t, channel)
+	openerCalled := false
 
-	messageCh := make(chan message.ImmutableMessage)
-	innerScanner := mock_walimpls.NewMockScannerImpls(t)
-	innerScanner.EXPECT().Chan().Return(messageCh).Maybe()
-	innerScanner.EXPECT().Close().Return(nil).Once()
-	historicalWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
-		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_StartFrom)
-		return ok
-	})).Return(innerScanner, nil).Once()
-
-	outputCh := make(chan message.ImmutableMessage, 3)
-	type readerInfo struct {
-		walName message.WALName
-		role    string
-	}
-	switchedCh := make(chan readerInfo, 1)
-	scanner := &historicalScanner{
-		switchableScannerImpl: switchableScannerImpl{
-			scannerName: "historical-test",
-			logger:      mlog.With(),
-			innerWAL:    currentWAL,
-			msgChan:     outputCh,
-			onReaderSwitch: func(walName message.WALName, role string) {
-				switchedCh <- readerInfo{walName: walName, role: role}
-			},
+	scanner := newSwitchableScanner(
+		"current-reader",
+		mlog.With(),
+		currentWAL,
+		nil,
+		options.DeliverPolicyStartFrom(walimplstest.NewTestMessageID(1)),
+		make(chan message.ImmutableMessage),
+		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			openerCalled = true
+			return nil, nil
 		},
-		historicalWAL: historicalWAL,
-		deliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
-	}
+		nil,
+	)
 
-	type result struct {
-		next switchableScanner
-		err  error
-	}
-	resultCh := make(chan result, 1)
-	go func() {
-		next, err := scanner.Do(ctx)
-		resultCh <- result{next: next, err: err}
-	}()
-
-	alterWAL := newTestAlterWALMessage(commonpb.WALName_Test, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
-	messageCh <- alterWAL
-	require.Equal(t, message.MessageTypeAlterWAL, (<-outputCh).MessageType())
-
-	select {
-	case result := <-resultCh:
-		t.Fatalf("historical scanner switched before the TimeTick barrier: %v", result.err)
-	case <-time.After(100 * time.Millisecond):
-	}
-
-	timeTickBeforeBarrier := newTestTimeTickMessage(99, rmq.NewRmqID(3), rmq.NewRmqID(2))
-	messageCh <- timeTickBeforeBarrier
-	require.Equal(t, uint64(99), (<-outputCh).TimeTick())
-
-	select {
-	case result := <-resultCh:
-		t.Fatalf("historical scanner switched below the TimeTick barrier: %v", result.err)
-	case <-time.After(100 * time.Millisecond):
-	}
-
-	timeTick := newTestTimeTickMessage(100, rmq.NewRmqID(4), rmq.NewRmqID(3))
-	messageCh <- timeTick
-	require.Equal(t, message.MessageTypeTimeTick, (<-outputCh).MessageType())
-
-	resultValue := <-resultCh
-	require.NoError(t, resultValue.err)
-	catchup, ok := resultValue.next.(*catchupScanner)
+	_, ok := scanner.(*catchupScanner)
 	require.True(t, ok)
-	assert.Equal(t, uint64(100), catchup.exclusiveStartTimeTick)
+	require.False(t, openerCalled)
+}
+
+func TestSwitchableScannerSwitchesImmediatelyOnAlterWAL(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	currentWAL := newTestCurrentWAL(t, channel)
+	marker := newTestAlterWALMessage(commonpb.WALName_Test, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
+	oldWAL := newTestReadWAL(t, message.WALNameRocksmq, channel, marker)
+	outputCh := make(chan message.ImmutableMessage, 1)
+
+	scanner := newSwitchableScanner(
+		"switch-reader",
+		mlog.With(),
+		currentWAL,
+		nil,
+		options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
+		outputCh,
+		func(_ context.Context, walName message.WALName, gotChannel types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			require.Equal(t, message.WALNameRocksmq, walName)
+			require.Equal(t, channel, gotChannel)
+			return oldWAL, nil
+		},
+		nil,
+	)
+
+	next, err := scanner.Do(context.Background())
+	require.NoError(t, err)
+	catchup, ok := next.(*catchupScanner)
+	require.True(t, ok)
+	require.Equal(t, uint64(100), catchup.exclusiveStartTimeTick)
 	_, ok = catchup.deliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
-	assert.True(t, ok)
-	assert.Equal(t, readerInfo{walName: message.WALNameTest, role: metrics.WALReaderRoleCurrent}, <-switchedCh)
+	require.True(t, ok)
+	require.Equal(t, marker, <-outputCh)
 }
 
-func TestHistoricalScannerFollowsMigrationChain(t *testing.T) {
-	currentWAL := mock_walimpls.NewMockWALImpls(t)
-	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
-	currentWAL.EXPECT().Channel().Return(types.PChannelInfo{Name: "test-channel"}).Maybe()
+func TestSwitchableScannerFollowsMigrationChainAndFiltersRepeatedWAL(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	currentWAL := newTestCurrentWAL(t, channel)
 
-	rocksmqWAL := mock_walimpls.NewMockWALImpls(t)
-	rocksmqWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
-	rocksmqWAL.EXPECT().Close().Return().Once()
+	firstRocksmqWAL := newTestReadWAL(t, message.WALNameRocksmq, channel,
+		newTestAlterWALMessage(commonpb.WALName_WoodPecker, 100, rmq.NewRmqID(2), rmq.NewRmqID(1)),
+	)
+	woodpeckerWAL := newTestReadWAL(t, message.WALNameWoodpecker, channel,
+		newTestTimeTickMessage(150, rmq.NewRmqID(3), rmq.NewRmqID(2)),
+		newTestAlterWALMessage(commonpb.WALName_RocksMQ, 200, rmq.NewRmqID(4), rmq.NewRmqID(3)),
+	)
+	secondRocksmqWAL := newTestReadWAL(t, message.WALNameRocksmq, channel,
+		// These records belong to the first RocksMQ epoch and must be skipped.
+		newTestTimeTickMessage(50, rmq.NewRmqID(1), rmq.NewRmqID(1)),
+		newTestAlterWALMessage(commonpb.WALName_WoodPecker, 100, rmq.NewRmqID(2), rmq.NewRmqID(1)),
+		newTestTimeTickMessage(250, rmq.NewRmqID(5), rmq.NewRmqID(4)),
+		newTestAlterWALMessage(commonpb.WALName_Test, 300, rmq.NewRmqID(6), rmq.NewRmqID(5)),
+	)
 
-	rocksmqMessages := make(chan message.ImmutableMessage, 2)
-	rocksmqMessages <- newTestAlterWALMessage(commonpb.WALName_WoodPecker, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
-	rocksmqMessages <- newTestTimeTickMessage(100, rmq.NewRmqID(3), rmq.NewRmqID(2))
-	rocksmqScanner := mock_walimpls.NewMockScannerImpls(t)
-	rocksmqScanner.EXPECT().Chan().Return(rocksmqMessages).Maybe()
-	rocksmqScanner.EXPECT().Close().Return(nil).Once()
-	rocksmqWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(rocksmqScanner, nil).Once()
-
-	woodpeckerWAL := mock_walimpls.NewMockWALImpls(t)
-	woodpeckerWAL.EXPECT().WALName().Return(message.WALNameWoodpecker).Maybe()
-	woodpeckerWAL.EXPECT().Close().Return().Once()
-	woodpeckerMessages := make(chan message.ImmutableMessage, 3)
-	woodpeckerMessages <- newTestTimeTickMessage(100, rmq.NewRmqID(4), rmq.NewRmqID(3))
-	woodpeckerMessages <- newTestAlterWALMessage(commonpb.WALName_Test, 200, rmq.NewRmqID(5), rmq.NewRmqID(4))
-	woodpeckerMessages <- newTestTimeTickMessage(200, rmq.NewRmqID(6), rmq.NewRmqID(5))
-	woodpeckerScanner := mock_walimpls.NewMockScannerImpls(t)
-	woodpeckerScanner.EXPECT().Chan().Return(woodpeckerMessages).Maybe()
-	woodpeckerScanner.EXPECT().Close().Return(nil).Once()
-	woodpeckerWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
-		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
-		return ok
-	})).Return(woodpeckerScanner, nil).Once()
-
-	type readerInfo struct {
-		walName message.WALName
-		role    string
-	}
-	switchedCh := make(chan readerInfo, 2)
-	outputCh := make(chan message.ImmutableMessage, 4)
-
-	scanner := &historicalScanner{
-		switchableScannerImpl: switchableScannerImpl{
-			scannerName: "historical-chain-test",
-			logger:      mlog.With(),
-			innerWAL:    currentWAL,
-			msgChan:     outputCh,
-			historicalWALOpener: func(_ context.Context, walName message.WALName, _ types.PChannelInfo) (walimpls.ROWALImpls, error) {
-				assert.Equal(t, message.WALNameWoodpecker, walName)
+	opened := 0
+	readerSwitches := make([]message.WALName, 0, 3)
+	outputCh := make(chan message.ImmutableMessage, 8)
+	scanner := newSwitchableScanner(
+		"migration-chain-reader",
+		mlog.With(),
+		currentWAL,
+		nil,
+		options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
+		outputCh,
+		func(_ context.Context, walName message.WALName, _ types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			opened++
+			switch opened {
+			case 1:
+				require.Equal(t, message.WALNameRocksmq, walName)
+				return firstRocksmqWAL, nil
+			case 2:
+				require.Equal(t, message.WALNameWoodpecker, walName)
 				return woodpeckerWAL, nil
-			},
-			onReaderSwitch: func(walName message.WALName, role string) {
-				switchedCh <- readerInfo{walName: walName, role: role}
-			},
+			case 3:
+				require.Equal(t, message.WALNameRocksmq, walName)
+				return secondRocksmqWAL, nil
+			default:
+				t.Fatalf("unexpected WAL open %d for %s", opened, walName)
+				return nil, nil
+			}
 		},
-		historicalWAL: rocksmqWAL,
-		deliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
-	}
+		func(walName message.WALName, _ string) {
+			readerSwitches = append(readerSwitches, walName)
+		},
+	)
 
 	next, err := scanner.Do(context.Background())
 	require.NoError(t, err)
-	historicalNext, ok := next.(*historicalScanner)
-	require.True(t, ok)
-	assert.Equal(t, message.WALNameWoodpecker, historicalNext.historicalWAL.WALName())
-
-	next, err = historicalNext.Do(context.Background())
-	require.NoError(t, err)
 	catchup, ok := next.(*catchupScanner)
 	require.True(t, ok)
-	assert.Equal(t, uint64(200), catchup.exclusiveStartTimeTick)
-	assert.Equal(t, readerInfo{walName: message.WALNameWoodpecker, role: metrics.WALReaderRoleHistorical}, <-switchedCh)
-	assert.Equal(t, readerInfo{walName: message.WALNameTest, role: metrics.WALReaderRoleCurrent}, <-switchedCh)
+	require.Equal(t, uint64(300), catchup.exclusiveStartTimeTick)
+	require.Equal(t, 3, opened)
+	require.Equal(t, []message.WALName{
+		message.WALNameWoodpecker,
+		message.WALNameRocksmq,
+		message.WALNameTest,
+	}, readerSwitches)
 
 	var timeTicks []uint64
 	for len(outputCh) > 0 {
@@ -222,370 +210,123 @@ func TestHistoricalScannerFollowsMigrationChain(t *testing.T) {
 			timeTicks = append(timeTicks, msg.TimeTick())
 		}
 	}
-	assert.Equal(t, []uint64{100, 200}, timeTicks)
+	require.Equal(t, []uint64{150, 250}, timeTicks)
 }
 
-func TestHistoricalScannerFollowsMigrationChainWithRepeatedWALType(t *testing.T) {
-	currentWAL := mock_walimpls.NewMockWALImpls(t)
-	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
-	currentWAL.EXPECT().Channel().Return(types.PChannelInfo{Name: "test-channel"}).Maybe()
-
-	firstRocksmqWAL := mock_walimpls.NewMockWALImpls(t)
-	firstRocksmqWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
-	firstRocksmqWAL.EXPECT().Close().Return().Once()
-	firstRocksmqMessages := make(chan message.ImmutableMessage, 2)
-	firstRocksmqMessages <- newTestAlterWALMessage(commonpb.WALName_WoodPecker, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
-	firstRocksmqMessages <- newTestTimeTickMessage(100, rmq.NewRmqID(3), rmq.NewRmqID(2))
-	firstRocksmqScanner := mock_walimpls.NewMockScannerImpls(t)
-	firstRocksmqScanner.EXPECT().Chan().Return(firstRocksmqMessages).Maybe()
-	firstRocksmqScanner.EXPECT().Close().Return(nil).Once()
-	firstRocksmqWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(firstRocksmqScanner, nil).Once()
-
-	woodpeckerWAL := mock_walimpls.NewMockWALImpls(t)
-	woodpeckerWAL.EXPECT().WALName().Return(message.WALNameWoodpecker).Maybe()
-	woodpeckerWAL.EXPECT().Close().Return().Once()
-	woodpeckerMessages := make(chan message.ImmutableMessage, 2)
-	woodpeckerMessages <- newTestAlterWALMessage(commonpb.WALName_RocksMQ, 200, rmq.NewRmqID(4), rmq.NewRmqID(3))
-	woodpeckerMessages <- newTestTimeTickMessage(200, rmq.NewRmqID(5), rmq.NewRmqID(4))
-	woodpeckerScanner := mock_walimpls.NewMockScannerImpls(t)
-	woodpeckerScanner.EXPECT().Chan().Return(woodpeckerMessages).Maybe()
-	woodpeckerScanner.EXPECT().Close().Return(nil).Once()
-	woodpeckerWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(woodpeckerScanner, nil).Once()
-
-	secondRocksmqWAL := mock_walimpls.NewMockWALImpls(t)
-	secondRocksmqWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
-	secondRocksmqWAL.EXPECT().Close().Return().Once()
-	secondRocksmqMessages := make(chan message.ImmutableMessage, 2)
-	secondRocksmqMessages <- newTestAlterWALMessage(commonpb.WALName_Test, 300, rmq.NewRmqID(6), rmq.NewRmqID(5))
-	secondRocksmqMessages <- newTestTimeTickMessage(300, rmq.NewRmqID(7), rmq.NewRmqID(6))
-	secondRocksmqScanner := mock_walimpls.NewMockScannerImpls(t)
-	secondRocksmqScanner.EXPECT().Chan().Return(secondRocksmqMessages).Maybe()
-	secondRocksmqScanner.EXPECT().Close().Return(nil).Once()
-	secondRocksmqWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(secondRocksmqScanner, nil).Once()
-
-	type readerInfo struct {
-		walName message.WALName
-		role    string
-	}
-	switchedCh := make(chan readerInfo, 3)
-	outputCh := make(chan message.ImmutableMessage, 6)
-	openCount := 0
-	scanner := &historicalScanner{
-		switchableScannerImpl: switchableScannerImpl{
-			scannerName: "historical-repeated-wal-chain-test",
-			logger:      mlog.With(),
-			innerWAL:    currentWAL,
-			msgChan:     outputCh,
-			historicalWALOpener: func(_ context.Context, walName message.WALName, _ types.PChannelInfo) (walimpls.ROWALImpls, error) {
-				openCount++
-				switch openCount {
-				case 1:
-					assert.Equal(t, message.WALNameWoodpecker, walName)
-					return woodpeckerWAL, nil
-				case 2:
-					assert.Equal(t, message.WALNameRocksmq, walName)
-					return secondRocksmqWAL, nil
-				default:
-					t.Fatalf("unexpected historical WAL open %d for %s", openCount, walName)
-					return nil, nil
-				}
-			},
-			onReaderSwitch: func(walName message.WALName, role string) {
-				switchedCh <- readerInfo{walName: walName, role: role}
-			},
-		},
-		historicalWAL: firstRocksmqWAL,
-		deliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
-	}
-
-	next, err := scanner.Do(context.Background())
-	require.NoError(t, err)
-	firstNext, ok := next.(*historicalScanner)
-	require.True(t, ok)
-
-	next, err = firstNext.Do(context.Background())
-	require.NoError(t, err)
-	secondNext, ok := next.(*historicalScanner)
-	require.True(t, ok)
-
-	next, err = secondNext.Do(context.Background())
-	require.NoError(t, err)
-	catchup, ok := next.(*catchupScanner)
-	require.True(t, ok)
-	assert.Equal(t, uint64(300), catchup.exclusiveStartTimeTick)
-	assert.Equal(t, 2, openCount)
-	assert.Equal(t, readerInfo{walName: message.WALNameWoodpecker, role: metrics.WALReaderRoleHistorical}, <-switchedCh)
-	assert.Equal(t, readerInfo{walName: message.WALNameRocksmq, role: metrics.WALReaderRoleHistorical}, <-switchedCh)
-	assert.Equal(t, readerInfo{walName: message.WALNameTest, role: metrics.WALReaderRoleCurrent}, <-switchedCh)
-
-	var timeTicks []uint64
-	for len(outputCh) > 0 {
-		msg := <-outputCh
-		if msg.MessageType() == message.MessageTypeTimeTick {
-			timeTicks = append(timeTicks, msg.TimeTick())
-		}
-	}
-	assert.Equal(t, []uint64{100, 200, 300}, timeTicks)
-}
-
-func TestHistoricalScannerFallsBackWhenNextHopIsUnavailable(t *testing.T) {
-	currentWAL := mock_walimpls.NewMockWALImpls(t)
-	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
-	currentWAL.EXPECT().Channel().Return(types.PChannelInfo{Name: "test-channel"}).Maybe()
-
-	historicalWAL := mock_walimpls.NewMockWALImpls(t)
-	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
-	historicalWAL.EXPECT().Close().Return().Once()
-	messageCh := make(chan message.ImmutableMessage, 2)
-	messageCh <- newTestAlterWALMessage(commonpb.WALName_WoodPecker, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
-	messageCh <- newTestTimeTickMessage(100, rmq.NewRmqID(3), rmq.NewRmqID(2))
-	innerScanner := mock_walimpls.NewMockScannerImpls(t)
-	innerScanner.EXPECT().Chan().Return(messageCh).Maybe()
-	innerScanner.EXPECT().Close().Return(nil).Once()
-	historicalWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(innerScanner, nil).Once()
-
-	scanner := &historicalScanner{
-		switchableScannerImpl: switchableScannerImpl{
-			scannerName: "historical-fallback-test",
-			logger:      mlog.With(),
-			innerWAL:    currentWAL,
-			msgChan:     make(chan message.ImmutableMessage, 2),
-			historicalWALOpener: func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
-				return nil, status.NewWALNameMismatchError(message.WALNameTest.String(), message.WALNameWoodpecker.String())
-			},
-		},
-		historicalWAL: historicalWAL,
-		deliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
-	}
-
-	next, err := scanner.Do(context.Background())
-	require.NoError(t, err)
-	catchup, ok := next.(*catchupScanner)
-	require.True(t, ok)
-	assert.Equal(t, uint64(100), catchup.exclusiveStartTimeTick)
-}
-
-func TestHistoricalScannerStartAfterMarkerStillObservesBoundary(t *testing.T) {
-	currentWAL := mock_walimpls.NewMockWALImpls(t)
-	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
-	currentWAL.EXPECT().Channel().Return(types.PChannelInfo{Name: "test-channel"}).Maybe()
-
+func TestSwitchableScannerStartAfterAlterWALMarker(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	currentWAL := newTestCurrentWAL(t, channel)
 	markerID := rmq.NewRmqID(2)
-	historicalWAL := mock_walimpls.NewMockWALImpls(t)
-	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
-	historicalWAL.EXPECT().Close().Return().Once()
-	messageCh := make(chan message.ImmutableMessage, 2)
-	messageCh <- newTestAlterWALMessage(commonpb.WALName_Test, 100, markerID, rmq.NewRmqID(1))
-	messageCh <- newTestTimeTickMessage(100, rmq.NewRmqID(3), markerID)
-	innerScanner := mock_walimpls.NewMockScannerImpls(t)
-	innerScanner.EXPECT().Chan().Return(messageCh).Maybe()
-	innerScanner.EXPECT().Close().Return(nil).Once()
-	historicalWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
-		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_StartFrom)
-		return ok
-	})).Return(innerScanner, nil).Once()
+	oldWAL := newTestReadWAL(t, message.WALNameRocksmq, channel,
+		newTestAlterWALMessage(commonpb.WALName_Test, 100, markerID, rmq.NewRmqID(1)),
+	)
+	outputCh := make(chan message.ImmutableMessage, 1)
 
-	outputCh := make(chan message.ImmutableMessage, 2)
-	scanner := &historicalScanner{
-		switchableScannerImpl: switchableScannerImpl{
-			scannerName: "historical-start-after-marker-test",
-			logger:      mlog.With(),
-			innerWAL:    currentWAL,
-			msgChan:     outputCh,
+	scanner := newSwitchableScanner(
+		"start-after-marker-reader",
+		mlog.With(),
+		currentWAL,
+		nil,
+		options.DeliverPolicyStartAfter(markerID),
+		outputCh,
+		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			return oldWAL, nil
 		},
-		historicalWAL:           historicalWAL,
-		deliverPolicy:           options.DeliverPolicyStartFrom(markerID),
-		exclusiveStartMessageID: markerID,
-	}
+		nil,
+	)
 
 	next, err := scanner.Do(context.Background())
 	require.NoError(t, err)
-	_, ok := next.(*catchupScanner)
+	catchup, ok := next.(*catchupScanner)
 	require.True(t, ok)
-	require.Len(t, outputCh, 1)
-	assert.Equal(t, message.MessageTypeTimeTick, (<-outputCh).MessageType())
+	require.Equal(t, uint64(100), catchup.exclusiveStartTimeTick)
+	require.Empty(t, outputCh)
 }
 
-func TestHistoricalScannerIdleTailFallsBackToCurrentWAL(t *testing.T) {
-	currentWAL := mock_walimpls.NewMockWALImpls(t)
-	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
-	currentWAL.EXPECT().Channel().Return(types.PChannelInfo{Name: "test-channel"}).Maybe()
+func TestSwitchableScannerFallsBackWhenReadWALIsUnavailable(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	currentWAL := newTestCurrentWAL(t, channel)
 
-	historicalWAL := mock_walimpls.NewMockWALImpls(t)
-	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
-	historicalWAL.EXPECT().Close().Return().Once()
-	messageCh := make(chan message.ImmutableMessage)
-	innerScanner := mock_walimpls.NewMockScannerImpls(t)
-	innerScanner.EXPECT().Chan().Return(messageCh).Maybe()
-	innerScanner.EXPECT().Close().Return(nil).Once()
-	historicalWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(innerScanner, nil).Once()
-
-	scanner := &historicalScanner{
-		switchableScannerImpl: switchableScannerImpl{
-			scannerName:                  "historical-idle-tail-test",
-			logger:                       mlog.With(),
-			innerWAL:                     currentWAL,
-			msgChan:                      make(chan message.ImmutableMessage),
-			historicalWALFallbackTimeout: 20 * time.Millisecond,
+	scanner := newSwitchableScanner(
+		"missing-reader",
+		mlog.With(),
+		currentWAL,
+		nil,
+		options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
+		make(chan message.ImmutableMessage),
+		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			return nil, merr.WrapErrMqTopicNotFound(channel.Name)
 		},
-		historicalWAL: historicalWAL,
-		deliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(3)),
-	}
+		nil,
+	)
 
 	next, err := scanner.Do(context.Background())
 	require.NoError(t, err)
-	_, ok := next.(*catchupScanner)
+	catchup, ok := next.(*catchupScanner)
+	require.True(t, ok)
+	_, ok = catchup.deliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
 	require.True(t, ok)
 }
 
-func TestHistoricalScannerReaderCreationTimeoutFallsBackToCurrentWAL(t *testing.T) {
-	currentWAL := mock_walimpls.NewMockWALImpls(t)
-	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
-	currentWAL.EXPECT().Channel().Return(types.PChannelInfo{Name: "test-channel"}).Maybe()
+func TestSwitchableScannerReopensWALAfterReaderFailure(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	currentWAL := newTestCurrentWAL(t, channel)
 
-	historicalWAL := mock_walimpls.NewMockWALImpls(t)
-	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
-	historicalWAL.EXPECT().Close().Return().Once()
-	historicalWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(nil, errors.New("historical reader unavailable")).Once()
-
-	scanner := &historicalScanner{
-		switchableScannerImpl: switchableScannerImpl{
-			scannerName:                  "historical-reader-create-timeout-test",
-			logger:                       mlog.With(),
-			innerWAL:                     currentWAL,
-			msgChan:                      make(chan message.ImmutableMessage),
-			historicalWALFallbackTimeout: 20 * time.Millisecond,
-		},
-		historicalWAL: historicalWAL,
-		deliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(3)),
-	}
-
-	next, err := scanner.Do(context.Background())
-	require.NoError(t, err)
-	_, ok := next.(*catchupScanner)
-	require.True(t, ok)
-}
-
-func TestHistoricalScannerMissingTopicFallsBackWithoutRetry(t *testing.T) {
-	currentWAL := mock_walimpls.NewMockWALImpls(t)
-	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
-	currentWAL.EXPECT().Channel().Return(types.PChannelInfo{Name: "test-channel"}).Maybe()
-
-	historicalWAL := mock_walimpls.NewMockWALImpls(t)
-	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
-	historicalWAL.EXPECT().Close().Return().Once()
-	historicalWAL.EXPECT().Read(mock.Anything, mock.Anything).
-		Return(nil, merr.WrapErrMqTopicNotFound("test-channel")).Once()
-
-	scanner := &historicalScanner{
-		switchableScannerImpl: switchableScannerImpl{
-			scannerName:                  "historical-missing-topic-test",
-			logger:                       mlog.With(),
-			innerWAL:                     currentWAL,
-			msgChan:                      make(chan message.ImmutableMessage),
-			historicalWALFallbackTimeout: time.Second,
-		},
-		historicalWAL: historicalWAL,
-		deliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(3)),
-	}
-
-	next, err := scanner.Do(context.Background())
-	require.NoError(t, err)
-	_, ok := next.(*catchupScanner)
-	require.True(t, ok)
-}
-
-func TestHistoricalScannerUnavailableRocksMQFallsBackToCurrentWAL(t *testing.T) {
-	originalRocksMQ := server.Rmq
-	server.Rmq = nil
-	defer func() { server.Rmq = originalRocksMQ }()
-
-	builder, ok := walregistry.GetBuilder(message.WALNameRocksmq)
-	require.True(t, ok)
-	opener, err := builder.Build()
-	require.NoError(t, err)
-	defer opener.Close()
-	historicalWAL, err := opener.Open(context.Background(), &walimpls.OpenOption{
-		Channel: types.PChannelInfo{
-			Name:       "unavailable-historical-rocksmq",
-			AccessMode: types.AccessModeRO,
-		},
-	})
-	require.NoError(t, err)
-
-	currentWAL := mock_walimpls.NewMockWALImpls(t)
-	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
-	currentWAL.EXPECT().Channel().Return(types.PChannelInfo{Name: "test-channel"}).Maybe()
-	scanner := &historicalScanner{
-		switchableScannerImpl: switchableScannerImpl{
-			scannerName:                  "unavailable-historical-rocksmq-test",
-			logger:                       mlog.With(),
-			innerWAL:                     currentWAL,
-			msgChan:                      make(chan message.ImmutableMessage),
-			historicalWALFallbackTimeout: 20 * time.Millisecond,
-		},
-		historicalWAL: historicalWAL,
-		deliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
-	}
-
-	next, err := scanner.Do(context.Background())
-	require.NoError(t, err)
-	_, ok = next.(*catchupScanner)
-	require.True(t, ok)
-}
-
-func TestHistoricalScannerRetriesAfterMidStreamReaderFailure(t *testing.T) {
-	currentWAL := mock_walimpls.NewMockWALImpls(t)
-	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
-	currentWAL.EXPECT().Channel().Return(types.PChannelInfo{Name: "test-channel"}).Maybe()
-
-	transientErr := errors.New("transient historical reader failure")
 	failedMessages := make(chan message.ImmutableMessage, 1)
 	failedMessages <- newTestTimeTickMessage(90, rmq.NewRmqID(2), rmq.NewRmqID(1))
 	close(failedMessages)
 	failedScanner := mock_walimpls.NewMockScannerImpls(t)
 	failedScanner.EXPECT().Chan().Return(failedMessages).Maybe()
-	failedScanner.EXPECT().Error().Return(transientErr).Once()
+	failedScanner.EXPECT().Error().Return(errors.New("transient reader failure")).Once()
 	failedScanner.EXPECT().Close().Return(nil).Once()
+	failedWAL := mock_walimpls.NewMockWALImpls(t)
+	failedWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
+	failedWAL.EXPECT().Channel().Return(channel).Maybe()
+	failedWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(failedScanner, nil).Once()
+	failedWAL.EXPECT().Close().Return().Once()
 
-	recoveredMessages := make(chan message.ImmutableMessage, 2)
-	recoveredMessages <- newTestAlterWALMessage(commonpb.WALName_Test, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
-	recoveredMessages <- newTestTimeTickMessage(100, rmq.NewRmqID(3), rmq.NewRmqID(2))
-	recoveredScanner := mock_walimpls.NewMockScannerImpls(t)
-	recoveredScanner.EXPECT().Chan().Return(recoveredMessages).Maybe()
-	recoveredScanner.EXPECT().Close().Return(nil).Once()
-
-	historicalWAL := mock_walimpls.NewMockWALImpls(t)
-	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
-	historicalWAL.EXPECT().Close().Return().Once()
-	historicalWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
-		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_StartFrom)
-		return ok
-	})).Return(failedScanner, nil).Once()
-	historicalWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
-		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_StartFrom)
-		return ok
-	})).Return(recoveredScanner, nil).Once()
-
-	outputCh := make(chan message.ImmutableMessage, 3)
-	scanner := &historicalScanner{
-		switchableScannerImpl: switchableScannerImpl{
-			scannerName: "historical-retry-test",
-			logger:      mlog.With(),
-			innerWAL:    currentWAL,
-			msgChan:     outputCh,
+	recoveredWAL := newTestReadWAL(t, message.WALNameRocksmq, channel,
+		newTestAlterWALMessage(commonpb.WALName_Test, 100, rmq.NewRmqID(3), rmq.NewRmqID(2)),
+	)
+	openCount := 0
+	outputCh := make(chan message.ImmutableMessage, 2)
+	scanner := newSwitchableScanner(
+		"retry-reader",
+		mlog.With(),
+		currentWAL,
+		nil,
+		options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
+		outputCh,
+		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			openCount++
+			if openCount == 1 {
+				return failedWAL, nil
+			}
+			return recoveredWAL, nil
 		},
-		historicalWAL: historicalWAL,
-		deliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
-	}
+		nil,
+	)
 
 	next, err := scanner.Do(context.Background())
 	require.NoError(t, err)
-	_, ok := next.(*catchupScanner)
+	catchup, ok := next.(*catchupScanner)
 	require.True(t, ok)
-	assert.Equal(t, uint64(90), (<-outputCh).TimeTick())
-	assert.Equal(t, message.MessageTypeAlterWAL, (<-outputCh).MessageType())
-	assert.Equal(t, message.MessageTypeTimeTick, (<-outputCh).MessageType())
+	require.Equal(t, uint64(100), catchup.exclusiveStartTimeTick)
+	require.Equal(t, 2, openCount)
+	require.Equal(t, uint64(90), (<-outputCh).TimeTick())
+	require.Equal(t, message.MessageTypeAlterWAL, (<-outputCh).MessageType())
+}
+
+func TestNormalizeSwitchableDeliverPolicy(t *testing.T) {
+	messageID := rmq.NewRmqID(10)
+	normalized, excluded, err := normalizeSwitchableDeliverPolicy(options.DeliverPolicyStartAfter(messageID))
+	require.NoError(t, err)
+	require.True(t, excluded.EQ(messageID))
+	policy, ok := normalized.GetPolicy().(*streamingpb.DeliverPolicy_StartFrom)
+	require.True(t, ok)
+	normalizedID, err := message.UnmarshalMessageID(policy.StartFrom)
+	require.NoError(t, err)
+	require.True(t, normalizedID.EQ(messageID))
 }
 
 func TestOldVersionLastConfirmedTracker_DefaultWindowSize(t *testing.T) {
@@ -601,15 +342,10 @@ func TestOldVersionLastConfirmedTracker_BeforeWindowFull(t *testing.T) {
 		ids[i] = mock_message.NewMockMessageID(t)
 	}
 
-	// First message: should return itself (the first one)
 	result := tracker.Track(ids[0])
 	assert.Equal(t, ids[0], result)
-
-	// Second message: still returns the first one (window not full)
 	result = tracker.Track(ids[1])
 	assert.Equal(t, ids[0], result)
-
-	// Third message: still returns the first one (window size = 3, need 4th to start sliding)
 	result = tracker.Track(ids[2])
 	assert.Equal(t, ids[0], result)
 }
@@ -622,25 +358,12 @@ func TestOldVersionLastConfirmedTracker_WindowSliding(t *testing.T) {
 		ids[i] = mock_message.NewMockMessageID(t)
 	}
 
-	// Fill the window: track ids[0], ids[1], ids[2]
 	tracker.Track(ids[0])
 	tracker.Track(ids[1])
 	tracker.Track(ids[2])
-
-	// 4th message (ids[3]): window is now [ids[0], ids[1], ids[2], ids[3]]
-	// len=4 > windowSize=3, return ids[4-3-1] = ids[0]
-	result := tracker.Track(ids[3])
-	assert.Equal(t, ids[0], result, "should return the message 3 positions back")
-
-	// 5th message (ids[4]): window is [ids[0]..ids[4]]
-	// return ids[5-3-1] = ids[1]
-	result = tracker.Track(ids[4])
-	assert.Equal(t, ids[1], result, "should return the message 3 positions back")
-
-	// 6th message (ids[5]): window is [ids[0]..ids[5]]
-	// return ids[6-3-1] = ids[2]
-	result = tracker.Track(ids[5])
-	assert.Equal(t, ids[2], result, "should return the message 3 positions back")
+	assert.Equal(t, ids[0], tracker.Track(ids[3]))
+	assert.Equal(t, ids[1], tracker.Track(ids[4]))
+	assert.Equal(t, ids[2], tracker.Track(ids[5]))
 }
 
 func TestOldVersionLastConfirmedTracker_WindowSizeOne(t *testing.T) {
@@ -651,24 +374,16 @@ func TestOldVersionLastConfirmedTracker_WindowSizeOne(t *testing.T) {
 		ids[i] = mock_message.NewMockMessageID(t)
 	}
 
-	// First message: returns itself
-	result := tracker.Track(ids[0])
-	assert.Equal(t, ids[0], result)
-
-	// Second message: returns the one 1 position back = ids[0]
-	result = tracker.Track(ids[1])
-	assert.Equal(t, ids[0], result)
-
-	// Third message: returns ids[1]
-	result = tracker.Track(ids[2])
-	assert.Equal(t, ids[1], result)
+	assert.Equal(t, ids[0], tracker.Track(ids[0]))
+	assert.Equal(t, ids[0], tracker.Track(ids[1]))
+	assert.Equal(t, ids[1], tracker.Track(ids[2]))
 }
 
 func TestOldVersionLastConfirmedTracker_LargeWindow(t *testing.T) {
-	windowSize := 30
+	const windowSize = 30
 	tracker := newOldVersionLastConfirmedTracker(windowSize)
 
-	totalMessages := 100
+	const totalMessages = 100
 	ids := make([]*mock_message.MockMessageID, totalMessages)
 	for i := range ids {
 		ids[i] = mock_message.NewMockMessageID(t)
@@ -677,12 +392,9 @@ func TestOldVersionLastConfirmedTracker_LargeWindow(t *testing.T) {
 	for i := 0; i < totalMessages; i++ {
 		result := tracker.Track(ids[i])
 		if i < windowSize {
-			// Before window is full, always return the first ID
-			assert.Equal(t, ids[0], result, "before window full, should return first ID at i=%d", i)
+			assert.Equal(t, ids[0], result)
 		} else {
-			// After window is full, return the ID from windowSize positions back
-			expected := ids[i-windowSize]
-			assert.Equal(t, expected, result, "should return ID from %d positions back at i=%d", windowSize, i)
+			assert.Equal(t, ids[i-windowSize], result)
 		}
 	}
 }

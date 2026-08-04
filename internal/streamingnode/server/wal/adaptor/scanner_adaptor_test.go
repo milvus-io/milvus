@@ -61,13 +61,13 @@ func TestScannerAdaptorReadError(t *testing.T) {
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
 	l.EXPECT().WALName().Return(message.WALNameTest)
 
-	s := newScannerAdaptor("scanner", l, l,
+	s := newScannerAdaptor("scanner", l,
 		wal.ReadOption{
 			VChannel:      "test",
 			DeliverPolicy: options.DeliverPolicyAll(),
 			MessageFilter: nil,
 		},
-		switchableScannerOptions{},
+		nil,
 		metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
 		func() {}, false)
 	// wait for timetick inspector first round
@@ -102,9 +102,8 @@ func TestScannerAdaptorFallsBackWhenMigrationChainIsUnavailable(t *testing.T) {
 	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
 	historicalWAL.EXPECT().Close().Return().Once()
 
-	messageCh := make(chan message.ImmutableMessage, 2)
+	messageCh := make(chan message.ImmutableMessage, 1)
 	messageCh <- newTestAlterWALMessage(commonpb.WALName_WoodPecker, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
-	messageCh <- newTestTimeTickMessage(100, rmq.NewRmqID(3), rmq.NewRmqID(2))
 	innerScanner := mock_walimpls.NewMockScannerImpls(t)
 	innerScanner.EXPECT().Chan().Return(messageCh).Maybe()
 	innerScanner.EXPECT().Close().Return(nil).Once()
@@ -113,12 +112,16 @@ func TestScannerAdaptorFallsBackWhenMigrationChainIsUnavailable(t *testing.T) {
 	scanner := newScannerAdaptor(
 		"historical-error",
 		currentWAL,
-		historicalWAL,
 		wal.ReadOption{DeliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1))},
-		switchableScannerOptions{
-			historicalWALOpener: func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
+		func(_ context.Context, walName message.WALName, _ types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			if walName == message.WALNameRocksmq {
+				return historicalWAL, nil
+			}
+			if walName == message.WALNameWoodpecker {
 				return nil, status.NewWALNameMismatchError(message.WALNameTest.String(), message.WALNameWoodpecker.String())
-			},
+			}
+			t.Fatalf("unexpected WAL name %s", walName)
+			return nil, nil
 		},
 		metricsutil.NewScanMetrics(channel).NewScannerMetrics(),
 		func() {},
@@ -159,9 +162,8 @@ func TestROWALReadBridgesHistoricalAndCurrentWAL(t *testing.T) {
 		return ok
 	})).Return(currentScanner, nil).Once()
 
-	historicalMessages := make(chan message.ImmutableMessage, 2)
+	historicalMessages := make(chan message.ImmutableMessage, 1)
 	historicalMessages <- newTestAlterWALMessage(commonpb.WALName_Test, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
-	historicalMessages <- newTestTimeTickMessage(100, rmq.NewRmqID(3), rmq.NewRmqID(2))
 	historicalScanner := mock_walimpls.NewMockScannerImpls(t)
 	historicalScanner.EXPECT().Chan().Return(historicalMessages).Maybe()
 	historicalScanner.EXPECT().Close().Return(nil).Once()
@@ -192,7 +194,7 @@ func TestROWALReadBridgesHistoricalAndCurrentWAL(t *testing.T) {
 
 	var timeTicks []uint64
 	deadline := time.After(time.Second)
-	for len(timeTicks) < 2 {
+	for len(timeTicks) < 1 {
 		select {
 		case msg := <-scanner.Chan():
 			if msg.MessageType() == message.MessageTypeTimeTick {
@@ -202,7 +204,7 @@ func TestROWALReadBridgesHistoricalAndCurrentWAL(t *testing.T) {
 			t.Fatalf("timed out waiting for bridged TimeTicks, got %v", timeTicks)
 		}
 	}
-	assert.Equal(t, []uint64{100, 101}, timeTicks)
+	assert.Equal(t, []uint64{101}, timeTicks)
 }
 
 func TestROWALReadStartAfterAlterWALMarker(t *testing.T) {
@@ -224,9 +226,8 @@ func TestROWALReadStartAfterAlterWALMarker(t *testing.T) {
 	})).Return(currentScanner, nil).Once()
 
 	markerID := rmq.NewRmqID(2)
-	historicalMessages := make(chan message.ImmutableMessage, 2)
+	historicalMessages := make(chan message.ImmutableMessage, 1)
 	historicalMessages <- newTestAlterWALMessage(commonpb.WALName_Test, 100, markerID, rmq.NewRmqID(1))
-	historicalMessages <- newTestTimeTickMessage(100, rmq.NewRmqID(3), markerID)
 	historicalScanner := mock_walimpls.NewMockScannerImpls(t)
 	historicalScanner.EXPECT().Chan().Return(historicalMessages).Maybe()
 	historicalScanner.EXPECT().Close().Return(nil).Once()
@@ -260,7 +261,7 @@ func TestROWALReadStartAfterAlterWALMarker(t *testing.T) {
 
 	var timeTicks []uint64
 	deadline := time.After(time.Second)
-	for len(timeTicks) < 2 {
+	for len(timeTicks) < 1 {
 		select {
 		case msg := <-scanner.Chan():
 			assert.NotEqual(t, message.MessageTypeAlterWAL, msg.MessageType())
@@ -271,7 +272,7 @@ func TestROWALReadStartAfterAlterWALMarker(t *testing.T) {
 			t.Fatalf("timed out waiting for StartAfter(marker) bridge, got %v", timeTicks)
 		}
 	}
-	assert.Equal(t, []uint64{100, 101}, timeTicks)
+	assert.Equal(t, []uint64{101}, timeTicks)
 }
 
 func TestPauseConsumption(t *testing.T) {

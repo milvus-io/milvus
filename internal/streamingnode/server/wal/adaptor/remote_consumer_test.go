@@ -71,14 +71,13 @@ func TestRemoteConsumerTransparentlyBridgesHistoricalAndCurrentWAL(t *testing.T)
 		return ok
 	})).Return(currentScanner, nil).Once()
 
-	historicalMessages := make(chan message.ImmutableMessage, 2)
+	historicalMessages := make(chan message.ImmutableMessage, 1)
 	historicalMessages <- newTestAlterWALMessage(
 		commonpb.WALName_Test,
 		100,
 		rmq.NewRmqID(2),
 		rmq.NewRmqID(1),
 	)
-	historicalMessages <- newTestTimeTickMessage(100, rmq.NewRmqID(3), rmq.NewRmqID(2))
 	historicalScanner := mock_walimpls.NewMockScannerImpls(t)
 	historicalScanner.EXPECT().Chan().Return(historicalMessages).Maybe()
 	historicalScanner.EXPECT().Close().Return(nil).Once()
@@ -125,9 +124,9 @@ func TestRemoteConsumerTransparentlyBridgesHistoricalAndCurrentWAL(t *testing.T)
 	)
 	require.NoError(t, err)
 
-	timeTicks := make([]uint64, 0, 2)
-	walNames := make([]message.WALName, 0, 2)
-	for len(timeTicks) < 2 {
+	timeTicks := make([]uint64, 0, 1)
+	walNames := make([]message.WALName, 0, 1)
+	for len(timeTicks) < 1 {
 		select {
 		case msg := <-resultCh:
 			if msg.MessageType() == message.MessageTypeTimeTick {
@@ -140,8 +139,8 @@ func TestRemoteConsumerTransparentlyBridgesHistoricalAndCurrentWAL(t *testing.T)
 			t.Fatalf("timed out waiting for bridged TimeTicks, got %v", timeTicks)
 		}
 	}
-	require.Equal(t, []uint64{100, 101}, timeTicks)
-	require.Equal(t, []message.WALName{message.WALNameRocksmq, message.WALNameTest}, walNames)
+	require.Equal(t, []uint64{101}, timeTicks)
+	require.Equal(t, []message.WALName{message.WALNameTest}, walNames)
 	opened := <-historicalOpenCh
 	require.Equal(t, message.WALNameRocksmq, opened.walName)
 	require.Equal(t, channel, opened.channel)
