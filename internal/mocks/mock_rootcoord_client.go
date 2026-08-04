@@ -2070,6 +2070,80 @@ func (_c *MockRootCoordClient_CreateRole_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// CreateRowPolicy provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) CreateRowPolicy(ctx context.Context, in *milvuspb.CreateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateRowPolicy")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateRowPolicyRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateRowPolicyRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateRowPolicyRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_CreateRowPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateRowPolicy'
+type MockRootCoordClient_CreateRowPolicy_Call struct {
+	*mock.Call
+}
+
+// CreateRowPolicy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.CreateRowPolicyRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) CreateRowPolicy(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_CreateRowPolicy_Call {
+	return &MockRootCoordClient_CreateRowPolicy_Call{Call: _e.mock.On("CreateRowPolicy",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_CreateRowPolicy_Call) Run(run func(ctx context.Context, in *milvuspb.CreateRowPolicyRequest, opts ...grpc.CallOption)) *MockRootCoordClient_CreateRowPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.CreateRowPolicyRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_CreateRowPolicy_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_CreateRowPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_CreateRowPolicy_Call) RunAndReturn(run func(context.Context, *milvuspb.CreateRowPolicyRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_CreateRowPolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteClientCommand provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) DeleteClientCommand(ctx context.Context, in *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -2214,6 +2288,80 @@ func (_c *MockRootCoordClient_DeleteCredential_Call) Return(_a0 *commonpb.Status
 }
 
 func (_c *MockRootCoordClient_DeleteCredential_Call) RunAndReturn(run func(context.Context, *milvuspb.DeleteCredentialRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_DeleteCredential_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteRLSPrincipalTags provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) DeleteRLSPrincipalTags(ctx context.Context, in *milvuspb.DeleteRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteRLSPrincipalTags")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_DeleteRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteRLSPrincipalTags'
+type MockRootCoordClient_DeleteRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// DeleteRLSPrincipalTags is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.DeleteRLSPrincipalTagsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) DeleteRLSPrincipalTags(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DeleteRLSPrincipalTags_Call {
+	return &MockRootCoordClient_DeleteRLSPrincipalTags_Call{Call: _e.mock.On("DeleteRLSPrincipalTags",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_DeleteRLSPrincipalTags_Call) Run(run func(ctx context.Context, in *milvuspb.DeleteRLSPrincipalTagsRequest, opts ...grpc.CallOption)) *MockRootCoordClient_DeleteRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.DeleteRLSPrincipalTagsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_DeleteRLSPrincipalTags_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_DeleteRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_DeleteRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_DeleteRLSPrincipalTags_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3032,6 +3180,80 @@ func (_c *MockRootCoordClient_DropRole_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// DropRowPolicy provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) DropRowPolicy(ctx context.Context, in *milvuspb.DropRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropRowPolicy")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropRowPolicyRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropRowPolicyRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropRowPolicyRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_DropRowPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropRowPolicy'
+type MockRootCoordClient_DropRowPolicy_Call struct {
+	*mock.Call
+}
+
+// DropRowPolicy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.DropRowPolicyRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) DropRowPolicy(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DropRowPolicy_Call {
+	return &MockRootCoordClient_DropRowPolicy_Call{Call: _e.mock.On("DropRowPolicy",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_DropRowPolicy_Call) Run(run func(ctx context.Context, in *milvuspb.DropRowPolicyRequest, opts ...grpc.CallOption)) *MockRootCoordClient_DropRowPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.DropRowPolicyRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_DropRowPolicy_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_DropRowPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_DropRowPolicy_Call) RunAndReturn(run func(context.Context, *milvuspb.DropRowPolicyRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_DropRowPolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetClientTelemetry provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) GetClientTelemetry(ctx context.Context, in *milvuspb.GetClientTelemetryRequest, opts ...grpc.CallOption) (*milvuspb.GetClientTelemetryResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -3472,6 +3694,80 @@ func (_c *MockRootCoordClient_GetQuotaMetrics_Call) Return(_a0 *internalpb.GetQu
 }
 
 func (_c *MockRootCoordClient_GetQuotaMetrics_Call) RunAndReturn(run func(context.Context, *internalpb.GetQuotaMetricsRequest, ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error)) *MockRootCoordClient_GetQuotaMetrics_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetRLSPrincipalTags provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) GetRLSPrincipalTags(ctx context.Context, in *milvuspb.GetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRLSPrincipalTags")
+	}
+
+	var r0 *milvuspb.GetRLSPrincipalTagsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest, ...grpc.CallOption) (*milvuspb.GetRLSPrincipalTagsResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest, ...grpc.CallOption) *milvuspb.GetRLSPrincipalTagsResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetRLSPrincipalTagsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_GetRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRLSPrincipalTags'
+type MockRootCoordClient_GetRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// GetRLSPrincipalTags is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.GetRLSPrincipalTagsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) GetRLSPrincipalTags(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_GetRLSPrincipalTags_Call {
+	return &MockRootCoordClient_GetRLSPrincipalTags_Call{Call: _e.mock.On("GetRLSPrincipalTags",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_GetRLSPrincipalTags_Call) Run(run func(ctx context.Context, in *milvuspb.GetRLSPrincipalTagsRequest, opts ...grpc.CallOption)) *MockRootCoordClient_GetRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.GetRLSPrincipalTagsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_GetRLSPrincipalTags_Call) Return(_a0 *milvuspb.GetRLSPrincipalTagsResponse, _a1 error) *MockRootCoordClient_GetRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_GetRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest, ...grpc.CallOption) (*milvuspb.GetRLSPrincipalTagsResponse, error)) *MockRootCoordClient_GetRLSPrincipalTags_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4364,6 +4660,154 @@ func (_c *MockRootCoordClient_ListPrivilegeGroups_Call) RunAndReturn(run func(co
 	return _c
 }
 
+// ListRLSPrincipals provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) ListRLSPrincipals(ctx context.Context, in *milvuspb.ListRLSPrincipalsRequest, opts ...grpc.CallOption) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRLSPrincipals")
+	}
+
+	var r0 *milvuspb.ListRLSPrincipalsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRLSPrincipalsRequest, ...grpc.CallOption) (*milvuspb.ListRLSPrincipalsResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRLSPrincipalsRequest, ...grpc.CallOption) *milvuspb.ListRLSPrincipalsResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListRLSPrincipalsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListRLSPrincipalsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_ListRLSPrincipals_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRLSPrincipals'
+type MockRootCoordClient_ListRLSPrincipals_Call struct {
+	*mock.Call
+}
+
+// ListRLSPrincipals is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.ListRLSPrincipalsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) ListRLSPrincipals(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ListRLSPrincipals_Call {
+	return &MockRootCoordClient_ListRLSPrincipals_Call{Call: _e.mock.On("ListRLSPrincipals",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_ListRLSPrincipals_Call) Run(run func(ctx context.Context, in *milvuspb.ListRLSPrincipalsRequest, opts ...grpc.CallOption)) *MockRootCoordClient_ListRLSPrincipals_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.ListRLSPrincipalsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_ListRLSPrincipals_Call) Return(_a0 *milvuspb.ListRLSPrincipalsResponse, _a1 error) *MockRootCoordClient_ListRLSPrincipals_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_ListRLSPrincipals_Call) RunAndReturn(run func(context.Context, *milvuspb.ListRLSPrincipalsRequest, ...grpc.CallOption) (*milvuspb.ListRLSPrincipalsResponse, error)) *MockRootCoordClient_ListRLSPrincipals_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListRowPolicies provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) ListRowPolicies(ctx context.Context, in *milvuspb.ListRowPoliciesRequest, opts ...grpc.CallOption) (*milvuspb.ListRowPoliciesResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRowPolicies")
+	}
+
+	var r0 *milvuspb.ListRowPoliciesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRowPoliciesRequest, ...grpc.CallOption) (*milvuspb.ListRowPoliciesResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRowPoliciesRequest, ...grpc.CallOption) *milvuspb.ListRowPoliciesResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListRowPoliciesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListRowPoliciesRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_ListRowPolicies_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRowPolicies'
+type MockRootCoordClient_ListRowPolicies_Call struct {
+	*mock.Call
+}
+
+// ListRowPolicies is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.ListRowPoliciesRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) ListRowPolicies(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ListRowPolicies_Call {
+	return &MockRootCoordClient_ListRowPolicies_Call{Call: _e.mock.On("ListRowPolicies",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_ListRowPolicies_Call) Run(run func(ctx context.Context, in *milvuspb.ListRowPoliciesRequest, opts ...grpc.CallOption)) *MockRootCoordClient_ListRowPolicies_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.ListRowPoliciesRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_ListRowPolicies_Call) Return(_a0 *milvuspb.ListRowPoliciesResponse, _a1 error) *MockRootCoordClient_ListRowPolicies_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_ListRowPolicies_Call) RunAndReturn(run func(context.Context, *milvuspb.ListRowPoliciesRequest, ...grpc.CallOption) (*milvuspb.ListRowPoliciesResponse, error)) *MockRootCoordClient_ListRowPolicies_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // OperatePrivilege provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivilegeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
@@ -5104,6 +5548,80 @@ func (_c *MockRootCoordClient_SelectUser_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// SetRLSPrincipalTags provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) SetRLSPrincipalTags(ctx context.Context, in *milvuspb.SetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetRLSPrincipalTags")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_SetRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetRLSPrincipalTags'
+type MockRootCoordClient_SetRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// SetRLSPrincipalTags is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.SetRLSPrincipalTagsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) SetRLSPrincipalTags(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_SetRLSPrincipalTags_Call {
+	return &MockRootCoordClient_SetRLSPrincipalTags_Call{Call: _e.mock.On("SetRLSPrincipalTags",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_SetRLSPrincipalTags_Call) Run(run func(ctx context.Context, in *milvuspb.SetRLSPrincipalTagsRequest, opts ...grpc.CallOption)) *MockRootCoordClient_SetRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.SetRLSPrincipalTagsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_SetRLSPrincipalTags_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_SetRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_SetRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_SetRLSPrincipalTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ShowCollectionIDs provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowCollectionIDsRequest, opts ...grpc.CallOption) (*rootcoordpb.ShowCollectionIDsResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -5766,6 +6284,80 @@ func (_c *MockRootCoordClient_UpdateCredential_Call) Return(_a0 *commonpb.Status
 }
 
 func (_c *MockRootCoordClient_UpdateCredential_Call) RunAndReturn(run func(context.Context, *internalpb.CredentialInfo, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_UpdateCredential_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateRowPolicy provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) UpdateRowPolicy(ctx context.Context, in *milvuspb.UpdateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateRowPolicy")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateRowPolicyRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateRowPolicyRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.UpdateRowPolicyRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_UpdateRowPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateRowPolicy'
+type MockRootCoordClient_UpdateRowPolicy_Call struct {
+	*mock.Call
+}
+
+// UpdateRowPolicy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.UpdateRowPolicyRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) UpdateRowPolicy(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_UpdateRowPolicy_Call {
+	return &MockRootCoordClient_UpdateRowPolicy_Call{Call: _e.mock.On("UpdateRowPolicy",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_UpdateRowPolicy_Call) Run(run func(ctx context.Context, in *milvuspb.UpdateRowPolicyRequest, opts ...grpc.CallOption)) *MockRootCoordClient_UpdateRowPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.UpdateRowPolicyRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_UpdateRowPolicy_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_UpdateRowPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_UpdateRowPolicy_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateRowPolicyRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_UpdateRowPolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }
