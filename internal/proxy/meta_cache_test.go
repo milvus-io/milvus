@@ -1090,6 +1090,30 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 	wg.Wait()
 }
 
+func TestMetaCache_RLSProperties(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := mocks.NewMockMixCoordClient(t)
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:       merr.Success(),
+		CollectionID: 100,
+		DbName:       "default",
+		Schema: &schemapb.CollectionSchema{
+			Name: "rls_collection",
+		},
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.RLSEnabledKey, Value: "true"},
+			{Key: common.RLSForceKey, Value: "true"},
+		},
+	}, nil).Once()
+
+	cache, err := NewMetaCache(rootCoord)
+	assert.NoError(t, err)
+	info, err := cache.GetCollectionInfo(ctx, "default", "rls_collection", 0)
+	assert.NoError(t, err)
+	assert.True(t, info.RlsEnabled)
+	assert.True(t, info.RlsForce)
+}
+
 func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)

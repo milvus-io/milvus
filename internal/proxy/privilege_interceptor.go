@@ -253,6 +253,90 @@ func isSelectMyRoleGrants(req interface{}, roleNames []string) bool {
 	return funcutil.SliceContain(roleNames, roleName)
 }
 
+func checkSkipRLSPrivilege(ctx context.Context, metaCache Cache, dbName, collectionName, operation string) error {
+	permitted, err := isCurrentUserPermitted(ctx, metaCache, dbName, commonpb.ObjectType_Collection.String(), collectionName, commonpb.ObjectPrivilege_PrivilegeSkipRLS.String())
+	if err != nil {
+		return err
+	}
+	if permitted {
+		return nil
+	}
+	return merr.WrapErrPrivilegeNotPermitted("%s operation denied by RLS: skip_rls requires SkipRLS privilege on collection %s", operation, collectionName)
+}
+
+// resolveRLSEnforcement returns whether RLS remains enabled after processing a
+// request-scoped bypass. rls.force takes precedence over both authorization
+// configuration and SkipRLS privileges.
+func resolveRLSEnforcement(ctx context.Context, metaCache Cache, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error) {
+	if !rlsEnabled || !skipRLS {
+		return rlsEnabled, nil
+	}
+	if rlsForce {
+		return false, merr.WrapErrPrivilegeNotPermitted(
+			"%s operation denied by RLS: skip_rls is not allowed when rls.force is enabled on collection %s",
+			operation, collectionName)
+	}
+	if err := checkSkipRLSPrivilege(ctx, metaCache, dbName, collectionName, operation); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+func isCurrentUserPermitted(ctx context.Context, metaCache Cache, dbName, objectType, objectName, objectPrivilege string) (bool, error) {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return true, nil
+	}
+	username, _, err := contextutil.GetAuthInfoFromContext(ctx)
+	if err != nil {
+		mlog.Warn(ctx, "GetCurUserFromContext fail", mlog.Err(err))
+		return false, err
+	}
+	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
+		return true, nil
+	}
+	if dbName == "" {
+		dbName = GetCurDBNameFromContextOrDefault(ctx)
+	}
+	roleNames, err := GetRole(username)
+	if err != nil {
+		mlog.Warn(ctx, "GetRole fail", mlog.String("username", username), mlog.Err(err))
+		return false, err
+	}
+	roleNames = append(roleNames, util.RolePublic)
+
+	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() {
+		if objectName != util.AnyWord && objectName != "" {
+			if actualCollectionName, resolveErr := resolveCollectionAlias(ctx, metaCache, dbName, objectName); resolveErr != nil {
+				mlog.RatedWarn(ctx, rate.Limit(60), "failed to resolve collection alias for RBAC, using original name",
+					mlog.String("objectName", objectName), mlog.FieldDbName(dbName), mlog.Err(resolveErr))
+			} else {
+				objectName = actualCollectionName
+			}
+		}
+	}
+
+	e := privilege.GetEnforcer()
+	for _, roleName := range roleNames {
+		object := funcutil.PolicyForResource(dbName, objectType, objectName)
+		isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
+		if cached {
+			if isPermit {
+				return true, nil
+			}
+			continue
+		}
+		isPermit, err := e.Enforce(roleName, object, objectPrivilege)
+		if err != nil {
+			return false, err
+		}
+		privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
+		if isPermit {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // resolveCollectionAlias resolves an alias to its actual collection name
 func resolveCollectionAlias(ctx context.Context, metaCache Cache, dbName, nameOrAlias string) (string, error) {
 	if metaCache == nil {
