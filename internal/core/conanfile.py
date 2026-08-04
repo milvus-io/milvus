@@ -84,11 +84,12 @@ class MilvusConan(ConanFile):
         "glog:shared": True,
         "prometheus-cpp:with_pull": False,
         "fmt:header_only": True,
+        "openblas:dynamic_arch": True,
+        "openblas:shared": False,
         "onetbb:tbbmalloc": False,
         "onetbb:tbbproxy": False,
         "gdal:shared": True,
         "gdal:fPIC": True,
-        "openblas:use_openmp": True,
     }
 
     def configure(self):
@@ -100,6 +101,8 @@ class MilvusConan(ConanFile):
             self.options["arrow"].with_jemalloc = False
 
     def requirements(self):
+        if self.settings.os == "Linux":
+            self.requires("openblas/0.3.30#b818732ec6d4be12891e042d331a7e48")
         if self.settings.os != "Macos":
             self.requires("libunwind/1.7.2")
         # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection
