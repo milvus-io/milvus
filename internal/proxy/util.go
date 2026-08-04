@@ -3098,6 +3098,17 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 	case *milvuspb.CreateCollectionRequest:
 		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.CreateSnapshotRequest, *milvuspb.DropSnapshotRequest, *milvuspb.PinSnapshotDataRequest:
+		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
+		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.RestoreSnapshotRequest:
+		targetDBName := r.GetTargetDbName()
+		if targetDBName == "" {
+			targetDBName = util.DefaultDBName
+		}
+		return getDatabaseID(targetDBName), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.UnpinSnapshotDataRequest:
+		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.RefreshExternalCollectionRequest:
 		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
@@ -3209,8 +3220,18 @@ func GetFailedResponse(req any, err error) any {
 		*milvuspb.CreateIndexRequest, *milvuspb.DropIndexRequest,
 		*milvuspb.CreateDatabaseRequest, *milvuspb.DropDatabaseRequest,
 		*milvuspb.AlterDatabaseRequest,
-		*milvuspb.AddFileResourceRequest, *milvuspb.RemoveFileResourceRequest:
+		*milvuspb.AddFileResourceRequest, *milvuspb.RemoveFileResourceRequest,
+		*milvuspb.CreateSnapshotRequest, *milvuspb.DropSnapshotRequest,
+		*milvuspb.UnpinSnapshotDataRequest:
 		return merr.Status(err)
+	case *milvuspb.RestoreSnapshotRequest:
+		return &milvuspb.RestoreSnapshotResponse{
+			Status: merr.Status(err),
+		}
+	case *milvuspb.PinSnapshotDataRequest:
+		return &milvuspb.PinSnapshotDataResponse{
+			Status: merr.Status(err),
+		}
 	case *milvuspb.RestoreExternalSnapshotRequest:
 		return &milvuspb.RestoreExternalSnapshotResponse{
 			Status: merr.Status(err),
