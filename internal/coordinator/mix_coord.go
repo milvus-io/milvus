@@ -173,6 +173,7 @@ func (s *mixCoordImpl) initInternal() error {
 		mlog.Error(s.ctx, "rootCoord init failed", mlog.Err(err))
 		return err
 	}
+	s.fileResourceObserver.InitProxy(s.rootcoordServer.GetProxyClientManager())
 
 	if err := s.rootcoordServer.Start(); err != nil {
 		mlog.Error(s.ctx, "rootCoord start failed", mlog.Err(err))
@@ -245,7 +246,9 @@ func (s *mixCoordImpl) startAndUpdateHealthy() {
 }
 
 func (s *mixCoordImpl) IsServerActive(serverID int64) bool {
-	return s.queryCoordServer.ServerExist(serverID) || s.datacoordServer.ServerExist(serverID)
+	return s.queryCoordServer.ServerExist(serverID) ||
+		s.datacoordServer.ServerExist(serverID) ||
+		s.rootcoordServer.ServerExist(serverID)
 }
 
 func (s *mixCoordImpl) checkExpiredPOSIXDIR() {
