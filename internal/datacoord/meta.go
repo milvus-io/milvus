@@ -1783,6 +1783,54 @@ func getMaxPosition(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
 	return maxPos
 }
 
+// inputDeleteCoverageTs returns the WAL timestamp up to which deletes are
+// provably applied into seg's data, and whether that is known. It is the newest
+// of (a) seg's own delete_covered_position (set when seg was itself produced by
+// a prior compaction) and (b) the max TimestampTo across seg's deltalogs (the
+// deletes attached to seg that the current compaction bakes into its output).
+// known is false when neither is available, i.e. coverage is unknown.
+func inputDeleteCoverageTs(seg *SegmentInfo) (ts uint64, known bool) {
+	if covered := seg.GetDeleteCoveredPosition().GetTimestamp(); covered > 0 {
+		ts, known = covered, true
+	}
+	for _, fieldDelta := range seg.GetDeltalogs() {
+		for _, binlog := range fieldDelta.GetBinlogs() {
+			if binlog.GetTimestampTo() > ts {
+				ts = binlog.GetTimestampTo()
+			}
+			known = true
+		}
+	}
+	return ts, known
+}
+
+// computeDeleteCoveredPosition returns the delete_covered_position for a
+// compaction OUTPUT segment built from inputs (issue #49435). Compaction applies
+// every input's deltalogs to every output row, but a row that came from an input
+// is only trustworthy up to THAT input's delete coverage, so the output's single
+// covered position is the MIN coverage across inputs. If ANY input's coverage is
+// unknown it returns nil, so the delegator conservatively falls back to
+// start_position (minTs). The result is a lower bound on the true coverage:
+// replaying deletes from it can only re-apply already-applied deletes
+// (idempotent), never skip a live one.
+func computeDeleteCoveredPosition(channel string, inputs []*SegmentInfo) *msgpb.MsgPosition {
+	var minTs uint64
+	ok := false
+	for _, in := range inputs {
+		ts, known := inputDeleteCoverageTs(in)
+		if !known {
+			return nil
+		}
+		if !ok || ts < minTs {
+			minTs, ok = ts, true
+		}
+	}
+	if !ok {
+		return nil
+	}
+	return &msgpb.MsgPosition{ChannelName: channel, Timestamp: minTs}
+}
+
 // recalculateSegmentPosition recalculates StartPosition and DmlPosition from
 // actual binlog timestamps on the compaction result segment. This makes compaction
 // self-healing: wrong positions from import or prior compaction are corrected.
@@ -1981,8 +2029,11 @@ func (m *meta) completeMixCompactionMutation(
 				StorageVersion:      compactToSegment.GetStorageVersion(),
 				StartPosition:       startPos,
 				DmlPosition:         dmlPos,
-				IsSorted:            compactToSegment.GetIsSorted(),
-				ManifestPath:        compactToSegment.GetManifest(),
+				// deletes <= this are already baked into the output by this
+				// compaction; lets the delegator replay only the tail (#49435).
+				DeleteCoveredPosition: computeDeleteCoveredPosition(t.GetChannel(), compactFromSegInfos),
+				IsSorted:              compactToSegment.GetIsSorted(),
+				ManifestPath:          compactToSegment.GetManifest(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -2466,13 +2517,16 @@ func (m *meta) completeSortCompactionMutation(
 		oldSegment.GetStartPosition(), oldSegment.GetDmlPosition())
 
 	segmentInfo := &datapb.SegmentInfo{
-		CollectionID:              oldSegment.GetCollectionID(),
-		PartitionID:               oldSegment.GetPartitionID(),
-		InsertChannel:             oldSegment.GetInsertChannel(),
-		MaxRowNum:                 oldSegment.GetMaxRowNum(),
-		LastExpireTime:            oldSegment.GetLastExpireTime(),
-		StartPosition:             startPos,
-		DmlPosition:               dmlPos,
+		CollectionID:   oldSegment.GetCollectionID(),
+		PartitionID:    oldSegment.GetPartitionID(),
+		InsertChannel:  oldSegment.GetInsertChannel(),
+		MaxRowNum:      oldSegment.GetMaxRowNum(),
+		LastExpireTime: oldSegment.GetLastExpireTime(),
+		StartPosition:  startPos,
+		DmlPosition:    dmlPos,
+		// deletes <= this are already baked into the output by this compaction;
+		// lets the delegator replay only the tail on load (issue #49435).
+		DeleteCoveredPosition:     computeDeleteCoveredPosition(oldSegment.GetInsertChannel(), []*SegmentInfo{oldSegment}),
 		IsImporting:               oldSegment.GetIsImporting(),
 		State:                     commonpb.SegmentState_Flushed,
 		Level:                     oldSegment.GetLevel(),

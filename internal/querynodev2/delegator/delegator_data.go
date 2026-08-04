@@ -491,11 +491,11 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	// Note: if delete records is pinned, it will skip cleanup during SyncTargetVersion
 	// which means after segment is loaded, then delete buffer will be cleaned up by next SyncTargetVersion call
 	for _, info := range req.GetInfos() {
-		sd.deleteBuffer.Pin(info.GetStartPosition().GetTimestamp(), info.GetSegmentID())
+		sd.deleteBuffer.Pin(segmentDeleteReplayStartTs(info), info.GetSegmentID())
 	}
 	defer func() {
 		for _, info := range req.GetInfos() {
-			sd.deleteBuffer.Unpin(info.GetStartPosition().GetTimestamp(), info.GetSegmentID())
+			sd.deleteBuffer.Unpin(segmentDeleteReplayStartTs(info), info.GetSegmentID())
 		}
 	}()
 
@@ -809,6 +809,21 @@ type segDeleteSnapshot struct {
 	snapshotMaxTs uint64               // max Item.Ts in snapshot, used for timestamp-based catch-up
 }
 
+// segmentDeleteReplayStartTs returns the WAL timestamp from which the delegator
+// must replay buffered deletes for a segment on load. It prefers the segment's
+// delete_covered_position — deletes with ts <= it are already baked into the
+// segment's data by compaction, so only the tail after it needs replay (issue
+// #49435) — and falls back to start_position (minTs) when that position is
+// absent (nil), which preserves the pre-existing behavior for segments that
+// carry no coverage info. Because replaying from an earlier ts only re-applies
+// already-applied deletes (idempotent), the fallback can never lose a delete.
+func segmentDeleteReplayStartTs(info *querypb.SegmentLoadInfo) uint64 {
+	if covered := info.GetDeleteCoveredPosition().GetTimestamp(); covered > 0 {
+		return covered
+	}
+	return info.GetStartPosition().GetTimestamp()
+}
+
 func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	candidates []*pkoracle.BloomFilterSet,
 	infos []*querypb.SegmentLoadInfo,
@@ -837,7 +852,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	sd.deleteMut.RLock()
 	snapshots := make([]segDeleteSnapshot, len(infos))
 	for i, info := range infos {
-		records := sd.deleteBuffer.ListAfter(info.GetStartPosition().GetTimestamp())
+		records := sd.deleteBuffer.ListAfter(segmentDeleteReplayStartTs(info))
 		// Copy the slice to safely use outside lock scope.
 		// ListAfter returns a new slice from doubleCacheBuffer, but we copy to
 		// ensure no dependency on internal buffer state that may change after unlock.
@@ -905,7 +920,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	// ListAfter(lastTs + 1) precisely captures only newer records.
 	catchUpTs := make([]uint64, len(infos))
 	for i, info := range infos {
-		catchUpTs[i] = info.GetStartPosition().GetTimestamp()
+		catchUpTs[i] = segmentDeleteReplayStartTs(info)
 		if snapshots[i].snapshotMaxTs > 0 {
 			catchUpTs[i] = snapshots[i].snapshotMaxTs + 1
 		}
