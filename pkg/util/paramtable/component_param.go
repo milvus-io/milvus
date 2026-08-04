@@ -5747,7 +5747,6 @@ type dataCoordConfig struct {
 	WaitForIndex                    ParamItem `refreshable:"true"`
 	ImportInReplicatingCluster      ParamItem `refreshable:"true"`
 	EnableL0Import                  ParamItem `refreshable:"true"`
-	EnableBinlogImport              ParamItem `refreshable:"true"`
 	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
 	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
 	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
@@ -7109,19 +7108,6 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Export:       true,
 	}
 	p.EnableL0Import.Init(base.mgr)
-
-	p.EnableBinlogImport = ParamItem{
-		Key:     "dataCoord.import.enableBinlogImport",
-		Version: "2.7.0",
-		Doc: "Whether to allow binlog import (import option backup=true) and L0 import on this cluster. " +
-			"These read Milvus's own internal storage layout rather than a caller staging area, so they " +
-			"are also gated by the cluster-level ImportBinlog privilege. Set to false on clusters that " +
-			"never restore from milvus-backup to remove the capability entirely.",
-		DefaultValue: "true",
-		PanicIfEmpty: false,
-		Export:       true,
-	}
-	p.EnableBinlogImport.Init(base.mgr)
 
 	p.ImportPreAllocIDExpansionFactor = ParamItem{
 		Key:          "dataCoord.import.preAllocateIDExpansionFactor",
