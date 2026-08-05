@@ -1453,6 +1453,7 @@ message RefreshExternalCollectionTaskRequest {
   int64 file_index_end = 13;              // File range end for this task
   int64 partitionID = 14;                 // target partition for manifest path
   int64 target_rows_per_segment = 15;     // target row count for segment organization
+  string clusterID = 16;                  // serving cluster that created this task
 }
 
 message RefreshExternalCollectionTaskResponse {

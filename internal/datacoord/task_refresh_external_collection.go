@@ -675,6 +675,7 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	partitionID := collInfo.Partitions[0]
 
 	req := &datapb.RefreshExternalCollectionTaskRequest{
+		ClusterID:              paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		CollectionID:           t.GetCollectionId(),
 		PartitionID:            partitionID,
 		TaskID:                 t.GetTaskId(),
