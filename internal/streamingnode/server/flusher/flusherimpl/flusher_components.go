@@ -63,7 +63,7 @@ func (impl *flusherComponents) WhenCreateCollection(ctx context.Context, createC
 	ds := pipeline.NewEmptyStreamingNodeDataSyncService(
 		context.Background(), // There's no any rpc in this function, so the context is not used here.
 		&util.PipelineParams{
-			Ctx:                context.Background(),
+			Ctx:                ctx,
 			Broker:             impl.broker,
 			SyncMgr:            resource.Resource().SyncManager(),
 			ChunkManager:       impl.chunkManager,
@@ -252,7 +252,7 @@ func (impl *flusherComponents) buildDataSyncService(ctx context.Context, recover
 	schema := schemaManager.GetSchema(0)
 	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx,
 		&util.PipelineParams{
-			Ctx:                context.Background(),
+			Ctx:                ctx,
 			Broker:             impl.broker,
 			SyncMgr:            resource.Resource().SyncManager(),
 			ChunkManager:       impl.chunkManager,

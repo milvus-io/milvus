@@ -47,9 +47,11 @@ type BulkPackWriterV2 struct {
 	bufferSize          int64
 	multiPartUploadSize int64
 
-	storageConfig *indexpb.StorageConfig
-	columnGroups  []storagecommon.ColumnGroup
-	preparedStats *metacache.SegmentStats
+	storageConfig         *indexpb.StorageConfig
+	columnGroups          []storagecommon.ColumnGroup
+	preparedStats         *metacache.SegmentStats
+	preparedStatsBlobSize int64
+	preparedStatsDigested bool
 }
 
 // PreparedStats returns this sync's cumulative SegmentStats clone for SyncTask
@@ -57,6 +59,10 @@ type BulkPackWriterV2 struct {
 // embedding V3 writer.
 func (bw *BulkPackWriterV2) PreparedStats() *metacache.SegmentStats {
 	return bw.preparedStats
+}
+
+func (bw *BulkPackWriterV2) PreparedStatsDelta() (int64, bool) {
+	return bw.preparedStatsBlobSize, bw.preparedStatsDigested
 }
 
 // finalizeStats builds this sync's cumulative Statistics by cloning the live
@@ -83,20 +89,23 @@ func (bw *BulkPackWriterV2) finalizeStats(
 		clone.Digest(inserts, deltas, statsBlobSize, pack.batchRows, pack.tsFrom, pack.tsTo)
 	}
 	bw.preparedStats = clone
+	bw.preparedStatsBlobSize = statsBlobSize
+	bw.preparedStatsDigested = digested
 	return clone.Publish(), nil
 }
 
 func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
 	allocator allocator.Interface, bufferSize, multiPartUploadSize int64,
-	storageConfig *indexpb.StorageConfig, columnGroups []storagecommon.ColumnGroup, writeRetryOpts ...retry.Option,
+	storageConfig *indexpb.StorageConfig, columnGroups []storagecommon.ColumnGroup,
+	ioRetryAttempts uint,
 ) *BulkPackWriterV2 {
 	return &BulkPackWriterV2{
 		BulkPackWriter: &BulkPackWriter{
-			metaCache:      metaCache,
-			schema:         schema,
-			chunkManager:   chunkManager,
-			allocator:      allocator,
-			writeRetryOpts: writeRetryOpts,
+			ioRetryAttempts: ioRetryAttempts,
+			metaCache:       metaCache,
+			schema:          schema,
+			chunkManager:    chunkManager,
+			allocator:       allocator,
 		},
 		bufferSize:          bufferSize,
 		multiPartUploadSize: multiPartUploadSize,
@@ -225,7 +234,6 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 
 	var logs map[int64]*datapb.FieldBinlog
 	var manifestPath string
-
 	if err := retry.Do(ctx, func() error {
 		var err error
 		logs, manifestPath, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, pack, rec, tsFrom, tsTo)
@@ -234,10 +242,9 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 				mlog.FieldCollectionID(pack.collectionID),
 				mlog.FieldSegmentID(pack.segmentID),
 				mlog.Err(err))
-			return err
 		}
-		return nil
-	}, bw.writeRetryOpts...); err != nil {
+		return err
+	}, ioRetryOptions(bw.ioRetryAttempts)...); err != nil {
 		return nil, "", err
 	}
 	return logs, manifestPath, nil

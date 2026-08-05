@@ -59,7 +59,16 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream
 }
 
 func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error {
+	// Every timetick that carries data is also the retry clock for this channel:
+	// a flush that failed earlier gets its next attempt here, ahead of the new
+	// data, so the segment's queue is always replayed from its oldest task.
+	wb.driveRetries(wb.syncCtx)
+
 	wb.mut.Lock()
+	if wb.closed || wb.dropping {
+		wb.mut.Unlock()
+		return merr.WrapErrChannelNotFound(wb.channelName)
+	}
 
 	for _, inData := range insertData {
 		if wb.allowGrowingSourceFlush {
@@ -74,8 +83,7 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 			}
 		}
 
-		err := wb.bufferInsert(inData, startPos, endPos, schemaVersion)
-		if err != nil {
+		if err := wb.bufferInsert(inData, startPos, endPos, schemaVersion); err != nil {
 			wb.mut.Unlock()
 			return err
 		}
@@ -85,7 +93,6 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 	// So, here we skip generating BF (growing segment's BF will be regenerated during the sync phase)
 	// and also skip filtering delete entries by bf.
 	wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos)
-	// update buffer last checkpoint
 	wb.checkpoint = endPos
 	wb.updateProcessedTsLocked(endPos.GetTimestamp())
 
@@ -97,14 +104,13 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 			delete(wb.l0Segments, partition)
 		}
 	}
-	syncTasks := wb.getSyncTasksLocked(context.Background(), segmentsSync)
 	wb.mut.Unlock()
 
-	if len(syncTasks) > 0 {
-		wb.submitSyncTasks(context.Background(), syncTasks)
+	if len(segmentsSync) > 0 {
+		wb.syncSegments(wb.syncCtx, segmentsSync)
 	}
 
-	return nil
+	return wb.waitFlushCapacity()
 }
 
 // bufferInsert function InsertMsg into bufferred InsertData and returns primary key field data for future usage.
@@ -120,7 +126,7 @@ func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgp
 	segBuf := wb.getOrCreateBuffer(inData.segmentID, startPos.GetTimestamp())
 
 	totalMemSize := segBuf.insertBuffer.Buffer(inData, startPos, endPos)
-	wb.metaCache.UpdateSegments(metacache.SegmentActions(
+	wb.metaCache.UpdateSegments(metacache.MergeSegmentAction(
 		metacache.UpdateBufferedRows(segBuf.insertBuffer.rows),
 		metacache.SetStartPositionIfNil(startPos),
 	), metacache.WithSegmentIDs(inData.segmentID))

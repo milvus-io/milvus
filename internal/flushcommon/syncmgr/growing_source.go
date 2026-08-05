@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -398,7 +397,10 @@ type GrowingSourceSyncTask struct {
 	committedInsertBinlogs map[int64]*datapb.FieldBinlog
 	committedPKStats       *storage.PrimaryKeyStats
 
-	writeRetryOpts  []retry.Option
+	preparedColumnGroups []storagecommon.ColumnGroup
+	prepared             bool
+	commitSkipped        bool
+
 	failureCallback func(error)
 	tr              *timerecord.TimeRecorder
 }
@@ -511,11 +513,6 @@ func (t *GrowingSourceSyncTask) WithChunkManager(cm storage.ChunkManager) *Growi
 	return t
 }
 
-func (t *GrowingSourceSyncTask) WithWriteRetryOptions(opts ...retry.Option) *GrowingSourceSyncTask {
-	t.writeRetryOpts = opts
-	return t
-}
-
 func (t *GrowingSourceSyncTask) WithFailureCallback(callback func(error)) *GrowingSourceSyncTask {
 	t.failureCallback = callback
 	return t
@@ -606,38 +603,28 @@ func (t *GrowingSourceSyncTask) ReleaseSource() {
 	}
 }
 
-func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
+// Prepare materializes the growing segment's rows into object storage. It owns
+// no write buffer payload — the rows stay pinned in the growing segment until
+// Commit hands them over — so a failed attempt costs nothing but a round trip.
+func (t *GrowingSourceSyncTask) Prepare(ctx context.Context) error {
 	t.tr = timerecord.NewTimeRecorder("growingSourceSyncTask")
-	log := mlog.With(
-		mlog.Int64("collectionID", t.collectionID),
-		mlog.Int64("partitionID", t.partitionID),
-		mlog.Int64("segmentID", t.segmentID),
-		mlog.String("channel", t.channelName),
-	)
-	commitSource := false
-	defer func() {
-		committer, shouldCommit := t.source.(GrowingFlushSourceCommitter)
-		t.ReleaseSource()
-		if commitSource && shouldCommit && (t.IsFlush() || t.IsDrop()) {
-			committer.CommitGrowingFlush(t.targetOffset)
-		}
-		if err != nil {
-			t.HandleError(err)
-		}
-	}()
+	log := t.getLogger()
 
 	segment, ok := t.metacache.GetSegmentByID(t.segmentID)
 	if !ok {
 		if t.isDrop {
 			log.Info(ctx, "segment dropped, discard growing source sync task")
-			return nil
+		} else {
+			log.Warn(ctx, "segment not found in metacache")
 		}
-		log.Warn(ctx, "segment not found in metacache")
+		t.commitSkipped = true
 		return nil
 	}
 	expectedRows := t.targetOffset - segment.FlushedRows()
 	if expectedRows < 0 {
-		return merr.WrapErrServiceInternalMsg("growing source target offset is behind flushed rows, flushedRows=%d targetOffset=%d segmentID=%d",
+		// Deterministic: FlushedRows only grows and targetOffset is fixed for
+		// this task, so a retry re-derives the same negative span.
+		return merr.WrapErrDataIntegrityMsg("growing source target offset is behind flushed rows, flushedRows=%d targetOffset=%d segmentID=%d",
 			segment.FlushedRows(), t.targetOffset, t.segmentID)
 	}
 	columnGroups, err := t.getColumnGroups(segment)
@@ -651,64 +638,96 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	if t.committedManifestPath != "" {
+
+	switch {
+	case t.committedManifestPath != "":
 		t.manifestPath = t.committedManifestPath
 		t.bm25Stats = t.committedBM25Stats
 		t.insertBinlogs = cloneFieldBinlogMap(t.committedInsertBinlogs)
 		t.singlePKStats = t.committedPKStats
 		t.flushedSize = growingSourceFlushedSizeFromBinlogs(t.insertBinlogs)
-	} else if expectedRows == 0 {
+	case expectedRows == 0:
 		t.manifestPath = segment.ManifestPath()
 		t.flushedSize = 0
-	} else {
-		if t.source == nil {
-			return merr.WrapErrServiceInternalMsg("growing flush source is nil")
-		}
-		if t.source.CurrentOffset() < t.targetOffset {
-			return merr.WrapErrServiceInternalMsg("growing flush source is behind target offset, current=%d target=%d", t.source.CurrentOffset(), t.targetOffset)
-		}
-		config, err := t.buildFlushConfig(segment, columnGroups)
-		if err != nil {
+	default:
+		if err := t.flushGrowingData(ctx, segment, columnGroups, expectedRows); err != nil {
 			return err
-		}
-		var insertSummaryLogIDs []int64
-		if t.metaWriter != nil && len(columnGroups) > 0 {
-			insertSummaryLogIDs, err = t.allocLogIDs(len(columnGroups), "growing source insert summary")
-			if err != nil {
-				return err
-			}
-		}
-		startOffset := segment.FlushedRows()
-		if err := t.fillPrimaryKeyStatsConfig(ctx, startOffset, t.targetOffset, config); err != nil {
-			return err
-		}
-		result, err := t.source.FlushGrowingData(ctx, startOffset, t.targetOffset, config)
-		if err != nil {
-			return errors.Wrap(err, "flush growing source data")
-		}
-		if result == nil || result.ManifestPath == "" {
-			return merr.WrapErrDataIntegrityMsg("growing source flush returned empty manifest")
-		}
-		if result.NumRows != expectedRows {
-			return merr.WrapErrDataIntegrityMsg("growing source flush row count mismatch, expected=%d actual=%d flushedRows=%d targetOffset=%d segmentID=%d",
-				expectedRows, result.NumRows, segment.FlushedRows(), t.targetOffset, t.segmentID)
-		}
-		t.manifestPath = result.ManifestPath
-		if len(result.BM25Stats) > 0 {
-			t.bm25Stats = result.BM25Stats
-		}
-		t.flushedSize = growingSourceFlushedSizeFromResult(result)
-		if t.metaWriter != nil && len(columnGroups) > 0 {
-			t.insertBinlogs, err = buildGrowingSourceInsertBinlogs(columnGroups, result, insertSummaryLogIDs)
-			if err != nil {
-				return err
-			}
 		}
 	}
+
 	if t.metaWriter != nil && expectedRows > 0 && len(columnGroups) > 0 && len(t.insertBinlogs) == 0 {
 		return merr.WrapErrDataIntegrityMsg("growing source committed flush missing insert binlog summary, segmentID=%d targetOffset=%d",
 			t.segmentID, t.targetOffset)
 	}
+	t.preparedColumnGroups = columnGroups
+	t.prepared = true
+	return nil
+}
+
+// flushGrowingData is the one step that writes bytes. Splitting it out keeps
+// Prepare readable and keeps the "did we materialize anything" decision in one
+// switch above.
+func (t *GrowingSourceSyncTask) flushGrowingData(ctx context.Context, segment *metacache.SegmentInfo, columnGroups []storagecommon.ColumnGroup, expectedRows int64) error {
+	if t.source == nil {
+		return merr.WrapErrServiceInternalMsg("growing flush source is nil")
+	}
+	if t.source.CurrentOffset() < t.targetOffset {
+		return merr.WrapErrServiceInternalMsg("growing flush source is behind target offset, current=%d target=%d", t.source.CurrentOffset(), t.targetOffset)
+	}
+	config, err := t.buildFlushConfig(segment, columnGroups)
+	if err != nil {
+		return err
+	}
+	var insertSummaryLogIDs []int64
+	if t.metaWriter != nil && len(columnGroups) > 0 {
+		insertSummaryLogIDs, err = t.allocLogIDs(len(columnGroups), "growing source insert summary")
+		if err != nil {
+			return err
+		}
+	}
+	startOffset := segment.FlushedRows()
+	if err := t.fillPrimaryKeyStatsConfig(ctx, startOffset, t.targetOffset, config); err != nil {
+		return err
+	}
+	result, err := t.source.FlushGrowingData(ctx, startOffset, t.targetOffset, config)
+	if err != nil {
+		return errors.Wrap(err, "flush growing source data")
+	}
+	if result == nil || result.ManifestPath == "" {
+		return merr.WrapErrDataIntegrityMsg("growing source flush returned empty manifest")
+	}
+	if result.NumRows != expectedRows {
+		return merr.WrapErrDataIntegrityMsg("growing source flush row count mismatch, expected=%d actual=%d flushedRows=%d targetOffset=%d segmentID=%d",
+			expectedRows, result.NumRows, segment.FlushedRows(), t.targetOffset, t.segmentID)
+	}
+	t.manifestPath = result.ManifestPath
+	if len(result.BM25Stats) > 0 {
+		t.bm25Stats = result.BM25Stats
+	}
+	t.flushedSize = growingSourceFlushedSizeFromResult(result)
+	if t.metaWriter != nil && len(columnGroups) > 0 {
+		t.insertBinlogs, err = buildGrowingSourceInsertBinlogs(columnGroups, result, insertSummaryLogIDs)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Commit publishes what Prepare materialized and only then hands the flushed
+// rows back to the growing segment. CommitGrowingFlush is the point of no
+// return for those rows, so it must not run until the metadata that describes
+// them is durable.
+func (t *GrowingSourceSyncTask) Commit(ctx context.Context) error {
+	if t.commitSkipped {
+		t.ReleaseSource()
+		return nil
+	}
+	if !t.prepared {
+		return merr.WrapErrServiceInternalMsg("growing source commit before prepare, segmentID=%d", t.segmentID)
+	}
+	log := t.getLogger()
+	columnGroups := t.preparedColumnGroups
 
 	if t.metaWriter != nil {
 		if err := t.metaWriter.UpdateGrowingSourceSync(ctx, t); err != nil {
@@ -716,7 +735,7 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		}
 	}
 
-	actions := make([]metacache.SegmentAction, 0, 3)
+	actions := make([]metacache.SegmentAction, 0, 6)
 	if t.batchRows > 0 {
 		actions = append(actions, metacache.FinishSyncing(t.batchRows))
 	}
@@ -740,7 +759,12 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		t.metacache.RemoveSegments(metacache.WithSegmentIDs(t.segmentID))
 		log.Info(ctx, "dropped growing source segment removed")
 	}
-	commitSource = true
+
+	committer, shouldCommit := t.source.(GrowingFlushSourceCommitter)
+	t.ReleaseSource()
+	if shouldCommit && (t.IsFlush() || t.IsDrop()) {
+		committer.CommitGrowingFlush(t.targetOffset)
+	}
 
 	metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.StreamingDataSourceLabel, metrics.InsertLabel, fmt.Sprint(t.collectionID)).Add(float64(t.batchRows))
 	metrics.DataNodeFlushedRows.WithLabelValues(paramtable.GetStringNodeID(), metrics.StreamingDataSourceLabel).Add(float64(t.batchRows))
@@ -751,6 +775,15 @@ func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
 		mlog.String("manifestPath", t.manifestPath),
 		mlog.Duration("timeTaken", t.tr.ElapseSpan()))
 	return nil
+}
+
+func (t *GrowingSourceSyncTask) getLogger() *mlog.Logger {
+	return mlog.With(
+		mlog.Int64("collectionID", t.collectionID),
+		mlog.Int64("partitionID", t.partitionID),
+		mlog.Int64("segmentID", t.segmentID),
+		mlog.String("channel", t.channelName),
+	)
 }
 
 func (t *GrowingSourceSyncTask) getColumnGroups(segment *metacache.SegmentInfo) ([]storagecommon.ColumnGroup, error) {
@@ -829,7 +862,7 @@ func (t *GrowingSourceSyncTask) trimColumnGroupsToMaterialized(ctx context.Conte
 	// InsertRecord ctor, so an empty set has no legal meaning — refuse it
 	// instead of writing a layout that may disagree with the data.
 	if len(materialized) == 0 {
-		return nil, merr.WrapErrServiceInternalMsg(
+		return nil, merr.WrapErrDataIntegrityMsg(
 			"growing flush source reported empty materialized field ids for segment %d", t.segmentID)
 	}
 	materializedSet := typeutil.NewSet(materialized...)

@@ -141,7 +141,11 @@ func (s *L0ImportSuite) TestL0Import() {
 			s.cm.(*mocks.ChunkManager).EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			task.(*syncmgr.SyncTask).WithChunkManager(s.cm)
 
-			err := task.Run(context.Background())
+			taskCtx := context.Background()
+			err := task.Prepare(taskCtx)
+			if err == nil {
+				err = task.Commit(taskCtx)
+			}
 			s.NoError(err)
 
 			future := conc.Go(func() (struct{}, error) {

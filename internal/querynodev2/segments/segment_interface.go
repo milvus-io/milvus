@@ -76,6 +76,10 @@ type Segment interface {
 	InsertCount() int64
 	// RowNum returns the number of rows, it's slow, so DO NOT call it in a loop
 	RowNum() int64
+	// AckedRowCount returns the acknowledged insert prefix (segcore
+	// get_row_count) — the bound flush admission is validated against.
+	// Not reduced by deletes, and cheap (a counter read, never a query).
+	AckedRowCount() int64
 	MemSize() int64
 	// ResourceUsageEstimate returns the estimated resource usage of the segment
 	ResourceUsageEstimate() ResourceUsage

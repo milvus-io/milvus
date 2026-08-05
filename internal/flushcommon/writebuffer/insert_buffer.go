@@ -138,7 +138,9 @@ func (ib *InsertBuffer) Buffer(inData *InsertData, startPos, endPos *msgpb.MsgPo
 		bufferedSize += int64(data.GetMemorySize())
 	}
 	if inData.bm25Stats != nil {
-		ib.statsBuffer.Buffer(inData.bm25Stats)
+		statsSize := ib.statsBuffer.Buffer(inData.bm25Stats)
+		ib.size += statsSize
+		bufferedSize += statsSize
 	}
 
 	return bufferedSize

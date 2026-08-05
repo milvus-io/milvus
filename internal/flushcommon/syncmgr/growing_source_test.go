@@ -337,7 +337,9 @@ func TestGrowingSourceSyncTaskBuildFlushConfigUsesCurrentSplitPattern(t *testing
 	require.Equal(t, "100,101,102", config.SchemaBasedPattern)
 	require.Equal(t, "parquet,vortex,parquet", config.SchemaBasedFormats)
 	require.Equal(t, []int64{100, 101, 102}, config.AllowedFieldIDs)
-	require.Equal(t, columnGroups, segment.GetCurrentSplit())
+	require.Equal(t, []int{0}, columnGroups[0].Columns)
+	require.Empty(t, segment.GetCurrentSplit()[0].Columns,
+		"resolving a layout must not mutate the shared metacache segment during parallel Prepare")
 	require.NotEmpty(t, config.WriterFormat)
 }
 
@@ -528,7 +530,7 @@ func TestGrowingSourceSyncTaskBuildsColumnGroupBinlogs(t *testing.T) {
 		WithAllocator(&fakeAllocator{next: 500}).
 		WithSource(source)
 
-	require.NoError(t, task.Run(context.Background()))
+	require.NoError(t, runTaskForTest(context.Background(), task))
 	require.Len(t, segment.GetCurrentSplit(), 3)
 	require.Equal(t, []int64{100}, segment.GetCurrentSplit()[0].Fields)
 	require.Len(t, segment.GetHistory(), 1)
@@ -694,7 +696,7 @@ func TestGrowingSourceSyncTaskRequiresPrimaryKeysForGrowingFlush(t *testing.T) {
 		WithAllocator(&fakeAllocator{next: 500}).
 		WithSource(source)
 
-	err := task.Run(context.Background())
+	err := runTaskForTest(context.Background(), task)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, merr.ErrDataIntegrity), err.Error())
 	require.ErrorContains(t, err, "primary key count mismatch")
@@ -748,7 +750,7 @@ func TestGrowingSourceSyncTaskCommitRetainedSourceOnlyOnFinalization(t *testing.
 			finalize(task)
 		}
 
-		require.NoError(t, task.Run(context.Background()))
+		require.NoError(t, runTaskForTest(context.Background(), task))
 		if expectCommit {
 			require.Equal(t, []int64{10}, source.commits)
 		} else {
@@ -864,7 +866,7 @@ func TestGrowingSourceSyncTaskMergesReturnedBM25Stats(t *testing.T) {
 		WithAllocator(&fakeAllocator{next: 500}).
 		WithSource(&fakeBM25GrowingFlushSource{stats: map[int64]*storage.BM25Stats{102: stats}})
 
-	require.NoError(t, task.Run(context.Background()))
+	require.NoError(t, runTaskForTest(context.Background(), task))
 	serialized, _, err := segment.GetBM25Stats().Serialize()
 	require.NoError(t, err)
 	require.Contains(t, serialized, int64(102))

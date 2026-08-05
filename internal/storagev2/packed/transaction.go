@@ -321,3 +321,37 @@ func AddStatsToManifest(
 
 	return newManifestPath, nil
 }
+
+// GetLatestManifestVersion reports the greatest committed manifest version at
+// basePath without modifying anything. A read-only transaction is opened at
+// read_version < 0, which the FFI defines as "fetch greatest version".
+//
+// The flush path uses this to tell "nobody has committed since I read" from
+// "my own previous attempt already landed", before it stages any update.
+func GetLatestManifestVersion(basePath string, storageConfig *indexpb.StorageConfig) (int64, error) {
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return 0, merr.Wrap(err, "failed to create properties")
+	}
+	defer C.loon_properties_free(cProperties)
+
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+
+	var handle C.LoonTransactionHandle
+	result := C.loon_transaction_begin(cBasePath, cProperties,
+		C.int64_t(-1), /* read_version < 0: greatest */
+		C.int32_t(0),  /* resolve_id: FAIL, nothing is committed anyway */
+		C.uint32_t(1), /* retry_limit */
+		&handle)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return 0, merr.WrapErrStorage(err, "begin read-only manifest transaction")
+	}
+	defer C.loon_transaction_destroy(handle)
+
+	var version C.int64_t
+	if err := HandleLoonFFIResult(C.loon_transaction_get_read_version(handle, &version)); err != nil {
+		return 0, merr.WrapErrStorage(err, "get manifest read version")
+	}
+	return int64(version), nil
+}

@@ -83,6 +83,27 @@ func (s *ManagerSuite) TestRegister() {
 	s.ErrorIs(err, merr.ErrChannelReduplicate)
 }
 
+func (s *ManagerSuite) TestDropChannelPropagatesBoundedContext() {
+	param := paramtable.Get()
+	param.Save(param.DataNodeCfg.GracefulStopTimeout.Key, "2")
+	defer param.Reset(param.DataNodeCfg.GracefulStopTimeout.Key)
+
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "caller")
+	wb := NewMockWriteBuffer(s.T())
+	wb.EXPECT().Close(mock.MatchedBy(func(dropCtx context.Context) bool {
+		deadline, ok := dropCtx.Deadline()
+		remaining := time.Until(deadline)
+		return ok && dropCtx.Value(contextKey{}) == "caller" && remaining > 0 && remaining <= 2*time.Second
+	}), true).Return().Once()
+	s.manager.buffers.Insert(s.channelName, wb)
+
+	s.manager.DropChannel(ctx, s.channelName)
+
+	_, loaded := s.manager.buffers.Get(s.channelName)
+	s.False(loaded)
+}
+
 func (s *ManagerSuite) TestFlushSegments() {
 	manager := s.manager
 	s.Run("channel_not_found", func() {
@@ -342,6 +363,37 @@ func (s *ManagerSuite) TestStopDuringMemoryCheck() {
 
 	// expect stop operation won't stuck
 	manager.Stop()
+}
+
+func (s *ManagerSuite) TestMemoryCheckDoesNotSpinOnInFlightPayload() {
+	param := paramtable.Get()
+	param.Save(param.DataNodeCfg.MemoryForceSyncEnable.Key, "true")
+	param.Save(param.DataNodeCfg.MemoryForceSyncWatermark.Key, "0")
+	defer param.Reset(param.DataNodeCfg.MemoryForceSyncEnable.Key)
+	defer param.Reset(param.DataNodeCfg.MemoryForceSyncWatermark.Key)
+
+	segmentID := int64(1001)
+	task := syncmgr.NewSyncTask().
+		WithSyncPack(new(syncmgr.SyncPack).WithSegmentID(segmentID)).
+		WithPayloadAccounting(100, 0, nil)
+	entry := &ordinarySyncEntry{task: task}
+	wb := &l0WriteBuffer{writeBufferBase: &writeBufferBase{
+		buffers:               make(map[int64]*segmentBuffer),
+		ordinarySyncQueues:    map[int64]*ordinarySyncQueue{segmentID: {entries: []*ordinarySyncEntry{entry}}},
+		growingSourceProgress: make(map[int64]*growingSourceProgress),
+	}}
+	s.manager.buffers.Insert(s.channelName, wb)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.manager.memoryCheck()
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		s.FailNow("memory check spun on non-evictable in-flight payload")
+	}
 }
 
 func TestManager(t *testing.T) {

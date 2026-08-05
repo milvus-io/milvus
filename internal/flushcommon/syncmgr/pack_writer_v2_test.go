@@ -149,7 +149,7 @@ func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema)).WithDeleteData(deletes)
 
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, DefaultIORetryAttempts)
 
 	gotInserts, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
@@ -183,7 +183,7 @@ func (s *PackWriterV2Suite) TestWriteFeedsSegmentStatistics() {
 		WithTimeRange(1, uint64(rows)).
 		WithBatchRows(int64(rows))
 
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, DefaultIORetryAttempts)
 
 	_, _, _, _, _, _, published, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
@@ -218,7 +218,7 @@ func (s *PackWriterV2Suite) TestWritePublishesCumulativeStats() {
 		action(seg)
 	}).Return().Maybe()
 
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, DefaultIORetryAttempts)
 
 	newPack := func() *SyncPack {
 		return new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).
@@ -265,7 +265,7 @@ func (s *PackWriterV2Suite) TestWriteEmptyInsertData() {
 	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName)
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, DefaultIORetryAttempts)
 
 	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
@@ -294,7 +294,7 @@ func (s *PackWriterV2Suite) TestNoPkField() {
 	buf.Append(data)
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, DefaultIORetryAttempts)
 
 	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
@@ -311,7 +311,7 @@ func (s *PackWriterV2Suite) TestAllocIDExhausedError() {
 	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema))
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, DefaultIORetryAttempts)
 
 	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)
@@ -332,7 +332,7 @@ func (s *PackWriterV2Suite) TestWriteInsertDataError() {
 	buf.Append(data)
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData([]*storage.InsertData{buf})
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit, DefaultIORetryAttempts)
 
 	_, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.Error(err)

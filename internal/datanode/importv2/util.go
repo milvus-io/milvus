@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -106,18 +105,32 @@ func NewSyncTask(ctx context.Context,
 		syncPack.WithBM25Stats(bm25Stats)
 	}
 
-	writeRetryAttempts := paramtable.Get().DataNodeCfg.ImportMaxWriteRetryAttempts.GetAsUint()
-	retryOpts := []retry.Option{
-		retry.Attempts(writeRetryAttempts), // default retry always
-		retry.MaxSleepTime(10 * time.Second),
-	}
+	// Import raises the writer's retry budget because its own recovery is
+	// expensive: a failure here fails the whole ImportTask and DataCoord
+	// re-reads and re-parses the entire file. The flush path, which re-drives a
+	// failed task from its own queue, keeps the short default instead.
 	task := syncmgr.NewSyncTask().
 		WithAllocator(allocator).
 		WithMetaCache(metaCache).
 		WithSchema(metaCache.GetSchema(0)). // TODO specify import schema if needed
 		WithSyncPack(syncPack).
 		WithStorageConfig(storageConfig).
-		WithWriteRetryOptions(retryOpts...)
+		WithIORetryAttempts(paramtable.Get().DataNodeCfg.ImportMaxWriteRetryAttempts.GetAsUint())
+
+	// Freeze the physical layout at construction, exactly like the write buffer
+	// does. Import happens to submit one task per segment at a time today, but
+	// the invariant Prepare enforces is "the layout is decided before the task
+	// runs", not "the caller is single-threaded".
+	if segmentInfo, ok := metaCache.GetSegmentByID(segmentID); ok {
+		columnGroups := task.ResolveColumnGroups(segmentInfo)
+		if segmentInfo.GetCurrentSplit() == nil && columnGroups != nil {
+			metaCache.UpdateSegments(metacache.SetCurrentSplitIfNil(columnGroups),
+				metacache.WithSegmentIDs(segmentID))
+		}
+		task.WithFrozenColumnGroups(columnGroups)
+	} else {
+		task.WithFrozenColumnGroups(nil)
+	}
 	return task, nil
 }
 

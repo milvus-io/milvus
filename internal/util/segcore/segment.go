@@ -118,6 +118,14 @@ func (s *cSegmentImpl) RowNum() int64 {
 	return int64(rowCount)
 }
 
+// AckedRowCount returns the contiguous acknowledged insert prefix (segcore
+// get_row_count, i.e. ack_responder_.GetAck()) — the exact bound
+// FlushGrowingSegmentData validates flush ranges against. Unlike RowNum
+// (GetRealCount) it is not reduced by deletes and never runs a count query.
+func (s *cSegmentImpl) AckedRowCount() int64 {
+	return int64(C.GetRowCount(s.ptr))
+}
+
 // MemSize returns the memory size of the segment.
 func (s *cSegmentImpl) MemSize() int64 {
 	cMemSize := C.GetMemoryUsageInBytes(s.ptr)

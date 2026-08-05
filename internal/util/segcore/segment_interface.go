@@ -50,6 +50,10 @@ type basicSegmentMethodSet interface {
 	// RawPointer returns the raw pointer of the segment.
 	RowNum() int64
 
+	// AckedRowCount returns the acknowledged insert prefix (segcore
+	// get_row_count); not reduced by deletes.
+	AckedRowCount() int64
+
 	// MemSize returns the memory size of the segment.
 	MemSize() int64
 
