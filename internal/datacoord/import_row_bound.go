@@ -57,15 +57,28 @@ func nonSourceFieldIDs(schema *schemapb.CollectionSchema) typeutil.Set[int64] {
 }
 
 // minRowTextBytes returns a provable lower bound on the number of bytes one row
-// occupies when serialized as JSON/CSV, EXCLUDING fields not present in the source
-// files (autoID primary key and function-output fields). Known dense vector fields
-// contribute at least one character per element (dim, or dim/8 for binary vectors);
-// VarChar/JSON may be empty and contribute 0; unknown/sparse source fields
-// contribute 0; every other known fixed scalar contributes at least 1. The result
-// is floored to 1 to avoid divide-by-zero downstream.
-func minRowTextBytes(schema *schemapb.CollectionSchema) (int64, error) {
+// occupies in a text import file of type ft, EXCLUDING fields not present in the
+// source files (autoID primary key and function-output fields).
+//
+// Two parts contribute. The per-field value floor is format-independent: a known
+// dense vector needs at least one character per element (dim, or dim/8 for binary
+// vectors); every other known fixed scalar needs at least 1; VarChar/JSON may be
+// empty and unknown/sparse source fields need none.
+//
+// The structural floor is NOT format-independent, and it is what keeps a large
+// all-VarChar file from being estimated at one row per byte: a JSON row spells out
+// every field name it carries, paying {"name": per field, whereas a CSV row carries
+// only separators because its names live in the header.
+//
+// Row separators are deliberately not counted: a single-row file has none, so
+// counting one would let the floor exceed a real row and under-count the file --
+// the one direction this bound may never take. The result is floored to 1 to avoid
+// divide-by-zero downstream.
+func minRowTextBytes(schema *schemapb.CollectionSchema, ft importutilv2.FileType) (int64, error) {
+	// A JSON row is an object: braces around it, and "name": before each value.
+	jsonShaped := ft == importutilv2.JSON || ft == importutilv2.JSONLines
 	skip := nonSourceFieldIDs(schema)
-	var total int64
+	var total, present int64
 	for _, field := range schema.GetFields() {
 		if skip.Contain(field.GetFieldID()) {
 			continue
@@ -76,6 +89,11 @@ func minRowTextBytes(schema *schemapb.CollectionSchema) (int64, error) {
 		// true lower bound.
 		if field.GetNullable() || field.GetDefaultValue() != nil {
 			continue
+		}
+		present++
+		if jsonShaped {
+			// Two quotes and a colon around the field name.
+			total += int64(len(field.GetName())) + 3
 		}
 		switch field.GetDataType() {
 		case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16,
@@ -100,6 +118,13 @@ func minRowTextBytes(schema *schemapb.CollectionSchema) (int64, error) {
 		default:
 			// VarChar/JSON may be empty; unknown/sparse source fields contribute 0.
 		}
+	}
+	if present > 1 {
+		// One separator between adjacent fields: ',' in both formats.
+		total += present - 1
+	}
+	if jsonShaped {
+		total += 2 // the row object's braces
 	}
 	if total < 1 {
 		total = 1
@@ -154,7 +179,7 @@ func computeFileRowUpperBound(ctx context.Context, cm storage.ChunkManager,
 		// provable per-row floor. This over-estimates heavily (the floor is 1 byte
 		// for an all-VarChar schema) and must stay an upper bound: under-estimating
 		// would exhaust the range and fail the import at the datanode guard.
-		minRow, _ := minRowTextBytes(schema)
+		minRow, _ := minRowTextBytes(schema, ft)
 		total, err := sumSize()
 		if err != nil {
 			return 0, false, err
@@ -434,8 +459,14 @@ func reserveRanges(bounds []int64, files []*internalpb.ImportFile,
 		j := i
 		for ; j < len(bounds); j++ {
 			if bounds[j] > maxIDsPerAllocBatch {
+				// For a format that records no row count the number below is an upper
+				// bound derived from the file size, so it can exceed the ceiling on a
+				// file holding far fewer rows. Say so, or the operator reads it as a
+				// real row count and has nowhere to go.
 				return merr.WrapErrParameterInvalidMsg(
-					"import file %d needs %d primary keys, more than one allocation batch holds (max %d)",
+					"import file %d needs up to %d primary keys, more than one allocation batch holds (max %d); "+
+						"for json/csv this is an upper bound derived from the file size -- split the file, "+
+						"or use parquet/numpy, which record their row count exactly",
 					j, bounds[j], maxIDsPerAllocBatch)
 			}
 			if batch+bounds[j] > maxIDsPerAllocBatch {

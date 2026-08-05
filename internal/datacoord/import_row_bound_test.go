@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -41,7 +42,7 @@ func schemaVec(dim int, extraScalars int) *schemapb.CollectionSchema {
 
 func Test_minRowTextBytes(t *testing.T) {
 	// dim=768 float vector: >= 768 numeric chars (conservative lower bound); scalars add >= 1 each.
-	got, err := minRowTextBytes(schemaVec(768, 1))
+	got, err := minRowTextBytes(schemaVec(768, 1), importutilv2.CSV)
 	assert.NoError(t, err)
 	assert.GreaterOrEqual(t, got, int64(768))
 	assert.LessOrEqual(t, got, int64(768+16)) // still a tight-ish floor
@@ -67,7 +68,7 @@ func Test_rowByteHelpers_skipFunctionOutput(t *testing.T) {
 	// sparse (102) is a function output and the autoID pk (100) is generated, so
 	// only the VarChar text field remains -- and VarChar may be empty, so the floor
 	// falls through to 1 rather than erroring on the sparse field.
-	m, err := minRowTextBytes(schemaBM25AutoID())
+	m, err := minRowTextBytes(schemaBM25AutoID(), importutilv2.CSV)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), m)
 }
@@ -79,10 +80,11 @@ func Test_computeFileRowUpperBound(t *testing.T) {
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().Size(mock.Anything, "a.json").Return(int64(768*100), nil)
 		file := &internalpb.ImportFile{Paths: []string{"a.json"}}
-		// minRowTextBytes(schemaVec(768,0)) == 768; 768*100 / 768 + 1 == 101.
+		// A JSON row of this schema floors at 776: 768 for the dim-768 vector plus
+		// 8 for the braces and "vec": around it. 768*100 / 776 + 1 == 99.
 		bound, exact, err := computeFileRowUpperBound(ctx, cm, schemaVec(768, 0), file)
 		assert.NoError(t, err)
-		assert.Equal(t, int64(101), bound)
+		assert.Equal(t, int64(99), bound)
 		assert.False(t, exact, "a byte-derived text bound is an estimate")
 	})
 
@@ -114,8 +116,10 @@ func Test_computeFileRowUpperBound(t *testing.T) {
 func Test_assignPKRangesToFiles(t *testing.T) {
 	schema := schemaVec(768, 0) // minRowTextBytes == 768
 	cm := mocks.NewChunkManager(t)
-	cm.EXPECT().Size(mock.Anything, "a.json").Return(int64(768*10), nil) // bound 10 + 1 = 11
-	cm.EXPECT().Size(mock.Anything, "b.json").Return(int64(768*20), nil) // bound 20 + 1 = 21
+	// A JSON row floors at 776 for this schema: 768 for the vector, 8 for the
+	// braces and "vec": around it.
+	cm.EXPECT().Size(mock.Anything, "a.json").Return(int64(768*10), nil) // 7680/776 + 1 = 10
+	cm.EXPECT().Size(mock.Anything, "b.json").Return(int64(768*20), nil) // 15360/776 + 1 = 20
 
 	files := []*internalpb.ImportFile{
 		{Paths: []string{"a.json"}},
@@ -127,8 +131,8 @@ func Test_assignPKRangesToFiles(t *testing.T) {
 	err := assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1 /*clusterID*/)
 	assert.NoError(t, err)
 	// each file's range width equals its own bound
-	assert.Equal(t, int64(11), files[0].GetPkIdEnd()-files[0].GetPkIdBegin())
-	assert.Equal(t, int64(21), files[1].GetPkIdEnd()-files[1].GetPkIdBegin())
+	assert.Equal(t, int64(10), files[0].GetPkIdEnd()-files[0].GetPkIdBegin())
+	assert.Equal(t, int64(20), files[1].GetPkIdEnd()-files[1].GetPkIdBegin())
 	// files are contiguous, second begins where first ends
 	assert.Equal(t, files[0].GetPkIdEnd(), files[1].GetPkIdBegin())
 	// cluster bits are applied to the high bits
@@ -153,7 +157,7 @@ func Test_minRowTextBytes_skipsNullableAndDefault(t *testing.T) {
 			{FieldID: 103, Name: "n2", DataType: schemapb.DataType_Int64, DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 7}}},
 		},
 	}
-	got, err := minRowTextBytes(schema)
+	got, err := minRowTextBytes(schema, importutilv2.CSV)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(2), got) // was 4 before the fix (nullable+default counted)
 }
@@ -421,3 +425,63 @@ func Test_validateParquetFooter(t *testing.T) {
 type readerAtFunc func(p []byte, off int64) (int, error)
 
 func (f readerAtFunc) ReadAt(p []byte, off int64) (int, error) { return f(p, off) }
+
+// A JSON row must spell out each field name it carries, so the per-row floor for a
+// text format is not the same in both formats. Without that, an all-VarChar schema
+// floors at one byte per row and a legal multi-GB .json is estimated at one primary
+// key per byte -- more than a single allocation batch holds.
+func Test_minRowTextBytes_jsonPaysForFieldNames(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "65535"}},
+			},
+		},
+	}
+
+	// {"text":} -- braces plus quotes and colon around the one required name. The
+	// VarChar value itself may be empty, so it still adds nothing.
+	json, err := minRowTextBytes(schema, importutilv2.JSON)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2+len("text")+3), json)
+
+	jsonl, err := minRowTextBytes(schema, importutilv2.JSONLines)
+	assert.NoError(t, err)
+	assert.Equal(t, json, jsonl)
+
+	// CSV keeps its names in the header, so a single-column row really can be one
+	// byte. This gap is not closable and is why the reserveRanges error explains
+	// itself rather than pretending the count is a real row count.
+	csv, err := minRowTextBytes(schema, importutilv2.CSV)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), csv)
+}
+
+// A 5 GiB all-VarChar .json is well under maxImportFileSizeInGB (16) and used to be
+// rejected outright at broadcast: floored at one byte per row, its estimate crossed
+// the per-file allocation ceiling.
+func Test_assignPKRangesToFiles_largeVarcharJSONIsAccepted(t *testing.T) {
+	const fileSize = int64(5) << 30
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "65535"}},
+			},
+		},
+	}
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().Size(mock.Anything, "big.json").Return(fileSize, nil)
+
+	files := []*internalpb.ImportFile{{Paths: []string{"big.json"}}}
+	var asked int64
+	alloc := func(n int64) (int64, int64, error) { asked = n; return 1000, 1000 + n, nil }
+
+	err := assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, asked, maxIDsPerAllocBatch, "the reservation must fit one allocation batch")
+	assert.Positive(t, files[0].GetPkIdEnd()-files[0].GetPkIdBegin())
+}
