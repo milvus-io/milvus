@@ -254,6 +254,49 @@ func numpyNumRows(ctx context.Context, cm storage.ChunkManager, paths []string) 
 	return rows, nil
 }
 
+var (
+	parquetMagic          = []byte("PAR1")
+	parquetMagicEncrypted = []byte("PARE")
+)
+
+// maxParquetFooterLen caps the footer metadata length a parquet file may declare.
+// Arrow bounds that length only by the object's own size
+// (parquet/file/file_reader.go:174) and then allocates it verbatim (:182, :202).
+// A footer carries one thrift struct per column chunk, so its size tracks
+// row_groups * columns: a 16 GiB file written in 128 MiB row groups under Milvus's
+// default 64-field ceiling lands in the low single-digit MiB, which this clears by
+// a wide margin.
+const maxParquetFooterLen = 16 << 20
+
+// validateParquetFooter rejects an out-of-range declared footer length before Arrow
+// allocates it. sizingReaderAt.ReadAt buffers a whole ranged GET before copying, so
+// each parse costs about twice the declared length, and the sizing pool runs 2*CPU
+// of them concurrently on the coordinator.
+//
+// This bounds one file, not the pass: worst-case in-flight is still
+// 2*CPU * 2 * maxParquetFooterLen. An aggregate byte budget across the pass is left
+// as follow-up.
+func validateParquetFooter(ra io.ReaderAt, size int64, path string) error {
+	// Leading magic (4) + metadata length (4) + trailing magic (4).
+	const minParquetSize = 12
+	if size < minParquetSize {
+		return merr.WrapErrImportFailedMsg("parquet file too small, size=%d, path=%s", size, path)
+	}
+	var tail [8]byte
+	if _, err := ra.ReadAt(tail[:], size-int64(len(tail))); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	if !bytes.Equal(tail[4:], parquetMagic) && !bytes.Equal(tail[4:], parquetMagicEncrypted) {
+		return merr.WrapErrImportFailedMsg("not a parquet file, path=%s", path)
+	}
+	footerLen := int64(binary.LittleEndian.Uint32(tail[:4]))
+	if footerLen <= 0 || footerLen > maxParquetFooterLen {
+		return merr.WrapErrImportFailedMsg("parquet footer length %d out of range (max %d), path=%s",
+			footerLen, maxParquetFooterLen, path)
+	}
+	return nil
+}
+
 // parquetNumRows reads only the parquet footer to get the exact row count via a
 // sizingReaderAt, which retries the ranged reads the footer relies on. Any error
 // from NewParquetReader is therefore a genuine file-format problem, not a transient
@@ -261,6 +304,9 @@ func numpyNumRows(ctx context.Context, cm storage.ChunkManager, paths []string) 
 func parquetNumRows(ctx context.Context, cm storage.ChunkManager, path string) (int64, error) {
 	ra, err := newSizingReaderAt(ctx, cm, path)
 	if err != nil {
+		return 0, err
+	}
+	if err := validateParquetFooter(ra, ra.size, path); err != nil {
 		return 0, err
 	}
 	pr, err := file.NewParquetReader(ra)

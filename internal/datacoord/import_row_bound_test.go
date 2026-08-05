@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"math"
+	"runtime"
 	"strconv"
 	"testing"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -346,3 +348,76 @@ func Test_computeFileRowUpperBounds_decoderPanicBecomesError(t *testing.T) {
 	assert.Nil(t, bounds)
 	assert.Nil(t, exacts)
 }
+
+// A hostile parquet declares a footer as large as the object itself. Arrow's only
+// check is that the declared length fits inside the file, after which it allocates
+// it, and sizingReaderAt buffers the ranged GET on top -- so sizing must reject the
+// length rather than pay for it. Measured by allocation, since the defect is memory
+// and not the (already failing) parse.
+func Test_parquetNumRows_hostileFooterLength(t *testing.T) {
+	const objSize = int64(200 << 20)
+	declared := uint32(objSize - 8)
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().Size(mock.Anything, "bad.parquet").Return(objSize, nil).Maybe()
+	cm.EXPECT().ReadAt(mock.Anything, "bad.parquet", mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, off int64, length int64) ([]byte, error) {
+			b := make([]byte, length)
+			if off+length == objSize && length >= 8 {
+				binary.LittleEndian.PutUint32(b[length-8:], declared)
+				copy(b[length-4:], parquetMagic)
+			}
+			return b, nil
+		}).Maybe()
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, err := parquetNumRows(context.Background(), cm, "bad.parquet")
+	runtime.ReadMemStats(&after)
+
+	require.Error(t, err)
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(maxParquetFooterLen),
+		"sizing must reject the declared footer length instead of allocating it")
+}
+
+func Test_validateParquetFooter(t *testing.T) {
+	tail := func(footerLen uint32, magic []byte) []byte {
+		b := make([]byte, 8)
+		binary.LittleEndian.PutUint32(b[:4], footerLen)
+		copy(b[4:], magic)
+		return b
+	}
+	readerAt := func(tail []byte, size int64) io.ReaderAt {
+		return readerAtFunc(func(p []byte, off int64) (int, error) {
+			if off != size-8 {
+				return 0, io.EOF
+			}
+			return copy(p, tail), nil
+		})
+	}
+
+	t.Run("accepts a plausible footer", func(t *testing.T) {
+		assert.NoError(t, validateParquetFooter(readerAt(tail(4096, parquetMagic), 1<<20), 1<<20, "a.parquet"))
+	})
+	t.Run("accepts an encrypted footer", func(t *testing.T) {
+		assert.NoError(t, validateParquetFooter(readerAt(tail(4096, parquetMagicEncrypted), 1<<20), 1<<20, "a.parquet"))
+	})
+	t.Run("rejects a footer over the cap", func(t *testing.T) {
+		err := validateParquetFooter(readerAt(tail(maxParquetFooterLen+1, parquetMagic), 1<<30), 1<<30, "a.parquet")
+		assert.ErrorIs(t, err, merr.ErrImportFailed)
+	})
+	t.Run("rejects a zero-length footer", func(t *testing.T) {
+		assert.Error(t, validateParquetFooter(readerAt(tail(0, parquetMagic), 1<<20), 1<<20, "a.parquet"))
+	})
+	t.Run("rejects a foreign magic", func(t *testing.T) {
+		assert.Error(t, validateParquetFooter(readerAt(tail(4096, []byte("XXXX")), 1<<20), 1<<20, "a.parquet"))
+	})
+	t.Run("rejects a file too small to hold a footer", func(t *testing.T) {
+		assert.Error(t, validateParquetFooter(readerAt(nil, 4), 4, "a.parquet"))
+	})
+}
+
+type readerAtFunc func(p []byte, off int64) (int, error)
+
+func (f readerAtFunc) ReadAt(p []byte, off int64) (int, error) { return f(p, off) }
