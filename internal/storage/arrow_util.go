@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -43,8 +44,9 @@ func isNullableDenseVectorArrowType(dataType schemapb.DataType) bool {
 	}
 }
 
-func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *schemapb.ValueField) (uint64, error) {
+func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemapb.FieldSchema) (uint64, error) {
 	// a could never be nil here
+	defaultValue := field.GetDefaultValue()
 	switch b := builder.(type) {
 	case *array.BooleanBuilder:
 		ba, ok := a.(*array.Boolean)
@@ -189,6 +191,14 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 		if ba.IsNull(idx) {
 			// could be internal $meta json
 			if defaultValue != nil {
+				if field.GetDataType() == schemapb.DataType_Geometry {
+					val, err := common.ConvertWKTToWKB(defaultValue.GetStringData())
+					if err != nil {
+						return 0, merr.WrapErrServiceInternalErr(err, "invalid default value for geometry field %s", field.GetName())
+					}
+					b.Append(val)
+					return uint64(len(val)), nil
+				}
 				val := defaultValue.GetBytesData()
 				b.Append(val)
 				return uint64(len(val)), nil
@@ -327,6 +337,15 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 			bd.AppendValues(
 				lo.RepeatBy(numRows, func(_ int) []byte { return schema.GetDefaultValue().GetBytesData() }),
 				nil)
+		case schemapb.DataType_Geometry:
+			bd := builder.(*array.BinaryBuilder)
+			defaultValue, err := common.ConvertWKTToWKB(schema.GetDefaultValue().GetStringData())
+			if err != nil {
+				return nil, merr.WrapErrServiceInternalErr(err, "invalid default value for geometry field %s", schema.GetName())
+			}
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) []byte { return defaultValue }),
+				nil)
 		default:
 			return nil, merr.WrapErrServiceInternalMsg("Unexpected default value type: %s", schema.GetDataType().String())
 		}
@@ -355,7 +374,7 @@ func (b *RecordBuilder) Append(rec Record, start, end int) error {
 		for i, builder := range b.builders {
 			f := b.fields[i]
 			col := rec.Column(f.FieldID)
-			size, err := appendValueAt(builder, col, offset, f.GetDefaultValue())
+			size, err := appendValueAt(builder, col, offset, f)
 			if err != nil {
 				return merr.Wrapf(err, "failed to append value at offset %d for field %s", offset, f.GetName())
 			}

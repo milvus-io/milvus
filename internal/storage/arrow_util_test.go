@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
 func TestGenerateEmptyArray(t *testing.T) {
@@ -208,6 +209,23 @@ func TestGenerateEmptyArray(t *testing.T) {
 			},
 			expectValue: []byte(`{}`),
 		},
+		{
+			tag: "geometry",
+			field: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_Geometry,
+				Nullable: true,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_StringData{
+						StringData: "POINT (1 2)",
+					},
+				},
+			},
+			expectValue: func() []byte {
+				wkb, err := common.ConvertWKTToWKB("POINT (1 2)")
+				require.NoError(t, err)
+				return wkb
+			}(),
+		},
 	}
 
 	for _, tc := range cases {
@@ -235,6 +253,48 @@ func TestGenerateEmptyArray(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRecordBuilderFillsNullableGeometryDefault(t *testing.T) {
+	const defaultWKT = "POINT (1 2)"
+	defaultWKB, err := common.ConvertWKTToWKB(defaultWKT)
+	require.NoError(t, err)
+
+	field := &schemapb.FieldSchema{
+		FieldID:  100,
+		Name:     "geom",
+		DataType: schemapb.DataType_Geometry,
+		Nullable: true,
+		DefaultValue: &schemapb.ValueField{
+			Data: &schemapb.ValueField_StringData{StringData: defaultWKT},
+		},
+	}
+
+	builder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+	defer builder.Release()
+	builder.AppendNull()
+	srcArr := builder.NewArray()
+	defer srcArr.Release()
+
+	src := NewSimpleArrowRecord(array.NewRecord(
+		arrow.NewSchema([]arrow.Field{{Name: field.Name, Type: arrow.BinaryTypes.Binary, Nullable: true}}, nil),
+		[]arrow.Array{srcArr},
+		int64(srcArr.Len()),
+	), map[FieldID]int{field.FieldID: 0})
+	defer src.Release()
+
+	rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
+	defer rb.Release()
+	require.NoError(t, rb.Append(src, 0, 1))
+
+	rebuilt := rb.Build()
+	defer rebuilt.Release()
+	out := rebuilt.Column(field.FieldID).(*array.Binary)
+	require.True(t, out.IsValid(0))
+	require.Equal(t, defaultWKB, out.Value(0))
+	require.NotEmpty(t, out.Value(0))
+	_, err = common.ConvertWKBToWKT(out.Value(0))
+	require.NoError(t, err)
 }
 
 func TestGenerateEmptyArrayFromSchemaNullableDenseVectorUsesBinaryArrow(t *testing.T) {
