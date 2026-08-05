@@ -1,49 +1,49 @@
 # Spark-Milvus Backfill pytest
 
-本目录实现 Spark-Milvus Read/Backfill pytest。它支持两种 Spark 执行模式：
+This directory contains the Spark-Milvus Read/Backfill pytest suite. It supports two Spark execution modes:
 
-- `toolbox`：通过 Kubernetes exec 复用一个已经现场编译好 Connector 的 Toolbox Pod，适合当前手工功能验证和未来 Nightly 的最新 Connector 源码构建。
-- `job`：每次 Spark 调用创建一次性 Kubernetes Job，并从 HTTPS bundle 下载 Connector，适合已经发布固定 Connector 产物的环境。
+- `toolbox`: reuses a Toolbox Pod whose Connector was compiled in the target environment through Kubernetes exec. This is suitable for manual feature validation and future Nightly builds from the latest Connector source.
+- `job`: creates a one-shot Kubernetes Job for each Spark invocation and downloads the Connector from an HTTPS bundle. This is suitable for environments that publish pinned Connector artifacts.
 
-两种模式都在单 Pod 中使用 `spark-submit --master local[2]`，不需要 Spark Master/Worker。
+Both modes run `spark-submit --master local[2]` in a single Pod. A Spark Master/Worker cluster is not required.
 
-## 执行边界
+## Execution boundaries
 
-- 普通 pytest、PR CI 和常规 E2E 默认完全不收集本目录。
-- 只有显式传入 `--run-spark-backfill` 才会收集用例。
-- 所有用例使用独立 `SparkBackfill` tag，不属于普通 Nightly 的 `L0 L1 L2 ClusterOnly` 选择范围。
-- 禁止 pytest-xdist；运行时使用 `-n 0` 或不传 `-n`。
-- 每个用例创建独立 Collection、Snapshot、对象存储 prefix 和 Result 路径。
-- `job` 模式由 pytest 创建、等待、取日志和删除 Spark Job。
-- `toolbox` 模式保留 Toolbox Pod，仅为每次调用保存独立 evidence；测试仍必须串行执行。
-- V3 和 V2 必须在独立 Milvus 部署中运行，并用 marker 分开选择。
+- Normal pytest, PR CI, and regular E2E runs do not collect this directory.
+- Tests are collected only when `--run-spark-backfill` is passed explicitly.
+- Every case uses the dedicated `SparkBackfill` tag and is outside the normal Nightly `L0 L1 L2 ClusterOnly` selection.
+- pytest-xdist is not supported. Run with `-n 0` or omit `-n`.
+- Every case creates an independent collection, snapshot, object-storage prefix, and Result path.
+- In `job` mode, pytest creates, waits for, collects logs from, and deletes the Spark Job.
+- In `toolbox` mode, pytest preserves the Toolbox Pod and writes independent evidence for each invocation. Tests must still run serially.
+- V3 and V2 must run against separate Milvus deployments and be selected with separate markers.
 
-## 运行架构
+## Runtime architecture
 
 ```text
-pytest/开发机/Jenkins Agent
-  ├─ pymilvus: Collection、数据、Flush、Snapshot、Commit 后回读
-  ├─ PyArrow: 生成确定性 Parquet
-  ├─ MinIO SDK: 上传输入、读取 Result、检查 Artifact、清理 prefix
+pytest/developer machine/Jenkins Agent
+  ├─ pymilvus: collection setup, data insertion, flush, snapshot, commit, and readback
+  ├─ PyArrow: deterministic Parquet generation
+  ├─ MinIO SDK: upload input, read Result, inspect artifacts, and clean prefixes
   └─ Kubernetes SDK
-       ├─ toolbox mode: exec 已有 Toolbox Pod
-       └─ job mode: 创建 one-shot Job Pod
+       ├─ toolbox mode: exec into an existing Toolbox Pod
+       └─ job mode: create a one-shot Job Pod
             └─ spark-submit --master local[2]
                  ├─ BackfillApp
                  └─ PySpark Read Probe
 ```
 
-## Toolbox 模式（当前推荐）
+## Toolbox mode (recommended for current development)
 
-Toolbox Pod 必须已经完成 Connector 构建并处于 `Running 1/1`。Runner 默认按 label 自动发现：
+The Toolbox Pod must have completed the Connector build and be `Running 1/1`. The runner discovers it by this label by default:
 
 ```text
 app=spark-milvus-toolbox
 ```
 
-也可以通过 `--spark-toolbox-pod` 指定 Pod 名，但 Pod 重建后名字会变化，因此稳定运行更推荐 label。
+You can specify a Pod with `--spark-toolbox-pod`, but the name changes after a Pod rebuild. Label discovery is more stable.
 
-本机运行 pytest 时，先把 ClusterIP Service port-forward 到本机：
+When running pytest locally, first port-forward the ClusterIP services:
 
 ```bash
 kubectl --kubeconfig /Users/zilliz/Desktop/kubecon/kubeconfig -n default \
@@ -53,7 +53,7 @@ kubectl --kubeconfig /Users/zilliz/Desktop/kubecon/kubeconfig -n default \
   port-forward svc/eric-spark-minio 19000:9000
 ```
 
-从现有 MinIO Secret 设置本地 pytest 所需凭证：
+Export the credentials needed by the local pytest MinIO client from the existing MinIO Secret:
 
 ```bash
 export SPARK_BACKFILL_S3_ACCESS_KEY="$(
@@ -66,7 +66,7 @@ export SPARK_BACKFILL_S3_SECRET_KEY="$(
 )"
 ```
 
-运行一个最小 V3 coalesce Backfill：
+Run a minimal V3 coalesce Backfill:
 
 ```bash
 python3 -m pytest -p no:rerunfailures \
@@ -88,37 +88,39 @@ python3 -m pytest -p no:rerunfailures \
   -n 0 -v --tb=short
 ```
 
-Toolbox Runner 会：
+The Toolbox runner:
 
-1. 找到唯一 Ready Toolbox Pod；
-2. 检查 wrapper、Connector JAR 和 native libraries；
-3. 将 `contracts.py`、`read_probe.py` 注入 `/workspace/spark-backfill-pytest`；
-4. 从 Pod 自己的 `MILVUS_TOKEN`、`S3_ACCESS_KEY`、`S3_SECRET_KEY` 环境变量取运行凭证；
-5. 执行 Spark，并把脱敏命令、完整日志、退出码和结果写入 evidence；
-6. 不删除或重启 Toolbox Pod。
+1. Finds the single Ready Toolbox Pod.
+2. Checks the wrapper, Connector JAR, and native libraries.
+3. Injects `contracts.py` and `read_probe.py` into `/workspace/spark-backfill-pytest`.
+4. Reads runtime credentials from the Pod's `MILVUS_TOKEN`, `S3_ACCESS_KEY`, and `S3_SECRET_KEY` environment variables.
+5. Runs Spark and writes the redacted command, complete logs, exit code, and results to the evidence directory.
+6. Does not delete or restart the Toolbox Pod.
 
-Toolbox 模式最低 RBAC：
+Minimum Toolbox RBAC:
 
 ```text
 get/list pods
 get pods/exec
 ```
 
-## Job 模式运行时
+If pytest must read `--spark-storage-secret-name` because local AK/SK variables are absent, it also requires `get secrets`.
 
-固定 Spark 镜像：
+## Job-mode runtime
+
+Pinned Spark image:
 
 ```text
 apache/spark:4.0.1-scala2.13-java21-python3-ubuntu@sha256:fb5c5e61e7bb1be94b7f3a31afe1f73c5b4d20b6008f4ffa7278fc085da08a9e
 ```
 
-Job 固定为 Linux AMD64、`restartPolicy: Never`、`backoffLimit: 0`、2 CPU / 8 GiB，默认超时 30 分钟。
+The Job is pinned to Linux AMD64, `restartPolicy: Never`, `backoffLimit: 0`, 2 CPU / 8 GiB, and a default timeout of 30 minutes.
 
-远程入口固定添加 `--packages org.apache.hadoop:hadoop-aws:3.4.1`。Nightly namespace 需要能够访问 Maven/Ivy 仓库；如果集群禁止公网 egress，应在 Spark 镜像中预热 Ivy cache 或预置兼容的 Hadoop AWS/AWS SDK JAR，并在接入 Jenkins 前验证解析过程。
+The remote entrypoint always adds `--packages org.apache.hadoop:hadoop-aws:3.4.1`. The Nightly namespace must be able to reach the Maven/Ivy repositories. If public egress is blocked, prewarm the Ivy cache or include compatible Hadoop AWS/AWS SDK JARs in the Spark image, then verify dependency resolution before integrating with Jenkins.
 
-## Job 模式的 Connector bundle 契约
+## Connector bundle contract for Job mode
 
-只有 `--spark-runner-mode job` 需要 Connector bundle。`--spark-connector-url` 必须是 Job Pod 可访问的 HTTPS `tar.gz`，并通过 `--spark-connector-sha256` 固定归档内容。归档至少包含：
+Only `--spark-runner-mode job` needs a Connector bundle. `--spark-connector-url` must be an HTTPS `tar.gz` accessible from the Job Pod, and `--spark-connector-sha256` pins the archive contents. The archive must contain at least:
 
 ```text
 manifest.json
@@ -127,28 +129,28 @@ lib/libmilvus-storage.so
 lib/libmilvus-storage-jni.so
 ```
 
-`manifest.json` 必须声明 Connector revision、文件 SHA256、Spark/Scala/Java、OS/架构、Assembly JAR 和 Backfill 主类。远程入口会在执行 Spark 前校验归档 SHA256、安全解压、文件 SHA256 和运行时兼容性。
+`manifest.json` must declare the Connector revision, file SHA256 values, Spark/Scala/Java versions, OS/architecture, Assembly JAR, and Backfill main class. Before starting Spark, the remote entrypoint verifies the archive SHA256, safe extraction, individual file SHA256 values, and runtime compatibility.
 
-## 凭证
+## Credentials
 
-本地 pytest 的 MinIO SDK在两种模式下都从以下环境变量读取凭证：
+In both modes, the local pytest MinIO client reads credentials from:
 
 ```bash
 export SPARK_BACKFILL_S3_ACCESS_KEY='...'
 export SPARK_BACKFILL_S3_SECRET_KEY='...'
 ```
 
-`job` 模式在未指定 `--spark-storage-secret-name` 时，用这些环境变量创建临时 K8s Secret；Milvus token 来自 `--token`。凭证通过 Secret env 注入，不写入 Job manifest、pytest 证据或远程命令日志。
+When `--spark-storage-secret-name` is not specified, `job` mode creates a temporary Kubernetes Secret from these variables. The Milvus token comes from `--token`. Credentials are injected through Secret-backed environment variables and are not written to the Job manifest, pytest evidence, or remote command logs.
 
-`toolbox` 模式不创建 Secret。Spark 进程使用 Toolbox Pod 已有的 `MILVUS_TOKEN`、`S3_ACCESS_KEY` 和 `S3_SECRET_KEY`；本地环境变量只供 pytest 上传 Parquet、读取 Result 和清理对象使用。
+`toolbox` mode does not create a Secret. The Spark process uses the Toolbox Pod's existing `MILVUS_TOKEN`, `S3_ACCESS_KEY`, and `S3_SECRET_KEY`. The local variables are used only by pytest to upload Parquet, read Results, and clean objects.
 
-如果传入 `--spark-storage-secret-name`，该 Secret 应使用同样的 key：`s3-access-key`、`s3-secret-key`、`milvus-token`。S3 两个 key 可以在 IAM 模式下同时省略；启用 Milvus 鉴权时不能省略 `milvus-token`。
+When `--spark-storage-secret-name` is provided, that Secret should use the keys `s3-access-key`, `s3-secret-key`, and `milvus-token`. The two S3 keys may both be omitted in IAM mode. `milvus-token` is required when Milvus authentication is enabled.
 
-本地 MinIO SDK 当前需要静态 AK/SK。如果 Spark 侧使用 IAM，仍需为 pytest 的上传、Result 读取和清理提供可用的静态测试凭证，或后续扩展本地对象存储客户端认证方式。
+The local MinIO SDK currently requires static AK/SK. Even when Spark uses IAM, pytest still needs static test credentials for upload, Result reads, and cleanup until the local object-storage client supports another authentication mode.
 
-## Job 模式最小 Kubernetes RBAC
+## Minimum Kubernetes RBAC for Job mode
 
-执行 pytest 的 kubeconfig/ServiceAccount 至少需要：
+The kubeconfig or ServiceAccount running pytest needs at least:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -173,9 +175,27 @@ rules:
     verbs: ["create", "delete"]
 ```
 
-如果使用已有 `--spark-storage-secret-name`，可以移除 Secrets 创建和删除权限。pytest 启动时会用 SelfSubjectAccessReview fail-fast 检查权限。
+For an existing `--spark-storage-secret-name`, replace the Secret `create/delete` verbs with `get` when local AK/SK variables are absent and pytest must read the Secret. If both local credential variables are set, pytest does not read the Secret and the `get` verb may be omitted. Startup uses SelfSubjectAccessReview to fail fast on missing permissions.
 
-## V3 Job 模式手工运行
+## V3 deployment prerequisites
+
+The online function-output case adds a function field to a collection that already has sealed rows. Milvus requires Storage V3, storage-version compaction, and schema-bump compaction to admit this DDL:
+
+```yaml
+common:
+  storage:
+    useLoonFFI: true
+dataCoord:
+  compaction:
+    storageVersion:
+      enabled: true
+    bumpSchemaVersion:
+      enabled: true
+```
+
+The test creates a protected snapshot immediately after the DDL so schema-bump compaction cannot replace the snapshot segments while Spark generates and commits the backfill result.
+
+## Manual V3 run in Job mode
 
 ```bash
 python3 -m pytest -p no:rerunfailures tests/python_client/spark_backfill \
@@ -198,11 +218,11 @@ python3 -m pytest -p no:rerunfailures tests/python_client/spark_backfill \
   -n 0 -v --tb=short
 ```
 
-本机已安装的 `pytest-rerunfailures` 在部分沙箱环境会尝试打开本地 socket，因此本地开发示例使用 `-p no:rerunfailures`；Jenkins 环境不需要无条件照搬。
+In some sandbox environments, the locally installed `pytest-rerunfailures` plugin attempts to open a local socket and is blocked. The development examples disable it with `-p no:rerunfailures`; Jenkins does not need to copy that flag unconditionally.
 
-## V2 手工运行
+## Manual V2 run
 
-V2 使用独立部署，至少关闭 Loon FFI 和 Storage V3 compaction upgrade：
+V2 uses a separate deployment. At minimum, disable Loon FFI and Storage V3 upgrade compaction:
 
 ```yaml
 common:
@@ -214,73 +234,73 @@ dataCoord:
       enabled: false
 ```
 
-运行：
+Run:
 
 ```bash
 python3 -m pytest -p no:rerunfailures tests/python_client/spark_backfill \
   --run-spark-backfill \
   --tags SparkBackfill \
-  <与上面相同的环境参数> \
+  <same-environment-options-as-above> \
   -m "spark_backfill_v2 and spark_backfill_core" \
   -n 0 -v --tb=short
 ```
 
-fixture 会读取 `MilvusClient.list_persistent_segments()` 的真实 `storage_version`。V2 Snapshot 中只要出现 V1、V3、混合版本或 Segment 证据不完整，整组立即失败；不会根据 `storagev2_manifest_list` 的历史字段名猜版本。
+The fixture reads the real `storage_version` from `MilvusClient.list_persistent_segments()`. The V2 suite fails immediately if a Snapshot contains V1, V3, mixed versions, or incomplete segment evidence. It does not infer the version from the legacy `storagev2_manifest_list` field name.
 
-V2 用例执行两轮相同 Field ID 的 Backfill：第二轮使用不同 Artifact 和值，Commit 后不主动 Reload，必须在线看到第二轮值。这个行为同时验证 Column Group 替换、加载中 Segment 的元数据传播和 DataVersion/Reopen 链路。当前公开持久 Segment API不返回 DataVersion 数字，因此测试保存提交前后 Segment 证据并做行为级验证；若后续 API 暴露 DataVersion，应再增加显式 `after > before` 断言。
+The V2 case runs two Backfills against the same field IDs. The second run uses different artifacts and values. After Commit, the test does not force a Reload and must observe the second values online. This verifies Column Group replacement, metadata propagation for a loaded segment, and the DataVersion/Reopen path. The public persistent-segment API does not currently expose DataVersion, so the test records segment evidence before and after Commit and verifies behavior. Add an explicit `after > before` assertion if the API exposes DataVersion later.
 
-指定 Snapshot 的 Connector Read 不能只传 Snapshot URL。它还需要 `milvus.snapshot.manifests`、`milvus.snapshot.v2.segments` 和 snapshot schema bytes。当前 bundle 契约没有包含 `ReadSourceOnlyApp`/`ListV2SegmentsApp` 的参数组装接口，因此 V2 初期使用 pymilvus 在线回读，不把 live client-mode 的已知 V2 planner 限制误判为 Backfill 写入失败。
+Connector Read for a specific Snapshot needs more than the Snapshot URL. It also needs `milvus.snapshot.manifests`, `milvus.snapshot.v2.segments`, and the snapshot schema bytes. The current bundle contract does not expose argument construction for `ReadSourceOnlyApp` or `ListV2SegmentsApp`, so the initial V2 suite uses pymilvus for online readback rather than misclassifying the known live client-mode V2 planner limitation as a Backfill write failure.
 
-## 证据与清理
+## Evidence and cleanup
 
-每次 Spark 调用在 `--spark-evidence-root` 下保存独立目录，默认：
+Each Spark invocation writes an independent directory under `--spark-evidence-root`, which defaults to:
 
 ```text
 ${CI_LOG_PATH:-/tmp/ci_logs}/spark_backfill/<job-name>/
 ```
 
-包含：
+It contains:
 
-- Job 模式保存脱敏 Job manifest；Toolbox 模式保存脱敏 exec command；
-- Pod 完整脱敏日志、退出码和失败原因；
-- Snapshot 原始元数据；
-- Backfill Result JSON；
-- Result 同目录对象清单；
-- Manifest/Column Group 文件路径和对象大小；
-- Commit 响应和逐 Segment 状态；
-- V2 提交前后持久 Segment 证据。
+- A redacted Job manifest in Job mode, or a redacted exec command in Toolbox mode.
+- Complete redacted Pod logs, exit code, and failure reason.
+- Raw Snapshot metadata.
+- Backfill Result JSON.
+- Object listings from the Result directory.
+- Manifest/Column Group paths and object sizes.
+- Commit response and per-segment status.
+- Persistent segment evidence before and after V2 commits.
 
-两种模式正常结束都会删除测试 Collection、Snapshot 和对象 prefix。Job 模式额外删除 ConfigMap、临时 Secret 和 Job；Toolbox 模式始终保留 Toolbox Pod。传 `--spark-keep-failed-job` 只影响 Job 模式。
+On normal completion, both modes delete the test collection, snapshots, and object prefix. Job mode also deletes the ConfigMap, temporary Secret, and Job. Toolbox mode always preserves the Toolbox Pod. `--spark-keep-failed-job` affects Job mode only.
 
-## Nightly 接入
+## Nightly integration
 
-Nightly 不应依赖 spark-milvus Release 每日发布。推荐分成两个阶段：
+Nightly should not depend on a daily spark-milvus release. Use two stages:
 
 ```text
 Builder/Toolbox Pod
-  → checkout 指定 spark-milvus commit
-  → 现场编译 Connector/JNI/native libraries
-  → readiness 验证产物
+  → checkout a pinned spark-milvus commit
+  → compile Connector/JNI/native libraries in the target environment
+  → verify artifact readiness
 
 pytest
   → --spark-runner-mode toolbox
-  → 按 label 连接 Builder/Toolbox Pod
-  → 执行 Read/Backfill cases
+  → connect to the Builder/Toolbox Pod by label
+  → run Read/Backfill cases
 ```
 
-Toolbox Runner 不负责 Pod 生命周期，因此 Jenkins/独立 fixture 可以自由选择 Deployment、Job + PVC 或预构建镜像。当前建议：
+The Toolbox runner does not manage the Pod lifecycle. Jenkins or a dedicated fixture may use a Deployment, Job + PVC, or prebuilt image. Recommended workflow:
 
-1. Jenkins 提供 kubeconfig/ServiceAccount、Milvus/MinIO/Management 地址和凭证。
-2. Builder 阶段 checkout 明确的 Connector commit 并启动 Toolbox，等待 `Running 1/1`。
-3. pytest 使用 Toolbox label，不需要 Connector URL/SHA。
-4. V3 每晚执行完整 core + negative。
-5. V2 环境准备完成后，顺序执行独立 V3 和 V2 部署，禁止在同一部署中混跑。
-6. Jenkins 归档 JUnit、整个 evidence root、Builder 日志和 pytest 控制台日志。
+1. Jenkins provides the kubeconfig/ServiceAccount, Milvus/MinIO/Management endpoints, and credentials.
+2. The builder checks out an explicit Connector commit, starts the Toolbox, and waits for `Running 1/1`.
+3. pytest uses the Toolbox label and does not require a Connector URL/SHA.
+4. Run the complete V3 core + negative selection every night.
+5. After the V2 environment is available, run the separate V3 and V2 deployments sequentially. Never mix them in one deployment.
+6. Archive JUnit, the complete evidence root, builder logs, and pytest console logs.
 
-普通收集门禁可用下面的命令检查：
+Check the normal collection gate with:
 
 ```bash
 python3 -m pytest -p no:rerunfailures tests/python_client/spark_backfill --collect-only -q
 ```
 
-显式选择该目录时因为 0 tests 可能返回 pytest exit code 5，这是 pytest 对“所选目录为空”的标准行为；在仓库常规测试收集中，本目录被忽略且其他测试仍正常收集。
+Explicitly selecting this directory may return pytest exit code 5 because zero tests were collected. That is pytest's standard behavior for an empty selection. During normal repository collection, this directory is ignored and other tests continue to collect normally.

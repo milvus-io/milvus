@@ -65,24 +65,34 @@ def read_storage_credentials(core_api, namespace: str, secret_name: str) -> tupl
     return decode_storage_credentials(getattr(secret, "data", None) or {})
 
 
-def required_rbac_permissions(*, create_secret: bool, runner_mode: str = "job") -> list[tuple[str, str, str]]:
+def required_rbac_permissions(
+    *,
+    create_secret: bool,
+    read_secret: bool | None = None,
+    runner_mode: str = "job",
+) -> list[tuple[str, str, str]]:
+    if read_secret is None:
+        read_secret = not create_secret
     if runner_mode == "toolbox":
-        return [
+        permissions = [
             ("", "pods", "get"),
             ("", "pods", "list"),
             ("", "pods/exec", "get"),
         ]
-    permissions = [
-        ("batch", "jobs", "create"),
-        ("batch", "jobs", "get"),
-        ("batch", "jobs", "delete"),
-        ("", "pods", "get"),
-        ("", "pods", "list"),
-        ("", "pods/log", "get"),
-        ("", "configmaps", "create"),
-        ("", "configmaps", "get"),
-        ("", "configmaps", "delete"),
-    ]
+    else:
+        permissions = [
+            ("batch", "jobs", "create"),
+            ("batch", "jobs", "get"),
+            ("batch", "jobs", "delete"),
+            ("", "pods", "get"),
+            ("", "pods", "list"),
+            ("", "pods/log", "get"),
+            ("", "configmaps", "create"),
+            ("", "configmaps", "get"),
+            ("", "configmaps", "delete"),
+        ]
+    if read_secret:
+        permissions.append(("", "secrets", "get"))
     if create_secret:
         permissions.extend(
             [
@@ -98,11 +108,13 @@ def assert_rbac_permissions(
     namespace: str,
     *,
     create_secret: bool,
+    read_secret: bool | None = None,
     runner_mode: str = "job",
 ) -> None:
     denied = []
     for group, resource, verb in required_rbac_permissions(
         create_secret=create_secret,
+        read_secret=read_secret,
         runner_mode=runner_mode,
     ):
         body = {
