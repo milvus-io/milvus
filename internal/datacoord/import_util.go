@@ -47,6 +47,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// ErrPKRangeTooSmall marks the one AssembleImportRequest failure a retry can never
+// fix: the PK range was reserved at broadcast from an upper bound, and preimport
+// has since produced a larger exact row count. Neither number changes by
+// rescheduling, so the task must fail now and keep the precise reason.
+//
+// The scheduler cannot key this off merr classification. ErrImportSysFailed also
+// carries genuinely transient cases ("job %d not found, waiting for import job
+// creation"), and merr.IsNonRetryableErr is a deny-list over ErrIo* sentinels that
+// AssembleImportRequest never returns.
+var ErrPKRangeTooSmall = errors.New("reserved PK range too small")
+
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.FieldTaskID(task.GetTaskID()),
@@ -368,9 +379,12 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		f := fileStat.GetImportFile()
 		reserved := f.GetPkIdEnd() - f.GetPkIdBegin()
 		if reserved > 0 && fileStat.GetTotalRows() > reserved {
-			return nil, merr.WrapErrImportSysFailedMsg(
+			// Marked so the scheduler can tell this apart from the retriable
+			// failures AssembleImportRequest also returns. The merr code stays
+			// ErrImportSysFailed; markers.Mark only adds the sentinel to the chain.
+			return nil, merr.Mark(merr.WrapErrImportSysFailedMsg(
 				"reserved PK range too small for file %v: %d rows, %d ids reserved",
-				f.GetPaths(), fileStat.GetTotalRows(), reserved)
+				f.GetPaths(), fileStat.GetTotalRows(), reserved), ErrPKRangeTooSmall)
 		}
 	}
 

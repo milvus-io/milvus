@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	importutilv2common "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -264,9 +266,7 @@ func numpyNumRows(ctx context.Context, cm storage.ChunkManager, paths []string) 
 		}
 		r, err := npyio.NewReader(ra)
 		if err != nil {
-			// Header parse over already-retried bytes: a file-format problem, not a
-			// transient fault, so it is a non-retryable import error.
-			return 0, merr.WrapErrImportFailedMsg("read numpy header failed, path=%s, err=%v", path, err)
+			return 0, importutilv2common.WrapDecodeErr(err, fmt.Sprintf("read numpy header failed, path=%s", path))
 		}
 		shape := r.Header.Descr.Shape
 		if len(shape) == 0 {
@@ -336,10 +336,7 @@ func parquetNumRows(ctx context.Context, cm storage.ChunkManager, path string) (
 	}
 	pr, err := file.NewParquetReader(ra)
 	if err != nil {
-		// Footer parse over already-retried bytes: a file-format problem, not a
-		// transient fault, so it is a non-retryable import error (matching
-		// internal/util/importutilv2/parquet/reader.go).
-		return 0, merr.WrapErrImportFailedMsg("read parquet footer failed, path=%s, err=%v", path, err)
+		return 0, importutilv2common.WrapDecodeErr(err, fmt.Sprintf("read parquet footer failed, path=%s", path))
 	}
 	defer pr.Close()
 	return pr.NumRows(), nil
@@ -347,10 +344,11 @@ func parquetNumRows(ctx context.Context, cm storage.ChunkManager, path string) (
 
 // sizingReaderAt is a minimal io.Reader / io.ReaderAt / io.Seeker over a
 // ChunkManager, used only to read the small header/footer a sizing pass needs.
-// Each ReadAt is an independent ranged GET wrapped in retry, so transient
-// object-store faults are retried at the fetch layer and never reach the
-// parquet/numpy decoder — a decoder failure is therefore always a genuine
-// (non-retryable) file-format error. Unlike RetryableReader it retries the
+// Each ReadAt is an independent ranged GET wrapped in retry, so a brief
+// object-store fault is absorbed at the fetch layer. retry.Handle gives up after a
+// bounded number of attempts though, so a persistent outage does surface to the
+// decoder as a typed IO error — see wrapSizingErr, which is why a decoder failure
+// may not be assumed to be a file-format problem. Unlike RetryableReader it retries the
 // ReadAt/Seek path the parquet footer relies on, and it holds no open handle
 // (nothing to close, no reopen-at-offset logic).
 type sizingReaderAt struct {
@@ -438,7 +436,9 @@ func assignPKRangesToFiles(ctx context.Context, cm storage.ChunkManager,
 	if err != nil {
 		return err
 	}
-	sizeReservations(bounds, exacts)
+	if err := sizeReservations(bounds, exacts); err != nil {
+		return err
+	}
 	return reserveRanges(bounds, files, allocN, clusterID)
 }
 
@@ -544,19 +544,29 @@ func computeFileRowUpperBounds(ctx context.Context, cm storage.ChunkManager,
 // is only usable because it is guaranteed not to under-count, and scaling it down
 // would break that guarantee and surface as a mid-import failure on the datanode.
 // reserveRanges splits the allocation across batches instead.
-func sizeReservations(bounds []int64, exacts []bool) {
+func sizeReservations(bounds []int64, exacts []bool) error {
 	factor := paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
 	if factor < 1 {
 		factor = 1
 	}
 	for i, b := range bounds {
 		if exacts[i] {
+			// A file needing more ids than one batch holds can never be reserved
+			// contiguously, and clamping it here would hand back fewer ids than the
+			// file has rows -- a silent under-reservation in a mechanism whose whole
+			// premise is that the bound never under-counts. reserveRanges cannot
+			// catch it either: it only ever sees the post-clamp value. Reject on the
+			// raw count, while it is still visible.
+			if b > maxIDsPerAllocBatch {
+				return merr.WrapErrParameterInvalidMsg(
+					"import file %d holds %d rows, more than one allocation batch can reserve (max %d); split the file",
+					i, b, maxIDsPerAllocBatch)
+			}
 			// Exact counts are authoritative; the factor only adds headroom for a
 			// reader emitting marginally more rows than the footer/header advertised.
 			// Cap that headroom at the allocation-batch ceiling so an ordinary large
 			// file (e.g. a 500M-row column, ~4GB, well under the size limit) is not
-			// rejected merely for crossing rows*factor. reserveRanges still rejects a
-			// file whose row count itself exceeds one batch.
+			// rejected merely for crossing rows*factor.
 			if b <= maxIDsPerAllocBatch/factor {
 				b *= factor
 			} else {
@@ -568,4 +578,5 @@ func sizeReservations(bounds []int64, exacts []bool) {
 		}
 		bounds[i] = b
 	}
+	return nil
 }

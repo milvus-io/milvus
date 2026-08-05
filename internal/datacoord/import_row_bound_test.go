@@ -173,7 +173,7 @@ func Test_sizeReservations(t *testing.T) {
 	t.Run("exact gets the expansion factor, estimate does not", func(t *testing.T) {
 		withExpansionFactor(t, "10")
 		bounds := []int64{100, 100}
-		sizeReservations(bounds, []bool{true, false})
+		require.NoError(t, sizeReservations(bounds, []bool{true, false}))
 		assert.Equal(t, []int64{1000, 100}, bounds)
 	})
 
@@ -182,7 +182,7 @@ func Test_sizeReservations(t *testing.T) {
 		// An empty range reads as "no range" on the datanode and silently falls back
 		// to the local allocator, which is the divergence this mechanism prevents.
 		bounds := []int64{0, 0}
-		sizeReservations(bounds, []bool{true, false})
+		require.NoError(t, sizeReservations(bounds, []bool{true, false}))
 		assert.Equal(t, []int64{1, 1}, bounds)
 	})
 
@@ -191,7 +191,7 @@ func Test_sizeReservations(t *testing.T) {
 		// Scaling an estimate down would break the upper-bound guarantee that makes
 		// it usable at all; reserveRanges splits the allocation instead.
 		bounds := []int64{3 * math.MaxUint32, math.MaxUint32}
-		sizeReservations(bounds, []bool{false, false})
+		require.NoError(t, sizeReservations(bounds, []bool{false, false}))
 		assert.Equal(t, []int64{3 * math.MaxUint32, math.MaxUint32}, bounds)
 	})
 }
@@ -484,4 +484,22 @@ func Test_assignPKRangesToFiles_largeVarcharJSONIsAccepted(t *testing.T) {
 	require.NoError(t, err)
 	assert.LessOrEqual(t, asked, maxIDsPerAllocBatch, "the reservation must fit one allocation batch")
 	assert.Positive(t, files[0].GetPkIdEnd()-files[0].GetPkIdBegin())
+}
+
+// An exact row count above one allocation batch cannot be reserved contiguously.
+// Clamping it -- which is what the code did -- hands back fewer ids than the file
+// has rows, and reserveRanges cannot notice because it only sees the clamped
+// value. numpyNumRows returns shape[0] unclamped, so the count is reachable.
+func Test_sizeReservations_rejectsExactCountOverOneBatch(t *testing.T) {
+	withExpansionFactor(t, "2")
+	bounds := []int64{maxIDsPerAllocBatch + 1}
+	err := sizeReservations(bounds, []bool{true})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "more than one allocation batch can reserve")
+
+	// An estimate is not an exact count and keeps its own path: reserveRanges
+	// still reports it, with the wording that explains the estimate.
+	bounds = []int64{maxIDsPerAllocBatch + 1}
+	assert.NoError(t, sizeReservations(bounds, []bool{false}))
 }
