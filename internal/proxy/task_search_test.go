@@ -2873,6 +2873,7 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 			Type: schemapb.DataType_Int64,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
+					ValidData: valids,
 					Data: &schemapb.ScalarField_LongData{
 						LongData: &schemapb.LongArray{
 							Data: groupByValues,
@@ -2880,7 +2881,6 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 					},
 				},
 			},
-			ValidData: valids,
 		}
 		return result
 	}
@@ -2941,12 +2941,12 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 				FieldId: 1,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{true, true, true, true, false, true, true, true, true, false},
 						Data: &schemapb.ScalarField_LongData{
 							LongData: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 0, 1, 2, 3, 4, 0}},
 						},
 					},
 				},
-				ValidData: []bool{true, true, true, true, false, true, true, true, true, false},
 			},
 		},
 	}

@@ -1265,7 +1265,7 @@ func TestInsertWithNullableVectorFields(t *testing.T) {
 				}
 			}
 			assert.NotNil(t, vectorFieldData)
-			assert.Equal(t, []bool{false, true, false}, vectorFieldData.GetValidData())
+			assert.Equal(t, []bool{false, true, false}, typeutil.GetFieldDataValidData(vectorFieldData))
 			testcase.checkData(t, vectorFieldData)
 		})
 	}
@@ -1308,7 +1308,7 @@ func TestPartialUpdateWithNullableExplicitNull(t *testing.T) {
 		assert.NoError(t, err)
 		nullableField := getFieldDataByName(fieldsData, "nullable")
 		assert.NotNil(t, nullableField)
-		assert.Equal(t, []bool{false, false}, nullableField.GetValidData())
+		assert.Equal(t, []bool{false, false}, typeutil.GetFieldDataValidData(nullableField))
 		assert.Empty(t, nullableField.GetScalars().GetLongData().GetData())
 	})
 
@@ -1339,7 +1339,7 @@ func TestPartialUpdateWithNullableExplicitNull(t *testing.T) {
 		assert.NoError(t, err)
 		nullableField := getFieldDataByName(fieldsData, "nullable")
 		assert.NotNil(t, nullableField)
-		assert.Equal(t, []bool{false, true}, nullableField.GetValidData())
+		assert.Equal(t, []bool{false, true}, typeutil.GetFieldDataValidData(nullableField))
 		assert.Equal(t, []int64{20}, nullableField.GetScalars().GetLongData().GetData())
 	})
 
@@ -1422,7 +1422,7 @@ func TestPartialUpdateWithNullableExplicitNull(t *testing.T) {
 		assert.NoError(t, err)
 		vectorFieldData := getFieldDataByName(fieldsData, FieldBookIntro)
 		assert.NotNil(t, vectorFieldData)
-		assert.Equal(t, []bool{false, false}, vectorFieldData.GetValidData())
+		assert.Equal(t, []bool{false, false}, typeutil.GetFieldDataValidData(vectorFieldData))
 		assert.Empty(t, vectorFieldData.GetVectors().GetFloatVector().GetData())
 		assert.Equal(t, int64(2), vectorFieldData.GetVectors().GetDim())
 	})
@@ -1862,7 +1862,8 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 			FieldName: FieldBookIntro,
 			Field: &schemapb.FieldData_Vectors{
 				Vectors: &schemapb.VectorField{
-					Dim: 2,
+					ValidData: []bool{true, false, true},
+					Dim:       2,
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{
 							Data: []float32{0.1, 0.2, 0.3, 0.4},
@@ -1870,7 +1871,6 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 					},
 				},
 			},
-			ValidData: []bool{true, false, true},
 		}
 
 		rows, err := buildQueryResp(0, []string{FieldBookIntro}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
@@ -1887,13 +1887,13 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 			FieldName: FieldBookIntro,
 			Field: &schemapb.FieldData_Vectors{
 				Vectors: &schemapb.VectorField{
-					Dim: 2,
+					ValidData: []bool{false, false},
+					Dim:       2,
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{},
 					},
 				},
 			},
-			ValidData: []bool{false, false},
 		}
 
 		rows, err := buildQueryResp(0, []string{FieldBookIntro}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
@@ -1909,7 +1909,8 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 			FieldName: FieldBookIntro,
 			Field: &schemapb.FieldData_Vectors{
 				Vectors: &schemapb.VectorField{
-					Dim: 2,
+					ValidData: []bool{true, false, true},
+					Dim:       2,
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{
 							Data: []float32{
@@ -1921,7 +1922,6 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 					},
 				},
 			},
-			ValidData: []bool{true, false, true},
 		}
 
 		_, err := buildQueryResp(0, []string{FieldBookIntro}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
@@ -1941,13 +1941,13 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 					FieldName: FieldBookIntro,
 					Field: &schemapb.FieldData_Vectors{
 						Vectors: &schemapb.VectorField{
-							Dim: 2,
+							ValidData: []bool{true, false},
+							Dim:       2,
 							Data: &schemapb.VectorField_FloatVector{
 								FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2, 0.3}},
 							},
 						},
 					},
-					ValidData: []bool{true, false},
 				},
 			},
 			{
@@ -1957,13 +1957,13 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 					FieldName: FieldBookIntro,
 					Field: &schemapb.FieldData_Vectors{
 						Vectors: &schemapb.VectorField{
-							Dim: 16,
+							ValidData: []bool{true, false},
+							Dim:       16,
 							Data: &schemapb.VectorField_BinaryVector{
 								BinaryVector: []byte{0x01, 0x02, 0x03},
 							},
 						},
 					},
-					ValidData: []bool{true, false},
 				},
 			},
 			{
@@ -1973,13 +1973,13 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 					FieldName: FieldBookIntro,
 					Field: &schemapb.FieldData_Vectors{
 						Vectors: &schemapb.VectorField{
-							Dim: 2,
+							ValidData: []bool{true, false},
+							Dim:       2,
 							Data: &schemapb.VectorField_Float16Vector{
 								Float16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05},
 							},
 						},
 					},
-					ValidData: []bool{true, false},
 				},
 			},
 			{
@@ -1989,13 +1989,13 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 					FieldName: FieldBookIntro,
 					Field: &schemapb.FieldData_Vectors{
 						Vectors: &schemapb.VectorField{
-							Dim: 2,
+							ValidData: []bool{true, false},
+							Dim:       2,
 							Data: &schemapb.VectorField_Bfloat16Vector{
 								Bfloat16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05},
 							},
 						},
 					},
-					ValidData: []bool{true, false},
 				},
 			},
 			{
@@ -2005,13 +2005,13 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 					FieldName: FieldBookIntro,
 					Field: &schemapb.FieldData_Vectors{
 						Vectors: &schemapb.VectorField{
-							Dim: 2,
+							ValidData: []bool{true, false},
+							Dim:       2,
 							Data: &schemapb.VectorField_Int8Vector{
 								Int8Vector: []byte{0x01, 0x02, 0x03},
 							},
 						},
 					},
-					ValidData: []bool{true, false},
 				},
 			},
 		}
@@ -2033,12 +2033,12 @@ func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 			FieldName: FieldWordCount,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
+					ValidData: []bool{false, true},
 					Data: &schemapb.ScalarField_LongData{
 						LongData: &schemapb.LongArray{Data: []int64{20}},
 					},
 				},
 			},
-			ValidData: []bool{false, true},
 		}
 
 		rows, err := buildQueryResp(0, []string{FieldWordCount}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
@@ -2448,6 +2448,7 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 		FieldName: "field-bool",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
 				Data: &schemapb.ScalarField_BoolData{
 					BoolData: &schemapb.BoolArray{
 						Data: []bool{true, true, true},
@@ -2455,7 +2456,6 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 				},
 			},
 		},
-		ValidData: []bool{true, false, true},
 		IsDynamic: false,
 	}
 	fieldDatas = append(fieldDatas, &fieldData1)
@@ -2465,6 +2465,7 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 		FieldName: "field-int8",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
 				Data: &schemapb.ScalarField_IntData{
 					IntData: &schemapb.IntArray{
 						Data: []int32{0, 1, 2},
@@ -2472,7 +2473,6 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 				},
 			},
 		},
-		ValidData: []bool{true, false, true},
 		IsDynamic: false,
 	}
 	fieldDatas = append(fieldDatas, &fieldData2)
@@ -2482,6 +2482,7 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 		FieldName: "field-int16",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
 				Data: &schemapb.ScalarField_IntData{
 					IntData: &schemapb.IntArray{
 						Data: []int32{0, 1, 2},
@@ -2489,7 +2490,6 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 				},
 			},
 		},
-		ValidData: []bool{true, false, true},
 		IsDynamic: false,
 	}
 	fieldDatas = append(fieldDatas, &fieldData3)
@@ -2499,6 +2499,7 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 		FieldName: "field-int32",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
 				Data: &schemapb.ScalarField_IntData{
 					IntData: &schemapb.IntArray{
 						Data: []int32{0, 1, 2},
@@ -2506,7 +2507,6 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 				},
 			},
 		},
-		ValidData: []bool{true, false, true},
 		IsDynamic: false,
 	}
 	fieldDatas = append(fieldDatas, &fieldData4)
@@ -2516,6 +2516,7 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 		FieldName: "field-float",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
 				Data: &schemapb.ScalarField_FloatData{
 					FloatData: &schemapb.FloatArray{
 						Data: []float32{0, 1, 2},
@@ -2523,7 +2524,6 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 				},
 			},
 		},
-		ValidData: []bool{true, false, true},
 		IsDynamic: false,
 	}
 	fieldDatas = append(fieldDatas, &fieldData5)
@@ -2533,6 +2533,7 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 		FieldName: "field-double",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
 				Data: &schemapb.ScalarField_DoubleData{
 					DoubleData: &schemapb.DoubleArray{
 						Data: []float64{0, 1, 2},
@@ -2540,7 +2541,6 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 				},
 			},
 		},
-		ValidData: []bool{true, false, true},
 		IsDynamic: false,
 	}
 	fieldDatas = append(fieldDatas, &fieldData6)
@@ -2550,6 +2550,7 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 		FieldName: "field-string",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
 				Data: &schemapb.ScalarField_StringData{
 					StringData: &schemapb.StringArray{
 						Data: []string{"0", "1", "2"},
@@ -2557,7 +2558,6 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 				},
 			},
 		},
-		ValidData: []bool{true, false, true},
 		IsDynamic: false,
 	}
 	fieldDatas = append(fieldDatas, &fieldData7)
@@ -2567,6 +2567,7 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 		FieldName: "field-varchar",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
 				Data: &schemapb.ScalarField_StringData{
 					StringData: &schemapb.StringArray{
 						Data: []string{"0", "1", "2"},
@@ -2574,7 +2575,6 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 				},
 			},
 		},
-		ValidData: []bool{true, false, true},
 		IsDynamic: false,
 	}
 	fieldDatas = append(fieldDatas, &fieldData8)
@@ -2584,6 +2584,7 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 		FieldName: "field-json",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
 				Data: &schemapb.ScalarField_JsonData{
 					JsonData: &schemapb.JSONArray{
 						Data: [][]byte{[]byte(`{"XXX": 0}`), []byte(`{"XXX": 0}`), []byte(`{"XXX": 0}`)},
@@ -2591,7 +2592,6 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 				},
 			},
 		},
-		ValidData: []bool{true, false, true},
 		IsDynamic: false,
 	}
 	fieldDatas = append(fieldDatas, &fieldData9)
@@ -2601,6 +2601,7 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 		FieldName: "field-array",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
 				Data: &schemapb.ScalarField_ArrayData{
 					ArrayData: &schemapb.ArrayArray{
 						Data: []*schemapb.ScalarField{
@@ -2612,7 +2613,6 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 				},
 			},
 		},
-		ValidData: []bool{true, false, true},
 		IsDynamic: false,
 	}
 
@@ -2621,6 +2621,7 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 		FieldName: "field-int64",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
 						Data: []int64{0, 1, 2},
@@ -2628,7 +2629,6 @@ func newNullableFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schem
 				},
 			},
 		},
-		ValidData: []bool{true, false, true},
 		IsDynamic: false,
 	}
 	fieldDatas = append(fieldDatas, &fieldData11)
@@ -4126,7 +4126,7 @@ func TestAnyToColumnsNullableStructArray(t *testing.T) {
 	subs := structFD.GetStructArrays().GetFields()
 	require.Len(t, subs, 2)
 	for _, sub := range subs {
-		assert.Equal(t, []bool{true, false, true}, sub.GetValidData())
+		assert.Equal(t, []bool{true, false, true}, typeutil.GetFieldDataValidData(sub))
 	}
 	assert.Len(t, subs[0].GetScalars().GetArrayData().GetData(), 2)
 	assert.Len(t, subs[1].GetVectors().GetVectorArray().GetData(), 2)
@@ -4157,7 +4157,7 @@ func TestAnyToColumnsNullableStructArrayAllNull(t *testing.T) {
 	subs := structFD.GetStructArrays().GetFields()
 	require.Len(t, subs, 2)
 	for _, sub := range subs {
-		assert.Equal(t, []bool{false, false}, sub.GetValidData())
+		assert.Equal(t, []bool{false, false}, typeutil.GetFieldDataValidData(sub))
 	}
 	assert.Empty(t, subs[0].GetScalars().GetArrayData().GetData())
 	assert.Empty(t, subs[1].GetVectors().GetVectorArray().GetData())
@@ -4240,7 +4240,7 @@ func TestBuildQueryRespNullableStructArrayDense(t *testing.T) {
 		structSchema, []structArrayRow{first, nullPlaceholder, third})
 	require.NoError(t, err)
 	for _, sub := range structFD.GetStructArrays().GetFields() {
-		sub.ValidData = []bool{true, false, true}
+		typeutil.SetFieldDataValidData(sub, []bool{true, false, true})
 	}
 
 	resp, err := buildQueryResp(0, []string{"my_struct"}, []*schemapb.FieldData{structFD}, nil, nil, true, schema)
@@ -4261,8 +4261,8 @@ func TestBuildQueryRespNullableStructArrayRejectsMismatchedValidData(t *testing.
 	require.NoError(t, err)
 	subs := structFD.GetStructArrays().GetFields()
 	require.Len(t, subs, 2)
-	subs[0].ValidData = []bool{true}
-	subs[1].ValidData = []bool{false}
+	typeutil.SetFieldDataValidData(subs[0], []bool{true})
+	typeutil.SetFieldDataValidData(subs[1], []bool{false})
 
 	_, err = buildQueryResp(0, []string{"my_struct"}, []*schemapb.FieldData{structFD}, nil, nil, true, schema)
 	require.Error(t, err)

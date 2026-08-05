@@ -93,6 +93,7 @@ func NewInt64FieldDataNullableWithStart(fieldName string, numRows, start int) *s
 		FieldName: fieldName,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: validData,
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
 						Data: GenerateInt64Array(num, int64(start)),
@@ -100,7 +101,6 @@ func NewInt64FieldDataNullableWithStart(fieldName string, numRows, start int) *s
 				},
 			},
 		},
-		ValidData: validData,
 	}
 }
 
@@ -146,6 +146,7 @@ func NewVarCharFieldData(fieldName string, numRows int, nullable bool) *schemapb
 		FieldName: fieldName,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: testutils.GenerateBoolArray(numRows),
 				Data: &schemapb.ScalarField_StringData{
 					StringData: &schemapb.StringArray{
 						Data: testutils.GenerateStringArray(numValid),
@@ -154,7 +155,6 @@ func NewVarCharFieldData(fieldName string, numRows int, nullable bool) *schemapb
 				},
 			},
 		},
-		ValidData: testutils.GenerateBoolArray(numRows),
 	}
 }
 

@@ -29,6 +29,7 @@
 #include "common/SealedOffsetMapping.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
@@ -127,18 +128,20 @@ TEST(Util_Segcore, CreateEmptyVectorDataArrayForNullableVectors) {
 
     auto dense_result =
         CreateEmptyVectorDataArray(3, 0, valid_data.data(), (*schema)[vec]);
-    ASSERT_EQ(dense_result->valid_data().size(), 3);
-    ASSERT_FALSE(dense_result->valid_data(0));
-    ASSERT_FALSE(dense_result->valid_data(1));
-    ASSERT_FALSE(dense_result->valid_data(2));
+    const auto& dense_valid_data = GetFieldDataRowValidData(*dense_result);
+    ASSERT_EQ(dense_valid_data.size(), 3);
+    ASSERT_FALSE(dense_valid_data[0]);
+    ASSERT_FALSE(dense_valid_data[1]);
+    ASSERT_FALSE(dense_valid_data[2]);
     ASSERT_EQ(dense_result->vectors().float_vector().data_size(), 0);
 
     auto sparse_result = CreateEmptyVectorDataArray(
         3, 0, valid_data.data(), (*schema)[sparse_vec]);
-    ASSERT_EQ(sparse_result->valid_data().size(), 3);
-    ASSERT_FALSE(sparse_result->valid_data(0));
-    ASSERT_FALSE(sparse_result->valid_data(1));
-    ASSERT_FALSE(sparse_result->valid_data(2));
+    const auto& sparse_valid_data = GetFieldDataRowValidData(*sparse_result);
+    ASSERT_EQ(sparse_valid_data.size(), 3);
+    ASSERT_FALSE(sparse_valid_data[0]);
+    ASSERT_FALSE(sparse_valid_data[1]);
+    ASSERT_FALSE(sparse_valid_data[2]);
     ASSERT_EQ(sparse_result->vectors().data_case(),
               proto::schema::VectorField::kSparseFloatVector);
     ASSERT_EQ(sparse_result->vectors().sparse_float_vector().contents_size(),
@@ -175,8 +178,9 @@ TEST(Util_Segcore, CreateVectorDataArrayFromNullableVectors) {
     auto result = CreateVectorDataArrayFrom(
         data.data(), valid_flags.get(), total_count, valid_count, field_meta);
 
-    ASSERT_TRUE(result->valid_data().size() > 0);
-    ASSERT_EQ(result->valid_data().size(), total_count);
+    const auto& result_valid_data = GetFieldDataRowValidData(*result);
+    ASSERT_FALSE(result_valid_data.empty());
+    ASSERT_EQ(result_valid_data.size(), total_count);
     ASSERT_EQ(result->vectors().float_vector().data_size(), valid_count * dim);
 }
 
@@ -227,15 +231,16 @@ TEST(Util_Segcore, MergeDataArrayWithNullableVectors) {
 
     auto merged_result = MergeDataArray(merge_bases, field_meta);
 
-    ASSERT_TRUE(merged_result->valid_data().size() > 0);
-    ASSERT_EQ(merged_result->valid_data().size(), 5);
+    const auto& merged_valid_data = GetFieldDataRowValidData(*merged_result);
+    ASSERT_FALSE(merged_valid_data.empty());
+    ASSERT_EQ(merged_valid_data.size(), 5);
     ASSERT_EQ(merged_result->vectors().float_vector().data_size(), 5 * dim);
 
-    ASSERT_TRUE(merged_result->valid_data(0));
-    ASSERT_TRUE(merged_result->valid_data(1));
-    ASSERT_TRUE(merged_result->valid_data(2));
-    ASSERT_TRUE(merged_result->valid_data(3));
-    ASSERT_TRUE(merged_result->valid_data(4));
+    ASSERT_TRUE(merged_valid_data[0]);
+    ASSERT_TRUE(merged_valid_data[1]);
+    ASSERT_TRUE(merged_valid_data[2]);
+    ASSERT_TRUE(merged_valid_data[3]);
+    ASSERT_TRUE(merged_valid_data[4]);
 }
 
 TEST(Util_Segcore, MergeDataArrayWithNullableByteVectorsAppendsRows) {
@@ -297,11 +302,13 @@ TEST(Util_Segcore, MergeDataArrayWithNullableByteVectorsAppendsRows) {
 
         auto merged_result = MergeDataArray(merge_bases, field_meta);
 
-        ASSERT_EQ(merged_result->valid_data().size(), total_count);
-        EXPECT_TRUE(merged_result->valid_data(0));
-        EXPECT_FALSE(merged_result->valid_data(1));
-        EXPECT_TRUE(merged_result->valid_data(2));
-        EXPECT_TRUE(merged_result->valid_data(3));
+        const auto& merged_valid_data =
+            GetFieldDataRowValidData(*merged_result);
+        ASSERT_EQ(merged_valid_data.size(), total_count);
+        EXPECT_TRUE(merged_valid_data[0]);
+        EXPECT_FALSE(merged_valid_data[1]);
+        EXPECT_TRUE(merged_valid_data[2]);
+        EXPECT_TRUE(merged_valid_data[3]);
 
         std::string actual;
         switch (test_case.data_type) {
@@ -515,10 +522,11 @@ TEST(Util_Segcore, MergeDataArrayWithNullableVectorArrayUsesLogicalOffsets) {
 
     auto merged_result = MergeDataArray(merge_bases, field_meta);
 
-    ASSERT_EQ(merged_result->valid_data_size(), 3);
-    EXPECT_FALSE(merged_result->valid_data(0));
-    EXPECT_TRUE(merged_result->valid_data(1));
-    EXPECT_TRUE(merged_result->valid_data(2));
+    const auto& merged_valid_data = GetFieldDataRowValidData(*merged_result);
+    ASSERT_EQ(merged_valid_data.size(), 3);
+    EXPECT_FALSE(merged_valid_data[0]);
+    EXPECT_TRUE(merged_valid_data[1]);
+    EXPECT_TRUE(merged_valid_data[2]);
 
     const auto& result_rows = merged_result->vectors().vector_array().data();
     ASSERT_EQ(result_rows.size(), 3);

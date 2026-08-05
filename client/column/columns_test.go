@@ -99,6 +99,47 @@ func TestIDColumns(t *testing.T) {
 	})
 }
 
+func TestFieldDataColumnValidDataSources(t *testing.T) {
+	validData := []bool{true, false}
+	makeField := func(legacy, current []bool) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "value",
+			ValidData: legacy,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					ValidData: current,
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1, 0}},
+					},
+				},
+			},
+		}
+	}
+
+	for _, test := range []struct {
+		name    string
+		legacy  []bool
+		current []bool
+		wantErr bool
+	}{
+		{name: "legacy fallback", legacy: validData},
+		{name: "field-specific", current: validData},
+		{name: "dual source", legacy: validData, current: validData, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			col, err := FieldDataColumn(makeField(test.legacy, test.current), 0, -1)
+			if test.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, col)
+				return
+			}
+			assert.NoError(t, err)
+			assert.NotNil(t, col)
+		})
+	}
+}
+
 func TestGetIntData(t *testing.T) {
 	type testCase struct {
 		tag      string

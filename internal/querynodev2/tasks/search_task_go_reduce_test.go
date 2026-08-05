@@ -1379,7 +1379,7 @@ func TestExecuteNullableVectorOutput(t *testing.T) {
 	}
 	require.NotNil(t, vecFD, "float_vector must be in output FieldsData")
 	returnedVecs := vecFD.GetVectors().GetFloatVector().GetData()
-	validBits := vecFD.GetValidData()
+	validBits := typeutil.GetFieldDataValidData(vecFD)
 
 	// Ground truth: the inserted FloatVectorFieldData.Data is already compacted
 	// to valid_count * dim (binlog convention for nullable vectors). Map each

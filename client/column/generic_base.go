@@ -31,6 +31,42 @@ type GColumn[T any] interface {
 	AppendValue(v T)
 }
 
+func getFieldDataValidData(fd *schemapb.FieldData) []bool {
+	if validData := fd.GetValidData(); len(validData) > 0 {
+		return validData
+	}
+	if scalars := fd.GetScalars(); scalars != nil {
+		return scalars.GetValidData()
+	}
+	return fd.GetVectors().GetValidData()
+}
+
+func setFieldDataValidData(fd *schemapb.FieldData, validData []bool) {
+	if fd == nil {
+		return
+	}
+	fd.ValidData = nil
+	switch field := fd.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		if field.Scalars == nil {
+			field.Scalars = &schemapb.ScalarField{}
+		}
+		field.Scalars.ValidData = validData
+	case *schemapb.FieldData_Vectors:
+		if field.Vectors == nil {
+			field.Vectors = &schemapb.VectorField{}
+		}
+		field.Vectors.ValidData = validData
+	}
+}
+
+func hasFieldDataValidDataConflict(fd *schemapb.FieldData) bool {
+	if fd == nil || len(fd.GetValidData()) == 0 {
+		return false
+	}
+	return len(fd.GetScalars().GetValidData()) > 0 || len(fd.GetVectors().GetValidData()) > 0
+}
+
 var _ Column = (*genericColumnBase[any])(nil)
 
 // genericColumnBase implements `Column` interface
@@ -153,7 +189,7 @@ func (c *genericColumnBase[T]) FieldData() *schemapb.FieldData {
 	fd.FieldName = c.name
 	fd.Type = schemapb.DataType(c.fieldType)
 	if c.nullable {
-		fd.ValidData = c.validData
+		setFieldDataValidData(fd, c.validData)
 	}
 	return fd
 }
