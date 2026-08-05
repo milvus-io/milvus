@@ -37,6 +37,7 @@ const (
 	structArrayFieldID  = 1002
 	structSubStrFieldID = 1003
 	structSubIntFieldID = 1004
+	legacyNullFieldID   = 1005
 )
 
 func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
@@ -264,7 +265,7 @@ func TestExpr_NullLiteral_LegacyNullField(t *testing.T) {
 	withNullField := func(dataType schemapb.DataType) *typeutil.SchemaHelper {
 		schema := newTestSchema(true)
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-			FieldID: 199, Name: "null", Description: "legacy field literally named null", DataType: dataType,
+			FieldID: legacyNullFieldID, Name: "null", Description: "legacy field literally named null", DataType: dataType,
 		})
 		helper, err := typeutil.CreateSchemaHelper(schema)
 		require.NoError(t, err)
