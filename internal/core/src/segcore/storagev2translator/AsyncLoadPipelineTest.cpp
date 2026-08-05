@@ -880,6 +880,52 @@ TEST_F(AsyncLoadPipelineTest, ComposesWithCallerCoroutine) {
     EXPECT_EQ(Run(caller()), 1);
 }
 
+TEST_F(AsyncLoadPipelineTest, SubmitsOnlyBudgetAdmittedWindowsToLoadExecutor) {
+    budget_.SetCapacityBytes(2);
+    RecordingManualExecutor work_executor;
+    InlineRecordingExecutor caller_executor;
+    auto reader = std::make_shared<FakeChunkReader>(nullptr);
+    std::vector<CellSpec> cells{
+        {.cid = 0,
+         .file_idx = 0,
+         .local_rg_offset = 0,
+         .rg_count = 1,
+         .memory_size = 1},
+        {.cid = 1,
+         .file_idx = 0,
+         .local_rg_offset = 1,
+         .rg_count = 1,
+         .memory_size = 1},
+        {.cid = 2,
+         .file_idx = 0,
+         .local_rg_offset = 2,
+         .rg_count = 1,
+         .memory_size = 1},
+    };
+    auto options = Options();
+    options.executor = &work_executor;
+    options.read_window_bytes = 1;
+    auto load = std::move(LoadCellsAsync(
+                              nullptr,
+                              std::move(cells),
+                              reader,
+                              [](const auto&, int64_t) {
+                                  return std::make_unique<GroupChunk>();
+                              },
+                              std::move(options)))
+                    .semi()
+                    .via(folly::getKeepAliveToken(&caller_executor));
+
+    ASSERT_FALSE(load.isReady());
+    EXPECT_EQ(work_executor.Priorities().size(), 2);
+    EXPECT_EQ(reader->AsyncCalls(), 0);
+
+    work_executor.drain();
+    ASSERT_TRUE(load.isReady());
+    EXPECT_EQ(std::move(load).get().size(), 3);
+    work_executor.drain();
+}
+
 TEST_F(AsyncLoadPipelineTest, RegistersBudgetAdmissionBeforeWindowWorkStarts) {
     budget_.SetCapacityBytes(1);
     auto blocker = folly::coro::blockingWait(
@@ -922,8 +968,7 @@ TEST_F(AsyncLoadPipelineTest, RegistersBudgetAdmissionBeforeWindowWorkStarts) {
     work_executor.drain();
 }
 
-TEST_F(AsyncLoadPipelineTest,
-       CleansPendingAdmissionWhenWindowTaskConstructionFails) {
+TEST_F(AsyncLoadPipelineTest, ReleasesBudgetWhenWindowTaskConstructionFails) {
     budget_.SetCapacityBytes(10);
     auto running = folly::coro::blockingWait(
         budget_.AcquireAsync(5, storage::TransientBudgetPriority::High));
@@ -935,7 +980,7 @@ TEST_F(AsyncLoadPipelineTest,
                                  .file_idx = 0,
                                  .local_rg_offset = 0,
                                  .rg_count = 1,
-                                 .memory_size = 10}};
+                                 .memory_size = 5}};
     auto options = Options();
     options.executor = &work_executor;
     options.finalization_executor_provider =
@@ -955,17 +1000,10 @@ TEST_F(AsyncLoadPipelineTest,
     EXPECT_THROW(std::move(load).get(), std::runtime_error);
     auto fitting =
         budget_.AcquireAsync(5, storage::TransientBudgetPriority::High);
-    auto admitted_without_releasing_running = fitting.isReady();
-    EXPECT_TRUE(admitted_without_releasing_running);
-    if (!admitted_without_releasing_running) {
-        running.Release();
-    }
     ASSERT_TRUE(fitting.isReady());
     auto fitting_lease = folly::coro::blockingWait(std::move(fitting));
     fitting_lease.Release();
-    if (admitted_without_releasing_running) {
-        running.Release();
-    }
+    running.Release();
     work_executor.drain();
 }
 
