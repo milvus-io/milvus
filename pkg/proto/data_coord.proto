@@ -474,6 +474,7 @@ message SegmentInfo {
   // instead of iterating Binlogs/Statslogs/Deltalogs for scheduling
   // decisions (compaction, load balancing, GC). See message Statistics.
   Statistics stats = 38;
+  int64 mem_size = 39;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
