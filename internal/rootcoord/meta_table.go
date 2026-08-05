@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/exp/maps"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -154,6 +155,7 @@ type IMetaTable interface {
 	AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error
 	RemoveFileResource(ctx context.Context, name string) (error, bool)
 	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64)
+	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)
 	IncFileResourceRefCnt(ids []int64) error
 	DecFileResourceRefCnt(ids []int64)
 	RecoverFileResourceRefCnt(pendingCollections map[int64][]int64)
@@ -2479,6 +2481,21 @@ func (mt *MetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileRe
 	defer mt.ddLock.RUnlock()
 
 	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
+}
+
+func (mt *MetaTable) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	resources := make([]*internalpb.FileResourceInfo, 0, len(resourceIDs))
+	for _, resourceID := range resourceIDs {
+		resource, ok := mt.fileResourceID2Meta[resourceID]
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg("file resource %d not found", resourceID)
+		}
+		resources = append(resources, proto.Clone(resource).(*internalpb.FileResourceInfo))
+	}
+	return resources, nil
 }
 
 // IncFileResourceRefCnt increments refCnt for file resources, reserving them for

@@ -1841,6 +1841,28 @@ func TestMetaTableAlterCollectionFileResourceRefCnt(t *testing.T) {
 	})
 }
 
+func TestMetaTableGetFileResources(t *testing.T) {
+	resourcesByID := map[int64]*internalpb.FileResourceInfo{
+		1: {Id: 1, Name: "resource-1", Path: "files/1"},
+		2: {Id: 2, Name: "resource-2", Path: "files/2"},
+	}
+	meta := &MetaTable{fileResourceID2Meta: resourcesByID}
+
+	t.Run("return requested resources in order", func(t *testing.T) {
+		resources, err := meta.GetFileResources(context.Background(), 2, 1)
+		require.NoError(t, err)
+		require.Equal(t, []*internalpb.FileResourceInfo{resourcesByID[2], resourcesByID[1]}, resources)
+		require.NotSame(t, resourcesByID[2], resources[0])
+		require.NotSame(t, resourcesByID[1], resources[1])
+	})
+
+	t.Run("missing resource is internal error", func(t *testing.T) {
+		resources, err := meta.GetFileResources(context.Background(), 3)
+		require.Nil(t, resources)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+}
+
 func TestMetaTable_DropPartition_CopyOnWrite(t *testing.T) {
 	catalog := mocks.NewRootCoordCatalog(t)
 	originalPart := &model.Partition{
