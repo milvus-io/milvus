@@ -1127,7 +1127,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	result, err := qn.Query(ctx, req)
 	if err != nil {
 		log.Warn(ctx, "QueryNode query return error", mlog.Err(err))
-		t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		invalidateShardLeaderCacheOnQueryNodeError(t.shardclientMgr, t.GetCollectionID(), err)
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {

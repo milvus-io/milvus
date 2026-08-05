@@ -312,6 +312,12 @@ func TestComponentParam(t *testing.T) {
 
 		t.Logf("ShardLeaderCacheInterval: %d", Params.ShardLeaderCacheInterval.GetAsInt64())
 
+		assert.False(t, Params.SkipInvalidateShardLeaderCacheOnTimeout.GetAsBool())
+		params.Save(Params.SkipInvalidateShardLeaderCacheOnTimeout.Key, "true")
+		assert.True(t, Params.SkipInvalidateShardLeaderCacheOnTimeout.GetAsBool())
+		params.Reset(Params.SkipInvalidateShardLeaderCacheOnTimeout.Key)
+		assert.False(t, Params.SkipInvalidateShardLeaderCacheOnTimeout.GetAsBool())
+
 		assert.Equal(t, Params.ReplicaSelectionPolicy.GetValue(), "look_aside")
 		params.Save(Params.ReplicaSelectionPolicy.Key, "round_robin")
 		assert.Equal(t, Params.ReplicaSelectionPolicy.GetValue(), "round_robin")
