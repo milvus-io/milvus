@@ -267,3 +267,26 @@ func TestValidateNoDuplicateKeys(t *testing.T) {
 		{Key: StartTs2, Value: "2"},
 	}))
 }
+
+// Nothing bounds how many options an ImportV2 request carries -- the only ceiling
+// is the 256 MiB gRPC body, and 50k keys fit in under 1 MB. This check runs first
+// in proxy PreExecute, ahead of even the collection lookup, on the task pool shared
+// with insert and delete, and again in datacoord.
+//
+// Measured under the -N -l build these tests use: linear ~30ms, pairwise ~28s. The
+// one-second bound therefore leaves ~30x headroom for a slow CI box while still
+// sitting ~28x below what a reintroduced quadratic scan costs.
+func TestValidateNoDuplicateKeys_ScalesLinearly(t *testing.T) {
+	const n = 50000
+	opts := make(Options, 0, n)
+	for i := 0; i < n; i++ {
+		opts = append(opts, &commonpb.KeyValuePair{Key: fmt.Sprintf("k%08d", i), Value: "v"})
+	}
+
+	start := time.Now()
+	assert.NoError(t, ValidateNoDuplicateKeys(opts))
+	elapsed := time.Since(start)
+
+	assert.Less(t, elapsed, time.Second,
+		"validating %d options took %s -- a pairwise scan is back", n, elapsed)
+}
