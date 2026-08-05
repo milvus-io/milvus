@@ -83,7 +83,6 @@ func ensureContext(ctx context.Context) error {
 // RefreshExternalCollectionTask handles updating external collection segments
 type RefreshExternalCollectionTask struct {
 	ctx context.Context
-
 	req *datapb.RefreshExternalCollectionTaskRequest
 	tr  *timerecord.TimeRecorder
 
@@ -1063,7 +1062,6 @@ func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
 	segmentID int64,
 	fragments []packed.Fragment,
 ) (string, error) {
-	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 	basePath := segmentInsertLogBasePath(
 		t.req.GetStorageConfig(),
 		t.req.GetCollectionID(),
@@ -1080,7 +1078,7 @@ func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
 		t.req.GetCollectionID(),
 		segmentID,
 		basePath,
-		clusterID,
+		t.req.GetClusterID(),
 	)
 	if err != nil {
 		return "", err

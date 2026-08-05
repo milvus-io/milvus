@@ -917,6 +917,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateInProgress, metaTask.GetState())
 		assert.NotNil(t, cluster.refreshReq)
+		assert.Equal(t, paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), cluster.refreshReq.GetClusterID())
 		assert.Equal(t, int64(10), cluster.refreshReq.GetPartitionID())
 		assert.Equal(t, int64(12345), cluster.refreshReq.GetTargetRowsPerSegment())
 	})
