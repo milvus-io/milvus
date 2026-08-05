@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -589,6 +590,48 @@ func TestRbacDropRole(t *testing.T) {
 	// drop a not exist role
 	err = mt.CheckIfDropRole(context.TODO(), &milvuspb.DropRoleRequest{RoleName: "role_not_exist"})
 	require.ErrorIs(t, err, errRoleNotExists)
+}
+
+// TestRbacDropRoleAlsoDropsGrants: DropRole must take down the whole role
+// chain - role record, user-role mappings AND every grant of the role - in
+// one composite catalog write, so no separate DropGrant call is needed and a
+// crash can never leave orphaned grants behind a deleted role.
+func TestRbacDropRoleAlsoDropsGrants(t *testing.T) {
+	mt := &MetaTable{catalog: rootcoord.NewCatalog(memkv.NewMemoryKV())}
+	ctx := context.TODO()
+	roleName := "role" + funcutil.RandomString(10)
+
+	require.NoError(t, mt.CreateRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName}))
+	require.NoError(t, mt.OperateUserRole(ctx, util.DefaultTenant,
+		&milvuspb.UserEntity{Name: "user1"}, &milvuspb.RoleEntity{Name: roleName},
+		milvuspb.OperateUserRoleType_AddUserToRole))
+	require.NoError(t, mt.OperatePrivilege(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: roleName},
+		Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+		ObjectName: "coll1",
+		DbName:     "db1",
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: "root"},
+			Privilege: &milvuspb.PrivilegeEntity{Name: "Insert"},
+		},
+	}, milvuspb.OperatePrivilegeType_Grant))
+	policies, err := mt.ListPolicy(ctx, util.DefaultTenant)
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+
+	require.NoError(t, mt.DropRole(ctx, util.DefaultTenant, roleName))
+
+	// role record gone.
+	_, err = mt.SelectRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: roleName}, false)
+	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	// user-role mappings gone.
+	userRoles, err := mt.ListUserRole(ctx, util.DefaultTenant)
+	require.NoError(t, err)
+	require.Empty(t, userRoles)
+	// grants gone - no orphaned policy survives the drop.
+	policies, err = mt.ListPolicy(ctx, util.DefaultTenant)
+	require.NoError(t, err)
+	require.Empty(t, policies)
 }
 
 func TestRbacOperateRole(t *testing.T) {

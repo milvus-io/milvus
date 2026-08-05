@@ -1237,11 +1237,27 @@ func (kc *Catalog) AlterRole(ctx context.Context, tenant string, entity *milvusp
 }
 
 func (kc *Catalog) DropRole(ctx context.Context, tenant string, roleName string) error {
+	deleteKeys, err := kc.dropRoleRemovals(ctx, tenant, roleName)
+	if err != nil {
+		return err
+	}
+
+	err = kc.Txn.MultiRemove(ctx, deleteKeys)
+	if err != nil {
+		mlog.Warn(ctx, "fail to drop role", mlog.String("key", deleteKeys[0]), mlog.Err(err))
+		return err
+	}
+	return nil
+}
+
+// dropRoleRemovals returns the exact keys DropRole removes: the role record
+// key first, followed by the role's user-role mapping keys.
+func (kc *Catalog) dropRoleRemovals(ctx context.Context, tenant string, roleName string) ([]string, error) {
 	k := RolePrefix + "/" + roleName
 	roleResults, err := kc.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: roleName}, true)
 	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
 		mlog.Warn(ctx, "fail to list role", mlog.String("key", k), mlog.Err(err))
-		return err
+		return nil, err
 	}
 
 	deleteKeys := make([]string, 0, len(roleResults)+1)
@@ -1254,13 +1270,7 @@ func (kc *Catalog) DropRole(ctx context.Context, tenant string, roleName string)
 			}
 		}
 	}
-
-	err = kc.Txn.MultiRemove(ctx, deleteKeys)
-	if err != nil {
-		mlog.Warn(ctx, "fail to drop role", mlog.String("key", k), mlog.Err(err))
-		return err
-	}
-	return nil
+	return deleteKeys, nil
 }
 
 func (kc *Catalog) AlterUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
@@ -1946,6 +1956,21 @@ func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string
 }
 
 func (kc *Catalog) DeleteGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
+	removeKeys, err := kc.deleteGrantPrefixes(ctx, tenant, role)
+	if err != nil {
+		return err
+	}
+
+	if err = kc.Txn.MultiSaveAndRemoveWithPrefix(ctx, nil, removeKeys); err != nil {
+		mlog.Error(ctx, "fail to remove with the prefix", mlog.String("key", removeKeys[0]), mlog.Err(err))
+	}
+	return err
+}
+
+// deleteGrantPrefixes returns the prefixes DeleteGrant removes: the role's
+// grantee-privileges subtree first, then every grantee-id subtree no
+// surviving grantee still references.
+func (kc *Catalog) deleteGrantPrefixes(ctx context.Context, tenant string, role *milvuspb.RoleEntity) ([]string, error) {
 	var (
 		k          = funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, role.Name)
 		err        error
@@ -1958,7 +1983,7 @@ func (kc *Catalog) DeleteGrant(ctx context.Context, tenant string, role *milvusp
 	keys, values, err := kc.Txn.LoadWithPrefix(ctx, k)
 	if err != nil {
 		mlog.Warn(ctx, "fail to load grant privilege entities", mlog.String("key", k), mlog.Err(err))
-		return err
+		return nil, err
 	}
 	removingGrantees := make(map[string]struct{})
 	keyWithoutTrailingSlash := strings.TrimSuffix(k, "/")
@@ -1979,7 +2004,7 @@ func (kc *Catalog) DeleteGrant(ctx context.Context, tenant string, role *milvusp
 			allKeys, allValues, err = kc.Txn.LoadWithPrefix(ctx, granteePrefix)
 			if err != nil {
 				mlog.Warn(ctx, "fail to load grant privilege entities for shared id check", mlog.String("key", granteePrefix), mlog.Err(err))
-				return err
+				return nil, err
 			}
 		}
 		if !shouldRemoveGranteeIDSubtree(ctx, funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant), v, allKeys, allValues, removingGrantees) {
@@ -1989,10 +2014,7 @@ func (kc *Catalog) DeleteGrant(ctx context.Context, tenant string, role *milvusp
 		removeKeys = append(removeKeys, granteeIDKey)
 	}
 
-	if err = kc.Txn.MultiSaveAndRemoveWithPrefix(ctx, nil, removeKeys); err != nil {
-		mlog.Error(ctx, "fail to remove with the prefix", mlog.String("key", k), mlog.Err(err))
-	}
-	return err
+	return removeKeys, nil
 }
 
 func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {

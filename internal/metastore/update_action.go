@@ -152,6 +152,19 @@ type ReplicaKeyEntry struct {
 	ReplicaID    int64
 }
 
+// RoleEntry targets a role's record and its user-role mappings.
+type RoleEntry struct {
+	Tenant string
+	Name   string
+}
+
+// RoleGrantsEntry targets every grant of a role: the role's
+// grantee-privileges subtree plus the grantee-id subtrees it references.
+type RoleGrantsEntry struct {
+	Tenant   string
+	RoleName string
+}
+
 func (SegmentEntry) isEntry()               {}
 func (ChannelEntry) isEntry()               {}
 func (CollectionEntry) isEntry()            {}
@@ -162,6 +175,8 @@ func (PartitionStatsEntry) isEntry()        {}
 func (PartitionStatsVersionEntry) isEntry() {}
 func (ReplicaEntry) isEntry()               {}
 func (ReplicaKeyEntry) isEntry()            {}
+func (RoleEntry) isEntry()                  {}
+func (RoleGrantsEntry) isEntry()            {}
 
 // UpdateAction is a single composable write against a metastore catalog,
 // applied via that catalog's composite Update. Type and Entry together
@@ -283,4 +298,23 @@ func SaveReplica(r *querypb.Replica) UpdateAction {
 // ReleaseReplica returns an UpdateAction that removes a replica's kv record.
 func ReleaseReplica(collectionID, replicaID int64) UpdateAction {
 	return UpdateAction{Type: ActionDelete, Entry: ReplicaKeyEntry{CollectionID: collectionID, ReplicaID: replicaID}}
+}
+
+// DropRole returns an UpdateAction that removes a role's record and its
+// user-role mappings. Compose it after DropRoleGrants for the same role: the
+// role record is the visibility marker of the whole removal and must land
+// last on the chunked fallback path, so a crash mid-drop leaves the role
+// visible (and the drop retryable) instead of orphaning its grants.
+func DropRole(tenant string, roleName string) UpdateAction {
+	return UpdateAction{Type: ActionDelete, Entry: RoleEntry{Tenant: tenant, Name: roleName}}
+}
+
+// DropRoleGrants returns an UpdateAction that removes every grant of a role.
+// Both DropRole and DropRoleGrants read the current key set at apply time and
+// commit it without predicate checks, so the caller must serialize them
+// against concurrent grant/user-role writes (rootcoord does this via
+// MetaTable's permission lock); an unserialized caller can lose a concurrent
+// grant or leave one undeleted.
+func DropRoleGrants(tenant string, roleName string) UpdateAction {
+	return UpdateAction{Type: ActionDelete, Entry: RoleGrantsEntry{Tenant: tenant, RoleName: roleName}}
 }
