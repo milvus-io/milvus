@@ -241,4 +241,29 @@ func TestValidateNoDuplicateKeys(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	assert.Contains(t, err.Error(), "backup")
+
+	// ParseTimeRange matches keys with strings.EqualFold, so case variants of one
+	// target key are duplicates too: accepting them leaves getTimestamp to pick a
+	// value by map iteration order.
+	err = ValidateNoDuplicateKeys(Options{
+		{Key: StartTs, Value: "1"},
+		{Key: "START_TS", Value: "2"},
+	})
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "START_TS")
+
+	// U+017F folds to "s" but is unchanged by strings.ToLower, so a ToLower-based
+	// dedup would admit this pair while getTimestamp still matches both.
+	err = ValidateNoDuplicateKeys(Options{
+		{Key: StartTs, Value: "1"},
+		{Key: "ſtart_ts", Value: "2"},
+	})
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+	// The start_ts/startTs alias pair differs in length, so EqualFold never
+	// matches them against each other and both remain legal in one request.
+	assert.NoError(t, ValidateNoDuplicateKeys(Options{
+		{Key: StartTs, Value: "1"},
+		{Key: StartTs2, Value: "2"},
+	}))
 }
