@@ -1,6 +1,7 @@
 package datacoord
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/sbinet/npyio"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -311,6 +313,18 @@ func cmServing(t *testing.T, path string, data []byte) *mocks.ChunkManager {
 	return cm
 }
 
+// numpySchema names one Int64 field per .npy basename under test, so every path
+// survives numpy.SourcePaths and reaches the header decode.
+func numpySchema(names ...string) *schemapb.CollectionSchema {
+	fields := make([]*schemapb.FieldSchema, 0, len(names))
+	for i, name := range names {
+		fields = append(fields, &schemapb.FieldSchema{
+			FieldID: int64(100 + i), Name: name, DataType: schemapb.DataType_Int64,
+		})
+	}
+	return &schemapb.CollectionSchema{Fields: fields}
+}
+
 func Test_numpyNumRows_malformedHeader(t *testing.T) {
 	cases := map[string][]byte{
 		// The review's repro: a 10-byte object declaring a zero-length header.
@@ -326,11 +340,41 @@ func Test_numpyNumRows_malformedHeader(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cm := cmServing(t, "bad.npy", data)
 			assert.NotPanics(t, func() {
-				_, err := numpyNumRows(context.Background(), cm, []string{"bad.npy"})
+				_, err := numpyNumRows(context.Background(), cm, numpySchema("bad"), []string{"bad.npy"})
 				assert.Error(t, err)
 			})
 		})
 	}
+}
+
+// A path whose basename names no schema field is redundant: numpy.CreateReaders
+// skips it, so sizing must skip it too. Sizing runs before the broadcast, so a
+// redundant .npy that is broken (or missing from the bucket) used to fail the
+// whole request at submit even though the same file set imported fine.
+//
+// The ChunkManager is given no expectation for the redundant path at all, so the
+// test fails if sizing so much as calls Size on it -- proving the path is never
+// opened, not merely that its decode error is swallowed.
+func Test_numpyNumRows_skipsRedundantPaths(t *testing.T) {
+	buf := new(bytes.Buffer)
+	require.NoError(t, npyio.Write(buf, []int64{1, 2, 3}))
+
+	cm := cmServing(t, "vec.npy", buf.Bytes())
+	rows, err := numpyNumRows(context.Background(), cm, numpySchema("vec"),
+		[]string{"vec.npy", "README.npy"})
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), rows)
+}
+
+// Every path redundant means the file carries no readable column. Sizing reports
+// 0 instead of an error: rejecting here would again be stricter than the reader,
+// which is where "no file for field" is raised, as it was before sizing existed.
+func Test_numpyNumRows_allPathsRedundant(t *testing.T) {
+	cm := mocks.NewChunkManager(t)
+	rows, err := numpyNumRows(context.Background(), cm, numpySchema("vec"),
+		[]string{"README.npy", "LICENSE.npy"})
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), rows)
 }
 
 // A decoder panic inside the sizing pool must fail the import rather than the

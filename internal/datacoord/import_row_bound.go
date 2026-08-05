@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	importutilv2common "github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -171,7 +172,7 @@ func computeFileRowUpperBound(ctx context.Context, cm storage.ChunkManager,
 		}
 		exact = true
 	case importutilv2.Numpy:
-		bound, err = numpyNumRows(ctx, cm, file.GetPaths())
+		bound, err = numpyNumRows(ctx, cm, schema, file.GetPaths())
 		if err != nil {
 			return 0, false, err
 		}
@@ -254,9 +255,17 @@ func validateNpyHeader(ra io.ReaderAt, path string) error {
 // over-reserve rather than under-reserve (the reader rejects the mismatch later).
 // Paths for omitted nullable/default columns are simply absent and contribute
 // nothing.
-func numpyNumRows(ctx context.Context, cm storage.ChunkManager, paths []string) (int64, error) {
+//
+// Only the paths the reader will open are inspected. Sizing runs before the
+// broadcast, so validating a path the reader ignores would reject at submit an
+// input that imports fine -- a redundant .npy naming no schema field is dropped
+// by numpy.CreateReaders, and must be dropped here by the same rule. When that
+// leaves no path at all, this returns 0 rather than an error: the file carries no
+// readable column, and saying so is the reader's job, at the same place it said
+// so before this sizing stage existed.
+func numpyNumRows(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (int64, error) {
 	var rows int64
-	for _, path := range paths {
+	for _, path := range numpy.SourcePaths(schema, paths) {
 		ra, err := newSizingReaderAt(ctx, cm, path)
 		if err != nil {
 			return 0, err
