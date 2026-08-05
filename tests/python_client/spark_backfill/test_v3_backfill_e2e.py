@@ -8,12 +8,14 @@ from common.common_type import CaseLabel
 from pymilvus import DataType
 
 from spark_backfill.backfill_helpers import (
+    FunctionOutputIndexNotReadyError,
     StaleSchemaFenceMissingError,
     assert_commit_succeeded,
     assert_stale_schema_commit_rejected,
     inspect_result_artifacts,
     make_backfill_rows,
     validate_v3_result,
+    wait_for_index_ready,
     wait_for_visible_rows,
 )
 from spark_backfill.contracts import build_ground_truth
@@ -157,6 +159,23 @@ def _run_stale_schema_commit_case(case, case_id):
     _assert_stale_schema_commit(case, job_result, result_uri, result_version)
 
 
+def _wait_for_compaction(case, job_result, timeout=180):
+    compaction_id = case.client.compact(case.collection_name)
+    deadline = time.monotonic() + timeout
+    state = ""
+    while time.monotonic() < deadline:
+        state = str(case.client.get_compaction_state(compaction_id))
+        if "Completed" in state:
+            break
+        if "Failed" in state:
+            pytest.fail(f"compaction {compaction_id} failed: {state}")
+        time.sleep(2)
+    else:
+        pytest.fail(f"compaction {compaction_id} did not complete: {state}")
+    case.write_local_evidence(job_result, "compaction.json", {"job_id": compaction_id, "state": state})
+    return compaction_id, state
+
+
 @pytest.mark.parametrize("mode", ["coalesce", "overwrite", "replace"])
 def test_v3_backfill_modes_publish_and_become_visible(backfill_case_factory, mode):
     case = backfill_case_factory()
@@ -181,6 +200,87 @@ def test_v3_explicit_null_semantics(backfill_case_factory, mode):
     )
 
     _validate_commit_and_visibility(case, job_result, result_uri, parquet_rows, mode, matched_rows=18)
+
+
+@pytest.mark.spark_backfill_known_gap
+@pytest.mark.xfail(
+    strict=True,
+    raises=FunctionOutputIndexNotReadyError,
+    reason=(
+        "https://github.com/milvus-io/milvus/issues/51318: "
+        "V3 Spark backfill does not advance function-output index readiness"
+    ),
+)
+def test_v3_online_minhash_function_output_builds_index_and_searches(backfill_case_factory):
+    row_count = 3000
+    num_hashes = 128
+    field_name = "bf_minhash"
+    case = backfill_case_factory(
+        source_row_count=row_count,
+        flush_batch_size=row_count,
+        online_minhash_field=field_name,
+    )
+    assert case.snapshot.schema_version > 0
+
+    def signature(primary_key):
+        return b"".join(
+            (((primary_key + 1) * 0x9E3779B1 + offset * 0x85EBCA77) & 0xFFFFFFFF).to_bytes(4, "little")
+            for offset in range(num_hashes)
+        )
+
+    parquet_rows = [
+        {
+            "pk": primary_key,
+            field_name: signature(primary_key),
+        }
+        for primary_key in range(row_count)
+    ]
+    parquet_uri = case.upload_parquet(
+        "online-minhash-function-output",
+        parquet_rows,
+        target_fields=(field_name,),
+        target_field_types={field_name: pa.binary()},
+    )
+    job_result, result_uri = case.run_backfill(
+        case_id="online-minhash-function-output",
+        parquet_uri=parquet_uri,
+        mode="replace",
+    )
+    _validate_result_artifacts(
+        case,
+        job_result,
+        result_uri,
+        parquet_rows,
+        matched_rows=row_count,
+        target_fields=(field_name,),
+    )
+
+    status, commit = case.commit(result_uri)
+    case.write_local_evidence(job_result, "commit-response.json", commit)
+    assert status == 200, commit
+    assert_commit_succeeded(commit, expected_segments=set(case.snapshot.segment_ids), expected_kind="v3")
+
+    index_info = wait_for_index_ready(
+        case.client,
+        case.collection_name,
+        field_name,
+        expected_rows=row_count,
+    )
+    case.write_local_evidence(job_result, "function-output-index.json", index_info)
+
+    case.client.release_collection(case.collection_name)
+    case.client.load_collection(case.collection_name)
+    for expected_id in (0, row_count // 2, row_count - 1):
+        hits = case.client.search(
+            case.collection_name,
+            ids=[expected_id],
+            anns_field=field_name,
+            limit=1,
+            output_fields=["id"],
+            search_params={"metric_type": "MHJACCARD", "params": {}},
+        )[0]
+        assert [hit["id"] for hit in hits] == [expected_id]
+        assert hits[0]["distance"] == pytest.approx(1.0)
 
 
 def test_parquet_extra_primary_key_does_not_expand_snapshot(backfill_case_factory):
@@ -498,6 +598,39 @@ def test_v3_rejects_duplicate_or_stale_manifest_commit(backfill_case_factory):
 
 
 @pytest.mark.spark_backfill_compaction
+def test_active_compaction_protection_preserves_snapshot_and_allows_commit(backfill_case_factory):
+    case = backfill_case_factory(compaction_protection_seconds=1800)
+    snapshot = case.snapshot
+    snapshot_segment_ids = set(snapshot.segment_ids)
+    assert len(snapshot_segment_ids) >= 2, "test requires multiple flushed segments"
+    assert int(time.time()) < snapshot.compaction_expire_time
+
+    parquet_rows = make_backfill_rows()
+    parquet_uri = case.upload_parquet("active-compaction-protection", parquet_rows)
+    job_result, result_uri = case.run_backfill(
+        case_id="active-compaction-protection",
+        parquet_uri=parquet_uri,
+        mode="coalesce",
+    )
+    assert job_result.succeeded, job_result.logs
+
+    assert int(time.time()) < snapshot.compaction_expire_time, "protection expired before compaction started"
+    _wait_for_compaction(case, job_result)
+    assert int(time.time()) < snapshot.compaction_expire_time, "protection expired before compaction completed"
+
+    persistent_segments = case.client.list_persistent_segments(case.collection_name)
+    case.write_local_evidence(
+        job_result,
+        "segments-after-protected-compaction.json",
+        [vars(segment) for segment in persistent_segments],
+    )
+    current_segment_ids = {int(segment.segment_id) for segment in persistent_segments}
+    assert snapshot_segment_ids.issubset(current_segment_ids)
+
+    _validate_commit_and_visibility(case, job_result, result_uri, parquet_rows, "coalesce", matched_rows=18)
+
+
+@pytest.mark.spark_backfill_compaction
 def test_expired_protection_without_compaction_still_allows_commit(backfill_case_factory):
     case = backfill_case_factory(compaction_protection_seconds=5)
     case.client.alter_collection_properties(
@@ -545,19 +678,7 @@ def test_expired_protection_with_compaction_rejects_old_result_and_new_snapshot_
     wait_seconds = max(0, old_snapshot.compaction_expire_time - int(time.time()) + 2)
     time.sleep(wait_seconds)
 
-    compaction_id = case.client.compact(case.collection_name)
-    deadline = time.monotonic() + 180
-    state = ""
-    while time.monotonic() < deadline:
-        state = str(case.client.get_compaction_state(compaction_id))
-        if "Completed" in state:
-            break
-        if "Failed" in state:
-            pytest.fail(f"compaction {compaction_id} failed: {state}")
-        time.sleep(2)
-    else:
-        pytest.fail(f"compaction {compaction_id} did not complete: {state}")
-    case.write_local_evidence(old_job, "compaction.json", {"job_id": compaction_id, "state": state})
+    _wait_for_compaction(case, old_job)
 
     case.write_local_evidence(old_job, "snapshot-before-compaction.json", old_snapshot.raw)
     persistent_segments = case.client.list_persistent_segments(case.collection_name)

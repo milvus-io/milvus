@@ -9,6 +9,7 @@ from minio import Minio
 from pymilvus import MilvusClient
 
 from spark_backfill.backfill_helpers import (
+    add_minhash_function_field,
     create_backfill_collection,
     make_source_rows,
     parse_snapshot_metadata,
@@ -64,11 +65,45 @@ def spark_backfill_settings(request):
 
 
 @pytest.fixture(scope="session")
-def spark_storage_credentials(spark_backfill_settings, spark_k8s_apis):
+def spark_k8s_apis(spark_backfill_settings):
+    if spark_backfill_settings.spark_k8s_context:
+        k8s_config.load_kube_config(context=spark_backfill_settings.spark_k8s_context)
+    elif os.getenv("KUBERNETES_SERVICE_HOST"):
+        k8s_config.load_incluster_config()
+    else:
+        k8s_config.load_kube_config()
+    return (
+        k8s_client.BatchV1Api(),
+        k8s_client.CoreV1Api(),
+        k8s_client.AuthorizationV1Api(),
+    )
+
+
+@pytest.fixture(scope="session")
+def spark_rbac_preflight(spark_backfill_settings, spark_k8s_apis):
     access_key = os.getenv("SPARK_BACKFILL_S3_ACCESS_KEY", "")
     secret_key = os.getenv("SPARK_BACKFILL_S3_SECRET_KEY", "")
     if bool(access_key) != bool(secret_key):
         pytest.fail("SPARK_BACKFILL_S3_ACCESS_KEY and SPARK_BACKFILL_S3_SECRET_KEY must both be set or both be empty")
+
+    _, _, authorization_api = spark_k8s_apis
+    namespace = spark_backfill_settings.spark_k8s_namespace
+    has_local_storage_credentials = bool(access_key)
+    read_storage_secret = bool(spark_backfill_settings.storage_secret_name) and not has_local_storage_credentials
+    create_secret = spark_backfill_settings.runner_mode == "job" and not spark_backfill_settings.storage_secret_name
+    assert_rbac_permissions(
+        authorization_api,
+        namespace,
+        create_secret=create_secret,
+        read_secret=read_storage_secret,
+        runner_mode=spark_backfill_settings.runner_mode,
+    )
+
+
+@pytest.fixture(scope="session")
+def spark_storage_credentials(spark_backfill_settings, spark_k8s_apis, spark_rbac_preflight):
+    access_key = os.getenv("SPARK_BACKFILL_S3_ACCESS_KEY", "")
+    secret_key = os.getenv("SPARK_BACKFILL_S3_SECRET_KEY", "")
     if access_key:
         return access_key, secret_key
 
@@ -89,41 +124,12 @@ def spark_storage_credentials(spark_backfill_settings, spark_k8s_apis):
 
 
 @pytest.fixture(scope="session")
-def spark_k8s_apis(spark_backfill_settings):
-    if spark_backfill_settings.spark_k8s_context:
-        k8s_config.load_kube_config(context=spark_backfill_settings.spark_k8s_context)
-    elif os.getenv("KUBERNETES_SERVICE_HOST"):
-        k8s_config.load_incluster_config()
-    else:
-        k8s_config.load_kube_config()
-    return (
-        k8s_client.BatchV1Api(),
-        k8s_client.CoreV1Api(),
-        k8s_client.AuthorizationV1Api(),
-    )
-
-
-@pytest.fixture(scope="session")
 def spark_support_resources(spark_backfill_settings, spark_storage_credentials, spark_k8s_apis):
-    _, core_api, authorization_api = spark_k8s_apis
+    _, core_api, _ = spark_k8s_apis
     namespace = spark_backfill_settings.spark_k8s_namespace
     if spark_backfill_settings.runner_mode == "toolbox":
-        assert_rbac_permissions(
-            authorization_api,
-            namespace,
-            create_secret=False,
-            runner_mode="toolbox",
-        )
         yield None, None
         return
-
-    create_secret = not bool(spark_backfill_settings.storage_secret_name)
-    assert_rbac_permissions(
-        authorization_api,
-        namespace,
-        create_secret=create_secret,
-        runner_mode="job",
-    )
 
     suffix = uuid.uuid4().hex[:8]
     config_map_name = f"spark-backfill-support-{suffix}"
@@ -242,17 +248,29 @@ def spark_backfill_case_factory(
         expected_storage_kind,
         compaction_protection_seconds=DEFAULT_COMPACTION_PROTECTION_SECONDS,
         flush_batch_size=10,
+        source_row_count=30,
+        online_minhash_field=None,
     ):
         collection_name = unique_name("spark_backfill")
         snapshot_names = []
         resource = {"collection_name": collection_name, "snapshot_names": snapshot_names, "prefix": ""}
         resources.append(resource)
-        source_rows = make_source_rows()
-        create_backfill_collection(spark_milvus_client, collection_name)
-        for start in range(0, len(source_rows), flush_batch_size):
-            spark_milvus_client.insert(collection_name, source_rows[start : start + flush_batch_size])
+        source_rows = make_source_rows(count=source_row_count)
+        create_backfill_collection(
+            spark_milvus_client,
+            collection_name,
+            include_backfill_fields=online_minhash_field is None,
+        )
+        insert_rows = source_rows
+        if online_minhash_field is not None:
+            source_fields = ("id", "base_int", "base_float", "text", "vector")
+            insert_rows = [{field: row[field] for field in source_fields} for row in source_rows]
+        for start in range(0, len(insert_rows), flush_batch_size):
+            spark_milvus_client.insert(collection_name, insert_rows[start : start + flush_batch_size])
             spark_milvus_client.flush(collection_name)
         spark_milvus_client.load_collection(collection_name)
+        if online_minhash_field is not None:
+            add_minhash_function_field(spark_backfill_settings, collection_name, online_minhash_field)
 
         snapshot_name = unique_name("spark_backfill_snapshot")
         spark_milvus_client.create_snapshot(

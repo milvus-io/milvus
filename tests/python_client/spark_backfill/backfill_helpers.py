@@ -30,6 +30,10 @@ class StaleSchemaFenceMissingError(BackfillContractError):
     """Milvus accepted at least part of a Result stamped with a stale SchemaVersion."""
 
 
+class FunctionOutputIndexNotReadyError(BackfillContractError):
+    """A Spark-backfilled function output did not become fully indexed."""
+
+
 def log_contains_message(logs: str, expected: str) -> bool:
     def normalize(value: str) -> str:
         tokens = re.findall(r"\w+", value.casefold())
@@ -201,25 +205,29 @@ def write_backfill_parquet(
     score_type: pa.DataType | None = None,
     vector_type: pa.DataType | None = None,
     target_fields: Sequence[str] = ("bf_score", "bf_label", "bf_vector"),
+    target_field_types: Mapping[str, pa.DataType] | None = None,
 ) -> None:
+    target_field_types = dict(target_field_types or {})
     fields = []
     if include_pk:
         fields.append(pa.field("pk", pa.int64(), nullable=False))
     if "bf_score" in target_fields:
-        fields.append(pa.field("bf_score", score_type or pa.float32(), nullable=True))
+        fields.append(
+            pa.field("bf_score", target_field_types.get("bf_score", score_type or pa.float32()), nullable=True)
+        )
     if "bf_label" in target_fields:
-        fields.append(pa.field("bf_label", pa.string(), nullable=True))
+        fields.append(pa.field("bf_label", target_field_types.get("bf_label", pa.string()), nullable=True))
     if "bf_vector" in target_fields:
         fields.append(
             pa.field(
                 "bf_vector",
-                vector_type or pa.list_(pa.float32(), dim),
+                target_field_types.get("bf_vector", vector_type or pa.list_(pa.float32(), dim)),
                 nullable=True,
             )
         )
     for field in target_fields:
         if field not in {"bf_score", "bf_label", "bf_vector"}:
-            fields.append(pa.field(field, pa.float32(), nullable=True))
+            fields.append(pa.field(field, target_field_types.get(field, pa.float32()), nullable=True))
     projected = [{field.name: row.get(field.name) for field in fields} for row in rows]
     table = pa.Table.from_pylist(projected, schema=pa.schema(fields))
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -480,24 +488,97 @@ def unique_name(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
-def create_backfill_collection(client, collection_name: str, dim: int = 4) -> None:
+def create_backfill_collection(
+    client,
+    collection_name: str,
+    dim: int = 4,
+    *,
+    include_backfill_fields: bool = True,
+) -> None:
     schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
     schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
     schema.add_field("base_int", DataType.INT64)
     schema.add_field("base_float", DataType.FLOAT)
     schema.add_field("text", DataType.VARCHAR, max_length=256)
     schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)
-    schema.add_field("bf_score", DataType.FLOAT, nullable=True)
-    schema.add_field("bf_label", DataType.VARCHAR, max_length=256, nullable=True)
-    schema.add_field("bf_vector", DataType.FLOAT_VECTOR, dim=dim, nullable=True)
     indexes = client.prepare_index_params()
     indexes.add_index("vector", index_type="FLAT", metric_type="L2")
-    indexes.add_index("bf_vector", index_type="FLAT", metric_type="L2")
+    if include_backfill_fields:
+        schema.add_field("bf_score", DataType.FLOAT, nullable=True)
+        schema.add_field("bf_label", DataType.VARCHAR, max_length=256, nullable=True)
+        schema.add_field("bf_vector", DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        indexes.add_index("bf_vector", index_type="FLAT", metric_type="L2")
     client.create_collection(
         collection_name,
         schema=schema,
         index_params=indexes,
         consistency_level="Strong",
+    )
+
+
+def add_minhash_function_field(settings, collection_name: str, field_name: str, *, num_hashes: int = 128) -> None:
+    endpoint = settings.local_milvus_uri.rstrip("/")
+    if not endpoint.startswith(("http://", "https://")):
+        endpoint = f"http://{endpoint}"
+    response = requests.post(
+        f"{endpoint}/v2/vectordb/collections/add_function_field",
+        headers={"Authorization": f"Bearer {settings.milvus_token}"},
+        json={
+            "collectionName": collection_name,
+            "function": {
+                "name": f"{field_name}_minhash_fn",
+                "type": "MinHash",
+                "inputFieldNames": ["text"],
+                "outputFieldNames": [field_name],
+                "params": {
+                    "num_hashes": num_hashes,
+                    "shingle_size": 3,
+                    "seed": 42,
+                },
+            },
+            "outputField": {
+                "fieldName": field_name,
+                "dataType": "BinaryVector",
+                "elementTypeParams": {"dim": str(num_hashes * 32)},
+            },
+            "indexParams": {
+                "fieldName": field_name,
+                "indexName": field_name,
+                "indexType": "MINHASH_LSH",
+                "metricType": "MHJACCARD",
+                "params": {"mh_lsh_band": 8},
+            },
+        },
+        timeout=120,
+    )
+    try:
+        payload = response.json()
+    except requests.JSONDecodeError as exc:
+        raise BackfillContractError(f"add_function_field returned non-JSON HTTP {response.status_code}") from exc
+    if response.status_code != 200 or payload.get("code") != 0:
+        raise BackfillContractError(f"add_function_field failed with HTTP {response.status_code}: {payload!r}")
+
+
+def wait_for_index_ready(
+    client,
+    collection_name: str,
+    index_name: str,
+    *,
+    expected_rows: int,
+    timeout: int = 180,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last_info = None
+    while time.monotonic() < deadline:
+        last_info = client.describe_index(collection_name, index_name)
+        if (
+            int(last_info.get("pending_index_rows", expected_rows)) == 0
+            and int(last_info.get("indexed_rows", 0)) >= expected_rows
+        ):
+            return last_info
+        time.sleep(2)
+    raise FunctionOutputIndexNotReadyError(
+        f"index {index_name!r} did not cover {expected_rows} rows within {timeout}s; last info={last_info!r}"
     )
 
 
