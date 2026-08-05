@@ -1,4 +1,3 @@
-import json
 import time
 
 import pytest
@@ -33,6 +32,39 @@ def pinyin_analyzer_params(keep_original):
     }
 
 
+def pinyin_collection_payload(collection_name, analyzer_params):
+    return {
+        "collectionName": collection_name,
+        "schema": {
+            "autoId": False,
+            "enableDynamicField": False,
+            "fields": [
+                {
+                    "fieldName": "id",
+                    "dataType": "Int64",
+                    "isPrimary": True,
+                    "elementTypeParams": {},
+                },
+                {
+                    "fieldName": "text",
+                    "dataType": "VarChar",
+                    "elementTypeParams": {
+                        "max_length": "1024",
+                        "enable_analyzer": True,
+                        "enable_match": True,
+                        "analyzer_params": analyzer_params,
+                    },
+                },
+                {
+                    "fieldName": "vector",
+                    "dataType": "FloatVector",
+                    "elementTypeParams": {"dim": "2"},
+                },
+            ],
+        },
+    }
+
+
 def build_rows(start, count):
     rows = []
     for row_id in range(start, start + count):
@@ -48,19 +80,41 @@ def build_rows(start, count):
 
 @pytest.mark.tags(CaseLabel.L0)
 class TestPinyinFilter(TestBase):
-    def _assert_analyzer_tokens(self, analyzer_params, expected_tokens):
+    def _field_analyzer_tokens(self, collection_name, text):
         rsp = self.collection_client.post(
             f"{self.endpoint}/v2/vectordb/common/run_analyzer",
             headers=self.collection_client.update_headers(),
             data={
-                "text": ["中文测试"],
-                "analyzerParams": json.dumps(analyzer_params),
+                "text": [text],
+                "collectionName": collection_name,
+                "fieldName": "text",
             },
         ).json()
         assert rsp["code"] == 0, rsp
         results = rsp["data"]["results"]
         assert len(results) == 1, results
-        assert [token["token"] for token in results[0]["tokens"]] == expected_tokens
+        return [token["token"] for token in results[0]["tokens"]]
+
+    def _index_and_load_collection(self, collection_name):
+        rsp = self.index_client.index_create(
+            {
+                "collectionName": collection_name,
+                "indexParams": [
+                    {
+                        "fieldName": "vector",
+                        "indexName": "vector",
+                        "indexType": "IVF_FLAT",
+                        "metricType": "L2",
+                        "params": {"nlist": 64},
+                    }
+                ],
+            }
+        )
+        assert rsp["code"] == 0, rsp
+
+        rsp = self.collection_client.collection_load(collection_name=collection_name)
+        assert rsp["code"] == 0, rsp
+        self.collection_client.wait_load_completed(collection_name, timeout=180)
 
     def _flush_with_rate_limit_retry(self, collection_name, timeout=30):
         deadline = time.monotonic() + timeout
@@ -87,22 +141,30 @@ class TestPinyinFilter(TestBase):
         assert rsp["code"] == 0, rsp
 
     @staticmethod
-    def _assert_exact_target_ids(rows):
+    def _assert_exact_ids(rows, expected_ids):
         ids = [int(row["id"]) for row in rows]
-        assert len(ids) == len(TARGET_IDS), ids
+        assert len(ids) == len(expected_ids), ids
         assert len(ids) == len(set(ids)), ids
-        assert set(ids) == TARGET_IDS, ids
+        assert set(ids) == expected_ids, ids
 
-    def _search_until_target_ids(self, collection_name, query_text, timeout=30):
+    def _search_until_ids(
+        self,
+        collection_name,
+        query_text,
+        expected_ids,
+        minimum_should_match=None,
+        timeout=30,
+    ):
         deadline = time.monotonic() + timeout
         rows = []
+        match_options = "" if minimum_should_match is None else f", minimum_should_match={minimum_should_match}"
         while time.monotonic() < deadline:
             rsp = self.vector_client.vector_search(
                 {
                     "collectionName": collection_name,
                     "data": [[0.0, 0.0]],
                     "annsField": "vector",
-                    "filter": f'text_match(text, "{query_text}")',
+                    "filter": f'text_match(text, "{query_text}"{match_options})',
                     "outputFields": ["id", "text"],
                     "limit": TOTAL_COUNT,
                     "searchParams": {"metricType": "L2", "params": {"nprobe": 64}},
@@ -112,7 +174,7 @@ class TestPinyinFilter(TestBase):
             assert rsp["code"] == 0, rsp
             rows = rsp["data"]
             ids = [int(row["id"]) for row in rows]
-            if len(ids) == len(TARGET_IDS) and len(ids) == len(set(ids)) and set(ids) == TARGET_IDS:
+            if len(ids) == len(expected_ids) and len(ids) == len(set(ids)) and set(ids) == expected_ids:
                 return rows
             time.sleep(1)
         return rows
@@ -120,53 +182,25 @@ class TestPinyinFilter(TestBase):
     def test_pinyin_filter_text_match_across_data_paths(self):
         """
         target: verify exact Pinyin tokens and filtered vector search through RESTful v2
-        method: run both original modes, then search 3000 indexed, 500 unindexed, and 500 growing rows
-        expected: exact tokens preserve the flag, and both query forms return every target row
+        method: read both field analyzer modes, then search 3000 indexed, 500 unindexed, and 500 growing rows
+        expected: exact field tokens preserve the flags, enabled tokens match, and disabled tokens do not
         """
         name = gen_collection_name()
         self.name = name
         analyzer_params = pinyin_analyzer_params(keep_original=True)
-        self._assert_analyzer_tokens(
-            analyzer_params,
-            ["中文", "zhongwen", "测试", "ceshi"],
-        )
-        self._assert_analyzer_tokens(
-            pinyin_analyzer_params(keep_original=False),
-            ["zhongwen", "ceshi"],
-        )
-
-        create_payload = {
-            "collectionName": name,
-            "schema": {
-                "autoId": False,
-                "enableDynamicField": False,
-                "fields": [
-                    {
-                        "fieldName": "id",
-                        "dataType": "Int64",
-                        "isPrimary": True,
-                        "elementTypeParams": {},
-                    },
-                    {
-                        "fieldName": "text",
-                        "dataType": "VarChar",
-                        "elementTypeParams": {
-                            "max_length": "1024",
-                            "enable_analyzer": True,
-                            "enable_match": True,
-                            "analyzer_params": analyzer_params,
-                        },
-                    },
-                    {
-                        "fieldName": "vector",
-                        "dataType": "FloatVector",
-                        "elementTypeParams": {"dim": "2"},
-                    },
-                ],
-            },
-        }
-        rsp = self.collection_client.collection_create(create_payload)
+        rsp = self.collection_client.collection_create(pinyin_collection_payload(name, analyzer_params))
         assert rsp["code"] == 0, rsp
+
+        without_original_name = gen_collection_name()
+        rsp = self.collection_client.collection_create(
+            pinyin_collection_payload(
+                without_original_name,
+                pinyin_analyzer_params(keep_original=False),
+            )
+        )
+        assert rsp["code"] == 0, rsp
+        self._index_and_load_collection(without_original_name)
+        assert self._field_analyzer_tokens(without_original_name, "中文测试") == ["zhongwen", "ceshi"]
 
         rsp = self.collection_client.alter_collection_properties(
             name,
@@ -177,25 +211,10 @@ class TestPinyinFilter(TestBase):
         self._insert_and_flush(name, 0, INDEXED_SEALED_COUNT)
         self._insert_and_flush(name, INDEXED_SEALED_COUNT, UNINDEXED_SEALED_COUNT)
 
-        rsp = self.index_client.index_create(
-            {
-                "collectionName": name,
-                "indexParams": [
-                    {
-                        "fieldName": "vector",
-                        "indexName": "vector",
-                        "indexType": "IVF_FLAT",
-                        "metricType": "L2",
-                        "params": {"nlist": 64},
-                    }
-                ],
-            }
-        )
-        assert rsp["code"] == 0, rsp
-
-        rsp = self.collection_client.collection_load(collection_name=name)
-        assert rsp["code"] == 0, rsp
-        self.collection_client.wait_load_completed(name, timeout=180)
+        self._index_and_load_collection(name)
+        assert self._field_analyzer_tokens(name, "中文测试") == ["中文", "zhongwen", "测试", "ceshi"]
+        original_query_tokens = self._field_analyzer_tokens(name, "中文")
+        assert original_query_tokens == ["中文", "zhongwen"]
 
         rsp = self.vector_client.vector_insert(
             {
@@ -209,7 +228,19 @@ class TestPinyinFilter(TestBase):
         assert rsp["code"] == 0, rsp
         assert rsp["data"]["insertCount"] == GROWING_COUNT, rsp
 
-        for query_text in ["zhongwen", "中文"]:
-            rows = self._search_until_target_ids(name, query_text)
-            self._assert_exact_target_ids(rows)
-            assert all(row["text"] == "中文测试" for row in rows)
+        search_cases = [
+            ("zhongwen", None, TARGET_IDS),
+            ("中文", len(original_query_tokens), TARGET_IDS),
+            ("zhong", None, set()),
+            ("zw", None, set()),
+        ]
+        for query_text, minimum_should_match, expected_ids in search_cases:
+            rows = self._search_until_ids(
+                name,
+                query_text,
+                expected_ids,
+                minimum_should_match=minimum_should_match,
+            )
+            self._assert_exact_ids(rows, expected_ids)
+            if expected_ids:
+                assert all(row["text"] == "中文测试" for row in rows)
