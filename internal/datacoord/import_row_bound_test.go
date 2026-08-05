@@ -2,6 +2,8 @@ package datacoord
 
 import (
 	"context"
+	"encoding/binary"
+	"io"
 	"math"
 	"strconv"
 	"testing"
@@ -14,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -268,4 +271,78 @@ func Test_reserveRanges(t *testing.T) {
 			func(int64) (int64, int64, error) { t.Fatal("allocN must not be called"); return 0, 0, nil }, 0))
 		assert.Equal(t, []int64{0, 0}, widths(files))
 	})
+}
+
+// malformedNpy builds a .npy prefix whose declared header length is hdrLen but
+// whose header bytes contain no '\n'. npyio's readHeader does not check r.err
+// between reading those bytes and slicing on the last newline, so an unguarded
+// decode panics with "slice bounds out of range [:-1]".
+func malformedNpy(major byte, hdrLen uint32, body []byte) []byte {
+	buf := []byte{'\x93', 'N', 'U', 'M', 'P', 'Y', major, 0}
+	switch major {
+	case 1:
+		buf = binary.LittleEndian.AppendUint16(buf, uint16(hdrLen))
+	default:
+		buf = binary.LittleEndian.AppendUint32(buf, hdrLen)
+	}
+	return append(buf, body...)
+}
+
+func cmServing(t *testing.T, path string, data []byte) *mocks.ChunkManager {
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().Size(mock.Anything, path).Return(int64(len(data)), nil).Maybe()
+	cm.EXPECT().ReadAt(mock.Anything, path, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, off int64, length int64) ([]byte, error) {
+			if off >= int64(len(data)) {
+				return nil, io.EOF
+			}
+			end := off + length
+			if end > int64(len(data)) {
+				end = int64(len(data))
+			}
+			return data[off:end], nil
+		}).Maybe()
+	return cm
+}
+
+func Test_numpyNumRows_malformedHeader(t *testing.T) {
+	cases := map[string][]byte{
+		// The review's repro: a 10-byte object declaring a zero-length header.
+		"zero length header": malformedNpy(1, 0, nil),
+		// Declared length is satisfied but carries no newline to slice on.
+		"no newline in header": malformedNpy(1, 8, []byte("{'descr'")),
+		// v2 takes the header length from a uint32, so the declared size is bounded
+		// only by 4 GiB -- reading it before validating is an allocation DoS on its
+		// own, independent of the slice panic.
+		"huge declared header": malformedNpy(2, math.MaxUint32, []byte("x")),
+	}
+	for name, data := range cases {
+		t.Run(name, func(t *testing.T) {
+			cm := cmServing(t, "bad.npy", data)
+			assert.NotPanics(t, func() {
+				_, err := numpyNumRows(context.Background(), cm, []string{"bad.npy"})
+				assert.Error(t, err)
+			})
+		})
+	}
+}
+
+// A decoder panic inside the sizing pool must fail the import rather than the
+// process: conc.Submit stores the panic in the future and then re-throws onto an
+// ants worker goroutine, which the caller's goroutine cannot recover. Concealing
+// the panic keeps the stored error reachable through AwaitAll.
+func Test_computeFileRowUpperBounds_decoderPanicBecomesError(t *testing.T) {
+	mk := mockey.Mock(computeFileRowUpperBound).To(
+		func(context.Context, storage.ChunkManager, *schemapb.CollectionSchema, *internalpb.ImportFile) (int64, bool, error) {
+			panic("decoder blew up")
+		}).Build()
+	defer mk.UnPatch()
+
+	files := []*internalpb.ImportFile{{Paths: []string{"a.npy"}}}
+	bounds, exacts, err := computeFileRowUpperBounds(
+		context.Background(), mocks.NewChunkManager(t), schemaVec(8, 0), files)
+	require.Error(t, err, "a panicked sizing task must surface as an error, not be swallowed")
+	assert.Contains(t, err.Error(), "decoder blew up")
+	assert.Nil(t, bounds)
+	assert.Nil(t, exacts)
 }

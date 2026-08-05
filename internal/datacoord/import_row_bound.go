@@ -17,11 +17,14 @@
 package datacoord
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"io"
 	"math"
 
 	"github.com/apache/arrow/go/v17/parquet/file"
+	"github.com/cockroachdb/errors"
 	"github.com/sbinet/npyio"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -167,6 +170,57 @@ func computeFileRowUpperBound(ctx context.Context, cm storage.ChunkManager,
 	return bound, exact, nil
 }
 
+// maxNpyHeaderLen caps the header length a .npy file may declare. numpy pads the
+// header to a 64-byte boundary and it carries a single dtype/shape dict, so real
+// headers are a few hundred bytes; a v1 length is a uint16 and can never exceed
+// this bound at all.
+const maxNpyHeaderLen = 1 << 16
+
+// validateNpyHeader checks the preconditions npyio's readHeader assumes but never
+// verifies (npy/reader.go:97-101): it allocates the declared header length
+// verbatim, then slices on the last '\n' without checking r.err or that a newline
+// exists. So a v2 file declaring a 4 GiB header allocates 4 GiB per sizing
+// goroutine, and a header carrying no newline yields index -1 and panics. Both run
+// on the coordinator here, where a panic is not recoverable by the caller: the
+// sizing pool's worker is a separate goroutine.
+//
+// Only the prefix is read, via ReadAt, so the reader's sequential offset is
+// untouched and npyio still decodes from the start.
+func validateNpyHeader(ra io.ReaderAt, path string) error {
+	var prefix [12]byte
+	n, err := ra.ReadAt(prefix[:], 0)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	if n < 10 || [6]byte(prefix[0:6]) != npyio.Magic {
+		return merr.WrapErrImportFailedMsg("not a numpy file, path=%s", path)
+	}
+	var hdrLen, hdrOff int64
+	switch major := prefix[6]; major {
+	case 1:
+		hdrLen, hdrOff = int64(binary.LittleEndian.Uint16(prefix[8:10])), 10
+	case 2:
+		if n < 12 {
+			return merr.WrapErrImportFailedMsg("numpy v2 header truncated, path=%s", path)
+		}
+		hdrLen, hdrOff = int64(binary.LittleEndian.Uint32(prefix[8:12])), 12
+	default:
+		return merr.WrapErrImportFailedMsg("unsupported numpy major version %d, path=%s", major, path)
+	}
+	if hdrLen <= 0 || hdrLen > maxNpyHeaderLen {
+		return merr.WrapErrImportFailedMsg("numpy header length %d out of range (max %d), path=%s",
+			hdrLen, maxNpyHeaderLen, path)
+	}
+	hdr := make([]byte, hdrLen)
+	if _, err := ra.ReadAt(hdr, hdrOff); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	if bytes.IndexByte(hdr, '\n') < 0 {
+		return merr.WrapErrImportFailedMsg("numpy header is not newline-terminated, path=%s", path)
+	}
+	return nil
+}
+
 // numpyNumRows reads only the .npy headers to get the exact row count of one
 // column-based import file. Every path belongs to the same rows, so their shapes
 // agree on a well-formed input; the maximum is taken so a disagreement can only
@@ -178,6 +232,9 @@ func numpyNumRows(ctx context.Context, cm storage.ChunkManager, paths []string) 
 	for _, path := range paths {
 		ra, err := newSizingReaderAt(ctx, cm, path)
 		if err != nil {
+			return 0, err
+		}
+		if err := validateNpyHeader(ra, path); err != nil {
 			return 0, err
 		}
 		r, err := npyio.NewReader(ra)
@@ -369,7 +426,12 @@ func computeFileRowUpperBounds(ctx context.Context, cm storage.ChunkManager,
 ) ([]int64, []bool, error) {
 	bounds := make([]int64, len(files))
 	exacts := make([]bool, len(files))
-	pool := conc.NewPool[struct{}](hardware.GetCPUNum() * 2)
+	// Conceal panics so a decoder crash fails this import instead of the process.
+	// conc.Submit's recover already stores the panic in the future before
+	// re-throwing; concealing stops ants from re-panicking on a worker goroutine,
+	// which no caller here could recover. validateNpyHeader covers the one decoder
+	// panic known today -- this covers the ones parquet or a future npyio has left.
+	pool := conc.NewPool[struct{}](hardware.GetCPUNum()*2, conc.WithConcealPanic(true))
 	defer pool.Release()
 
 	futures := make([]*conc.Future[struct{}], 0, len(files))
