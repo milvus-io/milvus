@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <memory>
 #include <optional>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -739,8 +740,41 @@ class PreparedDataScan final : public ChunkedColumnInterface::PreparedScan {
             projection_ == ChunkedColumnInterface::ScanProjection::Data ||
                 projection == ChunkedColumnInterface::ScanProjection::NoData,
             "validity-only prepared scan cannot open a data cursor");
-        const auto start = plan.requested_range.start;
-        const auto length = plan.requested_range.end - start;
+        auto effective_plan = plan;
+        if (projection == ChunkedColumnInterface::ScanProjection::Data) {
+            // Planner-pruned Cells may not be present in input_. Reopening a
+            // cursor for a subrange must retain those skips automatically;
+            // callers should only describe the logical range (and any
+            // additional skips), not repeat backend pin-selection state.
+            for (const auto& prepared_skip : plan_.skip_ranges) {
+                const auto start = std::max(prepared_skip.start,
+                                            plan.requested_range.start);
+                const auto end =
+                    std::min(prepared_skip.end, plan.requested_range.end);
+                if (start < end) {
+                    effective_plan.skip_ranges.emplace_back(
+                        ChunkedColumnInterface::ScanRowRange{start, end});
+                }
+            }
+            std::sort(effective_plan.skip_ranges.begin(),
+                      effective_plan.skip_ranges.end(),
+                      [](const auto& left, const auto& right) {
+                          return std::tie(left.start, left.end) <
+                                 std::tie(right.start, right.end);
+                      });
+            std::vector<ChunkedColumnInterface::ScanRowRange> merged;
+            for (const auto& skip : effective_plan.skip_ranges) {
+                if (!merged.empty() && skip.start <= merged.back().end) {
+                    merged.back().end = std::max(merged.back().end, skip.end);
+                } else {
+                    merged.emplace_back(skip);
+                }
+            }
+            effective_plan.skip_ranges = std::move(merged);
+            ValidateScanPlan(effective_plan, start_, end_);
+        }
+        const auto start = effective_plan.requested_range.start;
+        const auto length = effective_plan.requested_range.end - start;
         if (value_kind_ == ChunkedColumnInterface::ScanValueKind::FixedWidth) {
             return std::make_unique<FixedWidthDataScanCursor>(column_,
                                                               input_,
@@ -749,7 +783,8 @@ class PreparedDataScan final : public ChunkedColumnInterface::PreparedScan {
                                                               data_type_,
                                                               projection,
                                                               value_kind_,
-                                                              plan.skip_ranges);
+                                                              effective_plan
+                                                                  .skip_ranges);
         }
         return std::make_unique<ViewDataScanCursor>(column_,
                                                     input_,
@@ -758,7 +793,7 @@ class PreparedDataScan final : public ChunkedColumnInterface::PreparedScan {
                                                     data_type_,
                                                     projection,
                                                     value_kind_,
-                                                    plan.skip_ranges);
+                                                    effective_plan.skip_ranges);
     }
 
  private:

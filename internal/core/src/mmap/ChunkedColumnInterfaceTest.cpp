@@ -957,6 +957,23 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     EXPECT_FALSE(batch.values.empty());
     EXPECT_FALSE(cursor->Next(7, &batch));
     EXPECT_EQ(cursor->Position(), 7);
+
+    // Reopening a subrange keeps the planner skips selected before pinning.
+    // The caller does not need to repeat those ranges, and the cursor must not
+    // try to access the unpinned middle Cells.
+    cursor = prepared->Open(
+        ChunkedColumnInterface::ScanPlan::Full(1, 5),
+        ChunkedColumnInterface::ScanProjection::Data);
+    ASSERT_NE(cursor, nullptr);
+    ASSERT_TRUE(cursor->Next(5, &batch));
+    EXPECT_EQ(batch.row_id_start, 1);
+    EXPECT_EQ(batch.size, 1);
+    ASSERT_TRUE(cursor->Next(5, &batch));
+    EXPECT_EQ(batch.row_id_start, 5);
+    EXPECT_EQ(batch.size, 1);
+    EXPECT_FALSE(cursor->Next(5, &batch));
+    EXPECT_EQ(cursor->Position(), 6);
+    EXPECT_EQ(fx.pin_requests->size(), 1u);
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,
