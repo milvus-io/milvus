@@ -897,10 +897,22 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			zap.String("channel", info.InsertChannel),
 			zap.Int64("segmentID", info.GetSegmentID()),
 			zap.Time("startPosition", tsoutil.PhysicalTime(info.GetStartPosition().GetTimestamp())),
+			// #49435: did the delete-coverage optimization engage for this load?
+			// usedCoverage=false means replayFromTs fell back to start_position
+			// (minTs) and bfHitDeleteRowNum replays the whole history; engaged
+			// loads replay only the tail after deleteCoveredTs.
+			zap.Uint64("deleteCoveredTs", info.GetDeleteCoveredTs()),
+			zap.Uint64("replayFromTs", segmentDeleteReplayStartTs(info)),
+			zap.Bool("usedCoverage", info.GetDeleteCoveredTs() > 0),
 			zap.Int64("tsHitDeleteRowNum", tsHit),
 			zap.Int64("bfHitDeleteRowNum", bfHit),
 			zap.Int64("bfCost", time.Since(start).Milliseconds()),
 		)
+		usedCoverageLabel := "false"
+		if info.GetDeleteCoveredTs() > 0 {
+			usedCoverageLabel = "true"
+		}
+		metrics.QueryNodeDeleteReplayCoverage.WithLabelValues(usedCoverageLabel).Inc()
 	}
 
 	// === Phase 2.5: Flush the bulk snapshot payload WITHOUT the lock ===

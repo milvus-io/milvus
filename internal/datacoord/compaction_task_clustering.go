@@ -391,9 +391,11 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 	}
 	// Persist delete coverage from the plan snapshot so completion stamps the
 	// output consistent with what the datanode bakes, not live meta (issue #49435).
-	if err := t.updateAndSaveTaskMeta(setDeleteCoveredTs(computeDeleteCoveredTs(segments))); err != nil {
+	deleteCoveredTs := computeDeleteCoveredTs(segments)
+	if err := t.updateAndSaveTaskMeta(setDeleteCoveredTs(deleteCoveredTs)); err != nil {
 		return nil, err
 	}
+	logCompactionDeleteCoverage(log, deleteCoveredTs, segments)
 	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
 	log.Info("Compaction handler build clustering compaction plan", zap.Any("PreAllocatedLogIDs", logIDRange))
 	return plan, nil

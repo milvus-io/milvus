@@ -5273,9 +5273,14 @@ exceeds this threshold, the largest growing segment will be sealed.`,
 	p.GrowingSegmentsMemSizeInMB.Init(base.mgr)
 
 	p.BlockingL0EntryNum = ParamItem{
-		Key:          "dataCoord.sealPolicy.channel.blockingL0EntryNum",
-		Version:      "2.5.7",
-		DefaultValue: "5000000",
+		Key:     "dataCoord.sealPolicy.channel.blockingL0EntryNum",
+		Version: "2.5.7",
+		// #49435 EXPERIMENT (temporary — revert before merge): upstream default 5000000.
+		// Lowered ~10x so the earliest (L0-frontier-blocking) growing segment seals much
+		// sooner -> delete-baking frontier advances -> segment deltalogs fill ->
+		// compaction delete_covered_ts engages instead of staying 0. Was letting ~5M
+		// deletes pile up (matching the observed ~4.6M delete buffer) before sealing.
+		DefaultValue: "500000",
 		Doc: `If the total entry number of l0 logs of each shard
 exceeds this threshold, the earliest growing segments will be sealed.`,
 		Export: true,
@@ -5283,9 +5288,10 @@ exceeds this threshold, the earliest growing segments will be sealed.`,
 	p.BlockingL0EntryNum.Init(base.mgr)
 
 	p.BlockingL0SizeInMB = ParamItem{
-		Key:          "dataCoord.sealPolicy.channel.blockingL0SizeInMB",
-		Version:      "2.5.7",
-		DefaultValue: "64",
+		Key:     "dataCoord.sealPolicy.channel.blockingL0SizeInMB",
+		Version: "2.5.7",
+		// #49435 EXPERIMENT (temporary — revert before merge): upstream default 64.
+		DefaultValue: "8",
 		Doc: `The size threshold in MB, if the total entry number of l0 logs of each shard
 exceeds this threshold, the earliest growing segments will be sealed.`,
 		Export: true,

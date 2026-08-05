@@ -410,9 +410,11 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	// datanode bakes) and persist it on the task, so completion stamps the
 	// output with coverage consistent with what was baked, not live meta that a
 	// concurrent L0 compaction may have advanced past the snapshot (issue #49435).
-	if err := t.updateAndSaveTaskMeta(setDeleteCoveredTs(computeDeleteCoveredTs(segments))); err != nil {
+	deleteCoveredTs := computeDeleteCoveredTs(segments)
+	if err := t.updateAndSaveTaskMeta(setDeleteCoveredTs(deleteCoveredTs)); err != nil {
 		return nil, err
 	}
+	logCompactionDeleteCoverage(log, deleteCoveredTs, segments)
 
 	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments)
 	if err != nil {

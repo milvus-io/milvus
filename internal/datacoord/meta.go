@@ -1837,6 +1837,33 @@ func computeDeleteCoveredTs(inputs []*SegmentInfo) uint64 {
 	return minTs
 }
 
+// logCompactionDeleteCoverage records whether delete coverage engaged for a
+// compaction and, if not, why, so a single (multi-hour) test run reveals the
+// coverage hit-rate instead of iterating blind (issue #49435). engaged=false
+// with inputsWithDeltalogs=0 is the signature of the dormant case: in 2.6 an
+// L1 input's deletes usually live in L0 (empty own deltalogs) and it has no
+// prior covered ts, so computeDeleteCoveredTs is 0 and the delegator falls back
+// to start_position. Pair this with the delegator's per-load "usedCoverage" log
+// to see the read side.
+func logCompactionDeleteCoverage(logger *log.MLogger, deleteCoveredTs uint64, inputs []*SegmentInfo) {
+	withDeltalogs, withOwnCoverage := 0, 0
+	for _, in := range inputs {
+		if len(in.GetDeltalogs()) > 0 {
+			withDeltalogs++
+		}
+		if in.GetDeleteCoveredTs() > 0 {
+			withOwnCoverage++
+		}
+	}
+	logger.Info("compaction delete coverage computed",
+		zap.Uint64("deleteCoveredTs", deleteCoveredTs),
+		zap.Bool("engaged", deleteCoveredTs > 0),
+		zap.Int("inputs", len(inputs)),
+		zap.Int("inputsWithDeltalogs", withDeltalogs),
+		zap.Int("inputsWithOwnCoverage", withOwnCoverage))
+	metrics.DataCoordCompactionDeleteCoverage.WithLabelValues(strconv.FormatBool(deleteCoveredTs > 0)).Inc()
+}
+
 // recalculateSegmentPosition recalculates StartPosition and DmlPosition from
 // actual binlog timestamps on the compaction result segment. This makes compaction
 // self-healing: wrong positions from import or prior compaction are corrected.

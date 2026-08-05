@@ -107,6 +107,17 @@ var (
 			collectionIDLabelName,
 		})
 
+	// QueryNodeDeleteReplayCoverage counts per-segment delete replays on load by
+	// whether covered_ts was used (vs start_position fallback). issue #49435
+	// experiment instrumentation (temporary).
+	QueryNodeDeleteReplayCoverage = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "delete_replay_coverage_total",
+			Help:      "issue #49435: count of segment delete replays by whether covered_ts was used (vs start_position fallback)",
+		}, []string{"used"})
+
 	QueryNodeNumPartitions = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -944,6 +955,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeConsumeCounter)
 	registry.MustRegister(QueryNodeExecuteCounter)
 	registry.MustRegister(QueryNodeConsumerMsgCount)
+	registry.MustRegister(QueryNodeDeleteReplayCoverage)
 	registry.MustRegister(QueryNodeConsumeTimeTickLag)
 	registry.MustRegister(QueryNodeMsgDispatcherTtLag)
 	registry.MustRegister(QueryNodeSegmentSearchLatencyPerVector)
