@@ -287,7 +287,7 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 			mlog.Int64("nodeID", nodeID),
 			mlog.String("channel", channel),
 			mlog.Err(err))
-		g.shardclientMgr.InvalidateShardLeaderCache([]int64{g.CollectionID})
+		invalidateShardLeaderCacheOnQueryNodeError(g.shardclientMgr, g.CollectionID, err)
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
