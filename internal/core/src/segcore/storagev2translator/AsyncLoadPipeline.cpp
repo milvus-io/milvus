@@ -26,8 +26,8 @@
 
 #include "arrow/api.h"
 #include "common/EasyAssert.h"
-#include "folly/ScopeGuard.h"
-#include "folly/coro/Collect.h"
+#include "folly/coro/AsyncScope.h"
+#include "folly/coro/WithCancellation.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
 #include "folly/executors/ExecutorWithPriority.h"
 #include "folly/executors/thread_factory/NamedThreadFactory.h"
@@ -69,11 +69,6 @@ class WindowFailureState {
                 first_failure_ = std::move(failure);
             }
         }
-        cancellation_source_.requestCancellation();
-    }
-
-    void
-    RequestCancellation() {
         cancellation_source_.requestCancellation();
     }
 
@@ -200,19 +195,13 @@ FinalizeWindowAsync(int64_t segment_id,
                     AsyncReadWindow window,
                     std::shared_ptr<CellFinalizeFunc> finalize_cell,
                     storage::TransientBudgetLease lease,
-                    ChunkReadResult batches_result,
-                    std::shared_ptr<WindowFailureState> failure_state) {
+                    ChunkReadResult batches_result) {
     (void)lease;
-    try {
-        co_return FinalizeWindow(segment_id,
-                                 cancellation_token,
-                                 std::move(window),
-                                 *finalize_cell,
-                                 std::move(batches_result));
-    } catch (...) {
-        failure_state->RecordAndCancel(std::current_exception());
-        throw;
-    }
+    co_return FinalizeWindow(segment_id,
+                             cancellation_token,
+                             std::move(window),
+                             *finalize_cell,
+                             std::move(batches_result));
 }
 
 folly::coro::Task<WindowLoadResult>
@@ -220,46 +209,66 @@ LoadWindowAsync(int64_t segment_id,
                 std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
                 AsyncReadWindow window,
                 std::shared_ptr<CellFinalizeFunc> finalize_cell,
-                folly::coro::Future<storage::TransientBudgetLease> admission,
+                storage::TransientBudgetLease lease,
                 std::function<folly::Executor::KeepAlive<>()>
                     finalization_executor_provider,
                 int8_t executor_priority,
-                folly::CancellationToken cancellation_token,
-                std::shared_ptr<WindowFailureState> failure_state) {
-    storage::TransientBudgetLease lease;
+                folly::CancellationToken cancellation_token) {
+    CheckCancellationToken(
+        cancellation_token, segment_id, "AsyncLoadPipeline::admission");
+
+    auto batches_result = co_await chunk_reader->get_chunks_async(
+        window.chunk_indices, /*parallelism=*/1);
+    auto finalization_executor = finalization_executor_provider
+                                     ? finalization_executor_provider()
+                                     : folly::Executor::KeepAlive<>{};
+    if (!finalization_executor) {
+        (void)lease;
+        co_return FinalizeWindow(segment_id,
+                                 cancellation_token,
+                                 std::move(window),
+                                 *finalize_cell,
+                                 std::move(batches_result));
+    }
+
+    co_return co_await folly::coro::co_withExecutor(
+        WithExecutorPriority(std::move(finalization_executor),
+                             executor_priority),
+        FinalizeWindowAsync(segment_id,
+                            cancellation_token,
+                            std::move(window),
+                            std::move(finalize_cell),
+                            std::move(lease),
+                            std::move(batches_result)));
+}
+
+folly::coro::Task<void>
+LoadWindowAndStoreResultAsync(
+    int64_t segment_id,
+    std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
+    AsyncReadWindow window,
+    std::shared_ptr<CellFinalizeFunc> finalize_cell,
+    storage::TransientBudgetLease lease,
+    std::function<folly::Executor::KeepAlive<>()>
+        finalization_executor_provider,
+    int8_t executor_priority,
+    folly::CancellationToken cancellation_token,
+    std::shared_ptr<WindowFailureState> failure_state,
+    std::optional<WindowLoadResult>* result) {
     try {
-        lease = co_await std::move(admission);
-        CheckCancellationToken(
-            cancellation_token, segment_id, "AsyncLoadPipeline::admission");
-
-        auto batches_result = co_await chunk_reader->get_chunks_async(
-            window.chunk_indices, /*parallelism=*/1);
-        auto finalization_executor = finalization_executor_provider
-                                         ? finalization_executor_provider()
-                                         : folly::Executor::KeepAlive<>{};
-        if (!finalization_executor) {
-            (void)lease;
-            co_return FinalizeWindow(segment_id,
-                                     cancellation_token,
+        *result =
+            co_await LoadWindowAsync(segment_id,
+                                     std::move(chunk_reader),
                                      std::move(window),
-                                     *finalize_cell,
-                                     std::move(batches_result));
-        }
-
-        co_return co_await folly::coro::co_withExecutor(
-            WithExecutorPriority(std::move(finalization_executor),
-                                 executor_priority),
-            FinalizeWindowAsync(segment_id,
-                                cancellation_token,
-                                std::move(window),
-                                std::move(finalize_cell),
-                                std::move(lease),
-                                std::move(batches_result),
-                                failure_state));
+                                     std::move(finalize_cell),
+                                     std::move(lease),
+                                     std::move(finalization_executor_provider),
+                                     executor_priority,
+                                     std::move(cancellation_token));
     } catch (...) {
         failure_state->RecordAndCancel(std::current_exception());
-        throw;
     }
+    co_return;
 }
 
 folly::coro::Task<std::vector<AsyncCellResult>>
@@ -310,40 +319,48 @@ LoadCellsAsyncImpl(
     auto window_failure_state = std::make_shared<WindowFailureState>();
     auto window_cancellation_token = folly::cancellation_token_merge(
         cancellation_token, window_failure_state->GetToken());
-    auto cancel_pending_admissions = folly::makeGuard([window_failure_state]() {
-        window_failure_state->RequestCancellation();
-    });
-
-    std::vector<folly::coro::TaskWithExecutor<WindowLoadResult>> tasks;
-    tasks.reserve(windows.size());
-    for (auto& window : windows) {
-        auto admission = budget.AcquireAsync(
-            window.budget_bytes, budget_priority, window_cancellation_token);
-        tasks.push_back(folly::coro::co_withExecutor(
-            work_executor.copy(),
-            LoadWindowAsync(segment_id,
-                            chunk_reader,
-                            std::move(window),
-                            shared_finalizer,
-                            std::move(admission),
-                            finalization_executor_provider,
-                            executor_priority,
-                            window_cancellation_token,
-                            window_failure_state)));
+    auto request_count = cells.size();
+    std::vector<std::optional<WindowLoadResult>> window_results(windows.size());
+    folly::coro::AsyncScope scope;
+    try {
+        for (size_t i = 0; i < windows.size(); ++i) {
+            auto lease =
+                co_await budget.AcquireAsync(windows[i].budget_bytes,
+                                             budget_priority,
+                                             window_cancellation_token);
+            CheckCancellationToken(window_cancellation_token,
+                                   segment_id,
+                                   "AsyncLoadPipeline::admission");
+            scope.add(folly::coro::co_withCancellation(
+                window_cancellation_token,
+                folly::coro::co_withExecutor(work_executor.copy(),
+                                             LoadWindowAndStoreResultAsync(
+                                                 segment_id,
+                                                 chunk_reader,
+                                                 std::move(windows[i]),
+                                                 shared_finalizer,
+                                                 std::move(lease),
+                                                 finalization_executor_provider,
+                                                 executor_priority,
+                                                 window_cancellation_token,
+                                                 window_failure_state,
+                                                 &window_results[i]))));
+        }
+    } catch (...) {
+        window_failure_state->RecordAndCancel(std::current_exception());
     }
 
-    auto request_count = cells.size();
-    auto tries = co_await folly::coro::collectAllTryRange(std::move(tasks));
+    co_await scope.joinAsync();
     CheckCancellationToken(
         cancellation_token, segment_id, "AsyncLoadPipeline::complete");
     if (auto failure = window_failure_state->FirstFailure()) {
         std::rethrow_exception(failure);
     }
-    cancel_pending_admissions.dismiss();
     std::vector<std::optional<AsyncCellResult>> ordered(request_count);
-    for (auto& result : tries) {
-        result.throwUnlessValue();
-        for (auto& cell : result.value()) {
+    for (auto& result : window_results) {
+        AssertInfo(result.has_value(),
+                   "[StorageV2] async window result is missing");
+        for (auto& cell : *result) {
             AssertInfo(cell.request_index < ordered.size(),
                        "[StorageV2] async result index {} is out of range {}",
                        cell.request_index,
