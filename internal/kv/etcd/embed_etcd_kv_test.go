@@ -926,6 +926,46 @@ func (s *EmbedEtcdKVSuite) TestTxnWithPredicates() {
 	}
 }
 
+func (s *EmbedEtcdKVSuite) TestMultiSaveAndRemoveMixed() {
+	etcdKV := s.kv
+
+	prepareTests := map[string]string{
+		"mix/a-1":    "1",
+		"mix/a-1/c1": "11",
+		"mix/a-1/c2": "12",
+		"mix/a-10":   "10", // exact-remove canary: a prefix delete of "mix/a-1" would wipe it
+		"mix/b":      "b",
+	}
+	err := etcdKV.MultiSave(context.TODO(), prepareTests)
+	s.Require().NoError(err)
+
+	// failed predicate: the whole mixed txn must be a no-op.
+	err = etcdKV.MultiSaveAndRemoveMixed(context.TODO(),
+		map[string]string{"mix/new": "nv"}, []string{"mix/a-1"}, []string{"mix/a-1/"},
+		predicates.ValueEqual("mix/b", "not-b"))
+	s.Error(err)
+	keys, _, err := etcdKV.LoadWithPrefix(context.TODO(), "mix")
+	s.NoError(err)
+	s.Len(keys, 5)
+
+	err = etcdKV.MultiSaveAndRemoveMixed(context.TODO(),
+		map[string]string{"mix/new": "nv"}, []string{"mix/a-1"}, []string{"mix/a-1/"},
+		predicates.ValueEqual("mix/b", "b"))
+	s.NoError(err)
+
+	keys, vals, err := etcdKV.LoadWithPrefix(context.TODO(), "mix")
+	s.NoError(err)
+	got := make(map[string]string, len(keys))
+	for i, k := range keys {
+		got[k] = vals[i]
+	}
+	s.Equal(map[string]string{
+		etcdKV.GetPath("mix/a-10"): "10",
+		etcdKV.GetPath("mix/b"):    "b",
+		etcdKV.GetPath("mix/new"):  "nv",
+	}, got)
+}
+
 func TestEmbedEtcdKV(t *testing.T) {
 	suite.Run(t, new(EmbedEtcdKVSuite))
 }

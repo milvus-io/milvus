@@ -607,6 +607,56 @@ func (kv *etcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[st
 	return nil
 }
 
+// MultiSaveAndRemoveMixed saves kv in @saves, removes the exact keys in
+// @removals and removes every key under the prefixes in @prefixRemovals, all
+// in one transaction.
+func (kv *etcdKV) MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error {
+	cmps, err := parsePredicates(kv.rootPath, preds...)
+	if err != nil {
+		return err
+	}
+
+	start := time.Now()
+	ops := make([]clientv3.Op, 0, len(saves)+len(removals)+len(prefixRemovals))
+	// use complement to remove keys that are not in saves
+	saveKeys := typeutil.NewSet(lo.Keys(saves)...)
+	removeKeys := typeutil.NewSet(removals...)
+	removals = removeKeys.Complement(saveKeys).Collect()
+	for _, keyDelete := range removals {
+		ops = append(ops, clientv3.OpDelete(kv.GetPath(keyDelete)))
+	}
+	for _, keyDelete := range prefixRemovals {
+		ops = append(ops, clientv3.OpDelete(kv.GetPath(keyDelete), clientv3.WithPrefix()))
+	}
+
+	var keys []string
+	for key, value := range saves {
+		keys = append(keys, key)
+		ops = append(ops, clientv3.OpPut(kv.GetPath(key), value))
+	}
+
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
+	defer cancel()
+
+	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx1, cmps...), ops...)
+	if err != nil {
+		mlog.Warn(ctx, "Etcd MultiSaveAndRemoveMixed error",
+			mlog.Any("saves", saves),
+			mlog.Strings("removes", removals),
+			mlog.Strings("prefixRemoves", prefixRemovals),
+			mlog.Int("saveLength", len(saves)),
+			mlog.Int("removeLength", len(removals)),
+			mlog.Int("prefixRemoveLength", len(prefixRemovals)),
+			mlog.Err(err))
+		return err
+	}
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi save and remove mixed", mlog.Strings("keys", keys))
+	if !resp.Succeeded {
+		return merr.WrapErrIoFailedReason("failed to execute transaction")
+	}
+	return nil
+}
+
 // MultiSaveBytesAndRemoveWithPrefix saves kv in @saves and removes the keys with given prefix in @removals.
 func (kv *etcdKV) MultiSaveBytesAndRemoveWithPrefix(ctx context.Context, saves map[string][]byte, removals []string) error {
 	start := time.Now()

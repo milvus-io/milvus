@@ -333,6 +333,43 @@ func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[
 	return nil
 }
 
+// MultiSaveAndRemoveMixed saves key-value pairs in @saves, removes exact keys
+// in @removals and keys under the prefixes in @prefixRemovals in MemoryKV
+// atomically.
+func (kv *MemoryKV) MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error {
+	if len(preds) > 0 {
+		return merr.WrapErrServiceUnavailable("predicates not supported")
+	}
+	kv.Lock()
+	defer kv.Unlock()
+
+	// use complement to remove keys that are not in saves
+	saveKeys := typeutil.NewSet(lo.Keys(saves)...)
+	removeKeys := typeutil.NewSet(removals...)
+	removals = removeKeys.Complement(saveKeys).Collect()
+	for _, key := range removals {
+		kv.tree.Delete(memoryKVItem{key: key})
+	}
+
+	var items []memoryKVItem
+	for _, prefix := range prefixRemovals {
+		kv.tree.Ascend(func(i btree.Item) bool {
+			if strings.HasPrefix(i.(memoryKVItem).key, prefix) {
+				items = append(items, i.(memoryKVItem))
+			}
+			return true
+		})
+	}
+	for _, item := range items {
+		kv.tree.Delete(item)
+	}
+
+	for key, value := range saves {
+		kv.tree.ReplaceOrInsert(memoryKVItem{key, StringValue(value)})
+	}
+	return nil
+}
+
 // MultiSaveBytesAndRemoveWithPrefix saves key-value pairs in @saves, & remove key with prefix in @removals in MemoryKV atomically.
 func (kv *MemoryKV) MultiSaveBytesAndRemoveWithPrefix(ctx context.Context, saves map[string][]byte, removals []string) error {
 	kv.Lock()

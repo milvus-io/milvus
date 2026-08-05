@@ -456,6 +456,35 @@ func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map
 	return err
 }
 
+// MultiSaveAndRemoveMixed saves kv in @saves, removes the exact keys in
+// @removals and removes every key under the prefixes in @prefixRemovals in a
+// single write batch.
+func (kv *RocksdbKV) MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error {
+	if len(preds) > 0 {
+		return merr.WrapErrServiceUnavailable("predicates not supported")
+	}
+	if kv.DB == nil {
+		return merr.WrapErrServiceInternalMsg("Rocksdb instance is nil when do MultiSaveAndRemoveMixed")
+	}
+	writeBatch := gorocksdb.NewWriteBatch()
+	defer writeBatch.Destroy()
+	// use complement to remove keys that are not in saves
+	saveKeys := typeutil.NewSet(lo.Keys(saves)...)
+	removeKeys := typeutil.NewSet(removals...)
+	removals = removeKeys.Complement(saveKeys).Collect()
+
+	for _, key := range removals {
+		writeBatch.Delete([]byte(key))
+	}
+	kv.prepareRemovePrefix(prefixRemovals, writeBatch)
+	for k, v := range saves {
+		writeBatch.Put([]byte(k), []byte(v))
+	}
+
+	err := kv.DB.Write(kv.WriteOptions, writeBatch)
+	return err
+}
+
 func (kv *RocksdbKV) prepareRemovePrefix(prefixes []string, writeBatch *gorocksdb.WriteBatch) {
 	// check if any empty prefix, if yes then we delete whole table, no more data should be remained
 	for _, prefix := range prefixes {

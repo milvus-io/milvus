@@ -61,6 +61,13 @@ type TxnKV interface {
 	BaseKV
 	MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error
 	MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error
+	// MultiSaveAndRemoveMixed saves kv in @saves, removes the exact keys in
+	// @removals AND removes every key under the prefixes in @prefixRemovals,
+	// all in one transaction. MultiSaveAndRemoveWithPrefix cannot express this
+	// mix - it widens EVERY removal to a prefix delete. A key present in both
+	// @saves and @removals is saved, not removed; a saved key under a removed
+	// prefix is backend-dependent (etcd rejects the txn) and must be avoided.
+	MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error
 	// MaxTxnOps reports the maximum number of key operations this store applies
 	// as a single atomic transaction; a batch exceeding it must be split by the
 	// caller. This is a per-store property (etcd's is small, TiKV's is large),
