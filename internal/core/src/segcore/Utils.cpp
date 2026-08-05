@@ -237,7 +237,7 @@ GetRawDataSizeOfDataArray(const DataArray* data,
             }
             case DataType::ARRAY: {
                 auto& array_data = FIELD_DATA(data, array);
-                if (field_meta.has_element_schema()) {
+                if (field_meta.is_nested_array()) {
                     for (const auto& row : array_data) {
                         result += row.ByteSizeLong();
                     }
@@ -384,10 +384,8 @@ CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta) {
     }
 
     auto scalar_array = data_array->mutable_scalars();
-    const auto element_type = data_type == DataType::ARRAY
-                                  ? field_meta.get_array_element_type()
-                                  : field_meta.get_element_type();
-    SetUpScalarFieldData(scalar_array, data_type, element_type, count);
+    SetUpScalarFieldData(
+        scalar_array, data_type, field_meta.get_element_type(), count);
     return data_array;
 }
 
@@ -687,7 +685,7 @@ CreateScalarDataArrayFrom(const void* data_raw,
             auto data = reinterpret_cast<const ScalarFieldProto*>(data_raw);
             auto obj = scalar_array->mutable_array_data();
             obj->set_element_type(static_cast<milvus::proto::schema::DataType>(
-                field_meta.get_array_element_type()));
+                field_meta.get_element_type()));
             for (auto i = 0; i < count; i++) {
                 *(obj->mutable_data()->Add()) = data[i];
             }
@@ -1065,8 +1063,8 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             }
             case DataType::ARRAY: {
                 auto obj = scalar_array->mutable_array_data();
-                obj->set_element_type(proto::schema::DataType(
-                    field_meta.get_array_element_type()));
+                obj->set_element_type(
+                    proto::schema::DataType(field_meta.get_element_type()));
                 auto* mutable_src = src_field_data->mutable_scalars()
                                         ->mutable_array_data()
                                         ->mutable_data();

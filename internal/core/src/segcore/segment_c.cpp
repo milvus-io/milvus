@@ -2144,10 +2144,8 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             info.field_id = field_id;
             info.field_name = field_meta.get_name().get();
             info.data_type = data_type;
-            info.element_type = data_type == milvus::DataType::ARRAY
-                                    ? field_meta.get_array_element_type()
-                                    : field_meta.get_element_type();
-            info.is_nested_array = field_meta.has_element_schema();
+            info.element_type = field_meta.get_element_type();
+            info.is_nested_array = field_meta.is_nested_array();
             info.nullable = field_meta.is_nullable();
             info.dim = dim;
             info.vec_base = vec_base;

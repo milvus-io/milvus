@@ -118,7 +118,7 @@ TEST(FieldMetaTest, NestedArrayRoundTrip) {
     auto field = FieldMeta::ParseFrom(proto);
     EXPECT_EQ(field.get_data_type(), DataType::ARRAY);
     EXPECT_EQ(field.get_element_type(), DataType::ARRAY);
-    EXPECT_TRUE(field.has_element_schema());
+    EXPECT_TRUE(field.is_nested_array());
 
     auto serialized = field.ToProto();
     ASSERT_TRUE(serialized.has_type_schema());

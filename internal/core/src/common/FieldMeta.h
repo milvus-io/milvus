@@ -264,11 +264,6 @@ class FieldMeta {
         return element_type_;
     }
 
-    DataType
-    get_array_element_type() const {
-        return element_type_;
-    }
-
     milvus::proto::schema::TypeSchema
     get_array_type_schema() const {
         if (type_schema_.has_value()) {
@@ -281,15 +276,9 @@ class FieldMeta {
     }
 
     bool
-    has_element_schema() const {
-        return type_schema_.has_value() &&
+    is_nested_array() const {
+        return type_schema_.has_value() && type_schema_->has_array_element() &&
                type_schema_->array_element().has_array_element();
-    }
-
-    const milvus::proto::schema::TypeSchema&
-    get_element_schema() const {
-        Assert(has_element_schema());
-        return type_schema_->array_element();
     }
 
     bool

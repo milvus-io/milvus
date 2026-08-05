@@ -211,7 +211,7 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                 array_lengths[offset + i] = raw_data[source_index].length();
             }
         } else {
-            if (field_meta.has_element_schema()) {
+            if (field_meta.is_nested_array()) {
                 auto* raw_data = static_cast<const ArrayValue*>(data->Data());
                 for (int64_t i = 0; i < num_rows; ++i) {
                     array_lengths[offset + i] =
@@ -299,7 +299,7 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
     } else {
         // ARRAY: extract from scalars().array_data().data(i)
         const auto& array_data = field_data.scalars().array_data();
-        if (field_meta.has_element_schema()) {
+        if (field_meta.is_nested_array()) {
             const auto has_valid_data =
                 field_data.valid_data_size() == num_rows;
             for (int64_t i = 0; i < num_rows; ++i) {
@@ -966,7 +966,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
 
         if (!SystemProperty::Instance().IsSystem(field_id)) {
             const auto& field_meta = (*schema)[field_id];
-            if (field_meta.has_element_schema() &&
+            if (field_meta.is_nested_array() &&
                 infos.storage_version < STORAGE_V2) {
                 ThrowInfo(ErrorCode::Unsupported,
                           "nested ARRAY field {} is supported only by Storage "
@@ -995,7 +995,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
             auto lack_num = info.row_count - total;
             std::optional<proto::schema::TypeSchema> array_type;
             if (infos.storage_version >= STORAGE_V2 &&
-                field_meta.has_element_schema()) {
+                field_meta.is_nested_array()) {
                 array_type = field_meta.get_array_type_schema();
             }
             auto field_data =
@@ -1017,7 +1017,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
         if (!SystemProperty::Instance().IsSystem(field_id)) {
             const auto& field_meta = (*schema)[field_id];
             if (infos.storage_version >= STORAGE_V2 &&
-                field_meta.has_element_schema()) {
+                field_meta.is_nested_array()) {
                 array_type = field_meta.get_array_type_schema();
             }
         }
@@ -1299,7 +1299,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                 ? field.second.get_dim()
                                 : 1,
                             batch_num_rows,
-                            field.second.has_element_schema()
+                            field.second.is_nested_array()
                                 ? std::make_optional(
                                       field.second.get_array_type_schema())
                                 : std::nullopt);
@@ -1407,7 +1407,7 @@ SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                                     FieldId field_id,
                                     int64_t chunk_id) const {
     const auto& field_meta = (*schema_)[field_id];
-    if (field_meta.has_element_schema()) {
+    if (field_meta.is_nested_array()) {
         ThrowInfo(ErrorCode::Unsupported,
                   "Span API does not support nested ARRAY field {}",
                   field_id.get());
@@ -2372,7 +2372,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::ARRAY: {
-            if (field_meta.has_element_schema()) {
+            if (field_meta.is_nested_array()) {
                 ThrowInfo(ErrorCode::Unsupported,
                           "raw Array* API does not support nested ARRAY field "
                           "{}; use protobuf retrieve output",
@@ -3155,7 +3155,7 @@ SegmentGrowingImpl::LoadColumnGroup(
                         ? field.get_dim()
                         : 1,
                     rows_to_load,
-                    field.has_element_schema()
+                    field.is_nested_array()
                         ? std::make_optional(field.get_array_type_schema())
                         : std::nullopt);
                 auto array = record_batch->column(i);

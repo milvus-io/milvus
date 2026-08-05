@@ -432,7 +432,7 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
                 append_array_length(array_len);
             }
         }
-    } else if (field_meta.has_element_schema()) {
+    } else if (field_meta.is_nested_array()) {
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
             auto pinned_chunk = column.GetChunk(op_ctx_ptr, chunk_id);
             auto* array_chunk =

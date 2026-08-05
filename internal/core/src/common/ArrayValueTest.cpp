@@ -620,8 +620,8 @@ TEST(ArrayValue, RecursiveSchemaSelectsStorageFieldData) {
     *schema_proto.mutable_type_schema() = type;
 
     auto field_meta = FieldMeta::ParseFrom(schema_proto);
-    ASSERT_TRUE(field_meta.has_element_schema());
-    ASSERT_EQ(field_meta.get_array_element_type(), DataType::ARRAY);
+    ASSERT_TRUE(field_meta.is_nested_array());
+    ASSERT_EQ(field_meta.get_element_type(), DataType::ARRAY);
     ASSERT_TRUE(google::protobuf::util::MessageDifferencer::Equals(
         type, field_meta.get_array_type_schema()));
     ASSERT_TRUE(google::protobuf::util::MessageDifferencer::Equals(

@@ -2980,7 +2980,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             storage::SortByPath(file_infos);
 
             auto field_meta = schema_snapshot->operator[](field_id);
-            if (field_meta.has_element_schema() &&
+            if (field_meta.is_nested_array() &&
                 load_info.storage_version < STORAGE_V2) {
                 ThrowInfo(ErrorCode::Unsupported,
                           "nested ARRAY field {} is supported only by Storage "
@@ -3146,7 +3146,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             storage::SortByPath(file_infos);
 
             auto field_meta = schema_snapshot->operator[](field_id);
-            if (field_meta.has_element_schema() &&
+            if (field_meta.is_nested_array() &&
                 load_info.storage_version < STORAGE_V2) {
                 ThrowInfo(ErrorCode::Unsupported,
                           "nested ARRAY field {} is supported only by Storage "
@@ -5044,7 +5044,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::ARRAY: {
-            if (field_meta.has_element_schema()) {
+            if (field_meta.is_nested_array()) {
                 ThrowInfo(ErrorCode::Unsupported,
                           "raw Array* API does not support nested ARRAY field "
                           "{}; use protobuf retrieve output",
@@ -5979,7 +5979,7 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
             // "unsupported element type None". Regression fix for #48619.
             ret->mutable_scalars()->mutable_array_data()->set_element_type(
                 static_cast<milvus::proto::schema::DataType>(
-                    field_meta.get_array_element_type()));
+                    field_meta.get_element_type()));
             auto* dst =
                 ret->mutable_scalars()->mutable_array_data()->mutable_data();
             bulk_subscript_array_impl(op_ctx,
@@ -5987,7 +5987,7 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
                                       seg_offsets,
                                       count,
                                       dst,
-                                      field_meta.has_element_schema());
+                                      field_meta.is_nested_array());
             break;
         }
 
@@ -9268,7 +9268,7 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             // Same element_type carry-through as the chunked sealed path
             // above; without it the SDK rejects the response. Fix for #48619.
             obj->set_element_type(static_cast<milvus::proto::schema::DataType>(
-                field_meta.get_array_element_type()));
+                field_meta.get_element_type()));
             auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
             for (int64_t i = 0; i < size; i++) {
                 if (typed->IsNull(result_mapping[i])) {

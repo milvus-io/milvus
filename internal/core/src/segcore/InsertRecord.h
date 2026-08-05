@@ -1739,7 +1739,7 @@ class InsertRecordGrowing {
                 return;
             }
             case DataType::ARRAY: {
-                if (field_meta.has_element_schema()) {
+                if (field_meta.is_nested_array()) {
                     this->append_data<ArrayValue>(
                         field_id, size_per_chunk, scalar_mmap_descriptor);
                 } else {

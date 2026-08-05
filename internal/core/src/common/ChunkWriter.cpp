@@ -1382,7 +1382,7 @@ create_chunk_writer(const FieldMeta& field_meta) {
             return std::make_shared<GeometryChunkWriter>(nullable);
         }
         case milvus::DataType::ARRAY:
-            if (field_meta.has_element_schema()) {
+            if (field_meta.is_nested_array()) {
                 return std::make_shared<ColumnarArrayChunkWriter>(
                     field_meta.get_array_type_schema(), nullable);
             }
@@ -1527,7 +1527,7 @@ make_chunk(const FieldMeta& field_meta,
                 row_nums, data, size, nullable, chunk_mmap_guard);
         }
         case milvus::DataType::ARRAY:
-            if (field_meta.has_element_schema()) {
+            if (field_meta.is_nested_array()) {
                 return std::make_unique<ColumnarArrayChunk>(
                     row_nums,
                     data,
