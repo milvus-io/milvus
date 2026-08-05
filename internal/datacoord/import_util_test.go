@@ -1420,3 +1420,34 @@ func TestImportUtil_AssembleRequestCarriesPKRange(t *testing.T) {
 	// logID IDRange is still allocated locally and independently.
 	assert.Greater(t, importReq.GetIDRange().GetEnd(), importReq.GetIDRange().GetBegin())
 }
+
+// The scheduler must be able to separate the one terminal assemble failure from
+// the retriable ones. It cannot do that on merr classification: ErrImportSysFailed
+// also carries transient cases, and merr.IsNonRetryableErr is a deny-list over
+// ErrIo* sentinels AssembleImportRequest never returns -- so the branch that used
+// it was unreachable for every failure it was written for.
+func TestErrPKRangeTooSmall_IsDistinguishableAndKeepsItsCode(t *testing.T) {
+	terminal := merr.Mark(merr.WrapErrImportSysFailedMsg(
+		"reserved PK range too small for file %v: %d rows, %d ids reserved",
+		[]string{"a.npy"}, 100, 10), ErrPKRangeTooSmall)
+
+	assert.True(t, errors.Is(terminal, ErrPKRangeTooSmall))
+	assert.Equal(t, merr.Code(merr.ErrImportSysFailed), merr.Code(terminal),
+		"marking must not replace the merr code the wire projection carries")
+	assert.Contains(t, terminal.Error(), "100 rows, 10 ids reserved")
+
+	// merr.Mark carries a cockroachdb marker, which the standard library's
+	// errors.Is does not resolve. CreateTaskOnWorker must use the cockroachdb
+	// package -- which depguard already enforces repo-wide, so this cannot regress
+	// by an accidental import swap.
+
+	// The transient shape AssembleImportRequest and its callees also return: same
+	// merr code, and it must NOT be treated as terminal.
+	transient := merr.WrapErrImportSysFailedMsg("job %d not found, waiting for import job creation", 1)
+	assert.False(t, errors.Is(transient, ErrPKRangeTooSmall))
+
+	// The deny-list helper the old branch used returns false for both, which is
+	// why the branch never fired.
+	assert.False(t, merr.IsNonRetryableErr(terminal))
+	assert.False(t, merr.IsNonRetryableErr(transient))
+}
