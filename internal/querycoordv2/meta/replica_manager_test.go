@@ -113,7 +113,8 @@ func (suite *ReplicaManagerSuite) SetupTest() {
 		config.EtcdTLSCert.GetValue(),
 		config.EtcdTLSKey.GetValue(),
 		config.EtcdTLSCACert.GetValue(),
-		config.EtcdTLSMinVersion.GetValue())
+		config.EtcdTLSMinVersion.GetValue(),
+	)
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 	suite.catalog = querycoord.NewCatalog(suite.kv)
@@ -447,7 +448,8 @@ func (suite *ReplicaManagerV2Suite) SetupSuite() {
 		config.EtcdTLSCert.GetValue(),
 		config.EtcdTLSKey.GetValue(),
 		config.EtcdTLSCACert.GetValue(),
-		config.EtcdTLSMinVersion.GetValue())
+		config.EtcdTLSMinVersion.GetValue(),
+	)
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 	suite.catalog = querycoord.NewCatalog(suite.kv)
@@ -473,7 +475,7 @@ func (suite *ReplicaManagerV2Suite) TestSpawn() {
 			rgsOfCollection[rg] = newTestResourceGroup(rg, suite.rgNodes[rg])
 		}
 		mgr.RecoverNodesInCollection(ctx, id, rgsOfCollection)
-		mgr.RecoverSQNodesInCollection(ctx, id, suite.sqNodesByRG)
+		mgr.RecoverSQNodesInCollections(ctx, []int64{id}, suite.sqNodesByRG)
 		for rg := range cfg.spawnConfig {
 			for _, node := range suite.rgNodes[rg].Collect() {
 				replica := mgr.GetByCollectionAndNode(ctx, id, node)
@@ -602,7 +604,7 @@ func (suite *ReplicaManagerV2Suite) recoverReplica(k int, clearOutbound bool) {
 				sqNodesByRG[rg].Remove(suite.outboundSQNodes...)
 			}
 			suite.mgr.RecoverNodesInCollection(ctx, id, rgsOfCollection)
-			suite.mgr.RecoverSQNodesInCollection(ctx, id, sqNodesByRG)
+			suite.mgr.RecoverSQNodesInCollections(ctx, []int64{id}, sqNodesByRG)
 		}
 
 		// clear all outbound nodes
@@ -612,7 +614,11 @@ func (suite *ReplicaManagerV2Suite) recoverReplica(k int, clearOutbound bool) {
 				for _, r := range replicas {
 					outboundNodes := r.GetRONodes()
 					suite.mgr.RemoveNode(ctx, id, r.GetID(), outboundNodes...)
-					suite.mgr.RemoveSQNode(ctx, id, r.GetID(), r.GetROSQNodes()...)
+					suite.mgr.RemoveSQNodesInCollections(ctx, []SQNodeRemoval{{
+						CollectionID: id,
+						ReplicaID:    r.GetID(),
+						Nodes:        r.GetROSQNodes(),
+					}})
 				}
 			}
 		}
@@ -666,7 +672,7 @@ func TestSQNodeResourceGroupIsolation(t *testing.T) {
 		"RG3": typeutil.NewUniqueSet(301),
 	}
 
-	err = mgr.RecoverSQNodesInCollection(ctx, 100, sqNodesByRG)
+	err = mgr.RecoverSQNodesInCollections(ctx, []int64{100}, sqNodesByRG)
 	assert.NoError(t, err)
 
 	// Verify that each replica only gets streaming nodes from its own resource group.
@@ -699,7 +705,7 @@ func TestSQNodeResourceGroupIsolation(t *testing.T) {
 	err = mgr.Put(ctx, replica4, replica5)
 	assert.NoError(t, err)
 
-	err = mgr.RecoverSQNodesInCollection(ctx, 200, sqNodesByRG)
+	err = mgr.RecoverSQNodesInCollections(ctx, []int64{200}, sqNodesByRG)
 	assert.NoError(t, err)
 
 	// In fallback mode, all streaming nodes are pooled together.
@@ -747,7 +753,7 @@ func TestSQNodeResourceGroupIsolation(t *testing.T) {
 		"RG1":                    typeutil.NewUniqueSet(101, 102),
 	}
 
-	err = mgr.RecoverSQNodesInCollection(ctx, 250, rollingUpgradeSQNodesByRG)
+	err = mgr.RecoverSQNodesInCollections(ctx, []int64{250}, rollingUpgradeSQNodesByRG)
 	assert.NoError(t, err)
 
 	updatedReplica8 := mgr.Get(ctx, 8)
@@ -781,7 +787,7 @@ func TestSQNodeResourceGroupIsolation(t *testing.T) {
 	err = mgr.Put(ctx, replica6, replica7)
 	assert.NoError(t, err)
 
-	err = mgr.RecoverSQNodesInCollection(ctx, 300, sqNodesByRG)
+	err = mgr.RecoverSQNodesInCollections(ctx, []int64{300}, sqNodesByRG)
 	assert.NoError(t, err)
 
 	// In strict isolation mode:
@@ -828,7 +834,7 @@ func TestSQNodeRecoveryWithRONodes(t *testing.T) {
 		"RG1": typeutil.NewUniqueSet(101, 102, 104, 105),
 	}
 
-	err = mgr.RecoverSQNodesInCollection(ctx, 100, sqNodesByRG)
+	err = mgr.RecoverSQNodesInCollections(ctx, []int64{100}, sqNodesByRG)
 	assert.NoError(t, err)
 
 	updatedReplica := mgr.Get(ctx, 1)
@@ -873,7 +879,7 @@ func TestSQNodeRecoveryWithUnrecoverableNodes(t *testing.T) {
 		"RG1": typeutil.NewUniqueSet(101, 102),
 	}
 
-	err = mgr.RecoverSQNodesInCollection(ctx, 100, sqNodesByRG)
+	err = mgr.RecoverSQNodesInCollections(ctx, []int64{100}, sqNodesByRG)
 	assert.NoError(t, err)
 
 	updatedReplica := mgr.Get(ctx, 1)
@@ -883,6 +889,187 @@ func TestSQNodeRecoveryWithUnrecoverableNodes(t *testing.T) {
 	assert.Contains(t, updatedReplica.GetRWSQNodes(), int64(101))
 	// Node 102 should be added as new RW
 	assert.Contains(t, updatedReplica.GetRWSQNodes(), int64(102))
+}
+
+func TestRecoverSQNodesInCollectionsPersistsSingleBatch(t *testing.T) {
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+	mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+	ctx := context.Background()
+	replicas := []*Replica{
+		newReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: "RG1", RwSqNodes: []int64{101}}),
+		newReplica(&querypb.Replica{ID: 2, CollectionID: 200, ResourceGroup: "RG1", RwSqNodes: []int64{101}}),
+		newReplica(&querypb.Replica{ID: 3, CollectionID: 300, ResourceGroup: "RG1", RwSqNodes: []int64{101}}),
+	}
+	for _, replica := range replicas {
+		mgr.putReplicasInMemory(replica.GetCollectionID(), replica)
+	}
+
+	err := mgr.RecoverSQNodesInCollections(ctx, []int64{100, 200, 300}, map[string]typeutil.UniqueSet{
+		"RG1": typeutil.NewUniqueSet(int64(102)),
+	})
+	assert.NoError(t, err)
+	for _, replica := range replicas {
+		updated := mgr.Get(ctx, replica.GetID())
+		assert.ElementsMatch(t, []int64{102}, updated.GetRWSQNodes())
+		assert.ElementsMatch(t, []int64{101}, updated.GetROSQNodes())
+	}
+}
+
+func TestRecoverSQNodesInCollectionsSkipsStaleCollection(t *testing.T) {
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
+
+	mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+	ctx := context.Background()
+	replica := newReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: "RG1", RwSqNodes: []int64{101}})
+	mgr.putReplicasInMemory(replica.GetCollectionID(), replica)
+
+	err := mgr.RecoverSQNodesInCollections(ctx, []int64{999, 100}, map[string]typeutil.UniqueSet{
+		"RG1": typeutil.NewUniqueSet(int64(102)),
+	})
+	assert.NoError(t, err)
+
+	updated := mgr.Get(ctx, replica.GetID())
+	assert.ElementsMatch(t, []int64{102}, updated.GetRWSQNodes())
+	assert.ElementsMatch(t, []int64{101}, updated.GetROSQNodes())
+}
+
+func TestRecoverSQNodesInCollectionsReturnsSaveErrorAndKeepsMemory(t *testing.T) {
+	saveErr := errors.New("save failed")
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(saveErr).Once()
+
+	mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+	ctx := context.Background()
+	replica := newReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: "RG1", RwSqNodes: []int64{101}})
+	mgr.putReplicasInMemory(replica.GetCollectionID(), replica)
+
+	err := mgr.RecoverSQNodesInCollections(ctx, []int64{999, 100}, map[string]typeutil.UniqueSet{
+		"RG1": typeutil.NewUniqueSet(int64(102)),
+	})
+	assert.ErrorIs(t, err, saveErr)
+
+	updated := mgr.Get(ctx, replica.GetID())
+	assert.ElementsMatch(t, []int64{101}, updated.GetRWSQNodes())
+	assert.Empty(t, updated.GetROSQNodes())
+}
+
+func TestSQNodeCleanupBatchSave(t *testing.T) {
+	paramtable.Init()
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+
+	mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+	ctx := context.Background()
+	replicas := []*Replica{
+		newReplica(&querypb.Replica{ID: 1, CollectionID: 100, ResourceGroup: "RG1", RwSqNodes: []int64{101}, RoSqNodes: []int64{201}}),
+		newReplica(&querypb.Replica{ID: 2, CollectionID: 200, ResourceGroup: "RG1", RwSqNodes: []int64{102}, RoSqNodes: []int64{202}}),
+		newReplica(&querypb.Replica{ID: 3, CollectionID: 300, ResourceGroup: "RG1", RwSqNodes: []int64{103}, RoSqNodes: []int64{203}}),
+	}
+	assert.NoError(t, mgr.Put(ctx, replicas...))
+
+	err := mgr.RemoveSQNodesInCollections(ctx, []SQNodeRemoval{
+		{CollectionID: 100, ReplicaID: 1, Nodes: []int64{201}},
+		{CollectionID: 200, ReplicaID: 2, Nodes: []int64{202}},
+		{CollectionID: 300, ReplicaID: 3, Nodes: []int64{203}},
+	})
+	assert.NoError(t, err)
+	for _, replica := range replicas {
+		updated := mgr.Get(ctx, replica.GetID())
+		assert.Empty(t, updated.GetROSQNodes())
+		assert.ElementsMatch(t, replica.GetRWSQNodes(), updated.GetRWSQNodes())
+	}
+}
+
+func TestSQNodeCleanupBatchIgnoresStaleRemovalForRecoveredRWNode(t *testing.T) {
+	paramtable.Init()
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
+
+	mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+	ctx := context.Background()
+	replica := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  100,
+		ResourceGroup: "RG1",
+		RwSqNodes:     []int64{201},
+	})
+	assert.NoError(t, mgr.Put(ctx, replica))
+
+	err := mgr.RemoveSQNodesInCollections(ctx, []SQNodeRemoval{
+		{CollectionID: 100, ReplicaID: 1, Nodes: []int64{201}},
+	})
+	assert.NoError(t, err)
+
+	updated := mgr.Get(ctx, replica.GetID())
+	assert.ElementsMatch(t, []int64{201}, updated.GetRWSQNodes())
+	assert.Empty(t, updated.GetROSQNodes())
+}
+
+func TestSQNodeCleanupBatchSkipsStaleReplicas(t *testing.T) {
+	paramtable.Init()
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+	mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+	ctx := context.Background()
+	replica1 := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  100,
+		ResourceGroup: "RG1",
+		RwSqNodes:     []int64{101},
+		RoSqNodes:     []int64{201},
+	})
+	replica2 := newReplica(&querypb.Replica{
+		ID:            2,
+		CollectionID:  200,
+		ResourceGroup: "RG1",
+		RwSqNodes:     []int64{102},
+		RoSqNodes:     []int64{202},
+	})
+	mgr.putReplicasInMemory(replica1.GetCollectionID(), replica1)
+	mgr.putReplicasInMemory(replica2.GetCollectionID(), replica2)
+
+	err := mgr.RemoveSQNodesInCollections(ctx, []SQNodeRemoval{
+		{CollectionID: 100, ReplicaID: 1, Nodes: []int64{201}},
+		{CollectionID: 100, ReplicaID: 999, Nodes: []int64{299}},
+		{CollectionID: 200, ReplicaID: 1, Nodes: []int64{201}},
+		{CollectionID: 200, ReplicaID: 2, Nodes: []int64{202}},
+	})
+	assert.NoError(t, err)
+
+	updated1 := mgr.Get(ctx, replica1.GetID())
+	assert.Empty(t, updated1.GetROSQNodes())
+	updated2 := mgr.Get(ctx, replica2.GetID())
+	assert.Empty(t, updated2.GetROSQNodes())
+}
+
+func TestRemoveSQNodesInCollectionsSaveErrorKeepsMemory(t *testing.T) {
+	saveErr := errors.New("save failed")
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(saveErr).Once()
+
+	mgr := NewReplicaManager(RandomIncrementIDAllocator(), catalog)
+	ctx := context.Background()
+	replica := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  100,
+		ResourceGroup: "RG1",
+		RwSqNodes:     []int64{101},
+		RoSqNodes:     []int64{201},
+	})
+	mgr.putReplicasInMemory(replica.GetCollectionID(), replica)
+
+	err := mgr.RemoveSQNodesInCollections(ctx, []SQNodeRemoval{
+		{CollectionID: 100, ReplicaID: 1, Nodes: []int64{201}},
+	})
+	assert.ErrorIs(t, err, saveErr)
+
+	updated := mgr.Get(ctx, replica.GetID())
+	assert.ElementsMatch(t, []int64{101}, updated.GetRWSQNodes())
+	assert.ElementsMatch(t, []int64{201}, updated.GetROSQNodes())
 }
 
 func TestReplicaManager(t *testing.T) {
@@ -1134,7 +1321,11 @@ func TestReplicaManagerPersistErrorPaths(t *testing.T) {
 		})
 		mgr.putReplicasInMemory(replica.GetCollectionID(), replica)
 
-		err := mgr.RemoveSQNode(ctx, replica.GetCollectionID(), replica.GetID(), int64(202))
+		err := mgr.RemoveSQNodesInCollections(ctx, []SQNodeRemoval{{
+			CollectionID: replica.GetCollectionID(),
+			ReplicaID:    replica.GetID(),
+			Nodes:        []int64{202},
+		}})
 		assert.ErrorIs(t, err, saveErr)
 		assert.ElementsMatch(t, []int64{202}, mgr.Get(ctx, replica.GetID()).GetROSQNodes())
 	})
