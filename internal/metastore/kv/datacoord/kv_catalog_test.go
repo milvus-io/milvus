@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -2019,7 +2018,7 @@ func TestCatalog_CopySegmentTask(t *testing.T) {
 	})
 }
 
-func TestCatalog_ExternalCollectionRefreshAndFileResource(t *testing.T) {
+func TestCatalog_ExternalCollectionRefresh(t *testing.T) {
 	kc := &Catalog{}
 
 	job := &datapb.ExternalCollectionRefreshJob{
@@ -2033,11 +2032,6 @@ func TestCatalog_ExternalCollectionRefreshAndFileResource(t *testing.T) {
 		TaskId: 54321,
 		JobId:  12345,
 		State:  indexpb.JobState_JobStateInProgress,
-	}
-
-	resource := &internalpb.FileResourceInfo{
-		Id:   int64(12345),
-		Name: "test_resource",
 	}
 
 	t.Run("SaveExternalCollectionRefreshJob", func(t *testing.T) {
@@ -2092,45 +2086,4 @@ func TestCatalog_ExternalCollectionRefreshAndFileResource(t *testing.T) {
 		assert.Equal(t, int64(54321), tasks[0].TaskId)
 	})
 
-	t.Run("SaveFileResource", func(t *testing.T) {
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil).Times(1)
-		kc.MetaKv = txn
-
-		err := kc.SaveFileResource(context.Background(), resource, uint64(1))
-		assert.NoError(t, err)
-	})
-
-	t.Run("RemoveFileResource", func(t *testing.T) {
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(1)
-		kc.MetaKv = txn
-
-		err := kc.RemoveFileResource(context.Background(), resource.GetId(), uint64(1))
-		assert.NoError(t, err)
-	})
-
-	t.Run("ListFileResource", func(t *testing.T) {
-		value, err := proto.Marshal(resource)
-		assert.NoError(t, err)
-
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(
-			[]string{"key1"}, []string{string(value)}, nil).Times(1)
-		txn.EXPECT().Has(mock.Anything, mock.Anything).Return(true, nil).Times(1)
-		txn.EXPECT().Load(mock.Anything, mock.Anything).Return("100", nil).Times(1)
-		kc.MetaKv = txn
-
-		resources, version, err := kc.ListFileResource(context.Background())
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(resources))
-		assert.Equal(t, int64(12345), resources[0].GetId())
-		assert.Equal(t, uint64(100), version)
-	})
-
-	t.Run("BuildFileResourceKey", func(t *testing.T) {
-		key := BuildFileResourceKey(int64(12345))
-		assert.NotEmpty(t, key)
-		assert.Contains(t, key, "12345")
-	})
 }

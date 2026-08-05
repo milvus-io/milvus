@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -36,8 +37,10 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -448,6 +451,33 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTask() {
 
 	// Verify task creation
 	s.alloc.AssertCalled(s.T(), "AllocID", mock.Anything)
+}
+
+func (s *statsInspectorSuite) TestTriggerTextStatsTaskWithFileResourcesInRefMode() {
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.DNFileResourceMode.Key, "ref")
+	defer pt.Reset(pt.CommonCfg.DNFileResourceMode.Key)
+
+	collection, ok := s.mt.collections.Get(1)
+	s.Require().True(ok)
+	collection.Schema.FileResourceIds = []int64{7}
+
+	expectedResources := []*internalpb.FileResourceInfo{
+		{Id: 7, Name: "dict", Path: "dict.jieba"},
+	}
+	resourceBroker := broker.NewMockBroker(s.T())
+	resourceBroker.EXPECT().GetFileResources(mock.Anything, int64(7)).Return(expectedResources, nil)
+	s.mt.broker = resourceBroker
+
+	segment := s.mt.segments.segments[20]
+	segment.IsSorted = true
+	segment.TextStatsLogs = nil
+
+	s.inspector.triggerTextStatsTask()
+
+	task := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob)
+	s.Require().NotNil(task)
+	s.Equal(expectedResources, task.GetFileResources())
 }
 
 func (s *statsInspectorSuite) TestTriggerTextStatsTaskExternalCollection() {
