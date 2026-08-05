@@ -800,6 +800,20 @@ func LogResultSegmentsInfo(jobID int64, meta *meta, segmentIDs []int64) {
 //     cannot do for a relative path. This matters because LocalChunkManager
 //     opens the caller's path with os.Open, where "../files/insert_log/x"
 //     resolves against the process working directory.
+//
+// Applying POSIX cleaning to REMOTE object keys is deliberate, not an oversight.
+// An S3/MinIO key is an opaque string and RemoteChunkManager passes it through
+// verbatim, so literal prefix matching would describe what a single backend does
+// more precisely -- and would let "files/../files/insert_log/x" and every other
+// syntactic variant of an internal prefix through. RemoteChunkManager fronts
+// MinIO, S3, GCS, Azure Blob, OSS and COS, whose key normalization is not uniform
+// and has historically included key-to-filesystem-path mappings; on any backend
+// that does normalize, those variants read real internal data. The deny list
+// therefore compares the cleaned form on purpose, accepting that a caller key
+// which cleans onto an internal prefix (say "files//insert_log/x", a distinct
+// object on a literal backend) is over-rejected. Over-rejecting is recoverable;
+// under-rejecting is not, and no syntax distinguishes an accidental doubled
+// slash from a deliberate one.
 func normalizeStorageKey(key string) string {
 	return path.Clean("/" + key)
 }
