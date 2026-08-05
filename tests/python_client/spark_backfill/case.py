@@ -69,6 +69,7 @@ class BackfillCase:
             self.collection_name,
             compaction_protection_seconds=compaction_protection_seconds,
         )
+        self.snapshot_names.append(snapshot_name)
         info = self.client.describe_snapshot(snapshot_name, self.collection_name)
         raw = read_json_object(self.minio_client, self.settings.minio_bucket, info.s3_location)
         raw_segment_ids = raw.get("segment_ids", raw.get("segmentIds", []))
@@ -88,7 +89,6 @@ class BackfillCase:
                 f"Storage {expected_kind.upper()} suite requires {expected_kind.upper()} Snapshot segments, "
                 f"observed {view.storage_kind!r}"
             )
-        self.snapshot_names.append(snapshot_name)
         self.snapshot_location = info.s3_location
         self.snapshot = view
         return view
@@ -103,6 +103,7 @@ class BackfillCase:
         score_type=None,
         vector_type=None,
         target_fields: Sequence[str] = ("bf_score", "bf_label", "bf_vector"),
+        target_field_types: Mapping[str, Any] | None = None,
     ) -> str:
         local_path = self.tmp_path / case_id / "input.parquet"
         write_backfill_parquet(
@@ -113,6 +114,7 @@ class BackfillCase:
             score_type=score_type,
             vector_type=vector_type,
             target_fields=target_fields,
+            target_field_types=target_field_types,
         )
         return upload_file(
             self.minio_client,
