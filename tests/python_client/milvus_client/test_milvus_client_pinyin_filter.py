@@ -17,6 +17,13 @@ UNINDEXED_TARGET_ID = INDEXED_SEALED_COUNT
 GROWING_TARGET_ID = INDEXED_SEALED_COUNT + UNINDEXED_SEALED_COUNT
 TARGET_IDS = {INDEXED_TARGET_ID, UNINDEXED_TARGET_ID, GROWING_TARGET_ID}
 
+BM25_TARGET_TEXTS = {
+    INDEXED_TARGET_ID: "中文 向量 数据库",
+    UNINDEXED_TARGET_ID: "中文 中文 向量",
+    GROWING_TARGET_ID: "中文 中文 中文",
+}
+BM25_EXPECTED_RANKED_IDS = [GROWING_TARGET_ID, UNINDEXED_TARGET_ID, INDEXED_TARGET_ID]
+
 PINYIN_OUTPUT_MODES = [
     pytest.param(
         {
@@ -27,6 +34,7 @@ PINYIN_OUTPUT_MODES = [
         },
         "zhong",
         ["中文", "zhong", "wen", "测试", "ce", "shi"],
+        ["中文", "zhong", "wen"],
         ["zhongwen", "zw"],
         id="full-pinyin",
     ),
@@ -39,6 +47,7 @@ PINYIN_OUTPUT_MODES = [
         },
         "zhongwen",
         ["中文", "zhongwen", "测试", "ceshi"],
+        ["中文", "zhongwen"],
         ["zhong", "zw"],
         id="joined-pinyin",
     ),
@@ -51,6 +60,7 @@ PINYIN_OUTPUT_MODES = [
         },
         "zw",
         ["中文", "zw", "测试", "cs"],
+        ["中文", "zw"],
         ["zhong", "zhongwen"],
         id="first-letters",
     ),
@@ -64,12 +74,16 @@ def pinyin_analyzer(options):
     }
 
 
-def build_rows(start, count, include_vector):
+def build_rows(start, count, include_vector, target_texts=None):
     rows = []
     for row_id in range(start, start + count):
         row = {
             "id": row_id,
-            "text": "中文测试" if row_id in TARGET_IDS else f"向量数据库样本{row_id}",
+            "text": (
+                (target_texts[row_id] if target_texts is not None else "中文测试")
+                if row_id in TARGET_IDS
+                else f"向量数据库样本{row_id}"
+            ),
         }
         if include_vector:
             row["vector"] = [float(row_id % 2), float((row_id // 2) % 2)]
@@ -87,9 +101,28 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
         assert len(ids) == len(set(ids)), ids
         assert set(ids) == expected_ids, ids
 
-    def _search_text_match_until_ids(self, client, collection_name, query_text, expected_ids, timeout=30):
+    def _field_analyzer_tokens(self, client, collection_name, text):
+        analyzer_result, _ = self.run_analyzer(
+            client,
+            text,
+            analyzer_params=None,
+            collection_name=collection_name,
+            field_name="text",
+        )
+        return analyzer_result.tokens
+
+    def _search_text_match_until_ids(
+        self,
+        client,
+        collection_name,
+        query_text,
+        expected_ids,
+        minimum_should_match=None,
+        timeout=30,
+    ):
         deadline = time.monotonic() + timeout
         rows = []
+        match_options = "" if minimum_should_match is None else f", minimum_should_match={minimum_should_match}"
         while time.monotonic() < deadline:
             results, _ = self.search(
                 client,
@@ -97,7 +130,7 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
                 data=[[0.0, 0.0]],
                 anns_field="vector",
                 search_params={"metric_type": "L2", "params": {"nprobe": 64}},
-                filter=f'text_match(text, "{query_text}")',
+                filter=f'text_match(text, "{query_text}"{match_options})',
                 limit=TOTAL_COUNT,
                 output_fields=["id", "text"],
             )
@@ -115,6 +148,7 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
         index_params,
         index_name,
         include_vector,
+        target_texts=None,
     ):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(
@@ -129,7 +163,7 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
             properties={"collection.autocompaction.enabled": "false"},
         )
 
-        indexed_rows = build_rows(0, INDEXED_SEALED_COUNT, include_vector)
+        indexed_rows = build_rows(0, INDEXED_SEALED_COUNT, include_vector, target_texts)
         self.insert(client, collection_name, data=indexed_rows)
         self.flush(client, collection_name)
 
@@ -137,6 +171,7 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
             INDEXED_SEALED_COUNT,
             UNINDEXED_SEALED_COUNT,
             include_vector,
+            target_texts,
         )
         self.insert(client, collection_name, data=unindexed_rows)
         self.flush(client, collection_name)
@@ -154,11 +189,12 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
             INDEXED_SEALED_COUNT + UNINDEXED_SEALED_COUNT,
             GROWING_COUNT,
             include_vector,
+            target_texts,
         )
         self.insert(client, collection_name, data=growing_rows)
         return collection_name
 
-    def _create_text_match_collection(self, client, analyzer_params):
+    def _create_text_match_schema(self, client, analyzer_params):
         schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
         self.add_field(schema, "id", DataType.INT64, is_primary=True)
         self.add_field(
@@ -171,6 +207,10 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
             analyzer_params=analyzer_params,
         )
         self.add_field(schema, "vector", DataType.FLOAT_VECTOR, dim=2)
+        return schema
+
+    def _create_text_match_collection(self, client, analyzer_params):
+        schema = self._create_text_match_schema(client, analyzer_params)
 
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(
@@ -187,9 +227,26 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
             include_vector=True,
         )
 
+    def _index_and_load_text_match_collection(self, client, collection_name):
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name="vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 64},
+        )
+        self.create_index(client, collection_name, index_params=index_params)
+        assert self.wait_for_index_ready(
+            client,
+            collection_name,
+            index_name="vector",
+            timeout=180,
+        )
+        self.load_collection(client, collection_name, timeout=180)
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
-        "options,pinyin_query,expected_tokens,disabled_queries",
+        "options,pinyin_query,expected_tokens,original_query_tokens,disabled_queries",
         PINYIN_OUTPUT_MODES,
     )
     def test_pinyin_filter_text_match_output_modes(
@@ -197,6 +254,7 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
         options,
         pinyin_query,
         expected_tokens,
+        original_query_tokens,
         disabled_queries,
     ):
         """
@@ -207,10 +265,9 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
         client = self._client()
         analyzer_params = pinyin_analyzer(options)
 
-        analyzer_result, _ = self.run_analyzer(client, "中文测试", analyzer_params)
-        assert analyzer_result.tokens == expected_tokens
-
         collection_name = self._create_text_match_collection(client, analyzer_params)
+        assert self._field_analyzer_tokens(client, collection_name, "中文测试") == expected_tokens
+        assert self._field_analyzer_tokens(client, collection_name, "中文") == original_query_tokens
 
         pinyin_rows = self._search_text_match_until_ids(
             client,
@@ -225,6 +282,7 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
             collection_name,
             "中文",
             TARGET_IDS,
+            minimum_should_match=len(original_query_tokens),
         )
         self._assert_exact_ids(original_rows, TARGET_IDS)
 
@@ -241,8 +299,8 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
     def test_pinyin_filter_analyzer_without_original(self):
         """
         target: verify keep_original=false removes the original Chinese tokens
-        method: run the joined-Pinyin analyzer directly
-        expected: only joined Pinyin tokens are emitted
+        method: create a field with the joined-Pinyin analyzer and run the analyzer through that field
+        expected: the field configuration emits only joined Pinyin tokens
         """
         client = self._client()
         analyzer_params = pinyin_analyzer(
@@ -254,8 +312,16 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
             }
         )
 
-        analyzer_result, _ = self.run_analyzer(client, "中文测试", analyzer_params)
-        assert analyzer_result.tokens == ["zhongwen", "ceshi"]
+        schema = self._create_text_match_schema(client, analyzer_params)
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            consistency_level="Strong",
+        )
+        self._index_and_load_text_match_collection(client, collection_name)
+        assert self._field_analyzer_tokens(client, collection_name, "中文测试") == ["zhongwen", "ceshi"]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_pinyin_filter_bm25_search_joined_and_original(self):
@@ -309,6 +375,7 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
             index_params,
             index_name="sparse",
             include_vector=False,
+            target_texts=BM25_TARGET_TEXTS,
         )
 
         for query_text in ["zhongwen", "中文"]:
@@ -318,8 +385,13 @@ class TestMilvusClientPinyinFilterIndependent(TestMilvusClientV2Base):
                 data=[query_text],
                 anns_field="sparse",
                 search_params={"metric_type": "BM25", "params": {}},
-                limit=TOTAL_COUNT,
+                limit=len(BM25_EXPECTED_RANKED_IDS),
                 output_fields=["id", "text"],
             )
-            self._assert_exact_ids(results[0], TARGET_IDS)
-            assert all(hit["entity"]["text"] == "中文测试" for hit in results[0])
+            hits = results[0]
+            assert [hit["id"] for hit in hits] == BM25_EXPECTED_RANKED_IDS
+            distances = [hit["distance"] for hit in hits]
+            assert all(left > right for left, right in zip(distances, distances[1:])), distances
+            assert [hit["entity"]["text"] for hit in hits] == [
+                BM25_TARGET_TEXTS[row_id] for row_id in BM25_EXPECTED_RANKED_IDS
+            ]
