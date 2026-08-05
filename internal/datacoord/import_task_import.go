@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -35,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -136,11 +136,12 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
 		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
-		if merr.IsNonRetryableErr(err) {
-			// Deterministic failure (e.g. a reserved PK range too small for the
-			// file): fail the task now and keep the precise reason, instead of
-			// leaving it Pending to be rescheduled until the job's import timeout
-			// overwrites the reason with a generic message.
+		if errors.Is(err, ErrPKRangeTooSmall) {
+			// The one assemble failure a retry cannot fix: the reservation was
+			// sized from an upper bound and preimport produced a larger exact
+			// count. Fail now and keep the precise reason, instead of leaving the
+			// task Pending to be rescheduled every tick until the job's import
+			// timeout overwrites the reason with a generic message.
 			if updateErr := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
 				UpdateState(datapb.ImportTaskStateV2_Failed),
 				UpdateReason(err.Error())); updateErr != nil {
