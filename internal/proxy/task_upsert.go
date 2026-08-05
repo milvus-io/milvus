@@ -744,16 +744,30 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 
 		case *schemapb.ScalarField_ArrayData:
 			validRowNum := getValidNumber(field.GetValidData())
-			if validRowNum == 0 {
-				sd.ArrayData.Data = make([]*schemapb.ScalarField, 0)
-			} else {
-				ret := make([]*schemapb.ScalarField, 0, validRowNum)
-				for i, valid := range field.GetValidData() {
-					if valid {
-						ret = append(ret, sd.ArrayData.Data[i])
+			if len(sd.ArrayData.GetNullableData()) > 0 {
+				if validRowNum == 0 {
+					sd.ArrayData.NullableData = make([]*schemapb.NullableScalarArrayValue, 0)
+				} else {
+					ret := make([]*schemapb.NullableScalarArrayValue, 0, validRowNum)
+					for i, valid := range field.GetValidData() {
+						if valid {
+							ret = append(ret, sd.ArrayData.NullableData[i])
+						}
 					}
+					sd.ArrayData.NullableData = ret
 				}
-				sd.ArrayData.Data = ret
+			} else {
+				if validRowNum == 0 {
+					sd.ArrayData.Data = make([]*schemapb.ScalarField, 0)
+				} else {
+					ret := make([]*schemapb.ScalarField, 0, validRowNum)
+					for i, valid := range field.GetValidData() {
+						if valid {
+							ret = append(ret, sd.ArrayData.Data[i])
+						}
+					}
+					sd.ArrayData.Data = ret
+				}
 			}
 		case *schemapb.ScalarField_TimestamptzData:
 			validRowNum := getValidNumber(field.GetValidData())
@@ -943,6 +957,14 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 		}, nil
 
 	case schemapb.DataType_Array:
+		arrayData := &schemapb.ArrayArray{
+			ElementType: field.GetElementType(),
+		}
+		if field.GetElementNullable() {
+			arrayData.NullableData = make([]*schemapb.NullableScalarArrayValue, upsertIDSize)
+		} else {
+			arrayData.Data = make([]*schemapb.ScalarField, upsertIDSize)
+		}
 		return &schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
@@ -952,10 +974,7 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_ArrayData{
-						ArrayData: &schemapb.ArrayArray{
-							Data:        make([]*schemapb.ScalarField, upsertIDSize),
-							ElementType: field.GetElementType(),
-						},
+						ArrayData: arrayData,
 					},
 				},
 			},

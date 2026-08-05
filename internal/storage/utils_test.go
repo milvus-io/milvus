@@ -1165,6 +1165,112 @@ func TestColumnBasedTransferInsertMsgToInsertRecordSkipDroppedField(t *testing.T
 	assert.Equal(t, []int64{158}, skippedFields)
 }
 
+func TestColumnBasedTransferInsertMsgToInsertRecord_ElementNullableArray(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "element_nullable_array",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:         101,
+				Name:            "arr",
+				DataType:        schemapb.DataType_Array,
+				ElementType:     schemapb.DataType_Int64,
+				ElementNullable: true,
+			},
+		},
+	}
+	msg := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			NumRows: 2,
+			Version: msgpb.InsertDataVersion_ColumnBased,
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   100,
+					FieldName: "pk",
+					Type:      schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{1, 2}},
+							},
+						},
+					},
+				},
+				{
+					FieldId:   101,
+					FieldName: "arr",
+					Type:      schemapb.DataType_Array,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_ArrayData{
+								ArrayData: &schemapb.ArrayArray{
+									ElementType: schemapb.DataType_Int64,
+									NullableData: []*schemapb.NullableScalarArrayValue{
+										{
+											Data: &schemapb.ScalarField{
+												Data: &schemapb.ScalarField_LongData{
+													LongData: &schemapb.LongArray{Data: []int64{10, 0}},
+												},
+											},
+											ValidData: []bool{true, false},
+										},
+										{
+											Data: &schemapb.ScalarField{
+												Data: &schemapb.ScalarField_LongData{
+													LongData: &schemapb.LongArray{Data: []int64{20}},
+												},
+											},
+											ValidData: []bool{true},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	record, err := TransferInsertMsgToInsertRecord(schema, msg)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), record.GetNumRows())
+	require.Len(t, record.GetFieldsData(), 2)
+	arrayData := record.GetFieldsData()[1].GetScalars().GetArrayData()
+	require.Len(t, arrayData.GetNullableData(), 2)
+	assert.Empty(t, arrayData.GetData())
+	assert.Equal(t, []bool{true, false}, arrayData.GetNullableData()[0].GetValidData())
+	assert.Equal(t, []int64{10, 0}, arrayData.GetNullableData()[0].GetData().GetLongData().GetData())
+}
+
+func TestTransferInsertDataToInsertRecord_ElementNullableArrayOfVectorAllowsNullRowPlaceholder(t *testing.T) {
+	insertData := &InsertData{
+		Data: map[FieldID]FieldData{
+			101: &VectorArrayFieldData{
+				Dim:             2,
+				ElementType:     schemapb.DataType_FloatVector,
+				Nullable:        true,
+				ElementNullable: true,
+				ValidData:       []bool{false},
+				NullableData:    []*schemapb.NullableVectorArrayValue{{}},
+			},
+		},
+	}
+
+	record, err := TransferInsertDataToInsertRecord(insertData)
+	require.NoError(t, err)
+	require.Len(t, record.GetFieldsData(), 1)
+	field := record.GetFieldsData()[0]
+	assert.Equal(t, []bool{false}, field.GetValidData())
+	require.Len(t, field.GetVectors().GetVectorArray().GetNullableData(), 1)
+	assert.Nil(t, field.GetVectors().GetVectorArray().GetNullableData()[0].GetData())
+}
+
 func TestRowBasedInsertMsgToInsertFloat16VectorDataError(t *testing.T) {
 	msg := &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{

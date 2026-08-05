@@ -299,8 +299,12 @@ func (ds *DataSorter) Swap(i, j int) {
 			}
 		case schemapb.DataType_Array:
 			fd := singleData.(*ArrayFieldData)
-			data := fd.Data
-			data[i], data[j] = data[j], data[i]
+			if fd.GetElementNullable() {
+				fd.NullableData[i], fd.NullableData[j] = fd.NullableData[j], fd.NullableData[i]
+			} else {
+				data := fd.Data
+				data[i], data[j] = data[j], data[i]
+			}
 			swapValidData(fd.ValidData, i, j)
 		case schemapb.DataType_JSON:
 			fd := singleData.(*JSONFieldData)
@@ -332,7 +336,12 @@ func (ds *DataSorter) Swap(i, j int) {
 			}
 		case schemapb.DataType_ArrayOfVector:
 			fieldData := singleData.(*VectorArrayFieldData)
-			fieldData.Data[i], fieldData.Data[j] = fieldData.Data[j], fieldData.Data[i]
+			if fieldData.GetElementNullable() {
+				fieldData.NullableData[i], fieldData.NullableData[j] = fieldData.NullableData[j], fieldData.NullableData[i]
+			} else {
+				fieldData.Data[i], fieldData.Data[j] = fieldData.Data[j], fieldData.Data[i]
+			}
+			swapValidData(fieldData.ValidData, i, j)
 		default:
 			errMsg := "undefined data type " + string(field.DataType)
 			panic(errMsg)
