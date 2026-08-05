@@ -394,7 +394,8 @@ func TestOldVersionLastConfirmedTracker_LargeWindow(t *testing.T) {
 		if i < windowSize {
 			assert.Equal(t, ids[0], result)
 		} else {
-			assert.Equal(t, ids[i-windowSize], result)
+			expected := ids[i-windowSize]
+			assert.Equal(t, expected, result)
 		}
 	}
 }
