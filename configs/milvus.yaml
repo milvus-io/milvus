@@ -662,7 +662,8 @@ queryNode:
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   scheduler:
-    unsolvedQueueSize: 1024
+    unsolvedQueueSize: 1024 # Maximum number of regular read tasks waiting in the scheduler. When the dedicated requery lane is enabled under fifo, this is an independent regular-task budget and the effective total capacity is the sum of the regular and requery capacities.
+    requeryUnsolvedQueueSize: 1024 # Maximum number of scheduler-owned requery tasks waiting in the dedicated priority lane when scheduleReadPolicy is fifo, including a task staged for execution handoff. It defaults to an independent capacity of 1024, so the default total waiting-task capacity is 1024 regular tasks plus 1024 requery tasks. A positive integer sets the lane capacity, a value <= 0 disables the lane, and an invalid value emits a warning and falls back to 1024. The lane is disabled when scheduleReadPolicy is user-task-polling.
     # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
     # Max read concurrency would be the value of hardware.GetCPUNum * maxReadConcurrentRatio.
     # It defaults to 2.0, which means max read concurrency would be the value of hardware.GetCPUNum * 2.
