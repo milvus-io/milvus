@@ -75,6 +75,7 @@ func TestProtoContract_FieldSetsPinned(t *testing.T) {
 		{"schemapb.DoubleArray", &schemapb.DoubleArray{}, []int{1}},
 		{"schemapb.BytesArray", &schemapb.BytesArray{}, []int{1}},
 		{"schemapb.JSONArray", &schemapb.JSONArray{}, []int{1}},
+		{"schemapb.UUIDArray", &schemapb.UUIDArray{}, []int{1}},
 		{"schemapb.StringArray", &schemapb.StringArray{}, []int{1}},
 	}
 	for _, c := range cases {
