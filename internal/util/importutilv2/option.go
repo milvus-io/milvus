@@ -75,6 +75,13 @@ const (
 
 type Options []*commonpb.KeyValuePair
 
+// foldMatchedKeys are the only option keys any reader on the import path matches
+// case-insensitively: ParseTimeRange's getTimestamp compares against exactly these
+// (option.go's getTimestamp is the sole strings.EqualFold on the path). Every other
+// reader matches byte-exactly, so two keys differing only in case are distinct to
+// them and need no dedup.
+var foldMatchedKeys = []string{StartTs, StartTs2, EndTs, EndTs2}
+
 // ValidateNoDuplicateKeys rejects an option list carrying the same key twice.
 //
 // Import options are read in two incompatible ways. Every check reads them as a
@@ -95,16 +102,27 @@ type Options []*commonpb.KeyValuePair
 //
 // Call this before any option is read.
 func ValidateNoDuplicateKeys(options Options) error {
-	for i, kv := range options {
-		for _, prev := range options[:i] {
-			if !strings.EqualFold(prev.GetKey(), kv.GetKey()) {
+	seen := make(map[string]struct{}, len(options))
+	// Which fold-matched key each request key has already claimed. Comparing every
+	// pair would also be correct but quadratic, and nothing bounds how many options
+	// a request may carry: the only ceiling is the 256 MiB gRPC body, and 20k keys
+	// fit in 352 KB. Scanning the fixed foldMatchedKeys per option keeps it linear.
+	claimed := make(map[string]string, len(foldMatchedKeys))
+	for _, kv := range options {
+		key := kv.GetKey()
+		if _, ok := seen[key]; ok {
+			return merr.WrapErrParameterInvalidMsg("duplicate import option key: %s", key)
+		}
+		seen[key] = struct{}{}
+		for _, target := range foldMatchedKeys {
+			if !strings.EqualFold(key, target) {
 				continue
 			}
-			if prev.GetKey() == kv.GetKey() {
-				return merr.WrapErrParameterInvalidMsg("duplicate import option key: %s", kv.GetKey())
+			if prev, ok := claimed[target]; ok {
+				return merr.WrapErrParameterInvalidMsg(
+					"duplicate import option key: %s, which matches %s case-insensitively", key, prev)
 			}
-			return merr.WrapErrParameterInvalidMsg(
-				"duplicate import option key: %s, which matches %s case-insensitively", kv.GetKey(), prev.GetKey())
+			claimed[target] = key
 		}
 	}
 	return nil
