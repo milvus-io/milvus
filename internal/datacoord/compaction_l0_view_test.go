@@ -104,14 +104,17 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 			128 * 1024 * 1024,
 			1,
 			30000,
-			[]UniqueID{100},
+			// #49435: over-limit pick is now oldest-first; id101 (dmlPos 10000)
+			// is older than id100 (dmlPos 20000).
+			[]UniqueID{101},
 		},
 		{
 			"Trigger by > maxDeltaCount",
 			1,
 			800,
 			30000,
-			[]UniqueID{100},
+			// #49435: over-limit pick is now oldest-first; id101 (dmlPos 10000).
+			[]UniqueID{101},
 		},
 	}
 
@@ -143,6 +146,40 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 			}
 		})
 	}
+}
+
+func (s *LevelZeroSegmentsViewSuite) TestTriggerPicksOldestContiguousPrefix() {
+	// issue #49435: when the L0 view exceeds the pick limit, Trigger must consume the
+	// OLDEST contiguous ts-prefix, so a baked deltalog's TimestampTo can never
+	// over-state coverage. Feed segments in shuffled dmlPos order and assert the pick
+	// is the two oldest (by dmlPos), not the input-order prefix {103, 101}.
+	label := s.v.GetGroupLabel()
+	// dmlPos: id100=10000 (oldest), id101=20000, id102=30000, id103=40000 (newest);
+	// deliberately shuffled in the slice.
+	views := []*SegmentView{
+		genTestL0SegmentView(103, label, 40000),
+		genTestL0SegmentView(101, label, 20000),
+		genTestL0SegmentView(100, label, 10000),
+		genTestL0SegmentView(102, label, 30000),
+	}
+	// DeltalogCount 400 each with maxDeltaCount=1000 admits exactly two per pick.
+	for _, v := range views {
+		v.DeltalogCount = 400
+		v.DeltaSize = 1
+		v.DeltaRowCount = 1
+	}
+	s.v.l0Segments = views
+
+	gotView, _ := s.v.Trigger()
+	s.Require().NotNil(gotView)
+	levelZeroView, ok := gotView.(*LevelZeroCompactionView)
+	s.Require().True(ok)
+
+	gotSegIDs := lo.Map(levelZeroView.GetSegmentsView(), func(v *SegmentView, _ int) int64 {
+		return v.ID
+	})
+	// oldest two (dmlPos 10000, 20000) = id100, id101 — contiguous, not {103, 101}.
+	s.ElementsMatch([]int64{100, 101}, gotSegIDs)
 }
 
 func (s *LevelZeroSegmentsViewSuite) TestMinCountSizeTrigger() {
