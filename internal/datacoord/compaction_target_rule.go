@@ -26,9 +26,18 @@ import (
 
 const compactionTargetPropertySegmentIDs = "segment_ids"
 
+// targetRule evaluates the intent-specific predicate after the target applies
+// its common scope and candidate requirements.
+type targetRule interface {
+	// Match reports whether an in-scope candidate satisfies the rule.
+	Match(segment *SegmentInfo) bool
+}
+
 type rewriteRule struct {
 	expectedTS uint64
 }
+
+var _ targetRule = rewriteRule{}
 
 func newRewriteRule(target *datapb.CompactionTarget) rewriteRule {
 	return rewriteRule{
@@ -37,9 +46,7 @@ func newRewriteRule(target *datapb.CompactionTarget) rewriteRule {
 }
 
 func (rule rewriteRule) Match(segment *SegmentInfo) bool {
-	return segment != nil &&
-		isNormalManualCompactionSegment(segment) &&
-		segment.GetCreateTs() < rule.expectedTS
+	return segment != nil && segment.GetCreateTs() < rule.expectedTS
 }
 
 func sortedCompactionTargetSegmentIDs(segmentIDs []int64) []int64 {

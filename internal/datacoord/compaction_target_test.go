@@ -426,22 +426,22 @@ func TestRewriteCompactionTargetSegmentIDScopeUsesExactLiveSegmentID(t *testing.
 	))
 }
 
-func mustNewCompactionTarget(t testing.TB, record *datapb.CompactionTarget) *compactionTarget {
+func mustNewCompactionTarget(t testing.TB, record *datapb.CompactionTarget) compactionTarget {
 	t.Helper()
 	target, err := newCompactionTarget(record)
 	require.NoError(t, err)
 	return target
 }
 
-func targetSatisfied(target compactionTargetEvaluator, segments ...*SegmentInfo) bool {
+func targetSatisfied(target compactionTarget, segments ...*SegmentInfo) bool {
 	return target.Satisfied(filterTargetMatches(target, segments...))
 }
 
-func targetMatchesSegment(target compactionTargetEvaluator, segment *SegmentInfo) bool {
+func targetMatchesSegment(target compactionTarget, segment *SegmentInfo) bool {
 	return len(filterTargetMatches(target, segment)) == 1
 }
 
-func filterTargetMatches(target compactionTargetEvaluator, segments ...*SegmentInfo) []*SegmentInfo {
+func filterTargetMatches(target compactionTarget, segments ...*SegmentInfo) []*SegmentInfo {
 	filters := target.MatchFilters()
 	matches := make([]*SegmentInfo, 0, len(segments))
 	for _, segment := range segments {

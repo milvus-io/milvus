@@ -39,14 +39,14 @@ type compactionTargetMeta struct {
 	sync.RWMutex
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog
-	targets map[int64]*compactionTarget
+	targets map[int64]compactionTarget
 }
 
 func newCompactionTargetMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*compactionTargetMeta, error) {
 	meta := &compactionTargetMeta{
 		ctx:     ctx,
 		catalog: catalog,
-		targets: make(map[int64]*compactionTarget),
+		targets: make(map[int64]compactionTarget),
 	}
 	if err := meta.reloadFromKV(); err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func (m *compactionTargetMeta) reloadFromKV() error {
 	if err != nil {
 		return err
 	}
-	loadedTargets := make(map[int64]*compactionTarget, len(targets))
+	loadedTargets := make(map[int64]compactionTarget, len(targets))
 	for _, target := range targets {
 		runtimeTarget, err := newCompactionTarget(target)
 		if err != nil {
@@ -102,11 +102,11 @@ func (m *compactionTargetMeta) GetCompactionTargets() map[int64]*datapb.Compacti
 	return targets
 }
 
-func (m *compactionTargetMeta) GetActiveCompactionTargets() map[int64]compactionTargetEvaluator {
+func (m *compactionTargetMeta) GetActiveCompactionTargets() map[int64]compactionTarget {
 	m.RLock()
 	defer m.RUnlock()
 
-	active := make(map[int64]compactionTargetEvaluator)
+	active := make(map[int64]compactionTarget)
 	for targetID, target := range m.targets {
 		if target.active() {
 			active[targetID] = target
@@ -144,9 +144,11 @@ func (m *compactionTargetMeta) UpdateCompactionTargetState(ctx context.Context, 
 
 	var inactivatedAtTS uint64
 	target, loaded := m.targets[targetID]
+	var updated *datapb.CompactionTarget
 	if loaded {
 		var changed bool
-		inactivatedAtTS, changed = compactionTargetStateUpdate(target, state)
+		updated = target.Clone()
+		inactivatedAtTS, changed = compactionTargetStateUpdate(updated, state)
 		if !changed {
 			mlog.Info(ctx, "meta update: skip unchanged compaction target state",
 				mlog.Int64("targetID", targetID),
@@ -164,7 +166,6 @@ func (m *compactionTargetMeta) UpdateCompactionTargetState(ctx context.Context, 
 		return err
 	}
 	if loaded {
-		updated := target.Clone()
 		updated.State = state
 		updated.InactivatedAtTS = inactivatedAtTS
 		m.upsertCompactionTargetLocked(updated)
@@ -256,28 +257,27 @@ func (target *manualRewriteCompactionTarget) Properties() map[string]string {
 	return compactionTargetSegmentIDProperties(target.segmentIDs)
 }
 
-type matchRule interface {
-	Match(segment *SegmentInfo) bool
-}
-
-type compactionTargetEvaluator interface {
+// compactionTarget defines the runtime behavior of a persisted target.
+type compactionTarget interface {
+	Clone() *datapb.CompactionTarget
+	active() bool
 	MatchFilters() []SegmentFilter
 	Satisfied(matches []*SegmentInfo) bool
 }
 
-type compactionTarget struct {
+type baseCompactionTarget struct {
 	*datapb.CompactionTarget
 	segmentIDs []int64
-	rule       matchRule
+	rule       targetRule
 }
 
-var _ compactionTargetEvaluator = (*compactionTarget)(nil)
+var _ compactionTarget = (*baseCompactionTarget)(nil)
 
-func newCompactionTarget(target *datapb.CompactionTarget) (*compactionTarget, error) {
+func newCompactionTarget(target *datapb.CompactionTarget) (compactionTarget, error) {
 	if target == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("nil compaction target record")
 	}
-	runtimeTarget := &compactionTarget{
+	runtimeTarget := &baseCompactionTarget{
 		CompactionTarget: proto.Clone(target).(*datapb.CompactionTarget),
 	}
 	switch target.GetIntent() {
@@ -294,25 +294,25 @@ func newCompactionTarget(target *datapb.CompactionTarget) (*compactionTarget, er
 	}
 }
 
-func (target *compactionTarget) Clone() *datapb.CompactionTarget {
+func (target *baseCompactionTarget) Clone() *datapb.CompactionTarget {
 	if target == nil || target.CompactionTarget == nil {
 		return nil
 	}
 	return proto.Clone(target.CompactionTarget).(*datapb.CompactionTarget)
 }
 
-func (target *compactionTarget) active() bool {
+func (target *baseCompactionTarget) active() bool {
 	return target != nil &&
 		target.CompactionTarget != nil &&
 		target.rule != nil &&
 		target.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE
 }
 
-func (target *compactionTarget) finite() bool {
+func (target *baseCompactionTarget) finite() bool {
 	return target.GetTailLimit() >= 0
 }
 
-func (target *compactionTarget) scopeIn(segment *SegmentInfo) bool {
+func (target *baseCompactionTarget) scopeIn(segment *SegmentInfo) bool {
 	if target == nil || target.CompactionTarget == nil || target.rule == nil || segment == nil {
 		return false
 	}
@@ -337,12 +337,14 @@ func (target *compactionTarget) scopeIn(segment *SegmentInfo) bool {
 	return true
 }
 
-func (target *compactionTarget) match(segment *SegmentInfo) bool {
-	return target.scopeIn(segment) && target.rule.Match(segment)
+func (target *baseCompactionTarget) match(segment *SegmentInfo) bool {
+	return target.scopeIn(segment) &&
+		isNormalManualCompactionSegment(segment) &&
+		target.rule.Match(segment)
 }
 
 // MatchFilters returns the complete authoritative semantic match filters for the target.
-func (target *compactionTarget) MatchFilters() []SegmentFilter {
+func (target *baseCompactionTarget) MatchFilters() []SegmentFilter {
 	filters := make([]SegmentFilter, 0, 2)
 	if target != nil && target.CompactionTarget != nil && target.GetCollectionID() != 0 {
 		filters = append(filters, WithCollection(target.GetCollectionID()))
@@ -350,7 +352,7 @@ func (target *compactionTarget) MatchFilters() []SegmentFilter {
 	return append(filters, SegmentFilterFunc(target.match))
 }
 
-func (target *compactionTarget) Satisfied(matches []*SegmentInfo) bool {
+func (target *baseCompactionTarget) Satisfied(matches []*SegmentInfo) bool {
 	tail := target.GetTailLimit()
 	if tail < 0 {
 		return false
@@ -385,7 +387,7 @@ func allocCompactionTargetIdentity(ctx context.Context, alloc allocator.Allocato
 	return targetID, activatedAtTS, nil
 }
 
-func compactionTargetStateUpdate(target *compactionTarget, state datapb.TargetState) (uint64, bool) {
+func compactionTargetStateUpdate(target *datapb.CompactionTarget, state datapb.TargetState) (uint64, bool) {
 	if state == datapb.TargetState_TARGET_STATE_INACTIVE {
 		if target.GetState() == state && target.GetInactivatedAtTS() != 0 {
 			return target.GetInactivatedAtTS(), false
