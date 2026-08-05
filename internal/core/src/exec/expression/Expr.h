@@ -550,6 +550,38 @@ class SegmentExpr : public Expr {
         return prepared;
     }
 
+    void
+    PrefetchLegacyRawDataChunksIfNeeded(const ChunkedColumnInterface* column) {
+        if (column == nullptr || !UsesLegacyChunkPrefetch(column) ||
+            prefetched_ || !segment_->is_chunked()) {
+            return;
+        }
+        const auto num_chunks = column->num_chunks();
+        int64_t first_chunk = num_chunks;
+        if (current_data_global_pos_ < active_count_) {
+            first_chunk =
+                column->GetChunkIDByOffset(current_data_global_pos_).first;
+        }
+        AssertInfo(first_chunk >= 0 && first_chunk <= num_chunks,
+                   "scan prefetch chunk {} out of range {}",
+                   first_chunk,
+                   num_chunks);
+        std::vector<int64_t> chunk_ids;
+        chunk_ids.reserve(num_chunks - first_chunk);
+        for (int64_t i = first_chunk; i < num_chunks; i++) {
+            chunk_ids.push_back(i);
+        }
+        column->PrefetchChunks(op_ctx_, chunk_ids);
+        prefetched_ = true;
+    }
+
+    static bool
+    UsesLegacyChunkPrefetch(const ChunkedColumnInterface* column) {
+        return column == nullptr ||
+               column->GetLocalFormat() ==
+                   ChunkedColumnInterface::LocalFormat::Raw;
+    }
+
     static void
     ApplyScanValidity(const ChunkedColumnInterface::ScanBatch& batch,
                       int64_t batch_pos,
@@ -1448,16 +1480,8 @@ class SegmentExpr : public Expr {
         int64_t processed_rows = 0;
         int64_t processed_elems = 0;
 
-        // Prefetch chunks to reduce cache miss latency
-        if (!prefetched_) {
-            std::vector<int64_t> pf_chunk_ids;
-            pf_chunk_ids.reserve(num_data_chunk_ - current_data_chunk_);
-            for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
-                pf_chunk_ids.push_back(i);
-            }
-            segment_->prefetch_chunks(op_ctx_, field_id_, pf_chunk_ids);
-            prefetched_ = true;
-        }
+        auto column = segment_->GetChunkedColumn(field_id_);
+        PrefetchLegacyRawDataChunksIfNeeded(column.get());
 
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
@@ -3014,6 +3038,13 @@ class SegmentExpr : public Expr {
             }
             self->EnsureExecPathDetermined();
             if (self->exec_path_ == ExprExecPath::RawData) {
+                auto column = self->segment_->GetChunkedColumn(self->field_id_);
+                if (!UsesLegacyChunkPrefetch(column.get())) {
+                    // Non-raw formats own their cell selection and pinning.
+                    // Legacy chunk prefetch would eagerly load the full
+                    // column and defeat their cache policy.
+                    return;
+                }
                 self->PrefetchRawData();
                 self->prefetched_ = true;
             }

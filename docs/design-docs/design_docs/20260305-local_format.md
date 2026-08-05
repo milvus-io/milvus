@@ -110,8 +110,11 @@ true:
 - all fields in the physical column group have `local_format=vortex`;
 - the Storage V3 manifest says the physical column group file is Vortex.
 
-If either condition is false, the segment uses the existing raw loading path for
-that column group.
+If the group mixes Vortex with default or explicit raw local-format fields, the
+segment falls back to the group default local format. The default is currently
+the existing raw row layout; a future server-level default may change this
+resolution. A group containing the primary-key field is the exception: it must
+always fall back to the raw row layout, regardless of the configured default.
 
 ## Design Details
 
@@ -289,7 +292,11 @@ The interface covers two operation groups:
 - scan operations for expression evaluation;
 - positional take/output operations for retrieve, requery, and bulk_subscript.
 
-`Scan` returns a cursor of `ScanBatch` values.
+`PrepareScan` returns a window-local prepared scan that owns the planner result,
+selected cell set, and cache pins for one leaf operator execution window.
+Cursors of `ScanBatch` values are opened from that prepared scan. The
+convenience `Scan` method prepares the input and immediately opens its planned
+cursor.
 
 Scan outputs:
 
@@ -314,15 +321,44 @@ Vortex converts the current Arrow slice's validity bitmap into a
 `FixedVector<bool>`, and `ScanBatch::owner` keeps that mask and the values alive
 for the batch lifetime.
 
-Scan creation first plans the cells required by the requested row range and
-projection, pins that complete cell set, and then constructs the cursor over
-the pinned input. Validity-only scans use the same flow but omit value parsing;
-non-nullable validity-only scans have an empty cell plan. `Next(max_rows)` never
-loads or pins cells. It only returns a complete batch starting at `Position()`,
-bounded by both `max_rows` and the current column chunk, and advances the cursor
-position. `ScanBatch::owner` shares the cursor's pinned input (plus any
-batch-local materialization) so returned pointers remain valid even if the
-cursor advances or is closed.
+Scan preparation keeps backend pruning decisions in Cell-ID form until the
+cursor boundary:
+
+1. A pre-pin planner uses only footer/statistics metadata loaded with the
+   segment and produces skipped Cell IDs.
+2. Non-nullable scans omit those Cells from the pin request. Nullable scans pin
+   every Cell in the window because data and validity share the same Cell.
+3. After pinning, Raw may run its payload-backed legacy SkipIndex on the
+   planner-retained Cells and add more skipped Cell IDs. Vortex has no
+   payload-backed post-pin skip phase.
+4. Immediately before publishing the prepared cursor plan, the backend unions
+   the skipped Cell IDs and converts them to sorted, coalesced segment-offset
+   ranges. Vortex Cell IDs remain scoped by source file until this conversion
+   because the same local Cell ID may occur in multiple files.
+
+Validity and data are currently stored in the same Cell. A nullable scan that
+needs field validity therefore pins every Cell intersecting the current window,
+including planner-NoMatch ranges. A non-nullable scan may omit planner-skipped
+Cells. Validity-only scans use the same Cell pin semantics and omit values from
+the public `ScanBatch`; a backend may still need to decode the combined physical
+representation to recover validity. Non-nullable validity-only scans have an
+empty cell plan.
+
+`Next(max_rows)` does not pin cells, and `max_rows` is an upper bound rather
+than an exact batch size. Dense data batches cannot cross a NoMatch range or a
+backend batch boundary. For a non-nullable NoMatch range, the cursor returns no
+batch and advances its logical `Position()` across the range. For a nullable
+NoMatch range, the same data cursor returns a validity-only batch: `values` is
+empty, while `row_id_start`, `size`, and `validity` remain aligned with the
+source rows. This preserves Unknown without opening a second validity cursor or
+repinning Cells. The complete expression window remains row aligned.
+`ScanBatch::owner` shares the prepared scan's pinned input (plus any batch-local
+materialization) so returned pointers remain valid for the batch lifetime.
+
+Reopening a cursor for a subrange of the same `PreparedScan` retains and clips
+the prepared planner skips automatically. Callers specify the new logical
+range; they do not repeat backend pin-selection state, and reopening never
+repins Cells.
 
 Row-id scan supports:
 
@@ -361,6 +397,12 @@ Responsibilities:
   internal fields use the field id string.
 - Build a field-level projected Arrow schema.
 - Create field-level planner/reader state.
+- Validate every file's Arrow field type against the Milvus `FieldMeta` before
+  publishing the column. Direct scans use checked Arrow casts; physical
+  representations that require the existing normalization path fall back to
+  materialized raw-compatible scans instead of being reinterpreted in place.
+- Reject actual NULL rows returned for a non-nullable Milvus field across scan
+  and take paths as `DataFormatBroken`.
 - Implement `Scan`.
 - Implement positional take helpers for retrieve output.
 
@@ -409,12 +451,31 @@ This is the current path for examples such as `LIKE`, `IN`, JSON path
 expressions, and array predicates when they cannot be represented as a Vortex
 predicate.
 
+`VortexColumn::PrepareScan` is called once per evaluated operator window. It
+creates the window read plan and pins its cells before returning. Nullable
+row-id scans prepare both the predicate plan and the full validity plan, union
+their cell ids, and share one pin between the two readers; this intentionally
+pins planner-pruned Cells because their validity is still needed. Non-nullable
+row-id scans can omit predicate-pruned Cells. Vortex does not run the legacy
+payload-dependent Raw SkipIndex path.
+
+The prepared scan retains those plans and reuses them when opening the normal
+full-window cursor, so pin selection and reader execution consume the same
+planner result. Predicate-pruned Vortex Cells remain file-scoped Cell IDs while
+plans are built and pins are selected, then are normalized once to segment
+offset `ScanPlan::skip_ranges` at the prepared cursor boundary. The private read
+plan and the public logical ranges therefore describe the same planner
+decision without conflating equal local Cell IDs from different files. A cursor
+may consume the Arrow stream incrementally, but the reader and its Cell pins
+remain scoped to that one operator window and are destroyed before the next
+window. The scan path does not concatenate the window through `IntoArray`;
+subrange reopen is allowed to replan within the already pinned Cell set.
+
 The expression layer keeps only its segment-global execution position. Normal
-evaluation consumes complete cursor batches and advances that position. If a
-conjunction short-circuits an execution batch, the expression advances its
-logical position and closes the active cursor. The next real read reopens a
-cursor at the new position on the same retained column generation. A future
-cursor seek operation can replace reopen without changing this ownership split.
+evaluation prepares, consumes, and destroys one complete window before moving
+to the next. If a conjunction short-circuits an execution window, it advances
+the logical position without creating that leaf's planner, pins, or reader.
+Readers and pins are not retained across expression windows.
 Legacy Chunk access follows the same position rule: chunk id and in-chunk offset
 are derived caches. A short-circuit invalidates that cache, and the next Chunk
 read reconstructs it from the segment-global execution position.
@@ -424,19 +485,22 @@ read reconstructs it from the segment-global execution position.
 Offset-input execution is used when expression evaluation is restricted to a
 known set of segment offsets.
 
-The initial Vortex local format implementation handles dense sorted offsets by
-scanning one continuous range:
+Offset input uses positional `Take`, not a dense range `Scan`:
 
 ```text
 ProcessDataByOffsets
-  -> ProcessSortedDataByOffsetsByScan
-  -> scan [min_offset, max_offset + 1)
-  -> expression layer checks the offset bitmap
+  -> ChunkedColumnInterface::Take(offsets)
+  -> consume one or more TakeBatch values
+  -> evaluate exactly the requested rows in input order
 ```
 
-Bitmap or selection pushdown into `ChunkedColumnInterface::Scan` is left as
-future work. The current strategy avoids many small reads while keeping
-semantics simple.
+The public contract preserves input order and duplicate offsets. Raw keeps the
+request order and streams consecutive runs from the same raw chunk;
+fixed-width values use a pinned payload plus selection, while variable-width
+types build views only for requested rows. Vortex may sort, group, and
+deduplicate offsets internally to reduce reader work, materializes the request,
+and restores the original order before exposing batches. Internal result
+positions and physical grouping do not cross the `TakeBatch` boundary.
 
 ### Retrieve and Requery
 
@@ -446,18 +510,19 @@ selected row offsets.
 ```text
 FillTargetEntry / Retrieve output
   -> bulk_subscript
-  -> ChunkedColumnInterface positional take
-  -> VortexColumn::BulkPrimitiveValueAt / BulkRawStringAt / BulkArrayAt
-  -> TakeOwn / TakeStringLikeViews
-  -> VortexPlanner::PlanForOffsets
-  -> pin planned cells
-  -> VortexFormatReader::read_with_plan(row indices)
-  -> restore requested output order
+  -> ChunkedColumnInterface::Take(offsets)
+  -> Raw ordered chunk-run cursor, or Vortex ordered materialized cursor
+  -> copy or serialize into the final owned result while each TakeBatch owner
+     is alive
 ```
 
-The planner disables predicate semantics for take because retrieve output is
-positional. Random requery over long strings can still touch many cells; this is
-tracked as a separate performance area from filter pushdown.
+For Vortex, `PlanForOffsets` selects and pins Cells only while the reader imports
+and materializes the requested data. The returned cursor owns the materialized
+Arrow/copied result rather than retaining Cell pins. Raw read-only expression
+Take keeps raw chunk pins in the batch owner; retrieve/requery copies or
+serializes into its final owned result before that owner is released. Random
+requery over long strings can still touch many cells and remains a separate
+performance area from filter pushdown.
 
 ### Nullable and Validity
 
@@ -540,6 +605,8 @@ System and integration validation:
 - Verify `local_format=vortex` is rejected for primary-key and vector fields.
 - Verify Storage V3 manifests with Vortex physical column groups load as
   `VortexColumnGroup + VortexColumn`.
+- Verify mixed local-format groups fall back to the default local format and
+  groups containing the primary key always fall back to the raw row layout.
 - Verify non-Vortex physical files continue to load through the raw path.
 - Run scalar filter benchmark cases for primitive predicates, complex
   expressions, offset-input execution, and retrieve/requery output.
@@ -566,7 +633,8 @@ Performance validation:
 
 ## Future Work
 
-- Push offset bitmaps or row selections into `ChunkedColumnInterface::Scan`.
+- Add a specialized monotonic-offset Vortex Take path if benchmarks show that a
+  true streaming reader materially improves ordered requests.
 - Expand Vortex predicate construction for more scalar types and expression
   forms.
 - Optimize long string, JSON, and ARRAY retrieve/take conversion paths.
