@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
@@ -48,24 +49,28 @@ func (s *CompactionTargetMetaSuite) SetupTest() {
 func (s *CompactionTargetMetaSuite) TestReloadRetainsAllRecordStates() {
 	catalog, _, _, _ := newCompactionTargetTestCatalog(s.T(),
 		&datapb.CompactionTarget{
-			TargetID: 1,
-			Intent:   datapb.TargetIntent_INTENT_REWRITE,
-			State:    datapb.TargetState_TARGET_STATE_ACTIVE,
+			TargetID:     1,
+			CollectionID: 100,
+			Intent:       datapb.TargetIntent_INTENT_REWRITE,
+			State:        datapb.TargetState_TARGET_STATE_ACTIVE,
 		},
 		&datapb.CompactionTarget{
-			TargetID: 2,
-			Intent:   datapb.TargetIntent_INTENT_REWRITE,
-			State:    datapb.TargetState_TARGET_STATE_INACTIVE,
+			TargetID:     2,
+			CollectionID: 100,
+			Intent:       datapb.TargetIntent_INTENT_REWRITE,
+			State:        datapb.TargetState_TARGET_STATE_INACTIVE,
 		},
 		&datapb.CompactionTarget{
-			TargetID: 3,
-			Intent:   datapb.TargetIntent_INTENT_REWRITE,
-			State:    datapb.TargetState_TARGET_STATE_INACTIVE,
+			TargetID:     3,
+			CollectionID: 100,
+			Intent:       datapb.TargetIntent_INTENT_REWRITE,
+			State:        datapb.TargetState_TARGET_STATE_INACTIVE,
 		},
 		&datapb.CompactionTarget{
-			TargetID: 4,
-			Intent:   datapb.TargetIntent_INTENT_REWRITE,
-			State:    datapb.TargetState_TARGET_STATE_INACTIVE,
+			TargetID:     4,
+			CollectionID: 100,
+			Intent:       datapb.TargetIntent_INTENT_REWRITE,
+			State:        datapb.TargetState_TARGET_STATE_INACTIVE,
 		},
 		&datapb.CompactionTarget{
 			TargetID: 5,
@@ -87,9 +92,10 @@ func (s *CompactionTargetMetaSuite) TestReloadRetainsAllRecordStates() {
 
 func (s *CompactionTargetMetaSuite) TestReturnsClones() {
 	catalog, _, _, _ := newCompactionTargetTestCatalog(s.T(), &datapb.CompactionTarget{
-		TargetID: 10,
-		Intent:   datapb.TargetIntent_INTENT_REWRITE,
-		State:    datapb.TargetState_TARGET_STATE_ACTIVE,
+		TargetID:     10,
+		CollectionID: 100,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
 		Properties: map[string]string{
 			"maxSize": "1024",
 		},
@@ -113,9 +119,10 @@ func (s *CompactionTargetMetaSuite) TestSaveUpdateDrop() {
 	s.Require().NoError(err)
 
 	record := &datapb.CompactionTarget{
-		TargetID: 10,
-		Intent:   datapb.TargetIntent_INTENT_REWRITE,
-		State:    datapb.TargetState_TARGET_STATE_ACTIVE,
+		TargetID:     10,
+		CollectionID: 100,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
 	}
 
 	s.Require().NoError(meta.SaveCompactionTarget(s.ctx, record))
@@ -229,9 +236,32 @@ func TestCompactionTargetFactoryKeepsUnsupportedIntentInert(t *testing.T) {
 	require.False(t, targetMatchesSegment(target, targetSegment(1, 0, 10, "ch-1", 0, false)))
 }
 
+func TestManualRewriteCompactionTargetRequiresCollectionScope(t *testing.T) {
+	record, err := newManualRewriteCompactionTarget(0, nil).Create(
+		context.Background(),
+		allocator.NewMockAllocator(t),
+	)
+
+	require.Error(t, err)
+	require.Nil(t, record)
+}
+
+func TestCompactionTargetFactoryKeepsFiniteGlobalTargetInert(t *testing.T) {
+	target, err := newCompactionTarget(&datapb.CompactionTarget{
+		Intent:    datapb.TargetIntent_INTENT_REWRITE,
+		TailLimit: 0,
+		State:     datapb.TargetState_TARGET_STATE_ACTIVE,
+	})
+
+	require.Error(t, err)
+	require.NotNil(t, target)
+	require.False(t, target.active())
+}
+
 func TestCompactionTargetFactoryKeepsInvalidRewriteTargetInert(t *testing.T) {
 	target, err := newCompactionTarget(&datapb.CompactionTarget{
-		Intent: datapb.TargetIntent_INTENT_REWRITE,
+		CollectionID: 100,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
 		Properties: map[string]string{
 			compactionTargetPropertySegmentIDs: "not-json",
 		},
@@ -242,6 +272,15 @@ func TestCompactionTargetFactoryKeepsInvalidRewriteTargetInert(t *testing.T) {
 	require.NotNil(t, target)
 	require.False(t, target.active())
 	require.False(t, targetMatchesSegment(target, targetSegment(1, 0, 10, "ch-1", 0, false)))
+}
+
+func TestRewriteCompactionTargetProvidesExecutionType(t *testing.T) {
+	target := mustNewCompactionTarget(t, &datapb.CompactionTarget{
+		CollectionID: 100,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+	})
+
+	require.Equal(t, datapb.CompactionType_MixCompaction, target.CompactionType())
 }
 
 func TestFiniteCompactionTargetMatchUsesRewriteBoundaryPredicate(t *testing.T) {
@@ -378,12 +417,11 @@ func TestCompactionTargetSatisfiedUsesTailLimitPerLabel(t *testing.T) {
 	))
 }
 
-func TestCompactionTargetSatisfiedNeverCompletesStandingTarget(t *testing.T) {
+func TestStandingCompactionTargetMayUseGlobalScopeAndNeverCompletes(t *testing.T) {
 	record := &datapb.CompactionTarget{
-		CollectionID: 100,
-		Intent:       datapb.TargetIntent_INTENT_REWRITE,
-		ExpectedTS:   1000,
-		TailLimit:    -1,
+		Intent:     datapb.TargetIntent_INTENT_REWRITE,
+		ExpectedTS: 1000,
+		TailLimit:  -1,
 	}
 	target := mustNewCompactionTarget(t, record)
 

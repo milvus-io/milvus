@@ -34,19 +34,36 @@ type targetRule interface {
 }
 
 type rewriteRule struct {
+	segmentIDs []int64
 	expectedTS uint64
 }
 
 var _ targetRule = rewriteRule{}
 
-func newRewriteRule(target *datapb.CompactionTarget) rewriteRule {
-	return rewriteRule{
-		expectedTS: target.GetExpectedTS(),
+func newRewriteRule(target *datapb.CompactionTarget) (rewriteRule, error) {
+	segmentIDs, err := parseCompactionTargetSegmentIDs(target)
+	if err != nil {
+		return rewriteRule{}, err
 	}
+	return rewriteRule{
+		segmentIDs: segmentIDs,
+		expectedTS: target.GetExpectedTS(),
+	}, nil
 }
 
 func (rule rewriteRule) Match(segment *SegmentInfo) bool {
-	return segment != nil && segment.GetCreateTs() < rule.expectedTS
+	if segment == nil || segment.GetCreateTs() >= rule.expectedTS {
+		return false
+	}
+	if len(rule.segmentIDs) == 0 {
+		return true
+	}
+	for _, segmentID := range rule.segmentIDs {
+		if segment.GetID() == segmentID {
+			return true
+		}
+	}
+	return false
 }
 
 func sortedCompactionTargetSegmentIDs(segmentIDs []int64) []int64 {

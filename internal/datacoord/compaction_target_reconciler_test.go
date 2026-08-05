@@ -39,18 +39,14 @@ func TestCompactionTargetReconcilerTriggersEligibleRewriteSegments(t *testing.T)
 	require.NoError(t, err)
 	views := events[TriggerTypeTarget]
 	require.Len(t, views, 3)
-	require.Equal(t, int64(100), views[0].GetTriggerID())
-	require.Equal(t, int64(10), views[0].GetGroupLabel().PartitionID)
-	require.Equal(t, "ch-1", views[0].GetGroupLabel().Channel)
-	require.Equal(t, []int64{1}, segmentIDsFromViews(views[0].GetSegmentsView()))
-	require.Equal(t, int64(100), views[1].GetTriggerID())
-	require.Equal(t, int64(10), views[1].GetGroupLabel().PartitionID)
-	require.Equal(t, "ch-1", views[1].GetGroupLabel().Channel)
-	require.Equal(t, []int64{3}, segmentIDsFromViews(views[1].GetSegmentsView()))
-	require.Equal(t, int64(100), views[2].GetTriggerID())
-	require.Equal(t, int64(10), views[2].GetGroupLabel().PartitionID)
-	require.Equal(t, "ch-1", views[2].GetGroupLabel().Channel)
-	require.Equal(t, []int64{4}, segmentIDsFromViews(views[2].GetSegmentsView()))
+	segmentIDs := make([]int64, 0, len(views))
+	for _, view := range views {
+		require.Equal(t, int64(100), view.GetTriggerID())
+		require.Equal(t, int64(10), view.GetGroupLabel().PartitionID)
+		require.Equal(t, "ch-1", view.GetGroupLabel().Channel)
+		segmentIDs = append(segmentIDs, segmentIDsFromViews(view.GetSegmentsView())...)
+	}
+	require.ElementsMatch(t, []int64{1, 3, 4}, segmentIDs)
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
@@ -109,10 +105,14 @@ func TestCompactionTargetReconcilerReconcilesMultipleTargetsIndependently(t *tes
 	require.NoError(t, err)
 	views := events[TriggerTypeTarget]
 	require.Len(t, views, 2)
-	require.Equal(t, int64(100), views[0].GetTriggerID())
-	require.Equal(t, []int64{1}, segmentIDsFromViews(views[0].GetSegmentsView()))
-	require.Equal(t, int64(200), views[1].GetTriggerID())
-	require.Equal(t, []int64{2}, segmentIDsFromViews(views[1].GetSegmentsView()))
+	segmentsByTarget := make(map[int64][]int64, len(views))
+	for _, view := range views {
+		segmentsByTarget[view.GetTriggerID()] = segmentIDsFromViews(view.GetSegmentsView())
+	}
+	require.Equal(t, map[int64][]int64{
+		100: {1},
+		200: {2},
+	}, segmentsByTarget)
 }
 
 func TestCompactionTargetReconcilerAppliesTargetCollectionScope(t *testing.T) {
@@ -247,7 +247,7 @@ func TestCompactionTargetReconcilerOutsideManualMatchDomainDoesNotHoldTargetActi
 	}
 }
 
-func TestCompactionTargetReconcilerPausesAndResumesSnapshotProtectedSegment(t *testing.T) {
+func TestCompactionTargetReconcilerWaitsForSnapshotCreatedAfterTarget(t *testing.T) {
 	enableCompactionTargetReconciler(t)
 	ctx := context.Background()
 	record := &datapb.CompactionTarget{
@@ -366,62 +366,6 @@ func TestCompactionTargetReconcilerPausesAndResumesSnapshotBlockedCollection(t *
 
 	meta.snapshotMeta.ClearSnapshotPending(1)
 	events, err = newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
-
-	require.NoError(t, err)
-	require.Len(t, events[TriggerTypeTarget], 1)
-	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
-	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
-}
-
-func TestCompactionTargetReconcilerGlobalTargetContinuesUnblockedCollections(t *testing.T) {
-	enableCompactionTargetReconciler(t)
-	ctx := context.Background()
-	record := &datapb.CompactionTarget{
-		TargetID:   100,
-		Intent:     datapb.TargetIntent_INTENT_REWRITE,
-		ExpectedTS: 200,
-		TailLimit:  0,
-		State:      datapb.TargetState_TARGET_STATE_ACTIVE,
-	}
-	targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
-	meta := newCompactionTargetReconcilerTestMeta(targetMeta,
-		sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false),
-		sortedTargetSegment(2, 2, 20, "ch-2", 0, 199, false),
-	)
-	meta.snapshotMeta = createTestSnapshotMetaLoaded(t)
-	meta.snapshotMeta.SetSnapshotPending(1)
-
-	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
-
-	require.NoError(t, err)
-	require.Len(t, events[TriggerTypeTarget], 1)
-	require.Equal(t, int64(2), events[TriggerTypeTarget][0].GetGroupLabel().CollectionID)
-	require.Equal(t, []int64{2}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
-	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
-}
-
-func TestCompactionTargetReconcilerDoesNotAddCollectionTypeMatchFilter(t *testing.T) {
-	enableCompactionTargetReconciler(t)
-	ctx := context.Background()
-	record := &datapb.CompactionTarget{
-		TargetID:   100,
-		Intent:     datapb.TargetIntent_INTENT_REWRITE,
-		ExpectedTS: 200,
-		TailLimit:  0,
-		State:      datapb.TargetState_TARGET_STATE_ACTIVE,
-	}
-	targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
-	meta := newCompactionTargetReconcilerTestMeta(targetMeta,
-		sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false),
-	)
-	meta.collections.Insert(1, &collectionInfo{
-		ID: 1,
-		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, ExternalField: "external_vector"},
-		}},
-	})
-
-	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
 	require.Len(t, events[TriggerTypeTarget], 1)

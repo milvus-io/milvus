@@ -2,7 +2,6 @@ package datacoord
 
 import (
 	"context"
-	"sort"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -57,29 +56,20 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		return events, nil
 	}
 
-	targetIDs := make([]int64, 0, len(targets))
-	for targetID := range targets {
-		targetIDs = append(targetIDs, targetID)
-	}
-	sort.Slice(targetIDs, func(i, j int) bool {
-		return targetIDs[i] < targetIDs[j]
-	})
 	satisfiedTargets := make([]*datapb.CompactionTarget, 0)
-	for _, targetID := range targetIDs {
-		target := targets[targetID]
-		record := targetMeta.GetCompactionTarget(targetID)
-		compactionType, supported := compactionTypeForTarget(record)
-		if !supported {
-			continue
-		}
+	for _, target := range targets {
+		record := target.Clone()
 		matches := reconciler.meta.SelectSegments(ctx, target.MatchFilters()...)
+		// Satisfaction uses semantic matches before temporary execution
+		// blockers. A snapshot-protected segment must keep the target active
+		// until the snapshot releases it.
 		if target.Satisfied(matches) {
 			satisfiedTargets = append(satisfiedTargets, record)
 			continue
 		}
 		events[TriggerTypeTarget] = append(
 			events[TriggerTypeTarget],
-			reconciler.compactionViews(ctx, record, compactionType, matches)...,
+			reconciler.compactionViews(ctx, record, target.CompactionType(), matches)...,
 		)
 	}
 
@@ -91,15 +81,7 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 			mlog.Int64("targetID", record.GetTargetID()),
 			mlog.FieldCollectionID(record.GetCollectionID()))
 	}
-	sortCompactionTargetViews(events[TriggerTypeTarget])
 	return events, nil
-}
-
-func compactionTypeForTarget(record *datapb.CompactionTarget) (datapb.CompactionType, bool) {
-	if record.GetIntent() == datapb.TargetIntent_INTENT_REWRITE {
-		return datapb.CompactionType_MixCompaction, true
-	}
-	return 0, false
 }
 
 func (reconciler *compactionTargetReconciler) compactionViews(
@@ -155,24 +137,4 @@ func (reconciler *compactionTargetReconciler) filterMixCompactionSelectable(
 		return FilterInIndexedSegments(ctx, reconciler.handler, reconciler.meta, true, selectable...)
 	}
 	return selectable
-}
-
-func sortCompactionTargetViews(views []CompactionView) {
-	sort.Slice(views, func(i, j int) bool {
-		left := views[i].GetGroupLabel()
-		right := views[j].GetGroupLabel()
-		if left.CollectionID != right.CollectionID {
-			return left.CollectionID < right.CollectionID
-		}
-		if left.PartitionID != right.PartitionID {
-			return left.PartitionID < right.PartitionID
-		}
-		if left.Channel != right.Channel {
-			return left.Channel < right.Channel
-		}
-		if views[i].GetSegmentsView()[0].ID != views[j].GetSegmentsView()[0].ID {
-			return views[i].GetSegmentsView()[0].ID < views[j].GetSegmentsView()[0].ID
-		}
-		return views[i].GetTriggerID() < views[j].GetTriggerID()
-	})
 }

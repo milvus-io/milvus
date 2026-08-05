@@ -142,21 +142,17 @@ func (m *compactionTargetMeta) UpdateCompactionTargetState(ctx context.Context, 
 	m.Lock()
 	defer m.Unlock()
 
-	var inactivatedAtTS uint64
 	target, loaded := m.targets[targetID]
 	var updated *datapb.CompactionTarget
 	if loaded {
-		var changed bool
 		updated = target.Clone()
-		inactivatedAtTS, changed = compactionTargetStateUpdate(updated, state)
-		if !changed {
-			mlog.Info(ctx, "meta update: skip unchanged compaction target state",
-				mlog.Int64("targetID", targetID),
-				mlog.String("state", state.String()))
-			return nil
-		}
-	} else {
-		inactivatedAtTS = compactionTargetInactivatedAtTS(state)
+	}
+	inactivatedAtTS, changed := evaluateCompactionTargetStateChange(updated, state)
+	if !changed {
+		mlog.Info(ctx, "meta update: skip unchanged compaction target state",
+			mlog.Int64("targetID", targetID),
+			mlog.String("state", state.String()))
+		return nil
 	}
 	if err := m.catalog.UpdateCompactionTargetState(ctx, targetID, state, inactivatedAtTS); err != nil {
 		mlog.Error(ctx, "meta update: update compaction target state failed",
@@ -237,6 +233,9 @@ func newManualRewriteCompactionTarget(collectionID int64, segmentIDs []int64) *m
 }
 
 func (target *manualRewriteCompactionTarget) Create(ctx context.Context, alloc allocator.Allocator) (*datapb.CompactionTarget, error) {
+	if target.collectionID <= 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("finite compaction target requires a collection scope")
+	}
 	targetID, activatedAtTS, err := allocCompactionTargetIdentity(ctx, alloc)
 	if err != nil {
 		return nil, err
@@ -257,9 +256,12 @@ func (target *manualRewriteCompactionTarget) Properties() map[string]string {
 	return compactionTargetSegmentIDProperties(target.segmentIDs)
 }
 
-// compactionTarget defines the runtime behavior of a persisted target.
+// compactionTarget defines the runtime behavior of a persisted target. Finite
+// targets are collection-scoped; invalid persisted records remain durable but
+// are materialized as inert runtime targets.
 type compactionTarget interface {
 	Clone() *datapb.CompactionTarget
+	CompactionType() datapb.CompactionType
 	active() bool
 	MatchFilters() []SegmentFilter
 	Satisfied(matches []*SegmentInfo) bool
@@ -267,8 +269,8 @@ type compactionTarget interface {
 
 type baseCompactionTarget struct {
 	*datapb.CompactionTarget
-	segmentIDs []int64
-	rule       targetRule
+	compactionType datapb.CompactionType
+	rule           targetRule
 }
 
 var _ compactionTarget = (*baseCompactionTarget)(nil)
@@ -282,12 +284,15 @@ func newCompactionTarget(target *datapb.CompactionTarget) (compactionTarget, err
 	}
 	switch target.GetIntent() {
 	case datapb.TargetIntent_INTENT_REWRITE:
-		segmentIDs, err := parseCompactionTargetSegmentIDs(runtimeTarget.CompactionTarget)
+		if runtimeTarget.finite() && runtimeTarget.GetCollectionID() <= 0 {
+			return runtimeTarget, merr.WrapErrParameterInvalidMsg("finite compaction target requires a collection scope")
+		}
+		rule, err := newRewriteRule(runtimeTarget.CompactionTarget)
 		if err != nil {
 			return runtimeTarget, err
 		}
-		runtimeTarget.segmentIDs = segmentIDs
-		runtimeTarget.rule = newRewriteRule(runtimeTarget.CompactionTarget)
+		runtimeTarget.compactionType = datapb.CompactionType_MixCompaction
+		runtimeTarget.rule = rule
 		return runtimeTarget, nil
 	default:
 		return runtimeTarget, errUnsupportedCompactionTarget
@@ -301,10 +306,18 @@ func (target *baseCompactionTarget) Clone() *datapb.CompactionTarget {
 	return proto.Clone(target.CompactionTarget).(*datapb.CompactionTarget)
 }
 
+func (target *baseCompactionTarget) CompactionType() datapb.CompactionType {
+	if target == nil {
+		return datapb.CompactionType_UndefinedCompaction
+	}
+	return target.compactionType
+}
+
 func (target *baseCompactionTarget) active() bool {
 	return target != nil &&
 		target.CompactionTarget != nil &&
 		target.rule != nil &&
+		target.CompactionType() != datapb.CompactionType_UndefinedCompaction &&
 		target.GetState() == datapb.TargetState_TARGET_STATE_ACTIVE
 }
 
@@ -313,23 +326,11 @@ func (target *baseCompactionTarget) finite() bool {
 }
 
 func (target *baseCompactionTarget) scopeIn(segment *SegmentInfo) bool {
-	if target == nil || target.CompactionTarget == nil || target.rule == nil || segment == nil {
+	if target == nil || target.CompactionTarget == nil || segment == nil {
 		return false
 	}
 	if target.GetCollectionID() != 0 && segment.GetCollectionID() != target.GetCollectionID() {
 		return false
-	}
-	if len(target.segmentIDs) > 0 {
-		inSegmentScope := false
-		for _, segmentID := range target.segmentIDs {
-			if segment.GetID() == segmentID {
-				inSegmentScope = true
-				break
-			}
-		}
-		if !inSegmentScope {
-			return false
-		}
 	}
 	if target.finite() && segment.GetDmlPosition().GetTimestamp() > target.GetExpectedTS() {
 		return false
@@ -338,7 +339,9 @@ func (target *baseCompactionTarget) scopeIn(segment *SegmentInfo) bool {
 }
 
 func (target *baseCompactionTarget) match(segment *SegmentInfo) bool {
-	return target.scopeIn(segment) &&
+	return target != nil &&
+		target.rule != nil &&
+		target.scopeIn(segment) &&
 		isNormalManualCompactionSegment(segment) &&
 		target.rule.Match(segment)
 }
@@ -387,22 +390,18 @@ func allocCompactionTargetIdentity(ctx context.Context, alloc allocator.Allocato
 	return targetID, activatedAtTS, nil
 }
 
-func compactionTargetStateUpdate(target *datapb.CompactionTarget, state datapb.TargetState) (uint64, bool) {
+// evaluateCompactionTargetStateChange returns the timestamp to persist and
+// whether persistence is needed. Inactive targets require an inactivation
+// timestamp; every other state clears it.
+func evaluateCompactionTargetStateChange(target *datapb.CompactionTarget, state datapb.TargetState) (inactivatedAtTS uint64, changed bool) {
 	if state == datapb.TargetState_TARGET_STATE_INACTIVE {
-		if target.GetState() == state && target.GetInactivatedAtTS() != 0 {
+		if target != nil && target.GetState() == state && target.GetInactivatedAtTS() != 0 {
 			return target.GetInactivatedAtTS(), false
 		}
 		return tsoutil.ComposeTSByTime(time.Now()), true
 	}
-	if target.GetState() == state && target.GetInactivatedAtTS() == 0 {
+	if target != nil && target.GetState() == state && target.GetInactivatedAtTS() == 0 {
 		return 0, false
 	}
 	return 0, true
-}
-
-func compactionTargetInactivatedAtTS(state datapb.TargetState) uint64 {
-	if state == datapb.TargetState_TARGET_STATE_INACTIVE {
-		return tsoutil.ComposeTSByTime(time.Now())
-	}
-	return 0
 }
