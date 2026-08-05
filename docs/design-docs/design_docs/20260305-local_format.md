@@ -321,11 +321,20 @@ Vortex converts the current Arrow slice's validity bitmap into a
 `FixedVector<bool>`, and `ScanBatch::owner` keeps that mask and the values alive
 for the batch lifetime.
 
-Scan preparation first uses footer/statistics metadata loaded with the segment
-to produce segment-offset Evaluate/NoMatch ranges. Payload-dependent legacy Raw
-SkipIndex decisions are not planner input; they run after Raw batches are
-available and only skip predicate computation. The backend then pins the cells
-required by the current window and constructs cursors over the pinned input.
+Scan preparation keeps backend pruning decisions in Cell-ID form until the
+cursor boundary:
+
+1. A pre-pin planner uses only footer/statistics metadata loaded with the
+   segment and produces skipped Cell IDs.
+2. Non-nullable scans omit those Cells from the pin request. Nullable scans pin
+   every Cell in the window because data and validity share the same Cell.
+3. After pinning, Raw may run its payload-backed legacy SkipIndex on the
+   planner-retained Cells and add more skipped Cell IDs. Vortex has no
+   payload-backed post-pin skip phase.
+4. Immediately before publishing the prepared cursor plan, the backend unions
+   the skipped Cell IDs and converts them to sorted, coalesced segment-offset
+   ranges. Vortex Cell IDs remain scoped by source file until this conversion
+   because the same local Cell ID may occur in multiple files.
 
 Validity and data are currently stored in the same Cell. A nullable scan that
 needs field validity therefore pins every Cell intersecting the current window,
@@ -335,14 +344,21 @@ the public `ScanBatch`; a backend may still need to decode the combined physical
 representation to recover validity. Non-nullable validity-only scans have an
 empty cell plan.
 
-`Next(max_rows)` does not pin cells. Dense data batches contain at most
-`max_rows` evaluated rows and cannot cross a NoMatch range or backend batch
-boundary; adjacent returned batches may have a segment-offset gap. The
-expression fills that gap as NoMatch and, for nullable fields, obtains validity
-through a validity-only cursor opened from the same prepared scan. The complete
-window result remains row aligned. `ScanBatch::owner` shares the prepared
-scan's pinned input (plus any batch-local materialization) so returned pointers
-remain valid for the batch lifetime.
+`Next(max_rows)` does not pin cells, and `max_rows` is an upper bound rather
+than an exact batch size. Dense data batches cannot cross a NoMatch range or a
+backend batch boundary. For a non-nullable NoMatch range, the cursor returns no
+batch and advances its logical `Position()` across the range. For a nullable
+NoMatch range, the same data cursor returns a validity-only batch: `values` is
+empty, while `row_id_start`, `size`, and `validity` remain aligned with the
+source rows. This preserves Unknown without opening a second validity cursor or
+repinning Cells. The complete expression window remains row aligned.
+`ScanBatch::owner` shares the prepared scan's pinned input (plus any batch-local
+materialization) so returned pointers remain valid for the batch lifetime.
+
+Reopening a cursor for a subrange of the same `PreparedScan` retains and clips
+the prepared planner skips automatically. Callers specify the new logical
+range; they do not repeat backend pin-selection state, and reopening never
+repins Cells.
 
 Row-id scan supports:
 
@@ -445,13 +461,15 @@ payload-dependent Raw SkipIndex path.
 
 The prepared scan retains those plans and reuses them when opening the normal
 full-window cursor, so pin selection and reader execution consume the same
-planner result. Predicate-pruned Vortex Cells are also normalized to
-segment-offset `ScanPlan::skip_ranges`; the private read plan and the public
-logical ranges therefore describe the same planner decision. A cursor may
-consume the Arrow stream incrementally, but the reader and its Cell pins remain
-scoped to that one operator window and are destroyed before the next window.
-The scan path does not concatenate the window through `IntoArray`; subrange
-reopen is allowed to replan within the already pinned Cell set.
+planner result. Predicate-pruned Vortex Cells remain file-scoped Cell IDs while
+plans are built and pins are selected, then are normalized once to segment
+offset `ScanPlan::skip_ranges` at the prepared cursor boundary. The private read
+plan and the public logical ranges therefore describe the same planner
+decision without conflating equal local Cell IDs from different files. A cursor
+may consume the Arrow stream incrementally, but the reader and its Cell pins
+remain scoped to that one operator window and are destroyed before the next
+window. The scan path does not concatenate the window through `IntoArray`;
+subrange reopen is allowed to replan within the already pinned Cell set.
 
 The expression layer keeps only its segment-global execution position. Normal
 evaluation prepares, consumes, and destroys one complete window before moving
