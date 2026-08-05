@@ -557,7 +557,8 @@ MakeNullableRecordBatch(int64_t begin, int64_t count) {
 VortexColumn::FileInfo
 WriteNullableVortexFile(const std::string& path,
                         const std::shared_ptr<arrow::Schema>& schema,
-                        const milvus_storage::api::Properties& properties) {
+                        const milvus_storage::api::Properties& properties,
+                        int64_t begin = 0) {
     auto fs = std::make_shared<arrow::fs::LocalFileSystem>();
     auto writer_result = milvus_storage::vortex::VortexFileWriter::Open(
         fs, schema, path, properties);
@@ -566,8 +567,8 @@ WriteNullableVortexFile(const std::string& path,
         return {};
     }
     auto writer = std::move(writer_result).ValueOrDie();
-    EXPECT_TRUE(writer->Write(MakeNullableRecordBatch(0, 8)).ok());
-    EXPECT_TRUE(writer->Write(MakeNullableRecordBatch(8, 8)).ok());
+    EXPECT_TRUE(writer->Write(MakeNullableRecordBatch(begin, 8)).ok());
+    EXPECT_TRUE(writer->Write(MakeNullableRecordBatch(begin + 8, 8)).ok());
     EXPECT_TRUE(writer->Flush().ok());
     auto close_result = writer->Close();
     EXPECT_TRUE(close_result.ok());
@@ -575,8 +576,8 @@ WriteNullableVortexFile(const std::string& path,
 
     VortexColumn::FileInfo info;
     info.path = path;
-    info.start_index = 0;
-    info.end_index = kNullableRows;
+    info.start_index = begin;
+    info.end_index = begin + kNullableRows;
     info.file_size =
         cg_file.Get<uint64_t>(milvus_storage::api::kPropertyFileSize, 0);
     info.footer_size =
@@ -1591,6 +1592,69 @@ TEST(VortexColumnTest, ScanPinsPlannedCellsBeforeCursorCreation) {
         }
     }
     EXPECT_EQ(unknown_rows, (std::vector<int64_t>{1, 5, 9, 13}));
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST(VortexColumnTest, PlannerSkipCellIdsRemainFileScopedUntilScanPlan) {
+    auto schema = MakeNullableSchema();
+    auto properties =
+        std::make_shared<milvus_storage::api::Properties>(MakeProperties());
+    milvus_storage::api::SetValue(
+        *properties, PROPERTY_WRITER_VORTEX_FORMAT_VERSION, "2");
+    milvus_storage::api::SetValue(
+        *properties, PROPERTY_WRITER_VORTEX_ENABLE_STATISTICS, "true");
+    milvus_storage::api::SetValue(
+        *properties,
+        PROPERTY_WRITER_VORTEX_V2_ROW_GROUP_MAX_SIZE,
+        std::to_string(128 * 1024).c_str());
+    auto dir = std::filesystem::temp_directory_path() /
+               ("milvus_vortex_scoped_skip_cells_test_" +
+                std::to_string(::getpid()) + "_" +
+                std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
+    std::filesystem::create_directories(dir);
+    auto file0 = WriteNullableVortexFile(
+        (dir / "cg0.vx").string(), schema, *properties, 0);
+    auto file1 = WriteNullableVortexFile(
+        (dir / "cg1.vx").string(), schema, *properties, kNullableRows);
+
+    const auto types = NullableLocalVortexTypes();
+    const auto string_it =
+        std::find(types.begin(), types.end(), DataType::VARCHAR);
+    ASSERT_NE(string_it, types.end());
+    const FieldId field_id(kNullableFieldIdBase +
+                           std::distance(types.begin(), string_it));
+    auto column_group = MakeColumnGroup(
+        {file0, file1}, properties, {std::to_string(field_id.get())});
+    VortexColumn column(field_id,
+                        MakeNullableFieldMeta(field_id, DataType::VARCHAR),
+                        properties,
+                        column_group);
+
+    const auto predicate = StringValue(ExpectedString(DataType::VARCHAR, 20));
+    auto prepared = column.PrepareScan(
+        nullptr,
+        ChunkedColumnInterface::ScanOptions::ForUnary(
+            0,
+            2 * kNullableRows,
+            proto::plan::OpType::Equal,
+            predicate));
+    ASSERT_NE(prepared, nullptr);
+    EXPECT_TRUE(std::none_of(
+        prepared->Plan().skip_ranges.begin(),
+        prepared->Plan().skip_ranges.end(),
+        [](const auto& range) { return range.start <= 20 && 20 < range.end; }));
+
+    auto cursor = prepared->Open(
+        prepared->Plan(), ChunkedColumnInterface::ScanProjection::NoData);
+    ASSERT_NE(cursor, nullptr);
+    ChunkedColumnInterface::ScanBatch batch;
+    std::vector<int64_t> rows;
+    while (cursor->Next(kScanBatchRows, &batch)) {
+        rows.insert(rows.end(), batch.row_ids.begin(), batch.row_ids.end());
+    }
+    EXPECT_EQ(rows,
+              (std::vector<int64_t>{1, 5, 9, 13, 17, 20, 21, 25, 29}));
 
     std::filesystem::remove_all(dir);
 }

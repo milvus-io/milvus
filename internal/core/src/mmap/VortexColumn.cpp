@@ -206,6 +206,10 @@ struct PreparedVortexRowIdScanSource {
     VortexReaderRange range;
     milvus_storage::vortex::VortexPlan matched_plan;
     std::optional<milvus_storage::vortex::VortexPlan> validity_plan;
+    // Vortex Cell IDs are file-local. Keep skipped IDs scoped by this source
+    // until all planning and pinning is complete, then translate them to
+    // segment logical ranges immediately before publishing the scan plan.
+    std::vector<uint64_t> skipped_cell_ids;
     std::vector<uint64_t> pinned_cell_ids;
     VortexCellPin pin;
 };
@@ -303,14 +307,12 @@ AppendSkipRange(
         ChunkedColumnInterface::ScanRowRange{start, end});
 }
 
-void
-AppendPlannerSkipRanges(
+std::vector<uint64_t>
+CollectPlannerSkippedCellIds(
     const std::shared_ptr<milvus_storage::vortex::VortexPlanner>& planner,
-    int64_t chunk_start,
     int64_t local_start,
     int64_t local_end,
-    const std::vector<uint64_t>& kept_cell_ids,
-    std::vector<ChunkedColumnInterface::ScanRowRange>* skip_ranges) {
+    const std::vector<uint64_t>& kept_cell_ids) {
     AssertInfo(planner != nullptr, "vortex field planner is null");
     AssertInfo(local_start >= 0 && local_start <= local_end,
                "invalid vortex planner local range [{}, {})",
@@ -318,6 +320,7 @@ AppendPlannerSkipRanges(
                local_end);
     AssertInfo(std::is_sorted(kept_cell_ids.begin(), kept_cell_ids.end()),
                "vortex planner returned unsorted cell ids");
+    std::vector<uint64_t> skipped_cell_ids;
     for (const auto& cell : planner->cell_metas()) {
         const auto cell_start = static_cast<int64_t>(cell.row_offset);
         const auto cell_end = static_cast<int64_t>(cell.row_offset +
@@ -330,7 +333,46 @@ AppendPlannerSkipRanges(
                                cell.cell_id)) {
             continue;
         }
-        AppendSkipRange(skip_ranges, chunk_start + start, chunk_start + end);
+        skipped_cell_ids.emplace_back(cell.cell_id);
+    }
+    std::sort(skipped_cell_ids.begin(), skipped_cell_ids.end());
+    skipped_cell_ids.erase(
+        std::unique(skipped_cell_ids.begin(), skipped_cell_ids.end()),
+        skipped_cell_ids.end());
+    return skipped_cell_ids;
+}
+
+void
+AppendSkippedCellRanges(
+    const std::shared_ptr<milvus_storage::vortex::VortexPlanner>& planner,
+    int64_t chunk_start,
+    int64_t local_start,
+    int64_t local_end,
+    const std::vector<uint64_t>& skipped_cell_ids,
+    std::vector<ChunkedColumnInterface::ScanRowRange>* skip_ranges) {
+    AssertInfo(planner != nullptr, "vortex field planner is null");
+    AssertInfo(local_start >= 0 && local_start <= local_end,
+               "invalid vortex planner local range [{}, {})",
+               local_start,
+               local_end);
+    AssertInfo(std::is_sorted(skipped_cell_ids.begin(),
+                              skipped_cell_ids.end()),
+               "vortex skipped cell ids are not sorted");
+    for (const auto& cell : planner->cell_metas()) {
+        if (!std::binary_search(skipped_cell_ids.begin(),
+                                skipped_cell_ids.end(),
+                                cell.cell_id)) {
+            continue;
+        }
+        const auto cell_start = static_cast<int64_t>(cell.row_offset);
+        const auto cell_end = static_cast<int64_t>(cell.row_offset +
+                                                   cell.row_count);
+        const auto start = std::max(local_start, cell_start);
+        const auto end = std::min(local_end, cell_end);
+        if (start < end) {
+            AppendSkipRange(
+                skip_ranges, chunk_start + start, chunk_start + end);
+        }
     }
 }
 
@@ -3299,12 +3341,11 @@ VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
         const auto row_end =
             static_cast<uint64_t>(range->local_offset + range->length);
         auto matched_plan = PlanRowRange(file, row_start, row_end, *predicate);
-        AppendPlannerSkipRanges(file.planner,
-                                range->chunk_start,
-                                range->local_offset,
-                                range->local_offset + range->length,
-                                matched_plan.cell_ids,
-                                &scan_plan.skip_ranges);
+        auto skipped_cell_ids = CollectPlannerSkippedCellIds(
+            file.planner,
+            range->local_offset,
+            range->local_offset + range->length,
+            matched_plan.cell_ids);
         std::optional<milvus_storage::vortex::VortexPlan> validity_plan;
         auto cell_ids = matched_plan.cell_ids;
         if (IsNullable()) {
@@ -3317,9 +3358,23 @@ VortexColumn::PrepareScan(milvus::OpContext* op_ctx,
             *range,
             std::move(matched_plan),
             std::move(validity_plan),
+            std::move(skipped_cell_ids),
             std::move(cell_ids),
             std::move(pin)});
         plan_pos = range->range_end;
+    }
+    // Planner and backend-specific skip decisions stay in Cell-ID form. Only
+    // at the PreparedScan/cursor boundary do file-scoped Vortex Cell IDs become
+    // public segment-offset ranges.
+    for (const auto& prepared : prepared_sources) {
+        const auto& file = files_[prepared.range.chunk_id];
+        AppendSkippedCellRanges(file.planner,
+                                prepared.range.chunk_start,
+                                prepared.range.local_offset,
+                                prepared.range.local_offset +
+                                    prepared.range.length,
+                                prepared.skipped_cell_ids,
+                                &scan_plan.skip_ranges);
     }
     return std::make_shared<CallbackPreparedScan>(
         std::move(scan_plan),
