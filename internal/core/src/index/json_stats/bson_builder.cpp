@@ -15,9 +15,11 @@
 // limitations under the License.
 
 #include <iostream>
-#include <vector>
-#include <string>
 #include <map>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "index/json_stats/bson_builder.h"
 
@@ -102,13 +104,132 @@ AppendDomElementToBsonArray(simdjson::dom::element elem,
         out.append(bsoncxx::types::b_null{});
     }
 }
+
+bool
+IsJsonWhitespace(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+bool
+HasJsonValuePrefix(std::string_view json, size_t offset) {
+    auto cursor = offset;
+    while (cursor > 0 && IsJsonWhitespace(json[cursor - 1])) {
+        --cursor;
+    }
+
+    if (cursor == 0) {
+        return true;
+    }
+
+    const auto previous = json[cursor - 1];
+    return previous == ':' || previous == '[' || previous == ',';
+}
+
+bool
+HasJsonValueSuffix(std::string_view json, size_t offset) {
+    auto cursor = offset;
+    while (cursor < json.size() && IsJsonWhitespace(json[cursor])) {
+        ++cursor;
+    }
+
+    if (cursor == json.size()) {
+        return true;
+    }
+
+    const auto next = json[cursor];
+    return next == ',' || next == ']' || next == '}';
+}
+
+std::optional<std::string>
+NormalizeLegacyNonFiniteNumbers(std::string_view json) {
+    std::optional<std::string> normalized;
+    size_t copied_until = 0;
+    bool in_string = false;
+    bool escaped = false;
+
+    for (size_t i = 0; i < json.size();) {
+        const auto c = json[i];
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                in_string = false;
+            }
+            ++i;
+            continue;
+        }
+
+        if (c == '"') {
+            in_string = true;
+            ++i;
+            continue;
+        }
+
+        std::string_view token;
+        if (c == 'N') {
+            token = "NaN";
+        } else if (c == 'I') {
+            token = "Infinity";
+        } else if (c == '-') {
+            token = "-Infinity";
+        }
+
+        if (!token.empty() && i + token.size() <= json.size() &&
+            json.substr(i, token.size()) == token &&
+            HasJsonValuePrefix(json, i) &&
+            HasJsonValueSuffix(json, i + token.size())) {
+            if (!normalized.has_value()) {
+                normalized.emplace();
+                normalized->reserve(json.size());
+            }
+            normalized->append(json.data() + copied_until, i - copied_until);
+            normalized->append("null");
+            copied_until = i + token.size();
+            i += token.size();
+            continue;
+        }
+
+        ++i;
+    }
+
+    if (normalized.has_value()) {
+        normalized->append(json.data() + copied_until,
+                           json.size() - copied_until);
+    }
+    return normalized;
+}
 }  // namespace
 
 // Parse a JSON array string with simdjson and build an owning BSON array value
 bsoncxx::array::value
 BuildBsonArrayFromJsonString(const std::string& json_array) {
     simdjson::dom::parser parser;
-    simdjson::dom::element root = parser.parse(json_array);
+    simdjson::dom::element root;
+    auto error = parser.parse(json_array).get(root);
+    if (error != simdjson::SUCCESS) {
+        if (error != simdjson::TAPE_ERROR && error != simdjson::NUMBER_ERROR) {
+            ThrowInfo(ErrorCode::JsonKeyInvalid,
+                      "failed to parse JSON array: {}",
+                      simdjson::error_message(error));
+        }
+
+        auto normalized = NormalizeLegacyNonFiniteNumbers(json_array);
+        if (!normalized.has_value()) {
+            ThrowInfo(ErrorCode::JsonKeyInvalid,
+                      "failed to parse JSON array: {}",
+                      simdjson::error_message(error));
+        }
+
+        error = parser.parse(normalized.value()).get(root);
+        if (error != simdjson::SUCCESS) {
+            ThrowInfo(ErrorCode::JsonKeyInvalid,
+                      "failed to parse normalized JSON array: {}",
+                      simdjson::error_message(error));
+        }
+    }
+
     if (root.type() != simdjson::dom::element_type::ARRAY) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "input is not a JSON array: {}",
@@ -185,22 +306,8 @@ BsonBuilder::CreateValueNode(const std::string& value, JSONType type) {
             return DomNode(bsoncxx::types::b_string{value});
         }
         case JSONType::ARRAY: {
-            try {
-                auto arr_value = BuildBsonArrayFromJsonString(value);
-                return DomNode(bsoncxx::types::b_array{arr_value.view()});
-            } catch (const simdjson::simdjson_error& e) {
-                ThrowInfo(
-                    ErrorCode::UnexpectedError,
-                    "Failed to build bson array (simdjson) from string: {}, {}",
-                    value,
-                    e.what());
-            } catch (const std::exception& e) {
-                ThrowInfo(
-                    ErrorCode::UnexpectedError,
-                    "Failed to build bson array (generic) from string: {}, {}",
-                    value,
-                    e.what());
-            }
+            auto arr_value = BuildBsonArrayFromJsonString(value);
+            return DomNode(bsoncxx::types::b_array{arr_value.view()});
         }
         case JSONType::OBJECT: {
             AssertInfo(value == "{}",
