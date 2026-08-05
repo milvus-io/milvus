@@ -7116,7 +7116,9 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			},
 		}
 		fieldSchema := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_ArrayOfVector,
 			ElementType: schemapb.DataType_FloatVector,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
 		}
 		v := newValidateUtil()
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
@@ -7164,7 +7166,9 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			},
 		}
 		fieldSchema := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_ArrayOfVector,
 			ElementType: schemapb.DataType_FloatVector,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "3"}},
 		}
 		v := newValidateUtil()
 		v.checkNAN = false
@@ -7193,7 +7197,9 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			},
 		}
 		fieldSchema := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_ArrayOfVector,
 			ElementType: schemapb.DataType_FloatVector,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "1"}},
 		}
 		v := newValidateUtil(withNANCheck())
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
@@ -7228,11 +7234,46 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 			},
 		}
 		fieldSchema := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_ArrayOfVector,
 			ElementType: schemapb.DataType_FloatVector,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
 		}
 		v := newValidateUtil(withNANCheck())
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
 		assert.NoError(t, err)
+	})
+
+	t.Run("payload length not divisible by dim", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			FieldName: "vec_array",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_VectorArray{
+						VectorArray: &schemapb.VectorArray{
+							Data: []*schemapb.VectorField{
+								{
+									Data: &schemapb.VectorField_FloatVector{
+										FloatVector: &schemapb.FloatArray{
+											Data: make([]float32, 512),
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		fieldSchema := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "768"}},
+		}
+		v := newValidateUtil()
+		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "payload length 512")
+		assert.Contains(t, err.Error(), "vector width 768")
 	})
 }
 

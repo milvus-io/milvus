@@ -63,6 +63,10 @@ class ChunkedColumnGroup {
 
     PinWrapper<GroupChunk*>
     GetGroupChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const {
+        AssertInfo(
+            chunk_id >= 0 && chunk_id < num_chunks_,
+            "[StorageV2] chunk_id out of range: " + std::to_string(chunk_id) +
+                ", num_chunks: " + std::to_string(num_chunks_));
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<GroupChunk*>(ca, chunk);
@@ -71,6 +75,12 @@ class ChunkedColumnGroup {
     std::shared_ptr<CellAccessor<GroupChunk>>
     GetGroupChunks(milvus::OpContext* op_ctx,
                    const std::vector<int64_t>& chunk_ids) {
+        for (auto chunk_id : chunk_ids) {
+            AssertInfo(chunk_id >= 0 && chunk_id < num_chunks_,
+                       "[StorageV2] chunk_id out of range: " +
+                           std::to_string(chunk_id) +
+                           ", num_chunks: " + std::to_string(num_chunks_));
+        }
         return SemiInlineGet(slot_->PinCells(op_ctx, chunk_ids));
     }
 

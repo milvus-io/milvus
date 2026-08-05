@@ -24,17 +24,23 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <numeric>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "common/Consts.h"
 #include "common/FieldDataInterface.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "exec/expression/EvalCtx.h"
+#include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
 #include "index/Meta.h"
+#include "index/ScalarIndex.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/packed/writer.h"
@@ -43,6 +49,7 @@
 #include "pb/schema.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentGrowing.h"
@@ -56,6 +63,98 @@
 using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::segcore::storagev1translator;
+
+namespace {
+class RawLookupOnlyIndex : public index::ScalarIndex<int64_t> {
+ public:
+    RawLookupOnlyIndex() : index::ScalarIndex<int64_t>("raw_lookup_only") {
+    }
+
+    index::ScalarIndexType
+    GetIndexType() const override {
+        return index::ScalarIndexType::STLSORT;
+    }
+
+    void
+    Build(size_t, const int64_t*, const bool* = nullptr) override {
+    }
+
+    const TargetBitmap
+    In(size_t, const int64_t*) override {
+        return {};
+    }
+
+    const TargetBitmap
+    NotIn(size_t, const int64_t*) override {
+        return {};
+    }
+
+    const TargetBitmap
+    IsNull() override {
+        return {};
+    }
+
+    TargetBitmap
+    IsNotNull() override {
+        return {};
+    }
+
+    const TargetBitmap
+    Range(const int64_t&, OpType) override {
+        return {};
+    }
+
+    const TargetBitmap
+    Range(const int64_t&, bool, const int64_t&, bool) override {
+        return {};
+    }
+
+    std::optional<int64_t>
+    Reverse_Lookup(size_t offset) const override {
+        last_lookup_offset = offset;
+        return static_cast<int64_t>(offset);
+    }
+
+    void
+    Build(const Config& = {}) override {
+    }
+
+    BinarySet
+    Serialize(const Config& = {}) override {
+        return {};
+    }
+
+    void
+    Load(const BinarySet&, const Config& = {}) override {
+    }
+
+    void
+    Load(milvus::tracer::TraceContext, const Config& = {}) override {
+    }
+
+    int64_t
+    Count() override {
+        return 0;
+    }
+
+    int64_t
+    Size() override {
+        return 0;
+    }
+
+    index::IndexStatsPtr
+    Upload(const Config& = {}) override {
+        return nullptr;
+    }
+
+    const bool
+    HasRawData() const override {
+        return true;
+    }
+
+    mutable size_t last_lookup_offset = 0;
+};
+}  // namespace
 
 class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
  protected:
@@ -212,6 +311,78 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         ASSERT_TRUE(status.ok());
     }
 
+    int64_t
+    RowCount() const {
+        return chunk_num * test_data_count;
+    }
+
+    void
+    LoadInt64ScalarIndex(const std::string& index_type) {
+        auto fid = fields.at("int64");
+        auto file_manager_ctx = storage::FileManagerContext();
+        file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+            milvus::proto::schema::Int64);
+        file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
+        file_manager_ctx.fieldDataMeta.field_id = fid.get();
+        milvus::storage::IndexMeta index_meta;
+        index_meta.field_id = fid.get();
+        index_meta.build_id = 1000 + fid.get();
+        index_meta.index_version = 2000 + fid.get();
+        file_manager_ctx.indexMeta = index_meta;
+
+        index::CreateIndexInfo create_index_info;
+        create_index_info.field_type = milvus::DataType::INT64;
+        create_index_info.index_type = index_type;
+        auto index = index::IndexFactory::GetInstance().CreateScalarIndex(
+            create_index_info, file_manager_ctx);
+
+        std::vector<int64_t> data(RowCount());
+        std::iota(data.begin(), data.end(), 0);
+        index->BuildWithRawDataForUT(data.size(), data.data());
+
+        segcore::LoadIndexInfo load_index_info;
+        load_index_info.index_params = GenIndexParams(index.get());
+        load_index_info.cache_index =
+            CreateTestCacheIndex("int64_scalar_index", std::move(index));
+        load_index_info.field_id = fid.get();
+        segment->LoadIndex(load_index_info);
+    }
+
+    void
+    LoadString1ScalarIndex(const std::string& index_type) {
+        auto fid = fields.at("string1");
+        auto file_manager_ctx = storage::FileManagerContext();
+        file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+            milvus::proto::schema::VarChar);
+        file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
+        file_manager_ctx.fieldDataMeta.field_id = fid.get();
+        milvus::storage::IndexMeta index_meta;
+        index_meta.field_id = fid.get();
+        index_meta.build_id = 1000 + fid.get();
+        index_meta.index_version = 2000 + fid.get();
+        file_manager_ctx.indexMeta = index_meta;
+
+        index::CreateIndexInfo create_index_info;
+        create_index_info.field_type = milvus::DataType::VARCHAR;
+        create_index_info.index_type = index_type;
+        auto index = index::IndexFactory::GetInstance().CreateScalarIndex(
+            create_index_info, file_manager_ctx);
+
+        std::vector<std::string> data;
+        data.reserve(RowCount());
+        for (int64_t i = 0; i < RowCount(); ++i) {
+            data.push_back("test" + std::to_string(i));
+        }
+        index->BuildWithRawDataForUT(data.size(), data.data());
+
+        segcore::LoadIndexInfo load_index_info;
+        load_index_info.index_params = GenIndexParams(index.get());
+        load_index_info.cache_index =
+            CreateTestCacheIndex("string1_scalar_index", std::move(index));
+        load_index_info.field_id = fid.get();
+        segment->LoadIndex(load_index_info);
+    }
+
     segcore::SegmentSealedUPtr segment;
     int chunk_num = 2;
     int test_data_count = 10000;
@@ -349,6 +520,210 @@ TEST_P(TestChunkSegmentStorageV2, TestCompareExpr) {
     final = query::ExecuteQueryExpr(
         plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
     ASSERT_EQ(chunk_num * test_data_count, final.count());
+}
+
+TEST_P(TestChunkSegmentStorageV2, TestColumnExprWithScalarIndexRawData) {
+    LoadInt64ScalarIndex(index::ASCENDING_SORT);
+    ASSERT_TRUE(segment->HasRawData(fields.at("int64").get()));
+
+    auto query_config = std::make_shared<exec::QueryConfig>(
+        std::unordered_map<std::string, std::string>{
+            {exec::QueryConfig::kExprEvalBatchSize, "4096"}});
+    exec::QueryContext query_context("column_expr_scalar_index_raw_data",
+                                     segment.get(),
+                                     RowCount(),
+                                     MAX_TIMESTAMP,
+                                     0,
+                                     0,
+                                     query::PlanOptions(),
+                                     query_config);
+    exec::ExecContext exec_context(&query_context);
+
+    std::vector<expr::TypedExprPtr> exprs{std::make_shared<expr::ColumnExpr>(
+        expr::ColumnInfo(fields.at("int64"), milvus::DataType::INT64))};
+    exec::ExprSet expr_set(exprs, &exec_context);
+    exec::EvalCtx eval_context(&exec_context);
+
+    int64_t offset = 0;
+    while (offset < RowCount()) {
+        std::vector<VectorPtr> results;
+        expr_set.Eval(eval_context, results);
+        ASSERT_EQ(1, results.size());
+
+        auto column = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+        ASSERT_NE(column, nullptr);
+        auto expected_batch_size = std::min<int64_t>(4096, RowCount() - offset);
+        ASSERT_EQ(expected_batch_size, column->size());
+
+        auto values = column->RawAsValues<int64_t>();
+        for (int64_t i = 0; i < expected_batch_size; ++i) {
+            ASSERT_TRUE(column->ValidAt(i));
+            ASSERT_EQ(offset + i, values[i]);
+        }
+        offset += expected_batch_size;
+    }
+}
+
+TEST_P(TestChunkSegmentStorageV2,
+       TestChunkDataAccessorFallsBackWhenPinnedIndexViewIsEmpty) {
+    SegmentChunkReader reader(nullptr, segment.get(), RowCount());
+
+    auto accessor = reader.GetChunkDataAccessor(
+        milvus::DataType::INT64, fields.at("int64"), 0, {});
+
+    auto value = accessor(7);
+    ASSERT_TRUE(value.has_value());
+    ASSERT_EQ(7, segcore::get_from_variant<int64_t>(value));
+}
+
+TEST_P(TestChunkSegmentStorageV2,
+       TestChunkDataAccessorUsesGlobalOffsetForFieldLevelScalarIndex) {
+    auto raw_lookup_index = std::make_unique<RawLookupOnlyIndex>();
+    std::vector<PinWrapper<const index::IndexBase*>> pinned_indexes;
+    pinned_indexes.emplace_back(raw_lookup_index.get());
+
+    SegmentChunkReader reader(nullptr, segment.get(), RowCount());
+    auto accessor = reader.GetChunkDataAccessor(
+        milvus::DataType::INT64,
+        fields.at("int64"),
+        1,
+        {pinned_indexes.data(), pinned_indexes.size()});
+
+    auto expected_offset =
+        segment->num_rows_until_chunk(fields.at("int64"), 1) + 7;
+    auto value = accessor(7);
+    ASSERT_TRUE(value.has_value());
+    ASSERT_EQ(expected_offset, segcore::get_from_variant<int64_t>(value));
+    ASSERT_EQ(expected_offset, raw_lookup_index->last_lookup_offset);
+}
+
+TEST_P(TestChunkSegmentStorageV2,
+       TestChunkDataAccessorThrowsWhenPinnedIndexAndRawDataAreUnavailable) {
+    LoadString1ScalarIndex(index::INVERTED_INDEX_TYPE);
+    segment->DropFieldData(fields.at("string1"));
+    ASSERT_FALSE(segment->HasRawData(fields.at("string1").get()));
+    ASSERT_EQ(0, segment->num_chunk_data(fields.at("string1")));
+
+    SegmentChunkReader reader(nullptr, segment.get(), RowCount());
+    EXPECT_THROW(reader.GetChunkDataAccessor(
+                     milvus::DataType::VARCHAR, fields.at("string1"), 0, {}),
+                 SegcoreError);
+}
+
+TEST_P(TestChunkSegmentStorageV2,
+       TestColumnExprOffsetInputFallsBackWhenScalarIndexHasNoRawData) {
+    LoadInt64ScalarIndex(index::INVERTED_INDEX_TYPE);
+    ASSERT_FALSE(segment->HasRawData(fields.at("int64").get()));
+
+    auto query_config = std::make_shared<exec::QueryConfig>(
+        std::unordered_map<std::string, std::string>{
+            {exec::QueryConfig::kExprEvalBatchSize, "4096"}});
+    exec::QueryContext query_context("column_expr_offset_input",
+                                     segment.get(),
+                                     RowCount(),
+                                     MAX_TIMESTAMP,
+                                     0,
+                                     0,
+                                     query::PlanOptions(),
+                                     query_config);
+    exec::ExecContext exec_context(&query_context);
+
+    std::vector<expr::TypedExprPtr> exprs{std::make_shared<expr::ColumnExpr>(
+        expr::ColumnInfo(fields.at("int64"), milvus::DataType::INT64))};
+    exec::ExprSet expr_set(exprs, &exec_context);
+
+    exec::OffsetVector offsets;
+    offsets.push_back(7);
+    offsets.push_back(7000);
+    exec::EvalCtx eval_context(&exec_context, &expr_set, &offsets);
+
+    std::vector<VectorPtr> results;
+    expr_set.Eval(eval_context, results);
+    ASSERT_EQ(1, results.size());
+
+    auto column = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+    ASSERT_NE(column, nullptr);
+    ASSERT_EQ(offsets.size(), column->size());
+
+    auto values = column->RawAsValues<int64_t>();
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        ASSERT_TRUE(column->ValidAt(i));
+        ASSERT_EQ(offsets[i], values[i]);
+    }
+}
+
+TEST_P(TestChunkSegmentStorageV2,
+       TestColumnExprOffsetInputThrowsWhenIndexAndRawDataAreUnavailable) {
+    LoadString1ScalarIndex(index::INVERTED_INDEX_TYPE);
+    segment->DropFieldData(fields.at("string1"));
+    ASSERT_FALSE(segment->HasRawData(fields.at("string1").get()));
+    ASSERT_EQ(0, segment->num_chunk_data(fields.at("string1")));
+
+    auto query_config = std::make_shared<exec::QueryConfig>(
+        std::unordered_map<std::string, std::string>{
+            {exec::QueryConfig::kExprEvalBatchSize, "4096"}});
+    exec::QueryContext query_context("column_expr_offset_input_no_raw_data",
+                                     segment.get(),
+                                     RowCount(),
+                                     MAX_TIMESTAMP,
+                                     0,
+                                     0,
+                                     query::PlanOptions(),
+                                     query_config);
+    exec::ExecContext exec_context(&query_context);
+
+    std::vector<expr::TypedExprPtr> exprs{std::make_shared<expr::ColumnExpr>(
+        expr::ColumnInfo(fields.at("string1"), milvus::DataType::VARCHAR))};
+    exec::ExprSet expr_set(exprs, &exec_context);
+
+    exec::OffsetVector offsets;
+    offsets.push_back(0);
+    exec::EvalCtx eval_context(&exec_context, &expr_set, &offsets);
+
+    std::vector<VectorPtr> results;
+    EXPECT_THROW(expr_set.Eval(eval_context, results), SegcoreError);
+}
+
+TEST_P(TestChunkSegmentStorageV2,
+       TestCompareExprSkippedCursorWithScalarIndexWithoutRawData) {
+    LoadInt64ScalarIndex(index::INVERTED_INDEX_TYPE);
+    ASSERT_FALSE(segment->HasRawData(fields.at("int64").get()));
+
+    proto::plan::GenericValue threshold;
+    threshold.set_int64_val(12000);
+    auto range_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(fields.at("int64"), milvus::DataType::INT64),
+        proto::plan::OpType::GreaterEqual,
+        threshold);
+    auto right_field = GetParam() ? fields.at("int64") : fields.at("pk");
+    auto compare_expr =
+        std::make_shared<expr::CompareExpr>(fields.at("int64"),
+                                            right_field,
+                                            milvus::DataType::INT64,
+                                            milvus::DataType::INT64,
+                                            proto::plan::OpType::Equal);
+    auto conjunct_expr = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, range_expr, compare_expr);
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       conjunct_expr);
+
+    auto query_config = std::make_shared<exec::QueryConfig>(
+        std::unordered_map<std::string, std::string>{
+            {exec::QueryConfig::kExprEvalBatchSize, "6000"}});
+    auto query_context =
+        std::make_shared<exec::QueryContext>(DEAFULT_QUERY_ID,
+                                             segment.get(),
+                                             RowCount(),
+                                             MAX_TIMESTAMP,
+                                             0,
+                                             0,
+                                             query::PlanOptions(),
+                                             query_config);
+    auto plan_fragment = plan::PlanFragment(plan);
+    auto final =
+        query::ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
+    final.flip();
+    ASSERT_EQ(RowCount() - threshold.int64_val(), final.count());
 }
 
 // Test DropFieldData behavior based on parquet file structure.

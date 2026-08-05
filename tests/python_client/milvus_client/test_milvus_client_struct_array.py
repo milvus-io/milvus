@@ -1515,6 +1515,133 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert len(struct_search_results[0]) > 0
 
     @pytest.mark.tags(CaseLabel.L0)
+    def test_search_struct_array_last_vector_subfield(self):
+        """
+        target: test search on a vector sub-field after multiple struct array parent fields
+        method: create multiple struct arrays so parent field IDs create gaps, then search the last vector sub-field
+        expected: search returns results
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_search_last_subfield")
+
+        client = self._client()
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+
+        person_schema = client.create_struct_field_schema()
+        person_schema.add_field("name", DataType.VARCHAR, max_length=128)
+        person_schema.add_field("name_vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(
+            "suspects",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=person_schema,
+            max_capacity=20,
+        )
+        schema.add_field(
+            "victims",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=person_schema,
+            max_capacity=20,
+        )
+
+        vehicle_schema = client.create_struct_field_schema()
+        vehicle_schema.add_field("model", DataType.VARCHAR, max_length=128)
+        vehicle_schema.add_field("vehicle_vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(
+            "vehicles",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=vehicle_schema,
+            max_capacity=20,
+        )
+
+        evidence_schema = client.create_struct_field_schema()
+        evidence_schema.add_field("item", DataType.VARCHAR, max_length=128)
+        evidence_schema.add_field("evidence_vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(
+            "evidence",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=evidence_schema,
+            max_capacity=20,
+        )
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="suspects[name_vector]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="victims[name_vector]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="vehicles[vehicle_vector]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="evidence[evidence_vector]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        data = []
+        for i in range(64):
+            data.append(
+                {
+                    "id": i,
+                    "normal_vector": [random.random() for _ in range(default_dim)],
+                    "suspects": [
+                        {"name": f"suspect_{i}", "name_vector": [random.random() for _ in range(default_dim)]}
+                    ],
+                    "victims": [{"name": f"victim_{i}", "name_vector": [random.random() for _ in range(default_dim)]}],
+                    "vehicles": [
+                        {"model": f"vehicle_{i}", "vehicle_vector": [random.random() for _ in range(default_dim)]}
+                    ],
+                    "evidence": [
+                        {"item": f"evidence_{i}", "evidence_vector": [random.random() for _ in range(default_dim)]}
+                    ],
+                }
+            )
+
+        res, check = self.insert(client, collection_name, data)
+        assert check
+        assert res["insert_count"] == 64
+
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        search_tensor = EmbeddingList()
+        search_tensor.add([random.random() for _ in range(default_dim)])
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[search_tensor],
+            anns_field="evidence[evidence_vector]",
+            search_params={"metric_type": "MAX_SIM_COSINE"},
+            limit=10,
+        )
+        assert check
+        assert len(results[0]) > 0
+
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_struct_array_vector_multiple(self):
         """
         target: test search with multiple vectors (EmbeddingList) in struct array
