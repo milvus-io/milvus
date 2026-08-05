@@ -494,10 +494,13 @@ class SegmentExpr : public Expr {
 
     template <typename T>
     ChunkedColumnInterface::PreparedScanResult
-    PrepareDataScanWindow(int64_t start,
-                          int64_t length,
-                          ChunkedColumnInterface::ScanProjection projection =
-                              ChunkedColumnInterface::ScanProjection::Data) {
+    PrepareDataScanWindow(
+        int64_t start,
+        int64_t length,
+        ChunkedColumnInterface::ScanProjection projection =
+            ChunkedColumnInterface::ScanProjection::Data,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func =
+            {}) {
         const auto value_kind = DataScanValueKind<T>();
         if (data_access_mode_ == DataAccessMode::Chunk) {
             return nullptr;
@@ -519,6 +522,20 @@ class SegmentExpr : public Expr {
 
         auto options = ChunkedColumnInterface::ScanOptions::ForData(
             start, length, projection, value_kind);
+        if (skip_func && data_scan_skip_index_ != nullptr) {
+            const auto source =
+                data_scan_skip_index_->GetMetricsSource(field_id_);
+            auto cell_skip = [skip_index = data_scan_skip_index_,
+                              skip_func = std::move(skip_func),
+                              field_id = field_id_](int64_t cell_id) {
+                return skip_func(*skip_index, field_id, cell_id);
+            };
+            if (source == SkipIndex::MetricsSource::PreloadedStatistics) {
+                options.metadata_skip_cell = std::move(cell_skip);
+            } else if (source == SkipIndex::MetricsSource::LoadedPayload) {
+                options.loaded_skip_cell = std::move(cell_skip);
+            }
+        }
         auto prepared = data_scan_column_->PrepareScan(op_ctx_, options);
         if (prepared == nullptr) {
             AssertInfo(data_access_mode_ != DataAccessMode::Scan,
@@ -1817,7 +1834,8 @@ class SegmentExpr : public Expr {
         auto prepared = PrepareDataScanWindow<T>(
             window_start,
             real_batch_size,
-            ChunkedColumnInterface::ScanProjection::Data);
+            ChunkedColumnInterface::ScanProjection::Data,
+            skip_func);
         if (prepared == nullptr) {
             return -1;
         }
@@ -1878,36 +1896,11 @@ class SegmentExpr : public Expr {
                        "invalid no-match scan range [{}, {})",
                        start,
                        end);
-            auto validity_cursor = prepared->Open(
-                ChunkedColumnInterface::ScanPlan::Full(start, end - start),
-                ChunkedColumnInterface::ScanProjection::NoData);
-            AssertInfo(validity_cursor != nullptr,
-                       "prepared scan cannot open validity range [{}, {})",
+            AssertInfo(!data_scan_column_->IsNullable(),
+                       "nullable data scan omitted validity range [{}, {})",
                        start,
                        end);
-            auto position = start;
-            ChunkedColumnInterface::ScanBatch validity_batch;
-            while (validity_cursor->Next(end - position, &validity_batch)) {
-                AssertInfo(validity_batch.row_id_start == position &&
-                               validity_batch.size > 0 &&
-                               position + validity_batch.size <= end,
-                           "invalid no-match validity batch [{}, {}) at {}",
-                           validity_batch.row_id_start,
-                           validity_batch.row_id_start + validity_batch.size,
-                           position);
-                const auto output_offset = position - window_start;
-                ApplyScanValidity(validity_batch,
-                                  0,
-                                  res + output_offset,
-                                  valid_res + output_offset,
-                                  validity_batch.size);
-                evaluate_batch(nullptr, nullptr, position, validity_batch.size);
-                position += validity_batch.size;
-            }
-            AssertInfo(position == end && validity_cursor->Position() == end,
-                       "no-match validity scan stopped at {}, expected {}",
-                       position,
-                       end);
+            evaluate_batch(nullptr, nullptr, start, end - start);
         };
 
         auto logical_position = window_start;
@@ -1936,29 +1929,7 @@ class SegmentExpr : public Expr {
             if (batch.row_id_start > logical_position) {
                 evaluate_no_match(logical_position, batch.row_id_start);
             }
-            AssertInfo(!batch.values.empty(),
-                       "evaluated data scan batch [{}, {}) has no values",
-                       batch.row_id_start,
-                       batch.row_id_start + batch.size);
-            bool legacy_skipped = false;
-            if (data_scan_column_->UseLegacyDataSkipIndex() && skip_func) {
-                AssertInfo(data_scan_skip_index_ != nullptr,
-                           "legacy data skip index is not initialized");
-                auto [chunk_id, _] =
-                    data_scan_column_->GetChunkIDByOffset(batch.row_id_start);
-                const auto chunk_end =
-                    data_scan_column_->GetNumRowsUntilChunk(chunk_id) +
-                    data_scan_column_->chunk_row_nums(chunk_id);
-                AssertInfo(batch.row_id_start + batch.size <= chunk_end,
-                           "legacy skip batch [{}, {}) crosses chunk {} end {}",
-                           batch.row_id_start,
-                           batch.row_id_start + batch.size,
-                           chunk_id,
-                           chunk_end);
-                legacy_skipped =
-                    skip_func(*data_scan_skip_index_, field_id_, chunk_id);
-            }
-            if (legacy_skipped) {
+            if (batch.values.empty()) {
                 const auto output_offset = batch.row_id_start - window_start;
                 ApplyScanValidity(batch,
                                   0,

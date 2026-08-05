@@ -224,15 +224,6 @@ class ChunkedColumnInterface {
     virtual PreparedScanResult
     PrepareScan(milvus::OpContext* op_ctx, const ScanOptions& options) const;
 
-    // Existing Raw SkipIndex implementations may inspect pinned chunk payload
-    // and therefore run only after Scan has prepared the current window. Local
-    // formats with metadata/footer planners should override this to false and
-    // express pre-pin pruning through PreparedScan::Plan().
-    virtual bool
-    UseLegacyDataSkipIndex() const {
-        return true;
-    }
-
     // Positional access. The returned logical values must follow the input
     // offset order exactly and preserve duplicates. Backends are free to sort,
     // group, deduplicate, or materialize internally as long as those details

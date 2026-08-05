@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -175,9 +176,10 @@ class ScanCursor {
 
     // Return the next evaluated batch from the underlying source. A batch is
     // always one continuous logical range, contains at most max_rows rows, and
-    // never crosses a skipped range or backend batch boundary. Position() may
-    // advance across skipped ranges before the next batch is returned, so
-    // adjacent batches are allowed to have a logical row gap.
+    // never crosses a skipped range or backend batch boundary. Non-nullable
+    // scans may advance Position() across a data-skip range without returning
+    // it. Nullable scans return that range as a validity-only batch so null
+    // rows preserve expression Unknown semantics without reopening a cursor.
     virtual bool
     Next(int64_t max_rows, ScanBatch* out) = 0;
 };
@@ -194,10 +196,9 @@ struct ScanPlan {
     }
 
     ScanRowRange requested_range;
-    // Sorted, non-overlapping segment-offset ranges that the data cursor must
-    // not return. Expressions still produce result/validity for these logical
-    // rows, using a validity-only cursor over the same PreparedScan when the
-    // source column is nullable.
+    // Sorted, non-overlapping segment-offset ranges whose data values must not
+    // be returned or evaluated. Non-nullable cursors skip these rows;
+    // nullable cursors return validity-only batches for them.
     std::vector<ScanRowRange> skip_ranges;
 };
 
@@ -218,10 +219,9 @@ class PreparedScan {
     virtual int64_t
     End() const = 0;
 
-    // Backend planner result for this prepared operator window. The plan is
-    // computed before data pinning from metadata that was loaded with the
-    // segment. Payload-dependent legacy Raw SkipIndex decisions are not part
-    // of this plan.
+    // Backend planner result for this prepared operator window. Backends keep
+    // metadata and post-load pruning in Cell-ID form, then convert the union
+    // to segment-offset ranges before exposing this cursor plan.
     virtual const ScanPlan&
     Plan() const = 0;
 
@@ -237,6 +237,8 @@ enum class ScanProjection {
 };
 
 struct ScanOptions {
+    using CellSkipPredicate = std::function<bool(int64_t)>;
+
     ScanOptions() = default;
 
     ScanOptions(int64_t start_offset,
@@ -269,6 +271,13 @@ struct ScanOptions {
     int64_t length = 0;
     ScanProjection projection = ScanProjection::Data;
     ScanValueKind value_kind = ScanValueKind::Default;
+    // The common Raw backend invokes metadata_skip_cell before pinning and
+    // loaded_skip_cell after the selected Cells have been pinned. Backends
+    // with native planners may keep their own scoped Cell identifiers instead.
+    // Cell identifiers remain backend-private until PreparedScan converts the
+    // final skipped set into segment-offset ScanPlan ranges.
+    CellSkipPredicate metadata_skip_cell;
+    CellSkipPredicate loaded_skip_cell;
 };
 
 using ScanResult = std::unique_ptr<ScanCursor>;

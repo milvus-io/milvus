@@ -54,55 +54,95 @@ ValidateScanPlan(const ChunkedColumnInterface::ScanPlan& plan,
 
 class PinnedScanInput final {
  public:
-    PinnedScanInput(int64_t first_chunk_id,
+    PinnedScanInput(std::vector<int64_t> chunk_ids,
                     std::vector<PinWrapper<Chunk*>>&& chunks)
-        : first_chunk_id_(first_chunk_id), chunks_(std::move(chunks)) {
+        : chunk_ids_(std::move(chunk_ids)), chunks_(std::move(chunks)) {
+        AssertInfo(chunk_ids_.size() == chunks_.size(),
+                   "scan input has {} chunk ids for {} pins",
+                   chunk_ids_.size(),
+                   chunks_.size());
     }
 
     Chunk*
     GetChunk(int64_t chunk_id) const {
-        const auto index = chunk_id - first_chunk_id_;
-        AssertInfo(index >= 0 && index < static_cast<int64_t>(chunks_.size()),
-                   "scan chunk {} is outside pinned range [{}, {})",
-                   chunk_id,
-                   first_chunk_id_,
-                   first_chunk_id_ + chunks_.size());
-        return chunks_[index].get();
+        const auto it =
+            std::lower_bound(chunk_ids_.begin(), chunk_ids_.end(), chunk_id);
+        AssertInfo(it != chunk_ids_.end() && *it == chunk_id,
+                   "scan chunk {} is not pinned",
+                   chunk_id);
+        return chunks_[std::distance(chunk_ids_.begin(), it)].get();
     }
 
  private:
-    int64_t first_chunk_id_;
+    std::vector<int64_t> chunk_ids_;
     std::vector<PinWrapper<Chunk*>> chunks_;
 };
 
 std::shared_ptr<PinnedScanInput>
 PinScanInput(const ChunkedColumnInterface* column,
              milvus::OpContext* op_ctx,
-             int64_t start_offset,
-             int64_t length,
+             const std::vector<int64_t>& chunk_ids,
              ChunkedColumnInterface::ScanProjection projection) {
-    if (length == 0 ||
+    if (chunk_ids.empty() ||
         (projection == ChunkedColumnInterface::ScanProjection::NoData &&
          !column->IsNullable())) {
         return nullptr;
-    }
-
-    const auto first_chunk_id =
-        static_cast<int64_t>(column->GetChunkIDByOffset(start_offset).first);
-    const auto last_chunk_id = static_cast<int64_t>(
-        column->GetChunkIDByOffset(start_offset + length - 1).first);
-    std::vector<int64_t> chunk_ids;
-    chunk_ids.reserve(last_chunk_id - first_chunk_id + 1);
-    for (auto chunk_id = first_chunk_id; chunk_id <= last_chunk_id;
-         ++chunk_id) {
-        chunk_ids.emplace_back(chunk_id);
     }
     auto chunks = column->PinChunks(op_ctx, chunk_ids);
     AssertInfo(chunks.size() == chunk_ids.size(),
                "scan pinned {} chunks for {} requested chunks",
                chunks.size(),
                chunk_ids.size());
-    return std::make_shared<PinnedScanInput>(first_chunk_id, std::move(chunks));
+    return std::make_shared<PinnedScanInput>(chunk_ids, std::move(chunks));
+}
+
+std::vector<int64_t>
+GetScanChunkIds(const ChunkedColumnInterface* column,
+                int64_t start_offset,
+                int64_t length) {
+    std::vector<int64_t> chunk_ids;
+    if (length == 0) {
+        return chunk_ids;
+    }
+    const auto first_chunk_id =
+        static_cast<int64_t>(column->GetChunkIDByOffset(start_offset).first);
+    const auto last_chunk_id = static_cast<int64_t>(
+        column->GetChunkIDByOffset(start_offset + length - 1).first);
+    chunk_ids.reserve(last_chunk_id - first_chunk_id + 1);
+    for (auto chunk_id = first_chunk_id; chunk_id <= last_chunk_id;
+         ++chunk_id) {
+        chunk_ids.emplace_back(chunk_id);
+    }
+    return chunk_ids;
+}
+
+std::vector<ChunkedColumnInterface::ScanRowRange>
+SkippedCellsToRanges(const ChunkedColumnInterface* column,
+                     int64_t start_offset,
+                     int64_t length,
+                     std::vector<int64_t> skipped_cell_ids) {
+    std::sort(skipped_cell_ids.begin(), skipped_cell_ids.end());
+    skipped_cell_ids.erase(
+        std::unique(skipped_cell_ids.begin(), skipped_cell_ids.end()),
+        skipped_cell_ids.end());
+    std::vector<ChunkedColumnInterface::ScanRowRange> ranges;
+    const auto scan_end = start_offset + length;
+    for (const auto cell_id : skipped_cell_ids) {
+        const auto cell_start = column->GetNumRowsUntilChunk(cell_id);
+        const auto cell_end = cell_start + column->chunk_row_nums(cell_id);
+        const auto range_start = std::max(start_offset, cell_start);
+        const auto range_end = std::min(scan_end, cell_end);
+        if (range_start >= range_end) {
+            continue;
+        }
+        if (!ranges.empty() && ranges.back().end == range_start) {
+            ranges.back().end = range_end;
+        } else {
+            ranges.emplace_back(
+                ChunkedColumnInterface::ScanRowRange{range_start, range_end});
+        }
+    }
+    return ranges;
 }
 
 class FixedWidthDataScanCursor final
@@ -151,7 +191,13 @@ class FixedWidthDataScanCursor final
         }
 
         while (scan_pos_ < scan_end_) {
-            AdvancePastSkippedRanges();
+            if (projection_ == ChunkedColumnInterface::ScanProjection::Data &&
+                IsInSkippedRange()) {
+                if (column_->IsNullable()) {
+                    return FillSkippedValidityBatch(max_rows, out);
+                }
+                AdvancePastSkippedRanges();
+            }
             if (scan_pos_ >= scan_end_) {
                 return false;
             }
@@ -165,7 +211,8 @@ class FixedWidthDataScanCursor final
             const auto rows_left_in_chunk = rows - current_chunk_offset_;
             const auto rows_left_in_scan = scan_end_ - scan_pos_;
             const auto rows_before_skip =
-                skip_index_ < skip_ranges_.size()
+                projection_ == ChunkedColumnInterface::ScanProjection::Data &&
+                        skip_index_ < skip_ranges_.size()
                     ? skip_ranges_[skip_index_].start - scan_pos_
                     : rows_left_in_scan;
             const auto rows_to_return = std::min<int64_t>({rows_left_in_chunk,
@@ -230,6 +277,49 @@ class FixedWidthDataScanCursor final
     }
 
  private:
+    bool
+    IsInSkippedRange() {
+        while (skip_index_ < skip_ranges_.size() &&
+               skip_ranges_[skip_index_].end <= scan_pos_) {
+            ++skip_index_;
+        }
+        return skip_index_ < skip_ranges_.size() &&
+               skip_ranges_[skip_index_].start <= scan_pos_;
+    }
+
+    bool
+    FillSkippedValidityBatch(int64_t max_rows,
+                             ChunkedColumnInterface::ScanBatch* out) {
+        AssertInfo(input_ != nullptr,
+                   "nullable skipped scan has no pinned input");
+        const auto& skipped = skip_ranges_[skip_index_];
+        const auto rows = column_->chunk_row_nums(current_chunk_id_);
+        const auto rows_to_return =
+            std::min<int64_t>({max_rows,
+                               skipped.end - scan_pos_,
+                               rows - current_chunk_offset_,
+                               scan_end_ - scan_pos_});
+        AssertInfo(rows_to_return > 0,
+                   "invalid skipped validity batch at row {}",
+                   scan_pos_);
+        auto* chunk = input_->GetChunk(current_chunk_id_);
+        auto* fixed_chunk = dynamic_cast<FixedWidthChunk*>(chunk);
+        AssertInfo(fixed_chunk != nullptr,
+                   "scan chunk {} is not fixed-width",
+                   current_chunk_id_);
+        const auto span = fixed_chunk->Span();
+        AssertInfo(span.valid_data() != nullptr,
+                   "nullable scan chunk {} has no validity",
+                   current_chunk_id_);
+        out->validity = span.valid_data() + current_chunk_offset_;
+        out->owner = input_;
+        out->row_id_start = scan_pos_;
+        out->size = rows_to_return;
+        scan_pos_ += rows_to_return;
+        current_chunk_offset_ += rows_to_return;
+        return true;
+    }
+
     void
     SetChunkPosition(int64_t position) {
         auto [chunk_id, offset] = column_->GetChunkIDByOffset(position);
@@ -308,7 +398,13 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
             return false;
         }
 
-        AdvancePastSkippedRanges();
+        if (projection_ == ChunkedColumnInterface::ScanProjection::Data &&
+            IsInSkippedRange()) {
+            if (column_->IsNullable()) {
+                return FillSkippedValidityBatch(max_rows, out);
+            }
+            AdvancePastSkippedRanges();
+        }
         if (scan_pos_ >= scan_end_) {
             return false;
         }
@@ -317,7 +413,8 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
         const auto chunk_rows = column_->chunk_row_nums(chunk_id);
         auto rows_to_return = std::min<int64_t>(
             chunk_rows - static_cast<int64_t>(offset), scan_end_ - scan_pos_);
-        if (skip_index_ < skip_ranges_.size()) {
+        if (projection_ == ChunkedColumnInterface::ScanProjection::Data &&
+            skip_index_ < skip_ranges_.size()) {
             rows_to_return = std::min(
                 rows_to_return, skip_ranges_[skip_index_].start - scan_pos_);
         }
@@ -412,6 +509,44 @@ class ViewDataScanCursor final : public ChunkedColumnInterface::ScanCursor {
         out->owner.reset();
         out->row_id_start = 0;
         out->size = 0;
+    }
+
+    bool
+    IsInSkippedRange() {
+        while (skip_index_ < skip_ranges_.size() &&
+               skip_ranges_[skip_index_].end <= scan_pos_) {
+            ++skip_index_;
+        }
+        return skip_index_ < skip_ranges_.size() &&
+               skip_ranges_[skip_index_].start <= scan_pos_;
+    }
+
+    bool
+    FillSkippedValidityBatch(int64_t max_rows,
+                             ChunkedColumnInterface::ScanBatch* out) {
+        AssertInfo(input_ != nullptr,
+                   "nullable skipped view scan has no pinned input");
+        const auto& skipped = skip_ranges_[skip_index_];
+        auto [chunk_id, offset] = column_->GetChunkIDByOffset(scan_pos_);
+        const auto chunk_rows = column_->chunk_row_nums(chunk_id);
+        const auto rows_to_return =
+            std::min<int64_t>({max_rows,
+                               skipped.end - scan_pos_,
+                               chunk_rows - static_cast<int64_t>(offset),
+                               scan_end_ - scan_pos_});
+        AssertInfo(rows_to_return > 0,
+                   "invalid skipped view validity batch at row {}",
+                   scan_pos_);
+        const auto& valid_data = input_->GetChunk(chunk_id)->Valid();
+        AssertInfo(!valid_data.empty(),
+                   "nullable scan chunk {} has no validity",
+                   chunk_id);
+        out->validity = valid_data.data() + offset;
+        out->owner = input_;
+        out->row_id_start = scan_pos_;
+        out->size = rows_to_return;
+        scan_pos_ += rows_to_return;
+        return true;
     }
 
     void
@@ -568,7 +703,8 @@ class PreparedDataScan final : public ChunkedColumnInterface::PreparedScan {
                      int64_t length,
                      DataType data_type,
                      ChunkedColumnInterface::ScanProjection projection,
-                     ChunkedColumnInterface::ScanValueKind value_kind)
+                     ChunkedColumnInterface::ScanValueKind value_kind,
+                     std::vector<int64_t> skipped_cell_ids)
         : column_(column),
           input_(std::move(input)),
           start_(start_offset),
@@ -577,6 +713,8 @@ class PreparedDataScan final : public ChunkedColumnInterface::PreparedScan {
           data_type_(data_type),
           projection_(projection),
           value_kind_(value_kind) {
+        plan_.skip_ranges = SkippedCellsToRanges(
+            column_, start_offset, length, std::move(skipped_cell_ids));
     }
 
     int64_t
@@ -642,7 +780,11 @@ PrepareDataScan(const ChunkedColumnInterface* column,
                 int64_t length,
                 DataType data_type,
                 ChunkedColumnInterface::ScanProjection projection,
-                ChunkedColumnInterface::ScanValueKind value_kind) {
+                ChunkedColumnInterface::ScanValueKind value_kind,
+                const ChunkedColumnInterface::ScanOptions::CellSkipPredicate&
+                    metadata_skip_cell,
+                const ChunkedColumnInterface::ScanOptions::CellSkipPredicate&
+                    loaded_skip_cell) {
     AssertInfo(
         start_offset >= 0 && length >= 0 &&
             start_offset + length <= static_cast<int64_t>(column->NumRows()),
@@ -683,19 +825,41 @@ PrepareDataScan(const ChunkedColumnInterface* column,
                data_type,
                static_cast<int>(*column_kind));
 
+    const auto scan_chunk_ids = GetScanChunkIds(column, start_offset, length);
+    std::vector<int64_t> skipped_cell_ids;
+    std::vector<int64_t> loaded_cell_ids;
+    skipped_cell_ids.reserve(scan_chunk_ids.size());
+    loaded_cell_ids.reserve(scan_chunk_ids.size());
+    for (const auto cell_id : scan_chunk_ids) {
+        if (metadata_skip_cell && metadata_skip_cell(cell_id)) {
+            skipped_cell_ids.emplace_back(cell_id);
+        } else {
+            loaded_cell_ids.emplace_back(cell_id);
+        }
+    }
+    const auto& pinned_cell_ids =
+        column->IsNullable() ? scan_chunk_ids : loaded_cell_ids;
+    auto input = PinScanInput(column, op_ctx, pinned_cell_ids, projection);
+    if (loaded_skip_cell) {
+        for (const auto cell_id : loaded_cell_ids) {
+            if (loaded_skip_cell(cell_id)) {
+                skipped_cell_ids.emplace_back(cell_id);
+            }
+        }
+    }
+
     if (resolved_kind == ChunkedColumnInterface::ScanValueKind::FixedWidth) {
         if (!ChunkedColumnInterface::IsPrimitiveDataType(data_type)) {
             return nullptr;
         }
-        auto input =
-            PinScanInput(column, op_ctx, start_offset, length, projection);
         return std::make_shared<PreparedDataScan>(column,
                                                   std::move(input),
                                                   start_offset,
                                                   length,
                                                   data_type,
                                                   projection,
-                                                  resolved_kind);
+                                                  resolved_kind,
+                                                  std::move(skipped_cell_ids));
     }
 
     if (resolved_kind == ChunkedColumnInterface::ScanValueKind::StringView ||
@@ -703,15 +867,14 @@ PrepareDataScan(const ChunkedColumnInterface* column,
         resolved_kind == ChunkedColumnInterface::ScanValueKind::ArrayView ||
         resolved_kind ==
             ChunkedColumnInterface::ScanValueKind::VectorArrayView) {
-        auto input =
-            PinScanInput(column, op_ctx, start_offset, length, projection);
         return std::make_shared<PreparedDataScan>(column,
                                                   std::move(input),
                                                   start_offset,
                                                   length,
                                                   data_type,
                                                   projection,
-                                                  resolved_kind);
+                                                  resolved_kind,
+                                                  std::move(skipped_cell_ids));
     }
 
     return nullptr;
@@ -742,7 +905,9 @@ ChunkedColumnInterface::PrepareScan(milvus::OpContext* op_ctx,
                                    options.length,
                                    *data_type,
                                    options.projection,
-                                   options.value_kind);
+                                   options.value_kind,
+                                   options.metadata_skip_cell,
+                                   options.loaded_skip_cell);
 }
 
 }  // namespace milvus

@@ -185,11 +185,18 @@ class SkipIndex {
                            T>;
 
  public:
+    enum class MetricsSource {
+        None,
+        PreloadedStatistics,
+        LoadedPayload,
+    };
+
     std::shared_ptr<SkipIndex>
     Clone() const {
         auto cloned = std::make_shared<SkipIndex>();
         std::shared_lock lck(mutex_);
         cloned->fieldChunkMetrics_ = fieldChunkMetrics_;
+        cloned->metricsSources_ = metricsSources_;
         return cloned;
     }
 
@@ -197,6 +204,14 @@ class SkipIndex {
     Erase(FieldId field_id) {
         std::unique_lock lck(mutex_);
         fieldChunkMetrics_.erase(field_id);
+        metricsSources_.erase(field_id);
+    }
+
+    MetricsSource
+    GetMetricsSource(FieldId field_id) const {
+        std::shared_lock lck(mutex_);
+        auto it = metricsSources_.find(field_id);
+        return it == metricsSources_.end() ? MetricsSource::None : it->second;
     }
 
     template <typename T>
@@ -469,6 +484,7 @@ class SkipIndex {
 
         std::unique_lock lck(mutex_);
         fieldChunkMetrics_[field_id] = std::move(cache_slot);
+        metricsSources_[field_id] = MetricsSource::LoadedPayload;
     }
 
     void
@@ -486,6 +502,7 @@ class SkipIndex {
 
         std::unique_lock lck(mutex_);
         fieldChunkMetrics_[field_id] = std::move(cache_slot);
+        metricsSources_[field_id] = MetricsSource::PreloadedStatistics;
     }
 
  private:
@@ -520,6 +537,7 @@ class SkipIndex {
         FieldId,
         std::shared_ptr<cachinglayer::CacheSlot<index::FieldChunkMetrics>>>
         fieldChunkMetrics_;
+    std::unordered_map<FieldId, MetricsSource> metricsSources_;
     mutable std::shared_mutex mutex_;
 };
 }  // namespace milvus
