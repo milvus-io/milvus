@@ -681,8 +681,8 @@ func TestSnapshotRestoreWithMultiFields(t *testing.T) {
 	common.CheckErr(t, err, true)
 }
 
-// TestSnapshotRestoreEmptyCollection tests snapshot and restore of an empty collection
-// Verifies that schema and indexes are preserved correctly without any data
+// TestSnapshotRestoreEmptyCollection tests snapshot and restore of an empty collection.
+// It verifies that collection metadata, schema, and indexes are preserved without any data.
 func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 	// Heavy case (large data volume + minute-scale index/refresh/restore
 	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
@@ -729,8 +729,19 @@ func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 		WithField(stringArrayField).
 		WithDynamicFieldEnabled(true)
 
-	// Create collection with 3 shards
-	createOpt := client.NewCreateCollectionOption(collName, schema).WithShardNum(3)
+	// Create collection with non-default metadata and 3 shards.
+	expectedProperties := map[string]string{
+		common.CollectionTTLSeconds:         "360",
+		"collection.autocompaction.enabled": "false",
+		common.MmapEnabled:                  "false",
+		"allow_insert_auto_id":              "false",
+	}
+	createOpt := client.NewCreateCollectionOption(collName, schema).
+		WithShardNum(3).
+		WithConsistencyLevel(entity.ClBounded)
+	for key, value := range expectedProperties {
+		createOpt.WithProperty(key, value)
+	}
 	err := mc.CreateCollection(ctx, createOpt)
 	common.CheckErr(t, err, true)
 	collectionsToClean := []string{collName}
@@ -824,6 +835,11 @@ func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 	// Step 10: Get restored collection info
 	restoredColl, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(restoredCollName))
 	common.CheckErr(t, err, true)
+	require.Equal(t, originalColl.ConsistencyLevel, restoredColl.ConsistencyLevel, "Consistency level should match")
+	for key, expectedValue := range expectedProperties {
+		require.Equal(t, expectedValue, originalColl.Properties[key], "Source collection property should match")
+		require.Equal(t, expectedValue, restoredColl.Properties[key], "Restored collection property should match")
+	}
 
 	// Step 11: Verify schema matches
 	mlog.Info(context.TODO(), "Verifying schema consistency")
