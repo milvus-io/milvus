@@ -3759,15 +3759,16 @@ type queryNodeConfig struct {
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
-	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
-	MaxReadConcurrency    ParamItem `refreshable:"true"`
-	MaxGpuReadConcurrency ParamItem `refreshable:"false"`
-	MaxGroupNQ            ParamItem `refreshable:"true"`
-	NQMergeRatio          ParamItem `refreshable:"true"`
-	MaxDeadlineMergeGap   ParamItem `refreshable:"true"`
-	TopKMergeRatio        ParamItem `refreshable:"true"`
-	CPURatio              ParamItem `refreshable:"true"`
-	GracefulStopTimeout   ParamItem `refreshable:"false"`
+	MaxUnsolvedQueueSize     ParamItem `refreshable:"true"`
+	RequeryUnsolvedQueueSize ParamItem `refreshable:"true"`
+	MaxReadConcurrency       ParamItem `refreshable:"true"`
+	MaxGpuReadConcurrency    ParamItem `refreshable:"false"`
+	MaxGroupNQ               ParamItem `refreshable:"true"`
+	NQMergeRatio             ParamItem `refreshable:"true"`
+	MaxDeadlineMergeGap      ParamItem `refreshable:"true"`
+	TopKMergeRatio           ParamItem `refreshable:"true"`
+	CPURatio                 ParamItem `refreshable:"true"`
+	GracefulStopTimeout      ParamItem `refreshable:"false"`
 
 	EnableResultZeroCopy ParamItem `refreshable:"true"`
 
@@ -4721,6 +4722,18 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.MaxUnsolvedQueueSize.Init(base.mgr)
+
+	p.RequeryUnsolvedQueueSize = ParamItem{
+		Key:          "queryNode.scheduler.requeryUnsolvedQueueSize",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		Doc: "Maximum number of pending requery tasks in the dedicated requery lane. " +
+			"Requery (the output-field fetch phase of search) bypasses unsolvedQueueSize and is scheduled ahead of regular read tasks, " +
+			"because rejecting it wastes the ANN computation its parent search already completed, " +
+			"while its arrival rate is naturally capped by admitted searches. <= 0 disables the lane.",
+		Export: true,
+	}
+	p.RequeryUnsolvedQueueSize.Init(base.mgr)
 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",
