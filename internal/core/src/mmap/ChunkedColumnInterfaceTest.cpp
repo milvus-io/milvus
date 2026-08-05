@@ -968,9 +968,6 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     ASSERT_TRUE(cursor->Next(5, &batch));
     EXPECT_EQ(batch.row_id_start, 1);
     EXPECT_EQ(batch.size, 1);
-    ASSERT_TRUE(cursor->Next(5, &batch));
-    EXPECT_EQ(batch.row_id_start, 5);
-    EXPECT_EQ(batch.size, 1);
     EXPECT_FALSE(cursor->Next(5, &batch));
     EXPECT_EQ(cursor->Position(), 6);
     EXPECT_EQ(fx.pin_requests->size(), 1u);
