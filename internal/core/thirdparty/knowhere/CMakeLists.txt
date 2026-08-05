@@ -14,9 +14,9 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-# Pin zilliztech/knowhere#1745 until the next release; v3.0.6 still pins
-# Cardinal v3.0.3 and an older milvus-common revision.
-set( KNOWHERE_VERSION 16a71a3d )
+# Pin zilliztech/knowhere#1673 until the next release; nullable vector
+# mapping now relies on Knowhere id-map APIs introduced by that PR.
+set( KNOWHERE_VERSION 92fd89bc3c66a2a68971c6d4eab563fa8152452c )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
@@ -54,6 +54,7 @@ FetchContent_Declare(
         knowhere
         GIT_REPOSITORY  ${GIT_REPOSITORY}
         GIT_TAG         ${KNOWHERE_VERSION}
+        GIT_CONFIG      remote.origin.fetch=+refs/pull/1673/head:refs/remotes/origin/pr/1673
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-build
         DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH} )

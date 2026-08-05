@@ -186,7 +186,7 @@ SaturatingMul(uint64_t lhs, uint64_t rhs) {
 }
 
 uint64_t
-OffsetMappingMmapDiskCost(const Config& config, int64_t num_rows) {
+IdMapMmapDiskCost(const Config& config, int64_t num_rows) {
     if (num_rows <= 0) {
         return 0;
     }
@@ -672,12 +672,11 @@ IndexFactory::VecIndexLoadResource(
         request.max_memory_cost = 2 * res.memoryCost;
     }
     if (knowhere::UseDiskLoad(index_type, index_version)) {
-        const auto offset_mapping_disk_cost =
-            OffsetMappingMmapDiskCost(config, num_rows);
+        const auto id_map_disk_cost = IdMapMmapDiskCost(config, num_rows);
         request.final_disk_cost =
-            SaturatingAdd(request.final_disk_cost, offset_mapping_disk_cost);
+            SaturatingAdd(request.final_disk_cost, id_map_disk_cost);
         request.max_disk_cost =
-            SaturatingAdd(request.max_disk_cost, offset_mapping_disk_cost);
+            SaturatingAdd(request.max_disk_cost, id_map_disk_cost);
     }
     return request;
 }
