@@ -522,6 +522,13 @@ message Statistics {
   // the effective (non-null) row count for vector index build decisions
   // on nullable vector fields.
   map<int64, int64> null_counts = 13;
+  // Sum of serialized vector-index files for this segment. The value is
+  // refreshed after a vector index build completes, including rebuilds for
+  // compaction output segments.
+  int64 vector_index_size = 14;
+  // Reserved for the analogous scalar-index accounting. Scalar index sizes
+  // are not populated yet.
+  int64 scalar_index_size = 15;
 }
 
 message SegmentStartPosition {

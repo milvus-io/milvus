@@ -130,10 +130,31 @@ func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
 }
 
 func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
+	isFinishedVectorIndex := result.GetState() == commonpb.IndexState_Finished &&
+		it.meta.isVectorIndex(it.SegmentIndex)
+	if isFinishedVectorIndex {
+		// Serialize completion and reconciliation for this segment only. A
+		// global lock would unnecessarily block unrelated index builds.
+		if it.meta.vectorIndexSizeLocks != nil {
+			it.meta.vectorIndexSizeLocks.Lock(it.SegmentID)
+			defer it.meta.vectorIndexSizeLocks.Unlock(it.SegmentID)
+		}
+	}
+
 	if err := it.meta.indexMeta.FinishTask(result); err != nil {
 		return err
 	}
 	it.SetState(indexpb.JobState(result.GetState()), result.GetFailReason())
+
+	if isFinishedVectorIndex {
+		// The build result is durable at this point. Do not leave the task
+		// running if the independent segment-stats write fails; startup
+		// reconciliation will repair a missed update.
+		if err := it.meta.syncVectorIndexSizeLocked(context.TODO(), it.CollectionID, it.SegmentID); err != nil {
+			mlog.Warn(context.TODO(), "failed to update vector index size after index build completion",
+				mlog.FieldSegmentID(it.SegmentID), mlog.FieldIndexID(it.IndexID), mlog.Err(err))
+		}
+	}
 	return nil
 }
 

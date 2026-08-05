@@ -40,9 +40,11 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -103,6 +105,7 @@ type meta struct {
 	chunkManager storage.ChunkManager
 
 	indexMeta                     *indexMeta
+	vectorIndexSizeLocks          *lock.KeyLock[UniqueID]
 	analyzeMeta                   *analyzeMeta
 	partitionStatsMeta            *partitionStatsMeta
 	compactionTaskMeta            *compactionTaskMeta
@@ -282,15 +285,16 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// Construct meta struct first so reloadFromKV can run in parallel with sub-meta loading.
 	// reloadFromKV uses m.catalog/m.segments/m.channelCPs which are independent of sub-metas.
 	mt := &meta{
-		ctx:             ctx,
-		catalog:         catalog,
-		collections:     typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:        NewSegmentsInfo(),
-		channelCPs:      newChannelCps(),
-		chunkManager:    chunkManager,
-		resourceIDMap:   make(map[int64]*internalpb.FileResourceInfo),
-		resourceVersion: 0,
-		resourceLock:    lock.RWMutex{},
+		ctx:                  ctx,
+		catalog:              catalog,
+		collections:          typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:             NewSegmentsInfo(),
+		channelCPs:           newChannelCps(),
+		chunkManager:         chunkManager,
+		vectorIndexSizeLocks: lock.NewKeyLock[UniqueID](),
+		resourceIDMap:        make(map[int64]*internalpb.FileResourceInfo),
+		resourceVersion:      0,
+		resourceLock:         lock.RWMutex{},
 	}
 
 	g, _ := errgroup.WithContext(ctx)
@@ -1450,6 +1454,7 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25l
 			return false
 		}
 
+		oldStats := segment.EnsureStats()
 		segment.Binlogs = binlogs
 		segment.Statslogs = statslogs
 		segment.Deltalogs = deltalogs
@@ -1459,7 +1464,8 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25l
 		// is the right semantic for these paths: they don't carry a
 		// writer-reported V3 stats override, and the segment is being
 		// (re)initialized with the supplied arrays.
-		segment.Stats = storage.BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs)
+		segment.Stats = preserveDataCoordIndexStats(oldStats,
+			storage.BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs))
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 		}
@@ -1467,9 +1473,10 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25l
 	}
 }
 
-// UpdateSegmentStats stores the complete cumulative Statistics shipped by
-// the datanode's StatisticsCollector onto SegmentInfo.Stats wholesale —
-// one object, no per-field recompute.
+// UpdateSegmentStats stores the cumulative Statistics shipped by the
+// datanode's StatisticsCollector onto SegmentInfo.Stats. Vector/scalar index
+// sizes are DataCoord-owned and are retained from the segment rather than
+// accepted from the writer.
 //
 // When requestStats is nil (storage V1 / pre-Statistics datanodes during
 // rolling upgrade), it falls back to deriving Statistics from the
@@ -1482,12 +1489,108 @@ func UpdateSegmentStats(segmentID int64, requestStats *datapb.Statistics) Update
 				mlog.Int64("segmentID", segmentID))
 			return false
 		}
+		oldStats := segment.EnsureStats()
 		if requestStats != nil {
-			segment.Stats = requestStats
+			segment.Stats = preserveDataCoordIndexStats(oldStats,
+				proto.Clone(requestStats).(*datapb.Statistics))
 		} else {
-			segment.Stats = storage.BuildStatsFromFieldBinlogs(segment.GetBinlogs(), segment.GetStatslogs(), segment.GetBm25Statslogs(), segment.GetDeltalogs())
+			segment.Stats = preserveDataCoordIndexStats(oldStats,
+				storage.BuildStatsFromFieldBinlogs(segment.GetBinlogs(), segment.GetStatslogs(), segment.GetBm25Statslogs(), segment.GetDeltalogs()))
 		}
 		return true
+	}
+}
+
+// preserveDataCoordIndexStats retains fields whose source of truth is
+// DataCoord's index metadata rather than a Datanode or compactor report.
+func preserveDataCoordIndexStats(oldStats, stats *datapb.Statistics) *datapb.Statistics {
+	if stats == nil {
+		stats = &datapb.Statistics{}
+	}
+	stats.VectorIndexSize = oldStats.GetVectorIndexSize()
+	stats.ScalarIndexSize = oldStats.GetScalarIndexSize()
+	return stats
+}
+
+// UpdateSegmentVectorIndexSize updates the vector-index footprint while preserving
+// every aggregate reported by the flush or compaction writer. The caller
+// provides the sum of all finished vector indexes for the segment.
+func UpdateSegmentVectorIndexSize(segmentID, vectorIndexSize int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			mlog.Warn(context.TODO(), "meta update: update vector index size failed - segment not found",
+				mlog.Int64("segmentID", segmentID))
+			return false
+		}
+
+		stats := segment.EnsureStats()
+		stats.VectorIndexSize = vectorIndexSize
+		segment.Stats = stats
+		return true
+	}
+}
+
+// syncVectorIndexSize persists the total serialized size of every finished
+// vector index on a segment. Index build completion, index copy, index drop,
+// and DataCoord startup all call this reconciler, so Stats can recover from a
+// process crash between independent index and segment-meta writes.
+func (m *meta) syncVectorIndexSize(ctx context.Context, collectionID, segmentID UniqueID) error {
+	if m.segments == nil || m.indexMeta == nil {
+		return nil
+	}
+
+	if m.vectorIndexSizeLocks == nil {
+		// Only hand-built test metas omit this lock. Production metas always
+		// initialize it in newMeta.
+		return m.syncVectorIndexSizeLocked(ctx, collectionID, segmentID)
+	}
+	m.vectorIndexSizeLocks.Lock(segmentID)
+	defer m.vectorIndexSizeLocks.Unlock(segmentID)
+	return m.syncVectorIndexSizeLocked(ctx, collectionID, segmentID)
+}
+
+// syncVectorIndexSizeLocked requires vectorIndexSizeLocks[segmentID] when the
+// lock is configured.
+func (m *meta) syncVectorIndexSizeLocked(ctx context.Context, collectionID, segmentID UniqueID) error {
+	var (
+		vectorIndexSize int64
+		hasVectorIndex  bool
+	)
+	for _, segmentIndex := range m.indexMeta.GetSegmentIndexes(collectionID, segmentID) {
+		if segmentIndex.IndexState != commonpb.IndexState_Finished || !m.isVectorIndex(segmentIndex) {
+			continue
+		}
+		hasVectorIndex = true
+		vectorIndexSize += int64(segmentIndex.IndexSerializedSize)
+	}
+
+	segment := m.GetSegment(ctx, segmentID)
+	if segment == nil || (!hasVectorIndex && segment.EnsureStats().GetVectorIndexSize() == 0) {
+		return nil
+	}
+	return m.UpdateSegmentsInfo(ctx, UpdateSegmentVectorIndexSize(segmentID, vectorIndexSize))
+}
+
+// isVectorIndex handles records persisted before SegmentIndex.IndexType was
+// populated by falling back to the collection index definition.
+func (m *meta) isVectorIndex(segmentIndex *model.SegmentIndex) bool {
+	indexType := segmentIndex.IndexType
+	if indexType == "" {
+		indexType = GetIndexType(m.indexMeta.GetIndexParams(segmentIndex.CollectionID, segmentIndex.IndexID))
+	}
+	return vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
+}
+
+// reconcileVectorIndexSizes repairs statistics after DataCoord starts. This
+// covers indexes completed before the field was introduced and interruptions
+// between persisting index metadata and segment statistics.
+func (m *meta) reconcileVectorIndexSizes(ctx context.Context) {
+	for _, segment := range m.GetAllSegmentsUnsafe() {
+		if err := m.syncVectorIndexSize(ctx, segment.CollectionID, segment.ID); err != nil {
+			mlog.Warn(ctx, "failed to reconcile vector index size",
+				mlog.FieldSegmentID(segment.ID), mlog.Err(err))
+		}
 	}
 }
 
@@ -1501,13 +1604,15 @@ func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslog
 			return false
 		}
 
+		oldStats := segment.EnsureStats()
 		segment.Binlogs = mergeFieldBinlogs(nil, binlogs)
 		segment.Statslogs = mergeFieldBinlogs(nil, statslogs)
 		segment.Deltalogs = mergeFieldBinlogs(nil, deltalogs)
 		segment.Bm25Statslogs = mergeFieldBinlogs(nil, bm25logs)
-		// Stats invalidated; UpdateSegmentStats is chained next under the
-		// same write lock to repopulate from the replaced arrays.
-		segment.Stats = nil
+		// Data-log statistics are invalidated; UpdateSegmentStats is chained
+		// next under the same write lock to repopulate them. Retain the
+		// DataCoord-owned index-size fields across that handoff.
+		segment.Stats = preserveDataCoordIndexStats(oldStats, nil)
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 		}
@@ -3499,7 +3604,13 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	// KVs, so it cannot be rebuilt from arrays after a restart). Only adopt a
 	// non-nil result Stats.
 	if s := resultSegment.GetStats(); s != nil {
-		cloned.Stats = s
+		cloned.Stats = proto.Clone(s).(*datapb.Statistics)
+		// Vector/scalar index sizes are maintained by DataCoord, not the
+		// compactor. In-place schema-bump compaction retains the existing
+		// SegmentIndex records, so keep these values while adopting the
+		// compactor's data-log statistics.
+		cloned.Stats.VectorIndexSize = oldSegment.EnsureStats().GetVectorIndexSize()
+		cloned.Stats.ScalarIndexSize = oldSegment.EnsureStats().GetScalarIndexSize()
 	}
 	if !proto.Equal(oldSegment.SegmentInfo, cloned.SegmentInfo) {
 		cloned.DataVersion = oldSegment.GetDataVersion() + 1

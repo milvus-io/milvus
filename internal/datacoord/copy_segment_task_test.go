@@ -37,6 +37,7 @@ import (
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -902,11 +903,31 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_SingleIndex() {
 	collectionID := int64(1)
 	segmentID := int64(100)
 
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 	indexes := map[int64]*model.Index{
-		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
+		300: {
+			CollectionID: collectionID,
+			FieldID:      101,
+			IndexID:      300,
+			IndexName:    "vec_idx",
+			IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}},
+		},
 	}
-	im := createTestIndexMeta(s.T(), collectionID, indexes)
-	m := &meta{indexMeta: im}
+	im := createTestIndexMeta(s.T(), collectionID, indexes, catalog)
+	segments := NewSegmentsInfo()
+	segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           segmentID,
+		CollectionID: collectionID,
+		State:        commonpb.SegmentState_Flushed,
+	}))
+	m := &meta{
+		catalog:              catalog,
+		segments:             segments,
+		vectorIndexSizeLocks: lock.NewKeyLock[UniqueID](),
+		indexMeta:            im,
+	}
 
 	result := &datapb.CopySegmentResult{
 		SegmentId:    segmentID,
@@ -932,6 +953,8 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_SingleIndex() {
 	s.True(ok)
 	s.Equal(int64(300), segIdx.IndexID) // target indexID, not source 200
 	s.Equal(commonpb.IndexState_Finished, segIdx.IndexState)
+	s.Equal("HNSW", segIdx.IndexType)
+	s.EqualValues(10000, m.GetSegment(context.Background(), segmentID).GetStats().GetVectorIndexSize())
 }
 
 func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_PreservesIndexStorePathVersion() {
