@@ -85,14 +85,27 @@ type Options []*commonpb.KeyValuePair
 // another: options=[{backup,false},{backup,true}] passes as an ordinary import,
 // skipping the ImportBinlog privilege check, then runs as a binlog import.
 //
+// Keys are compared with strings.EqualFold, not byte equality, because
+// ParseTimeRange matches its keys that way (see getTimestamp, the only
+// fold-matching reader on the import path). Under byte equality
+// [{start_ts,A},{START_TS,B}] would pass here and then resolve to A or B
+// depending on map iteration order, so a restore would filter different files
+// by different time windows. strings.ToLower is not a substitute:
+// EqualFold("ſtart_ts", "start_ts") is true while ToLower leaves U+017F alone.
+//
 // Call this before any option is read.
 func ValidateNoDuplicateKeys(options Options) error {
-	seen := make(map[string]struct{}, len(options))
-	for _, kv := range options {
-		if _, ok := seen[kv.GetKey()]; ok {
-			return merr.WrapErrParameterInvalidMsg("duplicate import option key: %s", kv.GetKey())
+	for i, kv := range options {
+		for _, prev := range options[:i] {
+			if !strings.EqualFold(prev.GetKey(), kv.GetKey()) {
+				continue
+			}
+			if prev.GetKey() == kv.GetKey() {
+				return merr.WrapErrParameterInvalidMsg("duplicate import option key: %s", kv.GetKey())
+			}
+			return merr.WrapErrParameterInvalidMsg(
+				"duplicate import option key: %s, which matches %s case-insensitively", kv.GetKey(), prev.GetKey())
 		}
-		seen[kv.GetKey()] = struct{}{}
 	}
 	return nil
 }
