@@ -19,6 +19,7 @@ package testcases
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -62,17 +63,59 @@ func pinyinAnalyzerParams(keepOriginal bool) map[string]any {
 	}
 }
 
-func requirePinyinAnalyzerTokens(
+func pinyinCollectionSchema(collectionName string, analyzerParams map[string]any) *entity.Schema {
+	return entity.NewSchema().WithName(collectionName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("text").WithDataType(entity.FieldTypeVarChar).WithMaxLength(1024).
+			WithEnableAnalyzer(true).WithEnableMatch(true).WithAnalyzerParams(analyzerParams)).
+		WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(pinyinVectorDim))
+}
+
+func createPinyinCollection(
 	t *testing.T,
 	ctx CtxT,
 	mc MC,
+	collectionName string,
 	analyzerParams map[string]any,
+) {
+	t.Helper()
+
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(
+		collectionName,
+		pinyinCollectionSchema(collectionName, analyzerParams),
+	).WithConsistencyLevel(entity.ClStrong)))
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName)))
+	})
+}
+
+func indexAndLoadPinyinCollection(t *testing.T, ctx CtxT, mc MC, collectionName string) {
+	t.Helper()
+
+	indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, "vector",
+		index.NewIvfFlatIndex(entity.L2, 64)))
+	require.NoError(t, err)
+	require.NoError(t, indexTask.Await(ctx))
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collectionName))
+	require.NoError(t, err)
+	require.NoError(t, loadTask.Await(ctx))
+}
+
+func requirePinyinFieldAnalyzerTokens(
+	t *testing.T,
+	ctx CtxT,
+	mc MC,
+	collectionName string,
+	text string,
 	expected []string,
 ) {
 	t.Helper()
 
-	results, err := mc.RunAnalyzer(ctx, client.NewRunAnalyzerOption("中文测试").
-		WithAnalyzerParams(analyzerParams))
+	results, err := mc.RunAnalyzer(ctx, client.NewRunAnalyzerOption(text).
+		WithField(collectionName, "text"))
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 
@@ -121,12 +164,23 @@ func flushPinyinRows(t *testing.T, ctx CtxT, mc MC, collectionName string) {
 	require.NoError(t, lastErr)
 }
 
-func searchPinyinIDs(t *testing.T, ctx CtxT, mc MC, collectionName, queryText string) []int64 {
+func searchPinyinIDs(
+	t *testing.T,
+	ctx CtxT,
+	mc MC,
+	collectionName string,
+	queryText string,
+	minimumShouldMatch int,
+) []int64 {
+	filter := fmt.Sprintf("text_match(text, %q)", queryText)
+	if minimumShouldMatch > 0 {
+		filter = fmt.Sprintf("text_match(text, %q, minimum_should_match=%d)", queryText, minimumShouldMatch)
+	}
 	result, err := mc.Search(ctx, client.NewSearchOption(collectionName, pinyinTotalCount,
 		[]entity.Vector{entity.FloatVector{0, 0}}).
 		WithANNSField("vector").
 		WithSearchParam("nprobe", "64").
-		WithFilter(`text_match(text, "`+queryText+`")`).
+		WithFilter(filter).
 		WithOutputFields("id", "text").
 		WithConsistencyLevel(entity.ClStrong))
 	require.NoError(t, err)
@@ -144,15 +198,23 @@ func searchPinyinIDs(t *testing.T, ctx CtxT, mc MC, collectionName, queryText st
 	return ids
 }
 
-func searchPinyinIDsUntilExpected(t *testing.T, ctx CtxT, mc MC, collectionName, queryText string) []int64 {
+func searchPinyinIDsUntilExpected(
+	t *testing.T,
+	ctx CtxT,
+	mc MC,
+	collectionName string,
+	queryText string,
+	minimumShouldMatch int,
+	expectedIDs []int64,
+) []int64 {
 	deadline := time.Now().Add(30 * time.Second)
 	var ids []int64
 	for time.Now().Before(deadline) {
-		ids = searchPinyinIDs(t, ctx, mc, collectionName, queryText)
-		if len(ids) == len(pinyinTargetIDs) {
+		ids = searchPinyinIDs(t, ctx, mc, collectionName, queryText, minimumShouldMatch)
+		if len(ids) == len(expectedIDs) {
 			matched := true
 			for i := range ids {
-				if ids[i] != pinyinTargetIDs[i] {
+				if ids[i] != expectedIDs[i] {
 					matched = false
 					break
 				}
@@ -172,34 +234,19 @@ func TestPinyinFilterTextMatchAcrossDataPaths(t *testing.T) {
 	collectionName := common.GenRandomString("pinyin_filter", 6)
 
 	analyzerParams := pinyinAnalyzerParams(true)
-	requirePinyinAnalyzerTokens(
+	createPinyinCollection(t, ctx, mc, collectionName, analyzerParams)
+
+	withoutOriginalCollectionName := common.GenRandomString("pinyin_filter_no_original", 6)
+	createPinyinCollection(t, ctx, mc, withoutOriginalCollectionName, pinyinAnalyzerParams(false))
+	indexAndLoadPinyinCollection(t, ctx, mc, withoutOriginalCollectionName)
+	requirePinyinFieldAnalyzerTokens(
 		t,
 		ctx,
 		mc,
-		analyzerParams,
-		[]string{"中文", "zhongwen", "测试", "ceshi"},
-	)
-	requirePinyinAnalyzerTokens(
-		t,
-		ctx,
-		mc,
-		pinyinAnalyzerParams(false),
+		withoutOriginalCollectionName,
+		"中文测试",
 		[]string{"zhongwen", "ceshi"},
 	)
-
-	schema := entity.NewSchema().WithName(collectionName).
-		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
-		WithField(entity.NewField().WithName("text").WithDataType(entity.FieldTypeVarChar).WithMaxLength(1024).
-			WithEnableAnalyzer(true).WithEnableMatch(true).WithAnalyzerParams(analyzerParams)).
-		WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(pinyinVectorDim))
-
-	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(collectionName, schema).
-		WithConsistencyLevel(entity.ClStrong)))
-	t.Cleanup(func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName)))
-	})
 
 	require.NoError(t, mc.AlterCollectionProperties(ctx, client.NewAlterCollectionPropertiesOption(collectionName).
 		WithProperty("collection.autocompaction.enabled", false)))
@@ -210,20 +257,50 @@ func TestPinyinFilterTextMatchAcrossDataPaths(t *testing.T) {
 	insertPinyinRows(t, ctx, mc, collectionName, pinyinIndexedSealedCount, pinyinUnindexedSealedCount)
 	flushPinyinRows(t, ctx, mc, collectionName)
 
-	indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collectionName, "vector",
-		index.NewIvfFlatIndex(entity.L2, 64)))
-	require.NoError(t, err)
-	require.NoError(t, indexTask.Await(ctx))
-
-	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collectionName))
-	require.NoError(t, err)
-	require.NoError(t, loadTask.Await(ctx))
+	indexAndLoadPinyinCollection(t, ctx, mc, collectionName)
+	requirePinyinFieldAnalyzerTokens(
+		t,
+		ctx,
+		mc,
+		collectionName,
+		"中文测试",
+		[]string{"中文", "zhongwen", "测试", "ceshi"},
+	)
+	requirePinyinFieldAnalyzerTokens(
+		t,
+		ctx,
+		mc,
+		collectionName,
+		"中文",
+		[]string{"中文", "zhongwen"},
+	)
 
 	insertPinyinRows(t, ctx, mc, collectionName,
 		pinyinIndexedSealedCount+pinyinUnindexedSealedCount, pinyinGrowingCount)
 
-	for _, queryText := range []string{"zhongwen", "中文"} {
-		ids := searchPinyinIDsUntilExpected(t, ctx, mc, collectionName, queryText)
-		require.Equal(t, pinyinTargetIDs, ids)
+	searchCases := []struct {
+		name               string
+		queryText          string
+		minimumShouldMatch int
+		expectedIDs        []int64
+	}{
+		{name: "joined_pinyin", queryText: "zhongwen", expectedIDs: pinyinTargetIDs},
+		{name: "original", queryText: "中文", minimumShouldMatch: 2, expectedIDs: pinyinTargetIDs},
+		{name: "disabled_full_pinyin", queryText: "zhong", expectedIDs: []int64{}},
+		{name: "disabled_first_letters", queryText: "zw", expectedIDs: []int64{}},
+	}
+	for _, searchCase := range searchCases {
+		t.Run(searchCase.name, func(t *testing.T) {
+			ids := searchPinyinIDsUntilExpected(
+				t,
+				ctx,
+				mc,
+				collectionName,
+				searchCase.queryText,
+				searchCase.minimumShouldMatch,
+				searchCase.expectedIDs,
+			)
+			require.Equal(t, searchCase.expectedIDs, ids)
+		})
 	}
 }
