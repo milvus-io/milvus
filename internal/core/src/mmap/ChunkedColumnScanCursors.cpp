@@ -191,6 +191,12 @@ class FixedWidthDataScanCursor final
         }
 
         while (scan_pos_ < scan_end_) {
+            const auto rows = column_->chunk_row_nums(current_chunk_id_);
+            if (current_chunk_offset_ >= rows) {
+                ++current_chunk_id_;
+                current_chunk_offset_ = 0;
+                continue;
+            }
             if (projection_ == ChunkedColumnInterface::ScanProjection::Data &&
                 IsInSkippedRange()) {
                 if (column_->IsNullable()) {
@@ -201,13 +207,6 @@ class FixedWidthDataScanCursor final
             if (scan_pos_ >= scan_end_) {
                 return false;
             }
-            const auto rows = column_->chunk_row_nums(current_chunk_id_);
-            if (current_chunk_offset_ >= rows) {
-                ++current_chunk_id_;
-                current_chunk_offset_ = 0;
-                continue;
-            }
-
             const auto rows_left_in_chunk = rows - current_chunk_offset_;
             const auto rows_left_in_scan = scan_end_ - scan_pos_;
             const auto rows_before_skip =
