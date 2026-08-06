@@ -10,11 +10,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // NewCataLog creates a new catalog instance
@@ -135,7 +134,12 @@ func (c *catalog) loadMetaWithLegacyTrailingSlash(ctx context.Context, key strin
 }
 
 func (c *catalog) saveAndRemoveLegacyMeta(ctx context.Context, key, value string) error {
-	return c.metaKV.MultiSaveAndRemove(ctx, map[string]string{key: value}, []string{key + "/"})
+	// canonical save recorded before the legacy-key removal, so even a chunked
+	// flush can never drop the only copy of the value.
+	b := txn.New()
+	b.Save(key, value)
+	b.Remove(key + "/")
+	return txn.Commit(ctx, c.metaKV, b)
 }
 
 // ListPChannels returns all pchannels
@@ -159,19 +163,17 @@ func (c *catalog) ListPChannel(ctx context.Context) ([]*streamingpb.PChannelMeta
 
 // SavePChannels saves a pchannel
 func (c *catalog) SavePChannels(ctx context.Context, infos []*streamingpb.PChannelMeta) error {
-	kvs := make(map[string]string, len(infos))
+	b := txn.New()
 	for _, info := range infos {
-		key := buildPChannelInfoPath(info.GetChannel().GetName())
 		v, err := proto.Marshal(info)
 		if err != nil {
 			return errors.Wrapf(err, "marshal pchannel %s failed", info.GetChannel().GetName())
 		}
-		kvs[key] = string(v)
+		b.Save(buildPChannelInfoPath(info.GetChannel().GetName()), string(v))
 	}
-	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
-	return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
-		return c.metaKV.MultiSave(ctx, partialKvs)
-	})
+	// within the store's txn limit the batch is one atomic txn; over it, the
+	// engine flushes chunks in the input-slice order
+	return txn.Commit(ctx, c.metaKV, b)
 }
 
 func (c *catalog) ListBroadcastTask(ctx context.Context) ([]*streamingpb.BroadcastTask, error) {
@@ -200,7 +202,9 @@ func (c *catalog) SaveBroadcastTask(ctx context.Context, broadcastID uint64, tas
 	if err != nil {
 		return errors.Wrapf(err, "marshal broadcast task failed")
 	}
-	return c.metaKV.Save(ctx, key, string(v))
+	b := txn.New()
+	b.Save(key, string(v))
+	return txn.Commit(ctx, c.metaKV, b)
 }
 
 // buildPChannelInfoPath builds the path for pchannel info.
@@ -213,27 +217,32 @@ func buildBroadcastTaskPath(id uint64) string {
 	return BroadcastTaskPrefix + strconv.FormatUint(id, 10)
 }
 
+// SaveReplicateConfiguration persists the replicate configuration and the new
+// replicating-pchannel records as one composite commit. The config record is
+// the composite's visibility marker: GetReplicateConfiguration is what makes a
+// configuration update observable, so on the engine's chunked fallback it
+// lands alone in the final guarded txn, after every task record - a crash
+// mid-write leaves the OLD config visible with the new task records inert, and
+// the caller's retry (serialized by ChannelManager's lock) reissues the same
+// composite. The CDC controller watches the replicating-pchannel prefix
+// directly, so task records becoming visible before the config is no wider a
+// window than today's unordered MultiSave batches had.
 func (c *catalog) SaveReplicateConfiguration(ctx context.Context, config *streamingpb.ReplicateConfigurationMeta, replicatingTasks []*streamingpb.ReplicatePChannelMeta) error {
 	v, err := proto.Marshal(config)
 	if err != nil {
 		return errors.Wrapf(err, "marshal replicate configuration failed")
 	}
 
-	kvs := make(map[string]string, len(replicatingTasks)+1)
-	kvs[ReplicateConfigurationKey] = string(v)
-
+	b := txn.New()
 	for _, task := range replicatingTasks {
-		key := buildReplicatePChannelPath(task.GetTargetCluster().GetClusterId(), task.GetSourceChannelName())
-		v, err := proto.Marshal(task)
+		tv, err := proto.Marshal(task)
 		if err != nil {
 			return errors.Wrapf(err, "marshal replicate pchannel meta failed")
 		}
-		kvs[key] = string(v)
+		b.Save(buildReplicatePChannelPath(task.GetTargetCluster().GetClusterId(), task.GetSourceChannelName()), string(tv))
 	}
-	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
-	return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
-		return c.metaKV.MultiSave(ctx, partialKvs)
-	})
+	b.CommitSave(ReplicateConfigurationKey, string(v))
+	return txn.Commit(ctx, c.metaKV, b)
 }
 
 func (c *catalog) GetReplicateConfiguration(ctx context.Context) (*streamingpb.ReplicateConfigurationMeta, error) {

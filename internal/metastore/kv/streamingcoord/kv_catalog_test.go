@@ -85,6 +85,7 @@ func newTestCatalog(t *testing.T) (metastore.StreamingCoordCataLog, map[string]s
 		delete(kvStorage, key)
 		return nil
 	}).Maybe()
+	kv.EXPECT().MaxTxnOps().Return(128).Maybe()
 	return NewCataLog(kv), kvStorage, kv
 }
 
