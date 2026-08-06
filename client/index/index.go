@@ -76,7 +76,8 @@ func (gi GenericIndex) WithMetricType(metricType MetricType) {
 func NewGenericIndex(name string, params map[string]string) GenericIndex {
 	return GenericIndex{
 		baseIndex: baseIndex{
-			name: name,
+			name:      name,
+			indexType: IndexType(params[IndexTypeKey]),
 		},
 		params: params,
 	}
