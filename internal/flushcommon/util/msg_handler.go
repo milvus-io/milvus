@@ -46,5 +46,10 @@ func ConvertInternalImportFile(file *msgpb.ImportFile, _ int) *internalpb.Import
 	return &internalpb.ImportFile{
 		Id:    file.GetId(),
 		Paths: file.GetPaths(),
+		// The DataNode decides whether to use the replicated range by comparing
+		// PkIdEnd > PkIdBegin, so dropping these here would silently fall back to
+		// local autoID allocation -- the divergence the range exists to prevent.
+		PkIdBegin: file.GetPreAllocatedAutoIds().GetBegin(),
+		PkIdEnd:   file.GetPreAllocatedAutoIds().GetEnd(),
 	}
 }
