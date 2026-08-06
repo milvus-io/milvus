@@ -327,7 +327,13 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 
 	g.Go(func() error {
 		var err error
-		ecrm, err = newExternalCollectionRefreshMeta(ctx, catalog)
+		ecrm, err = newExternalCollectionRefreshMeta(
+			ctx,
+			catalog,
+			withExternalCollectionRefreshResultStore(
+				newExternalCollectionRefreshResultStore(chunkManager),
+			),
+		)
 		return err
 	})
 

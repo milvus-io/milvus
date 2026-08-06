@@ -1601,6 +1601,18 @@ message ExternalCollectionRefreshTask {
   repeated int64 kept_segments = 15;  // Segment IDs kept by this task result
   repeated SegmentInfo updated_segments = 16;  // Segment upsert payload produced by this task result
   bool result_ready = 17;  // True once this task has persisted job-level refresh result payload
+  // Version of the persisted file-range and segment-ownership contract.
+  // Zero denotes a legacy task without ownership metadata and is rejected.
+  int32 ownership_plan_version = 19;
+  // Immutable baseline segment IDs assigned exclusively to this task.
+  // These IDs are ownership input, not task results.
+  repeated int64 owned_segment_ids = 20;
+  // Version of the task result storage format. Zero stores results inline.
+  int32 result_storage_version = 21;
+  // Object-storage key containing the task result payload.
+  string result_path = 22;
+  // SHA-256 checksum of the serialized task result payload.
+  bytes result_checksum = 23;
 }
 
 message GetRefreshExternalCollectionProgressResponse {
@@ -1887,4 +1899,15 @@ message HandleCommitVchannelRequest {
   // commit_timestamp is the WAL message timestamp of the CommitImportMessage.
   // This becomes the segment's commit_timestamp for MVCC/TTL/delete correctness.
   uint64         commit_timestamp = 4;
+}
+
+// ExternalCollectionRefreshTaskResult stores the task result outside etcd.
+// Identity fields prevent a valid object from being attached to another task.
+message ExternalCollectionRefreshTaskResult {
+  int64 collection_id = 1;
+  int64 job_id = 2;
+  int64 task_id = 3;
+  int64 task_version = 4;
+  repeated int64 kept_segments = 5;
+  repeated SegmentInfo updated_segments = 6;
 }
