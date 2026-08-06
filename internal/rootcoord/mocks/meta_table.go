@@ -5,16 +5,12 @@ package mockrootcoord
 import (
 	context "context"
 
-	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-
-	messagespb "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-
-	mock "github.com/stretchr/testify/mock"
-
 	model "github.com/milvus-io/milvus/internal/metastore/model"
+	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	messagespb "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	mock "github.com/stretchr/testify/mock"
 
 	rootcoordpb "github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 )
@@ -1744,54 +1740,6 @@ func (_c *IMetaTable_DropDatabase_Call) Return(_a0 error) *IMetaTable_DropDataba
 }
 
 func (_c *IMetaTable_DropDatabase_Call) RunAndReturn(run func(context.Context, string, uint64) error) *IMetaTable_DropDatabase_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// DropGrant provides a mock function with given fields: ctx, tenant, role
-func (_m *IMetaTable) DropGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
-	ret := _m.Called(ctx, tenant, role)
-
-	if len(ret) == 0 {
-		panic("no return value specified for DropGrant")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, *milvuspb.RoleEntity) error); ok {
-		r0 = rf(ctx, tenant, role)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// IMetaTable_DropGrant_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropGrant'
-type IMetaTable_DropGrant_Call struct {
-	*mock.Call
-}
-
-// DropGrant is a helper method to define mock.On call
-//   - ctx context.Context
-//   - tenant string
-//   - role *milvuspb.RoleEntity
-func (_e *IMetaTable_Expecter) DropGrant(ctx interface{}, tenant interface{}, role interface{}) *IMetaTable_DropGrant_Call {
-	return &IMetaTable_DropGrant_Call{Call: _e.mock.On("DropGrant", ctx, tenant, role)}
-}
-
-func (_c *IMetaTable_DropGrant_Call) Run(run func(ctx context.Context, tenant string, role *milvuspb.RoleEntity)) *IMetaTable_DropGrant_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(*milvuspb.RoleEntity))
-	})
-	return _c
-}
-
-func (_c *IMetaTable_DropGrant_Call) Return(_a0 error) *IMetaTable_DropGrant_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *IMetaTable_DropGrant_Call) RunAndReturn(run func(context.Context, string, *milvuspb.RoleEntity) error) *IMetaTable_DropGrant_Call {
 	_c.Call.Return(run)
 	return _c
 }

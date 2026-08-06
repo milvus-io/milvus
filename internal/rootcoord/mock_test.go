@@ -96,7 +96,6 @@ type mockMetaTable struct {
 	SelectUserFunc                   func(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error)
 	OperatePrivilegeFunc             func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
 	SelectGrantFunc                  func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
-	DropGrantFunc                    func(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error
 	ListPolicyFunc                   func(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error)
 	ListUserRoleFunc                 func(ctx context.Context, tenant string) ([]string, error)
 	DescribeDatabaseFunc             func(ctx context.Context, dbName string) (*model.Database, error)
@@ -242,10 +241,6 @@ func (m mockMetaTable) OperatePrivilege(ctx context.Context, tenant string, enti
 
 func (m mockMetaTable) SelectGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
 	return m.SelectGrantFunc(ctx, tenant, entity)
-}
-
-func (m mockMetaTable) DropGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
-	return m.DropGrantFunc(ctx, tenant, role)
 }
 
 func (m mockMetaTable) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
@@ -546,9 +541,6 @@ func withInvalidMeta() Opt {
 	}
 	meta.SelectGrantFunc = func(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
 		return nil, errors.New("error mock SelectGrant")
-	}
-	meta.DropGrantFunc = func(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
-		return errors.New("error mock DropGrant")
 	}
 	meta.ListPolicyFunc = func(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
 		return nil, errors.New("error mock ListPolicy")

@@ -139,7 +139,6 @@ type IMetaTable interface {
 	SelectUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error)
 	OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
 	SelectGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
-	DropGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error
 	ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error)
 	ListUserRole(ctx context.Context, tenant string) ([]string, error)
 	BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error)
@@ -2122,16 +2121,6 @@ func (mt *MetaTable) SelectGrant(ctx context.Context, tenant string, entity *mil
 	defer mt.permissionLock.RUnlock()
 
 	return mt.catalog.ListGrant(ctx, tenant, entity)
-}
-
-func (mt *MetaTable) DropGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
-	if role == nil || funcutil.IsEmptyString(role.Name) {
-		return merr.WrapErrParameterInvalidMsg("the role entity is invalid when dropping the grant")
-	}
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
-
-	return mt.catalog.DeleteGrant(ctx, tenant, role)
 }
 
 func (mt *MetaTable) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {

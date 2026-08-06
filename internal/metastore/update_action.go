@@ -38,11 +38,12 @@ const (
 	// because every caller holds the authoritative in-memory object under the
 	// single-writer meta lock and supplies it whole.
 	//
-	// ActionUpdate is a placeholder for a future partial-update (mutator) API:
-	// a transactional read-modify-write that applies a func(current) to a clone
-	// at the apply site, so a caller could touch only the fields it changes
-	// (see the SegmentEntry note on the deferred mutator field). Until such a
-	// caller exists, treat ActionUpdate as replace, not patch.
+	// Partial update is a future direction only, not what ActionUpdate does: a
+	// mutator API would be a transactional read-modify-write that applies a
+	// func(current) to a clone at the apply site, so a caller could touch only
+	// the fields it changes (see the SegmentEntry note on the deferred mutator
+	// field). Until such a caller exists, treat ActionUpdate as replace, not
+	// patch.
 	ActionUpdate
 	// ActionDelete physically removes an entry's keys from the store (e.g.
 	// collection drop; reserved for future segment GC).

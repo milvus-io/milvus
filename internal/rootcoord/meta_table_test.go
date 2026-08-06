@@ -594,7 +594,7 @@ func TestRbacDropRole(t *testing.T) {
 
 // TestRbacDropRoleAlsoDropsGrants: DropRole must take down the whole role
 // chain - role record, user-role mappings AND every grant of the role - in
-// one composite catalog write, so no separate DropGrant call is needed and a
+// one composite catalog write, so no separate grant-cleanup call is needed and a
 // crash can never leave orphaned grants behind a deleted role.
 func TestRbacDropRoleAlsoDropsGrants(t *testing.T) {
 	mt := &MetaTable{catalog: rootcoord.NewCatalog(memkv.NewMemoryKV())}
@@ -895,32 +895,6 @@ func TestRbacSelectGrant(t *testing.T) {
 			if test.isValid {
 				assert.NoError(t, err)
 				assert.Equal(t, 0, len(entities))
-			} else {
-				assert.Error(t, err)
-			}
-		})
-	}
-}
-
-func TestRbacDropGrant(t *testing.T) {
-	mt := generateMetaTable(t)
-
-	tests := []struct {
-		description string
-
-		isValid bool
-		role    *milvuspb.RoleEntity
-	}{
-		{"nil role", false, nil},
-		{"empty Role name", false, &milvuspb.RoleEntity{Name: ""}},
-		{"valid", true, &milvuspb.RoleEntity{Name: "role"}},
-	}
-
-	for _, test := range tests {
-		t.Run(test.description, func(t *testing.T) {
-			err := mt.DropGrant(context.TODO(), util.DefaultTenant, test.role)
-			if test.isValid {
-				assert.NoError(t, err)
 			} else {
 				assert.Error(t, err)
 			}
