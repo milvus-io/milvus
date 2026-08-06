@@ -3457,10 +3457,9 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	// Clone the segment for update
 	cloned := oldSegment.Clone()
 
-	// SegmentInfo.Binlogs is the input to the index-eligibility gate:
-	// indexInspector.getSegmentBinlogFields derives the set of fields that have
-	// data from this array's ChildFields, and canCreateIndexForSegment refuses
-	// to build an index on a function-output field missing from that set.
+	// SegmentInfo.Binlogs is where a field's data becomes visible: this array's
+	// ChildFields carry the real field IDs of a StorageV2/V3 column group, and a
+	// function-output field with no data here has nothing to index.
 	// Materialization exists precisely to make such a field indexable, and
 	// compaction_task_bump_schema_version enqueues the segment for index
 	// building right after this mutation — so the column groups this run wrote
