@@ -85,10 +85,14 @@ var (
 type Prioritizer func(t CompactionTask) int
 
 type CompactionQueue struct {
-	pq          PriorityQueue[CompactionTask]
-	lock        lock.RWMutex
-	prioritizer Prioritizer
-	capacity    int
+	pq   PriorityQueue[CompactionTask]
+	lock lock.RWMutex
+	// prioritizer and prioritizerName are guarded by lock.
+	// Prioritizer is a func value and therefore cannot be compared with ==,
+	// so the configuration name is kept alongside it as its identity.
+	prioritizer     Prioritizer
+	prioritizerName string
+	capacity        int
 }
 
 func NewCompactionQueue(capacity int, prioritizer Prioritizer) *CompactionQueue {
@@ -124,9 +128,25 @@ func (q *CompactionQueue) Dequeue() (CompactionTask, error) {
 }
 
 func (q *CompactionQueue) UpdatePrioritizer(prioritizer Prioritizer) {
-	q.prioritizer = prioritizer
 	q.lock.Lock()
 	defer q.lock.Unlock()
+	q.updatePrioritizerLocked("", prioritizer)
+}
+
+// SyncPrioritizer re-prioritizes the queue only when the configured prioritizer
+// actually changed. It is safe to call on every scheduling tick.
+func (q *CompactionQueue) SyncPrioritizer(name string) {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+	if q.prioritizerName == name {
+		return
+	}
+	q.updatePrioritizerLocked(name, getPrioritizerByName(name))
+}
+
+func (q *CompactionQueue) updatePrioritizerLocked(name string, prioritizer Prioritizer) {
+	q.prioritizer = prioritizer
+	q.prioritizerName = name
 	for i := range q.pq {
 		q.pq[i].priority = q.prioritizer(q.pq[i].value)
 	}
@@ -194,9 +214,12 @@ var (
 	}
 )
 
-func getPrioritizer() Prioritizer {
-	p := Params.DataCoordCfg.CompactionTaskPrioritizer.GetValue()
-	switch p {
+func getPrioritizerName() string {
+	return Params.DataCoordCfg.CompactionTaskPrioritizer.GetValue()
+}
+
+func getPrioritizerByName(name string) Prioritizer {
+	switch name {
 	case "level":
 		return LevelPrioritizer
 	case "mix":
@@ -204,4 +227,8 @@ func getPrioritizer() Prioritizer {
 	default:
 		return DefaultPrioritizer
 	}
+}
+
+func getPrioritizer() Prioritizer {
+	return getPrioritizerByName(getPrioritizerName())
 }

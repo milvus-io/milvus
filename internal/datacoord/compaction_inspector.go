@@ -240,10 +240,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 		}
 	}()
 
-	p := getPrioritizer()
-	if &c.queueTasks.prioritizer != &p {
-		c.queueTasks.UpdatePrioritizer(p)
-	}
+	c.queueTasks.SyncPrioritizer(getPrioritizerName())
 
 	// The schedule loop will stop if either:
 	// 1. no more task to schedule (the task queue is empty)

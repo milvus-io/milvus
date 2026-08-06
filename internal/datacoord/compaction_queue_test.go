@@ -175,3 +175,81 @@ func TestConcurrency(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestCompactionQueue_SyncPrioritizer guards against re-prioritizing the whole
+// queue on every scheduling tick.
+//
+// Prioritizer is a func value and cannot be compared with ==. The previous code
+// compared &q.prioritizer (address of a struct field) against &p (address of a
+// local variable); those addresses are never equal, so the guard was always
+// true and the entire queue was re-prioritized and re-heapified every 500ms.
+func TestCompactionQueue_SyncPrioritizer(t *testing.T) {
+	t1 := &mixCompactionTask{}
+	t1.SetTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_MixCompaction})
+	t2 := &mixCompactionTask{}
+	t2.SetTask(&datapb.CompactionTask{PlanID: 2, Type: datapb.CompactionType_MixCompaction})
+
+	t.Run("same name does not re-prioritize", func(t *testing.T) {
+		var calls int
+		counting := func(task CompactionTask) int {
+			calls++
+			return DefaultPrioritizer(task)
+		}
+
+		cq := NewCompactionQueue(10, counting)
+		assert.NoError(t, cq.Enqueue(t1))
+		assert.NoError(t, cq.Enqueue(t2))
+
+		// First sync adopts the configured prioritizer.
+		cq.SyncPrioritizer("default")
+		calls = 0
+
+		// Subsequent syncs with an unchanged configuration must be no-ops.
+		for i := 0; i < 100; i++ {
+			cq.SyncPrioritizer("default")
+		}
+		assert.Zero(t, calls, "queue was re-prioritized despite unchanged configuration")
+	})
+
+	t.Run("changed name does re-prioritize", func(t *testing.T) {
+		cq := NewCompactionQueue(10, DefaultPrioritizer)
+		assert.NoError(t, cq.Enqueue(t1))
+
+		cq.SyncPrioritizer("level")
+		cq.lock.RLock()
+		assert.Equal(t, "level", cq.prioritizerName)
+		cq.lock.RUnlock()
+
+		cq.SyncPrioritizer("mix")
+		cq.lock.RLock()
+		assert.Equal(t, "mix", cq.prioritizerName)
+		cq.lock.RUnlock()
+	})
+
+	// UpdatePrioritizer used to assign q.prioritizer before acquiring the lock,
+	// racing with concurrent Enqueue/Dequeue which read it under the lock.
+	// Run with -race.
+	t.Run("no data race with concurrent enqueue", func(t *testing.T) {
+		cq := NewCompactionQueue(0, DefaultPrioritizer)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 500; i++ {
+				cq.UpdatePrioritizer(LevelPrioritizer)
+				cq.SyncPrioritizer("mix")
+				cq.SyncPrioritizer("level")
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 500; i++ {
+				task := &mixCompactionTask{}
+				task.SetTask(&datapb.CompactionTask{PlanID: int64(i), Type: datapb.CompactionType_MixCompaction})
+				_ = cq.Enqueue(task)
+				_, _ = cq.Dequeue()
+			}
+		}()
+		wg.Wait()
+	})
+}
