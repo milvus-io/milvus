@@ -119,7 +119,7 @@ TEST_F(FileWriterTest, MmapChunkTargetWithWriteback) {
                            /*populate=*/false,
                            kBufferSize,
                            io::Priority::LOW,
-                           MmapChunkWritebackMode::FdatasyncOnFinish);
+                           {/*enabled=*/true});
 
     std::string test_data = "mmap writeback";
     target.write(test_data.data(), test_data.size());
