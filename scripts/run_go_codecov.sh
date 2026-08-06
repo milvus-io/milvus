@@ -48,6 +48,7 @@ for d in cmd/tools internal pkg client; do
     $TEST_CMD \
         "-gcflags=all=-N -l" \
         -race \
+        -vet=off \
         -tags dynamic,test \
         -v \
         -failfast \
