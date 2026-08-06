@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -213,6 +214,82 @@ func TestSort(t *testing.T) {
 		assert.Equal(t, 0, gotNumRows)
 		assert.Nil(t, timings)
 	})
+}
+
+func TestSortCachesNullableGeometryDefaultWKB(t *testing.T) {
+	const defaultWKT = "POINT (1 2)"
+	defaultWKB, err := common.ConvertWKTToWKB(defaultWKT)
+	require.NoError(t, err)
+
+	convertCalls := 0
+	patch := mockey.Mock(common.ConvertWKTToWKB).To(func(wkt string) ([]byte, error) {
+		convertCalls++
+		require.Equal(t, defaultWKT, wkt)
+		return defaultWKB, nil
+	}).Build()
+	defer patch.UnPatch()
+
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+	}
+	geomField := &schemapb.FieldSchema{
+		FieldID:  101,
+		Name:     "geom",
+		DataType: schemapb.DataType_Geometry,
+		Nullable: true,
+		DefaultValue: &schemapb.ValueField{
+			Data: &schemapb.ValueField_StringData{StringData: defaultWKT},
+		},
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField, geomField}}
+
+	pkBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	defer pkBuilder.Release()
+	pkBuilder.AppendValues([]int64{3, 1, 2}, nil)
+	pkColumn := pkBuilder.NewArray()
+	defer pkColumn.Release()
+
+	geomBuilder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+	defer geomBuilder.Release()
+	geomBuilder.AppendNulls(3)
+	geomColumn := geomBuilder.NewArray()
+	defer geomColumn.Release()
+
+	rec := NewSimpleArrowRecord(array.NewRecord(
+		arrow.NewSchema([]arrow.Field{
+			{Name: pkField.Name, Type: arrow.PrimitiveTypes.Int64},
+			{Name: geomField.Name, Type: arrow.BinaryTypes.Binary, Nullable: true},
+		}, nil),
+		[]arrow.Array{pkColumn, geomColumn},
+		3,
+	), map[FieldID]int{pkField.FieldID: 0, geomField.FieldID: 1})
+	defer rec.Release()
+
+	writer := &MockRecordWriter{
+		writefn: func(r Record) error {
+			out := r.Column(geomField.FieldID).(*array.Binary)
+			require.Equal(t, 3, out.Len())
+			for i := 0; i < out.Len(); i++ {
+				require.True(t, out.IsValid(i))
+				require.Equal(t, defaultWKB, out.Value(i))
+			}
+			return nil
+		},
+		closefn: func() error {
+			return nil
+		},
+	}
+
+	gotNumRows, timings, err := Sort(64*1024*1024, schema, []RecordReader{&oneShotRecordReader{rec: rec}}, writer, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{pkField.FieldID})
+	require.NoError(t, err)
+	require.Equal(t, 3, gotNumRows)
+	require.NotNil(t, timings)
+	require.Equal(t, 1, convertCalls)
 }
 
 func TestMergeSort(t *testing.T) {
