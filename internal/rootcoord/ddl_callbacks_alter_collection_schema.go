@@ -130,6 +130,9 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		if err := validator.ValidateFunction(schema, plan.Function.GetName(), true); err != nil {
 			return merr.Wrap(err, "invalid function schema")
 		}
+		if err := schemautil.ValidateAddFunctionInputNotText(schema, plan.Function); err != nil {
+			return err
+		}
 	}
 	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
 		return err
