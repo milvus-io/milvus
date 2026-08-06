@@ -2319,12 +2319,10 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			lo.Map(replayed[0].GetBinlogs(), func(fb *datapb.FieldBinlog, _ int) int64 { return fb.GetFieldID() }))
 	})
 
-	suite.Run("materialized column group is visible to the index-eligibility gate", func() {
-		// Regression pin for the real consumer: indexInspector calls
-		// getSegmentBinlogFields on the segment and canCreateIndexForSegment
-		// refuses to build an index on a function-output field absent from that
-		// set. compaction_task_bump_schema_version enqueues the segment for
-		// index building right after this mutation, so field 102 must be there.
+	suite.Run("materialized column group is retained in segment metadata", func() {
+		// Bump-schema-version compaction writes the materialized function output
+		// into a new column group. The mutation must retain both the new field and
+		// the pre-existing fields in SegmentInfo.Binlogs.
 		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
 		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
 		segs := makeSegments(1, commonpb.SegmentState_Flushed)
@@ -2359,9 +2357,10 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		_, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
 
-		fields := getSegmentBinlogFields(m.segments.GetSegment(1))
-		suite.Contains(fields, int64(102), "materialized function-output field must be index-eligible")
-		suite.Contains(fields, int64(100), "pre-existing fields must stay index-eligible")
+		fields := lo.FlatMap(m.segments.GetSegment(1).GetBinlogs(),
+			func(binlog *datapb.FieldBinlog, _ int) []int64 { return binlog.GetChildFields() })
+		suite.Contains(fields, int64(102), "materialized function-output field must be retained")
+		suite.Contains(fields, int64(100), "pre-existing fields must be retained")
 	})
 
 	suite.Run("in-place result with stale base manifest is rejected", func() {
