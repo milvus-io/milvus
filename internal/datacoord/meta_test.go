@@ -2013,16 +2013,23 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.EqualValues(3, infos[0].GetStats().GetDeleteNumRows())
 	})
 
-	suite.Run("materialization non-nil result stats overwrites old stats", func() {
-		// runMissingFunctionMaterialization grows Binlogs and ships a freshly
-		// computed Stats; the receiver must adopt it, not keep the pre-bump value.
+	suite.Run("in-place result stats is added onto existing stats", func() {
 		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
 		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
 		segs := makeSegments(1, commonpb.SegmentState_Flushed)
 		old := segs.GetSegment(1)
 		old.StorageVersion = storage.StorageV3
 		old.ManifestPath = currentManifest
-		old.Stats = &datapb.Statistics{InsertBinlogSize: 1234, InsertBinlogCount: 7}
+		old.Stats = &datapb.Statistics{
+			InsertBinlogSize:  1000,
+			InsertBinlogCount: 4,
+			StatsBinlogSize:   20,
+			DeleteNumRows:     3,
+			DeltaBinlogSize:   77,
+			TimestampFrom:     10,
+			TimestampTo:       50,
+			NullCounts:        map[int64]int64{100: 0},
+		}
 		m := &meta{
 			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
 			segments: segs,
@@ -2041,16 +2048,181 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					Manifest:       resultManifest,
 					BaseManifest:   currentManifest,
 					StorageVersion: storage.StorageV3,
-					Stats:          &datapb.Statistics{InsertBinlogSize: 9999, InsertBinlogCount: 9},
+					Stats: &datapb.Statistics{
+						InsertBinlogSize:  300,
+						InsertBinlogCount: 1,
+						StatsBinlogSize:   5,
+						NullCounts:        map[int64]int64{102: 0},
+					},
 				},
 			},
 		}
 		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
-		suite.Require().NotNil(infos[0].GetStats())
-		suite.EqualValues(9999, infos[0].GetStats().GetInsertBinlogSize())
-		suite.EqualValues(9, infos[0].GetStats().GetInsertBinlogCount())
+
+		got := infos[0].GetStats()
+		suite.EqualValues(1300, got.GetInsertBinlogSize())
+		suite.EqualValues(5, got.GetInsertBinlogCount())
+		suite.EqualValues(25, got.GetStatsBinlogSize())
+		// Untouched by the increment.
+		suite.EqualValues(3, got.GetDeleteNumRows())
+		suite.EqualValues(77, got.GetDeltaBinlogSize())
+		suite.EqualValues(10, got.GetTimestampFrom())
+		suite.EqualValues(50, got.GetTimestampTo())
+		suite.Equal(map[int64]int64{100: 0, 102: 0}, got.GetNullCounts())
+	})
+
+	suite.Run("replayed in-place result does not accumulate twice", func() {
+		// result == current means a prior adoption already persisted this
+		// manifest, so the increment is already in Stats. Accumulating again
+		// would double-count. This test guards the coupling between the
+		// accumulation and the forward-commit branch of the manifest CAS.
+		manifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = manifest
+		old.Stats = &datapb.Statistics{InsertBinlogSize: 1300, InsertBinlogCount: 5}
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					Manifest:       manifest, // == current pointer: replay
+					BaseManifest:   packed.MarshalManifestPath("/data/segments/1", 10),
+					StorageVersion: storage.StorageV3,
+					Stats: &datapb.Statistics{
+						InsertBinlogSize:  300,
+						InsertBinlogCount: 1,
+					},
+				},
+			},
+		}
+		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(infos, 1)
+
+		got := infos[0].GetStats()
+		suite.EqualValues(1300, got.GetInsertBinlogSize())
+		suite.EqualValues(5, got.GetInsertBinlogCount())
+	})
+
+	suite.Run("in-place result merges column groups into Binlogs", func() {
+		// The compactor ships only the groups this run wrote, so the receiver
+		// must upsert them: assigning the array would drop the segment's other
+		// column groups. Replaying the same result must not duplicate them.
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = currentManifest
+		old.Binlogs = []*datapb.FieldBinlog{
+			{FieldID: 0, ChildFields: []int64{0, 1, 100}, Binlogs: []*datapb.Binlog{{LogID: 10000}}},
+		}
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		newGroup := &datapb.FieldBinlog{
+			FieldID:     102,
+			ChildFields: []int64{102},
+			Binlogs:     []*datapb.Binlog{{LogID: 10002, EntriesNum: 5, MemorySize: 512}},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					InsertLogs:     []*datapb.FieldBinlog{newGroup},
+					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
+					StorageVersion: storage.StorageV3,
+					Stats:          &datapb.Statistics{InsertBinlogSize: 1},
+				},
+			},
+		}
+		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(infos, 1)
+		// Pre-existing group survives, the materialized group is present.
+		suite.ElementsMatch([]int64{0, 102},
+			lo.Map(infos[0].GetBinlogs(), func(fb *datapb.FieldBinlog, _ int) int64 { return fb.GetFieldID() }))
+		for _, fb := range infos[0].GetBinlogs() {
+			if fb.GetFieldID() == 0 {
+				suite.ElementsMatch([]int64{0, 1, 100}, fb.GetChildFields(),
+					"no child collision, so the pre-existing group keeps its fields")
+			}
+		}
+
+		// Replay: the segment now sits at resultManifest, so this is the
+		// idempotent-adoption branch. The merge must not duplicate the group.
+		replayed, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(replayed, 1)
+		suite.Require().Len(replayed[0].GetBinlogs(), 2)
+		suite.ElementsMatch([]int64{0, 102},
+			lo.Map(replayed[0].GetBinlogs(), func(fb *datapb.FieldBinlog, _ int) int64 { return fb.GetFieldID() }))
+	})
+
+	suite.Run("materialized column group is visible to the index-eligibility gate", func() {
+		// Regression pin for the real consumer: indexInspector calls
+		// getSegmentBinlogFields on the segment and canCreateIndexForSegment
+		// refuses to build an index on a function-output field absent from that
+		// set. compaction_task_bump_schema_version enqueues the segment for
+		// index building right after this mutation, so field 102 must be there.
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
+		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = currentManifest
+		old.Binlogs = []*datapb.FieldBinlog{
+			{FieldID: 0, ChildFields: []int64{0, 1, 100}, Binlogs: []*datapb.Binlog{{LogID: 10000}}},
+		}
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{
+				{
+					SegmentID:      1,
+					NumOfRows:      5,
+					InsertLogs:     []*datapb.FieldBinlog{{FieldID: 102, ChildFields: []int64{102}, Binlogs: []*datapb.Binlog{{LogID: 10002}}}},
+					Manifest:       resultManifest,
+					BaseManifest:   currentManifest,
+					StorageVersion: storage.StorageV3,
+					Stats:          &datapb.Statistics{InsertBinlogSize: 1},
+				},
+			},
+		}
+		_, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+
+		fields := getSegmentBinlogFields(m.segments.GetSegment(1))
+		suite.Contains(fields, int64(102), "materialized function-output field must be index-eligible")
+		suite.Contains(fields, int64(100), "pre-existing fields must stay index-eligible")
 	})
 
 	suite.Run("in-place result with stale base manifest is rejected", func() {
@@ -2667,7 +2839,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.EqualValues(3, infos[0].GetSchemaVersion())
 	})
 
-	suite.Run("v3 in-place applies shipped stats", func() {
+	suite.Run("v3 in-place adds shipped stats increment", func() {
 		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
 		newerManifest := packed.MarshalManifestPath("/data/segments/1", 11)
 		segs := makeSegments(1, commonpb.SegmentState_Flushed)
@@ -2675,7 +2847,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		segment.SchemaVersion = 1
 		segment.StorageVersion = storage.StorageV3
 		segment.ManifestPath = currentManifest
-		// Pre-bump Stats under-counts once materialization grows Binlogs.
+		// Footprint of the segment before materialization appended columns.
 		segment.Stats = &datapb.Statistics{InsertBinlogSize: 100, InsertBinlogCount: 1}
 		m := &meta{
 			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
@@ -2686,8 +2858,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
 			Schema:        &schemapb.CollectionSchema{Version: 3},
 		}
-		// Materialization adds a function-output column: Binlogs and the
-		// shipped Stats both grow; the receiver must copy the shipped Stats.
+		// Materialization adds a function-output column and ships the
+		// footprint of just that column; the receiver adds it onto the
+		// segment's current Stats.
 		shippedStats := &datapb.Statistics{InsertBinlogSize: 250, InsertBinlogCount: 2}
 		result := &datapb.CompactionPlanResult{
 			Segments: []*datapb.CompactionSegment{
@@ -2706,8 +2879,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.NoError(err)
 		suite.NotNil(mutation)
 		suite.Require().Len(infos, 1)
-		suite.EqualValues(250, infos[0].GetStats().GetInsertBinlogSize())
-		suite.EqualValues(250, m.segments.GetSegment(1).getSegmentSize())
+		suite.EqualValues(350, infos[0].GetStats().GetInsertBinlogSize())
+		suite.EqualValues(3, infos[0].GetStats().GetInsertBinlogCount())
+		suite.EqualValues(350, m.segments.GetSegment(1).getSegmentSize())
 	})
 
 	suite.Run("v3 same manifest and same task schema accepted", func() {
@@ -3054,6 +3228,75 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.Nil(infos)
 		suite.Nil(mutation)
 		suite.Equal(currentManifest, m.segments.GetSegment(1).GetManifestPath())
+	})
+
+	suite.Run("post-restart segment accumulates successive increments", func() {
+		// The recovered StorageV3 shape: per-field binlog KVs were skipped, so
+		// Binlogs/Deltalogs come back empty, and Stats is the only durable
+		// record of the segment's footprint. Two successive materializations
+		// must both land on top of it.
+		segs := NewSegmentsInfo()
+		segs.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   100,
+			PartitionID:    10,
+			State:          commonpb.SegmentState_Flushed,
+			Level:          datapb.SegmentLevel_L1,
+			NumOfRows:      5,
+			SchemaVersion:  1,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/data/segments/1", 10),
+			Binlogs:        nil, // recovered V3: arrays are gone
+			Deltalogs:      nil,
+			Stats: &datapb.Statistics{
+				InsertBinlogSize:  10_000,
+				InsertBinlogCount: 8,
+				StatsBinlogSize:   100,
+				DeleteNumRows:     42,
+				NullCounts:        map[int64]int64{100: 0},
+			},
+		}})
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+
+		apply := func(baseVer, resultVer int64, fieldID int64, size int64) {
+			result := &datapb.CompactionPlanResult{
+				Segments: []*datapb.CompactionSegment{
+					{
+						SegmentID:      1,
+						NumOfRows:      5,
+						Manifest:       packed.MarshalManifestPath("/data/segments/1", resultVer),
+						BaseManifest:   packed.MarshalManifestPath("/data/segments/1", baseVer),
+						StorageVersion: storage.StorageV3,
+						Stats: &datapb.Statistics{
+							InsertBinlogSize:  size,
+							InsertBinlogCount: 1,
+							StatsBinlogSize:   10,
+							NullCounts:        map[int64]int64{fieldID: 0},
+						},
+					},
+				},
+			}
+			_, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+			suite.NoError(err)
+		}
+
+		apply(10, 11, 102, 2_000)
+		apply(11, 12, 103, 3_000)
+
+		got := m.segments.GetSegment(1).GetStats()
+		suite.EqualValues(15_000, got.GetInsertBinlogSize())
+		suite.EqualValues(10, got.GetInsertBinlogCount())
+		suite.EqualValues(120, got.GetStatsBinlogSize())
+		suite.EqualValues(42, got.GetDeleteNumRows())
+		suite.Equal(map[int64]int64{100: 0, 102: 0, 103: 0}, got.GetNullCounts())
 	})
 }
 

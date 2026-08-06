@@ -1518,6 +1518,54 @@ func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslog
 	}
 }
 
+// mergeSegmentColumnGroups upserts incoming column groups into an existing
+// FieldBinlog array: a group whose top-level FieldID already exists is replaced,
+// a new one is appended, and every child field claimed by an incoming group is
+// stripped from whichever other group used to hold it, so that each field lives
+// in exactly one column group. A pre-existing group left with no child fields is
+// dropped and its FieldID returned in droppedFieldIDs, so the caller can have the
+// catalog delete the orphan etcd KV -- otherwise listBinlogs' prefix scan will
+// resurrect the zombie on restart.
+//
+// The result is sorted by FieldID, which makes the merge idempotent down to the
+// serialized bytes: re-applying the same groups yields an identical array, never
+// a reordered or duplicated one.
+//
+// Elements of existing are mutated in place (ChildFields filtering) and the
+// incoming group pointers are stored as-is, so callers must pass an array they
+// own.
+func mergeSegmentColumnGroups(existing []*datapb.FieldBinlog, groups map[int64]*datapb.FieldBinlog) ([]*datapb.FieldBinlog, []int64) {
+	incomingChildFields := typeutil.NewSet[int64]()
+	for _, g := range groups {
+		incomingChildFields.Insert(g.GetChildFields()...)
+	}
+
+	var droppedFieldIDs []int64
+	merged := make([]*datapb.FieldBinlog, 0, len(existing)+len(groups))
+	for _, fb := range existing {
+		if _, replaced := groups[fb.GetFieldID()]; replaced {
+			continue
+		}
+		if len(fb.GetChildFields()) > 0 {
+			fb.ChildFields = lo.Filter(fb.GetChildFields(), func(fid int64, _ int) bool {
+				return !incomingChildFields.Contain(fid)
+			})
+			if len(fb.ChildFields) == 0 {
+				droppedFieldIDs = append(droppedFieldIDs, fb.GetFieldID())
+				continue
+			}
+		}
+		merged = append(merged, fb)
+	}
+	for _, g := range groups {
+		merged = append(merged, g)
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		return merged[i].GetFieldID() < merged[j].GetFieldID()
+	})
+	return merged, droppedFieldIDs
+}
+
 // UpdateSegmentColumnGroupsOperator upserts storage-v2 column groups on a
 // segment's FieldBinlogs and removes the listed child fields from any other
 // pre-existing group whose child_fields contained them, so that every field
@@ -1536,38 +1584,8 @@ func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb
 			return false
 		}
 
-		incomingChildFields := typeutil.NewSet[int64]()
-		for _, g := range groups {
-			incomingChildFields.Insert(g.GetChildFields()...)
-		}
-
-		// Strip incoming child fields from any other existing group, then drop
-		// in-place groups that the request is replacing. Also drop groups that
-		// become empty (all ChildFields claimed by incoming groups) and record
-		// their FieldIDs so the catalog removes the orphan etcd KV -- otherwise
-		// listBinlogs' prefix scan will resurrect the zombie on restart.
-		var droppedFieldIDs []int64
-		kept := segment.Binlogs[:0]
-		for _, existing := range segment.Binlogs {
-			if _, replaced := groups[existing.GetFieldID()]; replaced {
-				continue
-			}
-			if len(existing.GetChildFields()) > 0 {
-				existing.ChildFields = lo.Filter(existing.GetChildFields(), func(fid int64, _ int) bool {
-					return !incomingChildFields.Contain(fid)
-				})
-				if len(existing.ChildFields) == 0 {
-					droppedFieldIDs = append(droppedFieldIDs, existing.GetFieldID())
-					continue
-				}
-			}
-			kept = append(kept, existing)
-		}
-		segment.Binlogs = kept
-
-		for _, g := range groups {
-			segment.Binlogs = append(segment.Binlogs, g)
-		}
+		merged, droppedFieldIDs := mergeSegmentColumnGroups(segment.Binlogs, groups)
+		segment.Binlogs = merged
 
 		// Bump DataVersion so querynodes with the segment already loaded will Reopen;
 		// ManifestPath is intentionally not moved here (see segment_checker.isSegmentUpdate).
@@ -3438,7 +3456,28 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	// Clone the segment for update
 	cloned := oldSegment.Clone()
 
-	cloned.Binlogs = resultSegment.GetInsertLogs()
+	// SegmentInfo.Binlogs is the input to the index-eligibility gate:
+	// indexInspector.getSegmentBinlogFields derives the set of fields that have
+	// data from this array's ChildFields, and canCreateIndexForSegment refuses
+	// to build an index on a function-output field missing from that set.
+	// Materialization exists precisely to make such a field indexable, and
+	// compaction_task_bump_schema_version enqueues the segment for index
+	// building right after this mutation — so the column groups this run wrote
+	// must land here, or the index on the materialized field is never built.
+	//
+	// This is an upsert, not an assignment: the compactor ships only the groups
+	// it just wrote, so overwriting would drop the segment's other groups. Same
+	// semantics as the backfill path's UpdateSegmentColumnGroupsOperator, shared
+	// through mergeSegmentColumnGroups. The merge is idempotent (groups are
+	// upserted by FieldID and the result is FieldID-sorted), so unlike the
+	// additive Stats increment below it needs no manifest gate: re-applying a
+	// replayed result cannot double-count.
+	var droppedBinlogFieldIDs []int64
+	if newGroups := resultSegment.GetInsertLogs(); len(newGroups) > 0 {
+		cloned.Binlogs, droppedBinlogFieldIDs = mergeSegmentColumnGroups(cloned.GetBinlogs(),
+			lo.KeyBy(newGroups, func(fb *datapb.FieldBinlog) int64 { return fb.GetFieldID() }))
+	}
+
 	if newSchemaVersion > cloned.GetSchemaVersion() {
 		cloned.SchemaVersion = newSchemaVersion
 		mlog.Info(m.ctx, "meta update: update schema version for schema bump compaction",
@@ -3449,23 +3488,41 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 
 	cloned.StorageVersion = resultSegment.GetStorageVersion()
 	cloned.ManifestPath = resultManifest
-	// Statistics is computed at the compactor and shipped on the
-	// CompactionSegment. Materialization grows Binlogs and ships a freshly
-	// computed Stats, which must be adopted. The schema-bump-only path rewrites
-	// no data and deliberately ships Stats=nil to preserve oldSegment.Stats —
-	// overwriting with nil would zero the durable summary (V3 skips per-field
-	// KVs, so it cannot be rebuilt from arrays after a restart). Only adopt a
-	// non-nil result Stats.
-	if s := resultSegment.GetStats(); s != nil {
-		cloned.Stats = s
+	// Statistics semantics depend on the adoption path: this branch updates an
+	// existing SegmentInfo, so a non-nil result Stats is an INCREMENT to add
+	// onto the segment's current value. See CompactionSegment.stats.
+	//
+	// The gate is the exactly-once token. resultManifest != currentManifest is
+	// the forward-commit branch of the CAS above; result == current is a replay
+	// of an adoption that already persisted, and its increment is already in
+	// Stats. Loosening the CAS silently double-counts.
+	//
+	// runSchemaVersionBumpOnly ships nil, which preserves oldSegment.Stats.
+	if resultManifest != currentManifest {
+		if delta := resultSegment.GetStats(); delta != nil {
+			cloned.Stats = addStatsDelta(m.ctx, segmentID, cloned.GetStats(), delta)
+			mlog.Info(m.ctx, "meta update: applied schema bump stats increment",
+				mlog.Int64("segmentID", segmentID),
+				mlog.String("baseManifest", baseManifest),
+				mlog.String("resultManifest", resultManifest),
+				mlog.Int64("deltaInsertBinlogSize", delta.GetInsertBinlogSize()),
+				mlog.Int64("deltaInsertBinlogCount", delta.GetInsertBinlogCount()),
+				mlog.Int64("deltaStatsBinlogSize", delta.GetStatsBinlogSize()),
+				mlog.Int64("insertBinlogSize", cloned.GetStats().GetInsertBinlogSize()),
+				mlog.Int64("insertBinlogCount", cloned.GetStats().GetInsertBinlogCount()),
+				mlog.Int64("statsBinlogSize", cloned.GetStats().GetStatsBinlogSize()))
+		}
 	}
 	if !proto.Equal(oldSegment.SegmentInfo, cloned.SegmentInfo) {
 		cloned.DataVersion = oldSegment.GetDataVersion() + 1
 	}
 
-	// Prepare binlogs increment for catalog update
+	// Prepare binlogs increment for catalog update. droppedBinlogFieldIDs is
+	// empty unless the merge above emptied a pre-existing group; when it is not,
+	// the catalog must delete that group's KV or listBinlogs resurrects it.
 	binlogsIncrement := metastore.BinlogsIncrement{
-		Segment: cloned.SegmentInfo,
+		Segment:               cloned.SegmentInfo,
+		DroppedBinlogFieldIDs: droppedBinlogFieldIDs,
 	}
 
 	mlog.Info(m.ctx, "meta update: prepare for complete schema bump compaction mutation - complete",

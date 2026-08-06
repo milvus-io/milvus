@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -46,4 +47,46 @@ func TestBuildCompactionOutputStats_NullCounts(t *testing.T) {
 		s := buildCompactionOutputStats(nil, deltalogs, 0)
 		assert.Nil(t, s.GetNullCounts())
 	})
+}
+
+func TestBuildMaterializationStatsDelta(t *testing.T) {
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 102, Fields: []int64{102}},
+		{GroupID: 103, Fields: []int64{103}},
+	}
+	memorySizes := map[int64]int{102: 4096, 103: 2048}
+	nullCounts := map[int64]int64{102: 0, 103: 7}
+
+	got := buildMaterializationStatsDelta(columnGroups, memorySizes, nullCounts, 512)
+
+	assert.EqualValues(t, 6144, got.GetInsertBinlogSize())
+	assert.EqualValues(t, 2, got.GetInsertBinlogCount())
+	assert.EqualValues(t, 512, got.GetStatsBinlogSize())
+	assert.Equal(t, map[int64]int64{102: 0, 103: 7}, got.GetNullCounts())
+
+	// Fields materialization does not change must be absent from the increment,
+	// so the receiver's accumulation leaves the segment's values untouched.
+	assert.EqualValues(t, 0, got.GetDeltaBinlogSize())
+	assert.EqualValues(t, 0, got.GetDeltaBinlogCount())
+	assert.EqualValues(t, 0, got.GetDeleteNumRows())
+	assert.EqualValues(t, 0, got.GetTimestampFrom())
+	assert.EqualValues(t, 0, got.GetTimestampTo())
+	assert.EqualValues(t, 0, got.GetDeltaTimestampFrom())
+	assert.EqualValues(t, 0, got.GetDeltaTimestampTo())
+	assert.Empty(t, got.GetTimestampQuantiles())
+}
+
+// TestBuildMaterializationStatsDeltaMissingMemorySize pins that a column group
+// with no recorded memory size contributes zero bytes but still counts as a
+// binlog and still gets a null_counts entry — the presence contract in
+// storage.BuildStatsFromFieldBinlogs requires an entry for every field
+// physically present in the segment.
+func TestBuildMaterializationStatsDeltaMissingMemorySize(t *testing.T) {
+	columnGroups := []storagecommon.ColumnGroup{{GroupID: 104, Fields: []int64{104}}}
+
+	got := buildMaterializationStatsDelta(columnGroups, map[int64]int{}, map[int64]int64{104: 0}, 0)
+
+	assert.EqualValues(t, 0, got.GetInsertBinlogSize())
+	assert.EqualValues(t, 1, got.GetInsertBinlogCount())
+	assert.Equal(t, map[int64]int64{104: 0}, got.GetNullCounts())
 }
