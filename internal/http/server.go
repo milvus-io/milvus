@@ -105,8 +105,8 @@ func registerDefaults() {
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			// Check if expr endpoint is enabled
 			if !paramtable.Get().CommonCfg.ExprEnabled.GetAsBool() {
-				w.WriteHeader(http.StatusForbidden)
-				w.Write([]byte(`{"msg": "expr endpoint is disabled. Set common.security.exprEnabled to true to enable it."}`))
+				writeJSONError(w, http.StatusForbidden,
+					"expr endpoint is disabled. Set common.security.exprEnabled to true to enable it.")
 				return
 			}
 
@@ -115,8 +115,8 @@ func registerDefaults() {
 
 			// Only Proxy nodes can access /expr endpoint
 			if !expr.HasRegistered("proxy") || passwordVerifyFunc == nil {
-				w.WriteHeader(http.StatusForbidden)
-				w.Write([]byte(`{"msg": "/expr endpoint is only available on Proxy nodes"}`))
+				writeJSONError(w, http.StatusForbidden,
+					"/expr endpoint is only available on Proxy nodes")
 				return
 			}
 
