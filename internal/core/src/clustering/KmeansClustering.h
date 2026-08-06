@@ -122,6 +122,8 @@ class KmeansClustering {
         const std::vector<int64_t>& segment_ids,
         const std::map<int64_t, std::vector<std::string>>& insert_files,
         const std::map<int64_t, int64_t>& num_rows,
+        const std::map<int64_t, std::string>& manifest_paths,
+        const Config& base_config,
         const int64_t dim,
         const int64_t trained_segments_num,
         const int64_t num_clusters);
@@ -135,6 +137,17 @@ class KmeansClustering {
                    const int64_t dim,
                    int64_t& offset);
 
+    // StorageV3 sibling of FetchDataFiles: reads a whole segment through its
+    // manifest instead of a list of insert log files.
+    template <typename T>
+    void
+    FetchSegmentViaManifest(uint8_t* buf,
+                            const int64_t expected_train_size,
+                            const int64_t expected_remote_file_size,
+                            const std::string& manifest_path,
+                            const Config& base_config,
+                            int64_t& offset);
+
     // given all possible segments, sample data to buffer
     template <typename T>
     void
@@ -142,6 +155,8 @@ class KmeansClustering {
         const std::vector<int64_t>& segment_ids,
         const std::map<int64_t, std::vector<std::string>>& segment_file_paths,
         const std::map<int64_t, int64_t>& segment_num_rows,
+        const std::map<int64_t, std::string>& manifest_paths,
+        const Config& base_config,
         const int64_t expected_train_size,
         const int64_t dim,
         const bool random_sample,
