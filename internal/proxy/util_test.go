@@ -3669,6 +3669,30 @@ func TestComputeRecall(t *testing.T) {
 		assert.Equal(t, result1.Recalls[1], float32(0.8))
 	})
 
+	t.Run("mixed queries with zero-hit result", func(t *testing.T) {
+		result := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2}},
+				},
+			},
+			Topks: []int64{2, 0},
+		}
+		gt := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 3, 4, 5}},
+				},
+			},
+			Topks: []int64{2, 2},
+		}
+
+		require.NoError(t, computeRecall(result, gt))
+		assert.Equal(t, []float32{0.5, 0}, result.Recalls)
+	})
+
 	t.Run("not match size", func(t *testing.T) {
 		result1 := &schemapb.SearchResultData{
 			NumQueries: 2,
