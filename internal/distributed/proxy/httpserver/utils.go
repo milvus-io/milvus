@@ -466,6 +466,9 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool) ([]map[string]interface{}, map[string][]bool, error) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
+	// Escape hatch for clients that relied on a missing non-nullable field being
+	// stored as an empty value. Read once per request rather than per field.
+	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
 	dataResult := gjson.GetBytes(body, HTTPRequestData)
 	dataResultArray := dataResult.Array()
 	if len(dataResultArray) == 0 {
@@ -496,6 +499,9 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						validDataMap[structField.GetName()] = append(validDataMap[structField.GetName()], false)
 						continue
 					}
+					// Not gated by compatibilityMode: a missing struct array field
+					// already failed before this change, in parseStructArrayRow,
+					// so there is no lenient behaviour to fall back to.
 					return reallyDataArray, validDataMap, merr.WrapErrParameterMissingMsg(
 						"field %s is required", structField.GetName())
 				}
@@ -551,11 +557,13 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					continue
 				}
 
-				if !fieldValue.Exists() {
-					return reallyDataArray, validDataMap, merr.WrapErrParameterMissingMsg("field %s is required", fieldName)
-				}
-				if fieldValue.Type == gjson.Null {
-					return reallyDataArray, validDataMap, merr.WrapErrParameterInvalidMsg("field %s is not nullable", fieldName)
+				if !compatibilityMode {
+					if !fieldValue.Exists() {
+						return reallyDataArray, validDataMap, merr.WrapErrParameterMissingMsg("field %s is required", fieldName)
+					}
+					if fieldValue.Type == gjson.Null {
+						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalidMsg("field %s is not nullable", fieldName)
+					}
 				}
 
 				switch fieldType {

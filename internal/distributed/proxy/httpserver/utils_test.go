@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -5030,4 +5031,65 @@ func TestEncodeEmbListQueryErrorPaths(t *testing.T) {
 
 	_, err = encodeEmbListQuery(gjson.Parse(`[[true]]`).Array(), schemapb.DataType_Bool, 1, 0)
 	assert.Error(t, err)
+}
+
+// proxy.http.compatibilityMode restores the behaviour a client saw before a
+// missing non-nullable field was rejected: the value was silently stored empty.
+func TestCheckAndSetDataCompatibilityModeSwitch(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
+
+	schema := func() *schemapb.CollectionSchema {
+		vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
+		vectorField.Name = "vector"
+		return &schemapb.CollectionSchema{
+			Name: DefaultCollectionName,
+			Fields: []*schemapb.FieldSchema{
+				generatePrimaryField(schemapb.DataType_Int64, false),
+				vectorField,
+				{Name: "name", DataType: schemapb.DataType_VarChar},
+			},
+		}
+	}
+	missing := []byte(fmt.Sprintf(`{"data": {"%s": 1, "vector": [0.1, 0.2]}}`, FieldBookID))
+	explicitNull := []byte(fmt.Sprintf(`{"data": {"%s": 1, "vector": [0.1, 0.2], "name": null}}`, FieldBookID))
+
+	t.Run("default rejects a missing field", func(t *testing.T) {
+		_, _, err := checkAndSetData(missing, schema(), false)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterMissing)
+	})
+
+	t.Run("default rejects an explicit null", func(t *testing.T) {
+		_, _, err := checkAndSetData(explicitNull, schema(), false)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("enabled stores the empty value again", func(t *testing.T) {
+		paramtable.Get().Save(key, "true")
+		defer paramtable.Get().Reset(key)
+
+		rows, _, err := checkAndSetData(missing, schema(), false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, "", rows[0]["name"])
+
+		rows, _, err = checkAndSetData(explicitNull, schema(), false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, "", rows[0]["name"])
+	})
+
+	t.Run("enabled does not weaken nullable handling", func(t *testing.T) {
+		paramtable.Get().Save(key, "true")
+		defer paramtable.Get().Reset(key)
+
+		nullableSchema := schema()
+		nullableSchema.Fields[2].Nullable = true
+		rows, validData, err := checkAndSetData(explicitNull, nullableSchema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, []bool{false}, validData["name"])
+	})
 }
