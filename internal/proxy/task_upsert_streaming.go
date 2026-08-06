@@ -322,8 +322,15 @@ func (ut *upsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) 
 		if !message.HasPartialUpdateCAS(msg) {
 			return merr.WrapErrServiceInternalMsg("partial update insert is missing CAS metadata for vchannel %s", vchannel)
 		}
-		if msg.EstimateSize() > Params.PulsarCfg.MaxMessageSize.GetAsInt() {
-			return merr.WrapErrParameterTooLarge("partial update message exceeds max message size")
+		maxMessageSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+		messageSize := msg.EstimateSize()
+		if messageSize > maxMessageSize {
+			return merr.WrapErrServiceInternalMsg(
+				"partial update insert packer emitted oversized message for vchannel %s: size=%d, max=%d",
+				vchannel,
+				messageSize,
+				maxMessageSize,
+			)
 		}
 		attached[vchannel] = struct{}{}
 	}
