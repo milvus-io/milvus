@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -5421,4 +5422,54 @@ func TestCheckAndSetDataQuotedIntegerIsDecimal(t *testing.T) {
 			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 		})
 	}
+}
+
+// proxy.http.compatibilityMode restores the previous integer handling,
+// including the two's complement wraparound this PR removes.
+func TestCheckAndSetDataIntegerCompatibilityMode(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
+	paramtable.Get().Save(key, "true")
+	defer paramtable.Get().Reset(key)
+
+	narrowSchema := func(dataType schemapb.DataType) *schemapb.CollectionSchema {
+		vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
+		vectorField.Name = "vector"
+		return &schemapb.CollectionSchema{
+			Name: DefaultCollectionName,
+			Fields: []*schemapb.FieldSchema{
+				generatePrimaryField(schemapb.DataType_Int64, false),
+				vectorField,
+				{Name: "narrow", DataType: dataType},
+			},
+		}
+	}
+	insert := func(t *testing.T, schema *schemapb.CollectionSchema, value string) map[string]interface{} {
+		t.Helper()
+		body := []byte(fmt.Sprintf(
+			`{"data": {"%s": 1, "vector": [0.1, 0.2], "narrow": %s}}`, FieldBookID, value))
+		rows, _, err := checkAndSetData(body, schema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		return rows[0]
+	}
+
+	t.Run("int8 wraps again", func(t *testing.T) {
+		assert.Equal(t, int8(-128), insert(t, narrowSchema(schemapb.DataType_Int8), `128`)["narrow"])
+	})
+
+	t.Run("int32 wraps again", func(t *testing.T) {
+		assert.Equal(t, int32(0), insert(t, narrowSchema(schemapb.DataType_Int32), `4294967296`)["narrow"])
+	})
+
+	t.Run("quoted integer uses base detection again", func(t *testing.T) {
+		assert.Equal(t, int8(8), insert(t, narrowSchema(schemapb.DataType_Int8), `"010"`)["narrow"])
+	})
+
+	t.Run("int64 loses precision again", func(t *testing.T) {
+		rows, err := insertOneInt64Value(t, `9007199254740993.0`)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, int64(9007199254740992), rows[0]["count"])
+	})
 }

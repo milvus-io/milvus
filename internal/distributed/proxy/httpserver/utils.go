@@ -466,6 +466,9 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool) ([]map[string]interface{}, map[string][]bool, error) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
+	// Escape hatch for clients that relied on the previous value handling.
+	// Read once per request rather than per field.
+	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
 	dataResult := gjson.GetBytes(body, HTTPRequestData)
 	dataResultArray := dataResult.Array()
 	if len(dataResultArray) == 0 {
@@ -619,6 +622,14 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Int8:
+					if compatibilityMode {
+						legacy, err := cast.ToInt8E(dataString)
+						if err != nil {
+							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
+						}
+						reallyData[fieldName] = legacy
+						break
+					}
 					result, actual, ok := parseRESTInteger(fieldValue, 8)
 					if !ok {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(
@@ -627,6 +638,14 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					}
 					reallyData[fieldName] = int8(result)
 				case schemapb.DataType_Int16:
+					if compatibilityMode {
+						legacy, err := cast.ToInt16E(dataString)
+						if err != nil {
+							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
+						}
+						reallyData[fieldName] = legacy
+						break
+					}
 					result, actual, ok := parseRESTInteger(fieldValue, 16)
 					if !ok {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(
@@ -635,6 +654,14 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					}
 					reallyData[fieldName] = int16(result)
 				case schemapb.DataType_Int32:
+					if compatibilityMode {
+						legacy, err := cast.ToInt32E(dataString)
+						if err != nil {
+							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
+						}
+						reallyData[fieldName] = legacy
+						break
+					}
 					result, actual, ok := parseRESTInteger(fieldValue, 32)
 					if !ok {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(
@@ -651,7 +678,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					// carries Int64 primary keys, and strconv's base detection
 					// would silently reinterpret a zero-padded id such as "010".
 					var result int64
-					if fieldValue.Type == gjson.Number {
+					if fieldValue.Type == gjson.Number && !compatibilityMode {
 						parsed, ok := parseJSONInteger(fieldValue.Raw, 64)
 						if !ok {
 							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(
