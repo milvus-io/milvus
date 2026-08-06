@@ -26,10 +26,12 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -454,4 +456,253 @@ func TestCatalog_Update_AddPartitionStatsAndVersionEncodingMatchesLegacy(t *test
 
 	assert.Equal(t, legacySaves, compositeSaves)
 	assert.Equal(t, "100", compositeSaves[buildCurrentPartitionStatsVersionPath(1, 2, "ch-1")])
+}
+
+// ---------------------------------------------------------------------------
+// Import job + task composite tests
+// ---------------------------------------------------------------------------
+
+// memMetaKv adapts the in-memory TxnKV to kv.MetaKv so crash-injection tests
+// can replay a retry against real store state (the mocks.MetaKv harness above
+// records calls but keeps no state). Only the read/write surface the import
+// composite touches is implemented.
+type memMetaKv struct {
+	*memkv.MemoryKV
+}
+
+func (m *memMetaKv) GetPath(key string) string { return key }
+
+func (m *memMetaKv) CompareVersionAndSwap(ctx context.Context, key string, version int64, target string) (bool, error) {
+	return false, errors.New("not implemented")
+}
+
+func (m *memMetaKv) WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+	keys, vals, err := m.LoadWithPrefix(ctx, prefix)
+	if err != nil {
+		return err
+	}
+	for i := range keys {
+		if err := fn([]byte(keys[i]), []byte(vals[i])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func dumpMetaKV(t *testing.T, k *memkv.MemoryKV) map[string]string {
+	keys, vals, err := k.LoadWithPrefix(context.TODO(), "")
+	assert.NoError(t, err)
+	got := make(map[string]string, len(keys))
+	for i, key := range keys {
+		got[key] = vals[i]
+	}
+	return got
+}
+
+// TestCatalog_Update_AddImportTasksAndSaveJobEncodingMatchesLegacy proves the
+// composite import-create write (AddPreImportTask/AddImportTask x N +
+// SaveImportJob) persists byte-identical kvs to the legacy per-object catalog
+// methods (SavePreImportTask + SaveImportTask + SaveImportJob), in a single
+// txn.
+func TestCatalog_Update_AddImportTasksAndSaveJobEncodingMatchesLegacy(t *testing.T) {
+	preTask := &datapb.PreImportTask{JobID: 7, TaskID: 1001, CollectionID: 3, State: datapb.ImportTaskStateV2_Pending}
+	task := &datapb.ImportTaskV2{JobID: 7, TaskID: 1002, CollectionID: 3, State: datapb.ImportTaskStateV2_Pending}
+	job := &datapb.ImportJob{JobID: 7, CollectionID: 3, State: internalpb.ImportJobState_PreImporting}
+
+	// Legacy: three independent Saves.
+	legacySaves := make(map[string]string)
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, k string, v string) error {
+		legacySaves[k] = v
+		return nil
+	}).Times(3)
+	c := NewCatalog(metakv, "", "")
+	assert.NoError(t, c.SavePreImportTask(context.TODO(), preTask))
+	assert.NoError(t, c.SaveImportTask(context.TODO(), task))
+	assert.NoError(t, c.SaveImportJob(context.TODO(), job))
+
+	// Composite: one MultiSaveAndRemove.
+	var compositeSaves map[string]string
+	metakv2 := mocks.NewMetaKv(t)
+	metakv2.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv2.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+			compositeSaves = saves
+			assert.Empty(t, removals)
+			return nil
+		}).Once()
+	c2 := NewCatalog(metakv2, "", "")
+	assert.NoError(t, c2.Update(context.TODO(),
+		metastore.AddPreImportTask(preTask),
+		metastore.AddImportTask(task),
+		metastore.SaveImportJob(job)))
+
+	assert.Equal(t, legacySaves, compositeSaves)
+	assert.Len(t, compositeSaves, 3)
+}
+
+// TestCatalog_Update_ImportEntries_RejectsUnsupportedTypeAndNil proves an
+// ImportTaskEntry/ImportJobEntry paired with an action type it does not
+// implement, or carrying a nil payload, is rejected with no KV call. An
+// ImportTaskEntry supports ActionAdd only; an ImportJobEntry supports
+// ActionUpdate (upsert) only.
+func TestCatalog_Update_ImportEntries_RejectsUnsupportedTypeAndNil(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	c := NewCatalog(metakv, "", "")
+
+	err := c.Update(context.TODO(), metastore.UpdateAction{Type: metastore.ActionUpdate, Entry: metastore.ImportTaskEntry{Task: &datapb.ImportTaskV2{TaskID: 1}}})
+	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
+
+	err = c.Update(context.TODO(), metastore.UpdateAction{Type: metastore.ActionAdd, Entry: metastore.ImportJobEntry{Job: &datapb.ImportJob{JobID: 1}}})
+	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
+
+	err = c.Update(context.TODO(), metastore.UpdateAction{Type: metastore.ActionAdd, Entry: metastore.ImportTaskEntry{}})
+	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
+
+	err = c.Update(context.TODO(), metastore.UpdateAction{Type: metastore.ActionUpdate, Entry: metastore.ImportJobEntry{}})
+	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
+}
+
+// importAtomicCrashKV fails the first MultiSaveAndRemove to simulate a crash
+// of the atomic commit.
+type importAtomicCrashKV struct {
+	*memMetaKv
+	failures int
+}
+
+func (f *importAtomicCrashKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	if f.failures > 0 {
+		f.failures--
+		return errors.New("injected crash")
+	}
+	return f.memMetaKv.MultiSaveAndRemove(ctx, saves, removals, preds...)
+}
+
+// TestCatalog_Update_ImportJobAndTasks_AtomicCrashRetry: on the atomic path a
+// failed commit must leave neither task records nor a job-state flip behind
+// (the two key classes live and die together - no task orphans under a job
+// that never left Pending, no PreImporting job without its tasks), and
+// retrying the same composite write must converge to the legacy end state.
+func TestCatalog_Update_ImportJobAndTasks_AtomicCrashRetry(t *testing.T) {
+	ctx := context.TODO()
+	pending := &datapb.ImportJob{JobID: 7, CollectionID: 3, State: internalpb.ImportJobState_Pending}
+	preImporting := &datapb.ImportJob{JobID: 7, CollectionID: 3, State: internalpb.ImportJobState_PreImporting}
+	tasks := []*datapb.PreImportTask{
+		{JobID: 7, TaskID: 1001, CollectionID: 3, State: datapb.ImportTaskStateV2_Pending},
+		{JobID: 7, TaskID: 1002, CollectionID: 3, State: datapb.ImportTaskStateV2_Pending},
+	}
+
+	// Legacy end state: job created, then its tasks and the job transition.
+	legacyKV := &memMetaKv{MemoryKV: memkv.NewMemoryKV()}
+	legacy := NewCatalog(legacyKV, "", "")
+	assert.NoError(t, legacy.SaveImportJob(ctx, pending))
+	for _, task := range tasks {
+		assert.NoError(t, legacy.SavePreImportTask(ctx, task))
+	}
+	assert.NoError(t, legacy.SaveImportJob(ctx, preImporting))
+
+	fk := &importAtomicCrashKV{memMetaKv: &memMetaKv{MemoryKV: memkv.NewMemoryKV()}, failures: 1}
+	c := NewCatalog(fk, "", "")
+	assert.NoError(t, c.SaveImportJob(ctx, pending))
+	before := dumpMetaKV(t, fk.MemoryKV)
+
+	save := func() error {
+		return c.Update(ctx,
+			metastore.AddPreImportTask(tasks[0]),
+			metastore.AddPreImportTask(tasks[1]),
+			metastore.SaveImportJob(preImporting))
+	}
+	assert.Error(t, save())
+	// atomic: the failed commit applied nothing - no orphan task records, and
+	// the job record still carries its pre-transition value.
+	assert.Equal(t, before, dumpMetaKV(t, fk.MemoryKV))
+
+	assert.NoError(t, save())
+	assert.Equal(t, dumpMetaKV(t, legacyKV.MemoryKV), dumpMetaKV(t, fk.MemoryKV))
+}
+
+// importFallbackCommitCrashKV shrinks MaxTxnOps so the composite import write
+// takes the chunked fallback, records which keys each MultiSave chunk
+// carried, and fails the final guarded commit txn - simulating a crash after
+// the task flush but before the job marker lands.
+type importFallbackCommitCrashKV struct {
+	*memMetaKv
+	multiSaveKeys  [][]string
+	commitFailures int
+}
+
+func (f *importFallbackCommitCrashKV) MaxTxnOps() int { return 2 }
+
+func (f *importFallbackCommitCrashKV) MultiSave(ctx context.Context, kvs map[string]string) error {
+	keys := make([]string, 0, len(kvs))
+	for k := range kvs {
+		keys = append(keys, k)
+	}
+	f.multiSaveKeys = append(f.multiSaveKeys, keys)
+	return f.memMetaKv.MultiSave(ctx, kvs)
+}
+
+func (f *importFallbackCommitCrashKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	if f.commitFailures > 0 {
+		f.commitFailures--
+		return errors.New("injected crash")
+	}
+	return f.memMetaKv.MultiSaveAndRemove(ctx, saves, removals, preds...)
+}
+
+// TestCatalog_Update_ImportJobMarkerLandsLast_FallbackCrashRetry: on the
+// chunked fallback path the job record is the sole visibility marker of the
+// batch. A crash between the task flush and the final commit txn must leave
+// the job record un-flipped (still Pending) - the flushed task records sit
+// inert under a job that never observed them - and retrying the same
+// composite write must converge to the legacy end state.
+func TestCatalog_Update_ImportJobMarkerLandsLast_FallbackCrashRetry(t *testing.T) {
+	ctx := context.TODO()
+	pending := &datapb.ImportJob{JobID: 7, CollectionID: 3, State: internalpb.ImportJobState_Pending}
+	preImporting := &datapb.ImportJob{JobID: 7, CollectionID: 3, State: internalpb.ImportJobState_PreImporting}
+	tasks := []*datapb.PreImportTask{
+		{JobID: 7, TaskID: 1001, CollectionID: 3, State: datapb.ImportTaskStateV2_Pending},
+		{JobID: 7, TaskID: 1002, CollectionID: 3, State: datapb.ImportTaskStateV2_Pending},
+		{JobID: 7, TaskID: 1003, CollectionID: 3, State: datapb.ImportTaskStateV2_Pending},
+	}
+
+	legacyKV := &memMetaKv{MemoryKV: memkv.NewMemoryKV()}
+	legacy := NewCatalog(legacyKV, "", "")
+	assert.NoError(t, legacy.SaveImportJob(ctx, pending))
+	for _, task := range tasks {
+		assert.NoError(t, legacy.SavePreImportTask(ctx, task))
+	}
+	assert.NoError(t, legacy.SaveImportJob(ctx, preImporting))
+
+	fk := &importFallbackCommitCrashKV{memMetaKv: &memMetaKv{MemoryKV: memkv.NewMemoryKV()}, commitFailures: 1}
+	c := NewCatalog(fk, "", "")
+	assert.NoError(t, c.SaveImportJob(ctx, pending))
+	pendingValue, err := fk.Load(ctx, buildImportJobKey(7))
+	assert.NoError(t, err)
+
+	save := func() error {
+		return c.Update(ctx,
+			metastore.AddPreImportTask(tasks[0]),
+			metastore.AddPreImportTask(tasks[1]),
+			metastore.AddPreImportTask(tasks[2]),
+			metastore.SaveImportJob(preImporting))
+	}
+	// 4 ops against a 2-op txn limit: the task saves flush in chunks, the job
+	// save must ride the final guarded commit txn - which is failed here.
+	assert.Error(t, save())
+
+	// The job marker never rode in a task chunk...
+	assert.NotEmpty(t, fk.multiSaveKeys)
+	for _, keys := range fk.multiSaveKeys {
+		assert.NotContains(t, keys, buildImportJobKey(7))
+	}
+	// ...so the crash left the job record un-flipped.
+	got, err := fk.Load(ctx, buildImportJobKey(7))
+	assert.NoError(t, err)
+	assert.Equal(t, pendingValue, got)
+
+	assert.NoError(t, save())
+	assert.Equal(t, dumpMetaKV(t, legacyKV.MemoryKV), dumpMetaKV(t, fk.MemoryKV))
 }

@@ -179,6 +179,12 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		return id, id + n, nil
 	})
 	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	// checkPendingJob persists the task batch and the job transition as one
+	// composite Update: ctx + 2 preimport tasks + job.
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	// the no-lack re-check still lands the job marker alone: ctx + job.
+	catalog.EXPECT().Update(mock.Anything, mock.Anything).Return(nil)
+	// UpdateTask below still persists per-task.
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 
 	s.checker.checkPendingJob(job)
@@ -196,6 +202,8 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 			TotalRows: 100,
 		},
 	}
+	// composite Update: ctx + 1 import task + job.
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	for _, t := range preimportTasks {
 		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
@@ -309,7 +317,11 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	alloc := s.alloc
 	alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, nil)
 	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
-	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(mockErr)
+	// the composite Update (ctx + 2 preimport tasks + job) fails: nothing is
+	// applied - no orphan tasks, job stays Pending - and the batch's task
+	// records are rolled back (the next tick allocates fresh task IDs).
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+	catalog.EXPECT().DropPreImportTask(mock.Anything, mock.Anything).Return(nil).Twice()
 
 	s.checker.checkPendingJob(job)
 	preimportTasks := s.importMeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(PreImportTaskType))
@@ -326,7 +338,8 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	alloc.ExpectedCalls = nil
 	alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, nil)
 	catalog.ExpectedCalls = nil
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	// UpdateTask below still persists per-task.
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 	s.checker.checkPendingJob(job)
 	preimportTasks = s.importMeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(PreImportTaskType))
@@ -346,7 +359,13 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	}
 
 	catalog.ExpectedCalls = nil
-	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(mockErr)
+	// the composite Update (ctx + 1 import task + job) fails: the read-back
+	// finds no committed job marker, so the batch's task record is rolled
+	// back BEFORE the checker marks the job Failed via SaveImportJob - a job
+	// that will never retry leaves no orphan behind.
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil).Once()
+	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	s.checker.checkPreImportingJob(job)
 	importTasks := s.importMeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(ImportTaskType))
@@ -362,13 +381,63 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	catalog.ExpectedCalls = nil
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
-	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	alloc.ExpectedCalls = nil
 	alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, nil)
 	s.checker.checkPreImportingJob(job)
 	importTasks = s.importMeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(ImportTaskType))
 	s.Equal(1, len(importTasks))
+	s.Equal(internalpb.ImportJobState_Importing, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+}
+
+// TestCheckPreImporting_MarkerOnlyFailureRetries pins the crash-recovery
+// replay path: every import task already exists (lacks==0, newTasks empty)
+// and only the Importing job marker still needs to land. A transient store
+// error on that marker-only write must NOT fail the job - legacy
+// updateJobState(Importing) failures were warn-and-retry, and the next tick
+// replays the same marker write - so the job must stay PreImporting.
+func (s *ImportCheckerSuite) TestCheckPreImporting_MarkerOnlyFailureRetries() {
+	mockErr := errors.New("mock err")
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+
+	// Drive the job to Importing the normal way: preimport tasks, complete
+	// them, then import tasks + the Importing marker.
+	alloc := s.alloc
+	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		id := rand.Int63()
+		return id, id + n, nil
+	})
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
+	s.checker.checkPendingJob(job)
+	preimportTasks := s.importMeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(PreImportTaskType))
+	s.Equal(2, len(preimportTasks))
+	fileStats := []*datapb.ImportFileStats{{TotalRows: 100}}
+	for _, t := range preimportTasks {
+		s.NoError(s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
+			UpdateState(datapb.ImportTaskStateV2_Completed), UpdateFileStats(fileStats)))
+	}
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.checker.checkPreImportingJob(job)
+	s.Equal(1, len(s.importMeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(ImportTaskType))))
+
+	// Simulate the crash-replay state: the import tasks are all persisted but
+	// the job is still PreImporting (the marker write is what failed/crashed).
+	s.manuallyUpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
+
+	// The marker-only composite write (ctx + job) fails transiently. No
+	// SaveImportJob expectation: marking the job Failed would fail the mock.
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().Update(mock.Anything, mock.Anything).Return(mockErr)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil).Maybe()
+	s.checker.checkPreImportingJob(job)
+	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+
+	// The next tick retries the same marker write and succeeds.
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().Update(mock.Anything, mock.Anything).Return(nil)
+	s.checker.checkPreImportingJob(job)
 	s.Equal(internalpb.ImportJobState_Importing, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 }
 
@@ -973,8 +1042,8 @@ func TestImportCheckerCompaction(t *testing.T) {
 		return id, id + n, nil
 	}).Maybe()
 	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil).Maybe()
-	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil).Twice()
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+	// checkPendingJob: one composite Update (ctx + 2 preimport tasks + job).
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	assert.Eventually(t, func() bool {
 		job := importMeta.GetJob(context.TODO(), jobID)
 		preimportTasks := importMeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(PreImportTaskType))
@@ -985,9 +1054,10 @@ func TestImportCheckerCompaction(t *testing.T) {
 	mlog.Info(context.TODO(), "job pre-importing")
 
 	// check pre-importing
-	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
+	// checkPreImportingJob: one composite Update (ctx + 1 import task + job);
+	// the UpdateTask calls below still persist per-task.
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil).Twice()
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 	preimportTasks := importMeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(PreImportTaskType))
 	fileStats := []*datapb.ImportFileStats{
 		{
@@ -1199,6 +1269,7 @@ func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitFalse()
 		id := rand.Int63()
 		return id, id + n, nil
 	})
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 	s.checker.checkPendingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
@@ -1233,6 +1304,7 @@ func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitTrue() 
 		id := rand.Int63()
 		return id, id + n, nil
 	})
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 	s.checker.checkPendingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())

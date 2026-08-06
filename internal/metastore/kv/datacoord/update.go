@@ -99,6 +99,44 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			default:
 				return unsupportedAction(action)
 			}
+		case metastore.ImportTaskEntry:
+			if action.Type != metastore.ActionAdd {
+				return unsupportedAction(action)
+			}
+			switch {
+			case e.Task != nil:
+				// Same encoding as catalog.SaveImportTask.
+				value, err := proto.Marshal(e.Task)
+				if err != nil {
+					return err
+				}
+				b.Save(buildImportTaskKey(e.Task.GetTaskID()), string(value))
+			case e.PreImportTask != nil:
+				// Same encoding as catalog.SavePreImportTask.
+				value, err := proto.Marshal(e.PreImportTask)
+				if err != nil {
+					return err
+				}
+				b.Save(buildPreImportTaskKey(e.PreImportTask.GetTaskID()), string(value))
+			default:
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil import task in UpdateAction")
+			}
+		case metastore.ImportJobEntry:
+			if action.Type != metastore.ActionUpdate {
+				return unsupportedAction(action)
+			}
+			if e.Job == nil {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil import job in UpdateAction")
+			}
+			// Same encoding as catalog.SaveImportJob. CommitSave marks the job
+			// save as the visibility point: the job is the failover anchor for
+			// its tasks, so every ImportTaskEntry save above must land before
+			// it on the ordered fallback path.
+			value, err := proto.Marshal(e.Job)
+			if err != nil {
+				return err
+			}
+			b.CommitSave(buildImportJobKey(e.Job.GetJobID()), string(value))
 		case metastore.AnalyzeTaskEntry:
 			if action.Type != metastore.ActionDelete {
 				return unsupportedAction(action)

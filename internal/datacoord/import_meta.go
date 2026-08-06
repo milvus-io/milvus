@@ -23,10 +23,13 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/samber/lo"
 	"golang.org/x/exp/maps"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -44,6 +47,7 @@ type ImportMeta interface {
 	HandleCommitVchannel(ctx context.Context, jobID int64, vchannel string, callback func() error) error
 
 	AddTask(ctx context.Context, task ImportTask) error
+	AddTasksToJob(ctx context.Context, jobID int64, tasks []ImportTask, actions ...UpdateJobAction) error
 	UpdateTask(ctx context.Context, taskID int64, actions ...UpdateAction) error
 	GetTask(ctx context.Context, taskID int64) ImportTask
 	GetTaskBy(ctx context.Context, filters ...ImportTaskFilter) []ImportTask
@@ -254,6 +258,137 @@ func (m *importMeta) AddTask(ctx context.Context, task ImportTask) error {
 		m.tasks.add(task)
 	}
 	return nil
+}
+
+// AddTasksToJob persists a batch of newly-created tasks together with the
+// job's updated record as ONE composite catalog write, then applies the
+// in-memory bookkeeping of both. It replaces the per-task AddTask calls
+// followed by an UpdateJob - which, being N+1 independent txns, could crash
+// in between and leave task records under a job that never observed them.
+//
+// The job record - the failover anchor for its tasks - is written LAST as the
+// commit marker. A failed write recovers along two distinct paths:
+//   - Process crash mid-write (chunked fallback): the flushed task records sit
+//     inert under the un-flipped job; restart reloads them into memory, the
+//     checker's lack computation excludes their files, and the retry persists
+//     only the remainder plus the marker - converging on the same keys.
+//   - In-process failure: memory stays untouched, and the checker's next tick
+//     allocates FRESH task IDs for the recomputed missing set (NewPreImportTasks/
+//     NewImportTasks), retrying under a DIFFERENT key set. The flushed records
+//     of the failed batch would become orphans no memory-driven GC can reach,
+//     so they are rolled back below, best-effort: a drop that fails leaves its
+//     record to the crash path above (restart reload adopts it).
+//
+// A returned error does NOT prove the write missed the store: etcd can apply
+// a txn and still surface a timeout or a leader-switch error to the client.
+// In that ambiguous case the job marker may already reference the batch, and
+// rolling the task records back would leave a PreImporting/Importing job with
+// ZERO tasks on disk - a restarted checker sees totalRows==0 (or no
+// incomplete import task) and completes the job empty. So before any
+// rollback the job record is read back to disambiguate: marker committed ->
+// adopt the write as a success; marker definitively absent -> roll back;
+// read-back failed -> leave the records untouched for restart reload.
+//
+// m.mu serializes the whole read -> compute -> commit -> apply sequence, so no
+// concurrent task or job write can interleave. Terminal jobs (Completed/Failed)
+// reject the batch without a write, mirroring UpdateJob's guard.
+func (m *importMeta) AddTasksToJob(ctx context.Context, jobID int64, tasks []ImportTask, actions ...UpdateJobAction) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	job, ok := m.jobs[jobID]
+	if !ok {
+		return nil
+	}
+	if job.GetState() == internalpb.ImportJobState_Completed ||
+		job.GetState() == internalpb.ImportJobState_Failed {
+		// import job is already completed or failed, no need to update
+		return nil
+	}
+	updatedJob := job.Clone()
+	for _, action := range actions {
+		action(updatedJob)
+	}
+	catalogActions := make([]metastore.UpdateAction, 0, len(tasks)+1)
+	for _, task := range tasks {
+		switch task.GetType() {
+		case PreImportTaskType:
+			catalogActions = append(catalogActions, metastore.AddPreImportTask(task.(*preImportTask).task.Load()))
+		case ImportTaskType:
+			catalogActions = append(catalogActions, metastore.AddImportTask(task.(*importTask).task.Load()))
+		}
+	}
+	catalogActions = append(catalogActions, metastore.SaveImportJob(updatedJob.(*importJob).ImportJob))
+	if err := m.catalog.Update(ctx, catalogActions...); err != nil {
+		switch m.readBackJobMarker(ctx, jobID, updatedJob.(*importJob).ImportJob) {
+		case jobMarkerCommitted:
+			// Ambiguous failure, but the marker is on disk: the composite
+			// write actually landed. Adopt it exactly as a success - rolling
+			// back now would delete task records a committed job references.
+			mlog.Warn(ctx, "composite import write reported an error but its job marker is committed, adopting",
+				mlog.FieldJobID(jobID), mlog.Err(err))
+		case jobMarkerAbsent:
+			// The marker is definitively not on disk, so no job observed the
+			// batch. Roll back any task record the chunked fallback already
+			// flushed: the retry re-allocates task IDs, so these keys would
+			// never be written - or dropped - again by this process.
+			for _, task := range tasks {
+				var dropErr error
+				switch task.GetType() {
+				case PreImportTaskType:
+					dropErr = m.catalog.DropPreImportTask(ctx, task.GetTaskID())
+				case ImportTaskType:
+					dropErr = m.catalog.DropImportTask(ctx, task.GetTaskID())
+				}
+				if dropErr != nil {
+					mlog.Warn(ctx, "roll back flushed import task failed, restart reload will adopt it",
+						mlog.FieldJobID(jobID), mlog.FieldTaskID(task.GetTaskID()), mlog.Err(dropErr))
+				}
+			}
+			return err
+		default: // jobMarkerUnknown
+			// The read-back failed too: neither adopting nor rolling back is
+			// safe. If the marker landed, a rollback would empty a committed
+			// job; if it did not, the flushed records sit inert under the
+			// un-flipped job and restart reload adopts them - the same
+			// terminal state as a failed drop above.
+			mlog.Warn(ctx, "composite import write failed and the job marker could not be read back, skipping rollback",
+				mlog.FieldJobID(jobID), mlog.Err(err))
+			return err
+		}
+	}
+	for _, task := range tasks {
+		m.tasks.add(task)
+	}
+	m.jobs[jobID] = updatedJob
+	return nil
+}
+
+type jobMarkerState int
+
+const (
+	jobMarkerUnknown jobMarkerState = iota
+	jobMarkerCommitted
+	jobMarkerAbsent
+)
+
+// readBackJobMarker reads the job record back from the store to tell an
+// ambiguous composite-write failure (applied-but-timed-out) apart from a real
+// miss: the record equal to the batch's updated job proves the marker - and,
+// by write order, every task record before it - committed.
+func (m *importMeta) readBackJobMarker(ctx context.Context, jobID int64, updatedJob *datapb.ImportJob) jobMarkerState {
+	jobs, err := m.catalog.ListImportJobs(ctx)
+	if err != nil {
+		return jobMarkerUnknown
+	}
+	for _, job := range jobs {
+		if job.GetJobID() == jobID {
+			if proto.Equal(job, updatedJob) {
+				return jobMarkerCommitted
+			}
+			return jobMarkerAbsent
+		}
+	}
+	return jobMarkerAbsent
 }
 
 func (m *importMeta) UpdateTask(ctx context.Context, taskID int64, actions ...UpdateAction) error {

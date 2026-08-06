@@ -115,6 +115,69 @@ func (_c *MockImportMeta_AddTask_Call) RunAndReturn(run func(context.Context, Im
 	return _c
 }
 
+// AddTasksToJob provides a mock function with given fields: ctx, jobID, tasks, actions
+func (_m *MockImportMeta) AddTasksToJob(ctx context.Context, jobID int64, tasks []ImportTask, actions ...UpdateJobAction) error {
+	_va := make([]interface{}, len(actions))
+	for _i := range actions {
+		_va[_i] = actions[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, jobID, tasks)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddTasksToJob")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []ImportTask, ...UpdateJobAction) error); ok {
+		r0 = rf(ctx, jobID, tasks, actions...)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockImportMeta_AddTasksToJob_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddTasksToJob'
+type MockImportMeta_AddTasksToJob_Call struct {
+	*mock.Call
+}
+
+// AddTasksToJob is a helper method to define mock.On call
+//   - ctx context.Context
+//   - jobID int64
+//   - tasks []ImportTask
+//   - actions ...UpdateJobAction
+func (_e *MockImportMeta_Expecter) AddTasksToJob(ctx interface{}, jobID interface{}, tasks interface{}, actions ...interface{}) *MockImportMeta_AddTasksToJob_Call {
+	return &MockImportMeta_AddTasksToJob_Call{Call: _e.mock.On("AddTasksToJob",
+		append([]interface{}{ctx, jobID, tasks}, actions...)...)}
+}
+
+func (_c *MockImportMeta_AddTasksToJob_Call) Run(run func(ctx context.Context, jobID int64, tasks []ImportTask, actions ...UpdateJobAction)) *MockImportMeta_AddTasksToJob_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]UpdateJobAction, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(UpdateJobAction)
+			}
+		}
+		run(args[0].(context.Context), args[1].(int64), args[2].([]ImportTask), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockImportMeta_AddTasksToJob_Call) Return(_a0 error) *MockImportMeta_AddTasksToJob_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImportMeta_AddTasksToJob_Call) RunAndReturn(run func(context.Context, int64, []ImportTask, ...UpdateJobAction) error) *MockImportMeta_AddTasksToJob_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CountJobBy provides a mock function with given fields: ctx, filters
 func (_m *MockImportMeta) CountJobBy(ctx context.Context, filters ...ImportJobFilter) int {
 	_va := make([]interface{}, len(filters))

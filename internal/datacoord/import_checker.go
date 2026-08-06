@@ -256,30 +256,32 @@ func (c *importChecker) getLackFilesForImports(job ImportJob) []*datapb.ImportFi
 
 func (c *importChecker) checkPendingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
+	// len(lacks) == 0 is NOT an early exit: after a crash between the task
+	// flush and the job commit marker (the chunked-fallback window of
+	// AddTasksToJob), every task already exists while the job is still
+	// Pending, and the retry must still land the PreImporting marker below.
 	lacks := c.getLackFilesForPreImports(job)
-	if len(lacks) == 0 {
-		return
-	}
 	fileGroups := lo.Chunk(lacks, Params.DataCoordCfg.FilesPerPreImportTask.GetAsInt())
 
-	newTasks, err := NewPreImportTasks(fileGroups, job, c.alloc, c.importMeta)
+	var newTasks []ImportTask
+	if len(fileGroups) > 0 {
+		var err error
+		newTasks, err = NewPreImportTasks(fileGroups, job, c.alloc, c.importMeta)
+		if err != nil {
+			log.Warn(c.ctx, "new preimport tasks failed", mlog.Err(err))
+			return
+		}
+	}
+	// The task batch and the job transition persist as one composite write,
+	// job record last as the commit marker, so a crash cannot leave task
+	// records under a job that never observed them.
+	err := c.importMeta.AddTasksToJob(c.ctx, job.GetJobID(), newTasks, UpdateJobState(internalpb.ImportJobState_PreImporting))
 	if err != nil {
-		log.Warn(c.ctx, "new preimport tasks failed", mlog.Err(err))
+		log.Warn(c.ctx, "add preimport tasks failed", mlog.Err(err))
 		return
 	}
 	for _, t := range newTasks {
-		err = c.importMeta.AddTask(c.ctx, t)
-		if err != nil {
-			log.Warn(c.ctx, "add preimport task failed", WrapTaskLog(t, mlog.Err(err))...)
-			return
-		}
 		log.Info(c.ctx, "add new preimport task", WrapTaskLog(t, mlog.Any("fileStats", t.GetFileStats()))...)
-	}
-
-	err = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
-	if err != nil {
-		log.Warn(c.ctx, "failed to update job state to PreImporting", mlog.Err(err))
-		return
 	}
 	pendingDuration := job.GetTR().RecordSpan()
 	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStagePending).Observe(float64(pendingDuration.Milliseconds()))
@@ -326,10 +328,11 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 		return
 	}
 
+	// len(lacks) == 0 is NOT an early exit: after a crash between the task
+	// flush and the job commit marker (the chunked-fallback window of
+	// AddTasksToJob), every task already exists while the job is still
+	// PreImporting, and the retry must still land the Importing marker below.
 	lacks := c.getLackFilesForImports(job)
-	if len(lacks) == 0 {
-		return
-	}
 
 	requestSize, err := CheckDiskQuota(c.ctx, job, c.meta, c.importMeta)
 	if err != nil {
@@ -340,22 +343,44 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 
 	segmentMaxSize := GetSegmentMaxSize(job, c.meta)
 	groups := RegroupImportFiles(job, lacks, segmentMaxSize)
-	newTasks, err := NewImportTasks(groups, job, c.alloc, c.meta, c.importMeta, segmentMaxSize)
+	var newTasks []ImportTask
+	if len(groups) > 0 {
+		newTasks, err = NewImportTasks(groups, job, c.alloc, c.meta, c.importMeta, segmentMaxSize)
+		if err != nil {
+			log.Warn(c.ctx, "new import tasks failed", mlog.Err(err))
+			return
+		}
+	}
+	// The task batch and the job transition persist as one composite write,
+	// job record last as the commit marker, so a crash cannot leave task
+	// records under a job that never observed them.
+	err = c.importMeta.AddTasksToJob(c.ctx, job.GetJobID(), newTasks,
+		UpdateJobState(internalpb.ImportJobState_Importing), UpdateRequestedDiskSize(requestSize))
 	if err != nil {
-		log.Warn(c.ctx, "new import tasks failed", mlog.Err(err))
+		if len(newTasks) == 0 {
+			// Crash-recovery replay: every task already exists and this write
+			// carried the Importing marker alone. The legacy path treated a
+			// failed transition-only write as retriable (warn, next tick
+			// replays it), and a transient store error must not kill the job
+			// - keep that semantic.
+			log.Warn(c.ctx, "update import job state to Importing failed, wait for retry", mlog.Err(err))
+			return
+		}
+		// Task creation failed (the batch was rolled back); mirror the legacy
+		// AddTask-failure semantic and fail the job.
+		log.Warn(c.ctx, "add new import tasks failed", mlog.Err(err))
+		updateJobState(internalpb.ImportJobState_Failed, UpdateJobReason(err.Error()))
 		return
 	}
 	for _, t := range newTasks {
-		err = c.importMeta.AddTask(c.ctx, t)
-		if err != nil {
-			log.Warn(c.ctx, "add new import task failed", WrapTaskLog(t, mlog.Err(err))...)
-			updateJobState(internalpb.ImportJobState_Failed, UpdateJobReason(err.Error()))
-			return
-		}
 		log.Info(c.ctx, "add new import task", WrapTaskLog(t, mlog.Any("fileStats", t.GetFileStats()))...)
 	}
 
-	updateJobState(internalpb.ImportJobState_Importing, UpdateRequestedDiskSize(requestSize))
+	preImportDuration := job.GetTR().RecordSpan()
+	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStagePreImport).Observe(float64(preImportDuration.Milliseconds()))
+	log.Info(c.ctx, "import job preimport done",
+		mlog.String("state", internalpb.ImportJobState_Importing.String()),
+		mlog.Duration("jobTimeCost/preimport", preImportDuration))
 }
 
 func (c *importChecker) checkImportingJob(job ImportJob) {

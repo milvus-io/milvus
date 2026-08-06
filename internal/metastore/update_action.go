@@ -115,6 +115,22 @@ type RefreshJobEntry struct {
 	JobID int64
 }
 
+// ImportTaskEntry targets a single import task record: exactly one of Task
+// (an import task) or PreImportTask (a pre-import task) is set, selecting the
+// key space the record is written under.
+type ImportTaskEntry struct {
+	Task          *datapb.ImportTaskV2
+	PreImportTask *datapb.PreImportTask
+}
+
+// ImportJobEntry targets an import job's record upsert. The job is the
+// failover anchor for its tasks: compose a SaveImportJob action after every
+// AddImportTask/AddPreImportTask action of the same batch, so the job - the
+// commit marker - lands last on the chunked fallback path.
+type ImportJobEntry struct {
+	Job *datapb.ImportJob
+}
+
 // AnalyzeTaskEntry targets a single analyze task's removal.
 type AnalyzeTaskEntry struct {
 	TaskID int64
@@ -214,6 +230,8 @@ func (ChannelEntry) isEntry()               {}
 func (CollectionEntry) isEntry()            {}
 func (RefreshTaskEntry) isEntry()           {}
 func (RefreshJobEntry) isEntry()            {}
+func (ImportTaskEntry) isEntry()            {}
+func (ImportJobEntry) isEntry()             {}
 func (AnalyzeTaskEntry) isEntry()           {}
 func (PartitionStatsEntry) isEntry()        {}
 func (PartitionStatsVersionEntry) isEntry() {}
@@ -305,6 +323,31 @@ func DropRefreshTask(taskID int64) UpdateAction {
 // the job - the failover anchor - is removed last.
 func DropRefreshJob(jobID int64) UpdateAction {
 	return UpdateAction{Type: ActionDelete, Entry: RefreshJobEntry{JobID: jobID}}
+}
+
+// AddPreImportTask returns an UpdateAction that persists task as a new
+// pre-import task record.
+func AddPreImportTask(task *datapb.PreImportTask) UpdateAction {
+	return UpdateAction{Type: ActionAdd, Entry: ImportTaskEntry{PreImportTask: task}}
+}
+
+// AddImportTask returns an UpdateAction that persists task as a new import
+// task record.
+func AddImportTask(task *datapb.ImportTaskV2) UpdateAction {
+	return UpdateAction{Type: ActionAdd, Entry: ImportTaskEntry{Task: task}}
+}
+
+// SaveImportJob returns an UpdateAction that persists job's record (an
+// upsert). Compose it after every AddImportTask/AddPreImportTask action of
+// the same batch, so the job - the failover anchor - is written last as the
+// commit marker: a crash mid-batch leaves the persisted tasks inert under a
+// job that never observed them, and the restart reload adopts them so the
+// post-crash retry persists only the remainder. An in-process retry does NOT
+// reuse the same task keys (datacoord re-allocates task IDs per attempt), so
+// the caller must roll back the batch's task records when the composite write
+// fails - see importMeta.AddTasksToJob.
+func SaveImportJob(job *datapb.ImportJob) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: ImportJobEntry{Job: job}}
 }
 
 // DropAnalyzeTask returns an UpdateAction that removes an analyze task.
