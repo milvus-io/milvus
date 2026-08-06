@@ -23,7 +23,6 @@ import (
 	"io"
 	"net/http"
 	"path"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -42,15 +41,8 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-const walManagementPort = 19091
-
 type WALSwitchSuite struct {
 	integration.MiniClusterSuite
-}
-
-func (s *WALSwitchSuite) SetupSuite() {
-	s.WithMilvusConfig(paramtable.Get().CommonCfg.MetricsPort.Key, strconv.Itoa(walManagementPort))
-	s.MiniClusterSuite.SetupSuite()
 }
 
 func (s *WALSwitchSuite) TestExistingQueryNodeContinuesAfterPulsarToWoodpeckerSwitch() {
@@ -190,7 +182,9 @@ func (s *WALSwitchSuite) queryPrimaryKey(ctx context.Context, collectionName str
 }
 
 func (s *WALSwitchSuite) alterWALToWoodpecker(ctx context.Context) {
-	url := fmt.Sprintf("http://localhost:%d%s", walManagementPort, management.WALAlterPath)
+	mixCoordManagementPort, err := s.Cluster.DefaultMixCoord().GetMetricsPort()
+	s.Require().NoError(err)
+	url := fmt.Sprintf("http://localhost:%d%s", mixCoordManagementPort, management.WALAlterPath)
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
