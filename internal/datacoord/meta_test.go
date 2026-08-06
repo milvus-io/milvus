@@ -2384,6 +2384,10 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.NoError(err)
 
 		updated := m.segments.GetSegment(1)
+		suite.Require().NotNil(updated)
+		suite.Equal(int32(3), updated.GetSchemaVersion(),
+			"materialized function-output field must be index-eligible")
+
 		fields := make(map[int64]struct{})
 		for _, binlog := range updated.GetBinlogs() {
 			for _, childFieldID := range binlog.GetChildFields() {
