@@ -234,6 +234,8 @@ static-check: getdeps
 	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
 	@echo "Start check go_client e2e package"
 	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags L0,L1,L2,test --timeout=30m --config $(PWD)/tests/go_client/.golangci.yml
+	@echo "Start check segcore error boundaries"
+	@$(PWD)/scripts/check_segcore_error_boundaries.sh
 
 verifiers: build-cpp getdeps cppcheck rustcheck fmt static-check
 
