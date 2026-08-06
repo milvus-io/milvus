@@ -303,20 +303,14 @@ FileWriter::FlushWithBufferedIO() {
 
 size_t
 FileWriter::Finish() {
-    auto has_file_io =
-        offset_ != 0 || (fdatasync_on_finish_ && file_size_ != 0);
-    if (has_file_io) {
+    if (offset_ != 0) {
         auto permit = LocalFileIOPool::GetInstance().AcquireWritePermit();
 
-        // if the aligned buffer is not empty, we should flush it to the file
-        if (offset_ != 0) {
-            if (use_direct_io_) {
-                FlushWithDirectIO();
-            } else {
-                FlushWithBufferedIO();
-            }
+        if (use_direct_io_) {
+            FlushWithDirectIO();
+        } else {
+            FlushWithBufferedIO();
         }
-        SyncWrittenData();
     }
 
     // clean up the file writer

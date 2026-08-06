@@ -39,6 +39,17 @@
 using namespace milvus;
 using namespace milvus::storage;
 
+namespace {
+
+std::string
+ReadFile(const std::string& filename) {
+    std::ifstream file(filename, std::ios::binary);
+    return {std::istreambuf_iterator<char>(file),
+            std::istreambuf_iterator<char>()};
+}
+
+}  // namespace
+
 class FileWriterTest : public testing::Test {
  protected:
     void
