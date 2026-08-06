@@ -18,13 +18,13 @@ package meta
 
 import (
 	"context"
-	"time"
 
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -39,6 +39,9 @@ type CollectionTarget struct {
 	dmChannels         map[string]*DmChannel
 	partitions         typeutil.Set[int64] // stores target partitions info
 	version            int64
+	indexInfos         []*indexpb.IndexInfo
+	indexInfoPresent   bool
+	indexInfoVersion   int64
 
 	// record target status, if target has been save before milvus v2.4.19, then the target will lack of segment info.
 	lackSegmentInfo bool
@@ -48,6 +51,14 @@ type CollectionTarget struct {
 }
 
 func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64) *CollectionTarget {
+	return newCollectionTarget(segments, dmChannels, partitionIDs, nil, false, 0)
+}
+
+func NewCollectionTargetWithIndexInfo(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64, indexInfos []*indexpb.IndexInfo) *CollectionTarget {
+	return newCollectionTarget(segments, dmChannels, partitionIDs, indexInfos, true, 0)
+}
+
+func newCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64, indexInfos []*indexpb.IndexInfo, indexInfoPresent bool, indexInfoVersion int64) *CollectionTarget {
 	channel2Segments := make(map[string][]*datapb.SegmentInfo, len(dmChannels))
 	partition2Segments := make(map[int64][]*datapb.SegmentInfo, len(partitionIDs))
 	totalRowCount := int64(0)
@@ -70,7 +81,10 @@ func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 		partition2Segments: partition2Segments,
 		dmChannels:         dmChannels,
 		partitions:         typeutil.NewSet(partitionIDs...),
-		version:            time.Now().UnixNano(),
+		version:            0,
+		indexInfos:         indexInfos,
+		indexInfoPresent:   indexInfoPresent,
+		indexInfoVersion:   indexInfoVersion,
 		totalRowCount:      totalRowCount,
 	}
 }
@@ -128,6 +142,10 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 		mlog.Info(context.TODO(), "target has lack of segment info", mlog.FieldCollectionID(target.GetCollectionID()))
 	}
 
+	indexInfoVersion := target.GetIndexInfoVersion()
+	if target.GetIndexInfoPresent() && indexInfoVersion == 0 {
+		indexInfoVersion = target.GetVersion()
+	}
 	return &CollectionTarget{
 		segments:           segments,
 		channel2Segments:   channel2Segments,
@@ -135,6 +153,9 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 		dmChannels:         dmChannels,
 		partitions:         typeutil.NewSet(partitions...),
 		version:            target.GetVersion(),
+		indexInfos:         target.GetIndexInfoList(),
+		indexInfoPresent:   target.GetIndexInfoPresent(),
+		indexInfoVersion:   indexInfoVersion,
 		lackSegmentInfo:    lackSegmentInfo,
 		totalRowCount:      totalRowCount,
 	}
@@ -188,9 +209,12 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 	}
 
 	return &querypb.CollectionTarget{
-		CollectionID:   collectionID,
-		ChannelTargets: lo.Values(channelTargets),
-		Version:        p.version,
+		CollectionID:     collectionID,
+		ChannelTargets:   lo.Values(channelTargets),
+		Version:          p.version,
+		IndexInfoList:    p.indexInfos,
+		IndexInfoPresent: p.indexInfoPresent,
+		IndexInfoVersion: p.indexInfoVersion,
 	}
 }
 
@@ -208,6 +232,14 @@ func (p *CollectionTarget) GetPartitionSegments(partitionID int64) []*datapb.Seg
 
 func (p *CollectionTarget) GetTargetVersion() int64 {
 	return p.version
+}
+
+func (p *CollectionTarget) GetIndexInfoSnapshot() ([]*indexpb.IndexInfo, bool) {
+	return p.indexInfos, p.indexInfoPresent
+}
+
+func (p *CollectionTarget) GetIndexInfoVersion() int64 {
+	return p.indexInfoVersion
 }
 
 func (p *CollectionTarget) GetAllDmChannels() map[string]*DmChannel {
@@ -248,14 +280,15 @@ func newTarget() *target {
 	}
 }
 
-func (t *target) updateCollectionTarget(collectionID int64, target *CollectionTarget) {
+func (t *target) updateCollectionTarget(collectionID int64, target *CollectionTarget) bool {
 	t.keyLock.Lock(collectionID)
 	defer t.keyLock.Unlock(collectionID)
 	if old, ok := t.collectionTargetMap.Get(collectionID); ok && old != nil && target.GetTargetVersion() <= old.GetTargetVersion() {
-		return
+		return false
 	}
 
 	t.collectionTargetMap.Insert(collectionID, target)
+	return true
 }
 
 func (t *target) removeCollectionTarget(collectionID int64) {

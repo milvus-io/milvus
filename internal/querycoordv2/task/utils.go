@@ -131,7 +131,12 @@ func packLoadSegmentRequest(
 	loadMeta *querypb.LoadMetaInfo,
 	loadInfo *querypb.SegmentLoadInfo,
 	indexInfo []*indexpb.IndexInfo,
+	indexInfoVersions ...int64,
 ) *querypb.LoadSegmentsRequest {
+	var indexInfoVersion int64
+	if len(indexInfoVersions) > 0 {
+		indexInfoVersion = indexInfoVersions[0]
+	}
 	loadScope := querypb.LoadScope_Full
 	if action.Type() == ActionTypeStatsUpdate {
 		loadScope = querypb.LoadScope_Stats
@@ -153,17 +158,18 @@ func packLoadSegmentRequest(
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
 			commonpbutil.WithMsgID(task.ID()),
 		),
-		Infos:          []*querypb.SegmentLoadInfo{loadInfo},
-		Schema:         finalSchema, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		LoadMeta:       loadMeta,    // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		CollectionID:   task.CollectionID(),
-		ReplicaID:      task.ReplicaID(),
-		DeltaPositions: []*msgpb.MsgPosition{loadInfo.GetDeltaPosition()}, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		DstNodeID:      action.Node(),
-		Version:        time.Now().UnixNano(),
-		NeedTransfer:   true,
-		IndexInfoList:  indexInfo,
-		LoadScope:      loadScope,
+		Infos:            []*querypb.SegmentLoadInfo{loadInfo},
+		Schema:           finalSchema, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		LoadMeta:         loadMeta,    // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		CollectionID:     task.CollectionID(),
+		ReplicaID:        task.ReplicaID(),
+		DeltaPositions:   []*msgpb.MsgPosition{loadInfo.GetDeltaPosition()}, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		DstNodeID:        action.Node(),
+		Version:          time.Now().UnixNano(),
+		NeedTransfer:     true,
+		IndexInfoList:    indexInfo,
+		IndexInfoVersion: indexInfoVersion,
+		LoadScope:        loadScope,
 	}
 }
 
@@ -191,8 +197,9 @@ func packLoadMeta(loadType querypb.LoadType, collectionInfo *milvuspb.DescribeCo
 		DbName:        collectionInfo.GetDbName(),
 		ResourceGroup: resourceGroup,
 		LoadFields:    loadFields,
-		// The update timestamp is a load barrier, not the logical schema version.
-		// QueryNode uses it only to reject stale load results after schema changes.
+		// Kept for one rolling-upgrade window. New QueryNodes order schema state by
+		// schema.Version, but old QueryNodes still use this timestamp to fence load
+		// results that started before a schema change.
 		SchemaBarrierTs: collectionInfo.GetUpdateTimestamp(),
 	}
 }
@@ -207,6 +214,7 @@ func packSubChannelRequest(
 	indexInfo []*indexpb.IndexInfo,
 	partitions []int64,
 	targetVersion int64,
+	indexInfoVersion int64,
 ) *querypb.WatchDmChannelsRequest {
 	finalSchema := applyCollectionSettings(schema, collectionProperties)
 	return &querypb.WatchDmChannelsRequest{
@@ -214,16 +222,17 @@ func packSubChannelRequest(
 			commonpbutil.WithMsgType(commonpb.MsgType_WatchDmChannels),
 			commonpbutil.WithMsgID(task.ID()),
 		),
-		NodeID:        action.Node(),
-		CollectionID:  task.CollectionID(),
-		PartitionIDs:  partitions,
-		Infos:         []*datapb.VchannelInfo{channel.VchannelInfo},
-		Schema:        finalSchema, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		LoadMeta:      loadMeta,    // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		ReplicaID:     task.ReplicaID(),
-		Version:       time.Now().UnixNano(),
-		IndexInfoList: indexInfo,
-		TargetVersion: targetVersion,
+		NodeID:           action.Node(),
+		CollectionID:     task.CollectionID(),
+		PartitionIDs:     partitions,
+		Infos:            []*datapb.VchannelInfo{channel.VchannelInfo},
+		Schema:           finalSchema, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		LoadMeta:         loadMeta,    // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		ReplicaID:        task.ReplicaID(),
+		Version:          time.Now().UnixNano(),
+		IndexInfoList:    indexInfo,
+		TargetVersion:    targetVersion,
+		IndexInfoVersion: indexInfoVersion,
 	}
 }
 

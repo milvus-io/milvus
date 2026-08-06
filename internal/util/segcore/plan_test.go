@@ -48,8 +48,7 @@ func (suite *PlanSuite) SetupTest() {
 	schema := mock_segcore.GenTestCollectionSchema("plan-suite", schemapb.DataType_Int64, true)
 	var err error
 	suite.collection, err = segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
-		Schema:    schema,
-		IndexMeta: mock_segcore.GenTestIndexMeta(suite.collectionID, schema),
+		Schema: schema,
 	})
 	if err != nil {
 		panic(err)

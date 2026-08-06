@@ -76,6 +76,7 @@
 #include "segcore/FieldIndexing.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentIndexMeta.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/KeyRetriever.h"
@@ -1588,6 +1589,26 @@ SegmentGrowingImpl::search_batch_pks(
     }
 }
 
+MetricType
+SegmentGrowingImpl::ResolveMetricType(FieldId field_id) const {
+    return ResolveMetricTypeFromIndexMeta(get_index_meta_snapshot(), field_id);
+}
+
+void
+SegmentGrowingImpl::PrepareSearchInfo(SearchInfo& search_info,
+                                      bool element_level) const {
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](search_info.field_id_);
+    search_info.metric_type_ =
+        ResolveSearchMetricType(search_info.metric_type_,
+                                ResolveMetricType(search_info.field_id_),
+                                field_meta.get_name().get());
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        ValidateVectorArraySearchMode(
+            search_info.metric_type_, element_level, search_info.field_id_);
+    }
+}
+
 void
 SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   const void* query_data,
@@ -1597,6 +1618,11 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   const BitsetView& bitset,
                                   milvus::OpContext* op_context,
                                   SearchResult& output) const {
+    // Same contract as the sealed path: use the growing segment's immutable
+    // construction-time index configuration to fill an omitted request metric or
+    // reject an explicit mismatch before brute-force/interim-index search runs.
+    PrepareSearchInfo(search_info, search_info.element_level());
+    output.metric_type_ = search_info.metric_type_;
     query::SearchOnGrowing(*this,
                            search_info,
                            query_data,

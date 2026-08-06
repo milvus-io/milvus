@@ -1339,6 +1339,13 @@ func (s *mixCoordImpl) ManualUpdateCurrentTarget(ctx context.Context, collection
 	return s.queryCoordServer.ManualUpdateCurrentTarget(ctx, collectionID)
 }
 
+// RefreshCollectionIndexTarget refreshes the QueryCoord target after index
+// metadata changes in DataCoord. It is intentionally an in-process extension,
+// not a public RPC.
+func (s *mixCoordImpl) RefreshCollectionIndexTarget(ctx context.Context, collectionID int64) error {
+	return s.queryCoordServer.RefreshCollectionIndexTarget(ctx, collectionID)
+}
+
 func (s *mixCoordImpl) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
 	return s.datacoordServer.CreateSnapshot(ctx, req)
 }

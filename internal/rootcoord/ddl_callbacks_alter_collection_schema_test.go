@@ -201,7 +201,9 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 		},
 	}, false))
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
+	// +1 vs. the pre-fix expectation: the timezone property alter above now bumps
+	// schema.Version like any other property that lands in the schema snapshot.
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 4)
 	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	expectedTimestamptzDefault, err := timestamptz.ValidateAndReturnUnixMicroTz(defaultTimeString, "Asia/Shanghai")
@@ -534,7 +536,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	}
 	resp, err = core.AlterCollectionSchema(ctx, minHashReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 6)
 
 	// The bound index meta must have been applied through the CreateIndex ack
 	// callback within the same DDL, fully materialized at prepare time.
@@ -630,19 +632,19 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	firstAlterReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output", "bm25_fn")
 	resp, err = core.AlterCollectionSchema(ctx, firstAlterReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 7)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 8)
 
 	// second happy path with DoPhysicalBackfill=true: the flag is ignored by alter schema.
 	secondAlterReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse_output2", "bm25_fn2")
 	secondAlterReq.GetAction().GetAddRequest().DoPhysicalBackfill = true
 	resp, err = core.AlterCollectionSchema(ctx, secondAlterReq)
 	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 8)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 9)
 	updated, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	schema := updated.ToCollectionSchemaPB()
 	require.False(t, schema.GetDoPhysicalBackfill())
-	require.EqualValues(t, 8, schema.GetVersion())
+	require.EqualValues(t, 9, schema.GetVersion())
 
 	// case 9: function already exists (same name "bm25_fn")
 	resp, err = core.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{

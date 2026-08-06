@@ -582,12 +582,13 @@ func TestMeta_HasSameReq(t *testing.T) {
 
 func newSegmentIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 	return &indexMeta{
-		keyLock:          lock.NewKeyLock[UniqueID](),
-		ctx:              context.Background(),
-		catalog:          catalog,
-		indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
-		segmentBuildInfo: newSegmentIndexBuildInfo(),
-		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		keyLock:                lock.NewKeyLock[UniqueID](),
+		ctx:                    context.Background(),
+		catalog:                catalog,
+		indexes:                make(map[UniqueID]map[UniqueID]*model.Index),
+		indexSnapshotRevisions: make(map[UniqueID]int64),
+		segmentBuildInfo:       newSegmentIndexBuildInfo(),
+		segmentIndexes:         typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 	}
 }
 
@@ -1092,6 +1093,41 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 		err = m.MarkIndexAsDeleted(context.TODO(), collID+1, []UniqueID{indexID, indexID + 1, indexID + 2})
 		assert.NoError(t, err)
 	})
+}
+
+func TestMeta_MarkIndexAsDeletedPersistsCompleteRevisionSnapshot(t *testing.T) {
+	const (
+		collectionID     = int64(10)
+		revision         = int64(200)
+		previousRevision = int64(100)
+	)
+	indexes := make(map[UniqueID]*model.Index, 64)
+	for i := int64(1); i <= 64; i++ {
+		indexes[i] = &model.Index{CollectionID: collectionID, IndexID: i, IndexName: "idx"}
+	}
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().Update(mock.Anything, mock.MatchedBy(func(action metastore.UpdateAction) bool {
+		entry, ok := action.Entry.(metastore.IndexSnapshotRevisionEntry)
+		if !ok || entry.CollectionID != collectionID || entry.Revision != revision || entry.PreviousRevision != previousRevision || len(entry.Indexes) != 64 {
+			return false
+		}
+		for _, index := range entry.Indexes {
+			if !index.IsDeleted {
+				return false
+			}
+		}
+		return true
+	})).Return(nil).Once()
+	m := &indexMeta{
+		catalog:                catalog,
+		indexes:                map[UniqueID]map[UniqueID]*model.Index{collectionID: indexes},
+		indexSnapshotRevisions: map[UniqueID]int64{collectionID: previousRevision},
+		segmentIndexes:         typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+	}
+
+	assert.NoError(t, m.MarkIndexAsDeleted(context.Background(), collectionID, nil, revision))
+	assert.Equal(t, revision, m.indexSnapshotRevisions[collectionID])
 }
 
 func TestMeta_GetSegmentIndexes(t *testing.T) {
@@ -1777,7 +1813,7 @@ func TestRemoveIndex(t *testing.T) {
 		expectedErr := errors.New("error")
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().
-			DropIndex(mock.Anything, mock.Anything, mock.Anything).
+			Update(mock.Anything, mock.Anything).
 			Return(expectedErr)
 
 		m := newSegmentIndexMeta(catalog)
@@ -1789,11 +1825,12 @@ func TestRemoveIndex(t *testing.T) {
 	t.Run("remove index ok", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().
-			DropIndex(mock.Anything, mock.Anything, mock.Anything).
+			Update(mock.Anything, mock.Anything).
 			Return(nil)
 
 		m := &indexMeta{
-			catalog: catalog,
+			catalog:                catalog,
+			indexSnapshotRevisions: make(map[int64]int64),
 			indexes: map[int64]map[int64]*model.Index{
 				collID: {
 					indexID: &model.Index{},

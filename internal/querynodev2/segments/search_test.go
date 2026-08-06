@@ -75,16 +75,15 @@ func (suite *SearchSuite) SetupTest() {
 
 	suite.manager = NewManager()
 	suite.schema = mock_segcore.GenTestCollectionSchema("test-reduce", schemapb.DataType_Int64, true)
-	indexMeta := mock_segcore.GenTestIndexMeta(suite.collectionID, suite.schema)
 	suite.manager.Collection.PutOrRef(suite.collectionID,
-		suite.schema,
-		indexMeta,
+		suite.schema, nil,
+
 		&querypb.LoadMetaInfo{
 			LoadType:     querypb.LoadType_LoadCollection,
 			CollectionID: suite.collectionID,
 			PartitionIDs: []int64{suite.partitionID},
-		},
-	)
+		})
+
 	suite.collection = suite.manager.Collection.Get(suite.collectionID)
 
 	suite.sealed, err = NewSegment(ctx,

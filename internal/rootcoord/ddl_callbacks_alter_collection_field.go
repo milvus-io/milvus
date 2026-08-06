@@ -110,8 +110,7 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	}
 
 	// build new collection schema.
-	schema := coll.ToCollectionSchemaPB()
-	schema.Version = coll.SchemaVersion + 1
+	schema := nextSchemaSnapshot(coll)
 	for _, field := range schema.Fields {
 		if field.Name == req.GetFieldName() {
 			field.TypeParams = newFieldProperties

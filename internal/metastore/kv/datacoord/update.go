@@ -24,6 +24,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -42,6 +44,38 @@ import (
 // or Type/Entry combinations it does not implement, are a caller programming
 // error and are rejected with a ServiceInternal error and no write.
 func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
+	revisionedCollections := make(map[int64]struct{})
+	obsoleteSnapshotPrefixes := make([]string, 0)
+	var cleanup *metastore.IndexSnapshotCleanupEntry
+	for _, action := range actions {
+		switch e := action.Entry.(type) {
+		case metastore.IndexSnapshotRevisionEntry:
+			revisionedCollections[e.CollectionID] = struct{}{}
+			if e.PreviousRevision > 0 && e.PreviousRevision != e.Revision {
+				obsoleteSnapshotPrefixes = append(obsoleteSnapshotPrefixes,
+					buildIndexSnapshotRevisionPrefix(e.CollectionID, e.PreviousRevision))
+			}
+		case metastore.IndexSnapshotCleanupEntry:
+			entry := e
+			cleanup = &entry
+		}
+	}
+	if cleanup != nil {
+		if len(actions) != 1 {
+			return merr.WrapErrServiceInternalMsg("datacoord catalog: index snapshot cleanup must be a standalone action")
+		}
+		// The marker is the visibility point. Remove it first so a crash can
+		// leave only unreachable staged data, never a marker that points at a
+		// partially removed snapshot. The leftover prefixes are retry-safe.
+		if err := kc.MetaKv.Remove(ctx, buildIndexSnapshotRevisionKey(cleanup.CollectionID)); err != nil {
+			return err
+		}
+		if err := kc.MetaKv.RemoveWithPrefix(ctx, buildIndexSnapshotCollectionPrefix(cleanup.CollectionID)); err != nil {
+			return err
+		}
+		return kc.MetaKv.RemoveWithPrefix(ctx, buildIndexCollectionPrefix(cleanup.CollectionID))
+	}
+
 	b := txn.New()
 	for _, action := range actions {
 		switch e := action.Entry.(type) {
@@ -57,6 +91,53 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			// earlier ops in this composite write land before it on the
 			// ordered fallback path.
 			b.CommitSave(buildChannelRemovePath(e.Channel), RemoveFlagTomestone)
+		case metastore.IndexEntry:
+			if e.Index == nil {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil index in UpdateAction")
+			}
+			switch action.Type {
+			case metastore.ActionAdd, metastore.ActionUpdate:
+				// A revision-bearing update is persisted exclusively in the
+				// immutable snapshot below. Writing legacy keys before the marker
+				// would make a failed first migration visible on restart.
+				if _, revisioned := revisionedCollections[e.Index.CollectionID]; revisioned {
+					continue
+				}
+				value, err := proto.Marshal(model.MarshalIndexModel(e.Index))
+				if err != nil {
+					return err
+				}
+				b.Save(BuildIndexKey(e.Index.CollectionID, e.Index.IndexID), string(value))
+			case metastore.ActionDelete:
+				b.Remove(BuildIndexKey(e.Index.CollectionID, e.Index.IndexID))
+				if e.Revision > 0 {
+					b.Remove(buildIndexSnapshotKey(e.Index.CollectionID, e.Revision, e.Index.IndexID))
+				}
+			default:
+				return unsupportedAction(action)
+			}
+		case metastore.IndexSnapshotRevisionEntry:
+			if action.Type != metastore.ActionUpdate {
+				return unsupportedAction(action)
+			}
+			if e.Revision <= 0 {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: invalid index snapshot revision %d", e.Revision)
+			}
+			for _, index := range e.Indexes {
+				if index == nil || index.CollectionID != e.CollectionID {
+					return merr.WrapErrServiceInternalMsg("datacoord catalog: invalid index in snapshot for collection %d", e.CollectionID)
+				}
+				value, err := proto.Marshal(model.MarshalIndexModel(index))
+				if err != nil {
+					return err
+				}
+				b.Save(buildIndexSnapshotKey(e.CollectionID, e.Revision, index.IndexID), string(value))
+			}
+			b.CommitSave(buildIndexSnapshotRevisionKey(e.CollectionID), strconv.FormatInt(e.Revision, 10))
+		case metastore.IndexSnapshotCleanupEntry:
+			// Handled before building a transaction so marker removal can be
+			// ordered before prefix cleanup.
+			return merr.WrapErrServiceInternalMsg("datacoord catalog: unreachable index snapshot cleanup action")
 		case metastore.RefreshTaskEntry:
 			switch action.Type {
 			case metastore.ActionAdd:
@@ -142,7 +223,18 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply entry %T", action.Entry)
 		}
 	}
-	return txn.Commit(ctx, kc.MetaKv, b)
+	if err := txn.Commit(ctx, kc.MetaKv, b); err != nil {
+		return err
+	}
+	// Old immutable snapshots are unreachable once the new marker lands.
+	// Their cleanup is deliberately best-effort: returning an error here would
+	// make the caller retry an already committed DDL with a new revision.
+	for _, prefix := range obsoleteSnapshotPrefixes {
+		if err := kc.MetaKv.RemoveWithPrefix(ctx, prefix); err != nil {
+			mlog.Warn(ctx, "failed to clean obsolete field index snapshot", mlog.String("prefix", prefix), mlog.Err(err))
+		}
+	}
+	return nil
 }
 
 // applySegmentEntry stages the kv writes for a segment action.

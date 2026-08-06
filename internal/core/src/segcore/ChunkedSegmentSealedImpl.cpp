@@ -125,6 +125,7 @@
 #include "segcore/ConcurrentVector.h"
 #include "segcore/DeletedRecord.h"
 #include "segcore/SealedIndexingRecord.h"
+#include "segcore/SegmentIndexMeta.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/TimestampIndex.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
@@ -1081,10 +1082,12 @@ std::shared_ptr<const ChunkedSegmentSealedImpl::PublishedSegmentState>
 ChunkedSegmentSealedImpl::BuildPublishedState(
     const SchemaPtr& schema,
     const std::shared_ptr<const SegmentLoadInfo>& load_info,
+    IndexMetaPtr index_meta,
     Timestamp commit_ts) const {
     auto state = std::make_shared<PublishedSegmentState>();
     state->schema = schema;
     state->load_info = load_info;
+    state->index_meta = std::move(index_meta);
     state->runtime = BuildRuntimeResourceState();
     state->commit_ts = commit_ts;
     NormalizePublishedState(*state);
@@ -1247,6 +1250,7 @@ ChunkedSegmentSealedImpl::ClonePublishedState(
     }
     state->schema = current->schema;
     state->load_info = current->load_info;
+    state->index_meta = current->index_meta;
     state->runtime =
         current->runtime ? current->runtime : BuildRuntimeResourceState();
     state->commit_ts = current->commit_ts;
@@ -1272,6 +1276,9 @@ ChunkedSegmentSealedImpl::ApplyDeltaToState(PublishedSegmentState& state,
     }
     if (delta.load_info.has_value()) {
         state.load_info = *delta.load_info;
+    }
+    if (delta.index_meta.has_value()) {
+        state.index_meta = *delta.index_meta;
     }
     if (delta.runtime.has_value()) {
         state.runtime = *delta.runtime;
@@ -3643,6 +3650,46 @@ ChunkedSegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
     deleted_record_.Query(bitset, ins_barrier, timestamp);
 }
 
+// ResolveMetricType answers with what this segment would actually search with: the
+// metric baked into its loaded vector index, or -- before that index exists -- the
+// index configuration published atomically with this segment's load snapshot.
+MetricType
+ChunkedSegmentSealedImpl::ResolveMetricType(
+    const std::shared_ptr<const RuntimeResourceState>& runtime,
+    const IndexMetaPtr& index_meta,
+    FieldId field_id) const {
+    if (auto entry = GetVectorIndexing(runtime, field_id); entry != nullptr) {
+        return entry->metric_type_;
+    }
+    return ResolveMetricTypeFromIndexMeta(index_meta, field_id);
+}
+
+void
+ChunkedSegmentSealedImpl::PrepareSearchInfo(
+    const std::shared_ptr<const PublishedSegmentState>& snapshot,
+    SearchInfo& search_info,
+    bool element_level) const {
+    auto field_id = search_info.field_id_;
+    auto& field_meta = snapshot->schema->operator[](field_id);
+    AssertInfo(field_meta.is_vector(),
+               "The meta type of vector field is not vector type");
+    auto segment_metric =
+        ResolveMetricType(snapshot->runtime, snapshot->index_meta, field_id);
+    search_info.metric_type_ = ResolveSearchMetricType(
+        search_info.metric_type_, segment_metric, field_meta.get_name().get());
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        ValidateVectorArraySearchMode(
+            search_info.metric_type_, element_level, field_id);
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::PrepareSearchInfo(SearchInfo& search_info,
+                                            bool element_level) const {
+    std::shared_lock vector_state_lck(mutex_);
+    PrepareSearchInfo(CapturePublishedState(), search_info, element_level);
+}
+
 void
 ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         const void* query_data,
@@ -3654,13 +3701,14 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         SearchResult& output) const {
     std::shared_lock vector_state_lck(mutex_);
     auto snapshot = CapturePublishedState();
-    AssertInfo(snapshot->system_field_ready, "System field is not ready");
     auto field_id = search_info.field_id_;
+    // search_info is a segment-local copy. Resolve the segment's authoritative
+    // metric first, then either fill an omitted request metric or reject an
+    // explicit mismatch before any vector search runs.
+    PrepareSearchInfo(snapshot, search_info, search_info.element_level());
+    output.metric_type_ = search_info.metric_type_;
+    AssertInfo(snapshot->system_field_ready, "System field is not ready");
     auto runtime = snapshot->runtime;
-    auto& field_meta = snapshot->schema->operator[](field_id);
-
-    AssertInfo(field_meta.is_vector(),
-               "The meta type of vector field is not vector type");
 
     if (get_bit(snapshot->binlog_index_bitset, field_id)) {
         auto config_it = runtime->vec_binlog_config.find(field_id);
@@ -3712,17 +3760,16 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         AssertInfo(
             vec_data != nullptr, "vector field {} not loaded", field_id.get());
 
-        // get index params for bm25 and minhash brute force.
-        // A field added by add_function_field is absent from this segment's
-        // construction-time col_index_meta_ snapshot, so guard with HasField:
-        // BM25 k1/b are delivered through the plan, MinHash falls back to
-        // defaults for the brief window before the segment is reloaded.
+        // Get index params for BM25 and MinHash brute force from the same
+        // published segment snapshot that supplied the metric. Reopen replaces
+        // this configuration atomically with load_info/runtime publication.
         std::map<std::string, std::string> index_info;
         if ((search_info.metric_type_ == knowhere::metric::BM25 ||
              search_info.metric_type_ == knowhere::metric::MHJACCARD) &&
-            col_index_meta_ != nullptr && col_index_meta_->HasField(field_id)) {
-            index_info =
-                col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
+            snapshot->index_meta != nullptr &&
+            snapshot->index_meta->HasField(field_id)) {
+            index_info = snapshot->index_meta->GetFieldIndexMeta(field_id)
+                             .GetIndexParams();
         }
 
         query::SearchOnSealedColumn(*snapshot->schema,
@@ -4705,7 +4752,6 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                            .GetMmapChunkManager()
                            ->Register()),
       id_(segment_id),
-      col_index_meta_(index_meta),
       is_sorted_by_pk_(is_sorted_by_pk),
       deleted_record_(
           nullptr,
@@ -4843,8 +4889,10 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
           segment_id) {
     auto load_info = std::make_shared<const SegmentLoadInfo>(
         milvus::proto::segcore::SegmentLoadInfo(), schema);
-    std::atomic_store(&published_state_,
-                      BuildPublishedState(schema, load_info, commit_ts_));
+    std::atomic_store(
+        &published_state_,
+        BuildPublishedState(
+            schema, load_info, std::move(index_meta), commit_ts_));
 }
 
 ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {
@@ -6768,13 +6816,20 @@ ChunkedSegmentSealedImpl::generate_interim_index(
     const std::shared_ptr<ChunkedColumnInterface>& loaded_column,
     milvus::OpContext* op_ctx,
     StagedStateCommitter* committer) {
-    if (col_index_meta_ == nullptr || !col_index_meta_->HasField(field_id)) {
+    auto snapshot = CapturePublishedState();
+    auto index_meta =
+        committer != nullptr ? committer->GetIndexMeta() : snapshot->index_meta;
+    if (index_meta == nullptr || !index_meta->HasField(field_id)) {
         return false;
     }
-    auto snapshot = CapturePublishedState();
-    auto schema_snapshot = snapshot->schema;
+    auto schema_snapshot =
+        committer != nullptr ? committer->GetSchema() : snapshot->schema;
+    AssertInfo(schema_snapshot != nullptr,
+               "schema is not available when generating interim index for "
+               "field {}",
+               field_id.get());
     auto& field_meta = schema_snapshot->operator[](field_id);
-    auto& field_index_meta = col_index_meta_->GetFieldIndexMeta(field_id);
+    auto& field_index_meta = index_meta->GetFieldIndexMeta(field_id);
     auto& index_params = field_index_meta.GetIndexParams();
 
     bool is_sparse =
@@ -7596,6 +7651,7 @@ ChunkedSegmentSealedImpl::Reopen(
     }
 
     auto target_schema = new_schema ? std::move(new_schema) : current_schema;
+    auto new_index_meta = BuildSegmentIndexMeta(&new_load_info);
 
     SegmentLoadInfo current_mutable(*current->load_info);
     SegmentLoadInfo new_local(new_load_info, target_schema);
@@ -7622,6 +7678,7 @@ ChunkedSegmentSealedImpl::Reopen(
     auto staged = ClonePublishedState(current);
     staged->schema = target_schema;
     staged->load_info = std::make_shared<const SegmentLoadInfo>(new_local);
+    staged->index_meta = new_index_meta;
     staged->runtime = ToConstRuntimeState(next_runtime);
     staged->commit_ts = current->commit_ts;
     NormalizePublishedState(*staged);
@@ -7635,6 +7692,7 @@ ChunkedSegmentSealedImpl::Reopen(
                                 published,
                                 ToConstRuntimeState(std::move(next_runtime)),
                                 current->commit_ts);
+    delta.index_meta = std::move(new_index_meta);
     delta.published_index_ready_bitset =
         staged->published_index_ready_bitset.clone();
     delta.published_binlog_index_ready_bitset =
@@ -8012,6 +8070,7 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
     auto current = CapturePublishedState();
     auto schema_snapshot = current->schema;
+    auto index_meta = BuildSegmentIndexMeta(&load_info);
     auto commit_ts =
         static_cast<milvus::Timestamp>(load_info.commit_timestamp());
     {
@@ -8022,10 +8081,10 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
     // pre-cancelled OpContext before any storage/manifest IO happens.
     auto published = std::make_shared<const SegmentLoadInfo>(
         std::move(load_info), schema_snapshot);
-    PublishStateOnline(BuildNextPublishedState(
-        current,
-        MakeStateDelta(
-            schema_snapshot, published, static_cast<Timestamp>(commit_ts))));
+    auto delta = MakeStateDelta(
+        schema_snapshot, published, static_cast<Timestamp>(commit_ts));
+    delta.index_meta = std::move(index_meta);
+    PublishStateOnline(BuildNextPublishedState(current, delta));
     LOG_INFO(
         "SetLoadInfo for segment {}, num_rows: {}, index count: {}, "
         "storage_version: {}, use_take_for_output: {}, commit_ts: {}",

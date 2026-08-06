@@ -60,10 +60,12 @@
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentIndexMeta.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
+#include "segcore/search_result_export_c.h"
 #include "segcore/segment_c.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
@@ -1309,6 +1311,295 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
+}
+
+TEST(CApiTest, SealedRawSearchResolvesAndValidatesSegmentMetric) {
+    constexpr int64_t topk = 5;
+    constexpr int64_t num_queries = 2;
+    constexpr int64_t row_count = 1000;
+
+    auto schema_string = generate_collection_schema<milvus::FloatVector>(
+        knowhere::metric::IP, DIM);
+    auto collection = NewCollection(schema_string.c_str());
+    auto schema = static_cast<segcore::Collection*>(collection)->get_schema();
+    auto dataset = DataGen(schema, row_count);
+    auto vec_col = dataset.get_col<float>(FieldId(100));
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto raw_group =
+        CreatePlaceholderGroupFromBlob(num_queries, DIM, vec_col.data());
+    auto placeholder_blob = raw_group.SerializeAsString();
+    ScopedSchemaHandle schema_handle(*schema);
+
+    auto run_search_with_options = [&](CSegmentInterface target_segment,
+                                       const std::string& predicate,
+                                       const std::string& requested_metric,
+                                       bool clear_plan_metric,
+                                       const std::string& hints,
+                                       CSearchResult* result) {
+        auto plan_blob = schema_handle.ParseSearch(predicate,
+                                                   "fakevec",
+                                                   topk,
+                                                   requested_metric,
+                                                   R"({"nprobe": 10})",
+                                                   -1,
+                                                   hints);
+        CSearchPlan plan = nullptr;
+        auto status = CreateSearchPlanByExpr(
+            collection, plan_blob.data(), plan_blob.size(), &plan);
+        EXPECT_EQ(status.error_code, Success);
+        if (status.error_code != Success) {
+            return std::pair<CStatus, CSearchPlan>{status, plan};
+        }
+        if (clear_plan_metric) {
+            auto typed_plan = static_cast<query::Plan*>(plan);
+            typed_plan->plan_node_->search_info_.metric_type_.clear();
+        }
+
+        CPlaceholderGroup placeholder_group = nullptr;
+        status = ParsePlaceholderGroup(plan,
+                                       placeholder_blob.data(),
+                                       placeholder_blob.size(),
+                                       &placeholder_group);
+        EXPECT_EQ(status.error_code, Success);
+        if (status.error_code == Success) {
+            status = CSearch(target_segment,
+                             plan,
+                             placeholder_group,
+                             dataset.timestamps_.back() + 1,
+                             result);
+        }
+        DeletePlaceholderGroup(placeholder_group);
+        return std::pair<CStatus, CSearchPlan>{status, plan};
+    };
+    auto run_search_with_predicate = [&](CSegmentInterface target_segment,
+                                         const std::string& predicate,
+                                         const std::string& requested_metric,
+                                         bool clear_plan_metric,
+                                         CSearchResult* result) {
+        return run_search_with_options(target_segment,
+                                       predicate,
+                                       requested_metric,
+                                       clear_plan_metric,
+                                       "",
+                                       result);
+    };
+    auto run_search = [&](CSegmentInterface target_segment,
+                          const std::string& requested_metric,
+                          bool clear_plan_metric,
+                          CSearchResult* result) {
+        return run_search_with_predicate(
+            target_segment, "", requested_metric, clear_plan_metric, result);
+    };
+
+    // Legacy/test-created raw segments may not carry index configuration. An
+    // explicit metric remains sufficient, while an omitted one is a retriable
+    // server-side missing-state error rather than bad user input.
+    CSearchResult legacy_result = nullptr;
+    auto [legacy_status, legacy_plan] =
+        run_search(segment.get(), knowhere::metric::IP, false, &legacy_result);
+    ASSERT_EQ(legacy_status.error_code, Success);
+    ASSERT_NE(legacy_result, nullptr);
+    EXPECT_STREQ(GetSearchResultMetricType(legacy_result),
+                 knowhere::metric::IP);
+    DeleteSearchResult(legacy_result);
+    DeleteSearchPlan(legacy_plan);
+
+    CSearchResult missing_metric_result = nullptr;
+    auto [missing_metric_status, missing_metric_plan] = run_search(
+        segment.get(), knowhere::metric::IP, true, &missing_metric_result);
+    EXPECT_EQ(missing_metric_status.error_code, FieldNotLoaded);
+    EXPECT_EQ(missing_metric_result, nullptr);
+    ASSERT_NE(missing_metric_status.error_msg, nullptr);
+    EXPECT_NE(std::string(missing_metric_status.error_msg)
+                  .find("field index of the field: fakevec is not loaded, "
+                        "please reload the collection"),
+              std::string::npos);
+    free(const_cast<char*>(missing_metric_status.error_msg));
+    DeleteSearchPlan(missing_metric_plan);
+
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_segmentid(1);
+    load_info.set_num_of_rows(row_count);
+    load_info.set_max_index_row_count(row_count);
+    auto* index_info = load_info.add_index_infos();
+    index_info->set_fieldid(100);
+    auto* index_type = index_info->add_index_params();
+    index_type->set_key(knowhere::meta::INDEX_TYPE);
+    index_type->set_value(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
+    auto* metric_type = index_info->add_index_params();
+    metric_type->set_key(knowhere::meta::METRIC_TYPE);
+    metric_type->set_value(knowhere::metric::IP);
+    sealed->SetLoadInfo(load_info);
+
+    CSearchResult result = nullptr;
+    auto [status, plan] =
+        run_search(segment.get(), knowhere::metric::IP, true, &result);
+    ASSERT_EQ(status.error_code, Success);
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(GetSearchResultMetricType(result), knowhere::metric::IP);
+
+    auto search_result = static_cast<SearchResult*>(result);
+    ASSERT_EQ(search_result->distances_.size(), num_queries * topk);
+    for (int64_t query = 0; query < num_queries; ++query) {
+        auto offset = query * topk;
+        for (int64_t i = 1; i < topk; ++i) {
+            EXPECT_GE(search_result->distances_[offset + i - 1],
+                      search_result->distances_[offset + i]);
+        }
+    }
+    DeleteSearchResult(result);
+    DeleteSearchPlan(plan);
+
+    // The resolved metric must also reach downstream physical operators. An
+    // iterative filter reads its sort direction from QueryContext rather than
+    // SearchResult; leaving the context metric empty reverses IP/COSINE output.
+    CSearchResult iterative_result = nullptr;
+    auto [iterative_status, iterative_plan] =
+        run_search_with_options(segment.get(),
+                                "counter >= 0",
+                                knowhere::metric::IP,
+                                true,
+                                "iterative_filter",
+                                &iterative_result);
+    ASSERT_EQ(iterative_status.error_code, Success);
+    ASSERT_NE(iterative_result, nullptr);
+    EXPECT_STREQ(GetSearchResultMetricType(iterative_result),
+                 knowhere::metric::IP);
+    auto iterative_search_result = static_cast<SearchResult*>(iterative_result);
+    ASSERT_EQ(iterative_search_result->distances_.size(), num_queries * topk);
+    for (int64_t query = 0; query < num_queries; ++query) {
+        auto offset = query * topk;
+        for (int64_t i = 1; i < topk; ++i) {
+            EXPECT_GE(iterative_search_result->distances_[offset + i - 1],
+                      iterative_search_result->distances_[offset + i]);
+        }
+    }
+    DeleteSearchResult(iterative_result);
+    DeleteSearchPlan(iterative_plan);
+
+    CSearchResult mismatch_result = nullptr;
+    auto [mismatch_status, mismatch_plan] = run_search(
+        segment.get(), knowhere::metric::L2, false, &mismatch_result);
+    EXPECT_EQ(mismatch_status.error_code, MetricTypeNotMatch);
+    EXPECT_EQ(mismatch_result, nullptr);
+    ASSERT_NE(mismatch_status.error_msg, nullptr);
+    EXPECT_NE(std::string(mismatch_status.error_msg)
+                  .find("metric type not match[expected=IP][actual=L2]"),
+              std::string::npos);
+    free(const_cast<char*>(mismatch_status.error_msg));
+    DeleteSearchPlan(mismatch_plan);
+
+    // The filter eliminates every candidate inside VectorSearchNode. Request
+    // validation must still run before that node returns an empty result.
+    CSearchResult zero_hit_mismatch_result = nullptr;
+    auto [zero_hit_mismatch_status, zero_hit_mismatch_plan] =
+        run_search_with_predicate(segment.get(),
+                                  "counter < 0",
+                                  knowhere::metric::L2,
+                                  false,
+                                  &zero_hit_mismatch_result);
+    EXPECT_EQ(zero_hit_mismatch_status.error_code, MetricTypeNotMatch);
+    EXPECT_EQ(zero_hit_mismatch_result, nullptr);
+    free(const_cast<char*>(zero_hit_mismatch_status.error_msg));
+    DeleteSearchPlan(zero_hit_mismatch_plan);
+
+    // Growing segments receive the same per-segment configuration at
+    // construction time. Exercise the real growing search path as well, since
+    // it has no loaded vector index from which to recover the metric.
+    auto growing =
+        CreateGrowingWithFieldDataLoaded(schema,
+                                         BuildSegmentIndexMeta(&load_info),
+                                         SegcoreConfig::default_config(),
+                                         dataset);
+    CSearchResult growing_result = nullptr;
+    auto [growing_status, growing_plan] =
+        run_search(growing.get(), knowhere::metric::IP, true, &growing_result);
+    ASSERT_EQ(growing_status.error_code, Success);
+    ASSERT_NE(growing_result, nullptr);
+    EXPECT_STREQ(GetSearchResultMetricType(growing_result),
+                 knowhere::metric::IP);
+    DeleteSearchResult(growing_result);
+    DeleteSearchPlan(growing_plan);
+
+    // A growing segment can predate the collection index snapshot (for
+    // example, while add_function_field is propagating). Publishing the latest
+    // metadata must make an omitted-metric search usable without rebuilding
+    // the segment's construction-time IndexingRecord.
+    auto growing_without_meta =
+        CreateGrowingWithFieldDataLoaded(schema,
+                                         BuildSegmentIndexMeta(nullptr),
+                                         SegcoreConfig::default_config(),
+                                         dataset);
+    auto load_info_blob = load_info.SerializeAsString();
+    auto update_status = UpdateGrowingSegmentIndexMeta(
+        growing_without_meta.get(),
+        reinterpret_cast<const uint8_t*>(load_info_blob.data()),
+        load_info_blob.size());
+    ASSERT_EQ(update_status.error_code, Success);
+    auto* growing_impl =
+        dynamic_cast<SegmentGrowingImpl*>(growing_without_meta.get());
+    ASSERT_NE(growing_impl, nullptr);
+    EXPECT_FALSE(growing_impl->CanUseInterimIndex(FieldId(100)));
+    EXPECT_EQ(growing_impl->GetCurrentIndexParams(FieldId(100))
+                  .at(knowhere::meta::METRIC_TYPE),
+              knowhere::metric::IP);
+
+    CSearchResult updated_growing_result = nullptr;
+    auto [updated_growing_status, updated_growing_plan] =
+        run_search(growing_without_meta.get(),
+                   knowhere::metric::IP,
+                   true,
+                   &updated_growing_result);
+    ASSERT_EQ(updated_growing_status.error_code, Success);
+    ASSERT_NE(updated_growing_result, nullptr);
+    EXPECT_STREQ(GetSearchResultMetricType(updated_growing_result),
+                 knowhere::metric::IP);
+    DeleteSearchResult(updated_growing_result);
+    DeleteSearchPlan(updated_growing_plan);
+
+    CSearchResult growing_mismatch_result = nullptr;
+    auto [growing_mismatch_status, growing_mismatch_plan] = run_search(
+        growing.get(), knowhere::metric::L2, false, &growing_mismatch_result);
+    EXPECT_EQ(growing_mismatch_status.error_code, MetricTypeNotMatch);
+    EXPECT_EQ(growing_mismatch_result, nullptr);
+    ASSERT_NE(growing_mismatch_status.error_msg, nullptr);
+    EXPECT_NE(std::string(growing_mismatch_status.error_msg)
+                  .find("metric type not match[expected=IP][actual=L2]"),
+              std::string::npos);
+    free(const_cast<char*>(growing_mismatch_status.error_msg));
+    DeleteSearchPlan(growing_mismatch_plan);
+
+    // An empty growing segment is not FieldAccessible yet, so AsyncSearch takes
+    // its request-level empty-result shortcut before Segment::Search. It must
+    // still validate the authoritative metric and publish it on success.
+    auto empty_growing =
+        CreateGrowingSegment(schema, BuildSegmentIndexMeta(&load_info));
+    CSearchResult empty_mismatch_result = nullptr;
+    auto [empty_mismatch_status, empty_mismatch_plan] =
+        run_search(empty_growing.get(),
+                   knowhere::metric::L2,
+                   false,
+                   &empty_mismatch_result);
+    EXPECT_EQ(empty_mismatch_status.error_code, MetricTypeNotMatch);
+    EXPECT_EQ(empty_mismatch_result, nullptr);
+    free(const_cast<char*>(empty_mismatch_status.error_msg));
+    DeleteSearchPlan(empty_mismatch_plan);
+
+    CSearchResult empty_result = nullptr;
+    auto [empty_status, empty_plan] = run_search(
+        empty_growing.get(), knowhere::metric::IP, true, &empty_result);
+    ASSERT_EQ(empty_status.error_code, Success);
+    ASSERT_NE(empty_result, nullptr);
+    EXPECT_STREQ(GetSearchResultMetricType(empty_result), knowhere::metric::IP);
+    EXPECT_TRUE(static_cast<SearchResult*>(empty_result)->distances_.empty());
+    DeleteSearchResult(empty_result);
+    DeleteSearchPlan(empty_plan);
+    growing.reset();
+    segment.reset();
+    DeleteCollection(collection);
 }
 
 TEST(CApiTest, SealedSegment_search_without_predicates) {

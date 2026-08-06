@@ -142,4 +142,10 @@ message SegmentLoadInfo {
   // When non-zero, segcore overwrites the in-memory timestamp column so all
   // MVCC/TTL/delete logic uses the commit time instead of raw row timestamps.
   uint64 commit_timestamp = 24;
+  // max_index_row_count is the expected row capacity of a segment of this
+  // collection: segment max size * seal proportion / estimated row size. It only
+  // scales the interim-index build threshold (VecIndexConfig::GetBuildThreshold).
+  // It travels with the segment because it is derived from DataCoord config that
+  // segcore cannot read, and it used to arrive on the collection-wide index meta.
+  int64 max_index_row_count = 25;
 }

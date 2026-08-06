@@ -1222,3 +1222,15 @@ func (s *Server) ManualUpdateCurrentTarget(ctx context.Context, collectionID int
 	mlog.Info(context.TODO(), "manual update current target done")
 	return nil
 }
+
+// RefreshCollectionIndexTarget captures the latest collection-index metadata
+// into a newly versioned target after create, alter, or drop index finishes.
+func (s *Server) RefreshCollectionIndexTarget(ctx context.Context, collectionID int64) error {
+	if s.meta == nil || s.meta.GetCollection(ctx, collectionID) == nil {
+		return nil
+	}
+	if s.targetObserver == nil {
+		return merr.WrapErrServiceNotReadyMsg("target observer is not initialized")
+	}
+	return s.targetObserver.RefreshCollectionIndexTarget(ctx, collectionID)
+}

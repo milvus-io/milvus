@@ -1126,6 +1126,12 @@ GetSearchResultMetadata(CSearchResult c_search_result,
         search_result->search_storage_cost_.scanned_total_bytes;
 }
 
+const char*
+GetSearchResultMetricType(CSearchResult c_search_result) {
+    auto search_result = static_cast<SearchResult*>(c_search_result);
+    return search_result->metric_type_.c_str();
+}
+
 CStatus
 PrepareSearchResultsForExportImpl(
     CTraceContext c_trace,

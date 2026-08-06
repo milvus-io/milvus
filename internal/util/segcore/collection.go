@@ -18,7 +18,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -26,7 +25,6 @@ import (
 type CreateCCollectionRequest struct {
 	CollectionID  int64
 	Schema        *schemapb.CollectionSchema
-	IndexMeta     *segcorepb.CollectionIndexMeta
 	LoadFieldList []int64
 }
 
@@ -36,24 +34,10 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 	if err != nil {
 		return nil, merr.WrapErrSegcoreMsg("marshal schema failed")
 	}
-	var indexMetaBlob []byte
-	if req.IndexMeta != nil {
-		indexMetaBlob, err = proto.Marshal(req.IndexMeta)
-		if err != nil {
-			return nil, merr.WrapErrSegcoreMsg("marshal index meta failed")
-		}
-	}
 	var ptr C.CCollection
 	status := C.NewCollection(unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), &ptr)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
-	}
-	if indexMetaBlob != nil {
-		status = C.SetIndexMeta(ptr, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
-		if err := ConsumeCStatusIntoError(&status); err != nil {
-			C.DeleteCollection(ptr)
-			return nil, err
-		}
 	}
 	if req.LoadFieldList != nil {
 		status = C.UpdateLoadFields(ptr, (*C.int64_t)(unsafe.Pointer(&req.LoadFieldList[0])),
@@ -67,7 +51,6 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 		collectionID: req.CollectionID,
 		ptr:          ptr,
 		schema:       req.Schema,
-		indexMeta:    req.IndexMeta,
 	}, nil
 }
 
@@ -77,7 +60,6 @@ type CCollection struct {
 	ptr          C.CCollection
 	collectionID int64
 	schema       *schemapb.CollectionSchema
-	indexMeta    *segcorepb.CollectionIndexMeta
 }
 
 // ID returns the collection ID.
@@ -92,28 +74,6 @@ func (c *CCollection) rawPointer() C.CCollection {
 
 func (c *CCollection) Schema() *schemapb.CollectionSchema {
 	return c.schema
-}
-
-func (c *CCollection) IndexMeta() *segcorepb.CollectionIndexMeta {
-	return c.indexMeta
-}
-
-func (c *CCollection) UpdateIndexMeta(meta *segcorepb.CollectionIndexMeta) error {
-	if meta == nil {
-		return nil
-	}
-
-	indexMetaBlob, err := proto.Marshal(meta)
-	if err != nil {
-		return err
-	}
-
-	status := C.SetIndexMeta(c.ptr, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
-	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return err
-	}
-	c.indexMeta = meta
-	return nil
 }
 
 func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint64) error {

@@ -115,6 +115,7 @@ func TestLoadDeltalogsExternalRealPKManifestReadsSourceDeltas(t *testing.T) {
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: collectionID,
 	})
+
 	if !assert.NoError(t, err) {
 		return
 	}
@@ -173,6 +174,7 @@ func TestLoadDeltalogsExternalRealPKManifestRejectsTargetDeltas(t *testing.T) {
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: collectionID,
 	})
+
 	if !assert.NoError(t, err) {
 		return
 	}
@@ -245,13 +247,12 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 
 	// Data
 	suite.schema = mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
-	indexMeta := mock_segcore.GenTestIndexMeta(suite.collectionID, suite.schema)
 	loadMeta := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: suite.collectionID,
 		PartitionIDs: []int64{suite.partitionID},
 	}
-	suite.manager.Collection.PutOrRef(suite.collectionID, suite.schema, indexMeta, loadMeta)
+	suite.manager.Collection.PutOrRef(suite.collectionID, suite.schema, nil, loadMeta)
 }
 
 func (suite *SegmentLoaderSuite) TearDownTest() {
@@ -746,7 +747,8 @@ func (suite *SegmentLoaderSuite) TestLoadVirtualPKExternalCollectionLoadsDeltaLo
 	pkField := GetPkField(suite.schema)
 	suite.Require().NotNil(pkField)
 	pkField.Name = common.VirtualPKFieldName
-	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
+	suite.schema.Version = 1
+	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema))
 
 	msgLength := 100
 	binlogs, statsLogs, err := mock_segcore.SaveBinLog(ctx,
@@ -953,7 +955,8 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestStorageV
 	pkField := GetPkField(suite.schema)
 	suite.Require().NotNil(pkField)
 	pkField.ExternalField = pkField.GetName()
-	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
+	suite.schema.Version = 1
+	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema))
 
 	sourceDeltaPath := "s3://source-bucket/files/insert_log/1/_delta/100"
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 1)
@@ -1032,7 +1035,8 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestLegacyL0
 	pkField := GetPkField(suite.schema)
 	suite.Require().NotNil(pkField)
 	pkField.ExternalField = pkField.GetName()
-	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
+	suite.schema.Version = 1
+	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema))
 
 	sourceDeltaPath := "s3://source-bucket/files/delta_log/1/2/3/100"
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 1)
@@ -1558,14 +1562,13 @@ func (suite *SegmentLoaderDetailSuite) SetupTest() {
 	// Data
 	schema := mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
 
-	indexMeta := mock_segcore.GenTestIndexMeta(suite.collectionID, schema)
 	loadMeta := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: suite.collectionID,
 		PartitionIDs: []int64{suite.partitionID},
 	}
 
-	suite.Require().NoError(suite.manager.Collection.PutOrRef(suite.collectionID, schema, indexMeta, loadMeta))
+	suite.Require().NoError(suite.manager.Collection.PutOrRef(suite.collectionID, schema, nil, loadMeta))
 }
 
 func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {

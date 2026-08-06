@@ -289,6 +289,9 @@ message ListIndexesRequest {
 message ListIndexesResponse {
     common.Status status = 1;
     repeated IndexInfo index_infos = 2;
+    // Persistent, globally ordered revision of the complete collection-index
+    // snapshot returned in index_infos.
+    int64 revision = 3;
 }
 
 message AnalyzeTask {

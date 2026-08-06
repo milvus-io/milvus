@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/samber/lo"
 
@@ -30,9 +32,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -76,23 +80,63 @@ type TargetManagerInterface interface {
 	GetCollectionRowCount(ctx context.Context, collectionID int64, scope TargetScope) int64
 }
 
+type collectionIndexInfoProvider interface {
+	GetCollectionIndexInfoSnapshot(ctx context.Context, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, bool)
+}
+
+type collectionIndexInfoTargetProvider interface {
+	GetCollectionIndexInfoSnapshotWithTargetVersion(ctx context.Context, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, int64, bool)
+}
+
+type targetIndexBroker interface {
+	ListIndexesForTarget(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, int64, error)
+}
+
+func GetCollectionIndexInfoSnapshot(ctx context.Context, targetMgr TargetManagerInterface, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, bool) {
+	provider, ok := targetMgr.(collectionIndexInfoProvider)
+	if !ok {
+		return nil, 0, false
+	}
+	return provider.GetCollectionIndexInfoSnapshot(ctx, collectionID, scope)
+}
+
+func GetCollectionIndexInfoSnapshotWithTargetVersion(ctx context.Context, targetMgr TargetManagerInterface, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, int64, bool) {
+	if provider, ok := targetMgr.(collectionIndexInfoTargetProvider); ok {
+		return provider.GetCollectionIndexInfoSnapshotWithTargetVersion(ctx, collectionID, scope)
+	}
+	indexInfos, indexInfoVersion, present := GetCollectionIndexInfoSnapshot(ctx, targetMgr, collectionID, scope)
+	return indexInfos, indexInfoVersion, targetMgr.GetCollectionTargetVersion(ctx, collectionID, scope), present
+}
+
 type TargetManager struct {
 	broker Broker
 	meta   *Meta
+	// updateLocks serializes every target transition for a collection, including
+	// the complete read-build-publish sequence. updateCollectionTarget only
+	// serializes the final map write, which is too late: a slower stale broker
+	// read or a partition-removal clone could otherwise finish last, receive a
+	// newer wall-clock version, and replace a fresher snapshot.
+	updateLocks *lock.KeyLock[int64]
 
 	// all read segment/channel operation happens on current -> only current target are visible to outer
 	// all add segment/channel operation happens on next -> changes can only happen on next target
 	// all remove segment/channel operation happens on Both current and next -> delete status should be consistent
 	current *target
 	next    *target
+
+	// lastTargetVersion turns wall time into a process-local logical clock.
+	// Recover observes persisted versions before allocating new ones, so a
+	// failover onto a host with a slower clock still produces a newer target.
+	lastTargetVersion atomic.Int64
 }
 
 func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
 	return &TargetManager{
-		broker:  broker,
-		meta:    meta,
-		current: newTarget(),
-		next:    newTarget(),
+		broker:      broker,
+		meta:        meta,
+		updateLocks: lock.NewKeyLock[int64](),
+		current:     newTarget(),
+		next:        newTarget(),
 	}
 }
 
@@ -100,6 +144,9 @@ func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
 // WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
 // which may make the current target not available
 func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, collectionID int64) bool {
+	mgr.updateLocks.Lock(collectionID)
+	defer mgr.updateLocks.Unlock(collectionID)
+
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
 
 	newTarget := mgr.next.getCollectionTarget(collectionID)
@@ -107,7 +154,12 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, col
 		log.Info(ctx, "next target does not exist, skip it")
 		return false
 	}
-	mgr.current.updateCollectionTarget(collectionID, newTarget)
+	if !mgr.current.updateCollectionTarget(collectionID, newTarget) {
+		log.Warn(ctx, "next target is not newer than current target; retain it for retry",
+			mlog.Int64("nextVersion", newTarget.GetTargetVersion()),
+			mlog.Int64("currentVersion", mgr.current.getCollectionTarget(collectionID).GetTargetVersion()))
+		return false
+	}
 	mgr.next.removeCollectionTarget(collectionID)
 
 	partStatsVersionInfo := "partitionStats:"
@@ -137,6 +189,9 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, col
 // WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
 // which may make the current target not available
 func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collectionID int64) error {
+	mgr.updateLocks.Lock(collectionID)
+	defer mgr.updateLocks.Unlock(collectionID)
+
 	var vChannelInfos []*datapb.VchannelInfo
 	var segmentInfos []*datapb.SegmentInfo
 	err := retry.Handle(ctx, func() (bool, error) {
@@ -190,7 +245,20 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 		return nil
 	}
 
-	allocatedTarget := NewCollectionTarget(segments, dmChannels, partitionIDs)
+	var indexInfos []*indexpb.IndexInfo
+	indexInfoPresent := false
+	var indexInfoVersion int64
+	if broker, ok := mgr.broker.(targetIndexBroker); ok {
+		indexInfos, indexInfoVersion, err = broker.ListIndexesForTarget(ctx, collectionID)
+		if err != nil {
+			mlog.Warn(ctx, "failed to get index snapshot for next target", mlog.FieldCollectionID(collectionID), mlog.Err(err))
+			return err
+		}
+		indexInfoPresent = true
+	}
+
+	allocatedTarget := newCollectionTarget(segments, dmChannels, partitionIDs, indexInfos, indexInfoPresent, indexInfoVersion)
+	mgr.assignTargetVersion(allocatedTarget)
 
 	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
 
@@ -223,6 +291,9 @@ func mergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {
 
 // RemoveCollection removes all channels and segments in the given collection
 func (mgr *TargetManager) RemoveCollection(ctx context.Context, collectionID int64) {
+	mgr.updateLocks.Lock(collectionID)
+	defer mgr.updateLocks.Unlock(collectionID)
+
 	mlog.Info(ctx, "remove collection from targets",
 		mlog.FieldCollectionID(collectionID))
 
@@ -248,6 +319,9 @@ func (mgr *TargetManager) RemoveCollection(ctx context.Context, collectionID int
 // NOTE: this doesn't remove any channel even the given one is the only partition
 // Deprecated: use RemovePartitionFromNextTarget instead @weiliu1031
 func (mgr *TargetManager) RemovePartition(ctx context.Context, collectionID int64, partitionIDs ...int64) {
+	mgr.updateLocks.Lock(collectionID)
+	defer mgr.updateLocks.Unlock(collectionID)
+
 	log := mlog.With(mlog.FieldCollectionID(collectionID),
 		mlog.Int64s("PartitionIDs", partitionIDs))
 
@@ -288,6 +362,9 @@ func (mgr *TargetManager) RemovePartition(ctx context.Context, collectionID int6
 // NOTE: don't edit current target directly, it will be updated by target observer, which push the new next target as current target
 // need the full progress to update next target to current target, so the query view on delegator could be updated when current target is updated
 func (mgr *TargetManager) RemovePartitionFromNextTarget(ctx context.Context, collectionID int64, partitionIDs ...int64) {
+	mgr.updateLocks.Lock(collectionID)
+	defer mgr.updateLocks.Unlock(collectionID)
+
 	log := mlog.With(mlog.FieldCollectionID(collectionID),
 		mlog.Int64s("PartitionIDs", partitionIDs))
 
@@ -327,7 +404,38 @@ func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *Collect
 		return !partitionSet.Contain(partitionID)
 	})
 
-	return NewCollectionTarget(segments, channels, partitions)
+	indexInfos, indexInfoPresent := oldTarget.GetIndexInfoSnapshot()
+	newTarget := newCollectionTarget(segments, channels, partitions, indexInfos, indexInfoPresent, oldTarget.GetIndexInfoVersion())
+	mgr.assignTargetVersion(newTarget)
+	return newTarget
+}
+
+func (mgr *TargetManager) assignTargetVersion(target *CollectionTarget) {
+	for {
+		last := mgr.lastTargetVersion.Load()
+		candidate := time.Now().UnixNano()
+		if candidate <= last {
+			candidate = last + 1
+		}
+		if mgr.lastTargetVersion.CompareAndSwap(last, candidate) {
+			target.version = candidate
+			if target.indexInfoPresent && target.indexInfoVersion == 0 {
+				// Compatibility with DataCoords that predate the dedicated index
+				// revision. Once a revision is returned this fallback is unused.
+				target.indexInfoVersion = candidate
+			}
+			return
+		}
+	}
+}
+
+func (mgr *TargetManager) observeTargetVersion(version int64) {
+	for {
+		last := mgr.lastTargetVersion.Load()
+		if version <= last || mgr.lastTargetVersion.CompareAndSwap(last, version) {
+			return
+		}
+	}
 }
 
 func (mgr *TargetManager) getCollectionTarget(scope TargetScope, collectionID int64) []*CollectionTarget {
@@ -522,6 +630,22 @@ func (mgr *TargetManager) GetCollectionTargetVersion(ctx context.Context, collec
 	return 0
 }
 
+func (mgr *TargetManager) GetCollectionIndexInfoSnapshot(ctx context.Context, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, bool) {
+	indexInfos, indexInfoVersion, _, present := mgr.GetCollectionIndexInfoSnapshotWithTargetVersion(ctx, collectionID, scope)
+	return indexInfos, indexInfoVersion, present
+}
+
+func (mgr *TargetManager) GetCollectionIndexInfoSnapshotWithTargetVersion(ctx context.Context, collectionID int64, scope TargetScope) ([]*indexpb.IndexInfo, int64, int64, bool) {
+	targets := mgr.getCollectionTarget(scope, collectionID)
+	for _, target := range targets {
+		indexInfos, present := target.GetIndexInfoSnapshot()
+		if present {
+			return indexInfos, target.GetIndexInfoVersion(), target.GetTargetVersion(), true
+		}
+	}
+	return nil, 0, 0, false
+}
+
 func (mgr *TargetManager) IsCurrentTargetExist(ctx context.Context, collectionID int64, partitionID int64) bool {
 	targets := mgr.getCollectionTarget(CurrentTarget, collectionID)
 
@@ -582,6 +706,7 @@ func (mgr *TargetManager) Recover(ctx context.Context, catalog metastore.QueryCo
 
 	for _, t := range targets {
 		newTarget := FromPbCollectionTarget(t)
+		mgr.observeTargetVersion(newTarget.GetTargetVersion())
 		mgr.current.updateCollectionTarget(t.GetCollectionID(), newTarget)
 		mlog.Info(ctx, "recover current target for collection",
 			mlog.FieldCollectionID(t.GetCollectionID()),

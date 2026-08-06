@@ -479,8 +479,22 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
     // PreExecute: skip all calculation
     if (active_count == 0) {
         const auto& placeholder = placeholder_group_->at(0);
-        search_result_opt_ = empty_search_result(placeholder.num_of_queries_,
+        auto search_info = node.search_info_;
+        if (placeholder.element_level_) {
+            auto array_offsets =
+                segment->GetArrayOffsets(search_info.field_id_);
+            AssertInfo(array_offsets != nullptr, "Array offsets not available");
+            search_info.array_offsets_ = array_offsets;
+        }
+
+        // Empty MVCC snapshots must obey the same request/index validation as
+        // non-empty searches. PrepareSearchInfo resolves the segment-owned
+        // metric and validates VECTOR_ARRAY search mode before the fast return.
+        segment->PrepareSearchInfo(search_info, placeholder.element_level_);
+        auto search_result = empty_search_result(placeholder.num_of_queries_,
                                                  placeholder.element_level_);
+        search_result.metric_type_ = search_info.metric_type_;
+        search_result_opt_ = std::move(search_result);
         return;
     }
 

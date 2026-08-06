@@ -321,7 +321,7 @@ func prepareAlterSchemaAddField(coll *model.Collection, plan *schemautil.AlterSc
 }
 
 func buildAlterSchemaAddSchema(coll *model.Collection, plan *schemautil.AlterSchemaAddPlan) (*schemapb.CollectionSchema, []*commonpb.KeyValuePair, error) {
-	schema := coll.ToCollectionSchemaPB()
+	schema := nextSchemaSnapshot(coll)
 	name2id := make(map[string]int64, len(coll.Fields)+1)
 	for _, field := range coll.Fields {
 		name2id[field.Name] = field.FieldID
@@ -361,7 +361,6 @@ func buildAlterSchemaAddSchema(coll *model.Collection, plan *schemautil.AlterSch
 		schema.Functions = append(schema.Functions, function)
 	}
 
-	schema.Version = coll.SchemaVersion + 1
 	switch plan.Kind {
 	case schemautil.AlterSchemaAddField:
 		plan.Field.IsFunctionOutput = false
@@ -496,12 +495,11 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 		if fn, kind := functionReferencing(coll.Functions, droppedField.Name); fn != "" {
 			return nil, nil, nil, merr.WrapErrParameterInvalidMsg("field is referenced by function %s as %s, drop function first", fn, kind)
 		}
-		schema = coll.ToCollectionSchemaPB()
+		schema = nextSchemaSnapshot(coll)
 		maxFieldID := maxAssignedFieldIDFromSchema(schema)
 		properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
 		schema.Fields = newFields
 		schema.Properties = properties
-		schema.Version = coll.SchemaVersion + 1
 		return schema, properties, []int64{droppedField.FieldID}, nil
 	}
 
@@ -526,12 +524,11 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 				return nil, nil, nil, merr.WrapErrParameterInvalidMsg("cannot drop struct array field %s: sub-field %s is referenced by function %s as %s", droppedStruct.Name, sub.Name, fn, kind)
 			}
 		}
-		schema = coll.ToCollectionSchemaPB()
+		schema = nextSchemaSnapshot(coll)
 		maxFieldID := maxAssignedFieldIDFromSchema(schema)
 		properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
 		schema.StructArrayFields = newStructs
 		schema.Properties = properties
-		schema.Version = coll.SchemaVersion + 1
 		droppedFieldIds = append(droppedFieldIds, droppedStruct.FieldID)
 		for _, subField := range droppedStruct.Fields {
 			droppedFieldIds = append(droppedFieldIds, subField.FieldID)
@@ -640,13 +637,12 @@ func buildSchemaForDropFunctionField(coll *model.Collection, functionName string
 		}
 	}
 
-	schema = coll.ToCollectionSchemaPB()
+	schema = nextSchemaSnapshot(coll)
 	maxFieldID := maxAssignedFieldIDFromSchema(schema)
 	properties = updateMaxFieldIDProperty(coll.Properties, maxFieldID)
 	schema.Fields = newFields
 	schema.Functions = newFunctions
 	schema.Properties = properties
-	schema.Version = coll.SchemaVersion + 1
 
 	return schema, properties, droppedFieldIds, nil
 }

@@ -27,7 +27,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -36,18 +38,19 @@ type UtilsSuite struct {
 	suite.Suite
 }
 
-func (s *UtilsSuite) TestPackLoadMetaSchemaVersions() {
+func (s *UtilsSuite) TestPackLoadMeta() {
 	collectionInfoResp := &milvuspb.DescribeCollectionResponse{
-		CollectionID:    100,
-		DbName:          "default",
-		UpdateTimestamp: 200,
-		Schema: &schemapb.CollectionSchema{
-			Version: 3,
-		},
+		CollectionID: 100,
+		DbName:       "default",
 	}
 
-	loadMeta := packLoadMeta(querypb.LoadType_LoadCollection, collectionInfoResp, "rg", []int64{10}, 20)
-	s.Equal(uint64(200), loadMeta.GetSchemaBarrierTs())
+	loadMeta := packLoadMeta(querypb.LoadType_LoadCollection, collectionInfoResp, "rg", []int64{10}, 20, 21)
+	s.Equal(querypb.LoadType_LoadCollection, loadMeta.GetLoadType())
+	s.Equal(int64(100), loadMeta.GetCollectionID())
+	s.Equal("default", loadMeta.GetDbName())
+	s.Equal("rg", loadMeta.GetResourceGroup())
+	s.Equal([]int64{10}, loadMeta.GetLoadFields())
+	s.Equal([]int64{20, 21}, loadMeta.GetPartitionIDs())
 }
 
 func (s *UtilsSuite) TestPackLoadSegmentRequest() {
@@ -93,17 +96,47 @@ func (s *UtilsSuite) TestPackLoadSegmentRequest() {
 		},
 		&querypb.SegmentLoadInfo{},
 		nil,
+		int64(1234),
 	)
 
 	s.True(req.GetNeedTransfer())
 	s.Equal(task.CollectionID(), req.CollectionID)
 	s.Equal(task.ReplicaID(), req.ReplicaID)
 	s.Equal(action.Node(), req.GetDstNodeID())
+	s.Equal(int64(1234), req.GetIndexInfoVersion())
 	for _, field := range req.GetSchema().GetFields() {
 		mmapEnable, ok := common.IsMmapDataEnabled(field.GetTypeParams()...)
 		s.False(mmapEnable)
 		s.True(ok)
 	}
+}
+
+func (s *UtilsSuite) TestPackSubChannelRequestSeparatesTargetAndIndexVersions() {
+	action := NewChannelAction(1, ActionTypeGrow, "test-ch")
+	task, err := NewChannelTask(
+		context.Background(),
+		time.Second,
+		nil,
+		1,
+		newReplicaDefaultRG(10),
+		action,
+	)
+	s.NoError(err)
+
+	req := packSubChannelRequest(
+		task,
+		action,
+		&schemapb.CollectionSchema{},
+		nil,
+		&querypb.LoadMetaInfo{},
+		&meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{ChannelName: "test-ch"}},
+		nil,
+		nil,
+		111,
+		222,
+	)
+	s.Equal(int64(111), req.GetTargetVersion())
+	s.Equal(int64(222), req.GetIndexInfoVersion())
 }
 
 func (s *UtilsSuite) TestPackLoadSegmentRequestMmapDuplicateBug() {

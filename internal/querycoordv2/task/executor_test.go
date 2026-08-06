@@ -25,10 +25,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -162,6 +164,33 @@ func TestExecutorGetCollectionInfoReturnsCallerContextErrorBeforeLookup(t *testi
 	assert.Nil(t, collectionInfo)
 	assert.ErrorIs(t, err, context.Canceled)
 	broker.AssertNotCalled(t, "DescribeCollection", mock.Anything, collectionID)
+}
+
+func TestBindSegmentIndexesToSnapshot(t *testing.T) {
+	segmentIndexes := []*querypb.FieldIndexInfo{
+		{IndexID: 10, IndexName: "dropped"},
+		{IndexID: 20, IndexName: "current"},
+	}
+	indexSnapshot := []*indexpb.IndexInfo{{IndexID: 20, IndexName: "current"}}
+
+	bound := bindSegmentIndexesToSnapshot(
+		context.Background(),
+		100,
+		segmentIndexes,
+		indexSnapshot,
+		commonpb.LoadPriority_LOW,
+	)
+	assert.Len(t, bound, 1)
+	assert.Equal(t, int64(20), bound[0].GetIndexID())
+
+	bound = bindSegmentIndexesToSnapshot(
+		context.Background(),
+		100,
+		segmentIndexes,
+		nil,
+		commonpb.LoadPriority_LOW,
+	)
+	assert.Empty(t, bound, "an authoritative empty snapshot must drop every stale segment index")
 }
 
 func TestExecutorCapacity(t *testing.T) {

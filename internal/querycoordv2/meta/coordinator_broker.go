@@ -372,6 +372,11 @@ func (broker *CoordinatorBroker) describeIndex(ctx context.Context, collectionID
 }
 
 func (broker *CoordinatorBroker) ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error) {
+	indexInfos, _, err := broker.listIndexesWithRevision(ctx, collectionID)
+	return indexInfos, err
+}
+
+func (broker *CoordinatorBroker) listIndexesWithRevision(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
@@ -383,11 +388,20 @@ func (broker *CoordinatorBroker) ListIndexes(ctx context.Context, collectionID U
 	if err != nil {
 		if errors.Is(err, merr.ErrServiceUnimplemented) {
 			mlog.Warn(context.TODO(), "datacoord does not implement ListIndex API fallback to DescribeIndex")
-			return broker.describeIndex(ctx, collectionID)
+			indexInfos, err := broker.describeIndex(ctx, collectionID)
+			return indexInfos, 0, err
 		}
 		mlog.Warn(context.TODO(), "failed to fetch index meta", mlog.Err(err))
-		return nil, err
+		return nil, 0, err
 	}
 
-	return resp.GetIndexInfos(), nil
+	return resp.GetIndexInfos(), resp.GetRevision(), nil
+}
+
+// ListIndexesForTarget is a concrete extension consumed by TargetManager so a
+// collection's index configuration and its persistent DataCoord revision are
+// captured into the same immutable target. Keeping it off Broker avoids
+// widening the long-standing interface and generated test adapters.
+func (broker *CoordinatorBroker) ListIndexesForTarget(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, int64, error) {
+	return broker.listIndexesWithRevision(ctx, collectionID)
 }

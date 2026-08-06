@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -74,6 +75,24 @@ const legacyLoadScopeIndex = querypb.LoadScope(2)
 
 type segmentDetacher interface {
 	DetachStreaming(ctx context.Context, segmentID typeutil.UniqueID) int
+}
+
+type indexInfoListErrorUpdater interface {
+	UpdateIndexInfoListWithError(indexInfos []*indexpb.IndexInfo, version int64) error
+}
+
+func updateDelegatorIndexInfoList(d delegator.ShardDelegator, indexInfos []*indexpb.IndexInfo, indexInfoVersion, legacyVersion int64) error {
+	version := delegator.EffectiveIndexInfoVersion(indexInfoVersion, legacyVersion)
+	if updater, ok := d.(indexInfoListErrorUpdater); ok {
+		return updater.UpdateIndexInfoListWithError(indexInfos, version)
+	}
+	d.UpdateIndexInfoList(indexInfos, version)
+	return nil
+}
+
+func effectiveWatchIndexInfoVersion(req *querypb.WatchDmChannelsRequest) int64 {
+	legacyVersion := delegator.EffectiveIndexInfoVersion(req.GetTargetVersion(), req.GetVersion())
+	return delegator.EffectiveIndexInfoVersion(req.GetIndexInfoVersion(), legacyVersion)
 }
 
 // GetComponentStates returns information about whether the node is healthy
@@ -229,7 +248,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	}
 
 	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
-		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
+		req.GetIndexInfoList(), req.GetLoadMeta())
 	if err != nil {
 		log.Warn(ctx, "failed to ref collection", mlog.Err(err))
 		return merr.Status(err), nil
@@ -262,6 +281,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		queryView,
 		node.binlogSaver,
 		delegator.WithLeaderViewUpdatedCallback(node.markLeaderViewUpdated),
+		delegator.WithIndexInfoList(req.GetIndexInfoList(), effectiveWatchIndexInfoVersion(req)),
 	)
 	if err != nil {
 		log.Warn(ctx, "failed to create shard delegator", mlog.Err(err))
@@ -484,7 +504,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	defer node.lifetime.Done()
 
 	// check index
-	if len(req.GetIndexInfoList()) == 0 {
+	// Reopen with an empty authoritative snapshot is how dropping the final
+	// collection index removes the segment's old index configuration.
+	if len(req.GetIndexInfoList()) == 0 && req.GetLoadScope() != querypb.LoadScope_Reopen {
 		err := merr.WrapErrIndexNotFoundForCollection(req.GetSchema().GetName())
 		return merr.Status(err), nil
 	}
@@ -532,17 +554,37 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 			log.Warn(ctx, "delegator failed to load segments", mlog.Err(err))
 			return merr.Status(err), nil
 		}
+		if err := updateDelegatorIndexInfoList(delegator, req.GetIndexInfoList(), req.GetIndexInfoVersion(), req.GetVersion()); err != nil {
+			return merr.Status(err), nil
+		}
 
 		return merr.Success(), nil
 	}
 
-	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
-		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.GetSchema()), req.GetLoadMeta())
-	if err != nil {
-		log.Warn(ctx, "failed to ref collection", mlog.Err(err))
-		return merr.Status(err), nil
+	// Enrich only when this QueryNode is the final worker consuming the request.
+	// Keeping transfer requests sparse preserves new-leader -> old-worker rolling
+	// compatibility: old workers do not understand config-only FieldIndexInfo
+	// entries and may report them as loaded indexes. A new destination worker runs
+	// this same shim after the delegator clears NeedTransfer.
+	segments.AppendCollectionIndexConfig(req.GetInfos(), req.GetIndexInfoList())
+
+	// A reopened segment must NOT advance the delegator's SERVED collection schema: the
+	// served schema advances only via the stream UpdateSchema, so its derived-state
+	// rebuild (idfOracle / function runners) is not skipped — not advancing served on
+	// reopen is the #50989/#51062 load-wins fix. The segment carries its own
+	// schema.Version explicitly (from the load request). So reopen skips the PutOrRef
+	// below (which would advance served): the collection stays alive via the channel's
+	// persistent ref (WatchDmChannels) plus the reopened segments' own refs, and no
+	// temporary ref is taken here.
+	// All other scopes ref the collection (PutOrRef) for the duration of the load.
+	if req.GetLoadScope() != querypb.LoadScope_Reopen {
+		if err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+			req.GetIndexInfoList(), req.GetLoadMeta()); err != nil {
+			log.Warn(ctx, "failed to ref collection", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+		defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 	}
-	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
 	switch req.GetLoadScope() {
 	case querypb.LoadScope_Delta:
@@ -604,15 +646,13 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 
 	log := mlog.With(
 		mlog.Int64("collectionID", req.GetCollectionID()),
-		mlog.Uint64("schemaBarrierTs", req.GetSchemaBarrierTs()),
 		mlog.Int32("schemaVersion", req.GetSchema().GetVersion()),
 	)
 
 	log.Info(ctx, "querynode received update schema request")
 
-	// Pass the barrier timestamp through; collectionManager derives the logical
-	// schema version from the schema payload when it is present.
-	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema(), req.GetSchemaBarrierTs())
+	// Ordering is by schema.Version, the single monotonic schema version.
+	err := node.manager.Collection.UpdateSchema(req.GetCollectionID(), req.GetSchema())
 	if err != nil {
 		log.Warn(ctx, "failed to update schema", mlog.Err(err))
 	}
@@ -1558,6 +1598,14 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 	if err != nil {
 		log.Warn(ctx, "failed to sync distribution", mlog.Err(err))
 		return merr.Status(err), nil
+	}
+	// Version zero means this request did not carry an index snapshot (for
+	// example Remove or UpdatePartitionStats). The collection target version
+	// orders the complete snapshot, including an empty list that drops an index.
+	if req.GetVersion() != 0 {
+		if err := updateDelegatorIndexInfoList(shardDelegator, req.GetIndexInfoList(), 0, req.GetVersion()); err != nil {
+			return merr.Status(err), nil
+		}
 	}
 
 	// in case of target node offline, when try to remove segment from leader's distribution, use wildcardNodeID(-1) to skip nodeID check

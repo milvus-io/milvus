@@ -17,11 +17,58 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// isCollectionIndexConfigOnly identifies collection-wide configuration entries
+// that were copied into a SegmentLoadInfo only so segcore can resolve raw-search
+// parameters. They do not describe an index built for this segment and must not
+// be treated as loaded index state by the Go layer.
+func isCollectionIndexConfigOnly(info *querypb.FieldIndexInfo) bool {
+	return info != nil &&
+		!info.GetEnableIndex() &&
+		info.GetBuildID() == 0 &&
+		len(info.GetIndexFilePaths()) == 0
+}
+
+// AppendCollectionIndexConfig makes segment load infos self-contained for
+// rolling upgrades. Legacy QueryCoords put the complete collection index
+// configuration only in LoadSegmentsRequest.IndexInfoList, while the per-segment
+// IndexInfos contain only indexes with built files. Config-only entries have no
+// file paths, so segcore skips loading them as indexes but can still resolve the
+// metric and other search configuration for raw fields.
+func AppendCollectionIndexConfig(loadInfos []*querypb.SegmentLoadInfo, indexInfos []*indexpb.IndexInfo) {
+	for _, loadInfo := range loadInfos {
+		if loadInfo == nil {
+			continue
+		}
+
+		existing := typeutil.NewSet[int64]()
+		for _, info := range loadInfo.GetIndexInfos() {
+			existing.Insert(info.GetIndexID())
+		}
+		for _, info := range indexInfos {
+			if info == nil {
+				continue
+			}
+			if existing.Contain(info.GetIndexID()) {
+				continue
+			}
+			cloned := typeutil.Clone(info)
+			loadInfo.IndexInfos = append(loadInfo.IndexInfos, &querypb.FieldIndexInfo{
+				FieldID:     info.GetFieldID(),
+				IndexName:   info.GetIndexName(),
+				IndexID:     info.GetIndexID(),
+				IndexParams: append(cloned.GetIndexParams(), cloned.GetTypeParams()...),
+			})
+			existing.Insert(info.GetIndexID())
+		}
+	}
+}
 
 func GetPkField(schema *schemapb.CollectionSchema) *schemapb.FieldSchema {
 	for _, field := range schema.GetFields() {

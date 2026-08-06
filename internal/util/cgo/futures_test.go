@@ -76,6 +76,27 @@ func TestFutureWithSuccessCase(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
+func TestFutureWithErrorMapper(t *testing.T) {
+	var mappedCode int32
+	var mappedMessage string
+	future := createFutureWithTestCase(context.Background(), testCase{
+		interval: time.Millisecond,
+		loopCnt:  1,
+		caseNo:   caseNoThrowSegcoreException,
+	}, WithErrorMapper(func(code int32, message string) error {
+		mappedCode = code
+		mappedMessage = message
+		return merr.WrapErrParameterInvalidMsg("mapped future error")
+	}))
+	defer future.Release()
+
+	result, err := future.BlockAndLeakyGet()
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Equal(t, int32(2002), mappedCode)
+	assert.Contains(t, mappedMessage, "case 3")
+}
+
 func TestFutureWithCaseNoInterrupt(t *testing.T) {
 	// Test success case.
 	future := createFutureWithTestCase(context.Background(), testCase{

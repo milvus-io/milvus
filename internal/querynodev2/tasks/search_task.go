@@ -220,7 +220,9 @@ func (t *SearchTask) Execute() error {
 		return nil
 	}
 
-	// plan.MetricType is accurate, though req.MetricType may be empty
+	// An explicit request metric is already in the plan. When it was omitted,
+	// resolve the metric from the segments that actually searched, verify every
+	// segment agrees, and publish it back to the plan before reduce/export.
 	metricType := searchReq.Plan().GetMetricType()
 
 	if len(results) == 0 {
@@ -249,6 +251,13 @@ func (t *SearchTask) Execute() error {
 		}
 		return nil
 	}
+	metricType, err = resolveSearchMetricType(metricType, lo.Map(results, func(result *segments.SearchResult, _ int) string {
+		return result.GetMetricType()
+	}))
+	if err != nil {
+		return err
+	}
+	searchReq.Plan().SetMetricTypeIfEmpty(metricType)
 
 	relatedDataSize := lo.Reduce(searchedSegments, func(acc int64, seg segments.Segment, _ int) int64 {
 		return acc + segments.GetSegmentRelatedDataSize(seg)
@@ -323,6 +332,30 @@ func emptySearchResultData(nq, topK int64) *schemapb.SearchResultData {
 		Topks:      make([]int64, int(nq)),
 		FieldsData: []*schemapb.FieldData{},
 	}
+}
+
+func resolveSearchMetricType(planMetric string, resultMetrics []string) (string, error) {
+	metricType := planMetric
+	for _, resultMetric := range resultMetrics {
+		if resultMetric == "" {
+			// Segcore returns an empty result without running vector search when a
+			// segment does not yet contain a newly-added field. Such a result has
+			// no scores to orient and therefore contributes no metric.
+			continue
+		}
+		if metricType == "" {
+			metricType = resultMetric
+			continue
+		}
+		if metricType != resultMetric {
+			return "", merr.WrapErrServiceUnavailableMsg(
+				"searched segments resolved inconsistent metric types, expected %s, got %s",
+				metricType,
+				resultMetric,
+			)
+		}
+	}
+	return metricType, nil
 }
 
 func (t *SearchTask) Merge(other *SearchTask) bool {

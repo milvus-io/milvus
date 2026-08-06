@@ -101,12 +101,6 @@ PhyVectorSearchNode::GetOutput() {
     }
 
     WaitPrefetch();
-    span.GetSpan()->SetAttribute("search_type", search_info_.metric_type_);
-    span.GetSpan()->SetAttribute("topk", search_info_.topk_);
-
-    std::chrono::high_resolution_clock::time_point vector_start =
-        std::chrono::high_resolution_clock::now();
-
     auto& ph = placeholder_group_->at(0);
     auto src_data = ph.get_blob();
     auto src_offsets = ph.get_offsets();
@@ -118,6 +112,19 @@ PhyVectorSearchNode::GetOutput() {
         query_context_->set_array_offsets(array_offsets);
         search_info_.array_offsets_ = array_offsets;
     }
+
+    // Resolve the segment-owned metric after the placeholder has established
+    // the VECTOR_ARRAY search mode, but before any zero-candidate fast path can
+    // bypass vector_search().
+    segment_->PrepareSearchInfo(search_info_, ph.element_level_);
+    // Downstream operators use QueryContext to choose metric-dependent sort
+    // direction, so publish the segment-resolved metric before they run.
+    query_context_->set_search_info(search_info_);
+    span.GetSpan()->SetAttribute("search_type", search_info_.metric_type_);
+    span.GetSpan()->SetAttribute("topk", search_info_.topk_);
+
+    std::chrono::high_resolution_clock::time_point vector_start =
+        std::chrono::high_resolution_clock::now();
 
     // Prepare BitsetView for search.
     // Fast path: all_rows_visible + non-element-level → empty BitsetView
@@ -155,8 +162,10 @@ PhyVectorSearchNode::GetOutput() {
 
             query_context_->set_active_element_count(element_bitset.size());
             if (element_bitset.empty()) {
-                query_context_->set_search_result(
-                    empty_search_result(num_queries, ph.element_level_));
+                auto search_result =
+                    empty_search_result(num_queries, ph.element_level_);
+                search_result.metric_type_ = search_info_.metric_type_;
+                query_context_->set_search_result(std::move(search_result));
                 return input_;
             }
 
@@ -172,6 +181,7 @@ PhyVectorSearchNode::GetOutput() {
 
         if (view.all()) {
             auto search_result = empty_search_result(num_queries);
+            search_result.metric_type_ = search_info_.metric_type_;
             search_result.total_data_cnt_ = data_cnt;
             search_result.element_level_ = ph.element_level_;
             query_context_->set_search_result(std::move(search_result));

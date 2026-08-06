@@ -621,6 +621,15 @@ class SegmentInternalInterface : public SegmentInterface {
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
  public:
+    // Resolve segment-owned search configuration and validate request/index
+    // compatibility before execution. The request's element-level mode is
+    // passed explicitly because an inaccessible/empty VECTOR_ARRAY field may
+    // not have array offsets from which to infer the placeholder shape.
+    // Operators must call this before any zero-candidate fast path that can
+    // skip vector_search().
+    virtual void
+    PrepareSearchInfo(SearchInfo& search_info, bool element_level) const = 0;
+
     // `query_offsets` is not null only for vector array (embedding list) search
     // where it denotes the number of vectors in each embedding list. The length
     // of `query_offsets` is the number of queries in the search plus one (the first

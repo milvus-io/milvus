@@ -47,6 +47,10 @@ type Builder struct {
 	ops []op
 }
 
+func (b *Builder) Len() int {
+	return len(b.ops)
+}
+
 // New returns an empty Builder.
 func New() *Builder {
 	return &Builder{}

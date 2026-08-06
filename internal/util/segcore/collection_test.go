@@ -14,16 +14,13 @@ import (
 func TestCollection(t *testing.T) {
 	paramtable.Init()
 	schema := mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
-	indexMeta := mock_segcore.GenTestIndexMeta(1, schema)
 	ccollection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
 		CollectionID: 1,
 		Schema:       schema,
-		IndexMeta:    indexMeta,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, ccollection)
 	assert.NotNil(t, ccollection.Schema())
-	assert.NotNil(t, ccollection.IndexMeta())
 	assert.Equal(t, int64(1), ccollection.ID())
 	defer ccollection.Release()
 }

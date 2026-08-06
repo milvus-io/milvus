@@ -37,6 +37,9 @@ import (
 const (
 	SegmentTypeGrowing SegmentType = commonpb.SegmentState_Growing
 	SegmentTypeSealed  SegmentType = commonpb.SegmentState_Sealed
+
+	metricTypeMismatchExpectedMarker = "metric type not match[expected="
+	metricTypeMismatchActualMarker   = "][actual="
 )
 
 type (
@@ -51,6 +54,10 @@ type CreateCSegmentRequest struct {
 	SegmentType SegmentType
 	IsSorted    bool
 	LoadInfo    *querypb.SegmentLoadInfo
+	// MaxIndexRowCount is the expected row capacity of a segment of this
+	// collection. It only scales the interim-index build threshold; segcore
+	// cannot derive it because it comes from DataCoord config.
+	MaxIndexRowCount int64
 }
 
 func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
@@ -72,6 +79,7 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	var status C.CStatus
 	if req.LoadInfo != nil {
 		segLoadInfo := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+		segLoadInfo.MaxIndexRowCount = req.MaxIndexRowCount
 		loadInfoBlob, err := proto.Marshal(segLoadInfo)
 		if err != nil {
 			return nil, err
@@ -94,6 +102,31 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 		}
 	}
 	return seg, nil
+}
+
+// UpdateGrowingSegmentIndexMeta atomically publishes the latest index
+// configuration used for metric resolution and brute-force search. The
+// construction-time interim index remains immutable and is bypassed by segcore
+// when its parameters no longer match this snapshot.
+func UpdateGrowingSegmentIndexMeta(segment CSegment, loadInfo *querypb.SegmentLoadInfo, maxIndexRowCount int64) error {
+	if segment == nil || loadInfo == nil {
+		return merr.WrapErrParameterInvalidMsg("growing segment and load info are required")
+	}
+	segLoadInfo := ConvertToSegcoreSegmentLoadInfo(loadInfo)
+	segLoadInfo.MaxIndexRowCount = maxIndexRowCount
+	blob, err := proto.Marshal(segLoadInfo)
+	if err != nil {
+		return err
+	}
+	if len(blob) == 0 {
+		return merr.WrapErrServiceInternalMsg("growing segment index load info blob is empty")
+	}
+	status := C.UpdateGrowingSegmentIndexMeta(
+		C.CSegmentInterface(segment.RawPointer()),
+		(*C.uint8_t)(unsafe.Pointer(&blob[0])),
+		C.int64_t(len(blob)),
+	)
+	return ConsumeCStatusIntoError(&status)
 }
 
 // cSegmentImpl is a wrapper for cSegmentImplInterface.
@@ -166,6 +199,7 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 			))
 		},
 		cgo.WithName("search"),
+		cgo.WithErrorMapper(mapSearchCStatus),
 	)
 	defer future.Release()
 
@@ -174,6 +208,46 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		return nil, err
 	}
 	return &SearchResult{cSearchResult: (C.CSearchResult)(result)}, nil
+}
+
+// mapSearchCStatus restores the public metric-mismatch contract at the search
+// boundary. Before collection-wide index metadata was removed, Go compared the
+// request metric with the index metric during plan creation and returned
+// ParameterInvalid(1100). The authoritative comparison now happens inside the
+// segment, but callers must still observe the same code and message.
+func mapSearchCStatus(code int32, message string) error {
+	if !merr.IsSegcoreMetricTypeNotMatch(code) {
+		return merr.SegcoreError(code, message)
+	}
+
+	expected, actual, ok := parseMetricTypeMismatch(message)
+	if !ok {
+		return merr.WrapErrParameterInvalidMsg("metric type not match")
+	}
+	return merr.WrapErrParameterInvalid(expected, actual, "metric type not match")
+}
+
+func parseMetricTypeMismatch(message string) (string, string, bool) {
+	start := strings.Index(message, metricTypeMismatchExpectedMarker)
+	if start < 0 {
+		return "", "", false
+	}
+	rest := message[start+len(metricTypeMismatchExpectedMarker):]
+	separator := strings.Index(rest, metricTypeMismatchActualMarker)
+	if separator < 0 {
+		return "", "", false
+	}
+	expected := rest[:separator]
+	rest = rest[separator+len(metricTypeMismatchActualMarker):]
+	end := strings.IndexByte(rest, ']')
+	if end < 0 {
+		return "", "", false
+	}
+	actual := rest[:end]
+	if expected == "" || actual == "" {
+		return "", "", false
+	}
+	return expected, actual, true
 }
 
 // Retrieve retrieves entities from the segment.
@@ -357,6 +431,7 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	defer runtime.KeepAlive(req)
 
 	segLoadInfo := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+	segLoadInfo.MaxIndexRowCount = req.MaxIndexRowCount
 	loadInfoBlob, err := proto.Marshal(segLoadInfo)
 	if err != nil {
 		return err

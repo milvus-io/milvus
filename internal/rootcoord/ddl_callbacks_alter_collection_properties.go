@@ -106,6 +106,9 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		CacheExpirations: cacheExpirations,
 	}
 	udpates := &messagespb.AlterCollectionMessageUpdates{}
+	desiredExternalSource := coll.ExternalSource
+	desiredExternalSpec := coll.ExternalSpec
+	externalTupleChanged := false
 
 	// Apply the properties to override the existing properties.
 	oldProperties := common.CloneKeyValuePairs(coll.Properties).ToMap()
@@ -123,20 +126,20 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionConsistencyLevel)
 			}
 		case common.CollectionExternalSource:
-			if udpates.Schema == nil {
-				udpates.Schema = &schemapb.CollectionSchema{}
-			}
-			udpates.Schema.ExternalSource = prop.GetValue()
-			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
-				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+			if prop.GetValue() != "" && prop.GetValue() != desiredExternalSource {
+				desiredExternalSource = prop.GetValue()
+				externalTupleChanged = true
+				if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
+					header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+				}
 			}
 		case common.CollectionExternalSpec:
-			if udpates.Schema == nil {
-				udpates.Schema = &schemapb.CollectionSchema{}
-			}
-			udpates.Schema.ExternalSpec = prop.GetValue()
-			if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
-				header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+			if prop.GetValue() != "" && prop.GetValue() != desiredExternalSpec {
+				desiredExternalSpec = prop.GetValue()
+				externalTupleChanged = true
+				if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec) {
+					header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionExternalSpec)
+				}
 			}
 		default:
 			newProperties[prop.GetKey()] = prop.GetValue()
@@ -153,12 +156,11 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionProperties)
 	}
 
-	// If TTL field is changed through properties, also broadcast an updated schema snapshot and mark it as schema change,
-	// so QueryNode can refresh runtime schema properties without requiring release/load.
-	ttlOld, okOld := oldProperties[common.CollectionTTLFieldKey]
+	// ttl_field needs its own validation, but it no longer decides whether a schema
+	// snapshot is broadcast — the content comparison below does, so ttl_field is just
+	// one more property rather than the only one that refreshes.
 	ttlNew, okNew := newProperties[common.CollectionTTLFieldKey]
-	needTTLFieldSchemaRefresh := (okOld != okNew) || (okOld && okNew && ttlOld != ttlNew)
-	if needTTLFieldSchemaRefresh {
+	if ttlOld, okOld := oldProperties[common.CollectionTTLFieldKey]; okOld != okNew || (okOld && okNew && ttlOld != ttlNew) {
 		// validate ttl field name exists in schema fields when setting it
 		if okNew {
 			found := false
@@ -172,23 +174,33 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 				return merr.WrapErrParameterInvalidMsg("ttl field name %s not found in schema", ttlNew)
 			}
 		}
+	}
 
+	// I2: any property change that QueryNode would see in the schema snapshot must
+	// broadcast that snapshot and bump schema.Version. schema.Version is the single
+	// monotonic version QueryNode/segcore gate on, so a snapshot that reuses the
+	// current version is dropped as a no-op and the setting (mmap.enabled, warmup.*,
+	// ttl_field, ...) only takes effect after a full release/load.
+	//
+	// The decision is derived from CONTENT, not from a list of property keys, so a
+	// property added later is covered without anyone remembering to register it.
+	// External source/spec are schema content too. They have a dedicated field mask
+	// for catalog projection, but QueryNode consumes them from the served schema and
+	// therefore needs the same versioned full snapshot as a property change.
+	if schemaPropertiesChanged(coll.Properties, newPropsKeyValuePairs) || externalTupleChanged {
 		// Ensure schema update mask exists so QueryNode pipeline treats this as a schema update event.
 		if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionSchema) {
 			header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionSchema)
 		}
 
-		// Build schema snapshot with updated properties (schema version should NOT be changed for properties-only alter).
-		schema := coll.ToCollectionSchemaPB()
+		// I1: the +1 comes from nextSchemaSnapshot, the single entry point.
+		// The snapshot still carries the FULL property set, exactly as before: the
+		// projection narrows only the change DECISION above, so the schema QueryNode
+		// stores never loses a property it might read.
+		schema := nextSchemaSnapshot(coll)
 		schema.Properties = newPropsKeyValuePairs
-		// Preserve ExternalSource/ExternalSpec from current collection state
-		// unless this alter is itself updating them (refresh-completion sync).
-		if udpates.Schema != nil && udpates.Schema.ExternalSource != "" {
-			schema.ExternalSource = udpates.Schema.ExternalSource
-		}
-		if udpates.Schema != nil && udpates.Schema.ExternalSpec != "" {
-			schema.ExternalSpec = udpates.Schema.ExternalSpec
-		}
+		schema.ExternalSource = desiredExternalSource
+		schema.ExternalSpec = desiredExternalSpec
 		udpates.Schema = schema
 	}
 
@@ -302,9 +314,8 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 		return err
 	}
 
-	schema := coll.ToCollectionSchemaPB()
+	schema := nextSchemaSnapshot(coll)
 	fieldSchema.FieldID = maxAssignedFieldIDFromSchema(schema) + 1
-	schema.Version = coll.SchemaVersion + 1
 	schema.EnableDynamicField = targetValue
 	schema.Fields = append(schema.Fields, fieldSchema)
 	properties := updateMaxFieldIDProperty(coll.Properties, fieldSchema.GetFieldID())
@@ -361,13 +372,12 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 		return merr.WrapErrParameterInvalidMsg("dynamic field not found")
 	}
 
-	schema := coll.ToCollectionSchemaPB()
+	schema := nextSchemaSnapshot(coll)
 	maxFieldID := maxAssignedFieldIDFromSchema(schema)
 	properties := updateMaxFieldIDProperty(coll.Properties, maxFieldID)
 	schema.Fields = newFields
 	schema.EnableDynamicField = false
 	schema.Properties = properties
-	schema.Version = coll.SchemaVersion + 1
 	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
 	}

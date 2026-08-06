@@ -686,8 +686,10 @@ class Schema {
     std::unordered_set<FieldId> load_fields_;
     std::unordered_set<FieldId> bm25_function_output_fields_;
 
-    // schema_version_, currently marked with update timestamp
-    uint64_t schema_version_;
+    // schema_version_ is the logical collection schema version (schema.version),
+    // sourced from the proto in Schema::ParseFrom. It is the single monotonic
+    // version the segment/collection reopen gate compares.
+    uint64_t schema_version_ = 0;
 
     // mmap settings
     bool has_mmap_setting_ = false;

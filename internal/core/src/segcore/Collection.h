@@ -30,9 +30,6 @@ class Collection {
     explicit Collection(const void* collection_proto, const int64_t length);
 
     void
-    parseIndexMeta(const void* index_meta_proto_blob, const int64_t length);
-
-    void
     parse_schema(const void* schema_proto_blob,
                  const int64_t length,
                  const uint64_t version);
@@ -63,18 +60,6 @@ class Collection {
         }
     }
 
-    IndexMetaPtr
-    get_index_meta() {
-        std::shared_lock lock(index_meta_mutex_);
-        return index_meta_;
-    }
-
-    void
-    set_index_meta(const IndexMetaPtr index_meta) {
-        std::unique_lock lock(index_meta_mutex_);
-        index_meta_ = index_meta;
-    }
-
     const std::string_view
     get_collection_name() {
         return collection_name_;
@@ -84,8 +69,6 @@ class Collection {
     std::string collection_name_;
     SchemaPtr schema_;
     std::shared_mutex schema_mutex_;
-    IndexMetaPtr index_meta_;
-    std::shared_mutex index_meta_mutex_;
 };
 
 using CollectionPtr = std::unique_ptr<Collection>;

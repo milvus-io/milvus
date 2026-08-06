@@ -4835,6 +4835,70 @@ TEST(SealedSegmentCowState,
               CacheWarmupPolicy::CacheWarmupPolicy_Disable);
 }
 
+TEST(SealedSegmentCowState, ReopenPublishesLatestIndexConfiguration) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    auto dataset = DataGen(schema, 1);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto add_index = [&](proto::segcore::SegmentLoadInfo& load_info,
+                         int64_t index_id,
+                         const std::string& metric) {
+        auto* index_info = load_info.add_index_infos();
+        index_info->set_fieldid(vec.get());
+        index_info->set_indexid(index_id);
+        auto* index_type = index_info->add_index_params();
+        index_type->set_key(knowhere::meta::INDEX_TYPE);
+        index_type->set_value(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
+        auto* metric_type = index_info->add_index_params();
+        metric_type->set_key(knowhere::meta::METRIC_TYPE);
+        metric_type->set_value(metric);
+    };
+
+    auto initial = sealed->TestGetLoadInfoSnapshot()->GetProto();
+    initial.clear_index_infos();
+    initial.set_max_index_row_count(100);
+    add_index(initial, 10, knowhere::metric::L2);
+    sealed->SetLoadInfo(initial);
+
+    auto state = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(state->index_meta, nullptr);
+    ASSERT_TRUE(state->index_meta->HasField(vec));
+    EXPECT_EQ(state->index_meta->GetIndexMaxRowCount(), 100);
+    EXPECT_EQ(state->index_meta->GetFieldIndexMeta(vec).GeMetricType(),
+              knowhere::metric::L2);
+
+    auto reopened = initial;
+    reopened.clear_index_infos();
+    reopened.set_max_index_row_count(200);
+    add_index(reopened, 20, knowhere::metric::IP);
+    milvus::OpContext op_ctx;
+    ASSERT_NO_THROW(sealed->Reopen(&op_ctx, reopened));
+
+    state = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(state->index_meta, nullptr);
+    ASSERT_TRUE(state->index_meta->HasField(vec));
+    EXPECT_EQ(state->index_meta->GetIndexMaxRowCount(), 200);
+    EXPECT_EQ(state->index_meta->GetFieldIndexMeta(vec).GeMetricType(),
+              knowhere::metric::IP);
+
+    auto dropped = reopened;
+    dropped.clear_index_infos();
+    dropped.set_max_index_row_count(300);
+    ASSERT_NO_THROW(sealed->Reopen(&op_ctx, dropped));
+
+    state = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(state->index_meta, nullptr);
+    EXPECT_EQ(state->index_meta->GetIndexMaxRowCount(), 300);
+    EXPECT_FALSE(state->index_meta->HasField(vec));
+}
+
 TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
@@ -5004,6 +5068,7 @@ TEST(SealedSegmentCowState,
             current,
             {current->schema,
              current->load_info,
+             current->index_meta,
              sealed->TestFreezeRuntimeResourceState(runtime),
              current->commit_ts});
 
@@ -5695,6 +5760,7 @@ TEST(SealedSegmentCowState,
         current,
         {current->schema,
          current->load_info,
+         current->index_meta,
          sealed->TestFreezeRuntimeResourceState(std::move(runtime)),
          current->commit_ts});
 
@@ -5737,6 +5803,7 @@ TEST(SealedSegmentCowState,
         current,
         {current->schema,
          current->load_info,
+         current->index_meta,
          sealed->TestFreezeRuntimeResourceState(std::move(runtime)),
          current->commit_ts});
 

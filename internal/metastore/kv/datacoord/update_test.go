@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -52,6 +53,73 @@ func TestCatalog_Update_Empty(t *testing.T) {
 	c := NewCatalog(metakv, "", "")
 	err := c.Update(context.TODO())
 	assert.NoError(t, err)
+}
+
+func TestCatalog_Update_IndexSnapshotAndRevisionAreAtomic(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	index := &model.Index{CollectionID: 10, IndexID: 20, IndexName: "idx"}
+	const revision = int64(12345)
+
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+			assert.Empty(t, removals)
+			assert.Contains(t, saves, buildIndexSnapshotKey(index.CollectionID, revision, index.IndexID))
+			assert.NotContains(t, saves, BuildIndexKey(index.CollectionID, index.IndexID))
+			assert.Equal(t, "12345", saves[buildIndexSnapshotRevisionKey(index.CollectionID)])
+			return nil
+		}).Once()
+
+	c := NewCatalog(metakv, "", "")
+	err := c.Update(context.TODO(),
+		metastore.AddIndex(index),
+		metastore.SaveIndexSnapshotRevision(index.CollectionID, revision, index),
+	)
+	assert.NoError(t, err)
+}
+
+func TestCatalog_Update_LargeIndexSnapshotUsesCommitMarker(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(64).Once()
+	indexes := make([]*model.Index, 64)
+	for i := range indexes {
+		indexes[i] = &model.Index{CollectionID: 10, IndexID: int64(i + 1), IndexName: "idx"}
+	}
+	metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string) error {
+			assert.Len(t, saves, 64)
+			assert.NotContains(t, saves, buildIndexSnapshotRevisionKey(10))
+			return nil
+		}).Once()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+			assert.Empty(t, removals)
+			assert.Equal(t, map[string]string{buildIndexSnapshotRevisionKey(10): "12345"}, saves)
+			return nil
+		}).Once()
+
+	c := NewCatalog(metakv, "", "")
+	err := c.Update(context.TODO(), metastore.SaveIndexSnapshotRevision(10, 12345, indexes...))
+	assert.NoError(t, err)
+}
+
+func TestCatalog_Update_CleanupIndexSnapshotRemovesMarkerFirst(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	markerRemoved := false
+	metakv.EXPECT().Remove(mock.Anything, buildIndexSnapshotRevisionKey(10)).
+		RunAndReturn(func(context.Context, string) error {
+			markerRemoved = true
+			return nil
+		}).Once()
+	metakv.EXPECT().RemoveWithPrefix(mock.Anything, buildIndexSnapshotCollectionPrefix(10)).
+		RunAndReturn(func(context.Context, string) error {
+			assert.True(t, markerRemoved)
+			return nil
+		}).Once()
+	metakv.EXPECT().RemoveWithPrefix(mock.Anything, buildIndexCollectionPrefix(10)).Return(nil).Once()
+
+	c := NewCatalog(metakv, "", "")
+	assert.NoError(t, c.Update(context.Background(), metastore.CleanupIndexSnapshot(10)))
 }
 
 // TestCatalog_Update_AddSegmentEncodingMatchesLegacy proves AddSegment writes

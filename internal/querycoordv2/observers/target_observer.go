@@ -52,6 +52,8 @@ func (op *targetOp) String() string {
 		return "ReleaseCollection"
 	case ReleasePartition:
 		return "ReleasePartition"
+	case RefreshIndexSnapshot:
+		return "RefreshIndexSnapshot"
 	default:
 		return "Unknown"
 	}
@@ -62,6 +64,7 @@ const (
 	ReleaseCollection
 	ReleasePartition
 	UpdatePartition
+	RefreshIndexSnapshot
 )
 
 type targetUpdateRequest struct {
@@ -277,6 +280,11 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 					}
 					ob.keylocks.Unlock(req.CollectionID)
 				}
+			case RefreshIndexSnapshot:
+				ob.keylocks.Lock(req.CollectionID)
+				err := ob.updateNextTarget(ctx, req.CollectionID)
+				ob.keylocks.Unlock(req.CollectionID)
+				req.Notifier <- err
 			}
 			mlog.Info(ctx, "manually trigger update target done",
 				mlog.FieldCollectionID(req.CollectionID),
@@ -356,6 +364,30 @@ func (ob *TargetObserver) UpdateNextTarget(collectionID int64) (chan struct{}, e
 		ReadyNotifier: readyCh,
 	}
 	return readyCh, <-notifier
+}
+
+// RefreshCollectionIndexTarget rebuilds the next target after an index DDL
+// mutation. Unlike the periodic refresh, this request is ordered after the DDL
+// callback and waits until the target has captured the new index snapshot.
+func (ob *TargetObserver) RefreshCollectionIndexTarget(ctx context.Context, collectionID int64) error {
+	notifier := make(chan error, 1)
+
+	select {
+	case ob.updateChan <- targetUpdateRequest{
+		CollectionID: collectionID,
+		opType:       RefreshIndexSnapshot,
+		Notifier:     notifier,
+	}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	select {
+	case err := <-notifier:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (ob *TargetObserver) UpdatePartition(collectionID int64, partitionID int64) (chan struct{}, error) {
@@ -543,10 +575,23 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 		return false
 	}
 
-	indexInfo, err := ob.broker.ListIndexes(ctx, collectionID)
-	if err != nil {
-		mlog.Warn(ctx, "fail to get index info of collection", mlog.Err(err))
+	indexInfo, indexInfoVersion, snapshotTargetVersion, snapshotPresent := meta.GetCollectionIndexInfoSnapshotWithTargetVersion(ctx, ob.targetMgr, collectionID, meta.NextTarget)
+	if snapshotPresent && snapshotTargetVersion != newVersion {
+		mlog.Warn(ctx, "next target changed while reading index snapshot",
+			mlog.Int64("expectedVersion", newVersion),
+			mlog.Int64("snapshotTargetVersion", snapshotTargetVersion))
 		return false
+	}
+	if !snapshotPresent {
+		// Compatibility for targets recovered from an older QueryCoord. New
+		// targets always carry an authoritative (possibly empty) index snapshot.
+		var err error
+		indexInfo, err = ob.broker.ListIndexes(ctx, collectionID)
+		if err != nil {
+			mlog.Warn(ctx, "fail to get index info of collection", mlog.Err(err))
+			return false
+		}
+		indexInfoVersion = newVersion
 	}
 
 	for _, d := range collReadyDelegatorList {
@@ -558,7 +603,7 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 			return false
 		}
 
-		if !ob.syncToDelegator(ctx, replica, d.View, updateVersionAction, schema, schemaBarrierTs, partitions, indexInfo) {
+		if !ob.syncToDelegator(ctx, replica, d.View, updateVersionAction, schema, schemaBarrierTs, partitions, indexInfo, indexInfoVersion) {
 			return false
 		}
 	}
@@ -566,7 +611,7 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 }
 
 func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Replica, LeaderView *meta.LeaderView, action *querypb.SyncAction,
-	schema *schemapb.CollectionSchema, schemaBarrierTs uint64, partitions []int64, indexInfo []*indexpb.IndexInfo,
+	schema *schemapb.CollectionSchema, schemaBarrierTs uint64, partitions []int64, indexInfo []*indexpb.IndexInfo, indexInfoVersion int64,
 ) bool {
 	replicaID := replica.GetID()
 
@@ -592,7 +637,7 @@ func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Rep
 			ResourceGroup:   replica.GetResourceGroup(),
 			SchemaBarrierTs: schemaBarrierTs,
 		},
-		Version:       time.Now().UnixNano(),
+		Version:       indexInfoVersion,
 		IndexInfoList: indexInfo,
 	}
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))

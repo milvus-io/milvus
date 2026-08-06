@@ -493,10 +493,11 @@ func NewSegment(ctx context.Context,
 	if _, err := GetDynamicPool().Submit(func() (any, error) {
 		var err error
 		csegment, err = collection.CreateCSegment(&segcore.CreateCSegmentRequest{
-			SegmentID:   loadInfo.GetSegmentID(),
-			SegmentType: segmentType,
-			IsSorted:    loadInfo.GetIsSorted(),
-			LoadInfo:    loadInfo,
+			SegmentID:        loadInfo.GetSegmentID(),
+			SegmentType:      segmentType,
+			IsSorted:         loadInfo.GetIsSorted(),
+			LoadInfo:         loadInfo,
+			MaxIndexRowCount: estimateMaxIndexRowCount(ctx, collection.Schema()),
 		})
 		return nil, err
 	}).Await(); err != nil {
@@ -743,6 +744,9 @@ func (s *LocalSegment) syncFieldIndexes(indexInfos []*querypb.FieldIndexInfo) {
 
 	indexIDs := typeutil.NewSet[int64]()
 	for _, indexInfo := range indexInfos {
+		if isCollectionIndexConfigOnly(indexInfo) {
+			continue
+		}
 		indexID := indexInfo.GetIndexID()
 		indexIDs.Insert(indexID)
 		isLoaded, ok := isLoadedByIndexID[indexID]
@@ -1282,7 +1286,7 @@ func (s *LocalSegment) Load(ctx context.Context) error {
 	return nil
 }
 
-func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
+func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) error {
 	if !s.ptrLock.PinIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during reopen")
 	}
@@ -1295,11 +1299,26 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		return err
 	}
 
-	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
+	// Decode this segment with ITS data's actual schema, passed in explicitly from
+	// the load request so the segment adopts the version-ahead schema while the
+	// served collection schema stays behind — the reopen does NOT touch s.collection
+	// for schema. Fall back to the served schema only when the caller carried none.
+	// schema.Version is the single monotonic version, so the segcore version is taken
+	// straight from it.
+	// Take whichever schema is NEWER. The request's schema is normally the
+	// version-ahead one, but QueryCoord can snapshot an older collection version
+	// (DescribeCollection singleflight) while this node has already advanced the
+	// segment from the WAL — and segcore rejects a reopen whose version is strictly
+	// lower ("stale reopen segment"). Falling back to the served schema also covers
+	// a caller that carried none.
+	if served := s.collection.Schema(); schema == nil || served.GetVersion() > schema.GetVersion() {
+		schema = served
+	}
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
-		LoadInfo:      newLoadInfo,
-		Schema:        schema,
-		SchemaVersion: schemaVersion,
+		LoadInfo:         newLoadInfo,
+		Schema:           schema,
+		SchemaVersion:    uint64(schema.GetVersion()),
+		MaxIndexRowCount: estimateMaxIndexRowCount(ctx, schema),
 	})
 	if err != nil {
 		return err
@@ -1311,6 +1330,33 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	s.loadInfo.Store(newLoadInfo)
 	s.syncFieldJSONStatsFromLoadInfo(ctx, newLoadInfo)
 	s.compactLoadInfoForRuntime()
+	return nil
+}
+
+// UpdateGrowingIndexConfig refreshes search configuration for an existing
+// growing segment without mutating its construction-time interim IndexingRecord.
+func (s *LocalSegment) UpdateGrowingIndexConfig(ctx context.Context, indexInfos []*querypb.FieldIndexInfo) error {
+	if s.Type() != SegmentTypeGrowing {
+		return nil
+	}
+	if !s.ptrLock.PinIfNotReleased() {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during index config update")
+	}
+	defer s.ptrLock.Unpin()
+
+	loadInfo := typeutil.Clone(s.LoadInfo())
+	loadInfo.IndexInfos = make([]*querypb.FieldIndexInfo, 0, len(indexInfos))
+	for _, info := range indexInfos {
+		loadInfo.IndexInfos = append(loadInfo.IndexInfos, typeutil.Clone(info))
+	}
+	if err := segcore.UpdateGrowingSegmentIndexMeta(
+		s.csegment,
+		loadInfo,
+		estimateMaxIndexRowCount(ctx, s.collection.Schema()),
+	); err != nil {
+		return err
+	}
+	s.loadInfo.Store(loadInfo)
 	return nil
 }
 
@@ -1813,4 +1859,21 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		FieldNullCounts:        fieldNullCounts,
 		BM25Stats:              bm25Stats,
 	}, nil
+}
+
+// estimateMaxIndexRowCount is the expected row capacity of a segment of this
+// collection: DataCoord's segment size budget divided by the estimated row size.
+// It only scales the interim-index build threshold
+// (VecIndexConfig::GetBuildThreshold, which floors at nlist * 39), and segcore
+// cannot compute it because the budget is DataCoord configuration. It used to
+// ride on the collection-wide index meta; it now travels with the segment.
+func estimateMaxIndexRowCount(ctx context.Context, schema *schemapb.CollectionSchema) int64 {
+	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
+	if err != nil || sizePerRecord == 0 {
+		mlog.Warn(ctx, "failed to estimate size per record, interim index build threshold falls back to its floor", mlog.Err(err))
+		return 0
+	}
+	threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
+	proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
+	return int64(threshold * proportion / float64(sizePerRecord))
 }

@@ -51,23 +51,6 @@ Collection::Collection(const void* schema_proto, const int64_t length) {
 }
 
 void
-Collection::parseIndexMeta(const void* index_proto, const int64_t length) {
-    Assert(index_proto != nullptr);
-
-    milvus::proto::segcore::CollectionIndexMeta indexMeta;
-    auto suc = indexMeta.ParseFromArray(index_proto, length);
-
-    if (!suc) {
-        LOG_ERROR("unmarshal index meta string failed");
-        return;
-    }
-
-    auto new_index_meta = std::make_shared<CollectionIndexMeta>(indexMeta);
-    LOG_INFO("index meta info: {}", new_index_meta->ToString());
-    set_index_meta(new_index_meta);
-}
-
-void
 Collection::parse_schema(const void* schema_proto_blob,
                          const int64_t length,
                          const uint64_t version) {

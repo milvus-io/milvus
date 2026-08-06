@@ -343,6 +343,26 @@ func BuildIndexKey(collectionID, indexID int64) string {
 	return fmt.Sprintf("%s/%d/%d", util.FieldIndexPrefix, collectionID, indexID)
 }
 
+func buildIndexCollectionPrefix(collectionID int64) string {
+	return fmt.Sprintf("%s/%d/", util.FieldIndexPrefix, collectionID)
+}
+
+func buildIndexSnapshotRevisionKey(collectionID int64) string {
+	return fmt.Sprintf("%s/%d", util.FieldIndexRevisionPrefix, collectionID)
+}
+
+func buildIndexSnapshotCollectionPrefix(collectionID int64) string {
+	return fmt.Sprintf("%s/%d/", util.FieldIndexSnapshotPrefix, collectionID)
+}
+
+func buildIndexSnapshotRevisionPrefix(collectionID, revision int64) string {
+	return fmt.Sprintf("%s%d/", buildIndexSnapshotCollectionPrefix(collectionID), revision)
+}
+
+func buildIndexSnapshotKey(collectionID, revision, indexID int64) string {
+	return fmt.Sprintf("%s%d", buildIndexSnapshotRevisionPrefix(collectionID, revision), indexID)
+}
+
 func BuildSegmentIndexKey(collectionID, partitionID, segmentID, buildID int64) string {
 	return fmt.Sprintf("%s/%d/%d/%d/%d", util.SegmentIndexPrefix, collectionID, partitionID, segmentID, buildID)
 }

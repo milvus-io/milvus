@@ -4,15 +4,97 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestAppendCollectionIndexConfig(t *testing.T) {
+	loadInfos := []*querypb.SegmentLoadInfo{
+		{
+			IndexInfos: []*querypb.FieldIndexInfo{
+				{
+					FieldID:        101,
+					IndexID:        10,
+					IndexFilePaths: []string{"index/10"},
+				},
+			},
+		},
+		{},
+		nil,
+	}
+	collectionIndexes := []*indexpb.IndexInfo{
+		{FieldID: 101, IndexID: 10, IndexName: "built"},
+		{
+			FieldID:   102,
+			IndexID:   20,
+			IndexName: "raw-config",
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MetricTypeKey, Value: "IP"},
+			},
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+		},
+	}
+
+	AppendCollectionIndexConfig(loadInfos, collectionIndexes)
+
+	require.Len(t, loadInfos[0].GetIndexInfos(), 2)
+	assert.Equal(t, int64(10), loadInfos[0].GetIndexInfos()[0].GetIndexID())
+	config := loadInfos[0].GetIndexInfos()[1]
+	assert.Equal(t, int64(102), config.GetFieldID())
+	assert.Equal(t, int64(20), config.GetIndexID())
+	assert.Empty(t, config.GetIndexFilePaths())
+	assert.Equal(t, "IP", funcutil.KeyValuePair2Map(config.GetIndexParams())[common.MetricTypeKey])
+	assert.Equal(t, "128", funcutil.KeyValuePair2Map(config.GetIndexParams())[common.DimKey])
+
+	require.Len(t, loadInfos[1].GetIndexInfos(), 2)
+	collectionIndexes[1].IndexParams[0].Value = "COSINE"
+	assert.Equal(t, "IP", funcutil.KeyValuePair2Map(config.GetIndexParams())[common.MetricTypeKey])
+}
+
+func TestCollectionIndexConfigOnlyIsNotLoadedIndexState(t *testing.T) {
+	paramtable.Init()
+
+	config := &querypb.FieldIndexInfo{
+		FieldID: 102,
+		IndexID: 20,
+		IndexParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "DISKANN"},
+			{Key: common.MetricTypeKey, Value: "IP"},
+		},
+	}
+	require.True(t, isCollectionIndexConfigOnly(config))
+	require.NoError(t, prepareIndexLoadParams([]*querypb.FieldIndexInfo{config}))
+	_, injected := funcutil.KeyValuePair2Map(config.GetIndexParams())[indexparams.NumLoadThreadKey]
+	assert.False(t, injected)
+
+	built := &querypb.FieldIndexInfo{
+		FieldID:        101,
+		IndexID:        10,
+		BuildID:        100,
+		EnableIndex:    true,
+		IndexFilePaths: []string{"index/10"},
+	}
+	segment := &LocalSegment{
+		fieldIndexes: typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+	}
+	segment.syncFieldIndexes([]*querypb.FieldIndexInfo{config, built})
+
+	assert.Nil(t, segment.GetIndexByID(config.GetIndexID()))
+	assert.NotNil(t, segment.GetIndexByID(built.GetIndexID()))
+}
 
 func TestFilterZeroValuesFromSlice(t *testing.T) {
 	var ints []int64

@@ -15,6 +15,10 @@ import (
 )
 
 func ConsumeCStatusIntoError(status *C.CStatus) error {
+	return consumeCStatusIntoError(status, nil)
+}
+
+func consumeCStatusIntoError(status *C.CStatus, mapper ErrorMapper) error {
 	if status.error_code == 0 {
 		return nil
 	}
@@ -23,5 +27,8 @@ func ConsumeCStatusIntoError(status *C.CStatus) error {
 	getCGOCaller().call("free", func() {
 		C.free(unsafe.Pointer(status.error_msg))
 	})
+	if mapper != nil {
+		return mapper(int32(errorCode), errorMsg)
+	}
 	return merr.SegcoreError(int32(errorCode), errorMsg)
 }

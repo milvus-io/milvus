@@ -155,6 +155,11 @@ func TestSegcoreErrorClassification(t *testing.T) {
 	})
 }
 
+func TestIsSegcoreMetricTypeNotMatch(t *testing.T) {
+	assert.True(t, IsSegcoreMetricTypeNotMatch(SegcoreMetricTypeNotMatchCode))
+	assert.False(t, IsSegcoreMetricTypeNotMatch(2027))
+}
+
 // TestSegcoreCodeTableCoverage cross-checks segcoreCodeTable against a
 // hand-copied snapshot of the C++ ErrorCode enum. The enum's source of truth
 // lives in the external milvus-common dependency (common/EasyAssert.h, fetched

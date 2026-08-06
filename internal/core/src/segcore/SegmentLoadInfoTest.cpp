@@ -38,6 +38,7 @@
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/index_coord.pb.h"
 #include "pb/segcore.pb.h"
+#include "segcore/SegmentIndexMeta.h"
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/Types.h"
 
@@ -3952,4 +3953,74 @@ TEST(IndexFactoryRawDataTest,
         DataType::INT64, false));
     EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
         DataType::JSON, false));
+}
+
+// BuildSegmentIndexMeta is how a segment gets its index configuration now that the
+// collection-wide CollectionIndexMeta is gone. Nothing else exercised it: every
+// other test constructs a CollectionIndexMeta directly, which is why a regression
+// here (max_index_row_count left at 0, silently disabling the growing interim
+// index via IndexingRecord's `> 0` guard) went unnoticed.
+TEST_F(SegmentLoadInfoTest, BuildSegmentIndexMetaFromLoadInfo) {
+    milvus::proto::segcore::SegmentLoadInfo proto;
+    proto.set_max_index_row_count(123456);
+
+    auto* index_info = proto.add_index_infos();
+    index_info->set_fieldid(101);
+    auto* index_type = index_info->add_index_params();
+    index_type->set_key("index_type");
+    index_type->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
+    auto* metric = index_info->add_index_params();
+    metric->set_key(knowhere::meta::METRIC_TYPE);
+    metric->set_value(knowhere::metric::COSINE);
+
+    auto index_meta = milvus::segcore::BuildSegmentIndexMeta(&proto);
+    ASSERT_NE(index_meta, nullptr);
+
+    // The row capacity has to survive: IndexingRecord refuses to build a growing
+    // interim index at all unless it is positive.
+    EXPECT_EQ(index_meta->GetIndexMaxRowCount(), 123456);
+
+    ASSERT_TRUE(index_meta->HasField(milvus::FieldId(101)));
+    const auto& field_meta =
+        index_meta->GetFieldIndexMeta(milvus::FieldId(101));
+    EXPECT_EQ(field_meta.GeMetricType(), knowhere::metric::COSINE);
+    EXPECT_EQ(field_meta.GetIndexType(),
+              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
+
+    // A field whose entry carries no params at all is skipped rather than
+    // producing an entry that would throw on GeMetricType.
+    EXPECT_FALSE(index_meta->HasField(milvus::FieldId(999)));
+}
+
+TEST_F(SegmentLoadInfoTest, BuildSegmentIndexMetaWithoutLoadInfo) {
+    auto index_meta = milvus::segcore::BuildSegmentIndexMeta(nullptr);
+    ASSERT_NE(index_meta, nullptr);
+    EXPECT_EQ(index_meta->GetIndexMaxRowCount(), 0);
+    EXPECT_FALSE(index_meta->HasField(milvus::FieldId(101)));
+}
+
+TEST_F(SegmentLoadInfoTest, BuildSegmentIndexMetaSkipsParamlessEntries) {
+    milvus::proto::segcore::SegmentLoadInfo proto;
+    proto.set_max_index_row_count(10);
+    proto.add_index_infos()->set_fieldid(101);  // no index_params
+
+    auto index_meta = milvus::segcore::BuildSegmentIndexMeta(&proto);
+    ASSERT_NE(index_meta, nullptr);
+    EXPECT_FALSE(index_meta->HasField(milvus::FieldId(101)));
+}
+
+TEST_F(SegmentLoadInfoTest, ResolveSegmentMetricToleratesMissingMetricParam) {
+    milvus::proto::segcore::SegmentLoadInfo proto;
+    auto* index_info = proto.add_index_infos();
+    index_info->set_fieldid(101);
+    auto* index_type = index_info->add_index_params();
+    index_type->set_key(knowhere::meta::INDEX_TYPE);
+    index_type->set_value(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
+
+    auto index_meta = milvus::segcore::BuildSegmentIndexMeta(&proto);
+    ASSERT_NE(index_meta, nullptr);
+    ASSERT_TRUE(index_meta->HasField(milvus::FieldId(101)));
+    EXPECT_TRUE(milvus::segcore::ResolveMetricTypeFromIndexMeta(
+                    index_meta, milvus::FieldId(101))
+                    .empty());
 }

@@ -67,14 +67,13 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		return err
 	}
 
-	schema := coll.ToCollectionSchemaPB()
+	schema := nextSchemaSnapshot(coll)
 	fieldIDStart := maxAssignedFieldIDFromSchema(schema) + 1
 	structArrayField.FieldID = fieldIDStart
 	for i, field := range structArrayField.GetFields() {
 		field.FieldID = fieldIDStart + int64(i) + 1
 	}
 
-	schema.Version = coll.SchemaVersion + 1
 	schema.StructArrayFields = append(schema.StructArrayFields, structArrayField)
 	properties := updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(schema))
 	schema.Properties = properties

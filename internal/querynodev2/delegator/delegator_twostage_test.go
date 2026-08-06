@@ -36,8 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -97,34 +95,11 @@ func (s *TwoStageSearchSuite) SetupTest() {
 				},
 			},
 		},
-	}, &segcorepb.CollectionIndexMeta{
-		MaxIndexRowCount: 100,
-		IndexMetas: []*segcorepb.FieldIndexMeta{
-			{
-				FieldID:      101,
-				CollectionID: s.collectionID,
-				IndexName:    "vector_index",
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.DimKey,
-						Value: "128",
-					},
-				},
-				IndexParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.IndexTypeKey,
-						Value: "HNSW",
-					},
-					{
-						Key:   common.MetricTypeKey,
-						Value: metric.L2,
-					},
-				},
-			},
-		},
-	}, &querypb.LoadMetaInfo{
-		PartitionIDs: s.partitionIDs,
-	})
+	}, nil,
+
+		&querypb.LoadMetaInfo{
+			PartitionIDs: s.partitionIDs,
+		})
 
 	// init chunkManager
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)

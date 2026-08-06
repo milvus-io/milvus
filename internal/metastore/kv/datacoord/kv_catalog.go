@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 
@@ -622,23 +623,95 @@ func (kc *Catalog) CreateIndex(ctx context.Context, index *model.Index) error {
 
 func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
 	indexes := make([]*model.Index, 0)
-	applyFn := func(key []byte, value []byte) error {
+	revisions, err := kc.ListIndexSnapshotRevisions(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// A marker makes its revision-scoped snapshot authoritative. Staged keys
+	// from failed/newer writes and older committed revisions are invisible.
+	applySnapshot := func(key []byte, value []byte) error {
+		relative := strings.TrimPrefix(string(key), util.FieldIndexSnapshotPrefix+"/")
+		parts := strings.Split(relative, "/")
+		if len(parts) != 3 {
+			return merr.WrapErrDataIntegrityMsg("invalid field index snapshot key %q", string(key))
+		}
+		collectionID, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			return merr.WrapErrDataIntegrity(err, "invalid collection in field index snapshot key %q", string(key))
+		}
+		revision, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			return merr.WrapErrDataIntegrity(err, "invalid revision in field index snapshot key %q", string(key))
+		}
+		if revisions[collectionID] != revision {
+			return nil
+		}
+
 		meta := &indexpb.FieldIndex{}
-		err := proto.Unmarshal(value, meta)
+		err = proto.Unmarshal(value, meta)
 		if err != nil {
 			mlog.Warn(ctx, "unmarshal index info failed", mlog.Err(err))
 			return err
 		}
-
 		indexes = append(indexes, model.UnmarshalIndexModel(meta))
 		return nil
 	}
+	if err := kc.MetaKv.WalkWithPrefix(ctx, util.FieldIndexSnapshotPrefix+"/", kc.paginationSize, applySnapshot); err != nil {
+		return nil, err
+	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, util.FieldIndexPrefix+"/", kc.paginationSize, applyFn)
-	if err != nil {
+	// Collections without a marker are pre-migration metadata and continue to
+	// load from the legacy key space. Never merge legacy values into a marked
+	// collection: a failed chunked write may have left them partially updated.
+	applyLegacy := func(key []byte, value []byte) error {
+		collectionID, err := strconv.ParseInt(path.Base(path.Dir(string(key))), 10, 64)
+		if err != nil {
+			return merr.WrapErrDataIntegrity(err, "invalid collection in field index key %q", string(key))
+		}
+		if _, versioned := revisions[collectionID]; versioned {
+			return nil
+		}
+		meta := &indexpb.FieldIndex{}
+		if err := proto.Unmarshal(value, meta); err != nil {
+			mlog.Warn(ctx, "unmarshal index info failed", mlog.Err(err))
+			return err
+		}
+		indexes = append(indexes, model.UnmarshalIndexModel(meta))
+		return nil
+	}
+	if err := kc.MetaKv.WalkWithPrefix(ctx, util.FieldIndexPrefix+"/", kc.paginationSize, applyLegacy); err != nil {
 		return nil, err
 	}
 	return indexes, nil
+}
+
+// ListIndexSnapshotRevisions returns the persistent collection-level revision
+// of every field-index snapshot. It is intentionally separate from ListIndexes
+// so the revision survives GC of deleted index definitions.
+func (kc *Catalog) ListIndexSnapshotRevisions(ctx context.Context) (map[int64]int64, error) {
+	revisions := make(map[int64]int64)
+	applyFn := func(key []byte, value []byte) error {
+		collectionID, err := strconv.ParseInt(path.Base(string(key)), 10, 64)
+		if err != nil {
+			return merr.WrapErrDataIntegrity(err, "invalid index snapshot revision key %q", string(key))
+		}
+		revision, err := strconv.ParseInt(string(value), 10, 64)
+		if err != nil {
+			return merr.WrapErrDataIntegrity(err, "invalid index snapshot revision for collection %d", collectionID)
+		}
+		if revision <= 0 {
+			return merr.WrapErrDataIntegrityMsg("invalid index snapshot revision %d for collection %d", revision, collectionID)
+		}
+		revisions[collectionID] = revision
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, util.FieldIndexRevisionPrefix+"/", kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return revisions, nil
 }
 
 func (kc *Catalog) AlterIndexes(ctx context.Context, indexes []*model.Index) error {

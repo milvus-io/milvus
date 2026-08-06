@@ -45,6 +45,38 @@ type DDLCallbacks struct {
 	*Server
 }
 
+const indexSnapshotRevisionDomain uint64 = 1 << 62
+
+// encodeIndexSnapshotRevision places the globally ordered DDL TSO in a
+// dedicated positive int64 domain. The domain bit makes a new persistent
+// revision newer than legacy QueryCoord wall-clock versions during a rolling
+// upgrade, while the remaining bits preserve the TSO's strict ordering.
+func encodeIndexSnapshotRevision(tso uint64) (int64, error) {
+	if tso == 0 || tso >= indexSnapshotRevisionDomain {
+		return 0, merr.WrapErrServiceInternalMsg("invalid index snapshot TSO %d", tso)
+	}
+	return int64(indexSnapshotRevisionDomain | tso), nil
+}
+
+type collectionIndexTargetRefresher interface {
+	RefreshCollectionIndexTarget(ctx context.Context, collectionID int64) error
+}
+
+func (c *DDLCallbacks) refreshCollectionIndexTarget(ctx context.Context, collectionID int64) {
+	refresher, ok := c.mixCoord.(collectionIndexTargetRefresher)
+	if !ok {
+		return
+	}
+	if err := refresher.RefreshCollectionIndexTarget(ctx, collectionID); err != nil {
+		// Index metadata is already committed at this point. Keep the DDL
+		// callback successful and rely on the periodic target refresh as a
+		// fallback instead of turning a propagation failure into a partial DDL.
+		mlog.Warn(ctx, "failed to refresh collection target after index metadata changed",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Err(err))
+	}
+}
+
 func (c *DDLCallbacks) registerIndexCallbacks() {
 	registry.RegisterCreateIndexV2AckCallback(c.createIndexV2AckCallback)
 	registry.RegisterAlterIndexV2AckCallback(c.alterIndexV2AckCallback)

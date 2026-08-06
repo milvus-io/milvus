@@ -146,6 +146,11 @@ DeleteSegment(CSegmentInterface c_segment);
 void
 ClearSegmentData(CSegmentInterface c_segment);
 
+CStatus
+UpdateGrowingSegmentIndexMeta(CSegmentInterface c_segment,
+                              const uint8_t* load_info_blob,
+                              int64_t load_info_length);
+
 void
 DeleteSearchResult(CSearchResult search_result);
 

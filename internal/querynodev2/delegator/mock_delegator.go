@@ -8,6 +8,7 @@ import (
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	streamrpc "github.com/milvus-io/milvus/internal/util/streamrpc"
+	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	querypb "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	mock "github.com/stretchr/testify/mock"
@@ -1341,17 +1342,51 @@ func (_c *MockShardDelegator_TryCleanExcludedSegments_Call) RunAndReturn(run fun
 	return _c
 }
 
-// UpdateSchema provides a mock function with given fields: ctx, sch, schemaBarrierTs
-func (_m *MockShardDelegator) UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
-	ret := _m.Called(ctx, sch, schemaBarrierTs)
+// UpdateIndexInfoList provides a mock function with given fields: indexInfos, version
+func (_m *MockShardDelegator) UpdateIndexInfoList(indexInfos []*indexpb.IndexInfo, version int64) {
+	_m.Called(indexInfos, version)
+}
+
+// MockShardDelegator_UpdateIndexInfoList_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateIndexInfoList'
+type MockShardDelegator_UpdateIndexInfoList_Call struct {
+	*mock.Call
+}
+
+// UpdateIndexInfoList is a helper method to define mock.On call
+//   - indexInfos []*indexpb.IndexInfo
+//   - version int64
+func (_e *MockShardDelegator_Expecter) UpdateIndexInfoList(indexInfos interface{}, version interface{}) *MockShardDelegator_UpdateIndexInfoList_Call {
+	return &MockShardDelegator_UpdateIndexInfoList_Call{Call: _e.mock.On("UpdateIndexInfoList", indexInfos, version)}
+}
+
+func (_c *MockShardDelegator_UpdateIndexInfoList_Call) Run(run func(indexInfos []*indexpb.IndexInfo, version int64)) *MockShardDelegator_UpdateIndexInfoList_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]*indexpb.IndexInfo), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_UpdateIndexInfoList_Call) Return() *MockShardDelegator_UpdateIndexInfoList_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_UpdateIndexInfoList_Call) RunAndReturn(run func([]*indexpb.IndexInfo, int64)) *MockShardDelegator_UpdateIndexInfoList_Call {
+	_c.Run(run)
+	return _c
+}
+
+// UpdateSchema provides a mock function with given fields: ctx, sch
+func (_m *MockShardDelegator) UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema) error {
+	ret := _m.Called(ctx, sch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateSchema")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *schemapb.CollectionSchema, uint64) error); ok {
-		r0 = rf(ctx, sch, schemaBarrierTs)
+	if rf, ok := ret.Get(0).(func(context.Context, *schemapb.CollectionSchema) error); ok {
+		r0 = rf(ctx, sch)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -1367,14 +1402,13 @@ type MockShardDelegator_UpdateSchema_Call struct {
 // UpdateSchema is a helper method to define mock.On call
 //   - ctx context.Context
 //   - sch *schemapb.CollectionSchema
-//   - schemaBarrierTs uint64
-func (_e *MockShardDelegator_Expecter) UpdateSchema(ctx interface{}, sch interface{}, schemaBarrierTs interface{}) *MockShardDelegator_UpdateSchema_Call {
-	return &MockShardDelegator_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", ctx, sch, schemaBarrierTs)}
+func (_e *MockShardDelegator_Expecter) UpdateSchema(ctx interface{}, sch interface{}) *MockShardDelegator_UpdateSchema_Call {
+	return &MockShardDelegator_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", ctx, sch)}
 }
 
-func (_c *MockShardDelegator_UpdateSchema_Call) Run(run func(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64)) *MockShardDelegator_UpdateSchema_Call {
+func (_c *MockShardDelegator_UpdateSchema_Call) Run(run func(ctx context.Context, sch *schemapb.CollectionSchema)) *MockShardDelegator_UpdateSchema_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*schemapb.CollectionSchema), args[2].(uint64))
+		run(args[0].(context.Context), args[1].(*schemapb.CollectionSchema))
 	})
 	return _c
 }
@@ -1384,7 +1418,7 @@ func (_c *MockShardDelegator_UpdateSchema_Call) Return(_a0 error) *MockShardDele
 	return _c
 }
 
-func (_c *MockShardDelegator_UpdateSchema_Call) RunAndReturn(run func(context.Context, *schemapb.CollectionSchema, uint64) error) *MockShardDelegator_UpdateSchema_Call {
+func (_c *MockShardDelegator_UpdateSchema_Call) RunAndReturn(run func(context.Context, *schemapb.CollectionSchema) error) *MockShardDelegator_UpdateSchema_Call {
 	_c.Call.Return(run)
 	return _c
 }

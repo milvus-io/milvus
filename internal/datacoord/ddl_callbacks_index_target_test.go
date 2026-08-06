@@ -1,0 +1,56 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package datacoord
+
+import (
+	"context"
+	"sync/atomic"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+type refreshingMixCoord struct {
+	*mockMixCoord
+	collectionID atomic.Int64
+}
+
+func (m *refreshingMixCoord) RefreshCollectionIndexTarget(ctx context.Context, collectionID int64) error {
+	m.collectionID.Store(collectionID)
+	return nil
+}
+
+func TestRefreshCollectionIndexTarget(t *testing.T) {
+	mixCoord := &refreshingMixCoord{mockMixCoord: &mockMixCoord{}}
+	callbacks := &DDLCallbacks{Server: &Server{mixCoord: mixCoord}}
+
+	callbacks.refreshCollectionIndexTarget(context.Background(), 1000)
+
+	assert.Equal(t, int64(1000), mixCoord.collectionID.Load())
+}
+
+func TestEncodeIndexSnapshotRevision(t *testing.T) {
+	first, err := encodeIndexSnapshotRevision(100)
+	assert.NoError(t, err)
+	second, err := encodeIndexSnapshotRevision(101)
+	assert.NoError(t, err)
+
+	assert.Greater(t, first, int64(indexSnapshotRevisionDomain-1))
+	assert.Greater(t, second, first)
+	_, err = encodeIndexSnapshotRevision(0)
+	assert.Error(t, err)
+}

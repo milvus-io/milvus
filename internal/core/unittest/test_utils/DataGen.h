@@ -2273,18 +2273,11 @@ NewCollection(const char* schema_proto_blob,
               const MetricType metric_type = knowhere::metric::L2) {
     auto proto = std::string(schema_proto_blob);
     auto collection = std::make_unique<milvus::segcore::Collection>(proto);
-    auto schema = collection->get_schema();
-    milvus::proto::segcore::CollectionIndexMeta col_index_meta;
-    for (auto field : schema->get_fields()) {
-        auto field_index_meta = col_index_meta.add_index_metas();
-        auto index_param = field_index_meta->add_index_params();
-        index_param->set_key("metric_type");
-        index_param->set_value(metric_type);
-        field_index_meta->set_fieldid(field.first.get());
-    }
-
-    collection->set_index_meta(
-        std::make_shared<CollectionIndexMeta>(col_index_meta));
+    // metric_type is no longer stamped onto the collection: a segment resolves it
+    // from its own loaded index or load info, and a plan built from a proto that
+    // names a metric carries it directly. The parameter is kept so the many call
+    // sites still read naturally.
+    (void)metric_type;
     return (void*)collection.release();
 }
 
@@ -2292,16 +2285,7 @@ inline CCollection
 NewCollection(const milvus::proto::schema::CollectionSchema* schema,
               MetricType metric_type = knowhere::metric::L2) {
     auto collection = std::make_unique<milvus::segcore::Collection>(schema);
-    milvus::proto::segcore::CollectionIndexMeta col_index_meta;
-    for (auto field : collection->get_schema()->get_fields()) {
-        auto field_index_meta = col_index_meta.add_index_metas();
-        auto index_param = field_index_meta->add_index_params();
-        index_param->set_key("metric_type");
-        index_param->set_value(metric_type);
-        field_index_meta->set_fieldid(field.first.get());
-    }
-    collection->set_index_meta(
-        std::make_shared<CollectionIndexMeta>(col_index_meta));
+    (void)metric_type;
     return (void*)collection.release();
 }
 

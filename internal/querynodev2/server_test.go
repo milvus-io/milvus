@@ -231,6 +231,7 @@ func (suite *QueryNodeSuite) TestStop() {
 	collection, err := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
+
 	suite.Require().NoError(err)
 	segment, err := segments.NewSegment(
 		context.Background(),

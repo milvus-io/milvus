@@ -74,9 +74,10 @@ func (suite *InsertNodeSuite) TestBasic() {
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	in := suite.buildInsertNodeMsg(schema)
 
-	collection, err := segments.NewCollection(suite.collectionID, schema, mock_segcore.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
+	collection, err := segments.NewCollection(suite.collectionID, schema, nil, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
+
 	suite.NoError(err)
 	collection.AddPartition(suite.partitionID)
 
@@ -120,9 +121,10 @@ func (suite *InsertNodeSuite) TestDataTypeNotSupported() {
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	in := suite.buildInsertNodeMsg(schema)
 
-	collection, err := segments.NewCollection(suite.collectionID, schema, mock_segcore.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
+	collection, err := segments.NewCollection(suite.collectionID, schema, nil, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
+
 	suite.NoError(err)
 	collection.AddPartition(suite.partitionID)
 
@@ -413,7 +415,7 @@ func TestInsertNodeBlocksSchemaUpdateUntilGrowingInsertCompletes(t *testing.T) {
 	updateStarted = true
 	go func() {
 		defer close(updateDone)
-		updateErr <- manager.Collection.UpdateSchema(schemaTransitionCollectionID, schemaV951, 951)
+		updateErr <- manager.Collection.UpdateSchema(schemaTransitionCollectionID, schemaV951)
 	}()
 	require.True(t, collection.WaitForSchemaTransitionWriterForTest(5*time.Second), "schema writer did not queue behind old-schema payload conversion")
 
@@ -438,7 +440,7 @@ func TestInsertNodeBlocksSchemaUpdateUntilGrowingInsertCompletes(t *testing.T) {
 
 func TestInsertNodeSkipsDroppedFieldAfterSchemaUpdate(t *testing.T) {
 	manager, collection, schemaV950, schemaV951, insertMsg := setupSchemaTransitionInsertNodeTest(t)
-	require.NoError(t, manager.Collection.UpdateSchema(schemaTransitionCollectionID, schemaV951, 951))
+	require.NoError(t, manager.Collection.UpdateSchema(schemaTransitionCollectionID, schemaV951))
 
 	var (
 		insertErr        error

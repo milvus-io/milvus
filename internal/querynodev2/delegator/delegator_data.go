@@ -166,8 +166,11 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 	for segmentID, insertData := range insertRecords {
 		growing := sd.segmentManager.GetGrowing(segmentID)
 		newGrowingSegment := false
+		var creationIndexVersion int64
 		if growing == nil {
 			var err error
+			fieldIndexes, indexVersion := sd.getFieldIndexesSnapshot()
+			creationIndexVersion = indexVersion
 			// TODO: It's a wired implementation that growing segment have load info.
 			// we should separate the growing segment and sealed segment by type system.
 			growing, err = segments.NewSegment(
@@ -184,6 +187,10 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					StartPosition: insertData.StartPosition,
 					DeltaPosition: insertData.StartPosition,
 					Level:         datapb.SegmentLevel_L1,
+					// A QueryCoord-packed load info carries IndexInfos; this one is
+					// assembled here, so stamp the channel's index configuration in
+					// rather than leaving the segment to look one up globally.
+					IndexInfos: fieldIndexes,
 				},
 			)
 			if err != nil {
@@ -232,6 +239,14 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					idfOracle.RegisterGrowing(segmentID, insertData.BM25Stats)
 				}
 				sd.segmentManager.Put(context.Background(), segments.SegmentTypeGrowing, growing)
+				if _, currentIndexVersion := sd.getFieldIndexesSnapshot(); currentIndexVersion > creationIndexVersion {
+					if local, ok := growing.(*segments.LocalSegment); ok {
+						if err := local.UpdateGrowingIndexConfig(context.Background(), sd.getFieldIndexes()); err != nil {
+							sd.growingSegmentLock.Unlock()
+							panic(err)
+						}
+					}
+				}
 				sd.addGrowing(SegmentEntry{
 					NodeID:        paramtable.GetNodeID(),
 					SegmentID:     segmentID,
@@ -508,6 +523,30 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
 	idfOracle := sd.getIDFOracle()
 	if idfOracle == nil {
+		// A load can carry a BM25-bearing schema before the stream UpdateSchema that
+		// creates the oracle has been consumed (the load fence admits a version-ahead
+		// schema). Sealed BM25 stats have exactly ONE entry point — this load path,
+		// via LoadSealed — so silently skipping them would lose them permanently: the
+		// later SyncDistribution can only warn ("idf oracle lack some sealed segment"),
+		// it has no SegmentLoadInfo with which to back-fill, and avgdl/IDF would stay
+		// wrong until the segment is reopened or reloaded.
+		//
+		// Fail instead so QueryCoord retries this load once the oracle exists, matching
+		// what the reopen path already does. Only fail when these segments actually
+		// carry BM25 stats — collections without BM25 must not be affected.
+		for _, info := range infos {
+			bm25Paths, err := packed.NewStatsResolverFromLoadInfo(info).BM25StatsPaths()
+			if err != nil {
+				mlog.Warn(ctx, "resolve bm25 stats failed",
+					mlog.FieldCollectionID(req.GetCollectionID()),
+					mlog.FieldSegmentID(info.GetSegmentID()),
+					mlog.Err(err))
+				return err
+			}
+			if len(bm25Paths) > 0 {
+				return merr.WrapErrServiceNotReadyMsg("load contains BM25 stats before delegator BM25 oracle is initialized")
+			}
+		}
 		return nil
 	}
 
@@ -564,7 +603,7 @@ func (sd *shardDelegator) handleReopenPostLoad(ctx context.Context, req *querypb
 func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
 	idfOracle := sd.getIDFOracle()
 	if idfOracle == nil {
-		return merr.WrapErrServiceInternal("reopen contains BM25 stats before delegator BM25 oracle is initialized")
+		return merr.WrapErrServiceNotReadyMsg("reopen contains BM25 stats before delegator BM25 oracle is initialized")
 	}
 
 	pool := segments.GetLoadPool()
@@ -600,35 +639,6 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 		return err
 	}
 	return nil
-}
-
-// syncCollectionMeta refreshes the delegator node's CCollection IndexMeta and
-// channel-local function runtime after a forwarded worker load. Worker LoadSegments
-// already updates IndexMeta on the target worker, but the delegator must stay in sync.
-func (sd *shardDelegator) syncCollectionMeta(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-	if len(req.GetIndexInfoList()) > 0 {
-		schema := req.GetSchema()
-		if schema == nil {
-			schema = sd.collection.Schema()
-		}
-
-		loadMeta := req.GetLoadMeta()
-		if loadMeta == nil {
-			loadMeta = &querypb.LoadMetaInfo{
-				CollectionID: req.GetCollectionID(),
-			}
-		}
-
-		meta := segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), schema)
-		if err := sd.collectionManager.PutOrRef(req.GetCollectionID(), schema, meta, loadMeta); err != nil {
-			return err
-		}
-		sd.collectionManager.Unref(req.GetCollectionID(), 1)
-	}
-
-	// Reopen and concurrent loads also provide a deterministic catch-up point when
-	// another channel has already advanced the shared Collection schema.
-	return sd.UpdateDelegatorSchema(ctx)
 }
 
 // LoadSegments load segments local or remotely depends on the target node.
@@ -708,11 +718,12 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	}
 	log.Debug(ctx, "work loads segments done")
 
-	if err := sd.syncCollectionMeta(ctx, req); err != nil {
-		log.Warn(ctx, "failed to sync collection metadata on delegator", mlog.Err(err))
-		return err
-	}
-
+	// A reopen must NOT advance the delegator's served schema or register runners here:
+	// those arrive via the stream UpdateSchema (served schema + idfOracle + function
+	// runners), which is the #50989/#51062 load-wins fix. The worker has already
+	// reopened successfully, so backfill BM25 stats; the RPC entry point publishes
+	// the complete request-level index snapshot after this returns successfully.
+	// Neither step advances the served schema.
 	if req.GetLoadScope() == querypb.LoadScope_Reopen {
 		return sd.handleReopenPostLoad(ctx, req)
 	}
@@ -758,9 +769,10 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		}
 
 		log.Debug(ctx, "load delete...")
-		// loadStreamDelete now handles distribution add atomically in Phase 3
+		// loadStreamDelete now handles distribution add atomically in Phase 3.
+		// The in-flight load fence key is the load's carried schema.Version.
 		err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
-			entries, req.GetLoadMeta().GetSchemaBarrierTs())
+			entries, uint64(req.GetSchema().GetVersion()))
 		if err != nil {
 			log.Warn(ctx, "load stream delete failed", mlog.Err(err))
 			// BM25 stats already loaded into idf oracle will be cleaned up
@@ -791,11 +803,21 @@ func (sd *shardDelegator) withPostLoadLimit(ctx context.Context, fn func() error
 	return fn()
 }
 
-func (sd *shardDelegator) addDistributionIfSchemaBarrierOK(schemaBarrierTs uint64, entries ...SegmentEntry) error {
+// addDistributionIfSchemaVersionOK fences an in-flight load against a schema
+// change that landed while it was running. The fence key is the load's carried
+// schema.Version, the single monotonic schema version. A load whose
+// schema.Version is older than the delegator's current served schema version
+// started before the latest schema update and must be rejected so it cannot
+// publish stale-schema segments.
+func (sd *shardDelegator) addDistributionIfSchemaVersionOK(loadSchemaVersion uint64, entries ...SegmentEntry) error {
 	sd.schemaChangeMutex.RLock()
 	defer sd.schemaChangeMutex.RUnlock()
-	if schemaBarrierTs < sd.schemaBarrierTs {
-		return merr.WrapErrServiceInternal("schema barrier changed")
+	if loadSchemaVersion < sd.servedSchemaVersion {
+		return merr.WrapErrServiceUnavailableMsg(
+			"schema version changed during segment load, load version %d, served version %d",
+			loadSchemaVersion,
+			sd.servedSchemaVersion,
+		)
 	}
 
 	// alter distribution
@@ -1010,7 +1032,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	targetNodeID int64,
 	worker cluster.Worker,
 	entries []SegmentEntry,
-	schemaBarrierTs uint64,
+	loadSchemaVersion uint64,
 ) error {
 	log := sd.getLogger(ctx)
 
@@ -1140,7 +1162,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			// Atomically add to distribution while still holding RLock, so no
 			// ProcessDelete can run between "deletes applied" and "segment
 			// visible".
-			if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
+			if err := sd.addDistributionIfSchemaVersionOK(loadSchemaVersion, entries...); err != nil {
 				sd.deleteMut.RUnlock()
 				return err
 			}
@@ -1176,7 +1198,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 					mlog.Int64("bfCost", time.Since(start).Milliseconds()),
 				)
 			}
-			if err := sd.addDistributionIfSchemaBarrierOK(schemaBarrierTs, entries...); err != nil {
+			if err := sd.addDistributionIfSchemaVersionOK(loadSchemaVersion, entries...); err != nil {
 				sd.deleteMut.RUnlock()
 				return err
 			}

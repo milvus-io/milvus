@@ -1355,6 +1355,32 @@ func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context, signal <-c
 		}
 		log.Info(ctx, "remove index on collection done")
 	}
+
+	// A live collection that dropped its last index still needs the committed
+	// empty snapshot revision. Clean the revision domain only after RootCoord
+	// says the collection is gone, all segment metadata is gone, and index GC
+	// has physically removed every definition.
+	for _, collectionID := range gc.meta.indexMeta.GetIndexSnapshotCollectionIDs() {
+		if ctx.Err() != nil {
+			return
+		}
+		if gc.meta.indexMeta.HasIndexDefinitions(collectionID) || gc.collectionGCPaused(collectionID) {
+			continue
+		}
+		timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		hasCollection, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
+		cancel()
+		if err != nil || hasCollection || !gc.meta.catalog.GcConfirm(ctx, collectionID, common.AllPartitionsID) {
+			continue
+		}
+		if err := gc.meta.indexMeta.CleanupIndexSnapshot(ctx, collectionID); err != nil {
+			log.Warn(ctx, "failed to clean index snapshot revision for dropped collection",
+				mlog.Int64("collectionID", collectionID), mlog.Err(err))
+			continue
+		}
+		log.Info(ctx, "cleaned index snapshot revision for dropped collection",
+			mlog.Int64("collectionID", collectionID))
+	}
 }
 
 // recycleUnusedSegIndexes remove the index of segment if index is deleted or segment itself is deleted.

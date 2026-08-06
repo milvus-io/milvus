@@ -21,6 +21,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <variant>
@@ -33,6 +34,8 @@
 #include "common/Types.h"
 #include "common/VectorTrait.h"
 #include "common/protobuf_utils.h"
+#include "futures/Future.h"
+#include "futures/future_c.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
@@ -43,6 +46,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/segment_c.h"
 #include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
@@ -910,4 +914,174 @@ TEST(Query, VectorArrayElementLevelInference) {
             ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString()),
             std::exception);
     }
+
+    // Case 5: omitted metric + EmbList → infer embedding-list search. The
+    // segment validates the mode after resolving its own metric.
+    {
+        auto plan = make_plan("");
+        std::vector<size_t> offsets = {0, 1, 2};
+        auto ph_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+            num_queries, dim, query_vec.data(), offsets);
+        auto ph = ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString());
+        EXPECT_FALSE(ph->at(0).element_level_);
+    }
+
+    // Case 6: omitted metric + plain vector → infer element-level search.
+    {
+        auto plan = make_plan("");
+        auto ph_raw =
+            CreatePlaceholderGroupFromBlob(num_queries, dim, query_vec.data());
+        auto ph = ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString());
+        EXPECT_TRUE(ph->at(0).element_level_);
+    }
+}
+
+TEST(Query, VectorArrayOmittedMetricUsesSegmentMetric) {
+    constexpr int64_t dim = 8;
+    constexpr int64_t row_count = 32;
+    constexpr int64_t topk = 3;
+    constexpr int64_t query_count = 2;
+
+    auto run_case = [&](const MetricType& segment_metric,
+                        bool embedding_list_placeholder,
+                        bool expect_success,
+                        bool zero_hit) {
+        auto schema = std::make_shared<Schema>();
+        auto primary_key = schema->AddDebugField("pk", DataType::INT64);
+        auto array_vec = schema->AddDebugVectorArrayField(
+            "structA[array_vec]", DataType::VECTOR_FLOAT, dim, segment_metric);
+        schema->set_primary_field_id(primary_key);
+
+        std::map<std::string, std::string> index_params = {
+            {knowhere::meta::INDEX_TYPE,
+             knowhere::IndexEnum::INDEX_FAISS_IDMAP},
+            {knowhere::meta::METRIC_TYPE, segment_metric}};
+        std::map<std::string, std::string> type_params = {
+            {knowhere::meta::DIM, std::to_string(dim)}};
+        FieldIndexMeta field_index_meta(
+            array_vec, std::move(index_params), std::move(type_params));
+        std::map<FieldId, FieldIndexMeta> field_indexes = {
+            {array_vec, std::move(field_index_meta)}};
+        auto index_meta = std::make_shared<CollectionIndexMeta>(
+            row_count, std::move(field_indexes));
+
+        auto dataset = DataGen(schema, row_count, 42, 0, 1, 2);
+        auto sealed = CreateSealedSegment(schema, index_meta);
+        LoadGeneratedDataIntoSegment(dataset, sealed.get());
+        auto growing = CreateGrowingWithFieldDataLoaded(
+            schema, index_meta, SegcoreConfig::default_config(), dataset);
+        auto empty_growing = CreateGrowingSegment(schema, index_meta);
+
+        ScopedSchemaHandle handle(*schema);
+        auto plan_blob = handle.ParseSearch(
+            zero_hit ? "pk < 0" : "", "structA[array_vec]", topk, "", R"({})");
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_blob.data(), plan_blob.size());
+
+        auto query_vectors = generate_float_vector(
+            embedding_list_placeholder ? query_count * 2 : query_count, dim);
+        milvus::proto::common::PlaceholderGroup raw_group;
+        if (embedding_list_placeholder) {
+            std::vector<size_t> offsets = {0, 2, 4};
+            raw_group = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+                query_count * 2, dim, query_vectors.data(), offsets);
+        } else {
+            raw_group = CreatePlaceholderGroupFromBlob(
+                query_count, dim, query_vectors.data());
+        }
+        auto placeholder =
+            ParsePlaceholderGroup(plan.get(), raw_group.SerializeAsString());
+        ASSERT_EQ(placeholder->at(0).element_level_,
+                  !embedding_list_placeholder);
+
+        auto verify_segment = [&](SegmentInterface* segment,
+                                  bool empty_segment) {
+            if (expect_success) {
+                auto result = segment->Search(plan.get(),
+                                              placeholder.get(),
+                                              dataset.timestamps_.back() + 1);
+                ASSERT_NE(result, nullptr);
+                EXPECT_EQ(result->metric_type_, segment_metric);
+                EXPECT_EQ(result->element_level_, !embedding_list_placeholder);
+                EXPECT_EQ(result->distances_.empty(),
+                          zero_hit || empty_segment);
+                return;
+            }
+
+            try {
+                static_cast<void>(
+                    segment->Search(plan.get(),
+                                    placeholder.get(),
+                                    dataset.timestamps_.back() + 1));
+                FAIL() << "expected VECTOR_ARRAY search mode mismatch";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), ErrorCode::DataTypeInvalid);
+            }
+        };
+
+        verify_segment(sealed.get(), false);
+        verify_segment(growing.get(), false);
+        verify_segment(empty_growing.get(), true);
+
+        // AsyncSearch has a separate inaccessible-field empty-result shortcut
+        // before Segment::Search. Exercise that production entry point so it
+        // cannot bypass either metric resolution or placeholder-mode checks.
+        auto c_future = AsyncSearch({},
+                                    empty_growing.get(),
+                                    plan.get(),
+                                    placeholder.get(),
+                                    dataset.timestamps_.back() + 1,
+                                    0,
+                                    0,
+                                    0,
+                                    false,
+                                    false);
+        auto future = static_cast<milvus::futures::IFuture*>(
+            static_cast<void*>(static_cast<CFuture*>(c_future)));
+        std::mutex mu;
+        mu.lock();
+        future->registerReadyCallback(
+            [](CLockedGoMutex* mutex) {
+                reinterpret_cast<std::mutex*>(mutex)->unlock();
+            },
+            reinterpret_cast<CLockedGoMutex*>(&mu));
+        mu.lock();
+        mu.unlock();
+        auto [raw_result, c_status] = future->leakyGet();
+        future_destroy(c_future);
+        auto c_result = static_cast<CSearchResult>(raw_result);
+        if (expect_success) {
+            ASSERT_EQ(c_status.error_code, Success);
+            ASSERT_NE(c_result, nullptr);
+            EXPECT_EQ(static_cast<SearchResult*>(c_result)->metric_type_,
+                      segment_metric);
+            EXPECT_EQ(static_cast<SearchResult*>(c_result)->element_level_,
+                      !embedding_list_placeholder);
+            DeleteSearchResult(c_result);
+        } else {
+            EXPECT_EQ(c_status.error_code, DataTypeInvalid);
+            EXPECT_EQ(c_result, nullptr);
+            free(const_cast<char*>(c_status.error_msg));
+        }
+    };
+
+    // Both valid omitted-metric modes execute on sealed and growing segments.
+    run_case(knowhere::metric::MAX_SIM, true, true, false);
+    run_case(knowhere::metric::COSINE, false, true, false);
+
+    // Zero-candidate fast paths still carry the segment-resolved metric. Proxy
+    // search iterators need it to choose the correct +/-MaxFloat32 bound when
+    // the first page is empty and the request omitted metric_type.
+    run_case(knowhere::metric::MAX_SIM, true, true, true);
+    run_case(knowhere::metric::COSINE, false, true, true);
+
+    // The segment-resolved metric remains authoritative and rejects both
+    // placeholder/metric mode mismatch directions before vector search.
+    run_case(knowhere::metric::COSINE, true, false, false);
+    run_case(knowhere::metric::MAX_SIM, false, false, false);
+
+    // The same invalid request must fail even when the scalar filter removes
+    // every candidate before vector_search() would otherwise run.
+    run_case(knowhere::metric::COSINE, true, false, true);
+    run_case(knowhere::metric::MAX_SIM, false, false, true);
 }

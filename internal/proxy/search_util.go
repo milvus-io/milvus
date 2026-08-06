@@ -1104,3 +1104,29 @@ func getMetricType(toReduceResults []*internalpb.SearchResults) string {
 	}
 	return ""
 }
+
+// resolveSearchResultMetricType validates the metric at the shard -> Proxy
+// reduce boundary. Empty entries are allowed for shards that searched no
+// segments; every shard that reports a metric must agree with the explicit
+// request metric (when present) and with every other shard.
+func resolveSearchResultMetricType(requestMetric string, results []*internalpb.SearchResults) (string, error) {
+	metricType := requestMetric
+	for _, result := range results {
+		resultMetric := result.GetMetricType()
+		if resultMetric == "" {
+			continue
+		}
+		if metricType == "" {
+			metricType = resultMetric
+			continue
+		}
+		if metricType != resultMetric {
+			return "", merr.WrapErrServiceUnavailableMsg(
+				"query shards resolved inconsistent metric types, expected %s, got %s",
+				metricType,
+				resultMetric,
+			)
+		}
+	}
+	return metricType, nil
+}

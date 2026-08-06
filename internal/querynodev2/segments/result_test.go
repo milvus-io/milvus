@@ -31,12 +31,56 @@ import (
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type ResultSuite struct {
 	suite.Suite
+}
+
+func (suite *ResultSuite) TestResolveSearchResultMetricType() {
+	metricType, err := resolveSearchResultMetricType("", []*internalpb.SearchResults{
+		{MetricType: metric.IP},
+		{}, // a worker that searched no segments
+		{MetricType: metric.IP},
+	})
+	suite.NoError(err)
+	suite.Equal(metric.IP, metricType)
+
+	metricType, err = resolveSearchResultMetricType(metric.L2, []*internalpb.SearchResults{
+		{MetricType: metric.L2},
+	})
+	suite.NoError(err)
+	suite.Equal(metric.L2, metricType)
+
+	_, err = resolveSearchResultMetricType("", []*internalpb.SearchResults{
+		{MetricType: metric.IP},
+		{MetricType: metric.COSINE},
+	})
+	suite.ErrorIs(err, merr.ErrServiceUnavailable)
+	suite.True(merr.Status(err).GetRetriable())
+}
+
+func (suite *ResultSuite) TestReduceSearchResultsRejectsMixedWorkerMetrics() {
+	ctx := context.Background()
+	data := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       1,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		Scores:     []float32{0.9},
+		Topks:      []int64{1},
+	}
+	ipResult, err := EncodeSearchResultData(ctx, data, 1, 1, metric.IP)
+	suite.Require().NoError(err)
+	cosineResult, err := EncodeSearchResultData(ctx, data, 1, 1, metric.COSINE)
+	suite.Require().NoError(err)
+
+	_, err = ReduceSearchResults(ctx, []*internalpb.SearchResults{ipResult, cosineResult},
+		reduce.NewReduceSearchResultInfo(1, 1).WithPkType(schemapb.DataType_Int64))
+	suite.ErrorIs(err, merr.ErrServiceUnavailable)
+	suite.True(merr.Status(err).GetRetriable())
 }
 
 func (suite *ResultSuite) TestResult_SelectSearchResultData_int() {

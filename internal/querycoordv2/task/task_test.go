@@ -1339,7 +1339,12 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
-	suite.cluster.EXPECT().SyncDistribution(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil)
+	suite.cluster.EXPECT().SyncDistribution(mock.Anything, targetNode, mock.MatchedBy(func(req *querypb.SyncDistributionRequest) bool {
+		return req.GetVersion() != 0 &&
+			len(req.GetIndexInfoList()) == 1 &&
+			len(req.GetActions()) == 1 &&
+			req.GetActions()[0].GetType() == querypb.SyncType_Set
+	})).Return(merr.Success(), nil)
 
 	// Test load segment task
 	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{

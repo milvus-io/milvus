@@ -18,6 +18,7 @@ package meta
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -67,6 +69,40 @@ type TargetManagerSuite struct {
 	mgr *TargetManager
 
 	ctx context.Context
+}
+
+type targetIndexBrokerMock struct {
+	*MockBroker
+	revision atomic.Int64
+}
+
+func (broker *targetIndexBrokerMock) ListIndexesForTarget(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, int64, error) {
+	indexInfos, err := broker.ListIndexes(ctx, collectionID)
+	return indexInfos, broker.revision.Add(1), err
+}
+
+type concurrentTargetIndexBroker struct {
+	*MockBroker
+	listCalls       atomic.Int32
+	firstStarted    chan struct{}
+	releaseFirst    chan struct{}
+	secondCompleted chan struct{}
+	firstSnapshot   []*indexpb.IndexInfo
+	secondSnapshot  []*indexpb.IndexInfo
+}
+
+func (broker *concurrentTargetIndexBroker) ListIndexesForTarget(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, int64, error) {
+	if broker.listCalls.Add(1) == 1 {
+		close(broker.firstStarted)
+		select {
+		case <-broker.releaseFirst:
+			return broker.firstSnapshot, 1, nil
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
+		}
+	}
+	close(broker.secondCompleted)
+	return broker.secondSnapshot, 2, nil
 }
 
 func (suite *TargetManagerSuite) SetupSuite() {
@@ -249,6 +285,91 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	suite.NoError(err)
 }
 
+func (suite *TargetManagerSuite) TestIndexSnapshotUsesDataCoordRevision() {
+	collectionID := suite.collections[0]
+	broker := NewMockBroker(suite.T())
+	mgr := NewTargetManager(&targetIndexBrokerMock{MockBroker: broker}, suite.meta)
+	channels := []*datapb.VchannelInfo{{
+		CollectionID: collectionID,
+		ChannelName:  suite.channels[collectionID][0],
+	}}
+	segments := []*datapb.SegmentInfo{{
+		ID:            suite.segments[collectionID][suite.partitions[collectionID][0]][0],
+		CollectionID:  collectionID,
+		PartitionID:   suite.partitions[collectionID][0],
+		InsertChannel: suite.channels[collectionID][0],
+	}}
+	index0 := []*indexpb.IndexInfo{{IndexID: 10, IndexName: "index-0"}}
+	broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(channels, segments, nil).Once()
+	broker.EXPECT().ListIndexes(mock.Anything, collectionID).Return(index0, nil).Once()
+	suite.Require().NoError(mgr.UpdateCollectionNextTarget(suite.ctx, collectionID))
+
+	snapshot0, version0, present := mgr.GetCollectionIndexInfoSnapshot(suite.ctx, collectionID, NextTarget)
+	suite.True(present)
+	suite.Equal(index0, snapshot0)
+	suite.Positive(version0)
+
+	index1 := []*indexpb.IndexInfo{{IndexID: 11, IndexName: "index-1"}}
+	broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(channels, segments, nil).Once()
+	broker.EXPECT().ListIndexes(mock.Anything, collectionID).Return(index1, nil).Once()
+	suite.Require().NoError(mgr.UpdateCollectionNextTarget(suite.ctx, collectionID))
+
+	snapshot1, version1, present := mgr.GetCollectionIndexInfoSnapshot(suite.ctx, collectionID, NextTarget)
+	suite.True(present)
+	suite.Equal(index1, snapshot1)
+	suite.Greater(version1, version0)
+}
+
+func (suite *TargetManagerSuite) TestConcurrentTargetReadsCannotPublishOutOfOrder() {
+	collectionID := suite.collections[0]
+	channels := []*datapb.VchannelInfo{{
+		CollectionID: collectionID,
+		ChannelName:  suite.channels[collectionID][0],
+	}}
+	segments := []*datapb.SegmentInfo{{
+		ID:            suite.segments[collectionID][suite.partitions[collectionID][0]][0],
+		CollectionID:  collectionID,
+		PartitionID:   suite.partitions[collectionID][0],
+		InsertChannel: suite.channels[collectionID][0],
+	}}
+	firstSnapshot := []*indexpb.IndexInfo{{IndexID: 10, IndexName: "stale"}}
+	secondSnapshot := []*indexpb.IndexInfo{{IndexID: 11, IndexName: "fresh"}}
+	baseBroker := NewMockBroker(suite.T())
+	baseBroker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(channels, segments, nil).Twice()
+	broker := &concurrentTargetIndexBroker{
+		MockBroker:      baseBroker,
+		firstStarted:    make(chan struct{}),
+		releaseFirst:    make(chan struct{}),
+		secondCompleted: make(chan struct{}),
+		firstSnapshot:   firstSnapshot,
+		secondSnapshot:  secondSnapshot,
+	}
+	mgr := NewTargetManager(broker, suite.meta)
+
+	errs := make(chan error, 2)
+	go func() { errs <- mgr.UpdateCollectionNextTarget(suite.ctx, collectionID) }()
+	<-broker.firstStarted
+	secondInvoked := make(chan struct{})
+	go func() {
+		close(secondInvoked)
+		errs <- mgr.UpdateCollectionNextTarget(suite.ctx, collectionID)
+	}()
+	<-secondInvoked
+
+	select {
+	case <-broker.secondCompleted:
+		suite.Fail("second target read bypassed the in-flight read")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(broker.releaseFirst)
+	suite.NoError(<-errs)
+	suite.NoError(<-errs)
+
+	snapshot, _, present := mgr.GetCollectionIndexInfoSnapshot(suite.ctx, collectionID, NextTarget)
+	suite.True(present)
+	suite.Equal(secondSnapshot, snapshot)
+}
+
 func (suite *TargetManagerSuite) TestRemovePartition() {
 	ctx := suite.ctx
 	collectionID := int64(1000)
@@ -356,13 +477,8 @@ func (suite *TargetManagerSuite) assertSegments(expected []int64, actual map[int
 
 func (suite *TargetManagerSuite) TestGetCollectionTargetVersion() {
 	ctx := suite.ctx
-	t1 := time.Now().UnixNano()
 	target := NewCollectionTarget(nil, nil, nil)
-	t2 := time.Now().UnixNano()
-
-	version := target.GetTargetVersion()
-	suite.True(t1 <= version)
-	suite.True(t2 >= version)
+	suite.Zero(target.GetTargetVersion(), "unpublished targets receive a version from TargetManager")
 
 	collectionID := suite.collections[0]
 	t3 := time.Now().UnixNano()
@@ -372,6 +488,30 @@ func (suite *TargetManagerSuite) TestGetCollectionTargetVersion() {
 	collectionVersion := suite.mgr.GetCollectionTargetVersion(ctx, collectionID, NextTarget)
 	suite.True(t3 <= collectionVersion)
 	suite.True(t4 >= collectionVersion)
+}
+
+func TestTargetManagerMonotonicVersionAndPromotion(t *testing.T) {
+	paramtable.Init()
+	mgr := NewTargetManager(NewMockBroker(t), NewMeta(RandomIncrementIDAllocator(), nil, session.NewNodeManager()))
+	collectionID := int64(100)
+	channel := &DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "ch"}}
+
+	// Simulate recovering a target written by a host whose clock was one hour
+	// ahead. The new host must allocate above it instead of trusting wall time.
+	futureVersion := time.Now().Add(time.Hour).UnixNano()
+	mgr.observeTargetVersion(futureVersion)
+	next := NewCollectionTarget(nil, map[string]*DmChannel{"ch": channel}, []int64{1})
+	mgr.assignTargetVersion(next)
+	assert.Greater(t, next.GetTargetVersion(), futureVersion)
+
+	// If an externally recovered/stale next target is nevertheless not newer,
+	// promotion must retain it for retry rather than silently discarding it.
+	current := NewCollectionTarget(nil, map[string]*DmChannel{"ch": channel}, []int64{1})
+	current.version = next.GetTargetVersion() + 1
+	mgr.current.updateCollectionTarget(collectionID, current)
+	mgr.next.updateCollectionTarget(collectionID, next)
+	assert.False(t, mgr.UpdateCollectionCurrentTarget(context.Background(), collectionID))
+	assert.Same(t, next, mgr.next.getCollectionTarget(collectionID))
 }
 
 func (suite *TargetManagerSuite) TestGetSegmentByChannel() {

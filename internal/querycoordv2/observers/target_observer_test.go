@@ -687,6 +687,7 @@ func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
 			syncedNodes = append(syncedNodes, nodeID)
 			assert.Same(t, schema, req.GetSchema())
 			assert.Equal(t, schemaBarrierTs, req.GetLoadMeta().GetSchemaBarrierTs())
+			assert.Equal(t, newVersion, req.GetVersion())
 			return merr.Success(), nil
 		}).Maybe()
 
@@ -1232,4 +1233,23 @@ func TestUpdateAllReplicasCheckpointMetric(t *testing.T) {
 func TestTargetObserver(t *testing.T) {
 	suite.Run(t, new(TargetObserverSuite))
 	suite.Run(t, new(TargetObserverCheckSuite))
+}
+
+func TestRefreshCollectionIndexTarget(t *testing.T) {
+	paramtable.Init()
+	collectionID := int64(1000)
+	targetMgr := meta.NewMockTargetManager(t)
+	targetMgr.EXPECT().UpdateCollectionNextTarget(mock.Anything, collectionID).Return(nil).Once()
+	observer := NewTargetObserver(nil, targetMgr, nil, nil, nil, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		observer.schedule(ctx)
+	}()
+
+	assert.NoError(t, observer.RefreshCollectionIndexTarget(ctx, collectionID))
+	cancel()
+	<-done
 }
