@@ -85,8 +85,7 @@ const (
 	DefaultDim        = 128
 	defaultMetricType = metric.L2
 
-	dimKey = common.DimKey
-
+	dimKey              = common.DimKey
 	defaultLocalStorage = "/tmp/milvus_test/querynode"
 )
 
