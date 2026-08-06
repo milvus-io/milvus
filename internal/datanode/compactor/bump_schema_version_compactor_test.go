@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -278,6 +279,23 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionMa
 		}
 	}
 	s.True(found, "MinHash output field should be materialized into insert logs")
+
+	// The in-place receiver reads neither of these; they were echoes of the
+	// plan, whose arrays are empty for a recovered StorageV3 segment.
+	s.Empty(segment.GetDeltalogs())
+	s.Empty(segment.GetField2StatslogPaths())
+
+	// Stats is an INCREMENT: it describes only the columns this run wrote, so
+	// it carries no delete or timestamp aggregates for DataCoord to adopt.
+	stats := segment.GetStats()
+	s.Require().NotNil(stats)
+	s.Greater(stats.GetInsertBinlogSize(), int64(0))
+	s.EqualValues(1, stats.GetInsertBinlogCount())
+	s.EqualValues(0, stats.GetDeleteNumRows())
+	s.EqualValues(0, stats.GetDeltaBinlogSize())
+	s.EqualValues(0, stats.GetTimestampFrom())
+	s.EqualValues(0, stats.GetTimestampTo())
+	s.Contains(stats.GetNullCounts(), minHashOutputFieldID)
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) SetupTest() {
@@ -1268,125 +1286,51 @@ func TestBumpSchemaVersionCompactionTaskBasic(t *testing.T) {
 	assert.Equal(t, int64(1), task.GetSlotUsage())
 }
 
-func (s *BumpSchemaVersionCompactionTaskSuite) TestFinalizeMergedLogs() {
+// TestBuildNewInsertLogsV3ReturnsOnlyNewGroups pins that the result carries
+// only what this run wrote. The plan's FieldBinlogs are irrelevant — for a
+// StorageV3 segment recovered after a DataCoord restart they are empty. The
+// returned groups are what the receiver merges onto SegmentInfo.Binlogs, and
+// that merge is what makes a materialized function-output field eligible for
+// index creation (see completeBumpSchemaVersionCompactionMutation in
+// internal/datacoord/meta.go); it must not be dropped.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildNewInsertLogsV3ReturnsOnlyNewGroups() {
 	s.setupTest()
 
-	segment := &datapb.CompactionSegmentBinlogs{
-		SegmentID: 1,
-		FieldBinlogs: []*datapb.FieldBinlog{
-			{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{
-					{LogPath: "original/100", EntriesNum: 1000},
-				},
-			},
-		},
-	}
-	newInsertLogs := map[int64]*datapb.FieldBinlog{
-		102: {
-			FieldID: 102,
-			Binlogs: []*datapb.Binlog{
-				{LogPath: "new/102", EntriesNum: 1000, MemorySize: 500},
-			},
-		},
-	}
-	mergedInsert, err := s.task.finalizeMergedLogs(segment, newInsertLogs)
-	s.NoError(err)
-
-	s.Equal(2, len(mergedInsert))
-	s.Equal(int64(100), mergedInsert[0].GetFieldID())
-	s.Equal(int64(102), mergedInsert[1].GetFieldID())
-}
-
-// TestFinalizeMergedLogsCrashReplay verifies that retrying finalizeMergedLogs replaces rewritten output logs without duplicates.
-func (s *BumpSchemaVersionCompactionTaskSuite) TestFinalizeMergedLogsCrashReplay() {
-	s.setupTest()
-
-	// Segment state after first successful run: field 102 already present in etcd.
-	segment := &datapb.CompactionSegmentBinlogs{
-		SegmentID: 1,
-		FieldBinlogs: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "original/100", EntriesNum: 1000}}},
-			{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "first-run/102", EntriesNum: 1000, LogID: 99}}},
-		},
-	}
-	// Second run allocates a new logID for the same output field.
-	newInsertLogs := map[int64]*datapb.FieldBinlog{
-		102: {FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "second-run/102", EntriesNum: 1000, LogID: 100}}},
-	}
-
-	mergedInsert, err := s.task.finalizeMergedLogs(segment, newInsertLogs)
-	s.NoError(err)
-
-	s.Require().Equal(2, len(mergedInsert))
-	var fieldIDs []int64
-	for _, fb := range mergedInsert {
-		fieldIDs = append(fieldIDs, fb.GetFieldID())
-	}
-	s.ElementsMatch([]int64{100, 102}, fieldIDs)
-	for _, fb := range mergedInsert {
-		if fb.GetFieldID() == 102 {
-			s.Equal("second-run/102", fb.GetBinlogs()[0].GetLogPath())
-		}
-	}
-}
-
-// TestFinalizeMergedLogsV3CrashReplay verifies V3 column-group replacement through ChildFields.
-func (s *BumpSchemaVersionCompactionTaskSuite) TestFinalizeMergedLogsV3CrashReplay() {
-	s.setupTest()
-
-	// V3: column group 102 already present in segment after first run.
-	segment := &datapb.CompactionSegmentBinlogs{
-		SegmentID: 1,
-		FieldBinlogs: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "original/100"}}},
-			{FieldID: 102, ChildFields: []int64{102}, Binlogs: []*datapb.Binlog{{LogPath: "first-run/cg102"}}},
-		},
-	}
-	newInsertLogs := map[int64]*datapb.FieldBinlog{
-		102: {FieldID: 102, ChildFields: []int64{102}, Binlogs: []*datapb.Binlog{{LogPath: "second-run/cg102"}}},
-	}
-
-	mergedInsert, err := s.task.finalizeMergedLogs(segment, newInsertLogs)
-	s.NoError(err)
-
-	s.Require().Equal(2, len(mergedInsert))
-	for _, fb := range mergedInsert {
-		if fb.GetFieldID() == 102 {
-			s.Equal("second-run/cg102", fb.GetBinlogs()[0].GetLogPath())
-		}
-	}
-}
-
-func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildMergedLogsV3() {
-	s.setupTest()
-
-	segment := &datapb.CompactionSegmentBinlogs{
-		SegmentID: 1,
-		FieldBinlogs: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "original/100", EntriesNum: 1000}}},
-		},
-	}
 	writerResult := &bumpSchemaVersionWriterResult{
-		columnGroups: []storagecommon.ColumnGroup{
-			{GroupID: 102, Fields: []int64{102}, Format: "vortex"},
-		},
+		columnGroups: []storagecommon.ColumnGroup{{GroupID: 102, Fields: []int64{102}}},
 	}
 
-	mergedInsert, err := s.task.buildMergedLogsV3(segment, writerResult, map[int64]int{102: 512}, 1000)
+	newInsert, err := s.task.buildNewInsertLogsV3(writerResult, map[int64]int{102: 512}, 1000)
 	s.NoError(err)
 
-	// Original + new
-	s.Equal(2, len(mergedInsert))
-	s.Equal(int64(100), mergedInsert[0].GetFieldID())
-	s.Equal(int64(102), mergedInsert[1].GetFieldID())
-	s.Equal("vortex", mergedInsert[1].GetFormat())
-	s.Equal(int64(512), mergedInsert[1].GetBinlogs()[0].GetMemorySize())
-	s.Equal(int64(1000), mergedInsert[1].GetBinlogs()[0].GetEntriesNum())
-	// V3 binlog presence marker must carry a non-zero LogID so buildBinlogKvs validation
-	// passes (requires LogID!=0 AND LogPath=="" for V3 segments).
-	s.NotZero(mergedInsert[1].GetBinlogs()[0].GetLogID(),
-		"V3 schema bump binlog presence marker must have non-zero LogID")
+	s.Require().Len(newInsert, 1)
+	s.EqualValues(102, newInsert[0].GetFieldID())
+	s.EqualValues(512, newInsert[0].GetBinlogs()[0].GetMemorySize())
+	s.EqualValues(1000, newInsert[0].GetBinlogs()[0].GetEntriesNum())
+}
+
+// TestMaterializationStatsDeltaIgnoresPlanArrays is the regression test for
+// issue #51729: the increment must be identical whether or not the plan
+// carries the input segment's FieldBinlog arrays. After #50410 a recovered
+// StorageV3 segment ships empty arrays, and the old absolute-Stats
+// implementation silently undercounted the whole segment.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestMaterializationStatsDeltaIgnoresPlanArrays() {
+	s.setupTest()
+
+	columnGroups := []storagecommon.ColumnGroup{{GroupID: 102, Fields: []int64{102}}}
+	memorySizes := map[int64]int{102: 4096}
+	nullCounts := map[int64]int64{102: 0}
+
+	// The builder takes no plan input at all, which is the property under test:
+	// there is no argument through which an empty or populated plan array could
+	// change the answer.
+	got := buildMaterializationStatsDelta(columnGroups, memorySizes, nullCounts, 256)
+
+	s.EqualValues(4096, got.GetInsertBinlogSize())
+	s.EqualValues(1, got.GetInsertBinlogCount())
+	s.EqualValues(256, got.GetStatsBinlogSize())
+	s.EqualValues(0, got.GetDeleteNumRows())
+	s.EqualValues(0, got.GetDeltaBinlogSize())
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionOutputFieldsSelectsAllOutputsOnPartialState() {
@@ -1424,33 +1368,6 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialMaterializerExistingFi
 
 	s.NotContains(materializerFields, int64(102))
 	s.NotContains(materializerFields, int64(103))
-}
-
-func (s *BumpSchemaVersionCompactionTaskSuite) TestFinalizeMergedLogsReplacesExistingOutputFieldLogs() {
-	s.setupTest()
-
-	segment := &datapb.CompactionSegmentBinlogs{
-		SegmentID: 1,
-		FieldBinlogs: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "original/100"}}},
-			{FieldID: 102, ChildFields: []int64{102}, Binlogs: []*datapb.Binlog{{LogPath: "old/cg102"}}},
-		},
-	}
-	newInsertLogs := map[int64]*datapb.FieldBinlog{
-		102: {FieldID: 102, ChildFields: []int64{102}, Binlogs: []*datapb.Binlog{{LogPath: "new/cg102"}}},
-		103: {FieldID: 103, ChildFields: []int64{103}, Binlogs: []*datapb.Binlog{{LogPath: "new/cg103"}}},
-	}
-
-	mergedInsert, err := s.task.finalizeMergedLogs(segment, newInsertLogs)
-	s.NoError(err)
-
-	s.Require().Len(mergedInsert, 3)
-	s.Equal(int64(100), mergedInsert[0].GetFieldID())
-	s.Equal("original/100", mergedInsert[0].GetBinlogs()[0].GetLogPath())
-	s.Equal(int64(102), mergedInsert[1].GetFieldID())
-	s.Equal("new/cg102", mergedInsert[1].GetBinlogs()[0].GetLogPath())
-	s.Equal(int64(103), mergedInsert[2].GetFieldID())
-	s.Equal("new/cg103", mergedInsert[2].GetBinlogs()[0].GetLogPath())
 }
 
 // Existing BM25 fixtures expose one output; these tests need a partial multi-output state.
@@ -1492,4 +1409,22 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestCompleteAndStop() {
 func (s *BumpSchemaVersionCompactionTaskSuite) TestGetStorageConfig() {
 	s.setupTest()
 	s.NotNil(s.task.GetStorageConfig())
+}
+
+// TestMaterializationRejectsDroppedFields pins the add-only invariant the
+// stats increment depends on. Dropped fields must route to
+// runFullSchemaRewrite, which ships an absolute Stats; reaching
+// materialization with drops would produce an increment that over-estimates
+// the segment, because the removed columns' bytes are never subtracted.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestMaterializationRejectsDroppedFields() {
+	s.setupTest()
+
+	_, err := s.task.runMissingFunctionMaterialization(
+		context.Background(),
+		nil,
+		[]int64{101},
+		map[int64]struct{}{},
+	)
+	s.Error(err)
+	s.ErrorIs(err, merr.ErrServiceInternal)
 }

@@ -1072,7 +1072,7 @@ func (s *DataNodeServicesSuite) TestImportStateV2ToCopySegmentTaskState() {
 }
 
 func (s *DataNodeServicesSuite) TestCreateTaskRefreshExternalCollection() {
-	s.Run("create refresh-external-collection task", func() {
+	s.Run("fallback cluster ID from properties", func() {
 		refreshReq := &datapb.RefreshExternalCollectionTaskRequest{
 			TaskID:         999,
 			CollectionID:   100,
@@ -1093,11 +1093,25 @@ func (s *DataNodeServicesSuite) TestCreateTaskRefreshExternalCollection() {
 		}
 
 		status, err := s.node.CreateTask(s.ctx, req)
-		// Don't assert NoError — the createRefreshExternalCollectionTask may fail
-		// due to missing dependencies. We only need the code path to execute
-		// so that coverage is recorded for the routing branch.
-		_ = status
-		_ = err
+		s.NoError(err)
+		s.True(merr.Ok(status))
+		s.NotNil(s.node.externalCollectionManager.Get("cluster-0", 999))
+		s.Nil(s.node.externalCollectionManager.Get("", 999))
+	})
+
+	s.Run("missing cluster ID in payload and properties", func() {
+		payload, err := proto.Marshal(&datapb.RefreshExternalCollectionTaskRequest{TaskID: 1000})
+		s.NoError(err)
+
+		status, err := s.node.CreateTask(s.ctx, &workerpb.CreateTaskRequest{
+			Properties: map[string]string{
+				taskcommon.TypeKey:   taskcommon.RefreshExternalCollection,
+				taskcommon.TaskIDKey: "1000",
+			},
+			Payload: payload,
+		})
+		s.NoError(err)
+		s.Error(merr.Error(status))
 	})
 }
 
@@ -1110,6 +1124,7 @@ func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsUp
 	defer s.node.externalCollectionManager.Close()
 
 	req := &datapb.RefreshExternalCollectionTaskRequest{
+		ClusterID:              "cluster",
 		CollectionID:           100,
 		PartitionID:            1,
 		TaskID:                 200,
@@ -1127,7 +1142,12 @@ func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsUp
 	task := external.NewRefreshExternalCollectionTask(s.ctx, req)
 	patched := &datapb.SegmentInfo{ID: 10, CollectionID: 100, NumOfRows: 1}
 
-	mockNewTask := mockey.Mock(external.NewRefreshExternalCollectionTask).Return(task).Build()
+	gotClusterID := make(chan string, 1)
+	mockNewTask := mockey.Mock(external.NewRefreshExternalCollectionTask).
+		To(func(_ context.Context, gotReq *datapb.RefreshExternalCollectionTaskRequest) *external.RefreshExternalCollectionTask {
+			gotClusterID <- gotReq.GetClusterID()
+			return task
+		}).Build()
 	defer mockNewTask.UnPatch()
 	mockPre := mockey.Mock((*external.RefreshExternalCollectionTask).PreExecute).Return(nil).Build()
 	defer mockPre.UnPatch()
@@ -1139,9 +1159,15 @@ func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsUp
 		Return([]*datapb.SegmentInfo{patched}).Build()
 	defer mockUpdated.UnPatch()
 
-	status, err := s.node.createRefreshExternalCollectionTask(s.ctx, "cluster", req)
+	status, err := s.node.createRefreshExternalCollectionTask(s.ctx, req)
 	s.NoError(err)
 	s.True(merr.Ok(status))
+	select {
+	case clusterID := <-gotClusterID:
+		s.Equal("cluster", clusterID)
+	case <-time.After(time.Second):
+		s.Fail("task constructor was not called")
+	}
 
 	s.Eventually(func() bool {
 		info := s.node.externalCollectionManager.Get("cluster", 200)

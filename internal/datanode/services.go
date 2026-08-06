@@ -725,11 +725,14 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		clusterID, err := properties.GetClusterID()
-		if err != nil {
-			return merr.Status(err), nil
+		if req.GetClusterID() == "" {
+			clusterID, err := properties.GetClusterID()
+			if err != nil {
+				return merr.Status(err), nil
+			}
+			req.ClusterID = clusterID
 		}
-		return node.createRefreshExternalCollectionTask(ctx, clusterID, req)
+		return node.createRefreshExternalCollectionTask(ctx, req)
 	case taskcommon.CopySegment:
 		req := &datapb.CopySegmentRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -983,9 +986,7 @@ func (node *DataNode) SyncFileResource(ctx context.Context, req *internalpb.Sync
 
 // createRefreshExternalCollectionTask handles a refresh-external-collection task dispatched from DataCoord.
 // This submits the task to the external collection manager for async execution.
-// clusterID is the caller's cluster identifier (from CreateTask properties),
-// used as the task key so that QueryTask from the same caller can locate the result.
-func (node *DataNode) createRefreshExternalCollectionTask(ctx context.Context, clusterID string, req *datapb.RefreshExternalCollectionTaskRequest) (*commonpb.Status, error) {
+func (node *DataNode) createRefreshExternalCollectionTask(ctx context.Context, req *datapb.RefreshExternalCollectionTaskRequest) (*commonpb.Status, error) {
 	mlog.Info(context.TODO(), "createRefreshExternalCollectionTask received",
 		mlog.Int("currentSegments", len(req.GetCurrentSegments())),
 		mlog.String("externalSource", req.GetExternalSource()))
@@ -996,6 +997,7 @@ func (node *DataNode) createRefreshExternalCollectionTask(ctx context.Context, c
 
 	// Submit task to external collection manager
 	// The task will execute asynchronously in the manager's goroutine pool
+	clusterID := req.GetClusterID()
 	err := node.externalCollectionManager.SubmitTask(clusterID, req, func(taskCtx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 		task := external.NewRefreshExternalCollectionTask(taskCtx, req)
 

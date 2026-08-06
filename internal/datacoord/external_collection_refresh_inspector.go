@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -30,8 +29,9 @@ import (
 // externalCollectionRefreshInspector handles task scheduling and recovery for external collection refresh.
 //
 // This is an internal component of ExternalCollectionRefreshManager, responsible for:
-// 1. Reload InProgress/Init tasks to scheduler on DataCoord restart (idempotent recovery)
-// 2. Periodically enqueue pending tasks to the global task scheduler for execution
+// 1. Reload published InProgress/Init/Retry tasks on DataCoord restart
+// 2. Re-enqueue InProgress siblings of a Failed job so their DataNode tasks are canceled
+// 3. Periodically enqueue pending tasks to the global task scheduler for execution
 //
 // TASK STATE TRANSITIONS:
 // Init → InProgress (inspector enqueues to scheduler, scheduler dispatches to DataNode)
@@ -39,9 +39,7 @@ import (
 type externalCollectionRefreshInspector struct {
 	ctx         context.Context
 	refreshMeta *externalCollectionRefreshMeta
-	mt          *meta // meta for task operations (CreateTaskOnWorker, SetJobInfo)
 	scheduler   task.GlobalScheduler
-	allocator   allocator.Allocator
 	closeChan   chan struct{}
 	// wrapTask builds a scheduler-facing task wrapper with all callbacks
 	// wired (processFinishedJob → checker.processJobByID). The manager owns
@@ -54,17 +52,13 @@ type externalCollectionRefreshInspector struct {
 func newRefreshInspector(
 	ctx context.Context,
 	refreshMeta *externalCollectionRefreshMeta,
-	mt *meta,
 	scheduler task.GlobalScheduler,
-	allocator allocator.Allocator,
 	closeChan chan struct{},
 ) *externalCollectionRefreshInspector {
 	return &externalCollectionRefreshInspector{
 		ctx:         ctx,
 		refreshMeta: refreshMeta,
-		mt:          mt,
 		scheduler:   scheduler,
-		allocator:   allocator,
 		closeChan:   closeChan,
 	}
 }
@@ -94,26 +88,50 @@ func (i *externalCollectionRefreshInspector) run() {
 
 // inspect runs a single inspection cycle to re-enqueue any pending tasks.
 func (i *externalCollectionRefreshInspector) inspect() {
-	tasks := i.refreshMeta.GetAllTasks()
-	for _, t := range tasks {
-		switch t.GetState() {
-		case indexpb.JobState_JobStateInit, indexpb.JobState_JobStateRetry:
-			// Re-enqueue pending tasks (scheduler will deduplicate)
-			i.scheduler.Enqueue(i.wrapTask(t))
-		}
-	}
+	i.enqueueCommittedTasks(false)
 }
 
 // reloadFromMeta reloads active tasks from metadata on startup.
 func (i *externalCollectionRefreshInspector) reloadFromMeta() {
-	tasks := i.refreshMeta.GetAllTasks()
-	for _, t := range tasks {
-		if t.GetState() != indexpb.JobState_JobStateInit &&
-			t.GetState() != indexpb.JobState_JobStateRetry &&
-			t.GetState() != indexpb.JobState_JobStateInProgress {
+	i.enqueueCommittedTasks(true)
+}
+
+// enqueueCommittedTasks schedules only tasks referenced by their parent job's
+// published task_ids. Periodic scans enqueue Init/Retry tasks. Startup recovery
+// also enqueues InProgress tasks; for a Failed job, this is solely to drive the
+// QueryTaskOnWorker cancellation path and release the DataNode task.
+func (i *externalCollectionRefreshInspector) enqueueCommittedTasks(includeInProgress bool) {
+	for jobID, job := range i.refreshMeta.GetAllJobs() {
+		if job.GetState() == indexpb.JobState_JobStateFinished {
 			continue
 		}
-		// Enqueue active tasks for processing
-		i.scheduler.Enqueue(i.wrapTask(t))
+		failedJob := job.GetState() == indexpb.JobState_JobStateFailed
+		if failedJob && !includeInProgress {
+			continue
+		}
+
+		tasks, err := i.refreshMeta.GetCommittedTasksByJobID(jobID)
+		if err != nil {
+			mlog.Warn(i.ctx, "failed to resolve committed external refresh tasks",
+				mlog.FieldJobID(jobID),
+				mlog.Err(err))
+			continue
+		}
+		for _, task := range tasks {
+			if failedJob {
+				if task.GetState() == indexpb.JobState_JobStateInProgress {
+					i.scheduler.Enqueue(i.wrapTask(task))
+				}
+				continue
+			}
+			switch task.GetState() {
+			case indexpb.JobState_JobStateInit, indexpb.JobState_JobStateRetry:
+				i.scheduler.Enqueue(i.wrapTask(task))
+			case indexpb.JobState_JobStateInProgress:
+				if includeInProgress {
+					i.scheduler.Enqueue(i.wrapTask(task))
+				}
+			}
+		}
 	}
 }

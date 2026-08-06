@@ -5901,7 +5901,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.maxFullSegmentThreshold",
 		Version:      "2.6.8",
 		DefaultValue: "100",
-		Doc:          "Maximum number of segments to use maxFull algorithm (O(n³) complexity) for optimal full segment count. For larger counts, uses faster larger algorithm (O(n)).",
+		Doc:          "Deprecated. Force-merge grouping no longer uses this threshold.",
 		Export:       false,
 	}
 	p.CompactionMaxFullSegmentThreshold.Init(base.mgr)
@@ -6870,9 +6870,10 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.ExternalCollectionPreAllocSegments.Init(base.mgr)
 
 	p.ExternalCollectionFilesPerTask = ParamItem{
-		Key:          "dataCoord.externalCollectionFilesPerTask",
-		Version:      "3.0.0",
-		Doc:          "Minimum number of external files per refresh task. Controls task splitting granularity.",
+		Key:     "dataCoord.externalCollectionFilesPerTask",
+		Version: "3.0.0",
+		Doc: "Target number of external files per base refresh task. " +
+			"Ownership closure may merge base ranges, so final tasks can contain more files.",
 		DefaultValue: "10000",
 		PanicIfEmpty: false,
 	}
