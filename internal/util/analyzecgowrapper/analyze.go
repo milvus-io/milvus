@@ -34,6 +34,7 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 )
 
 type CodecAnalyze interface {
@@ -41,7 +42,7 @@ type CodecAnalyze interface {
 	GetResult(size int) (string, int64, []string, []int64, error)
 }
 
-func Analyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo) (CodecAnalyze, error) {
+func Analyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo, pluginContext *indexcgopb.StoragePluginContext) (CodecAnalyze, error) {
 	analyzeInfoBlob, err := proto.Marshal(analyzeInfo)
 	if err != nil {
 		mlog.Warn(ctx, "marshal analyzeInfo failed",
@@ -49,8 +50,23 @@ func Analyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo) (CodecA
 			mlog.Err(err))
 		return nil, err
 	}
+
+	var pluginContextPtr *C.CPluginContext
+	if pluginContext != nil {
+		// Analyze is synchronous; C++ copies the key before this function
+		// returns and retains only the encryption-zone and collection IDs.
+		key := C.CString(pluginContext.GetEncryptionKey())
+		defer C.free(unsafe.Pointer(key))
+		cPluginContext := C.CPluginContext{
+			ez_id:         C.int64_t(pluginContext.GetEncryptionZoneId()),
+			collection_id: C.int64_t(pluginContext.GetCollectionId()),
+			key:           key,
+		}
+		pluginContextPtr = &cPluginContext
+	}
+
 	var analyzePtr C.CAnalyze
-	status := C.Analyze(&analyzePtr, (*C.uint8_t)(unsafe.Pointer(&analyzeInfoBlob[0])), (C.uint64_t)(len(analyzeInfoBlob)))
+	status := C.Analyze(&analyzePtr, (*C.uint8_t)(unsafe.Pointer(&analyzeInfoBlob[0])), (C.uint64_t)(len(analyzeInfoBlob)), pluginContextPtr)
 	if err := HandleCStatus(&status, "failed to analyze task"); err != nil {
 		return nil, err
 	}
