@@ -5979,3 +5979,67 @@ func TestAbortImport_CommittingRejected(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, merr.Ok(resp))
 }
+
+// TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet pins a pre-existing gap
+// that this PR does not close: the fence derives its bound from the segment's
+// binlog arrays, and a V3 (manifest-backed) segment never persists those --
+// buildAlterSegmentsKvs skips the per-FieldBinlog KVs for it and the SegmentInfo
+// is written without them -- so a V3 segment reloaded after a DataCoord restart
+// compares against 0 and admits any commit timestamp, however low.
+//
+// Import segments become V3 as soon as UpdateManifest runs, so this is the main
+// import path, not a corner. The follow-up that reads Stats.TimestampTo instead
+// should flip these assertions; until then the current behavior is recorded
+// rather than left to be discovered.
+func TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet(t *testing.T) {
+	ctx := context.Background()
+
+	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3002), "vchan-0", mock.AnythingOfType("func() error")).
+		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
+			return callback()
+		})
+
+	segIDs := []int64{11}
+	getSegIDsMock := mockey.Mock((*Server).getImportSegmentIDsByVchannel).
+		Return(segIDs).Build()
+	defer getSegIDsMock.UnPatch()
+
+	segments := NewSegmentsInfo()
+	// Exactly the shape a reloaded V3 import segment has: a manifest, no binlog
+	// arrays, and Stats carrying the row timestamps that did survive the restart.
+	segments.SetSegment(11, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:            11,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "vchan-0",
+		State:         commonpb.SegmentState_Flushed,
+		IsImporting:   true,
+		ManifestPath:  "files/insert_log/100/10/11/manifest",
+		Stats:         &datapb.Statistics{TimestampTo: 500},
+	}})
+
+	server := &Server{
+		importMeta: importMetaMock,
+		meta: &meta{
+			catalog:  &datacoordkv.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segments,
+		},
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{
+		JobId:           3002,
+		Vchannel:        "vchan-0",
+		CommitTimestamp: 300, // below Stats.TimestampTo=500, yet admitted
+	})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp), "the fence does not fire for a reloaded V3 segment")
+
+	seg := server.meta.GetSegment(ctx, 11)
+	require.NotNil(t, seg)
+	assert.EqualValues(t, 300, seg.GetCommitTimestamp())
+	assert.False(t, seg.GetIsImporting())
+	assert.EqualValues(t, 0, maxBinlogTimestampTo(seg.GetBinlogs()),
+		"the bound the fence compares against is 0 despite Stats.TimestampTo=500")
+}
