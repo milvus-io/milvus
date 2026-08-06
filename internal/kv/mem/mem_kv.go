@@ -25,14 +25,14 @@ import (
 	"github.com/google/btree"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus/pkg/v3/kv"
+	kvpkg "github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // implementation assertion
-var _ kv.TxnKV = (*MemoryKV)(nil)
+var _ kvpkg.TxnKV = (*MemoryKV)(nil)
 
 // MemoryKV implements BaseKv interface and relies on underling btree.BTree.
 // As its name implies, all data is stored in memory.
@@ -339,6 +339,9 @@ func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[
 func (kv *MemoryKV) MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error {
 	if len(preds) > 0 {
 		return merr.WrapErrServiceUnavailable("predicates not supported")
+	}
+	if err := kvpkg.ValidateNoSaveUnderRemovedPrefix(saves, prefixRemovals); err != nil {
+		return err
 	}
 	kv.Lock()
 	defer kv.Unlock()

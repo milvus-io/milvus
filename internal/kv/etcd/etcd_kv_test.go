@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -661,6 +662,11 @@ func (s *EtcdKVSuite) TestMultiSaveAndRemoveMixed() {
 	}
 	err := etcdKV.MultiSave(context.TODO(), prepareTests)
 	s.Require().NoError(err)
+
+	err = etcdKV.MultiSaveAndRemoveMixed(context.TODO(),
+		map[string]string{"mix/a-1/c3": "new"}, nil, []string{"mix/a-1/"})
+	s.Error(err)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
 
 	// failed predicate: the whole mixed txn must be a no-op.
 	err = etcdKV.MultiSaveAndRemoveMixed(context.TODO(),

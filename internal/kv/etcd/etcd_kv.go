@@ -25,7 +25,7 @@ import (
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/pkg/v3/kv"
+	kvpkg "github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -42,7 +42,7 @@ const (
 )
 
 // implementation assertion
-var _ kv.WatchKV = (*etcdKV)(nil)
+var _ kvpkg.WatchKV = (*etcdKV)(nil)
 
 // etcdKV implements TxnKV interface, it supports to process multiple kvs in a transaction.
 type etcdKV struct {
@@ -611,6 +611,9 @@ func (kv *etcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[st
 // @removals and removes every key under the prefixes in @prefixRemovals, all
 // in one transaction.
 func (kv *etcdKV) MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error {
+	if err := kvpkg.ValidateNoSaveUnderRemovedPrefix(saves, prefixRemovals); err != nil {
+		return err
+	}
 	cmps, err := parsePredicates(kv.rootPath, preds...)
 	if err != nil {
 		return err

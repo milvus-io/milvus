@@ -23,13 +23,13 @@ import (
 	"github.com/samber/lo"
 	"github.com/tecbot/gorocksdb"
 
-	"github.com/milvus-io/milvus/pkg/v3/kv"
+	kvpkg "github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-var _ kv.BaseKV = (*RocksdbKV)(nil)
+var _ kvpkg.BaseKV = (*RocksdbKV)(nil)
 
 // RocksdbKV is KV implemented by rocksdb
 type RocksdbKV struct {
@@ -462,6 +462,9 @@ func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map
 func (kv *RocksdbKV) MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error {
 	if len(preds) > 0 {
 		return merr.WrapErrServiceUnavailable("predicates not supported")
+	}
+	if err := kvpkg.ValidateNoSaveUnderRemovedPrefix(saves, prefixRemovals); err != nil {
+		return err
 	}
 	if kv.DB == nil {
 		return merr.WrapErrServiceInternalMsg("Rocksdb instance is nil when do MultiSaveAndRemoveMixed")

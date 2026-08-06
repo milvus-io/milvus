@@ -31,7 +31,7 @@ import (
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"github.com/tikv/client-go/v2/txnkv/txnsnapshot"
 
-	"github.com/milvus-io/milvus/pkg/v3/kv"
+	kvpkg "github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -149,7 +149,7 @@ var (
 )
 
 // implementation assertion
-var _ kv.MetaKv = (*txnTiKV)(nil)
+var _ kvpkg.MetaKv = (*txnTiKV)(nil)
 
 // txnTiKV implements MetaKv and TxnKV interface. It supports processing multiple kvs within one transaction.
 type txnTiKV struct {
@@ -616,6 +616,9 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 // in one transaction: the prefix scan and its deletes run inside the same txn
 // snapshot as the exact deletes and saves.
 func (kv *txnTiKV) MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error {
+	if err := kvpkg.ValidateNoSaveUnderRemovedPrefix(saves, prefixRemovals); err != nil {
+		return err
+	}
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()

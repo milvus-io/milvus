@@ -315,6 +315,11 @@ func TestTiKVLoad(te *testing.T) {
 		err := kv.MultiSave(context.TODO(), prepareTests)
 		require.NoError(t, err)
 
+		err = kv.MultiSaveAndRemoveMixed(context.TODO(),
+			map[string]string{"mix/a-1/c3": "new"}, nil, []string{"mix/a-1/"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
 		// failed predicate: the whole mixed txn must be a no-op.
 		err = kv.MultiSaveAndRemoveMixed(context.TODO(),
 			map[string]string{"mix/new": "nv"}, []string{"mix/a-1"}, []string{"mix/a-1/"},

@@ -18,10 +18,13 @@ package kv
 
 import (
 	"context"
+	"sort"
+	"strings"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // CompareFailedError is a helper type for checking MetaKv CompareAndSwap series func error type
@@ -66,7 +69,7 @@ type TxnKV interface {
 	// all in one transaction. MultiSaveAndRemoveWithPrefix cannot express this
 	// mix - it widens EVERY removal to a prefix delete. A key present in both
 	// @saves and @removals is saved, not removed; a saved key under a removed
-	// prefix is backend-dependent (etcd rejects the txn) and must be avoided.
+	// prefix is rejected because backend semantics differ for that overlap.
 	MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error
 	// MaxTxnOps reports the maximum number of key operations this store applies
 	// as a single atomic transaction; a batch exceeding it must be split by the
@@ -75,6 +78,29 @@ type TxnKV interface {
 	// rather than a backend-specific constant. It bounds op COUNT only, not the
 	// request's total byte size.
 	MaxTxnOps() int
+}
+
+// ValidateNoSaveUnderRemovedPrefix rejects ambiguous mixed transactions where
+// a saved key also falls under a prefix removal.
+func ValidateNoSaveUnderRemovedPrefix(saves map[string]string, prefixRemovals []string) error {
+	if len(saves) == 0 || len(prefixRemovals) == 0 {
+		return nil
+	}
+
+	saveKeys := make([]string, 0, len(saves))
+	for key := range saves {
+		saveKeys = append(saveKeys, key)
+	}
+	sort.Strings(saveKeys)
+
+	for _, prefix := range prefixRemovals {
+		i := sort.SearchStrings(saveKeys, prefix)
+		if i < len(saveKeys) && strings.HasPrefix(saveKeys[i], prefix) {
+			return merr.WrapErrParameterInvalidMsg(
+				"save key %q conflicts with removed prefix %q", saveKeys[i], prefix)
+		}
+	}
+	return nil
 }
 
 // MetaKv is TxnKV for metadata. It should save data with lease.
