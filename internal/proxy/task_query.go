@@ -75,8 +75,11 @@ type queryTask struct {
 	shardclientMgr   shardclient.ShardClientMgr
 	lb               shardclient.LBPolicy
 	channelsMvcc     map[string]Timestamp
-	preferredNodes   map[string]int64
-	fastSkip         bool
+	// fixedSnapshotTimestamp pins internal queries whose read timestamp is
+	// also used as a later write-side correctness proof.
+	fixedSnapshotTimestamp uint64
+	preferredNodes         map[string]int64
+	fastSkip               bool
 
 	reQuery              bool
 	allQueryCnt          int64
@@ -93,6 +96,16 @@ func (t *queryTask) getQueryLabel() string {
 		return label
 	}
 	return metrics.QueryLabel
+}
+
+// applyFixedSnapshotTimestamp restores the exact read fence after generic
+// query preprocessing adjusts consistency and collection metadata fences.
+func (t *queryTask) applyFixedSnapshotTimestamp(guaranteeTimestamp uint64) uint64 {
+	if t.fixedSnapshotTimestamp == 0 {
+		return guaranteeTimestamp
+	}
+	t.MvccTimestamp = t.fixedSnapshotTimestamp
+	return t.fixedSnapshotTimestamp
 }
 
 type queryParams struct {
@@ -871,6 +884,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if collectionInfo.updateTimestamp > guaranteeTs {
 		guaranteeTs = collectionInfo.updateTimestamp
 	}
+	guaranteeTs = t.applyFixedSnapshotTimestamp(guaranteeTs)
 
 	t.GuaranteeTimestamp = guaranteeTs
 	// Extract physical time for entity-level TTL (issue #47413)
