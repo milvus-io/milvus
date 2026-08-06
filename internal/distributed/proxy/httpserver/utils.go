@@ -1112,8 +1112,13 @@ func parseJSONInteger(raw string, bitSize int) (int64, bool) {
 }
 
 // parseRESTInteger preserves the raw token for JSON numbers so validation runs
-// before gjson can normalize decimal or exponent forms through float64. Quoted
-// integer strings retain the existing base-prefix behavior.
+// before gjson can normalize decimal or exponent forms through float64.
+//
+// Quoted integers are read as base 10. cast used strconv's base detection, so
+// a zero-padded id such as "010" became 8 in an Int8/Int16/Int32 field while
+// the Int64 field read the same string as 10 through json.Number. Decimal is
+// the only reading a REST caller can have meant, and it makes the integer
+// types agree.
 func parseRESTInteger(value gjson.Result, bitSize int) (int64, string, bool) {
 	actual := value.String()
 	if value.Type == gjson.Number {
@@ -1122,7 +1127,7 @@ func parseRESTInteger(value gjson.Result, bitSize int) (int64, string, bool) {
 		return parsed, actual, ok
 	}
 
-	parsed, err := strconv.ParseInt(actual, 0, bitSize)
+	parsed, err := strconv.ParseInt(actual, 10, bitSize)
 	return parsed, actual, err == nil
 }
 

@@ -1106,7 +1106,7 @@ func TestCheckAndSetData(t *testing.T) {
 				}{
 					{raw: "100.0", expected: 100},
 					{raw: "1e2", expected: 100},
-					{raw: strconv.Quote("0x64"), expected: 100},
+					{raw: strconv.Quote("100"), expected: 100},
 				} {
 					body := []byte(fmt.Sprintf(`{"data":[{"book_id":1,"book_intro":[0.1,0.2],"word_count":2,"%s":%s}]}`, FieldNarrowInt, input.raw))
 					rows, _, err := checkAndSetData(body, schema, false)
@@ -5373,6 +5373,52 @@ func TestCheckAndSetDataInt64FieldRejectsNonIntegers(t *testing.T) {
 			require.Error(t, err)
 			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 			assert.Contains(t, err.Error(), "count")
+		})
+	}
+}
+
+// Quoted integers are read as base 10 for every integer width. cast relied on
+// strconv's base detection, so "010" meant 8 in a narrow integer field and 10
+// in an Int64 field.
+func TestCheckAndSetDataQuotedIntegerIsDecimal(t *testing.T) {
+	narrowSchema := func(dataType schemapb.DataType) *schemapb.CollectionSchema {
+		vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
+		vectorField.Name = "vector"
+		return &schemapb.CollectionSchema{
+			Name: DefaultCollectionName,
+			Fields: []*schemapb.FieldSchema{
+				generatePrimaryField(schemapb.DataType_Int64, false),
+				vectorField,
+				{Name: "narrow", DataType: dataType},
+			},
+		}
+	}
+
+	for _, dataType := range []schemapb.DataType{
+		schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32,
+	} {
+		t.Run(dataType.String()+" zero padded", func(t *testing.T) {
+			body := []byte(fmt.Sprintf(
+				`{"data": {"%s": 1, "vector": [0.1, 0.2], "narrow": "010"}}`, FieldBookID))
+			rows, _, err := checkAndSetData(body, narrowSchema(dataType), false)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			switch dataType {
+			case schemapb.DataType_Int8:
+				assert.Equal(t, int8(10), rows[0]["narrow"])
+			case schemapb.DataType_Int16:
+				assert.Equal(t, int16(10), rows[0]["narrow"])
+			case schemapb.DataType_Int32:
+				assert.Equal(t, int32(10), rows[0]["narrow"])
+			}
+		})
+
+		t.Run(dataType.String()+" hex prefix is rejected", func(t *testing.T) {
+			body := []byte(fmt.Sprintf(
+				`{"data": {"%s": 1, "vector": [0.1, 0.2], "narrow": "0x10"}}`, FieldBookID))
+			_, _, err := checkAndSetData(body, narrowSchema(dataType), false)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 		})
 	}
 }
