@@ -514,7 +514,7 @@ func TestBroadcastAckModulePreconditionsFollowMessageFlow(t *testing.T) {
 		ready bool
 	}{
 		{
-			name: "commit import waits only for previous ack",
+			name: "commit import has no data frontier",
 			msg: newAckPreconditionMessage(t, message.NewCommitImportMessageBuilderV2().
 				WithVChannel("v1").
 				WithHeader(&message.CommitImportMessageHeader{CollectionId: 1, JobId: 10}).
@@ -635,6 +635,61 @@ func TestBroadcastAckModuleReturnsBarrierForEveryBroadcastHeader(t *testing.T) {
 
 	require.NotNil(t, result.Data)
 }
+
+func TestBroadcastAckModuleSchedulesOnlyQueueHead(t *testing.T) {
+	frontierTimeTick := uint64(9)
+	scheduler := &recordingAckTaskScheduler{}
+	module := newBroadcastAckModule("test-pchannel", &recordingFrontierView{
+		barrier: walcheckpoint.BarrierFunc(func() uint64 { return frontierTimeTick }),
+	}, moduleapi.Runtime{Scheduler: scheduler})
+	module.SwitchIntoMetaAndData()
+
+	acked := make([]message.MessageType, 0, 2)
+	module.ack = func(_ context.Context, msg message.ImmutableMessage) error {
+		acked = append(acked, msg.MessageType())
+		return nil
+	}
+
+	flush := newBroadcastAckMessage(t, message.NewManualFlushMessageBuilderV2().
+		WithBroadcast([]string{"v1"}).
+		WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).
+		WithBody(&message.ManualFlushMessageBody{}))
+	create := newBroadcastAckMessage(t, message.NewCreateCollectionMessageBuilderV1().
+		WithBroadcast([]string{"v1"}).
+		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 2, PartitionIds: []int64{10}}).
+		WithBody(&msgpb.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{}}))
+
+	module.ObserveMessage(context.Background(), flush)
+	module.ObserveMessage(context.Background(), create)
+	require.Len(t, scheduler.tasks, 1)
+
+	require.ErrorIs(t, scheduler.tasks[0].Execute(context.Background()), nodescheduler.ErrDelay)
+	require.Len(t, scheduler.tasks, 1)
+
+	frontierTimeTick = flush.TimeTick()
+	require.NoError(t, scheduler.tasks[0].Execute(context.Background()))
+	require.Len(t, scheduler.tasks, 2)
+	require.NoError(t, scheduler.tasks[1].Execute(context.Background()))
+	assert.Equal(t, []message.MessageType{
+		message.MessageTypeManualFlush,
+		message.MessageTypeCreateCollection,
+	}, acked)
+}
+
+type recordingAckTaskScheduler struct {
+	tasks []nodescheduler.Task
+}
+
+func (s *recordingAckTaskScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+	s.tasks = append(s.tasks, task)
+	return recordingAckTaskHandle{}
+}
+
+type recordingAckTaskHandle struct{}
+
+func (recordingAckTaskHandle) Cancel() {}
+
+func (recordingAckTaskHandle) Wait(context.Context) error { return nil }
 
 func newAckPreconditionMessage(t *testing.T, builder interface{ MustBuildMutable() message.MutableMessage }) message.ImmutableMessage {
 	t.Helper()
