@@ -20,7 +20,6 @@
 #include "common/Types.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "unittest/utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
