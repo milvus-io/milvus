@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -232,7 +233,7 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 
 // genInsertMsgsByPartition used to build each message's FieldData with zero
 // capacity and grow it one row at a time, which copies the payload roughly five
-// times over. These tests pin the observable behaviour (message splitting and
+// times over. These tests pin the observable behavior (message splitting and
 // row contents) and assert that the destination is preallocated.
 func TestGenInsertMsgsByPartitionPreallocates(t *testing.T) {
 	paramtable.Init()
@@ -349,4 +350,106 @@ func TestGenInsertMsgsByPartitionPreallocates(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Empty(t, msgs)
 	})
+}
+
+// A dense vector column's backing array is sized dim*capacity by
+// PrepareResultFieldData regardless of nullability, while EstimateEntitySize
+// skips null rows entirely. Deriving the capacity from a row whose vector is
+// null therefore used to reserve orders of magnitude too much: 10k rows of a
+// null 32768-dim float vector reserve ~1.22GiB for an empty payload.
+func TestGenInsertMsgsByPartitionBoundsNullVectorReservation(t *testing.T) {
+	paramtable.Init()
+
+	const (
+		rows      = 10000
+		dim       = 32768
+		threshold = 2 * 1024 * 1024
+	)
+	Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(threshold))
+	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+
+	// nullVectorMsg builds an insert whose vector column is nullable and null
+	// for `nullRows` leading rows.
+	newMsg := func(nullRows int) *msgstream.InsertMsg {
+		ids := make([]int64, rows)
+		valid := make([]bool, rows)
+		vec := make([]float32, 0, rows*dim)
+		for i := 0; i < rows; i++ {
+			ids[i] = int64(i)
+			valid[i] = i >= nullRows
+			if valid[i] {
+				vec = append(vec, make([]float32, dim)...)
+			}
+		}
+		return &msgstream.InsertMsg{
+			BaseMsg: msgstream.BaseMsg{Ctx: context.Background(), HashValues: make([]uint32, rows)},
+			InsertRequest: &msgpb.InsertRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
+				DbName:         "default",
+				CollectionName: "c",
+				PartitionName:  "p",
+				NumRows:        rows,
+				Timestamps:     make([]uint64, rows),
+				RowIDs:         ids,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type: schemapb.DataType_Int64, FieldId: 100, FieldName: "pk",
+						Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}},
+						}},
+					},
+					{
+						Type: schemapb.DataType_FloatVector, FieldId: 101, FieldName: "vec",
+						ValidData: valid,
+						Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+							Dim:  dim,
+							Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vec}},
+						}},
+					},
+				},
+			},
+		}
+	}
+
+	offsets := make([]int, rows)
+	for i := range offsets {
+		offsets[i] = i
+	}
+
+	// A dense vector row costs dim*4 = 128KiB, so at a 2MiB threshold a message
+	// can hold ~16 rows. Anything far above that means the null rows were not
+	// accounted for. Allow generous slack; the bug reserved ~600x this.
+	const maxReserveBytes = 8 * 1024 * 1024
+
+	for _, tc := range []struct {
+		name     string
+		nullRows int
+	}{
+		{"all rows null", rows},
+		{"first row null", 1},
+		{"no rows null", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			msgs, err := genInsertMsgsByPartition(context.Background(), 7, 1, "p", offsets, "ch", newMsg(tc.nullRows))
+			assert.NoError(t, err)
+			assert.NotEmpty(t, msgs)
+
+			for _, m := range msgs {
+				im := m.(*msgstream.InsertMsg)
+				for _, fd := range im.GetFieldsData() {
+					v := fd.GetVectors().GetFloatVector().GetData()
+					assert.LessOrEqual(t, cap(v)*4, maxReserveBytes,
+						"vector column reserved %d bytes for %d rows", cap(v)*4, im.GetNumRows())
+				}
+			}
+
+			// Row contents must still be complete.
+			total := uint64(0)
+			for _, m := range msgs {
+				total += m.(*msgstream.InsertMsg).GetNumRows()
+			}
+			assert.Equal(t, uint64(rows), total)
+		})
+	}
 }

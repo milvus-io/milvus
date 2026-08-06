@@ -21,10 +21,37 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// denseVectorReserveBytes returns the bytes PrepareResultFieldData reserves per
+// row for dense vector columns. Those reservations are sized dim*capacity and
+// do not depend on nullability, unlike EstimateEntitySize which skips null
+// rows. Sparse vectors are excluded: they are reserved per row, not per
+// dimension.
+func denseVectorReserveBytes(fieldsData []*schemapb.FieldData) int {
+	total := 0
+	for _, fd := range fieldsData {
+		dim := int(fd.GetVectors().GetDim())
+		if dim <= 0 {
+			continue
+		}
+		switch fd.GetType() {
+		case schemapb.DataType_FloatVector:
+			total += dim * 4
+		case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+			total += dim * 2
+		case schemapb.DataType_BinaryVector:
+			total += dim / 8
+		case schemapb.DataType_Int8Vector:
+			total += dim
+		}
+	}
+	return total
+}
 
 func genInsertMsgsByPartition(ctx context.Context,
 	segmentID UniqueID,
@@ -36,11 +63,23 @@ func genInsertMsgsByPartition(ctx context.Context,
 ) ([]msgstream.TsMsg, error) {
 	threshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
 
+	// PrepareResultFieldData sizes a dense vector column's backing array as
+	// dim*capacity regardless of nullability, while EstimateEntitySize skips
+	// null rows entirely. Deriving capacity from a row whose vectors happen to
+	// be null would therefore over-reserve by orders of magnitude -- 10k rows
+	// of a null 32768-dim float vector would reserve ~1.22GiB for an empty
+	// payload. Use the schema-derived per-row reservation as a floor so the
+	// reserved bytes stay bounded by the message threshold either way.
+	vectorReserveFloor := denseVectorReserveBytes(insertMsg.GetFieldsData())
+
 	// rowCapacity estimates how many rows will fit into a single message before
 	// the size threshold forces a flush, so the destination buffers can be
 	// preallocated. Without it the FieldData slices start at zero capacity and
 	// Go's ~1.25x growth factor copies the payload roughly five times over.
 	rowCapacity := func(rowSize, remaining int) int {
+		if rowSize < vectorReserveFloor {
+			rowSize = vectorReserveFloor
+		}
 		if rowSize <= 0 || rowSize >= threshold {
 			return 1
 		}
@@ -72,7 +111,7 @@ func genInsertMsgsByPartition(ctx context.Context,
 			Version:        msgpb.InsertDataVersion_ColumnBased,
 			// PrepareResultFieldData preallocates each column for `capacity`
 			// rows. Field types it does not know about get a nil Field, which
-			// AppendFieldData already creates lazily, so behaviour is unchanged
+			// AppendFieldData already creates lazily, so behavior is unchanged
 			// for them.
 			FieldsData: typeutil.PrepareResultFieldData(insertMsg.GetFieldsData(), int64(capacity)),
 			RowIDs:     make([]int64, 0, capacity),
