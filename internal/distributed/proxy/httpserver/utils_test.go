@@ -5006,3 +5006,90 @@ func TestEncodeEmbListQueryErrorPaths(t *testing.T) {
 	_, err = encodeEmbListQuery(gjson.Parse(`[[true]]`).Array(), schemapb.DataType_Bool, 1, 0)
 	assert.Error(t, err)
 }
+
+func jsonFieldTestSchema() *schemapb.CollectionSchema {
+	vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
+	vectorField.Name = "vector"
+	return &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			generatePrimaryField(schemapb.DataType_Int64, false),
+			vectorField,
+			{
+				Name:     "json_field",
+				DataType: schemapb.DataType_JSON,
+			},
+		},
+	}
+}
+
+func insertOneJSONValue(t *testing.T, value string) []byte {
+	t.Helper()
+	body := []byte(fmt.Sprintf(
+		`{"data": {"%s": 1, "vector": [0.1, 0.2], "json_field": %s}}`, FieldBookID, value))
+	rows, _, err := checkAndSetData(body, jsonFieldTestSchema(), false)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	stored, ok := rows[0]["json_field"].([]byte)
+	require.True(t, ok, "json field must be stored as raw bytes")
+	return stored
+}
+
+// The REST adapter used to store gjson's String() rendering of the JSON field.
+// That unquotes JSON strings and renders numbers through float64, producing
+// bytes that are not a JSON document at all. Keep the original token instead.
+func TestCheckAndSetDataJSONFieldKeepsRawToken(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected string
+	}{
+		{"object", `{"a": 1}`, `{"a": 1}`},
+		{"nested object", `{"a": {"b": [1, 2]}}`, `{"a": {"b": [1, 2]}}`},
+		{"array", `[1, 2, 3]`, `[1, 2, 3]`},
+		{"bool", `true`, `true`},
+		{"integer", `42`, `42`},
+		{"negative", `-7`, `-7`},
+		{"decimal", `10.0`, `10.0`},
+		// gjson String() dropped the quotes here, storing `hello`.
+		{"string", `"hello"`, `"hello"`},
+		{"empty string", `""`, `""`},
+		{"string with braces", `"{not json"`, `"{not json"`},
+		// gjson String() rendered these through float64, storing `+Inf`
+		// and a truncated mantissa respectively.
+		{"exponent beyond double range", `1e400`, `1e400`},
+		{"integer beyond 2^53", `9007199254740993.0`, `9007199254740993.0`},
+		{"integer beyond int64", `12345678901234567890`, `12345678901234567890`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stored := insertOneJSONValue(t, tt.value)
+			assert.Equal(t, tt.expected, string(stored))
+			assert.True(t, json.Valid(stored),
+				"stored bytes must stay a valid JSON document, got %q", string(stored))
+		})
+	}
+}
+
+// A JSON document handed over as a JSON string keeps being unwrapped so that
+// clients relying on that input form are not broken.
+func TestCheckAndSetDataJSONFieldUnwrapsEncodedDocument(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected string
+	}{
+		{"encoded object", `"{\"a\": 1}"`, `{"a": 1}`},
+		{"encoded array", `"[1, 2]"`, `[1, 2]`},
+		{"plain text stays quoted", `"hello"`, `"hello"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stored := insertOneJSONValue(t, tt.value)
+			assert.Equal(t, tt.expected, string(stored))
+			assert.True(t, json.Valid(stored))
+		})
+	}
+}

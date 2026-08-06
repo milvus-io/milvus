@@ -758,7 +758,19 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						}
 					}
 				case schemapb.DataType_JSON:
-					reallyData[fieldName] = []byte(dataString)
+					// Store the original JSON token verbatim. gjson's String()
+					// unquotes JSON strings ("hello" -> hello) and renders numbers
+					// through float64 (1e400 -> +Inf), both of which are not valid
+					// JSON documents and make the stored field unparsable. The
+					// request body is already validated as JSON by the gin binder
+					// before it reaches here, so Raw is always a well-formed token.
+					// A JSON document supplied as a JSON string is still unwrapped,
+					// preserving the existing input form.
+					if fieldValue.Type == gjson.String && json.Valid([]byte(dataString)) {
+						reallyData[fieldName] = []byte(dataString)
+					} else {
+						reallyData[fieldName] = []byte(fieldValue.Raw)
+					}
 				case schemapb.DataType_Geometry:
 					reallyData[fieldName] = dataString
 				case schemapb.DataType_Float:
