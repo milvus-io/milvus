@@ -70,7 +70,6 @@ func parseSnapshotForeignURI(direction Direction, foreignURI string) (bucket, ro
 
 func applySnapshotExternalSpecToConfig(
 	cfg *objectstorage.Config,
-	instanceCfg *objectstorage.Config,
 	scheme string,
 	endpoint string,
 	externalSpec string,
@@ -96,28 +95,46 @@ func applySnapshotExternalSpecToConfig(
 	if err := validateCredentialModes(parsed.Extfs); err != nil {
 		return false, "", err
 	}
+	uriIdentity, transportKnown, err := applySnapshotURILocationToConfig(cfg, scheme, endpoint)
+	if err != nil {
+		return false, "", err
+	}
 	if !hasSpec {
-		return false, "", nil
-	}
-
-	if endpoint != "" {
-		if err := applyEndpointToConfig(cfg, endpoint); err != nil {
-			return false, "", err
+		if uriIdentity.azureAccount != "" {
+			configuredEndpoint, err := effectiveAzureSnapshotEndpoint(cfg)
+			if err != nil {
+				return false, "", err
+			}
+			if !strings.EqualFold(configuredEndpoint, endpoint) {
+				return false, "", merr.WrapErrParameterInvalidMsg(
+					"snapshot URI Azure account does not match the instance storage credential",
+				)
+			}
 		}
-	}
-	if scheme == "https" {
-		cfg.UseSSL = true
+		return false, "", nil
 	}
 
 	extfs := parsed.Extfs
 	cloudProvider := strings.ToLower(strings.TrimSpace(extfs[externalspec.ExtfsKeyCloudProvider]))
 	region := strings.TrimSpace(extfs[externalspec.ExtfsKeyRegion])
-	if cloudProvider != "" {
-		cfg.CloudProvider = cloudProvider
-	} else if schemeProvider, _ := providerInfoFromScheme(scheme); schemeProvider != "" && instanceCfg.CloudProvider != schemeProvider {
-		cfg.CloudProvider = schemeProvider
+	if cloudProvider != "" && uriIdentity.cloudProvider != "" && cloudProvider != uriIdentity.cloudProvider {
+		return false, "", merr.WrapErrParameterInvalidMsg(
+			"external_spec cloud_provider %q does not match snapshot URI provider %q",
+			cloudProvider,
+			uriIdentity.cloudProvider,
+		)
 	}
-	if region != "" {
+	if region != "" && uriIdentity.region != "" && !strings.EqualFold(region, uriIdentity.region) {
+		return false, "", merr.WrapErrParameterInvalidMsg(
+			"external_spec region %q does not match snapshot URI region %q",
+			region,
+			uriIdentity.region,
+		)
+	}
+	if cloudProvider != "" && uriIdentity.cloudProvider == "" {
+		cfg.CloudProvider = cloudProvider
+	}
+	if region != "" && uriIdentity.region == "" {
 		cfg.Region = region
 	}
 	if value := strings.TrimSpace(extfs[externalspec.ExtfsKeyIAMEndpoint]); value != "" {
@@ -139,7 +156,14 @@ func applySnapshotExternalSpecToConfig(
 		}
 	}
 	if value, set := extfs[externalspec.ExtfsKeyUseSSL]; set {
-		cfg.UseSSL = value == "true"
+		requestedUseSSL := value == "true"
+		if transportKnown && requestedUseSSL != cfg.UseSSL {
+			return false, "", merr.WrapErrParameterInvalidMsg(
+				"external_spec use_ssl=%t conflicts with snapshot URI transport",
+				requestedUseSSL,
+			)
+		}
+		cfg.UseSSL = requestedUseSSL
 	}
 	if value, set := extfs[externalspec.ExtfsKeyUseVirtualHost]; set {
 		cfg.UseVirtualHost = value == "true"
@@ -148,6 +172,14 @@ func applySnapshotExternalSpecToConfig(
 	accessKeyID := strings.TrimSpace(extfs[externalspec.ExtfsKeyAccessKeyID])
 	secretKey := strings.TrimSpace(extfs[externalspec.ExtfsKeyAccessKeyValue])
 	credentialJSON := strings.TrimSpace(extfs[snapshotExtfsKeyCredentialJSON])
+	if uriIdentity.azureAccount != "" && accessKeyID != "" &&
+		!strings.EqualFold(uriIdentity.azureAccount, accessKeyID) {
+		return false, "", merr.WrapErrParameterInvalidMsg(
+			"external_spec Azure account %q does not match snapshot URI account %q",
+			accessKeyID,
+			uriIdentity.azureAccount,
+		)
+	}
 	if credentialJSON != "" {
 		if !strings.EqualFold(cfg.CloudProvider, objectstorage.CloudProviderGCPNative) {
 			return false, "", merr.WrapErrParameterInvalidMsg(
@@ -197,6 +229,83 @@ func applySnapshotExternalSpecToConfig(
 		}
 	}
 	return true, storageType, nil
+}
+
+func applySnapshotURILocationToConfig(
+	cfg *objectstorage.Config,
+	scheme string,
+	endpoint string,
+) (storageEndpointIdentity, bool, error) {
+	if cfg == nil {
+		return storageEndpointIdentity{}, false, merr.WrapErrServiceInternalMsg("snapshot storage config is nil")
+	}
+	scheme = strings.ToLower(strings.TrimSpace(scheme))
+	identity := inferStorageEndpointIdentity(endpoint)
+	schemeProvider, _ := providerInfoFromScheme(scheme)
+	if identity.cloudProvider != "" && schemeProvider != "" && identity.cloudProvider != schemeProvider {
+		return storageEndpointIdentity{}, false, merr.WrapErrParameterInvalidMsg(
+			"snapshot URI scheme %q does not match endpoint provider %q",
+			scheme,
+			identity.cloudProvider,
+		)
+	}
+	if identity.cloudProvider == "" {
+		identity.cloudProvider = schemeProvider
+	}
+
+	transportKnown := false
+	if identity.cloudProvider == objectstorage.CloudProviderAzure {
+		if endpoint != "" {
+			if identity.azureSuffix == "" {
+				configuredEndpoint, err := effectiveAzureSnapshotEndpoint(cfg)
+				if err != nil {
+					return storageEndpointIdentity{}, false, err
+				}
+				if !strings.EqualFold(configuredEndpoint, endpoint) {
+					return storageEndpointIdentity{}, false, merr.WrapErrParameterInvalidMsg(
+						"Azure snapshot URI endpoint %q does not match the configured endpoint",
+						endpoint,
+					)
+				}
+				cfg.CloudProvider = objectstorage.CloudProviderAzure
+				cfg.UseSSL = true
+				return identity, true, nil
+			}
+			cfg.Address = identity.azureSuffix
+			if identity.azureAccount != "" {
+				cfg.AccessKeyID = identity.azureAccount
+			}
+		}
+		cfg.CloudProvider = objectstorage.CloudProviderAzure
+		cfg.UseSSL = true
+		return identity, true, nil
+	}
+
+	if endpoint != "" {
+		if err := applyEndpointToConfig(cfg, endpoint); err != nil {
+			return storageEndpointIdentity{}, false, err
+		}
+	}
+	if identity.cloudProvider != "" {
+		cfg.CloudProvider = identity.cloudProvider
+	}
+	if identity.region != "" {
+		cfg.Region = identity.region
+	}
+
+	switch scheme {
+	case "https":
+		cfg.UseSSL = true
+		transportKnown = true
+	case "http":
+		cfg.UseSSL = false
+		transportKnown = true
+	case "gs", "gcs":
+		cfg.Address = ""
+		cfg.UseSSL = true
+		transportKnown = true
+	}
+	return identity, transportKnown, nil
 }
 
 func parseSnapshotExternalSpec(externalSpec string) (*externalspec.ExternalSpec, error) {

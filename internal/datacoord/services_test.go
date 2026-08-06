@@ -2904,7 +2904,7 @@ func TestServer_ExportSnapshot_ForwardsForeignStorageFields(t *testing.T) {
 // --- Test rollbackRestoreSnapshot ---
 // Note: The actual DropCollection RPC is tested in internal/datacoord/broker/coordinator_broker_test.go
 
-func TestServer_RollbackRestoreSnapshot(t *testing.T) {
+	func TestServer_RollbackRestoreSnapshot(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 
@@ -3240,6 +3240,10 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
+		mockBuildURI := mockey.Mock(snapshotstorage.BuildInstanceSnapshotURI).
+			Return("https://s3.us-west-2.amazonaws.com/snapshot-bucket/files/snapshots/100/metadata/1.json", nil).
+			Build()
+		defer mockBuildURI.UnPatch()
 
 		// Mock DescribeSnapshot to return snapshot data
 		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).To(
@@ -3271,10 +3275,18 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 		assert.NoError(t, merr.Error(resp.GetStatus()))
 		assert.Equal(t, "test_snapshot", resp.GetSnapshotInfo().GetName())
 		assert.Equal(t, int64(100), resp.GetSnapshotInfo().GetCollectionId())
+		assert.Equal(t,
+			"https://s3.us-west-2.amazonaws.com/snapshot-bucket/files/snapshots/100/metadata/1.json",
+			resp.GetSnapshotInfo().GetS3Location(),
+		)
 	})
 
 	t.Run("success_with_collection_info", func(t *testing.T) {
 		ctx := context.Background()
+		mockBuildURI := mockey.Mock(snapshotstorage.BuildInstanceSnapshotURI).
+			Return("https://s3.us-west-2.amazonaws.com/snapshot-bucket/files/snapshots/100/metadata/1.json", nil).
+			Build()
+		defer mockBuildURI.UnPatch()
 
 		// Mock DescribeSnapshot to return snapshot data with collection info
 		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).To(
@@ -3311,6 +3323,25 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 		assert.NotNil(t, resp.GetCollectionInfo())
 		assert.Equal(t, "test_collection", resp.GetCollectionInfo().GetSchema().GetName())
 		assert.Len(t, resp.GetIndexInfos(), 1)
+	})
+
+	t.Run("missing_snapshot_info", func(t *testing.T) {
+		ctx := context.Background()
+		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).Return(
+			&snapshotstorage.SnapshotData{},
+			nil,
+		).Build()
+		defer mockDescribe.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.DescribeSnapshot(ctx, &datapb.DescribeSnapshotRequest{Name: "invalid_snapshot"})
+
+		require.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
 	})
 }
 

@@ -26,6 +26,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+type storageEndpointIdentity struct {
+	cloudProvider string
+	region        string
+	azureAccount  string
+	azureSuffix   string
+}
+
 func normalizeEndpointHost(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -106,11 +113,90 @@ func effectiveEndpointHost(cfg *objectstorage.Config) string {
 	}
 	host, _ := normalizeEndpointHost(cfg.Address)
 	if host != "" {
-		return host
+		return stripDefaultEndpointPort(host, cfg.UseSSL)
 	}
 	derived := externalspec.DeriveEndpoint(cfg.CloudProvider, cfg.Region)
 	host, _ = normalizeEndpointHost(derived)
+	return stripDefaultEndpointPort(host, cfg.UseSSL)
+}
+
+func stripDefaultEndpointPort(host string, useSSL bool) string {
+	hostname, port, err := net.SplitHostPort(host)
+	if err != nil {
+		return host
+	}
+	if (useSSL && port == "443") || (!useSSL && port == "80") {
+		return strings.Trim(hostname, "[]")
+	}
 	return host
+}
+
+// inferStorageEndpointIdentity recognizes the standard endpoint forms Milvus
+// emits. Custom and provider-specific endpoint variants require explicit
+// external_spec provider settings instead of heuristic classification.
+func inferStorageEndpointIdentity(raw string) storageEndpointIdentity {
+	host, err := normalizeEndpointHost(raw)
+	if err != nil || host == "" {
+		return storageEndpointIdentity{}
+	}
+	host = hostWithoutPort(host)
+
+	for _, suffix := range []string{
+		"core.windows.net",
+		"core.chinacloudapi.cn",
+		"core.usgovcloudapi.net",
+		"core.cloudapi.de",
+	} {
+		marker := ".blob." + suffix
+		if strings.HasSuffix(host, marker) {
+			account := strings.TrimSuffix(host, marker)
+			if account != "" && !strings.Contains(account, ".") {
+				return storageEndpointIdentity{
+					cloudProvider: objectstorage.CloudProviderAzure,
+					azureAccount:  account,
+					azureSuffix:   suffix,
+				}
+			}
+		}
+		if host == suffix {
+			return storageEndpointIdentity{
+				cloudProvider: objectstorage.CloudProviderAzure,
+				azureSuffix:   suffix,
+			}
+		}
+	}
+
+	provider := s3EndpointService(host)
+	identity := storageEndpointIdentity{cloudProvider: provider}
+	switch provider {
+	case objectstorage.CloudProviderAWS:
+		identity.region = endpointRegion(host, "s3.", ".amazonaws.com")
+		if identity.region == "" {
+			identity.region = endpointRegion(host, "s3.", ".amazonaws.com.cn")
+		}
+	case objectstorage.CloudProviderAliyun:
+		identity.region = endpointRegion(host, "oss-", ".aliyuncs.com")
+		identity.region = strings.TrimSuffix(identity.region, "-internal")
+		if identity.region == "accelerate" || identity.region == "accelerate-overseas" {
+			identity.region = ""
+		}
+	case objectstorage.CloudProviderTencent:
+		identity.region = endpointRegion(host, "cos.", ".myqcloud.com")
+	case objectstorage.CloudProviderHuawei:
+		identity.region = endpointRegion(host, "obs.", ".myhuaweicloud.com")
+	}
+	return identity
+}
+
+func endpointRegion(host, prefix, suffix string) string {
+	if !strings.HasPrefix(host, prefix) || !strings.HasSuffix(host, suffix) {
+		return ""
+	}
+	region := strings.TrimSuffix(strings.TrimPrefix(host, prefix), suffix)
+	if strings.Contains(region, ".") {
+		return ""
+	}
+	return region
 }
 
 func isCanonicalCloudEndpoint(host, cloudProvider, region string) bool {

@@ -406,6 +406,7 @@ func (m *snapshotExportManager) executeJob(ctx context.Context, jobID int64) err
 		resolved.ForeignBucket,
 		snapshot,
 		job.GetTargetS3Path(),
+		resolved.ForeignStorageConfig,
 	)
 	if err != nil {
 		return err

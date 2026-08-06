@@ -21,7 +21,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"hash"
 	"net/url"
 	"strconv"
@@ -33,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -64,6 +64,7 @@ func buildSnapshotExportPlan(
 	targetBucket string,
 	snapshot *snapshotstorage.SnapshotData,
 	targetPath string,
+	targetStorageConfig *indexpb.StorageConfig,
 ) (*snapshotExportPlan, error) {
 	if snapshot == nil || snapshot.SnapshotInfo == nil {
 		return nil, merr.WrapErrServiceInternalMsg("snapshot cannot be nil")
@@ -96,17 +97,9 @@ func buildSnapshotExportPlan(
 		snapshot.SnapshotInfo.GetCollectionId(),
 		snapshot.SnapshotInfo.GetId(),
 	)
-	metadataURI := metadataObjectPath
-	parsedTarget, parseErr := url.Parse(targetPath)
-	if parseErr == nil && parsedTarget.Scheme != "" && parsedTarget.Host != "" {
-		metadataURI, err = url.JoinPath(targetPath,
-			snapshotstorage.SnapshotRootPath,
-			fmt.Sprintf("%d", snapshot.SnapshotInfo.GetCollectionId()),
-			snapshotstorage.SnapshotMetadataSubPath,
-			fmt.Sprintf("%d.json", snapshot.SnapshotInfo.GetId()))
-		if err != nil {
-			return nil, merr.WrapErrServiceInternalErr(err, "failed to build snapshot metadata URI")
-		}
+	metadataURI, err := snapshotstorage.BuildStorageConfigSnapshotURI(targetStorageConfig, metadataObjectPath)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to build snapshot metadata URI")
 	}
 	mappings := make(map[string]string, len(refs)*2)
 	items := make([]snapshotExportPlanItem, 0, len(refs))
@@ -126,7 +119,7 @@ func buildSnapshotExportPlan(
 		}
 	}
 	if strings.TrimSpace(sourceBucket) == strings.TrimSpace(targetBucket) {
-		if err := rejectExportObjectOverlap(snapshot, refs, mappings, targetRoot, metadataURI); err != nil {
+		if err := rejectExportObjectOverlap(snapshot, refs, mappings, targetRoot, metadataObjectPath); err != nil {
 			return nil, err
 		}
 	}

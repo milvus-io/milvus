@@ -473,7 +473,7 @@ func TestResolveForeignStorageLayer2RejectsURISchemeProviderMismatch(t *testing.
 		`{"extfs":{"cloud_provider":"aws","region":"us-west-2"}}`,
 	)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), unsupportedServerSideCopyMessage)
+	assert.Contains(t, err.Error(), "does not match snapshot URI provider")
 	assert.Equal(t, merr.InputError, merr.GetErrorType(err))
 	assert.Empty(t, captured)
 }

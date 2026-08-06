@@ -137,7 +137,6 @@ func resolveForeignStorageConfig(
 	foreignCfg.SkipBucketCheck = true
 	hasSpec, storageType, err := applySnapshotExternalSpecToConfig(
 		foreignCfg,
-		instanceCfg,
 		uriScheme,
 		uriEndpoint,
 		externalSpec,
@@ -149,7 +148,7 @@ func resolveForeignStorageConfig(
 	if strings.TrimSpace(foreignCfg.BucketName) == "" {
 		return nil, merr.WrapErrServiceInternal(unsupportedServerSideCopyMessage)
 	}
-	if err := validateProviderEndpointPair(instanceCfg, foreignCfg, uriScheme, uriEndpoint, hasSpec); err != nil {
+	if err := validateProviderEndpointPair(instanceCfg, foreignCfg, uriScheme); err != nil {
 		return nil, err
 	}
 	return &resolvedForeignStorageConfig{
@@ -164,8 +163,6 @@ func validateProviderEndpointPair(
 	instanceCfg *objectstorage.Config,
 	foreignCfg *objectstorage.Config,
 	uriScheme string,
-	uriEndpoint string,
-	hasSpec bool,
 ) error {
 	// Only provider-side copy is implemented. Different provider families or
 	// untrusted custom endpoints would require streaming through Milvus, which
@@ -194,20 +191,14 @@ func validateProviderEndpointPair(
 	if region == "" {
 		region = instanceCfg.Region
 	}
-	if !hasSpec && uriEndpoint != "" {
-		uriHost, err := normalizeEndpointHost(uriEndpoint)
-		if err != nil {
-			return err
-		}
-		if uriHost != "" && instanceHost != "" && uriHost != instanceHost {
-			return merr.WrapErrParameterInvalidMsg(unsupportedServerSideCopyMessage)
-		}
-	}
 
 	switch foreignFamily {
 	case providerFamilyGCPNative:
+		if instanceHost == "" {
+			instanceHost = "storage.googleapis.com"
+		}
 		if foreignHost == "" {
-			return nil
+			foreignHost = "storage.googleapis.com"
 		}
 		if instanceHost == foreignHost ||
 			isCanonicalCloudEndpoint(instanceHost, objectstorage.CloudProviderGCPNative, region) &&
@@ -354,14 +345,13 @@ func providerInfoFromScheme(scheme string) (cloudProvider string, family string)
 }
 
 func sameAzureAccountEndpoint(instanceCfg, foreignCfg *objectstorage.Config) bool {
-	instanceHost := effectiveEndpointHost(instanceCfg)
-	foreignHost := effectiveEndpointHost(foreignCfg)
-	if instanceHost != "" && foreignHost != "" && instanceHost != foreignHost {
+	instanceEndpoint, err := effectiveAzureSnapshotEndpoint(instanceCfg)
+	if err != nil {
 		return false
 	}
-	if instanceCfg.AccessKeyID != "" && foreignCfg.AccessKeyID != "" &&
-		instanceCfg.AccessKeyID != foreignCfg.AccessKeyID {
+	foreignEndpoint, err := effectiveAzureSnapshotEndpoint(foreignCfg)
+	if err != nil {
 		return false
 	}
-	return true
+	return strings.EqualFold(instanceEndpoint, foreignEndpoint)
 }

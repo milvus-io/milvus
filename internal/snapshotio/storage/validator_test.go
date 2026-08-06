@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"net/url"
 	"path"
 	"testing"
 
@@ -41,7 +42,7 @@ func validateSnapshotForeignStorageForTest(
 		return nil, "", "", "", err
 	}
 	cfg := objectstorage.NewDefaultConfig()
-	if _, _, err := applySnapshotExternalSpecToConfig(cfg, objectstorage.NewDefaultConfig(), scheme, endpoint, externalSpec); err != nil {
+	if _, _, err := applySnapshotExternalSpecToConfig(cfg, scheme, endpoint, externalSpec); err != nil {
 		return nil, "", "", "", err
 	}
 	return cfg, bucket, root, scheme, nil
@@ -113,12 +114,8 @@ func TestApplySnapshotExternalSpecUseIAMClearsInheritedCredentials(t *testing.T)
 	cfg.AccessKeyID = "instance-ak"
 	cfg.SecretAccessKeyID = "instance-sk"
 	cfg.GcpCredentialJSON = `{"type":"service_account"}`
-	instanceCfg := objectstorage.NewDefaultConfig()
-	instanceCfg.CloudProvider = objectstorage.CloudProviderGCPNative
-
 	_, _, err := applySnapshotExternalSpecToConfig(
 		cfg,
-		instanceCfg,
 		"gs",
 		"",
 		`{"extfs":{"cloud_provider":"gcpnative","use_iam":"true"}}`,
@@ -136,12 +133,8 @@ func TestApplySnapshotExternalSpecUseIAMPreservesAzureAccountName(t *testing.T) 
 	cfg.AccessKeyID = "azure-account"
 	cfg.SecretAccessKeyID = "instance-account-key"
 	cfg.GcpCredentialJSON = `{"type":"service_account"}`
-	instanceCfg := objectstorage.NewDefaultConfig()
-	instanceCfg.CloudProvider = objectstorage.CloudProviderAzure
-
 	_, _, err := applySnapshotExternalSpecToConfig(
 		cfg,
-		instanceCfg,
 		"azure",
 		"",
 		`{"extfs":{"cloud_provider":"azure","region":"public","use_iam":"true"}}`,
@@ -160,12 +153,8 @@ func TestApplySnapshotExternalSpecAzureRawCredentialsIgnoreConnectionString(t *t
 	cfg.CloudProvider = objectstorage.CloudProviderAzure
 	cfg.AccessKeyID = "instance-account"
 	cfg.SecretAccessKeyID = "instance-key"
-	instanceCfg := objectstorage.NewDefaultConfig()
-	instanceCfg.CloudProvider = objectstorage.CloudProviderAzure
-
 	_, _, err := applySnapshotExternalSpecToConfig(
 		cfg,
-		instanceCfg,
 		"azure",
 		"",
 		`{"extfs":{"cloud_provider":"azure","region":"public","access_key_id":"request-account","access_key_value":"request-key"}}`,
@@ -185,7 +174,6 @@ func TestApplySnapshotExternalSpecIgnoresRequestSSLCACert(t *testing.T) {
 
 	_, _, err := applySnapshotExternalSpecToConfig(
 		cfg,
-		instanceCfg,
 		"s3",
 		"",
 		`{"extfs":{"use_iam":"true","ssl_ca_cert":"request-ca.pem"}}`,
@@ -428,6 +416,134 @@ func TestParseForeignURIRejectsTraversalInSchemelessObjectKey(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "path traversal")
+}
+
+func TestBuildInstanceSnapshotURIRoundTrip(t *testing.T) {
+	objectKey := "files/snapshots/100/metadata/1.json"
+	tests := []struct {
+		name         string
+		cfg          *objectstorage.Config
+		wantURI      string
+		wantProvider string
+		wantRegion   string
+	}{
+		{
+			name: "AWS",
+			cfg: &objectstorage.Config{
+				BucketName: "snapshot-bucket", CloudProvider: objectstorage.CloudProviderAWS,
+				Region: "us-west-2", UseSSL: true,
+			},
+			wantURI:      "https://s3.us-west-2.amazonaws.com/snapshot-bucket/" + objectKey,
+			wantProvider: objectstorage.CloudProviderAWS,
+			wantRegion:   "us-west-2",
+		},
+		{
+			name: "Aliyun",
+			cfg: &objectstorage.Config{
+				BucketName: "snapshot-bucket", CloudProvider: objectstorage.CloudProviderAliyun,
+				Region: "cn-hangzhou", UseSSL: true,
+			},
+			wantURI:      "https://oss-cn-hangzhou.aliyuncs.com/snapshot-bucket/" + objectKey,
+			wantProvider: objectstorage.CloudProviderAliyun,
+			wantRegion:   "cn-hangzhou",
+		},
+		{
+			name: "Tencent",
+			cfg: &objectstorage.Config{
+				BucketName: "snapshot-bucket", CloudProvider: objectstorage.CloudProviderTencent,
+				Region: "ap-shanghai", UseSSL: true,
+			},
+			wantURI:      "https://cos.ap-shanghai.myqcloud.com/snapshot-bucket/" + objectKey,
+			wantProvider: objectstorage.CloudProviderTencent,
+			wantRegion:   "ap-shanghai",
+		},
+		{
+			name: "Huawei",
+			cfg: &objectstorage.Config{
+				BucketName: "snapshot-bucket", CloudProvider: objectstorage.CloudProviderHuawei,
+				Region: "cn-north-4", UseSSL: true,
+			},
+			wantURI:      "https://obs.cn-north-4.myhuaweicloud.com/snapshot-bucket/" + objectKey,
+			wantProvider: objectstorage.CloudProviderHuawei,
+			wantRegion:   "cn-north-4",
+		},
+		{
+			name: "native GCS",
+			cfg: &objectstorage.Config{
+				BucketName: "snapshot-bucket", CloudProvider: objectstorage.CloudProviderGCPNative,
+			},
+			wantURI:      "gs://snapshot-bucket/" + objectKey,
+			wantProvider: objectstorage.CloudProviderGCPNative,
+		},
+		{
+			name: "Azure",
+			cfg: &objectstorage.Config{
+				Address: "core.windows.net", BucketName: "snapshot-container",
+				CloudProvider: objectstorage.CloudProviderAzure, AccessKeyID: "snapshot-account",
+				IgnoreAzureConnectionString: true,
+			},
+			wantURI:      "azure://snapshot-account.blob.core.windows.net/snapshot-container/" + objectKey,
+			wantProvider: objectstorage.CloudProviderAzure,
+		},
+		{
+			name: "MinIO",
+			cfg: &objectstorage.Config{
+				Address: "localhost:9000", BucketName: "snapshot-bucket", CloudProvider: "minio",
+			},
+			wantURI: "http://localhost:9000/snapshot-bucket/" + objectKey,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			uri, err := BuildInstanceSnapshotURI(tt.cfg, objectKey)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantURI, uri)
+
+			bucket, parsedKey, endpoint, err := ParseForeignURI(uri)
+			require.NoError(t, err)
+			assert.Equal(t, tt.cfg.BucketName, bucket)
+			assert.Equal(t, objectKey, parsedKey)
+
+			parsedURI, err := url.Parse(uri)
+			require.NoError(t, err)
+			restored := objectstorage.NewDefaultConfig()
+			_, _, err = applySnapshotExternalSpecToConfig(restored, parsedURI.Scheme, endpoint, "")
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantProvider, restored.CloudProvider)
+			assert.Equal(t, tt.wantRegion, restored.Region)
+		})
+	}
+}
+
+func TestApplySnapshotExternalSpecRejectsURIProviderConflict(t *testing.T) {
+	cfg := objectstorage.NewDefaultConfig()
+	_, _, err := applySnapshotExternalSpecToConfig(
+		cfg,
+		"https",
+		"oss-cn-hangzhou.aliyuncs.com",
+		`{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`,
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not match snapshot URI provider")
+}
+
+func TestBuildStorageConfigSnapshotURIQualifiesObjectKey(t *testing.T) {
+	cfg := storageConfigFromObjectConfig(&objectstorage.Config{
+		BucketName:    "snapshot-bucket",
+		CloudProvider: objectstorage.CloudProviderAliyun,
+		Region:        "cn-hangzhou",
+		UseSSL:        true,
+	}, "remote")
+
+	uri, err := BuildStorageConfigSnapshotURI(cfg, "export-root/snapshots/100/metadata/1.json")
+
+	require.NoError(t, err)
+	assert.Equal(t,
+		"https://oss-cn-hangzhou.aliyuncs.com/snapshot-bucket/export-root/snapshots/100/metadata/1.json",
+		uri,
+	)
 }
 
 func TestDeriveForeignRootRequiresTerminalCanonicalAnchor(t *testing.T) {

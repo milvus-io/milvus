@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -2456,10 +2457,22 @@ func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnaps
 			Status: merr.Status(err),
 		}, nil
 	}
+	if snapshotData == nil || snapshotData.SnapshotInfo == nil {
+		err := merr.WrapErrDataIntegrityMsg("snapshot info cannot be nil")
+		return &datapb.DescribeSnapshotResponse{Status: merr.Status(err)}, nil
+	}
+	snapshotInfo := proto.Clone(snapshotData.SnapshotInfo).(*datapb.SnapshotInfo)
+	snapshotInfo.S3Location, err = snapshotstorage.BuildInstanceSnapshotURI(
+		snapshotstorage.InstanceConfigFromParamtable(Params),
+		snapshotInfo.GetS3Location(),
+	)
+	if err != nil {
+		return &datapb.DescribeSnapshotResponse{Status: merr.Status(err)}, nil
+	}
 
 	resp := &datapb.DescribeSnapshotResponse{
 		Status:       merr.Success(),
-		SnapshotInfo: snapshotData.SnapshotInfo,
+		SnapshotInfo: snapshotInfo,
 	}
 	if req.GetIncludeCollectionInfo() {
 		resp.CollectionInfo = snapshotData.Collection

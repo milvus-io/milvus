@@ -146,6 +146,13 @@ failure reason, total bundle bytes, and the completed bundle metadata URI.
 objects plus generated segment manifests and metadata. The metadata URI is
 empty unless the state is `Completed`.
 
+For remote object storage, `DescribeSnapshot.s3_location` and the completed
+export metadata location are credential-free, complete URIs. Standard
+S3-compatible providers use
+`https://<endpoint>/<bucket>/<object-key>`, native GCS uses `gs://`, and Azure
+uses `azure://<account-endpoint>/<container>/<object-key>`. This keeps the
+provider endpoint available when the snapshot is restored by another cluster.
+
 The final API does not include `foreign_storage_spec`,
 `foreign_credential_ref`, or `external_credential_ref`. Splitting storage config
 and credential reference would create two credential models for one provider
@@ -312,6 +319,11 @@ Layer 2: request `external_spec.extfs`.
 - Snapshot validation is stricter than a generic external spec parser. It must
   reject generic `role_arn`, `gcp_target_service_account`, SAS, anonymous auth,
   source-auth URLs, and independent dual credentials.
+- Endpoint, provider, region, and TLS information encoded by the metadata URI
+  is authoritative. Conflicting `external_spec` values are rejected. Standard
+  AWS, Aliyun, Tencent, Huawei, GCP, and Azure endpoints are recognized;
+  unknown custom endpoints still require explicit provider configuration and
+  the existing endpoint compatibility checks.
 
 Provider notes:
 

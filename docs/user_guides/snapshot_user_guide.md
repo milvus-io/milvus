@@ -171,7 +171,9 @@ Parameters:
 - include_collection_info (bool, optional): Whether to include collection schema and index information
 
 Returns:
-- SnapshotInfo: Basic snapshot information
+- SnapshotInfo: Basic snapshot information. For object-storage snapshots,
+  `s3Location` is a credential-free, complete metadata URI suitable for
+  `RestoreExternalSnapshot`.
 - CollectionDescription: Collection schema and properties (if requested)
 - IndexInfo[]: Index information (if requested)
 
@@ -353,9 +355,10 @@ active so that DataCoord can recover it after restart. The terminal update
 clears the stored spec. Prefer instance credentials and bucket policy when
 possible.
 
-When `targetS3Path` is a complete URI, the completed metadata URI can be passed
-directly to `RestoreExternalSnapshot`. An object-key result must first be
-qualified with the configured bucket URI.
+For remote object storage, the completed job always returns a credential-free,
+complete metadata URI, including when `targetS3Path` was an object key or a
+legacy `s3://` URI. The returned URI can be passed directly to
+`RestoreExternalSnapshot`.
 
 StorageV2 manifest files are copied as ordinary objects; StorageV3 manifest and
 LOB objects are discovered from the packed manifest path.
@@ -401,7 +404,7 @@ POST /v2/vectordb/jobs/snapshot/restore_external
 ```json
 {
   "targetCollectionName": "restored_collection",
-  "snapshotMetadataURI": "s3://bucket/snapshot-exports/backup_20240101/snapshots/100/metadata/1.json",
+  "snapshotMetadataURI": "https://s3.us-west-2.amazonaws.com/bucket/snapshot-exports/backup_20240101/snapshots/100/metadata/1.json",
   "externalSpec": "{\"extfs\":{\"cloud_provider\":\"aws\",\"region\":\"us-west-2\",\"use_iam\":\"true\"}}"
 }
 ```
@@ -410,10 +413,12 @@ POST /v2/vectordb/jobs/snapshot/restore_external
 supported storage URI. `snapshotMetadataURI` must be a complete URI with a
 scheme and host; object keys are rejected before Milvus reads metadata or starts
 restore work. URI query parameters and fragments are rejected, so presigned URLs
-and Azure SAS URLs cannot be used as snapshot credential mechanisms. If export
-used an object-key `targetS3Path`, qualify the returned
-metadata path with the configured bucket URI before restore. `externalSpec` is
-optional. When it is empty, Milvus uses the instance object-storage credential
+and Azure SAS URLs cannot be used as snapshot credential mechanisms. Complete
+URIs returned by `DescribeSnapshot` and completed export jobs can be used
+directly. Standard cloud endpoints identify their provider and region; custom
+endpoints use the provider from `externalSpec` or the target instance storage
+configuration. `externalSpec` is optional. When it is empty, Milvus uses the
+instance object-storage credential
 and relies on bucket policy to authorize the other bucket. When it is set, only
 storage-config-compatible `extfs` fields are accepted. Supported credential
 modes are `use_iam=true`, raw `access_key_id`/`access_key_value`, or native GCS

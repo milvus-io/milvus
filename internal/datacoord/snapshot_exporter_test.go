@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/url"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,6 +47,17 @@ func clearSegmentNonInsertFiles(segment *datapb.SegmentDescription) {
 	segment.JsonKeyIndexFiles = nil
 }
 
+func snapshotExportStorageConfig(bucket string) *indexpb.StorageConfig {
+	cfg := &indexpb.StorageConfig{BucketName: bucket}
+	if bucket != "" {
+		cfg.Address = "s3.us-west-2.amazonaws.com"
+		cfg.CloudProvider = objectstorage.CloudProviderAWS
+		cfg.Region = "us-west-2"
+		cfg.UseSSL = true
+	}
+	return cfg
+}
+
 func exportSnapshot(
 	ctx context.Context,
 	sourceCM storage.ChunkManager,
@@ -56,6 +68,10 @@ func exportSnapshot(
 	snapshot *snapshotstorage.SnapshotData,
 	targetPath string,
 ) (string, error) {
+	targetStorageConfig := snapshotExportStorageConfig(targetBucket)
+	if strings.HasPrefix(targetPath, "/") {
+		targetStorageConfig = &indexpb.StorageConfig{}
+	}
 	plan, err := buildSnapshotExportPlan(
 		ctx,
 		sourceCM,
@@ -64,6 +80,7 @@ func exportSnapshot(
 		targetBucket,
 		snapshot,
 		targetPath,
+		targetStorageConfig,
 	)
 	if err != nil {
 		return "", err
@@ -699,7 +716,13 @@ func TestSnapshotExporter_ExportCrossBucketUsesTargetManagerAndCopier(t *testing
 	snapshotData.BuildIDs = nil
 
 	targetURI := "s3://foreign-bucket/export-root"
-	expectedMetadataURI, err := url.JoinPath(targetURI, snapshotstorage.SnapshotRootPath, "100", snapshotstorage.SnapshotMetadataSubPath, "1.json")
+	expectedMetadataURI, err := url.JoinPath(
+		"https://s3.us-west-2.amazonaws.com/foreign-bucket/export-root",
+		snapshotstorage.SnapshotRootPath,
+		"100",
+		snapshotstorage.SnapshotMetadataSubPath,
+		"1.json",
+	)
 	require.NoError(t, err)
 	expectedCopiedBinlog := path.Join("export-root", snapshotstorage.ExportedSnapshotFilesPath, "files/insert_log/100/1/10/1")
 
@@ -827,22 +850,22 @@ func TestSnapshotExporter_ValidationAndPublicationErrors(t *testing.T) {
 	snapshot := createTestSnapshotDataForMeta()
 
 	t.Run("plan input validation", func(t *testing.T) {
-		_, err := buildSnapshotExportPlan(ctx, cm, cm, "", "", nil, "target")
+		_, err := buildSnapshotExportPlan(ctx, cm, cm, "", "", nil, "target", snapshotExportStorageConfig(""))
 		require.Error(t, err)
-		_, err = buildSnapshotExportPlan(ctx, nil, cm, "", "", snapshot, "target")
+		_, err = buildSnapshotExportPlan(ctx, nil, cm, "", "", snapshot, "target", snapshotExportStorageConfig(""))
 		require.Error(t, err)
-		_, err = buildSnapshotExportPlan(ctx, cm, nil, "", "", snapshot, "target")
+		_, err = buildSnapshotExportPlan(ctx, cm, nil, "", "", snapshot, "target", snapshotExportStorageConfig(""))
 		require.Error(t, err)
-		_, err = buildSnapshotExportPlan(ctx, cm, cm, "", "expected-bucket", snapshot, "s3://other-bucket/target")
+		_, err = buildSnapshotExportPlan(ctx, cm, cm, "", "expected-bucket", snapshot, "s3://other-bucket/target", snapshotExportStorageConfig("expected-bucket"))
 		require.Error(t, err)
-		_, err = buildSnapshotExportPlan(ctx, cm, cm, "", "", snapshot, "/")
+		_, err = buildSnapshotExportPlan(ctx, cm, cm, "", "", snapshot, "/", snapshotExportStorageConfig(""))
 		require.Error(t, err)
 	})
 
 	t.Run("snapshot fingerprint failure", func(t *testing.T) {
 		invalid := createTestSnapshotDataForMeta()
 		invalid.Collection = nil
-		_, err := buildSnapshotExportPlan(ctx, cm, cm, "source-bucket", "target-bucket", invalid, "target")
+		_, err := buildSnapshotExportPlan(ctx, cm, cm, "source-bucket", "target-bucket", invalid, "target", snapshotExportStorageConfig("target-bucket"))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "fingerprint")
 	})

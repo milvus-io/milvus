@@ -18,10 +18,15 @@ package storage
 
 import (
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
+
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -38,6 +43,174 @@ func ParseForeignURI(raw string) (bucket, objectKey, endpointHost string, err er
 // identify the bucket/container root without an object key.
 func ParseForeignRootURI(raw string) (bucket, objectKey, endpointHost string, err error) {
 	return parseForeignURI(raw, true)
+}
+
+// BuildInstanceSnapshotURI qualifies an instance-owned snapshot object key
+// without changing the object-key form stored in the catalog.
+func BuildInstanceSnapshotURI(cfg *objectstorage.Config, objectPath string) (string, error) {
+	if strings.TrimSpace(objectPath) == "" {
+		return "", merr.WrapErrDataIntegrityMsg("snapshot metadata location is empty")
+	}
+	if cfg == nil {
+		return "", merr.WrapErrServiceInternalMsg("instance storage config is nil")
+	}
+
+	bucket := strings.TrimSpace(cfg.BucketName)
+	objectKey := objectPath
+	if hasURITransportScheme(objectPath) {
+		parsedBucket, parsedKey, endpointHost, err := ParseForeignURI(objectPath)
+		if err != nil {
+			return "", merr.WrapErrDataIntegrity(
+				err,
+				"invalid stored snapshot metadata location %q",
+				RedactSnapshotObjectPath(objectPath),
+			)
+		}
+		parsedURI, err := url.Parse(objectPath)
+		if err != nil {
+			return "", merr.WrapErrDataIntegrity(
+				err,
+				"invalid stored snapshot metadata location %q",
+				RedactSnapshotObjectPath(objectPath),
+			)
+		}
+		if endpointHost != "" || CanonicalForeignScheme(parsedURI.Scheme) != "s3" {
+			return objectPath, nil
+		}
+		if bucket == "" {
+			return objectPath, nil
+		}
+		bucket = parsedBucket
+		objectKey = parsedKey
+	} else if err := validateRawObjectKey(objectPath); err != nil {
+		return "", merr.WrapErrDataIntegrity(
+			err,
+			"invalid stored snapshot metadata location %q",
+			RedactSnapshotObjectPath(objectPath),
+		)
+	}
+
+	if bucket == "" {
+		// Local storage has no supported external snapshot URI scheme.
+		return objectPath, nil
+	}
+	return buildSnapshotObjectURI(cfg, bucket, objectKey)
+}
+
+// BuildStorageConfigSnapshotURI builds a credential-free URI from the
+// resolved storage config used by an export worker.
+func BuildStorageConfigSnapshotURI(cfg *indexpb.StorageConfig, objectPath string) (string, error) {
+	if cfg == nil {
+		return "", merr.WrapErrServiceInternalMsg("snapshot storage config is nil")
+	}
+	return buildSnapshotObjectURI(&objectstorage.Config{
+		Address:                     cfg.GetAddress(),
+		BucketName:                  cfg.GetBucketName(),
+		UseSSL:                      cfg.GetUseSSL(),
+		CloudProvider:               cfg.GetCloudProvider(),
+		Region:                      cfg.GetRegion(),
+		AccessKeyID:                 cfg.GetAccessKeyID(),
+		SecretAccessKeyID:           cfg.GetSecretAccessKey(),
+		IgnoreAzureConnectionString: true,
+	}, cfg.GetBucketName(), objectPath)
+}
+
+func buildSnapshotObjectURI(cfg *objectstorage.Config, bucket, objectPath string) (string, error) {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return objectPath, nil
+	}
+	if err := validateRawObjectKey(objectPath); err != nil {
+		return "", merr.WrapErrDataIntegrity(
+			err,
+			"invalid snapshot object path %q",
+			RedactSnapshotObjectPath(objectPath),
+		)
+	}
+	objectKey := strings.TrimLeft(objectPath, "/")
+	uri := &url.URL{}
+
+	switch providerFamily(cfg) {
+	case providerFamilyS3:
+		endpoint := effectiveEndpointHost(cfg)
+		if endpoint == "" {
+			return "", merr.WrapErrServiceInternalMsg("snapshot storage endpoint is empty")
+		}
+		if cfg.UseSSL {
+			uri.Scheme = "https"
+		} else {
+			uri.Scheme = "http"
+		}
+		uri.Host = endpoint
+		uri.Path = path.Join("/", bucket, objectKey)
+	case providerFamilyGCPNative:
+		endpoint := effectiveEndpointHost(cfg)
+		if endpoint == "" || hostWithoutPort(endpoint) == "storage.googleapis.com" {
+			uri.Scheme = "gs"
+			uri.Host = bucket
+			uri.Path = "/" + objectKey
+		} else {
+			if cfg.UseSSL {
+				uri.Scheme = "https"
+			} else {
+				uri.Scheme = "http"
+			}
+			uri.Host = endpoint
+			uri.Path = path.Join("/", bucket, objectKey)
+		}
+	case providerFamilyAzure:
+		endpoint, err := effectiveAzureSnapshotEndpoint(cfg)
+		if err != nil {
+			return "", err
+		}
+		uri.Scheme = "azure"
+		uri.Host = endpoint
+		uri.Path = path.Join("/", bucket, objectKey)
+	default:
+		return "", merr.WrapErrServiceInternalMsg("snapshot storage provider is not supported")
+	}
+
+	result := uri.String()
+	parsedBucket, parsedKey, _, err := ParseForeignURI(result)
+	if err != nil {
+		return "", merr.WrapErrServiceInternalErr(err, "failed to build snapshot metadata URI")
+	}
+	if parsedBucket != bucket || parsedKey != objectKey {
+		return "", merr.WrapErrServiceInternalMsg("snapshot metadata URI changed its bucket or object key")
+	}
+	return result, nil
+}
+
+func effectiveAzureSnapshotEndpoint(cfg *objectstorage.Config) (string, error) {
+	if cfg == nil {
+		return "", merr.WrapErrServiceInternalMsg("Azure storage config is nil")
+	}
+	if !cfg.IgnoreAzureConnectionString {
+		if connectionString := os.Getenv("AZURE_STORAGE_CONNECTION_STRING"); connectionString != "" {
+			client, err := service.NewClientFromConnectionString(connectionString, nil)
+			if err != nil {
+				return "", merr.WrapErrServiceInternalErr(err, "failed to parse Azure storage connection string")
+			}
+			endpoint, err := url.Parse(client.URL())
+			if err != nil {
+				return "", merr.WrapErrServiceInternalErr(err, "failed to resolve Azure storage endpoint")
+			}
+			if endpoint.Host == "" {
+				return "", merr.WrapErrServiceInternalMsg("resolved Azure storage endpoint has no host")
+			}
+			if strings.Trim(endpoint.Path, "/") != "" {
+				return "", merr.WrapErrServiceInternalMsg("Azure storage endpoints with path prefixes are not supported")
+			}
+			return endpoint.Host, nil
+		}
+	}
+
+	account := strings.TrimSpace(cfg.AccessKeyID)
+	suffix := strings.TrimSpace(cfg.Address)
+	if account == "" || suffix == "" {
+		return "", merr.WrapErrServiceInternalMsg("Azure account name and endpoint suffix are required")
+	}
+	return account + ".blob." + suffix, nil
 }
 
 func parseForeignURI(raw string, allowEmptyObjectKey bool) (bucket, objectKey, endpointHost string, err error) {
@@ -76,7 +249,7 @@ func parseForeignURI(raw string, allowEmptyObjectKey bool) (bucket, objectKey, e
 	}
 
 	switch scheme {
-	case "minio", "https":
+	case "minio", "http", "https":
 		minParts := 2
 		if allowEmptyObjectKey {
 			minParts = 1
@@ -168,7 +341,7 @@ func joinURIPathSegments(segments []string) string {
 
 func isSupportedForeignScheme(scheme string) bool {
 	switch scheme {
-	case "s3", "minio", "gs", "gcs", "az", "azure", "https":
+	case "s3", "minio", "gs", "gcs", "az", "azure", "http", "https":
 		return true
 	default:
 		return false
