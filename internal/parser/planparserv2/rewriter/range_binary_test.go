@@ -296,25 +296,22 @@ func TestRewrite_BinaryRange_AND_JSON_DifferentPaths(t *testing.T) {
 	require.Equal(t, planpb.BinaryExpr_LogicalAnd, be.GetOp())
 }
 
-// Test BinaryRangeExpr OR with 3 overlapping intervals
-// NOTE: Current implementation limitation - only merges 2 intervals at a time
-func TestRewrite_BinaryRange_OR_ThreeOverlapping_CurrentLimitation(t *testing.T) {
+// Test BinaryRangeExpr OR with 3 overlapping intervals.
+// The union rule is pairwise, so bottom-up OR processing must preserve the
+// transitive merge from two intervals to the third.
+func TestRewrite_BinaryRange_OR_ThreeOverlapping_Pairwise(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	// (10 < x < 20) OR (15 < x < 25) OR (22 < x < 30)
-	// Ideally should merge to (10 < x < 30)
-	// Currently: may only partially merge due to limitation
+	// → (10 < x < 30)
 	expr, err := parser.ParseExpr(helper, `(Int64Field > 10 and Int64Field < 20) or (Int64Field > 15 and Int64Field < 25) or (Int64Field > 22 and Int64Field < 30)`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Due to current limitation, result may vary depending on tree structure
-	// This test documents the current behavior rather than ideal behavior
-	// When enhancement is implemented, this test should be updated to verify (10 < x < 30)
-
-	// For now, just verify it doesn't crash and produces valid output
-	require.NotNil(t, expr)
-	// Could be BinaryRangeExpr (if some merged) or BinaryExpr OR (if not merged)
-	// We document that 3+ intervals are NOT fully optimized yet
+	bre := expr.GetBinaryRangeExpr()
+	require.NotNil(t, bre)
+	require.Equal(t, int64(10), bre.GetLowerValue().GetInt64Val())
+	require.False(t, bre.GetLowerInclusive())
+	require.Equal(t, int64(30), bre.GetUpperValue().GetInt64Val())
+	require.False(t, bre.GetUpperInclusive())
 }
 
 // Test BinaryRangeExpr OR with 3 fully overlapping intervals
