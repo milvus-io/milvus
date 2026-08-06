@@ -81,6 +81,75 @@ func (kc *Catalog) Update(ctx context.Context, ts typeutil.Timestamp, actions ..
 			default:
 				return merr.WrapErrServiceInternalMsg("rootcoord catalog cannot apply action type %v to CollectionEntry", action.Type)
 			}
+		case metastore.CollectionRenameEntry:
+			// RenameCollection rewrites the collection record with the exact
+			// same encoding as the legacy Catalog.AlterCollection(MODIFY) /
+			// AlterCollectionDB pair, routed on whether the database changed.
+			// The record is the visibility marker of the whole rename: it
+			// lands last on the chunked fallback path, so a crash mid-rename
+			// leaves the collection under its old name (and the rename
+			// retryable) instead of publishing a renamed collection whose
+			// grants are still keyed by the old name.
+			if action.Type != metastore.ActionUpdate {
+				return merr.WrapErrServiceInternalMsg("rootcoord catalog cannot apply action type %v to CollectionRenameEntry", action.Type)
+			}
+			if entry.Old.DBID != entry.New.DBID {
+				saves, removals, err := alterCollectionDBKvs(entry.Old, entry.New)
+				if err != nil {
+					return err
+				}
+				// the record move is a single save/remove pair; both sides
+				// flip together in the final guarded txn.
+				for k, v := range saves {
+					b.CommitSave(k, v)
+				}
+				for _, k := range removals {
+					b.CommitRemove(k)
+				}
+			} else {
+				saves, removals, err := alterModifyCollectionKvs(entry.Old, entry.New, entry.FieldModify)
+				if err != nil {
+					return err
+				}
+				collKey := BuildCollectionKey(entry.New.DBID, entry.New.CollectionID)
+				for _, k := range removals {
+					b.Remove(k)
+				}
+				for k, v := range saves {
+					if k != collKey {
+						b.Save(k, v)
+					}
+				}
+				b.CommitSave(collKey, saves[collKey])
+			}
+		case metastore.GrantMigrateEntry:
+			// MigrateCollectionGrants rewrites every grantee (and grantee-id)
+			// key referencing the old (db, collection) name pair, using the
+			// exact same kv set as the legacy MigrateGrantCollectionName.
+			// This is a read-current-state-then-commit rewrite with no
+			// predicate checks; see the MigrateCollectionGrants constructor
+			// for the serialization the caller must provide.
+			if action.Type != metastore.ActionUpdate {
+				return merr.WrapErrServiceInternalMsg("rootcoord catalog cannot apply action type %v to GrantMigrateEntry", action.Type)
+			}
+			saves, granteeRemovals, idRemovals, err := kc.migrateGrantCollectionNameKvs(ctx, entry.Tenant, entry.OldDBName, entry.OldName, entry.NewDBName, entry.NewName)
+			if err != nil {
+				return err
+			}
+			for k, v := range saves {
+				b.Save(k, v)
+			}
+			// the old grantee-privileges keys are the only index from which a
+			// retry can recompute this rewrite set (their values reference the
+			// grantee-id subtrees), so on the chunked fallback path they must
+			// land after the grantee-id removals - otherwise a crash between
+			// removal chunks permanently orphans the remaining old keys.
+			for _, k := range idRemovals {
+				b.Remove(k)
+			}
+			for _, k := range granteeRemovals {
+				b.Remove(k)
+			}
 		case metastore.RoleEntry:
 			// DropRole appends the exact same keys as the legacy
 			// Catalog.DropRole: user-role mapping removals first, then the

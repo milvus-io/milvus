@@ -1957,6 +1957,84 @@ func buildAlterCollectionSchemaResult(collectionID int64, schema *schemapb.Colle
 	}
 }
 
+func buildAlterCollectionRenameResult(collectionID int64, newName string, timetick uint64) message.BroadcastResultAlterCollectionMessageV2 {
+	controlChannel := funcutil.GetControlChannel("test")
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId: collectionID,
+			UpdateMask: &fieldmaskpb.FieldMask{
+				Paths: []string{message.FieldMaskCollectionName},
+			},
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				CollectionName: newName,
+			},
+		}).
+		WithBroadcast([]string{controlChannel}).
+		MustBuildBroadcast()
+	return message.BroadcastResultAlterCollectionMessageV2{
+		Message: message.MustAsBroadcastAlterCollectionMessageV2(raw),
+		Results: map[string]*message.AppendResult{
+			controlChannel: {TimeTick: timetick},
+		},
+	}
+}
+
+// TestMetaTable_AlterCollection_RenameUsesCompositeUpdate proves the rename
+// branch of AlterCollection issues one composite catalog.Update - grant
+// migration composed before the record rewrite - instead of the legacy
+// AlterCollection + MigrateGrantCollectionName call pair, so a crash cannot
+// leave the collection renamed with its grants still keyed by the old name.
+func TestMetaTable_AlterCollection_RenameUsesCompositeUpdate(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	var gotActions []metastore.UpdateAction
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ uint64, actions ...metastore.UpdateAction) error {
+			gotActions = actions
+			return nil
+		}).Once()
+
+	meta := &MetaTable{
+		catalog: catalog,
+		names:   newNameDb(),
+		aliases: newNameDb(),
+		collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			1: {
+				CollectionID: 1,
+				Name:         "old",
+				DBName:       util.DefaultDBName,
+				DBID:         util.DefaultDBID,
+				State:        pb.CollectionState_CollectionCreated,
+			},
+		},
+	}
+	meta.names.insert(util.DefaultDBName, "old", 1)
+
+	err := meta.AlterCollection(context.Background(), buildAlterCollectionRenameResult(1, "new", 100))
+	assert.NoError(t, err)
+
+	if assert.Len(t, gotActions, 2) {
+		mig, ok := gotActions[0].Entry.(metastore.GrantMigrateEntry)
+		if assert.True(t, ok) {
+			assert.Equal(t, util.DefaultDBName, mig.OldDBName)
+			assert.Equal(t, "old", mig.OldName)
+			assert.Equal(t, util.DefaultDBName, mig.NewDBName)
+			assert.Equal(t, "new", mig.NewName)
+		}
+		ren, ok := gotActions[1].Entry.(metastore.CollectionRenameEntry)
+		if assert.True(t, ok) {
+			assert.Equal(t, "old", ren.Old.Name)
+			assert.Equal(t, "new", ren.New.Name)
+		}
+	}
+
+	id, ok := meta.names.get(util.DefaultDBName, "new")
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), id)
+	assert.Equal(t, "new", meta.collID2Meta[1].Name)
+}
+
 func TestMetaTableAlterCollectionFileResourceRefCnt(t *testing.T) {
 	const (
 		collectionID = int64(100)

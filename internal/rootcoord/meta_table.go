@@ -1096,21 +1096,22 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	}
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if !dbChanged {
+	if oldColl.Name != newColl.Name || oldColl.DBName != newColl.DBName {
+		// a rename commits the record rewrite and the grant migration as one
+		// composite txn, so a crash cannot leave the collection renamed with
+		// its grants still keyed by the old name.
+		if err := mt.catalog.Update(ctx1, newColl.UpdateTimestamp,
+			metastore.MigrateCollectionGrants(util.DefaultTenant, oldColl.DBName, oldColl.Name, newColl.DBName, newColl.Name),
+			metastore.RenameCollection(oldColl, newColl, fieldModify)); err != nil {
+			return err
+		}
+	} else if !dbChanged {
 		if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, fieldModify); err != nil {
 			return err
 		}
 	} else {
 		if err := mt.catalog.AlterCollectionDB(ctx1, oldColl, newColl, newColl.UpdateTimestamp); err != nil {
 			return err
-		}
-	}
-
-	if oldColl.Name != newColl.Name || oldColl.DBName != newColl.DBName {
-		if err := mt.catalog.MigrateGrantCollectionName(ctx1, util.DefaultTenant, oldColl.DBName, oldColl.Name, newColl.DBName, newColl.Name); err != nil {
-			mlog.Warn(ctx, "failed to migrate grants for renamed collection, skipping",
-				mlog.String("oldDBName", oldColl.DBName), mlog.String("oldName", oldColl.Name),
-				mlog.String("newDBName", newColl.DBName), mlog.String("newName", newColl.Name), mlog.Err(err))
 		}
 	}
 

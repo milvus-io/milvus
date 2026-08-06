@@ -175,6 +175,31 @@ type RoleGrantsEntry struct {
 	RoleName string
 }
 
+// CollectionRenameEntry targets a collection's record rewrite for a rename,
+// possibly across databases: Old and New are the collection's before/after
+// values (New already carries the new name and, for a database move, the new
+// DBID).
+type CollectionRenameEntry struct {
+	Old *model.Collection
+	New *model.Collection
+	// FieldModify mirrors the legacy AlterCollection fieldModify flag: when
+	// set, the per-field/function child keys are rewritten alongside the
+	// record. It is only meaningful for a same-database rename; a database
+	// move never rewrites child keys (legacy AlterCollectionDB parity).
+	FieldModify bool
+}
+
+// GrantMigrateEntry targets every grantee key referencing a collection by its
+// old (database, collection) name pair, rewriting it - and its grantee-id
+// subtree - to the new pair.
+type GrantMigrateEntry struct {
+	Tenant    string
+	OldDBName string
+	OldName   string
+	NewDBName string
+	NewName   string
+}
+
 func (SegmentEntry) isEntry()               {}
 func (ChannelEntry) isEntry()               {}
 func (CollectionEntry) isEntry()            {}
@@ -189,6 +214,8 @@ func (ReplicaEntry) isEntry()               {}
 func (ReplicaKeyEntry) isEntry()            {}
 func (RoleEntry) isEntry()                  {}
 func (RoleGrantsEntry) isEntry()            {}
+func (CollectionRenameEntry) isEntry()      {}
+func (GrantMigrateEntry) isEntry()          {}
 
 // UpdateAction is a single composable write against a metastore catalog,
 // applied via that catalog's composite Update. Type and Entry together
@@ -337,6 +364,35 @@ func ReleaseReplica(collectionID, replicaID int64) UpdateAction {
 // visible (and the drop retryable) instead of orphaning its grants.
 func DropRole(tenant string, roleName string) UpdateAction {
 	return UpdateAction{Type: ActionDelete, Entry: RoleEntry{Tenant: tenant, Name: roleName}}
+}
+
+// RenameCollection returns an UpdateAction that rewrites a collection's
+// record for a rename: a same-database rename overwrites the record in place
+// (legacy AlterCollection MODIFY encoding), a database move (old.DBID !=
+// new.DBID) writes the record under the new database and removes the old one
+// (legacy AlterCollectionDB encoding). The record is the visibility marker of
+// the whole rename and lands last on the chunked fallback path, so compose it
+// after the MigrateCollectionGrants action of the same rename.
+func RenameCollection(oldColl, newColl *model.Collection, fieldModify bool) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: CollectionRenameEntry{Old: oldColl, New: newColl, FieldModify: fieldModify}}
+}
+
+// MigrateCollectionGrants returns an UpdateAction that rewrites every grant
+// keyed by the old (db, collection) name pair to the new pair. It reads the
+// current grantee key set at apply time and commits the rewrite without
+// predicate checks, so the caller must serialize it against concurrent grant
+// writes for the same collection; rootcoord renames run under MetaTable's
+// ddLock while grant writes take the permission lock, which keeps the same
+// benign window the legacy MigrateGrantCollectionName call had - a grant
+// issued mid-rename against the old name stays keyed by the old name.
+func MigrateCollectionGrants(tenant, oldDBName, oldName, newDBName, newName string) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: GrantMigrateEntry{
+		Tenant:    tenant,
+		OldDBName: oldDBName,
+		OldName:   oldName,
+		NewDBName: newDBName,
+		NewName:   newName,
+	}}
 }
 
 // DropRoleGrants returns an UpdateAction that removes every grant of a role.

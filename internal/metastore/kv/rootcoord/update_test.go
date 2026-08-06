@@ -432,6 +432,314 @@ func TestCatalog_Update_DropRoleWithGrants_SecondPrefixChunkCrashRetry(t *testin
 	assert.Equal(t, dumpKV(t, legacyKV), dumpKV(t, fk.MemoryKV))
 }
 
+// seedRenameGrants populates a catalog with the fixture used by the
+// rename-with-grants tests: coll1 in db1 (the rename target, returned) with
+// two grants from different roles, plus three canaries that an exact-match
+// migration must leave untouched: a name-prefix sibling (coll1_backup), the
+// same collection name in another database, and a Global grant.
+func seedRenameGrants(t *testing.T, c metastore.RootCoordCatalog) *model.Collection {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	for _, role := range []string{"role1", "role2"} {
+		assert.NoError(t, c.CreateRole(ctx, tenant, &milvuspb.RoleEntity{Name: role}))
+	}
+	grant := func(role, objType, dbName, objName, priv string) {
+		assert.NoError(t, c.AlterGrant(ctx, tenant, &milvuspb.GrantEntity{
+			Role:       &milvuspb.RoleEntity{Name: role},
+			Object:     &milvuspb.ObjectEntity{Name: objType},
+			ObjectName: objName,
+			DbName:     dbName,
+			Grantor: &milvuspb.GrantorEntity{
+				User:      &milvuspb.UserEntity{Name: "root"},
+				Privilege: &milvuspb.PrivilegeEntity{Name: priv},
+			},
+		}, milvuspb.OperatePrivilegeType_Grant))
+	}
+	grant("role1", "Collection", "db1", "coll1", "Insert")
+	grant("role2", "Collection", "db1", "coll1", "Delete")
+	// canaries.
+	grant("role1", "Collection", "db1", "coll1_backup", "Insert")
+	grant("role1", "Collection", "db2", "coll1", "Insert")
+	grant("role1", "Global", "db1", "*", "CreateCollection")
+
+	coll := &model.Collection{
+		CollectionID: 1,
+		DBID:         100,
+		Name:         "coll1",
+		DBName:       "db1",
+		State:        pb.CollectionState_CollectionCreated,
+		Partitions:   []*model.Partition{{PartitionID: 10}},
+		Fields:       []*model.Field{{FieldID: 101}},
+	}
+	assert.NoError(t, c.CreateCollection(ctx, coll, 0))
+	return coll
+}
+
+func renamedColl(coll *model.Collection, newDBID int64, newDBName, newName string) *model.Collection {
+	newColl := coll.Clone()
+	newColl.DBID = newDBID
+	newColl.DBName = newDBName
+	newColl.Name = newName
+	newColl.UpdateTimestamp = 100
+	return newColl
+}
+
+// TestCatalog_Update_RenameCollectionWithGrants_MatchesLegacyBytes proves the
+// new single-txn rename path leaves byte-for-byte the same store state as
+// today's multi-call path (Catalog.AlterCollection/AlterCollectionDB +
+// MigrateGrantCollectionName): record rewritten, grantee and grantee-id keys
+// rekeyed to the new name, canaries of other objects untouched.
+func TestCatalog_Update_RenameCollectionWithGrants_MatchesLegacyBytes(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+
+	t.Run("same db", func(t *testing.T) {
+		legacyKV := memkv.NewMemoryKV()
+		compositeKV := memkv.NewMemoryKV()
+		legacy := NewCatalog(legacyKV)
+		composite := NewCatalog(compositeKV)
+		oldColl := seedRenameGrants(t, legacy)
+		seedRenameGrants(t, composite)
+		newColl := renamedColl(oldColl, oldColl.DBID, "db1", "coll1_renamed")
+
+		// today's two-call path.
+		assert.NoError(t, legacy.AlterCollection(ctx, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false))
+		assert.NoError(t, legacy.MigrateGrantCollectionName(ctx, tenant, "db1", "coll1", "db1", "coll1_renamed"))
+
+		// new single-txn path.
+		assert.NoError(t, composite.Update(ctx, newColl.UpdateTimestamp,
+			metastore.MigrateCollectionGrants(tenant, "db1", "coll1", "db1", "coll1_renamed"),
+			metastore.RenameCollection(oldColl, newColl, false)))
+
+		got := dumpKV(t, compositeKV)
+		assert.Equal(t, dumpKV(t, legacyKV), got)
+		assert.Contains(t, got, GranteePrefix+"/role1/Collection/db1.coll1_renamed")
+		assert.Contains(t, got, GranteePrefix+"/role2/Collection/db1.coll1_renamed")
+		assert.NotContains(t, got, GranteePrefix+"/role1/Collection/db1.coll1")
+		assert.NotContains(t, got, GranteePrefix+"/role2/Collection/db1.coll1")
+		// canaries survive.
+		assert.Contains(t, got, GranteePrefix+"/role1/Collection/db1.coll1_backup")
+		assert.Contains(t, got, GranteePrefix+"/role1/Collection/db2.coll1")
+		assert.Contains(t, got, GranteePrefix+"/role1/Global/db1.*")
+	})
+
+	t.Run("cross db", func(t *testing.T) {
+		legacyKV := memkv.NewMemoryKV()
+		compositeKV := memkv.NewMemoryKV()
+		legacy := NewCatalog(legacyKV)
+		composite := NewCatalog(compositeKV)
+		oldColl := seedRenameGrants(t, legacy)
+		seedRenameGrants(t, composite)
+		newColl := renamedColl(oldColl, 200, "db2", "coll1_renamed")
+
+		// today's two-call path.
+		assert.NoError(t, legacy.AlterCollectionDB(ctx, oldColl, newColl, newColl.UpdateTimestamp))
+		assert.NoError(t, legacy.MigrateGrantCollectionName(ctx, tenant, "db1", "coll1", "db2", "coll1_renamed"))
+
+		// new single-txn path.
+		assert.NoError(t, composite.Update(ctx, newColl.UpdateTimestamp,
+			metastore.MigrateCollectionGrants(tenant, "db1", "coll1", "db2", "coll1_renamed"),
+			metastore.RenameCollection(oldColl, newColl, false)))
+
+		got := dumpKV(t, compositeKV)
+		assert.Equal(t, dumpKV(t, legacyKV), got)
+		// the record moved to the new database.
+		assert.Contains(t, got, BuildCollectionKey(200, oldColl.CollectionID))
+		assert.NotContains(t, got, BuildCollectionKey(100, oldColl.CollectionID))
+		assert.Contains(t, got, GranteePrefix+"/role1/Collection/db2.coll1_renamed")
+		assert.NotContains(t, got, GranteePrefix+"/role1/Collection/db1.coll1")
+		// canaries survive.
+		assert.Contains(t, got, GranteePrefix+"/role1/Collection/db1.coll1_backup")
+		assert.Contains(t, got, GranteePrefix+"/role1/Collection/db2.coll1")
+	})
+}
+
+// TestCatalog_Update_RenameCollectionWithGrants_SingleTxn proves the whole
+// rename - record rewrite plus grant migration - is one MultiSaveAndRemove
+// transaction.
+func TestCatalog_Update_RenameCollectionWithGrants_SingleTxn(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	mk := memkv.NewMemoryKV()
+	oldColl := seedRenameGrants(t, NewCatalog(mk))
+	newColl := renamedColl(oldColl, oldColl.DBID, "db1", "coll1_renamed")
+
+	rec := &writeRecordingKV{MemoryKV: mk}
+	c := NewCatalog(rec)
+	assert.NoError(t, c.Update(ctx, 0,
+		metastore.MigrateCollectionGrants(tenant, "db1", "coll1", "db1", "coll1_renamed"),
+		metastore.RenameCollection(oldColl, newColl, false)))
+	assert.Equal(t, []string{"MultiSaveAndRemove"}, rec.calls)
+}
+
+// flakySaveRemoveKV fails the first MultiSaveAndRemove to simulate a crash of
+// the atomic commit.
+type flakySaveRemoveKV struct {
+	*memkv.MemoryKV
+	failures int
+}
+
+func (f *flakySaveRemoveKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	if f.failures > 0 {
+		f.failures--
+		return errors.New("injected crash")
+	}
+	return f.MemoryKV.MultiSaveAndRemove(ctx, saves, removals, preds...)
+}
+
+// TestCatalog_Update_RenameCollectionWithGrants_AtomicCrashRetry: a failed
+// atomic commit must leave the store untouched - collection record, database
+// pointer and grant keys all still old - and retrying the same composite
+// rename must converge to exactly the legacy multi-call end state.
+func TestCatalog_Update_RenameCollectionWithGrants_AtomicCrashRetry(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+
+	legacyKV := memkv.NewMemoryKV()
+	legacy := NewCatalog(legacyKV)
+	oldColl := seedRenameGrants(t, legacy)
+	newColl := renamedColl(oldColl, 200, "db2", "coll1_renamed")
+	assert.NoError(t, legacy.AlterCollectionDB(ctx, oldColl, newColl, newColl.UpdateTimestamp))
+	assert.NoError(t, legacy.MigrateGrantCollectionName(ctx, tenant, "db1", "coll1", "db2", "coll1_renamed"))
+
+	fk := &flakySaveRemoveKV{MemoryKV: memkv.NewMemoryKV(), failures: 1}
+	seedRenameGrants(t, NewCatalog(fk.MemoryKV))
+	before := dumpKV(t, fk.MemoryKV)
+
+	c := NewCatalog(fk)
+	rename := func() error {
+		return c.Update(ctx, 0,
+			metastore.MigrateCollectionGrants(tenant, "db1", "coll1", "db2", "coll1_renamed"),
+			metastore.RenameCollection(oldColl, newColl, false))
+	}
+	assert.Error(t, rename())
+	// atomic: the failed commit applied nothing, everything is all-old.
+	assert.Equal(t, before, dumpKV(t, fk.MemoryKV))
+
+	assert.NoError(t, rename())
+	assert.Equal(t, dumpKV(t, legacyKV), dumpKV(t, fk.MemoryKV))
+}
+
+// commitCrashKV shrinks MaxTxnOps so the composite takes the chunked fallback
+// and fails the final guarded commit txn - the only MultiSaveAndRemove call
+// carrying saves - simulating a crash right before the visibility marker
+// lands.
+type commitCrashKV struct {
+	*memkv.MemoryKV
+	failures int
+}
+
+func (f *commitCrashKV) MaxTxnOps() int { return 2 }
+
+func (f *commitCrashKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	if len(saves) > 0 && f.failures > 0 {
+		f.failures--
+		return errors.New("injected crash")
+	}
+	return f.MemoryKV.MultiSaveAndRemove(ctx, saves, removals, preds...)
+}
+
+// TestCatalog_Update_RenameCollectionWithGrants_FallbackCommitCrashRetry: on
+// the chunked fallback path the collection record is the visibility marker of
+// the rename. A crash before the final commit txn must leave the record (and
+// for a database move, the database pointer) all-old - never a renamed record
+// with grants half-migrated - and the retry must converge to the legacy end
+// state.
+func TestCatalog_Update_RenameCollectionWithGrants_FallbackCommitCrashRetry(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+
+	legacyKV := memkv.NewMemoryKV()
+	legacy := NewCatalog(legacyKV)
+	oldColl := seedRenameGrants(t, legacy)
+	newColl := renamedColl(oldColl, 200, "db2", "coll1_renamed")
+	assert.NoError(t, legacy.AlterCollectionDB(ctx, oldColl, newColl, newColl.UpdateTimestamp))
+	assert.NoError(t, legacy.MigrateGrantCollectionName(ctx, tenant, "db1", "coll1", "db2", "coll1_renamed"))
+
+	fk := &commitCrashKV{MemoryKV: memkv.NewMemoryKV(), failures: 1}
+	seedRenameGrants(t, NewCatalog(fk.MemoryKV))
+	before := dumpKV(t, fk.MemoryKV)
+
+	c := NewCatalog(fk)
+	rename := func() error {
+		return c.Update(ctx, 0,
+			metastore.MigrateCollectionGrants(tenant, "db1", "coll1", "db2", "coll1_renamed"),
+			metastore.RenameCollection(oldColl, newColl, false))
+	}
+	assert.Error(t, rename())
+	// crash-safety: the record still sits under the old database with the old
+	// bytes, and nothing was published under the new database.
+	got := dumpKV(t, fk.MemoryKV)
+	oldCollKey := BuildCollectionKey(100, oldColl.CollectionID)
+	assert.Equal(t, before[oldCollKey], got[oldCollKey])
+	assert.NotContains(t, got, BuildCollectionKey(200, oldColl.CollectionID))
+
+	assert.NoError(t, rename())
+	assert.Equal(t, dumpKV(t, legacyKV), dumpKV(t, fk.MemoryKV))
+}
+
+// granteeChunkCrashKV shrinks MaxTxnOps so the exact-removal run splits into
+// chunks and fails the second one - the chunk carrying the old grantee keys -
+// simulating a crash after the grantee-id removals but before the rediscovery
+// index is gone.
+type granteeChunkCrashKV struct {
+	*memkv.MemoryKV
+	delCalls   int
+	failAtCall int
+}
+
+func (f *granteeChunkCrashKV) MaxTxnOps() int { return 2 }
+
+func (f *granteeChunkCrashKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	if len(saves) == 0 {
+		f.delCalls++
+		if f.delCalls == f.failAtCall {
+			return errors.New("injected crash")
+		}
+	}
+	return f.MemoryKV.MultiSaveAndRemove(ctx, saves, removals, preds...)
+}
+
+// TestCatalog_Update_RenameCollectionWithGrants_GranteeIndexChunkCrashRetry:
+// on the chunked fallback path the old grantee-privileges keys are the only
+// index from which a retry can recompute the migration's rewrite set (and
+// reach the grantee-id subtrees via their values), so they must be removed
+// last. A crash between removal chunks must leave them intact so the retry
+// converges to the legacy end state instead of stranding half-renamed grants.
+func TestCatalog_Update_RenameCollectionWithGrants_GranteeIndexChunkCrashRetry(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+
+	legacyKV := memkv.NewMemoryKV()
+	legacy := NewCatalog(legacyKV)
+	oldColl := seedRenameGrants(t, legacy)
+	newColl := renamedColl(oldColl, oldColl.DBID, "db1", "coll1_renamed")
+	assert.NoError(t, legacy.AlterCollection(ctx, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false))
+	assert.NoError(t, legacy.MigrateGrantCollectionName(ctx, tenant, "db1", "coll1", "db1", "coll1_renamed"))
+
+	fk := &granteeChunkCrashKV{MemoryKV: memkv.NewMemoryKV(), failAtCall: 2}
+	seedRenameGrants(t, NewCatalog(fk.MemoryKV))
+	before := dumpKV(t, fk.MemoryKV)
+
+	c := NewCatalog(fk)
+	rename := func() error {
+		return c.Update(ctx, 0,
+			metastore.MigrateCollectionGrants(tenant, "db1", "coll1", "db1", "coll1_renamed"),
+			metastore.RenameCollection(oldColl, newColl, false))
+	}
+	assert.Error(t, rename())
+	got := dumpKV(t, fk.MemoryKV)
+	// the rediscovery index must have survived the crash.
+	assert.Contains(t, got, GranteePrefix+"/role1/Collection/db1.coll1")
+	assert.Contains(t, got, GranteePrefix+"/role2/Collection/db1.coll1")
+	// the visibility marker has not flipped: record bytes still old.
+	collKey := BuildCollectionKey(oldColl.DBID, oldColl.CollectionID)
+	assert.Equal(t, before[collKey], got[collKey])
+
+	assert.NoError(t, rename())
+	assert.Equal(t, dumpKV(t, legacyKV), dumpKV(t, fk.MemoryKV))
+}
+
 // TestCatalog_Update_DropRoleWithGrants_FallbackCrashRetry: on the chunked
 // fallback path a crash before the commit marker must leave the role record
 // visible (so the drop is observably incomplete and retryable, never a

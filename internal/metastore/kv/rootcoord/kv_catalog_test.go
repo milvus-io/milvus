@@ -4686,7 +4686,10 @@ func TestMigrateGrantCollectionName(t *testing.T) {
 				newKey2:   newIdStr2,
 				newIDKey1: "root", newIDKey2a: "root", newIDKey2b: "admin",
 			},
-			[]string{key1, oldIDEntry1, key2, oldIDEntry2a, oldIDEntry2b}).Return(nil)
+			// grantee keys are listed before grantee-id keys (the order within
+			// one txn is irrelevant; migrateGrantCollectionNameKvs returns the
+			// two classes split for the composite Update's fallback ordering).
+			[]string{key1, key2, oldIDEntry1, oldIDEntry2a, oldIDEntry2b}).Return(nil)
 
 		err := c.MigrateGrantCollectionName(ctx, tenant, "default", "old_col", "default", "new_col")
 		assert.NoError(t, err)

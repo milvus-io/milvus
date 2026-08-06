@@ -743,12 +743,15 @@ func buildDropCollectionKeys(collectionInfo *model.Collection) (string, []string
 	return collectionKey, delMetakeysSnap
 }
 
-func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp, fieldModify bool) error {
+// alterModifyCollectionKvs computes the kv set an in-place collection
+// modification persists; it is shared by the legacy alterModifyCollection
+// path and the composite Update rename path so both stay byte-identical.
+func alterModifyCollectionKvs(oldColl *model.Collection, newColl *model.Collection, fieldModify bool) (map[string]string, []string, error) {
 	if oldColl.TenantID != newColl.TenantID || oldColl.CollectionID != newColl.CollectionID {
-		return merr.WrapErrParameterInvalidMsg("altering tenant id or collection id is forbidden")
+		return nil, nil, merr.WrapErrParameterInvalidMsg("altering tenant id or collection id is forbidden")
 	}
 	if oldColl.DBID != newColl.DBID {
-		return merr.WrapErrParameterInvalidMsg("altering dbID should use `AlterCollectionDB` interface")
+		return nil, nil, merr.WrapErrParameterInvalidMsg("altering dbID should use `AlterCollectionDB` interface")
 	}
 	oldCollClone := oldColl.Clone()
 	oldCollClone.DBID = newColl.DBID
@@ -775,7 +778,7 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 	newKey := BuildCollectionKey(newColl.DBID, oldColl.CollectionID)
 	value, err := proto.Marshal(model.MarshalCollectionModel(oldCollClone))
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	saves := map[string]string{newKey: string(value)}
 	removals := []string{}
@@ -789,7 +792,7 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 			fieldInfo := model.MarshalFieldModel(field)
 			v, err := proto.Marshal(fieldInfo)
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
 			saves[k] = string(v)
 		}
@@ -806,7 +809,7 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 			structArrayFieldInfo := model.MarshalStructArrayFieldModel(structArrayField)
 			v, err := proto.Marshal(structArrayFieldInfo)
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
 			saves[k] = string(v)
 		}
@@ -823,7 +826,7 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 			functionInfo := model.MarshalFunctionModel(function)
 			v, err := proto.Marshal(functionInfo)
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
 			saves[k] = string(v)
 		}
@@ -832,6 +835,15 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 				removals = append(removals, BuildFunctionKey(oldColl.CollectionID, function.ID))
 			}
 		}
+	}
+
+	return saves, removals, nil
+}
+
+func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp, fieldModify bool) error {
+	saves, removals, err := alterModifyCollectionKvs(oldColl, newColl, fieldModify)
+	if err != nil {
+		return err
 	}
 
 	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
@@ -855,20 +867,29 @@ func (kc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collectio
 	}
 }
 
-func (kc *Catalog) AlterCollectionDB(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp) error {
+// alterCollectionDBKvs computes the kv set a collection database move
+// persists; it is shared by the legacy AlterCollectionDB path and the
+// composite Update rename path so both stay byte-identical.
+func alterCollectionDBKvs(oldColl *model.Collection, newColl *model.Collection) (map[string]string, []string, error) {
 	if oldColl.TenantID != newColl.TenantID || oldColl.CollectionID != newColl.CollectionID {
-		return merr.WrapErrParameterInvalidMsg("altering tenant id or collection id is forbidden")
+		return nil, nil, merr.WrapErrParameterInvalidMsg("altering tenant id or collection id is forbidden")
 	}
 	oldKey := BuildCollectionKey(oldColl.DBID, oldColl.CollectionID)
 	newKey := BuildCollectionKey(newColl.DBID, newColl.CollectionID)
 
 	value, err := proto.Marshal(model.MarshalCollectionModel(newColl))
 	if err != nil {
+		return nil, nil, err
+	}
+	return map[string]string{newKey: string(value)}, []string{oldKey}, nil
+}
+
+func (kc *Catalog) AlterCollectionDB(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp) error {
+	saves, removals, err := alterCollectionDBKvs(oldColl, newColl)
+	if err != nil {
 		return err
 	}
-	saves := map[string]string{newKey: string(value)}
-
-	return kc.Txn.MultiSaveAndRemove(ctx, saves, []string{oldKey})
+	return kc.Txn.MultiSaveAndRemove(ctx, saves, removals)
 }
 
 func (kc *Catalog) alterModifyPartition(ctx context.Context, oldPart *model.Partition, newPart *model.Partition, ts typeutil.Timestamp) error {
@@ -1863,17 +1884,25 @@ func (kc *Catalog) DeleteGrantByCollectionName(ctx context.Context, tenant strin
 	return nil
 }
 
-func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string, oldDBName string, oldName string, newDBName string, newName string) error {
+// migrateGrantCollectionNameKvs reads the current grantee subtree and computes
+// the rewrite set of a collection rename: saves are the new-name grantee and
+// grantee-id keys, granteeRemovals the old grantee-privileges keys and
+// idRemovals the old grantee-id keys. It is shared by the legacy
+// MigrateGrantCollectionName path and the composite Update rename path so both
+// stay byte-identical. The removals are returned split because the old
+// grantee-privileges keys are the only index from which a retry can recompute
+// this rewrite set (their values reference the grantee-id subtrees), so a
+// non-atomic applier must remove them after every other key.
+func (kc *Catalog) migrateGrantCollectionNameKvs(ctx context.Context, tenant string, oldDBName string, oldName string, newDBName string, newName string) (saves map[string]string, granteeRemovals []string, idRemovals []string, err error) {
 	granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 	keys, values, err := kc.Txn.LoadWithPrefix(ctx, granteeKey)
 	if err != nil {
 		mlog.Warn(ctx, "fail to load grant privilege entities for collection migration",
 			mlog.String("key", granteeKey), mlog.Err(err))
-		return err
+		return nil, nil, nil, err
 	}
 
-	saves := make(map[string]string)
-	var removeKeys []string
+	saves = make(map[string]string)
 	for i, key := range keys {
 		grantInfos := typeutil.AfterN(key, granteeKey, "/")
 		if len(grantInfos) != 3 {
@@ -1893,11 +1922,11 @@ func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string
 			if isLegacyGranteeID(oldIdStr) {
 				otherGranteeKey, err := findOtherGranteeWithIDFromKeys(ctx, granteeKey, oldKey, oldIdStr, keys, values)
 				if err != nil {
-					removeKeys = append(removeKeys, oldKey)
+					granteeRemovals = append(granteeRemovals, oldKey)
 					continue
 				}
 				if otherGranteeKey != "" {
-					removeKeys = append(removeKeys, oldKey)
+					granteeRemovals = append(granteeRemovals, oldKey)
 					continue
 				}
 			}
@@ -1920,7 +1949,7 @@ func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string
 			newKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, grantInfos[0], grantInfos[1], newObjName)
 			newIdStr := crypto.GranteeID(newKey)
 			saves[newKey] = newIdStr
-			removeKeys = append(removeKeys, oldKey)
+			granteeRemovals = append(granteeRemovals, oldKey)
 
 			// Migrate GranteeIDPrefix entries from oldIdStr to newIdStr
 			for j, idKey := range idKeys {
@@ -1936,14 +1965,27 @@ func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string
 				saves[newIDKey] = idValues[j]
 				// Reconstruct logical key for deletion
 				oldIDKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, oldIdStr, privilegeName)
-				removeKeys = append(removeKeys, oldIDKey)
+				idRemovals = append(idRemovals, oldIDKey)
 			}
 		}
 	}
 
-	if len(removeKeys) == 0 {
+	return saves, granteeRemovals, idRemovals, nil
+}
+
+func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string, oldDBName string, oldName string, newDBName string, newName string) error {
+	saves, granteeRemovals, idRemovals, err := kc.migrateGrantCollectionNameKvs(ctx, tenant, oldDBName, oldName, newDBName, newName)
+	if err != nil {
+		return err
+	}
+
+	if len(granteeRemovals)+len(idRemovals) == 0 {
 		return nil
 	}
+
+	removeKeys := make([]string, 0, len(granteeRemovals)+len(idRemovals))
+	removeKeys = append(removeKeys, granteeRemovals...)
+	removeKeys = append(removeKeys, idRemovals...)
 
 	// Use MultiSaveAndRemove (exact deletion) instead of prefix-based deletion
 	// to avoid accidentally matching keys like col1_backup when removing col1
