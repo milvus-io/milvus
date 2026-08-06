@@ -15,7 +15,6 @@ type walCtxKey int
 
 var (
 	extraAppendResultValue walCtxKey = 1
-	notPersistedValue      walCtxKey = 2
 	metricsValue           walCtxKey = 3
 	flushFromOldArchValue  walCtxKey = 4
 )
@@ -26,25 +25,6 @@ type ExtraAppendResult struct {
 	TxnCtx                 *message.TxnContext
 	Extra                  protoreflect.ProtoMessage
 	LastConfirmedMessageID message.MessageID
-}
-
-// NotPersistedHint is the hint of not persisted message.
-type NotPersistedHint struct {
-	MessageID message.MessageID // The reused MessageID.
-}
-
-// WithNotPersisted set not persisted message to context
-func WithNotPersisted(ctx context.Context, hint *NotPersistedHint) context.Context {
-	return context.WithValue(ctx, notPersistedValue, hint)
-}
-
-// GetNotPersisted get not persisted message from context
-func GetNotPersisted(ctx context.Context) *NotPersistedHint {
-	val := ctx.Value(notPersistedValue)
-	if val == nil {
-		return nil
-	}
-	return val.(*NotPersistedHint)
 }
 
 // WithExtraAppendResult set extra to context

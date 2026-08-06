@@ -7,9 +7,12 @@ create per-VChannel query MVCC entries. WAL recovery uses a separate
 [RecoveryBarrier](message-semantic-recovery-barrier.md) message when it needs to
 establish a query-resource baseline for every recovered live VChannel.
 
-## IsPersist
+## Persistence
 
-TimeTick messages have an **IsPersist** flag. Persisted when real data messages exist in the batch; non-persisted for idle sync ticks (skips WAL backend write but still flows through interceptors and WriteAheadBuffer).
+TimeTick messages produced by the WAL are persisted. A regular idle sync does
+not create a TimeTick message when there are no real data messages in the batch.
+Callers that require a durable boundary can explicitly force a persisted
+TimeTick.
 
 ## Example
 

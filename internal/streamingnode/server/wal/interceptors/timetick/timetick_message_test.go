@@ -13,30 +13,18 @@ func TestNewTimeTickMsg(t *testing.T) {
 	lastConfirmedMessageID := walimplstest.NewTestMessageID(1)
 	messageID := walimplstest.NewTestMessageID(2)
 	sourceID := int64(42)
-	persist := true
 
-	// Test with persist = true and lastConfirmedMessageID provided
-	msg := NewTimeTickMsg(ts, lastConfirmedMessageID, sourceID, persist)
+	msg := NewTimeTickMsg(ts, lastConfirmedMessageID, sourceID)
 	immutableMsg := msg.IntoImmutableMessage(messageID)
 	assert.NotNil(t, msg)
 	assert.Equal(t, ts, msg.TimeTick())
 	assert.True(t, immutableMsg.IsPersisted())
 	assert.True(t, immutableMsg.LastConfirmedMessageID().EQ(lastConfirmedMessageID))
 
-	// Test with persist = false and lastConfirmedMessageID provided
-	persist = false
-	msg = NewTimeTickMsg(ts, lastConfirmedMessageID, sourceID, persist)
-	immutableMsg = msg.IntoImmutableMessage(messageID)
-	assert.NotNil(t, msg)
-	assert.Equal(t, ts, msg.TimeTick())
-	assert.True(t, immutableMsg.LastConfirmedMessageID().EQ(lastConfirmedMessageID))
-	assert.False(t, msg.IsPersisted())
-
-	// Test with persist = false and lastConfirmedMessageID nil
-	msg = NewTimeTickMsg(ts, nil, sourceID, persist)
+	msg = NewTimeTickMsg(ts, nil, sourceID)
 	immutableMsg = msg.IntoImmutableMessage(messageID)
 	assert.NotNil(t, msg)
 	assert.Equal(t, ts, msg.TimeTick())
 	assert.True(t, immutableMsg.LastConfirmedMessageID().EQ(messageID))
-	assert.False(t, msg.IsPersisted())
+	assert.True(t, immutableMsg.IsPersisted())
 }

@@ -9,7 +9,6 @@ import (
 // WriteAheadBufferReader is used to read messages from WriteAheadBuffer.
 type WriteAheadBufferReader struct {
 	nextOffset    int
-	lastTimeTick  uint64
 	snapshot      []messageWithOffset
 	underlyingBuf *WriteAheadBuffer
 }
@@ -21,7 +20,7 @@ func (r *WriteAheadBufferReader) Next(ctx context.Context) (message.ImmutableMes
 		return msg, nil
 	}
 
-	snapshot, err := r.underlyingBuf.createSnapshotFromOffset(ctx, r.nextOffset, r.lastTimeTick)
+	snapshot, err := r.underlyingBuf.createSnapshotFromOffset(ctx, r.nextOffset)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +39,6 @@ func (r *WriteAheadBufferReader) nextFromSnapshot() message.ImmutableMessage {
 		panic("unreachable: next offset should be monotonically increasing")
 	}
 	r.nextOffset = newNextOffset
-	r.lastTimeTick = nextMsg.Message.TimeTick()
 	r.snapshot = r.snapshot[1:]
 	return nextMsg.Message
 }

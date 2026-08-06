@@ -6,6 +6,7 @@ package resource
 import (
 	"context"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -60,4 +62,6 @@ func InitForTest(t *testing.T, opts ...optResourceInit) {
 	}
 	r.segmentStatsManager = stats.NewStatsManager()
 	r.timeTickInspector = tinspector.NewTimeTickSyncInspector()
+	r.wabMaintenanceManager = wab.NewMaintenanceManager(time.Second)
+	t.Cleanup(r.wabMaintenanceManager.Close)
 }

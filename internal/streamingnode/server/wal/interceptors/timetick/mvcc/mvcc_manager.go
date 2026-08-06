@@ -51,8 +51,8 @@ func (cm *MVCCManager) ApplyRecoveryBarrier(vchannel string, timetick uint64) {
 // UpdateMVCC updates the mvcc state by incoming message.
 func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 	if !msg.IsPersisted() {
-		// A unpersisted message is always a time tick message that is used to sync up the system time.
-		// No data change should be made by this message so it should be ignored in the mvcc manager.
+		// Compatibility guard for externally constructed non-persisted messages.
+		// The WAL no longer produces non-persisted TimeTick messages.
 		return
 	}
 

@@ -11,16 +11,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
-func TestWithNotPersisted(t *testing.T) {
-	ctx := context.Background()
-	hint := &NotPersistedHint{MessageID: walimplstest.NewTestMessageID(1)}
-	ctx = WithNotPersisted(ctx, hint)
-
-	retrievedHint := GetNotPersisted(ctx)
-	assert.NotNil(t, retrievedHint)
-	assert.True(t, retrievedHint.MessageID.EQ(hint.MessageID))
-}
-
 func TestWithExtraAppendResult(t *testing.T) {
 	ctx := context.Background()
 	extra := &anypb.Any{}

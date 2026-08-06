@@ -32,7 +32,7 @@ func TestTimeTickSyncOperator(t *testing.T) {
 	msgID := walimplstest.NewTestMessageID(1)
 	channel := types.PChannelInfo{Name: "test", Term: 1}
 	ts, _ := resource.Resource().TSOAllocator().Allocate(ctx)
-	lastMsg := NewTimeTickMsg(ts, nil, 0, true)
+	lastMsg := NewTimeTickMsg(ts, nil, 0)
 	immutablelastMsg := lastMsg.IntoImmutableMessage(msgID)
 
 	param := &interceptors.InterceptorBuildParam{
@@ -40,6 +40,7 @@ func TestTimeTickSyncOperator(t *testing.T) {
 		WAL:                 walFuture,
 		LastTimeTickMessage: immutablelastMsg,
 		WriteAheadBuffer: wab.NewWriteAheadBuffer(
+			resource.Resource().WABMaintenanceManager(),
 			channel.Name,
 			resource.Resource().Logger().With(),
 			1024,

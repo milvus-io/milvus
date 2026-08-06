@@ -79,8 +79,8 @@ that VChannel after recovery.
 
 ## Invariants
 
-- `RecoveryBarrier` must be persisted in the WAL. A non-persisted idle tick is
-  not sufficient.
+- `RecoveryBarrier` must be persisted in the WAL. An in-memory idle sync is not
+  sufficient.
 - `RecoveryBarrier` is appended before recovery stream replay starts and is
   consumed as part of that replay.
 - Successful append of the barrier proves the recovering node can write the
