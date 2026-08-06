@@ -17,11 +17,11 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/analyzer/canalyzer"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // MinHashFunctionRunner
@@ -95,11 +95,15 @@ func NewMinHashFunctionRunner(
 	if inputField == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("no input field")
 	}
-
-	params := getAnalyzerParams(inputField)
-	tokenizer, err := analyzer.NewAnalyzer(params, "")
+	if outputField.GetDataType() != schemapb.DataType_BinaryVector {
+		return nil, merr.WrapErrFunctionFailedMsg("minhash function output field '%s' is not binary vector type", outputField.GetName())
+	}
+	outputDim, err := typeutil.GetDim(outputField)
 	if err != nil {
-		return nil, err
+		return nil, merr.WrapErrFunctionFailed(err, "failed to read minhash output field dimension")
+	}
+	if outputDim <= 0 || outputDim%32 != 0 {
+		return nil, merr.WrapErrFunctionFailedMsg("minhash function output field '%s' dim %d is invalid(dim > 0, dim %% 32 == 0)", outputField.GetName(), outputDim)
 	}
 
 	numHashes := 0
@@ -156,26 +160,24 @@ func NewMinHashFunctionRunner(
 		}
 	}
 	if numHashes <= 0 {
-		// auto generate numHashes from output field dim
-		var outputDim int64 = -1
-
-		for _, param := range outputField.GetTypeParams() {
-			if param.GetKey() == "dim" {
-				val, err := strconv.ParseInt(param.GetValue(), 10, 64)
-				if err == nil {
-					outputDim = val
-					break
-				}
-			}
-		}
-		if outputDim <= 0 || outputDim%32 != 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("minhash function output field '%s' dim not found or invalid(dim > 0, dim %% 32 == 0)", outputField.GetName())
-		}
+		// Keep the derived value runner-local. funSchema is shared with the
+		// compaction plan and may be read by concurrent runner constructions.
 		numHashes = int(outputDim / 32)
-		funSchema.Params = append(funSchema.Params, &commonpb.KeyValuePair{
-			Key:   NumHashesKey,
-			Value: strconv.Itoa(numHashes),
-		})
+	}
+	// Compare via division: outputDim is validated positive and %32==0 above,
+	// while numHashes*32 can wrap around int64 and defeat the check.
+	if int64(numHashes) != outputDim/32 {
+		return nil, merr.WrapErrFunctionFailedMsg(
+			"minhash function output field '%s' dim %d does not match expected dim for num_hashes %d (dim must be num_hashes * 32)",
+			outputField.GetName(), outputDim, numHashes)
+	}
+
+	// Create the native tokenizer only after every pure-Go validation succeeds;
+	// no error-returning initialization remains below this point.
+	params := getAnalyzerParams(inputField)
+	tokenizer, err := analyzer.NewAnalyzer(params, "")
+	if err != nil {
+		return nil, err
 	}
 	// Initialize permutations
 	permA, permB = initializePermutations(numHashes, int64(seed))
@@ -289,9 +291,10 @@ func ValidateMinHashFunction(collSchema *schemapb.CollectionSchema, funSchema *s
 	}
 
 	if numHashes > 0 {
-		expectedDim := int64(numHashes * 32) // binary vector, each hash is 4 bytes (32 bits), but stored as 8 bits in binary vector
-		if outputDim != expectedDim {
-			return merr.WrapErrParameterInvalidMsg("minhash function output field '%s' dim %d does not match expected dim %d (numHashes %d * one minhash signature size of 32bit)", outputFieldName, outputDim, expectedDim, numHashes)
+		// Compare via division: numHashes*32 can wrap around and defeat the
+		// check. Each hash occupies 32 bits of the binary vector.
+		if outputDim%32 != 0 || outputDim/32 != int64(numHashes) {
+			return merr.WrapErrParameterInvalidMsg("minhash function output field '%s' dim %d does not match expected dim (numHashes %d * one minhash signature size of 32bit)", outputFieldName, outputDim, numHashes)
 		}
 	} else {
 		if outputDim%32 != 0 {
@@ -392,7 +395,7 @@ func (m *MinHashFunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 		}
 	}
 
-	return []any{buildBinaryVectorFieldData(signatures)}, nil
+	return []any{buildBinaryVectorFieldData(signatures, int64(m.numHashes*32))}, nil
 }
 
 func (v *MinHashFunctionRunner) GetSchema() *schemapb.FunctionSchema {
@@ -560,12 +563,10 @@ func batchSignatureToBinaryVector(signatures [][]uint32, dst [][]byte) {
 	}
 }
 
-func buildBinaryVectorFieldData(signatures [][]byte) *schemapb.FieldData {
-	var dim int64
+func buildBinaryVectorFieldData(signatures [][]byte, dim int64) *schemapb.FieldData {
 	var flatData []byte
 
 	if len(signatures) > 0 {
-		dim = int64(len(signatures[0]) * 8)
 		flatData = make([]byte, 0, len(signatures)*len(signatures[0]))
 		for _, sig := range signatures {
 			flatData = append(flatData, sig...)

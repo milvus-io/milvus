@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -326,6 +327,16 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 			bd := builder.(*array.BinaryBuilder)
 			bd.AppendValues(
 				lo.RepeatBy(numRows, func(_ int) []byte { return schema.GetDefaultValue().GetBytesData() }),
+				nil)
+		case schemapb.DataType_Geometry:
+			// DDL persists the geometry default as WKT; storage carries WKB.
+			wkb, err := common.ConvertWKTToWKB(schema.GetDefaultValue().GetStringData())
+			if err != nil {
+				return nil, merr.WrapErrServiceInternalErr(err, "convert geometry default value for field %s", schema.GetName())
+			}
+			bd := builder.(*array.BinaryBuilder)
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) []byte { return wkb }),
 				nil)
 		default:
 			return nil, merr.WrapErrServiceInternalMsg("Unexpected default value type: %s", schema.GetDataType().String())

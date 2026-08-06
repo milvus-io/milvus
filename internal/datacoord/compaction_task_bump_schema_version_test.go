@@ -37,8 +37,10 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestBumpSchemaVersionCompactionTaskSuite(t *testing.T) {
@@ -203,6 +205,108 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequest() {
 	s.Require().NotNil(plan.GetSchema())
 	s.Equal(task.GetTaskProto().GetSchema().GetVersion(), plan.GetSchema().GetVersion())
 	s.Equal(int32(3), plan.GetCurrentScalarIndexVersion())
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) addFlushedSegmentForBuild(segmentID int64) {
+	err := s.meta.AddSegment(context.TODO(), &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            segmentID,
+			CollectionID:  1,
+			PartitionID:   10,
+			InsertChannel: "ch-1",
+			Level:         datapb.SegmentLevel_L1,
+			State:         commonpb.SegmentState_Flushed,
+			NumOfRows:     1000,
+			Binlogs: []*datapb.FieldBinlog{
+				{FieldID: 101, Binlogs: []*datapb.Binlog{{LogID: 1000, EntriesNum: 1000}}},
+			},
+		},
+	})
+	s.NoError(err)
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) taskWithFileResourceIds(ids []int64) *bumpSchemaVersionTask {
+	proto := s.generateBasicTask().GetTaskProto()
+	proto.Schema.FileResourceIds = ids
+	for _, field := range proto.Schema.GetFields() {
+		if field.GetName() == "text" {
+			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{Key: "enable_match", Value: "true"})
+			break
+		}
+	}
+	return newBumpSchemaVersionTask(proto, s.mockAlloc, s.meta, s.ievm)
+}
+
+// TestBuildCompactionRequest_BumpFileResourcesInRefMode covers the ref-mode FileResources
+// branch of bump BuildCompactionRequest: bump full-rewrite rebuilds the text-match index
+// inline (createTextIndex) and must carry the analyzer resources, mirroring sort/mix. Without
+// them ref mode cannot resolve the referenced analyzer resource and the compaction fails.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequest_BumpFileResourcesInRefMode() {
+	expectedResources := []*internalpb.FileResourceInfo{
+		{Id: 7, Name: "dict", Path: "dict.jieba"},
+	}
+
+	s.Run("ref_mode_carries_resources", func() {
+		pt := paramtable.Get()
+		pt.Save(pt.CommonCfg.DNFileResourceMode.Key, "ref")
+		defer pt.Reset(pt.CommonCfg.DNFileResourceMode.Key)
+
+		s.NoError(s.meta.UpdateFileResources(context.TODO(), expectedResources, 1))
+		s.addFlushedSegmentForBuild(101)
+
+		plan, err := s.taskWithFileResourceIds([]int64{7}).BuildCompactionRequest()
+		s.Require().NoError(err)
+		s.Equal(expectedResources, plan.GetFileResources(),
+			"bump full-rewrite must carry FileResources for inline text-index analyzer resources in ref mode")
+		s.NotEmpty(plan.GetSegmentBinlogs(),
+			"BuildCompactionRequest must run to completion (past the segment loop), not early-return")
+	})
+
+	s.Run("sync_mode_skips_resources", func() {
+		pt := paramtable.Get()
+		pt.Save(pt.CommonCfg.DNFileResourceMode.Key, "sync")
+		defer pt.Reset(pt.CommonCfg.DNFileResourceMode.Key)
+
+		s.addFlushedSegmentForBuild(101)
+
+		plan, err := s.taskWithFileResourceIds([]int64{7}).BuildCompactionRequest()
+		s.Require().NoError(err)
+		s.Empty(plan.GetFileResources(),
+			"sync mode pre-syncs resources, so the plan does not carry them")
+	})
+
+	s.Run("ref_mode_missing_resource_is_best_effort", func() {
+		pt := paramtable.Get()
+		pt.Save(pt.CommonCfg.DNFileResourceMode.Key, "ref")
+		defer pt.Reset(pt.CommonCfg.DNFileResourceMode.Key)
+
+		s.addFlushedSegmentForBuild(101)
+
+		// resource id 7 is never registered in meta; datacoord's resource view may
+		// legitimately be unpopulated, and only the full-rewrite path consumes the
+		// resources. Plan building must proceed without them so bump-only / partial
+		// backfill tasks are not failed by a resource they never use.
+		plan, err := s.taskWithFileResourceIds([]int64{7}).BuildCompactionRequest()
+		s.Require().NoError(err)
+		s.Empty(plan.GetFileResources(),
+			"missing resources must degrade to an empty carry, not fail the plan")
+		s.NotEmpty(plan.GetSegmentBinlogs(),
+			"BuildCompactionRequest must run to completion despite the missing resource")
+	})
+
+	s.Run("ref_mode_without_text_index_skips_resources", func() {
+		pt := paramtable.Get()
+		pt.Save(pt.CommonCfg.DNFileResourceMode.Key, "ref")
+		defer pt.Reset(pt.CommonCfg.DNFileResourceMode.Key)
+
+		taskProto := s.generateBasicTask().GetTaskProto()
+		taskProto.Schema.FileResourceIds = []int64{7}
+		s.addFlushedSegmentForBuild(101)
+
+		plan, err := newBumpSchemaVersionTask(taskProto, s.mockAlloc, s.meta, s.ievm).BuildCompactionRequest()
+		s.Require().NoError(err)
+		s.Empty(plan.GetFileResources(), "analyzer resources are unnecessary when no field enables text match")
+	})
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequestCarriesV3ManifestAndPreAllocatedLogs() {

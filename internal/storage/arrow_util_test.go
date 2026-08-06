@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
 func TestGenerateEmptyArray(t *testing.T) {
@@ -378,4 +379,26 @@ func TestRecordBuilderBuildReleasesCreatorRefs(t *testing.T) {
 		rec.Release()
 	}()
 	alloc.AssertSize(t, 0)
+}
+
+func TestGenerateEmptyArrayGeometryDefault(t *testing.T) {
+	wkt := "POINT (30 10)"
+	field := &schemapb.FieldSchema{
+		FieldID: 110, Name: "geo", DataType: schemapb.DataType_Geometry, Nullable: true,
+		DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: wkt}},
+	}
+
+	arr, err := GenerateEmptyArrayFromSchema(field, 3)
+	require.NoError(t, err)
+	defer arr.Release()
+
+	wkb, err := common.ConvertWKTToWKB(wkt)
+	require.NoError(t, err)
+	bin, ok := arr.(*array.Binary)
+	require.True(t, ok)
+	require.Equal(t, 3, bin.Len())
+	for i := 0; i < 3; i++ {
+		require.True(t, bin.IsValid(i))
+		require.Equal(t, wkb, bin.Value(i))
+	}
 }

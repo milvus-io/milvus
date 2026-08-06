@@ -2739,6 +2739,35 @@ func Test_validateMultiAnalyzerParams(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	// Dangling alias targets are deliberately ACCEPTED at DDL for compatibility:
+	// at runtime an ordinary dangling alias falls back to the default analyzer,
+	// and a dangling "default" alias fails the request via the terminal guard
+	// (covered by the function package tests). Tightening this is a product
+	// semantics change that must consciously revisit these assertions.
+	t.Run("dangling alias target passes DDL", func(t *testing.T) {
+		coll := createTestCollectionSchema([]*schemapb.FieldSchema{
+			createTestFieldSchema("string_field", schemapb.DataType_VarChar),
+		})
+		fieldSchema := createTestFieldSchema("test_field", schemapb.DataType_VarChar)
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		params := `{"by_field": "string_field", "alias": {"fr": "fr"}, "analyzers": {"default": {}}}`
+		err := validateMultiAnalyzerParams(params, coll, fieldSchema, &infos)
+		assert.NoError(t, err)
+	})
+
+	t.Run("dangling default alias passes DDL", func(t *testing.T) {
+		coll := createTestCollectionSchema([]*schemapb.FieldSchema{
+			createTestFieldSchema("string_field", schemapb.DataType_VarChar),
+		})
+		fieldSchema := createTestFieldSchema("test_field", schemapb.DataType_VarChar)
+		infos := make([]*querypb.AnalyzerInfo, 0)
+
+		params := `{"by_field": "string_field", "alias": {"default": "missing"}, "analyzers": {"default": {}}}`
+		err := validateMultiAnalyzerParams(params, coll, fieldSchema, &infos)
+		assert.NoError(t, err)
+	})
+
 	t.Run("valid params", func(t *testing.T) {
 		coll := createTestCollectionSchema([]*schemapb.FieldSchema{
 			createTestFieldSchema("string_field", schemapb.DataType_VarChar),
@@ -3046,4 +3075,67 @@ func Test_appendConsistecyLevel(t *testing.T) {
 	consistencyLevel, properties := mustConsumeConsistencyLevel(task.Req.Properties)
 	assert.Equal(t, commonpb.ConsistencyLevel_Session, consistencyLevel)
 	assert.Len(t, properties, 0)
+}
+
+// A MinHash input legally keeps enable_analyzer=false yet consumes its
+// analyzer_params; the collector must still emit its analyzer info, or any
+// referenced file resources never reach schema.FileResourceIds / ref-counting
+// while the runtime keeps depending on them.
+func TestCollectAnalyzerInfosIncludesDisabledMinHashInput(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "coll",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "128"},
+					{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+				},
+			},
+			{FieldID: 102, Name: "sig", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name: "mh", Type: schemapb.FunctionType_MinHash,
+			InputFieldNames: []string{"text"}, InputFieldIds: []int64{101},
+			OutputFieldNames: []string{"sig"}, OutputFieldIds: []int64{102},
+		}},
+	}
+
+	infos, err := collectAnalyzerInfos(schema)
+	assert.NoError(t, err)
+	assert.Len(t, infos, 1)
+	assert.Equal(t, "text", infos[0].GetField())
+}
+
+// collectAnalyzerInfos runs before assignFieldAndFunctionID, so a request may
+// carry non-canonical (stale, mismatched) field IDs. The MinHash input must
+// still be recognized by name — an ID-based check would miss it and silently
+// drop the resource-backed analyzer_params from FileResourceIds/ref-counting.
+func TestCollectAnalyzerInfosMinHashInputMatchedByNameBeforeIDAssignment(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "coll",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID: 999, Name: "text", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "128"},
+					{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+				},
+			},
+			{FieldID: 102, Name: "sig", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name: "mh", Type: schemapb.FunctionType_MinHash,
+			// names match the field, IDs are stale and disagree with FieldID above
+			InputFieldNames: []string{"text"}, InputFieldIds: []int64{888},
+			OutputFieldNames: []string{"sig"}, OutputFieldIds: []int64{102},
+		}},
+	}
+
+	infos, err := collectAnalyzerInfos(schema)
+	assert.NoError(t, err)
+	assert.Len(t, infos, 1)
+	assert.Equal(t, "text", infos[0].GetField())
 }
