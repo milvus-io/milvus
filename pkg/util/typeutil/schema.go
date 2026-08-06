@@ -1012,18 +1012,38 @@ func (c *FieldDataIdxComputer) Compute(rowIdx int64) []int64 {
 }
 
 func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int64) (appendSize int64) {
-	dstMap := make(map[int64]*schemapb.FieldData)
-	for _, fieldData := range dst {
-		if fieldData != nil {
-			dstMap[fieldData.FieldId] = fieldData
-		}
-	}
+	// AppendFieldData copies a single row, so reduce loops call it once per row
+	// with the same dst. Building a FieldId index up front therefore repeats
+	// identical work on every row.
+	//
+	// dst and src are index-parallel in every caller -- the lazy-creation
+	// branch below already relies on that when it does `dst[i] = ...` -- so the
+	// column can normally be found by index. The map is only built when that
+	// does not hold for some column, which preserves the previous behavior
+	// without paying for it in the common case.
+	var dstMap map[int64]*schemapb.FieldData
 	for i, fieldData := range src {
 		fieldIdx := idx
 		if i < len(fieldIdxs) {
 			fieldIdx = fieldIdxs[i]
 		}
-		dstFieldData, ok := dstMap[fieldData.FieldId]
+		var (
+			dstFieldData *schemapb.FieldData
+			ok           bool
+		)
+		if i < len(dst) && dst[i] != nil && dst[i].FieldId == fieldData.FieldId {
+			dstFieldData, ok = dst[i], true
+		} else {
+			if dstMap == nil {
+				dstMap = make(map[int64]*schemapb.FieldData, len(dst))
+				for _, fd := range dst {
+					if fd != nil {
+						dstMap[fd.FieldId] = fd
+					}
+				}
+			}
+			dstFieldData, ok = dstMap[fieldData.FieldId]
+		}
 		if !ok {
 			dstFieldData = &schemapb.FieldData{
 				Type:      fieldData.Type,
@@ -1031,7 +1051,11 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				FieldId:   fieldData.FieldId,
 				IsDynamic: fieldData.IsDynamic,
 			}
-			dst[i] = dstFieldData
+			// Callers size dst to at least len(src); the bound is explicit here
+			// so the write is provably safe.
+			if i < len(dst) {
+				dst[i] = dstFieldData
+			}
 		}
 		// assign null data
 		if len(fieldData.GetValidData()) != 0 {
