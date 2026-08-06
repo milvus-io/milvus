@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -103,7 +104,11 @@ type clusteringCompactionTask struct {
 	// bm25
 	bm25FieldIds []int64
 
-	compactionParams compaction.Params
+	compactionParams                 compaction.Params
+	maxCentroidsPerSegment           int
+	minimumSegments                  int
+	useAdditionalCentroidIfImbalance bool
+	mappingStatsCache                map[int64]*clusteringpb.ClusteringCentroidIdMappingStats
 
 	// lobContext holds LOB compaction strategy decisions for TEXT columns
 	lobContext *compaction.LOBCompactionContext
@@ -170,16 +175,19 @@ func NewClusteringCompactionTask(
 ) *clusteringCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
 	return &clusteringCompactionTask{
-		ctx:              ctx,
-		cancel:           cancel,
-		binlogIO:         binlogIO,
-		plan:             plan,
-		tr:               timerecord.NewTimeRecorder("clustering_compaction"),
-		done:             make(chan struct{}, 1),
-		clusterBuffers:   make([]*ClusterBuffer, 0),
-		flushCount:       atomic.NewInt64(0),
-		writtenRowNum:    atomic.NewInt64(0),
-		compactionParams: compactionParams,
+		ctx:                              ctx,
+		cancel:                           cancel,
+		binlogIO:                         binlogIO,
+		plan:                             plan,
+		tr:                               timerecord.NewTimeRecorder("clustering_compaction"),
+		done:                             make(chan struct{}, 1),
+		clusterBuffers:                   make([]*ClusterBuffer, 0),
+		flushCount:                       atomic.NewInt64(0),
+		writtenRowNum:                    atomic.NewInt64(0),
+		compactionParams:                 compactionParams,
+		maxCentroidsPerSegment:           paramtable.Get().DataCoordCfg.ClusteringCompactionMaxCentroidsPerSegment.GetAsInt(),
+		minimumSegments:                  paramtable.Get().DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt(),
+		useAdditionalCentroidIfImbalance: paramtable.Get().DataNodeCfg.ClusteringCompactionUseAdditionalCentroid.GetAsBool(),
 	}
 }
 
@@ -251,9 +259,11 @@ func (t *clusteringCompactionTask) init() error {
 	t.memoryLimit = t.getMemoryLimit()
 	t.bufferSize = int64(t.compactionParams.BinLogMaxSize) // Use binlog max size as read and write buffer size
 	workerPoolSize := t.getWorkerPoolSize()
+	flushPoolSize := t.getFlushPoolSize()
 	t.mappingPool = conc.NewPool[any](workerPoolSize)
-	t.flushPool = conc.NewPool[any](workerPoolSize)
-	mlog.Info(context.TODO(), "clustering compaction task initialed", mlog.Int64("memory_buffer_size", t.memoryLimit), mlog.Int("worker_pool_size", workerPoolSize))
+	t.flushPool = conc.NewPool[any](flushPoolSize)
+	mlog.Info(context.TODO(), "clustering compaction task initialed", mlog.Int64("memory_buffer_size", t.memoryLimit), mlog.Int("worker_pool_size", workerPoolSize),
+		mlog.Int("flush_pool_size", flushPoolSize))
 	return nil
 }
 
@@ -322,7 +332,7 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	}
 
 	metrics.DataNodeCompactionLatency.
-		WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String()).
+		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).
 		Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	mlog.Info(context.TODO(), "Clustering compaction finished", mlog.Duration("elapse", t.tr.ElapseSpan()), mlog.Int64("flushTimes", t.flushCount.Load()))
 	// clear the buffer cache
@@ -352,7 +362,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			t.getWriterOpts()...,
+			t.getWriterOpts(packed.DefaultMultiPartUploadSize)...,
 		)
 		if err != nil {
 			return err
@@ -375,7 +385,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			t.getWriterOpts()...,
+			t.getWriterOpts(packed.DefaultMultiPartUploadSize)...,
 		)
 		if err != nil {
 			return err
@@ -417,7 +427,15 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 	for i := 0; i < len(centroids); i++ {
 		centroidsOffset[i] = i
 	}
-	centroidGroups, groupIndex := splitCentroids(centroidsOffset, bufferNum)
+	centroidsInfo, err := t.createCentroidsInfo(centroids)
+	if err != nil {
+		return err
+	}
+	centroidGroups, groupIndex := centroidsInfo.splitCentroids(t.maxCentroidsPerSegment, t.minimumSegments, t.useAdditionalCentroidIfImbalance)
+	if len(centroidGroups) == 0 {
+		mlog.Info(context.TODO(), "Could not group segments, using 1 centroid per segment")
+		centroidGroups, groupIndex = splitCentroids(centroidsOffset, bufferNum)
+	}
 	for id, group := range centroidGroups {
 		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
 		if err != nil {
@@ -425,17 +443,37 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 		}
 
 		centroidValues := make([]storage.VectorFieldValue, len(group))
+		segmentNumRows := int64(0)
 		for i, offset := range group {
 			centroidValues[i] = storage.NewVectorFieldValue(t.clusteringKeyField.DataType, centroids[offset])
+			segmentNumRows += centroidsInfo.Counts[offset]
 		}
 
 		fieldStats.SetVectorCentroids(centroidValues...)
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
+		// use minimal part size for best performance which can still contain the segment as maximum parts is 10000
+		var partSize int64 = packed.DefaultMultiPartUploadSize
+		var sizePerRecord int
+		var maxSegmentSize int64
+		sizePerRecord, err = typeutil.EstimateSizePerRecord(t.plan.GetSchema())
+		if err != nil {
+			return err
+		}
+		maxSegmentSize = segmentNumRows * int64(sizePerRecord)
+		segmentSizeLimit := t.plan.MaxSegmentRows * int64(sizePerRecord)
+		if maxSegmentSize > segmentSizeLimit {
+			segmentSizeLimit = maxSegmentSize
+		}
+		for (maxSegmentSize / partSize) > 10000 {
+			partSize += 1024 * 1024
+		}
+		mlog.Info(context.TODO(), "Created a writer", mlog.Int64("bufferSize", t.bufferSize), mlog.Int64("partSize", partSize), mlog.Int64("segmentNumRows", segmentNumRows),
+			mlog.Int64("maxSegmentSize", maxSegmentSize), mlog.Int64("segmentSizeLimit", segmentSizeLimit))
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
-			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
+			segmentSizeLimit, t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			t.getWriterOpts()...,
+			t.getWriterOpts(partSize)...,
 		)
 		if err != nil {
 			return err
@@ -472,6 +510,19 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 		mlog.Debug(context.TODO(), "read segment offset mapping file", mlog.Int64("segmentID", segmentID), mlog.String("path", path))
 	}
 	t.segmentIDOffsetMapping = offsetMappingFiles
+	t.mappingStatsCache = make(map[int64]*clusteringpb.ClusteringCentroidIdMappingStats, len(t.segmentIDOffsetMapping))
+	for segmentID, filePath := range t.segmentIDOffsetMapping {
+		offsetBytes, err := t.binlogIO.Download(ctx, []string{filePath})
+		if err != nil {
+			return err
+		}
+		stats := &clusteringpb.ClusteringCentroidIdMappingStats{}
+		err = proto.Unmarshal(offsetBytes[0], stats)
+		if err != nil {
+			return err
+		}
+		t.mappingStatsCache[segmentID] = stats
+	}
 	centroidBytes, err := t.binlogIO.Download(ctx, []string{centroidFilePath})
 	if err != nil {
 		return err
@@ -565,7 +616,10 @@ func (t *clusteringCompactionTask) mappingSegment(
 ) error {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("mappingSegment-%d-%d", t.GetPlanID(), segment.GetSegmentID()))
 	defer span.End()
-	mlog.Info(context.TODO(), "mapping segment start")
+	mlog.Info(context.TODO(), "mapping segment start", mlog.Int64("planID", t.GetPlanID()),
+		mlog.Int64("collectionID", t.GetCollection()),
+		mlog.Int64("partitionID", t.partitionID),
+		mlog.Int64("segmentID", segment.GetSegmentID()))
 	processStart := time.Now()
 	var remained int64 = 0
 
@@ -581,6 +635,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 	mappingStats := &clusteringpb.ClusteringCentroidIdMappingStats{}
 	if t.isVectorClusteringKey {
+		// Use cached mapping stats loaded in preparation
+		cachedStats, ok := t.mappingStatsCache[segment.SegmentID]
+		if !ok {
+			return merr.WrapErrServiceInternalMsg("mapping stats not found for segment %d", segment.SegmentID)
+		}
 		offSetPath := t.segmentIDOffsetMapping[segment.SegmentID]
 		offsetBytes, err := t.binlogIO.Download(ctx, []string{offSetPath})
 		if err != nil {
@@ -590,6 +649,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		if err != nil {
 			return err
 		}
+		mappingStats = cachedStats
 	}
 
 	// Get the number of field binlog files from non-empty segment
@@ -642,7 +702,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		}
 
 		vs := make([]*storage.Value, r.Len())
-		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, true); err != nil {
+		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, false); err != nil {
 			mlog.Warn(context.TODO(), "compact wrong, failed to deserialize data", mlog.Err(err))
 			return err
 		}
@@ -684,6 +744,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 				return err
 			}
 			t.writtenRowNum.Inc()
+			rowNum := t.writtenRowNum.Load()
+			if rowNum%1000000 == 0 {
+				mlog.Info(context.TODO(), "Mapping progress", mlog.Int64("numRows", rowNum))
+			}
+
 			remained++
 
 			if (remained+1)%100 == 0 {
@@ -723,6 +788,10 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 func (t *clusteringCompactionTask) getWorkerPoolSize() int {
 	return int(math.Max(float64(paramtable.Get().DataNodeCfg.ClusteringCompactionWorkerPoolSize.GetAsInt()), 1.0))
+}
+
+func (t *clusteringCompactionTask) getFlushPoolSize() int {
+	return int(math.Max(float64(paramtable.Get().DataNodeCfg.ClusteringCompactionFlushPoolSize.GetAsInt()), 1.0))
 }
 
 // getMemoryLimit returns the maximum memory that a clustering compaction task is allowed to use
@@ -1063,12 +1132,38 @@ func (t *clusteringCompactionTask) GetStorageConfig() *indexpb.StorageConfig {
 	return t.compactionParams.StorageConfig
 }
 
+func (t *clusteringCompactionTask) createCentroidsInfo(
+	centroids []*schemapb.VectorField,
+) (*CentroidsSplitter, error) {
+	vectors := make([][]float32, len(centroids))
+	for i, c := range centroids {
+		if c.GetDim() == 0 {
+			return nil, merr.WrapErrServiceInternalMsg("empty centroid vector %d", i)
+		}
+		vectors[i] = c.GetFloatVector().GetData()
+	}
+
+	counts := make([]int64, len(centroids))
+	for _, stats := range t.mappingStatsCache {
+		nums := stats.GetNumInCentroid()
+		for cid := 0; cid < len(nums) && cid < len(counts); cid++ {
+			counts[cid] += nums[cid]
+		}
+	}
+
+	return &CentroidsSplitter{
+		Centroids: vectors,
+		Counts:    counts,
+	}, nil
+}
+
 // getWriterOpts returns common writer options for all cluster buffer writers.
 // Includes TEXT column configs when lobContext requires REWRITE_ALL.
-func (t *clusteringCompactionTask) getWriterOpts() []storage.RwOption {
+func (t *clusteringCompactionTask) getWriterOpts(partSize int64) []storage.RwOption {
 	opts := []storage.RwOption{
 		storage.WithBufferSize(t.bufferSize),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithMultiPartUploadSize(partSize),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
 		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
 	}
