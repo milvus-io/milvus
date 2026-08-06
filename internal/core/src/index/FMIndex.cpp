@@ -84,31 +84,17 @@ BuildFMIndexLibrary(fmindex::FMIndex& fm,
                     uint32_t sa_sample_rate,
                     uint32_t block_bytes,
                     int64_t field_id) {
-    try {
-        fm.Build(docs,
-                 sa_sample_rate,
-                 /*case_insensitive=*/false,
-                 /*force_wide=*/false,
-                 block_bytes);
-    } catch (const SegcoreError&) {
-        throw;
-    } catch (const std::bad_alloc& e) {
-        ThrowInfo(ErrorCode::MemAllocateFailed,
-                  "failed to build FM index for field {}: {}",
-                  field_id,
-                  e.what());
-    } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::IndexBuildError,
-                  "failed to build FM index for field {}: {}",
-                  field_id,
-                  e.what());
-    } catch (...) {
-        // fm-index-lite is vendored third-party code; a non-std exception
-        // from it must not escape past this Ring-2 boundary untyped.
-        ThrowInfo(ErrorCode::IndexBuildError,
-                  "failed to build FM index for field {}: unknown exception",
-                  field_id);
-    }
+    detail::GuardFMIndexLibrary(
+        [&] {
+            fm.Build(docs,
+                     sa_sample_rate,
+                     /*case_insensitive=*/false,
+                     /*force_wide=*/false,
+                     block_bytes);
+        },
+        ErrorCode::IndexBuildError,
+        "build",
+        field_id);
 }
 
 template <typename T>
@@ -723,15 +709,27 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
         }
         // The move keeps the views pointing at mmap_data_ (the vector buffers
         // move by address); the mapping is unmapped in the destructor.
-        fm_ = fmindex::FMIndex::LoadView(
-            reinterpret_cast<const uint8_t*>(mmap_data_), blob_size);
+        detail::GuardFMIndexLibrary(
+            [&] {
+                fm_ = fmindex::FMIndex::LoadView(
+                    reinterpret_cast<const uint8_t*>(mmap_data_), blob_size);
+            },
+            ErrorCode::DataFormatBroken,
+            "load",
+            field_id_);
         mmap_committed = true;  // destructor now owns the mapped file
     } else {
         // Move the reader entry buffer straight into the index's owned backing
         // store (owned_blob_ = std::move) — no intermediate std::string / copy,
         // so the non-mmap load peaks at ~1 blob + directories instead of ~3.
         auto blob_entry = reader.ReadEntry(FMINDEX_BLOB_FILE_NAME);
-        fm_ = fmindex::FMIndex::Deserialize(std::move(blob_entry.data));
+        detail::GuardFMIndexLibrary(
+            [&] {
+                fm_ = fmindex::FMIndex::Deserialize(std::move(blob_entry.data));
+            },
+            ErrorCode::DataFormatBroken,
+            "load",
+            field_id_);
     }
     if (!fm_.valid()) {
         ThrowInfo(ErrorCode::DataFormatBroken,
