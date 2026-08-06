@@ -2434,6 +2434,65 @@ func (_c *MockProxy_DeleteCredential_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// DeleteRLSPrincipalTags provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DeleteRLSPrincipalTags(_a0 context.Context, _a1 *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteRLSPrincipalTags")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_DeleteRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteRLSPrincipalTags'
+type MockProxy_DeleteRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// DeleteRLSPrincipalTags is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DeleteRLSPrincipalTagsRequest
+func (_e *MockProxy_Expecter) DeleteRLSPrincipalTags(_a0 interface{}, _a1 interface{}) *MockProxy_DeleteRLSPrincipalTags_Call {
+	return &MockProxy_DeleteRLSPrincipalTags_Call{Call: _e.mock.On("DeleteRLSPrincipalTags", _a0, _a1)}
+}
+
+func (_c *MockProxy_DeleteRLSPrincipalTags_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DeleteRLSPrincipalTagsRequest)) *MockProxy_DeleteRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DeleteRLSPrincipalTagsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DeleteRLSPrincipalTags_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_DeleteRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_DeleteRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error)) *MockProxy_DeleteRLSPrincipalTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteUserTags provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) DeleteUserTags(_a0 context.Context, _a1 *milvuspb.DeleteUserTagsRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -4414,6 +4473,65 @@ func (_c *MockProxy_GetDdChannel_Call) RunAndReturn(run func(context.Context, *i
 	return _c
 }
 
+// GetExportSnapshotState provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetExportSnapshotState(_a0 context.Context, _a1 *milvuspb.GetExportSnapshotStateRequest) (*milvuspb.GetExportSnapshotStateResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetExportSnapshotState")
+	}
+
+	var r0 *milvuspb.GetExportSnapshotStateResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetExportSnapshotStateRequest) (*milvuspb.GetExportSnapshotStateResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetExportSnapshotStateRequest) *milvuspb.GetExportSnapshotStateResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetExportSnapshotStateResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetExportSnapshotStateRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_GetExportSnapshotState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetExportSnapshotState'
+type MockProxy_GetExportSnapshotState_Call struct {
+	*mock.Call
+}
+
+// GetExportSnapshotState is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetExportSnapshotStateRequest
+func (_e *MockProxy_Expecter) GetExportSnapshotState(_a0 interface{}, _a1 interface{}) *MockProxy_GetExportSnapshotState_Call {
+	return &MockProxy_GetExportSnapshotState_Call{Call: _e.mock.On("GetExportSnapshotState", _a0, _a1)}
+}
+
+func (_c *MockProxy_GetExportSnapshotState_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetExportSnapshotStateRequest)) *MockProxy_GetExportSnapshotState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetExportSnapshotStateRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_GetExportSnapshotState_Call) Return(_a0 *milvuspb.GetExportSnapshotStateResponse, _a1 error) *MockProxy_GetExportSnapshotState_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_GetExportSnapshotState_Call) RunAndReturn(run func(context.Context, *milvuspb.GetExportSnapshotStateRequest) (*milvuspb.GetExportSnapshotStateResponse, error)) *MockProxy_GetExportSnapshotState_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetFlushAllState provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) GetFlushAllState(_a0 context.Context, _a1 *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -5354,6 +5472,65 @@ func (_c *MockProxy_GetQuotaMetrics_Call) Return(_a0 *internalpb.GetQuotaMetrics
 }
 
 func (_c *MockProxy_GetQuotaMetrics_Call) RunAndReturn(run func(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)) *MockProxy_GetQuotaMetrics_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetRLSPrincipalTags provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetRLSPrincipalTags(_a0 context.Context, _a1 *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRLSPrincipalTags")
+	}
+
+	var r0 *milvuspb.GetRLSPrincipalTagsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest) *milvuspb.GetRLSPrincipalTagsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetRLSPrincipalTagsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_GetRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRLSPrincipalTags'
+type MockProxy_GetRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// GetRLSPrincipalTags is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetRLSPrincipalTagsRequest
+func (_e *MockProxy_Expecter) GetRLSPrincipalTags(_a0 interface{}, _a1 interface{}) *MockProxy_GetRLSPrincipalTags_Call {
+	return &MockProxy_GetRLSPrincipalTags_Call{Call: _e.mock.On("GetRLSPrincipalTags", _a0, _a1)}
+}
+
+func (_c *MockProxy_GetRLSPrincipalTags_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetRLSPrincipalTagsRequest)) *MockProxy_GetRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetRLSPrincipalTagsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_GetRLSPrincipalTags_Call) Return(_a0 *milvuspb.GetRLSPrincipalTagsResponse, _a1 error) *MockProxy_GetRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_GetRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error)) *MockProxy_GetRLSPrincipalTags_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -7167,6 +7344,65 @@ func (_c *MockProxy_ListPrivilegeGroups_Call) Return(_a0 *milvuspb.ListPrivilege
 }
 
 func (_c *MockProxy_ListPrivilegeGroups_Call) RunAndReturn(run func(context.Context, *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error)) *MockProxy_ListPrivilegeGroups_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListRLSPrincipals provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListRLSPrincipals(_a0 context.Context, _a1 *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRLSPrincipals")
+	}
+
+	var r0 *milvuspb.ListRLSPrincipalsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRLSPrincipalsRequest) *milvuspb.ListRLSPrincipalsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListRLSPrincipalsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListRLSPrincipalsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ListRLSPrincipals_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRLSPrincipals'
+type MockProxy_ListRLSPrincipals_Call struct {
+	*mock.Call
+}
+
+// ListRLSPrincipals is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListRLSPrincipalsRequest
+func (_e *MockProxy_Expecter) ListRLSPrincipals(_a0 interface{}, _a1 interface{}) *MockProxy_ListRLSPrincipals_Call {
+	return &MockProxy_ListRLSPrincipals_Call{Call: _e.mock.On("ListRLSPrincipals", _a0, _a1)}
+}
+
+func (_c *MockProxy_ListRLSPrincipals_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListRLSPrincipalsRequest)) *MockProxy_ListRLSPrincipals_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListRLSPrincipalsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ListRLSPrincipals_Call) Return(_a0 *milvuspb.ListRLSPrincipalsResponse, _a1 error) *MockProxy_ListRLSPrincipals_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ListRLSPrincipals_Call) RunAndReturn(run func(context.Context, *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error)) *MockProxy_ListRLSPrincipals_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -9321,6 +9557,65 @@ func (_c *MockProxy_SetQueryNodeCreator_Call) RunAndReturn(run func(func(context
 	return _c
 }
 
+// SetRLSPrincipalTags provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) SetRLSPrincipalTags(_a0 context.Context, _a1 *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetRLSPrincipalTags")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_SetRLSPrincipalTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetRLSPrincipalTags'
+type MockProxy_SetRLSPrincipalTags_Call struct {
+	*mock.Call
+}
+
+// SetRLSPrincipalTags is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.SetRLSPrincipalTagsRequest
+func (_e *MockProxy_Expecter) SetRLSPrincipalTags(_a0 interface{}, _a1 interface{}) *MockProxy_SetRLSPrincipalTags_Call {
+	return &MockProxy_SetRLSPrincipalTags_Call{Call: _e.mock.On("SetRLSPrincipalTags", _a0, _a1)}
+}
+
+func (_c *MockProxy_SetRLSPrincipalTags_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.SetRLSPrincipalTagsRequest)) *MockProxy_SetRLSPrincipalTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.SetRLSPrincipalTagsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_SetRLSPrincipalTags_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_SetRLSPrincipalTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_SetRLSPrincipalTags_Call) RunAndReturn(run func(context.Context, *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error)) *MockProxy_SetRLSPrincipalTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetRates provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) SetRates(_a0 context.Context, _a1 *proxypb.SetRatesRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -10056,6 +10351,65 @@ func (_c *MockProxy_UpdateResourceGroups_Call) Return(_a0 *commonpb.Status, _a1 
 }
 
 func (_c *MockProxy_UpdateResourceGroups_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error)) *MockProxy_UpdateResourceGroups_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateRowPolicy provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) UpdateRowPolicy(_a0 context.Context, _a1 *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateRowPolicy")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateRowPolicyRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.UpdateRowPolicyRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_UpdateRowPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateRowPolicy'
+type MockProxy_UpdateRowPolicy_Call struct {
+	*mock.Call
+}
+
+// UpdateRowPolicy is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.UpdateRowPolicyRequest
+func (_e *MockProxy_Expecter) UpdateRowPolicy(_a0 interface{}, _a1 interface{}) *MockProxy_UpdateRowPolicy_Call {
+	return &MockProxy_UpdateRowPolicy_Call{Call: _e.mock.On("UpdateRowPolicy", _a0, _a1)}
+}
+
+func (_c *MockProxy_UpdateRowPolicy_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.UpdateRowPolicyRequest)) *MockProxy_UpdateRowPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.UpdateRowPolicyRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_UpdateRowPolicy_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_UpdateRowPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_UpdateRowPolicy_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error)) *MockProxy_UpdateRowPolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }
