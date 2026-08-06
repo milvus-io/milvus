@@ -463,6 +463,39 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 
 // --------------------- insert param --------------------- //
 
+// dynamicFieldNumber keeps the original JSON number literal for a dynamic field
+// instead of decoding it into int64/float64 and re-encoding it. A dynamic field
+// is stored as JSON text, so that round trip can only lose information: gjson's
+// String() renders numbers through float64, and cast.ToInt64 discards its error
+// and yields 0, so 1e300, 1e19 and integers beyond int64 were all silently
+// stored as 0.
+//
+// Values the JSON engine cannot represent are rejected here rather than stored,
+// so they surface at insert time instead of failing every query that touches the
+// path. Integers are limited to 64 bits because simdjson reports BIGINT_ERROR
+// beyond that; a caller that only needs the magnitude can send a floating-point
+// literal, and one that needs the exact digits can send a string.
+func dynamicFieldNumber(key string, raw string) (json.Number, error) {
+	if !strings.ContainsAny(raw, ".eE") {
+		if _, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			return json.Number(raw), nil
+		}
+		if _, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			return json.Number(raw), nil
+		}
+		return "", merr.WrapErrParameterInvalidMsg(
+			"dynamic field %s integer %s exceeds the 64-bit range supported by the JSON engine, "+
+				"write it as a floating-point literal or as a string", key, raw)
+	}
+	// The request binder already rejects numbers outside the float64 range, so
+	// this only guards against that gate changing.
+	if value, err := strconv.ParseFloat(raw, 64); err != nil || math.IsInf(value, 0) {
+		return "", merr.WrapErrParameterInvalidMsg(
+			"dynamic field %s number %s is outside the range representable as a double", key, raw)
+	}
+	return json.Number(raw), nil
+}
+
 func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool) ([]map[string]interface{}, map[string][]bool, error) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
@@ -811,11 +844,11 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						case gjson.String:
 							reallyData[mapKey] = mapValueStr
 						case gjson.Number:
-							if strings.Contains(mapValue.Raw, ".") {
-								reallyData[mapKey] = cast.ToFloat64(mapValue.Raw)
-							} else {
-								reallyData[mapKey] = cast.ToInt64(mapValueStr)
+							number, err := dynamicFieldNumber(mapKey, mapValue.Raw)
+							if err != nil {
+								return nil, nil, err
 							}
+							reallyData[mapKey] = number
 						case gjson.JSON:
 							reallyData[mapKey] = mapValue.Value()
 						case gjson.Null:

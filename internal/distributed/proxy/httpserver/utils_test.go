@@ -5094,3 +5094,88 @@ func TestCheckAndSetDataJSONFieldUnwrapsEncodedDocument(t *testing.T) {
 		})
 	}
 }
+
+func dynamicFieldTestSchema() *schemapb.CollectionSchema {
+	vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
+	vectorField.Name = "vector"
+	return &schemapb.CollectionSchema{
+		Name:               DefaultCollectionName,
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			generatePrimaryField(schemapb.DataType_Int64, false),
+			vectorField,
+		},
+	}
+}
+
+func insertOneDynamicValue(t *testing.T, value string) ([]map[string]interface{}, error) {
+	t.Helper()
+	body := []byte(fmt.Sprintf(
+		`{"data": {"%s": 1, "vector": [0.1, 0.2], "dyn": %s}}`, FieldBookID, value))
+	rows, _, err := checkAndSetData(body, dynamicFieldTestSchema(), false)
+	return rows, err
+}
+
+// A dynamic field is stored as JSON text, so decoding a number into
+// int64/float64 and re-encoding it only loses information. cast.ToInt64 also
+// discarded its error and yielded 0, so anything it could not parse -- 1e300,
+// 1e19, integers beyond int64 -- was silently stored as 0.
+func TestCheckAndSetDataDynamicFieldKeepsNumberLiteral(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected string
+	}{
+		{"small integer", `1`, `1`},
+		{"negative integer", `-7`, `-7`},
+		{"zero", `0`, `0`},
+		{"decimal keeps its fraction", `10.0`, `10.0`},
+		{"fraction", `0.5`, `0.5`},
+		{"integer beyond 2^53", `9007199254740993`, `9007199254740993`},
+		{"decimal beyond 2^53", `9007199254740993.0`, `9007199254740993.0`},
+		// each of these used to be stored as 0
+		{"exponent form", `1e19`, `1e19`},
+		{"large exponent", `1e300`, `1e300`},
+		{"negative exponent", `1e-7`, `1e-7`},
+		{"integer beyond int64", `12345678901234567890`, `12345678901234567890`},
+		{"uint64 upper bound", `18446744073709551615`, `18446744073709551615`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows, err := insertOneDynamicValue(t, tt.value)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			assert.Equal(t, json.Number(tt.expected), rows[0]["dyn"])
+
+			// the dynamic field is serialized back to JSON before it is stored
+			marshaled, err := json.Marshal(map[string]interface{}{"dyn": rows[0]["dyn"]})
+			require.NoError(t, err)
+			assert.Equal(t, `{"dyn":`+tt.expected+`}`, string(marshaled))
+		})
+	}
+}
+
+// simdjson reports BIGINT_ERROR for integer literals beyond 64 bits, so storing
+// them would turn every query touching that path into an error. Reject at
+// insert time instead.
+func TestCheckAndSetDataDynamicFieldRejectsUnrepresentableNumber(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{"one past uint64", `18446744073709551616`},
+		{"far beyond uint64", `123456789012345678901234567890`},
+		{"negative beyond int64", `-9223372036854775809`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := insertOneDynamicValue(t, tt.value)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "dyn")
+			assert.Contains(t, err.Error(), "exceeds the 64-bit range")
+		})
+	}
+}
