@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -5243,4 +5244,51 @@ func TestCheckAndSetDataDynamicFieldKeepsNestedLiterals(t *testing.T) {
 			assert.Equal(t, `{"dyn":`+tt.expected+`}`, string(marshaled))
 		})
 	}
+}
+
+// proxy.http.compatibilityMode restores the previous handling for both the
+// JSON field and the dynamic field, including the values that were destroyed.
+func TestCheckAndSetDataJSONAndDynamicCompatibilityMode(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
+	paramtable.Get().Save(key, "true")
+	defer paramtable.Get().Reset(key)
+
+	t.Run("json field is rendered again", func(t *testing.T) {
+		// the unquoted form is what the field used to store
+		assert.Equal(t, `hello`, string(insertOneJSONValue(t, `"hello"`)))
+		assert.Equal(t, `9007199254740992`, string(insertOneJSONValue(t, `9007199254740993.0`)))
+	})
+
+	t.Run("json field accepts an oversized integer again", func(t *testing.T) {
+		stored := insertOneJSONValue(t, `123456789012345678901234567890`)
+		assert.Equal(t, `123456789012345678901234567890`, string(stored))
+	})
+
+	t.Run("dynamic field decodes again", func(t *testing.T) {
+		rows, err := insertOneDynamicValue(t, `1e300`)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, int64(0), rows[0]["dyn"])
+
+		rows, err = insertOneDynamicValue(t, `10.0`)
+		require.NoError(t, err)
+		assert.Equal(t, float64(10), rows[0]["dyn"])
+	})
+
+	t.Run("dynamic field accepts an oversized integer again", func(t *testing.T) {
+		rows, err := insertOneDynamicValue(t, `123456789012345678901234567890`)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, int64(0), rows[0]["dyn"])
+	})
+
+	t.Run("nested values are decoded again", func(t *testing.T) {
+		rows, err := insertOneDynamicValue(t, `{"a": 9007199254740993}`)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		marshaled, err := json.Marshal(map[string]interface{}{"dyn": rows[0]["dyn"]})
+		require.NoError(t, err)
+		assert.Equal(t, `{"dyn":{"a":9007199254740992}}`, string(marshaled))
+	})
 }

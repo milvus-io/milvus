@@ -499,6 +499,9 @@ func jsonNumberLiteral(field string, raw string) (json.Number, error) {
 func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool) ([]map[string]interface{}, map[string][]bool, error) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
+	// Escape hatch for clients that relied on the previous value handling.
+	// Read once per request rather than per field.
+	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
 	dataResult := gjson.GetBytes(body, HTTPRequestData)
 	dataResultArray := dataResult.Array()
 	if len(dataResultArray) == 0 {
@@ -800,6 +803,8 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					// A JSON document supplied as a JSON string is still unwrapped,
 					// preserving the existing input form.
 					switch {
+					case compatibilityMode:
+						reallyData[fieldName] = []byte(dataString)
 					case fieldValue.Type == gjson.String && json.Valid([]byte(dataString)):
 						reallyData[fieldName] = []byte(dataString)
 					case fieldValue.Type == gjson.Number:
@@ -857,6 +862,14 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						case gjson.String:
 							reallyData[mapKey] = mapValueStr
 						case gjson.Number:
+							if compatibilityMode {
+								if strings.Contains(mapValue.Raw, ".") {
+									reallyData[mapKey] = cast.ToFloat64(mapValue.Raw)
+								} else {
+									reallyData[mapKey] = cast.ToInt64(mapValueStr)
+								}
+								break
+							}
 							number, err := jsonNumberLiteral(mapKey, mapValue.Raw)
 							if err != nil {
 								return nil, nil, err
@@ -867,6 +880,10 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 							// turning every nested number into a float64, so a
 							// nested 9007199254740993 came back as ...992. Keep
 							// the subtree as written; it is re-emitted verbatim.
+							if compatibilityMode {
+								reallyData[mapKey] = mapValue.Value()
+								break
+							}
 							reallyData[mapKey] = json.RawMessage(mapValue.Raw)
 						case gjson.Null:
 							// skip null
