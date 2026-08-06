@@ -1129,49 +1129,49 @@ struct TantivyIndexWrapper {
 
             if constexpr (std::is_integral_v<T>) {
                 if constexpr (std::is_signed_v<T>) {
-                    auto res = tantivy_json_term_query_i64(
-                        reader_, json_path.c_str(), term, bitset);
-                    AssertInfo(res.success,
-                               "TantivyIndexWrapper.json_term_query: {}",
-                               res.error);
-                    free_rust_result(res);
+                    auto res = RustResultWrapper(tantivy_json_term_query_i64(
+                        reader_, json_path.c_str(), term, bitset));
+                    AssertTantivyOk(res,
+                                    "TantivyIndexWrapper.json_term_query: {}",
+                                    res.result_->error);
                 } else {
                     if (term <=
                         static_cast<T>(std::numeric_limits<int64_t>::max())) {
-                        auto res = tantivy_json_term_query_i64(
-                            reader_,
-                            json_path.c_str(),
-                            static_cast<int64_t>(term),
-                            bitset);
-                        AssertInfo(res.success,
-                                   "TantivyIndexWrapper.json_term_query: {}",
-                                   res.error);
-                        free_rust_result(res);
+                        auto res =
+                            RustResultWrapper(tantivy_json_term_query_i64(
+                                reader_,
+                                json_path.c_str(),
+                                static_cast<int64_t>(term),
+                                bitset));
+                        AssertTantivyOk(
+                            res,
+                            "TantivyIndexWrapper.json_term_query: {}",
+                            res.result_->error);
                     }
                 }
                 if constexpr (std::is_signed_v<T>) {
                     if (term >= 0) {
-                        auto res_u64 = tantivy_json_term_query_u64(
-                            reader_,
-                            json_path.c_str(),
-                            static_cast<uint64_t>(term),
-                            bitset);
-                        AssertInfo(
-                            res_u64.success,
+                        auto res_u64 =
+                            RustResultWrapper(tantivy_json_term_query_u64(
+                                reader_,
+                                json_path.c_str(),
+                                static_cast<uint64_t>(term),
+                                bitset));
+                        AssertTantivyOk(
+                            res_u64,
                             "TantivyIndexWrapper.json_term_query u64: {}",
-                            res_u64.error);
-                        free_rust_result(res_u64);
+                            res_u64.result_->error);
                     }
                 } else {
-                    auto res_u64 =
+                    auto res_u64 = RustResultWrapper(
                         tantivy_json_term_query_u64(reader_,
                                                     json_path.c_str(),
                                                     static_cast<uint64_t>(term),
-                                                    bitset);
-                    AssertInfo(res_u64.success,
-                               "TantivyIndexWrapper.json_term_query u64: {}",
-                               res_u64.error);
-                    free_rust_result(res_u64);
+                                                    bitset));
+                    AssertTantivyOk(
+                        res_u64,
+                        "TantivyIndexWrapper.json_term_query u64: {}",
+                        res_u64.result_->error);
                 }
                 return tantivy_json_term_query_f64(
                     reader_, json_path.c_str(), term, bitset);
@@ -1180,26 +1180,25 @@ struct TantivyIndexWrapper {
             if constexpr (std::is_floating_point_v<T>) {
                 // if term can be cast to int64 without precision loss, use int64 query first
                 if (can_cast_double_to_i64(term)) {
-                    auto res =
+                    auto res = RustResultWrapper(
                         tantivy_json_term_query_i64(reader_,
                                                     json_path.c_str(),
                                                     static_cast<int64_t>(term),
-                                                    bitset);
-                    AssertInfo(res.success,
-                               "TantivyIndexWrapper.json_term_query: {}",
-                               res.error);
-                    free_rust_result(res);
+                                                    bitset));
+                    AssertTantivyOk(res,
+                                    "TantivyIndexWrapper.json_term_query: {}",
+                                    res.result_->error);
                 }
                 if (can_cast_double_to_u64(term)) {
-                    auto res =
+                    auto res = RustResultWrapper(
                         tantivy_json_term_query_u64(reader_,
                                                     json_path.c_str(),
                                                     static_cast<uint64_t>(term),
-                                                    bitset);
-                    AssertInfo(res.success,
-                               "TantivyIndexWrapper.json_term_query u64: {}",
-                               res.error);
-                    free_rust_result(res);
+                                                    bitset));
+                    AssertTantivyOk(
+                        res,
+                        "TantivyIndexWrapper.json_term_query u64: {}",
+                        res.result_->error);
                 }
                 return tantivy_json_term_query_f64(
                     reader_, json_path.c_str(), term, bitset);
@@ -1255,16 +1254,16 @@ struct TantivyIndexWrapper {
                     }
                 }
                 if (!i64_values.empty()) {
-                    auto res_i64 =
+                    auto res_i64 = RustResultWrapper(
                         tantivy_json_terms_query_i64(reader_,
                                                      json_path.c_str(),
                                                      i64_values.data(),
                                                      i64_values.size(),
-                                                     bitset);
-                    AssertInfo(res_i64.success,
-                               "TantivyIndexWrapper.json_terms_query i64: {}",
-                               res_i64.error);
-                    free_rust_result(res_i64);
+                                                     bitset));
+                    AssertTantivyOk(
+                        res_i64,
+                        "TantivyIndexWrapper.json_terms_query i64: {}",
+                        res_i64.result_->error);
                 }
 
                 std::vector<uint64_t> u64_values;
@@ -1278,16 +1277,16 @@ struct TantivyIndexWrapper {
                     u64_values.push_back(static_cast<uint64_t>(values[i]));
                 }
                 if (!u64_values.empty()) {
-                    auto res_u64 =
+                    auto res_u64 = RustResultWrapper(
                         tantivy_json_terms_query_u64(reader_,
                                                      json_path.c_str(),
                                                      u64_values.data(),
                                                      u64_values.size(),
-                                                     bitset);
-                    AssertInfo(res_u64.success,
-                               "TantivyIndexWrapper.json_terms_query u64: {}",
-                               res_u64.error);
-                    free_rust_result(res_u64);
+                                                     bitset));
+                    AssertTantivyOk(
+                        res_u64,
+                        "TantivyIndexWrapper.json_terms_query u64: {}",
+                        res_u64.result_->error);
                 }
 
                 // Query f64 only when the integer round-trips exactly. JSON
@@ -1334,28 +1333,28 @@ struct TantivyIndexWrapper {
                     }
                 }
                 if (!int_values.empty()) {
-                    auto res_i64 =
+                    auto res_i64 = RustResultWrapper(
                         tantivy_json_terms_query_i64(reader_,
                                                      json_path.c_str(),
                                                      int_values.data(),
                                                      int_values.size(),
-                                                     bitset);
-                    AssertInfo(res_i64.success,
-                               "TantivyIndexWrapper.json_terms_query i64: {}",
-                               res_i64.error);
-                    free_rust_result(res_i64);
+                                                     bitset));
+                    AssertTantivyOk(
+                        res_i64,
+                        "TantivyIndexWrapper.json_terms_query i64: {}",
+                        res_i64.result_->error);
                 }
                 if (!u64_values.empty()) {
-                    auto res_u64 =
+                    auto res_u64 = RustResultWrapper(
                         tantivy_json_terms_query_u64(reader_,
                                                      json_path.c_str(),
                                                      u64_values.data(),
                                                      u64_values.size(),
-                                                     bitset);
-                    AssertInfo(res_u64.success,
-                               "TantivyIndexWrapper.json_terms_query u64: {}",
-                               res_u64.error);
-                    free_rust_result(res_u64);
+                                                     bitset));
+                    AssertTantivyOk(
+                        res_u64,
+                        "TantivyIndexWrapper.json_terms_query u64: {}",
+                        res_u64.result_->error);
                 }
                 return tantivy_json_terms_query_f64(
                     reader_,

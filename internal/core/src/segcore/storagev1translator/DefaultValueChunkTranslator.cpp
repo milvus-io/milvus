@@ -279,7 +279,16 @@ DefaultValueChunkTranslator::build_buffer_for_rows(
     }
 
     arrow::ArrayVector array_vec;
-    array_vec.emplace_back(builder->Finish().ValueOrDie());
+    auto finish_result = builder->Finish();
+    if (!finish_result.ok()) {
+        // ValueOrDie would abort the process; a Finish failure (allocation)
+        // must surface as a classified, retriable error instead.
+        ThrowInfo(
+            milvus::storage::ArrowStatusToErrorCode(finish_result.status()),
+            "finish arrow builder for default values failed: {}",
+            finish_result.status().ToString());
+    }
+    array_vec.emplace_back(finish_result.ValueUnsafe());
 
     if (!use_mmap_ || mmap_dir_path_.empty()) {
         return milvus::create_chunk_buffer(
