@@ -8,7 +8,10 @@ import (
 	"math"
 	"runtime"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/sbinet/npyio"
@@ -21,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -546,4 +550,86 @@ func Test_sizeReservations_rejectsExactCountOverOneBatch(t *testing.T) {
 	// still reports it, with the wording that explains the estimate.
 	bounds = []int64{maxIDsPerAllocBatch + 1}
 	assert.NoError(t, sizeReservations(bounds, []bool{false}))
+}
+
+func Test_minRowTextBytes_skipsLegacyDynamicField(t *testing.T) {
+	// A collection created before $meta gained Nullable/DefaultValue keeps a
+	// non-nullable, no-default dynamic field in its persisted schema, and no
+	// migration ever rewrote it. The JSON reader still never requires $meta
+	// (json/row_parser.go:80-83 keeps it out of name2FieldID), so counting it
+	// would overstate the per-row floor and under-reserve the PK range.
+	legacy := &schemapb.CollectionSchema{
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{FieldID: 102, Name: common.MetaFieldName, DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+
+	got, err := minRowTextBytes(legacy, importutilv2.JSONLines)
+	assert.NoError(t, err)
+	// The floor for `{"text":""}` is `"text":` (7) plus the braces (2). $meta adds
+	// nothing: no name bytes, and no separator, since it is not a present field.
+	assert.Equal(t, int64(9), got) // was 18 before the fix
+
+	// A row of exactly that shape must not size below the floor.
+	assert.LessOrEqual(t, got, int64(len(`{"text":""}`)))
+
+	// The modern schema, where $meta is nullable with a default, is unchanged.
+	modern := &schemapb.CollectionSchema{
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{
+				FieldID: 102, Name: common.MetaFieldName, DataType: schemapb.DataType_JSON, IsDynamic: true,
+				Nullable:     true,
+				DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_BytesData{BytesData: []byte("{}")}},
+			},
+		},
+	}
+	modernGot, err := minRowTextBytes(modern, importutilv2.JSONLines)
+	assert.NoError(t, err)
+	assert.Equal(t, got, modernGot, "legacy and modern $meta must size identically")
+}
+
+func Test_parquetNumRows_boundsConcurrentFooterParses(t *testing.T) {
+	// maxParquetFooterLen bounds the bytes read, not what Arrow's thrift decoder
+	// allocates from them, so the number of parses in flight is what caps the
+	// coordinator's exposure. Pin it.
+	const objSize = int64(1 << 20)
+	var inFlight, peak atomic.Int32
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(objSize, nil).Maybe()
+	cm.EXPECT().ReadAt(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, _ int64, length int64) ([]byte, error) {
+			cur := inFlight.Add(1)
+			for {
+				old := peak.Load()
+				if cur <= old || peak.CompareAndSwap(old, cur) {
+					break
+				}
+			}
+			time.Sleep(20 * time.Millisecond)
+			inFlight.Add(-1)
+			// Not a parquet file: validateParquetFooter rejects it before any decode.
+			return make([]byte, length), nil
+		}).Maybe()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4*maxConcurrentParquetFooterParses; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := parquetNumRows(context.Background(), cm, "f.parquet")
+			assert.Error(t, err)
+		}()
+	}
+	wg.Wait()
+
+	assert.LessOrEqual(t, peak.Load(), int32(maxConcurrentParquetFooterParses),
+		"concurrent footer parses must stay within the process-wide cap")
+	assert.Greater(t, peak.Load(), int32(1), "the probe must actually have overlapped")
 }

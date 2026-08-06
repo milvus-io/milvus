@@ -52,6 +52,15 @@ func nonSourceFieldIDs(schema *schemapb.CollectionSchema) typeutil.Set[int64] {
 		if f.GetIsPrimaryKey() && f.GetAutoID() {
 			ids.Insert(f.GetFieldID())
 		}
+		// The dynamic field is never required from the source file: the JSON row
+		// parser leaves it out of name2FieldID (json/row_parser.go:80-83), so the
+		// completeness check never asks for it and combineDynamicRow synthesizes
+		// it from the row's spare keys. The nullable/default skip below covers it
+		// only for collections created after $meta gained those attributes; a
+		// schema persisted before that is neither, and nothing migrated it.
+		if f.GetIsDynamic() {
+			ids.Insert(f.GetFieldID())
+		}
 	}
 	for _, fn := range schema.GetFunctions() {
 		ids.Insert(fn.GetOutputFieldIds()...)
@@ -302,14 +311,29 @@ var (
 // a wide margin.
 const maxParquetFooterLen = 16 << 20
 
+// maxConcurrentParquetFooterParses bounds how many parquet footers are parsed at
+// once across the whole process.
+//
+// maxParquetFooterLen bounds the bytes read, not the memory the decode takes:
+// Arrow's generated reader sizes []*RowGroup from the element count the footer
+// declares (parquet/internal/gen-go/parquet/parquet.go:12252) before reading a
+// single element, while thrift's guard compares that count against a *byte*
+// limit (thrift/configuration.go:305, default 100 MiB). A 6-byte footer may
+// therefore declare 104857600 elements and allocate 800 MiB of pointers. The cap
+// is process-wide, not per-request, because every import request builds its own
+// sizing pool and nothing above them limits how many run at once.
+const maxConcurrentParquetFooterParses = 4
+
+var parquetFooterParseSem = make(chan struct{}, maxConcurrentParquetFooterParses)
+
 // validateParquetFooter rejects an out-of-range declared footer length before Arrow
 // allocates it. sizingReaderAt.ReadAt buffers a whole ranged GET before copying, so
-// each parse costs about twice the declared length, and the sizing pool runs 2*CPU
-// of them concurrently on the coordinator.
+// each parse costs about twice the declared length.
 //
-// This bounds one file, not the pass: worst-case in-flight is still
-// 2*CPU * 2 * maxParquetFooterLen. An aggregate byte budget across the pass is left
-// as follow-up.
+// This bounds the bytes one file may read, which is not the same as the memory its
+// decode takes -- see maxConcurrentParquetFooterParses, which bounds how many parses
+// run at once and is what actually caps the coordinator's exposure. A per-pass byte
+// budget is still absent; the concurrency cap stands in for it.
 func validateParquetFooter(ra io.ReaderAt, size int64, path string) error {
 	// Leading magic (4) + metadata length (4) + trailing magic (4).
 	const minParquetSize = 12
@@ -336,6 +360,13 @@ func validateParquetFooter(ra io.ReaderAt, size int64, path string) error {
 // from NewParquetReader is therefore a genuine file-format problem, not a transient
 // fault, and is returned as a non-retryable import error.
 func parquetNumRows(ctx context.Context, cm storage.ChunkManager, path string) (int64, error) {
+	select {
+	case parquetFooterParseSem <- struct{}{}:
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+	defer func() { <-parquetFooterParseSem }()
+
 	ra, err := newSizingReaderAt(ctx, cm, path)
 	if err != nil {
 		return 0, err
