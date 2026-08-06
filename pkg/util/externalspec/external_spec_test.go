@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestParseExternalSpec_Empty(t *testing.T) {
@@ -193,6 +194,11 @@ func minimalValidSpec() string {
 }
 
 func TestValidateSourceAndSpec(t *testing.T) {
+	requireParameterInvalid := func(t *testing.T, err error) {
+		t.Helper()
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	}
+
 	t.Run("both_valid", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix", minimalValidSpec())
 		assert.NoError(t, err)
@@ -200,34 +206,34 @@ func TestValidateSourceAndSpec(t *testing.T) {
 
 	t.Run("invalid_source", func(t *testing.T) {
 		err := ValidateSourceAndSpec("file:///tmp/x", minimalValidSpec())
-		require.Error(t, err)
+		requireParameterInvalid(t, err)
 	})
 
 	t.Run("source_credentials_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://SOURCE_ACCESS_ERROR_SENTINEL:SOURCE_SECRET_ERROR_SENTINEL@bucket/prefix", minimalValidSpec())
-		require.Error(t, err)
+		requireParameterInvalid(t, err)
 		assert.Contains(t, err.Error(), "external_source is invalid")
 		assert.Contains(t, err.Error(), "must not embed credentials")
 	})
 
-	t.Run("malformed_source_includes_parse_error", func(t *testing.T) {
+	t.Run("malformed_source_redacts_parse_error", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://SOURCE_PARSE_ERROR_SENTINEL bad/prefix", minimalValidSpec())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "SOURCE_PARSE_ERROR_SENTINEL")
+		requireParameterInvalid(t, err)
+		assert.NotContains(t, err.Error(), "SOURCE_PARSE_ERROR_SENTINEL")
 		assert.Contains(t, err.Error(), "external_source is invalid")
-		assert.Contains(t, err.Error(), "invalid external_source URL")
+		assert.Contains(t, err.Error(), "external_source is not a valid URL")
 	})
 
 	t.Run("invalid_spec_includes_parse_error", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix", `{bad json`)
-		require.Error(t, err)
+		requireParameterInvalid(t, err)
 		assert.Contains(t, err.Error(), "external_spec is invalid")
 		assert.Contains(t, err.Error(), "invalid external spec JSON")
 	})
 
 	t.Run("invalid_format_includes_validation_error", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"FORMAT_VALUE_SECRET_SENTINEL"}`)
-		require.Error(t, err)
+		requireParameterInvalid(t, err)
 		assert.Contains(t, err.Error(), "FORMAT_VALUE_SECRET_SENTINEL")
 		assert.Contains(t, err.Error(), "external_spec is invalid")
 		assert.Contains(t, err.Error(), "unsupported format")
@@ -235,7 +241,7 @@ func TestValidateSourceAndSpec(t *testing.T) {
 
 	t.Run("invalid_extfs_value_includes_validation_error", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"CLOUD_PROVIDER_SECRET_SENTINEL"}}`)
-		require.Error(t, err)
+		requireParameterInvalid(t, err)
 		assert.Contains(t, err.Error(), "CLOUD_PROVIDER_SECRET_SENTINEL")
 		assert.Contains(t, err.Error(), "cloud_provider_secret_sentinel")
 		assert.Contains(t, err.Error(), "external_spec is invalid")
@@ -244,7 +250,7 @@ func TestValidateSourceAndSpec(t *testing.T) {
 
 	t.Run("missing_credentials_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"parquet"}`)
-		require.Error(t, err)
+		require.ErrorIs(t, err, merr.ErrParameterMissing)
 		assert.Contains(t, err.Error(), "external_spec is invalid")
 		assert.Contains(t, err.Error(), "cloud_provider is required")
 	})
@@ -252,20 +258,20 @@ func TestValidateSourceAndSpec(t *testing.T) {
 	t.Run("missing_region_for_aws_scheme_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
 			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","cloud_provider":"aws"}}`)
-		require.Error(t, err)
+		require.ErrorIs(t, err, merr.ErrParameterMissing)
 	})
 
 	t.Run("missing_cloud_provider_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
 			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1"}}`)
-		require.Error(t, err)
+		require.ErrorIs(t, err, merr.ErrParameterMissing)
 		assert.Contains(t, err.Error(), "external_spec is invalid")
 	})
 
 	t.Run("invalid_cloud_provider_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
 			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"unknown"}}`)
-		require.Error(t, err)
+		requireParameterInvalid(t, err)
 		assert.Contains(t, err.Error(), "external_spec is invalid")
 	})
 
@@ -284,7 +290,7 @@ func TestValidateSourceAndSpec(t *testing.T) {
 	t.Run("minio_scheme_rejects_non_minio_cloud_provider", func(t *testing.T) {
 		err := ValidateSourceAndSpec("minio://localhost:9000/mybucket/path",
 			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"aws"}}`)
-		require.Error(t, err)
+		requireParameterInvalid(t, err)
 		assert.Contains(t, err.Error(), "external_spec is invalid")
 	})
 
@@ -315,19 +321,19 @@ func TestValidateSourceAndSpec(t *testing.T) {
 	t.Run("ak_without_sk_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
 			`{"format":"parquet","extfs":{"access_key_id":"AK","region":"us-east-1","cloud_provider":"aws"}}`)
-		require.Error(t, err)
+		require.ErrorIs(t, err, merr.ErrParameterMissing)
 	})
 
 	t.Run("anonymous_with_aksk_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
 			`{"format":"parquet","extfs":{"anonymous":"true","access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"aws"}}`)
-		require.Error(t, err)
+		requireParameterInvalid(t, err)
 	})
 
 	t.Run("multiple_modes_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
 			`{"format":"parquet","extfs":{"role_arn":"arn:aws:iam::1:role/r","access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"aws"}}`)
-		require.Error(t, err)
+		requireParameterInvalid(t, err)
 	})
 
 	t.Run("gcp_impersonation_mode", func(t *testing.T) {
@@ -345,31 +351,31 @@ func TestValidateSourceAndSpec(t *testing.T) {
 	t.Run("gcp_impersonation_on_aws_scheme_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
 			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","region":"us-east-1","cloud_provider":"aws"}}`)
-		require.Error(t, err)
+		requireParameterInvalid(t, err)
 	})
 
 	t.Run("gcp_impersonation_malformed_email_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("gs://bucket/prefix",
 			`{"format":"parquet","extfs":{"gcp_target_service_account":"not-an-email","cloud_provider":"gcp"}}`)
-		require.Error(t, err)
+		requireParameterInvalid(t, err)
 	})
 
 	t.Run("gcp_impersonation_missing_at_sign_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("gs://bucket/prefix",
 			`{"format":"parquet","extfs":{"gcp_target_service_account":"saproj.iam.gserviceaccount.com","cloud_provider":"gcp"}}`)
-		require.Error(t, err)
+		requireParameterInvalid(t, err)
 	})
 
 	t.Run("gcp_impersonation_with_aksk_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("gs://bucket/prefix",
 			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","access_key_id":"AK","access_key_value":"SK","cloud_provider":"gcp"}}`)
-		require.Error(t, err)
+		requireParameterInvalid(t, err)
 	})
 
 	t.Run("gcp_impersonation_with_anonymous_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("gs://bucket/prefix",
 			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","anonymous":"true","cloud_provider":"gcp"}}`)
-		require.Error(t, err)
+		requireParameterInvalid(t, err)
 	})
 }
 
