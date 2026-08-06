@@ -592,20 +592,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 		}
 	}
 
-	// Get the number of field binlog files from non-empty segment
-	var binlogNum int
-	for _, b := range segment.GetFieldBinlogs() {
-		if b != nil {
-			binlogNum = len(b.GetBinlogs())
-			break
-		}
-	}
-	// Unable to deal with all empty segments cases, so return error
-	if binlogNum == 0 {
-		mlog.Warn(context.TODO(), "compact wrong, all segments' binlogs are empty")
-		return merr.WrapErrIllegalCompactionPlan()
-	}
-
 	rr, existingFields, err := newCompactionSegmentRecordReader(ctx, segment, t.plan.Schema, t.compactionParams.StorageConfig,
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return t.binlogIO.Download(ctx, paths)
@@ -884,21 +870,6 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("scalarAnalyzeSegment-%d-%d", t.GetPlanID(), segment.GetSegmentID()))
 	defer span.End()
 	processStart := time.Now()
-
-	// Get the number of field binlog files from non-empty segment
-	var binlogNum int
-	for _, b := range segment.GetFieldBinlogs() {
-		if b != nil {
-			binlogNum = len(b.GetBinlogs())
-			break
-		}
-	}
-	// Unable to deal with all empty segments cases, so return error
-	if binlogNum == 0 {
-		mlog.Warn(context.TODO(), "compact wrong, all segments' binlogs are empty")
-		return nil, merr.WrapErrIllegalCompactionPlan("all segments' binlogs are empty")
-	}
-	mlog.Debug(context.TODO(), "binlogNum", mlog.Int("binlogNum", binlogNum))
 
 	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
 	requiredFields := typeutil.NewSet[int64]()
