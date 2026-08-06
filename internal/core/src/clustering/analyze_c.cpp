@@ -31,6 +31,7 @@
 #include "storage/StorageV2FSCache.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/util.h"
 #include "type_c.h"
 
 using namespace milvus;
@@ -80,7 +81,8 @@ Analyze(CAnalyze* res_analyze,
         milvus::storage::FieldDataMeta field_meta{analyze_info->collectionid(),
                                                   analyze_info->partitionid(),
                                                   0,
-                                                  field_id};
+                                                  field_id,
+                                                  analyze_info->field_schema()};
 
         milvus::storage::IndexMeta index_meta{
             0, field_id, analyze_info->buildid(), analyze_info->version()};
@@ -114,6 +116,18 @@ Analyze(CAnalyze* res_analyze,
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
+
+        // Loon FFI properties are required by the manifest read path
+        // (GetFieldDatasFromManifest asserts they are set). They are inert for
+        // V1 segments -- cache_raw_data_to_memory_internal never reads them --
+        // so set them unconditionally rather than scanning manifest_paths.
+        // Clustering analyze runs on native (non-external) collections, so
+        // internal properties from the storage config suffice; the manifest
+        // reader falls back to column name = field_id when no
+        // storage_column_mapping is set.
+        fileManagerContext.set_loon_ffi_properties(
+            MakeInternalPropertiesFromStorageConfig(
+                ToCStorageConfig(storage_config)));
 
         if (plugin_context != nullptr) {
             AssertInfo(plugin_context->key != nullptr,
