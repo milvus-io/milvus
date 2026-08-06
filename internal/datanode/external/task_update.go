@@ -304,7 +304,7 @@ func (t *RefreshExternalCollectionTask) GetKeptSegmentIDs() []int64 {
 // fragmentKey identifies the L1 data fragment. Delete overlays are handled as
 // manifest-only updates so L0 changes do not force a new target segment ID.
 func fragmentKey(f packed.Fragment) string {
-	return fmt.Sprintf("%s:%d:%d", f.FilePath, f.StartRow, f.EndRow)
+	return packed.FragmentIdentity(f)
 }
 
 // buildCurrentSegmentFragments builds segment to fragments mapping from current segments
@@ -723,62 +723,117 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			}
 		}
 	} else {
+		// DataCoord derives this target from the configured segment sizing policy
+		// and passes it with the refresh request.
 		targetRowsPerSegment := t.req.GetTargetRowsPerSegment()
+		if targetRowsPerSegment <= 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("external collection target rows per segment must be positive")
+		}
 		if totalRows < targetRowsPerSegment {
 			targetRowsPerSegment = totalRows
 		}
 
-		numSegments := (totalRows + targetRowsPerSegment - 1) / targetRowsPerSegment
-		if numSegments == 0 {
-			numSegments = 1
-		}
-
-		avgRowsPerSegment := totalRows / numSegments
-
-		mlog.Info(context.TODO(), "Balancing fragments to segments",
-			mlog.Int("numFragments", len(fragments)),
-			mlog.Int64("totalRows", totalRows),
-			mlog.Int64("numSegments", numSegments),
-			mlog.Int64("avgRowsPerSegment", avgRowsPerSegment))
-
-		// Sort fragments by row count descending for better bin-packing
-		sortedFragments := make([]packed.Fragment, len(fragments))
-		copy(sortedFragments, fragments)
-		sort.Slice(sortedFragments, func(i, j int) bool {
-			return sortedFragments[i].RowCount > sortedFragments[j].RowCount
-		})
-
-		// Initialize segment bins
-		type segmentBin struct {
-			fragments []packed.Fragment
-			rowCount  int64
-		}
-		bins := make([]segmentBin, numSegments)
-
-		// Greedy bin-packing: assign each fragment to the bin with lowest current row count
-		for _, f := range sortedFragments {
-			if err := ensureContext(ctx); err != nil {
-				return nil, err
+		isPaimonTask := t.parsedSpec != nil && t.parsedSpec.Format == externalspec.FormatPaimonTable
+		maxDataSplitsPerSegment := int64(len(fragments))
+		if isPaimonTask {
+			maxDataSplitsPerSegment = paramtable.Get().DataNodeCfg.ExternalCollectionPaimonMaxDataSplitsPerSegment.GetAsInt64()
+			if maxDataSplitsPerSegment <= 0 {
+				return nil, merr.WrapErrParameterInvalidMsg("Paimon max DataSplits per segment must be positive")
 			}
-			// Find bin with minimum row count
-			minIdx := 0
-			for i := 1; i < len(bins); i++ {
-				if bins[i].rowCount < bins[minIdx].rowCount {
-					minIdx = i
+		}
+
+		// Native Paimon DataSplits are independent merge domains. Preserve their
+		// bucket boundary while allowing several immutable DataSplits from one
+		// bucket to share a Milvus segment. Direct files keep the same global
+		// packing behavior as Iceberg and other file-based formats.
+		packingGroups := make(map[string][]packed.Fragment)
+		for _, fragment := range fragments {
+			group := ""
+			if isPaimonTask {
+				readPath, bucket, err := packed.PaimonRoutingMeta(fragment.Properties)
+				if err != nil {
+					return nil, err
+				}
+				if readPath == packed.PaimonDataSplitReadPath {
+					group = "paimon-bucket:" + strconv.FormatInt(int64(bucket), 10)
 				}
 			}
-			bins[minIdx].fragments = append(bins[minIdx].fragments, f)
-			bins[minIdx].rowCount += f.RowCount
+			packingGroups[group] = append(packingGroups[group], fragment)
+		}
+		groupNames := make([]string, 0, len(packingGroups))
+		for group := range packingGroups {
+			groupNames = append(groupNames, group)
+		}
+		sort.Strings(groupNames)
+
+		type segmentBin struct {
+			fragments  []packed.Fragment
+			rowCount   int64
+			dataSplits int64
+		}
+		for _, group := range groupNames {
+			groupFragments := packingGroups[group]
+			var groupRows int64
+			for _, fragment := range groupFragments {
+				groupRows += fragment.RowCount
+			}
+
+			numSegments := (groupRows + targetRowsPerSegment - 1) / targetRowsPerSegment
+			isDataSplitGroup := isPaimonTask && group != ""
+			if isDataSplitGroup {
+				dataSplits := int64(len(groupFragments))
+				bySplitLimit := (dataSplits + maxDataSplitsPerSegment - 1) / maxDataSplitsPerSegment
+				if bySplitLimit > numSegments {
+					numSegments = bySplitLimit
+				}
+			}
+			if numSegments == 0 {
+				numSegments = 1
+			}
+
+			sortedFragments := append([]packed.Fragment(nil), groupFragments...)
+			sort.SliceStable(sortedFragments, func(i, j int) bool {
+				return sortedFragments[i].RowCount > sortedFragments[j].RowCount
+			})
+			bins := make([]segmentBin, numSegments)
+			for _, fragment := range sortedFragments {
+				if err := ensureContext(ctx); err != nil {
+					return nil, err
+				}
+				minIdx := -1
+				for index := range bins {
+					if isDataSplitGroup && bins[index].dataSplits >= maxDataSplitsPerSegment {
+						continue
+					}
+					if minIdx < 0 || bins[index].rowCount < bins[minIdx].rowCount {
+						minIdx = index
+					}
+				}
+				if minIdx < 0 {
+					return nil, merr.WrapErrParameterInvalidMsg("cannot place Paimon DataSplit within per-segment limit %d", maxDataSplitsPerSegment)
+				}
+				bins[minIdx].fragments = append(bins[minIdx].fragments, fragment)
+				bins[minIdx].rowCount += fragment.RowCount
+				if isDataSplitGroup {
+					bins[minIdx].dataSplits++
+				}
+			}
+
+			for _, bin := range bins {
+				if len(bin.fragments) == 0 {
+					continue
+				}
+				if err := appendWork(bin.rowCount, bin.fragments); err != nil {
+					return nil, err
+				}
+			}
 		}
 
-		for _, bin := range bins {
-			if len(bin.fragments) == 0 {
-				continue
-			}
-			if err := appendWork(bin.rowCount, bin.fragments); err != nil {
-				return nil, err
-			}
-		}
+		mlog.Info(context.TODO(), "Balanced fragments to segments",
+			mlog.Int("numFragments", len(fragments)),
+			mlog.Int64("totalRows", totalRows),
+			mlog.Int("packingGroups", len(packingGroups)),
+			mlog.Int("numSegments", len(works)))
 	}
 
 	mlog.Info(context.TODO(), "Allocated segment IDs, starting manifest creation",

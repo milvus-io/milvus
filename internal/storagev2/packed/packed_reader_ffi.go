@@ -136,7 +136,7 @@ func NewFFIPackedReaderWithFragments(
 	if err != nil {
 		return nil, err
 	}
-	defer C.loon_column_groups_destroy(cColumnGroups)
+	defer destroyCreatedColumnGroups(cColumnGroups)
 
 	return openFFIPackedReader(schema, neededColumns, bufferSize, storageConfig, storagePluginContext, extfs,
 		func(cSchema *C.struct_ArrowSchema,

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -468,6 +469,79 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Mult
 		// The difference between max and min should be reasonable
 		avgFragmentSize := int64(2000000 / 5)
 		s.Less(maxRows-minRows, avgFragmentSize*2)
+	}
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PaimonDataSplitLimitsAndBuckets() {
+	paramtable.Init()
+	maxSplitsKey := paramtable.Get().DataNodeCfg.ExternalCollectionPaimonMaxDataSplitsPerSegment.Key
+	paramtable.Get().Save(maxSplitsKey, "2")
+	defer paramtable.Get().Reset(maxSplitsKey)
+
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 300},
+		TargetRowsPerSegment:   100,
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/table",
+		ExternalSpec:           `{"format":"paimon-table"}`,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", ExternalField: "pk"},
+		}},
+	}
+	task := NewRefreshExternalCollectionTask(context.Background(), req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: externalspec.FormatPaimonTable}
+
+	var mu sync.Mutex
+	var packedBins [][]packed.Fragment
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
+			mu.Lock()
+			packedBins = append(packedBins, append([]packed.Fragment(nil), fragments...))
+			mu.Unlock()
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).Return(map[string]int64{"pk": 8}, nil).Build()
+	defer m2.UnPatch()
+
+	fragments := make([]packed.Fragment, 0, 6)
+	for bucket := 0; bucket < 2; bucket++ {
+		for split := 0; split < 3; split++ {
+			fragments = append(fragments, packed.Fragment{
+				FragmentID: int64(bucket*3 + split),
+				FilePath:   fmt.Sprintf("split-%d-%d", bucket, split),
+				RowCount:   10,
+				Properties: map[string]string{
+					// Production fragments carry only the descriptor; routing
+					// is derived from it.
+					"metadata": fmt.Sprintf(
+						`{"version":1,"read_path":"data-split","bucket":%d,"snapshot_id":9,"record_count":10}`,
+						bucket),
+				},
+			})
+		}
+	}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.NoError(err)
+	s.Len(result, 4)
+	s.Len(packedBins, 4)
+	for _, bin := range packedBins {
+		s.LessOrEqual(len(bin), 2)
+		if !s.NotEmpty(bin) {
+			continue
+		}
+		_, bucket, err := packed.PaimonRoutingMeta(bin[0].Properties)
+		s.NoError(err)
+		for _, fragment := range bin {
+			_, fragmentBucket, err := packed.PaimonRoutingMeta(fragment.Properties)
+			s.NoError(err)
+			s.Equal(bucket, fragmentBucket)
+		}
 	}
 }
 
@@ -2741,6 +2815,23 @@ func (s *RefreshExternalCollectionTaskSuite) TestFragmentKey() {
 	// Identical fragments should produce the same key
 	f4 := packed.Fragment{FilePath: "/data/file1.parquet", StartRow: 0, EndRow: 1000}
 	s.Equal(fragmentKey(f1), fragmentKey(f4))
+
+	// Snapshot-specific file properties are part of the data view identity.
+	// Their map insertion order is not.
+	withSnapshot1 := packed.Fragment{
+		FilePath: "/data/file1.parquet", StartRow: 0, EndRow: 1000,
+		Properties: map[string]string{"metadata": "snapshot-1", "file_size": "10"},
+	}
+	withSnapshot1Reordered := packed.Fragment{
+		FilePath: "/data/file1.parquet", StartRow: 0, EndRow: 1000,
+		Properties: map[string]string{"file_size": "10", "metadata": "snapshot-1"},
+	}
+	withSnapshot2 := packed.Fragment{
+		FilePath: "/data/file1.parquet", StartRow: 0, EndRow: 1000,
+		Properties: map[string]string{"metadata": "snapshot-2", "file_size": "10"},
+	}
+	s.Equal(fragmentKey(withSnapshot1), fragmentKey(withSnapshot1Reordered))
+	s.NotEqual(fragmentKey(withSnapshot1), fragmentKey(withSnapshot2))
 
 	// L0 deltalogs are not part of the L1 data identity. They are handled by a
 	// manifest-only refresh so the target segment ID can be reused.

@@ -41,6 +41,7 @@
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentSealed.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/util.h"
 
 using namespace milvus;
@@ -3298,6 +3299,73 @@ TEST(InjectExtfsAllowlist, IcebergSnapshotIDAcceptsString) {
 
     EXPECT_EQ(std::get<std::string>(props.at("iceberg.snapshot_id")),
               "5320540205222981137");
+}
+
+TEST(InjectExtfsAllowlist, PaimonSnapshotIDAcceptsStringAndNumber) {
+    const int64_t coll_id = 42;
+    {
+        milvus_storage::api::Properties props;
+        std::string spec =
+            R"({"format":"paimon-table","snapshot_id":"5320540205222981137"})";
+        ::InjectExternalSpecProperties(
+            props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+        EXPECT_EQ(std::get<int64_t>(props.at("paimon.snapshot_id")),
+                  int64_t{5320540205222981137});
+    }
+    {
+        milvus_storage::api::Properties props;
+        std::string spec = R"({"format":"paimon-table","snapshot_id":7})";
+        ::InjectExternalSpecProperties(
+            props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+        EXPECT_EQ(std::get<int64_t>(props.at("paimon.snapshot_id")),
+                  int64_t{7});
+    }
+}
+
+TEST(InjectExtfsAllowlist, PaimonSnapshotIDSurvivesCABIConversion) {
+    LoonProperties props{nullptr, 0};
+    auto result = loon_properties_inject_external_spec(
+        &props,
+        42,
+        "s3://s3.amazonaws.com/bucket/key",
+        R"({"format":"paimon-table","snapshot_id":"5320540205222981137"})");
+    ASSERT_NE(loon_ffi_is_success(&result), 0);
+    loon_ffi_free_result(&result);
+
+    const auto* snapshot_id = loon_properties_get(&props, "paimon.snapshot_id");
+    ASSERT_NE(snapshot_id, nullptr);
+    EXPECT_STREQ(snapshot_id, "5320540205222981137");
+
+    const auto* use_ssl = loon_properties_get(&props, "extfs.42.use_ssl");
+    ASSERT_NE(use_ssl, nullptr);
+    EXPECT_STREQ(use_ssl, "true");
+
+    loon_properties_free(&props);
+}
+
+TEST(InjectExtfsAllowlist, PaimonSnapshotIDOptional) {
+    // Without snapshot_id the property must stay absent so the paimon
+    // planner falls back to the latest snapshot.
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 42;
+    std::string spec = R"({"format":"paimon-table"})";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+
+    EXPECT_EQ(props.count("paimon.snapshot_id"), 0u);
+}
+
+TEST(InjectExtfsAllowlist, PaimonScanModeIsInjected) {
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 42;
+    std::string spec = R"({"format":"paimon-table","scan_mode":"direct-file"})";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+
+    EXPECT_EQ(std::get<std::string>(props.at(PROPERTY_PAIMON_SCAN_MODE)),
+              "direct-file");
 }
 
 // ============================================================

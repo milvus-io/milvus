@@ -19,6 +19,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -745,8 +746,9 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     }
 
     // Format-layer: emit per-format properties derived from spec.format.
-    // Currently only Iceberg-table → iceberg.snapshot_id. Future formats
-    // (Lance version, Iceberg branch, etc.) land here.
+    // Currently iceberg-table → iceberg.snapshot_id and paimon-table →
+    // paimon.snapshot_id. Future formats (Lance version, Iceberg branch,
+    // etc.) land here.
     if (external_spec.empty()) {
         return;
     }
@@ -758,7 +760,16 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
         if (doc.find_field("format").get_string().get(format_view) ==
             simdjson::SUCCESS) {
             std::string format{format_view};
+            // Table formats whose snapshot pin travels as a loon property.
+            // For paimon-table the property is optional: when absent, the
+            // planner reads the latest snapshot.
+            const char* snapshot_property = nullptr;
             if (format == "iceberg-table") {
+                snapshot_property = "iceberg.snapshot_id";
+            } else if (format == "paimon-table") {
+                snapshot_property = "paimon.snapshot_id";
+            }
+            if (snapshot_property != nullptr) {
                 auto snapshot_field = doc.find_field("snapshot_id");
                 int64_t snapshot_id = 0;
                 auto int_err = snapshot_field.get_int64().get(snapshot_id);
@@ -772,8 +783,9 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
                             int_err = simdjson::SUCCESS;
                         } catch (const std::exception& e) {
                             LOG_WARN(
-                                "iceberg snapshot_id parse failed "
+                                "{} parse failed "
                                 "(collection_id={}): {}",
+                                snapshot_property,
                                 collection_id,
                                 e.what());
                         }
@@ -782,7 +794,7 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
                 if (int_err == simdjson::SUCCESS) {
                     milvus_storage::api::SetValue(
                         properties,
-                        "iceberg.snapshot_id",
+                        snapshot_property,
                         std::to_string(snapshot_id).c_str());
                 }
             }
@@ -791,6 +803,34 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
         // Top-level parse failure already caught by the extfs block above;
         // this second pass only runs after the first succeeded.
         LOG_WARN("format-props parse failed (collection_id={}): {}",
+                 collection_id,
+                 e.what());
+    }
+
+    // Paimon's path selection is a format property, not an extfs setting.
+    // Parse it independently from the on-demand snapshot pass above so JSON
+    // field order cannot affect lookup. Go validates the enum at the API
+    // boundary; milvus-storage validates it again when the property is set.
+    try {
+        const auto spec = json::parse(external_spec);
+        if (spec.value("format", std::string{}) == "paimon-table") {
+            auto scan_mode = spec.find("scan_mode");
+            if (scan_mode != spec.end()) {
+                AssertInfo(scan_mode->is_string(),
+                           "Paimon scan_mode must be a string");
+                milvus_storage::api::SetValue(
+                    properties,
+                    PROPERTY_PAIMON_SCAN_MODE,
+                    scan_mode->get_ref<const std::string&>().c_str());
+            }
+        }
+    } catch (const json::exception& e) {
+        // Every pass in this function tolerates a structurally broken spec:
+        // Go's ParseExternalSpec rejects it long before this point, and the
+        // extfs passes above still populate what they derived from the URI.
+        // Throwing here would turn that documented fallthrough into a load
+        // failure (InjectExtfsAllowlist.InvalidJsonIsHandledGracefully).
+        LOG_WARN("Paimon scan_mode parse failed (collection_id={}): {}",
                  collection_id,
                  e.what());
     }
@@ -892,6 +932,41 @@ GetLoonManifest(
     }
 }
 
+namespace {
+
+// TODO: the vector<string> comma join is ambiguous when an element contains
+// a comma, and std::to_string renders doubles with fixed six decimals. No
+// property crossing this C-ABI today carries either shape; revisit the
+// encoding before one does.
+std::string
+PropertyValueToString(const milvus_storage::api::PropertyVariant& value) {
+    return std::visit(
+        [](const auto& v) -> std::string {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, bool>) {
+                return v ? "true" : "false";
+            } else if constexpr (std::is_same_v<T, std::nullptr_t>) {
+                return "";
+            } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
+                std::ostringstream output;
+                for (size_t i = 0; i < v.size(); ++i) {
+                    if (i != 0) {
+                        output << ',';
+                    }
+                    output << v[i];
+                }
+                return output.str();
+            } else if constexpr (std::is_arithmetic_v<T>) {
+                return std::to_string(v);
+            } else {
+                return v;
+            }
+        },
+        value);
+}
+
+}  // namespace
+
 // ==================== C-ABI: external spec injection ====================
 //
 // Bridges Go callers into the C++ InjectExternalSpecProperties pipeline so
@@ -949,8 +1024,8 @@ loon_properties_inject_external_spec(LoonProperties* properties,
         size_t i = 0;
         for (const auto& kv : props) {
             arr[i].key = strdup(kv.first.c_str());
-            const auto* sval = std::get_if<std::string>(&kv.second);
-            arr[i].value = strdup(sval ? sval->c_str() : "");
+            const auto value = PropertyValueToString(kv.second);
+            arr[i].value = strdup(value.c_str());
             ++i;
         }
         properties->properties = arr;
