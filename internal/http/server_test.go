@@ -140,6 +140,35 @@ func (suite *HTTPServerTestSuite) TestHealthzHandler() {
 	suite.NotEqual("OK", respObj.State)
 }
 
+func (suite *HTTPServerTestSuite) TestStopComponentHandler() {
+	RegisterStopComponent(func(role string) error {
+		if role == "fail" {
+			return fmt.Errorf("mock error")
+		}
+		return nil
+	})
+
+	tests := []struct {
+		role         string
+		expectedCode int
+		expectedBody string
+	}{
+		{role: "proxy", expectedCode: http.StatusOK, expectedBody: "{\"msg\":\"OK\"}\n"},
+		{role: "fail", expectedCode: http.StatusInternalServerError, expectedBody: "{\"msg\":\"failed to trigger component stop, mock error\"}\n"},
+	}
+
+	for _, test := range tests {
+		resp, err := http.Get("http://localhost:" + DefaultListenPort + RouteTriggerStopPath + "?role=" + test.role)
+		suite.Require().NoError(err)
+		body, err := io.ReadAll(resp.Body)
+		suite.Require().NoError(err)
+		suite.NoError(resp.Body.Close())
+		suite.Equal(test.expectedCode, resp.StatusCode)
+		suite.Equal("application/json", resp.Header.Get("Content-Type"))
+		suite.Equal(test.expectedBody, string(body))
+	}
+}
+
 func (suite *HTTPServerTestSuite) TestEventlogHandler() {
 	url := "http://localhost:" + DefaultListenPort + EventLogRouterPath
 	client := http.Client{}
