@@ -54,6 +54,18 @@ import (
 
 const compactionBatchSize = 100
 
+// schemaNeedsTextIndex reports whether any field enables text match — the
+// condition under which compaction output builds text indexes (and, in ref
+// mode, needs plan-attached analyzer file resources).
+func schemaNeedsTextIndex(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.GetFields() {
+		if typeutil.CreateFieldSchemaHelper(field).EnableMatch() {
+			return true
+		}
+	}
+	return false
+}
+
 func createTextIndex(ctx context.Context,
 	cm storage.ChunkManager,
 	plan *datapb.CompactionPlan,
@@ -70,6 +82,13 @@ func createTextIndex(ctx context.Context,
 		mlog.FieldPartitionID(partitionID),
 		mlog.FieldSegmentID(segmentID),
 	)
+
+	// Text indexes are built only for enable_match fields, and the analyzer file
+	// resources below are downloaded solely to build them. If no field enables
+	// match, skip the resource download and all setup entirely.
+	if !schemaNeedsTextIndex(plan.GetSchema()) {
+		return map[int64]*datapb.TextIndexStats{}, nil
+	}
 
 	fieldBinlogs := lo.GroupBy(segment.GetInsertLogs(), func(binlog *datapb.FieldBinlog) int64 {
 		return binlog.GetFieldID()

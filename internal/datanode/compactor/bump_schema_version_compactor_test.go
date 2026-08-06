@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -1427,4 +1428,41 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMaterializationRejectsDropped
 	)
 	s.Error(err)
 	s.ErrorIs(err, merr.ErrServiceInternal)
+}
+
+// CollectionSchema.FileResourceIds is a collection-wide union, not a
+// field-to-resource binding. A match field using the built-in analyzer must not
+// be rejected because an unrelated non-match analyzer field owns a resource.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteDoesNotRejectUnrelatedRefModeResources() {
+	savedManager := fileresource.GlobalFileManager
+	fileresource.GlobalFileManager = fileresource.NewRefManger()
+	defer func() { fileresource.GlobalFileManager = savedManager }()
+
+	schema := s.task.plan.GetSchema()
+	textField := typeutil.GetField(schema, 101)
+	s.Require().NotNil(textField)
+	textField.TypeParams = append(textField.GetTypeParams(),
+		&commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"},
+		&commonpb.KeyValuePair{Key: "enable_match", Value: "true"})
+	schema.Fields = append(schema.GetFields(), &schemapb.FieldSchema{
+		FieldID:  104,
+		Name:     "resource_text",
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: "128"},
+			{Key: common.EnableAnalyzerKey, Value: "true"},
+			{Key: common.AnalyzerParamKey, Value: `{"tokenizer":{"type":"jieba","dict":["resource://dict"]}}`},
+		},
+	})
+	schema.FileResourceIds = []int64{7}
+	jsonParams, err := compaction.GenerateJSONParams(schema)
+	s.Require().NoError(err)
+	s.task.plan.JsonParams = jsonParams
+	s.task.plan.FileResources = nil
+
+	composePatch := mockey.Mock(compaction.ComposeDeleteFromDeltalogs).Return(nil, assert.AnError).Build()
+	defer composePatch.UnPatch()
+
+	_, err = s.task.runFullSchemaRewrite(collectionSchemaFields(schema))
+	s.ErrorIs(err, assert.AnError)
 }
