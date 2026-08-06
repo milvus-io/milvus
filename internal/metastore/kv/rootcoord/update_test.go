@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -1015,4 +1016,453 @@ func TestCatalog_Update_DropRoleWithGrants_FallbackCrashRetry(t *testing.T) {
 
 	assert.NoError(t, drop())
 	assert.Equal(t, dumpKV(t, legacyKV), dumpKV(t, fk.MemoryKV))
+}
+
+// grantEntity builds one GrantEntity for direct AlterGrant calls.
+func grantEntity(role, objType, dbName, objName, priv, user string) *milvuspb.GrantEntity {
+	return &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: role},
+		Object:     &milvuspb.ObjectEntity{Name: objType},
+		ObjectName: objName,
+		DbName:     dbName,
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: user},
+			Privilege: &milvuspb.PrivilegeEntity{Name: priv},
+		},
+	}
+}
+
+// TestCatalog_AlterGrant_Grant_SingleTxnAndBytes proves a grant - the grantee
+// leaf allocation plus the grantee-id leaf - lands in ONE transaction (today
+// it is two independent Saves with a dangling-leaf window in between) and
+// writes byte-for-byte the same kvs as today's multi-step path.
+func TestCatalog_AlterGrant_Grant_SingleTxnAndBytes(t *testing.T) {
+	ctx := context.TODO()
+	rec := &writeRecordingKV{MemoryKV: memkv.NewMemoryKV()}
+	c := NewCatalog(rec)
+
+	assert.NoError(t, c.AlterGrant(ctx, util.DefaultTenant,
+		grantEntity("role1", "Collection", "db1", "coll1", "PrivilegeInsert", "root"),
+		milvuspb.OperatePrivilegeType_Grant))
+	assert.Equal(t, []string{"MultiSaveAndRemove"}, rec.calls)
+
+	granteeKey := GranteePrefix + "/role1/Collection/db1.coll1"
+	id := crypto.GranteeID(granteeKey)
+	assert.Equal(t, map[string]string{
+		granteeKey:                               id,
+		buildGranteeIDKey(id, "PrivilegeInsert"): "root",
+	}, dumpKV(t, rec.MemoryKV))
+
+	// a second privilege on the existing leaf is again one txn adding exactly
+	// one grantee-id leaf.
+	rec.calls = nil
+	assert.NoError(t, c.AlterGrant(ctx, util.DefaultTenant,
+		grantEntity("role1", "Collection", "db1", "coll1", "PrivilegeQuery", "root"),
+		milvuspb.OperatePrivilegeType_Grant))
+	assert.Equal(t, []string{"MultiSaveAndRemove"}, rec.calls)
+	assert.Equal(t, map[string]string{
+		granteeKey:                               id,
+		buildGranteeIDKey(id, "PrivilegeInsert"): "root",
+		buildGranteeIDKey(id, "PrivilegeQuery"):  "root",
+	}, dumpKV(t, rec.MemoryKV))
+}
+
+// TestCatalog_AlterGrant_Revoke_SingleTxnAndBytes proves a revoke commits
+// through the same composite call and leaves byte-for-byte today's end state:
+// the revoked grantee-id leaf gone, the grantee leaf and sibling privileges
+// untouched.
+func TestCatalog_AlterGrant_Revoke_SingleTxnAndBytes(t *testing.T) {
+	ctx := context.TODO()
+	mk := memkv.NewMemoryKV()
+	c0 := NewCatalog(mk)
+	assert.NoError(t, c0.AlterGrant(ctx, util.DefaultTenant,
+		grantEntity("role1", "Collection", "db1", "coll1", "PrivilegeInsert", "root"),
+		milvuspb.OperatePrivilegeType_Grant))
+	assert.NoError(t, c0.AlterGrant(ctx, util.DefaultTenant,
+		grantEntity("role1", "Collection", "db1", "coll1", "PrivilegeQuery", "root"),
+		milvuspb.OperatePrivilegeType_Grant))
+
+	rec := &writeRecordingKV{MemoryKV: mk}
+	c := NewCatalog(rec)
+	assert.NoError(t, c.AlterGrant(ctx, util.DefaultTenant,
+		grantEntity("role1", "Collection", "db1", "coll1", "PrivilegeInsert", "root"),
+		milvuspb.OperatePrivilegeType_Revoke))
+	assert.Equal(t, []string{"MultiSaveAndRemove"}, rec.calls)
+
+	granteeKey := GranteePrefix + "/role1/Collection/db1.coll1"
+	id := crypto.GranteeID(granteeKey)
+	assert.Equal(t, map[string]string{
+		granteeKey:                              id,
+		buildGranteeIDKey(id, "PrivilegeQuery"): "root",
+	}, dumpKV(t, mk))
+}
+
+// seedLegacyGrant writes the pre-refactor grant layout directly: the grantee
+// leaf holds a 16-char legacy id and the grantee-id leaf hangs off that id.
+func seedLegacyGrant(t *testing.T, mk *memkv.MemoryKV, granteeKey, priv, user string) string {
+	legacyID := crypto.MD5(granteeKey)
+	assert.Len(t, legacyID, 16)
+	assert.NoError(t, mk.MultiSave(context.TODO(), map[string]string{
+		granteeKey:                        legacyID,
+		buildGranteeIDKey(legacyID, priv): user,
+	}))
+	return legacyID
+}
+
+// TestCatalog_AlterGrant_LegacyIDMigration_SingleTxnAndBytes proves the
+// legacy-grantee-id migration and the grant (or revoke) it precedes land in
+// ONE transaction - today the migration commits first and the grant write is
+// a separate call, leaving a window where the subtree has moved but the new
+// privilege is lost - with byte-for-byte today's end state.
+func TestCatalog_AlterGrant_LegacyIDMigration_SingleTxnAndBytes(t *testing.T) {
+	ctx := context.TODO()
+	granteeKey := GranteePrefix + "/role1/Collection/db1.coll1"
+	newID := crypto.GranteeID(granteeKey)
+
+	t.Run("grant", func(t *testing.T) {
+		mk := memkv.NewMemoryKV()
+		seedLegacyGrant(t, mk, granteeKey, "PrivilegeLoad", "legacy-user")
+		rec := &writeRecordingKV{MemoryKV: mk}
+		c := NewCatalog(rec)
+		assert.NoError(t, c.AlterGrant(ctx, util.DefaultTenant,
+			grantEntity("role1", "Collection", "db1", "coll1", "PrivilegeInsert", "root"),
+			milvuspb.OperatePrivilegeType_Grant))
+		assert.Equal(t, []string{"MultiSaveAndRemove"}, rec.calls)
+		assert.Equal(t, map[string]string{
+			granteeKey: newID,
+			buildGranteeIDKey(newID, "PrivilegeLoad"):   "legacy-user",
+			buildGranteeIDKey(newID, "PrivilegeInsert"): "root",
+		}, dumpKV(t, mk))
+	})
+
+	t.Run("revoke", func(t *testing.T) {
+		mk := memkv.NewMemoryKV()
+		seedLegacyGrant(t, mk, granteeKey, "PrivilegeLoad", "legacy-user")
+		rec := &writeRecordingKV{MemoryKV: mk}
+		c := NewCatalog(rec)
+		assert.NoError(t, c.AlterGrant(ctx, util.DefaultTenant,
+			grantEntity("role1", "Collection", "db1", "coll1", "PrivilegeLoad", "legacy-user"),
+			milvuspb.OperatePrivilegeType_Revoke))
+		assert.Equal(t, []string{"MultiSaveAndRemove"}, rec.calls)
+		// the leaf is rewritten to the new id, the revoked privilege never
+		// reappears under it, and the old subtree is gone.
+		assert.Equal(t, map[string]string{granteeKey: newID}, dumpKV(t, mk))
+	})
+}
+
+// grantWriteCrashKV fails any write that touches targetKey (in its saves or
+// removals), simulating a crash of the write carrying the grantee-id leaf.
+type grantWriteCrashKV struct {
+	*memkv.MemoryKV
+	targetKey string
+	failures  int
+}
+
+func (f *grantWriteCrashKV) touches(saves map[string]string, removals []string) bool {
+	if _, ok := saves[f.targetKey]; ok {
+		return true
+	}
+	for _, k := range removals {
+		if k == f.targetKey {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *grantWriteCrashKV) Save(ctx context.Context, key, value string) error {
+	if f.failures > 0 && key == f.targetKey {
+		f.failures--
+		return errors.New("injected crash")
+	}
+	return f.MemoryKV.Save(ctx, key, value)
+}
+
+func (f *grantWriteCrashKV) Remove(ctx context.Context, key string) error {
+	if f.failures > 0 && key == f.targetKey {
+		f.failures--
+		return errors.New("injected crash")
+	}
+	return f.MemoryKV.Remove(ctx, key)
+}
+
+func (f *grantWriteCrashKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	if f.failures > 0 && f.touches(saves, removals) {
+		f.failures--
+		return errors.New("injected crash")
+	}
+	return f.MemoryKV.MultiSaveAndRemove(ctx, saves, removals, preds...)
+}
+
+// TestCatalog_AlterGrant_GrantCrashAtomicRetry: failing the write that carries
+// the grantee-id leaf must leave the store untouched - today's two-step path
+// strands the grantee leaf without any grantee-id leaf, a grant that lists as
+// nothing - and a retry must land both kvs.
+func TestCatalog_AlterGrant_GrantCrashAtomicRetry(t *testing.T) {
+	ctx := context.TODO()
+	granteeKey := GranteePrefix + "/role1/Collection/db1.coll1"
+	id := crypto.GranteeID(granteeKey)
+	k := buildGranteeIDKey(id, "PrivilegeInsert")
+
+	fk := &grantWriteCrashKV{MemoryKV: memkv.NewMemoryKV(), targetKey: k, failures: 1}
+	c := NewCatalog(fk)
+	grant := func() error {
+		return c.AlterGrant(ctx, util.DefaultTenant,
+			grantEntity("role1", "Collection", "db1", "coll1", "PrivilegeInsert", "root"),
+			milvuspb.OperatePrivilegeType_Grant)
+	}
+	assert.Error(t, grant())
+	// atomic: the failed commit applied nothing, no dangling grantee leaf.
+	assert.Empty(t, dumpKV(t, fk.MemoryKV))
+
+	assert.NoError(t, grant())
+	assert.Equal(t, map[string]string{granteeKey: id, k: "root"}, dumpKV(t, fk.MemoryKV))
+}
+
+// TestCatalog_AlterGrant_MigrationCrashAtomicRetry: failing the write that
+// carries the new privilege's grantee-id leaf while a legacy-id migration is
+// staged must not publish the migration alone - today the migration txn lands
+// first and the store is left half-mutated when the grant write dies - and a
+// retry must converge to the fully migrated + granted end state.
+func TestCatalog_AlterGrant_MigrationCrashAtomicRetry(t *testing.T) {
+	ctx := context.TODO()
+	granteeKey := GranteePrefix + "/role1/Collection/db1.coll1"
+	newID := crypto.GranteeID(granteeKey)
+
+	fk := &grantWriteCrashKV{
+		MemoryKV:  memkv.NewMemoryKV(),
+		targetKey: buildGranteeIDKey(newID, "PrivilegeInsert"),
+		failures:  1,
+	}
+	seedLegacyGrant(t, fk.MemoryKV, granteeKey, "PrivilegeLoad", "legacy-user")
+	before := dumpKV(t, fk.MemoryKV)
+
+	c := NewCatalog(fk)
+	grant := func() error {
+		return c.AlterGrant(ctx, util.DefaultTenant,
+			grantEntity("role1", "Collection", "db1", "coll1", "PrivilegeInsert", "root"),
+			milvuspb.OperatePrivilegeType_Grant)
+	}
+	assert.Error(t, grant())
+	// atomic: the legacy layout is fully intact, not migrated-but-grantless.
+	assert.Equal(t, before, dumpKV(t, fk.MemoryKV))
+
+	assert.NoError(t, grant())
+	assert.Equal(t, map[string]string{
+		granteeKey: newID,
+		buildGranteeIDKey(newID, "PrivilegeLoad"):   "legacy-user",
+		buildGranteeIDKey(newID, "PrivilegeInsert"): "root",
+	}, dumpKV(t, fk.MemoryKV))
+}
+
+// restoreMeta returns a fresh RBAC backup fixture: two roles, one privilege
+// group, three grants (two sharing one grantee leaf) and two users with role
+// mappings. Fresh per call because RestoreRBAC normalizes privilege names in
+// place.
+func restoreMeta() *milvuspb.RBACMeta {
+	return &milvuspb.RBACMeta{
+		Users: []*milvuspb.UserInfo{
+			{User: "user1", Password: "pw1", Roles: []*milvuspb.RoleEntity{{Name: "role1"}}},
+			{User: "user2", Password: "pw2", Roles: []*milvuspb.RoleEntity{{Name: "role1"}, {Name: "role2"}}},
+		},
+		Roles: []*milvuspb.RoleEntity{{Name: "role1"}, {Name: "role2"}},
+		Grants: []*milvuspb.GrantEntity{
+			grantEntity("role1", "Collection", "db1", "coll1", "Insert", "root"),
+			grantEntity("role1", "Collection", "db1", "coll1", "Query", "root"),
+			grantEntity("role2", "Global", "db1", "*", "CreateCollection", "root"),
+		},
+		PrivilegeGroups: []*milvuspb.PrivilegeGroupInfo{
+			{GroupName: "pg1", Privileges: []*milvuspb.PrivilegeEntity{{Name: "Insert"}}},
+		},
+	}
+}
+
+// legacyRestoreRBAC replays meta with today's per-key calls (the current
+// RestoreRBAC body); the batched RestoreRBAC must land byte-for-byte on this
+// end state.
+func legacyRestoreRBAC(t *testing.T, c metastore.RootCoordCatalog, tenant string, meta *milvuspb.RBACMeta) {
+	ctx := context.TODO()
+	for _, role := range meta.GetRoles() {
+		assert.NoError(t, c.CreateRole(ctx, tenant, role))
+	}
+	for _, group := range meta.GetPrivilegeGroups() {
+		assert.NoError(t, c.SavePrivilegeGroup(ctx, group))
+	}
+	for _, grant := range meta.GetGrants() {
+		privName := grant.GetGrantor().GetPrivilege().GetName()
+		switch {
+		case util.IsAnyWord(privName):
+		case util.IsPrivilegeNameDefined(privName):
+			grant.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(privName)
+		default:
+			grant.Grantor.Privilege.Name = util.PrivilegeGroupNameForMetastore(privName)
+		}
+		assert.NoError(t, c.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Grant))
+	}
+	for _, user := range meta.GetUsers() {
+		assert.NoError(t, c.AlterCredential(ctx, &model.Credential{
+			Username:          user.GetUser(),
+			EncryptedPassword: user.GetPassword(),
+		}))
+		for _, role := range user.GetRoles() {
+			assert.NoError(t, c.AlterUserRole(ctx, tenant, &milvuspb.UserEntity{Name: user.GetUser()}, role, milvuspb.OperateUserRoleType_AddUserToRole))
+		}
+	}
+}
+
+// batchRecordingKV shrinks MaxTxnOps and records every write call plus the op
+// count of each composite batch.
+type batchRecordingKV struct {
+	*memkv.MemoryKV
+	limit      int
+	calls      []string
+	batchSizes []int
+}
+
+func (b *batchRecordingKV) MaxTxnOps() int { return b.limit }
+
+func (b *batchRecordingKV) Save(ctx context.Context, key, value string) error {
+	b.calls = append(b.calls, "Save")
+	return b.MemoryKV.Save(ctx, key, value)
+}
+
+func (b *batchRecordingKV) Remove(ctx context.Context, key string) error {
+	b.calls = append(b.calls, "Remove")
+	return b.MemoryKV.Remove(ctx, key)
+}
+
+func (b *batchRecordingKV) MultiSave(ctx context.Context, kvs map[string]string) error {
+	b.calls = append(b.calls, "MultiSave")
+	return b.MemoryKV.MultiSave(ctx, kvs)
+}
+
+func (b *batchRecordingKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	b.calls = append(b.calls, "MultiSaveAndRemove")
+	b.batchSizes = append(b.batchSizes, len(saves)+len(removals))
+	return b.MemoryKV.MultiSaveAndRemove(ctx, saves, removals, preds...)
+}
+
+// TestCatalog_RestoreRBAC_BatchedMatchesLegacyBytes: the batched restore lands
+// byte-for-byte on the legacy per-key loop's end state, writes only composite
+// batches (never per-key Saves), and keeps every batch within the store's txn
+// op limit.
+func TestCatalog_RestoreRBAC_BatchedMatchesLegacyBytes(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	legacyKV := memkv.NewMemoryKV()
+	legacyRestoreRBAC(t, NewCatalog(legacyKV), tenant, restoreMeta())
+
+	bk := &batchRecordingKV{MemoryKV: memkv.NewMemoryKV(), limit: 4}
+	c := NewCatalog(bk)
+	assert.NoError(t, c.RestoreRBAC(ctx, tenant, restoreMeta()))
+
+	assert.Equal(t, dumpKV(t, legacyKV), dumpKV(t, bk.MemoryKV))
+	for _, call := range bk.calls {
+		assert.Equal(t, "MultiSaveAndRemove", call)
+	}
+	// the fixture holds more kvs than one batch: it really batched, and every
+	// batch stayed within the limit.
+	assert.GreaterOrEqual(t, len(bk.batchSizes), 2)
+	for _, n := range bk.batchSizes {
+		assert.LessOrEqual(t, n, bk.limit)
+	}
+}
+
+// restoreBatchCrashKV shrinks MaxTxnOps and fails the Nth composite batch,
+// simulating a restore interrupted between batches.
+type restoreBatchCrashKV struct {
+	*memkv.MemoryKV
+	limit      int
+	calls      int
+	failAtCall int
+}
+
+func (f *restoreBatchCrashKV) MaxTxnOps() int { return f.limit }
+
+func (f *restoreBatchCrashKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	f.calls++
+	if f.calls == f.failAtCall {
+		return errors.New("injected crash")
+	}
+	return f.MemoryKV.MultiSaveAndRemove(ctx, saves, removals, preds...)
+}
+
+// TestCatalog_RestoreRBAC_InterruptedRetryConverges: the restore is not atomic
+// as a whole - a crash between batches leaves a prefix of batches applied -
+// but re-running the same restore must not abort on the keys the earlier run
+// already landed and must converge to the legacy end state.
+func TestCatalog_RestoreRBAC_InterruptedRetryConverges(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	legacyKV := memkv.NewMemoryKV()
+	legacyRestoreRBAC(t, NewCatalog(legacyKV), tenant, restoreMeta())
+
+	fk := &restoreBatchCrashKV{MemoryKV: memkv.NewMemoryKV(), limit: 4, failAtCall: 2}
+	c := NewCatalog(fk)
+	assert.Error(t, c.RestoreRBAC(ctx, tenant, restoreMeta()))
+	// interrupted: some batches landed, but not the whole backup.
+	partial := dumpKV(t, fk.MemoryKV)
+	assert.NotEmpty(t, partial)
+	assert.NotEqual(t, dumpKV(t, legacyKV), partial)
+
+	assert.NoError(t, c.RestoreRBAC(ctx, tenant, restoreMeta()))
+	assert.Equal(t, dumpKV(t, legacyKV), dumpKV(t, fk.MemoryKV))
+}
+
+// TestCatalog_RestoreRBAC_OversizedEntityStaysWithinTxnLimit: a single entity
+// whose kvs alone exceed MaxTxnOps (a user with more role mappings than the
+// limit, or a grant whose legacy-id migration moves a large privilege
+// subtree) must be split across multiple batches instead of being flushed as
+// one oversized MultiSaveAndRemove - etcd rejects a txn above its op limit,
+// which would make the restore permanently fail where the legacy per-key
+// path succeeded. Entity atomicity cannot hold above the limit; convergence
+// on retry is what matters, and the end state must still match the legacy
+// per-key loop byte-for-byte.
+func TestCatalog_RestoreRBAC_OversizedEntityStaysWithinTxnLimit(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	granteeKey := GranteePrefix + "/role1/Collection/db1.coll1"
+	legacyPrivs := []string{"PrivilegeLoad", "PrivilegeQuery", "PrivilegeDelete"}
+
+	// user1 carries 6 role mappings: 1 credential + 6 user-role kvs = 7 ops,
+	// above the limit of 4. The grant's legacy-id migration moves 3 leaves:
+	// 1 grantee rewrite + 3 new leaves + 1 granted privilege + 3 removals =
+	// 8 ops, also above the limit.
+	roles := make([]*milvuspb.RoleEntity, 0, 6)
+	for _, name := range []string{"role1", "role2", "role3", "role4", "role5", "role6"} {
+		roles = append(roles, &milvuspb.RoleEntity{Name: name})
+	}
+	oversizedMeta := func() *milvuspb.RBACMeta {
+		return &milvuspb.RBACMeta{
+			Users: []*milvuspb.UserInfo{
+				{User: "user1", Password: "pw1", Roles: roles},
+			},
+			Roles: roles,
+			Grants: []*milvuspb.GrantEntity{
+				grantEntity("role1", "Collection", "db1", "coll1", "Insert", "root"),
+			},
+		}
+	}
+	seedLegacy := func(mk *memkv.MemoryKV) {
+		for _, priv := range legacyPrivs {
+			seedLegacyGrant(t, mk, granteeKey, priv, "legacy-user")
+		}
+	}
+
+	legacyKV := memkv.NewMemoryKV()
+	seedLegacy(legacyKV)
+	legacyRestoreRBAC(t, NewCatalog(legacyKV), tenant, oversizedMeta())
+
+	mk := memkv.NewMemoryKV()
+	seedLegacy(mk)
+	bk := &batchRecordingKV{MemoryKV: mk, limit: 4}
+	c := NewCatalog(bk)
+	assert.NoError(t, c.RestoreRBAC(ctx, tenant, oversizedMeta()))
+
+	// Every batch respects the txn op limit - the header contract - and the
+	// end state matches the legacy per-key loop.
+	for _, n := range bk.batchSizes {
+		assert.LessOrEqual(t, n, bk.limit)
+	}
+	assert.Equal(t, dumpKV(t, legacyKV), dumpKV(t, bk.MemoryKV))
 }

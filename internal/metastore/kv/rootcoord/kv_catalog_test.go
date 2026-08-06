@@ -2644,9 +2644,6 @@ func TestRBAC_Grant(t *testing.T) {
 			Return("", func(ctx context.Context, key string) error {
 				return merr.WrapErrIoKeyNotFound(key)
 			})
-		kvmock.EXPECT().Save(mock.Anything, keyNotExistRoleKeyWithDb, mock.Anything).Return(nil)
-		kvmock.EXPECT().Save(mock.Anything, errorSaveRoleKeyWithDb, mock.Anything).Return(errors.New("mock save error role"))
-
 		validPrivilegeKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, validRoleValue, validPrivilege)
 		invalidPrivilegeKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, validRoleValue, invalidPrivilege)
 		keyNotExistPrivilegeKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, validRoleValue, keyNotExistPrivilege)
@@ -2668,10 +2665,30 @@ func TestRBAC_Grant(t *testing.T) {
 			})
 		kvmock.EXPECT().Load(mock.Anything, mock.Anything).Call.Return("", nil)
 
-		t.Run("test Grant", func(t *testing.T) {
-			kvmock.EXPECT().Save(mock.Anything, mock.Anything, validUser).Return(nil)
-			kvmock.EXPECT().Save(mock.Anything, mock.Anything, invalidUser).Return(errors.New("mock save invalid user"))
+		// AlterGrant commits every state (grant, revoke, migration) through a
+		// single MultiSaveAndRemove; the write failures the old per-key mocks
+		// injected are dispatched on the composite call's content instead.
+		invalidPrivilegeRemove := "p-remove"
+		invalidPrivilegeRemoveKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, validRoleValue, invalidPrivilegeRemove)
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+				if _, ok := saves[errorSaveRoleKeyWithDb]; ok {
+					return errors.New("mock save error role")
+				}
+				for _, v := range saves {
+					if v == invalidUser {
+						return errors.New("mock save invalid user")
+					}
+				}
+				for _, k := range removals {
+					if k == invalidPrivilegeRemoveKey {
+						return errors.New("mock remove error")
+					}
+				}
+				return nil
+			}).Maybe()
 
+		t.Run("test Grant", func(t *testing.T) {
 			tests := []struct {
 				isValid bool
 
@@ -2726,12 +2743,6 @@ func TestRBAC_Grant(t *testing.T) {
 		})
 
 		t.Run("test Revoke", func(t *testing.T) {
-			invalidPrivilegeRemove := "p-remove"
-			invalidPrivilegeRemoveKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, validRoleValue, invalidPrivilegeRemove)
-
-			kvmock.EXPECT().Load(mock.Anything, invalidPrivilegeRemoveKey).Call.Return("", nil)
-			kvmock.EXPECT().Remove(mock.Anything, invalidPrivilegeRemoveKey).Return(errors.New("mock remove error"))
-			kvmock.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 			tests := []struct {
 				isValid bool
 

@@ -3,6 +3,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -368,18 +369,28 @@ func (kc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeu
 	return kc.Txn.MultiSaveAndRemove(ctx, kvs, []string{oldKBefore210, oldKeyWithoutDb})
 }
 
-func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
+// buildCredentialKV is the single source of the credential record encoding,
+// shared by AlterCredential and the batched RestoreRBAC.
+func buildCredentialKV(credential *model.Credential) (string, string, error) {
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, credential.Username)
 	credentialInfo := model.MarshalCredentialModel(credential)
 	credentialInfo.Username = ""       // Username is already save in the key, remove it from the value.
 	credentialInfo.Sha256Password = "" // Sha256Password is cache-only, do not persist it.
 	v, err := json.Marshal(credentialInfo)
 	if err != nil {
+		return k, "", err
+	}
+	return k, string(v), nil
+}
+
+func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
+	k, v, err := buildCredentialKV(credential)
+	if err != nil {
 		mlog.Error(ctx, "create credential marshal fail", mlog.String("key", k), mlog.Err(err))
 		return err
 	}
 
-	err = kc.Txn.Save(ctx, k, string(v))
+	err = kc.Txn.Save(ctx, k, v)
 	if err != nil {
 		mlog.Error(ctx, "create credential persist meta fail", mlog.String("key", k), mlog.Err(err))
 		return err
@@ -1223,12 +1234,22 @@ func (kc *Catalog) remove(ctx context.Context, k string) error {
 	return kc.Txn.Remove(ctx, k)
 }
 
-func (kc *Catalog) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
+// buildRoleKV is the single source of the role record encoding, shared by
+// CreateRole and the batched RestoreRBAC.
+func buildRoleKV(entity *milvuspb.RoleEntity) (string, string, error) {
 	k := RolePrefix + "/" + entity.Name
 	value, err := model.MarshalRoleModel(&model.Role{
 		Name:        entity.GetName(),
 		Description: entity.GetDescription(),
 	})
+	if err != nil {
+		return k, "", err
+	}
+	return k, value, nil
+}
+
+func (kc *Catalog) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
+	k, value, err := buildRoleKV(entity)
 	if err != nil {
 		return err
 	}
@@ -1294,8 +1315,12 @@ func (kc *Catalog) dropRoleRemovals(ctx context.Context, tenant string, roleName
 	return deleteKeys, nil
 }
 
+func buildUserRoleKey(username string, roleName string) string {
+	return fmt.Sprintf("%s/%s/%s", RoleMappingPrefix, username, roleName)
+}
+
 func (kc *Catalog) AlterUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
-	k := fmt.Sprintf("%s/%s/%s", RoleMappingPrefix, userEntity.Name, roleEntity.Name)
+	k := buildUserRoleKey(userEntity.Name, roleEntity.Name)
 	switch operateType {
 	case milvuspb.OperateUserRoleType_AddUserToRole:
 		return kc.Txn.Save(ctx, k, "")
@@ -1599,18 +1624,20 @@ func (kc *Catalog) findOtherGranteeWithID(ctx context.Context, tenant string, gr
 	return findOtherGranteeWithIDFromKeys(ctx, granteePrefix, granteeKey, idStr, keys, values)
 }
 
-func (kc *Catalog) migrateGranteeID(ctx context.Context, tenant string, granteeKey string, idStr string) (string, error) {
+// migrateGranteeIDKvs computes, without committing, the subtree move of a
+// legacy grantee id to its deterministic replacement: the grantee leaf rewrite
+// plus every grantee-id leaf rekeyed from the old id to the new one, with the
+// old grantee-id keys as removals. The caller commits saves and removals in
+// one transaction together with whatever else the mutation stages.
+func (kc *Catalog) migrateGranteeIDKvs(ctx context.Context, tenant string, granteeKey string, idStr string) (map[string]string, []string, string, error) {
 	newID := crypto.GranteeID(granteeKey)
-	if idStr == newID {
-		return idStr, nil
-	}
 	if isLegacyGranteeID(idStr) {
 		otherGranteeKey, err := kc.findOtherGranteeWithID(ctx, tenant, granteeKey, idStr)
 		if err != nil {
-			return "", err
+			return nil, nil, "", err
 		}
 		if otherGranteeKey != "" {
-			return "", newSharedGranteeIDError(idStr, granteeKey, otherGranteeKey)
+			return nil, nil, "", newSharedGranteeIDError(idStr, granteeKey, otherGranteeKey)
 		}
 	}
 
@@ -1620,7 +1647,7 @@ func (kc *Catalog) migrateGranteeID(ctx context.Context, tenant string, granteeK
 	keys, values, err := kc.Txn.LoadWithPrefix(ctx, granteeIDKey)
 	if err != nil {
 		if !errors.Is(err, merr.ErrIoKeyNotFound) {
-			return "", err
+			return nil, nil, "", err
 		}
 	}
 	for i, key := range keys {
@@ -1633,13 +1660,17 @@ func (kc *Catalog) migrateGranteeID(ctx context.Context, tenant string, granteeK
 		saves[buildGranteeIDKey(newID, privilegeName)] = values[i]
 		removals = append(removals, buildGranteeIDKey(idStr, privilegeName))
 	}
-	if err := kc.Txn.MultiSaveAndRemove(ctx, saves, removals); err != nil {
-		return "", err
-	}
-	return newID, nil
+	return saves, removals, newID, nil
 }
 
-func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+// alterGrantOps computes, without committing, the full write/removal set of
+// one AlterGrant mutation: the grantee leaf allocation (grant on a missing
+// leaf), the legacy-grantee-id subtree migration, and the grantee-id leaf
+// write or removal. A returned IgnorableError can carry staged ops - the leaf
+// allocation or migration the old multi-step path would already have persisted
+// before detecting the no-op - which the caller must still commit to land on
+// the same end state.
+func (kc *Catalog) alterGrantOps(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) (map[string]string, []string, error) {
 	var (
 		privilegeName = entity.Grantor.Privilege.Name
 		granteeKey    = fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, entity.Role.Name, entity.Object.Name, funcutil.CombineObjectName(entity.DbName, entity.ObjectName))
@@ -1657,6 +1688,8 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 			granteeKey = legacyKey
 		}
 	}
+	saves := make(map[string]string)
+	var removals []string
 	if idStr == "" {
 		if v, err = kc.Txn.Load(ctx, granteeKey); err == nil {
 			idStr = v
@@ -1664,57 +1697,83 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 			mlog.Warn(ctx, "fail to load grant privilege entity", mlog.String("key", granteeKey), mlog.Any("type", operateType), mlog.Err(err))
 			if funcutil.IsRevoke(operateType) {
 				if errors.Is(err, merr.ErrIoKeyNotFound) {
-					return common.NewIgnorableErrorf("the grant[%s] isn't existed", granteeKey)
+					return nil, nil, common.NewIgnorableErrorf("the grant[%s] isn't existed", granteeKey)
 				}
-				return err
+				return nil, nil, err
 			}
 			if !errors.Is(err, merr.ErrIoKeyNotFound) {
-				return err
+				return nil, nil, err
 			}
 
 			idStr = crypto.GranteeID(granteeKey)
-			err = kc.Txn.Save(ctx, granteeKey, idStr)
-			if err != nil {
-				mlog.Error(ctx, "fail to allocate id when altering the grant", mlog.Err(err))
-				return err
-			}
+			saves[granteeKey] = idStr
 		}
 	}
 	if idStr != crypto.GranteeID(granteeKey) {
-		idStr, err = kc.migrateGranteeID(ctx, tenant, granteeKey, idStr)
+		migSaves, migRemovals, newID, err := kc.migrateGranteeIDKvs(ctx, tenant, granteeKey, idStr)
 		if err != nil {
 			mlog.Error(ctx, "fail to migrate grantee id when altering the grant", mlog.String("key", granteeKey), mlog.Err(err))
-			return err
+			return nil, nil, err
 		}
+		for mk, mv := range migSaves {
+			saves[mk] = mv
+		}
+		removals = append(removals, migRemovals...)
+		idStr = newID
 	}
 	k := buildGranteeIDKey(idStr, privilegeName)
-	_, err = kc.Txn.Load(ctx, k)
-	if err != nil {
-		mlog.Warn(ctx, "fail to load the grantee id", mlog.String("key", k), mlog.Err(err))
-		if !errors.Is(err, merr.ErrIoKeyNotFound) {
-			mlog.Warn(context.TODO(), "fail to load the grantee id", mlog.String("key", k), mlog.Err(err))
-			return err
+	// the staged migration may already carry this privilege under the new id;
+	// checking saves first keeps the decision identical to the old path, which
+	// looked the store up after the migration had committed.
+	_, granted := saves[k]
+	if !granted {
+		if _, err = kc.Txn.Load(ctx, k); err == nil {
+			granted = true
+		} else {
+			mlog.Warn(ctx, "fail to load the grantee id", mlog.String("key", k), mlog.Err(err))
+			if !errors.Is(err, merr.ErrIoKeyNotFound) {
+				return nil, nil, err
+			}
+			mlog.Debug(ctx, "not found the grantee id", mlog.String("key", k))
 		}
-		mlog.Debug(ctx, "not found the grantee id", mlog.String("key", k))
+	}
+	if !granted {
 		if funcutil.IsRevoke(operateType) {
-			return common.NewIgnorableErrorf("the grantee-id[%s] isn't existed", k)
+			return saves, removals, common.NewIgnorableErrorf("the grantee-id[%s] isn't existed", k)
 		}
 		if funcutil.IsGrant(operateType) {
-			if err = kc.Txn.Save(ctx, k, entity.Grantor.User.Name); err != nil {
-				mlog.Error(ctx, "fail to save the grantee id", mlog.String("key", k), mlog.Err(err))
-			}
-			return err
+			saves[k] = entity.Grantor.User.Name
 		}
-		return nil
+		return saves, removals, nil
 	}
 	if funcutil.IsRevoke(operateType) {
-		if err = kc.Txn.Remove(ctx, k); err != nil {
-			mlog.Error(ctx, "fail to remove the grantee id", mlog.String("key", k), mlog.Err(err))
+		// the privilege may sit in the staged migration saves or in the store;
+		// drop the staged write and remove the key so both sources converge to
+		// "absent".
+		delete(saves, k)
+		removals = append(removals, k)
+		return saves, removals, nil
+	}
+	return saves, removals, common.NewIgnorableErrorf("the privilege[%s] has been granted", privilegeName)
+}
+
+// AlterGrant lands the whole mutation - grantee leaf, legacy-id migration and
+// grantee-id leaf - in a single transaction, so a crash can no longer strand
+// the grantee leaf without its grantee-id leaf or leave the grantee-id subtree
+// half-migrated. The read-compute-commit sequence takes no predicates:
+// rootcoord serializes RBAC mutations behind the MetaTable lock.
+func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+	saves, removals, opErr := kc.alterGrantOps(ctx, tenant, entity, operateType)
+	if opErr != nil && !common.IsIgnorableError(opErr) {
+		return opErr
+	}
+	if len(saves)+len(removals) > 0 {
+		if err := kc.Txn.MultiSaveAndRemove(ctx, saves, removals); err != nil {
+			mlog.Error(ctx, "fail to commit the grant mutation", mlog.Any("type", operateType), mlog.Err(err))
 			return err
 		}
-		return err
 	}
-	return common.NewIgnorableErrorf("the privilege[%s] has been granted", privilegeName)
+	return opErr
 }
 
 func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
@@ -2211,15 +2270,105 @@ func (kc *Catalog) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBA
 	}, nil
 }
 
+// RestoreRBAC replays an RBAC backup in batched composite writes. Kvs are
+// staged in the order the previous per-key loop wrote them (roles, privilege
+// groups, grants, then each user's credential and role mappings) and flushed
+// in transactions of at most MaxTxnOps ops, each batch atomic; an entity
+// whose kvs alone exceed that limit is split across batches (see stage
+// below). The restore as
+// a whole is NOT atomic: a crash leaves a prefix of batches applied. That
+// partial state is safe to re-run - every staged kv is deterministic for a
+// given backup (grantee ids are content hashes of their keys) and an
+// already-granted privilege is skipped instead of failing - so retrying the
+// same restore converges to the same end state.
 func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
+	limit := kc.Txn.MaxTxnOps()
+	if limit <= 0 {
+		return merr.WrapErrParameterInvalidMsg("restore batch limit must be positive")
+	}
+
+	saves := make(map[string]string)
+	var removals []string
+	removalSet := make(map[string]struct{})
+	flush := func() error {
+		if len(saves)+len(removals) == 0 {
+			return nil
+		}
+		if err := kc.Txn.MultiSaveAndRemove(ctx, saves, removals); err != nil {
+			mlog.Warn(ctx, "fail to flush a restore batch", mlog.Err(err))
+			return err
+		}
+		saves = make(map[string]string)
+		removals = nil
+		removalSet = make(map[string]struct{})
+		return nil
+	}
+	// stage adds one entity's kvs to the pending batch, flushing first when
+	// they would not fit. keepExisting makes an already-staged key win,
+	// mirroring the sequential path where the first grant of a privilege lands
+	// and a duplicate is an ignorable no-op; plain saves (roles, groups,
+	// credentials) overwrite, as sequential Saves did. Removals are deduped:
+	// two grants staging the same legacy-id migration must not put the same
+	// delete twice into one txn.
+	//
+	// An entity whose kvs alone exceed the limit cannot be written atomically
+	// at all - one oversized txn is simply rejected by the store, failing the
+	// restore permanently where the legacy per-key path succeeded. Its kvs are
+	// therefore split across batches, saves (in deterministic key order)
+	// before removals, giving up per-entity atomicity for the same
+	// convergence-on-retry guarantee the restore as a whole already relies on.
+	stage := func(addSaves map[string]string, addRemovals []string, keepExisting bool) error {
+		if n := len(saves) + len(removals); n > 0 && n+len(addSaves)+len(addRemovals) > limit {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		saveKeys := lo.Keys(addSaves)
+		sort.Strings(saveKeys)
+		for _, k := range saveKeys {
+			if keepExisting {
+				if _, ok := saves[k]; ok {
+					continue
+				}
+			}
+			if len(saves)+len(removals) >= limit {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+			saves[k] = addSaves[k]
+		}
+		for _, k := range addRemovals {
+			if _, ok := removalSet[k]; ok {
+				continue
+			}
+			if len(saves)+len(removals) >= limit {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+			removalSet[k] = struct{}{}
+			removals = append(removals, k)
+		}
+		return nil
+	}
+
 	for _, role := range meta.GetRoles() {
-		if err := kc.CreateRole(ctx, tenant, role); err != nil {
+		k, v, err := buildRoleKV(role)
+		if err != nil {
+			return errors.Wrap(err, "failed to create role")
+		}
+		if err := stage(map[string]string{k: v}, nil, false); err != nil {
 			return errors.Wrap(err, "failed to create role")
 		}
 	}
 
 	for _, group := range meta.GetPrivilegeGroups() {
-		if err := kc.SavePrivilegeGroup(ctx, group); err != nil {
+		k, v, err := buildPrivilegeGroupKV(group)
+		if err != nil {
+			return errors.Wrap(err, "failed to save privilege group")
+		}
+		if err := stage(map[string]string{k: v}, nil, false); err != nil {
 			return errors.Wrap(err, "failed to save privilege group")
 		}
 	}
@@ -2233,30 +2382,36 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 		default:
 			grant.Grantor.Privilege.Name = util.PrivilegeGroupNameForMetastore(privName)
 		}
-		if err := kc.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Grant); err != nil {
+		grantSaves, grantRemovals, err := kc.alterGrantOps(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Grant)
+		if err != nil && !common.IsIgnorableError(err) {
+			return errors.Wrap(err, "failed to alter grant")
+		}
+		// an already-granted privilege (IgnorableError) is skipped rather than
+		// aborting the restore, so re-running an interrupted restore converges;
+		// its staged kvs (a legacy-id migration the sequential path would have
+		// persisted before detecting the duplicate) are still applied.
+		if err := stage(grantSaves, grantRemovals, true); err != nil {
 			return errors.Wrap(err, "failed to alter grant")
 		}
 	}
 
 	for _, user := range meta.GetUsers() {
-		if err := kc.AlterCredential(ctx, &model.Credential{
+		k, v, err := buildCredentialKV(&model.Credential{
 			Username:          user.GetUser(),
 			EncryptedPassword: user.GetPassword(),
-		}); err != nil {
+		})
+		if err != nil {
 			return errors.Wrap(err, "failed to alter credential")
 		}
-
-		// restore user role mapping
-		entity := &milvuspb.UserEntity{
-			Name: user.GetUser(),
-		}
+		userSaves := map[string]string{k: v}
 		for _, role := range user.GetRoles() {
-			if err := kc.AlterUserRole(ctx, tenant, entity, role, milvuspb.OperateUserRoleType_AddUserToRole); err != nil {
-				return errors.Wrap(err, "failed to alter user role")
-			}
+			userSaves[buildUserRoleKey(user.GetUser(), role.GetName())] = ""
+		}
+		if err := stage(userSaves, nil, false); err != nil {
+			return errors.Wrap(err, "failed to restore user")
 		}
 	}
-	return nil
+	return flush()
 }
 
 func (kc *Catalog) GetPrivilegeGroup(ctx context.Context, groupName string) (*milvuspb.PrivilegeGroupInfo, error) {
@@ -2288,7 +2443,9 @@ func (kc *Catalog) DropPrivilegeGroup(ctx context.Context, groupName string) err
 	return nil
 }
 
-func (kc *Catalog) SavePrivilegeGroup(ctx context.Context, data *milvuspb.PrivilegeGroupInfo) error {
+// buildPrivilegeGroupKV is the single source of the privilege group record
+// encoding, shared by SavePrivilegeGroup and the batched RestoreRBAC.
+func buildPrivilegeGroupKV(data *milvuspb.PrivilegeGroupInfo) (string, string, error) {
 	k := BuildPrivilegeGroupkey(data.GroupName)
 	groupInfo := &milvuspb.PrivilegeGroupInfo{
 		GroupName:  data.GroupName,
@@ -2296,10 +2453,18 @@ func (kc *Catalog) SavePrivilegeGroup(ctx context.Context, data *milvuspb.Privil
 	}
 	v, err := proto.Marshal(groupInfo)
 	if err != nil {
+		return k, "", err
+	}
+	return k, string(v), nil
+}
+
+func (kc *Catalog) SavePrivilegeGroup(ctx context.Context, data *milvuspb.PrivilegeGroupInfo) error {
+	k, v, err := buildPrivilegeGroupKV(data)
+	if err != nil {
 		mlog.Error(ctx, "failed to marshal privilege group info", mlog.Err(err))
 		return err
 	}
-	if err = kc.Txn.Save(ctx, k, string(v)); err != nil {
+	if err = kc.Txn.Save(ctx, k, v); err != nil {
 		mlog.Warn(ctx, "fail to put privilege group", mlog.String("key", k), mlog.Err(err))
 		return err
 	}
