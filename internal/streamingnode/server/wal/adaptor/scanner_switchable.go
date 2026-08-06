@@ -60,11 +60,18 @@ func newSwitchableScanner(
 
 	normalizedPolicy, excludedMessageID, err := normalizeSwitchableDeliverPolicy(deliverPolicy)
 	if err != nil {
-		logger.Warn(context.TODO(), "invalid cross-WAL start position, falling back to current WAL",
+		initializationErr := status.NewUnrecoverableError(
+			"invalid historical WAL start position for %s: %s", startWALName, err.Error())
+		logger.Warn(context.TODO(), "invalid cross-WAL start position",
 			mlog.Stringer("startWALName", startWALName),
 			mlog.Stringer("currentWALName", currentWAL.WALName()),
-			mlog.Err(err))
-		return newCatchupScanner(impl, options.DeliverPolicyAll(), 0)
+			mlog.Err(initializationErr))
+		return &switchableScannerAdaptorImpl{
+			switchableScannerImpl:      impl,
+			underlyingROWALImplsOpener: underlyingROWALImplsOpener,
+			walName:                    startWALName,
+			initializationErr:          initializationErr,
+		}
 	}
 
 	return &switchableScannerAdaptorImpl{
@@ -150,9 +157,13 @@ type switchableScannerAdaptorImpl struct {
 	cutTs                          uint64
 	excludedMessageID              message.MessageID
 	oldVersionLastConfirmedTracker *oldVersionLastConfirmedTracker
+	initializationErr              error
 }
 
 func (s *switchableScannerAdaptorImpl) Do(ctx context.Context) (switchableScanner, error) {
+	if s.initializationErr != nil {
+		return nil, s.initializationErr
+	}
 	for {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -160,9 +171,6 @@ func (s *switchableScannerAdaptorImpl) Do(ctx context.Context) (switchableScanne
 
 		underlyingWAL, err := s.openUnderlyingROWALImpls(ctx)
 		if err != nil {
-			if isReadWALUnavailable(err) {
-				return s.newCurrentCatchupScanner(ctx, "WAL reader unavailable"), nil
-			}
 			return nil, err
 		}
 
@@ -174,8 +182,8 @@ func (s *switchableScannerAdaptorImpl) Do(ctx context.Context) (switchableScanne
 			}
 			continue
 		}
-		if isReadWALUnavailable(err) {
-			return s.newCurrentCatchupScanner(ctx, "WAL reader unavailable"), nil
+		if isReadWALUnavailable(err) || status.AsStreamingError(err).IsUnrecoverable() {
+			return nil, err
 		}
 		s.logger.Warn(ctx, "switchable scanner consumption was interrupted, retrying",
 			mlog.Stringer("walName", s.walName),
@@ -201,10 +209,11 @@ func (s *switchableScannerAdaptorImpl) consumeWAL(
 				if err := scanner.Error(); err != nil {
 					return nil, err
 				}
-				s.logger.Info(ctx, "WAL reader reached end of stream, switching to current WAL",
-					mlog.Stringer("walName", s.walName),
-					mlog.Stringer("currentWALName", s.innerWAL.WALName()))
-				return s.newCurrentCatchupScanner(ctx, "WAL reader exhausted"), nil
+				return nil, status.NewUnrecoverableError(
+					"historical WAL %s reached end of stream before an AlterWAL boundary to current WAL %s",
+					s.walName,
+					s.innerWAL.WALName(),
+				)
 			}
 
 			if msg.Version() == message.VersionOld {
@@ -249,7 +258,7 @@ func (s *switchableScannerAdaptorImpl) consumeWAL(
 					mlog.Stringer("sourceWALName", s.walName),
 					mlog.Stringer("targetWALName", targetWALName),
 					mlog.Uint64("timeTick", msg.TimeTick()))
-				return s.switchTo(ctx, targetWALName, msg.TimeTick()), nil
+				return s.switchTo(ctx, targetWALName, msg.TimeTick())
 			}
 		}
 	}
@@ -259,13 +268,18 @@ func (s *switchableScannerAdaptorImpl) switchTo(
 	ctx context.Context,
 	targetWALName message.WALName,
 	cutTs uint64,
-) switchableScanner {
+) (switchableScanner, error) {
 	if targetWALName == message.WALNameUnknown || targetWALName.String() == "" {
-		s.logger.Warn(ctx, "AlterWAL target is invalid, switching to current WAL",
+		err := status.NewUnrecoverableError(
+			"historical WAL %s contains an AlterWAL boundary with invalid target %d",
+			s.walName,
+			targetWALName,
+		)
+		s.logger.Warn(ctx, "AlterWAL target is invalid",
 			mlog.Stringer("sourceWALName", s.walName),
-			mlog.Stringer("currentWALName", s.innerWAL.WALName()))
-		s.cutTs = cutTs
-		return s.newCurrentCatchupScanner(ctx, "invalid AlterWAL target")
+			mlog.Stringer("currentWALName", s.innerWAL.WALName()),
+			mlog.Err(err))
+		return nil, err
 	}
 
 	s.walName = targetWALName
@@ -274,12 +288,12 @@ func (s *switchableScannerAdaptorImpl) switchTo(
 	s.excludedMessageID = nil
 	s.oldVersionLastConfirmedTracker = nil
 	if targetWALName == s.innerWAL.WALName() {
-		return s.newCurrentCatchupScanner(ctx, "AlterWAL reached current WAL")
+		return s.newCurrentCatchupScanner(ctx, "AlterWAL reached current WAL"), nil
 	}
 	if s.onReaderSwitch != nil {
 		s.onReaderSwitch(targetWALName, metrics.WALReaderRoleHistorical)
 	}
-	return nil
+	return nil, nil
 }
 
 func (s *switchableScannerAdaptorImpl) openUnderlyingROWALImpls(ctx context.Context) (walimpls.ROWALImpls, error) {

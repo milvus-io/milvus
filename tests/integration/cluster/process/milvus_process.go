@@ -44,6 +44,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
@@ -490,6 +491,11 @@ func (mp *MilvusProcess) getGrpcClient(ctx context.Context, addr string) (*grpc.
 func (mp *MilvusProcess) getConfigValueFromEnv(key string) string {
 	envKey := strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
 	return mp.env[envKey]
+}
+
+// GetMetricsPort returns the HTTP management/metrics port assigned to this process.
+func (mp *MilvusProcess) GetMetricsPort() (int, error) {
+	return strconv.Atoi(mp.env[management.ListenPortEnvKey])
 }
 
 // DailGRPClient dials a grpc client with the given address, root path and node id.

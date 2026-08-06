@@ -147,7 +147,7 @@ func TestRemoteConsumerTransparentlyBridgesHistoricalAndCurrentWAL(t *testing.T)
 	require.NoError(t, consumer.Close())
 }
 
-func TestRemoteConsumerDoesNotObserveHistoricalWALMismatch(t *testing.T) {
+func TestRemoteConsumerDoesNotAdvanceWhenHistoricalWALIsUnavailable(t *testing.T) {
 	resource.InitForTest(t)
 	channel := types.PChannelInfo{
 		Name:       "remote-cross-wal-unavailable",
@@ -155,24 +155,10 @@ func TestRemoteConsumerDoesNotObserveHistoricalWALMismatch(t *testing.T) {
 		AccessMode: types.AccessModeRO,
 	}
 
-	currentMessages := make(chan message.ImmutableMessage, 1)
-	currentMessages <- newTestTimeTickMessage(
-		101,
-		walimplstest.NewTestMessageID(1),
-		walimplstest.NewTestMessageID(1),
-	)
-	currentScanner := mock_walimpls.NewMockScannerImpls(t)
-	currentScanner.EXPECT().Chan().Return(currentMessages).Maybe()
-	currentScanner.EXPECT().Close().Return(nil).Once()
-
 	currentWAL := mock_walimpls.NewMockWALImpls(t)
 	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
 	currentWAL.EXPECT().Channel().Return(channel).Maybe()
 	currentWAL.EXPECT().Close().Return().Once()
-	currentWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
-		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
-		return ok
-	})).Return(currentScanner, nil).Once()
 
 	roWAL := adaptImplsToROWAL(currentWAL, func() {}, func(
 		context.Context,
@@ -205,20 +191,13 @@ func TestRemoteConsumerDoesNotObserveHistoricalWALMismatch(t *testing.T) {
 
 	select {
 	case msg := <-resultCh:
-		require.Equal(t, uint64(101), msg.TimeTick())
-		require.Equal(t, message.WALNameTest, msg.MessageID().WALName())
+		t.Fatalf("received current WAL message after historical WAL failure: %s", msg.MessageID())
 	case <-consumer.Done():
-		t.Fatalf("remote consumer closed before receiving current WAL data: %v", consumer.Error())
+		require.Error(t, consumer.Error())
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for data after server-side historical WAL fallback")
+		t.Fatal("timed out waiting for the consumer to fail-stop")
 	}
-
-	select {
-	case <-consumer.Done():
-		t.Fatalf("remote consumer unexpectedly closed after WAL fallback: %v", consumer.Error())
-	default:
-	}
-	require.NoError(t, consumer.Close())
+	_ = consumer.Close()
 }
 
 type remoteConsumerTestServer struct {
