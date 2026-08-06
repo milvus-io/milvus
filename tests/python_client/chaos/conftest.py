@@ -39,6 +39,13 @@ def pytest_addoption(parser):
     parser.addoption("--collection_num", action="store", default="1", help="collection_num")
     parser.addoption("--search_timeout", action="store", type=float, default=None, help="search API timeout in seconds")
     parser.addoption("--query_timeout", action="store", type=float, default=None, help="query API timeout in seconds")
+    parser.addoption(
+        "--chaos_checker_profile",
+        action="store",
+        choices=("full", "core"),
+        default="full",
+        help="checker workload profile: full includes schema and snapshot operations; core covers DML and queries",
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -127,3 +134,8 @@ def target_components(request):
 @pytest.fixture
 def chaos_template(request):
     return request.config.getoption("--chaos_template")
+
+
+@pytest.fixture
+def chaos_checker_profile(request):
+    return request.config.getoption("--chaos_checker_profile")

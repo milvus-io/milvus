@@ -1796,7 +1796,11 @@ class AddFieldChecker(Checker):
 
             new_field_name = cf.gen_unique_str("new_field_")
             self.milvus_client.add_collection_field(
-                collection_name=self.c_name, field_name=new_field_name, data_type=DataType.INT64, nullable=True
+                collection_name=self.c_name,
+                field_name=new_field_name,
+                data_type=DataType.INT64,
+                nullable=True,
+                timeout=timeout,
             )
             log.debug(f"add field {new_field_name} to collection {self.c_name}")
             time.sleep(1)
@@ -4235,6 +4239,7 @@ class AddVectorFieldChecker(Checker):
                 data_type=DataType.FLOAT_VECTOR,
                 dim=dim,
                 nullable=True,
+                timeout=timeout,
             )
             log.debug(f"[AddVectorFieldChecker] added field {new_vec_field} (dim={dim})")
             time.sleep(1)
@@ -4247,7 +4252,11 @@ class AddVectorFieldChecker(Checker):
                 metric_type="COSINE",
                 params={"M": 16, "efConstruction": 200},
             )
-            self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
+            self.milvus_client.create_index(
+                collection_name=self.c_name,
+                index_params=index_params,
+                timeout=timeout,
+            )
             log.debug(f"[AddVectorFieldChecker] created index for {new_vec_field}")
 
             # Insert data (gen_row_data_by_schema handles nullable vectors)
