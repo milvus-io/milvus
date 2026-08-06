@@ -99,7 +99,7 @@ class TestOperations(TestBase):
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
 
-    def init_health_checkers(self, collection_name=None, checker_profile="full"):
+    def init_health_checkers(self, collection_name=None):
         c_name = collection_name
         checkers = {
             Op.insert: InsertChecker(collection_name=c_name),
@@ -115,18 +115,13 @@ class TestOperations(TestBase):
             Op.json_query: JsonQueryChecker(collection_name=c_name),
             Op.geo_query: GeoQueryChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
+            Op.add_field: AddFieldChecker(collection_name=c_name),
+            Op.snapshot: SnapshotChecker(collection_name=c_name),
+            Op.restore_snapshot: SnapshotRestoreChecker(),
             Op.null_vector_search: NullVectorSearchChecker(collection_name=c_name),
             Op.null_vector_query: NullVectorQueryChecker(collection_name=c_name),
+            Op.add_vector_field: AddVectorFieldChecker(collection_name=c_name),
         }
-        if checker_profile == "full":
-            checkers.update(
-                {
-                    Op.add_field: AddFieldChecker(collection_name=c_name),
-                    Op.snapshot: SnapshotChecker(collection_name=c_name),
-                    Op.restore_snapshot: SnapshotRestoreChecker(),
-                    Op.add_vector_field: AddVectorFieldChecker(collection_name=c_name),
-                }
-            )
         log.info(f"init_health_checkers: {checkers}")
         self.health_checkers = checkers
 
@@ -139,14 +134,14 @@ class TestOperations(TestBase):
             yield request.param
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_operations(self, request_duration, is_check, collection_name, chaos_checker_profile):
+    def test_operations(self, request_duration, is_check, collection_name):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
         log.info(connections.get_connection_addr("default"))
         # event_records = EventRecords()
         c_name = collection_name if collection_name else cf.gen_unique_str("Checker_")
         # event_records.insert("init_health_checkers", "start")
-        self.init_health_checkers(collection_name=c_name, checker_profile=chaos_checker_profile)
+        self.init_health_checkers(collection_name=c_name)
         # event_records.insert("init_health_checkers", "finished")
         with cc.monitor_threads(self.health_checkers):
             log.info("*********************Load Start**********************")

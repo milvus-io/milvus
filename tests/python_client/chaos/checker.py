@@ -321,12 +321,23 @@ class Op(Enum):
 timeout = 120
 search_timeout = 30
 query_timeout = 30
+HEAVY_OP_WAIT_SECONDS = 120
 
 enable_traceback = False
 DEFAULT_FMT = "[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}"
 
 request_records = RequestRecords()
 MAX_ERROR_SAMPLE_LENGTH = 500
+
+
+def _wait_for_next_operation(checker, wait_seconds):
+    """Wait between checker operations while remaining responsive to shutdown."""
+    deadline = time.monotonic() + wait_seconds
+    while checker._keep_running:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        sleep(min(1, remaining))
 
 
 def create_index_params_from_dict(field_name: str, index_param_dict: dict) -> IndexParams:
@@ -1822,7 +1833,7 @@ class AddFieldChecker(Checker):
     def keep_running(self):
         while self._keep_running:
             self.run_task()
-            sleep(constants.WAIT_PER_OP * 6)
+            _wait_for_next_operation(self, HEAVY_OP_WAIT_SECONDS)
 
 
 class InsertChecker(Checker):
@@ -3751,7 +3762,7 @@ class SnapshotChecker(Checker):
     def keep_running(self):
         while self._keep_running:
             self.run_task()
-            sleep(constants.WAIT_PER_OP * 3)
+            _wait_for_next_operation(self, HEAVY_OP_WAIT_SECONDS)
 
 
 class SnapshotRestoreChecker(Checker):
@@ -3990,7 +4001,7 @@ class SnapshotRestoreChecker(Checker):
     def keep_running(self):
         while self._keep_running:
             self.run_task()
-            sleep(constants.WAIT_PER_OP * 3)
+            _wait_for_next_operation(self, HEAVY_OP_WAIT_SECONDS)
 
 
 class NullVectorSearchChecker(Checker):
@@ -4220,6 +4231,8 @@ class NullVectorQueryChecker(Checker):
 class AddVectorFieldChecker(Checker):
     """check add nullable vector field operations: add field, create index, insert, query to verify"""
 
+    VECTOR_DIM = 8
+
     def __init__(self, collection_name=None, shards_num=2, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("AddVectorFieldChecker_")
@@ -4232,7 +4245,7 @@ class AddVectorFieldChecker(Checker):
         """Add a nullable FLOAT_VECTOR field, create index, insert data, and query to verify."""
         try:
             new_vec_field = cf.gen_unique_str("new_vec_")
-            dim = self.dim
+            dim = self.VECTOR_DIM
             self.milvus_client.add_collection_field(
                 collection_name=self.c_name,
                 field_name=new_vec_field,
@@ -4299,7 +4312,7 @@ class AddVectorFieldChecker(Checker):
     def keep_running(self):
         while self._keep_running:
             self.run_task()
-            sleep(constants.WAIT_PER_OP * 6)
+            _wait_for_next_operation(self, HEAVY_OP_WAIT_SECONDS)
 
 
 class EntityTTLChecker(Checker):
