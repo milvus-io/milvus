@@ -5055,9 +5055,10 @@ func TestCheckAndSetDataJSONFieldKeepsRawToken(t *testing.T) {
 		{"string", `"hello"`, `"hello"`},
 		{"empty string", `""`, `""`},
 		{"string with braces", `"{not json"`, `"{not json"`},
-		// gjson String() rendered these through float64, storing `+Inf`
-		// and a truncated mantissa respectively.
-		{"exponent beyond double range", `1e400`, `1e400`},
+		// gjson String() rendered this through float64, storing a truncated
+		// mantissa. Numbers outside the float64 range (1e400) never reach here:
+		// the gin binder decodes `data` into []map[string]interface{} and
+		// rejects them before checkAndSetData runs.
 		{"integer beyond 2^53", `9007199254740993.0`, `9007199254740993.0`},
 		{"integer beyond int64", `12345678901234567890`, `12345678901234567890`},
 	}
