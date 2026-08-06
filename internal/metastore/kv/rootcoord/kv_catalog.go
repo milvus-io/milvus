@@ -1813,16 +1813,24 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 	return entities, nil
 }
 
-func (kc *Catalog) DeleteGrantByCollectionName(ctx context.Context, tenant string, dbName string, collectionName string) error {
+// deleteGrantByCollectionNameKvs reads the current grantee subtree and
+// computes the removal set of a collection's grants: exactRemoveKeys are the
+// grantee-privileges leaves keyed by (dbName, collectionName) and
+// prefixRemoveKeys the grantee-id subtrees no surviving grantee still
+// references. It is shared by the legacy DeleteGrantByCollectionName path and
+// the composite Update drop path so both stay byte-identical. The removals
+// are returned split because the exact leaves are the only index from which a
+// retry can recompute this removal set (their values reference the grantee-id
+// subtrees), so a non-atomic applier must remove them after the prefixes.
+func (kc *Catalog) deleteGrantByCollectionNameKvs(ctx context.Context, tenant string, dbName string, collectionName string) (exactRemoveKeys []string, prefixRemoveKeys []string, err error) {
 	granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 	keys, values, err := kc.Txn.LoadWithPrefix(ctx, granteeKey)
 	if err != nil {
 		mlog.Warn(ctx, "fail to load grant privilege entities for collection cleanup",
 			mlog.String("key", granteeKey), mlog.Err(err))
-		return err
+		return nil, nil, err
 	}
 
-	var exactRemoveKeys []string
 	var granteeIDs []string
 	removingGrantees := make(map[string]struct{})
 	for i, key := range keys {
@@ -1847,11 +1855,6 @@ func (kc *Catalog) DeleteGrantByCollectionName(ctx context.Context, tenant strin
 		}
 	}
 
-	if len(exactRemoveKeys) == 0 && len(granteeIDs) == 0 {
-		return nil
-	}
-
-	var prefixRemoveKeys []string
 	for _, idStr := range granteeIDs {
 		if !shouldRemoveGranteeIDSubtree(ctx, granteeKey, idStr, keys, values, removingGrantees) {
 			continue
@@ -1859,6 +1862,15 @@ func (kc *Catalog) DeleteGrantByCollectionName(ctx context.Context, tenant strin
 		// Use prefix deletion for the granteeID key (has sub-keys)
 		granteeIDKey := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, idStr)
 		prefixRemoveKeys = append(prefixRemoveKeys, granteeIDKey)
+	}
+
+	return exactRemoveKeys, prefixRemoveKeys, nil
+}
+
+func (kc *Catalog) DeleteGrantByCollectionName(ctx context.Context, tenant string, dbName string, collectionName string) error {
+	exactRemoveKeys, prefixRemoveKeys, err := kc.deleteGrantByCollectionNameKvs(ctx, tenant, dbName, collectionName)
+	if err != nil {
+		return err
 	}
 
 	// Use prefix deletion for granteeID keys (which have sub-keys underneath).

@@ -150,6 +150,33 @@ func (kc *Catalog) Update(ctx context.Context, ts typeutil.Timestamp, actions ..
 			for _, k := range granteeRemovals {
 				b.Remove(k)
 			}
+		case metastore.CollectionGrantsEntry:
+			// DropCollectionGrants appends the exact same keys as the legacy
+			// Catalog.DeleteGrantByCollectionName: the unshared grantee-id
+			// subtrees as prefix removals, then the matching grantee-privileges
+			// leaves as exact removals. The leaves are the only index from
+			// which a retry can recompute this removal set (their values
+			// reference the grantee-id subtrees), so on the chunked fallback
+			// path they must land after the grantee-id subtrees - otherwise a
+			// crash in between permanently orphans the remaining subtrees. The
+			// collection record - the commit marker of the whole drop - is
+			// composed by the caller after this entry and lands last. This is
+			// a read-current-state-then-commit removal with no predicate
+			// checks; see the DropCollectionGrants constructor for the
+			// serialization the caller must provide.
+			if action.Type != metastore.ActionDelete {
+				return merr.WrapErrServiceInternalMsg("rootcoord catalog cannot apply action type %v to CollectionGrantsEntry", action.Type)
+			}
+			exactRemovals, prefixRemovals, err := kc.deleteGrantByCollectionNameKvs(ctx, entry.Tenant, entry.DBName, entry.CollectionName)
+			if err != nil {
+				return err
+			}
+			for _, p := range prefixRemovals {
+				b.RemovePrefix(p)
+			}
+			for _, k := range exactRemovals {
+				b.Remove(k)
+			}
 		case metastore.RoleEntry:
 			// DropRole appends the exact same keys as the legacy
 			// Catalog.DropRole: user-role mapping removals first, then the

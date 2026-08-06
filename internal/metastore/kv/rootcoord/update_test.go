@@ -740,6 +740,249 @@ func TestCatalog_Update_RenameCollectionWithGrants_GranteeIndexChunkCrashRetry(t
 	assert.Equal(t, dumpKV(t, legacyKV), dumpKV(t, fk.MemoryKV))
 }
 
+// addCollectionGrant issues one AlterGrant against c; shared by the
+// drop-collection-with-grants tests to extend the seedRenameGrants fixture.
+func addCollectionGrant(t *testing.T, c metastore.RootCoordCatalog, role, objType, dbName, objName, priv string) {
+	assert.NoError(t, c.AlterGrant(context.TODO(), util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: role},
+		Object:     &milvuspb.ObjectEntity{Name: objType},
+		ObjectName: objName,
+		DbName:     dbName,
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: "root"},
+			Privilege: &milvuspb.PrivilegeEntity{Name: priv},
+		},
+	}, milvuspb.OperatePrivilegeType_Grant))
+}
+
+// TestCatalog_Update_DropCollectionWithGrants_MatchesLegacyBytes proves the
+// new single-txn drop path leaves byte-for-byte the same store state as
+// today's two-call path (Catalog.DropCollection +
+// DeleteGrantByCollectionName): collection record, child keys, grantee leaves
+// and grantee-id subtrees all gone, canaries of other objects untouched.
+func TestCatalog_Update_DropCollectionWithGrants_MatchesLegacyBytes(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+
+	legacyKV := memkv.NewMemoryKV()
+	compositeKV := memkv.NewMemoryKV()
+	legacy := NewCatalog(legacyKV)
+	composite := NewCatalog(compositeKV)
+	coll := seedRenameGrants(t, legacy)
+	seedRenameGrants(t, composite)
+	assert.Equal(t, dumpKV(t, legacyKV), dumpKV(t, compositeKV))
+
+	// capture coll1's grantee ids before the drop, to assert their subtrees die.
+	granteeIDs := []string{
+		dumpKV(t, compositeKV)[GranteePrefix+"/role1/Collection/db1.coll1"],
+		dumpKV(t, compositeKV)[GranteePrefix+"/role2/Collection/db1.coll1"],
+	}
+
+	// today's two-call path.
+	assert.NoError(t, legacy.DropCollection(ctx, coll, 0))
+	assert.NoError(t, legacy.DeleteGrantByCollectionName(ctx, tenant, "db1", "coll1"))
+
+	// new single-txn path.
+	assert.NoError(t, composite.Update(ctx, 0,
+		metastore.DropCollectionGrants(tenant, "db1", "coll1"),
+		metastore.DropCollection(coll)))
+
+	got := dumpKV(t, compositeKV)
+	assert.Equal(t, dumpKV(t, legacyKV), got)
+
+	// collection record, grantee leaves and grantee-id subtrees are gone.
+	assert.NotContains(t, got, BuildCollectionKey(coll.DBID, coll.CollectionID))
+	assert.NotContains(t, got, GranteePrefix+"/role1/Collection/db1.coll1")
+	assert.NotContains(t, got, GranteePrefix+"/role2/Collection/db1.coll1")
+	for k := range got {
+		for _, id := range granteeIDs {
+			assert.False(t, strings.HasPrefix(k, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, id)), k)
+		}
+	}
+	// canaries survive: a name-prefix sibling, the same name in another
+	// database, and a Global grant.
+	assert.Contains(t, got, GranteePrefix+"/role1/Collection/db1.coll1_backup")
+	assert.Contains(t, got, GranteePrefix+"/role1/Collection/db2.coll1")
+	assert.Contains(t, got, GranteePrefix+"/role1/Global/db1.*")
+}
+
+// TestCatalog_Update_DropCollectionWithGrants_SingleTxn proves the whole drop
+// is one MultiSaveAndRemoveMixed transaction carrying the collection record,
+// its child keys and the grantee leaves as EXACT removals and the grantee-id
+// subtrees as PREFIX removals.
+func TestCatalog_Update_DropCollectionWithGrants_SingleTxn(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	mk := memkv.NewMemoryKV()
+	coll := seedRenameGrants(t, NewCatalog(mk))
+
+	before := dumpKV(t, mk)
+	granteeIDs := []string{
+		before[GranteePrefix+"/role1/Collection/db1.coll1"],
+		before[GranteePrefix+"/role2/Collection/db1.coll1"],
+	}
+
+	rec := &writeRecordingKV{MemoryKV: mk}
+	c := NewCatalog(rec)
+	assert.NoError(t, c.Update(ctx, 0,
+		metastore.DropCollectionGrants(tenant, "db1", "coll1"),
+		metastore.DropCollection(coll)))
+
+	assert.Equal(t, []string{"MultiSaveAndRemoveMixed"}, rec.calls)
+	assert.ElementsMatch(t, []string{
+		BuildCollectionKey(coll.DBID, coll.CollectionID),
+		BuildPartitionKey(coll.CollectionID, coll.Partitions[0].PartitionID),
+		BuildFieldKey(coll.CollectionID, coll.Fields[0].FieldID),
+		GranteePrefix + "/role1/Collection/db1.coll1",
+		GranteePrefix + "/role2/Collection/db1.coll1",
+	}, rec.removals)
+	wantPrefixes := make([]string, 0, len(granteeIDs))
+	for _, id := range granteeIDs {
+		wantPrefixes = append(wantPrefixes, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, id))
+	}
+	assert.ElementsMatch(t, wantPrefixes, rec.prefixRemovals)
+}
+
+// TestCatalog_Update_DropCollectionWithGrants_AtomicCrashRetry: a failed
+// atomic commit must leave the store untouched (collection intact, no partial
+// grant removal), and retrying the same composite drop must converge to
+// exactly the legacy two-call end state.
+func TestCatalog_Update_DropCollectionWithGrants_AtomicCrashRetry(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+
+	legacyKV := memkv.NewMemoryKV()
+	legacy := NewCatalog(legacyKV)
+	coll := seedRenameGrants(t, legacy)
+	assert.NoError(t, legacy.DropCollection(ctx, coll, 0))
+	assert.NoError(t, legacy.DeleteGrantByCollectionName(ctx, tenant, "db1", "coll1"))
+
+	fk := &flakyMixedKV{MemoryKV: memkv.NewMemoryKV(), failures: 1}
+	seedRenameGrants(t, NewCatalog(fk.MemoryKV))
+	before := dumpKV(t, fk.MemoryKV)
+
+	c := NewCatalog(fk)
+	drop := func() error {
+		return c.Update(ctx, 0,
+			metastore.DropCollectionGrants(tenant, "db1", "coll1"),
+			metastore.DropCollection(coll))
+	}
+	assert.Error(t, drop())
+	// atomic: the failed commit applied nothing.
+	assert.Equal(t, before, dumpKV(t, fk.MemoryKV))
+
+	assert.NoError(t, drop())
+	assert.Equal(t, dumpKV(t, legacyKV), dumpKV(t, fk.MemoryKV))
+}
+
+// markerCrashKV shrinks MaxTxnOps so the composite takes the chunked fallback
+// and fails only the final guarded commit txn - the MultiSaveAndRemove whose
+// removals carry the collection key - simulating a crash right before the
+// visibility marker lands.
+type markerCrashKV struct {
+	*memkv.MemoryKV
+	markerKey string
+	failures  int
+}
+
+func (f *markerCrashKV) MaxTxnOps() int { return 2 }
+
+func (f *markerCrashKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	if f.failures > 0 {
+		for _, k := range removals {
+			if k == f.markerKey {
+				f.failures--
+				return errors.New("injected crash")
+			}
+		}
+	}
+	return f.MemoryKV.MultiSaveAndRemove(ctx, saves, removals, preds...)
+}
+
+// TestCatalog_Update_DropCollectionWithGrants_FallbackMarkerCrashRetry: on the
+// chunked fallback path the collection record is the commit marker of the
+// whole drop. A crash before the final commit txn must leave the record
+// visible (so the drop is observably incomplete and retryable, never a
+// collection-gone-grants-orphaned state), and the retry must converge to the
+// legacy end state.
+func TestCatalog_Update_DropCollectionWithGrants_FallbackMarkerCrashRetry(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+
+	legacyKV := memkv.NewMemoryKV()
+	legacy := NewCatalog(legacyKV)
+	coll := seedRenameGrants(t, legacy)
+	assert.NoError(t, legacy.DropCollection(ctx, coll, 0))
+	assert.NoError(t, legacy.DeleteGrantByCollectionName(ctx, tenant, "db1", "coll1"))
+
+	fk := &markerCrashKV{
+		MemoryKV:  memkv.NewMemoryKV(),
+		markerKey: BuildCollectionKey(coll.DBID, coll.CollectionID),
+		failures:  1,
+	}
+	seedRenameGrants(t, NewCatalog(fk.MemoryKV))
+
+	c := NewCatalog(fk)
+	drop := func() error {
+		return c.Update(ctx, 0,
+			metastore.DropCollectionGrants(tenant, "db1", "coll1"),
+			metastore.DropCollection(coll))
+	}
+	assert.Error(t, drop())
+	// crash-safety: the collection record (commit marker) must still be visible.
+	has, err := fk.Has(ctx, BuildCollectionKey(coll.DBID, coll.CollectionID))
+	assert.NoError(t, err)
+	assert.True(t, has)
+
+	assert.NoError(t, drop())
+	assert.Equal(t, dumpKV(t, legacyKV), dumpKV(t, fk.MemoryKV))
+}
+
+// TestCatalog_Update_DropCollectionWithGrants_GranteeIndexChunkCrashRetry: on
+// the chunked fallback path the grantee-privileges leaves are the only index
+// from which a retry can recompute the removal set (their values reference the
+// grantee-id subtrees), so they must be removed after the grantee-id prefix
+// removals. A crash between prefix chunks must leave every leaf (and the
+// collection marker) intact so the retry converges to the legacy end state
+// instead of permanently orphaning the remaining grantee-id subtrees.
+func TestCatalog_Update_DropCollectionWithGrants_GranteeIndexChunkCrashRetry(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+
+	legacyKV := memkv.NewMemoryKV()
+	legacy := NewCatalog(legacyKV)
+	coll := seedRenameGrants(t, legacy)
+	// a third grant so the grantee-id prefix run splits into two chunks at
+	// MaxTxnOps=2.
+	assert.NoError(t, legacy.CreateRole(ctx, tenant, &milvuspb.RoleEntity{Name: "role3"}))
+	addCollectionGrant(t, legacy, "role3", "Collection", "db1", "coll1", "Query")
+	assert.NoError(t, legacy.DropCollection(ctx, coll, 0))
+	assert.NoError(t, legacy.DeleteGrantByCollectionName(ctx, tenant, "db1", "coll1"))
+
+	fk := &secondChunkCrashKV{MemoryKV: memkv.NewMemoryKV(), failAtCall: 2}
+	seedRenameGrants(t, NewCatalog(fk.MemoryKV))
+	assert.NoError(t, NewCatalog(fk.MemoryKV).CreateRole(ctx, tenant, &milvuspb.RoleEntity{Name: "role3"}))
+	addCollectionGrant(t, NewCatalog(fk.MemoryKV), "role3", "Collection", "db1", "coll1", "Query")
+
+	c := NewCatalog(fk)
+	drop := func() error {
+		return c.Update(ctx, 0,
+			metastore.DropCollectionGrants(tenant, "db1", "coll1"),
+			metastore.DropCollection(coll))
+	}
+	assert.Error(t, drop())
+	got := dumpKV(t, fk.MemoryKV)
+	// the rediscovery index must have survived the crash.
+	assert.Contains(t, got, GranteePrefix+"/role1/Collection/db1.coll1")
+	assert.Contains(t, got, GranteePrefix+"/role2/Collection/db1.coll1")
+	assert.Contains(t, got, GranteePrefix+"/role3/Collection/db1.coll1")
+	// the visibility marker has not flipped: the collection record survives.
+	assert.Contains(t, got, BuildCollectionKey(coll.DBID, coll.CollectionID))
+
+	assert.NoError(t, drop())
+	assert.Equal(t, dumpKV(t, legacyKV), dumpKV(t, fk.MemoryKV))
+}
+
 // TestCatalog_Update_DropRoleWithGrants_FallbackCrashRetry: on the chunked
 // fallback path a crash before the commit marker must leave the role record
 // visible (so the drop is observably incomplete and retryable, never a

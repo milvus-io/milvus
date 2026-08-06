@@ -1786,11 +1786,12 @@ func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 func TestMetaTable_RemoveCollection(t *testing.T) {
 	t.Run("catalog error", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("DropCollection",
+		catalog.On("Update",
 			mock.Anything, // context.Context
-			mock.Anything, // model.Collection
 			mock.AnythingOfType("uint64"),
-		).Return(errors.New("error mock DropCollection"))
+			mock.Anything, // metastore.UpdateAction
+			mock.Anything, // metastore.UpdateAction
+		).Return(errors.New("error mock Update"))
 
 		meta := &MetaTable{
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
@@ -1815,13 +1816,11 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 
 	t.Run("normal case", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("DropCollection",
+		catalog.On("Update",
 			mock.Anything, // context.Context
-			mock.Anything, // model.Collection
 			mock.AnythingOfType("uint64"),
-		).Return(nil)
-		catalog.On("DeleteGrantByCollectionName",
-			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+			mock.Anything, // metastore.UpdateAction
+			mock.Anything, // metastore.UpdateAction
 		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
@@ -1842,17 +1841,20 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 	})
 }
 
-func TestMetaTable_RemoveCollection_GrantDeleteBestEffort(t *testing.T) {
-	// When DeleteGrantByCollectionName fails, RemoveCollection should still succeed (best-effort)
+// TestMetaTable_RemoveCollection_UsesCompositeUpdate proves RemoveCollection
+// issues one composite catalog.Update - grant cleanup composed before the
+// collection removal - instead of the legacy DropCollection +
+// DeleteGrantByCollectionName call pair, so a crash cannot leave the
+// collection removed with its grants orphaned, and a grant-cleanup failure
+// now fails the drop (retryable) instead of being warn-and-skipped.
+func TestMetaTable_RemoveCollection_UsesCompositeUpdate(t *testing.T) {
 	catalog := mocks.NewRootCoordCatalog(t)
-	catalog.On("DropCollection",
-		mock.Anything,
-		mock.Anything,
-		mock.AnythingOfType("uint64"),
-	).Return(nil)
-	catalog.On("DeleteGrantByCollectionName",
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-	).Return(errors.New("grant delete failed"))
+	var gotActions []metastore.UpdateAction
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ uint64, actions ...metastore.UpdateAction) error {
+			gotActions = actions
+			return nil
+		}).Once()
 
 	meta := &MetaTable{
 		catalog:            catalog,
@@ -1860,15 +1862,35 @@ func TestMetaTable_RemoveCollection_GrantDeleteBestEffort(t *testing.T) {
 		aliases:            newNameDb(),
 		fileResourceRefCnt: make(map[int64]int),
 		collID2Meta: map[typeutil.UniqueID]*model.Collection{
-			100: {Name: "collection", State: pb.CollectionState_CollectionDropping},
+			100: {
+				CollectionID: 100,
+				Name:         "collection",
+				DBName:       "db1",
+				State:        pb.CollectionState_CollectionDropping,
+			},
 		},
 	}
 	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
-	meta.names.insert("", "collection", 100)
+	meta.names.insert("db1", "collection", 100)
 	ctx := context.Background()
-	err := meta.RemoveCollection(ctx, 100, 9999)
-	assert.NoError(t, err)
+	assert.NoError(t, meta.RemoveCollection(ctx, 100, 9999))
+
+	if assert.Len(t, gotActions, 2) {
+		grants, ok := gotActions[0].Entry.(metastore.CollectionGrantsEntry)
+		if assert.True(t, ok) {
+			assert.Equal(t, metastore.ActionDelete, gotActions[0].Type)
+			assert.Equal(t, "db1", grants.DBName)
+			assert.Equal(t, "collection", grants.CollectionName)
+		}
+		coll, ok := gotActions[1].Entry.(metastore.CollectionEntry)
+		if assert.True(t, ok) {
+			assert.Equal(t, metastore.ActionDelete, gotActions[1].Type)
+			assert.Equal(t, int64(100), coll.Collection.CollectionID)
+		}
+	}
+	_, ok := meta.collID2Meta[100]
+	assert.False(t, ok)
 }
 
 func TestMetaTable_DropCollection_GrantCleanup(t *testing.T) {

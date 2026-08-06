@@ -745,13 +745,15 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		Aliases:           aliases,
 		DBID:              coll.DBID,
 	}
-	if err := mt.catalog.DropCollection(ctx1, newColl, ts); err != nil {
+	// The collection removal and its grant cleanup commit as one composite
+	// write; the collection record is the commit marker and lands last, so a
+	// crash leaves the collection visible (and the drop retryable) instead of
+	// removed with orphaned grants. A grant-cleanup failure therefore fails
+	// the drop now, rather than being warn-and-skipped as before.
+	if err := mt.catalog.Update(ctx1, ts,
+		metastore.DropCollectionGrants(util.DefaultTenant, coll.DBName, coll.Name),
+		metastore.DropCollection(newColl)); err != nil {
 		return err
-	}
-
-	if err := mt.catalog.DeleteGrantByCollectionName(ctx1, util.DefaultTenant, coll.DBName, coll.Name); err != nil {
-		mlog.Warn(ctx, "failed to delete grants for dropped collection, skipping",
-			mlog.String("dbName", coll.DBName), mlog.String("collectionName", coll.Name), mlog.Err(err))
 	}
 
 	allNames := common.CloneStringList(aliases)

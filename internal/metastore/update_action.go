@@ -175,6 +175,15 @@ type RoleGrantsEntry struct {
 	RoleName string
 }
 
+// CollectionGrantsEntry targets every grant keyed by a collection's
+// (database, collection) name pair: the exact grantee-privileges leaves plus
+// the grantee-id subtrees no surviving grantee still references.
+type CollectionGrantsEntry struct {
+	Tenant         string
+	DBName         string
+	CollectionName string
+}
+
 // CollectionRenameEntry targets a collection's record rewrite for a rename,
 // possibly across databases: Old and New are the collection's before/after
 // values (New already carries the new name and, for a database move, the new
@@ -214,6 +223,7 @@ func (ReplicaEntry) isEntry()               {}
 func (ReplicaKeyEntry) isEntry()            {}
 func (RoleEntry) isEntry()                  {}
 func (RoleGrantsEntry) isEntry()            {}
+func (CollectionGrantsEntry) isEntry()      {}
 func (CollectionRenameEntry) isEntry()      {}
 func (GrantMigrateEntry) isEntry()          {}
 
@@ -392,6 +402,25 @@ func MigrateCollectionGrants(tenant, oldDBName, oldName, newDBName, newName stri
 		OldName:   oldName,
 		NewDBName: newDBName,
 		NewName:   newName,
+	}}
+}
+
+// DropCollectionGrants returns an UpdateAction that removes every grant keyed
+// by a collection's (db, collection) name pair. Compose it before the
+// DropCollection action of the same drop: the collection record is the
+// visibility marker of the whole removal and must land last on the chunked
+// fallback path, so a crash mid-drop leaves the collection visible (and the
+// drop retryable) instead of removed with half-cleaned grants. The removal
+// set is read at apply time and committed without predicate checks, so the
+// caller must serialize it against concurrent grant writes for the same
+// collection; rootcoord drops run under MetaTable's ddLock while grant writes
+// take the permission lock, the same benign window the legacy
+// DeleteGrantByCollectionName call had.
+func DropCollectionGrants(tenant, dbName, collectionName string) UpdateAction {
+	return UpdateAction{Type: ActionDelete, Entry: CollectionGrantsEntry{
+		Tenant:         tenant,
+		DBName:         dbName,
+		CollectionName: collectionName,
 	}}
 }
 
