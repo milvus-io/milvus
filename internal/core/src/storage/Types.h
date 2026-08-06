@@ -163,7 +163,6 @@ struct MmapConfig {
     bool vector_index_enable_mmap;
     bool vector_field_enable_mmap;
     bool mmap_populate;
-    bool mmap_writeback{false};
     bool json_stats_enable_mmap;
     std::string json_stats_mmap_path;
     bool
@@ -212,11 +211,6 @@ struct MmapConfig {
     }
 
     [[nodiscard]] bool
-    GetMmapWriteback() const {
-        return mmap_writeback;
-    }
-
-    [[nodiscard]] bool
     GetJsonStatsEnableMmap() const {
         return json_stats_enable_mmap;
     }
@@ -245,8 +239,8 @@ struct MmapConfig {
            << ", vector_index_enable_mmap=" << std::boolalpha
            << vector_index_enable_mmap
            << ", vector_field_enable_mmap=" << std::boolalpha
-           << vector_field_enable_mmap << ", mmap_writeback=" << std::boolalpha
-           << mmap_writeback << ", json_stats_enable_mmap=" << std::boolalpha
+           << vector_field_enable_mmap
+           << ", json_stats_enable_mmap=" << std::boolalpha
            << json_stats_enable_mmap
            << ", json_stats_mmap_path=" << json_stats_mmap_path << "]";
         return ss.str();

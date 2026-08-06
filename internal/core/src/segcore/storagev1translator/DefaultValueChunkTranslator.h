@@ -40,8 +40,7 @@ class DefaultValueChunkTranslator
                                 FieldDataInfo field_data_info,
                                 bool use_mmap,
                                 bool mmap_populate,
-                                const std::string& warmup_policy,
-                                MmapChunkWritebackConfig writeback_config);
+                                const std::string& warmup_policy);
     ~DefaultValueChunkTranslator() override;
     size_t
     num_cells() const override;
@@ -104,7 +103,6 @@ class DefaultValueChunkTranslator
     std::string key_;
     bool use_mmap_;
     bool mmap_populate_;
-    MmapChunkWritebackConfig writeback_config_;
     std::string mmap_dir_path_;
     CTMeta meta_;
     milvus::FieldMeta field_meta_;

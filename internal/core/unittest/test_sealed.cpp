@@ -4873,43 +4873,6 @@ TEST(SealedSegmentCowState,
     EXPECT_EQ(resolved, "disable");
 }
 
-TEST(SealedSegmentCowState, FieldTranslatorsRequireExplicitMmapWritebackMode) {
-    using storagev1translator::ChunkTranslator;
-    using storagev1translator::DefaultValueChunkTranslator;
-    using storagev2translator::GroupChunkTranslator;
-
-    EXPECT_FALSE(
-        (std::is_constructible_v<ChunkTranslator,
-                                 int64_t,
-                                 FieldMeta,
-                                 FieldDataInfo,
-                                 std::vector<ChunkTranslator::FileInfo>,
-                                 bool,
-                                 bool,
-                                 proto::common::LoadPriority,
-                                 std::string>));
-    EXPECT_FALSE((std::is_constructible_v<DefaultValueChunkTranslator,
-                                          int64_t,
-                                          FieldMeta,
-                                          FieldDataInfo,
-                                          bool,
-                                          bool,
-                                          std::string>));
-    EXPECT_FALSE((std::is_constructible_v<
-                  GroupChunkTranslator,
-                  int64_t,
-                  GroupChunkType,
-                  std::unordered_map<FieldId, FieldMeta>,
-                  FieldDataInfo,
-                  std::vector<std::string>,
-                  std::vector<milvus_storage::RowGroupMetadataVector>,
-                  bool,
-                  bool,
-                  int64_t,
-                  proto::common::LoadPriority,
-                  std::string>));
-}
-
 TEST(SealedSegmentCowState,
      StagedStorageV2ColumnGroupUsesVectorIndexWarmupForNoIndexVector) {
     auto async_load_guard = SetStorageV2AsyncLoadForTest(false);

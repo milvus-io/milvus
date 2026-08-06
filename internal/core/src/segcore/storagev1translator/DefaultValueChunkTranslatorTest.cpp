@@ -53,8 +53,7 @@ MakeDefaultValueChunkTranslatorForTest(int64_t segment_id,
         std::move(field_data_info),
         use_mmap,
         mmap_populate,
-        /*warmup_policy=*/"",
-        MmapChunkWritebackMode::Disabled);
+        /*warmup_policy=*/"");
 }
 
 class DefaultValueChunkTranslatorTest : public ::testing::TestWithParam<bool> {

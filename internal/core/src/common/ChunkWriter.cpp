@@ -772,8 +772,7 @@ create_chunk_buffer(const FieldMeta& field_meta,
                     const arrow::ArrayVector& array_vec,
                     bool mmap_populate,
                     const std::string& file_path,
-                    proto::common::LoadPriority load_priority,
-                    MmapChunkWritebackConfig writeback_config) {
+                    proto::common::LoadPriority load_priority) {
     auto cw = create_chunk_writer(field_meta);
     auto [size, row_nums] = cw->calculate_size(array_vec);
     size_t aligned_size = (size + ChunkTarget::ALIGNED_SIZE - 1) &
@@ -784,7 +783,7 @@ create_chunk_buffer(const FieldMeta& field_meta,
     } else {
         auto io_prio = storage::io::GetPriorityFromLoadPriority(load_priority);
         target = std::make_shared<MmapChunkTarget>(
-            file_path, mmap_populate, aligned_size, io_prio, writeback_config);
+            file_path, mmap_populate, aligned_size, io_prio);
     }
     cw->write_to_target(array_vec, target);
     // The writer is one-shot. Release its scratch buffers before a
@@ -821,14 +820,9 @@ create_chunk(const FieldMeta& field_meta,
              const arrow::ArrayVector& array_vec,
              bool mmap_populate,
              const std::string& file_path,
-             proto::common::LoadPriority load_priority,
-             MmapChunkWritebackConfig writeback_config) {
-    auto buffer = create_chunk_buffer(field_meta,
-                                      array_vec,
-                                      mmap_populate,
-                                      file_path,
-                                      load_priority,
-                                      writeback_config);
+             proto::common::LoadPriority load_priority) {
+    auto buffer = create_chunk_buffer(
+        field_meta, array_vec, mmap_populate, file_path, load_priority);
     return make_chunk_from_buffer(field_meta, buffer, 0);
 }
 
@@ -838,8 +832,7 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
                    const std::vector<arrow::ArrayVector>& array_vec,
                    bool mmap_populate,
                    const std::string& file_path,
-                   proto::common::LoadPriority load_priority,
-                   MmapChunkWritebackConfig writeback_config) {
+                   proto::common::LoadPriority load_priority) {
     std::vector<std::shared_ptr<ChunkWriterBase>> cws;
     cws.reserve(field_ids.size());
     size_t total_aligned_size = 0, final_row_nums = 0;
@@ -880,8 +873,7 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
             file_path,
             mmap_populate,
             total_aligned_size,
-            storage::io::GetPriorityFromLoadPriority(load_priority),
-            writeback_config);
+            storage::io::GetPriorityFromLoadPriority(load_priority));
     }
     for (size_t i = 0; i < field_ids.size(); i++) {
         auto start_off = target->tell();

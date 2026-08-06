@@ -164,11 +164,6 @@ FileWriter::~FileWriter() {
 }
 
 void
-FileWriter::SetFdatasyncOnFinish() {
-    fdatasync_on_finish_ = true;
-}
-
-void
 FileWriter::Cleanup() noexcept {
     if (fd_ != -1) {
         close(fd_);
@@ -204,31 +199,6 @@ FileWriter::PositionedWriteWithCheck(const void* data,
     } catch (...) {
         Cleanup();
         throw;
-    }
-}
-
-void
-FileWriter::SyncWrittenData() {
-    if (!fdatasync_on_finish_ || file_size_ == 0) {
-        return;
-    }
-    SyncFileData();
-}
-
-void
-FileWriter::SyncFileData() {
-#ifdef __APPLE__
-    auto ret = fsync(fd_);
-#else
-    auto ret = fdatasync(fd_);
-#endif
-    if (ret != 0) {
-        auto saved_errno = errno;
-        Cleanup();
-        ThrowInfo(ErrorCode::FileWriteFailed,
-                  "Failed to sync file data: {}, error: {}",
-                  filename_,
-                  strerror(saved_errno));
     }
 }
 

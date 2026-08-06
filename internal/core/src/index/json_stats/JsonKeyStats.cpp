@@ -1187,7 +1187,6 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             /*fallback_bytes_per_row=*/0,
             shard_,
             std::nullopt,
-            milvus::MmapChunkWritebackMode::Disabled,
             enable_async_load);
 
         auto chunked_column_group =
@@ -1271,7 +1270,6 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             /*fallback_bytes_per_row=*/0,
             shard_,
             size_estimate,
-            milvus::MmapChunkWritebackMode::Disabled,
             enable_async_load);
 
         auto chunked_column_group =

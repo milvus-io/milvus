@@ -31,7 +31,6 @@
 #include "arrow/table.h"
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
-#include "common/ChunkTarget.h"
 #include "common/FieldMeta.h"
 #include "common/GroupChunk.h"
 #include "common/OpContext.h"
@@ -103,7 +102,6 @@ class ManifestGroupTranslator
         std::string shard = "",
         std::optional<ColumnSizeEstimateResult> column_size_estimate =
             std::nullopt,
-        MmapChunkWritebackConfig writeback_config = {},
         bool enable_async_load = false);
     ~ManifestGroupTranslator() = default;
 
@@ -237,7 +235,6 @@ class ManifestGroupTranslator
     bool mmap_populate_;
     bool has_array_field_{false};
     std::string mmap_dir_path_;
-    MmapChunkWritebackConfig writeback_config_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
     bool enable_async_load_{false};
