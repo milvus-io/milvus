@@ -5179,3 +5179,37 @@ func TestCheckAndSetDataDynamicFieldRejectsUnrepresentableNumber(t *testing.T) {
 		})
 	}
 }
+
+// A JSON field whose document is itself a number gets the same 64-bit limit as
+// a dynamic field: simdjson reports BIGINT_ERROR beyond that, so storing it
+// would make every query touching the field fail instead of the insert.
+func TestCheckAndSetDataJSONFieldRejectsUnrepresentableNumber(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{"one past uint64", `18446744073709551616`},
+		{"far beyond uint64", `123456789012345678901234567890`},
+		{"negative beyond int64", `-9223372036854775809`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(fmt.Sprintf(
+				`{"data": {"%s": 1, "vector": [0.1, 0.2], "json_field": %s}}`, FieldBookID, tt.value))
+			_, _, err := checkAndSetData(body, jsonFieldTestSchema(), false)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "json_field")
+			assert.Contains(t, err.Error(), "exceeds the 64-bit range")
+		})
+	}
+}
+
+// The same literal nested inside a document is deliberately not walked, so it
+// keeps being stored as-is. Documenting the boundary of the check above.
+func TestCheckAndSetDataJSONFieldDoesNotWalkNestedNumbers(t *testing.T) {
+	stored := insertOneJSONValue(t, `{"a": 123456789012345678901234567890}`)
+	assert.Equal(t, `{"a": 123456789012345678901234567890}`, string(stored))
+	assert.True(t, json.Valid(stored))
+}
