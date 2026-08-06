@@ -869,16 +869,16 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 		return nil
 	}
 
-	// Build indexName -> target indexID mapping from target collection's index definitions.
+	// Build indexName -> target index mapping from target collection's index definitions.
 	// The source snapshot stores the source collection's indexID, but the target collection
 	// has new indexIDs allocated during RestoreIndexes(). We must use the target indexID
 	// so that segmentIndexes entries match the index definitions in indexes map.
 	// Using indexName (instead of fieldID) as key because a single JSON field can have
 	// multiple indexes on different paths, and indexName is preserved during RestoreIndexes.
 	targetIndexes := meta.indexMeta.GetIndexesForCollection(task.GetCollectionId(), "")
-	indexNameToTargetID := make(map[string]int64, len(targetIndexes))
+	indexNameToTargetIndex := make(map[string]*model.Index, len(targetIndexes))
 	for _, index := range targetIndexes {
-		indexNameToTargetID[index.IndexName] = index.IndexID
+		indexNameToTargetIndex[index.IndexName] = index
 	}
 
 	// Find partition ID from task's ID mappings
@@ -894,7 +894,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 	for _, indexInfo := range result.GetIndexInfos() {
 		// Resolve target indexID by indexName instead of fieldID.
 		// This correctly handles JSON path indexes where one field has multiple indexes.
-		targetIndexID, ok := indexNameToTargetID[indexInfo.GetIndexName()]
+		targetIndex, ok := indexNameToTargetIndex[indexInfo.GetIndexName()]
 		if !ok {
 			mlog.Warn(ctx, "no index definition found for index name in target collection, skip syncing",
 				WrapCopySegmentTaskLog(task,
@@ -903,6 +903,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 					mlog.Int64("sourceIndexID", indexInfo.GetIndexId()))...)
 			continue
 		}
+		targetIndexID := targetIndex.IndexID
 
 		now := time.Now().Unix()
 		segIndex := &model.SegmentIndex{
@@ -910,6 +911,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			CollectionID:              task.GetCollectionId(),
 			PartitionID:               partitionID,
 			IndexID:                   targetIndexID,
+			IndexType:                 GetIndexType(targetIndex.IndexParams),
 			BuildID:                   indexInfo.GetBuildId(),
 			IndexState:                commonpb.IndexState_Finished,
 			IndexFileKeys:             indexInfo.GetIndexFilePaths(),
@@ -960,6 +962,15 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 				mlog.FieldIndexID(targetIndexID),
 				mlog.Int64("sourceIndexID", indexInfo.GetIndexId()),
 				mlog.FieldBuildID(indexInfo.GetBuildId()))...)
+	}
+
+	if err := meta.syncVectorIndexSize(ctx, task.GetCollectionId(), result.GetSegmentId()); err != nil {
+		// The copied index metadata is already durable. Startup reconciliation
+		// repairs a transient statistics-write failure, so do not fail the copy
+		// task after a successful index copy.
+		mlog.Warn(ctx, "failed to update vector index size after syncing copied indexes",
+			WrapCopySegmentTaskLog(task,
+				mlog.FieldSegmentID(result.GetSegmentId()), mlog.Err(err))...)
 	}
 	return nil
 }

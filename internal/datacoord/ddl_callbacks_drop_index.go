@@ -19,10 +19,24 @@ package datacoord
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func (s *DDLCallbacks) dropIndexV2Callback(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
 	header := result.Message.Header()
-	return s.meta.indexMeta.MarkIndexAsDeleted(ctx, header.GetCollectionId(), header.GetIndexIds())
+	if err := s.meta.indexMeta.MarkIndexAsDeleted(ctx, header.GetCollectionId(), header.GetIndexIds()); err != nil {
+		return err
+	}
+
+	// Deleted index definitions are excluded by GetSegmentIndexes. Reconcile
+	// every segment in the collection so their aggregate footprint stops
+	// counting the dropped vector indexes before asynchronous file GC runs.
+	for _, segment := range s.meta.SelectSegments(ctx, WithCollection(header.GetCollectionId())) {
+		if err := s.meta.syncVectorIndexSize(ctx, header.GetCollectionId(), segment.ID); err != nil {
+			mlog.Warn(ctx, "failed to update vector index size after dropping index",
+				mlog.FieldSegmentID(segment.ID), mlog.Err(err))
+		}
+	}
+	return nil
 }

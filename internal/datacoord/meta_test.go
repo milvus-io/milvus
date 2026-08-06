@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -338,6 +339,65 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 			suite.Equal(collectionID, segments[0].GetCollectionID())
 		}
 	})
+}
+
+func TestReconcileVectorIndexSizes(t *testing.T) {
+	const (
+		collectionID = int64(1)
+		segmentID    = int64(100)
+		indexID      = int64(10)
+	)
+
+	catalog := mocks2.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Twice()
+
+	segments := NewSegmentsInfo()
+	segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           segmentID,
+		CollectionID: collectionID,
+		State:        commonpb.SegmentState_Flushed,
+		Stats:        &datapb.Statistics{},
+	}))
+	segmentIndexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segmentIndexes.Insert(indexID, &model.SegmentIndex{
+		CollectionID:        collectionID,
+		SegmentID:           segmentID,
+		IndexID:             indexID,
+		IndexState:          commonpb.IndexState_Finished,
+		IndexSerializedSize: 1024,
+		// Simulate a record created before IndexType was persisted.
+		IndexType: "",
+	})
+	indexMeta := &indexMeta{
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collectionID: {
+				indexID: {
+					CollectionID: collectionID,
+					IndexID:      indexID,
+					IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}},
+				},
+			},
+		},
+		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+	}
+	indexMeta.segmentIndexes.Insert(segmentID, segmentIndexes)
+	m := &meta{
+		catalog:              catalog,
+		segments:             segments,
+		indexMeta:            indexMeta,
+		vectorIndexSizeLocks: lock.NewKeyLock[UniqueID](),
+	}
+
+	// Startup reconciliation backfills the new statistic for legacy completed
+	// indexes after an upgrade or an interrupted prior update.
+	m.reconcileVectorIndexSizes(context.Background())
+	assert.EqualValues(t, 1024, m.GetSegment(context.Background(), segmentID).GetStats().GetVectorIndexSize())
+
+	// Dropping the definition makes GetSegmentIndexes exclude it. Reconciliation
+	// then removes its bytes before file GC asynchronously deletes the record.
+	indexMeta.indexes[collectionID][indexID].IsDeleted = true
+	require.NoError(t, m.syncVectorIndexSize(context.Background(), collectionID, segmentID))
+	assert.Zero(t, m.GetSegment(context.Background(), segmentID).GetStats().GetVectorIndexSize())
 }
 
 type MetaBasicSuite struct {
@@ -2815,7 +2875,12 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		segment.StorageVersion = storage.StorageV3
 		segment.ManifestPath = currentManifest
 		// Pre-bump Stats under-counts once materialization grows Binlogs.
-		segment.Stats = &datapb.Statistics{InsertBinlogSize: 100, InsertBinlogCount: 1}
+		segment.Stats = &datapb.Statistics{
+			InsertBinlogSize:  100,
+			InsertBinlogCount: 1,
+			VectorIndexSize:   777,
+			ScalarIndexSize:   88,
+		}
 		m := &meta{
 			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
 			segments: segs,
@@ -2846,6 +2911,8 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.NotNil(mutation)
 		suite.Require().Len(infos, 1)
 		suite.EqualValues(250, infos[0].GetStats().GetInsertBinlogSize())
+		suite.EqualValues(777, infos[0].GetStats().GetVectorIndexSize())
+		suite.EqualValues(88, infos[0].GetStats().GetScalarIndexSize())
 		suite.EqualValues(250, m.segments.GetSegment(1).getSegmentSize())
 	})
 
@@ -6172,10 +6239,9 @@ func TestUpdateSegmentStatsOperator(t *testing.T) {
 		assert.EqualValues(t, 1, stats.GetDeltaBinlogCount())
 	})
 
-	// Non-nil requestStats is stored wholesale — all fields verbatim as sent
-	// by the datanode's StatisticsCollector. No per-field override or array
-	// derivation happens.
-	t.Run("non-nil request stored wholesale", func(t *testing.T) {
+	// Non-nil requestStats is stored wholesale for data-log fields. Index-size
+	// fields remain DataCoord-owned and are preserved from the segment.
+	t.Run("non-nil request preserves DataCoord index sizes", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		require.NoError(t, err)
 
@@ -6186,6 +6252,7 @@ func TestUpdateSegmentStatsOperator(t *testing.T) {
 			Binlogs:      []*datapb.FieldBinlog{mkField(200, 2048)},
 			Statslogs:    nil,
 			Deltalogs:    []*datapb.FieldBinlog{mkField(3, 32)},
+			Stats:        &datapb.Statistics{VectorIndexSize: 123, ScalarIndexSize: 45},
 		})
 		require.NoError(t, meta.AddSegment(context.TODO(), segment))
 
@@ -6197,6 +6264,8 @@ func TestUpdateSegmentStatsOperator(t *testing.T) {
 			DeleteNumRows:     7,
 			InsertBinlogCount: 3,
 			DeltaBinlogCount:  2,
+			VectorIndexSize:   999,
+			ScalarIndexSize:   888,
 		}
 		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateSegmentStats(2, req))
 		require.NoError(t, err)
@@ -6212,6 +6281,8 @@ func TestUpdateSegmentStatsOperator(t *testing.T) {
 		assert.EqualValues(t, 7, stats.GetDeleteNumRows())
 		assert.EqualValues(t, 3, stats.GetInsertBinlogCount())
 		assert.EqualValues(t, 2, stats.GetDeltaBinlogCount())
+		assert.EqualValues(t, 123, stats.GetVectorIndexSize())
+		assert.EqualValues(t, 45, stats.GetScalarIndexSize())
 	})
 
 	// Non-nil requestStats is stored wholesale regardless of storage version.

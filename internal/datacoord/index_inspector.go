@@ -73,6 +73,7 @@ func newIndexInspector(
 }
 
 func (i *indexInspector) Start() {
+	i.meta.reconcileVectorIndexSizes(i.ctx)
 	i.reloadFromMeta()
 	i.wg.Add(1)
 	go i.createIndexForSegmentLoop(i.ctx)

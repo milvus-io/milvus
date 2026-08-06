@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -67,24 +69,24 @@ func (s *indexTaskSuite) SetupSuite() {
 
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
-	s.mt = &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				s.segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            s.segID,
-						CollectionID:  s.collID,
-						PartitionID:   s.partID,
-						InsertChannel: "ch1",
-						NumOfRows:     65535,
-						State:         commonpb.SegmentState_Flushed,
-						MaxRowNum:     65535,
-						Level:         datapb.SegmentLevel_L2,
-					},
-				},
-			},
+	segments := NewSegmentsInfo()
+	segments.SetSegment(s.segID, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:                  s.segID,
+			CollectionID:        s.collID,
+			PartitionID:         s.partID,
+			InsertChannel:       "ch1",
+			NumOfRows:           65535,
+			State:               commonpb.SegmentState_Flushed,
+			MaxRowNum:           65535,
+			Level:               datapb.SegmentLevel_L2,
+			CreatedByCompaction: true,
 		},
-		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+	})
+	s.mt = &meta{
+		segments:             segments,
+		vectorIndexSizeLocks: lock.NewKeyLock[UniqueID](),
+		indexMeta:            createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 	}
 }
 
@@ -682,6 +684,8 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 	s.Run("task finished", func() {
 		catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
 		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+		catalogMock.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+		s.mt.catalog = catalogMock
 		s.mt.indexMeta.catalog = catalogMock
 
 		it.SetState(indexpb.JobState_JobStateInProgress, "")
@@ -890,6 +894,7 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 		IndexID:      s.indexID,
 		BuildID:      s.taskID,
 		IndexState:   commonpb.IndexState_Unissued,
+		IndexType:    "HNSW",
 	}
 	it := newIndexBuildTask(t, 1, s.mt, nil, nil, nil)
 	result := &workerpb.IndexTaskInfo{
@@ -907,8 +912,51 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 
 	s.Run("successful update", func() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		s.mt.catalog = catalog
 		s.mt.indexMeta.catalog = catalog
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+
+		segIndex, ok := s.mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+		s.True(ok)
+		segIndex.IndexType = "HNSW"
+		s.mt.segments.segments[s.segID].Stats = &datapb.Statistics{InsertBinlogSize: 64}
+
+		// A segment may have more than one vector field. The size must be
+		// the aggregate of every finished vector index, not merely this task.
+		secondIndexID := s.indexID + 1
+		s.mt.indexMeta.indexes[s.collID][secondIndexID] = &model.Index{
+			CollectionID: s.collID,
+			IndexID:      secondIndexID,
+			FieldID:      s.fieldID + 1,
+		}
+		segmentIndexes, ok := s.mt.indexMeta.segmentIndexes.Get(s.segID)
+		s.True(ok)
+		segmentIndexes.Insert(secondIndexID, &model.SegmentIndex{
+			CollectionID:        s.collID,
+			SegmentID:           s.segID,
+			IndexID:             secondIndexID,
+			IndexType:           "IVF_FLAT",
+			IndexState:          commonpb.IndexState_Finished,
+			IndexSerializedSize: 512,
+		})
+		result.SerializedSize = 1024
+
+		err := it.setJobInfo(result)
+		s.NoError(err)
+		s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
+		stats := s.mt.GetSegment(context.TODO(), s.segID).GetStats()
+		s.EqualValues(64, stats.GetInsertBinlogSize())
+		s.EqualValues(1536, stats.GetVectorIndexSize())
+		s.Zero(stats.GetScalarIndexSize())
+	})
+
+	s.Run("statistics update failure does not leave task running", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		s.mt.catalog = catalog
+		s.mt.indexMeta.catalog = catalog
+		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
 
 		err := it.setJobInfo(result)
 		s.NoError(err)
