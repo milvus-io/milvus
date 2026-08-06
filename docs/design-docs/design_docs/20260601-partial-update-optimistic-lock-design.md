@@ -1,235 +1,105 @@
-# StreamingNode 上基于乐观锁的 Partial Update 设计
+# MEP：Partial Update 的乐观 CAS
 
-| | |
-|---|---|
-| **状态** | 草案（实现已对齐） |
-| **作者** | Wei Liu |
-| **创建时间** | 2026-06-01 |
-| **Issue** | [#49980](https://github.com/milvus-io/milvus/issues/49980) - Concurrent Partial Updates on the same PK |
-| **Feature PR** | [#51845](https://github.com/milvus-io/milvus/pull/51845) |
+- **创建时间：** 2026-06-01
+- **Feature DRI:** @weiliu1031
+- **Primary Approver:** TBD
+- **Independent Approver:** TBD
+- **Design Review:** TBD
+- **状态：** 评审中
+- **组件：** Proxy / StreamingNode / Streaming
+- **关联 Issue：** [#49980](https://github.com/milvus-io/milvus/issues/49980)
+- **发布版本：** N/A
 
 ## 摘要
 
-Partial update 保持现有 read-merge-write 模型：Proxy 查询当前完整行并执行 merge，
-StreamingNode 在 WAL `CommitTxn` 写入前执行 optimistic CAS admission。
+Milvus 的 Partial Update 目前采用“读取、合并、写入”的流程。Proxy 先读取
+当前行，把用户提供的字段合并成完整行，再写入一个标准的 Delete/Insert
+事务。两个并发请求可能读取同一个快照；提交时又不会校验合并所依据的快照，
+因此后提交的请求可能无声地覆盖先提交请求的修改。
 
-每个 attempt 严格执行：
+本提案保留 Proxy 中现有的查询和合并逻辑，在 StreamingNode 增加乐观提交
+准入校验。每次尝试都按以下顺序执行：
 
 ```text
-resolve all PChannel terms
-  -> allocate attempt-scoped readTS
+resolve all touched PChannel terms
+  -> allocate an attempt-scoped readTS
   -> query at readTS
+  -> merge
   -> commit(term, readTS)
 ```
 
-StreamingNode 为当前 PChannel term 维护近期 `PK -> lastWriteTS` 索引。普通 Insert
-通过 ShardManager 中的 collection schema 提取 PK；Delete 和 CAS Insert 直接从消息
-提取 PK。无法枚举 PK、但会整体改变数据可见性的 `TruncateCollection` 使用轻量
-`collectionFenceIndex`。
+StreamingNode 为每个 WAL term 维护一个内存中的近期主键写入索引。Local
+Partial Update 的 `CommitTxn` 会获取现有的 vchannel 写锁，校验请求观察到的
+term 和读取快照，追加 commit，并在释放锁之前发布该事务的写集合。
 
-新 term 不继承旧 term 的 PK index，也不执行 cold warm-up。正确性由
-`term -> readTS -> query` 顺序保证：Proxy 只能在观察到当前 term 后分配该 attempt
-的 `readTS`。如果 term 在 query 或 commit 前变化，SN 通过 term mismatch 拒绝旧
-attempt。
+本设计不新增公共 RPC、SDK 字段、配置项、Partial Update 专用 WAL 消息类型
+或持久化行版本存储。下游消费者仍然接收标准的 Delete/Insert 事务。
 
-WAL recovery 保持原有 transaction 语义。Partial-update interceptor 不读取 TxnBuffer，
-而是用是否在当前生命周期观察到 `BeginTxn` 判断 runtime write set 是否完整。普通或
-replicated recovered transaction 可以继续提交，但会发布 vchannel 级保守 fence；本地
-CAS 缺少完整 runtime proof 时返回 retryable error，由 Proxy 重建整个 attempt。
+## 动机
 
-该方案不新增 Proxy 到 SN 的 RPC，不新增 partial-update 专用 WAL message，也不使用
-`AppendResult.Extra` 返回行级结果。
-
-## 背景
-
-当前 partial update 在 Proxy 中先读取旧行，再把用户字段 merge 成完整行，最后向
-WAL 追加 Delete 和 Insert。读与提交之间没有冲突检查，因此两个并发请求可能读取
-同一个旧版本，并用各自的 merge 结果互相覆盖。
-
-把查询和 merge 下沉到 SN 会引入 QueryCoord client、shard leader 路由、schema
-处理和 merge 逻辑，改动范围过大。SN 已经拥有 WAL 排序点，因此本方案保留 Proxy
-读写路径，只把 commit-side CAS 放到 SN。
-
-## 目标
-
-- 同一 PK 的并发 partial update 不产生 lost update。
-- 查询路由和 merge 逻辑保留在 Proxy。
-- 下游仍消费标准 Delete/Insert WAL transaction。
-- 客户端 API 保持不变。
-- SN 重启或 channel 迁移后不能把索引缺失当作无冲突。
-- 不引入需要定时 warm-up 或后台重建的 index readiness 状态机。
-
-## 非目标
-
-- 不提供跨 vchannel 或跨 collection 原子性。
-- 不提供 strict serializability。
-- 不持久化独立 row-version storage。
-- MVP 不改变现有 Streaming transaction 在断流、超时或响应丢失时的自动重发和
-  ambiguous-outcome 语义，也不提供 transaction-level exactly-once 或 idempotency token。
-- MVP 不对 `ARRAY_APPEND`、`ARRAY_REMOVE` 的确定性 CAS conflict 执行自动重试。
-- MVP 暂不保证 partial update 与 Import、RestoreSnapshot、backfill 等独立数据可见性
-  流程并发执行时的正确性。
-
-## 正确性契约
-
-### Attempt 顺序
-
-每次 attempt 必须遵守：
+假设一行数据中有两个可以独立更新的字段：
 
 ```text
-route original PKs to vchannels
-  -> resolve and snapshot every touched PChannel term
-  -> allocate readTS from TSO
-  -> query with GuaranteeTimestamp = MvccTimestamp = readTS
-  -> attach the same term and readTS to CAS metadata
+initial row:       {pk: 1, name: "old", score: 10}
+request A updates: {pk: 1, name: "new"}
+request B updates: {pk: 1, score: 20}
 ```
 
-不能先分配 `readTS` 再解析 term。否则新 owner 可能已经启动，但该 attempt 的
-`readTS` 仍早于新 term，空的 per-term index 无法证明这段时间内的写入历史。
+如果提交时不做校验，两个请求都可能读取初始行。请求 A 写入
+`{name: "new", score: 10}`，请求 B 写入
+`{name: "old", score: 20}`。最后提交的请求会覆盖另一个请求的更新。
 
-调度 task 的 ID 和 `BeginTs` 在整个请求生命周期内保持不变。`readTS` 是独立的
-attempt-scoped timestamp，首次执行和每次 retry 都重新分配。
+Proxy 已经负责完整的 Partial Update 语义，包括 nullable 和默认值、动态字段、
+函数生成结果、相对数组操作、partition key 校验以及行合并。把查询和合并移到
+StreamingNode，会重复实现这些职责，还会让 WAL owner 依赖 QueryCoord 和
+QueryNode。
 
-### Read fence
+StreamingNode 已经是 WAL 排序点。因此，在提交侧执行乐观校验，可以在保留
+现有读取和合并路径的同时防止更新丢失。
 
-Partial update 内部查询使用：
+### 目标
 
-```text
-ConsistencyLevel = Customized
-GuaranteeTimestamp = readTS
-MvccTimestamp = readTS
-```
+- 防止并发 Partial Update 修改同一 PK 时发生更新丢失。
+- 查询路由、schema 处理、函数生成和合并继续由 Proxy 负责。
+- 持久化数据路径继续使用标准的 Delete/Insert WAL 事务。
+- PChannel term 发生变化后拒绝过期的尝试。
+- WAL 恢复和事务重放期间保持正确性，且不需要重建历史行级状态。
+- 限制近期 PK 版本占用的内存；保留历史不完整时按失败处理。
+- 只重试能够安全重建完整请求的操作。
 
-`queryTask.PreExecute` 之后仍需把 `GuaranteeTimestamp` 和 `MvccTimestamp` 固定为
-`readTS`，确保 QueryNode 实际读取的 MVCC 快照和 CAS metadata 完全一致。
+### 非目标
 
-### Term fence
+- 跨 vchannel 或跨 collection 原子性。
+- 严格可串行化。
+- 持久化行版本存储。
+- 事务级 exactly-once 语义或幂等 token。
+- 确定性 CAS 冲突后自动重放相对 `ARRAY_APPEND` 或 `ARRAY_REMOVE` 操作。
+- Partial Update 与 Import、RestoreSnapshot 或 backfill 可见性变更并发执行时
+  的正确性。
+- Feature flag 或运行时启用开关。
 
-Proxy 把查询前观察到的 term 写入 metadata：
+## 公共接口
 
-```text
-observedPChannelTerm = assignment.Channel.Term
-```
+### 公共 API 与 SDK 行为
 
-SN admission 首先比较当前 WAL term。读和提交之间发生 SN 重启或 channel 迁移时，
-旧 attempt 必须失败并由 Proxy 重新执行完整流程。
+本提案不新增公共 RPC 或 SDK 请求字段。现有 Partial Update 请求继续使用当前
+的 Upsert API。
 
-term 只处理 owner 生命周期变化。它不能发现同一 term 内发生的普通 DML 或 Truncate，
-因此仍需要 PK version index 和 collection fence。Import 和 RestoreSnapshot 不在本方案
-的并发正确性范围内。
+用户可观察到的行为变化如下：
 
-### Commit fence
+- 发生冲突的 replacement update 由 Proxy 重建并重试。
+- 发生冲突的 relative update 返回
+  `ErrCollectionPartialUpdateConflict`，且 `Retriable=false`。
+- replacement update 耗尽重试次数后返回
+  `ErrServiceUnavailable`，且 `Retriable=true`。
+- AutoID Partial Update 改为仅更新：请求提供的每个 PK 都必须存在于查询
+  快照中，合并后的 Insert 保留该 PK。
 
-本地 CAS `CommitTxn` 在 lock interceptor 中获取 vchannel 写锁。该锁覆盖 TimeTick
-分配、transaction body 收敛、CAS admission、WAL append、index publication 和
-transaction state transition：
+普通的非 Partial Update AutoID upsert 仍然分配新 PK。
 
-```text
-acquire glock.RLock + vchannel.Lock
-  -> allocate commitTS
-  -> RequestCommitAndWait
-  -> verify marker, runtime state, term, retention, fence and PK versions
-  -> append CommitTxn
-  -> publish PK/fence indexes
-  -> CommitDone or RejectCommit
-release vchannel.Lock + glock.RUnlock
-```
+### 内部协议
 
-CAS reject 必须满足：
-
-- `CommitTxn` 不写入 WAL；
-- transaction body 对 consumer 不可见；
-- txn session 不进入 committed 状态；
-- admission state 和 txn metadata 被清理。
-
-### VChannel admission lock
-
-lock interceptor 使用统一的层级顺序：先获取 PChannel `glock`，再获取 vchannel lock，
-释放时顺序相反。
-
-| 消息 | 锁 |
-|---|---|
-| 普通 DML、transaction body、普通 CommitTxn | `glock.RLock + vchannel.RLock` |
-| 本地 CAS CommitTxn | `glock.RLock + vchannel.Lock` |
-| vchannel exclusive DDL | `glock.RLock + vchannel.Lock` |
-| PChannel exclusive DDL | `glock.Lock` |
-
-CAS CommitTxn 使用专用分支，不能触发 exclusive DDL 的 `FailTxnAtVChannel`，否则会终止
-正在提交的 CAS transaction 自身。
-
-普通写入一直持有 vchannel 读锁，直到 WAL append 和 PK/fence publication 都完成。
-因此 CAS 获得写锁时，同一 vchannel 不可能存在已经开始、但尚未发布 write index 的
-普通写入；CAS 成功后也会在发布 index 之前继续持有写锁。该顺序同时解决两种竞态：
-
-- 普通写先进入时，CAS 等待其 publication 后再校验；
-- CAS 先进入时，后续普通写等待 CAS append 和 publication 完成。
-
-同一 vchannel 的 CAS commit 会全部串行，即使 PK 不相交；不同 vchannel 仍使用不同的
-锁，可以并行。锁只覆盖 commit 临界区，不覆盖 Proxy query、merge 或 transaction body
-append。
-
-### Complete write coverage
-
-所有纳入本方案支持范围、且会改变 logical row data 的写入必须进入 CAS proof：
-
-- Delete 从消息主键列表提取 PK；
-- CAS Insert 使用 metadata 中的 PK field ID 从 Insert body 提取 PK；
-- shard interceptor 先完成普通 Insert 的 schema version 校验，再由 partial-update
-  interceptor 使用 ShardManager schema 提取 PK；
-- shard 兼容接受、但没有可用 schema 的 legacy Insert 使用 collection fence，不能直接
-  跳过 write coverage；
-- transaction 内的精确 PK 在 `CommitTxn` 成功后统一发布；
-- `TruncateCollection` 更新 collection fence；
-- Flush、segment lifecycle、index、Drop、普通 AlterCollection 等不更新 row version。
-
-Import、RestoreSnapshot、backfill 等独立可见性流程暂不加入 proof，也不通过额外 gate
-阻止并发 partial update。调用方必须避免这些操作与 partial update 并发执行。
-
-## 请求流程
-
-```text
-Client Upsert(partial)
-  -> Proxy routes original PKs
-  -> Proxy resolves assignment terms
-  -> Proxy allocates attempt readTS
-  -> Proxy queries at readTS
-  -> Proxy merges current row and partial fields
-  -> Proxy builds standard Delete/Insert DML
-  -> Proxy attaches PartialUpdateCAS metadata to every Insert chunk
-  -> streaming.WAL().AppendMessages(...)
-  -> producer wraps same-vchannel DML in a transaction
-  -> SN records transaction PKs and metadata
-  -> producer marks the local CAS CommitTxn
-  -> lock interceptor acquires the vchannel write lock
-  -> TimeTick waits for transaction body completion
-  -> partial-update interceptor validates and appends CommitTxn
-  -> partial-update interceptor publishes indexes before unlock
-  -> WAL backend
-```
-
-Proxy 按现有 PK hash 和 namespace sharding 规则 fan-out。每个 vchannel group 是独立
-transaction；跨 vchannel 不提供原子性。即使某个 group 只有一条 CAS Insert，也必须
-经过 transaction path。
-
-## Proxy 设计
-
-### 查询和 merge
-
-Proxy 继续使用现有 `queryPreExecute` 和 merge 行为，包括 nullable/default、dynamic
-field、generated function output、array operation、nullable vector compact format 和
-partition key immutability check。
-
-AutoID partial update 采用 update-only 语义。请求必须携带已有 PK，query snapshot
-必须返回全部请求行；任意 PK 不存在时，Proxy 在 WAL append 前拒绝整个请求。merge
-后的 Insert 保留原 PK，因此 Delete、Insert 和 CAS 始终按同一 PK 路由到同一
-vchannel。内部 RowID 仍按现有逻辑重新分配。普通 AutoID upsert 继续分配新 PK，
-不受该规则影响。
-
-### CAS metadata
-
-Proxy 使用原始请求 PK 计算 attempt 涉及的 vchannel。metadata 不复制 PK，只记录
-PK field ID；每个 Insert chunk 携带固定大小 metadata，SN 从该 chunk 的完整行
-payload 提取 PK。
+内部消息 proto 增加事务级提交准入元数据：
 
 ```proto
 message PartialUpdateCAS {
@@ -240,271 +110,476 @@ message PartialUpdateCAS {
 }
 ```
 
-metadata 写入 Insert body 的 `MsgBase.Properties["_puc"]`，因此 cluster encryption
-启用时与 DML payload 处于同一加密边界。外层 message property 只保留空值 `_puc`
-marker，供 producer 强制选择 transaction path。Proxy repack 必须在 message builder
-执行 encryption 和 `BuildMutable()` 前写入 metadata；pack 完成后的检查只验证 marker、
-vchannel snapshot 和消息大小。若 marker 缺失，Proxy 直接返回 internal error，不重写
-已经构造或加密的 message body。
+内部 streaming error enum 增加：
 
-### Proxy 重试
-
-SN 使用 `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` 表示确定性 CAS reject。Producer
-必须把该错误直接返回 Proxy，不能在 producer 内重试携带旧 `readTS` 和旧 term 的
-transaction。
-
-如果 CAS transaction 在 producer 内遇到 `TxnExpired`，producer 将其转换为
-retryable CAS error 并交还 Proxy，从 term resolution 开始重建完整 attempt；普通
-transaction 保留已有的 producer 内过期重试。
-
-Proxy 只对可以安全重建的 `REPLACE` partial update 自动重试确定性 CAS reject。每次
-retry 必须：
-
-1. 恢复首次 function generation 和 query/merge 前保存的原始 partial payload；
-2. 重新生成 function output fields；
-3. 重新路由 PK 并获取 assignment terms；
-4. 在 terms 获取成功后分配新的 attempt `readTS`；
-5. 使用新 `readTS` 重新 query 和 merge；
-6. 重建 MutationResult 计数和 WAL transaction。
-
-非幂等相对操作遇到 CAS reject 时，Proxy 返回
-`ErrCollectionPartialUpdateConflict`，并设置 `Retriable=false`，阻止 SDK 自动重放
-`ARRAY_APPEND` 或 `ARRAY_REMOVE`。
-
-上述 retry 契约只覆盖 SN 明确在 CommitTxn 进入 WAL append 前返回的
-`STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE`。BeginTxn、transaction body 或 CommitTxn
-发送后的 transport failure 继续沿用现有 resumable producer 语义，消息可能在 producer
-内部重发，最终 request outcome 也可能不确定。本方案不保证原始 transport error 一定
-到达 Proxy，也不解决 transaction-level exactly-once。
-
-## StreamingNode 设计
-
-### Per-term PK version index
-
-每个 PChannel term 创建一个 registry，并按 vchannel 拆分可变索引：
-
-```text
-registry[vchannel].pkLastWriteTS[pk] = lastCommitTS
+```proto
+STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE = 17;
 ```
 
-CAS 冲突规则：
+元数据编码到 Insert body 的 `MsgBase.Properties["_puc"]`。外层消息的
+property 使用相同的 key，并以空字符串作为控制标记。外层标记不包含 PK、
+`readTS`、term 或其他用户数据。
 
-```text
-conflict iff pkLastWriteTS[vchannel, pk] > readTS
+### 配置与指标
+
+本提案不增加公共配置。以下内部常量均由本提案的功能实现新增，不是 Milvus
+已有的配置参数。它们没有对应的 `paramtable` key 或 `milvus.yaml` 配置项，
+不能在运行时修改：
+
+| 拟新增内部常量 | 提案默认值 | 用途 |
+|---|---|---|
+| `defaultVersionIndexTTL` | 30 秒 | 限制每个 vchannel 保留近期 PK 写入版本的时间，同时限制一次 Partial Update 从 `readTS` 到 `commitTS` 的最大有效窗口。超过该窗口时，StreamingNode 返回可重试 CAS 拒绝；Proxy 只对可安全重建的 replacement update 自动重试。 |
+| `defaultVersionIndexBudgetBytes` | 640,000,000 字节，约 610 MiB | 限制一个 PChannel WAL term 内所有 vchannel 共享的 PK 版本索引估算内存。预算不足时普通写入继续执行，但受影响 vchannel 的 CAS 在遗漏写入退出有效读取窗口前按失败处理。 |
+| `partialUpdateCASMaxRetryAttempts` | 5 次，包含第一次尝试 | 限制 Proxy 对确定性 CAS 冲突重建完整 replacement update 的总尝试次数。包含相对字段操作的请求不使用该自动重试。 |
+| `partialUpdateCASRetryBackoff` | 初始 10 ms，指数退避，单次最多 40 ms | 控制两次 Proxy CAS 尝试之间的等待，减少并发冲突后立即重试造成的持续竞争。40 ms 上限由 `4 * partialUpdateCASRetryBackoff` 计算。 |
+
+PK 索引预算是估算值，并非进程 RSS 的硬上限。每个 Int64 PK entry 按
+128 字节计费；VarChar PK entry 按 `128 + PK 字节长度` 计费。调整上述提案
+默认值需要修改代码并重新编译、部署。
+
+### 持久化格式
+
+本提案不增加新的 WAL 消息类型。BeginTxn、Delete、Insert 和 CommitTxn
+保持现有格式及事务语义。CAS 元数据使用 Insert body 中已有的 properties
+map，commit 标记使用外层消息中已有的 properties map。
+
+不引入持久化 PK 索引、schema 迁移或恢复阶段的 gate。
+
+## 设计细节
+
+### 正确性不变量
+
+本设计依赖以下五个不变量：
+
+1. **尝试证明：** term 快照与 `readTS` 必须来自同一次尝试，并且先解析 term，
+   再分配 `readTS`。
+2. **精确查询快照：** QueryNode 收到的
+   `GuaranteeTimestamp = MvccTimestamp = readTS`。
+3. **原子准入边界：** local CAS 校验、CommitTxn append、写集合发布和事务
+   状态转换由同一把 vchannel 写锁串行化。
+4. **完整写入覆盖：** 所有会改变逻辑行数据且受支持的 WAL 写入，都必须更新
+   精确 PK 版本或保守 fence。
+5. **失败关闭：** 历史缺失、proof 格式错误或 local CAS 恢复不完整时，不能
+   降级为不经校验的普通提交。
+
+### 架构与状态归属
+
+```mermaid
+flowchart LR
+    Client[Client] --> Proxy[Proxy read / merge / retry]
+    Proxy -->|resolve current term| Assignment[Streaming assignments]
+    Proxy -->|query at readTS| QueryNode[QueryNode]
+    Proxy -->|Delete + CAS Insert| Producer[Streaming producer]
+    Producer -->|BeginTxn / body / CommitTxn| Lock[lock interceptor]
+    Lock --> TimeTick[TimeTick interceptor]
+    TimeTick --> Shard[shard interceptor]
+    Shard --> CAS[partial-update interceptor]
+    CAS --> WAL[WAL backend]
+    CAS --- Index[per-term PK / collection / vchannel fences]
 ```
 
-新 term 创建新 index，旧 term index 不复用。因为 Proxy 在解析当前 term 后才分配
-`readTS`，新 index 只需要覆盖本 term 中 `readTS` 之后发生的写入，不需要等待一个
-完整 TTL window。
+| 状态 | Owner | 生命周期 | 持久化方式 |
+|---|---|---|---|
+| 原始 Partial Update payload、单次尝试的 `readTS` 和 vchannel term 快照 | Proxy `upsertTask` | 一个客户端请求；每次重试重新构建 | 无 |
+| Local transaction 封装和空 `_puc` commit 标记 | Producer | 一个 vchannel 消息组 | 标准 WAL properties |
+| PChannel 全局锁和按 vchannel 区分的 RW lock | Lock interceptor | 一个 WAL 实例 | 无 |
+| `pendingTxn`、PK 版本、collection fence 和 incomplete-txn fence | Partial Update interceptor | 一个 PChannel WAL term | 无 |
+| 活跃和恢复得到的 transaction session | TxnManager | 事务和 WAL 恢复生命周期 | 现有 TxnBuffer 恢复机制 |
+| Collection schema 和不可变 PK descriptor | ShardManager | 一个 WAL 内的 collection 生命周期 | 现有恢复快照 |
 
-### Retention window
+每次打开 WAL 都会创建独立的 Partial Update 状态。interceptor 不使用进程级
+registry，也不从 TxnBuffer 重建行级 proof。关闭 WAL 后，该 term 的 map、
+heap 和 pending transaction 状态都会释放。
 
-PK index 使用固定 TTL 和 PChannel 级共享字节预算，默认值为 30 秒和
-640,000,000 estimated bytes。每个 entry 按 128 bytes 固定结构开销加 VarChar PK
-实际长度保守计费，因此默认预算约等价于 5M 个 Int64 PK entry。每个 vchannel 独立持有
-map、expiration heap、`retainedSinceTS` 和 `lastMissedWriteTS`，Update、Verify 只获取目标
-vchannel 的锁；不同 vchannel 通过原子操作共享字节预算。
+### 端到端流程
 
-Update、Verify 和 TimeTick advance 根据当前 TS 增量淘汰过期 entry，然后执行以下检查：
+```mermaid
+sequenceDiagram
+    participant P as Proxy
+    participant A as Assignment / TSO
+    participant Q as QueryNode
+    participant R as Producer
+    participant S as StreamingNode
+    participant W as WAL
 
-- `readTS < retainedSinceTS` 时 fail closed；
-- `commitTS < readTS` 时返回 unrecoverable internal error；
-- read-to-commit 物理时间超过 TTL 时返回 retryable CAS error；
-- 已存在 PK 的版本更新不增加 entry 数；
-- 新 distinct PK 无法获得字节预算时不再分配 entry，并将对应 vchannel 的
-  `lastMissedWriteTS` 推进到该写入 TS；
-- `lastMissedWriteTS` 仍处于有效 read window 时，该 vchannel 的 CAS 全部 fail closed，
-  其他 vchannel 不受影响。
-
-每次遗漏写入都会延长 incomplete window。只有最后一次遗漏写入早于
-`currentTS - TTL` 后，`lastMissedWriteTS` 才会清零并恢复 CAS。TimeTick 即使在没有新
-DML 时也会推进淘汰，因此索引不会因空闲而长期保留过期 entry。持续超过预算时，普通
-写入继续，但发生遗漏的 vchannel CAS 保持 fail closed；entry 淘汰时原子归还字节预算。
-
-### Collection fence index
-
-无法按 PK 表达的 wide mutation 使用：
-
-```text
-fenceTS[vchannel, collection] = lastWideMutationCommitTS
+    P->>A: Resolve every touched PChannel term
+    P->>A: Allocate attempt readTS
+    P->>Q: Query with GuaranteeTS = MvccTS = readTS
+    Q-->>P: Complete rows at readTS
+    P->>P: Merge fields and build Delete / Insert
+    P->>R: AppendMessages with CAS metadata
+    R->>S: BeginTxn
+    R->>S: Delete / CAS Insert body
+    R->>S: CommitTxn with empty _puc marker
+    S->>S: Acquire vchannel write lock and allocate commitTS
+    S->>S: Wait for body, then validate term / window / fences / PKs
+    alt deterministic admission reject
+        S-->>R: PARTIAL_UPDATE_RETRYABLE
+        R-->>P: Return without producer-side replay
+        P->>P: Rebuild the full REPLACE attempt
+    else commit accepted
+        S->>W: Append CommitTxn
+        S->>S: Publish PK / fence state before unlock
+        S-->>R: commitTS
+        R-->>P: Append response
+    end
 ```
 
-如果 `fenceTS > readTS`，partial update 必须重新查询。当前只覆盖：
+Proxy 按现有 PK hash 或 namespace sharding 规则拆分请求。每个 vchannel 消息组
+都是独立事务。本设计不保证多 vchannel 请求的原子性。
 
-- `TruncateCollection`；
-- shard 兼容接受、但当前无法取得 schema 的 legacy Insert。
+### Proxy 侧单次尝试的构造
 
-普通 Insert 通过 ShardManager 的 `GetPrimaryKeyDescriptor` 获取不可变的 PK field ID 和
-data type，再从 `FieldsData` 精确提取 PK。Descriptor 在 schema recovery、CreateCollection
-和 AlterCollection 时预计算，热路径不 clone 完整 schema，也不在 partial-update
-interceptor 中维护第二份 schema cache。没有携带 schema version、且 shard 为兼容旧
-Proxy 而允许写入的 legacy Insert，如果当前没有可用 schema，则更新 collection fence。
-DropCollection、DropPartition 和 AlterCollection 依赖现有 exclusive lock、collection
-lifecycle 和 schema mismatch 路径，不进入 collection fence。
+Proxy 按以下顺序构造每次尝试：
 
-Fence 在当前 PChannel term 的 collection 生命周期内保留，不按 TTL 淘汰。
-`DropCollection` 成功写入后释放目标 vchannel 的 PK map、expiration heap、retention 和
-遗漏写入状态，归还共享 byte budget，并删除 incomplete-transaction fence 和对应
-`(vchannel, collection)` fence。WAL term 关闭时整体释放该 term 的全部 proof state。
+```text
+route original PKs to vchannels
+  -> resolve and snapshot every touched PChannel term
+  -> allocate readTS from TSO
+  -> query at readTS
+  -> merge
+  -> attach the same term and readTS to every CAS Insert chunk
+```
 
-### Transaction state
+必须先解析 term，再分配 `readTS`。新的 WAL owner 启动时，每个 term 的 PK
+索引为空。如果 Proxy 先分配 `readTS`，之后才观察到新的 term，空索引就无法
+证明这两个事件之间没有发生写入。
 
-运行时 interceptor 顺序是：
+任务 ID 和 `BeginTs` 在重试期间保持不变。`readTS` 是单次尝试范围内的独立
+时间戳，第一次尝试和每次重试都重新生成。
+
+内部查询使用自定义一致性：
+
+```text
+ConsistencyLevel = Customized
+GuaranteeTimestamp = readTS
+MvccTimestamp = readTS
+```
+
+通用 query preprocessing 可能调整一致性和 schema fence。Partial Update
+查询会在 preprocessing 完成后重新设置固定快照，确保实际发给 QueryNode
+的请求与 CAS 元数据使用同一个时间戳。
+
+### 查询与合并语义
+
+Proxy 保留现有合并实现，包括：
+
+- nullable 和默认值；
+- 动态字段；
+- 函数生成结果；
+- 相对数组操作；
+- 紧凑 nullable vector 表示；
+- partition key 不可变性校验。
+
+对于 AutoID collection，Partial Update 要求请求中的每个 PK 都存在于查询
+快照中。如果有 PK 不存在，完整请求会在 WAL append 之前被拒绝。合并后的
+Insert 保留请求 PK，保证 Delete、Insert、路由和 CAS 操作的是同一行。
+
+### CAS 元数据与加密
+
+Proxy 从原始请求的 PK 推导涉及的 vchannel。元数据不重复保存 PK 列表，只
+标识 PK 字段；StreamingNode 从每个完整 Insert chunk 中提取 PK。
+
+message builder 在加密和 `BuildMutable()` 之前，把元数据写入 Insert body。
+开启 cluster encryption 后，proof 与 DML payload 位于同一个加密边界内。
+
+外层的空 `_puc` 标记只用于选择事务路径和锁路径。完成打包后，Proxy 校验：
+
+- 每个已准备的 vchannel 至少生成一个 CAS Insert；
+- 每个 CAS Insert 都带有标记；
+- 每个 Insert 的 vchannel 都属于本次尝试的快照；
+- 最终消息均未超过 transport limit。
+
+缺失元数据或标记属于内部不变量被破坏。Proxy 不会改写已经构建或加密的 body。
+
+### 最终消息封装与拆分
+
+现有 entity-size packer 没有计算后续添加的 streaming header、schema
+version、CAS 元数据、外层 properties 或加密 envelope。因此，只按 entity
+判断合法的 chunk，在最终构造完成后仍可能超过 `pulsar.maxMessageSize`。
+
+CAS Insert 使用两阶段打包：
+
+1. 执行现有 entity packer，并保留每个 chunk 的原始行 offset。
+2. 通过 message builder 添加 streaming header、CAS 元数据和 cipher。
+3. 对最终消息执行 `EstimateSize()`。
+4. 多行消息超限时，把连续的行 offset 范围二分，并重新构建两半。
+5. 单行消息仍然超限时，在 WAL append 之前返回 `ErrParameterTooLarge`。
+6. 如果仍有超限消息逃过 packer，将其视为内部不变量错误。
+
+连续使用原始行 offset 范围，可以保持行顺序、字段对齐、partition、vchannel
+和本次尝试的元数据不变。普通非 CAS Insert 继续使用现有打包路径。
+
+### Producer 事务封装
+
+`AppendMessages` 按 vchannel 对 DML 分组。只要 local group 包含 CAS Insert，
+即使只有一条 Insert，也必须使用事务：
+
+```text
+BeginTxn
+  -> transaction body
+  -> CommitTxn with empty _puc marker
+```
+
+Producer 不会再次封装已经带有 `TxnContext` 或 `ReplicateHeader` 的消息。
+复制消息保留来源事务边界。
+
+resumable producer 会立即把 `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE`
+返回给 Proxy，不得重试携带过期合并行的事务。如果 local CAS transaction
+在 commit 前过期，producer 把 `TxnExpired` 转成同一个 CAS retry signal，
+由 Proxy 重建完整尝试。
+
+其他 transport failure 继续使用现有 resumable producer 行为。stream
+failure 之后，BeginTxn、body 或 CommitTxn 都可能重试，最终客户端结果可能
+不确定。本提案不增加事务级幂等机制。
+
+### 拦截器顺序与准入锁
+
+append chain 如下：
 
 ```text
 redo -> lock -> replicate -> timetick -> shard -> partialupdate -> WAL
 ```
 
-lock 是最外层并发边界，因此它持有的 vchannel 锁覆盖所有内层处理。shard 在
-partial-update tracking 前保留既有 schema compatibility 和 typed mismatch 语义。
-TimeTick 在进入 partial-update 前完成 `RequestCommitAndWait`；partial-update 返回成功后，
-TimeTick 才调用 `CommitDone()`。只有明确发生在 WAL append 前的 admission reject 才调用
-`RejectCommit()`；其他 inner error 仍按既有行为调用 `CommitDone()`，因为 WAL append error
-不能证明 `CommitTxn` 未持久化。
+lock interceptor 是最外层的并发边界：
 
-该约束只定义 SN 内部 TxnSession 的状态迁移，不改变 resumable producer 的 transport
-重发策略，也不保证 inner append error 会原样到达 Proxy。
+| 消息 | 锁 |
+|---|---|
+| 普通 DML、transaction body、普通 CommitTxn | `glock.RLock + vchannel.RLock` |
+| Local CAS CommitTxn | `glock.RLock + vchannel.Lock` |
+| vchannel exclusive DDL | `glock.RLock + vchannel.Lock` |
+| PChannel exclusive DDL | `glock.Lock` |
 
-Partial-update append interceptor 在 body append 成功后记录：
+所有非 PChannel exclusive 路径都先获取 PChannel lock，再获取 vchannel lock，
+并按相反顺序释放。
 
-- 当前 WAL lifecycle 是否观察到 BeginTxn；
-- CAS Insert chunk 的 PK；
-- transaction 中普通 Insert/Delete 的精确 PK；
-- optional `PartialUpdateCAS` metadata；
-- optional Truncate collection fence。
+Local CAS CommitTxn 使用专用的锁分支，不能复用 exclusive DDL cleanup 路径，
+因为该路径会调用 `FailTxnAtVChannel`，导致正在提交的事务被终止。
 
-处理 CommitTxn 时，interceptor 从 runtime `pendingTxn` 取得稳定 write set。只有当前
-生命周期观察到 BeginTxn，write set 才被视为完整。本地 CAS 缺少完整 proof 时直接返回
-retryable error；普通或 replicated transaction 仍按原语义提交，并在 write set 不完整时
-发布 vchannel 级保守 fence。完整的本地 CAS 再校验 marker、term、read window、PK
-versions、vchannel fence 和 collection fence。CommitTxn append 成功后使用 commit
-TimeTick 发布 write set 或保守 fence；reject、append error、rollback 和 expiration 不发布。
-Admission reject 使用进程内 marker 与 WAL append error 区分，不新增 wire error code。
-
-## Recovery 和迁移
-
-### WAL open
-
-新 WAL owner 创建全新的 per-term index，不执行 cold warm-up。Partial-update builder
-不读取 `InitialRecoverSnapshot.TxnBuffer`，也不查询历史 schema。
-
-TxnManager 完全保留既有 WAL recovery 行为，recovered session 可以继续接收 body、Commit
-或 Rollback。Partial-update interceptor 不读取 `recoveredSessions`，也不修改
-`RecoverDone`：
-
-- 当前 interceptor 生命周期观察到 BeginTxn 时，后续成功 body 构成完整 runtime write set；
-- 只观察到 body suffix 或 CommitTxn 时，write set 被视为不完整；
-- 本地 CAS CommitTxn 缺少完整 write set 时不进入 WAL，返回 retryable CAS error；
-- 普通或 replicated CommitTxn 缺少完整 write set时仍正常提交，成功后写入
-  `incompleteTxnFence[vchannel] = commitTS`；
-- 后续 CAS 如果 `readTS < incompleteTxnFence`，必须重新查询。retry 的新 `readTS` 晚于
-  fence，因此可以观察已恢复事务的提交结果。
-
-该策略不改变普通 producer、TxnBuffer、LastConfirmedMessageID 或 CDC 的恢复语义，也不
-依赖历史 schema。vchannel fence 只保守影响与恢复事务并发的 partial update。
-
-### Replication
-
-Replicated transaction 已经在 primary 完成 admission，secondary 不再使用 primary
-`readTS` 做 CAS。CDC 从 BeginTxn 完整重放时发布精确 PK/fence index；只恢复到 body suffix
-或 CommitTxn 时继续原有提交并发布 vchannel 保守 fence。Secondary promotion 会产生新
-term，并按相同规则创建新的 per-term index。
-
-### Import 和 RestoreSnapshot
-
-Import、RestoreSnapshot 和 backfill 的数据可见性不完全由目标 VChannel WAL 表达，
-当前版本不为这些操作增加 collection fence、持久 gate 或 Proxy 侧并发门禁。因此，
-它们与 partial update 并发执行不在本方案的正确性保证范围内。
-
-## 失败语义
-
-| 场景 | 结果 |
-|------|------|
-| 同一 PK 的并发 partial update | 一个 commit，另一个由 SN 返回 retryable CAS error；Proxy 只重试 `REPLACE` |
-| 普通 DML 在 `readTS` 后修改同一 PK | SN 返回 retryable CAS error；相对更新投影为 non-retriable client error |
-| Truncate 在 `readTS` 后提交 | collection fence conflict |
-| Import、RestoreSnapshot 或 backfill 与 partial update 并发 | 不在当前正确性保证范围内 |
-| PChannel term 改变 | term mismatch，Proxy 重新执行 attempt |
-| read window 过期或 capacity 导致索引 incomplete | retryable CAS error |
-| recovered 普通或 replicated transaction 提交 | 保持原事务恢复语义；write set 不完整时发布 vchannel fence |
-| recovered 本地 CAS transaction 提交 | 返回 retryable CAS error，Proxy 重建 attempt |
-| malformed internal CAS metadata | unrecoverable streaming error |
-| transaction message 发送后的断流、超时或响应丢失 | 继承现有 resumable producer 语义；结果可能不确定，transaction-level exactly-once 不在本方案范围内 |
-
-CAS error 对被拒绝的单个 vchannel transaction 是确定性 abort：其 `CommitTxn` 没有
-写入。Proxy 只对可安全重建的 `REPLACE` 从 term resolution 阶段自动重试；相对更新可能已经在
-其他 vchannel 提交，因此不能自动重放整个请求。
-
-## 验证要求
-
-1. Proxy 必须按 `terms -> readTS -> query` 顺序执行首次 attempt 和 retry。
-2. term 变化后创建全新 PK index，不存在 warm-up 等待。
-3. 普通 Insert 在 shard schema 校验后提取 Int64/Varchar PK；schema mismatch 保持 typed
-   error，合法 schema-less legacy Insert 使用 collection fence。
-4. Drop/Alter 不更新 collection fence；Truncate 和 schema-less legacy Insert 更新
-   fence；Import 和 RestoreSnapshot 不进入 proof。
-5. DropCollection 成功后清理目标 vchannel 的全部 proof state 并归还 PK byte budget；
-   append 失败时保留原状态。
-6. 普通写入先持有 vchannel 读锁并阻塞 WAL append 时，CAS commit 必须等待该写入完成
-   publication，再检测 PK 或 fence conflict。
-7. 两个 CAS transaction 使用相同 `readTS` 修改同一 PK 时，只能有一个写入
-   `CommitTxn`。
-8. 同一 vchannel 的 CAS commit 串行，不同 vchannel 的 CAS commit 可以并行；PChannel
-   exclusive 操作必须等待所有 shared holder。
-9. CAS 先持有 vchannel 写锁时，后续普通写只能在 CommitTxn append 和 index publication
-   完成后进入。
-10. 普通和 replicated recovered transaction 必须保持既有提交语义；没有观察到当前
-    lifecycle BeginTxn 时，成功提交后必须发布 vchannel 保守 fence。
-11. recovered 本地 CAS 缺少完整 runtime proof 时必须返回 retryable CAS error；完整
-    replicated CAS 跳过源 term/readTS proof，不完整 replay 使用 vchannel fence。
-12. CAS reject 不写 `CommitTxn`、不调用 `CommitDone()`，并清理 transaction state。
-13. retry 保持 task ID/BeginTs 稳定，并恢复原始 payload、函数输出和结果计数。
-14. PK version entry 的估算内存不超过 PChannel 字节预算；遗漏写入退出 TTL 前，只有对应
-    vchannel 的 CAS fail closed。
-15. TimeTick 在没有新 DML 时也能推进 PK version 淘汰和 incomplete 恢复。
-
-## 性能和容量
-
-新增成本包括：
-
-- Proxy partial update 每个 attempt 执行一次 query；
-- SN 对普通 Insert/Delete 提取 PK 并更新近期 index；
-- CAS CommitTxn 在同一 vchannel 的写锁内完成 TimeTick 分配、validation、WAL append 和
-  index publication；
-- 同一 vchannel 的所有 CAS commit 串行，即使 PK 不相交；不同 vchannel 保持并行；
-- 慢 WAL append 会延长对应 vchannel 的写锁持有时间，但不会阻塞同一 PChannel 上其他
-  vchannel；
-- Truncate 更新一个 collection fence entry。
-
-字节预算至少覆盖一个 TTL window 内的 distinct PK 写入量：
+Local CAS 的 critical region 如下：
 
 ```text
-required bytes ~= sum(128 + varchar PK bytes) within TTL
+acquire glock.RLock + vchannel.Lock
+  -> replicate validation
+  -> allocate commitTS
+  -> RequestCommitAndWait
+  -> validate marker and runtime state
+  -> validate term, read window, fences, and PK versions
+  -> append CommitTxn
+  -> publish PK / fence state
+  -> CommitDone or RejectCommit
+release vchannel.Lock + glock.RUnlock
 ```
 
-默认 640,000,000 bytes 和 30 秒 TTL 对 Int64 PK 约覆盖 5M entries，即 166k distinct
-PK/s。超过预算时新 distinct PK 不再进入 index，发生遗漏的 vchannel CAS fail closed；
-普通写入和 TimeTick 继续推进 retention。最后一次遗漏写入退出 TTL window 后 CAS 自动恢复。
+普通写入在 WAL append 和索引发布期间持有同一把 vchannel read lock。因此：
 
-当前验证覆盖并发正确性、错误链、race 和新增代码覆盖率，但尚未执行生产规模 benchmark。
-以下判断仍是待验证假设：同一 vchannel 的 CAS commit 排队不会造成不可接受的 p99
-append latency；慢 WAL append 持有写锁时，对同 vchannel 普通 DML 的阻塞可控；全量
-DML PK 提取、heap 更新以及默认字节预算的 CPU 和内存成本在目标写入速率下可接受。
-发布前应覆盖低冲突、高冲突和慢 WAL 三类场景，并记录锁等待时间、commit latency、
-普通 DML throughput、index entry 数、estimated bytes 和 budget miss。
+- 普通写入先进入时，CAS 等待，直到普通写入发布完成后再校验；
+- CAS 先进入时，后续普通写入等待 CommitTxn append 和 CAS 发布完成；
+- 同一 vchannel 上的两个 CAS commit 会串行执行，即使修改不同 PK；
+- 不同 vchannel 仍可并发执行。
 
-## 回滚
+锁只覆盖 commit 的 critical section。Proxy query 和 merge，以及 transaction
+body 的生产过程，不持有这把 exclusive lock。
 
-Partial update CAS 是 streaming partial update 的默认行为，不提供独立配置开关。
-回滚代码后 partial update 恢复 legacy read-merge-write 语义，并重新暴露 lost-update
-风险。
+### 事务状态与原子发布
 
-## 开放问题
+Partial Update interceptor 对每条 body message 分两个阶段维护
+`pendingTxn`：
 
-- vchannel 写锁在高 CAS 密度和慢 WAL 下的 p99 latency 与普通 DML 吞吐影响。
-- 高 distinct-PK churn 和长 VarChar PK 下默认字节预算是否足够。
-- 全量 DML PK extraction 对吞吐的影响。
-- 后续如何协调 Import、RestoreSnapshot、backfill 等独立数据可见性流程与
-  partial update。
-- 是否需要在 Streaming transaction 层引入 request token 和持久化结果去重，以支持
-  BeginTxn、body 和 CommitTxn 的 exactly-once outcome。
+- 在 inner append 之前提取、校验并登记 CAS 元数据。如果同一事务中
+  已登记的 CAS 元数据与当前 body 不同，当前 body 在进入 WAL
+  backend 之前被拒绝；
+- 只有 inner append 成功后，才记录当前 interceptor 生命周期内是否
+  观察到 BeginTxn、从 Insert 和 Delete 提取的精确 PK 写集合，以及
+  可选的 collection-wide fence。
+
+transaction body 可以并发 append，因此 `pendingTxn` 由 mutex 保护。
+`RequestCommitAndWait` 保证 commit validation 对写集合取快照之前，不再有
+body 处于处理中。
+
+marker validation 按失败处理：
+
+- runtime CAS 元数据存在，但 local commit marker 缺失，状态不可恢复；
+- 已观察到 BeginTxn 和 marker，但没有有效元数据或 PK 写集合，状态不可恢复；
+- 恢复得到的 local CAS 缺少完整 runtime proof 时返回 retryable error，且
+  永远不会到达 WAL backend。
+
+CAS validation 在 inner CommitTxn append 之前执行。确定性的准入拒绝与 WAL
+append error 分开标记：
+
+- 准入拒绝调用 `RejectCommit()`，不发布写集合；
+- append 成功后，以 CommitTxn time tick 发布状态，再释放锁；
+- WAL append error 不发布状态，但 `TxnSession` 保留现有的 `CommitDone()`
+  状态转换，因为该错误不能证明 commit 没有持久化。
+
+这一区分只改变进程内的事务状态转换，不提供 exactly-once 客户端结果。
+
+### 每个 term 的 PK 版本索引
+
+每个 PChannel WAL term 都拥有独立 registry，并按 vchannel 拆分：
+
+```text
+registry[vchannel].pkLastWriteTS[pk] = lastCommitTS
+```
+
+冲突判断规则如下：
+
+```text
+conflict iff pkLastWriteTS[vchannel, pk] > readTS
+```
+
+索引支持 Int64 和 VarChar PK。对已有 PK 的新写入会原地更新该 entry。索引
+不会复用上一个 WAL term 的状态。
+
+### 保留窗口与内存上限
+
+PK 索引使用固定的 30 秒 TTL，同一 PChannel term 的所有 vchannel 共享一个
+估算字节数上限。每个 vchannel 分别拥有独立的 map、expiration heap、
+retention watermark 和 incomplete-history marker。
+
+每个 entry 按以下方式保守估算：
+
+```text
+estimated bytes = 128 + VarChar PK bytes
+```
+
+本提案设定的 640,000,000 字节预算大约可以容纳五百万个 Int64 entry。
+
+`Update`、`Verify` 和 TimeTick advancement 会增量淘汰过期 entry。出现以下
+情况时，validation 按失败处理：
+
+- `readTS < retainedSinceTS`；
+- 从读取到提交的物理时间超过 TTL；
+- `commitTS < readTS`，这是不可恢复的内部不变量错误；
+- 受字节预算限制，之前某次已提交写入未能进入索引。
+
+新的 distinct PK 无法预留估算内存时，普通写入仍然可用，但对应 vchannel
+会记录 `lastMissedWriteTS`。在最后一次遗漏写入离开所有合法读取窗口之前，
+该 vchannel 上的 CAS 不可用。其他 vchannel 不会直接因这一状态失败。
+
+即使没有 DML，TimeTick 也会推进 retention，使空闲 channel 能够释放 entry，
+并从不完整窗口中恢复。
+
+### 恢复与 term 变更
+
+新打开的 WAL term 使用空的 Partial Update 索引，不需要 warm-up。这样做是
+安全的，因为合法尝试会先观察当前 term，再分配 `readTS`。query 和 commit
+之间一旦发生 term 变更，term mismatch 会迫使 Proxy 发起新尝试。
+
+TxnManager 保留现有恢复行为。Partial Update interceptor 以自身生命周期
+内是否观察到 BeginTxn，判断 write set 是否完整：
+
+| 恢复路径 | Commit 行为 | Proof 发布 |
+|---|---|---|
+| 完整观察到 Begin 和 body 的普通事务 | 保留普通 commit 行为 | 精确 PK / collection fence |
+| 只观察到 body 后缀或 Commit 的普通事务 | 保留普通 commit 行为 | vchannel incomplete-txn fence |
+| 缺少完整 runtime proof 的 local CAS | 在 WAL append 前拒绝 | 不发布；Proxy 重建尝试 |
+| 完整观察到 Begin 和 body 的复制事务 | 保留复制 commit 行为 | 精确 PK / collection fence |
+| replay 不完整的复制事务 | 保留复制 commit 行为 | vchannel incomplete-txn fence |
+
+interceptor 不读取 `InitialRecoverSnapshot.TxnBuffer`，不查询历史 schema，
+不修改 `recoveredSessions`，也不延迟 `RecoverDone`。
+
+### 复制
+
+主集群已经完成 CAS 准入。复制到 secondary 的 commit 不会再次校验来源 term
+或 `readTS`。
+
+CDC 重放 BeginTxn 和完整 body 时，secondary 发布精确 PK 或 collection
+fence 状态。如果重放从 body 后缀或 CommitTxn 继续，事务保留现有 commit
+语义，并发布 vchannel incomplete-transaction fence。
+
+promotion 会创建新 term，因此也会创建一个新的空 per-term index。
+
+### 错误与重试语义
+
+| 来源 | 内部分类 | Proxy 或客户端结果 |
+|---|---|---|
+| term mismatch、PK conflict、collection fence、incomplete-txn fence、TTL 过期或预算导致的历史不完整 | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | 重建 `REPLACE`；relative update 转换为不可重试冲突 |
+| 缺少完整 proof 的恢复 local CAS | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | 同上 |
+| local CAS transaction 在 commit 前过期 | Producer 转换为 `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | 同上 |
+| marker、metadata、PK write set 格式错误或内部不变量被破坏 | `STREAMING_CODE_UNRECOVERABLE` | 失败，不执行 CAS retry |
+| shard schema version mismatch | `STREAMING_CODE_SCHEMA_VERSION_MISMATCH` | `ErrCollectionSchemaMismatch` |
+| timeout、disconnect 或 append 结果未知 | 保留原 transport 或 streaming error | 不分类为确定性 CAS abort |
+
+仅当 Partial Update 的所有 field operation 都是 `REPLACE` 时，Proxy 才自动
+重试。每次重试都执行以下步骤：
+
+1. 恢复在函数生成之前保存的原始 Partial Update payload；
+2. 重新生成函数输出；
+3. 重新路由原始 PK；
+4. 解析所有涉及的 term；
+5. 分配新的 `readTS`；
+6. 重新查询并合并；
+7. 重新构建 Insert/Delete preprocessing 和 MutationResult count；
+8. 累加新查询产生的 storage cost；
+9. 创建新的 per-vchannel transaction。
+
+retry loop 最多尝试五次。重建过程中一旦出现非 CAS error，loop 立即终止。
+
+多 vchannel response 按以下规则归并：
+
+| vchannel 结果 | Replacement update | Relative update |
+|---|---|---|
+| 全部成功 | 成功 | 成功 |
+| 部分成功，其余均为确定性 CAS reject | 重建并重放完整请求 | 返回不可重试冲突 |
+| CAS reject 与 timeout、unknown 或其他非 CAS error 混合出现 | 返回非 CAS error，不重试请求 | 相同 |
+| 只有 CAS reject，且 retry budget 已耗尽 | 可重试的 service unavailable | 不可重试冲突 |
+
+已经提交的 vchannel 可以安全重放 replacement，因为它会读取更新后的快照，
+再重新应用绝对值。relative operation 不能使用这一规则，因为其他 vchannel
+可能已经应用了增量变更。
+
+response reduction 不提供请求级原子性。一个或多个 vchannel transaction
+提交后，客户端仍可能收到错误。
+
+### 性能与容量
+
+本设计增加以下成本：
+
+- 每次 Partial Update 尝试执行一次查询；
+- 普通 Insert/Delete 的 PK 提取和近期版本发布；
+- 被跟踪 PK 的 expiration-heap 更新；
+- 同一 vchannel 上的 CAS commit 串行化；
+- CommitTxn WAL append 期间持有 vchannel 写锁；
+- 最终 envelope size 校验，以及可能发生的 CAS Insert 重新打包。
+
+不同 vchannel 仍可并发执行。Query、merge 和 transaction-body append 不持有
+CAS 写锁。
+
+PK 索引所需预算大致为：
+
+```text
+required bytes ~= sum(128 + VarChar PK bytes)
+                 for distinct PKs written within the TTL
+```
+
+使用本提案设定的预算和 Int64 PK 时，索引可保留约五百万个 distinct entry，
+相当于在 30 秒窗口内每秒约 166,000 次 distinct PK write。
+
+超过预算会降低对应 vchannel 的 CAS 可用性，但不会拒绝普通写入。
+
+发布前仍需执行生产规模 benchmark，覆盖：
+
+- 低冲突 CAS 流量；
+- 单一 vchannel 上的高冲突流量；
+- 持有 vchannel 写锁期间出现的慢 WAL append；
+- 高 distinct-PK churn 和长 VarChar PK；
+- 接近 transport message-size limit 的大 batch。
+
+## 待讨论问题
+
+- 30 秒 TTL 是否能覆盖生产环境中的查询和提交延迟？
+- 本提案拟定的五百万 entry 预算是否足以覆盖高基数 workload 和长 VarChar PK？
+- Import、RestoreSnapshot 和 backfill 应如何与 Partial Update 协调？
+- Streaming transaction 是否应增加持久化 request token，以提供
+  exactly-once 客户端结果？
+
+## 参考资料
+
+- [同一 PK 上的并发 Partial Update](https://github.com/milvus-io/milvus/issues/49980)
+- [协议与设计文档 PR](https://github.com/milvus-io/milvus/pull/52235)
+- [功能实现 PR](https://github.com/milvus-io/milvus/pull/51845)
+- [Partial Update CAS OpenSpec](../../../openspec/specs/partial-update-cas/spec.md)
+- [Streaming System 指南](../../agent_guides/streaming-system/streaming-system.md)
+- [Milvus 设计文档要求](../../../CONTRIBUTING.md#design-documents)
