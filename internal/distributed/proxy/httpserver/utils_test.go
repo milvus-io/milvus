@@ -5295,3 +5295,84 @@ func TestEncodeEmbListQueryErrorPaths(t *testing.T) {
 	_, err = encodeEmbListQuery(gjson.Parse(`[[true]]`).Array(), schemapb.DataType_Bool, 1, 0)
 	assert.Error(t, err)
 }
+
+func int64FieldTestSchema() *schemapb.CollectionSchema {
+	vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
+	vectorField.Name = "vector"
+	return &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			generatePrimaryField(schemapb.DataType_Int64, false),
+			vectorField,
+			{
+				Name:     "count",
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+}
+
+func insertOneInt64Value(t *testing.T, value string) ([]map[string]interface{}, error) {
+	t.Helper()
+	body := []byte(fmt.Sprintf(
+		`{"data": {"%s": 1, "vector": [0.1, 0.2], "count": %s}}`, FieldBookID, value))
+	rows, _, err := checkAndSetData(body, int64FieldTestSchema(), false)
+	return rows, err
+}
+
+// gjson's String() renders a number through float64 as soon as the raw text is
+// not all digits, so a decimal or exponent form lost precision before reaching
+// json.Number and was then accepted as a valid int64.
+func TestCheckAndSetDataInt64FieldParsesRawLiteral(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected int64
+	}{
+		{"plain integer", `42`, 42},
+		{"negative", `-7`, -7},
+		{"int64 upper bound", `9223372036854775807`, 9223372036854775807},
+		{"int64 lower bound", `-9223372036854775808`, -9223372036854775808},
+		{"integer valued decimal", `1.0`, 1},
+		{"integer valued exponent", `1e3`, 1000},
+		{"negative exponent that is exact", `100e-2`, 1},
+		{"beyond 2^53 as a plain integer", `9007199254740993`, 9007199254740993},
+		// this used to be stored as 9007199254740992
+		{"beyond 2^53 as a decimal", `9007199254740993.0`, 9007199254740993},
+		{"quoted integer", `"42"`, 42},
+		// base-10, not strconv base detection: this path carries Int64 primary keys
+		{"quoted zero padded integer", `"010"`, 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows, err := insertOneInt64Value(t, tt.value)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			assert.Equal(t, tt.expected, rows[0]["count"])
+		})
+	}
+}
+
+func TestCheckAndSetDataInt64FieldRejectsNonIntegers(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{"fraction", `1.5`},
+		{"exponent past int64", `1e19`},
+		{"integer past int64", `9223372036854775808`},
+		{"integer below int64", `-9223372036854775809`},
+		// used to be stored as 0 because String() rendered it to "0"
+		{"underflow to zero", `1e-400`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := insertOneInt64Value(t, tt.value)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "count")
+		})
+	}
+}

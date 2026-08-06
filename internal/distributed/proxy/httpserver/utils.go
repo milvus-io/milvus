@@ -643,9 +643,29 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					}
 					reallyData[fieldName] = int32(result)
 				case schemapb.DataType_Int64:
-					result, err := json.Number(dataString).Int64()
-					if err != nil {
-						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
+					// Only the JSON-number form goes through the raw literal.
+					// gjson's String() renders a number through float64 as soon
+					// as the raw text is not all digits, so 9007199254740993.0
+					// reached json.Number as 9007199254740992 and was accepted.
+					// Quoted integers keep their base-10 parsing: this path also
+					// carries Int64 primary keys, and strconv's base detection
+					// would silently reinterpret a zero-padded id such as "010".
+					var result int64
+					if fieldValue.Type == gjson.Number {
+						parsed, ok := parseJSONInteger(fieldValue.Raw, 64)
+						if !ok {
+							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(
+								schemapb.DataType_name[int32(fieldType)], fieldValue.Raw,
+								fmt.Sprintf("field %s value must be an integer in range [%d, %d]",
+									fieldName, int64(math.MinInt64), int64(math.MaxInt64)))
+						}
+						result = parsed
+					} else {
+						parsed, err := json.Number(dataString).Int64()
+						if err != nil {
+							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
+						}
+						result = parsed
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Array:
