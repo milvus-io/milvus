@@ -23,6 +23,7 @@
 
 using namespace milvus;
 using namespace milvus::segcore;
+namespace schemapb = milvus::proto::schema;
 
 TEST(DecimalSegcore, GrowingSegmentInsertAndBulkSubscript) {
     auto schema = std::make_shared<Schema>();
@@ -37,7 +38,7 @@ TEST(DecimalSegcore, GrowingSegmentInsertAndBulkSubscript) {
     auto segment = CreateGrowingSegment(schema, nullptr, 0, config);
 
     const int64_t num_rows = 3;
-    auto insert_record = std::make_unique<segcorepb::InsertRecord>();
+    auto insert_record = std::make_unique<InsertRecordProto>();
     insert_record->set_num_rows(num_rows);
 
     // Primary key
