@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"context"
+	"sync"
 
 	"go.uber.org/atomic"
 
@@ -50,7 +51,9 @@ type broadcastAckModule struct {
 	runtime      moduleapi.Runtime
 	acked        *atomic.Uint64
 	mode         moduleMode
-	lastAckTask  *broadcastAckTask
+	ackTaskMu    sync.Mutex
+	ackTaskHead  *broadcastAckTask
+	ackTaskTail  *broadcastAckTask
 	ack          func(context.Context, message.ImmutableMessage) error
 }
 
@@ -87,8 +90,7 @@ func (m *broadcastAckModule) ObserveMessage(ctx context.Context, msg message.Imm
 	}
 	task := m.newTask(msg)
 	if m.runtime.Scheduler != nil {
-		m.lastAckTask = task
-		m.runtime.Scheduler.Submit(task)
+		m.enqueueTask(task)
 	}
 	return moduleapi.ObserveResult{Data: barrier}
 }
@@ -106,8 +108,42 @@ func (m *broadcastAckModule) newTask(msg message.ImmutableMessage) *broadcastAck
 	return &broadcastAckTask{
 		module:   m,
 		msg:      msg,
-		previous: m.lastAckTask,
 		frontier: m.buildFrontier(msg),
+	}
+}
+
+func (m *broadcastAckModule) enqueueTask(task *broadcastAckTask) {
+	m.ackTaskMu.Lock()
+	shouldSubmit := m.ackTaskTail == nil
+	if shouldSubmit {
+		m.ackTaskHead = task
+	} else {
+		m.ackTaskTail.next = task
+	}
+	m.ackTaskTail = task
+	m.ackTaskMu.Unlock()
+
+	if shouldSubmit {
+		m.runtime.Scheduler.Submit(task)
+	}
+}
+
+func (m *broadcastAckModule) finishTask(task *broadcastAckTask) {
+	m.ackTaskMu.Lock()
+	if m.ackTaskHead != task {
+		m.ackTaskMu.Unlock()
+		return
+	}
+	next := task.next
+	task.next = nil
+	m.ackTaskHead = next
+	if next == nil {
+		m.ackTaskTail = nil
+	}
+	m.ackTaskMu.Unlock()
+
+	if next != nil {
+		m.runtime.Scheduler.Submit(next)
 	}
 }
 
@@ -201,23 +237,15 @@ func (b *broadcastAckBarrier) TimeTick() uint64 {
 type broadcastAckTask struct {
 	module   *broadcastAckModule
 	msg      message.ImmutableMessage
-	previous *broadcastAckTask
 	frontier walcheckpoint.Barrier
-	done     atomic.Bool
-}
-
-func (t *broadcastAckTask) Done() bool {
-	return t.done.Load()
+	next     *broadcastAckTask
 }
 
 func (t *broadcastAckTask) Execute(ctx context.Context) error {
-	if t.previous != nil && !t.previous.Done() {
-		return nodescheduler.ErrDelay
-	}
 	if t.frontier != nil && t.frontier.TimeTick() < t.msg.TimeTick() {
 		return nodescheduler.ErrDelay
 	}
-	defer t.done.Store(true)
+	defer t.module.finishTask(t)
 	if err := t.module.ack(ctx, t.msg); err != nil {
 		return err
 	}
