@@ -5006,3 +5006,88 @@ func TestEncodeEmbListQueryErrorPaths(t *testing.T) {
 	_, err = encodeEmbListQuery(gjson.Parse(`[[true]]`).Array(), schemapb.DataType_Bool, 1, 0)
 	assert.Error(t, err)
 }
+
+func stringFieldTestSchema() *schemapb.CollectionSchema {
+	vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
+	vectorField.Name = "vector"
+	return &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			generatePrimaryField(schemapb.DataType_Int64, false),
+			vectorField,
+			{Name: "name", DataType: schemapb.DataType_VarChar},
+		},
+	}
+}
+
+func insertOneStringValue(t *testing.T, value string) ([]map[string]interface{}, error) {
+	t.Helper()
+	body := []byte(fmt.Sprintf(
+		`{"data": {"%s": 1, "vector": [0.1, 0.2], "name": %s}}`, FieldBookID, value))
+	rows, _, err := checkAndSetData(body, stringFieldTestSchema(), false)
+	return rows, err
+}
+
+// gjson's String() renders a number through float64 with the 'f' verb, so the
+// stored text was not the text the caller wrote.
+func TestCheckAndSetDataStringFieldKeepsNumberLiteral(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected string
+	}{
+		{"string passes through", `"abc"`, `abc`},
+		{"escapes are decoded once", `"a\"b"`, `a"b`},
+		{"empty string", `""`, ``},
+		{"integer", `12345`, `12345`},
+		{"negative", `-7`, `-7`},
+		{"bool", `true`, `true`},
+		// each of these used to be rewritten
+		{"trailing zero is kept", `1.50`, `1.50`},
+		{"decimal point is kept", `1.0`, `1.0`},
+		{"exponent is kept", `1e19`, `1e19`},
+		{"large exponent is not expanded", `1e300`, `1e300`},
+		{"precision is kept", `9007199254740993.0`, `9007199254740993.0`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows, err := insertOneStringValue(t, tt.value)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			assert.Equal(t, tt.expected, rows[0]["name"])
+		})
+	}
+}
+
+// 1e300 used to be stored as its full decimal expansion: five bytes in, 301
+// bytes stored, and a max_length error that named a size the caller never sent.
+func TestCheckAndSetDataStringFieldDoesNotExpandExponents(t *testing.T) {
+	rows, err := insertOneStringValue(t, `1e300`)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Len(t, rows[0]["name"], len("1e300"))
+}
+
+func TestCheckAndSetDataStringFieldRejectsStructures(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		kind  string
+	}{
+		{"object", `{"a": 1}`, "object"},
+		{"array", `[1, 2]`, "array"},
+		{"empty object", `{}`, "object"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := insertOneStringValue(t, tt.value)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "name")
+			assert.Contains(t, err.Error(), "expects a string")
+			assert.Contains(t, err.Error(), tt.kind)
+		})
+	}
+}

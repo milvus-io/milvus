@@ -463,6 +463,32 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 
 // --------------------- insert param --------------------- //
 
+// stringFieldValue converts a JSON value for a VARCHAR or STRING field.
+//
+// A number is taken from the literal the caller wrote rather than from gjson's
+// String(), which renders it through float64 with the 'f' verb: that turned
+// 1e300 into a 301 byte decimal expansion, dropped the last digit of
+// 9007199254740993.0, and rewrote 1.50 as 1.5.
+//
+// An object or an array is rejected. Storing its text is never what the caller
+// meant and it hides the common mistake of addressing the wrong field.
+func stringFieldValue(field string, value gjson.Result) (string, error) {
+	switch value.Type {
+	case gjson.Number, gjson.True, gjson.False:
+		return value.Raw, nil
+	case gjson.JSON:
+		kind := "object"
+		if value.IsArray() {
+			kind = "array"
+		}
+		return "", merr.WrapErrParameterInvalidMsg(
+			"field %s expects a string, got a JSON %s", field, kind)
+	default:
+		// String, plus Null which the nullable handling above already resolved.
+		return value.String(), nil
+	}
+}
+
 func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool) ([]map[string]interface{}, map[string][]bool, error) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
@@ -775,10 +801,12 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					reallyData[fieldName] = result
 				case schemapb.DataType_Timestamptz:
 					reallyData[fieldName] = dataString
-				case schemapb.DataType_VarChar:
-					reallyData[fieldName] = dataString
-				case schemapb.DataType_String:
-					reallyData[fieldName] = dataString
+				case schemapb.DataType_VarChar, schemapb.DataType_String:
+					value, err := stringFieldValue(fieldName, fieldValue)
+					if err != nil {
+						return reallyDataArray, validDataMap, err
+					}
+					reallyData[fieldName] = value
 				default:
 					return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid("", schemapb.DataType_name[int32(fieldType)], "fieldName: "+fieldName)
 				}
