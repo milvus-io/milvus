@@ -102,6 +102,12 @@ BuildFMIndexLibrary(fmindex::FMIndex& fm,
                   "failed to build FM index for field {}: {}",
                   field_id,
                   e.what());
+    } catch (...) {
+        // fm-index-lite is vendored third-party code; a non-std exception
+        // from it must not escape past this Ring-2 boundary untyped.
+        ThrowInfo(ErrorCode::IndexBuildError,
+                  "failed to build FM index for field {}: unknown exception",
+                  field_id);
     }
 }
 
