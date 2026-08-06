@@ -91,7 +91,16 @@ func (c *RetrieveResultCache) merge(result *internalpb.RetrieveResults) {
 	c.result.CostAggregation = mergeCostAggregation(c.result.GetCostAggregation(), result.GetCostAggregation())
 	c.result.ScannedRemoteBytes = c.result.GetScannedRemoteBytes() + result.GetScannedRemoteBytes()
 	c.result.ScannedTotalBytes = c.result.GetScannedTotalBytes() + result.GetScannedTotalBytes()
-	c.size = proto.Size(c.result)
+	// Accumulate rather than recompute. `c.size = proto.Size(c.result)` walked
+	// the whole accumulated message on every merge, making a stream of N
+	// results O(N^2) in the total number of IDs.
+	//
+	// This can only over-estimate: proto.Size(result) accounts for the incoming
+	// message in full, while merge carries over only its IDs and counters and
+	// drops the rest of the envelope. Over-estimating flushes slightly early;
+	// under-estimating would let a message exceed maxMsgSize, which the caller
+	// relies on this value to prevent.
+	c.size += proto.Size(result)
 }
 
 func mergeCostAggregation(a *internalpb.CostAggregation, b *internalpb.CostAggregation) *internalpb.CostAggregation {
@@ -132,7 +141,6 @@ func (s *ResultCacheServer) splitMsgToMaxSize(result *internalpb.RetrieveResults
 	case *schemapb.IDs_IntId:
 		pks := result.GetIds().GetIntId().Data
 		batch := s.maxMsgSize / 8
-		print(batch)
 		for start := 0; start < len(pks); start += batch {
 			newpks = append(newpks, &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: pks[start:min(start+batch, len(pks))]}}})
 		}
