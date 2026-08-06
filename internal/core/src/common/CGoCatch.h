@@ -34,17 +34,16 @@
 //   3. std::bad_alloc is pulled out ahead of std::exception: it is not a
 //      SegcoreError, so FailureCStatus would label an out-of-memory failure
 //      UnexpectedError(2001) -- permanent -- when it is in fact retriable.
-#define CGO_CATCH_AND_RETURN_CSTATUS                              \
-    catch (const std::bad_alloc& e) {                             \
-        return milvus::FailureCStatus(milvus::MemAllocateFailed,  \
-                                      e.what());                  \
-    }                                                             \
-    catch (const std::exception& e) {                             \
-        return milvus::FailureCStatus(&e);                        \
-    }                                                             \
-    catch (...) {                                                 \
-        return milvus::FailureCStatus(milvus::UnexpectedError,    \
-                                      "unknown exception");       \
+#define CGO_CATCH_AND_RETURN_CSTATUS                                        \
+    catch (const std::bad_alloc& e) {                                       \
+        return milvus::FailureCStatus(milvus::MemAllocateFailed, e.what()); \
+    }                                                                       \
+    catch (const std::exception& e) {                                       \
+        return milvus::FailureCStatus(&e);                                  \
+    }                                                                       \
+    catch (...) {                                                           \
+        return milvus::FailureCStatus(milvus::UnexpectedError,              \
+                                      "unknown exception");                 \
     }
 
 // Catch tail for extern "C" entry points that CANNOT return a CStatus (void /
