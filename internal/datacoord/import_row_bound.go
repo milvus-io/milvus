@@ -360,13 +360,6 @@ func validateParquetFooter(ra io.ReaderAt, size int64, path string) error {
 // from NewParquetReader is therefore a genuine file-format problem, not a transient
 // fault, and is returned as a non-retryable import error.
 func parquetNumRows(ctx context.Context, cm storage.ChunkManager, path string) (int64, error) {
-	select {
-	case parquetFooterParseSem <- struct{}{}:
-	case <-ctx.Done():
-		return 0, ctx.Err()
-	}
-	defer func() { <-parquetFooterParseSem }()
-
 	ra, err := newSizingReaderAt(ctx, cm, path)
 	if err != nil {
 		return 0, err
@@ -374,6 +367,18 @@ func parquetNumRows(ctx context.Context, cm storage.ChunkManager, path string) (
 	if err := validateParquetFooter(ra, ra.size, path); err != nil {
 		return 0, err
 	}
+
+	// Hold the gate across the decode only. The reads above are ordinary object
+	// storage traffic with their own retry/backoff, and holding a global slot
+	// through them would flatten the caller's pool to this gate's width and let
+	// one slow request stall every other import's sizing pass.
+	select {
+	case parquetFooterParseSem <- struct{}{}:
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+	defer func() { <-parquetFooterParseSem }()
+
 	pr, err := file.NewParquetReader(ra)
 	if err != nil {
 		return 0, importutilv2common.WrapDecodeErr(err, fmt.Sprintf("read parquet footer failed, path=%s", path))

@@ -596,15 +596,28 @@ func Test_minRowTextBytes_skipsLegacyDynamicField(t *testing.T) {
 
 func Test_parquetNumRows_boundsConcurrentFooterParses(t *testing.T) {
 	// maxParquetFooterLen bounds the bytes read, not what Arrow's thrift decoder
-	// allocates from them, so the number of parses in flight is what caps the
-	// coordinator's exposure. Pin it.
+	// allocates from them, so the number of decodes in flight is what caps the
+	// coordinator's exposure. The gate wraps only the decode -- the ranged reads
+	// before it are ordinary storage traffic -- so concurrency is measured on the
+	// footer read the decoder issues, not on the 8-byte tail read that
+	// validateParquetFooter does ahead of the gate.
 	const objSize = int64(1 << 20)
-	var inFlight, peak atomic.Int32
+	const declaredFooterLen = uint32(4096)
+	var inFlight, peak, tailReads atomic.Int32
 
 	cm := mocks.NewChunkManager(t)
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(objSize, nil).Maybe()
 	cm.EXPECT().ReadAt(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, _ string, _ int64, length int64) ([]byte, error) {
+		RunAndReturn(func(_ context.Context, _ string, off int64, length int64) ([]byte, error) {
+			b := make([]byte, length)
+			if off+length == objSize && length == 8 {
+				// The tail probe: hand back a well-formed footer descriptor so the
+				// call proceeds past validateParquetFooter and into the decode.
+				tailReads.Add(1)
+				binary.LittleEndian.PutUint32(b[:4], declaredFooterLen)
+				copy(b[4:], parquetMagic)
+				return b, nil
+			}
 			cur := inFlight.Add(1)
 			for {
 				old := peak.Load()
@@ -614,8 +627,8 @@ func Test_parquetNumRows_boundsConcurrentFooterParses(t *testing.T) {
 			}
 			time.Sleep(20 * time.Millisecond)
 			inFlight.Add(-1)
-			// Not a parquet file: validateParquetFooter rejects it before any decode.
-			return make([]byte, length), nil
+			// Garbage where a footer should be: the decode fails, inside the gate.
+			return b, nil
 		}).Maybe()
 
 	var wg sync.WaitGroup
@@ -629,7 +642,66 @@ func Test_parquetNumRows_boundsConcurrentFooterParses(t *testing.T) {
 	}
 	wg.Wait()
 
+	assert.Positive(t, tailReads.Load(), "the probe must have passed footer validation")
 	assert.LessOrEqual(t, peak.Load(), int32(maxConcurrentParquetFooterParses),
-		"concurrent footer parses must stay within the process-wide cap")
+		"concurrent footer decodes must stay within the process-wide cap")
 	assert.Greater(t, peak.Load(), int32(1), "the probe must actually have overlapped")
+}
+
+func Test_minRowTextBytes_singleColumnCSVProvesNothing(t *testing.T) {
+	// CSV keeps field names in the header, so a single VarChar column charges no
+	// name bytes, no separator (one field) and no braces. Nothing is provable, the
+	// floor clamps to 1, and the row bound therefore tracks the file size.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "65535"}},
+			},
+		},
+	}
+	got, err := minRowTextBytes(schema, importutilv2.CSV)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), got)
+}
+
+func Test_assignPKRangesToFiles_singleColumnCSVAboveOneBatchIsRefused(t *testing.T) {
+	// Behavior change introduced by this PR, pinned deliberately: a single-column
+	// all-VarChar CSV larger than maxIDsPerAllocBatch is refused at broadcast,
+	// because its per-row floor proves nothing and one file's range may not
+	// straddle two allocation batches. See the release note.
+	//
+	// The tightening suggested in review -- n*minRow + (n-1) <= size, giving
+	// (size+1)/(minRow+1) -- is NOT applied here: it assumes each row really
+	// occupies minRow bytes, which is false exactly when the floor was clamped.
+	// A single-column CSV of empty values is one newline per row, so n rows
+	// occupy n bytes and (n+1)/2 would under-count and fail a legal import.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "65535"}},
+			},
+		},
+	}
+	alloc := func(n int64) (int64, int64, error) { return 1000, 1000 + n, nil }
+
+	t.Run("just below one batch is accepted", func(t *testing.T) {
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().Size(mock.Anything, "ok.csv").Return(maxIDsPerAllocBatch-2, nil)
+		files := []*internalpb.ImportFile{{Paths: []string{"ok.csv"}}}
+		require.NoError(t, assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1))
+		assert.Positive(t, files[0].GetPkIdEnd()-files[0].GetPkIdBegin())
+	})
+
+	t.Run("above one batch is refused", func(t *testing.T) {
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().Size(mock.Anything, "big.csv").Return(int64(5)<<30, nil)
+		files := []*internalpb.ImportFile{{Paths: []string{"big.csv"}}}
+		err := assignPKRangesToFiles(context.TODO(), cm, schema, files, alloc, 1)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
 }
