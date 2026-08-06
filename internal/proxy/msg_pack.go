@@ -22,8 +22,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	streamingutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -66,8 +64,26 @@ func genInsertMsgsByPartition(ctx context.Context,
 	splitThreshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
 	singleRowLimit, hasSingleRowLimit := getMaxSingleRowSize(walName)
 
+	// rowCapacity estimates how many rows will fit into a single message before
+	// the size threshold forces a flush, so the destination buffers can be
+	// preallocated. Without it the FieldData slices start at zero capacity and
+	// Go's ~1.25x growth factor copies the payload roughly five times over.
+	rowCapacity := func(rowSize, remaining int) int {
+		if rowSize <= 0 || rowSize >= threshold {
+			return 1
+		}
+		n := threshold / rowSize
+		if n > remaining {
+			n = remaining
+		}
+		if n < 1 {
+			n = 1
+		}
+		return n
+	}
+
 	// create empty insert message
-	createInsertMsg := func(segmentID UniqueID, channelName string) *msgstream.InsertMsg {
+	createInsertMsg := func(segmentID UniqueID, channelName string, capacity int) *msgstream.InsertMsg {
 		insertReq := &msgpb.InsertRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_Insert),
@@ -82,11 +98,18 @@ func genInsertMsgsByPartition(ctx context.Context,
 			SegmentID:      segmentID,
 			ShardName:      channelName,
 			Version:        msgpb.InsertDataVersion_ColumnBased,
-			FieldsData:     make([]*schemapb.FieldData, len(insertMsg.GetFieldsData())),
+			// PrepareResultFieldData preallocates each column for `capacity`
+			// rows. Field types it does not know about get a nil Field, which
+			// AppendFieldData already creates lazily, so behaviour is unchanged
+			// for them.
+			FieldsData: typeutil.PrepareResultFieldData(insertMsg.GetFieldsData(), int64(capacity)),
+			RowIDs:     make([]int64, 0, capacity),
+			Timestamps: make([]uint64, 0, capacity),
 		}
 		msg := &msgstream.InsertMsg{
 			BaseMsg: msgstream.BaseMsg{
-				Ctx: ctx,
+				Ctx:        ctx,
+				HashValues: make([]uint32, 0, capacity),
 			},
 			InsertRequest: insertReq,
 		}
@@ -99,8 +122,10 @@ func genInsertMsgsByPartition(ctx context.Context,
 
 	repackedMsgs := make([]msgstream.TsMsg, 0)
 	requestSize := 0
-	msg := createInsertMsg(segmentID, channelName)
-	for _, offset := range rowOffsets {
+	// The message is created on the first row rather than up front, so that its
+	// capacity can be derived from that row's size.
+	var msg *msgstream.InsertMsg
+	for i, offset := range rowOffsets {
 		fieldIdxs := idxComputer.Compute(int64(offset))
 		curRowMessageSize, err := typeutil.EstimateEntitySize(fieldsData, offset, fieldIdxs...)
 		if err != nil {
@@ -114,10 +139,15 @@ func genInsertMsgsByPartition(ctx context.Context,
 		}
 
 		// If the insert message size exceeds the threshold, flush the current
-		// message first.
-		if msg.NumRows > 0 && requestSize+curRowMessageSize >= splitThreshold {
+		// message first. A single row can be larger than the threshold, so do
+		// not emit an empty message before adding that row.
+		if msg == nil {
+			msg = createInsertMsg(segmentID, channelName,
+				rowCapacity(curRowMessageSize, len(rowOffsets)-i))
+		} else if msg.NumRows > 0 && requestSize+curRowMessageSize >= threshold {
 			repackedMsgs = append(repackedMsgs, msg)
-			msg = createInsertMsg(segmentID, channelName)
+			msg = createInsertMsg(segmentID, channelName,
+				rowCapacity(curRowMessageSize, len(rowOffsets)-i))
 			requestSize = 0
 		}
 
@@ -128,7 +158,7 @@ func genInsertMsgsByPartition(ctx context.Context,
 		msg.NumRows++
 		requestSize += curRowMessageSize
 	}
-	if msg.NumRows > 0 {
+	if msg != nil && msg.NumRows > 0 {
 		repackedMsgs = append(repackedMsgs, msg)
 	}
 
