@@ -411,7 +411,9 @@ func (s *ClusteringCompactionTaskSuite) TestBuildCompactionRequest_NamespaceFile
 	defer mockVer.UnPatch()
 
 	s.Run("namespace_enabled", func() {
-		s.NoError(s.meta.UpdateFileResources(context.TODO(), expectedResources, 1))
+		resourceBroker := broker.NewMockBroker(s.T())
+		resourceBroker.EXPECT().GetFileResources(mock.Anything, int64(7)).Return(expectedResources, nil)
+		s.meta.broker = resourceBroker
 		task := s.newNamespaceClusteringTask(true, []int64{7})
 		plan, err := task.BuildCompactionRequest()
 		s.Require().NoError(err)
