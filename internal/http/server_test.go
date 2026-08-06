@@ -112,6 +112,7 @@ func (suite *HTTPServerTestSuite) TestHealthzHandler() {
 	resp, err := client.Do(req)
 	suite.Nil(err)
 	defer resp.Body.Close()
+	suite.Equal("text/plain", resp.Header.Get("Content-Type"))
 	body, _ := io.ReadAll(resp.Body)
 	suite.Equal("OK", string(body))
 
@@ -120,6 +121,7 @@ func (suite *HTTPServerTestSuite) TestHealthzHandler() {
 	resp, err = client.Do(req)
 	suite.Nil(err)
 	defer resp.Body.Close()
+	suite.Equal("application/json", resp.Header.Get("Content-Type"))
 	body, _ = io.ReadAll(resp.Body)
 	suite.Equal("{\"state\":\"OK\",\"detail\":[{\"name\":\"m1\",\"code\":1}]}", string(body))
 
@@ -130,6 +132,7 @@ func (suite *HTTPServerTestSuite) TestHealthzHandler() {
 	resp, err = client.Do(req)
 	suite.Nil(err)
 	defer resp.Body.Close()
+	suite.Equal("application/json", resp.Header.Get("Content-Type"))
 	body, _ = io.ReadAll(resp.Body)
 	respObj := &healthz.HealthResponse{}
 	err = json.Unmarshal(body, respObj)
