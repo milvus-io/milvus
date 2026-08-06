@@ -708,6 +708,19 @@ message LegacyProxyCollectionMetaCache {
     common.MsgType msg_type = 5;
 }
 
+// PartialUpdateCAS carries transaction-scoped commit-admission metadata from
+// Proxy to StreamingNode.
+message PartialUpdateCAS {
+    // read_ts must be non-zero.
+    uint64 read_ts = 1;
+    // observed_pchannel_term must be non-zero.
+    int64 observed_pchannel_term = 2;
+    // primary_key_field_id identifies the PK column in each insert chunk.
+    int64 primary_key_field_id = 3;
+    // collection_id scopes non-PK invalidation checks.
+    int64 collection_id = 4;
+}
+
 ///
 /// Message Extra Response
 /// Used to add extra information when response to the client.
