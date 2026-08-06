@@ -15,7 +15,7 @@ Every message receives a unique TimeTick from the TSO via `AckManager.Allocate()
 Every TimeTick transitions: **Allocated** → **Confirmed** → **Synced**.
 
 - **Confirmed**: Append completed and `Acker.Ack()` called. The confirmed watermark (`lastConfirmedTimeTick`) advances only when all TimeTicks ≤ it are acknowledged — any in-flight message blocks advancement.
-- **Synced**: A background `TimeTickSyncInspector` periodically drains confirmed entries, constructs a TimeTick message with `Timestamp` = confirmed watermark, and appends it to the WAL. When no real messages exist in the batch, a non-persisted TimeTick is generated (skips WAL backend write).
+- **Synced**: A background `TimeTickSyncInspector` periodically drains confirmed entries. When real messages exist in the batch, it constructs a persisted TimeTick message with `Timestamp` = confirmed watermark and appends it to the WAL. An idle sync without real messages only drains acknowledgements and does not append a TimeTick unless the caller explicitly requests a persisted boundary.
 
 ### Consumer-Side Reordering
 

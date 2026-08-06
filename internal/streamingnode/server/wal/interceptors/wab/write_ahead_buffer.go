@@ -25,30 +25,32 @@ type ROWriteAheadBuffer interface {
 
 // NewWriteAheadBuffer creates a new WriteAheadBuffer.
 func NewWriteAheadBuffer(
+	maintenanceManager *MaintenanceManager,
 	pchannel string,
 	logger *mlog.Logger,
 	capacity int,
 	keepalive time.Duration,
 	lastConfirmedTimeTickMessage message.ImmutableMessage,
 ) *WriteAheadBuffer {
-	return &WriteAheadBuffer{
-		logger:              logger,
-		cond:                syncutil.NewContextCond(&sync.Mutex{}),
-		pendingMessages:     newPendingQueue(capacity, keepalive, lastConfirmedTimeTickMessage),
-		lastTimeTickMessage: lastConfirmedTimeTickMessage,
-		metrics:             metricsutil.NewWriteAheadBufferMetrics(pchannel, capacity),
+	buffer := &WriteAheadBuffer{
+		logger:             logger,
+		cond:               syncutil.NewContextCond(&sync.Mutex{}),
+		pendingMessages:    newPendingQueue(capacity, keepalive, lastConfirmedTimeTickMessage),
+		metrics:            metricsutil.NewWriteAheadBufferMetrics(pchannel, capacity),
+		maintenanceManager: maintenanceManager,
 	}
+	maintenanceManager.register(buffer)
+	return buffer
 }
 
 // WriteAheadBuffer is a buffer that stores messages in order of time tick.
 type WriteAheadBuffer struct {
-	logger          *mlog.Logger
-	cond            *syncutil.ContextCond
-	closed          bool
-	pendingMessages *pendingQueue // The pending message is always sorted by timetick in monotonic ascending order.
-	// Only keep the persisted messages in the buffer.
-	lastTimeTickMessage message.ImmutableMessage
-	metrics             *metricsutil.WriteAheadBufferMetrics
+	logger             *mlog.Logger
+	cond               *syncutil.ContextCond
+	closed             bool
+	pendingMessages    *pendingQueue // The pending message is always sorted by timetick in monotonic ascending order.
+	metrics            *metricsutil.WriteAheadBufferMetrics
+	maintenanceManager *MaintenanceManager
 }
 
 // Append appends a message to the buffer.
@@ -62,12 +64,12 @@ func (w *WriteAheadBuffer) Append(msgs []message.ImmutableMessage, tsMsg message
 	if tsMsg.MessageType() != message.MessageTypeTimeTick {
 		panic("the message is not a time tick message")
 	}
-	if tsMsg.TimeTick() <= w.lastTimeTickMessage.TimeTick() {
+	if tsMsg.TimeTick() <= w.pendingMessages.LastTimeTick() {
 		panic("the time tick of the message is less or equal than the last time tick message")
 	}
 
 	if len(msgs) > 0 {
-		if msgs[0].TimeTick() <= w.lastTimeTickMessage.TimeTick() {
+		if msgs[0].TimeTick() <= w.pendingMessages.LastTimeTick() {
 			panic("the time tick of the message is less than or equal to the last time tick message")
 		}
 		if msgs[len(msgs)-1].TimeTick() > tsMsg.TimeTick() {
@@ -75,18 +77,27 @@ func (w *WriteAheadBuffer) Append(msgs []message.ImmutableMessage, tsMsg message
 		}
 		w.pendingMessages.Push(msgs)
 	}
-	if tsMsg.IsPersisted() {
-		// The message is persisted, so we need to push it to the pending queue.
-		w.pendingMessages.Push([]message.ImmutableMessage{tsMsg})
-	}
+	w.pendingMessages.Push([]message.ImmutableMessage{tsMsg})
 	w.pendingMessages.Evict()
 
-	w.lastTimeTickMessage = tsMsg
+	w.observeMetricsLocked()
+}
+
+func (w *WriteAheadBuffer) evictExpiredMessages() {
+	w.cond.L.Lock()
+	defer w.cond.L.Unlock()
+	if w.closed || !w.pendingMessages.Evict() {
+		return
+	}
+	w.observeMetricsLocked()
+}
+
+func (w *WriteAheadBuffer) observeMetricsLocked() {
 	w.metrics.Observe(
 		w.pendingMessages.Len(),
 		w.pendingMessages.Size(),
 		w.pendingMessages.EarliestTimeTick(),
-		w.lastTimeTickMessage.TimeTick(),
+		w.pendingMessages.LastTimeTick(),
 	)
 }
 
@@ -98,14 +109,13 @@ func (w *WriteAheadBuffer) ReadFromExclusiveTimeTick(ctx context.Context, timeti
 	}
 	return &WriteAheadBufferReader{
 		nextOffset:    nextOffset,
-		lastTimeTick:  timetick,
 		snapshot:      snapshot,
 		underlyingBuf: w,
 	}, nil
 }
 
 // createSnapshotFromOffset creates a snapshot of the buffer from the given offset.
-func (w *WriteAheadBuffer) createSnapshotFromOffset(ctx context.Context, offset int, timeTick uint64) ([]messageWithOffset, error) {
+func (w *WriteAheadBuffer) createSnapshotFromOffset(ctx context.Context, offset int) ([]messageWithOffset, error) {
 	w.cond.L.Lock()
 	if w.closed {
 		w.cond.L.Unlock()
@@ -123,18 +133,6 @@ func (w *WriteAheadBuffer) createSnapshotFromOffset(ctx context.Context, offset 
 			return nil, err
 		}
 
-		// error is eof, which means that the time tick is behind the message buffer.
-		// check if the last time tick is greater than the given time tick.
-		// if so, return it to update the timetick.
-		// lastTimeTickMessage will never be nil if call this api.
-		if w.lastTimeTickMessage.TimeTick() > timeTick {
-			msg := messageWithOffset{
-				Message: w.lastTimeTickMessage,
-				Offset:  w.pendingMessages.CurrentOffset(),
-			}
-			w.cond.L.Unlock()
-			return []messageWithOffset{msg}, nil
-		}
 		// Block until the buffer updates.
 		if err := w.cond.Wait(ctx); err != nil {
 			return nil, err
@@ -161,24 +159,13 @@ func (w *WriteAheadBuffer) createSnapshotFromTimeTick(ctx context.Context, timeT
 			return nil, 0, err
 		}
 
-		// error is eof, which means that the time tick is behind the message buffer.
-		// The lastTimeTickMessage should always be greater or equal to the lastTimeTick in the pending queue.
+		// The requested timetick is exactly the latest persisted message, so the
+		// reader can start from the next offset and wait for future appends.
 		if w.pendingMessages.LastTimeTick() == timeTick {
 			offset := w.pendingMessages.CurrentOffset() + 1
 			w.cond.L.Unlock()
 			return nil, offset, nil
 		}
-
-		if w.lastTimeTickMessage.TimeTick() > timeTick {
-			// check if the last time tick is greater than the given time tick, return it to update the timetick.
-			msg := messageWithOffset{
-				Message: w.lastTimeTickMessage,
-				Offset:  w.pendingMessages.CurrentOffset(), // We add a extra timetick message, so reuse the current offset.
-			}
-			w.cond.L.Unlock()
-			return []messageWithOffset{msg}, msg.Offset, nil
-		}
-
 		if err := w.cond.Wait(ctx); err != nil {
 			return nil, 0, err
 		}
@@ -187,7 +174,12 @@ func (w *WriteAheadBuffer) createSnapshotFromTimeTick(ctx context.Context, timeT
 
 func (w *WriteAheadBuffer) Close() {
 	w.cond.L.Lock()
+	if w.closed {
+		w.cond.L.Unlock()
+		return
+	}
 	w.metrics.Close()
 	w.closed = true
 	w.cond.L.Unlock()
+	w.maintenanceManager.unregister(w)
 }

@@ -31,8 +31,8 @@ type timeTickSyncInspectorImpl struct {
 	working      typeutil.ConcurrentSet[string]
 }
 
-func (s *timeTickSyncInspectorImpl) TriggerSync(pChannelInfo types.PChannelInfo, persisted bool) {
-	s.syncNotifier.AddAndNotify(pChannelInfo, persisted)
+func (s *timeTickSyncInspectorImpl) TriggerSync(pChannelInfo types.PChannelInfo, forcePersisted bool) {
+	s.syncNotifier.AddAndNotify(pChannelInfo, forcePersisted)
 }
 
 func (s *timeTickSyncInspectorImpl) GetOperator(pChannelInfo types.PChannelInfo) (TimeTickSyncOperator, bool) {
@@ -84,15 +84,15 @@ func (s *timeTickSyncInspectorImpl) background() {
 			})
 		case <-s.syncNotifier.WaitChan():
 			signals := s.syncNotifier.Get()
-			for pchannel, persisted := range signals {
-				s.asyncSync(pchannel.Name, persisted)
+			for pchannel, forcePersisted := range signals {
+				s.asyncSync(pchannel.Name, forcePersisted)
 			}
 		}
 	}
 }
 
 // asyncSync syncs the pchannel in a goroutine.
-func (s *timeTickSyncInspectorImpl) asyncSync(pchannelName string, persisted bool) {
+func (s *timeTickSyncInspectorImpl) asyncSync(pchannelName string, forcePersisted bool) {
 	if !s.working.Insert(pchannelName) {
 		// Check if the sync operation of pchannel is working, if so, skip it.
 		return
@@ -105,7 +105,7 @@ func (s *timeTickSyncInspectorImpl) asyncSync(pchannelName string, persisted boo
 			s.working.Remove(pchannelName)
 		}()
 		if operator, ok := s.operators.Get(pchannelName); ok {
-			operator.Sync(s.taskNotifier.Context(), persisted)
+			operator.Sync(s.taskNotifier.Context(), forcePersisted)
 		}
 	}()
 }

@@ -67,7 +67,7 @@ func (impl *timeTickSyncOperator) MVCCManager() *mvcc.MVCCManager {
 
 // Sync trigger a sync operation.
 // Sync operation is not thread safe, so call it in a single goroutine.
-func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
+func (impl *timeTickSyncOperator) Sync(ctx context.Context, forcePersisted bool) {
 	if impl.walShutdownOrFenced.Load() {
 		// skip append tt msg to a shutdown or fenced wal
 		return
@@ -86,7 +86,7 @@ func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
 			return nil, err
 		}
 		return appendResult.MessageID, nil
-	}, persisted)
+	}, forcePersisted)
 	if err != nil {
 		impl.logger.Warn(ctx, "send time tick sync message failed", mlog.Err(err))
 		if s := status.AsStreamingError(err); s.IsFenced() || s.IsOnShutdown() {
@@ -120,8 +120,7 @@ func (impl *timeTickSyncOperator) sendTsMsg(ctx context.Context, appender func(c
 	// Construct time tick message.
 	ts := impl.ackDetails.LastAllAcknowledgedTimestamp()
 	lastConfirmedMessageID := impl.ackDetails.EarliestLastConfirmedMessageID()
-	persist := (!impl.ackDetails.IsNoPersistedMessage() || forcePersisted)
-	if !persist {
+	if impl.ackDetails.IsNoPersistedMessage() && !forcePersisted {
 		impl.ackDetails.Clear()
 		return nil
 	}
@@ -135,7 +134,7 @@ func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 	lastConfirmedMessageID message.MessageID,
 	appender func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error),
 ) error {
-	msg := NewTimeTickMsg(ts, lastConfirmedMessageID, impl.sourceID, true)
+	msg := NewTimeTickMsg(ts, lastConfirmedMessageID, impl.sourceID)
 
 	// Append it to wal.
 	msgID, err := appender(ctx, msg)
