@@ -31,6 +31,10 @@ import (
 const (
 	// DefaultFragmentRowLimit is the default row limit for splitting large files into fragments
 	DefaultFragmentRowLimit = 1000000 // 1 million rows
+
+	// PaimonDataSplitReadPath is the descriptor read_path marking a fragment
+	// that must be consumed as one atomic Paimon DataSplit.
+	PaimonDataSplitReadPath = "data-split"
 )
 
 // SegmentFragments maps segment ID to its fragments
@@ -266,7 +270,33 @@ func FetchFragmentsFromExternalSourceWithRange(
 			})
 			continue
 		}
-		fragments = append(fragments, SplitFileToFragments(fi.FilePath, rowCounts[i], rowLimit, fragmentIDGenerator)...)
+		// A Paimon data-split FileInfo is one immutable DataSplit descriptor. Its
+		// logical range cannot be reopened independently, so preserve it as one
+		// atomic fragment even when it exceeds the generic row limit. Bounded
+		// batches inside PaimonFormatReader provide read parallelism without
+		// changing the snapshot split boundary.
+		if format == "paimon-table" {
+			readPath, _, err := PaimonRoutingMeta(fi.Properties)
+			if err != nil {
+				return nil, err
+			}
+			if readPath == PaimonDataSplitReadPath {
+				fragments = append(fragments, Fragment{
+					FragmentID: fragmentIDGenerator(),
+					FilePath:   fi.FilePath,
+					StartRow:   0,
+					EndRow:     rowCounts[i],
+					RowCount:   rowCounts[i],
+					Properties: cloneStringProperties(fi.Properties),
+				})
+				continue
+			}
+		}
+		fileFragments := SplitFileToFragments(fi.FilePath, rowCounts[i], rowLimit, fragmentIDGenerator)
+		for j := range fileFragments {
+			fileFragments[j].Properties = cloneStringProperties(fi.Properties)
+		}
+		fragments = append(fragments, fileFragments...)
 	}
 	if len(fragments) == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("no data files in range [%d, %d)", fileIndexBegin, fileIndexEnd)

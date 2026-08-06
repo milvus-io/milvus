@@ -18,6 +18,7 @@ package externalspec
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,7 +45,7 @@ func TestParseExternalSpec_DefaultFormat(t *testing.T) {
 }
 
 func TestParseExternalSpec_SupportedFormats(t *testing.T) {
-	for _, fmt := range []string{"parquet", "lance-table", "vortex", "iceberg-table", "milvus-table"} {
+	for _, fmt := range []string{"parquet", "lance-table", "vortex", "iceberg-table", "paimon-table", "milvus-table"} {
 		spec, err := ParseExternalSpec(`{"format":"` + fmt + `"}`)
 		require.NoError(t, err, "format %s should be supported", fmt)
 		assert.Equal(t, fmt, spec.Format)
@@ -393,22 +394,24 @@ func TestRedactExternalSpec(t *testing.T) {
 }
 
 func TestExternalSpecMarshalJSON(t *testing.T) {
-	t.Run("snapshot_id_marshaled_as_string", func(t *testing.T) {
-		snapshotID := int64(5320540205222981137)
-		out, err := json.Marshal(ExternalSpec{
-			Format:     FormatIcebergTable,
-			Columns:    []string{"id", "vec"},
-			Extfs:      map[string]string{"cloud_provider": "aws"},
-			SnapshotID: &snapshotID,
-		})
-		require.NoError(t, err)
-		assert.Contains(t, string(out), `"snapshot_id":"5320540205222981137"`)
+	for _, format := range []string{FormatIcebergTable, FormatPaimonTable} {
+		t.Run(format+"_snapshot_id_marshaled_as_string", func(t *testing.T) {
+			snapshotID := int64(5320540205222981137)
+			out, err := json.Marshal(ExternalSpec{
+				Format:     format,
+				Columns:    []string{"id", "vec"},
+				Extfs:      map[string]string{"cloud_provider": "aws"},
+				SnapshotID: &snapshotID,
+			})
+			require.NoError(t, err)
+			assert.Contains(t, string(out), `"snapshot_id":"5320540205222981137"`)
 
-		var got map[string]any
-		require.NoError(t, json.Unmarshal(out, &got))
-		assert.Equal(t, FormatIcebergTable, got["format"])
-		assert.Equal(t, "5320540205222981137", got["snapshot_id"])
-	})
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(out, &got))
+			assert.Equal(t, format, got["format"])
+			assert.Equal(t, "5320540205222981137", got["snapshot_id"])
+		})
+	}
 
 	t.Run("nil_snapshot_id_omitted", func(t *testing.T) {
 		out, err := json.Marshal(ExternalSpec{Format: FormatParquet})
@@ -695,35 +698,41 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 }
 
 func TestParseExternalSpec_SnapshotID(t *testing.T) {
-	t.Run("string_form_accepted", func(t *testing.T) {
-		spec, err := ParseExternalSpec(`{"format":"iceberg-table","snapshot_id":"5320540205222981137"}`)
-		require.NoError(t, err)
-		require.NotNil(t, spec.SnapshotID)
-		assert.Equal(t, int64(5320540205222981137), *spec.SnapshotID)
-	})
+	for _, format := range []string{FormatIcebergTable, FormatPaimonTable} {
+		t.Run(format, func(t *testing.T) {
+			t.Run("string_form_accepted", func(t *testing.T) {
+				spec, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,"snapshot_id":"5320540205222981137"}`, format))
+				require.NoError(t, err)
+				require.NotNil(t, spec.SnapshotID)
+				assert.Equal(t, int64(5320540205222981137), *spec.SnapshotID)
+			})
 
-	t.Run("bare_number_accepted", func(t *testing.T) {
-		spec, err := ParseExternalSpec(`{"format":"iceberg-table","snapshot_id":5320540205222981137}`)
-		require.NoError(t, err)
-		require.NotNil(t, spec.SnapshotID)
-		assert.Equal(t, int64(5320540205222981137), *spec.SnapshotID)
-	})
+			t.Run("bare_number_accepted", func(t *testing.T) {
+				spec, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,"snapshot_id":5320540205222981137}`, format))
+				require.NoError(t, err)
+				require.NotNil(t, spec.SnapshotID)
+				assert.Equal(t, int64(5320540205222981137), *spec.SnapshotID)
+			})
 
-	t.Run("non_numeric_string_rejected", func(t *testing.T) {
-		_, err := ParseExternalSpec(`{"format":"iceberg-table","snapshot_id":"abc"}`)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid external spec JSON")
-	})
+			t.Run("non_numeric_string_rejected", func(t *testing.T) {
+				_, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,"snapshot_id":"abc"}`, format))
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "invalid external spec JSON")
+			})
 
-	t.Run("omitted_yields_nil", func(t *testing.T) {
-		spec, err := ParseExternalSpec(`{"format":"iceberg-table"}`)
-		require.NoError(t, err)
-		assert.Nil(t, spec.SnapshotID)
-	})
+			t.Run("omitted_yields_nil", func(t *testing.T) {
+				spec, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q}`, format))
+				require.NoError(t, err)
+				assert.Nil(t, spec.SnapshotID)
+			})
+		})
+	}
 }
 
 func TestRedactExternalSpec_SnapshotIDNumber(t *testing.T) {
-	redacted := RedactExternalSpec(`{"format":"iceberg-table","snapshot_id":5320540205222981137}`)
-	assert.Contains(t, redacted, `"snapshot_id":"5320540205222981137"`)
-	assert.NotEqual(t, "<invalid spec>", redacted)
+	for _, format := range []string{FormatIcebergTable, FormatPaimonTable} {
+		redacted := RedactExternalSpec(fmt.Sprintf(`{"format":%q,"snapshot_id":5320540205222981137}`, format))
+		assert.Contains(t, redacted, `"snapshot_id":"5320540205222981137"`)
+		assert.NotEqual(t, "<invalid spec>", redacted)
+	}
 }

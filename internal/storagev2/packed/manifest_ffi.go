@@ -39,7 +39,10 @@ import "C"
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -64,6 +67,7 @@ type Fragment struct {
 	StartRow   int64                 // Start row index within the file (inclusive)
 	EndRow     int64                 // End row index within the file (exclusive)
 	RowCount   int64                 // Number of rows (EndRow - StartRow)
+	Properties map[string]string     // Opaque format-reader metadata (snapshot/delete descriptors, sizes, etc.)
 	Deltalogs  []*datapb.FieldBinlog // Source delete logs for milvus-table fragments
 }
 
@@ -73,8 +77,120 @@ type manifestColumnGroup struct {
 	Format    string
 }
 
-func fragmentIdentity(f Fragment) string {
-	return fmt.Sprintf("%s:%d:%d", f.FilePath, f.StartRow, f.EndRow)
+// paimonFileMetadataProperty carries the opaque per-file descriptor attached
+// by the milvus-storage explore pass; its JSON shape is owned by
+// milvus-storage and only the routing fields below are interpreted here.
+const (
+	paimonFileMetadataProperty = "metadata"
+	paimonMetadataVersion      = 1
+)
+
+type paimonRoutingMetadata struct {
+	Version  int    `json:"version"`
+	ReadPath string `json:"read_path"`
+	Bucket   *int32 `json:"bucket"`
+}
+
+func parsePaimonRoutingMetadata(properties map[string]string) (string, paimonRoutingMetadata, error) {
+	raw, found := properties[paimonFileMetadataProperty]
+	if !found {
+		return "", paimonRoutingMetadata{}, merr.WrapErrServiceInternalMsg("Paimon fragment has no metadata descriptor")
+	}
+	var metadata paimonRoutingMetadata
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return "", paimonRoutingMetadata{}, merr.WrapErrServiceInternalMsg("invalid Paimon metadata descriptor: %v", err)
+	}
+	if metadata.Version != paimonMetadataVersion {
+		return "", paimonRoutingMetadata{}, merr.WrapErrServiceInternalMsg(
+			"unsupported Paimon metadata version %d, expected %d", metadata.Version, paimonMetadataVersion)
+	}
+	if metadata.ReadPath != "direct-file" && metadata.ReadPath != PaimonDataSplitReadPath {
+		return "", paimonRoutingMetadata{}, merr.WrapErrServiceInternalMsg("invalid Paimon read_path %q", metadata.ReadPath)
+	}
+	return raw, metadata, nil
+}
+
+// PaimonRoutingMeta extracts the fields used for fragment splitting and
+// segment packing. Paimon fragments must carry valid storage-owned metadata;
+// silently treating a malformed DataSplit as a regular file would make it
+// splittable and violate its snapshot boundary.
+func PaimonRoutingMeta(properties map[string]string) (readPath string, bucket int32, err error) {
+	_, metadata, err := parsePaimonRoutingMetadata(properties)
+	if err != nil {
+		return "", 0, err
+	}
+	if metadata.ReadPath == PaimonDataSplitReadPath && metadata.Bucket == nil {
+		return "", 0, merr.WrapErrServiceInternalMsg("Paimon metadata descriptor has no bucket")
+	}
+	if metadata.Bucket == nil {
+		return metadata.ReadPath, 0, nil
+	}
+	return metadata.ReadPath, *metadata.Bucket, nil
+}
+
+// paimonDirectFileIdentity excludes snapshot_id so an unchanged append-only
+// file can retain its segment across refreshes. Every other current or future
+// descriptor field remains part of the canonical property hash. DataSplits use
+// the unmodified property hash because their descriptors pin a snapshot.
+func paimonDirectFileIdentity(f Fragment, base string) (string, bool) {
+	raw, metadata, err := parsePaimonRoutingMetadata(f.Properties)
+	if err != nil || metadata.ReadPath != "direct-file" {
+		return "", false
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	var descriptor map[string]any
+	if err := decoder.Decode(&descriptor); err != nil {
+		return "", false
+	}
+	delete(descriptor, "snapshot_id")
+	canonicalMetadata, err := json.Marshal(descriptor)
+	if err != nil {
+		return "", false
+	}
+
+	properties := maps.Clone(f.Properties)
+	properties[paimonFileMetadataProperty] = string(canonicalMetadata)
+	return "paimon-direct|" + fragmentIdentityWithProperties(base, properties), true
+}
+
+func fragmentIdentityWithProperties(base string, properties map[string]string) string {
+	if len(properties) == 0 {
+		return base
+	}
+	keys := make([]string, 0, len(properties))
+	for key := range properties {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var canonical strings.Builder
+	for _, key := range keys {
+		value := properties[key]
+		canonical.WriteString(strconv.Itoa(len(key)))
+		canonical.WriteString(":")
+		canonical.WriteString(key)
+		canonical.WriteString(strconv.Itoa(len(value)))
+		canonical.WriteString(":")
+		canonical.WriteString(value)
+	}
+	digest := sha256.Sum256([]byte(canonical.String()))
+	return fmt.Sprintf("%s:%x", base, digest)
+}
+
+// FragmentIdentity identifies the immutable data view represented by a
+// fragment. Format-specific properties are hashed rather than exposed in the
+// key because they may contain large snapshot descriptors. Deltalogs remain
+// outside this identity: milvus-table refreshes them in-place.
+//
+// Paimon direct files use snapshot-independent physical read state so
+// unchanged files keep their segments across refreshes.
+func FragmentIdentity(f Fragment) string {
+	base := fmt.Sprintf("%s:%d:%d", f.FilePath, f.StartRow, f.EndRow)
+	if identity, ok := paimonDirectFileIdentity(f, base); ok {
+		return identity
+	}
+	return fragmentIdentityWithProperties(base, f.Properties)
 }
 
 func sameFragmentSet(a, b []Fragment) bool {
@@ -84,10 +200,10 @@ func sameFragmentSet(a, b []Fragment) bool {
 
 	seen := make(map[string]int, len(a))
 	for _, fragment := range a {
-		seen[fragmentIdentity(fragment)]++
+		seen[FragmentIdentity(fragment)]++
 	}
 	for _, fragment := range b {
-		identity := fragmentIdentity(fragment)
+		identity := FragmentIdentity(fragment)
 		if seen[identity] == 0 {
 			return false
 		}
@@ -102,7 +218,7 @@ func manifestColumnGroupsToFragments(groups []manifestColumnGroup) []Fragment {
 
 	for _, group := range groups {
 		for _, fragment := range group.Fragments {
-			identity := fragmentIdentity(fragment)
+			identity := FragmentIdentity(fragment)
 			if _, ok := seen[identity]; ok {
 				continue
 			}
@@ -163,7 +279,7 @@ func CreateManifestForSegment(
 	if err != nil {
 		return "", merr.Wrap(err, "failed to create column groups")
 	}
-	defer C.loon_column_groups_destroy(columnGroups)
+	defer destroyCreatedColumnGroups(columnGroups)
 
 	// Create properties from storage config
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
@@ -376,8 +492,80 @@ func createColumnGroups(
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.WrapErrStorage(err, "loon_column_groups_create failed")
 	}
+	for i, fragment := range fragments {
+		if err := setColumnGroupFileProperties(outColumnGroups, i, fragment.Properties); err != nil {
+			destroyCreatedColumnGroups(outColumnGroups)
+			return nil, err
+		}
+	}
 
 	return outColumnGroups, nil
+}
+
+func setColumnGroupFileProperties(columnGroups *C.LoonColumnGroups, fileIndex int, properties map[string]string) error {
+	if len(properties) == 0 {
+		return nil
+	}
+	if columnGroups == nil || columnGroups.num_of_column_groups != 1 || columnGroups.column_group_array == nil {
+		return merr.WrapErrServiceInternalMsg(
+			"invalid column groups while setting file properties")
+	}
+	group := columnGroups.column_group_array
+	if fileIndex < 0 || fileIndex >= int(group.num_of_files) || group.files == nil {
+		return merr.WrapErrServiceInternalMsg(
+			"column group file index %d is out of range", fileIndex)
+	}
+
+	keys := make([]string, 0, len(properties))
+	for key := range properties {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	file := &unsafe.Slice(group.files, int(group.num_of_files))[fileIndex]
+	pointerBytes := C.size_t(len(keys)) * C.size_t(unsafe.Sizeof((*C.char)(nil)))
+	file.property_keys = (**C.char)(C.malloc(pointerBytes))
+	file.property_values = (**C.char)(C.malloc(pointerBytes))
+	cKeys := unsafe.Slice(file.property_keys, len(keys))
+	cValues := unsafe.Slice(file.property_values, len(keys))
+	for i, key := range keys {
+		cKeys[i] = C.CString(key)
+		cValues[i] = C.CString(properties[key])
+	}
+	file.num_properties = C.uint32_t(len(keys))
+	return nil
+}
+
+func freeColumnGroupFileProperties(columnGroups *C.LoonColumnGroups) {
+	if columnGroups == nil || columnGroups.column_group_array == nil {
+		return
+	}
+	group := columnGroups.column_group_array
+	if group.files == nil {
+		return
+	}
+	files := unsafe.Slice(group.files, int(group.num_of_files))
+	for i := range files {
+		file := &files[i]
+		keys := unsafe.Slice(file.property_keys, int(file.num_properties))
+		values := unsafe.Slice(file.property_values, int(file.num_properties))
+		for j := range keys {
+			C.free(unsafe.Pointer(keys[j]))
+			C.free(unsafe.Pointer(values[j]))
+		}
+		C.free(unsafe.Pointer(file.property_keys))
+		C.free(unsafe.Pointer(file.property_values))
+		file.property_keys = nil
+		file.property_values = nil
+		file.num_properties = 0
+	}
+}
+
+// File properties are C-allocated by Go and must be detached before the
+// C++ column-groups destructor frees the remaining fields.
+func destroyCreatedColumnGroups(columnGroups *C.LoonColumnGroups) {
+	freeColumnGroupFileProperties(columnGroups)
+	C.loon_column_groups_destroy(columnGroups)
 }
 
 // GetManifestFieldIDs reads numeric field IDs stored as column names in a
@@ -633,10 +821,14 @@ func readColumnGroupsFromManifest(
 				filePath := C.GoString(file.path)
 				startRow := int64(file.start_index)
 				endRow := int64(file.end_index)
+				properties, err := columnGroupFileProperties(file)
+				if err != nil {
+					return nil, merr.Wrapf(err, "read properties from column group %d, file %d", i, j)
+				}
 
-				sourceManifestPath := columnGroupFileProperty(file, milvusTableSourceManifestPathProperty)
+				sourceManifestPath := properties[milvusTableSourceManifestPathProperty]
 				if sourceManifestPath != "" {
-					rowCountText := columnGroupFileProperty(file, milvusTableSourceRowCountProperty)
+					rowCountText := properties[milvusTableSourceRowCountProperty]
 					rowCount, err := strconv.ParseInt(rowCountText, 10, 64)
 					if err != nil || rowCount <= 0 {
 						return nil, merr.WrapErrServiceInternalMsg("invalid milvus-table source row count %q for %s", rowCountText, sourceManifestPath)
@@ -658,6 +850,7 @@ func readColumnGroupsFromManifest(
 					StartRow:   startRow,
 					EndRow:     endRow,
 					RowCount:   endRow - startRow,
+					Properties: properties,
 				})
 			}
 		}
@@ -697,19 +890,8 @@ func deltaLogsFromManifest(manifest *C.LoonManifest) ([]*datapb.FieldBinlog, err
 	return []*datapb.FieldBinlog{{Binlogs: binlogs}}, nil
 }
 
-func columnGroupFileProperty(file *C.LoonColumnGroupFile, key string) string {
-	if file == nil || file.num_properties == 0 || file.property_keys == nil || file.property_values == nil {
-		return ""
-	}
-	keys := unsafe.Slice(file.property_keys, int(file.num_properties))
-	values := unsafe.Slice(file.property_values, int(file.num_properties))
-	for i, cKey := range keys {
-		if cKey == nil || C.GoString(cKey) != key || values[i] == nil {
-			continue
-		}
-		return C.GoString(values[i])
-	}
-	return ""
+func cloneStringProperties(properties map[string]string) map[string]string {
+	return maps.Clone(properties)
 }
 
 func AppendSegmentManifestColumns(
@@ -760,7 +942,7 @@ func AppendSegmentManifestColumns(
 		cColumnGroups:      columnGroups,
 		addNewColumnGroups: true,
 	}
-	defer newFiles.Destroy()
+	defer destroyCreatedColumnGroups(columnGroups)
 
 	if columnGroups.column_group_array == nil && columnGroups.num_of_column_groups > 0 {
 		return "", merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", columnGroups.num_of_column_groups)

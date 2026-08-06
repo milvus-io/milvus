@@ -91,6 +91,7 @@ func NormalizeFileInfos(fileInfos []FileInfo, format string) ([]FileInfo, int) {
 type FileInfo struct {
 	FilePath        string
 	NumRows         int64
+	Properties      map[string]string
 	SourceSegmentID int64
 	Deltalogs       []*datapb.FieldBinlog
 }
@@ -438,12 +439,40 @@ func ReadFileInfosFromManifestPath(
 			if fileArray[j].path == nil {
 				return nil, merr.WrapErrServiceInternalMsg("file path is nil in column group %d, file %d", i, j)
 			}
+			properties, err := columnGroupFileProperties(&fileArray[j])
+			if err != nil {
+				return nil, merr.Wrapf(err, "read properties from column group %d, file %d", i, j)
+			}
 			fileInfos = append(fileInfos, FileInfo{
-				FilePath: C.GoString(fileArray[j].path),
-				NumRows:  int64(fileArray[j].end_index),
+				FilePath:   C.GoString(fileArray[j].path),
+				NumRows:    int64(fileArray[j].end_index),
+				Properties: properties,
 			})
 		}
 	}
 
 	return fileInfos, nil
+}
+
+// columnGroupFileProperties copies format-specific file properties as
+// opaque values. Iceberg delete-file metadata and Paimon snapshot split
+// descriptors are interpreted only by their format readers.
+func columnGroupFileProperties(file *C.LoonColumnGroupFile) (map[string]string, error) {
+	if file == nil || file.num_properties == 0 {
+		return nil, nil
+	}
+	if file.property_keys == nil || file.property_values == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("column group file has %d properties but nil key/value arrays", file.num_properties)
+	}
+
+	keys := unsafe.Slice(file.property_keys, int(file.num_properties))
+	values := unsafe.Slice(file.property_values, int(file.num_properties))
+	properties := make(map[string]string, len(keys))
+	for i := range keys {
+		if keys[i] == nil || values[i] == nil {
+			return nil, merr.WrapErrDataIntegrityMsg("column group file property %d has nil key or value", i)
+		}
+		properties[C.GoString(keys[i])] = C.GoString(values[i])
+	}
+	return properties, nil
 }
