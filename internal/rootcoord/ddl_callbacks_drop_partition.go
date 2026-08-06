@@ -47,6 +47,11 @@ func (c *Core) broadcastDropPartition(ctx context.Context, in *milvuspb.DropPart
 		// Is this idempotent?
 		return err
 	}
+	done, err := c.beginTransferProtectedCollectionOperation(collMeta.CollectionID)
+	if err != nil {
+		return err
+	}
+	defer done()
 
 	partID := common.InvalidPartitionID
 	for _, partition := range collMeta.Partitions {

@@ -233,11 +233,23 @@ func (kv *MemoryKV) MultiRemove(ctx context.Context, keys []string) error {
 
 // MultiSaveAndRemove saves and removes given key-value pairs in MemoryKV atomicly.
 func (kv *MemoryKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
-	if len(preds) > 0 {
-		return merr.WrapErrServiceUnavailable("predicates not supported")
-	}
 	kv.Lock()
 	defer kv.Unlock()
+	for _, pred := range preds {
+		item := kv.tree.Get(memoryKVItem{key: pred.Key()})
+		switch pred.Target() {
+		case predicates.PredTargetValue:
+			if item == nil || !pred.IsTrue(item.(memoryKVItem).value.String()) {
+				return merr.WrapErrIoFailedReason("failed to meet predicate")
+			}
+		case predicates.PredTargetExists:
+			if !pred.IsTrue(item != nil) {
+				return merr.WrapErrIoFailedReason("failed to meet predicate")
+			}
+		default:
+			return merr.WrapErrParameterInvalid("valid predicate target", pred.Key())
+		}
+	}
 	// use complement to remove keys that are not in saves
 	saveKeys := typeutil.NewSet(lo.Keys(saves)...)
 	removeKeys := typeutil.NewSet(removals...)

@@ -60,6 +60,11 @@ func (c *Core) broadcastAlterCollectionForRenameCollection(ctx context.Context, 
 	if err != nil {
 		return err
 	}
+	done, err := c.beginTransferProtectedCollectionOperation(coll.CollectionID)
+	if err != nil {
+		return err
+	}
+	defer done()
 
 	updateMask := &fieldmaskpb.FieldMask{
 		Paths: []string{},

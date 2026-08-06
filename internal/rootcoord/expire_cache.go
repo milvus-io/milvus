@@ -47,3 +47,29 @@ func (c *Core) ExpireMetaCache(ctx context.Context, dbName string, collNames []s
 	}
 	return nil
 }
+
+// ExpireTransferMetaCache invalidates every name that can resolve to a
+// transferred collection and also carries the collection id for id-keyed caches.
+func (c *Core) ExpireTransferMetaCache(ctx context.Context, dbName string, collectionName string, aliases []string, collectionID UniqueID, ts typeutil.Timestamp, opts ...proxyutil.ExpireCacheOpt) error {
+	names := make([]string, 0, len(aliases)+1)
+	seen := make(map[string]struct{}, len(aliases)+1)
+	appendName := func(name string) {
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+
+	appendName(collectionName)
+	for _, alias := range aliases {
+		appendName(alias)
+	}
+	if len(names) == 0 && collectionID != InvalidCollectionID {
+		names = append(names, "")
+	}
+	return c.ExpireMetaCache(ctx, dbName, names, collectionID, "", ts, opts...)
+}

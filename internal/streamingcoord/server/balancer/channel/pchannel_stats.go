@@ -12,6 +12,10 @@ var StaticPChannelStatsManager = syncutil.NewFuture[*PchannelStatsManager]()
 
 // RecoverPChannelStatsManager recovers the pchannel stats manager.
 func RecoverPChannelStatsManager(vchannels []string) {
+	if StaticPChannelStatsManager.Ready() {
+		StaticPChannelStatsManager.Get().Recover(vchannels...)
+		return
+	}
 	m := &PchannelStatsManager{
 		mu:    sync.Mutex{},
 		n:     syncutil.NewVersionedNotifier(),
@@ -28,6 +32,13 @@ type PchannelStatsManager struct {
 	mu    sync.Mutex
 	n     *syncutil.VersionedNotifier
 	stats map[ChannelID]*pchannelStats
+}
+
+func (pm *PchannelStatsManager) Recover(vchannels ...string) {
+	pm.mu.Lock()
+	pm.stats = make(map[ChannelID]*pchannelStats)
+	pm.mu.Unlock()
+	pm.AddVChannel(vchannels...)
 }
 
 // WatchAtChannelCountChanged returns a channel that will be notified when the channel count changed.

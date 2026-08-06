@@ -49,6 +49,10 @@ func (t *hasPartitionTask) Execute(ctx context.Context) error {
 		t.Rsp.Status = merr.Status(err)
 		return err
 	}
+	if err := t.core.transferGate.AllowUserOperation(coll.CollectionID, 0); err != nil {
+		t.Rsp.Status = merr.Status(err)
+		return err
+	}
 	for _, part := range coll.Partitions {
 		if part.PartitionName == t.Req.PartitionName {
 			t.Rsp.Value = true

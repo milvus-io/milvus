@@ -27,6 +27,17 @@ func parsePredicates(rootPath string, preds ...predicates.Predicate) ([]clientv3
 			}
 			cmp := clientv3.Compare(clientv3.Value(util.GetPath(rootPath, pred.Key())), pt, pred.TargetValue())
 			result = append(result, cmp)
+		case predicates.PredTargetExists:
+			expected, ok := pred.TargetValue().(bool)
+			if !ok {
+				return nil, merr.WrapErrParameterInvalid("valid predicate target value", fmt.Sprintf("%v", pred.TargetValue()))
+			}
+			op := ">"
+			version := int64(0)
+			if !expected {
+				op = "="
+			}
+			result = append(result, clientv3.Compare(clientv3.Version(util.GetPath(rootPath, pred.Key())), op, version))
 		default:
 			return nil, merr.WrapErrParameterInvalid("valid predicate target", fmt.Sprintf("%d", pred.Target()))
 		}

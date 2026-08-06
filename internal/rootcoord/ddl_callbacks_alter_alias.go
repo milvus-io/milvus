@@ -62,6 +62,11 @@ func (c *Core) broadcastCreateAlias(ctx context.Context, req *milvuspb.CreateAli
 	if err != nil {
 		return err
 	}
+	done, err := c.beginTransferProtectedCollectionOperation(collection.CollectionID)
+	if err != nil {
+		return err
+	}
+	defer done()
 
 	msg := message.NewAlterAliasMessageBuilderV2().
 		WithHeader(&message.AlterAliasMessageHeader{
@@ -133,6 +138,11 @@ func (c *Core) broadcastAlterAlias(ctx context.Context, req *milvuspb.AlterAlias
 		mlog.Warn(ctx, "could not resolve pre-alter alias target; proxy will holder-scan for it",
 			mlog.String("db", req.GetDbName()), mlog.String("alias", req.GetAlias()), mlog.Err(err))
 	}
+	done, err := c.beginTransferProtectedCollectionOperations(collection.CollectionID, oldCollectionID)
+	if err != nil {
+		return err
+	}
+	defer done()
 
 	msg := message.NewAlterAliasMessageBuilderV2().
 		WithHeader(&message.AlterAliasMessageHeader{

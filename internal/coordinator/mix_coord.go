@@ -458,6 +458,26 @@ func (s *mixCoordImpl) ShowCollectionIDs(ctx context.Context, req *rootcoordpb.S
 	return s.rootcoordServer.ShowCollectionIDs(ctx, req)
 }
 
+func (s *mixCoordImpl) CatalogTransferPrepare(ctx context.Context, req *rootcoordpb.CatalogTransferPrepareRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.CatalogTransferPrepare(ctx, req)
+}
+
+func (s *mixCoordImpl) CatalogTransferDeactivate(ctx context.Context, req *rootcoordpb.CatalogTransferDeactivateRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.CatalogTransferDeactivate(ctx, req)
+}
+
+func (s *mixCoordImpl) CatalogTransferApply(ctx context.Context, req *rootcoordpb.CatalogTransferApplyRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.CatalogTransferApply(ctx, req)
+}
+
+func (s *mixCoordImpl) CatalogTransferAbort(ctx context.Context, req *rootcoordpb.CatalogTransferAbortRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.CatalogTransferAbort(ctx, req)
+}
+
+func (s *mixCoordImpl) RootCoordCatalogCutover(ctx context.Context, req *rootcoordpb.RootCoordCatalogCutoverRequest) (*rootcoordpb.RootCoordCatalogCutoverResponse, error) {
+	return s.rootcoordServer.RootCoordCatalogCutover(ctx, req)
+}
+
 func (s *mixCoordImpl) AlterCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return s.rootcoordServer.AlterCollection(ctx, req)
 }

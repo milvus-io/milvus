@@ -92,6 +92,11 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	if err != nil {
 		return err
 	}
+	done, err := c.beginTransferProtectedCollectionOperation(coll.CollectionID)
+	if err != nil {
+		return err
+	}
+	defer done()
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -280,6 +285,11 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 	if coll.EnableDynamicField == targetValue {
 		return errIgnoredAlterCollection
 	}
+	done, err := c.beginTransferProtectedCollectionOperation(coll.CollectionID)
+	if err != nil {
+		return err
+	}
+	defer done()
 
 	// Disable dynamic field: remove $meta field from schema.
 	if !targetValue {

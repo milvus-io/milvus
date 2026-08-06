@@ -83,6 +83,11 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	if err != nil {
 		return err
 	}
+	done, err := c.beginTransferProtectedCollectionOperation(coll.CollectionID)
+	if err != nil {
+		return err
+	}
+	defer done()
 
 	oldFieldProperties, err := GetFieldProperties(coll, req.GetFieldName())
 	if err != nil {

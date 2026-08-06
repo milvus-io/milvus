@@ -70,6 +70,13 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 		if requestedCollections != nil && !requestedCollections.Contain(coll.Name) {
 			continue
 		}
+		if err := t.core.transferGate.AllowUserOperation(coll.CollectionID, 0); err != nil {
+			if requestedCollections != nil && requestedCollections.Contain(coll.Name) {
+				t.Rsp.Status = merr.Status(err)
+				return err
+			}
+			continue
+		}
 		if !isVisibleCollectionForCurUser(coll.Name, visibleCollections) {
 			continue
 		}

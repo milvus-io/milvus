@@ -1,0 +1,635 @@
+syntax = "proto3";
+
+package milvus.proto.catalog;
+
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/catalogpb";
+
+import "common.proto";
+import "etcd_meta.proto";
+import "internal.proto";
+import "milvus.proto";
+
+message CatalogRequestHeader {
+  string tenant_id = 1;
+  string cluster_id = 2;
+  string namespace = 3;
+  string request_id = 4;
+  string idempotency_key = 5;
+  uint64 deadline_ms = 6;
+}
+
+message CatalogResponseHeader {
+  common.Status status = 1;
+  uint64 revision = 2;
+  uint64 read_revision = 3;
+  bool idempotent_replay = 4;
+}
+
+message RootCatalogCollection {
+  etcd.CollectionInfo collection = 1;
+  repeated etcd.PartitionInfo partitions = 2;
+}
+
+enum RootCatalogActionType {
+  ROOT_CATALOG_ACTION_TYPE_UNSPECIFIED = 0;
+  ROOT_CATALOG_ACTION_TYPE_ADD = 1;
+  ROOT_CATALOG_ACTION_TYPE_UPDATE = 2;
+  ROOT_CATALOG_ACTION_TYPE_DELETE = 3;
+}
+
+message RootCatalogUpdateAction {
+  RootCatalogActionType type = 1;
+  oneof entry {
+    RootCatalogCollection collection = 2;
+  }
+}
+
+service RootCatalogService {
+  rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
+  rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse) {}
+  rpc AlterDatabase(AlterDatabaseRequest) returns (AlterDatabaseResponse) {}
+  rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse) {}
+
+  rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
+  rpc DropCollection(DropCollectionRequest) returns (DropCollectionResponse) {}
+  rpc AlterCollection(AlterCollectionRequest) returns (AlterCollectionResponse) {}
+  rpc AlterCollectionDB(AlterCollectionDBRequest) returns (AlterCollectionDBResponse) {}
+  rpc GetCollectionByID(GetCollectionByIDRequest) returns (GetCollectionResponse) {}
+  rpc GetCollectionByName(GetCollectionByNameRequest) returns (GetCollectionResponse) {}
+  rpc ListCollections(ListCollectionsRequest) returns (ListCollectionsResponse) {}
+  rpc CollectionExists(CollectionExistsRequest) returns (CollectionExistsResponse) {}
+  rpc UpdateRootCatalog(UpdateRootCatalogRequest) returns (UpdateRootCatalogResponse) {}
+
+  rpc CreatePartition(CreatePartitionRequest) returns (CreatePartitionResponse) {}
+  rpc DropPartition(DropPartitionRequest) returns (DropPartitionResponse) {}
+  rpc AlterPartition(AlterPartitionRequest) returns (AlterPartitionResponse) {}
+
+  rpc CreateAlias(CreateAliasRequest) returns (CreateAliasResponse) {}
+  rpc DropAlias(DropAliasRequest) returns (DropAliasResponse) {}
+  rpc AlterAlias(AlterAliasRequest) returns (AlterAliasResponse) {}
+  rpc ListAliases(ListAliasesRequest) returns (ListAliasesResponse) {}
+
+  rpc SaveFileResource(SaveFileResourceRequest) returns (SaveFileResourceResponse) {}
+  rpc RemoveFileResource(RemoveFileResourceRequest) returns (RemoveFileResourceResponse) {}
+  rpc ListFileResource(ListFileResourceRequest) returns (ListFileResourceResponse) {}
+
+  rpc GetCredential(GetCredentialRequest) returns (GetCredentialResponse) {}
+  rpc AlterCredential(AlterCredentialRequest) returns (AlterCredentialResponse) {}
+  rpc DropCredential(DropCredentialRequest) returns (DropCredentialResponse) {}
+  rpc ListCredentials(ListCredentialsRequest) returns (ListCredentialsResponse) {}
+
+  rpc CreateRole(CreateRoleRequest) returns (CreateRoleResponse) {}
+  rpc AlterRole(AlterRoleRequest) returns (AlterRoleResponse) {}
+  rpc DropRole(DropRoleRequest) returns (DropRoleResponse) {}
+  rpc AlterUserRole(AlterUserRoleRequest) returns (AlterUserRoleResponse) {}
+  rpc ListRole(ListRoleRequest) returns (ListRoleResponse) {}
+  rpc ListUser(ListUserRequest) returns (ListUserResponse) {}
+
+  rpc AlterGrant(AlterGrantRequest) returns (AlterGrantResponse) {}
+  rpc DeleteGrant(DeleteGrantRequest) returns (DeleteGrantResponse) {}
+  rpc ListGrant(ListGrantRequest) returns (ListGrantResponse) {}
+  rpc ListPolicy(ListPolicyRequest) returns (ListPolicyResponse) {}
+  rpc ListUserRole(ListUserRoleRequest) returns (ListUserRoleResponse) {}
+  rpc DeleteGrantByCollectionName(DeleteGrantByCollectionNameRequest) returns (DeleteGrantByCollectionNameResponse) {}
+  rpc MigrateGrantCollectionName(MigrateGrantCollectionNameRequest) returns (MigrateGrantCollectionNameResponse) {}
+  rpc BackupRBAC(BackupRBACRequest) returns (BackupRBACResponse) {}
+  rpc RestoreRBAC(RestoreRBACRequest) returns (RestoreRBACResponse) {}
+
+  rpc GetPrivilegeGroup(GetPrivilegeGroupRequest) returns (GetPrivilegeGroupResponse) {}
+  rpc DropPrivilegeGroup(DropPrivilegeGroupRequest) returns (DropPrivilegeGroupResponse) {}
+  rpc SavePrivilegeGroup(SavePrivilegeGroupRequest) returns (SavePrivilegeGroupResponse) {}
+  rpc ListPrivilegeGroups(ListPrivilegeGroupsRequest) returns (ListPrivilegeGroupsResponse) {}
+}
+
+message CreateDatabaseRequest {
+  CatalogRequestHeader header = 1;
+  etcd.DatabaseInfo database = 2;
+  uint64 ts = 3;
+}
+
+message CreateDatabaseResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message DropDatabaseRequest {
+  CatalogRequestHeader header = 1;
+  int64 db_id = 2;
+  uint64 ts = 3;
+}
+
+message DropDatabaseResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message AlterDatabaseRequest {
+  CatalogRequestHeader header = 1;
+  etcd.DatabaseInfo database = 2;
+  uint64 ts = 3;
+}
+
+message AlterDatabaseResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message ListDatabasesRequest {
+  CatalogRequestHeader header = 1;
+  uint64 ts = 2;
+}
+
+message ListDatabasesResponse {
+  CatalogResponseHeader header = 1;
+  repeated etcd.DatabaseInfo databases = 2;
+}
+
+message CreateCollectionRequest {
+  CatalogRequestHeader header = 1;
+  RootCatalogCollection collection = 2;
+  uint64 ts = 3;
+}
+
+message CreateCollectionResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message DropCollectionRequest {
+  CatalogRequestHeader header = 1;
+  RootCatalogCollection collection = 2;
+  uint64 ts = 3;
+}
+
+message DropCollectionResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message AlterCollectionRequest {
+  CatalogRequestHeader header = 1;
+  RootCatalogCollection old_collection = 2;
+  RootCatalogCollection new_collection = 3;
+  int32 alter_type = 4;
+  uint64 ts = 5;
+  bool field_modify = 6;
+}
+
+message AlterCollectionResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message AlterCollectionDBRequest {
+  CatalogRequestHeader header = 1;
+  RootCatalogCollection old_collection = 2;
+  RootCatalogCollection new_collection = 3;
+  uint64 ts = 4;
+}
+
+message AlterCollectionDBResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message GetCollectionByIDRequest {
+  CatalogRequestHeader header = 1;
+  int64 db_id = 2;
+  uint64 ts = 3;
+  int64 collection_id = 4;
+}
+
+message GetCollectionByNameRequest {
+  CatalogRequestHeader header = 1;
+  int64 db_id = 2;
+  string db_name = 3;
+  string collection_name = 4;
+  uint64 ts = 5;
+}
+
+message GetCollectionResponse {
+  CatalogResponseHeader header = 1;
+  RootCatalogCollection collection = 2;
+}
+
+message ListCollectionsRequest {
+  CatalogRequestHeader header = 1;
+  int64 db_id = 2;
+  uint64 ts = 3;
+}
+
+message ListCollectionsResponse {
+  CatalogResponseHeader header = 1;
+  repeated RootCatalogCollection collections = 2;
+}
+
+message CollectionExistsRequest {
+  CatalogRequestHeader header = 1;
+  int64 db_id = 2;
+  int64 collection_id = 3;
+  uint64 ts = 4;
+}
+
+message CollectionExistsResponse {
+  CatalogResponseHeader header = 1;
+  bool exists = 2;
+}
+
+message UpdateRootCatalogRequest {
+  CatalogRequestHeader header = 1;
+  uint64 ts = 2;
+  repeated RootCatalogUpdateAction actions = 3;
+}
+
+message UpdateRootCatalogResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message CreatePartitionRequest {
+  CatalogRequestHeader header = 1;
+  int64 db_id = 2;
+  etcd.PartitionInfo partition = 3;
+  uint64 ts = 4;
+}
+
+message CreatePartitionResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message DropPartitionRequest {
+  CatalogRequestHeader header = 1;
+  int64 db_id = 2;
+  int64 collection_id = 3;
+  int64 partition_id = 4;
+  uint64 ts = 5;
+}
+
+message DropPartitionResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message AlterPartitionRequest {
+  CatalogRequestHeader header = 1;
+  int64 db_id = 2;
+  etcd.PartitionInfo old_partition = 3;
+  etcd.PartitionInfo new_partition = 4;
+  int32 alter_type = 5;
+  uint64 ts = 6;
+}
+
+message AlterPartitionResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message CreateAliasRequest {
+  CatalogRequestHeader header = 1;
+  etcd.AliasInfo alias = 2;
+  uint64 ts = 3;
+}
+
+message CreateAliasResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message DropAliasRequest {
+  CatalogRequestHeader header = 1;
+  int64 db_id = 2;
+  string alias = 3;
+  uint64 ts = 4;
+}
+
+message DropAliasResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message AlterAliasRequest {
+  CatalogRequestHeader header = 1;
+  etcd.AliasInfo alias = 2;
+  uint64 ts = 3;
+}
+
+message AlterAliasResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message ListAliasesRequest {
+  CatalogRequestHeader header = 1;
+  int64 db_id = 2;
+  uint64 ts = 3;
+}
+
+message ListAliasesResponse {
+  CatalogResponseHeader header = 1;
+  repeated etcd.AliasInfo aliases = 2;
+}
+
+message SaveFileResourceRequest {
+  CatalogRequestHeader header = 1;
+  internal.FileResourceInfo resource = 2;
+  uint64 version = 3;
+}
+
+message SaveFileResourceResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message RemoveFileResourceRequest {
+  CatalogRequestHeader header = 1;
+  int64 resource_id = 2;
+  uint64 version = 3;
+}
+
+message RemoveFileResourceResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message ListFileResourceRequest {
+  CatalogRequestHeader header = 1;
+}
+
+message ListFileResourceResponse {
+  CatalogResponseHeader header = 1;
+  repeated internal.FileResourceInfo resources = 2;
+  uint64 version = 3;
+}
+
+message GetCredentialRequest {
+  CatalogRequestHeader header = 1;
+  string username = 2;
+}
+
+message GetCredentialResponse {
+  CatalogResponseHeader header = 1;
+  internal.CredentialInfo credential = 2;
+}
+
+message AlterCredentialRequest {
+  CatalogRequestHeader header = 1;
+  internal.CredentialInfo credential = 2;
+}
+
+message AlterCredentialResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message DropCredentialRequest {
+  CatalogRequestHeader header = 1;
+  string username = 2;
+}
+
+message DropCredentialResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message ListCredentialsRequest {
+  CatalogRequestHeader header = 1;
+}
+
+message ListCredentialsResponse {
+  CatalogResponseHeader header = 1;
+  repeated string usernames = 2;
+}
+
+message CreateRoleRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+  milvus.RoleEntity role = 3;
+}
+
+message CreateRoleResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message AlterRoleRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+  milvus.RoleEntity role = 3;
+}
+
+message AlterRoleResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message DropRoleRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+  string role_name = 3;
+}
+
+message DropRoleResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message AlterUserRoleRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+  milvus.UserEntity user = 3;
+  milvus.RoleEntity role = 4;
+  milvus.OperateUserRoleType operate_type = 5;
+}
+
+message AlterUserRoleResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message ListRoleRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+  milvus.RoleEntity role = 3;
+  bool include_user_info = 4;
+}
+
+message ListRoleResponse {
+  CatalogResponseHeader header = 1;
+  repeated milvus.RoleResult roles = 2;
+}
+
+message ListUserRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+  milvus.UserEntity user = 3;
+  bool include_role_info = 4;
+}
+
+message ListUserResponse {
+  CatalogResponseHeader header = 1;
+  repeated milvus.UserResult users = 2;
+}
+
+message AlterGrantRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+  milvus.GrantEntity grant = 3;
+  milvus.OperatePrivilegeType operate_type = 4;
+}
+
+message AlterGrantResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message DeleteGrantRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+  milvus.RoleEntity role = 3;
+}
+
+message DeleteGrantResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message ListGrantRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+  milvus.GrantEntity grant = 3;
+}
+
+message ListGrantResponse {
+  CatalogResponseHeader header = 1;
+  repeated milvus.GrantEntity grants = 2;
+}
+
+message ListPolicyRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+}
+
+message ListPolicyResponse {
+  CatalogResponseHeader header = 1;
+  repeated milvus.GrantEntity grants = 2;
+}
+
+message ListUserRoleRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+}
+
+message ListUserRoleResponse {
+  CatalogResponseHeader header = 1;
+  repeated string user_roles = 2;
+}
+
+message DeleteGrantByCollectionNameRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+  string db_name = 3;
+  string collection_name = 4;
+}
+
+message DeleteGrantByCollectionNameResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message MigrateGrantCollectionNameRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+  string old_db_name = 3;
+  string old_name = 4;
+  string new_db_name = 5;
+  string new_name = 6;
+}
+
+message MigrateGrantCollectionNameResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message BackupRBACRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+}
+
+message BackupRBACResponse {
+  CatalogResponseHeader header = 1;
+  milvus.RBACMeta rbac_meta = 2;
+}
+
+message RestoreRBACRequest {
+  CatalogRequestHeader header = 1;
+  string tenant = 2;
+  milvus.RBACMeta rbac_meta = 3;
+}
+
+message RestoreRBACResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message GetPrivilegeGroupRequest {
+  CatalogRequestHeader header = 1;
+  string group_name = 2;
+}
+
+message GetPrivilegeGroupResponse {
+  CatalogResponseHeader header = 1;
+  milvus.PrivilegeGroupInfo privilege_group = 2;
+}
+
+message DropPrivilegeGroupRequest {
+  CatalogRequestHeader header = 1;
+  string group_name = 2;
+}
+
+message DropPrivilegeGroupResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message SavePrivilegeGroupRequest {
+  CatalogRequestHeader header = 1;
+  milvus.PrivilegeGroupInfo privilege_group = 2;
+}
+
+message SavePrivilegeGroupResponse {
+  CatalogResponseHeader header = 1;
+}
+
+message ListPrivilegeGroupsRequest {
+  CatalogRequestHeader header = 1;
+}
+
+message ListPrivilegeGroupsResponse {
+  CatalogResponseHeader header = 1;
+  repeated milvus.PrivilegeGroupInfo privilege_groups = 2;
+}
+
+service CatalogService {
+  rpc StartCollectionTransfer(StartCollectionTransferRequest) returns (StartCollectionTransferResponse) {}
+  rpc GetCollectionTransfer(GetCollectionTransferRequest) returns (GetCollectionTransferResponse) {}
+}
+
+enum CollectionTransferState {
+  COLLECTION_TRANSFER_STATE_UNSPECIFIED = 0;
+  COLLECTION_TRANSFER_STATE_PENDING = 1;
+  COLLECTION_TRANSFER_STATE_PREPARED = 2;
+  COLLECTION_TRANSFER_STATE_SOURCE_DROPPED = 3;
+  COLLECTION_TRANSFER_STATE_CATALOG_MOVED = 4;
+  COLLECTION_TRANSFER_STATE_SOURCE_DEACTIVATED = 5;
+  COLLECTION_TRANSFER_STATE_TARGET_APPLIED = 6;
+  COLLECTION_TRANSFER_STATE_DONE = 7;
+  COLLECTION_TRANSFER_STATE_FAILED = 8;
+  COLLECTION_TRANSFER_STATE_ABORTED = 9;
+  COLLECTION_TRANSFER_STATE_COMMIT_UNCERTAIN = 10;
+}
+
+message StartCollectionTransferRequest {
+  common.MsgBase base = 1;
+  string transfer_id = 2;
+  int64 transfer_epoch = 3;
+  string source_namespace = 4;
+  string target_namespace = 5;
+  string db_name = 6;
+  string collection_name = 7;
+  uint64 commit_ts = 8;
+  uint64 cache_expire_ts = 9;
+  int64 drain_timeout_ms = 10;
+}
+
+message StartCollectionTransferResponse {
+  common.Status status = 1;
+  string transfer_id = 2;
+  CollectionTransferState state = 3;
+  int64 collection_id = 4;
+}
+
+message GetCollectionTransferRequest {
+  common.MsgBase base = 1;
+  string transfer_id = 2;
+}
+
+message GetCollectionTransferResponse {
+  common.Status status = 1;
+  string transfer_id = 2;
+  CollectionTransferState state = 3;
+  int64 collection_id = 4;
+  string last_error = 5;
+}

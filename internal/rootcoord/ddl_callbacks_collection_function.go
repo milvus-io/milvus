@@ -180,6 +180,11 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 	if err != nil {
 		return err
 	}
+	done, err := c.beginTransferProtectedCollectionOperation(oldColl.CollectionID)
+	if err != nil {
+		return err
+	}
+	defer done()
 	if err := rejectExternalCollectionFunctionMutation(oldColl.ToCollectionSchemaPB()); err != nil {
 		return err
 	}

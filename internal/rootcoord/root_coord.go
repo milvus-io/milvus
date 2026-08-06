@@ -32,6 +32,8 @@ import (
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -40,6 +42,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
+	catalogservicerootcoord "github.com/milvus-io/milvus/internal/metastore/catalogservice/rootcoord"
 	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/rootcoord/telemetry"
@@ -59,6 +62,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/catalogpb"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
@@ -130,18 +134,20 @@ type metaKVCreator func() kv.MetaKv
 
 // Core root coordinator core
 type Core struct {
-	ctx              context.Context
-	cancel           context.CancelFunc
-	wg               sync.WaitGroup
-	etcdCli          *clientv3.Client
-	tikvCli          *txnkv.Client
-	address          string
-	meta             IMetaTable
-	scheduler        IScheduler
-	broker           Broker
-	ddlTsLockManager DdlTsLockManager
+	ctx                context.Context
+	cancel             context.CancelFunc
+	wg                 sync.WaitGroup
+	etcdCli            *clientv3.Client
+	tikvCli            *txnkv.Client
+	catalogServiceConn *grpc.ClientConn
+	address            string
+	meta               IMetaTable
+	scheduler          IScheduler
+	broker             Broker
+	ddlTsLockManager   DdlTsLockManager
 
 	metaKVCreator metaKVCreator
+	migrationGate *catalogMigrationGate
 
 	proxyCreator       proxyutil.ProxyCreator
 	proxyWatcher       *proxyutil.ProxyWatcher
@@ -177,6 +183,8 @@ type Core struct {
 
 	// telemetry manager for client telemetry collection and command management
 	telemetryMgr *telemetry.TelemetryManager
+
+	transferGate *transferGate
 }
 
 type FileResourceObserver interface {
@@ -197,6 +205,8 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 		cancel:         cancel,
 		factory:        factory,
 		metricsRequest: metricsinfo.NewMetricsRequest(),
+		transferGate:   newTransferGate(),
+		migrationGate:  newCatalogMigrationGate(),
 	}
 
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -400,6 +410,12 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 			kvmetastore.StartLegacySnapshotGC(c.ctx, metaKV)
 			kvmetastore.StartLegacyTombstoneGC(c.ctx, metaKV)
 			catalog = kvmetastore.NewCatalog(metaKV)
+		case util.MetaStoreTypeCatalogService:
+			mlog.Info(initCtx, "Using catalog service as rootcoord persistent metadata catalog.")
+			catalog, err = c.newCatalogServiceRootCoordCatalog(initCtx)
+			if err != nil {
+				return err
+			}
 		default:
 			return retry.Unrecoverable(merr.WrapErrServiceInternalMsg("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType.GetValue()))
 		}
@@ -412,6 +428,31 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 	}
 
 	return retry.Do(initCtx, fn, retry.Attempts(10))
+}
+
+func (c *Core) newCatalogServiceRootCoordCatalog(ctx context.Context) (metastore.RootCoordCatalog, error) {
+	address := Params.MetaStoreCfg.CatalogServiceAddress.GetValue()
+	if address == "" {
+		return nil, retry.Unrecoverable(merr.WrapErrParameterInvalidMsg("catalogService.address is required when metastore.type=%s", util.MetaStoreTypeCatalogService))
+	}
+	namespace := Params.MetaStoreCfg.CatalogServiceNamespace.GetValue()
+	if namespace == "" {
+		namespace = Params.CommonCfg.ClusterName.GetValue()
+	}
+	catalog, conn, err := c.newCatalogServiceRootCoordCatalogWithConfig(ctx, address, namespace)
+	if err != nil {
+		return nil, err
+	}
+	c.catalogServiceConn = conn
+	return catalog, nil
+}
+
+func (c *Core) newCatalogServiceRootCoordCatalogWithConfig(ctx context.Context, address string, namespace string) (metastore.RootCoordCatalog, *grpc.ClientConn, error) {
+	conn, err := grpc.DialContext(ctx, address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, nil, err
+	}
+	return catalogservicerootcoord.NewCatalog(catalogpb.NewRootCatalogServiceClient(conn), namespace), conn, nil
 }
 
 func (c *Core) initIDAllocator(initCtx context.Context) error {
@@ -807,6 +848,10 @@ func (c *Core) Stop() error {
 	}
 	if c.telemetryMgr != nil {
 		c.telemetryMgr.Stop()
+	}
+	if c.catalogServiceConn != nil {
+		_ = c.catalogServiceConn.Close()
+		c.catalogServiceConn = nil
 	}
 
 	c.revokeSession()
@@ -1999,13 +2044,26 @@ func (c *Core) DescribeAlias(ctx context.Context, in *milvuspb.DescribeAliasRequ
 			Status: merr.Status(merr.WrapErrParameterMissing("alias", "no input alias")),
 		}, nil
 	}
-
 	collectionName, err := c.meta.DescribeAlias(ctx, in.GetDbName(), in.GetAlias(), 0)
 	if err != nil {
 		mlog.Warn(context.TODO(), "fail to DescribeAlias", mlog.Err(err))
 		return &milvuspb.DescribeAliasResponse{
 			Status: merr.Status(err),
 		}, nil
+	}
+	if collectionName != "" {
+		coll, err := c.meta.GetCollectionByName(ctx, in.GetDbName(), collectionName, typeutil.MaxTimestamp, true)
+		if err != nil {
+			mlog.Warn(context.TODO(), "fail to resolve described alias collection", mlog.Err(err))
+			return &milvuspb.DescribeAliasResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+		if err := c.transferGate.AllowUserOperation(coll.CollectionID, 0); err != nil {
+			return &milvuspb.DescribeAliasResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
 	}
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -2033,12 +2091,30 @@ func (c *Core) ListAliases(ctx context.Context, in *milvuspb.ListAliasesRequest)
 
 	mlog.Info(context.TODO(), "received request to list aliases")
 
+	if in.GetCollectionName() != "" {
+		coll, err := c.meta.GetCollectionByName(ctx, in.GetDbName(), in.GetCollectionName(), typeutil.MaxTimestamp, true)
+		if err != nil {
+			mlog.Warn(context.TODO(), "fail to resolve alias list collection", mlog.Err(err))
+			return &milvuspb.ListAliasesResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+		if err := c.transferGate.AllowUserOperation(coll.CollectionID, 0); err != nil {
+			return &milvuspb.ListAliasesResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+	}
+
 	aliases, err := c.meta.ListAliases(ctx, in.GetDbName(), in.GetCollectionName(), 0)
 	if err != nil {
 		mlog.Warn(context.TODO(), "fail to ListAliases", mlog.Err(err))
 		return &milvuspb.ListAliasesResponse{
 			Status: merr.Status(err),
 		}, nil
+	}
+	if in.GetCollectionName() == "" {
+		aliases = c.filterTransferReadableAliases(ctx, in.GetDbName(), aliases)
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
@@ -2051,6 +2127,25 @@ func (c *Core) ListAliases(ctx context.Context, in *milvuspb.ListAliasesRequest)
 		CollectionName: in.GetCollectionName(),
 		Aliases:        aliases,
 	}, nil
+}
+
+func (c *Core) filterTransferReadableAliases(ctx context.Context, dbName string, aliases []string) []string {
+	filtered := aliases[:0]
+	for _, alias := range aliases {
+		collectionName, err := c.meta.DescribeAlias(ctx, dbName, alias, typeutil.MaxTimestamp)
+		if err != nil || collectionName == "" {
+			continue
+		}
+		coll, err := c.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, true)
+		if err != nil {
+			continue
+		}
+		if err := c.transferGate.AllowUserOperation(coll.CollectionID, 0); err != nil {
+			continue
+		}
+		filtered = append(filtered, alias)
+	}
+	return filtered
 }
 
 // ExpireCredCache will call invalidate credential cache

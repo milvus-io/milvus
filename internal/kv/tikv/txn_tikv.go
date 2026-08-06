@@ -495,14 +495,26 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 		for _, pred := range preds {
 			key := kv.GetPath(pred.Key())
 			val, err := txn.Get(ctx, []byte(key))
-			if err != nil {
-				if errors.Is(err, tikverr.ErrNotExist) {
-					return markPredicateNotMet(merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error()))
+			switch pred.Target() {
+			case predicates.PredTargetValue:
+				if err != nil {
+					if errors.Is(err, tikverr.ErrNotExist) {
+						return markPredicateNotMet(merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error()))
+					}
+					return merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error())
 				}
-				return merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error())
-			}
-			if !pred.IsTrue(val.Value) {
-				return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue())))
+				if !pred.IsTrue(val.Value) {
+					return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue())))
+				}
+			case predicates.PredTargetExists:
+				if err != nil && !errors.Is(err, tikverr.ErrNotExist) {
+					return merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error())
+				}
+				if !pred.IsTrue(err == nil) {
+					return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, exists=%t", pred.Key(), err == nil)))
+				}
+			default:
+				return merr.WrapErrParameterInvalid("valid predicate target", fmt.Sprintf("%d", pred.Target()))
 			}
 		}
 

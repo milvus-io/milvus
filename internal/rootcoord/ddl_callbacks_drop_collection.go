@@ -51,6 +51,11 @@ func (c *Core) broadcastDropCollectionV1(ctx context.Context, req *milvuspb.Drop
 	if err := dropCollectionTask.Prepare(ctx); err != nil {
 		return err
 	}
+	done, err := c.beginTransferProtectedCollectionOperation(dropCollectionTask.header.CollectionId)
+	if err != nil {
+		return err
+	}
+	defer done()
 
 	channels := make([]string, 0, len(dropCollectionTask.vchannels)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())

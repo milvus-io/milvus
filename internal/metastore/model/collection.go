@@ -276,6 +276,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		AutoID:               coll.Schema.AutoID,
 		Fields:               UnmarshalFieldModels(coll.GetSchema().GetFields()),
 		StructArrayFields:    UnmarshalStructArrayFieldModels(coll.GetSchema().GetStructArrayFields()),
+		Functions:            UnmarshalFunctionModels(coll.GetSchema().GetFunctions()),
 		Partitions:           partitions,
 		VirtualChannelNames:  coll.VirtualChannelNames,
 		PhysicalChannelNames: coll.PhysicalChannelNames,
@@ -306,6 +307,7 @@ type config struct {
 	withFields            bool
 	withPartitions        bool
 	withStructArrayFields bool
+	withFunctions         bool
 }
 
 type Option func(c *config)
@@ -329,6 +331,12 @@ func WithPartitions() Option {
 func WithStructArrayFields() Option {
 	return func(c *config) {
 		c.withStructArrayFields = true
+	}
+}
+
+func WithFunctions() Option {
+	return func(c *config) {
+		c.withFunctions = true
 	}
 }
 
@@ -358,6 +366,10 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 	if c.withStructArrayFields {
 		structArrayFields := MarshalStructArrayFieldModels(coll.StructArrayFields)
 		collSchema.StructArrayFields = structArrayFields
+	}
+
+	if c.withFunctions {
+		collSchema.Functions = MarshalFunctionModels(coll.Functions)
 	}
 
 	shardInfos := make([]*pb.CollectionShardInfo, len(coll.ShardInfos))

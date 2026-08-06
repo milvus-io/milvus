@@ -403,6 +403,26 @@ func (s *Server) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowColl
 	return s.mixCoord.ShowCollectionIDs(ctx, in)
 }
 
+func (s *Server) CatalogTransferPrepare(ctx context.Context, in *rootcoordpb.CatalogTransferPrepareRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CatalogTransferPrepare(ctx, in)
+}
+
+func (s *Server) CatalogTransferDeactivate(ctx context.Context, in *rootcoordpb.CatalogTransferDeactivateRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CatalogTransferDeactivate(ctx, in)
+}
+
+func (s *Server) CatalogTransferApply(ctx context.Context, in *rootcoordpb.CatalogTransferApplyRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CatalogTransferApply(ctx, in)
+}
+
+func (s *Server) CatalogTransferAbort(ctx context.Context, in *rootcoordpb.CatalogTransferAbortRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CatalogTransferAbort(ctx, in)
+}
+
+func (s *Server) RootCoordCatalogCutover(ctx context.Context, in *rootcoordpb.RootCoordCatalogCutoverRequest) (*rootcoordpb.RootCoordCatalogCutoverResponse, error) {
+	return s.mixCoord.RootCoordCatalogCutover(ctx, in)
+}
+
 func (s *Server) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
 	return s.mixCoord.AddCollectionField(ctx, in)
 }

@@ -66,8 +66,12 @@ etcd:
     password: etcdadmin # password for etcd authentication
 
 metastore:
-  type: etcd # Default value: etcd, Valid values: [etcd, tikv]
+  type: etcd # Default value: etcd, Valid values: [etcd, tikv, catalogservice]. catalogservice only moves persistent metadata catalog.
   maxEtcdTxnNum: 64 # maximum number of operations in a single etcd transaction
+
+catalogService:
+  address: "" # Catalog Service gRPC address used when metastore.type=catalogservice.
+  namespace: "" # Catalog Service namespace used when metastore.type=catalogservice. Defaults to common.clusterName when empty.
 
 # Related configuration of tikv, used to store Milvus metadata.
 # Notice that when TiKV is enabled for metastore, you still need to have etcd for service discovery.

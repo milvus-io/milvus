@@ -49,6 +49,11 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 	if err != nil {
 		return err
 	}
+	done, err := c.beginTransferProtectedCollectionOperation(coll.CollectionID)
+	if err != nil {
+		return err
+	}
+	defer done()
 
 	if req.GetStructArrayFieldSchema() == nil {
 		return merr.WrapErrParameterInvalidMsg("struct array field schema is nil")

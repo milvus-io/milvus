@@ -279,7 +279,7 @@ func (s *Server) initMeta() error {
 		metaRootPath = params.TiKVCfg.MetaRootPath.GetValue()
 		s.metaKV = tikvkv.NewTiKV(s.tikvCli, metaRootPath,
 			tikvkv.WithRequestTimeout(paramtable.Get().TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
-	case util.MetaStoreTypeEtcd:
+	case util.MetaStoreTypeEtcd, util.MetaStoreTypeCatalogService:
 		metaRootPath = params.EtcdCfg.MetaRootPath.GetValue()
 		s.metaKV = etcdkv.NewEtcdKV(s.etcdCli, metaRootPath,
 			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))

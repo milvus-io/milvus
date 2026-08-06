@@ -178,6 +178,26 @@ func (m *GrpcRootCoordClient) ShowCollectionIDs(ctx context.Context, in *rootcoo
 	return &rootcoordpb.ShowCollectionIDsResponse{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) CatalogTransferPrepare(ctx context.Context, in *rootcoordpb.CatalogTransferPrepareRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) CatalogTransferDeactivate(ctx context.Context, in *rootcoordpb.CatalogTransferDeactivateRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) CatalogTransferApply(ctx context.Context, in *rootcoordpb.CatalogTransferApplyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) CatalogTransferAbort(ctx context.Context, in *rootcoordpb.CatalogTransferAbortRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) RootCoordCatalogCutover(ctx context.Context, in *rootcoordpb.RootCoordCatalogCutoverRequest, opts ...grpc.CallOption) (*rootcoordpb.RootCoordCatalogCutoverResponse, error) {
+	return &rootcoordpb.RootCoordCatalogCutoverResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

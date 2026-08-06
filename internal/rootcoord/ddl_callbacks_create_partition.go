@@ -42,6 +42,12 @@ func (c *Core) broadcastCreatePartition(ctx context.Context, in *milvuspb.Create
 	if err != nil {
 		return 0, err
 	}
+	done, err := c.beginTransferProtectedCollectionOperation(collMeta.CollectionID)
+	if err != nil {
+		return 0, err
+	}
+	defer done()
+
 	if err := checkGeneralCapacity(ctx, 0, 1, 0, c); err != nil {
 		return 0, err
 	}

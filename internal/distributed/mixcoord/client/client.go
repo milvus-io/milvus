@@ -324,6 +324,61 @@ func (c *Client) ShowCollectionIDs(ctx context.Context, in *rootcoordpb.ShowColl
 	})
 }
 
+func (c *Client) CatalogTransferPrepare(ctx context.Context, in *rootcoordpb.CatalogTransferPrepareRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.CatalogTransferPrepare(ctx, in)
+	})
+}
+
+func (c *Client) CatalogTransferDeactivate(ctx context.Context, in *rootcoordpb.CatalogTransferDeactivateRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.CatalogTransferDeactivate(ctx, in)
+	})
+}
+
+func (c *Client) CatalogTransferApply(ctx context.Context, in *rootcoordpb.CatalogTransferApplyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.CatalogTransferApply(ctx, in)
+	})
+}
+
+func (c *Client) CatalogTransferAbort(ctx context.Context, in *rootcoordpb.CatalogTransferAbortRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.CatalogTransferAbort(ctx, in)
+	})
+}
+
+func (c *Client) RootCoordCatalogCutover(ctx context.Context, in *rootcoordpb.RootCoordCatalogCutoverRequest, opts ...grpc.CallOption) (*rootcoordpb.RootCoordCatalogCutoverResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*rootcoordpb.RootCoordCatalogCutoverResponse, error) {
+		return client.RootCoordCatalogCutover(ctx, in)
+	})
+}
+
 func (c *Client) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	request = typeutil.Clone(request)
 	commonpbutil.UpdateMsgBase(
