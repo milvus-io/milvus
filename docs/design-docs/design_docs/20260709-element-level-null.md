@@ -1,49 +1,25 @@
-# Array / ArrayOfVector Element-Level Null
+# Array Element-Level Null
 
 ## Background
 
-Milvus already supports row-level nullable fields. For `Array` and
-`ArrayOfVector`, row-level null means the whole array value of a row is null.
-
-This design adds element-level null:
+Milvus already supports row-level null. For `Array` and `ArrayOfVector`, this
+means the whole value of a row can be null. This design adds null elements
+inside a valid row:
 
 ```text
 int_array    = [1, null, 3]
 vector_array = [vec0, null, vec2]
 ```
 
-The new schema flag is `element_nullable`. It is independent from the existing
-row-level `nullable` flag:
+The two schema flags are independent:
 
 ```text
-nullable          controls whether the whole field row can be null
-element_nullable  controls whether array elements can be null
+nullable          controls whether the whole row can be null
+element_nullable  controls whether an array element can be null
 ```
 
-The main storage decisions are:
-
-- Scalar `Array` keeps the current Arrow `Binary` shape and stores element
-  validity in a protobuf row wrapper.
-- `ArrayOfVector` uses Arrow native `List<FixedSizeBinary>` child validity in
-  Storage V2.
-- Storage V1 rejects element-nullable `Array` / `ArrayOfVector`.
-
-## Scope
-
-Goals:
-
-- support element-level null for scalar `Array`;
-- support element-level null for `ArrayOfVector`;
-- preserve existing row-level null semantics;
-- define the behavior across insert, storage, load, query, and indexes.
-
-Non-goals:
-
-- no element-level null for non-array scalar or vector fields;
-- no scalar `Array` migration to Arrow native `List<T>` in this change;
-- no Storage V1 support;
-- no global element-level valid bitset;
-- no `array_contains(array, null)` support initially.
+This design targets Storage V2 and later. Storage V1 does not encode element
+validity and must reject element-nullable fields.
 
 ## Semantics
 
@@ -54,151 +30,140 @@ array is null       row-level null
 array[0] is null    element-level null
 ```
 
-For a row-level null array:
+For a null row or an out-of-range element index, element expressions produce
+no match:
 
 ```text
-array is null        -> true
 array[0] is null     -> false
 array[0] is not null -> false
 array[0] > 1         -> false
 ```
 
-For an out-of-range element index:
+An element expression reads a value only after checking:
 
-```text
-array[10] is null     -> false
-array[10] is not null -> false
-array[10] > 1         -> false
-```
+1. the row is valid;
+2. the index is in range;
+3. the element is valid when `element_nullable=true`.
 
-Element expressions may read the element value only after checking:
-
-1. the array row is valid;
-2. the element index is in range;
-3. if `element_nullable=true`, the element is valid.
-
-Value-matching operators skip null elements. `array_length` counts logical
-slots, including null slots.
+Value operators skip null elements. `array_length` counts logical slots,
+including null slots.
 
 ## Data Flow
 
-The write and read path is:
-
 ```text
-SDK / client payload
+SDK payload
   -> Proxy validation
   -> schemapb.FieldData
-  -> WAL message body: msgpb.InsertRequest
+  -> WAL msgpb.InsertRequest
   -> storage.InsertData
   -> Storage V2 Arrow Record
   -> Parquet / Vortex
   -> QueryNode load
-  -> segcore field data / chunks
-  -> query / search expression
+  -> segcore runtime data
+  -> query / search expressions and indexes
 ```
 
-WAL stores the `msgpb.InsertRequest` payload and does not parse array element
-validity. The compatibility boundary is whether all payload producers and
-consumers understand `element_nullable` and `nullable_data`, not the physical
-WAL append format.
+The WAL stores the insert request and does not reinterpret array contents.
+Element-null compatibility is determined by the payload producers and
+consumers, not by a separate WAL format.
 
-## Proto
+## Proto Representation
 
-`FieldSchema` adds `element_nullable`:
+`valid_data` belongs to the message that carries the immediate logical values:
 
 ```protobuf
-message FieldSchema {
-  ...
-  bool nullable = 15;
-  bool element_nullable = 18; // New field
+message ScalarField {
+  oneof data {
+    ...
+    ArrayArray array_data = 8;
+  }
+  repeated bool valid_data = 17;
+}
+
+message VectorField {
+  int64 dim = 1;
+  oneof data {
+    ...
+    VectorArray vector_array = 8;
+  }
+  repeated bool valid_data = 9;
 }
 ```
 
-`element_nullable` is valid only for `DataType_Array` and
-`DataType_ArrayOfVector`.
-
-Scalar `Array` adds a nullable row wrapper:
-
-```protobuf
-// New message
-message NullableScalarArrayValue {
-  ScalarField data = 1; // New field
-  repeated bool valid_data = 2; // New field
-}
-
-message ArrayArray {
-  repeated ScalarField data = 1;
-  DataType element_type = 2;
-  repeated NullableScalarArrayValue nullable_data = 3; // New field
-}
-```
-
-Representation:
+The same fields have different scopes at different nesting levels:
 
 ```text
-element_nullable=false -> use ArrayArray.data
-element_nullable=true  -> use ArrayArray.nullable_data
+FieldData.scalars.valid_data              row validity for a scalar field
+FieldData.vectors.valid_data              row validity for a vector field
+ArrayArray.data[row].valid_data            element validity in one scalar array
+VectorArray.data[row].valid_data           element validity in one vector array
 ```
 
-Scalar `Array` is logical-shaped. A null element still occupies a typed scalar
-slot, and `valid_data[i]` decides whether the slot is valid:
+`FieldData.valid_data` remains a legacy row-validity source. Readers accept it
+as a fallback, but a payload must not populate both legacy and field-specific
+row validity. New writers store row validity on `ScalarField` or `VectorField`.
+
+No nullable wrapper message or `nullable_data` field is needed. An array row is
+still represented by its existing `ScalarField` or `VectorField`, with
+`valid_data` attached directly to that row message.
+
+### Scalar Array
+
+`ArrayArray.data` always carries `ScalarField` rows:
 
 ```text
 int_array = [10, null, 30]
 
-NullableScalarArrayValue {
-  data.long_data.data = [10, 0, 30]
+ScalarField {
+  long_data.data = [10, 0, 30]
   valid_data = [true, false, true]
 }
 ```
 
-The placeholder value for a null element has no semantic meaning.
+Scalar array payload is dense in logical element space. A null element keeps a
+typed placeholder, and the placeholder value has no semantic meaning.
 
-`ArrayOfVector` uses the same wrapper pattern:
-
-```protobuf
-// New message
-message NullableVectorArrayValue {
-  VectorField data = 1; // New field
-  repeated bool valid_data = 2; // New field
-}
-
-message VectorArray {
-  int64 dim = 1;
-  repeated VectorField data = 2;
-  DataType element_type = 3;
-  repeated NullableVectorArrayValue nullable_data = 4; // New field
-}
-```
-
-For `ArrayOfVector`, vector payload is compact:
+The required invariant is:
 
 ```text
-len(valid_data) = logical vector count
-count(valid_data == true) = physical vector count in VectorField data
+len(row.valid_data) = number of scalar payload values
 ```
 
-Null vector elements do not occupy `dim` floats or bytes in `VectorField`.
+### ArrayOfVector
+
+`VectorArray.data` always carries `VectorField` rows. Vector payload is compact
+when element validity is present:
+
+```text
+logical elements: [vec0, null, vec2]
+row.valid_data:   [true, false, true]
+physical payload: [vec0, vec2]
+```
+
+The required invariants are:
+
+```text
+len(row.valid_data) = logical vector count
+count(row.valid_data == true) = physical vector count
+```
 
 ## Proxy and Go Data
 
-Proxy owns request-level semantic validation:
+Proxy validates the request against the schema:
 
-- `element_nullable` is used only by `Array` / `ArrayOfVector`;
-- `data` and `nullable_data` are not both set;
-- `element_nullable=true` uses `nullable_data`;
-- `element_nullable=false` does not use `nullable_data`;
-- column-based `nullable_data` is expanded to `NumRows`;
-- scalar `Array` `valid_data` length equals logical element count;
-- `ArrayOfVector` physical vector count equals `count(valid_data == true)`.
+- child `valid_data` is allowed only when `element_nullable=true`;
+- scalar array child validity length equals the scalar payload length;
+- ArrayOfVector physical vector count equals the number of valid elements;
+- max capacity counts logical elements, including null elements;
+- row validity has exactly one source;
+- row-level null expansion does not overwrite child element validity.
 
-`InsertData` keeps one active representation:
+The Go storage structures keep one row container for each type:
 
 ```go
 type ArrayFieldData struct {
     ElementType     schemapb.DataType
     Data            []*schemapb.ScalarField
-    NullableData    []*schemapb.NullableScalarArrayValue
     ValidData       []bool
     Nullable        bool
     ElementNullable bool
@@ -208,140 +173,87 @@ type VectorArrayFieldData struct {
     Dim             int64
     ElementType     schemapb.DataType
     Data            []*schemapb.VectorField
-    NullableData    []*schemapb.NullableVectorArrayValue
     ValidData       []bool
     Nullable        bool
     ElementNullable bool
 }
 ```
 
-`ValidData` remains row-level validity. Element validity is stored in each
-`NullableData[i].ValidData`.
-
-Struct array sub-fields are flattened before normal validation. For
-element-nullable sub-fields, flattening must preserve `NullableData`,
-`ElementType`, and row-level `ValidData`.
+The struct-level `ValidData` is row validity. Element validity stays in each
+`Data[row].ValidData` proto message. Sorting, merging, result slicing, struct
+flattening, and conversion back to `InsertRecord` move the row message as a
+unit, preserving its child validity.
 
 ## Storage V2
 
-Storage V2 writes through Arrow:
+Scalar `Array` remains Arrow `Binary`. Each non-null Arrow value is the
+serialized `ScalarField` row, so its child `valid_data` is preserved in the
+protobuf bytes:
 
 ```text
-InsertData -> BuildRecord -> Arrow Record -> Parquet / Vortex
+Arrow Binary value = proto.Marshal(ArrayArray.data[row])
 ```
 
-Scalar `Array` remains Arrow `Binary`:
+`ArrayOfVector` remains Arrow native list data:
 
 ```text
-element_nullable=false: Arrow Binary value = proto.Marshal(ScalarField)
-element_nullable=true:  Arrow Binary value = proto.Marshal(NullableScalarArrayValue)
+List<FixedSizeBinary(vector_bytes)>
 ```
 
-The Arrow type is `Binary` in both cases. The reader must use
-`FieldSchema.element_nullable` to choose the correct protobuf message type.
-
-`ArrayOfVector` uses Arrow native list:
-
-```text
-Arrow type:
-  List<FixedSizeBinary(vector_bytes)>
-```
-
-The column is a `ListArray`. Each row is a list value, and all vector elements
-share one child `FixedSizeBinaryArray`:
+Arrow list validity represents row null. Child `FixedSizeBinary` validity
+represents vector-element null:
 
 ```text
 ListArray
   offsets  = [0, 3, 3, 5]
-  validity = [true, false, true]        # row-level null
+  validity = [true, false, true]        # row validity
 
   values = FixedSizeBinaryArray
-    validity = [true, false, true, ...] # element-level null
-    values   = [vec0, null, vec2, ...]
+    validity = [true, false, true, ...] # element validity
 ```
 
-Storage V1 must reject element-nullable `Array` / `ArrayOfVector` at both schema
-writer and direct payload writer boundaries.
+The writer expands compact vector payload into Arrow child positions. The
+reader compacts valid child vectors back into `VectorField` payload and writes
+the child bitmap to `VectorField.valid_data`.
+
+Parquet and Vortex consume the Arrow representation; neither changes the
+Milvus-level null semantics.
 
 ## Load and Runtime
 
-For scalar `Array`:
+Load reconstructs both validity levels separately:
 
-- `element_nullable=false` deserializes `ScalarField`;
-- `element_nullable=true` deserializes `NullableScalarArrayValue`;
-- C++ `Array` / `ArrayView` carries element type, logical length, data buffer,
-  optional offsets, `element_nullable`, and element validity bitmap.
+- row validity enters the existing row-level valid bitset;
+- scalar array element validity is reconstructed from serialized
+  `ScalarField.valid_data`;
+- ArrayOfVector element validity is reconstructed from Arrow child validity.
 
-Scalar array data remains logical-shaped. Invalid elements still have
-placeholders in the data buffer. Callers should use:
-
-```cpp
-bool is_element_valid(int index) const;
-T get_data_unchecked<T>(int index) const;
-```
-
-`get_data_unchecked` is valid only after bounds and element validity checks.
-
-For `ArrayOfVector`, runtime data keeps logical element count while vector
-payload remains compact:
-
-```text
-logical vector slots: [valid, null, valid]
-physical vectors:     [vec0, vec2]
-valid_data:           [true, false, true]
-```
-
-Logical vector access must map through element validity to a physical vector
-offset.
+Element null does not require a global element-level filter bitset. Expression
+result granularity determines the result bitset: normal filters produce row
+bits, while element-filter internals may temporarily produce element bits.
 
 ## Query and Index
 
-Raw data expressions must check row validity, bounds, and element validity
-before reading element values. This affects:
-
-- `array[index] == value`
-- `array[index] > value`
-- `array[index] in [...]`
-- `array[index] is null`
-- `array[index] is not null`
-- string `like` / regex on `string_array[index]`
-- `array_contains`, `array_contains_all`, `array_contains_any`
-- `array_length`
-
-`is null` uses different validity sources:
+The affected raw-data expressions include indexed access, comparisons, term
+queries, string `like` / regex, `array_contains*`, and null predicates.
 
 ```text
-array is null        -> row ValidData
-array[index] is null -> per-row element valid_data
+array is null        uses row validity
+array[index] is null uses the selected row's child validity
 ```
 
-Array indexes can be used by both row-level and element-level expressions:
-
-```text
-array_contains(array, 3)  row-level result
-array[0] in [1, 2]        row-level result over a fixed element slot
-element_filter(...)       element-level intermediate result
-```
-
-Nested indexes need both row validity and element validity. Index primitive APIs
-should not infer the caller's semantic level only from whether the index is
-nested. The execution layer must preserve query context and request the correct
-validity semantics.
+Nested indexes use element document IDs, so they need element validity in
+addition to the existing row validity. Index primitives should return results
+in their own document-ID space; the execution layer remains responsible for
+converting nested element results to row results when required.
 
 ## Compatibility
 
-The new proto fields are wire-compatible. Old nodes ignore unknown fields and
-would treat `element_nullable` as false.
+The added schema and `valid_data` fields are protobuf wire-compatible, but old
+nodes do not understand their semantics and will treat placeholders as real
+values. Therefore element-nullable fields require a cluster-version gate and
+must not be inserted, loaded, or queried by old nodes.
 
-That is not semantically safe. Old nodes cannot correctly process
-element-nullable payloads because they do not understand:
-
-- `FieldSchema.element_nullable`
-- `ArrayArray.nullable_data`
-- `VectorArray.nullable_data`
-- Storage V2 read/write semantics
-- segcore load/query/index semantics
-
-Therefore, in a mixed-version cluster, element-nullable collections must not be
-inserted, loaded, or queried by old nodes. Creating or using
-`element_nullable=true` requires a cluster-version gate.
+Within the supported version, readers accept legacy `FieldData.valid_data` for
+row validity. New payloads use `ScalarField.valid_data` or
+`VectorField.valid_data`, and dual row-validity sources are rejected.

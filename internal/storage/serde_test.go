@@ -508,6 +508,45 @@ func TestArrayOfVectorSerializationRejectsInvalidPayloadLength(t *testing.T) {
 	assert.Contains(t, err.Error(), "not divisible")
 }
 
+func TestArrayOfVectorSerializationRejectsInvalidCompactElementCount(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		vector      *schemapb.VectorField
+	}{
+		{
+			name:        "float vector",
+			elementType: schemapb.DataType_FloatVector,
+			vector: &schemapb.VectorField{
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
+				},
+				ValidData: []bool{true, true},
+			},
+		},
+		{
+			name:        "int8 vector",
+			elementType: schemapb.DataType_Int8Vector,
+			vector: &schemapb.VectorField{
+				Data:      &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3, 4}},
+				ValidData: []bool{true, true},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := serdeMap[schemapb.DataType_ArrayOfVector]
+			builder := array.NewBuilder(memory.DefaultAllocator, entry.arrowType(4, tt.elementType))
+			defer builder.Release()
+
+			err := entry.serialize(builder, tt.vector, tt.elementType)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "compact physical payload")
+		})
+	}
+}
+
 func TestArrayOfVectorEmptyArray(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1262,20 +1301,16 @@ func TestBuildRecord_ElementNullableArrayRoundTrip(t *testing.T) {
 			100: &ArrayFieldData{
 				ElementType:     schemapb.DataType_Int64,
 				ElementNullable: true,
-				NullableData: []*schemapb.NullableScalarArrayValue{
+				Data: []*schemapb.ScalarField{
 					{
-						Data: &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_LongData{
-								LongData: &schemapb.LongArray{Data: []int64{10, 0}},
-							},
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{10, 0}},
 						},
 						ValidData: []bool{true, false},
 					},
 					{
-						Data: &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_LongData{
-								LongData: &schemapb.LongArray{Data: []int64{20}},
-							},
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{20}},
 						},
 						ValidData: []bool{true},
 					},
@@ -1296,9 +1331,9 @@ func TestBuildRecord_ElementNullableArrayRoundTrip(t *testing.T) {
 	entry := serdeMap[schemapb.DataType_Array]
 	value, err := entry.deserialize(record.Column(0), 0, schemapb.DataType_Int64, 0, true, true)
 	require.NoError(t, err)
-	row := value.(*schemapb.NullableScalarArrayValue)
+	row := value.(*schemapb.ScalarField)
 	assert.Equal(t, []bool{true, false}, row.GetValidData())
-	assert.Equal(t, []int64{10, 0}, row.GetData().GetLongData().GetData())
+	assert.Equal(t, []int64{10, 0}, row.GetLongData().GetData())
 }
 
 func TestBuildRecord_ElementNullableArrayOfVectorRoundTrip(t *testing.T) {
@@ -1323,15 +1358,13 @@ func TestBuildRecord_ElementNullableArrayOfVectorRoundTrip(t *testing.T) {
 				ElementType:     schemapb.DataType_FloatVector,
 				ElementNullable: true,
 				Dim:             int64(dim),
-				NullableData: []*schemapb.NullableVectorArrayValue{
-					{
-						Data:      makeFloatVec(dim, 1, 2, 3, 4, 5, 6, 7, 8),
-						ValidData: []bool{true, false, true},
-					},
+				Data: []*schemapb.VectorField{
+					makeFloatVec(dim, 1, 2, 3, 4, 5, 6, 7, 8),
 				},
 			},
 		},
 	}
+	insertData.Data[100].(*VectorArrayFieldData).Data[0].ValidData = []bool{true, false, true}
 
 	arrowSchema, err := ConvertToArrowSchema(schema, false)
 	require.NoError(t, err)
@@ -1345,9 +1378,9 @@ func TestBuildRecord_ElementNullableArrayOfVectorRoundTrip(t *testing.T) {
 	entry := serdeMap[schemapb.DataType_ArrayOfVector]
 	value, err := entry.deserialize(record.Column(0), 0, schemapb.DataType_FloatVector, dim, true, true)
 	require.NoError(t, err)
-	row := value.(*schemapb.NullableVectorArrayValue)
+	row := value.(*schemapb.VectorField)
 	assert.Equal(t, []bool{true, false, true}, row.GetValidData())
-	assert.Equal(t, []float32{1, 2, 3, 4, 5, 6, 7, 8}, row.GetData().GetFloatVector().GetData())
+	assert.Equal(t, []float32{1, 2, 3, 4, 5, 6, 7, 8}, row.GetFloatVector().GetData())
 }
 
 func TestBuildRecordRejectsElementNullableMismatch(t *testing.T) {
@@ -1444,12 +1477,10 @@ func TestBuildRecordRejectsElementNullableMismatch(t *testing.T) {
 				100: &ArrayFieldData{
 					ElementType:     schemapb.DataType_Int64,
 					ElementNullable: true,
-					NullableData: []*schemapb.NullableScalarArrayValue{
+					Data: []*schemapb.ScalarField{
 						{
-							Data: &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_LongData{
-									LongData: &schemapb.LongArray{Data: []int64{1}},
-								},
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{1}},
 							},
 							ValidData: []bool{true},
 						},
@@ -1489,15 +1520,13 @@ func TestBuildRecordRejectsElementNullableMismatch(t *testing.T) {
 					ElementType:     schemapb.DataType_FloatVector,
 					ElementNullable: true,
 					Dim:             int64(dim),
-					NullableData: []*schemapb.NullableVectorArrayValue{
-						{
-							Data:      makeFloatVec(dim, 1, 2, 3, 4),
-							ValidData: []bool{true},
-						},
+					Data: []*schemapb.VectorField{
+						makeFloatVec(dim, 1, 2, 3, 4),
 					},
 				},
 			},
 		}
+		insertData.Data[100].(*VectorArrayFieldData).Data[0].ValidData = []bool{true}
 
 		arrowSchema, err := ConvertToArrowSchema(schema, false)
 		require.NoError(t, err)
@@ -1532,7 +1561,7 @@ func TestBuildRecord_ElementNullableArrayOfVectorRejectsMissingTypedData(t *test
 				ElementType:     schemapb.DataType_FloatVector,
 				ElementNullable: true,
 				Dim:             int64(dim),
-				NullableData: []*schemapb.NullableVectorArrayValue{
+				Data: []*schemapb.VectorField{
 					{ValidData: []bool{false}},
 				},
 			},
@@ -1546,5 +1575,5 @@ func TestBuildRecord_ElementNullableArrayOfVectorRejectsMissingTypedData(t *test
 
 	err = BuildRecord(recordBuilder, insertData, schema)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "requires typed vector data")
+	assert.Contains(t, err.Error(), "FloatVector data is nil")
 }

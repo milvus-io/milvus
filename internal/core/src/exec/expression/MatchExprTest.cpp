@@ -751,7 +751,7 @@ BuildNullableStructInsertData(const std::shared_ptr<Schema>& schema,
 
     const std::vector<bool> valid = {true, false, true, true, false};
     for (auto is_valid : valid) {
-        sub_field->add_valid_data(is_valid);
+        sub_field->mutable_scalars()->add_valid_data(is_valid);
     }
 
     auto append_row = [array_data](std::initializer_list<int32_t> values) {

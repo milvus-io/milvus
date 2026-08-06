@@ -564,14 +564,15 @@ func ValidateNullableVectorFieldDataCompact(fieldData *schemapb.FieldData, logic
 	if fieldData == nil || !typeutil.IsSupportedNullableVectorType(fieldData.GetType()) {
 		return nil
 	}
-	if len(fieldData.GetValidData()) == 0 && !requireValidData {
+	validData := typeutil.GetFieldDataValidData(fieldData)
+	if len(validData) == 0 && !requireValidData {
 		return nil
 	}
 	physicalRows, err := GetVectorFieldPhysicalRows(fieldData.GetFieldName(), fieldData.GetType(), fieldData.GetVectors())
 	if err != nil {
 		return err
 	}
-	return ValidateNullableVectorCompactRows(fieldData.GetFieldName(), fieldData.GetValidData(), physicalRows, logicalRows, requireValidData)
+	return ValidateNullableVectorCompactRows(fieldData.GetFieldName(), validData, physicalRows, logicalRows, requireValidData)
 }
 
 func ValidateNullableVectorFieldDataCompactWithDim(fieldData *schemapb.FieldData, logicalRows uint64, requireValidData bool, dim int64) error {
@@ -581,14 +582,15 @@ func ValidateNullableVectorFieldDataCompactWithDim(fieldData *schemapb.FieldData
 	if !typeutil.IsSupportedNullableVectorType(fieldData.GetType()) {
 		return nil
 	}
-	if len(fieldData.GetValidData()) == 0 && !requireValidData {
+	validData := typeutil.GetFieldDataValidData(fieldData)
+	if len(validData) == 0 && !requireValidData {
 		return nil
 	}
 	physicalRows, err := getVectorFieldPhysicalRowsWithDim(fieldData.GetFieldName(), fieldData.GetType(), fieldData.GetVectors(), dim)
 	if err != nil {
 		return err
 	}
-	return ValidateNullableVectorCompactRows(fieldData.GetFieldName(), fieldData.GetValidData(), physicalRows, logicalRows, requireValidData)
+	return ValidateNullableVectorCompactRows(fieldData.GetFieldName(), validData, physicalRows, logicalRows, requireValidData)
 }
 
 // GetNumRowOfFieldDataWithSchema returns num of rows with schema specification.
@@ -599,7 +601,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 	if err != nil {
 		return 0, err
 	}
-	if len(fieldData.GetValidData()) > 0 && typeutil.IsSupportedNullableVectorType(fieldSchema.GetDataType()) {
+	validData := typeutil.GetFieldDataValidData(fieldData)
+	if len(validData) > 0 && typeutil.IsSupportedNullableVectorType(fieldSchema.GetDataType()) {
 		dim := fieldData.GetVectors().GetDim()
 		if dim == 0 && fieldSchema.GetDataType() != schemapb.DataType_SparseFloatVector {
 			dim, err = typeutil.GetDim(fieldSchema)
@@ -607,10 +610,10 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 				return 0, err
 			}
 		}
-		if err := ValidateNullableVectorFieldDataCompactWithDim(fieldData, uint64(len(fieldData.GetValidData())), false, dim); err != nil {
+		if err := ValidateNullableVectorFieldDataCompactWithDim(fieldData, uint64(len(validData)), false, dim); err != nil {
 			return 0, err
 		}
-		return uint64(len(fieldData.GetValidData())), nil
+		return uint64(len(validData)), nil
 	}
 	switch fieldSchema.GetDataType() {
 	case schemapb.DataType_Bool:
@@ -631,16 +634,11 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
 	case schemapb.DataType_Array:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 			break
 		}
-		arrayData := fieldData.GetScalars().GetArrayData()
-		if fieldSchema.GetElementNullable() {
-			fieldNumRows = getNumRowsOfScalarField(arrayData.GetNullableData())
-		} else {
-			fieldNumRows = getNumRowsOfScalarField(arrayData.GetData())
-		}
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetArrayData().GetData())
 	case schemapb.DataType_JSON:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetJsonData().GetData())
 	case schemapb.DataType_Geometry:
@@ -649,8 +647,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetGeometryWktData().GetData())
 		}
 	case schemapb.DataType_FloatVector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfFloatVectorField(fieldData.GetVectors().GetFloatVector().GetData(), dim)
@@ -659,8 +657,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_BinaryVector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfBinaryVectorField(fieldData.GetVectors().GetBinaryVector(), dim)
@@ -669,8 +667,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_Float16Vector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfFloat16VectorField(fieldData.GetVectors().GetFloat16Vector(), dim)
@@ -679,8 +677,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_BFloat16Vector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfBFloat16VectorField(fieldData.GetVectors().GetBfloat16Vector(), dim)
@@ -689,14 +687,14 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_SparseFloatVector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			fieldNumRows = uint64(len(fieldData.GetVectors().GetSparseFloatVector().GetContents()))
 		}
 	case schemapb.DataType_Int8Vector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfInt8VectorField(fieldData.GetVectors().GetInt8Vector(), dim)
@@ -705,15 +703,10 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_ArrayOfVector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
-			vectorArray := fieldData.GetVectors().GetVectorArray()
-			if fieldSchema.GetElementNullable() && len(vectorArray.GetNullableData()) > 0 {
-				fieldNumRows = getNumRowsOfArrayVectorField(vectorArray.GetNullableData())
-			} else {
-				fieldNumRows = getNumRowsOfArrayVectorField(vectorArray.GetData())
-			}
+			fieldNumRows = getNumRowsOfArrayVectorField(fieldData.GetVectors().GetVectorArray().GetData())
 		}
 	default:
 		return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", fieldSchema.GetDataType())
@@ -726,6 +719,7 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 	var fieldNumRows uint64
 	var err error
+	validData := typeutil.GetFieldDataValidData(fieldData)
 	switch fieldType := fieldData.Field.(type) {
 	case *schemapb.FieldData_Scalars:
 		scalarField := fieldData.GetScalars()
@@ -745,16 +739,11 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 		case *schemapb.ScalarField_StringData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetStringData().Data)
 		case *schemapb.ScalarField_ArrayData:
-			if len(fieldData.GetValidData()) > 0 {
-				fieldNumRows = uint64(len(fieldData.GetValidData()))
+			if len(validData) > 0 {
+				fieldNumRows = uint64(len(validData))
 				break
 			}
-			arrayData := scalarField.GetArrayData()
-			if len(arrayData.GetNullableData()) > 0 {
-				fieldNumRows = getNumRowsOfScalarField(arrayData.GetNullableData())
-			} else {
-				fieldNumRows = getNumRowsOfScalarField(arrayData.GetData())
-			}
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetArrayData().GetData())
 		case *schemapb.ScalarField_JsonData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetJsonData().Data)
 		case *schemapb.ScalarField_GeometryData:
@@ -764,11 +753,11 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 		}
 	case *schemapb.FieldData_Vectors:
 		vectorField := fieldData.GetVectors()
-		if len(fieldData.GetValidData()) > 0 {
-			if err := ValidateNullableVectorFieldDataCompact(fieldData, uint64(len(fieldData.GetValidData())), false); err != nil {
+		if len(validData) > 0 {
+			if err := ValidateNullableVectorFieldDataCompact(fieldData, uint64(len(validData)), false); err != nil {
 				return 0, err
 			}
-			return uint64(len(fieldData.GetValidData())), nil
+			return uint64(len(validData)), nil
 		}
 		switch vectorFieldType := vectorField.Data.(type) {
 		case *schemapb.VectorField_FloatVector:
@@ -804,12 +793,7 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 				return 0, err
 			}
 		case *schemapb.VectorField_VectorArray:
-			vectorArray := vectorField.GetVectorArray()
-			if len(vectorArray.GetNullableData()) > 0 {
-				fieldNumRows = getNumRowsOfArrayVectorField(vectorArray.GetNullableData())
-			} else {
-				fieldNumRows = getNumRowsOfArrayVectorField(vectorArray.GetData())
-			}
+			fieldNumRows = getNumRowsOfArrayVectorField(vectorField.GetVectorArray().GetData())
 		default:
 			return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", vectorFieldType)
 		}

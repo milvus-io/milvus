@@ -5,6 +5,50 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// GetFieldDataValidData returns the validity of the immediate values carried by
+// FieldData. New payloads store it on ScalarField or VectorField; FieldData is
+// retained as a legacy fallback for older payloads.
+func GetFieldDataValidData(fieldData *schemapb.FieldData) []bool {
+	if validData := fieldData.GetValidData(); len(validData) > 0 {
+		return validData
+	}
+	if scalars := fieldData.GetScalars(); scalars != nil {
+		return scalars.GetValidData()
+	}
+	return fieldData.GetVectors().GetValidData()
+}
+
+// SetFieldDataValidData writes validity to the current field-specific location
+// and clears the legacy FieldData.valid_data source.
+func SetFieldDataValidData(fieldData *schemapb.FieldData, validData []bool) {
+	if fieldData == nil {
+		return
+	}
+	fieldData.ValidData = nil
+	switch field := fieldData.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		if field.Scalars == nil {
+			field.Scalars = &schemapb.ScalarField{}
+		}
+		field.Scalars.ValidData = validData
+	case *schemapb.FieldData_Vectors:
+		if field.Vectors == nil {
+			field.Vectors = &schemapb.VectorField{}
+		}
+		field.Vectors.ValidData = validData
+	}
+}
+
+// HasFieldDataValidDataConflict reports whether both the legacy and current
+// validity locations are populated for the same FieldData.
+func HasFieldDataValidDataConflict(fieldData *schemapb.FieldData) bool {
+	if fieldData == nil || len(fieldData.GetValidData()) == 0 {
+		return false
+	}
+	return len(fieldData.GetScalars().GetValidData()) > 0 ||
+		len(fieldData.GetVectors().GetValidData()) > 0
+}
+
 type FieldDataBuilder struct {
 	dt         schemapb.DataType
 	data       []any
@@ -45,9 +89,6 @@ func (b *FieldDataBuilder) Add(data any) *FieldDataBuilder {
 func (b *FieldDataBuilder) Build() *schemapb.FieldData {
 	field := &schemapb.FieldData{
 		Type: b.dt,
-	}
-	if b.hasInvalid {
-		field.ValidData = b.valid
 	}
 
 	switch b.dt {
@@ -153,6 +194,9 @@ func (b *FieldDataBuilder) Build() *schemapb.FieldData {
 		}
 	default:
 		return nil
+	}
+	if b.hasInvalid {
+		SetFieldDataValidData(field, b.valid)
 	}
 	return field
 }

@@ -361,7 +361,7 @@ func rowAlignedStringFieldData(fieldData *schemapb.FieldData, rowNum int) ([]str
 	}
 
 	data := fieldData.GetScalars().GetStringData().GetData()
-	validData := fieldData.GetValidData()
+	validData := typeutil.GetFieldDataValidData(fieldData)
 	if len(validData) == 0 {
 		if len(data) != rowNum {
 			return nil, merr.WrapErrServiceInternalMsg(

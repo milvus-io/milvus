@@ -697,8 +697,7 @@ func TestNewFieldData_ElementNullableArrayPayloads(t *testing.T) {
 	arrayData, ok := fd.(*ArrayFieldData)
 	require.True(t, ok)
 	assert.True(t, arrayData.ElementNullable)
-	assert.NotNil(t, arrayData.NullableData)
-	assert.Nil(t, arrayData.Data)
+	assert.NotNil(t, arrayData.Data)
 
 	vectorArraySchema := &schemapb.FieldSchema{
 		FieldID:         101,
@@ -714,6 +713,5 @@ func TestNewFieldData_ElementNullableArrayPayloads(t *testing.T) {
 	vectorArrayData, ok := fd.(*VectorArrayFieldData)
 	require.True(t, ok)
 	assert.True(t, vectorArrayData.ElementNullable)
-	assert.NotNil(t, vectorArrayData.NullableData)
-	assert.Nil(t, vectorArrayData.Data)
+	assert.NotNil(t, vectorArrayData.Data)
 }

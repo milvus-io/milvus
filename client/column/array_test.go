@@ -301,6 +301,16 @@ func (s *ArraySuite) TestBasic() {
 	})
 }
 
+func (s *ArraySuite) TestNullableFieldDataValidity() {
+	column := NewColumnInt64Array("array", [][]int64{{1, 2}})
+	column.SetNullable(true)
+	s.Require().NoError(column.AppendNull())
+
+	fd := column.FieldData()
+	s.False(hasFieldDataValidDataConflict(fd))
+	s.Equal([]bool{true, false}, fd.GetScalars().GetValidData())
+}
+
 func TestArrays(t *testing.T) {
 	suite.Run(t, new(ArraySuite))
 }

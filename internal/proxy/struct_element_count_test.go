@@ -79,12 +79,10 @@ type nullableIntArrayRow struct {
 }
 
 func structElementCountTestNullableScalarArray(fieldName string, rows ...nullableIntArrayRow) *schemapb.FieldData {
-	data := make([]*schemapb.NullableScalarArrayValue, 0, len(rows))
+	data := make([]*schemapb.ScalarField, 0, len(rows))
 	for _, row := range rows {
-		data = append(data, &schemapb.NullableScalarArrayValue{
-			Data: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: row.values}},
-			},
+		data = append(data, &schemapb.ScalarField{
+			Data:      &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: row.values}},
 			ValidData: row.validData,
 		})
 	}
@@ -94,7 +92,7 @@ func structElementCountTestNullableScalarArray(fieldName string, rows ...nullabl
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_ArrayData{
-					ArrayData: &schemapb.ArrayArray{NullableData: data},
+					ArrayData: &schemapb.ArrayArray{Data: data},
 				},
 			},
 		},
@@ -107,12 +105,10 @@ type nullableFloatVectorArrayRow struct {
 }
 
 func structElementCountTestNullableVectorArray(fieldName string, rows ...nullableFloatVectorArrayRow) *schemapb.FieldData {
-	data := make([]*schemapb.NullableVectorArrayValue, 0, len(rows))
+	data := make([]*schemapb.VectorField, 0, len(rows))
 	for _, row := range rows {
-		data = append(data, &schemapb.NullableVectorArrayValue{
-			Data: &schemapb.VectorField{
-				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: row.values}},
-			},
+		data = append(data, &schemapb.VectorField{
+			Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: row.values}},
 			ValidData: row.validData,
 		})
 	}
@@ -122,7 +118,7 @@ func structElementCountTestNullableVectorArray(fieldName string, rows ...nullabl
 		Field: &schemapb.FieldData_Vectors{
 			Vectors: &schemapb.VectorField{
 				Data: &schemapb.VectorField_VectorArray{
-					VectorArray: &schemapb.VectorArray{NullableData: data},
+					VectorArray: &schemapb.VectorArray{Data: data},
 				},
 			},
 		},
@@ -249,10 +245,8 @@ func TestCheckAndFlattenStructFieldDataAllowsElementNullableSubFields(t *testing
 
 	require.NoError(t, err)
 	require.Len(t, insertMsg.FieldsData, 2)
-	assert.Len(t, insertMsg.FieldsData[0].GetScalars().GetArrayData().GetNullableData(), 1)
-	assert.Empty(t, insertMsg.FieldsData[0].GetScalars().GetArrayData().GetData())
-	assert.Len(t, insertMsg.FieldsData[1].GetVectors().GetVectorArray().GetNullableData(), 1)
-	assert.Empty(t, insertMsg.FieldsData[1].GetVectors().GetVectorArray().GetData())
+	assert.Len(t, insertMsg.FieldsData[0].GetScalars().GetArrayData().GetData(), 1)
+	assert.Len(t, insertMsg.FieldsData[1].GetVectors().GetVectorArray().GetData(), 1)
 }
 
 func TestCheckAndFlattenStructFieldDataRejectsMismatchedElementNullableRowCounts(t *testing.T) {
@@ -356,22 +350,22 @@ func TestCheckAndFlattenStructFieldDataAllowsNullableStructWithElementNullableSu
 		values:    []int32{1, 0},
 		validData: []bool{true, false},
 	})
-	field1.ValidData = validData
+	typeutil.SetFieldDataValidData(field1, validData)
 	field2 := structElementCountTestNullableVectorArray("field2", nullableFloatVectorArrayRow{
 		values:    []float32{0.1, 0.2},
 		validData: []bool{true, false},
 	})
-	field2.ValidData = validData
+	typeutil.SetFieldDataValidData(field2, validData)
 	insertMsg := structElementCountTestInsertMsg(structElementCountTestStructData(field1, field2))
 
 	err := checkAndFlattenStructFieldData(schema, insertMsg)
 
 	require.NoError(t, err)
 	require.Len(t, insertMsg.FieldsData, 2)
-	assert.Equal(t, validData, insertMsg.FieldsData[0].GetValidData())
-	assert.Equal(t, validData, insertMsg.FieldsData[1].GetValidData())
-	assert.Len(t, insertMsg.FieldsData[0].GetScalars().GetArrayData().GetNullableData(), 1)
-	assert.Len(t, insertMsg.FieldsData[1].GetVectors().GetVectorArray().GetNullableData(), 1)
+	assert.Equal(t, validData, insertMsg.FieldsData[0].GetScalars().GetValidData())
+	assert.Equal(t, validData, insertMsg.FieldsData[1].GetVectors().GetValidData())
+	assert.Len(t, insertMsg.FieldsData[0].GetScalars().GetArrayData().GetData(), 1)
+	assert.Len(t, insertMsg.FieldsData[1].GetVectors().GetVectorArray().GetData(), 1)
 }
 
 func TestCheckAndFlattenStructFieldDataAllowsRawPayloadNamesWithStoredStructSubFieldNames(t *testing.T) {
@@ -460,9 +454,9 @@ func TestCheckAndFlattenStructFieldDataAllowsNullableNullRowAndPresentRow(t *tes
 		},
 	}
 	field1 := structElementCountTestScalarArray("field1", []int32{1, 2})
-	field1.ValidData = []bool{false, true}
+	typeutil.SetFieldDataValidData(field1, []bool{false, true})
 	field2 := structElementCountTestVectorArray("field2", []float32{0.1, 0.2, 0.3, 0.4})
-	field2.ValidData = []bool{false, true}
+	typeutil.SetFieldDataValidData(field2, []bool{false, true})
 	insertMsg := structElementCountTestInsertMsg(structElementCountTestStructData(field1, field2))
 
 	err := checkAndFlattenStructFieldData(schema, insertMsg)

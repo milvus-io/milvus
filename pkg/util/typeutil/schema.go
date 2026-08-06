@@ -267,20 +267,11 @@ func CalcScalarSize(column *schemapb.FieldData) int {
 		}
 	case schemapb.DataType_Array:
 		arrayData := column.GetScalars().GetArrayData()
-		if len(arrayData.GetNullableData()) > 0 {
-			for _, array := range arrayData.GetNullableData() {
-				res += CalcScalarSize(&schemapb.FieldData{
-					Field: &schemapb.FieldData_Scalars{Scalars: array.GetData()},
-					Type:  arrayData.GetElementType(),
-				})
-			}
-		} else {
-			for _, array := range arrayData.GetData() {
-				res += CalcScalarSize(&schemapb.FieldData{
-					Field: &schemapb.FieldData_Scalars{Scalars: array},
-					Type:  arrayData.GetElementType(),
-				})
-			}
+		for _, array := range arrayData.GetData() {
+			res += CalcScalarSize(&schemapb.FieldData{
+				Field: &schemapb.FieldData_Scalars{Scalars: array},
+				Type:  arrayData.GetElementType(),
+			})
 		}
 	case schemapb.DataType_JSON:
 		for _, str := range column.GetScalars().GetJsonData().GetData() {
@@ -342,25 +333,14 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 			res += len(fs.GetScalars().GetStringData().Data[rowOffset])
 		case schemapb.DataType_Array:
 			arrayData := fs.GetScalars().GetArrayData()
-			if len(arrayData.GetNullableData()) > 0 {
-				if rowOffset >= len(arrayData.GetNullableData()) {
-					return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
-				}
-				array := arrayData.GetNullableData()[rowOffset]
-				res += CalcScalarSize(&schemapb.FieldData{
-					Field: &schemapb.FieldData_Scalars{Scalars: array.GetData()},
-					Type:  arrayData.GetElementType(),
-				})
-			} else {
-				if rowOffset >= len(arrayData.GetData()) {
-					return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
-				}
-				array := arrayData.GetData()[rowOffset]
-				res += CalcScalarSize(&schemapb.FieldData{
-					Field: &schemapb.FieldData_Scalars{Scalars: array},
-					Type:  arrayData.GetElementType(),
-				})
+			if rowOffset >= len(arrayData.GetData()) {
+				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
 			}
+			array := arrayData.GetData()[rowOffset]
+			res += CalcScalarSize(&schemapb.FieldData{
+				Field: &schemapb.FieldData_Scalars{Scalars: array},
+				Type:  arrayData.GetElementType(),
+			})
 		case schemapb.DataType_JSON:
 			if rowOffset >= len(fs.GetScalars().GetJsonData().GetData()) {
 				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
@@ -377,7 +357,7 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 			schemapb.DataType_BFloat16Vector,
 			schemapb.DataType_Int8Vector,
 			schemapb.DataType_SparseFloatVector:
-			validData := fs.GetValidData()
+			validData := GetFieldDataValidData(fs)
 			isNullRow := len(validData) > 0 && rowOffset < len(validData) && !validData[rowOffset]
 			if isNullRow {
 				continue
@@ -401,20 +381,10 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 			}
 		case schemapb.DataType_ArrayOfVector:
 			arrayVector := fs.GetVectors().GetVectorArray()
-			if len(arrayVector.GetNullableData()) > 0 {
-				if int(fieldIdx) >= len(arrayVector.GetNullableData()) {
-					return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
-				}
-				array := arrayVector.GetNullableData()[fieldIdx]
-				if array != nil && array.GetData() != nil {
-					res += calcVectorSize(array.GetData(), arrayVector.GetElementType())
-				}
-			} else {
-				if int(fieldIdx) >= len(arrayVector.GetData()) {
-					return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
-				}
-				res += calcVectorSize(arrayVector.GetData()[fieldIdx], arrayVector.GetElementType())
+			if int(fieldIdx) >= len(arrayVector.GetData()) {
+				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
 			}
+			res += calcVectorSize(arrayVector.GetData()[fieldIdx], arrayVector.GetElementType())
 		default:
 			panic("Unknown data type:" + fs.GetType().String())
 		}
@@ -908,11 +878,7 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 			case *schemapb.ScalarField_ArrayData:
 				arrayData := &schemapb.ArrayArray{
 					ElementType: scalarField.GetArrayData().GetElementType(),
-				}
-				if len(scalarField.GetArrayData().GetNullableData()) > 0 {
-					arrayData.NullableData = make([]*schemapb.NullableScalarArrayValue, 0, topK)
-				} else {
-					arrayData.Data = make([]*schemapb.ScalarField, 0, topK)
+					Data:        make([]*schemapb.ScalarField, 0, topK),
 				}
 				scalar.Scalars.Data = &schemapb.ScalarField_ArrayData{ArrayData: arrayData}
 			}
@@ -961,11 +927,7 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 				vectorArray := &schemapb.VectorArray{
 					Dim:         vectorField.GetVectorArray().GetDim(),
 					ElementType: vectorField.GetVectorArray().GetElementType(),
-				}
-				if len(vectorField.GetVectorArray().GetNullableData()) > 0 {
-					vectorArray.NullableData = make([]*schemapb.NullableVectorArrayValue, 0, topK)
-				} else {
-					vectorArray.Data = make([]*schemapb.VectorField, 0, topK)
+					Data:        make([]*schemapb.VectorField, 0, topK),
 				}
 				vectors.Vectors.Data = &schemapb.VectorField_VectorArray{VectorArray: vectorArray}
 			}
@@ -976,6 +938,9 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 					Fields: PrepareResultFieldData(fieldData.GetStructArrays().GetFields(), topK),
 				},
 			}
+		}
+		if len(GetFieldDataValidData(fieldData)) > 0 {
+			SetFieldDataValidData(fd, make([]bool, 0, topK))
 		}
 		result = append(result, fd)
 	}
@@ -1013,7 +978,7 @@ func NewFieldDataIdxComputerWithSchema(fieldsData []*schemapb.FieldData, schema 
 	}
 
 	for i, fieldData := range fieldsData {
-		validData := fieldData.GetValidData()
+		validData := GetFieldDataValidData(fieldData)
 		fieldSchema := fieldSchemas[fieldData.GetFieldId()]
 		isVector := IsSupportedNullableVectorType(fieldData.GetType())
 		isNullableVector := false
@@ -1041,7 +1006,7 @@ func (c *FieldDataIdxComputer) Compute(rowIdx int64) []int64 {
 				c.resultBuffer[i] = -1
 				continue
 			}
-			validData := fieldData.GetValidData()
+			validData := GetFieldDataValidData(fieldData)
 			for j := c.lastRowIdx; j < rowIdx && j < int64(len(validData)); j++ {
 				if validData[j] {
 					c.dataIndices[i]++
@@ -1079,18 +1044,11 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 			}
 			dst[i] = dstFieldData
 		}
-		// assign null data
-		if len(fieldData.GetValidData()) != 0 {
-			if dstFieldData.ValidData == nil {
-				dstFieldData.ValidData = make([]bool, 0)
-			}
-			valid := fieldData.ValidData[idx]
-			dstFieldData.ValidData = append(dstFieldData.ValidData, valid)
-		} else if fieldIdx < 0 {
-			if dstFieldData.ValidData == nil {
-				dstFieldData.ValidData = make([]bool, 0)
-			}
-			dstFieldData.ValidData = append(dstFieldData.ValidData, false)
+		srcValidData := GetFieldDataValidData(fieldData)
+		appendValidity := len(srcValidData) != 0 || fieldIdx < 0
+		valid := fieldIdx >= 0
+		if len(srcValidData) != 0 {
+			valid = srcValidData[idx]
 		}
 		switch fieldType := fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
@@ -1174,20 +1132,6 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				/* #nosec G103 */
 				appendSize += int64(unsafe.Sizeof(srcScalar.StringData.Data[idx]))
 			case *schemapb.ScalarField_ArrayData:
-				if len(srcScalar.ArrayData.GetNullableData()) > 0 {
-					if dstScalar.GetArrayData() == nil {
-						dstScalar.Data = &schemapb.ScalarField_ArrayData{
-							ArrayData: &schemapb.ArrayArray{
-								NullableData: []*schemapb.NullableScalarArrayValue{srcScalar.ArrayData.GetNullableData()[idx]},
-								ElementType:  srcScalar.ArrayData.ElementType,
-							},
-						}
-					} else {
-						dstScalar.GetArrayData().NullableData = append(dstScalar.GetArrayData().NullableData, srcScalar.ArrayData.GetNullableData()[idx])
-					}
-					appendSize += int64(unsafe.Sizeof(srcScalar.ArrayData.GetNullableData()[idx]))
-					break
-				}
 				if dstScalar.GetArrayData() == nil {
 					dstScalar.Data = &schemapb.ScalarField_ArrayData{
 						ArrayData: &schemapb.ArrayArray{
@@ -1257,7 +1201,7 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				}
 			}
 			dstVector := dstFieldData.GetVectors()
-			isNullRow := fieldIdx < 0 || (len(fieldData.GetValidData()) > 0 && !fieldData.GetValidData()[idx])
+			isNullRow := fieldIdx < 0 || (len(srcValidData) > 0 && !srcValidData[idx])
 
 			switch srcVector := fieldType.Vectors.Data.(type) {
 			case *schemapb.VectorField_BinaryVector:
@@ -1351,20 +1295,6 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 					appendSize += int64(unsafe.Sizeof(srcVector.Int8Vector[fieldIdx*dim : (fieldIdx+1)*dim]))
 				}
 			case *schemapb.VectorField_VectorArray:
-				if len(srcVector.VectorArray.GetNullableData()) > 0 {
-					if dstVector.GetVectorArray() == nil {
-						dstVector.Data = &schemapb.VectorField_VectorArray{
-							VectorArray: &schemapb.VectorArray{
-								NullableData: []*schemapb.NullableVectorArrayValue{srcVector.VectorArray.GetNullableData()[fieldIdx]},
-								Dim:          srcVector.VectorArray.Dim,
-								ElementType:  srcVector.VectorArray.ElementType,
-							},
-						}
-					} else {
-						dstVector.GetVectorArray().NullableData = append(dstVector.GetVectorArray().NullableData, srcVector.VectorArray.GetNullableData()[fieldIdx])
-					}
-					break
-				}
 				if dstVector.GetVectorArray() == nil {
 					dstVector.Data = &schemapb.VectorField_VectorArray{
 						VectorArray: &schemapb.VectorArray{
@@ -1378,6 +1308,10 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				}
 			}
 		}
+		if appendValidity {
+			dstValidData := GetFieldDataValidData(dstFieldData)
+			SetFieldDataValidData(dstFieldData, append(dstValidData, valid))
+		}
 	}
 
 	return
@@ -1388,18 +1322,29 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 		return
 	}
 
-	// Handle ValidData: use rowIndices if provided, otherwise use dataIndices
-	if len(src.GetValidData()) > 0 {
+	// Handle ValidData: use rowIndices if provided, otherwise use dataIndices.
+	if srcValidData := GetFieldDataValidData(src); len(srcValidData) > 0 {
 		validIndices := dataIndices
 		if len(rowIndices) > 0 {
 			validIndices = rowIndices[0]
 		}
-		if dst.ValidData == nil {
-			dst.ValidData = make([]bool, 0, len(validIndices))
+		switch src.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			if dst.GetScalars() == nil {
+				dst.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{}}
+			}
+		case *schemapb.FieldData_Vectors:
+			if dst.GetVectors() == nil {
+				dst.Field = &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{Dim: src.GetVectors().GetDim()},
+				}
+			}
 		}
+		dstValidData := GetFieldDataValidData(dst)
 		for _, idx := range validIndices {
-			dst.ValidData = append(dst.ValidData, src.ValidData[int(idx)])
+			dstValidData = append(dstValidData, srcValidData[int(idx)])
 		}
+		SetFieldDataValidData(dst, dstValidData)
 	}
 
 	// Return early if no data to copy
@@ -1474,24 +1419,14 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 			if dstScalar.GetArrayData() == nil {
 				arrayData := &schemapb.ArrayArray{
 					ElementType: srcScalar.ArrayData.ElementType,
-				}
-				if len(srcScalar.ArrayData.GetNullableData()) > 0 {
-					arrayData.NullableData = make([]*schemapb.NullableScalarArrayValue, 0, len(dataIndices))
-				} else {
-					arrayData.Data = make([]*schemapb.ScalarField, 0, len(dataIndices))
+					Data:        make([]*schemapb.ScalarField, 0, len(dataIndices)),
 				}
 				dstScalar.Data = &schemapb.ScalarField_ArrayData{
 					ArrayData: arrayData,
 				}
 			}
-			if len(srcScalar.ArrayData.GetNullableData()) > 0 {
-				for _, idx := range dataIndices {
-					dstScalar.GetArrayData().NullableData = append(dstScalar.GetArrayData().NullableData, srcScalar.ArrayData.GetNullableData()[idx])
-				}
-			} else {
-				for _, idx := range dataIndices {
-					dstScalar.GetArrayData().Data = append(dstScalar.GetArrayData().Data, srcScalar.ArrayData.Data[idx])
-				}
+			for _, idx := range dataIndices {
+				dstScalar.GetArrayData().Data = append(dstScalar.GetArrayData().Data, srcScalar.ArrayData.Data[idx])
 			}
 		case *schemapb.ScalarField_JsonData:
 			if dstScalar.GetJsonData() == nil {
@@ -1624,24 +1559,14 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 				vectorArray := &schemapb.VectorArray{
 					Dim:         srcVector.VectorArray.Dim,
 					ElementType: srcVector.VectorArray.ElementType,
-				}
-				if len(srcVector.VectorArray.GetNullableData()) > 0 {
-					vectorArray.NullableData = make([]*schemapb.NullableVectorArrayValue, 0, len(dataIndices))
-				} else {
-					vectorArray.Data = make([]*schemapb.VectorField, 0, len(dataIndices))
+					Data:        make([]*schemapb.VectorField, 0, len(dataIndices)),
 				}
 				dstVector.Data = &schemapb.VectorField_VectorArray{
 					VectorArray: vectorArray,
 				}
 			}
-			if len(srcVector.VectorArray.GetNullableData()) > 0 {
-				for _, idx := range dataIndices {
-					dstVector.GetVectorArray().NullableData = append(dstVector.GetVectorArray().NullableData, srcVector.VectorArray.GetNullableData()[idx])
-				}
-			} else {
-				for _, idx := range dataIndices {
-					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data[idx])
-				}
+			for _, idx := range dataIndices {
+				dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data[idx])
 			}
 		}
 	case *schemapb.FieldData_StructArrays:
@@ -1702,11 +1627,7 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 			case *schemapb.ScalarField_StringData:
 				dstScalar.GetStringData().Data = dstScalar.GetStringData().Data[:len(dstScalar.GetStringData().Data)-1]
 			case *schemapb.ScalarField_ArrayData:
-				if len(dstScalar.GetArrayData().GetNullableData()) > 0 {
-					dstScalar.GetArrayData().NullableData = dstScalar.GetArrayData().NullableData[:len(dstScalar.GetArrayData().NullableData)-1]
-				} else {
-					dstScalar.GetArrayData().Data = dstScalar.GetArrayData().Data[:len(dstScalar.GetArrayData().Data)-1]
-				}
+				dstScalar.GetArrayData().Data = dstScalar.GetArrayData().Data[:len(dstScalar.GetArrayData().Data)-1]
 			case *schemapb.ScalarField_JsonData:
 				dstScalar.GetJsonData().Data = dstScalar.GetJsonData().Data[:len(dstScalar.GetJsonData().Data)-1]
 			case *schemapb.ScalarField_GeometryData:
@@ -1736,11 +1657,7 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 				dstInt8Vector := dstVector.Data.(*schemapb.VectorField_Int8Vector)
 				dstInt8Vector.Int8Vector = dstInt8Vector.Int8Vector[:len(dstInt8Vector.Int8Vector)-int(dim)]
 			case *schemapb.VectorField_VectorArray:
-				if len(dstVector.GetVectorArray().GetNullableData()) > 0 {
-					dstVector.GetVectorArray().NullableData = dstVector.GetVectorArray().NullableData[:len(dstVector.GetVectorArray().NullableData)-1]
-				} else {
-					dstVector.GetVectorArray().Data = dstVector.GetVectorArray().Data[:len(dstVector.GetVectorArray().Data)-1]
-				}
+				dstVector.GetVectorArray().Data = dstVector.GetVectorArray().Data[:len(dstVector.GetVectorArray().Data)-1]
 			}
 		}
 	}
@@ -1761,9 +1678,12 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 		}
 
 		// Update ValidData if present
-		if len(updateFieldData.GetValidData()) != 0 {
-			if len(baseFieldData.GetValidData()) != 0 {
-				baseFieldData.ValidData[baseIdx] = updateFieldData.ValidData[updateIdx]
+		updateValidData := GetFieldDataValidData(updateFieldData)
+		if len(updateValidData) != 0 {
+			baseValidData := GetFieldDataValidData(baseFieldData)
+			if len(baseValidData) != 0 {
+				baseValidData[baseIdx] = updateValidData[updateIdx]
+				SetFieldDataValidData(baseFieldData, baseValidData)
 			}
 		}
 
@@ -2004,7 +1924,8 @@ func UpdateArrayFieldByColumnWithOp(
 		updateIdx := updateIndices[i]
 		// If the upsert payload row is explicitly null, there is nothing to
 		// append/remove; leave the existing base row untouched.
-		if len(update.ValidData) > 0 && !update.ValidData[updateIdx] {
+		updateValidData := GetFieldDataValidData(update)
+		if len(updateValidData) > 0 && !updateValidData[updateIdx] {
 			continue
 		}
 		merged, err := ApplyArrayRowOp(baseData[baseIdx], updateData[updateIdx], op, elementType, maxCapacity)
@@ -2015,8 +1936,10 @@ func UpdateArrayFieldByColumnWithOp(
 		// After a successful merge the base row carries concrete data and
 		// must be marked valid, otherwise downstream readers keep treating
 		// it as null and drop the merged payload silently.
-		if len(base.ValidData) > 0 {
-			base.ValidData[baseIdx] = true
+		baseValidData := GetFieldDataValidData(base)
+		if len(baseValidData) > 0 {
+			baseValidData[baseIdx] = true
+			SetFieldDataValidData(base, baseValidData)
 		}
 	}
 	return nil
@@ -2034,11 +1957,14 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 	}
 
 	// Handle ValidData
-	if len(update.GetValidData()) > 0 && len(base.GetValidData()) > 0 {
+	updateValidData := GetFieldDataValidData(update)
+	baseValidData := GetFieldDataValidData(base)
+	if len(updateValidData) > 0 && len(baseValidData) > 0 {
 		for i, baseIdx := range baseIndices {
 			updateIdx := updateIndices[i]
-			base.ValidData[baseIdx] = update.ValidData[updateIdx]
+			baseValidData[baseIdx] = updateValidData[updateIdx]
 		}
+		SetFieldDataValidData(base, baseValidData)
 	}
 
 	switch baseField := base.Field.(type) {
@@ -2207,7 +2133,7 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 
 // IsCompactNullableVectorFieldData reports whether field uses compact nullable vector payload.
 func IsCompactNullableVectorFieldData(field *schemapb.FieldData) bool {
-	return len(field.GetValidData()) > 0 && IsSupportedNullableVectorType(field.GetType())
+	return len(GetFieldDataValidData(field)) > 0 && IsSupportedNullableVectorType(field.GetType())
 }
 
 func updateCompactNullableVectorFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, updateIndices []int64) error {
@@ -2218,8 +2144,8 @@ func updateCompactNullableVectorFieldDataByColumn(base, update *schemapb.FieldDa
 		return merr.WrapErrParameterInvalidMsg("cannot update nullable vector field %s with %s", base.GetType().String(), update.GetType().String())
 	}
 
-	baseValidData := base.GetValidData()
-	updateValidData := update.GetValidData()
+	baseValidData := GetFieldDataValidData(base)
+	updateValidData := GetFieldDataValidData(update)
 	if len(updateValidData) == 0 {
 		return merr.WrapErrParameterInvalidMsg("nullable vector field %s missing ValidData", update.GetFieldName())
 	}
@@ -2376,7 +2302,7 @@ func updateCompactNullableVectorFieldDataByColumn(base, update *schemapb.FieldDa
 		return merr.WrapErrParameterInvalidMsg("unsupported nullable vector field type %s", base.GetType().String())
 	}
 
-	base.ValidData = newValidData
+	SetFieldDataValidData(base, newValidData)
 	return nil
 }
 
@@ -2440,7 +2366,7 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				return merr.WrapErrParameterInvalidMsg("fields in src but not in dst: " + srcFieldData.Type.String())
 			}
 			fieldData := fieldID2Data[srcFieldData.FieldId]
-			fieldData.ValidData = append(fieldData.ValidData, srcFieldData.GetValidData()...)
+			SetFieldDataValidData(fieldData, append(GetFieldDataValidData(fieldData), GetFieldDataValidData(srcFieldData)...))
 			dstScalar := fieldData.GetScalars()
 			switch srcScalar := fieldType.Scalars.Data.(type) {
 			case *schemapb.ScalarField_BoolData:
@@ -2517,21 +2443,13 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				if dstScalar.GetArrayData() == nil {
 					arrayData := &schemapb.ArrayArray{
 						ElementType: srcScalar.ArrayData.ElementType,
-					}
-					if len(srcScalar.ArrayData.GetNullableData()) > 0 {
-						arrayData.NullableData = srcScalar.ArrayData.GetNullableData()
-					} else {
-						arrayData.Data = srcScalar.ArrayData.Data
+						Data:        srcScalar.ArrayData.Data,
 					}
 					dstScalar.Data = &schemapb.ScalarField_ArrayData{
 						ArrayData: arrayData,
 					}
 				} else {
-					if len(srcScalar.ArrayData.GetNullableData()) > 0 {
-						dstScalar.GetArrayData().NullableData = append(dstScalar.GetArrayData().NullableData, srcScalar.ArrayData.GetNullableData()...)
-					} else {
-						dstScalar.GetArrayData().Data = append(dstScalar.GetArrayData().Data, srcScalar.ArrayData.Data...)
-					}
+					dstScalar.GetArrayData().Data = append(dstScalar.GetArrayData().Data, srcScalar.ArrayData.Data...)
 				}
 			case *schemapb.ScalarField_JsonData:
 				if dstScalar.GetJsonData() == nil {
@@ -2572,7 +2490,7 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 			}
 			fieldData := fieldID2Data[srcFieldData.FieldId]
 			// Merge ValidData for nullable vectors
-			fieldData.ValidData = append(fieldData.ValidData, srcFieldData.GetValidData()...)
+			SetFieldDataValidData(fieldData, append(GetFieldDataValidData(fieldData), GetFieldDataValidData(srcFieldData)...))
 			dstVector := fieldData.GetVectors()
 			switch srcVector := fieldType.Vectors.Data.(type) {
 			case *schemapb.VectorField_BinaryVector:
@@ -2634,21 +2552,13 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 					vectorArray := &schemapb.VectorArray{
 						Dim:         srcVector.VectorArray.Dim,
 						ElementType: srcVector.VectorArray.ElementType,
-					}
-					if len(srcVector.VectorArray.GetNullableData()) > 0 {
-						vectorArray.NullableData = srcVector.VectorArray.GetNullableData()
-					} else {
-						vectorArray.Data = srcVector.VectorArray.Data
+						Data:        srcVector.VectorArray.Data,
 					}
 					dstVector.Data = &schemapb.VectorField_VectorArray{
 						VectorArray: vectorArray,
 					}
 				} else {
-					if len(srcVector.VectorArray.GetNullableData()) > 0 {
-						dstVector.GetVectorArray().NullableData = append(dstVector.GetVectorArray().NullableData, srcVector.VectorArray.GetNullableData()...)
-					} else {
-						dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data...)
-					}
+					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data...)
 				}
 			case nil:
 				// nullable vector field where all rows are null — no vector data to merge
@@ -3600,8 +3510,7 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 }
 
 func GetDataIterator(field *schemapb.FieldData) func(int) any {
-	if field.GetValidData() != nil {
-		validData := field.GetValidData()
+	if validData := GetFieldDataValidData(field); validData != nil {
 		if IsCompactNullableVectorFieldData(field) {
 			idxs, _ := BuildNullableVectorDataIndices(validData)
 			return func(idx int) any {

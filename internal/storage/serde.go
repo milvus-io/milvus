@@ -430,19 +430,6 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return arrow.BinaryTypes.Binary
 		},
 		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error) {
-			if elementNullable {
-				if a.IsNull(i) {
-					return nil, nil
-				}
-				if arr, ok := a.(*array.Binary); ok && i < arr.Len() {
-					v := &schemapb.NullableScalarArrayValue{}
-					if err := proto.Unmarshal(arr.Value(i), v); err != nil {
-						return nil, merr.WrapErrSerializationFailed(err, "failed to unmarshal NullableScalarArrayValue")
-					}
-					return v, nil
-				}
-				return nil, merr.WrapErrServiceInternalMsg("expected *array.Binary, got %T", a)
-			}
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -462,23 +449,16 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				return nil
 			}
 			if builder, ok := b.(*array.BinaryBuilder); ok {
-				if vv, ok := v.(*schemapb.ScalarField); ok {
-					if bytes, err := proto.Marshal(vv); err == nil {
-						builder.Append(bytes)
-						return nil
-					} else {
-						return merr.WrapErrSerializationFailed(err, "failed to marshal ScalarField")
-					}
+				vv, ok := v.(*schemapb.ScalarField)
+				if !ok {
+					return merr.WrapErrServiceInternalMsg("expected *schemapb.ScalarField value, got %T", v)
 				}
-				if vv, ok := v.(*schemapb.NullableScalarArrayValue); ok {
-					if bytes, err := proto.Marshal(vv); err == nil {
-						builder.Append(bytes)
-						return nil
-					} else {
-						return merr.WrapErrSerializationFailed(err, "failed to marshal NullableScalarArrayValue")
-					}
+				if bytes, err := proto.Marshal(vv); err == nil {
+					builder.Append(bytes)
+					return nil
+				} else {
+					return merr.WrapErrSerializationFailed(err, "failed to marshal ScalarField")
 				}
-				return merr.WrapErrServiceInternalMsg("expected *schemapb.ScalarField or *schemapb.NullableScalarArrayValue value, got %T", v)
 			}
 			return merr.WrapErrServiceInternalMsg("expected *array.BinaryBuilder, got %T", b)
 		},
@@ -547,7 +527,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 		deserialize: func(a arrow.Array, i int, elementType schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error) {
 			if elementNullable {
-				return deserializeNullableVectorArrayValue(a, i, elementType, int64(dim))
+				return deserializeElementNullableArrayOfVector(a, i, elementType, int64(dim))
 			}
 			return deserializeArrayOfVector(a, i, elementType, int64(dim), shouldCopy)
 		},
@@ -557,22 +537,32 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				return nil
 			}
 
-			var vf *schemapb.VectorField
-			var elementValidData []bool
-			switch row := v.(type) {
-			case *schemapb.VectorField:
-				vf = row
-			case *schemapb.NullableVectorArrayValue:
-				vf = row.GetData()
-				elementValidData = row.GetValidData()
-				if vf == nil {
-					return merr.WrapErrParameterInvalidMsg("element nullable ArrayOfVector row requires typed vector data")
-				}
-			default:
-				return merr.WrapErrServiceInternalMsg("expected *schemapb.VectorField or *schemapb.NullableVectorArrayValue, got %T", v)
+			vf, ok := v.(*schemapb.VectorField)
+			if !ok {
+				return merr.WrapErrServiceInternalMsg("expected *schemapb.VectorField, got %T", v)
 			}
 			if vf == nil {
 				b.AppendNull()
+				return nil
+			}
+			elementValidData := vf.GetValidData()
+			validateCompactElementPayload := func(physicalVectors int) error {
+				if len(elementValidData) == 0 {
+					return nil
+				}
+				validVectors := 0
+				for _, valid := range elementValidData {
+					if valid {
+						validVectors++
+					}
+				}
+				if validVectors != physicalVectors {
+					return merr.WrapErrStorageMsg(
+						"ArrayOfVector element valid_data has %d valid vectors, but compact physical payload has %d",
+						validVectors,
+						physicalVectors,
+					)
+				}
 				return nil
 			}
 
@@ -587,6 +577,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			appendVectorChunks := func(data []byte) error {
 				numVectors, err := validateVectorArrayElementCount(len(data), bytesPerVector)
 				if err != nil {
+					return err
+				}
+				if err := validateCompactElementPayload(numVectors); err != nil {
 					return err
 				}
 				builder.Append(true)
@@ -621,6 +614,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				floatsPerVector := bytesPerVector / 4
 				numVectors, err := validateVectorArrayElementCount(len(data), floatsPerVector)
 				if err != nil {
+					return err
+				}
+				if err := validateCompactElementPayload(numVectors); err != nil {
 					return err
 				}
 
@@ -1108,7 +1104,7 @@ func createEmptyVectorField(elementType schemapb.DataType, dim int64) (*schemapb
 	}
 }
 
-func deserializeNullableVectorArrayValue(a arrow.Array, i int, elementType schemapb.DataType, dim int64) (any, error) {
+func deserializeElementNullableArrayOfVector(a arrow.Array, i int, elementType schemapb.DataType, dim int64) (any, error) {
 	if a.IsNull(i) {
 		return nil, nil
 	}
@@ -1158,45 +1154,35 @@ func deserializeNullableVectorArrayValue(a arrow.Array, i int, elementType schem
 			validData = append(validData, true)
 			floatData = append(floatData, arrow.Float32Traits.CastFromBytes(binaryArray.Value(idx))...)
 		}
-		return &schemapb.NullableVectorArrayValue{
-			Data: &schemapb.VectorField{
-				Dim: dim,
-				Data: &schemapb.VectorField_FloatVector{
-					FloatVector: &schemapb.FloatArray{Data: floatData},
-				},
+		return &schemapb.VectorField{
+			Dim: dim,
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: floatData},
 			},
 			ValidData: validData,
 		}, nil
 	case schemapb.DataType_BinaryVector:
-		return &schemapb.NullableVectorArrayValue{
-			Data: &schemapb.VectorField{
-				Dim:  dim,
-				Data: &schemapb.VectorField_BinaryVector{BinaryVector: extractByteVectors()},
-			},
+		return &schemapb.VectorField{
+			Dim:       dim,
+			Data:      &schemapb.VectorField_BinaryVector{BinaryVector: extractByteVectors()},
 			ValidData: validData,
 		}, nil
 	case schemapb.DataType_Float16Vector:
-		return &schemapb.NullableVectorArrayValue{
-			Data: &schemapb.VectorField{
-				Dim:  dim,
-				Data: &schemapb.VectorField_Float16Vector{Float16Vector: extractByteVectors()},
-			},
+		return &schemapb.VectorField{
+			Dim:       dim,
+			Data:      &schemapb.VectorField_Float16Vector{Float16Vector: extractByteVectors()},
 			ValidData: validData,
 		}, nil
 	case schemapb.DataType_BFloat16Vector:
-		return &schemapb.NullableVectorArrayValue{
-			Data: &schemapb.VectorField{
-				Dim:  dim,
-				Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: extractByteVectors()},
-			},
+		return &schemapb.VectorField{
+			Dim:       dim,
+			Data:      &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: extractByteVectors()},
 			ValidData: validData,
 		}, nil
 	case schemapb.DataType_Int8Vector:
-		return &schemapb.NullableVectorArrayValue{
-			Data: &schemapb.VectorField{
-				Dim:  dim,
-				Data: &schemapb.VectorField_Int8Vector{Int8Vector: extractByteVectors()},
-			},
+		return &schemapb.VectorField{
+			Dim:       dim,
+			Data:      &schemapb.VectorField_Int8Vector{Int8Vector: extractByteVectors()},
 			ValidData: validData,
 		}, nil
 	case schemapb.DataType_SparseFloatVector:

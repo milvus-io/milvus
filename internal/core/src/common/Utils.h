@@ -46,6 +46,44 @@ namespace milvus {
 #define VEC_FIELD_DATA(data_array, type) \
     (data_array->vectors().type##_vector().data())
 
+inline const google::protobuf::RepeatedField<bool>&
+GetFieldDataRowValidData(const DataArray& field_data) {
+    const bool has_legacy_valid_data = field_data.valid_data_size() > 0;
+    const bool has_field_valid_data =
+        (field_data.has_scalars() &&
+         field_data.scalars().valid_data_size() > 0) ||
+        (field_data.has_vectors() &&
+         field_data.vectors().valid_data_size() > 0);
+    AssertInfo(!(has_legacy_valid_data && has_field_valid_data),
+               "FieldData cannot set both legacy and field-specific "
+               "valid_data");
+    if (has_legacy_valid_data) {
+        return field_data.valid_data();
+    }
+    if (field_data.has_scalars()) {
+        return field_data.scalars().valid_data();
+    }
+    return field_data.vectors().valid_data();
+}
+
+inline google::protobuf::RepeatedField<bool>*
+MutableFieldDataRowValidData(DataArray* field_data) {
+    field_data->clear_valid_data();
+    if (field_data->has_scalars()) {
+        return field_data->mutable_scalars()->mutable_valid_data();
+    }
+    if (field_data->has_vectors()) {
+        return field_data->mutable_vectors()->mutable_valid_data();
+    }
+    auto data_type = static_cast<DataType>(field_data->type());
+    AssertInfo(data_type != DataType::NONE,
+               "cannot set valid_data without FieldData type");
+    if (IsVectorDataType(data_type)) {
+        return field_data->mutable_vectors()->mutable_valid_data();
+    }
+    return field_data->mutable_scalars()->mutable_valid_data();
+}
+
 using CheckDataValid = std::function<bool(size_t)>;
 using SparseValueType = typename knowhere::sparse_u32_f32::ValueType;
 
@@ -324,8 +362,7 @@ SparseBytesToRows(const Iterable& rows, const bool validate = false) {
 // SparseRowsToProto converts a list of knowhere::sparse::SparseRow<SparseValueType> to
 // a milvus::proto::schema::SparseFloatArray. The resulting proto is a deep copy
 // of the source data. source(i) returns the i-th row to be copied.
-inline void
-SparseRowsToProto(
+inline void SparseRowsToProto(
     const std::function<
         const knowhere::sparse::SparseRow<SparseValueType>*(size_t)>& source,
     int64_t rows,
