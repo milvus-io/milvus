@@ -863,7 +863,11 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 							}
 							reallyData[mapKey] = number
 						case gjson.JSON:
-							reallyData[mapKey] = mapValue.Value()
+							// Value() decodes the whole subtree into Go values,
+							// turning every nested number into a float64, so a
+							// nested 9007199254740993 came back as ...992. Keep
+							// the subtree as written; it is re-emitted verbatim.
+							reallyData[mapKey] = json.RawMessage(mapValue.Raw)
 						case gjson.Null:
 							// skip null
 						default:

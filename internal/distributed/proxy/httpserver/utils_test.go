@@ -5213,3 +5213,34 @@ func TestCheckAndSetDataJSONFieldDoesNotWalkNestedNumbers(t *testing.T) {
 	assert.Equal(t, `{"a": 123456789012345678901234567890}`, string(stored))
 	assert.True(t, json.Valid(stored))
 }
+
+// gjson's Value() decodes a whole subtree into Go values, so every nested
+// number went through float64 even after the top-level literal was preserved.
+func TestCheckAndSetDataDynamicFieldKeepsNestedLiterals(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected string
+	}{
+		{"nested integer beyond 2^53", `{"a": 9007199254740993}`, `{"a": 9007199254740993}`},
+		{"nested integer beyond int64", `{"a": 12345678901234567890}`, `{"a": 12345678901234567890}`},
+		{"nested decimal", `{"a": 10.0}`, `{"a": 10.0}`},
+		{"nested exponent", `{"a": 1e300}`, `{"a": 1e300}`},
+		{"array element beyond 2^53", `[9007199254740993]`, `[9007199254740993]`},
+		{"deeply nested", `{"a": {"b": [9007199254740993]}}`, `{"a": {"b": [9007199254740993]}}`},
+		{"strings keep their escapes", `{"a": "x\"y"}`, `{"a": "x\"y"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows, err := insertOneDynamicValue(t, tt.value)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			assert.Equal(t, json.RawMessage(tt.expected), rows[0]["dyn"])
+
+			marshaled, err := json.Marshal(map[string]interface{}{"dyn": rows[0]["dyn"]})
+			require.NoError(t, err)
+			assert.Equal(t, `{"dyn":`+tt.expected+`}`, string(marshaled))
+		})
+	}
+}
