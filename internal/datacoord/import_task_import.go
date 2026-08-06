@@ -148,6 +148,18 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 				mlog.Warn(context.TODO(), "failed to mark import task failed after assemble error",
 					WrapTaskLog(t, mlog.Err(updateErr))...)
 			}
+			// Fail the job too, the way the DataNode-reported failure path below
+			// does. Failing only the task leaves the job Importing:
+			// checkImportingJob skips any task that is not Completed and
+			// processFailed only drops segments, so nothing propagates upward and
+			// tryTimeoutJob eventually overwrites the reason with a generic
+			// timeout message -- the exact outcome this branch exists to avoid.
+			if updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(),
+				UpdateJobState(internalpb.ImportJobState_Failed),
+				UpdateJobReason(err.Error())); updateErr != nil {
+				mlog.Warn(context.TODO(), "failed to mark import job failed after assemble error",
+					WrapTaskLog(t, mlog.Err(updateErr))...)
+			}
 			return
 		}
 		t.retryTimes++
