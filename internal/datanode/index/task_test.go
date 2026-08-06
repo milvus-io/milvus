@@ -282,10 +282,10 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var captured *clusteringpb.AnalyzeInfo
+	var capturedMaxConnections uint32
 	patch := mockey.Mock(analyzecgowrapper.Analyze).To(
 		func(_ context.Context, info *clusteringpb.AnalyzeInfo, _ *indexcgopb.StoragePluginContext) (analyzecgowrapper.CodecAnalyze, error) {
-			captured = info
+			capturedMaxConnections = info.GetStorageConfig().GetMaxConnections()
 			return nil, nil
 		}).Build()
 	defer patch.UnPatch()
@@ -313,8 +313,7 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 
 	err := task.Execute(ctx)
 	suite.NoError(err)
-	suite.Require().NotNil(captured)
-	suite.Equal(uint32(237), captured.GetStorageConfig().GetMaxConnections())
+	suite.Equal(uint32(237), capturedMaxConnections)
 }
 
 func TestAnalyzeTaskSuite(t *testing.T) {
