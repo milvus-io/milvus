@@ -301,7 +301,7 @@ class HashTable : public BaseHashTable {
     allocateTables(uint64_t size);
 
     void
-    fullProbe(HashLookup& lookup, ProbeState& state);
+    fullProbe(HashLookup& lookup, ProbeState& state, bool extraCheck);
 
     void
     clear(bool freeTable = false) override;
