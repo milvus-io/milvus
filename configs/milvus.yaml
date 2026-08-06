@@ -614,6 +614,7 @@ queryNode:
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   scheduler:
     unsolvedQueueSize: 1024
+    requeryUnsolvedQueueSize: 1024 # Maximum number of pending requery tasks in the dedicated requery lane. Requery (the output-field fetch phase of search) bypasses unsolvedQueueSize and is scheduled ahead of regular read tasks, because rejecting it wastes the ANN computation its parent search already completed, while its arrival rate is naturally capped by admitted searches. <= 0 disables the lane.
     # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
     # Max read concurrency would be the value of hardware.GetCPUNum * maxReadConcurrentRatio.
     # It defaults to 2.0, which means max read concurrency would be the value of hardware.GetCPUNum * 2.

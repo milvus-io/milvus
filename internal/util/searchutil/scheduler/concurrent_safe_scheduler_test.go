@@ -117,6 +117,7 @@ func (s *SchedulerSuite) TestConsumeRecvChan() {
 		ch := make(chan addTaskReq, 10)
 		close(ch)
 		scheduler := &scheduler{
+			requeryQueue:     newMergeTaskQueue("requery"),
 			policy:           newFIFOPolicy(),
 			receiveChan:      ch,
 			execChan:         make(chan Task),
@@ -145,6 +146,7 @@ func (s *SchedulerSuite) TestConsumeRecvChan() {
 func (s *SchedulerSuite) TestConsumeRecvChanUsesLoopTimestampForBatch() {
 	now := time.Now()
 	scheduler := &scheduler{
+		requeryQueue:     newMergeTaskQueue("requery"),
 		policy:           newFIFOPolicy(),
 		receiveChan:      make(chan addTaskReq, 1),
 		schedulerCounter: schedulerCounter{},
@@ -176,6 +178,7 @@ func (s *SchedulerSuite) TestConsumeRecvChanUsesLoopTimestampForBatch() {
 
 func (s *SchedulerSuite) TestHandleAddTaskRequestRejectsWhenWaitingQueueFull() {
 	scheduler := &scheduler{
+		requeryQueue:     newMergeTaskQueue("requery"),
 		policy:           newFIFOPolicy(),
 		schedulerCounter: schedulerCounter{},
 	}
@@ -202,6 +205,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestRejectsWhenWaitingQueueFull() {
 func (s *SchedulerSuite) TestHandleAddTaskRequestCleansExpiredTasksBeforeQueueLimit() {
 	now := time.Now()
 	scheduler := &scheduler{
+		requeryQueue:     newMergeTaskQueue("requery"),
 		policy:           newFIFOPolicy(),
 		schedulerCounter: schedulerCounter{},
 	}
@@ -229,6 +233,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestCleansExpiredTasksBeforeQueueLi
 func (s *SchedulerSuite) TestHandleAddTaskRequestSkipsCleanupBeforeQueueFull() {
 	now := time.Now()
 	scheduler := &scheduler{
+		requeryQueue:     newMergeTaskQueue("requery"),
 		policy:           newFIFOPolicy(),
 		schedulerCounter: schedulerCounter{},
 	}
@@ -260,6 +265,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestCleansTasksNearDeadlineBeforeQu
 
 	now := time.Now()
 	scheduler := &scheduler{
+		requeryQueue:     newMergeTaskQueue("requery"),
 		policy:           newFIFOPolicy(),
 		schedulerCounter: schedulerCounter{},
 	}
@@ -290,6 +296,7 @@ func (s *SchedulerSuite) TestAddReturnsContextErrorWhenReceiveBlocks() {
 	defer cancel()
 
 	scheduler := &scheduler{
+		requeryQueue:     newMergeTaskQueue("requery"),
 		policy:           newFIFOPolicy(),
 		receiveChan:      make(chan addTaskReq),
 		schedulerCounter: schedulerCounter{},
@@ -303,6 +310,7 @@ func (s *SchedulerSuite) TestAddReturnsContextErrorWhenReceiveBlocks() {
 func (s *SchedulerSuite) TestHandleAddTaskRequestDoesNotRejectByQueueDelayDeadline() {
 	now := time.Now()
 	scheduler := &scheduler{
+		requeryQueue:     newMergeTaskQueue("requery"),
 		policy:           newFIFOPolicy(),
 		schedulerCounter: schedulerCounter{},
 	}
@@ -329,6 +337,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestDoesNotRejectByQueueDelayDeadli
 func (s *SchedulerSuite) TestHandleAddTaskRequestAcceptsDeadlineWhenQueueEmpty() {
 	now := time.Now()
 	scheduler := &scheduler{
+		requeryQueue:     newMergeTaskQueue("requery"),
 		policy:           newFIFOPolicy(),
 		schedulerCounter: schedulerCounter{},
 	}
@@ -354,6 +363,7 @@ func (s *SchedulerSuite) TestSetupExecListenerRecordsPoppedExpiredTask() {
 
 	now := time.Now()
 	scheduler := &scheduler{
+		requeryQueue:     newMergeTaskQueue("requery"),
 		policy:           newFIFOPolicy(),
 		execChan:         make(chan Task),
 		schedulerCounter: schedulerCounter{},
@@ -385,6 +395,7 @@ func (s *SchedulerSuite) TestClearQueuedTasksRemovesPolicyAndCurrentTask() {
 
 	now := time.Now()
 	scheduler := &scheduler{
+		requeryQueue:     newMergeTaskQueue("requery"),
 		policy:           newFIFOPolicy(),
 		execChan:         make(chan Task),
 		schedulerCounter: schedulerCounter{},

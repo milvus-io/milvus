@@ -95,6 +95,9 @@ type queuedTask struct {
 	Task
 
 	enqueueTime time.Time
+	// requery marks tasks admitted through the dedicated requery lane;
+	// they are excluded from the policy waiting counters.
+	requery bool
 }
 
 func newQueuedTask(task Task, enqueueTime time.Time) *queuedTask {

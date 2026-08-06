@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -33,6 +34,7 @@ func newScheduler(policy schedulePolicy) Scheduler {
 	mlog.Info(context.TODO(), "query node use concurrent safe scheduler", mlog.Int("max_concurrency", maxReadConcurrency))
 	return &scheduler{
 		policy:           policy,
+		requeryQueue:     newMergeTaskQueue("requery"),
 		receiveChan:      make(chan addTaskReq),
 		clearChan:        make(chan clearQueuedReq),
 		execChan:         make(chan Task),
@@ -61,12 +63,16 @@ type clearQueuedResp struct {
 
 // scheduler is a general concurrent safe scheduler implementation by wrapping a schedule policy.
 type scheduler struct {
-	policy      schedulePolicy
-	receiveChan chan addTaskReq
-	clearChan   chan clearQueuedReq
-	execChan    chan Task
-	pool        *conc.Pool[any]
-	gpuPool     *conc.Pool[any]
+	policy schedulePolicy
+	// requeryQueue is a bounded lane dispatched ahead of the policy queue; it is
+	// owned by the schedule goroutine and its tasks stay out of the policy
+	// waiting counters. See tryAddRequeryTask for the rationale.
+	requeryQueue *mergeTaskQueue
+	receiveChan  chan addTaskReq
+	clearChan    chan clearQueuedReq
+	execChan     chan Task
+	pool         *conc.Pool[any]
+	gpuPool      *conc.Pool[any]
 
 	// wg is the waitgroup for internal worker goroutine
 	wg sync.WaitGroup
@@ -172,7 +178,7 @@ func (s *scheduler) schedule() {
 				// drain policy maintained task
 				for task.valid() {
 					execChan <- task.Task
-					s.updateWaitingTaskCounter(-1, -nq)
+					s.onTaskDequeued(task, nq)
 					task = s.produceExecChan(now)
 				}
 				mlog.Info(context.TODO(), "all task put into exeChan, schedule worker exit")
@@ -189,7 +195,7 @@ func (s *scheduler) schedule() {
 		case execChan <- execTask:
 			// Task sent, drop the ownership of sent task.
 			// Update waiting task counter.
-			s.updateWaitingTaskCounter(-1, -nq)
+			s.onTaskDequeued(task, nq)
 			// And produce new task into execChan as much as possible.
 			task = s.produceExecChan(now)
 		}
@@ -223,6 +229,10 @@ func (s *scheduler) consumeRecvChan(req addTaskReq, limit int, now time.Time) {
 // HandleAddTaskRequest handle a add task request.
 // Return true if the process can be continued.
 func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, now time.Time) bool {
+	if s.tryAddRequeryTask(req, now) {
+		return maxWaitTaskNum <= 0 || s.GetWaitingTaskTotal() < maxWaitTaskNum
+	}
+
 	if maxWaitTaskNum > 0 && s.GetWaitingTaskTotal() >= maxWaitTaskNum {
 		s.cleanupExpiredTasks(now)
 	}
@@ -251,6 +261,38 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, n
 	return maxWaitTaskNum <= 0 || s.GetWaitingTaskTotal() < maxWaitTaskNum
 }
 
+// tryAddRequeryTask admits a requery task through the dedicated bounded lane so
+// that a full unsolved queue cannot reject it: a rejected requery discards the
+// ANN computation its parent search already completed. The lane cannot starve
+// regular tasks because requery arrival rate is capped by upstream search
+// admission. Returns false when the lane is disabled or the task is not requery.
+func (s *scheduler) tryAddRequeryTask(req addTaskReq, now time.Time) bool {
+	laneSize := paramtable.Get().QueryNodeCfg.RequeryUnsolvedQueueSize.GetAsInt64()
+	if laneSize <= 0 || contextutil.GetQueryLabel(req.task.Context()) != metrics.ReQueryLabel {
+		return false
+	}
+
+	if int64(s.requeryQueue.len()) >= laneSize {
+		s.cleanupExpiredTasks(now)
+	}
+
+	if err := req.task.Context().Err(); err != nil {
+		mlog.Warn(context.TODO(), "task canceled before enqueue", mlog.Err(err))
+		req.err <- err
+	} else if int64(s.requeryQueue.len()) >= laneSize {
+		req.err <- merr.WrapErrTooManyRequests(
+			int32(laneSize),
+			fmt.Sprintf("limit by %s", paramtable.Get().QueryNodeCfg.RequeryUnsolvedQueueSize.Key),
+		)
+	} else {
+		queued := newQueuedTask(req.task, now)
+		queued.requery = true
+		s.requeryQueue.push(queued)
+		req.err <- nil
+	}
+	return true
+}
+
 // produceExecChan produce task from scheduler into exec chan as much as possible
 func (s *scheduler) produceExecChan(now time.Time) *queuedTask {
 	var task *queuedTask
@@ -266,7 +308,7 @@ func (s *scheduler) produceExecChan(now time.Time) *queuedTask {
 		select {
 		case execChan <- execTask:
 			// Update waiting task counter.
-			s.updateWaitingTaskCounter(-1, -nq)
+			s.onTaskDequeued(task, nq)
 			// Task sent, drop the ownership of sent task.
 			task = nil
 		default:
@@ -338,6 +380,24 @@ func readTaskExecuteOutcome(err error) string {
 	return metrics.FailLabel
 }
 
+// popTask pops the next task to run: the requery lane first (strict priority —
+// completing a requery salvages already-spent ANN computation), then the policy.
+func (s *scheduler) popTask(now time.Time) *queuedTask {
+	if task := s.requeryQueue.pop(); task.valid() {
+		return task
+	}
+	return s.policy.Pop(now)
+}
+
+// onTaskDequeued updates the policy waiting counters when a task leaves the
+// scheduler; requery-lane tasks are tracked by the lane itself only.
+func (s *scheduler) onTaskDequeued(task *queuedTask, nq int64) {
+	if task.valid() && task.requery {
+		return
+	}
+	s.updateWaitingTaskCounter(-1, -nq)
+}
+
 // setupExecListener setup the execChan and next task to run.
 func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time) (*queuedTask, int64, chan Task) {
 	var execChan chan Task
@@ -345,12 +405,12 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 	if !lastWaitingTask.valid() {
 		// No task is waiting to send to execChan, schedule a new one from queue.
 		for {
-			lastWaitingTask = s.policy.Pop(now)
+			lastWaitingTask = s.popTask(now)
 			if !lastWaitingTask.valid() {
 				break
 			}
 			if err := lastWaitingTask.Context().Err(); err != nil {
-				s.updateWaitingTaskCounter(-1, -lastWaitingTask.NQ())
+				s.onTaskDequeued(lastWaitingTask, lastWaitingTask.NQ())
 				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeExpired)
 				lastWaitingTask.Done(err)
 				lastWaitingTask = nil
@@ -373,8 +433,9 @@ func (s *scheduler) cleanupExpiredTasks(now time.Time) {
 	deadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
 	cleanupTime := now.Add(deadlineAdvance)
 	tasks := s.policy.Cleanup(cleanupTime)
+	tasks = append(tasks, s.requeryQueue.cleanup(cleanupTime)...)
 	for _, task := range tasks {
-		s.updateWaitingTaskCounter(-1, -task.NQ())
+		s.onTaskDequeued(task, task.NQ())
 		s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeExpired)
 		task.Done(cleanupTaskError(task))
 	}
@@ -382,6 +443,7 @@ func (s *scheduler) cleanupExpiredTasks(now time.Time) {
 
 func (s *scheduler) clearQueuedTasks(filter TaskFilter, reason string, task *queuedTask, now time.Time) (ClearResult, *queuedTask) {
 	removed := s.policy.Remove(filter, now)
+	removed = append(removed, s.requeryQueue.remove(filter, now)...)
 	if task.valid() && (filter == nil || filter(task.Task)) {
 		removed = append(removed, task)
 		task = nil
@@ -396,7 +458,7 @@ func (s *scheduler) clearQueuedTasks(filter TaskFilter, reason string, task *que
 		nq := removedTask.NQ()
 		result.QueuedCleared++
 		result.QueuedNQCleared += nq
-		s.updateWaitingTaskCounter(-1, -nq)
+		s.onTaskDequeued(removedTask, nq)
 		s.recordReadTaskQueueDuration(removedTask, now, readTaskQueueOutcomeCleared)
 		removedTask.Done(clearErr)
 	}
