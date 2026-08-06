@@ -1231,12 +1231,15 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
     auto reader = milvus_storage::api::Reader::create(
         column_groups, nullptr, all_columns, properties);
     auto estimate_reader_result = reader->get_chunk_reader(0, all_columns);
-    AssertInfo(estimate_reader_result.ok(),
-               "[JsonStats] failed to create estimate chunk reader for column "
-               "group {} segment {}: {}",
-               column_group_id,
-               segment_id_,
-               estimate_reader_result.status().ToString());
+    if (!estimate_reader_result.ok()) {
+        ThrowInfo(
+            milvus::storage::ArrowStatusToErrorCode(estimate_reader_result),
+            "[JsonStats] failed to create estimate chunk reader for column "
+            "group {} segment {}: {}",
+            column_group_id,
+            segment_id_,
+            estimate_reader_result.status().ToString());
+    }
     auto estimate_chunk_reader = std::move(estimate_reader_result).ValueOrDie();
     auto size_estimate =
         milvus::segcore::storagev2translator::FetchColumnSizeEstimates(

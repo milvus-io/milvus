@@ -172,12 +172,14 @@ FetchColumnGroupSizeEstimate(
     int64_t segment_id) {
     auto chunk_reader_result =
         reader.get_chunk_reader(cg_index, needed_columns);
-    AssertInfo(chunk_reader_result.ok(),
-               "get estimate chunk reader failed, segment {}, column group "
-               "index {}, status msg: {}",
-               segment_id,
-               cg_index,
-               chunk_reader_result.status().ToString());
+    if (!chunk_reader_result.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(chunk_reader_result),
+                  "get estimate chunk reader failed, segment {}, column group "
+                  "index {}, status msg: {}",
+                  segment_id,
+                  cg_index,
+                  chunk_reader_result.status().ToString());
+    }
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
     return storagev2translator::FetchColumnSizeEstimates(*chunk_reader);
 }
