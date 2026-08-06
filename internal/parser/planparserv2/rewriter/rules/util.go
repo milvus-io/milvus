@@ -1,4 +1,4 @@
-package rewriter
+package rules
 
 import (
 	"fmt"
@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -88,11 +89,21 @@ func isNumericType(dt schemapb.DataType) bool {
 	return typeutil.IsArithmetic(dt)
 }
 
-func sortTermValues(term *planpb.TermExpr) {
+func sortTermValues(term *planpb.TermExpr) bool {
 	if term == nil || len(term.GetValues()) <= 1 {
-		return
+		return false
 	}
+	before := append([]*planpb.GenericValue(nil), term.GetValues()...)
 	term.Values = sortGenericValues(term.Values)
+	if len(before) != len(term.GetValues()) {
+		return true
+	}
+	for i := range before {
+		if !proto.Equal(before[i], term.GetValues()[i]) {
+			return true
+		}
+	}
+	return false
 }
 
 // sort and deduplicate a list of generic values.
