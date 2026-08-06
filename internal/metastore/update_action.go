@@ -140,6 +140,16 @@ type PartitionStatsVersionEntry struct {
 	Version      int64
 }
 
+// CollectionLoadEntry targets a collection's load-info upsert.
+type CollectionLoadEntry struct {
+	Collection *querypb.CollectionLoadInfo
+}
+
+// PartitionLoadEntry targets a partition's load-info upsert.
+type PartitionLoadEntry struct {
+	Partition *querypb.PartitionLoadInfo
+}
+
 // ReplicaEntry targets a single replica's upsert.
 type ReplicaEntry struct {
 	Replica *querypb.Replica
@@ -173,6 +183,8 @@ func (RefreshJobEntry) isEntry()            {}
 func (AnalyzeTaskEntry) isEntry()           {}
 func (PartitionStatsEntry) isEntry()        {}
 func (PartitionStatsVersionEntry) isEntry() {}
+func (CollectionLoadEntry) isEntry()        {}
+func (PartitionLoadEntry) isEntry()         {}
 func (ReplicaEntry) isEntry()               {}
 func (ReplicaKeyEntry) isEntry()            {}
 func (RoleEntry) isEntry()                  {}
@@ -288,6 +300,24 @@ func SavePartitionStatsVersion(collectionID, partitionID int64, vchannel string,
 		VChannel:     vchannel,
 		Version:      version,
 	}}
+}
+
+// SaveCollectionLoadInfo returns an UpdateAction that persists c's load-info
+// record (an upsert). The collection record is the visibility marker of a
+// collection load - querycoord recovery reads partition load infos only for
+// collections whose record exists - so compose it after every
+// SavePartitionLoadInfo of the same load; the querycoord catalog lands it
+// last on the chunked fallback path, so a crash mid-save leaves the load
+// invisible (and the save retryable) instead of publishing a loaded
+// collection with missing partitions.
+func SaveCollectionLoadInfo(c *querypb.CollectionLoadInfo) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: CollectionLoadEntry{Collection: c}}
+}
+
+// SavePartitionLoadInfo returns an UpdateAction that persists p's load-info
+// record (an upsert).
+func SavePartitionLoadInfo(p *querypb.PartitionLoadInfo) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: PartitionLoadEntry{Partition: p}}
 }
 
 // SaveReplica returns an UpdateAction that persists r as a replica upsert.

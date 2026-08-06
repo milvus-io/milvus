@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -51,16 +52,16 @@ func NewCatalog(cli kv.MetaKv) Catalog {
 }
 
 func (s Catalog) SaveCollection(ctx context.Context, collection *querypb.CollectionLoadInfo, partitions ...*querypb.PartitionLoadInfo) error {
-	k := EncodeCollectionLoadInfoKey(collection.GetCollectionID())
-	v, err := proto.Marshal(collection)
-	if err != nil {
-		return err
+	// one composite commit instead of the legacy collection-then-partitions
+	// two-step, so a crash cannot publish a loaded collection with missing
+	// partitions; the collection record - recovery's visibility marker - is
+	// composed last (see SaveCollectionLoadInfo)
+	actions := make([]metastore.UpdateAction, 0, len(partitions)+1)
+	for _, partition := range partitions {
+		actions = append(actions, metastore.SavePartitionLoadInfo(partition))
 	}
-	err = s.cli.Save(ctx, k, string(v))
-	if err != nil {
-		return err
-	}
-	return s.SavePartition(ctx, partitions...)
+	actions = append(actions, metastore.SaveCollectionLoadInfo(collection))
+	return s.Update(ctx, actions...)
 }
 
 func (s Catalog) SavePartition(ctx context.Context, info ...*querypb.PartitionLoadInfo) error {

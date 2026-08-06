@@ -34,13 +34,43 @@ import (
 //
 // A ReplicaEntry+ActionUpdate is a replica upsert, encoded exactly like
 // SaveReplica. A ReplicaKeyEntry+ActionDelete removes a replica's kv record,
-// encoded exactly like ReleaseReplica. Entries this catalog does not own, or
-// Type/Entry combinations it does not implement, are a caller programming
-// error and are rejected with a ServiceInternal error and no write.
+// encoded exactly like ReleaseReplica. A CollectionLoadEntry/
+// PartitionLoadEntry+ActionUpdate is a load-info upsert, encoded exactly like
+// the legacy SaveCollection/SavePartition; the collection record is staged as
+// a commit op because it is recovery's visibility marker (GetPartitions reads
+// partitions only for collections whose record exists), so on the chunked
+// fallback path it lands last, after every partition record. Entries this
+// catalog does not own, or Type/Entry combinations it does not implement, are
+// a caller programming error and are rejected with a ServiceInternal error
+// and no write.
 func (s Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
 	b := txn.New()
 	for _, action := range actions {
 		switch e := action.Entry.(type) {
+		case metastore.CollectionLoadEntry:
+			if action.Type != metastore.ActionUpdate {
+				return unsupportedAction(action)
+			}
+			if e.Collection == nil {
+				return merr.WrapErrServiceInternalMsg("querycoord catalog: nil collection load info in UpdateAction")
+			}
+			value, err := proto.Marshal(e.Collection)
+			if err != nil {
+				return err
+			}
+			b.CommitSave(EncodeCollectionLoadInfoKey(e.Collection.GetCollectionID()), string(value))
+		case metastore.PartitionLoadEntry:
+			if action.Type != metastore.ActionUpdate {
+				return unsupportedAction(action)
+			}
+			if e.Partition == nil {
+				return merr.WrapErrServiceInternalMsg("querycoord catalog: nil partition load info in UpdateAction")
+			}
+			value, err := proto.Marshal(e.Partition)
+			if err != nil {
+				return err
+			}
+			b.Save(EncodePartitionLoadInfoKey(e.Partition.GetCollectionID(), e.Partition.GetPartitionID()), string(value))
 		case metastore.ReplicaEntry:
 			if action.Type != metastore.ActionUpdate {
 				return unsupportedAction(action)
