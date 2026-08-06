@@ -2957,7 +2957,8 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		segment.ManifestPath = currentManifest
 		catalogErr := errors.New("catalog error")
 		metakv := mockkv.NewMetaKv(suite.T())
-		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(catalogErr).Once()
+		metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+		metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(catalogErr).Once()
 		m := &meta{
 			catalog:  datacoord.NewCatalog(metakv, "", ""),
 			segments: segs,
@@ -2992,8 +2993,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 	suite.Run("catalog error replacement does not update memory", func() {
 		catalogErr := errors.New("catalog error")
 		metakv := mockkv.NewMetaKv(suite.T())
+		metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
 		metakv.EXPECT().HasPrefix(mock.Anything, mock.Anything).Return(false, nil).Times(3)
-		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(catalogErr).Once()
+		metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(catalogErr).Once()
 		m := &meta{
 			catalog:  datacoord.NewCatalog(metakv, "", ""),
 			segments: makeSegments(1, commonpb.SegmentState_Flushed),

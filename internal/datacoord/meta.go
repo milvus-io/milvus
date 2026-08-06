@@ -2464,13 +2464,18 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		return info.SegmentInfo
 	})
 
-	binlogs := make([]metastore.BinlogsIncrement, 0)
+	// Only new segments are persisted here - the inputs stay live until the
+	// results are indexed and made visible (markInputSegmentsDropped), so no
+	// deletion ordering applies. A crash mid-write (on the chunked fallback
+	// path) leaves some invisible segment records that the task-level retry -
+	// serialized with every other segment write by m.segMu - rewrites
+	// byte-identically.
+	actions := make([]metastore.UpdateAction, 0, len(compactToInfos))
 	for _, seg := range compactToInfos {
-		binlogs = append(binlogs, metastore.BinlogsIncrement{Segment: seg})
+		actions = append(actions, metastore.AddSegment(seg))
 	}
-	// only add new segments
-	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
-		mlog.Warn(context.TODO(), "fail to alter compactTo segments", mlog.Err(err))
+	if err := m.catalog.Update(m.ctx, actions...); err != nil {
+		mlog.Warn(m.ctx, "fail to update compactTo segments", mlog.Err(err))
 		return nil, nil, err
 	}
 	lo.ForEach(compactToSegInfos, func(info *SegmentInfo, _ int) {
@@ -3377,8 +3382,16 @@ func (m *meta) completeSortCompactionMutation(
 		mlog.Int64("num rows", segment.GetNumOfRows()),
 		mlog.Int64("segment size", segment.getSegmentSize()),
 		mlog.Int64s("expirQuantiles", segment.GetExpirQuantiles()))
-	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo, segment.SegmentInfo}, metastore.BinlogsIncrement{Segment: segment.SegmentInfo}); err != nil {
-		mlog.Warn(context.TODO(), "fail to alter segments and new segment", mlog.Err(err))
+	// Add the compactTo segment before retiring the compactFrom input, so the
+	// ordered-fallback path always publishes the new segment before the old
+	// one is retired (mirrors completeMixCompactionMutation; AlterSegment
+	// keeps the retirement byte-identical to the legacy AlterSegments
+	// encoding, including the handleDroppedSegment GC-compat binlog write).
+	if err := m.catalog.Update(m.ctx,
+		metastore.AddSegment(segment.SegmentInfo),
+		metastore.AlterSegment(cloned.SegmentInfo),
+	); err != nil {
+		mlog.Warn(m.ctx, "fail to update sort compaction segments", mlog.Err(err))
 		return nil, nil, err
 	}
 
@@ -3505,17 +3518,15 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 		cloned.DataVersion = oldSegment.GetDataVersion() + 1
 	}
 
-	// Prepare binlogs increment for catalog update
-	binlogsIncrement := metastore.BinlogsIncrement{
-		Segment: cloned.SegmentInfo,
-	}
-
 	mlog.Info(m.ctx, "meta update: prepare for complete schema bump compaction mutation - complete",
 		mlog.Int64("num rows", cloned.GetNumOfRows()))
 
-	// Save to catalog
-	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo}, binlogsIncrement); err != nil {
-		mlog.Warn(m.ctx, "fail to alter segment for schema bump compaction", mlog.Err(err))
+	// The in-place adoption rewrites the segment record plus its binlog KVs
+	// from the already-mutated value - exactly the write set AddSegment stages
+	// - so this stays byte-identical to the legacy
+	// AlterSegments(cloned, BinlogsIncrement{cloned}) call.
+	if err := m.catalog.Update(m.ctx, metastore.AddSegment(cloned.SegmentInfo)); err != nil {
+		mlog.Warn(m.ctx, "fail to update segment for schema bump compaction", mlog.Err(err))
 		return nil, nil, err
 	}
 
@@ -3584,11 +3595,15 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 		newSegment.DroppedAt = uint64(time.Now().UnixNano())
 	}
 
-	binlogsIncrement := metastore.BinlogsIncrement{Segment: newSegment.SegmentInfo}
 	mlog.Info(m.ctx, "meta update: prepare replacement for schema bump full rewrite", mlog.Int64("num rows", newSegment.GetNumOfRows()))
 
-	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{dropped.SegmentInfo, newSegment.SegmentInfo}, binlogsIncrement); err != nil {
-		mlog.Warn(m.ctx, "fail to alter replacement segments for schema bump compaction", mlog.Err(err))
+	// Add the replacement segment before retiring the input (see
+	// completeSortCompactionMutation for the ordering rationale).
+	if err := m.catalog.Update(m.ctx,
+		metastore.AddSegment(newSegment.SegmentInfo),
+		metastore.AlterSegment(dropped.SegmentInfo),
+	); err != nil {
+		mlog.Warn(m.ctx, "fail to update replacement segments for schema bump compaction", mlog.Err(err))
 		return nil, nil, err
 	}
 
