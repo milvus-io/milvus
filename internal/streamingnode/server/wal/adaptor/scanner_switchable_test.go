@@ -11,6 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
 	mock_message "github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
@@ -243,7 +244,7 @@ func TestSwitchableScannerStartAfterAlterWALMarker(t *testing.T) {
 	require.Empty(t, outputCh)
 }
 
-func TestSwitchableScannerFallsBackWhenReadWALIsUnavailable(t *testing.T) {
+func TestSwitchableScannerFailsWhenReadWALIsUnavailable(t *testing.T) {
 	channel := types.PChannelInfo{Name: "test-channel"}
 	currentWAL := newTestCurrentWAL(t, channel)
 
@@ -261,11 +262,101 @@ func TestSwitchableScannerFallsBackWhenReadWALIsUnavailable(t *testing.T) {
 	)
 
 	next, err := scanner.Do(context.Background())
-	require.NoError(t, err)
-	catchup, ok := next.(*catchupScanner)
-	require.True(t, ok)
-	_, ok = catchup.deliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
-	require.True(t, ok)
+	require.Nil(t, next)
+	require.ErrorIs(t, err, merr.ErrMqTopicNotFound)
+}
+
+func TestSwitchableScannerRejectsInvalidHistoricalStartPosition(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	currentWAL := newTestCurrentWAL(t, channel)
+	invalidPolicy := &streamingpb.DeliverPolicy{
+		Policy: &streamingpb.DeliverPolicy_StartFrom{
+			StartFrom: &commonpb.MessageID{
+				WALName: commonpb.WALName_RocksMQ,
+				Id:      "invalid-rocksmq-id",
+			},
+		},
+	}
+
+	scanner := newSwitchableScanner(
+		"invalid-start-reader",
+		mlog.With(),
+		currentWAL,
+		nil,
+		invalidPolicy,
+		make(chan message.ImmutableMessage),
+		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			t.Fatal("historical WAL opener must not be called for an invalid start position")
+			return nil, nil
+		},
+		nil,
+	)
+
+	next, err := scanner.Do(context.Background())
+	require.Nil(t, next)
+	require.Error(t, err)
+	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
+}
+
+func TestSwitchableScannerFailsWhenHistoricalWALExhaustsBeforeBoundary(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	currentWAL := newTestCurrentWAL(t, channel)
+
+	messages := make(chan message.ImmutableMessage)
+	close(messages)
+	innerScanner := mock_walimpls.NewMockScannerImpls(t)
+	innerScanner.EXPECT().Chan().Return(messages).Maybe()
+	innerScanner.EXPECT().Error().Return(nil).Once()
+	innerScanner.EXPECT().Close().Return(nil).Once()
+	historicalWAL := mock_walimpls.NewMockWALImpls(t)
+	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
+	historicalWAL.EXPECT().Channel().Return(channel).Maybe()
+	historicalWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(innerScanner, nil).Once()
+	historicalWAL.EXPECT().Close().Return().Once()
+
+	scanner := newSwitchableScanner(
+		"exhausted-reader",
+		mlog.With(),
+		currentWAL,
+		nil,
+		options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
+		make(chan message.ImmutableMessage),
+		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			return historicalWAL, nil
+		},
+		nil,
+	)
+
+	next, err := scanner.Do(context.Background())
+	require.Nil(t, next)
+	require.Error(t, err)
+	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
+}
+
+func TestSwitchableScannerRejectsInvalidAlterWALTarget(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	currentWAL := newTestCurrentWAL(t, channel)
+	historicalWAL := newTestReadWAL(t, message.WALNameRocksmq, channel,
+		newTestAlterWALMessage(commonpb.WALName(12345), 100, rmq.NewRmqID(2), rmq.NewRmqID(1)),
+	)
+
+	scanner := newSwitchableScanner(
+		"invalid-target-reader",
+		mlog.With(),
+		currentWAL,
+		nil,
+		options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
+		make(chan message.ImmutableMessage, 1),
+		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			return historicalWAL, nil
+		},
+		nil,
+	)
+
+	next, err := scanner.Do(context.Background())
+	require.Nil(t, next)
+	require.Error(t, err)
+	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
 }
 
 func TestSwitchableScannerReopensWALAfterReaderFailure(t *testing.T) {

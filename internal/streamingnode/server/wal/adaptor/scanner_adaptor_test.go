@@ -80,23 +80,13 @@ func TestScannerAdaptorReadError(t *testing.T) {
 	assert.NoError(t, s.Error())
 }
 
-func TestScannerAdaptorFallsBackWhenMigrationChainIsUnavailable(t *testing.T) {
+func TestScannerAdaptorFailsWhenMigrationChainIsUnavailable(t *testing.T) {
 	resource.InitForTest(t)
 	channel := types.PChannelInfo{Name: "test-channel", AccessMode: types.AccessModeRO}
-
-	currentMessages := make(chan message.ImmutableMessage, 1)
-	currentMessages <- newTestTimeTickMessage(101, walimplstest.NewTestMessageID(1), walimplstest.NewTestMessageID(1))
-	currentScanner := mock_walimpls.NewMockScannerImpls(t)
-	currentScanner.EXPECT().Chan().Return(currentMessages).Maybe()
-	currentScanner.EXPECT().Close().Return(nil).Once()
 
 	currentWAL := mock_walimpls.NewMockWALImpls(t)
 	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
 	currentWAL.EXPECT().Channel().Return(channel).Maybe()
-	currentWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
-		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
-		return ok
-	})).Return(currentScanner, nil).Once()
 
 	historicalWAL := mock_walimpls.NewMockWALImpls(t)
 	historicalWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
@@ -128,17 +118,11 @@ func TestScannerAdaptorFallsBackWhenMigrationChainIsUnavailable(t *testing.T) {
 		false,
 	)
 
-	deadline := time.After(time.Second)
-	for {
-		select {
-		case msg := <-scanner.Chan():
-			if msg.TimeTick() == 101 {
-				require.NoError(t, scanner.Close())
-				return
-			}
-		case <-deadline:
-			t.Fatal("scanner did not fall back to the current WAL")
-		}
+	select {
+	case <-scanner.Done():
+		require.Error(t, scanner.Error())
+	case <-time.After(time.Second):
+		t.Fatal("scanner did not fail after the migration chain became unavailable")
 	}
 }
 
