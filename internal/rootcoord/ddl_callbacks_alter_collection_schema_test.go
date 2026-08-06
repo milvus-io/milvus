@@ -89,6 +89,29 @@ func buildAlterSchemaReq(dbName, collName, inputField, outputField, funcName str
 	}
 }
 
+func setAddFunctionBackfillConfig(t *testing.T, compactionEnabled, storageV3Enabled, bumpSchemaVersionEnabled, storageVersionEnabled bool) {
+	t.Helper()
+	params := paramtable.Get()
+	configs := []struct {
+		key      string
+		oldValue string
+		value    string
+	}{
+		{params.DataCoordCfg.EnableCompaction.Key, params.DataCoordCfg.EnableCompaction.GetValue(), strconv.FormatBool(compactionEnabled)},
+		{params.CommonCfg.UseLoonFFI.Key, params.CommonCfg.UseLoonFFI.GetValue(), strconv.FormatBool(storageV3Enabled)},
+		{params.DataCoordCfg.BumpSchemaVersionCompactionEnabled.Key, params.DataCoordCfg.BumpSchemaVersionCompactionEnabled.GetValue(), strconv.FormatBool(bumpSchemaVersionEnabled)},
+		{params.DataCoordCfg.StorageVersionCompactionEnabled.Key, params.DataCoordCfg.StorageVersionCompactionEnabled.GetValue(), strconv.FormatBool(storageVersionEnabled)},
+	}
+	for _, config := range configs {
+		require.NoError(t, params.Save(config.key, config.value))
+	}
+	t.Cleanup(func() {
+		for _, config := range configs {
+			require.NoError(t, params.Save(config.key, config.oldValue))
+		}
+	})
+}
+
 func buildAlterSchemaAddFieldReq(dbName, collName, fieldName string, doBackfill bool) *milvuspb.AlterCollectionSchemaRequest {
 	return buildAlterSchemaAddFieldSchemaReq(dbName, collName, &schemapb.FieldSchema{
 		Name:     fieldName,
@@ -132,6 +155,7 @@ func buildAlterSchemaAddFunctionReq(dbName, collName string, functionSchema *sch
 }
 
 func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
+	setAddFunctionBackfillConfig(t, true, true, true, true)
 	core := initStreamingSystemAndCore(t)
 
 	ctx := context.Background()
@@ -1011,6 +1035,7 @@ func TestDDLCallbacksAlterCollectionDropFieldWaitsForSchemaDropReady(t *testing.
 }
 
 func TestDDLCallbacksAlterCollectionSchemaAddSkipsSchemaDropReady(t *testing.T) {
+	setAddFunctionBackfillConfig(t, true, true, true, true)
 	core := initStreamingSystemAndCore(t)
 
 	ctx := context.Background()
@@ -1923,5 +1948,179 @@ func TestApplyBoundFieldIndexesInline(t *testing.T) {
 		err := cb.applyBoundFieldIndexesInline(context.Background(), buildResult([]*indexpb.FieldIndex{boundFieldIndex}))
 		require.Error(t, err)
 		require.ErrorContains(t, err, "failed to apply bound field index")
+	})
+}
+
+// The proxy runs this gate in alterCollectionSchemaTask.preExecuteAdd, but a
+// request hitting RootCoord directly bypasses the proxy entirely — the
+// broadcast callback must enforce it too.
+func TestDDLCallbacksAlterCollectionSchemaRejectsTextFunctionInput(t *testing.T) {
+	coll := &model.Collection{
+		CollectionID: 1,
+		Name:         "coll",
+		Fields: []*model.Field{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID: 101, Name: "text_input", DataType: schemapb.DataType_Text, Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.EnableAnalyzerKey, Value: "true"},
+					{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+				},
+			},
+		},
+	}
+	core := &Core{}
+
+	bm25Req := buildAlterSchemaReq("db", coll.Name, "text_input", "sparse_from_text", "bm25_from_text")
+	bm25Err := core.broadcastAlterCollectionSchemaAdd(context.Background(), nil, coll, bm25Req)
+	require.ErrorIs(t, bm25Err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, bm25Err, "TEXT input field")
+}
+
+func TestDDLCallbacksAlterCollectionSchemaExternalFunctionGates(t *testing.T) {
+	buildCollection := func(inputType schemapb.DataType, externalSpec string) *model.Collection {
+		typeParams := []*commonpb.KeyValuePair{
+			{Key: common.EnableAnalyzerKey, Value: "true"},
+		}
+		if inputType == schemapb.DataType_Text {
+			typeParams = append(typeParams, &commonpb.KeyValuePair{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`})
+		} else {
+			typeParams = append(typeParams, &commonpb.KeyValuePair{Key: common.MaxLengthKey, Value: "256"})
+		}
+		return &model.Collection{
+			CollectionID:   1,
+			Name:           "external_coll",
+			ExternalSource: "s3://bucket/source",
+			ExternalSpec:   externalSpec,
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{
+					FieldID:       101,
+					Name:          "text_input",
+					DataType:      inputType,
+					Nullable:      true,
+					ExternalField: "source_text",
+					TypeParams:    typeParams,
+				},
+			},
+		}
+	}
+	assertGatesSkipped := func(t *testing.T, coll *model.Collection) {
+		t.Helper()
+		gateReachedErr := errors.New("reached bound-index preparation")
+		mixc := imocks.NewMixCoord(t)
+		mixc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, gateReachedErr)
+		core := newTestCore(withMixCoord(mixc))
+		err := core.broadcastAlterCollectionSchemaAdd(
+			context.Background(),
+			nil,
+			coll,
+			buildAlterSchemaReq("db", coll.Name, "text_input", "sparse", "bm25"),
+		)
+		require.ErrorIs(t, err, gateReachedErr)
+	}
+
+	t.Run("external parquet skips backfill config gate", func(t *testing.T) {
+		setAddFunctionBackfillConfig(t, false, false, false, false)
+		assertGatesSkipped(t, buildCollection(schemapb.DataType_VarChar, `{"format":"parquet"}`))
+	})
+
+	t.Run("external parquet TEXT skips both add-function gates", func(t *testing.T) {
+		// Keep the separate, pre-existing TEXT/StorageV3 validation satisfied;
+		// this test is scoped to the two add-function gates introduced by #52220.
+		setAddFunctionBackfillConfig(t, false, true, false, false)
+		assertGatesSkipped(t, buildCollection(schemapb.DataType_Text, `{"format":"parquet"}`))
+	})
+
+	t.Run("milvus-table keeps TEXT gate but skips config gate", func(t *testing.T) {
+		setAddFunctionBackfillConfig(t, false, true, false, false)
+		coll := buildCollection(schemapb.DataType_Text, `{"format":"milvus-table"}`)
+		err := (&Core{}).broadcastAlterCollectionSchemaAdd(
+			context.Background(),
+			nil,
+			coll,
+			buildAlterSchemaReq("db", coll.Name, "text_input", "sparse", "bm25"),
+		)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.Equal(t, merr.InputError, merr.GetErrorType(err))
+		require.ErrorContains(t, err, "TEXT input field")
+	})
+}
+
+func TestDDLCallbacksAlterCollectionSchemaRequiresBackfillConfig(t *testing.T) {
+	coll := &model.Collection{
+		CollectionID: 1,
+		Name:         "coll",
+		Fields: []*model.Field{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID: 101, Name: "text_input", DataType: schemapb.DataType_VarChar, Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "256"},
+					{Key: common.EnableAnalyzerKey, Value: "true"},
+				},
+			},
+		},
+	}
+	tests := []struct {
+		name                     string
+		compactionEnabled        bool
+		storageV3Enabled         bool
+		bumpSchemaVersionEnabled bool
+		storageVersionEnabled    bool
+		expectedErrorSubstring   string
+	}{
+		{"compaction disabled", false, true, true, true, "dataCoord.enableCompaction"},
+		{"StorageV3 disabled", true, false, true, true, "common.storage.useLoonFFI"},
+		{"schema-version bump disabled", true, true, false, true, "dataCoord.compaction.bumpSchemaVersion.enabled"},
+		{"storage-version compaction disabled", true, true, true, false, "dataCoord.compaction.storageVersion.enabled"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setAddFunctionBackfillConfig(t, test.compactionEnabled, test.storageV3Enabled, test.bumpSchemaVersionEnabled, test.storageVersionEnabled)
+			// A nil Core dependency set and nil broadcaster are intentional: the
+			// gate must return before bound-index allocation, resource reservation,
+			// or WAL broadcast touches any of them.
+			err := (&Core{}).broadcastAlterCollectionSchemaAdd(
+				context.Background(),
+				nil,
+				coll,
+				buildAlterSchemaReq("db", coll.Name, "text_input", "sparse", "bm25"),
+			)
+			require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+			require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+			require.ErrorContains(t, err, test.expectedErrorSubstring)
+		})
+	}
+
+	t.Run("all enabled", func(t *testing.T) {
+		setAddFunctionBackfillConfig(t, true, true, true, true)
+		params := paramtable.Get()
+		oldAutoCompaction := params.DataCoordCfg.EnableAutoCompaction.GetValue()
+		require.NoError(t, params.Save(params.DataCoordCfg.EnableAutoCompaction.Key, "false"))
+		t.Cleanup(func() {
+			require.NoError(t, params.Save(params.DataCoordCfg.EnableAutoCompaction.Key, oldAutoCompaction))
+		})
+		core := initStreamingSystemAndCore(t)
+		ctx := context.Background()
+		dbName := "testDB" + funcutil.RandomString(10)
+		collectionName := "testCollection" + funcutil.RandomString(10)
+		createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+		resp, err := core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldSchemaReq(dbName, collectionName, &schemapb.FieldSchema{
+			Name:     "text_input",
+			DataType: schemapb.DataType_VarChar,
+			Nullable: true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "256"},
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+			},
+		}, false))
+		require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+
+		resp, err = core.AlterCollectionSchema(ctx, buildAlterSchemaReq(dbName, collectionName, "text_input", "sparse", "bm25"))
+		require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+		assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
 	})
 }
