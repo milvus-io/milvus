@@ -179,12 +179,17 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 			return
 		}
 		totalSegmentsRows += info.GetNumOfRows()
-		binlogIDs := getBinLogIDs(info, task.FieldID)
-		req.SegmentStats[segID] = &indexpb.SegmentStats{
+		stats := &indexpb.SegmentStats{
 			ID:      segID,
 			NumRows: info.GetNumOfRows(),
-			LogIDs:  binlogIDs,
 		}
+		// StorageV3 segments are read via manifest; V1 via logIDs. Exactly one.
+		if manifest := info.GetManifestPath(); manifest != "" {
+			stats.ManifestPath = manifest
+		} else {
+			stats.LogIDs = getBinLogIDs(info, task.FieldID)
+		}
+		req.SegmentStats[segID] = stats
 	}
 
 	// Extract dim from schema field TypeParams for vector clustering key.
