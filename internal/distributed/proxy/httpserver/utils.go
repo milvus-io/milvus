@@ -472,7 +472,13 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 //
 // An object or an array is rejected. Storing its text is never what the caller
 // meant and it hides the common mistake of addressing the wrong field.
-func stringFieldValue(field string, value gjson.Result) (string, error) {
+//
+// proxy.http.compatibilityMode restores the previous String() rendering for
+// every kind, including the object case.
+func stringFieldValue(field string, value gjson.Result, compatibilityMode bool) (string, error) {
+	if compatibilityMode {
+		return value.String(), nil
+	}
 	switch value.Type {
 	case gjson.Number, gjson.True, gjson.False:
 		return value.Raw, nil
@@ -492,6 +498,9 @@ func stringFieldValue(field string, value gjson.Result) (string, error) {
 func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool) ([]map[string]interface{}, map[string][]bool, error) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
+	// Escape hatch for clients that relied on the previous value handling.
+	// Read once per request rather than per field.
+	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
 	dataResult := gjson.GetBytes(body, HTTPRequestData)
 	dataResultArray := dataResult.Array()
 	if len(dataResultArray) == 0 {
@@ -802,7 +811,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				case schemapb.DataType_Timestamptz:
 					reallyData[fieldName] = dataString
 				case schemapb.DataType_VarChar, schemapb.DataType_String:
-					value, err := stringFieldValue(fieldName, fieldValue)
+					value, err := stringFieldValue(fieldName, fieldValue, compatibilityMode)
 					if err != nil {
 						return reallyDataArray, validDataMap, err
 					}

@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -5088,6 +5089,36 @@ func TestCheckAndSetDataStringFieldRejectsStructures(t *testing.T) {
 			assert.Contains(t, err.Error(), "name")
 			assert.Contains(t, err.Error(), "expects a string")
 			assert.Contains(t, err.Error(), tt.kind)
+		})
+	}
+}
+
+// proxy.http.compatibilityMode restores the previous String() rendering for a
+// string field, including accepting an object as its text.
+func TestCheckAndSetDataStringFieldCompatibilityMode(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
+	paramtable.Get().Save(key, "true")
+	defer paramtable.Get().Reset(key)
+
+	tests := []struct {
+		name     string
+		value    string
+		expected string
+	}{
+		{"object is stringified again", `{"a": 1}`, `{"a": 1}`},
+		{"array is stringified again", `[1, 2]`, `[1, 2]`},
+		{"decimal point is dropped again", `1.0`, `1`},
+		{"exponent is expanded again", `1e19`, `10000000000000000000`},
+		{"string is unchanged", `"abc"`, `abc`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows, err := insertOneStringValue(t, tt.value)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			assert.Equal(t, tt.expected, rows[0]["name"])
 		})
 	}
 }
