@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -63,6 +64,20 @@ func Release() error {
 // WAL is the entrance to interact with the milvus write ahead log.
 func WAL() WALAccesser {
 	return singleton
+}
+
+type pchannelInfoResolver interface {
+	ResolvePChannelInfo(ctx context.Context, vchannel string) (types.PChannelInfo, error)
+}
+
+// ResolvePChannelInfo returns the current pchannel assignment without
+// expanding WALAccesser for callers that do not need assignment discovery.
+func ResolvePChannelInfo(ctx context.Context, vchannel string) (types.PChannelInfo, error) {
+	resolver, ok := singleton.(pchannelInfoResolver)
+	if !ok {
+		return types.PChannelInfo{}, status.NewUnrecoverableError("wal accesser does not support pchannel assignment discovery")
+	}
+	return resolver.ResolvePChannelInfo(ctx, vchannel)
 }
 
 // AppendOption is the option for append operation.
