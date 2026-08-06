@@ -28,6 +28,7 @@ from chaos.checker import (
     SnapshotRestoreChecker,
     TextMatchChecker,
     UpsertChecker,
+    configure_heavy_operation_schedules,
 )
 from common import common_func as cf
 from common.common_type import CaseLabel
@@ -122,6 +123,7 @@ class TestOperations(TestBase):
             Op.null_vector_query: NullVectorQueryChecker(collection_name=c_name),
             Op.add_vector_field: AddVectorFieldChecker(collection_name=c_name),
         }
+        configure_heavy_operation_schedules(checkers)
         log.info(f"init_health_checkers: {checkers}")
         self.health_checkers = checkers
 

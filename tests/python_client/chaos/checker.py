@@ -1,12 +1,14 @@
 import functools
 import json
 import math
+import os
 import random
 import re
 import threading
 import time
 import unittest
 import uuid
+import zlib
 from collections import Counter
 from datetime import UTC, datetime
 from enum import Enum
@@ -340,6 +342,57 @@ def _wait_for_next_operation(checker, wait_seconds):
         sleep(min(1, remaining))
 
 
+def _get_initial_operation_jitter(checker, jitter_seconds):
+    """Return a stable per-checker delay that spreads synchronized operations."""
+    if jitter_seconds <= 0:
+        return 0
+    worker_match = re.fullmatch(r"gw(\d+)", os.getenv("PYTEST_XDIST_WORKER", ""))
+    try:
+        worker_count = int(os.getenv("PYTEST_XDIST_WORKER_COUNT", "0"))
+    except ValueError:
+        worker_count = 0
+    if worker_match and worker_count > 0:
+        worker_index = int(worker_match.group(1))
+        if worker_index < worker_count:
+            slot_start = worker_index * jitter_seconds // worker_count
+            slot_end = (worker_index + 1) * jitter_seconds // worker_count
+            slot_width = max(1, slot_end - slot_start)
+            operation_offset = zlib.crc32(type(checker).__name__.encode("utf-8")) % slot_width
+            return min(jitter_seconds - 1, slot_start + operation_offset)
+    identity = f"{type(checker).__name__}:{getattr(checker, 'c_name', '')}"
+    return zlib.crc32(identity.encode("utf-8")) % jitter_seconds
+
+
+def _run_checker_with_interval(checker, default_interval_seconds):
+    """Run a checker with optional initial jitter and an interruptible interval."""
+    jitter_seconds = getattr(checker, "initial_jitter_seconds", 0)
+    if jitter_seconds > 0:
+        initial_delay = _get_initial_operation_jitter(checker, jitter_seconds)
+        _wait_for_next_operation(checker, initial_delay)
+
+    interval_seconds = getattr(checker, "operation_interval_seconds", None) or default_interval_seconds
+    while checker._keep_running:
+        checker.run_task()
+        _wait_for_next_operation(checker, interval_seconds)
+
+
+def configure_heavy_operation_schedules(checkers):
+    """Throttle and stagger heavy operations in the concurrent chaos workload."""
+    for operation in (
+        Op.flush,
+        Op.add_field,
+        Op.snapshot,
+        Op.restore_snapshot,
+        Op.add_vector_field,
+    ):
+        checker = checkers.get(operation)
+        if checker is not None:
+            checker.configure_operation_schedule(
+                interval_seconds=HEAVY_OP_WAIT_SECONDS,
+                initial_jitter_seconds=HEAVY_OP_WAIT_SECONDS,
+            )
+
+
 def create_index_params_from_dict(field_name: str, index_param_dict: dict) -> IndexParams:
     """Helper function to convert dict-style index params to IndexParams object"""
     index_params = IndexParams()
@@ -506,6 +559,8 @@ class Checker:
         self.average_time = 0
         self.scale = 1 * 10**6
         self.files = []
+        self.operation_interval_seconds = None
+        self.initial_jitter_seconds = 0
         self.word_freq = Counter()
         self.ms = MilvusSys()
         self.bucket_name = cf.param_info.param_bucket_name
@@ -745,6 +800,15 @@ class Checker:
 
         self.initial_entities = self.milvus_client.get_collection_stats(c_name).get("row_count", 0)
         self.scale = 100000  # timestamp scale to make time.time() as int64
+
+    def configure_operation_schedule(self, interval_seconds, initial_jitter_seconds=0):
+        """Configure an operation cadence without changing checker coverage."""
+        if interval_seconds <= 0:
+            raise ValueError("interval_seconds must be positive")
+        if initial_jitter_seconds < 0:
+            raise ValueError("initial_jitter_seconds must be non-negative")
+        self.operation_interval_seconds = interval_seconds
+        self.initial_jitter_seconds = initial_jitter_seconds
 
     def get_schema(self):
         collection_info = self.milvus_client.describe_collection(self.c_name)
@@ -1772,9 +1836,7 @@ class FlushChecker(Checker):
             return str(e), False
 
     def keep_running(self):
-        while self._keep_running:
-            self.run_task()
-            sleep(constants.WAIT_PER_OP * 6)
+        _run_checker_with_interval(self, constants.WAIT_PER_OP * 6)
 
 
 class AddFieldChecker(Checker):
@@ -1831,9 +1893,7 @@ class AddFieldChecker(Checker):
         return res, result
 
     def keep_running(self):
-        while self._keep_running:
-            self.run_task()
-            _wait_for_next_operation(self, HEAVY_OP_WAIT_SECONDS)
+        _run_checker_with_interval(self, HEAVY_OP_WAIT_SECONDS)
 
 
 class InsertChecker(Checker):
@@ -3760,9 +3820,7 @@ class SnapshotChecker(Checker):
         return self.snapshot()
 
     def keep_running(self):
-        while self._keep_running:
-            self.run_task()
-            _wait_for_next_operation(self, HEAVY_OP_WAIT_SECONDS)
+        _run_checker_with_interval(self, HEAVY_OP_WAIT_SECONDS)
 
 
 class SnapshotRestoreChecker(Checker):
@@ -3999,9 +4057,7 @@ class SnapshotRestoreChecker(Checker):
         return self.restore_snapshot()
 
     def keep_running(self):
-        while self._keep_running:
-            self.run_task()
-            _wait_for_next_operation(self, HEAVY_OP_WAIT_SECONDS)
+        _run_checker_with_interval(self, HEAVY_OP_WAIT_SECONDS)
 
 
 class NullVectorSearchChecker(Checker):
@@ -4310,9 +4366,7 @@ class AddVectorFieldChecker(Checker):
         return res, result
 
     def keep_running(self):
-        while self._keep_running:
-            self.run_task()
-            _wait_for_next_operation(self, HEAVY_OP_WAIT_SECONDS)
+        _run_checker_with_interval(self, HEAVY_OP_WAIT_SECONDS)
 
 
 class EntityTTLChecker(Checker):
