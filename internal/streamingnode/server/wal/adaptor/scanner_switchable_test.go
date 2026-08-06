@@ -480,13 +480,15 @@ func TestOldVersionLastConfirmedTracker_LargeWindow(t *testing.T) {
 		ids[i] = mock_message.NewMockMessageID(t)
 	}
 
-	for i := 0; i < totalMessages; i++ {
-		result := tracker.Track(ids[i])
-		if i < windowSize {
-			assert.Equal(t, ids[0], result)
-		} else {
-			expected := ids[i-windowSize]
-			assert.Equal(t, expected, result)
-		}
+	for _, id := range ids[:windowSize] {
+		assert.Equal(t, ids[0], tracker.Track(id))
+	}
+
+	expectedIDs := ids[:totalMessages-windowSize]
+	remainingIDs := ids[windowSize:]
+	for len(remainingIDs) > 0 {
+		assert.Equal(t, expectedIDs[0], tracker.Track(remainingIDs[0]))
+		expectedIDs = expectedIDs[1:]
+		remainingIDs = remainingIDs[1:]
 	}
 }
