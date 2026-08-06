@@ -21,8 +21,9 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"unsafe"
 
-	"github.com/spaolacci/murmur3"
+	"github.com/twmb/murmur3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -51,6 +52,10 @@ func (stringRoutingHasher) Hash(key string) (uint64, error) {
 }
 
 // Hash32Bytes hashing a byte array to uint32
+//
+// Keep this on twmb/murmur3: spaolacci/murmur3's Sum32 walks the input through a
+// bare uintptr, which the runtime's checkptr instrumentation (on for every -race
+// build) rejects. Both produce identical digests.
 func Hash32Bytes(b []byte) (uint32, error) {
 	return murmur3.Sum32(b) & 0x7fffffff, nil
 }
