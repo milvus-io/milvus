@@ -224,16 +224,20 @@ CompactIndexDatas(
             auto& index_data_codec = index_file_slices.at(prefix);
             for (auto i = 0; i < slice_num; ++i) {
                 std::string file_name = GenSlicedFileName(prefix, i);
-                AssertInfo(index_datas.find(file_name) != index_datas.end(),
-                           "lost index slice data");
+                if (!(index_datas.find(file_name) != index_datas.end())) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "lost index slice data");
+                }
                 index_data_codec.codecs_.push_back(
                     std::move(index_datas.at(file_name)));
                 compacted_files.insert(file_name);
                 data_len += index_data_codec.codecs_.back()->PayloadSize();
             }
-            AssertInfo(
-                total_len == data_len,
-                "index len is inconsistent after disassemble and assemble");
+            if (!(total_len == data_len)) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "index len is inconsistent after disassemble and assemble");
+            }
             if (index_datas.count(prefix) > 0) {
                 index_data_codec.codecs_.push_back(
                     std::move(index_datas[prefix]));
@@ -283,12 +287,16 @@ CompactIndexDatasByKey(
     for (auto i = 0; i < slice_num; ++i) {
         std::string file_name = GenSlicedFileName(key, i);
         auto it = index_datas.find(file_name);
-        AssertInfo(it != index_datas.end(), "lost index slice data");
+        if (!(it != index_datas.end())) {
+            ThrowInfo(ErrorCode::DataFormatBroken, "lost index slice data");
+        }
         index_data_codec.codecs_.push_back(std::move(it->second));
         data_len += index_data_codec.codecs_.back()->PayloadSize();
     }
-    AssertInfo(total_len == data_len,
-               "index len is inconsistent after disassemble and assemble");
+    if (!(total_len == data_len)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "index len is inconsistent after disassemble and assemble");
+    }
     index_data_codec.size_ = data_len;
     return index_data_codec;
 }
@@ -319,8 +327,11 @@ AssembleIndexDataCodec(IndexDataCodec&& index_slices) {
     AssertInfo(index_slices.size_ >= 0, "index data size is invalid");
     if (index_slices.codecs_.size() == 1) {
         auto index_data = std::move(index_slices.codecs_.front());
-        AssertInfo(index_data->PayloadSize() == index_slices.size_,
-                   "index len is inconsistent after disassemble and assemble");
+        if (!(index_data->PayloadSize() == index_slices.size_)) {
+            ThrowInfo(
+                ErrorCode::DataFormatBroken,
+                "index len is inconsistent after disassemble and assemble");
+        }
         return index_data;
     }
     return AssembleIndexDataCodec(index_slices);
@@ -376,7 +387,10 @@ AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
             for (auto i = 0; i < slice_num; ++i) {
                 std::string file_name = GenSlicedFileName(prefix, i);
                 auto it = index_datas.find(file_name);
-                AssertInfo(it != index_datas.end(), "lost index slice data");
+                if (!(it != index_datas.end())) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "lost index slice data");
+                }
                 auto& channel = it->second;
                 auto data_array = storage::CollectFieldDataChannel(channel);
                 auto data = storage::MergeFieldData(data_array);
@@ -384,9 +398,11 @@ AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
                 new_field_data->FillFieldData(data->Data(), len);
                 index_datas.erase(file_name);
             }
-            AssertInfo(
-                new_field_data->IsFull(),
-                "index len is inconsistent after disassemble and assemble");
+            if (!(new_field_data->IsFull())) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "index len is inconsistent after disassemble and assemble");
+            }
             result[prefix] = new_field_data;
         }
     }

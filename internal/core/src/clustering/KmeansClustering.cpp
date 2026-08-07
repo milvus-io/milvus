@@ -105,10 +105,12 @@ KmeansClustering::FetchDataFiles(uint8_t* buf,
         fetched_file_size +=
             CopyFieldDatasToBuf(buf, expected_train_size, field_datas, offset);
     }
-    AssertInfo(fetched_file_size == expected_remote_file_size,
-               "file size inconsistent, expected: {}, actual: {}",
-               expected_remote_file_size,
-               fetched_file_size);
+    if (!(fetched_file_size == expected_remote_file_size)) {
+        ThrowInfo(ErrorCode::FileReadFailed,
+                  "file size inconsistent, expected: {}, actual: {}",
+                  expected_remote_file_size,
+                  fetched_file_size);
+    }
 }
 
 template <typename T>
@@ -128,10 +130,12 @@ KmeansClustering::FetchSegmentViaManifest(
     auto field_datas = file_manager_->CacheRawDataToMemory(config);
     int64_t fetched =
         CopyFieldDatasToBuf(buf, expected_train_size, field_datas, offset);
-    AssertInfo(fetched == expected_remote_file_size,
-               "file size inconsistent, expected: {}, actual: {}",
-               expected_remote_file_size,
-               fetched);
+    if (!(fetched == expected_remote_file_size)) {
+        ThrowInfo(ErrorCode::FileReadFailed,
+                  "file size inconsistent, expected: {}, actual: {}",
+                  expected_remote_file_size,
+                  fetched);
+    }
 }
 
 template <typename T>

@@ -129,13 +129,15 @@ AssertLoadedFieldRows(
         return;
     }
     auto rows = GetLoadedFieldRows(column_group_results, field_id);
-    AssertInfo(rows == expected_rows,
-               "growing segment StorageV3 manifest loads {} rows for {} "
-               "field {}, but SegmentLoadInfo expects {} rows",
-               rows,
-               field_name,
-               field_id.get(),
-               expected_rows);
+    if (!(rows == expected_rows)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "growing segment StorageV3 manifest loads {} rows for {} "
+                  "field {}, but SegmentLoadInfo expects {} rows",
+                  rows,
+                  field_name,
+                  field_id.get(),
+                  expected_rows);
+    }
 }
 
 void
@@ -158,12 +160,14 @@ AssertAllLoadedFieldRows(
     }
 
     for (const auto& [field_id, rows] : loaded_rows) {
-        AssertInfo(rows == expected_rows,
-                   "growing segment StorageV3 manifest loads {} rows for "
-                   "field {}, but SegmentLoadInfo expects {} rows",
-                   rows,
-                   field_id.get(),
-                   expected_rows);
+        if (!(rows == expected_rows)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "growing segment StorageV3 manifest loads {} rows for "
+                      "field {}, but SegmentLoadInfo expects {} rows",
+                      rows,
+                      field_id.get(),
+                      expected_rows);
+        }
     }
 }
 

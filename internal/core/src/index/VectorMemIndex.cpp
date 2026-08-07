@@ -438,9 +438,11 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                 for (const auto& file_path : batch) {
                     const std::string file_name =
                         file_path.substr(file_path.find_last_of('/') + 1);
-                    AssertInfo(batch_data.find(file_name) != batch_data.end(),
-                               "lost index slice data: {}",
-                               file_name);
+                    if (!(batch_data.find(file_name) != batch_data.end())) {
+                        ThrowInfo(ErrorCode::DataFormatBroken,
+                                  "lost index slice data: {}",
+                                  file_name);
+                    }
                     payload_size += batch_data[file_name]->PayloadSize();
                     index_data_codec.codecs_.push_back(
                         std::move(batch_data[file_name]));
@@ -448,9 +450,11 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                 for (auto& file : batch) {
                     pending_index_files.erase(file);
                 }
-                AssertInfo(
-                    payload_size == total_len,
-                    "index len is inconsistent after disassemble and assemble");
+                if (!(payload_size == total_len)) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "index len is inconsistent after disassemble and "
+                              "assemble");
+                }
                 index_data_codec.size_ = payload_size;
             }
         }
@@ -1097,8 +1101,10 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
                     (std::chrono::system_clock::now() - start_load2_mem);
                 for (int j = index - batch.size() + 1; j <= index; j++) {
                     std::string file_name = GenSlicedFileName(prefix, j);
-                    AssertInfo(batch_data.find(file_name) != batch_data.end(),
-                               "lost index slice data");
+                    if (!(batch_data.find(file_name) != batch_data.end())) {
+                        ThrowInfo(ErrorCode::DataFormatBroken,
+                                  "lost index slice data");
+                    }
                     auto&& data = batch_data[file_name];
                     auto start_write_file = std::chrono::system_clock::now();
                     WriteIndexData(prefix, data);

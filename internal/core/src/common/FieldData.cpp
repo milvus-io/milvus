@@ -232,8 +232,10 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     }
     switch (data_type_) {
         case DataType::BOOL: {
-            AssertInfo(array->type()->id() == arrow::Type::type::BOOL,
-                       "inconsistent data type");
+            if (!(array->type()->id() == arrow::Type::type::BOOL)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "inconsistent data type");
+            }
             auto bool_array =
                 std::dynamic_pointer_cast<arrow::BooleanArray>(array);
             FixedVector<bool> values(element_count);
@@ -334,8 +336,10 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
         }
         case DataType::STRING:
         case DataType::VARCHAR: {
-            AssertInfo(array->type()->id() == arrow::Type::type::STRING,
-                       "inconsistent data type");
+            if (!(array->type()->id() == arrow::Type::type::STRING)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "inconsistent data type");
+            }
             auto string_array =
                 std::dynamic_pointer_cast<arrow::StringArray>(array);
             return FillFieldData(string_array);
@@ -343,9 +347,11 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
         case DataType::TEXT: {
             // V3 storage: TEXT is stored as BINARY (LOBReference in parquet)
             // Insert path: TEXT arrives as STRING
-            AssertInfo(array->type()->id() == arrow::Type::type::STRING ||
-                           array->type()->id() == arrow::Type::type::BINARY,
-                       "inconsistent data type");
+            if (!(array->type()->id() == arrow::Type::type::STRING ||
+                  array->type()->id() == arrow::Type::type::BINARY)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "inconsistent data type");
+            }
             std::vector<std::string> values(element_count);
             if (array->type()->id() == arrow::Type::type::STRING) {
                 auto string_array =
@@ -372,8 +378,10 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
         case DataType::JSON: {
             // The code here is not referenced.
             // A subclass named FieldDataJsonImpl is implemented, which overloads this function.
-            AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
-                       "inconsistent data type");
+            if (!(array->type()->id() == arrow::Type::type::BINARY)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "inconsistent data type");
+            }
             auto json_array =
                 std::dynamic_pointer_cast<arrow::BinaryArray>(array);
             std::vector<Json> values(element_count);
@@ -390,8 +398,10 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(values.data(), element_count);
         }
         case DataType::GEOMETRY: {
-            AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
-                       "inconsistent data type");
+            if (!(array->type()->id() == arrow::Type::type::BINARY)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "inconsistent data type");
+            }
             auto geometry_array =
                 std::dynamic_pointer_cast<arrow::BinaryArray>(array);
             AssertInfo(geometry_array != nullptr,
@@ -466,8 +476,10 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(array_info.first, array_info.second);
         }
         case DataType::VECTOR_SPARSE_U32_F32: {
-            AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
-                       "inconsistent data type");
+            if (!(array->type()->id() == arrow::Type::type::BINARY)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "inconsistent data type");
+            }
             auto arr = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
             std::vector<knowhere::sparse::SparseRow<SparseValueType>> values;
             values.reserve(element_count);

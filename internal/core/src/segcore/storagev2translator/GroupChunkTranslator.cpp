@@ -202,14 +202,16 @@ GroupChunkTranslator::GroupChunkTranslator(
         meta_.chunk_memory_size_.push_back(cell_size);
     }
 
-    AssertInfo(
-        meta_.num_rows_until_chunk_.back() == column_group_info_.row_count,
-        fmt::format(
-            "[StorageV2] data lost while loading column group {}: found "
-            "num rows {} but expected {}",
-            column_group_info_.field_id,
-            meta_.num_rows_until_chunk_.back(),
-            column_group_info_.row_count));
+    if (!(meta_.num_rows_until_chunk_.back() == column_group_info_.row_count)) {
+        ThrowInfo(
+            ErrorCode::DataFormatBroken,
+            fmt::format(
+                "[StorageV2] data lost while loading column group {}: found "
+                "num rows {} but expected {}",
+                column_group_info_.field_id,
+                meta_.num_rows_until_chunk_.back(),
+                column_group_info_.row_count));
+    }
 
     LOG_INFO(
         "[StorageV2] translator {} merged {} row groups into {} cells "

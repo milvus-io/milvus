@@ -480,10 +480,12 @@ InjectExternalSpecProperties(
     // Caller must have run Go ValidateExternalSource; malformed here
     // signals etcd corruption or bypass — fail adjacent to bad input.
     auto scheme_end = external_source.find("://");
-    AssertInfo(scheme_end != std::string::npos,
-               "external_source for collection {} missing scheme: {}",
-               collection_id,
-               external_source);
+    if (!(scheme_end != std::string::npos)) {
+        ThrowInfo(milvus::ErrorCode::ConfigInvalid,
+                  "external_source for collection {} missing scheme: {}",
+                  collection_id,
+                  external_source);
+    }
 
     std::string scheme = external_source.substr(0, scheme_end);
     auto rest = external_source.substr(scheme_end + 3);
@@ -493,10 +495,12 @@ InjectExternalSpecProperties(
     // where rest itself is empty.
     std::string host =
         (slash_pos != std::string::npos) ? rest.substr(0, slash_pos) : rest;
-    AssertInfo(!host.empty(),
-               "external_source for collection {} has empty host: {}",
-               collection_id,
-               external_source);
+    if (!(!host.empty())) {
+        ThrowInfo(milvus::ErrorCode::ConfigInvalid,
+                  "external_source for collection {} has empty host: {}",
+                  collection_id,
+                  external_source);
+    }
 
     std::string path_part =
         (slash_pos != std::string::npos) ? rest.substr(slash_pos + 1) : "";

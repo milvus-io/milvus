@@ -68,7 +68,10 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
                    "cipher plugin missing for an encrypted file");
 
         int64_t ez_id = descriptor_event.GetEZFromExtra();
-        AssertInfo(ez_id != -1, "ez_id meta not exist for a encrypted file");
+        if (!(ez_id != -1)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "ez_id meta not exist for a encrypted file");
+        }
         auto decryptor = cipherPlugin->GetDecryptor(
             ez_id, descriptor_fix_part.collection_id, edek);
 
@@ -143,8 +146,10 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
 
             if (index_event_data.payload_reader->get_payload_datatype() ==
                 DataType::STRING) {
-                AssertInfo(index_event_data.payload_reader->has_field_data(),
-                           "old index having no field_data");
+                if (!(index_event_data.payload_reader->has_field_data())) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "old index having no field_data");
+                }
                 auto field_data =
                     index_event_data.payload_reader->get_field_data();
                 AssertInfo(field_data->get_data_type() == DataType::STRING,
@@ -170,8 +175,10 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
             index_meta.segment_id = data_meta.segment_id;
             index_meta.field_id = data_meta.field_id;
             auto& extras = descriptor_event.event_data.extras;
-            AssertInfo(extras.find(INDEX_BUILD_ID_KEY) != extras.end(),
-                       "index build id not exist");
+            if (!(extras.find(INDEX_BUILD_ID_KEY) != extras.end())) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "index build id not exist");
+            }
             index_meta.build_id = std::stol(
                 std::any_cast<std::string>(extras[INDEX_BUILD_ID_KEY]));
             index_data->set_index_meta(index_meta);

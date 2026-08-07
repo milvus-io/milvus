@@ -127,10 +127,12 @@ PayloadReader::init(const uint8_t* data,
                                   "failed to get arrow schema: {}",
                                   st.ToString());
                     }
-                    AssertInfo(
-                        arrow_schema->num_fields() == 1,
-                        "Vector field should have exactly 1 field, got {}",
-                        arrow_schema->num_fields());
+                    if (!(arrow_schema->num_fields() == 1)) {
+                        ThrowInfo(
+                            ErrorCode::DataFormatBroken,
+                            "Vector field should have exactly 1 field, got {}",
+                            arrow_schema->num_fields());
+                    }
 
                     auto field = arrow_schema->field(0);
                     if (field->HasMetadata()) {
@@ -170,21 +172,27 @@ PayloadReader::init(const uint8_t* data,
                               "failed to get arrow schema for VectorArray: {}",
                               st.ToString());
                 }
-                AssertInfo(arrow_schema->num_fields() == 1,
-                           "VectorArray should have exactly 1 field, got {}",
-                           arrow_schema->num_fields());
+                if (!(arrow_schema->num_fields() == 1)) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "VectorArray should have exactly 1 field, got {}",
+                              arrow_schema->num_fields());
+                }
 
                 auto field = arrow_schema->field(0);
-                AssertInfo(field->HasMetadata(),
-                           "VectorArray field is missing metadata");
+                if (!(field->HasMetadata())) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "VectorArray field is missing metadata");
+                }
 
                 auto metadata = field->metadata();
                 AssertInfo(metadata != nullptr, "VectorArray metadata is null");
 
                 // Get element type
-                AssertInfo(metadata->Contains(ELEMENT_TYPE_KEY_FOR_ARROW),
-                           "VectorArray metadata missing required "
-                           "'elementType' field");
+                if (!(metadata->Contains(ELEMENT_TYPE_KEY_FOR_ARROW))) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "VectorArray metadata missing required "
+                              "'elementType' field");
+                }
                 auto element_type_str =
                     metadata->Get(ELEMENT_TYPE_KEY_FOR_ARROW).ValueOrDie();
                 auto element_type_int =
@@ -192,8 +200,11 @@ PayloadReader::init(const uint8_t* data,
                 element_type = static_cast<DataType>(element_type_int);
 
                 // Get dimension from metadata
-                AssertInfo(metadata->Contains(DIM_KEY),
-                           "VectorArray metadata missing required 'dim' field");
+                if (!(metadata->Contains(DIM_KEY))) {
+                    ThrowInfo(
+                        ErrorCode::DataFormatBroken,
+                        "VectorArray metadata missing required 'dim' field");
+                }
                 auto dim_str = metadata->Get(DIM_KEY).ValueOrDie();
                 dim_ = ParseMetadataInt(dim_str, "dim");
                 AssertInfo(

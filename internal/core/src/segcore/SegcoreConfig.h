@@ -173,9 +173,11 @@ class SegcoreConfig {
 
     void
     set_dense_vector_intermin_index_type(const std::string index_type) {
-        AssertInfo(valid_dense_vector_index_type.find(index_type) !=
-                       valid_dense_vector_index_type.end(),
-                   "fail to set dense vector index type.");
+        if (!(valid_dense_vector_index_type.find(index_type) !=
+              valid_dense_vector_index_type.end())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "fail to set dense vector index type.");
+        }
         dense_index_type_ = index_type;
     }
 
