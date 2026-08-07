@@ -19,6 +19,7 @@ const (
 	messageReplicateMesssageHeader          = "_rh"  // replicate message header.
 	messageUnreplicable                     = "_ur"  // mark the message as unsafe to replicate.
 	messageTraceContext                     = "_tc"  // Trace context subset header.
+	messagePartialUpdateCAS                 = "_puc" // partial update CAS transaction marker.
 )
 
 var (

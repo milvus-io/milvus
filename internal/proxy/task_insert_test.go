@@ -67,7 +67,7 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 		},
 	}
 
-	msgs, err := repackInsertDataForStreamingService(context.Background(), []string{"ch"}, insertMsg, result, nil, 0)
+	msgs, err := repackInsertDataForStreamingService(context.Background(), []string{"ch"}, insertMsg, result, nil, 0, nil)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
 
