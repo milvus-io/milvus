@@ -1735,8 +1735,12 @@ func TestCreateCollection(t *testing.T) {
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "unknown"}`),
-		errMsg:      "idType can only be [Int64, VarChar], default: Int64: invalid parameter[expected=Int64, Varchar][actual=unknown]",
+		errMsg:      "idType can only be [Int64, VarChar, UUID], default: Int64: invalid parameter[expected=Int64, Varchar, UUID][actual=unknown]",
 		errCode:     1100, // ErrParameterInvalid
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path:        path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "UUID"}`),
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
