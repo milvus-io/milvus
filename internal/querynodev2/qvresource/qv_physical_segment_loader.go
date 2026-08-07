@@ -53,6 +53,7 @@ func (l *queryViewPhysicalSegmentLoader) Update(ctx context.Context, segment qnv
 	if snapshot.LoadInfo == nil {
 		return fmt.Errorf("query view segment load info is nil")
 	}
+	segment = qnview.UnwrapTransformSegment(segment)
 	transform, ok := segment.(*queryViewTransformSegment)
 	if !ok {
 		return fmt.Errorf("unexpected query view transform segment type %T", segment)
@@ -63,7 +64,9 @@ func (l *queryViewPhysicalSegmentLoader) Update(ctx context.Context, segment qnv
 		}
 	}
 	if action.Has(qnview.SegmentUpdateLoadIndex) {
-		if err := l.loader.LoadIndex(ctx, transform.segment, snapshot.LoadInfo, int64(snapshot.Revision.Revision)); err != nil {
+		// SegmentLoadInfoRevision is a content hash used only for equality. It is
+		// intentionally not forwarded as the loader's ordered version.
+		if err := l.loader.LoadIndex(ctx, transform.segment, snapshot.LoadInfo, 0); err != nil {
 			return err
 		}
 	}

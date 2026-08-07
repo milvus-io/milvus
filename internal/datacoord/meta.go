@@ -101,8 +101,9 @@ type meta struct {
 	// segmentManifestLocks serializes the full StorageV3 manifest commit for a
 	// segment. It must be acquired before segMu. Manifest I/O runs outside
 	// segMu; final full-record catalog and memory publication runs under segMu.
-	segmentManifestLocks *lock.KeyLock[int64]
-	dataViewManager      DataViewManager
+	segmentManifestLocks      *lock.KeyLock[int64]
+	dataViewManager           DataViewManager
+	queryViewLoadInfoNotifier QueryViewLoadInfoNotifier
 
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager

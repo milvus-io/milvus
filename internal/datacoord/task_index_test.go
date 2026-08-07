@@ -475,6 +475,8 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMissingBinlogOnStaleSc
 		},
 		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 	}
+	recorder := newQueryViewLoadInfoNotificationRecorder()
+	mt.queryViewLoadInfoNotifier = recorder
 	mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{
 		{Key: common.IndexTypeKey, Value: "HNSW"},
 		{Key: common.MetricTypeKey, Value: "MAX_SIM_COSINE"},
@@ -509,6 +511,10 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMissingBinlogOnStaleSc
 
 	s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
 	s.Equal("fake finished index success", it.FailReason)
+	s.Equal([]queryViewLoadInfoNotification{{
+		collectionID: s.collID,
+		segmentIDs:   []int64{s.segID},
+	}}, recorder.segments())
 }
 
 func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayManifestBackedProceeds() {
@@ -946,6 +952,9 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerNullableVectorEffectiveRows() {
 }
 
 func (s *indexTaskSuite) TestSetJobInfo() {
+	recorder := newQueryViewLoadInfoNotificationRecorder()
+	s.mt.queryViewLoadInfoNotifier = recorder
+	defer func() { s.mt.queryViewLoadInfoNotifier = nil }()
 	t := &model.SegmentIndex{
 		CollectionID: s.collID,
 		PartitionID:  s.partID,
@@ -966,9 +975,11 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
 		err := it.setJobInfo(result)
 		s.Error(err)
+		s.Empty(recorder.segments())
 	})
 
 	s.Run("successful update", func() {
+		recorder.reset()
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		s.mt.indexMeta.catalog = catalog
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
@@ -976,5 +987,9 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 		err := it.setJobInfo(result)
 		s.NoError(err)
 		s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
+		s.Equal([]queryViewLoadInfoNotification{{
+			collectionID: s.collID,
+			segmentIDs:   []int64{s.segID},
+		}}, recorder.segments())
 	})
 }
