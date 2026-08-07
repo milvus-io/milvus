@@ -144,6 +144,16 @@ def test_checker_initialization_fails_fast_when_indexes_cannot_be_listed(monkeyp
     assert client.create_index_calls == 0
 
 
+def test_query_checker_reuses_primary_vector_index(monkeypatch):
+    client = FakeMilvusClient(indexed_fields=("base_vector",))
+    patch_checker_constructor(monkeypatch, client, float_vector_fields=("base_vector",))
+    monkeypatch.setattr(checker_module.Checker, "insert_data", lambda self: None)
+
+    checker_module.QueryChecker(collection_name="existing_collection")
+
+    assert client.create_index_calls == 0
+
+
 def test_add_vector_field_checker_retries_until_first_success(monkeypatch):
     client = FakeMilvusClient(indexed_fields=("base_vector",))
     patch_checker_constructor(monkeypatch, client, float_vector_fields=("base_vector",))

@@ -2728,8 +2728,6 @@ class QueryChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("QueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(
             collection_name=self.c_name, replica_number=replica_number
         )  # do load before query
@@ -2765,8 +2763,6 @@ class TextMatchChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("TextMatchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)
         self.insert_data()
         key_word = self.word_freq.most_common(1)[0][0]
@@ -2821,8 +2817,6 @@ class PhraseMatchChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("PhraseMatchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(
             collection_name=self.c_name, replica_number=replica_number
         )  # do load before query
@@ -2867,8 +2861,6 @@ class JsonQueryChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("JsonQueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(
             collection_name=self.c_name, replica_number=replica_number
         )  # do load before query
@@ -2919,8 +2911,6 @@ class GeoQueryChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("GeoQueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(
             collection_name=self.c_name, replica_number=replica_number
         )  # do load before query
@@ -2962,8 +2952,6 @@ class DeleteChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("DeleteChecker_")
         super().__init__(collection_name=collection_name, schema=schema, shards_num=shards_num)
-        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(collection_name=self.c_name)  # load before query
         self.insert_data()
         query_expr = f"{self.int64_field_name} > 0"
@@ -4188,8 +4176,6 @@ class NullVectorQueryChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("NullVectorQueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
-        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)
         self.insert_data()
         # Only collect nullable dense vector fields from the original schema.
