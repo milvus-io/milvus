@@ -544,6 +544,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100*time.Millisecond, Params.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse())
 		assert.Equal(t, 10.0, Params.CPURatio.GetAsFloat())
 		assert.Equal(t, uint32(hardware.GetCPUNum()), Params.KnowhereThreadPoolSize.GetAsUint32())
+		assert.Equal(t, "10s", Params.StandaloneMigrateDataTimeout.DefaultValue)
 
 		// chunk cache
 		assert.Equal(t, "willneed", Params.ReadAheadPolicy.GetValue())

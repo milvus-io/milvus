@@ -3696,15 +3696,16 @@ type queryNodeConfig struct {
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
-	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
-	MaxReadConcurrency    ParamItem `refreshable:"true"`
-	MaxGpuReadConcurrency ParamItem `refreshable:"false"`
-	MaxGroupNQ            ParamItem `refreshable:"true"`
-	NQMergeRatio          ParamItem `refreshable:"true"`
-	MaxDeadlineMergeGap   ParamItem `refreshable:"true"`
-	TopKMergeRatio        ParamItem `refreshable:"true"`
-	CPURatio              ParamItem `refreshable:"true"`
-	GracefulStopTimeout   ParamItem `refreshable:"false"`
+	MaxUnsolvedQueueSize         ParamItem `refreshable:"true"`
+	MaxReadConcurrency           ParamItem `refreshable:"true"`
+	MaxGpuReadConcurrency        ParamItem `refreshable:"false"`
+	MaxGroupNQ                   ParamItem `refreshable:"true"`
+	NQMergeRatio                 ParamItem `refreshable:"true"`
+	MaxDeadlineMergeGap          ParamItem `refreshable:"true"`
+	TopKMergeRatio               ParamItem `refreshable:"true"`
+	CPURatio                     ParamItem `refreshable:"true"`
+	GracefulStopTimeout          ParamItem `refreshable:"false"`
+	StandaloneMigrateDataTimeout ParamItem `refreshable:"false"`
 
 	EnableResultZeroCopy ParamItem `refreshable:"true"`
 
@@ -4796,6 +4797,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		FallbackKeys: []string{"common.gracefulStopTimeout"},
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.StandaloneMigrateDataTimeout = ParamItem{
+		Key:          "queryNode.standaloneMigrateDataTimeout",
+		Version:      "2.6.16",
+		DefaultValue: "10s",
+		Doc:          "Duration string (e.g. 10s, 3m). In standalone mode, after this duration, the node stops waiting for data migration if no other active query node is available.",
+		Export:       true,
+	}
+	p.StandaloneMigrateDataTimeout.Init(base.mgr)
 
 	p.MaxSegmentDeleteBuffer = ParamItem{
 		Key:          "queryNode.maxSegmentDeleteBuffer",
