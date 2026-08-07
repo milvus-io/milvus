@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
@@ -117,6 +118,33 @@ func (s *RowsSuite) TestRowsToColumns() {
 		})
 		s.NotNil(err)
 	})
+}
+
+func (s *RowsSuite) TestTextRowsToColumns() {
+	type TextRow struct {
+		ID       int64  `milvus:"name:id"`
+		Document string `milvus:"name:document"`
+	}
+
+	schema := entity.NewSchema().
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("document").WithDataType(entity.FieldTypeText))
+	columns, err := AnyToColumns([]any{
+		&TextRow{ID: 1, Document: "first"},
+		&TextRow{ID: 2, Document: "second"},
+	}, false, schema)
+	s.Require().NoError(err)
+
+	for _, col := range columns {
+		if col.Name() != "document" {
+			continue
+		}
+		s.Equal(entity.FieldTypeText, col.Type())
+		s.Equal(schemapb.DataType_Text, col.FieldData().GetType())
+		s.Equal([]string{"first", "second"}, col.FieldData().GetScalars().GetStringData().GetData())
+		return
+	}
+	s.Fail("TEXT column not found")
 }
 
 func (s *RowsSuite) TestDynamicSchema() {
