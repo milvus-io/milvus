@@ -1,5 +1,7 @@
 import json
+import time
 
+import pytest
 from chaos import chaos_commons as cc
 from chaos import observability
 
@@ -63,6 +65,8 @@ def test_monitor_heartbeat_emits_one_aggregate_event(monkeypatch):
         "insert": _CheckerState("c1", success=3, failure=1),
         "search": _CheckerState("c2", success=5, failure=2),
     }
+    for checker in checkers.values():
+        checker.current_operation_started_at = time.monotonic() - 5
 
     snapshots = cc.log_monitor_heartbeat(checkers, phase="workload_1_of_10")
 
@@ -74,3 +78,16 @@ def test_monitor_heartbeat_emits_one_aggregate_event(monkeypatch):
     assert payload["total_success"] == 8
     assert payload["total_failure"] == 3
     assert payload["in_flight_count"] == 2
+
+
+def test_monitor_heartbeat_fails_fast_for_stalled_operation(monkeypatch):
+    messages = []
+    monkeypatch.setattr(cc.log, "info", messages.append)
+    monkeypatch.setattr(cc.log, "error", messages.append)
+    checker = _CheckerState("c1")
+    checker.current_operation_started_at = time.monotonic() - 181
+
+    with pytest.raises(AssertionError, match="search=181"):
+        cc.log_monitor_heartbeat({"search": checker})
+
+    assert any('"event":"monitor_stalled"' in message for message in messages)

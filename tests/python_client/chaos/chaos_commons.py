@@ -10,6 +10,13 @@ from chaos.observability import checker_snapshot, format_event
 from utils.util_log import test_log as log
 from yaml import full_load
 
+DEFAULT_MONITOR_JOIN_TIMEOUT_SECONDS = 180
+DEFAULT_OPERATION_STALL_TIMEOUT_SECONDS = 180
+OPERATION_STALL_TIMEOUT_OVERRIDES = {
+    "snapshot": 420,
+    "restore_snapshot": 420,
+}
+
 
 def check_config(chaos_config):
     if not chaos_config.get("kind", None):
@@ -59,7 +66,7 @@ def start_monitor_threads(checkers=None):
     return tasks
 
 
-def stop_monitor_threads(checkers=None, tasks=None, join_timeout=360):
+def stop_monitor_threads(checkers=None, tasks=None, join_timeout=DEFAULT_MONITOR_JOIN_TIMEOUT_SECONDS):
     """Stop checker loops and wait for in-flight operations to return."""
     checkers = checkers or {}
     tasks = tasks or []
@@ -98,7 +105,12 @@ def stop_monitor_threads(checkers=None, tasks=None, join_timeout=360):
     return alive_tasks
 
 
-def log_monitor_heartbeat(checkers=None, phase=None):
+def log_monitor_heartbeat(
+    checkers=None,
+    phase=None,
+    stall_timeout_seconds=DEFAULT_OPERATION_STALL_TIMEOUT_SECONDS,
+    stall_timeout_overrides=None,
+):
     """Log one structured snapshot for all checker threads."""
     checkers = checkers or {}
     snapshots = [checker_snapshot(operation, checker) for operation, checker in checkers.items()]
@@ -113,18 +125,44 @@ def log_monitor_heartbeat(checkers=None, phase=None):
             checkers=snapshots,
         )
     )
+    timeout_overrides = OPERATION_STALL_TIMEOUT_OVERRIDES | (stall_timeout_overrides or {})
+    stalled = [
+        snapshot
+        for snapshot in snapshots
+        if snapshot["in_flight_seconds"] is not None
+        and snapshot["in_flight_seconds"] > timeout_overrides.get(snapshot["operation"], stall_timeout_seconds)
+    ]
+    if stalled:
+        log.error(
+            format_event(
+                "monitor_stalled",
+                phase=phase,
+                default_timeout_seconds=stall_timeout_seconds,
+                stalled=stalled,
+            )
+        )
+        stalled_operations = ", ".join(
+            f"{snapshot['operation']}={snapshot['in_flight_seconds']}s" for snapshot in stalled
+        )
+        raise AssertionError(f"chaos checker operations exceeded their stall timeout: {stalled_operations}")
     return snapshots
 
 
 @contextmanager
-def monitor_threads(checkers=None, join_timeout=360):
+def monitor_threads(checkers=None, join_timeout=DEFAULT_MONITOR_JOIN_TIMEOUT_SECONDS):
     """Run checker threads and always stop them when the test scope exits."""
     checkers = checkers or {}
     tasks = start_monitor_threads(checkers)
+    body_failed = False
     try:
         yield tasks
+    except BaseException:
+        body_failed = True
+        raise
     finally:
-        stop_monitor_threads(checkers, tasks, join_timeout=join_timeout)
+        alive_tasks = stop_monitor_threads(checkers, tasks, join_timeout=join_timeout)
+        if alive_tasks and not body_failed:
+            raise AssertionError(f"chaos checker threads did not stop within {join_timeout}s: {', '.join(alive_tasks)}")
 
 
 def check_thread_status(tasks):
