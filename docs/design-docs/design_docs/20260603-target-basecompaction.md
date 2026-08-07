@@ -56,8 +56,9 @@ The guarded manual path persists a `CompactionTarget` with:
 
 `activatedAtTS` and `expectedTS` use one allocator timestamp. The API schema does
 not change; the target id rides the existing `compactionID` field. Partition and
-channel are not stored on the target; the Reconciler derives the compaction group
-label from live segment facts.
+channel are not stored on the target; guarded requests carrying either filter
+are rejected instead of silently widening their scope. The Reconciler derives
+the compaction group label from live segment facts.
 
 ### Select and Execute
 
@@ -155,6 +156,8 @@ persisted state and requires no migration or rollback cleanup.
 - Guard disabled manual compaction keeps current behavior.
 - Guard enabled manual compaction records an active rewrite target and returns
   immediately.
+- Guard enabled manual compaction rejects partition and channel filters before
+  allocating or persisting a target.
 - Predicate coverage includes legacy `create_ts = 0`, newer `data_ts`, and
   self-exclusion after freshening.
 - Candidate-stage coverage proves non-Flushed, importing, L0/L2, and precisely

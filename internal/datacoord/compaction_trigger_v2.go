@@ -368,6 +368,10 @@ func isTargetBasedManualRewriteCompactionRequest(req *milvuspb.ManualCompactionR
 }
 
 func (m *CompactionTriggerManager) saveManualRewriteCompactionTarget(ctx context.Context, req *milvuspb.ManualCompactionRequest) (UniqueID, error) {
+	if req.GetPartitionId() > 0 || req.GetChannel() != "" {
+		return 0, merr.WrapErrParameterInvalidMsg(
+			"target-based manual rewrite compaction does not support partition or channel filters")
+	}
 	if m.meta == nil {
 		return 0, merr.WrapErrServiceInternal("data coord meta is not initialized")
 	}

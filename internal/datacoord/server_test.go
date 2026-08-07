@@ -1920,8 +1920,6 @@ func TestManualCompaction(t *testing.T) {
 
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
-			PartitionId:  2,
-			Channel:      "ch-1",
 			SegmentIds:   []int64{10, 20},
 		})
 
@@ -1941,6 +1939,57 @@ func TestManualCompaction(t *testing.T) {
 		segmentIDs, ok := compactionTargetSegmentIDs(record)
 		require.True(t, ok)
 		require.Equal(t, []int64{10, 20}, segmentIDs)
+	})
+
+	t.Run("test manual rewrite target rejects unsupported filters", func(t *testing.T) {
+		paramtable.Get().Save(Params.DataCoordCfg.EnableTargetBasedCompaction.Key, "true")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
+
+		for _, test := range []struct {
+			name    string
+			request *milvuspb.ManualCompactionRequest
+		}{
+			{
+				name: "partition",
+				request: &milvuspb.ManualCompactionRequest{
+					CollectionID: 1,
+					PartitionId:  2,
+				},
+			},
+			{
+				name: "channel",
+				request: &milvuspb.ManualCompactionRequest{
+					CollectionID: 1,
+					Channel:      "ch-1",
+				},
+			},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				alloc := allocator.NewMockAllocator(t)
+
+				catalog, records, _, _ := newCompactionTargetTestCatalog(t)
+				targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
+				require.NoError(t, err)
+
+				handler := NewNMockHandler(t)
+				handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&collectionInfo{}, nil)
+				inspector := NewMockCompactionInspector(t)
+				versionManager := NewMockVersionManager(t)
+				versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
+
+				svr := &Server{allocator: alloc}
+				svr.stateCode.Store(commonpb.StateCode_Healthy)
+				svr.meta = &meta{compactionTargetMeta: targetMeta}
+				svr.compactionTriggerManager = NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, versionManager)
+
+				resp, err := svr.ManualCompaction(context.Background(), test.request)
+
+				require.NoError(t, err)
+				require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+				require.Zero(t, resp.GetCompactionID())
+				require.Empty(t, records)
+			})
+		}
 	})
 
 	t.Run("test manual compaction failure", func(t *testing.T) {
