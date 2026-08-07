@@ -3327,9 +3327,9 @@ type ImportFile struct {
 	// A singular row-based file or multiple column-based files.
 	Paths []string `protobuf:"bytes,2,rep,name=paths,proto3" json:"paths,omitempty"`
 	// Primary-allocated autoID PK range [pk_id_begin, pk_id_end) for this file,
-	// carried from the replicated ImportMsg (msgpb.ImportFile.pk_id_range) so the
-	// secondary derives identical primary keys. begin == end (0) means unset
-	// (legacy / non-autoID / backup imports).
+	// carried from the replicated ImportMsg (msgpb.ImportFile.pre_allocated_auto_ids)
+	// so the secondary derives identical primary keys. begin == end (0) means
+	// unset (legacy / non-autoID / backup imports).
 	PkIdBegin int64 `protobuf:"varint,3,opt,name=pk_id_begin,json=pkIdBegin,proto3" json:"pk_id_begin,omitempty"`
 	PkIdEnd   int64 `protobuf:"varint,4,opt,name=pk_id_end,json=pkIdEnd,proto3" json:"pk_id_end,omitempty"`
 }

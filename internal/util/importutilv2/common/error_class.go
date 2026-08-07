@@ -55,6 +55,15 @@ func IsTypedIOErr(err error) bool {
 // So a persistent outage does reach the decoder. Keep a typed IO cause and its
 // System classification; report anything else -- a real decode failure, which
 // carries no merr code -- as input.
+//
+// UPGRADE CHECK -- this classification depends on the decoder preserving the
+// cause. IsTypedIOErr walks the chain with errors.Is, so a decoder that
+// stringifies its cause instead of wrapping it would turn a persistent storage
+// outage into an InputError and abort the caller's retry.Do. Verified against
+// the pinned versions: arrow-go v17 wraps with %w throughout
+// parquet/file/file_reader.go, and npyio v0.6.0 returns reader errors unmodified.
+// Re-verify both when either dependency is bumped; TestWrapDecodeErr covers the
+// wrapping semantics but cannot detect a dependency that stops wrapping.
 func WrapDecodeErr(err error, what string) error {
 	if IsTypedIOErr(err) {
 		return merr.Wrap(err, what)

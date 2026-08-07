@@ -48,8 +48,7 @@ func schemaVec(dim int, extraScalars int) *schemapb.CollectionSchema {
 
 func Test_minRowTextBytes(t *testing.T) {
 	// dim=768 float vector: >= 768 numeric chars (conservative lower bound); scalars add >= 1 each.
-	got, err := minRowTextBytes(schemaVec(768, 1), importutilv2.CSV)
-	assert.NoError(t, err)
+	got := minRowTextBytes(schemaVec(768, 1), importutilv2.CSV)
 	assert.GreaterOrEqual(t, got, int64(768))
 	assert.LessOrEqual(t, got, int64(768+16)) // still a tight-ish floor
 }
@@ -74,8 +73,7 @@ func Test_rowByteHelpers_skipFunctionOutput(t *testing.T) {
 	// sparse (102) is a function output and the autoID pk (100) is generated, so
 	// only the VarChar text field remains -- and VarChar may be empty, so the floor
 	// falls through to 1 rather than erroring on the sparse field.
-	m, err := minRowTextBytes(schemaBM25AutoID(), importutilv2.CSV)
-	assert.NoError(t, err)
+	m := minRowTextBytes(schemaBM25AutoID(), importutilv2.CSV)
 	assert.Equal(t, int64(1), m)
 }
 
@@ -163,8 +161,7 @@ func Test_minRowTextBytes_skipsNullableAndDefault(t *testing.T) {
 			{FieldID: 103, Name: "n2", DataType: schemapb.DataType_Int64, DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 7}}},
 		},
 	}
-	got, err := minRowTextBytes(schema, importutilv2.CSV)
-	assert.NoError(t, err)
+	got := minRowTextBytes(schema, importutilv2.CSV)
 	assert.Equal(t, int64(2), got) // was 4 before the fix (nullable+default counted)
 }
 
@@ -491,19 +488,16 @@ func Test_minRowTextBytes_jsonPaysForFieldNames(t *testing.T) {
 
 	// {"text":} -- braces plus quotes and colon around the one required name. The
 	// VarChar value itself may be empty, so it still adds nothing.
-	json, err := minRowTextBytes(schema, importutilv2.JSON)
-	assert.NoError(t, err)
+	json := minRowTextBytes(schema, importutilv2.JSON)
 	assert.Equal(t, int64(2+len("text")+3), json)
 
-	jsonl, err := minRowTextBytes(schema, importutilv2.JSONLines)
-	assert.NoError(t, err)
+	jsonl := minRowTextBytes(schema, importutilv2.JSONLines)
 	assert.Equal(t, json, jsonl)
 
 	// CSV keeps its names in the header, so a single-column row really can be one
 	// byte. This gap is not closable and is why the reserveRanges error explains
 	// itself rather than pretending the count is a real row count.
-	csv, err := minRowTextBytes(schema, importutilv2.CSV)
-	assert.NoError(t, err)
+	csv := minRowTextBytes(schema, importutilv2.CSV)
 	assert.Equal(t, int64(1), csv)
 }
 
@@ -567,8 +561,7 @@ func Test_minRowTextBytes_skipsLegacyDynamicField(t *testing.T) {
 		},
 	}
 
-	got, err := minRowTextBytes(legacy, importutilv2.JSONLines)
-	assert.NoError(t, err)
+	got := minRowTextBytes(legacy, importutilv2.JSONLines)
 	// The floor for `{"text":""}` is `"text":` (7) plus the braces (2). $meta adds
 	// nothing: no name bytes, and no separator, since it is not a present field.
 	assert.Equal(t, int64(9), got) // was 18 before the fix
@@ -589,8 +582,7 @@ func Test_minRowTextBytes_skipsLegacyDynamicField(t *testing.T) {
 			},
 		},
 	}
-	modernGot, err := minRowTextBytes(modern, importutilv2.JSONLines)
-	assert.NoError(t, err)
+	modernGot := minRowTextBytes(modern, importutilv2.JSONLines)
 	assert.Equal(t, got, modernGot, "legacy and modern $meta must size identically")
 }
 
@@ -661,8 +653,7 @@ func Test_minRowTextBytes_singleColumnCSVProvesNothing(t *testing.T) {
 			},
 		},
 	}
-	got, err := minRowTextBytes(schema, importutilv2.CSV)
-	assert.NoError(t, err)
+	got := minRowTextBytes(schema, importutilv2.CSV)
 	assert.Equal(t, int64(1), got)
 }
 

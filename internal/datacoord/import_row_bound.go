@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"time"
 
 	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/cockroachdb/errors"
@@ -34,6 +35,7 @@ import (
 	importutilv2common "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -86,7 +88,7 @@ func nonSourceFieldIDs(schema *schemapb.CollectionSchema) typeutil.Set[int64] {
 // counting one would let the floor exceed a real row and under-count the file --
 // the one direction this bound may never take. The result is floored to 1 to avoid
 // divide-by-zero downstream.
-func minRowTextBytes(schema *schemapb.CollectionSchema, ft importutilv2.FileType) (int64, error) {
+func minRowTextBytes(schema *schemapb.CollectionSchema, ft importutilv2.FileType) int64 {
 	// A JSON row is an object: braces around it, and "name": before each value.
 	jsonShaped := ft == importutilv2.JSON || ft == importutilv2.JSONLines
 	skip := nonSourceFieldIDs(schema)
@@ -141,7 +143,7 @@ func minRowTextBytes(schema *schemapb.CollectionSchema, ft importutilv2.FileType
 	if total < 1 {
 		total = 1
 	}
-	return total, nil
+	return total
 }
 
 // computeFileRowUpperBound returns an upper bound on the row count of one
@@ -191,7 +193,7 @@ func computeFileRowUpperBound(ctx context.Context, cm storage.ChunkManager,
 		// provable per-row floor. This over-estimates heavily (the floor is 1 byte
 		// for an all-VarChar schema) and must stay an upper bound: under-estimating
 		// would exhaust the range and fail the import at the datanode guard.
-		minRow, _ := minRowTextBytes(schema, ft)
+		minRow := minRowTextBytes(schema, ft)
 		total, err := sumSize()
 		if err != nil {
 			return 0, false, err
@@ -343,6 +345,10 @@ const maxConcurrentParquetFooterParses = 4
 
 var parquetFooterParseSem = make(chan struct{}, maxConcurrentParquetFooterParses)
 
+// parquetFooterGateSlowWait is how long a sizing pass may wait for the gate
+// before the wait is worth a log line.
+const parquetFooterGateSlowWait = 5 * time.Second
+
 // validateParquetFooter rejects an out-of-range declared footer length before Arrow
 // allocates it. sizingReaderAt.ReadAt buffers a whole ranged GET before copying, so
 // each parse costs about twice the declared length.
@@ -390,10 +396,22 @@ func parquetNumRows(ctx context.Context, cm storage.ChunkManager, path string) (
 	// storage traffic with their own retry/backoff, and holding a global slot
 	// through them would flatten the caller's pool to this gate's width and let
 	// one slow request stall every other import's sizing pass.
+	//
+	// The gate is process-wide and narrow, so concurrent submissions of
+	// footer-heavy files queue behind each other and lengthen the broadcast RPC.
+	// That is the intended trade against unbounded decode allocation, but it is
+	// invisible from the outside, so a wait worth noticing is logged.
+	gateStart := time.Now()
 	select {
 	case parquetFooterParseSem <- struct{}{}:
 	case <-ctx.Done():
 		return 0, ctx.Err()
+	}
+	if waited := time.Since(gateStart); waited > parquetFooterGateSlowWait {
+		mlog.Warn(ctx, "waited for the parquet footer decode gate",
+			mlog.String("path", path),
+			mlog.Duration("waited", waited),
+			mlog.Int("gateWidth", maxConcurrentParquetFooterParses))
 	}
 	defer func() { <-parquetFooterParseSem }()
 
