@@ -31,7 +31,26 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+func TestMinioObjectStoragePutObjectOptions(t *testing.T) {
+	params := paramtable.Get()
+	params.Save(params.MinioCfg.DisableAWSChunkedEncoding.Key, "false")
+	t.Cleanup(func() {
+		params.Reset(params.MinioCfg.DisableAWSChunkedEncoding.Key)
+	})
+
+	storage := &MinioObjectStorage{}
+	opts := storage.putObjectOptions()
+	assert.False(t, opts.DisableContentSha256)
+	assert.False(t, opts.SendContentMd5)
+
+	params.Save(params.MinioCfg.DisableAWSChunkedEncoding.Key, "true")
+	opts = storage.putObjectOptions()
+	assert.True(t, opts.DisableContentSha256)
+	assert.False(t, opts.SendContentMd5)
+}
 
 func TestMinioObjectStorage(t *testing.T) {
 	ctx := context.Background()
