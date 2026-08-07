@@ -145,6 +145,27 @@ func (suite *HTTPServerTestSuite) TestEventlogHandler() {
 	suite.True(strings.HasPrefix(string(body), "{\"status\":200,\"port\":"))
 }
 
+func (suite *HTTPServerTestSuite) TestRemovedExprEndpointsReturnNotFound() {
+	suite.Require().NoError(paramtable.Get().Save("common.security.exprEnabled", "true"))
+	suite.Require().NoError(paramtable.Get().Save("common.security.exprAuthMode", "rbac"))
+	defer paramtable.Get().Remove("common.security.exprEnabled")
+	defer paramtable.Get().Remove("common.security.exprAuthMode")
+
+	client := http.Client{}
+	for _, path := range []string{"/expr?code=1%2B1", "/static/", "/static/index.html"} {
+		suite.Run(path, func() {
+			req, err := http.NewRequest(http.MethodGet, "http://localhost:"+DefaultListenPort+path, nil)
+			suite.Require().NoError(err)
+			req.SetBasicAuth("root", "Milvus")
+
+			resp, err := client.Do(req)
+			suite.Require().NoError(err)
+			defer resp.Body.Close()
+			suite.Equal(http.StatusNotFound, resp.StatusCode)
+		})
+	}
+}
+
 func (suite *HTTPServerTestSuite) TestPprofHandler() {
 	client := http.Client{}
 	testCases := []struct {
