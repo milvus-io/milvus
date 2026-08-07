@@ -2495,7 +2495,7 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 			return int64(len(fieldData.GetScalars().GetTimestamptzData().GetData())), nil
 		}
 		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
+	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
 	case schemapb.DataType_Array:
 		return int64(len(fieldData.GetScalars().GetArrayData().GetData())), nil
@@ -2729,9 +2729,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 					} else {
 						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
 					}
-				case schemapb.DataType_String:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
-				case schemapb.DataType_VarChar:
+				case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
 				case schemapb.DataType_BinaryVector:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBinaryVector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()/8) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()/8)]
