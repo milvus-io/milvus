@@ -174,6 +174,13 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/jobs/snapshot/export":              "ExportSnapshot",
 	"/v2/vectordb/jobs/snapshot/describe":            "GetRestoreSnapshotState",
 	"/v2/vectordb/jobs/snapshot/list":                "ListRestoreSnapshotJobs",
+	"/v2/vectordb/snapshots/create":                  "CreateSnapshot",
+	"/v2/vectordb/snapshots/drop":                    "DropSnapshot",
+	"/v2/vectordb/snapshots/list":                    "ListSnapshots",
+	"/v2/vectordb/snapshots/describe":                "DescribeSnapshot",
+	"/v2/vectordb/snapshots/restore":                 "RestoreSnapshot",
+	"/v2/vectordb/snapshots/pin":                     "PinSnapshotData",
+	"/v2/vectordb/snapshots/unpin":                   "UnpinSnapshotData",
 	"/v2/vectordb/jobs/external_collection/refresh":  "RefreshExternalCollection",
 	"/v2/vectordb/jobs/external_collection/describe": "GetRefreshExternalCollectionProgress",
 	"/v2/vectordb/jobs/external_collection/list":     "ListRefreshExternalCollectionJobs",
@@ -340,6 +347,13 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(SnapshotJobCategory+ExportAction, timeoutMiddleware(wrapperPost(func() any { return &ExportSnapshotReq{} }, wrapperTraceLog(h.exportSnapshot))))
 	router.POST(SnapshotJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getRestoreSnapshotState))))
 	router.POST(SnapshotJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listRestoreSnapshotJobs))))
+	router.POST(SnapshotCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &CreateSnapshotReq{} }, wrapperTraceLog(h.createSnapshot))))
+	router.POST(SnapshotCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &SnapshotReq{} }, wrapperTraceLog(h.dropSnapshot))))
+	router.POST(SnapshotCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.listSnapshots))))
+	router.POST(SnapshotCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &SnapshotReq{} }, wrapperTraceLog(h.describeSnapshot))))
+	router.POST(SnapshotCategory+RestoreAction, timeoutMiddleware(wrapperPost(func() any { return &RestoreSnapshotReq{} }, wrapperTraceLog(h.restoreSnapshot))))
+	router.POST(SnapshotCategory+PinAction, timeoutMiddleware(wrapperPost(func() any { return &PinSnapshotDataReq{} }, wrapperTraceLog(h.pinSnapshotData))))
+	router.POST(SnapshotCategory+UnpinAction, timeoutMiddleware(wrapperPost(func() any { return &UnpinSnapshotDataReq{} }, wrapperTraceLog(h.unpinSnapshotData))))
 	router.POST(ExternalCollectionJobCategory+RefreshAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionReq{} }, wrapperTraceLog(h.refreshExternalCollection))))
 	router.POST(ExternalCollectionJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionProgressReq{} }, wrapperTraceLog(h.getRefreshExternalCollectionProgress))))
 	router.POST(ExternalCollectionJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listRefreshExternalCollectionJobs))))
@@ -3847,9 +3861,10 @@ func (h *HandlersV2) restoreExternalSnapshot(ctx context.Context, c *gin.Context
 		return h.proxy.RestoreExternalSnapshot(reqCtx, req.(*milvuspb.RestoreExternalSnapshotRequest))
 	})
 	if err == nil {
+		allowInt64, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		HTTPReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode: merr.Code(nil),
-			HTTPReturnData: gin.H{"jobId": resp.(*milvuspb.RestoreExternalSnapshotResponse).GetJobId()},
+			HTTPReturnData: gin.H{"jobId": formatRESTInt64(resp.(*milvuspb.RestoreExternalSnapshotResponse).GetJobId(), allowInt64)},
 		})
 	}
 	return resp, err
@@ -3878,12 +3893,12 @@ func (h *HandlersV2) exportSnapshot(ctx context.Context, c *gin.Context, anyReq 
 	return resp, err
 }
 
-func restoreSnapshotJobToREST(info *milvuspb.RestoreSnapshotInfo) gin.H {
+func restoreSnapshotJobToREST(info *milvuspb.RestoreSnapshotInfo, allowInt64 bool) gin.H {
 	if info == nil {
 		return gin.H{}
 	}
 	return gin.H{
-		"jobId":          info.GetJobId(),
+		"jobId":          formatRESTInt64(info.GetJobId(), allowInt64),
 		"snapshotName":   info.GetSnapshotName(),
 		"dbName":         info.GetDbName(),
 		"collectionName": info.GetCollectionName(),
@@ -3912,9 +3927,10 @@ func (h *HandlersV2) getRestoreSnapshotState(ctx context.Context, c *gin.Context
 		return h.proxy.GetRestoreSnapshotState(reqCtx, req.(*milvuspb.GetRestoreSnapshotStateRequest))
 	})
 	if err == nil {
+		allowInt64, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		HTTPReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode: merr.Code(nil),
-			HTTPReturnData: restoreSnapshotJobToREST(resp.(*milvuspb.GetRestoreSnapshotStateResponse).GetInfo()),
+			HTTPReturnData: restoreSnapshotJobToREST(resp.(*milvuspb.GetRestoreSnapshotStateResponse).GetInfo(), allowInt64),
 		})
 	}
 	return resp, err
@@ -3933,9 +3949,10 @@ func (h *HandlersV2) listRestoreSnapshotJobs(ctx context.Context, c *gin.Context
 	})
 	if err == nil {
 		jobs := resp.(*milvuspb.ListRestoreSnapshotJobsResponse).GetJobs()
+		allowInt64, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		records := make([]gin.H, 0, len(jobs))
 		for _, info := range jobs {
-			records = append(records, restoreSnapshotJobToREST(info))
+			records = append(records, restoreSnapshotJobToREST(info, allowInt64))
 		}
 		HTTPReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode: merr.Code(nil),
