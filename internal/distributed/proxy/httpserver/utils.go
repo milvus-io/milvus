@@ -1385,7 +1385,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					reallyData[fieldName] = result
 				case schemapb.DataType_Timestamptz:
 					reallyData[fieldName] = dataString
-				case schemapb.DataType_VarChar, schemapb.DataType_String:
+				case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
 					value, err := stringFieldValue(fieldName, fieldValue, compatibilityMode)
 					if err != nil {
 						return reallyDataArray, validDataMap, err
@@ -2780,11 +2780,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			data = make([]float32, 0, rowsLen)
 		case schemapb.DataType_Double:
 			data = make([]float64, 0, rowsLen)
-		case schemapb.DataType_Timestamptz:
-			data = make([]string, 0, rowsLen)
-		case schemapb.DataType_String:
-			data = make([]string, 0, rowsLen)
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_Timestamptz, schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			data = make([]string, 0, rowsLen)
 		case schemapb.DataType_Array:
 			data = make([]*schemapb.ScalarField, 0, rowsLen)
@@ -2881,13 +2877,9 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]int64), candi.v.Interface().(int64))
 			case schemapb.DataType_Float:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]float32), candi.v.Interface().(float32))
-			case schemapb.DataType_Timestamptz:
-				nameColumns[field.Name] = append(nameColumns[field.Name].([]string), candi.v.Interface().(string))
 			case schemapb.DataType_Double:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]float64), candi.v.Interface().(float64))
-			case schemapb.DataType_String:
-				nameColumns[field.Name] = append(nameColumns[field.Name].([]string), candi.v.Interface().(string))
-			case schemapb.DataType_VarChar:
+			case schemapb.DataType_Timestamptz, schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]string), candi.v.Interface().(string))
 			case schemapb.DataType_Array:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]*schemapb.ScalarField), candi.v.Interface().(*schemapb.ScalarField))
@@ -3062,27 +3054,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					},
 				},
 			}
-		case schemapb.DataType_Timestamptz:
-			colData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_StringData{
-						StringData: &schemapb.StringArray{
-							Data: column.([]string),
-						},
-					},
-				},
-			}
-		case schemapb.DataType_String:
-			colData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_StringData{
-						StringData: &schemapb.StringArray{
-							Data: column.([]string),
-						},
-					},
-				},
-			}
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_Timestamptz, schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			colData.Field = &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
