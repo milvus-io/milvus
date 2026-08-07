@@ -948,12 +948,11 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSelectFullRewriteRecordDropsD
 	deleteTs := tsoutil.ComposeTSByTime(currentTime.Add(time.Second))
 	entityFilter := compaction.NewEntityFilter(map[any]typeutil.Timestamp{int64(2): deleteTs}, int64(time.Minute), currentTime, 0)
 
-	selection, ttlValues, err := selectFullRewriteRecord(record, pkField, entityFilter, 102, true, nil)
+	selection, err := selectFullRewriteRecord(record, pkField, entityFilter, 102, true)
 	s.Require().NoError(err)
 	s.Require().NotNil(selection)
 	s.Equal(2, selection.Len())
 	s.Equal([]rowRange{{start: 0, end: 1}, {start: 4, end: 5}}, selection.ranges)
-	s.Equal([]int64{keptTTLField, keptTTLField}, ttlValues)
 	s.Equal(1, entityFilter.GetDeletedCount())
 	s.Equal(2, entityFilter.GetExpiredCount())
 }
@@ -1476,4 +1475,93 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionInputSchemaByF
 	s.ErrorIs(err, merr.ErrDataIntegrity)
 	s.ErrorContains(err, "references by_field lang of type")
 	s.ErrorContains(err, "only VarChar is allowed")
+}
+
+// TestFullRewriteMissingTTLFieldDoesNotProbeRecord is the real-cgo regression
+// for the source-TTL presence check: the target schema designates a TTL field that
+// old segments do not carry, and a dropped field routes them through full rewrite.
+// Presence must be decided from existingFields; probing record.Column(ttlFieldID)
+// panics on V3 records ("no such field") before the materializer can fill the null
+// TTL column.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteMissingTTLFieldDoesNotProbeRecord() {
+	const newTTLFieldID = int64(105)
+	// Target schema gains a nullable Timestamptz field absent from the source
+	// segment and designates it as the collection TTL field.
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  newTTLFieldID,
+		Name:     "expire_at",
+		DataType: schemapb.DataType_Timestamptz,
+		Nullable: true,
+	})
+	s.task.plan.Schema.Properties = append(s.task.plan.Schema.Properties, &commonpb.KeyValuePair{
+		Key:   common.CollectionTTLFieldKey,
+		Value: "expire_at",
+	})
+	params, err := compaction.GenerateJSONParams(s.task.plan.GetSchema())
+	s.Require().NoError(err)
+	s.task.plan.JsonParams = params
+
+	// Source segment carries a dropped field (103) -> droppedFieldIDs>0 -> full rewrite.
+	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+	s.Require().Len(result.GetSegments(), 1)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows())
+}
+
+// TestFullRewriteSourceTTLFieldDropsExpiredRows covers the positive direction of
+// source-TTL presence detection. The source manifest physically carries the TTL
+// column, so existingFields must enable TTL filtering before materialization.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteSourceTTLFieldDropsExpiredRows() {
+	const ttlFieldID = int64(105)
+	now := getMilvusBirthday().Add(time.Hour)
+	ttlField := func() *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			FieldID:  ttlFieldID,
+			Name:     "expire_at",
+			DataType: schemapb.DataType_Timestamptz,
+			Nullable: true,
+		}
+	}
+
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, ttlField())
+	s.task.plan.Schema.Properties = append(s.task.plan.Schema.Properties, &commonpb.KeyValuePair{
+		Key:   common.CollectionTTLFieldKey,
+		Value: "expire_at",
+	})
+	params, err := compaction.GenerateJSONParams(s.task.plan.GetSchema())
+	s.Require().NoError(err)
+	s.task.plan.JsonParams = params
+	s.task.currentTime = now
+
+	// The dropped field forces full rewrite; the TTL field is physically present
+	// in the source manifest and contains one expired row and two live rows.
+	fields := append(schemaBumpBaseFields(),
+		&schemapb.FieldSchema{FieldID: 103, Name: "dropped", DataType: schemapb.DataType_Int64},
+		ttlField(),
+	)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.initSegBufferForSchemaBumpWithFields(100, fields, func(i int, value map[int64]interface{}) {
+		value[103] = int64(i)
+		value[ttlFieldID] = now.Add(time.Hour).UnixMicro()
+		if i == 0 {
+			value[ttlFieldID] = now.Add(-time.Minute).UnixMicro()
+		}
+	})
+	s.finishBumpSchemaVersionSegment()
+
+	existingFields, err := compactionSegmentStorageFields(s.task.plan.GetSegmentBinlogs()[0], s.task.compactionParams.StorageConfig)
+	s.Require().NoError(err)
+	s.Contains(existingFields, ttlFieldID, "source manifest must physically carry the TTL field")
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+	s.Require().Len(result.GetSegments(), 1)
+	s.EqualValues(2, result.GetSegments()[0].GetNumOfRows())
 }

@@ -338,35 +338,35 @@ func (t *bumpSchemaVersionCompactionTask) fullRewriteSegmentID() (int64, error) 
 	return idRange.GetBegin(), nil
 }
 
-func selectFullRewriteRecord(record storage.Record, pkField *schemapb.FieldSchema, entityFilter compaction.EntityFilter, ttlFieldID int64, useTTLField bool, ttlValues []int64) (*recordSelection, []int64, error) {
+func selectFullRewriteRecord(record storage.Record, pkField *schemapb.FieldSchema, entityFilter compaction.EntityFilter, ttlFieldID int64, useTTLField bool) (*recordSelection, error) {
 	pkArray := record.Column(pkField.GetFieldID())
 	var pkAt func(int) any
 	switch pkField.GetDataType() {
 	case schemapb.DataType_Int64:
 		int64Array, ok := pkArray.(*array.Int64)
 		if !ok {
-			return nil, nil, merr.WrapErrServiceInternal("int64 primary key field not found in full schema rewrite record")
+			return nil, merr.WrapErrServiceInternal("int64 primary key field not found in full schema rewrite record")
 		}
 		pkAt = func(i int) any { return int64Array.Value(i) }
 	case schemapb.DataType_VarChar:
 		stringArray, ok := pkArray.(*array.String)
 		if !ok {
-			return nil, nil, merr.WrapErrServiceInternal("varchar primary key field not found in full schema rewrite record")
+			return nil, merr.WrapErrServiceInternal("varchar primary key field not found in full schema rewrite record")
 		}
 		pkAt = func(i int) any { return stringArray.Value(i) }
 	default:
-		return nil, nil, merr.WrapErrServiceInternal("invalid primary key data type for full schema rewrite")
+		return nil, merr.WrapErrServiceInternal("invalid primary key data type for full schema rewrite")
 	}
 
 	timestampArray, ok := record.Column(common.TimeStampField).(*array.Int64)
 	if !ok {
-		return nil, nil, merr.WrapErrServiceInternal("timestamp field not found in full schema rewrite record")
+		return nil, merr.WrapErrServiceInternal("timestamp field not found in full schema rewrite record")
 	}
 	var ttlArray *array.Int64
 	if useTTLField {
 		ttlArray, ok = record.Column(ttlFieldID).(*array.Int64)
 		if !ok {
-			return nil, nil, merr.WrapErrServiceInternal("TTL field not found in full schema rewrite record")
+			return nil, merr.WrapErrServiceInternal("TTL field not found in full schema rewrite record")
 		}
 	}
 
@@ -388,9 +388,6 @@ func selectFullRewriteRecord(record storage.Record, pkField *schemapb.FieldSchem
 			continue
 		}
 
-		if useTTLField && expireTs > 0 {
-			ttlValues = append(ttlValues, expireTs)
-		}
 		if sliceStart == -1 {
 			sliceStart = i
 		}
@@ -400,9 +397,9 @@ func selectFullRewriteRecord(record storage.Record, pkField *schemapb.FieldSchem
 		selection.length += record.Len() - sliceStart
 	}
 	if filteredRows == 0 {
-		return nil, ttlValues, nil
+		return nil, nil
 	}
-	return selection, ttlValues, nil
+	return selection, nil
 }
 
 func (t *bumpSchemaVersionCompactionTask) runSchemaVersionBumpOnly() *datapb.CompactionPlanResult {
@@ -514,6 +511,11 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		}
 	}()
 
+	// Source TTL presence is decided from existingFields, never by probing the
+	// record: V2/V3 records panic on Column for a field they do not carry.
+	_, sourceHasTTL := existingFields[ttlFieldID]
+	sourceHasTTLField := ttlFieldID >= common.StartOfUserFieldID && sourceHasTTL
+	preMaterializeFilter := len(delta) > 0 || t.plan.GetCollectionTtl() > 0 || sourceHasTTLField
 	var totalRows int64
 	for {
 		record, err := reader.Next()
@@ -524,11 +526,9 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 			return nil, err
 		}
 
-		sourceHasTTLField := ttlFieldID >= common.StartOfUserFieldID && record.Column(ttlFieldID) != nil
-		preMaterializeFilter := len(delta) > 0 || t.plan.GetCollectionTtl() > 0 || sourceHasTTLField
 		var selection *recordSelection
 		if preMaterializeFilter {
-			selection, _, err = selectFullRewriteRecord(record, pkField, entityFilter, ttlFieldID, sourceHasTTLField, nil)
+			selection, err = selectFullRewriteRecord(record, pkField, entityFilter, ttlFieldID, sourceHasTTLField)
 			if err != nil {
 				return nil, err
 			}
