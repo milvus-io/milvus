@@ -522,6 +522,7 @@ message Statistics {
   // the effective (non-null) row count for vector index build decisions
   // on nullable vector fields.
   map<int64, int64> null_counts = 13;
+  LoadResourceStatistics load_resource = 14;
 }
 
 message SegmentStartPosition {
@@ -1913,7 +1914,6 @@ message HandleCommitVchannelRequest {
   // This becomes the segment's commit_timestamp for MVCC/TTL/delete correctness.
   uint64         commit_timestamp = 4;
 }
-
 // ExternalCollectionRefreshTaskResult stores the task result outside etcd.
 // Identity fields prevent a valid object from being attached to another task.
 message ExternalCollectionRefreshTaskResult {
@@ -1923,4 +1923,14 @@ message ExternalCollectionRefreshTaskResult {
   int64 task_version = 4;
   repeated int64 kept_segments = 5;
   repeated SegmentInfo updated_segments = 6;
+}
+
+message ColumnGroupStatistics {
+  int64 group_id = 1;
+  repeated int64 field_ids = 2;
+  int64 memory_size = 3;
+}
+
+message LoadResourceStatistics {
+  repeated ColumnGroupStatistics column_groups = 1;
 }
