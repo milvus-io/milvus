@@ -19,6 +19,7 @@ class FakeMilvusClient:
         self.add_collection_field_calls = 0
         self.create_index_calls = 0
         self.create_index_kwargs = []
+        self.create_collection_calls = 0
         self.load_collection_calls = 0
 
     def has_collection(self, collection_name):
@@ -49,6 +50,7 @@ class FakeMilvusClient:
         self.add_collection_field_calls += 1
 
     def create_collection(self, **kwargs):
+        self.create_collection_calls += 1
         self.collection_exists = True
 
     def load_collection(self, **kwargs):
@@ -208,6 +210,7 @@ def test_add_vector_field_checker_retries_same_field_after_index_timeout(monkeyp
         checker_module.FlushChecker,
         checker_module.AddFieldChecker,
         checker_module.AddVectorFieldChecker,
+        checker_module.CollectionDropChecker,
         checker_module.SnapshotChecker,
         checker_module.SnapshotRestoreChecker,
     ),
@@ -236,6 +239,19 @@ def test_heavy_checker_waits_between_operations(monkeypatch, checker_class):
     checker.keep_running()
 
     assert wait_calls == [17, checker_module.HEAVY_OP_WAIT_SECONDS]
+
+
+def test_collection_drop_checker_uses_bounded_pool(monkeypatch):
+    checker = object.__new__(checker_module.CollectionDropChecker)
+    checker.milvus_client = FakeMilvusClient()
+    checker.collection_pool = []
+    generated_names = iter(f"drop_pool_{index}" for index in range(checker_module.DROP_COLLECTION_POOL_SIZE))
+    monkeypatch.setattr(checker_module.cf, "gen_unique_str", lambda prefix: next(generated_names))
+
+    checker.gen_collection_pool(schema=object())
+
+    assert len(checker.collection_pool) == checker_module.DROP_COLLECTION_POOL_SIZE
+    assert checker.milvus_client.create_collection_calls == checker_module.DROP_COLLECTION_POOL_SIZE
 
 
 def test_initial_operation_jitter_is_stable_and_operation_specific():
@@ -272,6 +288,7 @@ def test_configure_heavy_operation_schedules():
         op: object.__new__(checker_class)
         for op, checker_class in (
             (checker_module.Op.flush, checker_module.FlushChecker),
+            (checker_module.Op.drop, checker_module.CollectionDropChecker),
             (checker_module.Op.add_field, checker_module.AddFieldChecker),
             (checker_module.Op.snapshot, checker_module.SnapshotChecker),
             (checker_module.Op.restore_snapshot, checker_module.SnapshotRestoreChecker),

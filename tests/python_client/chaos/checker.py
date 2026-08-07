@@ -324,6 +324,8 @@ timeout = 120
 search_timeout = 30
 query_timeout = 30
 HEAVY_OP_WAIT_SECONDS = 120
+DROP_COLLECTION_POOL_SIZE = 12
+DROP_COLLECTION_REFILL_THRESHOLD = 3
 
 enable_traceback = False
 DEFAULT_FMT = "[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}"
@@ -380,6 +382,7 @@ def configure_heavy_operation_schedules(checkers):
     """Throttle and stagger heavy operations in the concurrent chaos workload."""
     for operation in (
         Op.flush,
+        Op.drop,
         Op.add_field,
         Op.snapshot,
         Op.restore_snapshot,
@@ -2444,7 +2447,7 @@ class CollectionDropChecker(Checker):
         self.collection_pool = []
         self.gen_collection_pool(schema=self.schema)
 
-    def gen_collection_pool(self, pool_size=50, schema=None):
+    def gen_collection_pool(self, pool_size=DROP_COLLECTION_POOL_SIZE, schema=None):
         for i in range(pool_size):
             collection_name = cf.gen_unique_str("DropChecker_")
             try:
@@ -2469,24 +2472,14 @@ class CollectionDropChecker(Checker):
     @exception_handler()
     def run_task(self):
         res, result = self.drop_collection()
+        if result:
+            if len(self.collection_pool) <= DROP_COLLECTION_REFILL_THRESHOLD:
+                self.gen_collection_pool(schema=self.schema)
+            self.c_name = self.collection_pool[0]
         return res, result
 
     def keep_running(self):
-        while self._keep_running:
-            res, result = self.run_task()
-            if result:
-                try:
-                    if len(self.collection_pool) <= 10:
-                        self.gen_collection_pool(schema=self.schema)
-                except Exception as e:
-                    log.error(f"Failed to generate collection pool: {e}")
-                try:
-                    c_name = self.collection_pool[0]
-                    # Update current collection name to use from pool
-                    self.c_name = c_name
-                except Exception as e:
-                    log.error(f"Failed to init new collection: {e}")
-            sleep(constants.WAIT_PER_OP)
+        _run_checker_with_interval(self, HEAVY_OP_WAIT_SECONDS)
 
 
 class PartitionCreateChecker(Checker):
