@@ -93,7 +93,8 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 		logger: resource.Resource().Logger().With(
 			mlog.FieldComponent("consumer-server"),
 			mlog.String("channel", l.Channel().Name),
-			mlog.Int64("term", l.Channel().Term)), // Add trace info for all log.
+			mlog.Int64("term", l.Channel().Term),
+		), // Add trace info for all log.
 		closeCh: make(chan struct{}),
 		metrics: metrics,
 	}, nil
@@ -144,7 +145,10 @@ func (c *ConsumeServer) sendLoop() (err error) {
 		select {
 		case msg, ok := <-c.scanner.Chan():
 			if !ok {
-				return status.NewInner("scanner error: %s", c.scanner.Error())
+				if err := c.scanner.Error(); err != nil {
+					return err
+				}
+				return status.NewInner("scanner closed unexpectedly")
 			}
 			// If the message is a transaction message, we should send the sub messages one by one,
 			// Otherwise we can send the full message directly.

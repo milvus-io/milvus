@@ -27,6 +27,9 @@ func (b *builderImpl) Name() message.WALName {
 
 // Build build a wal instance.
 func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
+	if !paramtable.IsStandalone() {
+		return nil, merr.WrapErrServiceInternalMsg("RocksMQ WAL is only supported in standalone mode")
+	}
 	if server.Rmq == nil {
 		path := paramtable.Get().RocksmqCfg.Path.GetValue()
 		if err := server.InitRocksMQ(path); err != nil {

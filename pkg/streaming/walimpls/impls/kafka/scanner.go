@@ -13,9 +13,10 @@ import (
 var _ walimpls.ScannerImpls = (*scannerImpl)(nil)
 
 // newScanner creates a new scanner.
-func newScanner(scannerName string, exclude *kafkaID, consumer *kafka.Consumer) *scannerImpl {
+func newScanner(scannerName string, topic string, exclude *kafkaID, consumer *kafka.Consumer) *scannerImpl {
 	s := &scannerImpl{
 		ScannerHelper: helper.NewScannerHelper(scannerName),
+		topic:         topic,
 		consumer:      consumer,
 		msgChannel:    make(chan message.ImmutableMessage, 1),
 		exclude:       exclude,
@@ -27,6 +28,7 @@ func newScanner(scannerName string, exclude *kafkaID, consumer *kafka.Consumer) 
 // scannerImpl is the implementation of ScannerImpls for kafka.
 type scannerImpl struct {
 	*helper.ScannerHelper
+	topic      string
 	consumer   *kafka.Consumer
 	msgChannel chan message.ImmutableMessage
 	exclude    *kafkaID
@@ -59,7 +61,7 @@ func (s *scannerImpl) executeConsume() {
 			if c, ok := err.(kafka.Error); ok && c.Code() == kafka.ErrTimedOut {
 				continue
 			}
-			s.Finish(err)
+			s.Finish(mapKafkaReadError(s.topic, err))
 			return
 		}
 		messageID := kafkaID(msg.TopicPartition.Offset)

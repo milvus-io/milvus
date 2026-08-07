@@ -207,11 +207,11 @@ func TestConsumerServeSendArm(t *testing.T) {
 	scanCh <- txnMsg
 
 	// test scanner broken.
-	scanner.EXPECT().Error().Return(io.EOF)
+	scannerErr := status.NewUnrecoverableError("historical WAL unavailable")
+	scanner.EXPECT().Error().Return(scannerErr)
 	close(scanCh)
 	err := <-ch
-	sErr := status.AsStreamingError(err)
-	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INNER, sErr.Code)
+	assert.Same(t, scannerErr, err)
 
 	// test cancel by client.
 	scanner.EXPECT().Chan().Unset()

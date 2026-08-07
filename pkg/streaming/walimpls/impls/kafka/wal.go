@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
@@ -11,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var _ walimpls.WALImpls = (*walImpl)(nil)
@@ -64,7 +66,20 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 	// The scanner is stateless, so we can create a scanner with an anonymous consumer.
 	// and there's no commit opeartions.
 	consumerConfig := cloneKafkaConfig(w.consumerConfig)
-	consumerConfig.SetKey("group.id", opt.Name)
+	if err := consumerConfig.SetKey("group.id", opt.Name); err != nil {
+		return nil, merr.WrapErrMqInternal(err, "failed to configure kafka reader group")
+	}
+	if w.Channel().AccessMode == types.AccessModeRO {
+		// A read-only historical reader must never create a missing topic.
+		if err := consumerConfig.SetKey("allow.auto.create.topics", false); err != nil {
+			return nil, merr.WrapErrMqInternal(err, "failed to disable kafka topic auto creation")
+		}
+		// A historical read must fail instead of silently resetting to earliest
+		// when its requested offset has been removed by retention.
+		if err := consumerConfig.SetKey("auto.offset.reset", "error"); err != nil {
+			return nil, merr.WrapErrMqInternal(err, "failed to disable kafka offset auto reset")
+		}
+	}
 	c, err := kafka.NewConsumer(&consumerConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create kafka consumer")
@@ -76,6 +91,7 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 		Partition: 0,
 	}
 	var exclude *kafkaID
+	var requestedOffset *kafka.Offset
 	switch t := opt.DeliverPolicy.GetPolicy().(type) {
 	case *streamingpb.DeliverPolicy_All:
 		seekPosition.Offset = kafka.OffsetBeginning
@@ -87,21 +103,63 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 			return nil, err
 		}
 		seekPosition.Offset = kafka.Offset(id)
+		requestedOffset = &seekPosition.Offset
 	case *streamingpb.DeliverPolicy_StartAfter:
 		id, err := unmarshalMessageID(t.StartAfter.GetId())
 		if err != nil {
 			return nil, err
 		}
 		seekPosition.Offset = kafka.Offset(id)
+		requestedOffset = &seekPosition.Offset
 		exclude = &id
 	default:
 		panic("unknown deliver policy")
 	}
+	if w.Channel().AccessMode == types.AccessModeRO {
+		const topicValidationTimeout = 3000
+		low, high, err := c.QueryWatermarkOffsets(topic, 0, topicValidationTimeout)
+		if err != nil {
+			_ = c.Close()
+			return nil, mapKafkaReadError(topic, err)
+		}
+		if requestedOffset != nil {
+			if err := validateKafkaReadOffset(topic, int64(*requestedOffset), low, high); err != nil {
+				_ = c.Close()
+				return nil, err
+			}
+		}
+	}
 
 	if err := c.Assign([]kafka.TopicPartition{seekPosition}); err != nil {
+		_ = c.Close()
 		return nil, errors.Wrap(err, "failed to assign kafka consumer")
 	}
-	return newScanner(opt.Name, exclude, c), nil
+	return newScanner(opt.Name, topic, exclude, c), nil
+}
+
+func mapKafkaReadError(topic string, err error) error {
+	var kafkaErr kafka.Error
+	if errors.As(err, &kafkaErr) {
+		switch kafkaErr.Code() {
+		case kafka.ErrUnknownTopic, kafka.ErrUnknownPartition, kafka.ErrUnknownTopicOrPart, kafka.ErrOffsetOutOfRange:
+			return merr.WrapErrMqTopicNotFound(topic, err.Error())
+		}
+	}
+	return err
+}
+
+func validateKafkaReadOffset(topic string, offset, low, high int64) error {
+	if kafka.Offset(offset) == kafka.OffsetBeginning {
+		// OffsetBeginning is the persisted sentinel used by the migration
+		// checkpoint for an earliest-position Kafka reader.
+		return nil
+	}
+	if offset >= low && offset < high {
+		return nil
+	}
+	return merr.WrapErrMqTopicNotFound(topic,
+		"requested offset "+strconv.FormatInt(offset, 10)+
+			" is outside retained range ["+strconv.FormatInt(low, 10)+", "+strconv.FormatInt(high, 10)+")")
 }
 
 func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
