@@ -2066,6 +2066,28 @@ func TestBuildQueryRespDynamicFieldLargeIntPrecision(t *testing.T) {
 	})
 }
 
+func TestBuildQueryRespTextField(t *testing.T) {
+	fieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Text,
+		FieldName: FieldBookIntro,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{Data: []string{"hello", strings.Repeat("文", 32)}},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true},
+	}
+
+	rows, err := buildQueryResp(0, []string{FieldBookIntro}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+	require.NoError(t, err)
+	require.Len(t, rows, 3)
+	assert.Equal(t, "hello", rows[0][FieldBookIntro])
+	assert.Nil(t, rows[1][FieldBookIntro])
+	assert.Equal(t, strings.Repeat("文", 32), rows[2][FieldBookIntro])
+}
+
 func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 	t.Run("nullable vector derives logical rows from ValidData", func(t *testing.T) {
 		fieldData := &schemapb.FieldData{
