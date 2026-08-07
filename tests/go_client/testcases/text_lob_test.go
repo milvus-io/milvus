@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// L0 coverage for TEXT LOB through the public Go SDK.
+// L0 CRUD coverage for TEXT LOB through the public Go SDK.
 package testcases
 
 import (
@@ -216,6 +216,41 @@ func prepareTextLOBFixture(t *testing.T, ctx context.Context, mc *base.MilvusCli
 	}
 }
 
+func flushAndReloadTextLOBCollection(t *testing.T, ctx context.Context, mc *base.MilvusClient, collectionName string) {
+	t.Helper()
+
+	common.CheckErr(t, flushTextLOBCollectionWithRetry(ctx, mc, collectionName), true)
+
+	common.CheckErr(t, mc.ReleaseCollection(ctx, client.NewReleaseCollectionOption(collectionName)), true)
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collectionName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+}
+
+func flushTextLOBCollectionWithRetry(ctx context.Context, mc *base.MilvusClient, collectionName string) error {
+	retryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		flushTask, err := mc.Flush(retryCtx, client.NewFlushOption(collectionName))
+		if err == nil {
+			return flushTask.Await(retryCtx)
+		}
+		if !client.IsRetryableError(err) {
+			return err
+		}
+
+		select {
+		case <-retryCtx.Done():
+			return fmt.Errorf("flush collection %q retry timed out: %w", collectionName, err)
+		case <-ticker.C:
+		}
+	}
+}
+
 func requireExactTextLOB(t *testing.T, expected, actual string) {
 	t.Helper()
 	require.Equal(t, len(expected), len(actual), "TEXT byte length mismatch")
@@ -360,5 +395,95 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 			}
 		}
 		require.Len(t, seen, len(fixture.rows))
+	})
+
+	t.Run("upsert_payloads", func(t *testing.T) {
+		upsertRows := []textLOBRow{
+			{
+				id:       2,
+				vector:   fixture.rows[2].vector,
+				content:  textLOBValue(makeTextLOB(128*1024, "upsert-null-to-large")),
+				alt:      textLOBValue("upserted multilingual alternate 中文 payload 😀"),
+				sentinel: "sentinel text upsert 2",
+			},
+			{
+				id:       6,
+				vector:   fixture.rows[6].vector,
+				content:  textLOBValue(makeTextLOB(256*1024, "upsert-large")),
+				alt:      nil,
+				sentinel: "sentinel text upsert 6",
+			},
+		}
+		ids := []int64{upsertRows[0].id, upsertRows[1].id}
+		vectors := [][]float32{upsertRows[0].vector, upsertRows[1].vector}
+		sentinels := []string{upsertRows[0].sentinel, upsertRows[1].sentinel}
+		contentColumn := nullableTextLOBColumn(t, textLOBContentField, upsertRows, func(row textLOBRow) *string {
+			return row.content
+		})
+		altColumn := nullableTextLOBColumn(t, textLOBAltField, upsertRows, func(row textLOBRow) *string {
+			return row.alt
+		})
+
+		upsertResult, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(fixture.collectionName).
+			WithInt64Column(textLOBIDField, ids).
+			WithFloatVectorColumn(textLOBVectorField, textLOBVectorDim, vectors).
+			WithColumns(contentColumn, altColumn).
+			WithTextColumn(textLOBSentinelField, sentinels))
+		common.CheckErr(t, err, true)
+		require.EqualValues(t, len(upsertRows), upsertResult.UpsertCount)
+		flushAndReloadTextLOBCollection(t, ctx, mc, fixture.collectionName)
+
+		expected := make(map[int64]textLOBRow, len(upsertRows))
+		for _, row := range upsertRows {
+			expected[row.id] = row
+		}
+		result, err := mc.Query(ctx, client.NewQueryOption(fixture.collectionName).
+			WithFilter(fmt.Sprintf("%s in [2, 6]", textLOBIDField)).
+			WithOutputFields(textLOBIDField, textLOBContentField, textLOBAltField, textLOBSentinelField).
+			WithConsistencyLevel(entity.ClStrong).
+			WithLimit(len(upsertRows)))
+		common.CheckErr(t, err, true)
+		require.Equal(t, len(upsertRows), result.Len())
+		resultIDs := requireTextLOBResultRows(t, result, result.GetColumn(textLOBIDField), expected)
+		require.ElementsMatch(t, ids, resultIDs)
+
+		for id, row := range expected {
+			fixture.rowsByID[id] = row
+		}
+	})
+
+	t.Run("delete_payloads", func(t *testing.T) {
+		deletedID := int64(7)
+		deleteResult, err := mc.Delete(ctx, client.NewDeleteOption(fixture.collectionName).
+			WithInt64IDs(textLOBIDField, []int64{deletedID}))
+		common.CheckErr(t, err, true)
+		require.EqualValues(t, 1, deleteResult.DeleteCount)
+		flushAndReloadTextLOBCollection(t, ctx, mc, fixture.collectionName)
+
+		deleted, err := mc.Query(ctx, client.NewQueryOption(fixture.collectionName).
+			WithFilter(fmt.Sprintf("%s == %d", textLOBIDField, deletedID)).
+			WithOutputFields(textLOBIDField, textLOBContentField).
+			WithConsistencyLevel(entity.ClStrong))
+		common.CheckErr(t, err, true)
+		require.Zero(t, deleted.ResultCount)
+
+		survivors := make(map[int64]textLOBRow, len(fixture.rowsByID)-1)
+		expectedIDs := make([]int64, 0, len(fixture.rowsByID)-1)
+		for id, row := range fixture.rowsByID {
+			if id == deletedID {
+				continue
+			}
+			survivors[id] = row
+			expectedIDs = append(expectedIDs, id)
+		}
+		result, err := mc.Query(ctx, client.NewQueryOption(fixture.collectionName).
+			WithFilter(fmt.Sprintf("%s >= 0", textLOBIDField)).
+			WithOutputFields(textLOBIDField, textLOBContentField, textLOBAltField, textLOBSentinelField).
+			WithConsistencyLevel(entity.ClStrong).
+			WithLimit(len(survivors)))
+		common.CheckErr(t, err, true)
+		require.Equal(t, len(survivors), result.Len())
+		resultIDs := requireTextLOBResultRows(t, result, result.GetColumn(textLOBIDField), survivors)
+		require.ElementsMatch(t, expectedIDs, resultIDs)
 	})
 }
