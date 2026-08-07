@@ -189,6 +189,22 @@ func (s *ResultSetSuite) TestResultsetUnmarshalNullablePointer() {
 	s.Nil(receiver[2].Age)
 }
 
+func (s *ResultSetSuite) TestTextResultUnmarshal() {
+	type TextData struct {
+		Document string `milvus:"name:document"`
+	}
+
+	result := DataSet{
+		column.NewColumnText("document", []string{"first", "second"}),
+	}
+	var receiver []*TextData
+	err := result.Unmarshal(&receiver)
+	s.Require().NoError(err)
+	s.Require().Len(receiver, 2)
+	s.Equal("first", receiver[0].Document)
+	s.Equal("second", receiver[1].Document)
+}
+
 func (s *ResultSetSuite) TestSearchResultUnmarshalPointerPK() {
 	type PtrPKData struct {
 		A *int64    `milvus:"name:id"`
