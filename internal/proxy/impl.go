@@ -49,8 +49,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -128,6 +130,9 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	if request == nil {
+		return merr.Status(merr.WrapErrServiceInternalMsg("invalidate collection meta cache request is nil")), nil
+	}
 	ctx = logutil.WithModule(ctx, moduleName)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateCollectionMetaCache")
@@ -149,6 +154,21 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		if collectionID != UniqueID(0) {
 			node.shardMgr.InvalidateShardLeaderCache([]int64{collectionID})
 		}
+	}
+
+	switch msgType {
+	case rlsutil.MsgTypeCreateRowPolicy,
+		rlsutil.MsgTypeUpdateRowPolicy,
+		rlsutil.MsgTypeDropRowPolicy,
+		rlsutil.MsgTypeSetRLSPrincipalTags,
+		rlsutil.MsgTypeDeleteRLSPrincipalTags:
+		rls.RemoveCollection(ctx, collectionID)
+		mlog.Info(ctx, "complete to invalidate RLS snapshots",
+			mlog.String("type", request.GetBase().GetMsgType().String()),
+			mlog.FieldDbName(dbName),
+			mlog.FieldCollectionName(collectionName),
+			mlog.FieldCollectionID(collectionID))
+		return merr.Success(), nil
 	}
 
 	if globalMetaCache != nil {
@@ -215,6 +235,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 	switch msgType {
 	case commonpb.MsgType_DropCollection:
+		rls.RemoveCollection(ctx, request.GetCollectionID())
 		// no need to handle error, since this Proxy may not create dml stream for the collection.
 		node.chMgr.removeDMLStream(request.GetCollectionID())
 		// clean up collection level metrics
