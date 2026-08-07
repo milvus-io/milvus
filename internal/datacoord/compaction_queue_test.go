@@ -190,25 +190,45 @@ func TestCompactionQueue_SyncPrioritizer(t *testing.T) {
 	t2.SetTask(&datapb.CompactionTask{PlanID: 2, Type: datapb.CompactionType_MixCompaction})
 
 	t.Run("same name does not re-prioritize", func(t *testing.T) {
-		var calls int
-		counting := func(task CompactionTask) int {
-			calls++
-			return DefaultPrioritizer(task)
-		}
+		// Observe re-prioritization through the stored priorities rather than
+		// through an instrumented Prioritizer: SyncPrioritizer resolves the
+		// prioritizer by name, so any injected closure is discarded on the very
+		// first call and a call counter would stay at zero either way.
+		//
+		// DefaultPrioritizer is int(PlanID), so mutating PlanID after the queue
+		// has been primed makes a recompute observable: the stored priority only
+		// changes if updatePrioritizerLocked runs again.
+		task := &mixCompactionTask{}
+		task.SetTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_MixCompaction})
 
-		cq := NewCompactionQueue(10, counting)
-		assert.NoError(t, cq.Enqueue(t1))
-		assert.NoError(t, cq.Enqueue(t2))
+		cq := NewCompactionQueue(10, DefaultPrioritizer)
+		assert.NoError(t, cq.Enqueue(task))
 
-		// First sync adopts the configured prioritizer.
+		// First sync adopts the configured prioritizer and primes the priority.
 		cq.SyncPrioritizer("default")
-		calls = 0
+		cq.lock.RLock()
+		primed := cq.pq[0].priority
+		cq.lock.RUnlock()
+		assert.EqualValues(t, 1, primed)
+
+		task.SetTask(&datapb.CompactionTask{PlanID: 42, Type: datapb.CompactionType_MixCompaction})
 
 		// Subsequent syncs with an unchanged configuration must be no-ops.
 		for i := 0; i < 100; i++ {
 			cq.SyncPrioritizer("default")
 		}
-		assert.Zero(t, calls, "queue was re-prioritized despite unchanged configuration")
+		cq.lock.RLock()
+		after := cq.pq[0].priority
+		cq.lock.RUnlock()
+		assert.EqualValues(t, primed, after, "queue was re-prioritized despite unchanged configuration")
+
+		// A changed configuration must still recompute, proving the assertion
+		// above is not vacuous.
+		cq.SyncPrioritizer("mix")
+		cq.lock.RLock()
+		recomputed := cq.pq[0].priority
+		cq.lock.RUnlock()
+		assert.EqualValues(t, MixFirstPrioritizer(task), recomputed)
 	})
 
 	t.Run("changed name does re-prioritize", func(t *testing.T) {
