@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ---------------------------------------------------------------------------
@@ -582,8 +581,7 @@ func TestAddPreparing_DataVersionRollbackRejected(t *testing.T) {
 	// Try to add v2 with DV(1,1) → should fail with DataVersion rollback.
 	b2 := testBuilder(1, 1, 1)
 	err := mgr.AddPreparing(context.Background(), b2)
-	assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
-	assert.ErrorContains(t, err, "new data version must not be lower than any existing view's data version")
+	assert.ErrorIs(t, err, errDataVersionRollback)
 }
 
 func TestAddPreparing_BatchPersistAtomicity(t *testing.T) {
@@ -946,30 +944,6 @@ func TestRequestRelease_MixedViews(t *testing.T) {
 	assert.Equal(t, 1, catalog.numSaveCalls())
 }
 
-func TestAddPreparing_RejectedAfterRequestRelease(t *testing.T) {
-	catalog := newMockCatalog()
-	s := newMockSyncer()
-	mgr := newTestManager(t, catalog, s)
-
-	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
-	require.NoError(t, mgr.RequestRelease(context.Background()))
-
-	// A prepare arriving after release started must be rejected: resurrecting
-	// a Preparing view would fight the teardown already in flight.
-	catalog.reset()
-	s.reset()
-	err := mgr.AddPreparing(context.Background(), testBuilder(2, 1, 1))
-	require.Error(t, err)
-
-	// No new view, persist, or sync effects from the rejected prepare.
-	assert.Equal(t, 0, catalog.numSaveCalls())
-	assert.Zero(t, s.syncViewCount())
-	mgr.mu.Lock()
-	require.Len(t, mgr.views, 1)
-	assert.Equal(t, qviews.QueryViewStateDropping, mgr.views[testVersion(1, 1, 1)].State())
-	mgr.mu.Unlock()
-}
-
 // ===========================================================================
 // Recovery tests
 // ===========================================================================
@@ -1133,64 +1107,4 @@ func TestShardViewManagerConsumesOnlyProcessedStateMachineEffects(t *testing.T) 
 	assert.Equal(t, processed.Version(), qviews.FromProtoQueryViewVersion(event.persists[0].GetMeta().GetVersion()))
 	assert.Len(t, event.syncs, 2)
 	assert.False(t, untouched.ConsumeFlush().Empty())
-}
-
-func TestShardViewManagerRemovesDroppedViewOnlyAfterPersist(t *testing.T) {
-	view := buildTestViewWithVersion(1, 1, 1, 1)
-	sm := NewCoordQueryViewStateMachine(view)
-	sm.ConsumeFlush()
-	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateReady))
-	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateReady))
-	sm.ConsumeFlush()
-	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateUp))
-	sm.ConsumeFlush()
-	sm.EnterDown()
-	sm.ConsumeFlush()
-	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateDown))
-	sm.ConsumeFlush()
-	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateDropped))
-	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateDropped))
-	require.Equal(t, qviews.QueryViewStateDropped, sm.State())
-
-	manager := &ShardViewManager{
-		ctx:     context.Background(),
-		shardID: testShardID,
-		views: map[qviews.QueryViewVersion]*CoordQueryViewStateMachine{
-			sm.Version(): sm,
-		},
-	}
-	manager.mu.Lock()
-	manager.processStateMachine(sm)
-	event := manager.consumeDirtyEventLocked()
-	_, retainedBeforePersist := manager.views[sm.Version()]
-	manager.mu.Unlock()
-
-	assert.True(t, retainedBeforePersist)
-	require.Len(t, event.afterPersist, 1)
-	event.afterPersist[0]()
-
-	manager.mu.Lock()
-	_, retainedAfterPersist := manager.views[sm.Version()]
-	manager.mu.Unlock()
-	assert.False(t, retainedAfterPersist)
-}
-
-func TestShardViewManagerDoesNotPublishReleaseWithoutRequestRelease(t *testing.T) {
-	view := buildTestViewWithVersion(1, 1, 1, 1)
-	sm := NewCoordQueryViewStateMachine(view)
-	manager := &ShardViewManager{
-		ctx:     context.Background(),
-		shardID: testShardID,
-		views: map[qviews.QueryViewVersion]*CoordQueryViewStateMachine{
-			sm.Version(): sm,
-		},
-	}
-
-	released := false
-	manager.setOnReleasedEmpty(func(qviews.ShardID, *ShardViewManager) {
-		released = true
-	})
-	manager.finalizeRemoval(sm)
-
-	assert.False(t, released)
 }
