@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -195,9 +196,10 @@ func (c *catalog) ListQueryViews(ctx context.Context, pChannelName string) ([]*v
 			return nil, err
 		}
 		if typeutil.After(keys[idx], prefix) != typeutil.After(expectedKey, prefix) {
-			return nil, merr.WrapErrServiceInternalMsg(
-				"mismatched query view recovery meta, key %s, meta %s",
-				keys[idx], view.GetMeta().GetVchannel(),
+			return nil, merr.WrapErrDataIntegrityMsg(
+				"mismatched query view recovery meta, key %s, vchannel %s",
+				keys[idx],
+				view.GetMeta().GetVchannel(),
 			)
 		}
 		views = append(views, view)
@@ -325,10 +327,30 @@ func buildQueryViewKey(pChannelName string, meta *viewpb.QueryViewMeta) (string,
 	if version == nil || version.GetDataVersion() == nil {
 		return "", merr.WrapErrServiceInternalMsg("query view %s has nil version", meta.GetVchannel())
 	}
+	pchannel, collectionID, vchannelIndex, err := funcutil.ParseVChannel(meta.GetVchannel())
+	if err != nil {
+		return "", err
+	}
+	if pchannel != pChannelName {
+		return "", merr.WrapErrServiceInternalMsg(
+			"query view vchannel %s pchannel %s mismatches catalog pchannel %s",
+			meta.GetVchannel(),
+			pchannel,
+			pChannelName,
+		)
+	}
+	if collectionID != meta.GetCollectionId() {
+		return "", merr.WrapErrServiceInternalMsg(
+			"query view collection %d mismatches vchannel %s collection %d",
+			meta.GetCollectionId(),
+			meta.GetVchannel(),
+			collectionID,
+		)
+	}
 	dataVersion := version.GetDataVersion()
-	return fmt.Sprintf("%s%d/%d/%s/%d/%d/%d",
+	return fmt.Sprintf("%s%d/%d/%d/%d/%d/%d",
 		buildQueryViewPrefix(pChannelName),
-		meta.GetCollectionId(), meta.GetReplicaId(), meta.GetVchannel(),
+		meta.GetCollectionId(), meta.GetReplicaId(), vchannelIndex,
 		dataVersion.GetStreamingVersion(), dataVersion.GetCompactVersion(), version.GetQueryVersion(),
 	), nil
 }

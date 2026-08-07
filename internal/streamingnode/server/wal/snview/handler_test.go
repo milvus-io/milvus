@@ -229,6 +229,25 @@ func TestSNHandler_ApplyViews_NewPreparing(t *testing.T) {
 	require.True(t, ok)
 }
 
+func TestSNHandler_AcquireUnrecoverableReportsUnrecoverable(t *testing.T) {
+	cat := newMockCatalog()
+	mgr := newMockResourceManager()
+	h := recoverSNQueryViewHandler(testPChannel, cat, mgr, nil)
+
+	rc := &reportCollector{}
+	view := newPreparingSNView(1)
+	h.ApplyViews([]handler.ApplyView{{View: view, OnReport: rc.onReport}})
+	req, ok := mgr.getAcquired(view.QueryViewKey())
+	require.True(t, ok)
+	require.NotNil(t, req.OnUnrecoverable)
+
+	req.OnUnrecoverable()
+
+	require.Equal(t, 2, rc.count())
+	assert.Equal(t, qviews.QueryViewStateUnrecoverable, rc.last().State())
+	assert.Equal(t, 0, cat.savedCount())
+}
+
 func TestSNHandler_ApplyViews_UnknownViewReportsUnrecoverable(t *testing.T) {
 	cat := newMockCatalog()
 	mgr := newMockResourceManager()

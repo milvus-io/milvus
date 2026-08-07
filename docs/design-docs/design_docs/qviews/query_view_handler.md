@@ -112,8 +112,8 @@ Duplicate QueryViewKey handling is owned by the handler/SM pair, not by
 
 **Normal flow (Preparing → Ready → Up → Down → Dropped):**
 
-1. Coord pushes Preparing → handler creates SM (generates Preparing report immediately) → calls `resMgr.Acquire(OnReady)`.
-2. ResourceManager prepares resources asynchronously → calls `OnReady` → SM advances Preparing → Ready → report Ready to Coord.
+1. Coord pushes Preparing → handler creates SM (generates Preparing report immediately) → calls `resMgr.Acquire(OnReady, OnUnrecoverable)`.
+2. ResourceManager prepares resources asynchronously. `OnReady` advances Preparing → Ready; `OnUnrecoverable` advances Preparing → Unrecoverable and reports the failure to Coord.
 3. Coord pushes Up → SM advances Ready → Up → **persist Up** → report Up to Coord.
 4. Coord pushes Down → SM advances Up → Down → **persist Down (= delete recovery info)** → report Down to Coord.
 5. Coord pushes Dropped → SM enters Dropping → **persist Dropped (= delete recovery info)** → calls `resMgr.Release(OnDropped)`.
@@ -129,10 +129,11 @@ consumers without importing query execution in this change.
 
 SN-local persisted key format:
 
-- `streamingnode-meta/wal/{pchannel}/query-view/{collectionID}/{replicaID}/{vchannel}/{streamingVersion}/{compactVersion}/{queryVersion}` — `QueryViewOfShard` proto.
+- `streamingnode-meta/wal/{pchannel}/qv/{collectionID}/{replicaID}/{vchannelIndex}/{streamingVersion}/{compactVersion}/{queryVersion}` — `QueryViewOfShard` proto.
 
-The key keeps the full vchannel name and the QueryView/DataView version tuple so
-multiple in-flight views for the same shard do not overwrite each other.
+The pchannel is already present in the parent path, so the compact key stores
+only the canonical vchannel index plus the QueryView/DataView version tuple.
+Recovery validates the reconstructed key identity against the persisted proto.
 
 ### 4.3 SN: Crash Recovery
 
@@ -140,13 +141,13 @@ SN persists only the Up state. On crash recovery:
 
 1. Load persisted full Up shard views from `Catalog`.
 2. Create SMs in UpRecovering state (Coord-visible as Up).
-3. Call the injected `resMgr.Acquire(OnReady)` for each view.
-4. The recovery callback drives UpRecovering → Up → report Up.
+3. Call the injected `resMgr.Acquire(OnReady, OnUnrecoverable)` for each view.
+4. `OnReady` drives UpRecovering → Up → report Up. `OnUnrecoverable` drives
+   UpRecovering → Unrecoverable locally without reporting to Coord and retains
+   persisted recovery metadata until Coord later pushes Dropped.
 
-The state machine still defines UpRecovering failure semantics, but the concrete
-resource implementation and its failure wiring are outside this change. Only
-the `Acquire`/`Release` interface and successful recovery callback path are
-included here.
+The resource interface and state-machine failure wiring are part of this change;
+the concrete resource preparation implementation remains outside this scope.
 
 ### 4.4 SN: handleCoordDropped and Persistence Cleanup
 
@@ -177,7 +178,7 @@ The handler's response guarantee depends on external dependencies fulfilling cal
 
 | Operation | Obligation |
 |---|---|
-| `Acquire` | Must eventually invoke `OnReady` |
+| `Acquire` | Must eventually invoke exactly one of `OnReady` or `OnUnrecoverable` |
 | `Release` | Must eventually invoke `OnDropped` exactly once |
 
 All callbacks must be asynchronous. Synchronous invocation during Acquire/Release will deadlock the shard mutex.

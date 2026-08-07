@@ -410,6 +410,34 @@ func GetVirtualChannel(pchannel string, collectionID int64, idx int) string {
 	return fmt.Sprintf("%s_%dv%d", pchannel, collectionID, idx)
 }
 
+// ParseVChannel parses a canonical virtual channel name formatted as
+// {pchannel}_{collectionID}v{index}.
+func ParseVChannel(vchannel string) (string, int64, int, error) {
+	separator := strings.LastIndexByte(vchannel, '_')
+	if separator <= 0 || separator == len(vchannel)-1 {
+		return "", 0, 0, merr.WrapErrServiceInternalMsg("invalid vchannel %q", vchannel)
+	}
+
+	suffix := vchannel[separator+1:]
+	versionSeparator := strings.IndexByte(suffix, 'v')
+	if versionSeparator <= 0 || versionSeparator == len(suffix)-1 {
+		return "", 0, 0, merr.WrapErrServiceInternalMsg("invalid vchannel %q", vchannel)
+	}
+
+	collectionComponent := suffix[:versionSeparator]
+	collectionID, err := strconv.ParseInt(collectionComponent, 10, 64)
+	if err != nil || collectionID < 0 || strconv.FormatInt(collectionID, 10) != collectionComponent {
+		return "", 0, 0, merr.WrapErrServiceInternalMsg("invalid vchannel %q", vchannel)
+	}
+	indexComponent := suffix[versionSeparator+1:]
+	indexValue, err := strconv.ParseInt(indexComponent, 10, strconv.IntSize)
+	if err != nil || indexValue < 0 || strconv.FormatInt(indexValue, 10) != indexComponent {
+		return "", 0, 0, merr.WrapErrServiceInternalMsg("invalid vchannel %q", vchannel)
+	}
+
+	return vchannel[:separator], collectionID, int(indexValue), nil
+}
+
 // ConvertChannelName assembles channel name according to parameters.
 func ConvertChannelName(chanName string, tokenFrom string, tokenTo string) (string, error) {
 	if tokenFrom == "" {

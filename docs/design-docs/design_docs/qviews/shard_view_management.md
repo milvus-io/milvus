@@ -83,6 +83,10 @@ QueryView lifecycle caller
 reconstructs every manager, commits all emitted recovery events, and waits for
 the resulting keyed tasks before returning.
 
+The Registry also maintains resident-shard reverse indexes by collection and by
+currently placed QueryNode. These indexes support scoped management snapshots;
+managers remain resident after their last QueryView reaches Dropped.
+
 `Close` closes the flush scheduler before the QueryView runtime closes the
 underlying `ReliableSyncer`.
 
@@ -93,10 +97,12 @@ The ETCD persistence layer is implemented in
 
 Persisted key format:
 
-- `coord/qv/{collectionID}/{replicaID}/{vchannel}/{streamingVersion}/{compactVersion}/{queryVersion}`
+- `coord/qv/{collectionID}/{replicaID}/{vchannelIndex}/{streamingVersion}/{compactVersion}/{queryVersion}`
 
-The key retains the full vchannel and version tuple, so multiple in-flight views
-for one shard do not overwrite each other.
+The collection and canonical vchannel index reconstruct shard identity while
+the version tuple keeps multiple in-flight views distinct. Recovery validates
+the key identity against the persisted proto and reports corruption as a data
+integrity error.
 
 ### 2.3 ReliableSyncer
 
@@ -183,14 +189,16 @@ release the lock, and submit that event to the Scheduler.
 Every state-changing entry point follows the same pattern:
 
 1. Acquire `m.mu`.
-2. Apply the state-machine input.
-3. Run `processStateMachine` for each changed state machine. It consumes that
+2. For a new Preparing view, pin its DataView reference before mutating existing
+   state machines.
+3. Apply the state-machine input.
+4. Run `processStateMachine` for each changed state machine. It consumes that
    state machine's `ConsumeFlush` result into manager-local pending slices and
    updates `preparingView`, `upView`, and cascading Up-then-Down state.
-4. Move the accumulated effects into one immutable shard-scoped event with
-   persistence, node-sync, and callback information.
-5. Release `m.mu`.
-6. Call `DirtyViewFlushScheduler.Submit(event)`.
+5. Move the accumulated effects into one immutable shard-scoped event with
+   persistence, node-sync, and post-persist callback information.
+6. Release `m.mu`.
+7. Call `DirtyViewFlushScheduler.Submit(event)`.
 
 The same pattern is used by `AddPreparing`, `RequestRelease`,
 `OnSyncResponse`, and `OnQueryNodeLost`. The Scheduler never calls back into a
@@ -208,8 +216,9 @@ effects and handles its in-memory cross-view effects:
 - **Unrecoverable**: Clear the fast pointers and remain stable until
   `AddPreparing` or `RequestRelease` advances the view to Dropping.
 - **Dropping**: Wait for node callbacks.
-- **Dropped**: The final ETCD deletion effect is first moved into the manager's
-  pending persist slice, then the state machine is removed.
+- **Dropped**: The final ETCD deletion effect and a post-persist removal callback
+  are moved into the event. The state machine and its DataView reference remain
+  resident until persistence succeeds.
 
 Effects are consumed only from state machines explicitly processed by the
 current operation. Untouched resident views are not scanned.
@@ -238,9 +247,11 @@ WorkNode key. It packs ready, non-inflight shard lanes according to the configur
 maximum ETCD transaction operation count. For each claimed batch it performs:
 
 1. Flatten all `persists` and call `catalog.SaveQueryViews` once.
-2. Only after persistence succeeds, group every `syncer.SyncView` by
+2. Run post-persist callbacks, including final QueryView removal and DataView
+   unpin.
+3. Only after persistence succeeds, group every `syncer.SyncView` by
    `WorkNodeKey`.
-3. Call `syncer.SyncViews` once for the grouped node syncs.
+4. Call `syncer.SyncViews` once for the grouped node syncs.
 
 The ordering is local to each packed batch: all included QueryView states are
 persisted before any included node sync is dispatched. Different tasks contain
@@ -306,11 +317,12 @@ Cleanup continues asynchronously through reliable node callbacks.
 
 ## 5. Recovery and Shutdown
 
-During recovery, persisted views are grouped by `ShardID` and reconstructed as
-state machines. Recovered Preparing and Down views create pending sync effects.
-The Registry holds all emitted events inside one Begin/Commit window, commits
-them into keyed tasks, and waits for the Scheduler to become idle before recovery
-completes.
+During recovery, persisted views are grouped by `ShardID`; every durable view
+first rebuilds its DataView reference, then its state machine. Missing references
+are driven into terminal cleanup. Before committing the Begin/Commit window,
+the Registry installs manager observers and builds its collection/node indexes,
+so immediate recovery callbacks cannot be lost. It then waits for the Scheduler
+to become idle before recovery completes.
 
 On shutdown, the owner closes the Registry and its flush scheduler, then closes
 `ReliableSyncer`. This prevents a flush task
@@ -354,6 +366,10 @@ from submitting new sync work after the syncer has closed.
     `ShardID` cannot be flushed by concurrent tasks.
 12. **Cross-Shard Parallelism**: Different `ShardID` lanes may execute in
     different NodeScheduler tasks concurrently.
+13. **Reference Ordering**: DataViews are pinned before QueryView persistence and
+    unpinned only after the Dropped delete is persisted successfully.
+14. **Registry Residency**: Managers remain resident after their last QueryView
+    is removed; collection indexes are stable and node indexes follow stats.
 
 ## 8. Package Location
 

@@ -2,14 +2,36 @@ package coordview
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	viewsyncer "github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
+
+type immediateLostRecoverySyncer struct {
+	lostCallbacks atomic.Int64
+}
+
+func (s *immediateLostRecoverySyncer) SyncViews(_ context.Context, group viewsyncer.SyncGroup) error {
+	for _, views := range group.ViewsByNode {
+		for _, view := range views {
+			node, ok := view.View.WorkNode().(qviews.QueryNode)
+			if !ok || view.OnQueryNodeLost == nil {
+				continue
+			}
+			s.lostCallbacks.Add(1)
+			view.OnQueryNodeLost(node)
+		}
+	}
+	return nil
+}
+
+func (*immediateLostRecoverySyncer) Close() error { return nil }
 
 // newTestRegistry builds a fresh (empty) registry via the recovery path with
 // an empty catalog.
@@ -62,14 +84,16 @@ func TestRegistry_EnsureCreatesOnce(t *testing.T) {
 func TestRegistry_RecoverWithPersistedViews(t *testing.T) {
 	catalog := newMockCatalog()
 
-	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "v0_c0"}
-	shardB := qviews.ShardID{ReplicaID: 2, VChannel: "v0_c1"}
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 2, VChannel: "by-dev-rootcoord-dml_200v1"}
 
 	viewA := buildTestViewWithVersion(1, 1, 1, 1)
+	viewA.Meta.CollectionId = 100
 	viewA.Meta.ReplicaId = shardA.ReplicaID
 	viewA.Meta.Vchannel = shardA.VChannel
 
 	viewB := buildTestViewWithVersion(2, 1, 1, 1)
+	viewB.Meta.CollectionId = 200
 	viewB.Meta.ReplicaId = shardB.ReplicaID
 	viewB.Meta.Vchannel = shardB.VChannel
 
@@ -92,6 +116,124 @@ func TestRegistry_RecoverWithPersistedViews(t *testing.T) {
 
 	mgrB := reg.Get(shardB)
 	require.NotNil(t, mgrB)
+
+	assert.ElementsMatch(t, []qviews.ShardID{shardA}, reg.CollectionShards(100))
+	assert.ElementsMatch(t, []qviews.ShardID{shardB}, reg.CollectionShards(200))
+	assert.ElementsMatch(t, []qviews.ShardID{shardA, shardB}, reg.NodeShards(1))
+	assert.ElementsMatch(t, []qviews.ShardID{shardB}, reg.NodeShards(2))
+}
+
+func TestRegistry_RecoveryPublishesImmediateQueryNodeLoss(t *testing.T) {
+	catalog := newMockCatalog()
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
+	view := buildTestViewWithVersion(1, 1, 1, 1)
+	view.Meta.CollectionId = 100
+	view.Meta.ReplicaId = shardID.ReplicaID
+	view.Meta.Vchannel = shardID.VChannel
+
+	segmentIDs := make([]int64, 50_000)
+	for i := range segmentIDs {
+		segmentIDs[i] = int64(10_000 + i)
+	}
+	view.QueryNode[0].Partitions[0].SegmentIds = segmentIDs
+	catalog.listed = []*viewpb.QueryViewOfShard{view}
+	s := &immediateLostRecoverySyncer{}
+
+	reg, err := RecoverShardViewRegistry(context.Background(), catalog, s)
+	require.NoError(t, err)
+	t.Cleanup(reg.Close)
+	require.Equal(t, int64(1), s.lostCallbacks.Load())
+
+	managerStats := reg.Get(shardID).Stats()
+	registryStats := reg.SnapshotForShards([]qviews.ShardID{shardID}).StatsMap()[shardID]
+	require.NotNil(t, registryStats)
+	require.Nil(t, managerStats.PreparingVersion)
+	require.Nil(t, registryStats.PreparingVersion)
+	assert.Len(t, registryStats.Segments, len(managerStats.Segments))
+	require.Contains(t, registryStats.Segments, segmentIDs[0])
+	assert.Equal(t, SegmentStateUnrecoverable, registryStats.Segments[segmentIDs[0]].Nodes[1])
+}
+
+func TestRegistry_EnsureIndexesCollection(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 2, VChannel: "by-dev-rootcoord-dml_100v1"}
+	invalid := qviews.ShardID{ReplicaID: 3, VChannel: "invalid-vchannel"}
+
+	reg.Ensure(shardA)
+	reg.Ensure(shardB)
+	reg.Ensure(invalid)
+
+	assert.ElementsMatch(t, []qviews.ShardID{shardA, shardB}, reg.CollectionShards(100))
+	assert.Empty(t, reg.CollectionShards(0))
+	assert.ElementsMatch(t, []qviews.ShardID{shardA, shardB, invalid}, reg.ShardIDs())
+}
+
+func TestRegistry_NodeIndexTracksStatsReplacement(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
+	reg.Ensure(shardID)
+
+	observed := make(chan struct{}, 1)
+	reg.RegisterStatsObserver(func(_ qviews.ShardID, _ *ShardStats) {
+		reg.NodeShards(1)
+		observed <- struct{}{}
+	})
+
+	reg.onShardStatsChanged(shardID, shardStatsForNodes(map[int64][]int64{
+		101: {1, 2},
+		102: {1},
+	}))
+	assert.ElementsMatch(t, []qviews.ShardID{shardID}, reg.NodeShards(1))
+	assert.ElementsMatch(t, []qviews.ShardID{shardID}, reg.NodeShards(2))
+	assert.Len(t, reg.NodeShards(1), 1)
+	<-observed
+
+	reg.onShardStatsChanged(shardID, shardStatsForNodes(map[int64][]int64{103: {3}}))
+	assert.Empty(t, reg.NodeShards(1))
+	assert.Empty(t, reg.NodeShards(2))
+	assert.ElementsMatch(t, []qviews.ShardID{shardID}, reg.NodeShards(3))
+	<-observed
+
+	reg.onShardStatsChanged(shardID, emptyShardStats())
+	assert.Empty(t, reg.NodeShards(3))
+	<-observed
+
+	assert.NotPanics(t, func() {
+		reg.onShardStatsChanged(shardID, nil)
+	})
+	assert.Empty(t, reg.NodeShards(3))
+	<-observed
+}
+
+func TestRegistry_SnapshotForShards(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 2, VChannel: "by-dev-rootcoord-dml_200v0"}
+	missing := qviews.ShardID{ReplicaID: 3, VChannel: "by-dev-rootcoord-dml_300v0"}
+	reg.Ensure(shardA)
+	reg.Ensure(shardB)
+	statsA := shardStatsForNodes(map[int64][]int64{101: {1}})
+	statsB := shardStatsForNodes(map[int64][]int64{201: {2}})
+	reg.onShardStatsChanged(shardA, statsA)
+	reg.onShardStatsChanged(shardB, statsB)
+
+	resident := reg.Snapshot()
+	updatedStatsA := shardStatsForNodes(map[int64][]int64{102: {3}})
+	reg.onShardStatsChanged(shardA, updatedStatsA)
+	require.Same(t, resident, reg.snapshot)
+
+	scoped := reg.SnapshotForShards([]qviews.ShardID{shardA, missing, shardA})
+	require.Same(t, resident, reg.snapshot)
+	assert.Equal(t, reg.version, scoped.Version())
+	require.Len(t, scoped.StatsMap(), 1)
+	assert.Same(t, updatedStatsA, scoped.StatsMap()[shardA])
+	assert.NotContains(t, scoped.StatsMap(), missing)
+
+	scoped.StatsMap()[shardB] = statsB
+	next := reg.SnapshotForShards([]qviews.ShardID{shardA})
+	assert.NotContains(t, next.StatsMap(), shardB)
+	assert.Same(t, updatedStatsA, next.StatsMap()[shardA])
 }
 
 func TestRegistry_SnapshotStatsForMultipleShards(t *testing.T) {
@@ -216,4 +358,64 @@ func TestRegistry_SnapshotSegmentNodeStates(t *testing.T) {
 	assert.Equal(t, map[int64]SegmentState{2: SegmentStatePreparing}, stats[shardB].Segments[102].Nodes)
 	assert.Equal(t, map[int64]SegmentState{1: SegmentStatePreparing}, stats[shardC].Segments[103].Nodes)
 	assert.Equal(t, map[int64]SegmentState{2: SegmentStatePreparing}, stats[shardC].Segments[104].Nodes)
+}
+
+func TestRecoverShardViewRegistryRebuildsReferences(t *testing.T) {
+	catalog := newMockCatalog()
+	view := buildTestViewWithVersion(1, 3, 1, 2)
+	catalog.listed = []*viewpb.QueryViewOfShard{view}
+	refs := &testDataViewReferences{recoverPin: true}
+
+	_, err := RecoverShardViewRegistry(context.Background(), catalog, newMockSyncer(), refs)
+	require.NoError(t, err)
+	require.Equal(t, []qviews.DataVersion{{StreamingVersion: 3, CompactVersion: 1}}, refs.recovered)
+}
+
+func TestRecoverShardViewRegistryAllowsTerminalCleanup(t *testing.T) {
+	catalog := newMockCatalog()
+	view := buildTestViewWithVersion(1, 3, 1, 2)
+	view.Meta.State = viewpb.QueryViewState_QueryViewStatePreparing
+	catalog.listed = []*viewpb.QueryViewOfShard{view}
+	refs := &testDataViewReferences{recoverPin: false}
+	s := newMockSyncer()
+
+	registry, err := RecoverShardViewRegistry(context.Background(), catalog, s, refs)
+	require.NoError(t, err)
+	manager := registry.Get(qviews.NewShardIDFromQVMeta(view.GetMeta()))
+	require.NotNil(t, manager)
+	manager.mu.Lock()
+	require.Equal(t, qviews.QueryViewStateDropping, manager.views[testVersion(3, 1, 2)].State())
+	manager.mu.Unlock()
+	require.Empty(t, refs.unpins)
+}
+
+func TestRecoverShardViewRegistryRollsBackReferencesOnFailure(t *testing.T) {
+	catalog := newMockCatalog()
+	viewA := buildTestViewWithVersion(1, 3, 1, 1)
+	viewA.Meta.ReplicaId = 1
+	viewA.Meta.Vchannel = "v0"
+	viewB := buildTestViewWithVersion(1, 4, 1, 1)
+	viewB.Meta.ReplicaId = 2
+	viewB.Meta.Vchannel = "v1"
+	catalog.listed = []*viewpb.QueryViewOfShard{viewA, viewB}
+	refs := &testDataViewReferences{recoverPin: true, failRecoverAfter: 1}
+
+	_, err := RecoverShardViewRegistry(context.Background(), catalog, newMockSyncer(), refs)
+	require.EqualError(t, err, "recover failed")
+	require.Len(t, refs.unpins, 1)
+}
+
+func shardStatsForNodes(segmentNodes map[int64][]int64) *ShardStats {
+	stats := emptyShardStats()
+	for segmentID, nodeIDs := range segmentNodes {
+		nodes := make(map[int64]SegmentState, len(nodeIDs))
+		for _, nodeID := range nodeIDs {
+			nodes[nodeID] = SegmentStatePreparing
+		}
+		stats.Segments[segmentID] = &SegmentStats{
+			SegmentID: segmentID,
+			Nodes:     nodes,
+		}
+	}
+	return stats
 }

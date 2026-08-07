@@ -222,12 +222,9 @@ Persisted states: **Up** recovery info only. Every version that has reached Up
 is persisted independently until that view receives Down or Dropped, so
 multiple Up recovery records may coexist.
 
-> **TODO:** Wire StreamingNode resource-preparation and WAL-recovery failures
-> to `snQueryViewStateMachine.OnUnrecoverable`. The current production resource
-> manager reports successful readiness but does not provide an unrecoverable
-> failure callback. Until that callback is introduced, the StreamingNode
-> transitions to Unrecoverable described below are design intent rather than a
-> production-reachable chain.
+StreamingNode resource acquisition exposes both successful and unrecoverable
+callbacks. The handler wires them to `OnReady` and `OnUnrecoverable`, including
+the crash-recovery path.
 
 ### 2.1 Preparing
 
@@ -244,7 +241,7 @@ multiple Up recovery records may coexist.
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
 | Ready | Resource preparation succeeded | Report Ready to Coord |
-| Unrecoverable | **TODO:** data_version expired (growing segments already flushed and released) | Report Unrecoverable to Coord after the failure callback is wired |
+| Unrecoverable | data_version expired (growing segments already flushed and released) | Report Unrecoverable to Coord |
 | Dropped | Received Dropped push from Coord (Coord aborted this view) | Release any prepared resources |
 
 **Possible Coord States (and this node's reaction):**
@@ -316,7 +313,7 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 |---|---|---|
 | Up | WAL consumption catches up to current position | Begin serving queries |
 | Down | Received Down push from Coord | Delete recovery info; abandon WAL catch-up |
-| Unrecoverable | **TODO:** local resource failure during WAL recovery (e.g., OOM) | Mark the view locally unavailable without reporting to Coord after the failure callback is wired; retain persisted Up recovery info, and let the query path trigger replacement |
+| Unrecoverable | local resource failure during WAL recovery (e.g., OOM) | Mark the view locally unavailable without reporting to Coord; retain persisted Up recovery info, and let the query path trigger replacement |
 
 **Possible Coord States (and this node's reaction):**
 - Coord considers this view to be in Up state (Coord is unaware of UpRecovering).
@@ -346,12 +343,12 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 - Coord in Down / Dropping → SN does nothing; normal.
 - Coord pushes Dropped → SN transitions to Dropped.
 
-### 2.6 Unrecoverable (TODO: Production Failure Wiring)
+### 2.6 Unrecoverable
 
 **Entry Conditions:**
-- **TODO:** data_version check failed during Preparing (growing segments already
+- data_version check failed during Preparing (growing segments already
   flushed to sealed and released).
-- **TODO:** local resource failure during UpRecovering (e.g., OOM while
+- local resource failure during UpRecovering (e.g., OOM while
   replaying WAL to recover growing segments).
 
 **Automatic Behavior:**

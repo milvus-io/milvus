@@ -8,7 +8,9 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const queryViewKeyPrefix = "qv/"
@@ -42,15 +44,26 @@ func NewQueryViewCatalog(metaKV kv.MetaKv, role string) QueryViewCatalog {
 }
 
 func (c *queryViewCatalog) ListQueryViews(ctx context.Context) ([]*viewpb.QueryViewOfShard, error) {
-	_, values, err := c.metaKV.LoadWithPrefix(ctx, c.prefix)
+	keys, values, err := c.metaKV.LoadWithPrefix(ctx, c.prefix)
 	if err != nil {
 		return nil, err
 	}
 	views := make([]*viewpb.QueryViewOfShard, 0, len(values))
-	for _, val := range values {
+	for idx, val := range values {
 		view := &viewpb.QueryViewOfShard{}
 		if err := proto.Unmarshal([]byte(val), view); err != nil {
 			return nil, merr.Wrap(err, "unmarshal persisted query view")
+		}
+		expectedKey, err := c.buildKey(view.GetMeta())
+		if err != nil {
+			return nil, err
+		}
+		if typeutil.After(keys[idx], c.prefix) != typeutil.After(expectedKey, c.prefix) {
+			return nil, merr.WrapErrDataIntegrityMsg(
+				"mismatched query view meta, key %s, vchannel %s",
+				keys[idx],
+				view.GetMeta().GetVchannel(),
+			)
 		}
 		views = append(views, view)
 	}
@@ -87,7 +100,7 @@ func (c *queryViewCatalog) SaveQueryViews(ctx context.Context, views []*viewpb.Q
 }
 
 // buildKey constructs the ETCD key for a query view.
-// Format: {prefix}{collection_id}/{replica_id}/{vchannel}/{sv}/{cv}/{qv}
+// Format: {prefix}{collection_id}/{replica_id}/{vchannel_index}/{sv}/{cv}/{qv}
 func (c *queryViewCatalog) buildKey(meta *viewpb.QueryViewMeta) (string, error) {
 	if meta == nil {
 		return "", merr.WrapErrServiceInternalMsg("query view meta is nil")
@@ -96,12 +109,24 @@ func (c *queryViewCatalog) buildKey(meta *viewpb.QueryViewMeta) (string, error) 
 	if version == nil || version.GetDataVersion() == nil {
 		return "", merr.WrapErrServiceInternalMsg("query view %s has nil version", meta.GetVchannel())
 	}
+	_, collectionID, vchannelIndex, err := funcutil.ParseVChannel(meta.GetVchannel())
+	if err != nil {
+		return "", err
+	}
+	if collectionID != meta.GetCollectionId() {
+		return "", merr.WrapErrServiceInternalMsg(
+			"query view collection %d mismatches vchannel %s collection %d",
+			meta.GetCollectionId(),
+			meta.GetVchannel(),
+			collectionID,
+		)
+	}
 	dataVersion := version.GetDataVersion()
-	return fmt.Sprintf("%s%d/%d/%s/%d/%d/%d",
+	return fmt.Sprintf("%s%d/%d/%d/%d/%d/%d",
 		c.prefix,
 		meta.GetCollectionId(),
 		meta.GetReplicaId(),
-		meta.GetVchannel(),
+		vchannelIndex,
 		dataVersion.GetStreamingVersion(),
 		dataVersion.GetCompactVersion(),
 		version.GetQueryVersion(),

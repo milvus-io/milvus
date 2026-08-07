@@ -111,6 +111,60 @@ func TestCatalogQueryViews(t *testing.T) {
 	assert.Equal(t, int64(31), views[0].GetMeta().GetVersion().GetQueryVersion())
 }
 
+func TestBuildQueryViewKeyRejectsMismatchedIdentity(t *testing.T) {
+	meta := &viewpb.QueryViewMeta{
+		CollectionId: 1,
+		ReplicaId:    10,
+		Vchannel:     "p1_1v0",
+		Version: &viewpb.QueryViewVersion{
+			DataVersion:  &viewpb.DataVersion{StreamingVersion: 20},
+			QueryVersion: 30,
+		},
+	}
+
+	key, err := buildQueryViewKey("p1", meta)
+	require.NoError(t, err)
+	assert.Equal(t, "streamingnode-meta/wal/p1/qv/1/10/0/20/0/30", key)
+
+	_, err = buildQueryViewKey("p2", meta)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "pchannel")
+
+	meta.CollectionId = 2
+	_, err = buildQueryViewKey("p1", meta)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "collection")
+}
+
+func TestCatalogListQueryViewsRejectsCompactKeyValueMismatch(t *testing.T) {
+	view := &viewpb.QueryViewOfShard{
+		Meta: &viewpb.QueryViewMeta{
+			CollectionId: 1,
+			ReplicaId:    10,
+			Vchannel:     "p1_1v0",
+			Version: &viewpb.QueryViewVersion{
+				DataVersion:  &viewpb.DataVersion{StreamingVersion: 20},
+				QueryVersion: 30,
+			},
+			State: viewpb.QueryViewState_QueryViewStateUp,
+		},
+	}
+	value, err := marshalQueryViewForPersistence(view)
+	require.NoError(t, err)
+
+	kv := mocks.NewMetaKv(t)
+	kv.EXPECT().LoadWithPrefix(mock.Anything, buildQueryViewPrefix("p1")).Return(
+		[]string{"streamingnode-meta/wal/p1/qv/1/10/1/20/0/30"},
+		[]string{string(value)},
+		nil,
+	)
+
+	views, err := NewCataLog(kv).ListQueryViews(context.Background(), "p1")
+	require.Error(t, err)
+	assert.Nil(t, views)
+	assert.ErrorContains(t, err, "mismatched query view")
+}
+
 // TestCatalogSegmentAssignments round-trips segment assignments through the
 // compound SaveRecoverySnapshot: GROWING segments are persisted and listed
 // back, and a FLUSHED segment is removed from meta while untouched segments
@@ -426,4 +480,5 @@ func TestBuildPrefixAndKey(t *testing.T) {
 
 	assert.Equal(t, "streamingnode-meta/wal/p1/salvage-checkpoint/cluster-a", buildSalvageCheckpointPath("p1", "cluster-a"))
 	assert.Equal(t, "streamingnode-meta/wal/p2/salvage-checkpoint/cluster-b", buildSalvageCheckpointPath("p2", "cluster-b"))
+	assert.Equal(t, "streamingnode-meta/wal/p1/qv/", buildQueryViewPrefix("p1"))
 }

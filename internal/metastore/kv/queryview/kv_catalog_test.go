@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -233,16 +234,20 @@ func TestBuildKey(t *testing.T) {
 	c := &queryViewCatalog{prefix: "coord/qv/"}
 	key, err := c.buildKey(meta)
 	assert.NoError(t, err)
-	assert.Equal(t, "coord/qv/100/1/by-dev-rootcoord-dml_0_100v0/5/3/2", key)
+	assert.Equal(t, "coord/qv/100/1/0/5/3/2", key)
 
 	meta.Vchannel = "by-dev-rootcoord-dml_2_100v17"
 	c = &queryViewCatalog{prefix: "streamingnode/qv/"}
 	key, err = c.buildKey(meta)
 	assert.NoError(t, err)
-	assert.Equal(t, "streamingnode/qv/100/1/by-dev-rootcoord-dml_2_100v17/5/3/2", key)
+	assert.Equal(t, "streamingnode/qv/100/1/17/5/3/2", key)
+
+	meta.CollectionId = 101
+	_, err = c.buildKey(meta)
+	assert.ErrorContains(t, err, "collection")
 }
 
-func TestQueryViewCatalog_KeyKeepsFullVChannelAndVersions(t *testing.T) {
+func TestQueryViewCatalog_CompactKeyKeepsVChannelIndexAndVersions(t *testing.T) {
 	catalog, storage := newTestCatalog(t)
 	ctx := context.Background()
 
@@ -250,7 +255,7 @@ func TestQueryViewCatalog_KeyKeepsFullVChannelAndVersions(t *testing.T) {
 	newView := makeTestView(1, 1, "p2_1v0", 2, 0, 1, viewpb.QueryViewState_QueryViewStatePreparing)
 
 	assert.NoError(t, catalog.SaveQueryViews(ctx, []*viewpb.QueryViewOfShard{oldView}))
-	_, err := storage.Load(ctx, "test/qv/1/1/p1_1v0/1/0/1")
+	_, err := storage.Load(ctx, "test/qv/1/1/0/1/0/1")
 	assert.NoError(t, err)
 
 	assert.NoError(t, catalog.SaveQueryViews(ctx, []*viewpb.QueryViewOfShard{newView}))
@@ -258,7 +263,7 @@ func TestQueryViewCatalog_KeyKeepsFullVChannelAndVersions(t *testing.T) {
 	views, err := catalog.ListQueryViews(ctx)
 	assert.NoError(t, err)
 	assert.Len(t, views, 2)
-	_, err = storage.Load(ctx, "test/qv/1/1/p2_1v0/2/0/1")
+	_, err = storage.Load(ctx, "test/qv/1/1/0/2/0/1")
 	assert.NoError(t, err)
 
 	oldView.Meta.State = viewpb.QueryViewState_QueryViewStateDropped
@@ -268,6 +273,19 @@ func TestQueryViewCatalog_KeyKeepsFullVChannelAndVersions(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, views, 1)
 	assert.Equal(t, int64(2), views[0].GetMeta().GetVersion().GetDataVersion().GetStreamingVersion())
+}
+
+func TestQueryViewCatalog_ListRejectsCompactKeyValueMismatch(t *testing.T) {
+	catalog, storage := newTestCatalog(t)
+	view := makeTestView(1, 1, "p1_1v0", 1, 0, 1, viewpb.QueryViewState_QueryViewStateUp)
+	data, err := marshalForPersistence(view)
+	require.NoError(t, err)
+	require.NoError(t, storage.Save(context.Background(), "test/qv/1/1/1/1/0/1", string(data)))
+
+	views, err := catalog.ListQueryViews(context.Background())
+	require.Error(t, err)
+	assert.Nil(t, views)
+	assert.ErrorContains(t, err, "mismatched query view")
 }
 
 func TestMarshalForPersistence_ClearsReadySegmentIds(t *testing.T) {

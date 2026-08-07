@@ -16,6 +16,12 @@ type AcquireResource struct {
 	// OnReady is called when resource preparation completes successfully.
 	// Must NOT be called synchronously during Acquire.
 	OnReady func()
+
+	// OnUnrecoverable is called when the requested resources can no longer be
+	// reconstructed, for example when the QueryView DataVersion predates the
+	// persisted segment data-version summary.
+	// Must NOT be called synchronously during Acquire.
+	OnUnrecoverable func()
 }
 
 // ReleaseResource describes a resource release request when a query view
@@ -48,7 +54,7 @@ type ReleaseResource struct {
 // stall without ever producing a response to the Coordinator.
 //
 //   - Acquire: for every Acquire call in normal running mode, the implementation
-//     MUST eventually invoke OnReady.
+//     MUST eventually invoke exactly one of OnReady or OnUnrecoverable.
 //     Failure to do so leaves the view stuck in Preparing with no report.
 //
 //   - Release: for every Release call, the implementation MUST eventually
