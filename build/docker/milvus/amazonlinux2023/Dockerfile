@@ -15,6 +15,7 @@ ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
 
 RUN yum install -y wget libgomp libaio libatomic openblas-devel tzdata && \
+    yum upgrade -y openssl openssl-libs && \
     rm -rf /var/cache/yum/*
 
 # Add Tini
