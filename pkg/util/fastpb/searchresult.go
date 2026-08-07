@@ -241,7 +241,7 @@ func (d dec) ids(b []byte, ids *schemapb.IDs) error {
 			return errMalformed
 		}
 		b = b[vn:]
-		if num == 1 || num == 2 {
+		if num == 1 || num == 2 || num == 3 {
 			if oneofNum == num {
 				return fallbackUnmarshal(full, ids)
 			}
@@ -260,6 +260,13 @@ func (d dec) ids(b []byte, ids *schemapb.IDs) error {
 				return err
 			}
 			ids.IdField = &schemapb.IDs_StrId{StrId: sa}
+		case 3: // uuid_id (oneof) — delegate to official; must stay in-pass so
+			// oneof last-wins ordering matches official proto.Unmarshal.
+			m := &schemapb.UUIDArray{}
+			if err := protoUnmarshal(v, m); err != nil {
+				return err
+			}
+			ids.IdField = &schemapb.IDs_UuidId{UuidId: m}
 		default:
 			rest = append(rest, start[:tn+vn]...)
 		}
