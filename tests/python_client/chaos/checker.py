@@ -324,6 +324,7 @@ timeout = 120
 search_timeout = 30
 query_timeout = 30
 HEAVY_OP_WAIT_SECONDS = 120
+RUNTIME_ADDED_FIELD_PREFIXES = ("new_field_", "new_vec_")
 
 enable_traceback = False
 DEFAULT_FMT = "[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}"
@@ -391,6 +392,11 @@ def configure_heavy_operation_schedules(checkers):
                 interval_seconds=HEAVY_OP_WAIT_SECONDS,
                 initial_jitter_seconds=HEAVY_OP_WAIT_SECONDS,
             )
+
+
+def _is_runtime_added_field(field_name):
+    """Return whether a field is managed by a schema mutation checker."""
+    return field_name.startswith(RUNTIME_ADDED_FIELD_PREFIXES)
 
 
 def create_index_params_from_dict(field_name: str, index_param_dict: dict) -> IndexParams:
@@ -591,7 +597,8 @@ class Checker:
         self.p_names = [self.p_name] if partition_name is not None else None
 
         # Get or create schema
-        if self.milvus_client.has_collection(c_name):
+        collection_exists = self.milvus_client.has_collection(c_name)
+        if collection_exists:
             collection_info = self.milvus_client.describe_collection(c_name)
             schema = CollectionSchema.construct_from_dict(collection_info)
         else:
@@ -616,7 +623,7 @@ class Checker:
         self.float_vector_field_name = cf.get_float_vec_field_name(schema=schema)
 
         # Create collection if not exists
-        if not self.milvus_client.has_collection(c_name):
+        if not collection_exists:
             self.milvus_client.create_collection(
                 collection_name=c_name,
                 schema=schema,
@@ -641,33 +648,33 @@ class Checker:
         # Get existing indexes and their fields
         indexed_fields = set()
         try:
-            index_names = self.milvus_client.list_indexes(c_name)
-            for idx_name in index_names:
-                try:
-                    idx_info = self.milvus_client.describe_index(c_name, idx_name)
-                    if "field_name" in idx_info:
-                        indexed_fields.add(idx_info["field_name"])
-                except Exception as e:
-                    log.debug(f"Failed to describe index {idx_name}: {e}")
+            index_names = self.milvus_client.list_indexes(c_name, timeout=timeout)
         except Exception as e:
-            log.debug(f"Failed to list indexes: {e}")
+            raise RuntimeError(f"Failed to list indexes for collection {c_name}") from e
+        for idx_name in index_names:
+            try:
+                idx_info = self.milvus_client.describe_index(c_name, idx_name, timeout=timeout)
+                if "field_name" in idx_info:
+                    indexed_fields.add(idx_info["field_name"])
+            except Exception as e:
+                raise RuntimeError(f"Failed to describe index {idx_name} for collection {c_name}") from e
 
         log.debug(f"Already indexed fields: {indexed_fields}")
 
         # create index for scalar fields
         for f in self.scalar_field_names:
-            if f in indexed_fields:
+            if f in indexed_fields or (collection_exists and _is_runtime_added_field(f)):
                 continue
             try:
                 index_params = IndexParams()
                 index_params.add_index(field_name=f, index_type="INVERTED")
                 self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
             except Exception as e:
-                log.debug(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # create index for json fields
         for f in self.json_field_names:
-            if f in indexed_fields:
+            if f in indexed_fields or (collection_exists and _is_runtime_added_field(f)):
                 continue
             for json_path, json_cast in [("name", "varchar"), ("address", "varchar"), ("count", "double")]:
                 try:
@@ -679,18 +686,20 @@ class Checker:
                     )
                     self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
                 except Exception as e:
-                    log.debug(f"Failed to create json index for {f}['{json_path}']: {e}")
+                    raise RuntimeError(
+                        f"Failed to create JSON index for {f}['{json_path}'] in collection {c_name}"
+                    ) from e
 
         # create index for geometry fields
         for f in self.geometry_field_names:
-            if f in indexed_fields:
+            if f in indexed_fields or (collection_exists and _is_runtime_added_field(f)):
                 continue
             try:
                 index_params = IndexParams()
                 index_params.add_index(field_name=f, index_type="RTREE")
                 self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
             except Exception as e:
-                log.debug(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # create index for float vector fields
         vector_index_created = False
@@ -699,6 +708,8 @@ class Checker:
                 vector_index_created = True
                 log.debug(f"Float vector field {f} already has index")
                 continue
+            if collection_exists and _is_runtime_added_field(f):
+                continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_INDEX_PARAM)
                 self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
@@ -706,13 +717,15 @@ class Checker:
                 indexed_fields.add(f)
                 vector_index_created = True
             except Exception as e:
-                log.warning(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # create index for int8 vector fields
         for f in self.int8_vector_field_names:
             if f in indexed_fields:
                 vector_index_created = True
                 log.debug(f"Int8 vector field {f} already has index")
+                continue
+            if collection_exists and _is_runtime_added_field(f):
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_INT8_INDEX_PARAM)
@@ -721,13 +734,15 @@ class Checker:
                 indexed_fields.add(f)
                 vector_index_created = True
             except Exception as e:
-                log.warning(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # create index for binary vector fields
         for f in self.binary_vector_field_names:
             if f in indexed_fields:
                 vector_index_created = True
                 log.debug(f"Binary vector field {f} already has index")
+                continue
+            if collection_exists and _is_runtime_added_field(f):
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_BINARY_INDEX_PARAM)
@@ -736,22 +751,22 @@ class Checker:
                 indexed_fields.add(f)
                 vector_index_created = True
             except Exception as e:
-                log.warning(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # create index for bm25 sparse fields
         for f in self.bm25_sparse_field_names:
-            if f in indexed_fields:
+            if f in indexed_fields or (collection_exists and _is_runtime_added_field(f)):
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_BM25_INDEX_PARAM)
                 self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
                 log.debug(f"Created index for bm25 sparse field {f}")
             except Exception as e:
-                log.warning(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # create index for minhash fields
         for f in self.minhash_field_names:
-            if f in indexed_fields:
+            if f in indexed_fields or (collection_exists and _is_runtime_added_field(f)):
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_MINHASH_INDEX_PARAM)
@@ -760,27 +775,31 @@ class Checker:
                 indexed_fields.add(f)
                 vector_index_created = True
             except Exception as e:
-                log.warning(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # create index for emb list fields
         for f in self.emb_list_field_names:
-            if f in indexed_fields:
+            if f in indexed_fields or (collection_exists and _is_runtime_added_field(f)):
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_EMB_LIST_INDEX_PARAM)
                 self.milvus_client.create_index(collection_name=c_name, index_params=index_params, timeout=timeout)
                 log.debug(f"Created index for emb list field {f}")
             except Exception as e:
-                log.warning(f"Failed to create index for {f}: {e}")
+                raise RuntimeError(f"Failed to create index for field {f} in collection {c_name}") from e
 
         # Load collection - only if at least one vector field has an index
         self.replica_number = replica_number
         if vector_index_created:
             try:
-                self.milvus_client.load_collection(collection_name=c_name, replica_number=self.replica_number)
+                self.milvus_client.load_collection(
+                    collection_name=c_name,
+                    replica_number=self.replica_number,
+                    timeout=timeout,
+                )
                 log.debug(f"Loaded collection {c_name} with replica_number={self.replica_number}")
             except Exception as e:
-                log.warning(f"Failed to load collection {c_name}: {e}. Collection may need to be loaded manually.")
+                raise RuntimeError(f"Failed to load collection {c_name}") from e
         else:
             log.warning(
                 f"No vector index created for collection {c_name}, skipping load. You may need to create indexes and load manually."

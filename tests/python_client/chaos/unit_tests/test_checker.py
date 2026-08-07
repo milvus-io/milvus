@@ -2,6 +2,106 @@ import pytest
 from chaos import checker as checker_module
 
 
+class FakeMilvusClient:
+    def __init__(self, indexed_fields=(), create_index_error=None, list_indexes_error=None):
+        self.indexed_fields = tuple(indexed_fields)
+        self.create_index_error = create_index_error
+        self.list_indexes_error = list_indexes_error
+        self.create_index_calls = 0
+        self.load_collection_calls = 0
+
+    def has_collection(self, collection_name):
+        return True
+
+    def describe_collection(self, collection_name):
+        return {"collection_name": collection_name}
+
+    def list_indexes(self, collection_name, **kwargs):
+        if self.list_indexes_error is not None:
+            raise self.list_indexes_error
+        return [f"index_{field_name}" for field_name in self.indexed_fields]
+
+    def describe_index(self, collection_name, index_name, **kwargs):
+        return {"field_name": index_name.removeprefix("index_")}
+
+    def create_index(self, **kwargs):
+        self.create_index_calls += 1
+        if self.create_index_error is not None:
+            raise self.create_index_error
+
+    def load_collection(self, **kwargs):
+        self.load_collection_calls += 1
+
+    def get_collection_stats(self, collection_name):
+        return {"row_count": 1}
+
+
+def patch_checker_constructor(monkeypatch, client, *, scalar_fields=(), float_vector_fields=()):
+    schema = object()
+    monkeypatch.setattr(checker_module, "MilvusClient", lambda **kwargs: client)
+    monkeypatch.setattr(checker_module, "MilvusSys", lambda: object())
+    monkeypatch.setattr(checker_module.connections, "connect", lambda **kwargs: None)
+    monkeypatch.setattr(
+        checker_module.CollectionSchema,
+        "construct_from_dict",
+        staticmethod(lambda collection_info: schema),
+    )
+
+    field_helpers = {
+        "get_dim_by_schema": 8,
+        "get_int64_field_name": "id",
+        "get_text_field_name": "text",
+        "get_text_match_field_name": [],
+        "get_float_vec_field_name": "float_vector",
+        "get_scalar_field_name_list": list(scalar_fields),
+        "get_json_field_name_list": [],
+        "get_geometry_field_name_list": [],
+        "get_float_vec_field_name_list": list(float_vector_fields),
+        "get_binary_vec_field_name_list": [],
+        "get_int8_vec_field_name_list": [],
+        "get_bm25_vec_field_name_list": [],
+        "get_minhash_vec_field_name_list": [],
+        "get_emb_list_field_name_list": [],
+    }
+    for helper_name, return_value in field_helpers.items():
+        monkeypatch.setattr(checker_module.cf, helper_name, lambda *, schema, value=return_value: value)
+
+
+def test_checker_initialization_fails_fast_on_index_creation_error(monkeypatch):
+    client = FakeMilvusClient(create_index_error=TimeoutError("index creation timed out"))
+    patch_checker_constructor(monkeypatch, client, scalar_fields=("first_scalar", "second_scalar"))
+
+    with pytest.raises(RuntimeError, match="first_scalar"):
+        checker_module.Checker(collection_name="existing_collection", insert_data=False)
+
+    assert client.create_index_calls == 1
+
+
+def test_checker_initialization_skips_runtime_added_fields(monkeypatch):
+    client = FakeMilvusClient(indexed_fields=("base_scalar", "base_vector"))
+    patch_checker_constructor(
+        monkeypatch,
+        client,
+        scalar_fields=("base_scalar", "new_field_generated"),
+        float_vector_fields=("base_vector", "new_vec_generated"),
+    )
+
+    checker_module.Checker(collection_name="existing_collection", insert_data=False)
+
+    assert client.create_index_calls == 0
+    assert client.load_collection_calls == 1
+
+
+def test_checker_initialization_fails_fast_when_indexes_cannot_be_listed(monkeypatch):
+    client = FakeMilvusClient(list_indexes_error=TimeoutError("index discovery timed out"))
+    patch_checker_constructor(monkeypatch, client, scalar_fields=("base_scalar",))
+
+    with pytest.raises(RuntimeError, match="Failed to list indexes"):
+        checker_module.Checker(collection_name="existing_collection", insert_data=False)
+
+    assert client.create_index_calls == 0
+
+
 @pytest.mark.parametrize(
     "checker_class",
     (
