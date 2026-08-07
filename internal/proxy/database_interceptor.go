@@ -358,6 +358,9 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 		if r.DbName == "" {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}
+		if r.TargetDbName == "" {
+			r.TargetDbName = r.DbName
+		}
 		return ctx, r
 	case *milvuspb.RestoreExternalSnapshotRequest:
 		if r.DbName == "" {
