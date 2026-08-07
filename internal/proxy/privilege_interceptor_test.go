@@ -471,6 +471,66 @@ func TestPrivilegeInterceptorRenameCollection(t *testing.T) {
 	})
 }
 
+// TestPrivilegeInterceptorRestoreSnapshot covers restore authorization across
+// database boundaries. Same-database restore uses the collection-scoped grant,
+// while cross-database restore requires the same privilege at db="*" scope.
+func TestPrivilegeInterceptorRestoreSnapshot(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege("role_collection", commonpb.ObjectType_Collection.String(), "orders", commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(), "tenant_a"),
+				funcutil.PolicyForPrivilege("role_cluster", commonpb.ObjectType_Collection.String(), "orders", commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(), util.AnyWord),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("collection_admin", "role_collection"),
+				funcutil.EncodeUserRoleCache("cluster_admin", "role_cluster"),
+			},
+		}, nil
+	}
+	require.NoError(t, InitMetaCache(context.Background(), client))
+
+	t.Run("same database restore uses collection grant", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "collection_admin:pwd"), &milvuspb.RestoreSnapshotRequest{
+			DbName:         "tenant_a",
+			CollectionName: "orders",
+			TargetDbName:   "tenant_a",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("omitted target database is treated as source database", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "collection_admin:pwd"), &milvuspb.RestoreSnapshotRequest{
+			DbName:         "tenant_a",
+			CollectionName: "orders",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("cross database restore rejects collection grant", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "collection_admin:pwd"), &milvuspb.RestoreSnapshotRequest{
+			DbName:         "tenant_a",
+			CollectionName: "orders",
+			TargetDbName:   "tenant_b",
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("cross database restore accepts cluster scoped grant", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "cluster_admin:pwd"), &milvuspb.RestoreSnapshotRequest{
+			DbName:         "tenant_a",
+			CollectionName: "orders",
+			TargetDbName:   "tenant_b",
+		})
+		assert.NoError(t, err)
+	})
+}
+
 func TestRootShouldBindRole(t *testing.T) {
 	paramtable.Init()
 	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")

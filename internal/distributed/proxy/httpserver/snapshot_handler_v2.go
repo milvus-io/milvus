@@ -114,11 +114,15 @@ func (h *HandlersV2) describeSnapshot(ctx context.Context, c *gin.Context, anyRe
 
 func (h *HandlersV2) restoreSnapshot(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*RestoreSnapshotReq)
+	targetDBName := httpReq.TargetDbName
+	if targetDBName == "" {
+		targetDBName = dbName
+	}
 	req := &milvuspb.RestoreSnapshotRequest{
 		Name:                 httpReq.SnapshotName,
 		DbName:               dbName,
 		CollectionName:       httpReq.SourceCollectionName,
-		TargetDbName:         httpReq.TargetDbName,
+		TargetDbName:         targetDBName,
 		TargetCollectionName: httpReq.TargetCollectionName,
 	}
 	c.Set(ContextRequest, req)

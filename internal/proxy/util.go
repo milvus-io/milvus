@@ -3104,6 +3104,9 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 	case *milvuspb.RestoreSnapshotRequest:
 		targetDBName := r.GetTargetDbName()
 		if targetDBName == "" {
+			targetDBName = r.GetDbName()
+		}
+		if targetDBName == "" {
 			targetDBName = util.DefaultDBName
 		}
 		return getDatabaseID(targetDBName), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
