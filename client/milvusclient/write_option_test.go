@@ -80,6 +80,40 @@ func (s *ColumnBasedDataOptionSuite) TestTextInsertAndUpsertRequests() {
 	}
 }
 
+func (s *ColumnBasedDataOptionSuite) TestTextAndVarCharTypeMismatchError() {
+	tests := []struct {
+		name          string
+		fieldType     entity.FieldType
+		column        column.Column
+		expectedError string
+	}{
+		{
+			name:          "varchar column for text field",
+			fieldType:     entity.FieldTypeText,
+			column:        column.NewColumnVarChar("document", []string{"first"}),
+			expectedError: "param column document has type VarChar but collection field definition is Text",
+		},
+		{
+			name:          "text column for varchar field",
+			fieldType:     entity.FieldTypeVarChar,
+			column:        column.NewColumnText("document", []string{"first"}),
+			expectedError: "param column document has type Text but collection field definition is VarChar",
+		},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			collection := &entity.Collection{
+				Name: "text_collection",
+				Schema: entity.NewSchema().WithName("text_collection").
+					WithField(entity.NewField().WithName("document").WithDataType(test.fieldType)),
+			}
+			_, err := NewColumnBasedInsertOption(collection.Name, test.column).InsertRequest(collection)
+			s.Require().EqualError(err, test.expectedError)
+		})
+	}
+}
+
 func (s *ColumnBasedDataOptionSuite) TestTextRowInsertAndUpsertRequests() {
 	type TextRow struct {
 		ID       int64  `milvus:"name:id"`

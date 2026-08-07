@@ -119,7 +119,7 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 
 		mNameColumn[col.Name()] = col
 		if col.Type() != field.DataType {
-			return nil, 0, fmt.Errorf("param column %s has type %v but collection field definition is %v", col.Name(), col.Type(), field.DataType)
+			return nil, 0, fmt.Errorf("param column %s has type %s but collection field definition is %s", col.Name(), col.Type().Name(), field.DataType.Name())
 		}
 		if field.DataType == entity.FieldTypeFloatVector || field.DataType == entity.FieldTypeBinaryVector ||
 			field.DataType == entity.FieldTypeFloat16Vector || field.DataType == entity.FieldTypeBFloat16Vector ||
