@@ -193,31 +193,41 @@ func getSegmentBinlogFields(segment *SegmentInfo) map[int64]struct{} {
 	return result
 }
 
+// canCreateIndexForSegment reports whether the segment is ready to build the
+// index. The schema is resolved through the handler (lazy-loading on cache miss,
+// e.g. right after a DataCoord restart); the check fails closed on an
+// unresolvable or inconsistent view.
 func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *SegmentInfo, index *model.Index, segmentBinlogFields map[int64]struct{}) bool {
-	if _, hasField := segmentBinlogFields[index.FieldID]; hasField {
-		return true
-	}
-	// The segment has no binlog for the indexed field. A function-output field
-	// receives its data only through backfill, so building now is doomed; any
-	// other field may proceed. The schema is resolved through the handler
-	// (lazy-loading on cache miss, e.g. right after a datacoord restart) and the
-	// check fails closed: on an unresolvable or inconsistent view, defer to the
-	// next inspection round instead of trusting a stale schema.
 	collection, err := i.handler.GetCollection(ctx, segment.CollectionID)
 	if err != nil || collection == nil || collection.Schema == nil {
 		mlog.Warn(ctx, "cannot resolve collection schema, defer index build",
 			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID), mlog.Err(err))
 		return false
 	}
-	for _, functionSchema := range collection.Schema.GetFunctions() {
+
+	schema := collection.Schema
+	if typeutil.IsExternalCollection(schema) {
+		if segment.GetSchemaVersion() != schema.GetVersion() {
+			mlog.Debug(ctx, "external segment schema version does not match collection schema, defer index build",
+				mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID),
+				mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()), mlog.Int32("collectionSchemaVersion", schema.GetVersion()))
+			return false
+		}
+	}
+
+	if _, hasField := segmentBinlogFields[index.FieldID]; hasField {
+		return true
+	}
+	for _, functionSchema := range schema.GetFunctions() {
 		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
 			if outputFieldID == index.FieldID {
-				mlog.Debug(ctx, "function output field has no binlog, skip create index", mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
+				mlog.Debug(ctx, "function output field has no binlog, skip create index",
+					mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
 				return false
 			}
 		}
 	}
-	if typeutil.GetFieldByID(collection.Schema, index.FieldID) == nil {
+	if typeutil.GetFieldByID(schema, index.FieldID) == nil {
 		mlog.Warn(ctx, "indexed field not found in cached collection schema, defer index build",
 			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
 		return false
