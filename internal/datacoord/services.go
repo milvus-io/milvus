@@ -1906,6 +1906,16 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		return resp, nil
 	}
 
+	// Validate the idempotency key early (fail fast on malformed request content)
+	// before allocating any resources.
+	idempotencyKey := in.GetIdempotencyKey()
+	if idempotencyKey != "" {
+		if err := importutilv2.ValidateIdempotencyKey(idempotencyKey); err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+	}
+
 	// Use the incoming JobID if provided (backward compat: old proxy allocates jobID
 	// before sending broadcast RPC, which is forwarded here with the original jobID).
 	// Otherwise allocate a new one.
@@ -1922,6 +1932,25 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		}
 	}
 
+	// Idempotency: reserve (collectionID, idempotencyKey) -> jobID before broadcasting.
+	// The reservation is a synchronous, atomic etcd put-if-absent so that a retry (or a
+	// concurrent duplicate) that arrives even before the job is persisted resolves to the
+	// original jobID instead of creating a second import job.
+	if idempotencyKey != "" {
+		reservedJobID, isNew, err := s.importMeta.CheckAndReserveIdempotencyKey(ctx, in.GetCollectionID(), idempotencyKey, jobID)
+		if err != nil {
+			resp.Status = merr.Status(merr.Wrap(err, "failed to reserve import idempotency key"))
+			return resp, nil
+		}
+		if !isNew {
+			resp.JobID = fmt.Sprint(reservedJobID)
+			mlog.Info(ctx, "duplicate import request detected by idempotency key, returning existing jobID",
+				mlog.String("idempotencyKey", idempotencyKey), mlog.String("jobID", resp.JobID))
+			return resp, nil
+		}
+		// A fresh mapping was created; jobID == reservedJobID and we proceed to broadcast.
+	}
+
 	// Broadcast the import message
 	// dbName is retrieved inside broadcastImport via broker.DescribeCollectionInternal
 	err = s.broadcastImport(
@@ -1933,10 +1962,21 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		in.GetOptions(),
 		in.GetSchema(),
 		jobID,
+		idempotencyKey,
 		in.GetChannelNames(),
 	)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to broadcast import message", mlog.Err(err))
+		// Release the reservation so a subsequent retry can re-create the job. If this
+		// release fails (or the process crashes before it runs), the mapping is left
+		// dangling and a retry returns a jobID whose job was never created; a
+		// reconciliation sweep to reclaim such reservations is a follow-up.
+		if idempotencyKey != "" {
+			if relErr := s.importMeta.ReleaseIdempotencyKey(ctx, in.GetCollectionID(), idempotencyKey); relErr != nil {
+				mlog.Warn(ctx, "failed to release import idempotency key after broadcast failure",
+					mlog.String("idempotencyKey", idempotencyKey), mlog.Err(relErr))
+			}
+		}
 		resp.Status = merr.Status(merr.Wrap(err, "failed to broadcast import"))
 		return resp, nil
 	}
@@ -2041,6 +2081,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 			ReadyVchannels: in.GetChannelNames(),
 			DataTs:         in.GetDataTimestamp(),
 			AutoCommit:     importutilv2.IsAutoCommit(in.GetOptions()),
+			IdempotencyKey: in.GetIdempotencyKey(),
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
@@ -2078,10 +2119,26 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	resp := &internalpb.GetImportProgressResponse{
 		Status: merr.Success(),
 	}
-	jobID, err := strconv.ParseInt(in.GetJobID(), 10, 64)
-	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("parse job id failed: %v", err))
-		return resp, nil
+	var jobID int64
+	if in.GetJobID() == "" && in.GetIdempotencyKey() != "" {
+		// Look up the job by its per-collection idempotency key. This lets a client
+		// that lost the ImportV2 response recover the original jobID without resending
+		// the payload; a miss means the submission never succeeded, so the client can
+		// safely re-submit.
+		resolved, ok := s.importMeta.ResolveIdempotencyKey(ctx, in.GetCollectionID(), in.GetIdempotencyKey())
+		if !ok {
+			resp.Status = merr.Status(merr.WrapErrImportSysFailedMsg("import job does not exist, idempotencyKey=%s, collectionID=%d",
+				in.GetIdempotencyKey(), in.GetCollectionID()))
+			return resp, nil
+		}
+		jobID = resolved
+	} else {
+		var err error
+		jobID, err = strconv.ParseInt(in.GetJobID(), 10, 64)
+		if err != nil {
+			resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("parse job id failed: %v", err))
+			return resp, nil
+		}
 	}
 
 	job := s.importMeta.GetJob(ctx, jobID)
@@ -2093,6 +2150,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	resp.State = state
 	resp.Reason = reason
 	resp.Progress = progress
+	resp.JobID = fmt.Sprint(jobID)
 	resp.CollectionName = job.GetCollectionName()
 	resp.CreateTime = job.GetCreateTime()
 	resp.CompleteTime = job.GetCompleteTime()

@@ -255,6 +255,66 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 	s.Contains(resp.GetStatus().GetReason(), "broadcast")
 }
 
+func (s *ImportServicesSuite) TestImportV2_IdempotencyKeyDuplicateReturnsExistingJobID() {
+	ctx := context.Background()
+
+	// The idempotency key is already reserved -> CheckAndReserve reports not-new and
+	// returns the original jobID. ImportV2 must return that jobID without broadcasting,
+	// so no broker/broadcast mocks are configured (reaching them would fail the test).
+	mockImportMeta := NewMockImportMeta(s.T())
+	mockImportMeta.EXPECT().
+		CheckAndReserveIdempotencyKey(mock.Anything, int64(100), "run-1", mock.Anything).
+		Return(int64(999), false, nil)
+
+	server := &Server{importMeta: mockImportMeta}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	mockAllocator := allocator.NewMockAllocator(s.T())
+	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil)
+	server.allocator = mockAllocator
+
+	req := &internalpb.ImportRequestInternal{
+		CollectionID:   100,
+		CollectionName: "test_collection",
+		Files: []*internalpb.ImportFile{
+			{Id: 1, Paths: []string{"/test/file.json"}},
+		},
+		Options: []*commonpb.KeyValuePair{
+			{Key: "timeout", Value: "300s"},
+		},
+		IdempotencyKey: "run-1",
+	}
+
+	resp, err := server.ImportV2(ctx, req)
+
+	s.NoError(err)
+	s.NotNil(resp)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	// The original jobID is returned, not the freshly allocated candidate (1000).
+	s.Equal("999", resp.GetJobID())
+}
+
+func (s *ImportServicesSuite) TestImportV2_InvalidIdempotencyKeyRejected() {
+	ctx := context.Background()
+
+	server := &Server{importMeta: &importMeta{}}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	req := &internalpb.ImportRequestInternal{
+		CollectionID:   100,
+		CollectionName: "test_collection",
+		Files:          []*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+		Options:        []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		IdempotencyKey: "bad/key", // '/' is invalid; must be rejected before allocating
+	}
+
+	resp, err := server.ImportV2(ctx, req)
+
+	s.NoError(err)
+	s.NotNil(resp)
+	s.NotEqual(int32(0), resp.GetStatus().GetCode())
+}
+
 func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 	ctx := context.Background()
 

@@ -71,9 +71,10 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 				Paths: file.GetPaths(),
 			}
 		}),
-		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
-		DataTimestamp: result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
-		JobID:         body.GetJobID(),
+		Options:        funcutil.Map2KeyValuePair(body.GetOptions()),
+		DataTimestamp:  result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
+		JobID:          body.GetJobID(),
+		IdempotencyKey: body.GetIdempotencyKey(),
 	})
 
 	err = merr.CheckRPCCall(importResp, err)
@@ -176,6 +177,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	options []*commonpb.KeyValuePair,
 	schema *schemapb.CollectionSchema,
 	jobID int64,
+	idempotencyKey string,
 	vchannels []string,
 ) error {
 	// Convert files to msgpb format for validation
@@ -219,6 +221,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 			Files:          msgFiles,
 			Schema:         schema, // TODO: should we use the schema from the collection?
 			JobID:          jobID,
+			IdempotencyKey: idempotencyKey,
 		}).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()

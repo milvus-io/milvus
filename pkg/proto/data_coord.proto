@@ -1393,6 +1393,9 @@ message ImportJob {
   uint64 data_ts = 18;
   repeated string committed_vchannels = 19;
   bool            auto_commit         = 20;
+  // client-provided idempotency key (scoped per-collection); persisted so the
+  // key->jobID index can be rebuilt on restart and dropped when the job is GC'd.
+  string          idempotency_key     = 21;
 }
 
 enum ImportTaskStateV2 {

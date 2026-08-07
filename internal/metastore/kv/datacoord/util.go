@@ -363,6 +363,14 @@ func buildImportJobKey(jobID int64) string {
 	return fmt.Sprintf("%s/%d", ImportJobPrefix, jobID)
 }
 
+// buildImportIdempotencyKey maps a per-collection idempotency key to its jobID.
+// The key layout is import-idempotency/{collectionID}/{idempotencyKey}. The
+// idempotency key is validated (no '/') before reaching here, so it forms a
+// single path segment.
+func buildImportIdempotencyKey(collectionID int64, idempotencyKey string) string {
+	return fmt.Sprintf("%s/%d/%s", ImportIdempotencyPrefix, collectionID, idempotencyKey)
+}
+
 func buildImportTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", ImportTaskPrefix, taskID)
 }

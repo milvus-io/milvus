@@ -105,6 +105,13 @@ type DataCoordCatalog interface {
 	SaveImportJob(ctx context.Context, job *datapb.ImportJob) error
 	ListImportJobs(ctx context.Context) ([]*datapb.ImportJob, error)
 	DropImportJob(ctx context.Context, jobID int64) error
+	// SaveImportIdempotencyKeyIfAbsent atomically maps a per-collection idempotency
+	// key to jobID only if the mapping does not already exist. It returns
+	// (true, jobID, nil) when the mapping was created, and (false, existingJobID, nil)
+	// when a mapping already existed (the caller should reuse existingJobID).
+	SaveImportIdempotencyKeyIfAbsent(ctx context.Context, collectionID int64, idempotencyKey string, jobID int64) (bool, int64, error)
+	// DropImportIdempotencyKey removes the idempotency-key mapping for a collection.
+	DropImportIdempotencyKey(ctx context.Context, collectionID int64, idempotencyKey string) error
 	SavePreImportTask(ctx context.Context, task *datapb.PreImportTask) error
 	ListPreImportTasks(ctx context.Context) ([]*datapb.PreImportTask, error)
 	DropPreImportTask(ctx context.Context, taskID int64) error

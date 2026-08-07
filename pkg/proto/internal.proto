@@ -412,6 +412,9 @@ message ImportRequestInternal {
   repeated common.KeyValuePair options = 8;
   uint64 data_timestamp = 9;
   int64 jobID = 10;
+  // client-provided key for safely retrying an import request; a retry with the
+  // same key for the same collection returns the original jobID instead of creating a new job.
+  string idempotency_key = 11;
 }
 
 message ImportRequest {
@@ -420,6 +423,8 @@ message ImportRequest {
   string partition_name = 3;
   repeated ImportFile files = 4;
   repeated common.KeyValuePair options = 5;
+  // client-provided key for safely retrying an import request.
+  string idempotency_key = 6;
 }
 
 message ImportResponse {
@@ -430,6 +435,13 @@ message ImportResponse {
 message GetImportProgressRequest {
   string db_name = 1;
   string jobID = 2;
+  // Optional: look up an import job by its idempotency_key instead of jobID.
+  // When set (and jobID is empty), the caller provides collection_name; the proxy
+  // resolves it to collectionID (idempotency keys are scoped per-collection) before
+  // forwarding to DataCoord.
+  string idempotency_key = 3;
+  int64 collectionID = 4;
+  string collection_name = 5;
 }
 
 message ImportTaskProgress {
@@ -454,6 +466,8 @@ message GetImportProgressResponse {
   int64 imported_rows = 8;
   int64 total_rows = 9;
   string create_time = 10;
+  // The resolved jobID; useful when the job was looked up by idempotency_key.
+  string jobID = 11;
 }
 
 message ListImportsRequestInternal {
