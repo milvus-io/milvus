@@ -189,6 +189,9 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		if udpates.Schema != nil && udpates.Schema.ExternalSpec != "" {
 			schema.ExternalSpec = udpates.Schema.ExternalSpec
 		}
+		if err := validateCollectionSchemaPayloadSize(schema); err != nil {
+			return err
+		}
 		udpates.Schema = schema
 	}
 
