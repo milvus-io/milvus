@@ -85,6 +85,12 @@ func setState(state datapb.CompactionTaskState) compactionTaskOpt {
 	}
 }
 
+func setDeleteCoveredTs(ts uint64) compactionTaskOpt {
+	return func(task *datapb.CompactionTask) {
+		task.DeleteCoveredTs = ts
+	}
+}
+
 func setStartTime(startTime int64) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
 		task.StartTime = startTime

@@ -1783,6 +1783,87 @@ func getMaxPosition(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
 	return maxPos
 }
 
+// inputDeleteCoverageTs returns the WAL timestamp up to which deletes are
+// provably applied into seg's data, and whether that is known. It is the newest
+// of (a) seg's own delete_covered_ts (set when seg was itself produced by a
+// prior compaction) and (b) the max TimestampTo across seg's deltalogs. known is
+// false when neither is available, i.e. coverage is unknown.
+//
+// This MUST be evaluated at plan-build time, on the same segment metadata that
+// is snapshotted into the compaction plan, NOT at completion on live metadata:
+// a concurrent L0 compaction can attach newer deltalogs to an input after the
+// plan is built but before completion, which would over-state coverage and
+// silently drop the deletes in that gap (issue #49435).
+func inputDeleteCoverageTs(seg *SegmentInfo) (ts uint64, known bool) {
+	if covered := seg.GetDeleteCoveredTs(); covered > 0 {
+		ts, known = covered, true
+	}
+	for _, fieldDelta := range seg.GetDeltalogs() {
+		for _, binlog := range fieldDelta.GetBinlogs() {
+			if binlog.GetTimestampTo() > ts {
+				ts = binlog.GetTimestampTo()
+			}
+			known = true
+		}
+	}
+	return ts, known
+}
+
+// computeDeleteCoveredTs returns the delete_covered_ts for a compaction OUTPUT
+// segment built from inputs (issue #49435), or 0 when coverage is unknown.
+// Compaction applies every input's deltalogs to every output row, but a row that
+// came from an input is only trustworthy up to THAT input's delete coverage, so
+// the output's single covered ts is the MIN coverage across inputs. If ANY
+// input's coverage is unknown it returns 0, so the delegator conservatively
+// falls back to start_position (minTs). The result is a lower bound on the true
+// coverage: replaying deletes from it can only re-apply already-applied deletes
+// (idempotent), never skip a live one.
+//
+// Callers MUST pass the input segments as snapshotted into the compaction plan
+// (plan-build time) so the value matches the deltalog set the datanode bakes;
+// completion then reads it back from CompactionTask.delete_covered_ts.
+func computeDeleteCoveredTs(inputs []*SegmentInfo) uint64 {
+	var minTs uint64
+	ok := false
+	for _, in := range inputs {
+		ts, known := inputDeleteCoverageTs(in)
+		if !known {
+			return 0
+		}
+		if !ok || ts < minTs {
+			minTs, ok = ts, true
+		}
+	}
+	return minTs
+}
+
+// logCompactionDeleteCoverage records whether delete coverage engaged for a
+// compaction and, if not, why, so a single (multi-hour) test run reveals the
+// coverage hit-rate instead of iterating blind (issue #49435). engaged=false
+// with inputsWithDeltalogs=0 is the signature of the dormant case: in 2.6 an
+// L1 input's deletes usually live in L0 (empty own deltalogs) and it has no
+// prior covered ts, so computeDeleteCoveredTs is 0 and the delegator falls back
+// to start_position. Pair this with the delegator's per-load "usedCoverage" log
+// to see the read side.
+func logCompactionDeleteCoverage(logger *log.MLogger, deleteCoveredTs uint64, inputs []*SegmentInfo) {
+	withDeltalogs, withOwnCoverage := 0, 0
+	for _, in := range inputs {
+		if len(in.GetDeltalogs()) > 0 {
+			withDeltalogs++
+		}
+		if in.GetDeleteCoveredTs() > 0 {
+			withOwnCoverage++
+		}
+	}
+	logger.Info("compaction delete coverage computed",
+		zap.Uint64("deleteCoveredTs", deleteCoveredTs),
+		zap.Bool("engaged", deleteCoveredTs > 0),
+		zap.Int("inputs", len(inputs)),
+		zap.Int("inputsWithDeltalogs", withDeltalogs),
+		zap.Int("inputsWithOwnCoverage", withOwnCoverage))
+	metrics.DataCoordCompactionDeleteCoverage.WithLabelValues(strconv.FormatBool(deleteCoveredTs > 0)).Inc()
+}
+
 // recalculateSegmentPosition recalculates StartPosition and DmlPosition from
 // actual binlog timestamps on the compaction result segment. This makes compaction
 // self-healing: wrong positions from import or prior compaction are corrected.
@@ -1864,6 +1945,9 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			Level:               datapb.SegmentLevel_L2,
 			StartPosition:       startPos,
 			DmlPosition:         dmlPos,
+			// deletes <= this are already baked into the output by this
+			// compaction; lets the delegator replay only the tail (#49435).
+			DeleteCoveredTs: t.GetDeleteCoveredTs(),
 			// visible after stats and index
 			IsInvisible:    true,
 			StorageVersion: seg.GetStorageVersion(),
@@ -1981,8 +2065,11 @@ func (m *meta) completeMixCompactionMutation(
 				StorageVersion:      compactToSegment.GetStorageVersion(),
 				StartPosition:       startPos,
 				DmlPosition:         dmlPos,
-				IsSorted:            compactToSegment.GetIsSorted(),
-				ManifestPath:        compactToSegment.GetManifest(),
+				// deletes <= this are already baked into the output by this
+				// compaction; lets the delegator replay only the tail (#49435).
+				DeleteCoveredTs: t.GetDeleteCoveredTs(),
+				IsSorted:        compactToSegment.GetIsSorted(),
+				ManifestPath:    compactToSegment.GetManifest(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -2466,13 +2553,16 @@ func (m *meta) completeSortCompactionMutation(
 		oldSegment.GetStartPosition(), oldSegment.GetDmlPosition())
 
 	segmentInfo := &datapb.SegmentInfo{
-		CollectionID:              oldSegment.GetCollectionID(),
-		PartitionID:               oldSegment.GetPartitionID(),
-		InsertChannel:             oldSegment.GetInsertChannel(),
-		MaxRowNum:                 oldSegment.GetMaxRowNum(),
-		LastExpireTime:            oldSegment.GetLastExpireTime(),
-		StartPosition:             startPos,
-		DmlPosition:               dmlPos,
+		CollectionID:   oldSegment.GetCollectionID(),
+		PartitionID:    oldSegment.GetPartitionID(),
+		InsertChannel:  oldSegment.GetInsertChannel(),
+		MaxRowNum:      oldSegment.GetMaxRowNum(),
+		LastExpireTime: oldSegment.GetLastExpireTime(),
+		StartPosition:  startPos,
+		DmlPosition:    dmlPos,
+		// deletes <= this are already baked into the output by this compaction;
+		// lets the delegator replay only the tail on load (issue #49435).
+		DeleteCoveredTs:           t.GetDeleteCoveredTs(),
 		IsImporting:               oldSegment.GetIsImporting(),
 		State:                     commonpb.SegmentState_Flushed,
 		Level:                     oldSegment.GetLevel(),

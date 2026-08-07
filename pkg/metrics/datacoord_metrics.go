@@ -112,6 +112,17 @@ var (
 			collectionIDLabelName,
 		})
 
+	// DataCoordCompactionDeleteCoverage counts compactions by whether the delete
+	// coverage watermark engaged (delete_covered_ts non-zero). issue #49435
+	// experiment instrumentation (temporary).
+	DataCoordCompactionDeleteCoverage = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "compaction_delete_coverage_total",
+			Help:      "issue #49435: count of compactions by whether delete_covered_ts engaged (non-zero)",
+		}, []string{"engaged"})
+
 	DataCoordConsumeDataNodeTimeTickLag = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -393,6 +404,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordNumCollections)
 	registry.MustRegister(DataCoordNumStoredRows)
 	registry.MustRegister(DataCoordBulkVectors)
+	registry.MustRegister(DataCoordCompactionDeleteCoverage)
 	registry.MustRegister(DataCoordConsumeDataNodeTimeTickLag)
 	registry.MustRegister(DataCoordCheckpointUnixSeconds)
 	registry.MustRegister(DataCoordStoredBinlogSize)

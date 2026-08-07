@@ -73,18 +73,23 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 			zap.Duration("tsLag", tsLag))
 	}
 	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:        segment.ID,
-		PartitionID:      segment.PartitionID,
-		CollectionID:     segment.CollectionID,
-		BinlogPaths:      segment.Binlogs,
-		NumOfRows:        segment.NumOfRows,
-		Statslogs:        segment.Statslogs,
-		Deltalogs:        segment.Deltalogs,
-		Bm25Logs:         segment.Bm25Statslogs,
-		InsertChannel:    segment.InsertChannel,
-		IndexInfos:       indexes,
-		StartPosition:    segment.GetStartPosition(),
-		DeltaPosition:    channelCheckpoint,
+		SegmentID:     segment.ID,
+		PartitionID:   segment.PartitionID,
+		CollectionID:  segment.CollectionID,
+		BinlogPaths:   segment.Binlogs,
+		NumOfRows:     segment.NumOfRows,
+		Statslogs:     segment.Statslogs,
+		Deltalogs:     segment.Deltalogs,
+		Bm25Logs:      segment.Bm25Statslogs,
+		InsertChannel: segment.InsertChannel,
+		IndexInfos:    indexes,
+		StartPosition: segment.GetStartPosition(),
+		DeltaPosition: channelCheckpoint,
+		// DeleteCoveredTs: WAL ts up to which deletes are already baked into the
+		// segment by compaction; the delegator replays only the tail after it
+		// instead of from start_position/minTs (issue #49435). 0 for segments
+		// without it -> delegator falls back to start_position.
+		DeleteCoveredTs:  segment.GetDeleteCoveredTs(),
 		Level:            segment.GetLevel(),
 		StorageVersion:   segment.GetStorageVersion(),
 		IsSorted:         segment.GetIsSorted(),

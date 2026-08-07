@@ -385,6 +385,10 @@ message SegmentLoadInfo {
     map<int64, data.JsonKeyStats> jsonKeyStatsLogs = 22;
     common.LoadPriority priority = 23;
     string manifest_path = 24;
+    // Mirrors SegmentInfo.delete_covered_ts: WAL timestamp up to which deletes
+    // are already baked into this segment. 0 = unknown -> delegator falls back
+    // to start_position (minTs) for delete replay.
+    uint64 delete_covered_ts = 30;
 }
 
 message FieldIndexInfo {

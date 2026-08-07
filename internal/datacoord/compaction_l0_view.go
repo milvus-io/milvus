@@ -155,6 +155,17 @@ func (v *LevelZeroCompactionView) GetTriggerID() int64 {
 
 // Trigger triggers all qualified LevelZeroSegments according to views
 func (v *LevelZeroCompactionView) Trigger() (CompactionView, string) {
+	// Sort L0 segments oldest-first by dmlPos so minCountSizeTrigger, which picks a
+	// size/count-bounded PREFIX, always consumes a contiguous ts range. The segment
+	// list otherwise arrives in map-random order (SelectSegments iterates a map), so
+	// an over-limit view could bake a non-contiguous set (e.g. t1,t3 skipping t2),
+	// leaving a hole below a baked deltalog's TimestampTo and making the compaction
+	// delete_covered_ts watermark over-state coverage (issue #49435).
+	// ForceTrigger/ForceTriggerAll already sort for the same reason.
+	sort.Slice(v.l0Segments, func(i, j int) bool {
+		return v.l0Segments[i].dmlPos.GetTimestamp() < v.l0Segments[j].dmlPos.GetTimestamp()
+	})
+
 	latestL0 := lo.MaxBy(v.l0Segments, func(view1, view2 *SegmentView) bool {
 		return view1.dmlPos.GetTimestamp() > view2.dmlPos.GetTimestamp()
 	})
