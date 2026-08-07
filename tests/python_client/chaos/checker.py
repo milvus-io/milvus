@@ -4333,14 +4333,14 @@ class AddVectorFieldChecker(Checker):
                 log.debug(f"[AddVectorFieldChecker] added field {new_vec_field} (dim={dim})")
                 time.sleep(1)
 
-            # Create HNSW index for new vector field
+            # This checker validates the added field lifecycle, so use FLAT to
+            # avoid turning schema coverage into a long-running HNSW workload.
             if not self._vector_index_created:
                 index_params = IndexParams()
                 index_params.add_index(
                     field_name=new_vec_field,
-                    index_type="HNSW",
+                    index_type="FLAT",
                     metric_type="COSINE",
-                    params={"M": 16, "efConstruction": 200},
                 )
                 self.milvus_client.create_index(
                     collection_name=self.c_name,

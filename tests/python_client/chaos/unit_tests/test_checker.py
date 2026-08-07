@@ -18,6 +18,7 @@ class FakeMilvusClient:
         self.collection_exists = collection_exists
         self.add_collection_field_calls = 0
         self.create_index_calls = 0
+        self.create_index_kwargs = []
         self.load_collection_calls = 0
 
     def has_collection(self, collection_name):
@@ -36,6 +37,7 @@ class FakeMilvusClient:
 
     def create_index(self, **kwargs):
         self.create_index_calls += 1
+        self.create_index_kwargs.append(kwargs)
         if self.create_index_errors:
             error = self.create_index_errors.pop(0)
             if error is not None:
@@ -194,6 +196,9 @@ def test_add_vector_field_checker_retries_same_field_after_index_timeout(monkeyp
     assert second_result == third_result == (None, True)
     assert client.add_collection_field_calls == 1
     assert client.create_index_calls == 2
+    index_param = client.create_index_kwargs[-1]["index_params"][0].to_dict()
+    assert index_param["index_type"] == "FLAT"
+    assert index_param["metric_type"] == "COSINE"
 
 
 @pytest.mark.parametrize(
