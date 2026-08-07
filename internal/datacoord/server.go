@@ -94,6 +94,7 @@ var Params = paramtable.Get()
 // Server implements `types.DataCoord`
 // handles Data Coordinator related jobs
 type Server struct {
+ queryViewLoadInfoNotifier QueryViewLoadInfoNotifier
 	ctx              context.Context
 	serverLoopCtx    context.Context
 	serverLoopCancel context.CancelFunc
@@ -210,15 +211,16 @@ func WithSegmentManager(manager Manager) Option {
 func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
-		ctx:                 ctx,
-		quitCh:              make(chan struct{}),
-		factory:             factory,
-		flushCh:             make(chan UniqueID, 1024),
-		notifyIndexChan:     make(chan UniqueID, 1024),
-		dataNodeCreator:     defaultDataNodeCreatorFunc,
-		importJobLock:       lock.NewKeyLock[int64](),
-		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
-		metricsRequest:      metricsinfo.NewMetricsRequest(),
+		ctx:                       ctx,
+		quitCh:                    make(chan struct{}),
+		factory:                   factory,
+		flushCh:                   make(chan UniqueID, 1024),
+		notifyIndexChan:           make(chan UniqueID, 1024),
+		queryViewLoadInfoNotifier: noopQueryViewLoadInfoNotifier{},
+		dataNodeCreator:           defaultDataNodeCreatorFunc,
+		importJobLock:             lock.NewKeyLock[int64](),
+		metricsCacheManager:       metricsinfo.NewMetricsCacheManager(),
+		metricsRequest:            metricsinfo.NewMetricsRequest(),
 	}
 
 	for _, opt := range opts {
@@ -682,7 +684,8 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	}
 	// Publish only fully recovered metadata. A failed later phase must not
 	// make a subsequent initMeta call return early with partial state.
-	recoveredMeta.dataViewManager = manager
+	recoveredMeta.queryViewLoadInfoNotifier = s.queryViewLoadInfoNotifier
+ recoveredMeta.dataViewManager = manager
 	s.meta = recoveredMeta
 	s.dataViewManager = manager
 	return nil

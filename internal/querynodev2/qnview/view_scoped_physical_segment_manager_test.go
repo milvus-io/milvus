@@ -536,6 +536,49 @@ func TestViewScopedPhysicalSegmentManager_AppliesLoadInfoSnapshotAndCoalescesUpd
 	require.Equal(t, uint64(11), scheduler.updates[1].Snapshot.Revision.Revision)
 }
 
+func TestViewScopedPhysicalSegmentManager_CoalescesRevisionRevertDuringInFlightUpdate(t *testing.T) {
+	meta := buildHandlerTestMeta(1)
+	view := &viewpb.QueryViewOfQueryNode{
+		NodeId:     1,
+		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
+	}
+	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
+	scheduler := &fakeNodeScheduler{}
+	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler)
+	runtime := &fakeCollectionRuntimeGuard{collectionID: testCollectionID}
+	appliedRevision := SegmentLoadInfoRevision{Revision: 10}
+	inFlightRevision := SegmentLoadInfoRevision{Revision: 11}
+
+	mgr.views[key] = &viewRef{segments: map[int64]int64{1000: 10}}
+	mgr.segments[1000] = &physicalSegmentState{
+		segment:      &fakeTransformSegment{id: 1000, partitionID: 10},
+		refs:         map[qviews.QueryViewKey]struct{}{key: {}},
+		requests:     map[qviews.QueryViewKey]segmentLoadRequest{key: {meta: meta, collection: runtime}},
+		revision:     appliedRevision,
+		collectionID: testCollectionID,
+	}
+
+	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{
+		CollectionID: testCollectionID,
+		SegmentID:    1000,
+		Revision:     inFlightRevision,
+	})
+	require.Len(t, scheduler.updates, 1)
+
+	// SegmentLoadInfo revisions are content hashes, not monotonic sequence
+	// numbers. The latest metadata may therefore return to the currently
+	// applied revision while another revision is still being applied.
+	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{
+		CollectionID: testCollectionID,
+		SegmentID:    1000,
+		Revision:     appliedRevision,
+	})
+	scheduler.updates[0].OnUpdated(inFlightRevision)
+
+	require.Len(t, scheduler.updates, 2)
+	assert.Equal(t, appliedRevision, scheduler.updates[1].Snapshot.Revision)
+}
+
 func TestViewScopedPhysicalSegmentManager_KeepsNewerSnapshotPendingWhileUpdateTaskRetries(t *testing.T) {
 	nodeScheduler := &capturedNodeScheduler{}
 	var attempts atomic.Int32
@@ -884,9 +927,13 @@ func TestViewScopedPhysicalSegmentManager_AcquireWatchesSnapshotsLoadsAndReports
 	}, subscriptionOptions(stream.subscriptions))
 	applySegmentLoadSnapshots(t, stream, map[int64]int64{1000: 10, 1001: 10, 2000: 20})
 
-	require.Eventually(t, func() bool {
-		return len(loadedCh) == 3
-	}, time.Second, 10*time.Millisecond)
+	for range 3 {
+		select {
+		case <-loadedCh:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for loaded segment")
+		}
+	}
 	require.Len(t, loader.loadInfos, 3)
 }
 
@@ -913,9 +960,13 @@ func TestViewScopedPhysicalSegmentManager_LoadsMissingSegmentsIndependently(t *t
 	})
 	applySegmentLoadSnapshots(t, stream, map[int64]int64{1000: 10, 1001: 10})
 
-	require.Eventually(t, func() bool {
-		return len(loadedCh) == 2
-	}, time.Second, 10*time.Millisecond)
+	for range 2 {
+		select {
+		case <-loadedCh:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for loaded segment")
+		}
+	}
 	require.Len(t, loader.loadInfos, 2)
 	loadedSegments := []int64{loader.loadInfos[0].GetSegmentID(), loader.loadInfos[1].GetSegmentID()}
 	assert.ElementsMatch(t, []int64{1000, 1001}, loadedSegments)

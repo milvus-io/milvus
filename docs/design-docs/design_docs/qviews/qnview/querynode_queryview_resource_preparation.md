@@ -183,6 +183,14 @@ updates. After a QueryNode process restart the in-memory revisions are lost, so
 new subscriptions start from revision zero and QueryCoord returns full current
 snapshots.
 
+DataCoord invalidates these snapshots only after the corresponding segment
+index metadata is durable. A finished segment index, text-index stats, and
+current-format JSON key stats notify the exact segment. CreateIndex
+acknowledgement itself does not notify: each segment is refreshed when its own
+index reaches Finished. These events do not change DataView, QueryView, or
+LoadConfig; a newly loaded segment obtains the latest complete snapshot from
+its initial subscription.
+
 This boundary keeps task execution self-contained: a load/update task never
 performs a metadata lookup. It operates only on the immutable snapshot captured
 when the task was created.
@@ -231,6 +239,13 @@ revision. It advances when the handler has accepted the complete snapshot,
 because any subsequently submitted load/update failure remains owned by the
 NodeScheduler retry lifecycle. No task completion path sends a subscribe or
 revision update back to `SegmentLoadInfoStream`.
+
+`SegmentLoadInfoRevision` is a deterministic content hash and is only an
+equality token; it has no ordering semantics. While an update task is in
+flight, the physical manager therefore retains the latest accepted snapshot
+even when its revision equals the currently applied revision. The in-flight
+task may first move the physical segment to a different revision, after which
+the retained snapshot must move it back to the latest metadata state.
 
 On physical load completion, the physical manager validates that the segment is
 still referenced before keeping it. If no QueryView still references the
@@ -340,3 +355,8 @@ replacement view.
     last view release or segment reset closes that subscription.
 12. SegmentLoadInfo subscription revision advances only after its handler
     accepts a snapshot and is used only for stream recovery.
+13. SegmentLoadInfo revisions are calculated from a canonical clone of the
+    complete snapshot. Semantically unordered collection/segment index
+    metadata, parameters, field binlogs, child fields, resource file paths,
+    compaction sources, and child manifests do not change the revision, and
+    revision calculation never mutates metadata owned by the caller.
