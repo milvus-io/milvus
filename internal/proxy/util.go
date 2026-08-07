@@ -571,6 +571,17 @@ func validateElementType(dataType schemapb.DataType) error {
 	return merr.WrapErrParameterInvalidMsg("element type %s is not supported", dataType.String())
 }
 
+func validateElementNullable(field *schemapb.FieldSchema) error {
+	if !field.GetElementNullable() {
+		return nil
+	}
+	if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
+		return merr.WrapErrParameterInvalidMsg("element_nullable is only valid for Array and ArrayOfVector fields, field name = %s", field.GetName())
+	}
+	// TODO: temporarily disable element nullable until all parts ready
+	return merr.WrapErrParameterInvalidMsg("element_nullable is not supported yet, field name = %s", field.GetName())
+}
+
 func validateFieldType(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
 		switch field.GetDataType() {
@@ -625,6 +636,9 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	if err := validateFieldName(field.Name); err != nil {
 		return err
 	}
+	if err := validateElementNullable(field); err != nil {
+		return err
+	}
 	// validate dense vector field type parameters
 	isVectorType := typeutil.IsVectorType(field.DataType)
 	if isVectorType {
@@ -677,6 +691,9 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	// validate field name
 	var err error
 	if err := validateFieldName(field.Name); err != nil {
+		return err
+	}
+	if err := validateElementNullable(field); err != nil {
 		return err
 	}
 
@@ -2076,14 +2093,19 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			switch subFieldData := subField.Field.(type) {
 			case *schemapb.FieldData_Scalars:
 				if scalarArray := subFieldData.Scalars.GetArrayData(); scalarArray != nil {
-					currentArrayLen = len(scalarArray.Data)
+					currentArrayLen = len(scalarArray.GetData())
 					if totalSubFields > 1 {
+						subFieldSchema := subFieldSchema
+						scalarArray := scalarArray
 						rowElementCounters = append(rowElementCounters, rowElementCounter{
 							name: subField.GetFieldName(),
 							count: func(physicalRow int) (int, error) {
 								row := scalarArray.GetData()[physicalRow]
 								if row.GetData() == nil {
 									return 0, merr.WrapErrParameterInvalidMsg("nil array data")
+								}
+								if subFieldSchema.GetElementNullable() {
+									return len(row.GetValidData()), nil
 								}
 								switch subFieldSchema.GetElementType() {
 								case schemapb.DataType_Bool:
@@ -2110,8 +2132,10 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 				}
 			case *schemapb.FieldData_Vectors:
 				if vectorArray := subFieldData.Vectors.GetVectorArray(); vectorArray != nil {
-					currentArrayLen = len(vectorArray.Data)
+					currentArrayLen = len(vectorArray.GetData())
 					if totalSubFields > 1 {
+						subFieldSchema := subFieldSchema
+						vectorArray := vectorArray
 						var vectorWidth int
 						rowElementCounters = append(rowElementCounters, rowElementCounter{
 							name: subField.GetFieldName(),
@@ -2142,6 +2166,9 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 								}
 								if payloadLen%vectorWidth != 0 {
 									return 0, merr.WrapErrParameterInvalidMsg("payload length %d is not divisible by vector width %d", payloadLen, vectorWidth)
+								}
+								if subFieldSchema.GetElementNullable() {
+									return len(row.GetValidData()), nil
 								}
 								return payloadLen / vectorWidth, nil
 							},
