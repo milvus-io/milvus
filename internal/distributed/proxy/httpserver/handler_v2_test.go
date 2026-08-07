@@ -898,6 +898,75 @@ func TestDocInDocOutInsert(t *testing.T) {
 	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
 }
 
+func TestInsertTextField(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	schema := &schemapb.CollectionSchema{
+		Name:   DefaultCollectionName,
+		AutoID: false,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      common.StartOfUserFieldID,
+				Name:         "id",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:  common.StartOfUserFieldID + 1,
+				Name:     "doc",
+				DataType: schemapb.DataType_Text,
+			},
+			{
+				FieldID:  common.StartOfUserFieldID + 2,
+				Name:     "dense",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "2"},
+				},
+			},
+		},
+	}
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         schema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, req *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+			require.Equal(t, uint32(1), req.GetNumRows())
+			var textField *schemapb.FieldData
+			for _, field := range req.GetFieldsData() {
+				if field.GetFieldName() == "doc" {
+					textField = field
+					break
+				}
+			}
+			require.NotNil(t, textField)
+			assert.Equal(t, schemapb.DataType_Text, textField.GetType())
+			assert.Equal(t, []string{"hello, 世界 🌍"}, textField.GetScalars().GetStringData().GetData())
+			return &milvuspb.MutationResult{
+				Status:    commonSuccessStatus,
+				InsertCnt: 1,
+				IDs:       generateIDs(schemapb.DataType_Int64, 1),
+			}, nil
+		}).Once()
+
+	testEngine := initHTTPServerV2(mp, false)
+	testcase := requestBodyTestCase{
+		path: versionalV2(EntityCategory, InsertAction),
+		requestBody: []byte(`{
+			"collectionName": "book",
+			"data": [{"id": 1, "doc": "hello, 世界 🌍", "dense": [0.1, 0.2]}]
+		}`),
+	}
+	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+}
+
 func TestDocInDocOutInsertInvalid(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
