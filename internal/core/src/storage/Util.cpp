@@ -2250,13 +2250,15 @@ ValidateFixedSizeBinaryVectorWidth(const std::shared_ptr<arrow::Array>& array,
     auto fsb_array =
         std::static_pointer_cast<arrow::FixedSizeBinaryArray>(array);
     int byte_width = GetDataTypeSize(data_type, dim);
-    AssertInfo(fsb_array->byte_width() == byte_width,
-               "vector byte width mismatch{}, expected {} bytes for "
-               "dim {}, actual {} bytes",
-               FieldErrorSuffix(field_meta),
-               byte_width,
-               dim,
-               fsb_array->byte_width());
+    if (!(fsb_array->byte_width() == byte_width)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "vector byte width mismatch{}, expected {} bytes for "
+                  "dim {}, actual {} bytes",
+                  FieldErrorSuffix(field_meta),
+                  byte_width,
+                  dim,
+                  fsb_array->byte_width());
+    }
 }
 
 void
@@ -2271,14 +2273,16 @@ ValidateBinaryVectorWidth(const std::shared_ptr<arrow::Array>& array,
             continue;
         }
         auto actual_width = binary_array->value_length(i);
-        AssertInfo(actual_width == byte_width,
-                   "vector byte width mismatch{}, expected {} bytes for "
-                   "dim {}, actual {} bytes at row {}",
-                   FieldErrorSuffix(field_meta),
-                   byte_width,
-                   dim,
-                   actual_width,
-                   i);
+        if (!(actual_width == byte_width)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "vector byte width mismatch{}, expected {} bytes for "
+                      "dim {}, actual {} bytes at row {}",
+                      FieldErrorSuffix(field_meta),
+                      byte_width,
+                      dim,
+                      actual_width,
+                      i);
+        }
     }
 }
 
@@ -2291,10 +2295,12 @@ ValidateNoNullValuesInRange(const std::shared_ptr<arrow::Array>& values,
         return;
     }
     for (int64_t i = begin; i < end; ++i) {
-        AssertInfo(values->IsValid(i),
-                   "{} contains null element at child offset {}",
-                   context,
-                   i);
+        if (!(values->IsValid(i))) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "{} contains null element at child offset {}",
+                      context,
+                      i);
+        }
     }
 }
 
@@ -2396,12 +2402,12 @@ ValidateVectorListElementType(
         CanTreatVectorListAsRawBytes(data_type, actual_type)) {
         return;
     }
-    AssertInfo(false,
-               "vector element type mismatch{}, expected {} or raw uint8 "
-               "bytes, actual {}",
-               FieldErrorSuffix(field_meta),
-               ArrowTypeName(expected_type),
-               actual_type->ToString());
+    ThrowInfo(ErrorCode::DataFormatBroken,
+              "vector element type mismatch{}, expected {} or raw uint8 "
+              "bytes, actual {}",
+              FieldErrorSuffix(field_meta),
+              ArrowTypeName(expected_type),
+              actual_type->ToString());
 }
 
 arrow::ArrayVector
@@ -2461,13 +2467,15 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                     auto offset = list_array->value_offset(i);
                     auto actual_length =
                         list_array->value_offset(i + 1) - offset;
-                    AssertInfo(actual_length == expected_list_length,
-                               "vector list length mismatch{}, expected {}, "
-                               "actual {} at row {}",
-                               FieldErrorSuffix(field_meta),
-                               expected_list_length,
-                               actual_length,
-                               i);
+                    if (!(actual_length == expected_list_length)) {
+                        ThrowInfo(ErrorCode::DataFormatBroken,
+                                  "vector list length mismatch{}, expected {}, "
+                                  "actual {} at row {}",
+                                  FieldErrorSuffix(field_meta),
+                                  expected_list_length,
+                                  actual_length,
+                                  i);
+                    }
                     ValidateNoNullValuesInRange(
                         values, offset, offset + actual_length, "vector list");
                     milvus::fastmem::FastMemcpy(dst + i * byte_width,
@@ -2493,11 +2501,14 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                        FieldErrorSuffix(field_meta),
                        elem_bit_width);
             int elem_byte_size = elem_bit_width / 8;
-            AssertInfo(fsl_array->value_length() == expected_list_length,
-                       "vector list length mismatch{}, expected {}, actual {}",
-                       FieldErrorSuffix(field_meta),
-                       expected_list_length,
-                       fsl_array->value_length());
+            if (!(fsl_array->value_length() == expected_list_length)) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "vector list length mismatch{}, expected {}, actual {}",
+                    FieldErrorSuffix(field_meta),
+                    expected_list_length,
+                    fsl_array->value_length());
+            }
             auto raw = reinterpret_cast<const uint8_t*>(
                 values->data()->buffers[1]->data());
             for (int64_t i = 0; i < num_rows; i++) {
@@ -3473,11 +3484,13 @@ ValidateScalarArrowType(DataType data_type,
     if (expected_type == nullptr) {
         return;
     }
-    AssertInfo(array->type()->Equals(*expected_type),
-               "field type mismatch{}, expected Arrow {}, actual Arrow {}",
-               FieldErrorSuffix(field_meta),
-               expected_type->ToString(),
-               array->type()->ToString());
+    if (!(array->type()->Equals(*expected_type))) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "field type mismatch{}, expected Arrow {}, actual Arrow {}",
+                  FieldErrorSuffix(field_meta),
+                  expected_type->ToString(),
+                  array->type()->ToString());
+    }
 }
 
 void

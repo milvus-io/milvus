@@ -173,11 +173,13 @@ void
 ValidateMarisaEntryElementSize(const char* entry_name,
                                size_t bytes,
                                size_t element_size) {
-    AssertInfo(bytes % element_size == 0,
-               "invalid {} size: expected multiple of {}, got {}",
-               entry_name,
-               element_size,
-               bytes);
+    if (!(bytes % element_size == 0)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "invalid {} size: expected multiple of {}, got {}",
+                  entry_name,
+                  element_size,
+                  bytes);
+    }
 }
 
 void
@@ -291,7 +293,9 @@ StringIndexMarisa::Serialize(const Config& config) {
 
     auto fd = open(
         file.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
-    AssertInfo(fd != -1, "open file failed");
+    if (!(fd != -1)) {
+        ThrowInfo(ErrorCode::FileOpenFailed, "open file failed");
+    }
     try {
         trie_.write(fd);
     } catch (const marisa::Exception& e) {
@@ -910,7 +914,9 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
     auto fd = open(file.c_str(),
                    O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC,
                    S_IRUSR | S_IWUSR | S_IXUSR);
-    AssertInfo(fd != -1, "open file failed: {}", file);
+    if (!(fd != -1)) {
+        ThrowInfo(ErrorCode::FileOpenFailed, "open file failed: {}", file);
+    }
     auto close_fd = folly::makeGuard([fd]() { close(fd); });
 
     // Immediately unlink the file so it will be deleted when fd is closed,
@@ -1030,10 +1036,13 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                                        fw.Write(d, len);
                                        written += len;
                                    });
-            AssertInfo(written == str_ids_bytes,
-                       "str_ids stream read size mismatch: got {}, expected {}",
-                       written,
-                       str_ids_bytes);
+            if (!(written == str_ids_bytes)) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "str_ids stream read size mismatch: got {}, expected {}",
+                    written,
+                    str_ids_bytes);
+            }
             fw.Finish();
         }
         auto str_ids_file_raii = std::make_unique<MmapFileRAII>(str_ids_path);
@@ -1095,16 +1104,21 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                    has_csr_version);
         auto csr_format_version =
             reader.GetMeta<uint32_t>(MARISA_CSR_FORMAT_VERSION_META);
-        AssertInfo(csr_format_version == MARISA_CSR_FORMAT_VERSION,
-                   "unsupported marisa CSR format version: expected {}, got {}",
-                   MARISA_CSR_FORMAT_VERSION,
-                   csr_format_version);
+        if (!(csr_format_version == MARISA_CSR_FORMAT_VERSION)) {
+            ThrowInfo(
+                ErrorCode::DataFormatBroken,
+                "unsupported marisa CSR format version: expected {}, got {}",
+                MARISA_CSR_FORMAT_VERSION,
+                csr_format_version);
+        }
 
         csr_num_keys_ = reader.GetMeta<size_t>("csr_num_keys");
-        AssertInfo(csr_num_keys_ == trie_.num_keys(),
-                   "invalid marisa CSR key count: expected {}, got {}",
-                   trie_.num_keys(),
-                   csr_num_keys_);
+        if (!(csr_num_keys_ == trie_.num_keys())) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "invalid marisa CSR key count: expected {}, got {}",
+                      trie_.num_keys(),
+                      csr_num_keys_);
+        }
         AssertInfo(
             csr_num_keys_ <=
                 std::numeric_limits<size_t>::max() / sizeof(uint32_t) - 1,
@@ -1125,10 +1139,12 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
             MARISA_CSR_INDEX, idx_bytes, sizeof(uint32_t));
         ValidateMarisaEntryElementSize(
             MARISA_CSR_OFFSETS, off_bytes, sizeof(uint32_t));
-        AssertInfo(idx_bytes == (csr_num_keys_ + 1) * sizeof(uint32_t),
-                   "invalid marisa CSR index size: expected {}, got {}",
-                   (csr_num_keys_ + 1) * sizeof(uint32_t),
-                   idx_bytes);
+        if (!(idx_bytes == (csr_num_keys_ + 1) * sizeof(uint32_t))) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "invalid marisa CSR index size: expected {}, got {}",
+                      (csr_num_keys_ + 1) * sizeof(uint32_t),
+                      idx_bytes);
+        }
         auto csr_offsets_count = off_bytes / sizeof(uint32_t);
 
         if (config.contains(MMAP_FILE_PATH)) {
@@ -1150,10 +1166,13 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                                            fw.Write(d, len);
                                            written += len;
                                        });
-                AssertInfo(written == idx_bytes + off_bytes,
-                           "CSR stream read size mismatch: got {}, expected {}",
-                           written,
-                           idx_bytes + off_bytes);
+                if (!(written == idx_bytes + off_bytes)) {
+                    ThrowInfo(
+                        ErrorCode::DataFormatBroken,
+                        "CSR stream read size mismatch: got {}, expected {}",
+                        written,
+                        idx_bytes + off_bytes);
+                }
                 fw.Finish();
             }
 
@@ -1191,11 +1210,14 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                         len);
                     wo += len;
                 });
-            AssertInfo(wo == idx_bytes,
-                       "CSR index stream read size mismatch: got {}, expected "
-                       "{}",
-                       wo,
-                       idx_bytes);
+            if (!(wo == idx_bytes)) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "CSR index stream read size mismatch: got {}, expected "
+                    "{}",
+                    wo,
+                    idx_bytes);
+            }
 
             csr_offsets_.resize(off_bytes / sizeof(uint32_t));
             wo = 0;
@@ -1207,11 +1229,13 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                         len);
                     wo += len;
                 });
-            AssertInfo(wo == off_bytes,
-                       "CSR offsets stream read size mismatch: got {}, "
-                       "expected {}",
-                       wo,
-                       off_bytes);
+            if (!(wo == off_bytes)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "CSR offsets stream read size mismatch: got {}, "
+                          "expected {}",
+                          wo,
+                          off_bytes);
+            }
 
             csr_index_ptr_ = csr_index_.data();
             csr_offsets_ptr_ = csr_offsets_.data();

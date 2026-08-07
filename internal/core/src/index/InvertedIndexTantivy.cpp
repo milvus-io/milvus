@@ -178,9 +178,11 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
         } else {
             auto file_path_str = iter->path().string();
             LOG_INFO("trying to add index file: {}", file_path_str);
-            AssertInfo(disk_file_manager_->AddFile(file_path_str),
-                       "failed to add index file: {}",
-                       file_path_str);
+            if (!(disk_file_manager_->AddFile(file_path_str))) {
+                ThrowInfo(ErrorCode::FileWriteFailed,
+                          "failed to add index file: {}",
+                          file_path_str);
+            }
             LOG_INFO("index file: {} added", file_path_str);
         }
     }
