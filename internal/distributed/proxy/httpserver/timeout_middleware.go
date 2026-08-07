@@ -265,7 +265,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 		buffer := bufPool.Get()
 		buffer.Reset()
 		recorder := newTimeoutResponseRecorder(buffer)
-		// gin.Context.Copy did not retain the matched route path before Gin 1.11.
+		// gin.Context.Copy did not retain the matched route path before Gin 1.10.
 		// Preserve the registered route pattern for metrics and audit hooks running
 		// on the copied context; Request.URL.Path is unsuitable for dynamic routes.
 		routePath := matchedRoutePath(gCtx)
