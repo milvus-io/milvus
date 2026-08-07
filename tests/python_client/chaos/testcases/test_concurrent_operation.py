@@ -156,7 +156,14 @@ class TestOperations(TestBase):
                 for k, v in self.health_checkers.items():
                     v.check_result()
                     # log.info(v.check_result())
-            pods_ready = wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
+            # The pod-failure experiment can still have most of its seven-minute
+            # window remaining when the request loop ends. Keep the recovery
+            # wait bounded, but allow the fault to expire and Milvus to restart.
+            pods_ready = wait_pods_ready(
+                self.milvus_ns,
+                f"app.kubernetes.io/instance={self.release_name}",
+                timeout=600,
+            )
             assert pods_ready, f"Milvus pods for {self.release_name} did not become ready"
             time.sleep(60)
             ra = ResultAnalyzer()
