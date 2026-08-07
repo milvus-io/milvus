@@ -22,10 +22,6 @@ import (
 
 var snapshotPrefix = "snapshot"
 
-func qualifySnapshotMetadataURI(objectKey string) string {
-	return fmt.Sprintf("s3://%s/%s", getMinIOConfig().bucket, objectKey)
-}
-
 // flushWithRetry retries Flush if it hits the collection-level rate limiter (default: 0.1 rps),
 // and awaits flush completion before returning.
 func flushWithRetry(ctx context.Context, mc *base.MilvusClient, collName string) error {
@@ -390,7 +386,7 @@ func TestSnapshotRestoreExternalReferenced(t *testing.T) {
 	jobID, err := mc.RestoreExternalSnapshot(ctx,
 		client.NewRestoreExternalSnapshotOption(
 			restoredCollName,
-			qualifySnapshotMetadataURI(snapshotInfo.GetS3Location()),
+			snapshotInfo.GetS3Location(),
 		))
 	common.CheckErr(t, err, true)
 
@@ -478,7 +474,7 @@ func TestSnapshotRestoreExternalSelfContained(t *testing.T) {
 	jobID, err := mc.RestoreExternalSnapshot(ctx,
 		client.NewRestoreExternalSnapshotOption(
 			restoredCollName,
-			qualifySnapshotMetadataURI(metadataURI),
+			metadataURI,
 		))
 	common.CheckErr(t, err, true)
 

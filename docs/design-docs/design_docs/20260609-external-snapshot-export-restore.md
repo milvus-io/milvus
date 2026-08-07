@@ -146,6 +146,11 @@ failure reason, total bundle bytes, and the completed bundle metadata URI.
 objects plus generated segment manifests and metadata. The metadata URI is
 empty unless the state is `Completed`.
 
+DataCoord also persists an internal `Publishing` state after all data objects
+are copied and before manifests and metadata are written. The public API maps
+this state to `Executing` with progress `99`; it does not add another public
+enum value or expose the metadata URI before `Completed`.
+
 For remote object storage, `DescribeSnapshot.s3_location` and the completed
 export metadata location are credential-free, complete URIs. Standard
 S3-compatible providers use
@@ -469,10 +474,10 @@ DataCoord:
 - Owns snapshot metadata parsing, validation, export layout generation, restore
   job creation, and WAL restore message emission.
 - Owns a durable `SnapshotExportManager`. Submission persists one constant-size
-  job record before returning. Reconciliation schedules `Pending` and recovered
-  `Executing` jobs, enforces the configured deadline and concurrency limit,
-  retries pin cleanup, and removes credential-free terminal jobs after
-  retention.
+  job record before returning. Reconciliation schedules `Pending`, recovered
+  `Executing`, and recovered internal `Publishing` jobs, enforces the configured
+  deadline and concurrency limit, retries pin cleanup, and removes
+  credential-free terminal jobs after retention.
 - Builds a deterministic ordered copy plan and persists its version,
   fingerprint, total file count, and copy cursor. A recovered job resumes only
   when the rebuilt plan matches; otherwise it fails closed.
@@ -489,9 +494,18 @@ DataCoord:
   copy tasks.
 - For export, resolves the target in the background, prevents same-bucket
   source-object overwrite, and copies data before manifests and metadata.
-  Metadata is the publication marker and is written last. `external_spec` is
-  retained only while a job is non-terminal, and the first terminal update
-  clears it atomically.
+  After all copy checkpoints are durable, DataCoord persists `Publishing`, the
+  deterministic metadata URI, and progress `99`. Metadata is the publication
+  marker and is written last. Publication can be replayed idempotently after a
+  restart or catalog persistence failure. A separate durable update records
+  `Completed`, total bundle bytes, and end time. `external_spec` is retained
+  only while a job is non-terminal, and the first terminal update clears it
+  atomically.
+- Publication replay does not persist a second metadata checksum. It relies on
+  the durable plan fingerprint, deterministic destination paths, and the source
+  snapshot pin. If a prolonged catalog outage outlives that pin and the source
+  snapshot is then dropped, replay can no longer rebuild the publication plan
+  and the job fails.
 - Computes a deterministic fingerprint of external snapshot metadata and loaded
   segment manifests after preflight. The fingerprint is carried through WAL and
   copy-job state so ACK and task assembly reject metadata that changed between
@@ -531,7 +545,8 @@ Data flow:
 ```text
 ExportSnapshot:
 Proxy -> DataCoord durable Pending job -> background plan/checkpoint loop ->
-provider-side copies -> manifests -> metadata publication -> Completed job
+provider-side copies -> durable Publishing state -> manifests -> metadata
+publication -> Completed job
 
 GetExportSnapshotState:
 Proxy -> DataCoord in-memory cache backed by persisted export job metadata
@@ -568,6 +583,12 @@ Access probing:
   and KMS permissions.
 - A permission failure after acceptance transitions the export job to `Failed`
   before metadata is written.
+- The configured export deadline applies to queueing, planning, and data-copy
+  work. Once `Publishing` is durable, the job is not downgraded to `Failed`
+  solely because that original deadline elapsed. If metadata publication
+  succeeds but the `Completed` catalog update fails, reconciliation rebuilds
+  the persisted plan and republishes the same deterministic objects before
+  retrying completion.
 - A failed attempt may leave unreferenced data or manifest objects. Export does
   not delete them because object paths may already be shared by an older
   published bundle; deleting them could corrupt that bundle. A later retry can
@@ -651,6 +672,9 @@ Export tests:
   non-decreasing after restart, and fails closed if the rebuilt plan changes.
 - Queue timeout, active-worker timeout, shutdown, finalization replay, terminal
   credential clearing, pin cleanup retry, and retention are covered.
+- Internal `Publishing` remains schedulable after the original deadline, maps
+  to public `Executing` at `99`, and survives a failed `Completed` catalog write
+  without exposing the metadata URI early.
 - Export to the same bucket succeeds when destination objects do not overlap the
   source snapshot and fails before copy when metadata, manifest, or data objects
   would overlap.

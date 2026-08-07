@@ -547,6 +547,42 @@ func TestProxy_GetExportSnapshotState(t *testing.T) {
 	assert.Error(t, merr.Error(invalid.GetStatus()))
 }
 
+func TestExportSnapshotJobInfoToPublic(t *testing.T) {
+	assert.Nil(t, exportSnapshotJobInfoToPublic(nil))
+	assert.Equal(t,
+		milvuspb.ExportSnapshotState_ExportSnapshotNone,
+		exportSnapshotJobStateToPublic(datapb.ExportSnapshotJobState(100)),
+	)
+
+	info := exportSnapshotJobInfoToPublic(&datapb.ExportSnapshotJobInfo{
+		JobId:               9001,
+		State:               datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing,
+		Progress:            99,
+		SnapshotMetadataUri: "s3://bucket/export-root/snapshots/100/metadata/1.json",
+	})
+	require.NotNil(t, info)
+	assert.Equal(t, milvuspb.ExportSnapshotState_ExportSnapshotExecuting, info.GetState())
+	assert.Equal(t, int32(99), info.GetProgress())
+	assert.Empty(t, info.GetSnapshotMetadataUri())
+
+	assert.Equal(t,
+		milvuspb.ExportSnapshotState_ExportSnapshotPending,
+		exportSnapshotJobStateToPublic(datapb.ExportSnapshotJobState_ExportSnapshotJobPending),
+	)
+	assert.Equal(t,
+		milvuspb.ExportSnapshotState_ExportSnapshotExecuting,
+		exportSnapshotJobStateToPublic(datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting),
+	)
+	assert.Equal(t,
+		milvuspb.ExportSnapshotState_ExportSnapshotCompleted,
+		exportSnapshotJobStateToPublic(datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted),
+	)
+	assert.Equal(t,
+		milvuspb.ExportSnapshotState_ExportSnapshotFailed,
+		exportSnapshotJobStateToPublic(datapb.ExportSnapshotJobState_ExportSnapshotJobFailed),
+	)
+}
+
 func TestRestoreExternalSnapshotTask_Execute_ForwardsForeignStorageFields(t *testing.T) {
 	const (
 		externalSpec = `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`
