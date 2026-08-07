@@ -95,6 +95,38 @@ struct LikePatternMatcher : public RegexMatcher {
         : RegexMatcher(translate_pattern_match_to_regex(pattern)) {
     }
 };
+
+std::unique_ptr<index::NgramInvertedIndex>
+CreateNgramIndexForExecuteQuery(uintptr_t min_gram = 2,
+                                uintptr_t max_gram = 4) {
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t index_build_id = 4000;
+    int64_t index_version = 4000;
+
+    auto schema = std::make_shared<Schema>();
+    auto field_id = schema->AddDebugField("ngram", DataType::VARCHAR);
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      field_id.get(),
+                                                      DataType::VARCHAR,
+                                                      DataType::NONE,
+                                                      false);
+    auto index_meta = gen_index_meta(
+        segment_id, field_id.get(), index_build_id, index_version);
+
+    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto cm = CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+
+    auto ngram_params = index::NgramParams{
+        .loading_index = true, .min_gram = min_gram, .max_gram = max_gram};
+    return std::make_unique<index::NgramInvertedIndex>(ctx, ngram_params);
+}
 }  // namespace
 
 void
@@ -1514,6 +1546,24 @@ TEST(NgramPatternMatchConsistency, UTF8Patterns) {
 
         // Test with ngram index
         test_ngram_with_data(test_data, pattern, op_type, expected_results);
+    }
+}
+
+TEST(NgramPatternMatchConsistency, ExecuteQueryUsesUtf8CharacterCount) {
+    auto ngram_index = CreateNgramIndexForExecuteQuery(2, 4);
+
+    std::vector<std::pair<std::string, proto::plan::OpType>> short_literals = {
+        {"测", proto::plan::OpType::InnerMatch},
+        {"测", proto::plan::OpType::PrefixMatch},
+        {"测", proto::plan::OpType::PostfixMatch},
+        {"%测%", proto::plan::OpType::Match},
+    };
+
+    for (const auto& [literal, op_type] : short_literals) {
+        EXPECT_FALSE(ngram_index->ExecuteQuery(literal, op_type, nullptr)
+                         .has_value())
+            << "literal=\"" << literal
+            << "\", op_type=" << static_cast<int>(op_type);
     }
 }
 
