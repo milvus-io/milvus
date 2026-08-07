@@ -306,9 +306,10 @@ func TestSegmentLoadTask_RequiresWatchSnapshotForLoad(t *testing.T) {
 }
 
 func TestSegmentLoadTask_UsesTaskTransformStartTick(t *testing.T) {
+	physical := &fakeTransformSegment{id: 1000, partitionID: 10, startAfter: 10}
 	loader := &fakePhysicalLoader{
 		loadFn: func(info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error) {
-			return &fakeTransformSegment{id: info.GetSegmentID(), partitionID: info.GetPartitionID(), startAfter: 10}, nil
+			return physical, nil
 		},
 	}
 	loadedCh := make(chan TransformSegment, 1)
@@ -330,6 +331,9 @@ func TestSegmentLoadTask_UsesTaskTransformStartTick(t *testing.T) {
 		t.Fatal("timed out waiting for loaded segment")
 	}
 	assert.Equal(t, uint64(99), loaded.TransformStartAfterTimeTick())
+	unwrapper, ok := loaded.(WrappedTransformSegment)
+	require.True(t, ok)
+	assert.Same(t, physical, unwrapper.UnwrapTransformSegment())
 }
 
 func TestSegmentLoadTask_PreservesReadableSegment(t *testing.T) {

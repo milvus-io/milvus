@@ -102,17 +102,18 @@ type Server struct {
 	quitCh           chan struct{}
 	stateCode        atomic.Value
 
-	etcdCli            *clientv3.Client
-	tikvCli            *txnkv.Client
-	address            string
-	watchClient        kv.WatchKV
-	kv                 kv.MetaKv
-	metaRootPath       string
-	meta               *meta
-	dataViewManager    DataViewManager
-	dataViewReferences *dataViewReferenceManager
-	segmentManager     Manager
-	allocator          allocator.Allocator
+	etcdCli                   *clientv3.Client
+	tikvCli                   *txnkv.Client
+	address                   string
+	watchClient               kv.WatchKV
+	kv                        kv.MetaKv
+	metaRootPath              string
+	meta                      *meta
+	dataViewManager           DataViewManager
+	dataViewReferences        *dataViewReferenceManager
+	queryViewLoadInfoNotifier QueryViewLoadInfoNotifier
+	segmentManager            Manager
+	allocator                 allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
 	idAllocator      *globalIDAllocator.GlobalIDAllocator
 	nodeManager      session.NodeManager
@@ -210,15 +211,16 @@ func WithSegmentManager(manager Manager) Option {
 func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
-		ctx:                 ctx,
-		quitCh:              make(chan struct{}),
-		factory:             factory,
-		flushCh:             make(chan UniqueID, 1024),
-		notifyIndexChan:     make(chan UniqueID, 1024),
-		dataNodeCreator:     defaultDataNodeCreatorFunc,
-		importJobLock:       lock.NewKeyLock[int64](),
-		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
-		metricsRequest:      metricsinfo.NewMetricsRequest(),
+		ctx:                       ctx,
+		quitCh:                    make(chan struct{}),
+		factory:                   factory,
+		flushCh:                   make(chan UniqueID, 1024),
+		notifyIndexChan:           make(chan UniqueID, 1024),
+		queryViewLoadInfoNotifier: noopQueryViewLoadInfoNotifier{},
+		dataNodeCreator:           defaultDataNodeCreatorFunc,
+		importJobLock:             lock.NewKeyLock[int64](),
+		metricsCacheManager:       metricsinfo.NewMetricsCacheManager(),
+		metricsRequest:            metricsinfo.NewMetricsRequest(),
 	}
 
 	for _, opt := range opts {
@@ -656,6 +658,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		if err != nil {
 			return err
 		}
+		s.meta.queryViewLoadInfoNotifier = s.queryViewLoadInfoNotifier
 		dataViewStore.meta = s.meta
 		if dataViewRecovery.err != nil {
 			return dataViewRecovery.err

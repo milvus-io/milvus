@@ -554,6 +554,11 @@ Examples:
 These changes may affect QueryNode load/reopen behavior through other metadata
 paths, but DataView does not advance DataVersion for them.
 
+After a segment index result is durably committed, DataCoord refreshes the
+already-loaded QueryNode segment through the segment-load-info watch path. This
+wakeup is independent from DataView: it reloads the index held by an existing
+QueryView and does not create a replacement QueryView.
+
 ### 6.8 L0 Delete Segments
 
 L0 segments are delete-log carriers, not loadable sealed segments.

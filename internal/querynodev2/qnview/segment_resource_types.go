@@ -74,6 +74,25 @@ type TransformSegment interface {
 	Release(ctx context.Context) error
 }
 
+// WrappedTransformSegment decorates a TransformSegment without changing its
+// physical identity.
+type WrappedTransformSegment interface {
+	TransformSegment
+	UnwrapTransformSegment() TransformSegment
+}
+
+// UnwrapTransformSegment returns the physical segment beneath all transparent
+// TransformSegment decorators.
+func UnwrapTransformSegment(segment TransformSegment) TransformSegment {
+	for {
+		wrapped, ok := segment.(WrappedTransformSegment)
+		if !ok {
+			return segment
+		}
+		segment = wrapped.UnwrapTransformSegment()
+	}
+}
+
 // PhysicalSegmentManager owns metadata fetch, load planning, physical load, and
 // physical ref-counted release.
 type PhysicalSegmentManager interface {

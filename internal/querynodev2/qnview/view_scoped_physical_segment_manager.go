@@ -364,7 +364,10 @@ func (m *ViewScopedPhysicalSegmentManager) recordSegmentUpdate(ctx context.Conte
 }
 
 func (m *ViewScopedPhysicalSegmentManager) recordSegmentUpdateLocked(ctx context.Context, snapshot SegmentLoadInfoSnapshot, state *physicalSegmentState) (segmentUpdateSubmission, bool) {
-	if state == nil || state.segment == nil || len(state.refs) == 0 || snapshot.Revision.Empty() || state.revision == snapshot.Revision {
+	if state == nil || state.segment == nil || len(state.refs) == 0 || snapshot.Revision.Empty() {
+		return segmentUpdateSubmission{}, false
+	}
+	if !state.updating && state.revision == snapshot.Revision {
 		return segmentUpdateSubmission{}, false
 	}
 	snapshotCopy := snapshot
