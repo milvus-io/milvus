@@ -22,6 +22,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,11 @@ const (
 	textLOBIndexedMarkerID   = int64(7)
 	textLOBUnindexedMarkerID = int64(textLOBIndexedSealedRows + textLOBUnindexedSealedRows/2)
 	textLOBGrowingMarkerID   = int64(textLOBIndexedSealedRows + textLOBUnindexedSealedRows + textLOBGrowingRows/2)
+)
+
+const (
+	textLOBMinRowsConfig        = "indexCoord.segment.minSegmentNumRowsToEnableIndex"
+	textLOBMinRowsToEnableIndex = 1024
 )
 
 type textLOBRow struct {
@@ -482,11 +488,25 @@ func requireTextLOBResultRows(
 func TestTextLOBPublicSDKL0(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	require.Less(t, textLOBUnindexedSealedRows, textLOBMinRowsToEnableIndex)
+	require.GreaterOrEqual(t, textLOBIndexedSealedRows, textLOBMinRowsToEnableIndex)
+
 	previousStorageV3, err := hp.AlterServerConfig("common.storage.useLoonFFI", "true")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = hp.AlterServerConfig("common.storage.useLoonFFI", previousStorageV3)
 	})
+
+	minRowsValue := strconv.Itoa(textLOBMinRowsToEnableIndex)
+	previousMinRows, err := hp.AlterServerConfig(textLOBMinRowsConfig, minRowsValue)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = hp.AlterServerConfig(textLOBMinRowsConfig, previousMinRows)
+	})
+	configuredMinRows, err := hp.GetServerConfig(textLOBMinRowsConfig)
+	require.NoError(t, err)
+	require.Equal(t, minRowsValue, configuredMinRows)
+
 	fixture := prepareTextLOBFixture(t, ctx, mc)
 
 	t.Run("schema_and_payloads", func(t *testing.T) {
