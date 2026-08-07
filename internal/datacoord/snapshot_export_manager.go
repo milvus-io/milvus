@@ -249,9 +249,14 @@ func (m *snapshotExportManager) reconcile() {
 			m.cleanupTerminalJob(job, now)
 			continue
 		}
-		if job.GetDeadlineTime() != 0 && now >= job.GetDeadlineTime() {
-			m.cancelRunningJob(job.GetJobId())
-			m.tryFailJob(job.GetJobId(), "snapshot export job timed out")
+		if job.GetState() != datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing &&
+			job.GetDeadlineTime() != 0 && now >= job.GetDeadlineTime() {
+			// Persist the timeout transition before canceling the worker. If the
+			// worker has already entered Publishing, tryFailJob observes that state
+			// under the job lock and leaves publication running.
+			if m.tryFailJob(job.GetJobId(), "snapshot export job timed out") {
+				m.cancelRunningJob(job.GetJobId())
+			}
 		}
 	}
 
@@ -260,7 +265,8 @@ func (m *snapshotExportManager) reconcile() {
 		if isSnapshotExportTerminal(job.GetState()) {
 			continue
 		}
-		if job.GetDeadlineTime() != 0 && now >= job.GetDeadlineTime() {
+		if job.GetState() != datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing &&
+			job.GetDeadlineTime() != 0 && now >= job.GetDeadlineTime() {
 			continue
 		}
 		if !m.tryStartJob(job.GetJobId(), maxConcurrent) {
@@ -299,18 +305,33 @@ func (m *snapshotExportManager) runJob(ctx context.Context, jobID int64) {
 		attribute.Int64("jobID", jobID),
 	))
 	defer span.End()
-	ctx, cancel := m.withJobDeadline(ctx, jobID)
+	transitionCtx := ctx
+	cancel := func() {}
+	current, ok := m.meta.GetJob(jobID)
+	if ok && current.GetState() != datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing {
+		transitionCtx, cancel = m.withJobDeadline(ctx, jobID)
+	}
 	defer cancel()
 
-	job, _, err := m.meta.UpdateJob(ctx, jobID, func(job *datapb.ExportSnapshotJob) (bool, error) {
+	job, _, err := m.meta.UpdateJob(transitionCtx, jobID, func(job *datapb.ExportSnapshotJob) (bool, error) {
 		if isSnapshotExportTerminal(job.GetState()) {
 			return true, nil
 		}
-		if err := snapshotExportAdvanceError(ctx, job); err != nil {
+		if job.GetState() == datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing {
+			return true, nil
+		}
+		if err := snapshotExportAdvanceError(transitionCtx, job); err != nil {
 			return false, err
 		}
 		if job.GetState() == datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting {
 			return true, nil
+		}
+		if job.GetState() != datapb.ExportSnapshotJobState_ExportSnapshotJobPending {
+			return false, merr.WrapErrServiceInternalMsg(
+				"snapshot export job %d has invalid active state %s",
+				jobID,
+				job.GetState().String(),
+			)
 		}
 		job.State = datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting
 		return false, nil
@@ -349,7 +370,10 @@ func (m *snapshotExportManager) snapshotExportFailureReason(
 	err error,
 	externalSpec string,
 ) string {
-	if job != nil && job.GetDeadlineTime() != 0 && uint64(time.Now().UnixMilli()) >= job.GetDeadlineTime() {
+	if job != nil &&
+		job.GetState() != datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing &&
+		job.GetDeadlineTime() != 0 &&
+		uint64(time.Now().UnixMilli()) >= job.GetDeadlineTime() {
 		return "snapshot export job timed out"
 	}
 	return sanitizeSnapshotExportReason(err, externalSpec)
@@ -368,12 +392,26 @@ func (m *snapshotExportManager) executeJob(ctx context.Context, jobID int64) err
 	if !ok {
 		return merr.WrapErrServiceInternalMsg("snapshot export job %d not found", jobID)
 	}
-	if err := ensureSnapshotExportCanAdvance(ctx, job); err != nil {
-		return err
+	operationCtx := ctx
+	cancel := func() {}
+	switch job.GetState() {
+	case datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting:
+		operationCtx, cancel = m.withJobDeadline(ctx, jobID)
+		if err := ensureSnapshotExportCanAdvance(operationCtx, job); err != nil {
+			cancel()
+			return err
+		}
+	case datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing:
+		if err := ensureSnapshotExportCanPublish(ctx, job); err != nil {
+			return err
+		}
+	default:
+		return errSnapshotExportJobStopped
 	}
+	defer cancel()
 	instanceCfg := snapshotstorage.InstanceConfigFromParamtable(Params)
 	resolved, err := snapshotstorage.ResolveForeignStorage(
-		ctx,
+		operationCtx,
 		instanceCfg,
 		snapshotstorage.DirectionExport,
 		job.GetTargetS3Path(),
@@ -382,7 +420,7 @@ func (m *snapshotExportManager) executeJob(ctx context.Context, jobID int64) err
 	if err != nil {
 		return err
 	}
-	releaseTarget, err := m.lockTarget(ctx, snapshotExportTarget{
+	releaseTarget, err := m.lockTarget(operationCtx, snapshotExportTarget{
 		bucket: strings.TrimSpace(resolved.ForeignBucket),
 		root: strings.Trim(
 			snapshotstorage.NormalizeSnapshotObjectPath(job.GetTargetS3Path()),
@@ -394,12 +432,12 @@ func (m *snapshotExportManager) executeJob(ctx context.Context, jobID int64) err
 	}
 	defer releaseTarget()
 
-	snapshot, err := m.snapshotManager.ReadSnapshotData(ctx, job.GetCollectionId(), job.GetSnapshotName())
+	snapshot, err := m.snapshotManager.ReadSnapshotData(operationCtx, job.GetCollectionId(), job.GetSnapshotName())
 	if err != nil {
 		return err
 	}
 	plan, err := buildSnapshotExportPlan(
-		ctx,
+		operationCtx,
 		m.snapshotManager.snapshotMeta.chunkManager,
 		resolved.ForeignCM,
 		instanceCfg.BucketName,
@@ -412,97 +450,104 @@ func (m *snapshotExportManager) executeJob(ctx context.Context, jobID int64) err
 		return err
 	}
 
-	job, err = m.persistOrValidatePlan(ctx, jobID, plan)
+	job, err = m.persistOrValidatePlan(operationCtx, jobID, plan)
 	if err != nil {
 		return err
 	}
-	copyConcurrency := Params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt()
-	for cursor := job.GetCopyCursor(); cursor < int64(len(plan.items)); {
-		end := cursor + snapshotExportCheckpointBatchSize
-		if end > int64(len(plan.items)) {
-			end = int64(len(plan.items))
+	if job.GetState() == datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting {
+		copyConcurrency := Params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt()
+		for cursor := job.GetCopyCursor(); cursor < int64(len(plan.items)); {
+			end := cursor + snapshotExportCheckpointBatchSize
+			if end > int64(len(plan.items)) {
+				end = int64(len(plan.items))
+			}
+			if err := copySnapshotExportPlan(
+				operationCtx,
+				resolved.Copier,
+				instanceCfg.BucketName,
+				resolved.ForeignBucket,
+				plan.items[cursor:end],
+				copyConcurrency,
+			); err != nil {
+				return err
+			}
+			updated, _, err := m.meta.UpdateJob(operationCtx, jobID, func(latest *datapb.ExportSnapshotJob) (bool, error) {
+				if err := ensureSnapshotExportCanAdvance(operationCtx, latest); err != nil {
+					return false, err
+				}
+				if latest.GetCopyCursor() != cursor {
+					return false, merr.WrapErrDataIntegrityMsg(
+						"snapshot export job %d copy cursor changed from %d to %d",
+						jobID,
+						cursor,
+						latest.GetCopyCursor(),
+					)
+				}
+				latest.CopyCursor = end
+				latest.CopiedFiles = end
+				latest.Progress = snapshotExportCopyProgress(end, int64(len(plan.items)))
+				return false, nil
+			})
+			if err != nil {
+				return err
+			}
+			cursor = updated.GetCopyCursor()
+			mlog.Info(operationCtx, "snapshot export checkpoint persisted",
+				mlog.FieldJobID(jobID),
+				mlog.Int64("copiedFiles", cursor),
+				mlog.Int64("totalFiles", int64(len(plan.items))))
 		}
-		if err := copySnapshotExportPlan(
-			ctx,
-			resolved.Copier,
-			instanceCfg.BucketName,
-			resolved.ForeignBucket,
-			plan.items[cursor:end],
-			copyConcurrency,
-		); err != nil {
-			return err
-		}
-		updated, _, err := m.meta.UpdateJob(ctx, jobID, func(latest *datapb.ExportSnapshotJob) (bool, error) {
-			if err := ensureSnapshotExportCanAdvance(ctx, latest); err != nil {
+
+		job, _, err = m.meta.UpdateJob(operationCtx, jobID, func(latest *datapb.ExportSnapshotJob) (bool, error) {
+			if err := ensureSnapshotExportCanAdvance(operationCtx, latest); err != nil {
 				return false, err
 			}
-			if latest.GetCopyCursor() != cursor {
+			if latest.GetCopyCursor() != int64(len(plan.items)) ||
+				latest.GetCopiedFiles() != int64(len(plan.items)) {
 				return false, merr.WrapErrDataIntegrityMsg(
-					"snapshot export job %d copy cursor changed from %d to %d",
+					"snapshot export job %d cannot publish an incomplete copy plan",
 					jobID,
-					cursor,
-					latest.GetCopyCursor(),
 				)
 			}
-			latest.CopyCursor = end
-			latest.CopiedFiles = end
-			latest.Progress = snapshotExportCopyProgress(end, int64(len(plan.items)))
+			latest.State = datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing
+			latest.Progress = 99
+			latest.SnapshotMetadataUri = plan.metadataURI
 			return false, nil
 		})
 		if err != nil {
 			return err
 		}
-		cursor = updated.GetCopyCursor()
-		mlog.Info(ctx, "snapshot export checkpoint persisted",
-			mlog.FieldJobID(jobID),
-			mlog.Int64("copiedFiles", cursor),
-			mlog.Int64("totalFiles", int64(len(plan.items))))
 	}
 
-	_, _, err = m.meta.UpdateJob(ctx, jobID, func(latest *datapb.ExportSnapshotJob) (bool, error) {
-		if err := ensureSnapshotExportCanAdvance(ctx, latest); err != nil {
-			return false, err
-		}
-		latest.Progress = 99
-		return false, nil
-	})
+	if err := ensureSnapshotExportCanPublish(ctx, job); err != nil {
+		return err
+	}
+	_, totalBytes, err := publishSnapshotExportPlanWithSize(
+		ctx,
+		resolved.ForeignCM,
+		snapshot,
+		plan,
+	)
 	if err != nil {
 		return err
 	}
-
-	var totalBytes int64
-	completed, _, err := m.meta.UpdateJobWithPreApply(
-		ctx,
-		jobID,
-		func(latest *datapb.ExportSnapshotJob) error {
-			if err := ensureSnapshotExportCanAdvance(ctx, latest); err != nil {
-				return err
-			}
-			_, publishedBytes, err := publishSnapshotExportPlanWithSize(
-				ctx,
-				resolved.ForeignCM,
-				snapshot,
-				plan,
+	completed, _, err := m.meta.UpdateJob(ctx, jobID, func(latest *datapb.ExportSnapshotJob) (bool, error) {
+		if err := ensureSnapshotExportCanPublish(ctx, latest); err != nil {
+			return false, err
+		}
+		if latest.GetSnapshotMetadataUri() != plan.metadataURI {
+			return false, merr.WrapErrDataIntegrityMsg(
+				"snapshot export job %d metadata URI changed during publication",
+				jobID,
 			)
-			if err != nil {
-				return err
-			}
-			totalBytes = publishedBytes
-			return nil
-		},
-		func(latest *datapb.ExportSnapshotJob) (bool, error) {
-			if err := ensureSnapshotExportCanAdvance(ctx, latest); err != nil {
-				return false, err
-			}
-			latest.State = datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted
-			latest.Progress = 100
-			latest.EndTime = uint64(time.Now().UnixMilli())
-			latest.SnapshotMetadataUri = plan.metadataURI
-			latest.TotalBytes = totalBytes
-			latest.ExternalSpec = ""
-			return false, nil
-		},
-	)
+		}
+		latest.State = datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted
+		latest.Progress = 100
+		latest.EndTime = uint64(time.Now().UnixMilli())
+		latest.TotalBytes = totalBytes
+		latest.ExternalSpec = ""
+		return false, nil
+	})
 	if err != nil {
 		return err
 	}
@@ -519,10 +564,22 @@ func (m *snapshotExportManager) persistOrValidatePlan(
 	plan *snapshotExportPlan,
 ) (*datapb.ExportSnapshotJob, error) {
 	updated, _, err := m.meta.UpdateJob(ctx, jobID, func(job *datapb.ExportSnapshotJob) (bool, error) {
-		if err := ensureSnapshotExportCanAdvance(ctx, job); err != nil {
-			return false, err
+		switch job.GetState() {
+		case datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting:
+			if err := ensureSnapshotExportCanAdvance(ctx, job); err != nil {
+				return false, err
+			}
+		case datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing:
+			if err := ensureSnapshotExportCanPublish(ctx, job); err != nil {
+				return false, err
+			}
+		default:
+			return false, errSnapshotExportJobStopped
 		}
 		if job.GetPlanFingerprint() == "" {
+			if job.GetState() != datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting {
+				return false, merr.WrapErrDataIntegrityMsg("publishing snapshot export job has no durable plan")
+			}
 			job.PlanVersion = plan.version
 			job.PlanFingerprint = plan.fingerprint
 			job.SnapshotFingerprint = plan.snapshotFingerprint
@@ -542,6 +599,14 @@ func (m *snapshotExportManager) persistOrValidatePlan(
 			job.GetCopiedFiles() != job.GetCopyCursor() {
 			return false, merr.WrapErrDataIntegrityMsg("snapshot export checkpoint is invalid")
 		}
+		if job.GetState() == datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing {
+			if job.GetCopyCursor() != job.GetTotalFiles() {
+				return false, merr.WrapErrDataIntegrityMsg("publishing snapshot export job has an incomplete copy plan")
+			}
+			if job.GetSnapshotMetadataUri() != plan.metadataURI {
+				return false, merr.WrapErrDataIntegrityMsg("snapshot export metadata URI changed during recovery")
+			}
+		}
 		return true, nil
 	})
 	if err != nil {
@@ -551,18 +616,19 @@ func (m *snapshotExportManager) persistOrValidatePlan(
 }
 
 func (m *snapshotExportManager) failJob(jobID int64, reason string) bool {
-	return m.updateFailedJob(jobID, reason, false)
+	return m.updateFailedJob(jobID, reason, false, true)
 }
 
 func (m *snapshotExportManager) tryFailJob(jobID int64, reason string) bool {
-	return m.updateFailedJob(jobID, reason, true)
+	return m.updateFailedJob(jobID, reason, true, false)
 }
 
-func (m *snapshotExportManager) updateFailedJob(jobID int64, reason string, tryLock bool) bool {
+func (m *snapshotExportManager) updateFailedJob(jobID int64, reason string, tryLock bool, allowPublishing bool) bool {
 	ctx, cancel := context.WithTimeout(m.ctx, snapshotPinCleanupTimeout)
 	defer cancel()
 	mutate := func(job *datapb.ExportSnapshotJob) (bool, error) {
-		if isSnapshotExportTerminal(job.GetState()) {
+		if isSnapshotExportTerminal(job.GetState()) ||
+			(!allowPublishing && job.GetState() == datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing) {
 			return true, nil
 		}
 		job.State = datapb.ExportSnapshotJobState_ExportSnapshotJobFailed
@@ -748,6 +814,13 @@ func ensureSnapshotExportCanAdvance(ctx context.Context, job *datapb.ExportSnaps
 		return errSnapshotExportJobStopped
 	}
 	return snapshotExportAdvanceError(ctx, job)
+}
+
+func ensureSnapshotExportCanPublish(ctx context.Context, job *datapb.ExportSnapshotJob) error {
+	if job.GetState() != datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing {
+		return errSnapshotExportJobStopped
+	}
+	return ctx.Err()
 }
 
 func observeSnapshotExportTerminal(job *datapb.ExportSnapshotJob) {

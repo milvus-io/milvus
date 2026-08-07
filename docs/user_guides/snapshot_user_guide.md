@@ -330,17 +330,23 @@ The URI is empty for `Pending`, `Executing`, and `Failed` jobs.
 
 Progress is checkpoint based: `0` means queued, `5` means planning completed,
 values from `5` through `95` reflect durably checkpointed object copies, `99`
-means metadata finalization, and `100` means the bundle is published. A restart
-may replay an uncheckpointed copy batch, but reported progress does not move
-backward.
+means DataCoord has durably entered metadata publication, and `100` means the
+bundle is published and completion is durable. The internal publication state
+is reported through the public API as `Executing`; no additional public state
+is exposed. A restart may replay an uncheckpointed copy batch or the
+deterministic manifest/metadata publication, but reported progress does not
+move backward.
 
 `dataCoord.snapshot.exportCopyConcurrency` controls the maximum number of
 provider-side object copy requests executed concurrently by each job. The
 default is `16`. `dataCoord.snapshot.exportMaxConcurrentJobs` limits concurrent
 jobs and defaults to `1`. `dataCoord.snapshot.exportJobTimeout` covers queue and
-execution time and defaults to 12 hours. Completed and failed jobs remain
-queryable for `dataCoord.snapshot.exportJobRetention`, which defaults to 3
-hours. These settings are refreshable.
+data-copy execution time and defaults to 12 hours. Once publication progress
+reaches `99`, the original deadline no longer turns the job into `Failed`;
+DataCoord finishes or replays publication and then durably records completion.
+Completed and failed jobs remain queryable for
+`dataCoord.snapshot.exportJobRetention`, which defaults to 3 hours. These
+settings are refreshable.
 
 Request validation, source snapshot lookup, pin creation, and job persistence
 can fail synchronously before a job ID is returned. Storage permission errors,

@@ -399,20 +399,40 @@ func exportSnapshotJobInfoToPublic(info *datapb.ExportSnapshotJobInfo) *milvuspb
 	if info == nil {
 		return nil
 	}
+	metadataURI := ""
+	if info.GetState() == datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted {
+		metadataURI = info.GetSnapshotMetadataUri()
+	}
 	return &milvuspb.ExportSnapshotInfo{
 		JobId:               info.GetJobId(),
 		SnapshotName:        info.GetSnapshotName(),
 		DbName:              info.GetDbName(),
 		CollectionName:      info.GetCollectionName(),
-		State:               milvuspb.ExportSnapshotState(info.GetState()),
+		State:               exportSnapshotJobStateToPublic(info.GetState()),
 		Progress:            info.GetProgress(),
 		Reason:              info.GetReason(),
 		StartTime:           info.GetStartTime(),
 		TimeCost:            info.GetTimeCost(),
 		TotalFiles:          info.GetTotalFiles(),
 		CopiedFiles:         info.GetCopiedFiles(),
-		SnapshotMetadataUri: info.GetSnapshotMetadataUri(),
+		SnapshotMetadataUri: metadataURI,
 		TotalBytes:          info.GetTotalBytes(),
+	}
+}
+
+func exportSnapshotJobStateToPublic(state datapb.ExportSnapshotJobState) milvuspb.ExportSnapshotState {
+	switch state {
+	case datapb.ExportSnapshotJobState_ExportSnapshotJobPending:
+		return milvuspb.ExportSnapshotState_ExportSnapshotPending
+	case datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting,
+		datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing:
+		return milvuspb.ExportSnapshotState_ExportSnapshotExecuting
+	case datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted:
+		return milvuspb.ExportSnapshotState_ExportSnapshotCompleted
+	case datapb.ExportSnapshotJobState_ExportSnapshotJobFailed:
+		return milvuspb.ExportSnapshotState_ExportSnapshotFailed
+	default:
+		return milvuspb.ExportSnapshotState_ExportSnapshotNone
 	}
 }
 

@@ -117,7 +117,7 @@ func (m *snapshotExportMeta) UpdateJob(
 	jobID int64,
 	mutate func(*datapb.ExportSnapshotJob) (skip bool, err error),
 ) (*datapb.ExportSnapshotJob, bool, error) {
-	return m.updateJob(ctx, jobID, nil, mutate)
+	return m.updateJob(ctx, jobID, mutate)
 }
 
 func (m *snapshotExportMeta) TryUpdateJob(
@@ -129,34 +129,23 @@ func (m *snapshotExportMeta) TryUpdateJob(
 		return nil, false, false, nil
 	}
 	defer m.locks.Unlock(jobID)
-	job, applied, err := m.updateJobLocked(ctx, jobID, nil, mutate)
+	job, applied, err := m.updateJobLocked(ctx, jobID, mutate)
 	return job, true, applied, err
-}
-
-func (m *snapshotExportMeta) UpdateJobWithPreApply(
-	ctx context.Context,
-	jobID int64,
-	preApply func(*datapb.ExportSnapshotJob) error,
-	mutate func(*datapb.ExportSnapshotJob) (skip bool, err error),
-) (*datapb.ExportSnapshotJob, bool, error) {
-	return m.updateJob(ctx, jobID, preApply, mutate)
 }
 
 func (m *snapshotExportMeta) updateJob(
 	ctx context.Context,
 	jobID int64,
-	preApply func(*datapb.ExportSnapshotJob) error,
 	mutate func(*datapb.ExportSnapshotJob) (skip bool, err error),
 ) (*datapb.ExportSnapshotJob, bool, error) {
 	m.locks.Lock(jobID)
 	defer m.locks.Unlock(jobID)
-	return m.updateJobLocked(ctx, jobID, preApply, mutate)
+	return m.updateJobLocked(ctx, jobID, mutate)
 }
 
 func (m *snapshotExportMeta) updateJobLocked(
 	ctx context.Context,
 	jobID int64,
-	preApply func(*datapb.ExportSnapshotJob) error,
 	mutate func(*datapb.ExportSnapshotJob) (skip bool, err error),
 ) (*datapb.ExportSnapshotJob, bool, error) {
 	job, ok := m.jobs.Get(jobID)
@@ -164,11 +153,6 @@ func (m *snapshotExportMeta) updateJobLocked(
 		return nil, false, merr.WrapErrServiceInternalMsg("snapshot export job %d not found", jobID)
 	}
 	clone := proto.Clone(job).(*datapb.ExportSnapshotJob)
-	if preApply != nil {
-		if err := preApply(clone); err != nil {
-			return nil, false, err
-		}
-	}
 	skip, err := mutate(clone)
 	if err != nil {
 		return nil, false, err

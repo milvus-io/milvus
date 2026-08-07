@@ -1936,6 +1936,7 @@ enum ExportSnapshotJobState {
   ExportSnapshotJobExecuting = 2;
   ExportSnapshotJobCompleted = 3;
   ExportSnapshotJobFailed = 4;
+  ExportSnapshotJobPublishing = 5;
 }
 
 // ExportSnapshotJob is the constant-size durable record owned by DataCoord.

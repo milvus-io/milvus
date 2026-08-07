@@ -333,52 +333,6 @@ func TestSnapshotExportMeta_DurableUpdatesAndDefensiveCopies(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestSnapshotExportMeta_ReplaysPreApplyAfterPersistenceFailure(t *testing.T) {
-	ctx := context.Background()
-	job := &datapb.ExportSnapshotJob{
-		JobId:        9001,
-		ExternalSpec: `{"extfs":{"access_key_id":"AK","access_key_value":"SK"}}`,
-		State:        datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting,
-	}
-	catalog := newSnapshotExportCatalogFake(job)
-	meta, err := newSnapshotExportMeta(ctx, catalog)
-	require.NoError(t, err)
-
-	publishCount := 0
-	preApply := func(*datapb.ExportSnapshotJob) error {
-		publishCount++
-		return nil
-	}
-	complete := func(candidate *datapb.ExportSnapshotJob) (bool, error) {
-		candidate.State = datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted
-		candidate.Progress = 100
-		candidate.SnapshotMetadataUri = "s3://bucket/root/snapshots/100/metadata/1.json"
-		candidate.ExternalSpec = ""
-		return false, nil
-	}
-
-	catalog.saveErr = errors.New("etcd unavailable")
-	_, applied, err := meta.UpdateJobWithPreApply(ctx, job.GetJobId(), preApply, complete)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, errSnapshotExportJobPersistence)
-	assert.False(t, applied)
-	assert.Equal(t, 1, publishCount)
-	unchanged, ok := meta.GetJob(job.GetJobId())
-	require.True(t, ok)
-	assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting, unchanged.GetState())
-	assert.NotEmpty(t, unchanged.GetExternalSpec())
-	assert.Empty(t, unchanged.GetSnapshotMetadataUri())
-
-	catalog.saveErr = nil
-	completed, applied, err := meta.UpdateJobWithPreApply(ctx, job.GetJobId(), preApply, complete)
-	require.NoError(t, err)
-	assert.True(t, applied)
-	assert.Equal(t, 2, publishCount)
-	assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted, completed.GetState())
-	assert.Empty(t, completed.GetExternalSpec())
-	assert.NotEmpty(t, completed.GetSnapshotMetadataUri())
-}
-
 func TestSnapshotExportMeta_LoadErrors(t *testing.T) {
 	ctx := context.Background()
 	catalog := newSnapshotExportCatalogFake()
