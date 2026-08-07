@@ -626,12 +626,3 @@ Production-scale benchmarks are still required for:
   update?
 - Should Streaming transactions add a persistent request token to provide an
   exactly-once client outcome?
-
-## References
-
-- [Concurrent Partial Updates on the Same PK](https://github.com/milvus-io/milvus/issues/49980)
-- [Protocol and Design Document PR](https://github.com/milvus-io/milvus/pull/52235)
-- [Feature Implementation PR](https://github.com/milvus-io/milvus/pull/51845)
-- [Partial Update CAS OpenSpec](../../../openspec/specs/partial-update-cas/spec.md)
-- [Streaming System Guide](../../agent_guides/streaming-system/streaming-system.md)
-- [Milvus Design Document Requirements](../../../CONTRIBUTING.md#design-documents)
