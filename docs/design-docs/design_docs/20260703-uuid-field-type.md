@@ -168,15 +168,17 @@ Phase 1 supports:
 - `UUID` as a scalar field and as a collection primary key (with `Int64` and `VarChar`)
 - `==`, `!=`, `IN`, single-sided ranges; validation + canonicalization at the proxy boundary
 - String-backed storage (`StringData` / `VarCharPrimaryKey` / string indexes), consistent with the maintainer-agreed scope
+- Field-to-field comparison (`uuid_a == uuid_b`) — UUID is `IsStringDataType`, so `CompareExpr` executes it like VARCHAR, including ordering comparisons
 
 Phase 1 explicitly does **not** support, and rejects at the relevant boundary:
 - 16-byte `FixedSizeBinary(16)` storage and the `IDs_UuidId` wire field (deferred to the follow-up)
 - `ARRAY<UUID>` element type — rejected at schema validation (import readers, insert validation, capacity, SDK construction, and result deserialization are all string-only in this phase)
-- Field-to-field comparison (`uuid_a == uuid_b`) — supported via the string comparison path (UUID is `IsStringDataType`, so `CompareExpr` executes it like VARCHAR)
 - `StorageV1` (legacy codec) for UUID — rejected with a clear error; UUID requires the V2 storage format
 - Auto-generated UUID primary keys
 
 Compaction (sort, mix/merge, schema-bump full rewrite, clustering) **supports** UUID PKs: UUID values are canonical strings, so all compaction paths treat them via the VarChar/string branch and never panic. The 16-byte follow-up will switch compaction comparisons to the binary form.
+
+UUID also works with: materialized-view partition pruning (`IsFieldDataTypeSupportMaterializedView` recognizes UUID), distributed import hashing (`hashByVChannel`/`hashByPartition` route UUID as strings), the shared `NormalizeUUID` canonicalization helper at every query/delete/insert/import boundary, and the REST API (quick-create with `idType: UUID`, search/delete by ID).
 
 ### Int64 PK with separate UUID column
 Forces a synthetic integer key and a secondary lookup, defeating the purpose of a natural UUID identifier. Increases application complexity with no storage benefit.
@@ -190,7 +192,7 @@ Tracked as a follow-up issue (to be created once the storage scope is confirmed 
 - Store UUID as `FixedSizeBinary(16)` in Parquet/deltalog
 - Switch PK wire transport from `str_id` to the already-merged `IDs_UuidId` / `UUIDArray` (milvus-proto #639)
 - 16-byte PK comparisons, dedup, bloom filter
-- Enable sort/mix/schema-bump compaction, `ARRAY<UUID>`, and StorageV1 paths for UUID
+- Enable `ARRAY<UUID>` and StorageV1 paths for UUID (rejected in Phase 1)
 
 ## References
 
