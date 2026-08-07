@@ -302,19 +302,36 @@ var (
 	parquetMagicEncrypted = []byte("PARE")
 )
 
-// maxParquetFooterLen caps the footer metadata length a parquet file may declare.
-// Arrow bounds that length only by the object's own size
-// (parquet/file/file_reader.go:174) and then allocates it verbatim (:182, :202).
-// A footer carries one thrift struct per column chunk, so its size tracks
-// row_groups * columns: a 16 GiB file written in 128 MiB row groups under Milvus's
-// default 64-field ceiling lands in the low single-digit MiB, which this clears by
-// a wide margin.
-const maxParquetFooterLen = 16 << 20
+// parquetFooterMaxSize returns the largest footer metadata length import sizing
+// will read, from dataCoord.import.parquetFooterMaxSize.
+//
+// Arrow reads the declared length from the file's last 8 bytes
+// (parquet/file/file_reader.go:174) and allocates it verbatim (:182, :202), and
+// sizingReaderAt.ReadAt buffers a whole ranged GET before copying, so a parse
+// costs about twice the declared length.
+//
+// This is stricter than the DataNode reader, which bounds the footer only by the
+// file's own size, so a file above the limit is refused at submit although the
+// reader would have read it. Footer size tracks row_groups * columns: 128 MiB row
+// groups under Milvus's default 64-field ceiling land in the low single-digit MiB,
+// but small row groups, wide schemas or untruncated string statistics do not, which
+// is why the limit is configurable rather than fixed.
+func parquetFooterMaxSize() int64 {
+	v := paramtable.Get().DataCoordCfg.ImportParquetFooterMaxSize.GetAsInt64()
+	if v <= 0 {
+		return defaultParquetFooterMaxSize
+	}
+	return v
+}
+
+// defaultParquetFooterMaxSize mirrors the paramtable default; used when the
+// configured value is missing or nonsensical.
+const defaultParquetFooterMaxSize = 64 << 20
 
 // maxConcurrentParquetFooterParses bounds how many parquet footers are parsed at
 // once across the whole process.
 //
-// maxParquetFooterLen bounds the bytes read, not the memory the decode takes:
+// parquetFooterMaxSize bounds the bytes read, not the memory the decode takes:
 // Arrow's generated reader sizes []*RowGroup from the element count the footer
 // declares (parquet/internal/gen-go/parquet/parquet.go:12252) before reading a
 // single element, while thrift's guard compares that count against a *byte*
@@ -348,9 +365,10 @@ func validateParquetFooter(ra io.ReaderAt, size int64, path string) error {
 		return merr.WrapErrImportFailedMsg("not a parquet file, path=%s", path)
 	}
 	footerLen := int64(binary.LittleEndian.Uint32(tail[:4]))
-	if footerLen <= 0 || footerLen > maxParquetFooterLen {
-		return merr.WrapErrImportFailedMsg("parquet footer length %d out of range (max %d), path=%s",
-			footerLen, maxParquetFooterLen, path)
+	if maxLen := parquetFooterMaxSize(); footerLen <= 0 || footerLen > maxLen {
+		return merr.WrapErrImportFailedMsg(
+			"parquet footer length %d out of range (max %d, dataCoord.import.parquetFooterMaxSize), path=%s",
+			footerLen, maxLen, path)
 	}
 	return nil
 }
