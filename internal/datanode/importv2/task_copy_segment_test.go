@@ -17,13 +17,18 @@
 package importv2
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -492,6 +497,147 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 		assert.Equal(t, 0, len(copyTask.GetPartitionIDs()))
 		assert.Equal(t, 0, len(copyTask.GetSegmentResults()))
 	})
+}
+
+func TestCopySegmentTaskCloneSharesRuntime(t *testing.T) {
+	task := NewCopySegmentTask(&datapb.CopySegmentRequest{TaskID: 300}, NewTaskManager(), mocks.NewChunkManager(t)).(*CopySegmentTask)
+	clone := task.Clone().(*CopySegmentTask)
+	assert.Same(t, task.runtime, clone.runtime)
+	task.recordCopiedFiles([]string{"late-output"})
+	clone.runtime.mu.Lock()
+	defer clone.runtime.mu.Unlock()
+	assert.Equal(t, []string{"late-output"}, clone.runtime.copiedFiles)
+}
+
+func TestCopySegmentTaskAbortWaitsBeforeCleanup(t *testing.T) {
+	cm := mocks.NewChunkManager(t)
+	task := NewCopySegmentTask(&datapb.CopySegmentRequest{JobID: 1, TaskID: 301}, NewTaskManager(), cm).(*CopySegmentTask)
+	release := make(chan struct{})
+	task.runtime.wg.Add(1)
+	go func() {
+		defer task.runtime.wg.Done()
+		<-release
+		task.recordCopiedFiles([]string{"v3/target/_data/late-file"})
+	}()
+
+	cm.EXPECT().MultiRemove(mock.Anything, []string{"v3/target/_data/late-file"}).Return(nil).Once()
+	done := make(chan error, 1)
+	go func() { done <- task.Abort(context.Background()) }()
+	select {
+	case <-done:
+		t.Fatal("Abort returned before the copy closure exited")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	assert.NoError(t, <-done)
+}
+
+// TestCopySegmentTaskExecuteOutlivesSaturatedPool pins the deadlock that broke
+// every restore whose task carried more segments than the import execution pool
+// has workers.
+//
+// GetExecPool().Submit blocks once no worker is idle, and every submitted
+// closure takes runtime.mu through recordCopiedFiles. Holding runtime.mu across
+// the submit loop therefore wedges Execute permanently: the accepted closures
+// finish their copy and block on the mutex, no worker is ever released, and the
+// next Submit blocks forever while still holding the mutex those closures wait
+// on. Execute must release the lock before submitting anything.
+func TestCopySegmentTaskExecuteOutlivesSaturatedPool(t *testing.T) {
+	const poolSize = 2
+	const segmentCount = poolSize + 4 // must exceed the pool to saturate it
+
+	// A private, un-warmed pool. The shared GetExecPool() cannot be used here:
+	// WarmupPool leaves idle workers alive that ants hands out without a capacity
+	// check, and Resize does not reclaim them, so whether Submit actually blocks
+	// depends on what earlier tests left behind — which would let this regression
+	// test pass vacuously.
+	pool := conc.NewPool[any](poolSize, conc.WithPreAlloc(false))
+	defer pool.Release()
+	mockPool := mockey.Mock(GetExecPool).Return(pool).Build()
+	defer mockPool.UnPatch()
+
+	req := &datapb.CopySegmentRequest{JobID: 1, TaskID: 3020}
+	for i := 0; i < segmentCount; i++ {
+		req.Sources = append(req.Sources, &datapb.CopySegmentSource{
+			CollectionId: 111, PartitionId: 222, SegmentId: int64(333 + i),
+			InsertBinlogs: []*datapb.FieldBinlog{{FieldID: 1}},
+		})
+		req.Targets = append(req.Targets, &datapb.CopySegmentTarget{
+			CollectionId: 444, PartitionId: 555, SegmentId: int64(666 + i),
+		})
+	}
+
+	task := NewCopySegmentTask(req, NewTaskManager(), mocks.NewChunkManager(t)).(*CopySegmentTask)
+
+	// Stand in for a real copy: take runtime.mu exactly like the production path
+	// does via recordCopiedFiles, without needing storage.
+	copied := atomic.NewInt64(0)
+	mockCopy := mockey.Mock((*CopySegmentTask).copySingleSegment).To(
+		func(t *CopySegmentTask, source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (any, error) {
+			t.recordCopiedFiles([]string{fmt.Sprintf("copied-%d", target.GetSegmentId())})
+			copied.Inc()
+			return nil, nil
+		}).Build()
+	defer mockCopy.UnPatch()
+
+	returned := make(chan []*conc.Future[any], 1)
+	go func() { returned <- task.Execute() }()
+
+	var futures []*conc.Future[any]
+	select {
+	case futures = <-returned:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Execute deadlocked: the submit loop must not hold runtime.mu, " +
+			"the pool blocks once saturated and every closure needs that same lock")
+	}
+
+	require.Len(t, futures, segmentCount)
+	for _, future := range futures {
+		_, err := future.Await()
+		assert.NoError(t, err)
+	}
+
+	// Every closure ran, so Abort's wg.Wait() bookkeeping stayed balanced.
+	assert.Equal(t, int64(segmentCount), copied.Load())
+	task.runtime.mu.Lock()
+	defer task.runtime.mu.Unlock()
+	assert.Len(t, task.runtime.copiedFiles, segmentCount)
+}
+
+// TestCopySegmentTaskExecuteRefusesAbortedRuntime keeps the fence intact: moving
+// the unlock earlier must not let an already-aborted task submit new copies.
+func TestCopySegmentTaskExecuteRefusesAbortedRuntime(t *testing.T) {
+	req := &datapb.CopySegmentRequest{
+		JobID:   1,
+		TaskID:  3021,
+		Sources: []*datapb.CopySegmentSource{{CollectionId: 111, PartitionId: 222, SegmentId: 333}},
+		Targets: []*datapb.CopySegmentTarget{{CollectionId: 444, PartitionId: 555, SegmentId: 666}},
+	}
+	task := NewCopySegmentTask(req, NewTaskManager(), mocks.NewChunkManager(t)).(*CopySegmentTask)
+
+	called := atomic.NewInt64(0)
+	mockCopy := mockey.Mock((*CopySegmentTask).copySingleSegment).To(
+		func(t *CopySegmentTask, source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (any, error) {
+			called.Inc()
+			return nil, nil
+		}).Build()
+	defer mockCopy.UnPatch()
+
+	task.runtime.mu.Lock()
+	task.runtime.aborted = true
+	task.runtime.mu.Unlock()
+
+	assert.Nil(t, task.Execute())
+	assert.Equal(t, int64(0), called.Load())
+
+	// Nothing was accepted, so Abort must not block on a stale wg counter.
+	done := make(chan struct{})
+	go func() { defer close(done); task.runtime.wg.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("wg counter left unbalanced by a refused Execute")
+	}
 }
 
 func TestCopySegmentTaskGetSegmentResults(t *testing.T) {
@@ -1079,24 +1225,24 @@ func TestCopySegmentTask_RecordCopiedFiles(t *testing.T) {
 		task.recordCopiedFiles(files1)
 		task.recordCopiedFiles(files2)
 
-		task.copiedFilesMu.Lock()
-		defer task.copiedFilesMu.Unlock()
+		task.runtime.mu.Lock()
+		defer task.runtime.mu.Unlock()
 
-		assert.Len(t, task.copiedFiles, 4)
-		assert.Contains(t, task.copiedFiles, "10001")
-		assert.Contains(t, task.copiedFiles, "10002")
-		assert.Contains(t, task.copiedFiles, "10003")
-		assert.Contains(t, task.copiedFiles, "10004")
+		assert.Len(t, task.runtime.copiedFiles, 4)
+		assert.Contains(t, task.runtime.copiedFiles, "10001")
+		assert.Contains(t, task.runtime.copiedFiles, "10002")
+		assert.Contains(t, task.runtime.copiedFiles, "10003")
+		assert.Contains(t, task.runtime.copiedFiles, "10004")
 	})
 
 	t.Run("record empty files", func(t *testing.T) {
 		newTask := NewCopySegmentTask(req, mockManager, cm).(*CopySegmentTask)
 		newTask.recordCopiedFiles([]string{})
 
-		newTask.copiedFilesMu.Lock()
-		defer newTask.copiedFilesMu.Unlock()
+		newTask.runtime.mu.Lock()
+		defer newTask.runtime.mu.Unlock()
 
-		assert.Empty(t, newTask.copiedFiles)
+		assert.Empty(t, newTask.runtime.copiedFiles)
 	})
 
 	t.Run("concurrent recording", func(t *testing.T) {
@@ -1115,10 +1261,10 @@ func TestCopySegmentTask_RecordCopiedFiles(t *testing.T) {
 
 		wg.Wait()
 
-		newTask.copiedFilesMu.Lock()
-		defer newTask.copiedFilesMu.Unlock()
+		newTask.runtime.mu.Lock()
+		defer newTask.runtime.mu.Unlock()
 
-		assert.Len(t, newTask.copiedFiles, 10)
+		assert.Len(t, newTask.runtime.copiedFiles, 10)
 	})
 }
 
@@ -1300,10 +1446,10 @@ func TestCopySegmentTask_CopySingleSegment_WithCleanup(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify files were recorded
-		task.copiedFilesMu.Lock()
-		defer task.copiedFilesMu.Unlock()
-		assert.Len(t, task.copiedFiles, 1)
-		assert.Contains(t, task.copiedFiles, "files/insert_log/444/555/666/1/10001")
+		task.runtime.mu.Lock()
+		defer task.runtime.mu.Unlock()
+		assert.Len(t, task.runtime.copiedFiles, 1)
+		assert.Contains(t, task.runtime.copiedFiles, "files/insert_log/444/555/666/1/10001")
 	})
 
 	t.Run("records partial files on failure", func(t *testing.T) {
@@ -1345,8 +1491,129 @@ func TestCopySegmentTask_CopySingleSegment_WithCleanup(t *testing.T) {
 		assert.Error(t, err)
 
 		// Verify partial files were still recorded
-		task.copiedFilesMu.Lock()
-		defer task.copiedFilesMu.Unlock()
-		assert.True(t, len(task.copiedFiles) <= 1, "should record file copied before failure")
+		task.runtime.mu.Lock()
+		defer task.runtime.mu.Unlock()
+		assert.True(t, len(task.runtime.copiedFiles) <= 1, "should record file copied before failure")
 	})
+}
+
+// TestCopySegmentTaskAbortHonorsContextWhileCopiesOutstanding pins the abort
+// liveness gap: Abort runs synchronously inside the DropCopySegment RPC handler
+// (services.go:598) with the request context, but wg.Wait() was context-blind.
+//
+// The real-world trigger is a saturated shared exec pool — Execute's submit loop
+// parks inside conc.Pool.Submit waiting on *other* import tasks' work, which
+// t.cancel() cannot release, so the join outlives the RPC deadline. This test
+// drives the property directly with one outstanding copy instead of steering the
+// global pool, whose worker hand-out is order-dependent and would make the
+// assertion vacuous depending on test order.
+//
+// Abort must return the deadline error and must NOT clean up: the task stays
+// registered so DataCoord's drop retry converges cleanup later, rather than this
+// handler deleting output from under a copy that is still writing.
+func TestCopySegmentTaskAbortHonorsContextWhileCopiesOutstanding(t *testing.T) {
+	// No MultiRemove expectation: reaching cleanup at all is a failure here.
+	cm := mocks.NewChunkManager(t)
+	task := NewCopySegmentTask(&datapb.CopySegmentRequest{JobID: 1, TaskID: 3030},
+		NewTaskManager(), cm).(*CopySegmentTask)
+
+	// An accepted copy that has not finished, exactly as if it were still
+	// waiting for pool admission or still writing objects.
+	release := make(chan struct{})
+	task.runtime.wg.Add(1)
+	go func() {
+		defer task.runtime.wg.Done()
+		<-release
+		task.recordCopiedFiles([]string{"v3/target/_data/in-flight"})
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	abortDone := make(chan error, 1)
+	go func() { abortDone <- task.Abort(ctx) }()
+
+	select {
+	case err := <-abortDone:
+		assert.Error(t, err, "Abort must report that the join did not converge")
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("Abort ignored its context; it runs inside the DropCopySegment " +
+			"RPC handler and must honor the caller deadline")
+	}
+
+	// The fence still holds: the copy is joined and its output recorded, so a
+	// later retry cleans up the complete set.
+	close(release)
+	task.runtime.wg.Wait()
+	task.runtime.mu.Lock()
+	defer task.runtime.mu.Unlock()
+	assert.Equal(t, []string{"v3/target/_data/in-flight"}, task.runtime.copiedFiles)
+}
+
+// TestCopySegmentTaskAbortMidSubmitStopsAdmission covers both halves of stopping
+// admission on abort: the loop must stop handing new copies to the pool, and
+// every source already counted into wg.Add must still be released, or Abort's
+// join would wait on copies that will never run.
+func TestCopySegmentTaskAbortMidSubmitStopsAdmission(t *testing.T) {
+	const segmentCount = 6
+
+	// Capacity 1 so submission of the next source cannot proceed until the
+	// running closure returns, which makes the abort observable by the loop.
+	pool := conc.NewPool[any](1, conc.WithPreAlloc(false))
+	defer pool.Release()
+	mockPool := mockey.Mock(GetExecPool).Return(pool).Build()
+	defer mockPool.UnPatch()
+
+	req := &datapb.CopySegmentRequest{JobID: 1, TaskID: 3031}
+	for i := 0; i < segmentCount; i++ {
+		req.Sources = append(req.Sources, &datapb.CopySegmentSource{
+			CollectionId: 111, PartitionId: 222, SegmentId: int64(333 + i),
+			InsertBinlogs: []*datapb.FieldBinlog{{FieldID: 1}},
+		})
+		req.Targets = append(req.Targets, &datapb.CopySegmentTarget{
+			CollectionId: 444, PartitionId: 555, SegmentId: int64(666 + i),
+		})
+	}
+	task := NewCopySegmentTask(req, NewTaskManager(), mocks.NewChunkManager(t)).(*CopySegmentTask)
+
+	calls := atomic.NewInt64(0)
+	firstCopy := atomic.NewBool(true)
+	fenced := make(chan struct{})
+	release := make(chan struct{})
+	mockCopy := mockey.Mock((*CopySegmentTask).copySingleSegment).To(
+		func(t *CopySegmentTask, source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (any, error) {
+			calls.Inc()
+			if firstCopy.CompareAndSwap(true, false) {
+				t.runtime.mu.Lock()
+				t.runtime.aborted = true
+				t.runtime.mu.Unlock()
+				close(fenced)
+				<-release // hold the only worker so the loop cannot run ahead
+			}
+			return nil, nil
+		}).Build()
+	defer mockCopy.UnPatch()
+
+	executeDone := make(chan []*conc.Future[any], 1)
+	go func() { executeDone <- task.Execute() }()
+
+	<-fenced
+	close(release)
+	select {
+	case <-executeDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Execute never returned after the runtime was fenced")
+	}
+
+	done := make(chan struct{})
+	go func() { defer close(done); task.runtime.wg.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("wg left unbalanced: sources skipped after abort were never counted down")
+	}
+
+	assert.Less(t, calls.Load(), int64(segmentCount),
+		"submission must stop once the runtime is fenced instead of copying the whole batch")
 }

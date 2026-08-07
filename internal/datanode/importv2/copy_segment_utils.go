@@ -614,39 +614,17 @@ func generateSegmentInfoFromSource(
 // generateTargetPath converts source file path to target path by replacing collection/partition/segment IDs
 // Binlog path format: {rootPath}/{log_type}/{collectionID}/{partitionID}/{segmentID}/{fieldID}/{logID}
 // Example: files/insert_log/111/222/333/444/555.log -> files/insert_log/aaa/bbb/ccc/444/555.log
-func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (string, error) {
-	// Convert IDs to strings for replacement
-	targetCollectionIDStr := strconv.FormatInt(target.GetCollectionId(), 10)
-	targetPartitionIDStr := strconv.FormatInt(target.GetPartitionId(), 10)
-	targetSegmentIDStr := strconv.FormatInt(target.GetSegmentId(), 10)
-
-	// Split path into parts
-	parts := strings.Split(sourcePath, "/")
-
-	// Find the log type index (insert_log, delta_log, stats_log, bm25_stats)
-	// Path structure: .../log_type/collectionID/partitionID/segmentID/...
-	logTypeIndex := -1
-	for i, part := range parts {
-		if part == BinlogTypeInsert || part == BinlogTypeDelta || part == BinlogTypeStats || part == BinlogTypeBM25 {
-			logTypeIndex = i
-			break
-		}
+func generateTargetPath(sourcePath string, _ *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (string, error) {
+	targetPath, err := metautil.ReplaceSegmentIDsInPath(
+		sourcePath,
+		target.GetCollectionId(),
+		target.GetPartitionId(),
+		target.GetSegmentId(),
+	)
+	if err != nil {
+		return "", merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
-
-	if logTypeIndex == -1 || logTypeIndex+3 >= len(parts) {
-		return "", merr.WrapErrParameterInvalidMsg("invalid binlog path structure: %s (expected log_type at a valid position)", sourcePath)
-	}
-
-	// Replace IDs in order: collectionID, partitionID, segmentID
-	// log_type is at index logTypeIndex
-	// collectionID is at index logTypeIndex + 1
-	// partitionID is at index logTypeIndex + 2
-	// segmentID is at index logTypeIndex + 3
-	parts[logTypeIndex+1] = targetCollectionIDStr
-	parts[logTypeIndex+2] = targetPartitionIDStr
-	parts[logTypeIndex+3] = targetSegmentIDStr
-
-	return path.Join(parts...), nil
+	return targetPath, nil
 }
 
 // generateTargetLOBPath replaces collection and partition IDs in a LOB file path.

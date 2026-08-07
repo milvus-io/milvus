@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"strings"
 	"sync"
@@ -256,10 +257,62 @@ func (lobCtx *lobGCContext) collectUsedLOBFiles(ctx context.Context) (typeutil.S
 	return usedFiles, nil
 }
 
+// mayLackMaterializedManifest reports whether the segment is in a state where
+// its recorded manifest path may legitimately point at an object that has not
+// been written yet.
+//
+// createRestoreJob pre-registers every copy target with its derived V3 manifest
+// path while the segment is still Importing, deliberately: persisting the path
+// up front is what lets dropped-segment GC remove partially copied data if the
+// DataNode restarts before reporting a result. The object itself only appears
+// once the copy task has replicated it.
+//
+// This is necessary but not sufficient to classify a read failure as a missing
+// manifest. IsImporting remains true after regular imports materialize their
+// manifest and completed restore tasks also keep the target Importing until the
+// whole job publishes. Callers must additionally confirm that the exact
+// manifest object is absent.
+func mayLackMaterializedManifest(segment *SegmentInfo) bool {
+	return segment.GetIsImporting() || segment.GetState() == commonpb.SegmentState_Importing
+}
+
+// manifestObjectPath resolves the object-storage path read by the packed FFI.
+// Keep this layout aligned with packed.readColumnGroupsFromManifest.
+func manifestObjectPath(manifestPath string) (string, error) {
+	basePath, version, err := packed.UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return "", merr.WrapErrServiceInternalErr(err, "failed to unmarshal manifest path")
+	}
+	if basePath == "" {
+		return "", merr.WrapErrServiceInternalMsg("manifest base path is empty")
+	}
+	return fmt.Sprintf("%s/_metadata/manifest-%d.avro", basePath, version), nil
+}
+
+// manifestIsAbsent positively classifies a manifest read failure as object-not-
+// found. ChunkManager.Exist returns (false, nil) only for a missing object and
+// preserves storage failures such as throttling, timeouts, and 5xx responses as
+// errors, so callers can keep the safe GC-abort behavior for those failures.
+func (lobCtx *lobGCContext) manifestIsAbsent(ctx context.Context, manifestPath string) (bool, error) {
+	manifestFilePath, err := manifestObjectPath(manifestPath)
+	if err != nil {
+		return false, err
+	}
+	if lobCtx.gc.option.cli == nil {
+		return false, merr.WrapErrServiceInternalMsg("chunk manager is nil while checking manifest existence")
+	}
+	exists, err := lobCtx.gc.option.cli.Exist(ctx, manifestFilePath)
+	if err != nil {
+		return false, merr.WrapErrServiceInternalErr(err,
+			"failed to check manifest object existence (path=%s)", manifestFilePath)
+	}
+	return !exists, nil
+}
+
 // collectLOBFilesFromSegment extracts LOB file paths from a segment's manifest
 // and adds them to the usedFiles set.
-// Returns error if the manifest cannot be read, so the caller can abort GC
-// and avoid deleting files that may still be referenced.
+// Returns error when a manifest cannot be read unless the segment may still be
+// materializing it and object storage positively confirms the object is absent.
 func (lobCtx *lobGCContext) collectLOBFilesFromSegment(ctx context.Context, segment *SegmentInfo, usedFiles typeutil.Set[string]) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -271,6 +324,22 @@ func (lobCtx *lobGCContext) collectLOBFilesFromSegment(ctx context.Context, segm
 
 	lobFiles, err := lobCtx.cache.Get(ctx, manifestPath, lobCtx.storageConfig)
 	if err != nil {
+		if mayLackMaterializedManifest(segment) {
+			absent, classifyErr := lobCtx.manifestIsAbsent(ctx, manifestPath)
+			if classifyErr != nil {
+				return merr.WrapErrServiceInternalErr(merr.Combine(err, classifyErr),
+					"failed to read or classify manifest for segment %d (path=%s)", segment.GetID(), manifestPath)
+			}
+			if absent {
+				// A pre-registered restore target is allowed to lack its manifest
+				// until the copy lands. Fresh objects remain protected by the LOB
+				// safety window while this segment contributes no used files.
+				mlog.RatedInfo(ctx, 60, "skip LOB collection for segment whose manifest is not materialized yet",
+					mlog.Int64("segmentID", segment.GetID()),
+					mlog.String("manifestPath", manifestPath))
+				return nil
+			}
+		}
 		return merr.WrapErrServiceInternalErr(err, "failed to get LOB files from manifest for segment %d (path=%s)", segment.GetID(), manifestPath)
 	}
 

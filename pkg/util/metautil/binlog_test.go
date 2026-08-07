@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -168,6 +169,64 @@ func TestBuildDeltaLogPathV3(t *testing.T) {
 			result := BuildDeltaLogPathV3(tt.basePath, tt.logID)
 			if result != tt.expected {
 				t.Errorf("BuildDeltaLogPathV3() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestReplaceSegmentIDsInPath(t *testing.T) {
+	tests := []struct {
+		name       string
+		sourcePath string
+		expected   string
+		wantErr    bool
+	}{
+		{
+			name:       "insert log base path",
+			sourcePath: "files/insert_log/111/222/333",
+			expected:   "files/insert_log/444/555/666",
+		},
+		{
+			name:       "nested V3 data path",
+			sourcePath: "files/insert_log/111/222/333/_stats/bm25.100/1",
+			expected:   "files/insert_log/444/555/666/_stats/bm25.100/1",
+		},
+		{
+			name:       "other log type",
+			sourcePath: "files/stats_log/111/222/333/100/1",
+			expected:   "files/stats_log/444/555/666/100/1",
+		},
+		{
+			name:       "missing log type",
+			sourcePath: "files/111/222/333",
+			wantErr:    true,
+		},
+		{
+			name:       "truncated path",
+			sourcePath: "files/insert_log/111/222",
+			wantErr:    true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual, err := ReplaceSegmentIDsInPath(test.sourcePath, 444, 555, 666)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				// pkg/ errors must originate through merr so callers and the
+				// gRPC layer can classify them; a raw fmt.Errorf carries no code.
+				if got := merr.Code(err); got != merr.Code(merr.ErrParameterInvalid) {
+					t.Fatalf("error must be a merr ErrParameterInvalid, got code %d for %v", got, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if actual != test.expected {
+				t.Fatalf("ReplaceSegmentIDsInPath() = %q, want %q", actual, test.expected)
 			}
 		})
 	}
