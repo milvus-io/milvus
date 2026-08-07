@@ -20,6 +20,7 @@ class FakeMilvusClient:
         self.create_index_calls = 0
         self.create_index_kwargs = []
         self.create_collection_calls = 0
+        self.flush_calls = 0
         self.load_collection_calls = 0
 
     def has_collection(self, collection_name):
@@ -55,6 +56,9 @@ class FakeMilvusClient:
 
     def load_collection(self, **kwargs):
         self.load_collection_calls += 1
+
+    def flush(self, **kwargs):
+        self.flush_calls += 1
 
     def get_collection_stats(self, collection_name):
         return {"row_count": 1}
@@ -122,6 +126,25 @@ def test_checker_initialization_emits_structured_timing_events(monkeypatch):
     assert any('"stage":"index_discovery_complete"' in message for message in messages)
     assert any('"stage":"index_setup_complete"' in message for message in messages)
     assert any('"event":"checker_base_init_complete"' in message for message in messages)
+
+
+def test_checker_flushes_initial_seed_data_before_other_checkers_reuse_collection(monkeypatch):
+    client = FakeMilvusClient(collection_exists=False)
+    schema = patch_checker_constructor(monkeypatch, client)
+    row_counts = iter((0, 3000))
+    monkeypatch.setattr(client, "get_collection_stats", lambda collection_name: {"row_count": next(row_counts)})
+    insert_calls = []
+    monkeypatch.setattr(
+        checker_module.Checker,
+        "insert_data",
+        lambda self, **kwargs: insert_calls.append(kwargs) or (None, True),
+    )
+
+    checker = checker_module.Checker(collection_name="new_collection", schema=schema)
+
+    assert len(insert_calls) == 1
+    assert client.flush_calls == 1
+    assert checker.initial_entities == 3000
 
 
 def test_trace_tracks_in_flight_and_last_operation_state():

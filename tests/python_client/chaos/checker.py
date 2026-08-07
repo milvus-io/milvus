@@ -899,6 +899,7 @@ class Checker:
             log.info(f"collection {c_name} created, start to insert data")
             t0 = time.perf_counter()
             self.insert_data(nb=constants.ENTITIES_FOR_SEARCH, partition_name=self.p_name)
+            self.milvus_client.flush(collection_name=c_name, timeout=timeout)
             log.info(f"insert data for collection {c_name} cost {time.perf_counter() - t0}s")
 
         self.initial_entities = self.milvus_client.get_collection_stats(c_name).get("row_count", 0)
