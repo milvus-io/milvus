@@ -3591,6 +3591,7 @@ func TestRestoreSnapshotJobRESTV2(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, int64(2001), proxy.getRestoreSnapshotStateReq.GetJobId())
+	assert.Contains(t, w.Body.String(), `"jobId":"2001"`)
 	assert.Contains(t, w.Body.String(), `"collectionName":"restored_collection"`)
 	assert.Contains(t, w.Body.String(), `"state":"RestoreSnapshotCompleted"`)
 
@@ -3605,6 +3606,7 @@ func TestRestoreSnapshotJobRESTV2(t *testing.T) {
 	assert.Equal(t, "default", proxy.listRestoreSnapshotJobsReq.GetDbName())
 	assert.Equal(t, "restored_collection", proxy.listRestoreSnapshotJobsReq.GetCollectionName())
 	assert.Contains(t, w.Body.String(), `"records":[`)
+	assert.Contains(t, w.Body.String(), `"jobId":"2001"`)
 	assert.Contains(t, w.Body.String(), `"state":"RestoreSnapshotPending"`)
 }
 
