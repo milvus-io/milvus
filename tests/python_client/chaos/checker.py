@@ -324,7 +324,6 @@ timeout = 120
 search_timeout = 30
 query_timeout = 30
 HEAVY_OP_WAIT_SECONDS = 120
-RUNTIME_ADDED_FIELD_PREFIXES = ("new_field_", "new_vec_")
 
 enable_traceback = False
 DEFAULT_FMT = "[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}"
@@ -392,11 +391,6 @@ def configure_heavy_operation_schedules(checkers):
                 interval_seconds=HEAVY_OP_WAIT_SECONDS,
                 initial_jitter_seconds=HEAVY_OP_WAIT_SECONDS,
             )
-
-
-def _is_runtime_added_field(field_name):
-    """Return whether a field is managed by a schema mutation checker."""
-    return field_name.startswith(RUNTIME_ADDED_FIELD_PREFIXES)
 
 
 def create_index_params_from_dict(field_name: str, index_param_dict: dict) -> IndexParams:
@@ -660,10 +654,14 @@ class Checker:
                 raise RuntimeError(f"Failed to describe index {idx_name} for collection {c_name}") from e
 
         log.debug(f"Already indexed fields: {indexed_fields}")
+        # An existing collection owns its index lifecycle. During recovery,
+        # list_indexes may temporarily omit an in-progress index; recreating it
+        # here amplifies the pending queue across concurrent checker workers.
+        create_missing_indexes = not collection_exists
 
         # create index for scalar fields
         for f in self.scalar_field_names:
-            if f in indexed_fields or (collection_exists and _is_runtime_added_field(f)):
+            if f in indexed_fields or not create_missing_indexes:
                 continue
             try:
                 index_params = IndexParams()
@@ -674,7 +672,7 @@ class Checker:
 
         # create index for json fields
         for f in self.json_field_names:
-            if f in indexed_fields or (collection_exists and _is_runtime_added_field(f)):
+            if f in indexed_fields or not create_missing_indexes:
                 continue
             for json_path, json_cast in [("name", "varchar"), ("address", "varchar"), ("count", "double")]:
                 try:
@@ -692,7 +690,7 @@ class Checker:
 
         # create index for geometry fields
         for f in self.geometry_field_names:
-            if f in indexed_fields or (collection_exists and _is_runtime_added_field(f)):
+            if f in indexed_fields or not create_missing_indexes:
                 continue
             try:
                 index_params = IndexParams()
@@ -708,7 +706,7 @@ class Checker:
                 vector_index_created = True
                 log.debug(f"Float vector field {f} already has index")
                 continue
-            if collection_exists and _is_runtime_added_field(f):
+            if not create_missing_indexes:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_INDEX_PARAM)
@@ -725,7 +723,7 @@ class Checker:
                 vector_index_created = True
                 log.debug(f"Int8 vector field {f} already has index")
                 continue
-            if collection_exists and _is_runtime_added_field(f):
+            if not create_missing_indexes:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_INT8_INDEX_PARAM)
@@ -742,7 +740,7 @@ class Checker:
                 vector_index_created = True
                 log.debug(f"Binary vector field {f} already has index")
                 continue
-            if collection_exists and _is_runtime_added_field(f):
+            if not create_missing_indexes:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_BINARY_INDEX_PARAM)
@@ -755,7 +753,7 @@ class Checker:
 
         # create index for bm25 sparse fields
         for f in self.bm25_sparse_field_names:
-            if f in indexed_fields or (collection_exists and _is_runtime_added_field(f)):
+            if f in indexed_fields or not create_missing_indexes:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_BM25_INDEX_PARAM)
@@ -766,7 +764,7 @@ class Checker:
 
         # create index for minhash fields
         for f in self.minhash_field_names:
-            if f in indexed_fields or (collection_exists and _is_runtime_added_field(f)):
+            if f in indexed_fields or not create_missing_indexes:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_MINHASH_INDEX_PARAM)
@@ -779,7 +777,7 @@ class Checker:
 
         # create index for emb list fields
         for f in self.emb_list_field_names:
-            if f in indexed_fields or (collection_exists and _is_runtime_added_field(f)):
+            if f in indexed_fields or not create_missing_indexes:
                 continue
             try:
                 index_params = create_index_params_from_dict(f, constants.DEFAULT_EMB_LIST_INDEX_PARAM)

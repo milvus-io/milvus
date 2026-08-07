@@ -3,15 +3,22 @@ from chaos import checker as checker_module
 
 
 class FakeMilvusClient:
-    def __init__(self, indexed_fields=(), create_index_error=None, list_indexes_error=None):
+    def __init__(
+        self,
+        indexed_fields=(),
+        create_index_error=None,
+        list_indexes_error=None,
+        collection_exists=True,
+    ):
         self.indexed_fields = tuple(indexed_fields)
         self.create_index_error = create_index_error
         self.list_indexes_error = list_indexes_error
+        self.collection_exists = collection_exists
         self.create_index_calls = 0
         self.load_collection_calls = 0
 
     def has_collection(self, collection_name):
-        return True
+        return self.collection_exists
 
     def describe_collection(self, collection_name):
         return {"collection_name": collection_name}
@@ -28,6 +35,9 @@ class FakeMilvusClient:
         self.create_index_calls += 1
         if self.create_index_error is not None:
             raise self.create_index_error
+
+    def create_collection(self, **kwargs):
+        self.collection_exists = True
 
     def load_collection(self, **kwargs):
         self.load_collection_calls += 1
@@ -65,14 +75,18 @@ def patch_checker_constructor(monkeypatch, client, *, scalar_fields=(), float_ve
     }
     for helper_name, return_value in field_helpers.items():
         monkeypatch.setattr(checker_module.cf, helper_name, lambda *, schema, value=return_value: value)
+    return schema
 
 
 def test_checker_initialization_fails_fast_on_index_creation_error(monkeypatch):
-    client = FakeMilvusClient(create_index_error=TimeoutError("index creation timed out"))
-    patch_checker_constructor(monkeypatch, client, scalar_fields=("first_scalar", "second_scalar"))
+    client = FakeMilvusClient(
+        create_index_error=TimeoutError("index creation timed out"),
+        collection_exists=False,
+    )
+    schema = patch_checker_constructor(monkeypatch, client, scalar_fields=("first_scalar", "second_scalar"))
 
     with pytest.raises(RuntimeError, match="first_scalar"):
-        checker_module.Checker(collection_name="existing_collection", insert_data=False)
+        checker_module.Checker(collection_name="new_collection", schema=schema, insert_data=False)
 
     assert client.create_index_calls == 1
 
@@ -90,6 +104,21 @@ def test_checker_initialization_skips_runtime_added_fields(monkeypatch):
 
     assert client.create_index_calls == 0
     assert client.load_collection_calls == 1
+
+
+def test_checker_initialization_does_not_recreate_indexes_for_existing_collection(monkeypatch):
+    client = FakeMilvusClient()
+    patch_checker_constructor(
+        monkeypatch,
+        client,
+        scalar_fields=("base_scalar",),
+        float_vector_fields=("base_vector",),
+    )
+
+    checker_module.Checker(collection_name="existing_collection", insert_data=False)
+
+    assert client.create_index_calls == 0
+    assert client.load_collection_calls == 0
 
 
 def test_checker_initialization_fails_fast_when_indexes_cannot_be_listed(monkeypatch):
