@@ -107,16 +107,35 @@ ScalarIndexCreator::Build(const milvus::DatasetPtr& dataset,
     (void)valid_data_len;
     auto size = dataset->GetRows();
     auto data = dataset->GetTensor();
-    index_->BuildWithRawDataForUT(size, data);
+    try {
+        index_->BuildWithRawDataForUT(size, data);
+    } catch (const SegcoreError& e) {
+        if (e.get_error_code() == DataIsEmpty) {
+            skip_empty_ = true;
+            return;
+        }
+        throw;
+    }
 }
 
 void
 ScalarIndexCreator::Build() {
-    index_->Build(config_);
+    try {
+        index_->Build(config_);
+    } catch (const SegcoreError& e) {
+        if (e.get_error_code() == DataIsEmpty) {
+            skip_empty_ = true;
+            return;
+        }
+        throw;
+    }
 }
 
 milvus::BinarySet
 ScalarIndexCreator::Serialize() {
+    if (skip_empty_) {
+        return {};
+    }
     return index_->Serialize(config_);
 }
 
@@ -132,6 +151,9 @@ ScalarIndexCreator::index_type() {
 
 index::IndexStatsPtr
 ScalarIndexCreator::Upload() {
+    if (skip_empty_) {
+        return index::IndexStats::New(0, {});
+    }
     auto version = index::GetValueFromConfig<int32_t>(
                        config_, index::SCALAR_INDEX_ENGINE_VERSION)
                        .value_or(1);
