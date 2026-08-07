@@ -151,25 +151,29 @@ JSON_MIXED_TYPE_OR_51568_CASES = [
 # string / array) and OR-ing the per-kind predicates back together, so
 #   meta["p"] in [1, "2"]   ==>   meta["p"] == 1 or meta["p"] == "2"
 # Each case therefore carries the explicit OR expansion that defines its contract.
-# The tests assert equivalence against that expansion instead of hard-coded IDs, so the
-# cases stay valid if the fixture rows change. `expected_ids` is only filled in where the
-# value has been confirmed against a real cluster; it pins the equivalence check so that
-# two identically-broken sides (for example both returning nothing) cannot pass silently.
-# Tuple layout: (case_name, mixed_in_expr, or_expansion_expr, expected_ids_or_None)
+# The tests assert equivalence against that expansion, which is what the fix actually
+# promises. Equivalence alone is not enough though: both expressions go through the same
+# rewrite and execution path, so a regression there (valueGroupKey recombining literal
+# kinds, say) could make the two sides agree on the same wrong answer. The fixture is
+# deterministic, so every case also carries an independently derived `expected_ids` as a
+# second, path-independent oracle.
+# Tuple layout: (case_name, mixed_in_expr, or_expansion_expr, expected_ids)
 JSON_MIXED_TYPE_IN_51489_CASES = [
     ("int_string_in", 'meta["p"] in [1, "2"]', '(meta["p"] == 1) or (meta["p"] == "2")', [1]),
-    ("string_int_in", 'meta["p"] in ["1", 2]', '(meta["p"] == "1") or (meta["p"] == 2)', None),
+    ("string_int_in", 'meta["p"] in ["1", 2]', '(meta["p"] == "1") or (meta["p"] == 2)', [2, REAL_INDEX_ROW_COUNT]),
     (
         "int_unrelated_string_in",
         'meta["p"] in [1, "missing"]',
         '(meta["p"] == 1) or (meta["p"] == "missing")',
-        None,
+        # no row stores the string "missing", so only the int branch contributes
+        [1],
     ),
     (
         "json_array_subscript_mixed_in",
         'meta["arr"][0] in [1, "2"]',
         '(meta["arr"][0] == 1) or (meta["arr"][0] == "2")',
-        None,
+        # arr[0] is the row's own id, and it is never a string
+        [1],
     ),
 ]
 
@@ -180,12 +184,13 @@ JSON_MIXED_TYPE_IN_51489_CASES = [
 JSON_BOOL_MIXED_IN_51567_CASES = [
     ("bool_int_in_true_one", 'meta["b"] in [true, 1]', '(meta["b"] == true) or (meta["b"] == 1)', [1, 2, 6]),
     ("bool_int_in_false_one", 'meta["b"] in [false, 1]', '(meta["b"] == false) or (meta["b"] == 1)', [3, 4, 6]),
-    ("bool_string_in", 'meta["b"] in [true, "yes"]', '(meta["b"] == true) or (meta["b"] == "yes")', None),
+    ("bool_string_in", 'meta["b"] in [true, "yes"]', '(meta["b"] == true) or (meta["b"] == "yes")', [1, 2, 7]),
     (
         "bool_int_string_in",
         'meta["b"] in [true, 1, "true"]',
         '(meta["b"] == true) or (meta["b"] == 1) or (meta["b"] == "true")',
-        None,
+        # the string "true" matches nothing: pk 7/8 hold "yes"/"no"
+        [1, 2, 6],
     ),
 ]
 

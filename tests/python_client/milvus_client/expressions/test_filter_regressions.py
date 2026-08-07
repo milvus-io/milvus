@@ -72,9 +72,10 @@ L1_51567_BOOL_IN_CASE_NAMES = {"bool_int_in_true_one", "bool_int_in_false_one"}
 # Index the case tables by name so the single-case search variants below reuse the exact
 # same expression / OR expansion / expected IDs as their query counterparts.
 MIXED_IN_CASES_BY_NAME = {case[0]: case for case in JSON_MIXED_TYPE_IN_51489_CASES + JSON_BOOL_MIXED_IN_51567_CASES}
-# limit used by the mixed-type IN search variants. It is deliberately far larger than any
-# of these filters can match (at most 3 rows out of REAL_INDEX_ROW_COUNT), so the ANN
-# stage never has to drop a qualifying row for lack of slots.
+# limit used by the mixed-type IN search variants. Comfortably larger than anything these
+# filters can match, so a short result is attributable to the filter rather than to top-k.
+# No assertion depends on it being large enough -- see the search helper on why exact ANN
+# recall is never required.
 MIXED_IN_SEARCH_LIMIT = 20
 JSON_HOMOGENEOUS_IN_CONTROL_CASES = [
     ("numeric_in", 'meta["p"] in [1, 2]', [1, 2]),
@@ -279,10 +280,10 @@ def assert_mixed_type_in_matches_or_expansion(
     A mixed-type term list is partitioned by concrete literal kind and the per-kind
     predicates are OR-ed back together, so the IN form must be *exactly* equivalent to the
     explicit OR expansion carried by the case table. Asserting that equivalence -- rather
-    than a hard-coded ID list -- is what the fix actually promises, and it survives changes
-    to the fixture rows. `expected_ids` is an extra pin for the cases whose value has been
-    confirmed on a real cluster: a pure equivalence check would still pass if both sides
-    regressed the same way (both empty, for instance).
+    than a hard-coded ID list -- is what the fix actually promises. It is not sufficient on
+    its own, though: both expressions travel the same rewrite and execution path, so a
+    regression there could make them agree on the same wrong answer. `expected_ids` is the
+    independent oracle, derived from the deterministic fixture, that closes that hole.
     """
     try:
         rows = client.query(collection_name, filter=mixed_in_expr, output_fields=[default_pk])
@@ -329,12 +330,11 @@ def assert_mixed_type_in_search_matches_or_expansion(
     disagreement would be unattributable. A scalar query does exhaustive filtering, so
     `expansion_ids` is the exact predicate result.
 
-    The subset assertion is unconditionally sound -- ANN can only drop candidates, never
-    invent them -- so a row appearing in the search but not in the expansion always means the
-    filter itself is wrong. The equality assertion is safe here because these filters match at
-    most 3 rows while MIXED_IN_SEARCH_LIMIT is 20: nothing is truncated by top-k, which is the
-    only recall effect this fixture can realistically produce (the sibling #51568 search
-    regressions already rely on the same property against the same 3000-row collection).
+    Only the subset relation is asserted against the search result, because it is the one
+    direction that holds unconditionally: ANN can drop candidates but never invent them, so
+    a row present in the search and absent from the expansion always means the filter is
+    wrong. Exact recall is deliberately not required of an approximate index -- exactness is
+    covered by a scalar query on the same mixed-type expression instead.
     """
     try:
         result = client.search(
@@ -368,13 +368,23 @@ def assert_mixed_type_in_search_matches_or_expansion(
         f"its canonical expansion {or_expansion_expr!r} (={expansion_ids}); the filter is unsound"
     )
 
-    assert len(expansion_ids) <= MIXED_IN_SEARCH_LIMIT, (
-        f"{context}: {len(expansion_ids)} matching rows exceed limit {MIXED_IN_SEARCH_LIMIT}; "
-        "top-k truncation would make the equality assertion below meaningless"
-    )
-    assert search_ids == expansion_ids, (
-        f"{context}: search on {mixed_in_expr!r} returned {search_ids}, but scalar filtering on "
-        f"{or_expansion_expr!r} returned {expansion_ids}; the search filter lost qualifying rows"
+    # Deliberately no `search_ids == expansion_ids`. HNSW is approximate, so it may miss a
+    # qualifying row for reasons that have nothing to do with canonicalization, and keeping
+    # the match count under the top-k limit does not make the index exhaustive -- see the
+    # note in tests/integration/bloommatch/bloom_match_test.go, where residual differences
+    # remain ANN recall even at topK == rowNum. Requiring exact recall here would buy no
+    # coverage and would make the case flaky.
+    #
+    # Exactness is instead asserted through a scalar query on the same mixed-type
+    # expression, which filters exhaustively. Together the two checks pin the whole
+    # contract: the predicate resolves to the right row set, and the search path applies
+    # that same predicate soundly.
+    query_rows = client.query(collection_name, filter=mixed_in_expr, output_fields=[default_pk])
+    query_ids = sorted(row[default_pk] for row in query_rows)
+    missing, extra = id_delta(query_ids, expansion_ids)
+    assert query_ids == expansion_ids, (
+        f"{context}: {mixed_in_expr!r} returned {query_ids} but its canonical expansion "
+        f"{or_expansion_expr!r} returned {expansion_ids}, missing={missing}, extra={extra}"
     )
 
 
