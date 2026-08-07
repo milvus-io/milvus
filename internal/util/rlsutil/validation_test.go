@@ -41,6 +41,11 @@ func TestValidatePayloadBounds(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
+	t.Run("deprecated policy roles", func(t *testing.T) {
+		require.NoError(t, ValidatePolicyRoles(nil))
+		require.ErrorIs(t, ValidatePolicyRoles([]string{"reader"}), merr.ErrParameterInvalid)
+	})
+
 	t.Run("raw tag key transport count", func(t *testing.T) {
 		_, err := ValidateAndDeduplicateTagKeys(make([]string, MaxTransportTagKeys+1))
 		require.ErrorIs(t, err, merr.ErrParameterTooLarge)

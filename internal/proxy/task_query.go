@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
@@ -78,6 +79,7 @@ type queryTask struct {
 	channelsMvcc     map[string]Timestamp
 	preferredNodes   map[string]int64
 	fastSkip         bool
+	skipRuntimeRLS   bool
 
 	reQuery              bool
 	allQueryCnt          int64
@@ -784,8 +786,24 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		log.Debug(ctx, "determine timezone from collection", mlog.Any("collection timezone", t.resolvedTimezoneStr))
 	}
 
-	if err := t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}); err != nil {
+	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}
+	if err := t.createPlanArgs(ctx, visitorArgs); err != nil {
 		return err
+	}
+
+	if !t.skipRuntimeRLS {
+		rlsEnabled, err := resolveRLSEnforcement(ctx, colInfo.rlsEnabled, colInfo.rlsForce, t.request.GetSkipRls(),
+			t.request.GetDbName(), t.request.GetCollectionName(), "query")
+		if err != nil {
+			return err
+		}
+		principalName, enforceRLS, err := rls.ResolveRuntimePrincipal(rlsEnabled, t.request.GetRlsPrincipal(), "query")
+		if err != nil {
+			return err
+		}
+		if err := rls.DefaultManager().ApplyRLSUsingPredicate(ctx, t.CollectionID, principalName, rls.QueryAction(t.queryParams.isIterator), enforceRLS, t.schema.schemaHelper, visitorArgs, t.plan); err != nil {
+			return err
+		}
 	}
 	t.plan.GetQuery().Limit = t.Limit
 	if t.queryParams.queryIteratorCursor != nil {

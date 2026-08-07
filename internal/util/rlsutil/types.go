@@ -20,16 +20,6 @@ import "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 
 type PolicyType int32
 
-// Internal message type values reserved by the RLS proto change. Keep these
-// local until the public milvus-proto dependency is upgraded in the final PR.
-const (
-	MsgTypeCreateRowPolicy        commonpb.MsgType = 2400
-	MsgTypeDropRowPolicy          commonpb.MsgType = 2401
-	MsgTypeUpdateRowPolicy        commonpb.MsgType = 2403
-	MsgTypeSetRLSPrincipalTags    commonpb.MsgType = 2404
-	MsgTypeDeleteRLSPrincipalTags commonpb.MsgType = 2407
-)
-
 const (
 	PolicyTypeUnknown     PolicyType = 0
 	PolicyTypePermissive  PolicyType = 1
@@ -50,37 +40,36 @@ func (policyType PolicyType) String() string {
 type PolicyAction int32
 
 const (
-	PolicyActionUnknown        PolicyAction = 0
-	PolicyActionQuery          PolicyAction = 2
-	PolicyActionQueryIterator  PolicyAction = 3
-	PolicyActionSearch         PolicyAction = 4
-	PolicyActionSearchIterator PolicyAction = 5
-	PolicyActionHybridSearch   PolicyAction = 6
-	PolicyActionDelete         PolicyAction = 7
-	PolicyActionInsert         PolicyAction = 8
-	PolicyActionUpsert         PolicyAction = 9
+	PolicyActionQuery          PolicyAction = 0
+	PolicyActionSearch         PolicyAction = 1
+	PolicyActionInsert         PolicyAction = 2
+	PolicyActionDelete         PolicyAction = 3
+	PolicyActionUpsert         PolicyAction = 4
+	PolicyActionQueryIterator  PolicyAction = 5
+	PolicyActionSearchIterator PolicyAction = 6
+	PolicyActionHybridSearch   PolicyAction = 7
 )
 
 func (action PolicyAction) String() string {
 	switch action {
 	case PolicyActionQuery:
-		return "RowPolicyActionQuery"
-	case PolicyActionQueryIterator:
-		return "RowPolicyActionQueryIterator"
+		return "Query"
 	case PolicyActionSearch:
-		return "RowPolicyActionSearch"
-	case PolicyActionSearchIterator:
-		return "RowPolicyActionSearchIterator"
-	case PolicyActionHybridSearch:
-		return "RowPolicyActionHybridSearch"
-	case PolicyActionDelete:
-		return "RowPolicyActionDelete"
+		return "Search"
 	case PolicyActionInsert:
-		return "RowPolicyActionInsert"
+		return "Insert"
+	case PolicyActionDelete:
+		return "Delete"
 	case PolicyActionUpsert:
-		return "RowPolicyActionUpsert"
+		return "Upsert"
+	case PolicyActionQueryIterator:
+		return "QueryIterator"
+	case PolicyActionSearchIterator:
+		return "SearchIterator"
+	case PolicyActionHybridSearch:
+		return "HybridSearch"
 	default:
-		return "RowPolicyActionUnknown"
+		return "Unknown"
 	}
 }
 
