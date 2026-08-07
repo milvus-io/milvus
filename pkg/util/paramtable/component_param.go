@@ -5379,6 +5379,7 @@ type dataCoordConfig struct {
 	EnableCompaction                       ParamItem `refreshable:"false"`
 	EnableAutoCompaction                   ParamItem `refreshable:"true"`
 	EnableTargetBasedCompaction            ParamItem `refreshable:"false"`
+	TargetCompactionMaxEvents              ParamItem `refreshable:"true"`
 	IndexBasedCompaction                   ParamItem `refreshable:"true"`
 	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
@@ -5752,6 +5753,24 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 		Export:       true,
 	}
 	p.EnableTargetBasedCompaction.Init(base.mgr)
+
+	p.TargetCompactionMaxEvents = ParamItem{
+		Key:          "dataCoord.compaction.target.maxEventsPerReconcile",
+		Version:      "3.0.0",
+		DefaultValue: "100",
+		Doc:          "Maximum number of compaction events emitted by one target reconciliation.",
+		Export:       true,
+		Formatter: func(value string) string {
+			if getAsInt(value) <= 0 {
+				mlog.Warn(context.TODO(), "invalid target compaction event limit, using default",
+					mlog.String("configured", value),
+					mlog.String("default", "100"))
+				return "100"
+			}
+			return value
+		},
+	}
+	p.TargetCompactionMaxEvents.Init(base.mgr)
 
 	p.IndexBasedCompaction = ParamItem{
 		Key:          "dataCoord.compaction.indexBasedCompaction",

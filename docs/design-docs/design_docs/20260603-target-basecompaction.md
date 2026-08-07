@@ -1,15 +1,11 @@
 # MEP: Compaction target base slice
 
-Current state: In Progress
-
-ISSUE:
-
-- [[Enhancement]: Support reason based compaction trigger #49991](https://github.com/milvus-io/milvus/issues/49991)
-- [[Sub-task] Add compaction target foundation #50057](https://github.com/milvus-io/milvus/issues/50057)
-
-Keywords: DataCoord, Compaction, Target
-
-Released: N/A
+- **Created:** 2026-06-03
+- **Author(s):** @XuanYang-cn
+- **Status:** In Progress
+- **Component:** Coordinator
+- **Related Issues:** #49991, #50057
+- **Released:** N/A
 
 ## Summary
 
@@ -27,7 +23,25 @@ returns `ErrCompactionBlocked` without allocating or persisting a target.
 
 Guard disabled behavior remains the existing manual compaction flow.
 
-## Design
+## Motivation
+
+The Base path needs a durable request-level model that survives restart, while
+operators also need a bounded amount of physical work from each reconciliation
+tick. The event bound must not freeze semantic convergence or keep an already
+satisfied target active.
+
+## Public Interfaces
+
+This slice adds the refreshable
+`dataCoord.compaction.target.maxEventsPerReconcile` configuration. It defaults
+to `100` and limits the total number of compaction views returned by one Target
+Reconciler call. A non-positive or malformed value is invalid and falls back to
+the default.
+
+No API, proto, SDK, metric, or persisted-record shape changes are introduced by
+the event limit.
+
+## Design Details
 
 ### Record
 
@@ -51,6 +65,17 @@ The v2 trigger manager registers a guarded target reconciler. Reconciliation is
 target-first: each active target selects one complete semantic match set, asks
 the target whether that set is satisfied, and only then filters the matches for
 physical execution.
+
+The Base `REWRITE` target produces MixCompaction views and emits them through
+the existing `TriggerTypeSingle` dispatch path. This slice does not add a
+target-specific trigger type or change the Target interface; later target
+intents can define their dispatch mapping when they are introduced.
+
+Each reconciliation reads the event limit once. The limit bounds the total
+number of compaction views returned across all active targets. Reaching the
+limit suppresses only additional physical work: the reconciler still evaluates
+every target's complete match set and inactivates satisfied targets. Target
+ordering and priority remain unchanged in this slice.
 
 The Base manual `REWRITE` universe contains healthy `Flushed` segments that are
 not importing, are neither L0 nor L2, and are not precisely protected by a
@@ -104,6 +129,14 @@ Compaction task `create_ts` is minted from the allocator timestamp source, not
 the local wall clock. Replacement segments inherit the producing task
 `create_ts`.
 
+## Compatibility, Deprecation, and Migration Plan
+
+The Target path remains behind the default-off
+`dataCoord.compaction.enableTargetBasedCompaction` guard. When the path is
+enabled, the new event limit defaults to `100`; a dynamic update applies to the
+next reconciliation call. Older binaries ignore the new key. The change adds no
+persisted state and requires no migration or rollback cleanup.
+
 ## Out Of Scope
 
 - Target-aware status, drop, and retention.
@@ -115,6 +148,7 @@ the local wall clock. Replacement segments inherit the producing task
   publication causes.
 - Durable target source metadata and explicit satisfaction-cause logs.
 - Changing the existing retirement-update error contract.
+- Defining target priority, fairness, or a time-based dispatch rate limiter.
 
 ## Test Plan
 
@@ -130,6 +164,9 @@ the local wall clock. Replacement segments inherit the producing task
 - Target-first coverage proves satisfaction uses the complete match set before
   execution filtering and marks the target `TARGET_STATE_INACTIVE` only when no
   match remains.
+- Event-limit coverage proves one reconciliation emits no more than the dynamic
+  configured maximum while continuing satisfaction checks, and invalid limits
+  fall back to `100`.
 - Snapshot coverage proves pre-existing blocks reject the manual request,
   post-creation blocks pause and resume work, cluster-wide targets continue on
   unblocked collections, and task admission rejects stale planned work.
@@ -140,3 +177,18 @@ the local wall clock. Replacement segments inherit the producing task
 - Reload coverage verifies active records resume from persisted meta.
 - Build, DataCoord tests, metastore tests, static checks, and generated proto
   hygiene pass.
+
+## Rejected Alternatives
+
+- Caching the limit in the reconciler or registering a dedicated watcher was
+  rejected because reading the refreshable parameter once per reconciliation
+  is sufficient.
+- Stopping the Target loop after the budget is exhausted was rejected because
+  it would skip satisfaction checks for later Targets.
+- Defining deterministic ordering, fairness, or priority was deferred to the
+  later scheduling slice.
+
+## References
+
+- [Target-based compaction parent issue #49991](https://github.com/milvus-io/milvus/issues/49991)
+- [Compaction target foundation issue #50057](https://github.com/milvus-io/milvus/issues/50057)

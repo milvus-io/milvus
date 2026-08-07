@@ -44,7 +44,7 @@ func (reconciler *compactionTargetReconciler) Trigger(ctx context.Context) (map[
 
 func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
 	events := map[CompactionTriggerType][]CompactionView{
-		TriggerTypeTarget: nil,
+		TriggerTypeSingle: nil,
 	}
 	if !reconciler.Enable() {
 		return events, nil
@@ -55,6 +55,7 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 	if len(targets) == 0 {
 		return events, nil
 	}
+	maxEvents := paramtable.Get().DataCoordCfg.TargetCompactionMaxEvents.GetAsInt()
 
 	satisfiedTargets := make([]*datapb.CompactionTarget, 0)
 	for _, target := range targets {
@@ -67,9 +68,13 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 			satisfiedTargets = append(satisfiedTargets, record)
 			continue
 		}
-		events[TriggerTypeTarget] = append(
-			events[TriggerTypeTarget],
-			reconciler.compactionViews(ctx, record, target.CompactionType(), matches)...,
+		remaining := maxEvents - len(events[TriggerTypeSingle])
+		if remaining <= 0 {
+			continue
+		}
+		events[TriggerTypeSingle] = append(
+			events[TriggerTypeSingle],
+			reconciler.compactionViews(ctx, record, target.CompactionType(), matches, remaining)...,
 		)
 	}
 
@@ -89,6 +94,7 @@ func (reconciler *compactionTargetReconciler) compactionViews(
 	record *datapb.CompactionTarget,
 	compactionType datapb.CompactionType,
 	matches []*SegmentInfo,
+	limit int,
 ) []CompactionView {
 	blockedCollections := make(map[int64]bool)
 	sharedSelectable := make([]*SegmentInfo, 0, len(matches))
@@ -108,8 +114,11 @@ func (reconciler *compactionTargetReconciler) compactionViews(
 	switch compactionType {
 	case datapb.CompactionType_MixCompaction:
 		selectable := reconciler.filterMixCompactionSelectable(ctx, sharedSelectable)
-		views := make([]CompactionView, 0, len(selectable))
+		views := make([]CompactionView, 0, min(len(selectable), limit))
 		for _, segment := range selectable {
+			if len(views) >= limit {
+				break
+			}
 			segmentViews := GetViewsByInfo(segment)
 			views = append(views, &MixSegmentView{
 				label:     segmentViews[0].label,

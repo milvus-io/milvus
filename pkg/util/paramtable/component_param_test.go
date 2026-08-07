@@ -996,6 +996,22 @@ func TestDataCoordCompactionTargetConfig(t *testing.T) {
 	field, ok := reflect.TypeOf(dataCoordConfig{}).FieldByName("EnableTargetBasedCompaction")
 	assert.True(t, ok)
 	assert.Equal(t, "false", field.Tag.Get("refreshable"))
+
+	assert.Equal(t, "dataCoord.compaction.target.maxEventsPerReconcile", cfg.TargetCompactionMaxEvents.Key)
+	assert.Equal(t, "3.0.0", cfg.TargetCompactionMaxEvents.Version)
+	assert.Equal(t, "100", cfg.TargetCompactionMaxEvents.DefaultValue)
+	assert.Equal(t, 100, cfg.TargetCompactionMaxEvents.GetAsInt())
+
+	for _, value := range []string{"0", "-1", "invalid"} {
+		base.Save(cfg.TargetCompactionMaxEvents.Key, value)
+		assert.Equal(t, 100, cfg.TargetCompactionMaxEvents.GetAsInt())
+	}
+	base.Save(cfg.TargetCompactionMaxEvents.Key, "25")
+	assert.Equal(t, 25, cfg.TargetCompactionMaxEvents.GetAsInt())
+
+	field, ok = reflect.TypeOf(dataCoordConfig{}).FieldByName("TargetCompactionMaxEvents")
+	assert.True(t, ok)
+	assert.Equal(t, "true", field.Tag.Get("refreshable"))
 }
 
 func TestForbiddenItem(t *testing.T) {

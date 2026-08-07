@@ -37,7 +37,7 @@ func TestCompactionTargetReconcilerTriggersEligibleRewriteSegments(t *testing.T)
 	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	views := events[TriggerTypeTarget]
+	views := events[TriggerTypeSingle]
 	require.Len(t, views, 3)
 	segmentIDs := make([]int64, 0, len(views))
 	for _, view := range views {
@@ -69,7 +69,7 @@ func TestCompactionTargetReconcilerSatisfiedTargetEmitsNoWork(t *testing.T) {
 	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	require.Empty(t, events[TriggerTypeTarget])
+	require.Empty(t, events[TriggerTypeSingle])
 	require.Equal(t, datapb.TargetState_TARGET_STATE_INACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
@@ -103,7 +103,7 @@ func TestCompactionTargetReconcilerReconcilesMultipleTargetsIndependently(t *tes
 	events, err := newCompactionTargetReconcilerForTest(dcMeta).Trigger(ctx)
 
 	require.NoError(t, err)
-	views := events[TriggerTypeTarget]
+	views := events[TriggerTypeSingle]
 	require.Len(t, views, 2)
 	segmentsByTarget := make(map[int64][]int64, len(views))
 	for _, view := range views {
@@ -113,6 +113,53 @@ func TestCompactionTargetReconcilerReconcilesMultipleTargetsIndependently(t *tes
 		100: {1},
 		200: {2},
 	}, segmentsByTarget)
+}
+
+func TestCompactionTargetReconcilerLimitsEventsWithoutSkippingSatisfaction(t *testing.T) {
+	enableCompactionTargetReconciler(t)
+	paramtable.Get().Save(Params.DataCoordCfg.TargetCompactionMaxEvents.Key, "1")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(Params.DataCoordCfg.TargetCompactionMaxEvents.Key)
+	})
+
+	ctx := context.Background()
+	activeRecord := &datapb.CompactionTarget{
+		TargetID:     100,
+		CollectionID: 1,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+		Properties:   compactionTargetSegmentIDProperties([]int64{1, 2}),
+		ExpectedTS:   200,
+		TailLimit:    0,
+		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
+	}
+	satisfiedRecord := &datapb.CompactionTarget{
+		TargetID:     200,
+		CollectionID: 1,
+		Intent:       datapb.TargetIntent_INTENT_REWRITE,
+		Properties:   compactionTargetSegmentIDProperties([]int64{3}),
+		ExpectedTS:   200,
+		TailLimit:    0,
+		State:        datapb.TargetState_TARGET_STATE_ACTIVE,
+	}
+	targetMeta := newLoadedCompactionTargetMeta(t, ctx, activeRecord, satisfiedRecord)
+	meta := newCompactionTargetReconcilerTestMeta(targetMeta,
+		sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false),
+		sortedTargetSegment(2, 1, 10, "ch-1", 0, 199, false),
+	)
+	reconciler := newCompactionTargetReconcilerForTest(meta)
+
+	events, err := reconciler.Reconcile(ctx)
+
+	require.NoError(t, err)
+	require.Len(t, events[TriggerTypeSingle], 1)
+	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
+	require.Equal(t, datapb.TargetState_TARGET_STATE_INACTIVE, targetMeta.GetCompactionTarget(200).GetState())
+
+	paramtable.Get().Save(Params.DataCoordCfg.TargetCompactionMaxEvents.Key, "2")
+	events, err = reconciler.Reconcile(ctx)
+
+	require.NoError(t, err)
+	require.Len(t, events[TriggerTypeSingle], 2)
 }
 
 func TestCompactionTargetReconcilerAppliesTargetCollectionScope(t *testing.T) {
@@ -135,8 +182,8 @@ func TestCompactionTargetReconcilerAppliesTargetCollectionScope(t *testing.T) {
 	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	require.Len(t, events[TriggerTypeTarget], 1)
-	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
+	require.Len(t, events[TriggerTypeSingle], 1)
+	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeSingle][0].GetSegmentsView()))
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
@@ -160,7 +207,7 @@ func TestCompactionTargetReconcilerInactivatesRewriteTargetWhenNoMatchRemains(t 
 	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	require.Empty(t, events[TriggerTypeTarget])
+	require.Empty(t, events[TriggerTypeSingle])
 	require.Equal(t, datapb.TargetState_TARGET_STATE_INACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
@@ -186,7 +233,7 @@ func TestCompactionTargetReconcilerIgnoresDroppedSegmentsForSatisfaction(t *test
 	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	require.Empty(t, events[TriggerTypeTarget])
+	require.Empty(t, events[TriggerTypeSingle])
 	require.Equal(t, datapb.TargetState_TARGET_STATE_INACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
@@ -241,7 +288,7 @@ func TestCompactionTargetReconcilerOutsideManualMatchDomainDoesNotHoldTargetActi
 			events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 			require.NoError(t, err)
-			require.Empty(t, events[TriggerTypeTarget])
+			require.Empty(t, events[TriggerTypeSingle])
 			require.Equal(t, datapb.TargetState_TARGET_STATE_INACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 		})
 	}
@@ -270,15 +317,15 @@ func TestCompactionTargetReconcilerWaitsForSnapshotCreatedAfterTarget(t *testing
 	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	require.Empty(t, events[TriggerTypeTarget])
+	require.Empty(t, events[TriggerTypeSingle])
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 
 	delete(meta.snapshotMeta.segmentProtectionUntil, segment.GetID())
 	events, err = newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	require.Len(t, events[TriggerTypeTarget], 1)
-	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
+	require.Len(t, events[TriggerTypeSingle], 1)
+	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeSingle][0].GetSegmentsView()))
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
@@ -334,7 +381,7 @@ func TestCompactionTargetReconcilerKeepsTemporarilyBlockedMatchActive(t *testing
 			events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 			require.NoError(t, err)
-			require.Empty(t, events[TriggerTypeTarget])
+			require.Empty(t, events[TriggerTypeSingle])
 			require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 		})
 	}
@@ -361,15 +408,15 @@ func TestCompactionTargetReconcilerPausesAndResumesSnapshotBlockedCollection(t *
 	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	require.Empty(t, events[TriggerTypeTarget])
+	require.Empty(t, events[TriggerTypeSingle])
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 
 	meta.snapshotMeta.ClearSnapshotPending(1)
 	events, err = newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	require.Len(t, events[TriggerTypeTarget], 1)
-	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
+	require.Len(t, events[TriggerTypeSingle], 1)
+	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeSingle][0].GetSegmentsView()))
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 }
 
@@ -448,7 +495,7 @@ func TestCompactionTargetReconcilerUsesManualIndexReadinessFilter(t *testing.T) 
 			events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 			require.NoError(t, err)
-			views := events[TriggerTypeTarget]
+			views := events[TriggerTypeSingle]
 			require.Len(t, views, len(test.wantSegmentIDs))
 			for i, segmentID := range test.wantSegmentIDs {
 				require.Equal(t, []int64{segmentID}, segmentIDsFromViews(views[i].GetSegmentsView()))
@@ -485,8 +532,8 @@ func TestCompactionTargetReconcilerSkipsManualIndexFilterWhenDisabled(t *testing
 	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	require.Len(t, events[TriggerTypeTarget], 1)
-	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
+	require.Len(t, events[TriggerTypeSingle], 1)
+	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeSingle][0].GetSegmentsView()))
 }
 
 func TestCompactionTargetReconcilerManualIndexFilterKeepsNoIndexCollection(t *testing.T) {
@@ -513,8 +560,8 @@ func TestCompactionTargetReconcilerManualIndexFilterKeepsNoIndexCollection(t *te
 	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
-	require.Len(t, events[TriggerTypeTarget], 1)
-	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeTarget][0].GetSegmentsView()))
+	require.Len(t, events[TriggerTypeSingle], 1)
+	require.Equal(t, []int64{1}, segmentIDsFromViews(events[TriggerTypeSingle][0].GetSegmentsView()))
 }
 
 func newLoadedCompactionTargetMeta(t *testing.T, ctx context.Context, records ...*datapb.CompactionTarget) *compactionTargetMeta {

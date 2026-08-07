@@ -53,7 +53,6 @@ const (
 	TriggerTypeForceMerge
 	TriggerTypeStorageVersionUpgrade
 	TriggerTypeBumpSchemaVersion
-	TriggerTypeTarget
 )
 
 type TickerType int8
@@ -71,7 +70,7 @@ func (t CompactionTriggerType) GetCompactionType() datapb.CompactionType {
 	switch t {
 	case TriggerTypeLevelZeroViewChange, TriggerTypeLevelZeroViewIDLE, TriggerTypeLevelZeroViewManual:
 		return datapb.CompactionType_Level0DeleteCompaction
-	case TriggerTypeSegmentSizeViewChange, TriggerTypeSingle, TriggerTypeForceMerge, TriggerTypeTarget:
+	case TriggerTypeSegmentSizeViewChange, TriggerTypeSingle, TriggerTypeForceMerge:
 		return datapb.CompactionType_MixCompaction
 	case TriggerTypeClustering:
 		return datapb.CompactionType_ClusteringCompaction
@@ -108,8 +107,6 @@ func (t CompactionTriggerType) String() string {
 		return "StorageVersionUpgrade"
 	case TriggerTypeBumpSchemaVersion:
 		return "BumpSchemaVersion"
-	case TriggerTypeTarget:
-		return "Target"
 	default:
 		return ""
 	}
@@ -428,7 +425,7 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 					m.SubmitL0ViewToScheduler(ctx, outView)
 				case TriggerTypeClustering:
 					m.SubmitClusteringViewToScheduler(ctx, outView)
-				case TriggerTypeSingle, TriggerTypeSort, TriggerTypeStorageVersionUpgrade, TriggerTypeTarget:
+				case TriggerTypeSingle, TriggerTypeSort, TriggerTypeStorageVersionUpgrade:
 					m.SubmitSingleViewToScheduler(ctx, outView, eventType)
 				case TriggerTypeForceMerge:
 					m.SubmitForceMergeViewToScheduler(ctx, outView)
