@@ -3759,15 +3759,16 @@ type queryNodeConfig struct {
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
-	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
-	MaxReadConcurrency    ParamItem `refreshable:"true"`
-	MaxGpuReadConcurrency ParamItem `refreshable:"false"`
-	MaxGroupNQ            ParamItem `refreshable:"true"`
-	NQMergeRatio          ParamItem `refreshable:"true"`
-	MaxDeadlineMergeGap   ParamItem `refreshable:"true"`
-	TopKMergeRatio        ParamItem `refreshable:"true"`
-	CPURatio              ParamItem `refreshable:"true"`
-	GracefulStopTimeout   ParamItem `refreshable:"false"`
+	MaxUnsolvedQueueSize         ParamItem `refreshable:"true"`
+	MaxReadConcurrency           ParamItem `refreshable:"true"`
+	MaxGpuReadConcurrency        ParamItem `refreshable:"false"`
+	MaxGroupNQ                   ParamItem `refreshable:"true"`
+	NQMergeRatio                 ParamItem `refreshable:"true"`
+	MaxDeadlineMergeGap          ParamItem `refreshable:"true"`
+	TopKMergeRatio               ParamItem `refreshable:"true"`
+	CPURatio                     ParamItem `refreshable:"true"`
+	GracefulStopTimeout          ParamItem `refreshable:"false"`
+	StandaloneMigrateDataTimeout ParamItem `refreshable:"false"`
 
 	EnableResultZeroCopy ParamItem `refreshable:"true"`
 
@@ -4885,6 +4886,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
 
+	p.StandaloneMigrateDataTimeout = ParamItem{
+		Key:          "queryNode.standaloneMigrateDataTimeout",
+		Version:      "2.6.16",
+		DefaultValue: "10s",
+		Doc:          "Duration string (e.g. 10s, 3m). In standalone mode, after this duration, the node stops waiting for data migration if no other active query node is available.",
+		Export:       true,
+	}
+	p.StandaloneMigrateDataTimeout.Init(base.mgr)
+
 	p.MaxSegmentDeleteBuffer = ParamItem{
 		Key:          "queryNode.maxSegmentDeleteBuffer",
 		Version:      "2.3.0",
@@ -5901,7 +5911,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.maxFullSegmentThreshold",
 		Version:      "2.6.8",
 		DefaultValue: "100",
-		Doc:          "Maximum number of segments to use maxFull algorithm (O(n³) complexity) for optimal full segment count. For larger counts, uses faster larger algorithm (O(n)).",
+		Doc:          "Deprecated. Force-merge grouping no longer uses this threshold.",
 		Export:       false,
 	}
 	p.CompactionMaxFullSegmentThreshold.Init(base.mgr)
@@ -6870,9 +6880,10 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.ExternalCollectionPreAllocSegments.Init(base.mgr)
 
 	p.ExternalCollectionFilesPerTask = ParamItem{
-		Key:          "dataCoord.externalCollectionFilesPerTask",
-		Version:      "3.0.0",
-		Doc:          "Minimum number of external files per refresh task. Controls task splitting granularity.",
+		Key:     "dataCoord.externalCollectionFilesPerTask",
+		Version: "3.0.0",
+		Doc: "Target number of external files per base refresh task. " +
+			"Ownership closure may merge base ranges, so final tasks can contain more files.",
 		DefaultValue: "10000",
 		PanicIfEmpty: false,
 	}

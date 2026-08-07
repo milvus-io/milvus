@@ -93,6 +93,81 @@ func (at *analyzeTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
+func buildAnalyzeInfo(req *workerpb.AnalyzeRequest) *clusteringpb.AnalyzeInfo {
+	storageConfig := &clusteringpb.StorageConfig{
+		Address:           req.GetStorageConfig().GetAddress(),
+		AccessKeyID:       req.GetStorageConfig().GetAccessKeyID(),
+		SecretAccessKey:   req.GetStorageConfig().GetSecretAccessKey(),
+		UseSSL:            req.GetStorageConfig().GetUseSSL(),
+		BucketName:        req.GetStorageConfig().GetBucketName(),
+		RootPath:          req.GetStorageConfig().GetRootPath(),
+		UseIAM:            req.GetStorageConfig().GetUseIAM(),
+		IAMEndpoint:       req.GetStorageConfig().GetIAMEndpoint(),
+		StorageType:       req.GetStorageConfig().GetStorageType(),
+		UseVirtualHost:    req.GetStorageConfig().GetUseVirtualHost(),
+		Region:            req.GetStorageConfig().GetRegion(),
+		CloudProvider:     req.GetStorageConfig().GetCloudProvider(),
+		RequestTimeoutMs:  req.GetStorageConfig().GetRequestTimeoutMs(),
+		MaxConnections:    req.GetStorageConfig().GetMaxConnections(),
+		SslCACert:         req.GetStorageConfig().GetSslCACert(),
+		GcpCredentialJSON: req.GetStorageConfig().GetGcpCredentialJSON(),
+		SslTlsMinVersion:  req.GetStorageConfig().GetSslTlsMinVersion(),
+		UseCrc32CChecksum: req.GetStorageConfig().GetUseCrc32CChecksum(),
+	}
+
+	n := len(req.GetSegmentStats())
+	numRowsMap := make(map[int64]int64, n)
+	segmentInsertFilesMap := make(map[int64]*clusteringpb.InsertFiles, n)
+	manifestPathsMap := make(map[int64]string, n)
+
+	for segID, stats := range req.GetSegmentStats() {
+		numRowsMap[segID] = stats.GetNumRows()
+
+		if manifest := stats.GetManifestPath(); manifest != "" {
+			// StorageV3: forward the manifest string; C++ resolves files via loon.
+			manifestPathsMap[segID] = manifest
+			continue
+		}
+
+		// V1: reconstruct insert-log paths from logIDs.
+		insertFiles := make([]string, 0, len(stats.GetLogIDs()))
+		for _, id := range stats.GetLogIDs() {
+			path := metautil.BuildInsertLogPath(req.GetStorageConfig().RootPath,
+				req.GetCollectionID(), req.GetPartitionID(), segID, req.GetFieldID(), id)
+			insertFiles = append(insertFiles, path)
+		}
+		segmentInsertFilesMap[segID] = &clusteringpb.InsertFiles{InsertFiles: insertFiles}
+	}
+
+	field := req.GetField()
+	if field == nil || field.GetDataType() == schemapb.DataType_None {
+		field = &schemapb.FieldSchema{
+			FieldID:  req.GetFieldID(),
+			Name:     req.GetFieldName(),
+			DataType: req.GetFieldType(),
+		}
+	}
+
+	return &clusteringpb.AnalyzeInfo{
+		ClusterID:       req.GetClusterID(),
+		BuildID:         req.GetTaskID(),
+		CollectionID:    req.GetCollectionID(),
+		PartitionID:     req.GetPartitionID(),
+		Version:         req.GetVersion(),
+		Dim:             req.GetDim(),
+		StorageConfig:   storageConfig,
+		NumClusters:     req.GetNumClusters(),
+		TrainSize:       int64(float64(hardware.GetMemoryCount()) * req.GetMaxTrainSizeRatio()),
+		MinClusterRatio: req.GetMinClusterSizeRatio(),
+		MaxClusterRatio: req.GetMaxClusterSizeRatio(),
+		MaxClusterSize:  req.GetMaxClusterSize(),
+		NumRows:         numRowsMap,
+		InsertFiles:     segmentInsertFilesMap,
+		FieldSchema:     field,
+		ManifestPaths:   manifestPathsMap,
+	}
+}
+
 func (at *analyzeTask) Execute(ctx context.Context) error {
 	var err error
 
@@ -102,69 +177,7 @@ func (at *analyzeTask) Execute(ctx context.Context) error {
 
 	log.Info(ctx, "Begin to build analyze task")
 
-	storageConfig := &clusteringpb.StorageConfig{
-		Address:           at.req.GetStorageConfig().GetAddress(),
-		AccessKeyID:       at.req.GetStorageConfig().GetAccessKeyID(),
-		SecretAccessKey:   at.req.GetStorageConfig().GetSecretAccessKey(),
-		UseSSL:            at.req.GetStorageConfig().GetUseSSL(),
-		BucketName:        at.req.GetStorageConfig().GetBucketName(),
-		RootPath:          at.req.GetStorageConfig().GetRootPath(),
-		UseIAM:            at.req.GetStorageConfig().GetUseIAM(),
-		IAMEndpoint:       at.req.GetStorageConfig().GetIAMEndpoint(),
-		StorageType:       at.req.GetStorageConfig().GetStorageType(),
-		UseVirtualHost:    at.req.GetStorageConfig().GetUseVirtualHost(),
-		Region:            at.req.GetStorageConfig().GetRegion(),
-		CloudProvider:     at.req.GetStorageConfig().GetCloudProvider(),
-		RequestTimeoutMs:  at.req.GetStorageConfig().GetRequestTimeoutMs(),
-		MaxConnections:    at.req.GetStorageConfig().GetMaxConnections(),
-		SslCACert:         at.req.GetStorageConfig().GetSslCACert(),
-		GcpCredentialJSON: at.req.GetStorageConfig().GetGcpCredentialJSON(),
-		SslTlsMinVersion:  at.req.GetStorageConfig().GetSslTlsMinVersion(),
-		UseCrc32CChecksum: at.req.GetStorageConfig().GetUseCrc32CChecksum(),
-	}
-
-	numRowsMap := make(map[int64]int64)
-	segmentInsertFilesMap := make(map[int64]*clusteringpb.InsertFiles)
-
-	for segID, stats := range at.req.GetSegmentStats() {
-		numRows := stats.GetNumRows()
-		numRowsMap[segID] = numRows
-		log.Info(ctx, "append segment rows", mlog.Int64("segment id", segID), mlog.Int64("rows", numRows))
-		insertFiles := make([]string, 0, len(stats.GetLogIDs()))
-		for _, id := range stats.GetLogIDs() {
-			path := metautil.BuildInsertLogPath(at.req.GetStorageConfig().RootPath,
-				at.req.GetCollectionID(), at.req.GetPartitionID(), segID, at.req.GetFieldID(), id)
-			insertFiles = append(insertFiles, path)
-		}
-		segmentInsertFilesMap[segID] = &clusteringpb.InsertFiles{InsertFiles: insertFiles}
-	}
-
-	field := at.req.GetField()
-	if field == nil || field.GetDataType() == schemapb.DataType_None {
-		field = &schemapb.FieldSchema{
-			FieldID:  at.req.GetFieldID(),
-			Name:     at.req.GetFieldName(),
-			DataType: at.req.GetFieldType(),
-		}
-	}
-
-	analyzeInfo := &clusteringpb.AnalyzeInfo{
-		ClusterID:       at.req.GetClusterID(),
-		BuildID:         at.req.GetTaskID(),
-		CollectionID:    at.req.GetCollectionID(),
-		PartitionID:     at.req.GetPartitionID(),
-		Version:         at.req.GetVersion(),
-		Dim:             at.req.GetDim(),
-		StorageConfig:   storageConfig,
-		NumClusters:     at.req.GetNumClusters(),
-		TrainSize:       int64(float64(hardware.GetMemoryCount()) * at.req.GetMaxTrainSizeRatio()),
-		MinClusterRatio: at.req.GetMinClusterSizeRatio(),
-		MaxClusterRatio: at.req.GetMaxClusterSizeRatio(),
-		MaxClusterSize:  at.req.GetMaxClusterSize(),
-		NumRows:         numRowsMap,
-		InsertFiles:     segmentInsertFilesMap,
-		FieldSchema:     field,
-	}
+	analyzeInfo := buildAnalyzeInfo(at.req)
 
 	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo, at.pluginContext)
 	if err != nil {

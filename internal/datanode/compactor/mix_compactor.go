@@ -369,7 +369,13 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 					rb = storage.NewRecordBuilder(writerSchema)
 				}
 				if sliceStart != -1 {
-					rb.Append(r, sliceStart, i)
+					// Append is not atomic: a failed builder may hold a partial
+					// row and must never reach Build.
+					if err = rb.Append(r, sliceStart, i); err != nil {
+						rb.Release()
+						cleanupMaterializedRecord(r)
+						return 0, 0, err
+					}
 				}
 				sliceStart = -1
 				continue
@@ -382,7 +388,11 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 
 		if rb != nil {
 			if sliceStart != -1 {
-				rb.Append(r, sliceStart, r.Len())
+				if err = rb.Append(r, sliceStart, r.Len()); err != nil {
+					rb.Release()
+					cleanupMaterializedRecord(r)
+					return 0, 0, err
+				}
 			}
 			if rb.GetRowNum() > 0 {
 				err := func() error {
@@ -395,10 +405,12 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 					return mWriter.Write(out)
 				}()
 				if err != nil {
+					rb.Release()
 					cleanupMaterializedRecord(r)
 					return 0, 0, err
 				}
 			}
+			rb.Release()
 		} else {
 			out := overwriteRecordTimestamps(r, seg.GetCommitTimestamp())
 			err := mWriter.Write(out)
