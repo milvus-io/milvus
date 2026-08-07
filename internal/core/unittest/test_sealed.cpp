@@ -1575,37 +1575,37 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                     cm);
     segment->LoadFieldData(load_info);
     auto& skip_index = segment->GetSkipIndex();
-    bool equal_5_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 5);
-    bool equal_12_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 12);
-    bool equal_10_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 10);
+    bool equal_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, pk_fid, 0, OpType::Equal, 5);
+    bool equal_12_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, pk_fid, 0, OpType::Equal, 12);
+    bool equal_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, pk_fid, 0, OpType::Equal, 10);
     ASSERT_FALSE(equal_5_skip);
     ASSERT_TRUE(equal_12_skip);
     ASSERT_FALSE(equal_10_skip);
-    bool less_than_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 1);
-    bool less_than_5_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 5);
+    bool less_than_1_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, pk_fid, 0, OpType::LessThan, 1);
+    bool less_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, pk_fid, 0, OpType::LessThan, 5);
     ASSERT_TRUE(less_than_1_skip);
     ASSERT_FALSE(less_than_5_skip);
-    bool less_equal_than_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessEqual, 1);
-    bool less_equal_than_15_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 15);
+    bool less_equal_than_1_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, pk_fid, 0, OpType::LessEqual, 1);
+    bool less_equal_than_15_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, pk_fid, 0, OpType::LessThan, 15);
     ASSERT_FALSE(less_equal_than_1_skip);
     ASSERT_FALSE(less_equal_than_15_skip);
     bool greater_than_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterThan, 10);
+        nullptr, pk_fid, 0, OpType::GreaterThan, 10);
     bool greater_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterThan, 5);
+        nullptr, pk_fid, 0, OpType::GreaterThan, 5);
     ASSERT_TRUE(greater_than_10_skip);
     ASSERT_FALSE(greater_than_5_skip);
     bool greater_equal_than_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterEqual, 10);
+        nullptr, pk_fid, 0, OpType::GreaterEqual, 10);
     bool greater_equal_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterEqual, 5);
+        nullptr, pk_fid, 0, OpType::GreaterEqual, 5);
     ASSERT_FALSE(greater_equal_than_10_skip);
     ASSERT_FALSE(greater_equal_than_5_skip);
 
@@ -1621,8 +1621,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                {int32_field_data},
                                                cm);
     segment->LoadFieldData(load_info);
-    less_than_1_skip =
-        skip_index.CanSkipUnaryRange<int32_t>(i32_fid, 0, OpType::LessThan, 1);
+    less_than_1_skip = skip_index.CanSkipUnaryRange<int32_t>(
+        nullptr, i32_fid, 0, OpType::LessThan, 1);
     ASSERT_TRUE(less_than_1_skip);
 
     //test for int16
@@ -1637,8 +1637,8 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                {int16_field_data},
                                                cm);
     segment->LoadFieldData(load_info);
-    bool less_than_12_skip =
-        skip_index.CanSkipUnaryRange<int16_t>(i16_fid, 0, OpType::LessThan, 12);
+    bool less_than_12_skip = skip_index.CanSkipUnaryRange<int16_t>(
+        nullptr, i16_fid, 0, OpType::LessThan, 12);
     ASSERT_FALSE(less_than_12_skip);
 
     //test for int8
@@ -1654,7 +1654,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                cm);
     segment->LoadFieldData(load_info);
     bool greater_than_12_skip = skip_index.CanSkipUnaryRange<int8_t>(
-        i8_fid, 0, OpType::GreaterThan, 12);
+        nullptr, i8_fid, 0, OpType::GreaterThan, 12);
     ASSERT_TRUE(greater_than_12_skip);
 
     // test for float
@@ -1671,7 +1671,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                cm);
     segment->LoadFieldData(load_info);
     greater_than_10_skip = skip_index.CanSkipUnaryRange<float>(
-        float_fid, 0, OpType::GreaterThan, 10.0);
+        nullptr, float_fid, 0, OpType::GreaterThan, 10.0);
     ASSERT_TRUE(greater_than_10_skip);
 
     // test for double
@@ -1688,7 +1688,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
                                                cm);
     segment->LoadFieldData(load_info);
     greater_than_10_skip = skip_index.CanSkipUnaryRange<double>(
-        double_fid, 0, OpType::GreaterThan, 10.0);
+        nullptr, double_fid, 0, OpType::GreaterThan, 10.0);
     ASSERT_TRUE(greater_than_10_skip);
 }
 
@@ -1719,20 +1719,20 @@ TEST(Sealed, SkipIndexSkipBinaryRange) {
                                                     cm);
     segment->LoadFieldData(load_info);
     auto& skip_index = segment->GetSkipIndex();
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, -3, 1, true, true));
-    ASSERT_TRUE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, -3, 1, true, false));
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
+        nullptr, pk_fid, 0, -3, 1, true, true));
+    ASSERT_TRUE(skip_index.CanSkipBinaryRange<int64_t>(
+        nullptr, pk_fid, 0, -3, 1, true, false));
 
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, 7, 9, true, true));
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, 8, 12, true, false));
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
+        nullptr, pk_fid, 0, 7, 9, true, true));
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
+        nullptr, pk_fid, 0, 8, 12, true, false));
 
-    ASSERT_TRUE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, 10, 12, false, true));
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, 10, 12, true, true));
+    ASSERT_TRUE(skip_index.CanSkipBinaryRange<int64_t>(
+        nullptr, pk_fid, 0, 10, 12, false, true));
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
+        nullptr, pk_fid, 0, 10, 12, true, true));
 }
 
 TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
@@ -1763,46 +1763,46 @@ TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
                                                     cm);
     segment->LoadFieldData(load_info);
     auto& skip_index = segment->GetSkipIndex();
-    bool equal_5_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 5);
-    bool equal_4_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 4);
-    bool equal_2_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 2);
-    bool equal_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 1);
+    bool equal_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, i64_fid, 0, OpType::Equal, 5);
+    bool equal_4_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, i64_fid, 0, OpType::Equal, 4);
+    bool equal_2_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, i64_fid, 0, OpType::Equal, 2);
+    bool equal_1_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, i64_fid, 0, OpType::Equal, 1);
     ASSERT_TRUE(equal_5_skip);
     ASSERT_TRUE(equal_4_skip);
     ASSERT_FALSE(equal_2_skip);
     ASSERT_FALSE(equal_1_skip);
-    bool less_than_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessThan, 1);
-    bool less_than_5_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessThan, 5);
+    bool less_than_1_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, i64_fid, 0, OpType::LessThan, 1);
+    bool less_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, i64_fid, 0, OpType::LessThan, 5);
     ASSERT_TRUE(less_than_1_skip);
     ASSERT_FALSE(less_than_5_skip);
-    bool less_equal_than_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessEqual, 1);
-    bool less_equal_than_15_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessThan, 15);
+    bool less_equal_than_1_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, i64_fid, 0, OpType::LessEqual, 1);
+    bool less_equal_than_15_skip = skip_index.CanSkipUnaryRange<int64_t>(
+        nullptr, i64_fid, 0, OpType::LessThan, 15);
     ASSERT_FALSE(less_equal_than_1_skip);
     ASSERT_FALSE(less_equal_than_15_skip);
     bool greater_than_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterThan, 10);
+        nullptr, i64_fid, 0, OpType::GreaterThan, 10);
     bool greater_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterThan, 5);
+        nullptr, i64_fid, 0, OpType::GreaterThan, 5);
     bool greater_than_2_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterThan, 2);
+        nullptr, i64_fid, 0, OpType::GreaterThan, 2);
     bool greater_than_1_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterThan, 1);
+        nullptr, i64_fid, 0, OpType::GreaterThan, 1);
     ASSERT_TRUE(greater_than_10_skip);
     ASSERT_TRUE(greater_than_5_skip);
     ASSERT_TRUE(greater_than_2_skip);
     ASSERT_FALSE(greater_than_1_skip);
     bool greater_equal_than_3_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterEqual, 3);
+        nullptr, i64_fid, 0, OpType::GreaterEqual, 3);
     bool greater_equal_than_2_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterEqual, 2);
+        nullptr, i64_fid, 0, OpType::GreaterEqual, 2);
     ASSERT_TRUE(greater_equal_than_3_skip);
     ASSERT_FALSE(greater_equal_than_2_skip);
 }
@@ -1834,20 +1834,20 @@ TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
                                                     cm);
     segment->LoadFieldData(load_info);
     auto& skip_index = segment->GetSkipIndex();
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, -3, 1, true, true));
-    ASSERT_TRUE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, -3, 1, true, false));
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
+        nullptr, i64_fid, 0, -3, 1, true, true));
+    ASSERT_TRUE(skip_index.CanSkipBinaryRange<int64_t>(
+        nullptr, i64_fid, 0, -3, 1, true, false));
 
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 1, 3, true, true));
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 1, 2, true, false));
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
+        nullptr, i64_fid, 0, 1, 3, true, true));
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
+        nullptr, i64_fid, 0, 1, 2, true, false));
 
-    ASSERT_TRUE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 2, 3, false, true));
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 2, 3, true, true));
+    ASSERT_TRUE(skip_index.CanSkipBinaryRange<int64_t>(
+        nullptr, i64_fid, 0, 2, 3, false, true));
+    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
+        nullptr, i64_fid, 0, 2, 3, true, true));
 }
 
 TEST(Sealed, SkipIndexSkipStringRange) {
@@ -1878,38 +1878,38 @@ TEST(Sealed, SkipIndexSkipStringRange) {
     segment->LoadFieldData(load_info);
     auto& skip_index = segment->GetSkipIndex();
     ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::Equal, "w"));
+        nullptr, string_fid, 0, OpType::Equal, "w"));
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::Equal, "e"));
+        nullptr, string_fid, 0, OpType::Equal, "e"));
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::Equal, "j"));
+        nullptr, string_fid, 0, OpType::Equal, "j"));
 
     ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::LessThan, "e"));
+        nullptr, string_fid, 0, OpType::LessThan, "e"));
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::LessEqual, "e"));
+        nullptr, string_fid, 0, OpType::LessEqual, "e"));
 
     ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::GreaterThan, "j"));
+        nullptr, string_fid, 0, OpType::GreaterThan, "j"));
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::GreaterEqual, "j"));
+        nullptr, string_fid, 0, OpType::GreaterEqual, "j"));
     ASSERT_FALSE(skip_index.CanSkipUnaryRange<int64_t>(
-        string_fid, 0, OpType::GreaterEqual, 1));
+        nullptr, string_fid, 0, OpType::GreaterEqual, 1));
 
     ASSERT_TRUE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "a", "c", true, true));
+        nullptr, string_fid, 0, "a", "c", true, true));
     ASSERT_TRUE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "c", "e", true, false));
+        nullptr, string_fid, 0, "c", "e", true, false));
     ASSERT_FALSE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "c", "e", true, true));
+        nullptr, string_fid, 0, "c", "e", true, true));
     ASSERT_FALSE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "e", "k", false, true));
+        nullptr, string_fid, 0, "e", "k", false, true));
     ASSERT_FALSE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "j", "k", true, true));
+        nullptr, string_fid, 0, "j", "k", true, true));
     ASSERT_TRUE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "j", "k", false, true));
+        nullptr, string_fid, 0, "j", "k", false, true));
     ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
-        string_fid, 0, 1, 2, false, true));
+        nullptr, string_fid, 0, 1, 2, false, true));
 }
 
 TEST(Sealed, QueryAllFields) {
