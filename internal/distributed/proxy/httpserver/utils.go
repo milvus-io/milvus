@@ -773,7 +773,15 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
 					}
 					reallyData[fieldName] = result
-				case schemapb.DataType_Timestamptz, schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
+				case schemapb.DataType_Timestamptz, schemapb.DataType_VarChar, schemapb.DataType_String:
+					reallyData[fieldName] = dataString
+				case schemapb.DataType_Text:
+					if !fieldValue.Exists() {
+						return reallyDataArray, validDataMap, merr.WrapErrParameterMissingMsg("field %s is required", fieldName)
+					}
+					if fieldValue.Type == gjson.Null {
+						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalidMsg("field %s does not accept null", fieldName)
+					}
 					reallyData[fieldName] = dataString
 				default:
 					return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid("", schemapb.DataType_name[int32(fieldType)], "fieldName: "+fieldName)
