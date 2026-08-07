@@ -149,9 +149,11 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
                     index_event_data.payload_reader->get_field_data();
                 AssertInfo(field_data->get_data_type() == DataType::STRING,
                            "wrong index type in index binlog file");
-                AssertInfo(
-                    field_data->get_num_rows() == 1,
-                    "wrong length of string num in old index binlog file");
+                if (!(field_data->get_num_rows() == 1)) {
+                    ThrowInfo(
+                        ErrorCode::DataFormatBroken,
+                        "wrong length of string num in old index binlog file");
+                }
                 auto new_field_data =
                     CreateFieldData(DataType::INT8, DataType::NONE, nullable);
                 new_field_data->FillFieldData(

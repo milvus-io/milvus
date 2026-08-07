@@ -191,8 +191,10 @@ ScalarIndex<T>::UploadUnified(const Config& config) {
     // Create the IndexEntryWriter
     auto writer =
         file_manager_->CreateIndexEntryWriterUnified(filename, is_index_file_);
-    AssertInfo(writer != nullptr,
-               "failed to create IndexEntryWriter for V3 format");
+    if (!(writer != nullptr)) {
+        ThrowInfo(ErrorCode::FileCreateFailed,
+                  "failed to create IndexEntryWriter for V3 format");
+    }
 
     // Call subclass implementation to write all entries.
     // Subclasses use writer->PutMeta() to add their metadata.
@@ -242,9 +244,11 @@ ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
 
     // Open the file using the file manager
     auto input = file_manager_->OpenInputStream(packed_file, is_index_file_);
-    AssertInfo(input != nullptr,
-               "failed to open input stream for packed index file: {}",
-               packed_file);
+    if (!(input != nullptr)) {
+        ThrowInfo(ErrorCode::FileOpenFailed,
+                  "failed to open input stream for packed index file: {}",
+                  packed_file);
+    }
 
     size_t file_size = input->Size();
 
@@ -263,7 +267,10 @@ ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
                                         collection_id,
                                         milvus::PriorityForLoad(load_priority),
                                         cancellation_token);
-    AssertInfo(reader != nullptr, "failed to create IndexEntryReader");
+    if (!(reader != nullptr)) {
+        ThrowInfo(ErrorCode::FileOpenFailed,
+                  "failed to create IndexEntryReader");
+    }
 
     LoadEntries(*reader, config);
 
