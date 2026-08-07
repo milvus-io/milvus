@@ -80,14 +80,20 @@ IndexEntryEncryptedLocalWriter::IndexEntryEncryptedLocalWriter(
     local_path_ = dir + "/milvus_enc_" + boost::uuids::to_string(uuid);
 
     local_fd_ = ::open(local_path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    AssertInfo(
-        local_fd_ != -1, "Failed to create temp file: {}", strerror(errno));
+    if (local_fd_ == -1) {
+        ThrowInfo(ErrorCode::FileCreateFailed,
+                  "Failed to create temp file: {}",
+                  strerror(errno));
+    }
 
     try {
         auto written =
             ::write(local_fd_, MILVUS_V3_MAGIC, MILVUS_V3_MAGIC_SIZE);
-        AssertInfo(written == static_cast<ssize_t>(MILVUS_V3_MAGIC_SIZE),
-                   "Failed to write magic number");
+        if (written != static_cast<ssize_t>(MILVUS_V3_MAGIC_SIZE)) {
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "Failed to write magic number: {}",
+                      strerror(errno));
+        }
     } catch (...) {
         ::close(local_fd_);
         local_fd_ = -1;
@@ -121,8 +127,11 @@ ReadExact(int fd, size_t len) {
         if (n == -1 && errno == EINTR) {
             continue;
         }
-        AssertInfo(
-            n > 0, "Failed to read from file descriptor: {}", strerror(errno));
+        if (n <= 0) {
+            ThrowInfo(ErrorCode::FileReadFailed,
+                      "Failed to read from file descriptor: {}",
+                      strerror(errno));
+        }
         total_read += n;
     }
     return buf;

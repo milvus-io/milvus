@@ -211,13 +211,20 @@ RemoteInputStream::Read(int fd, size_t size) {
                    file_size_);
         auto bytes_to_write = static_cast<size_t>(bytes_read);
         ssize_t ret = ::write(fd, data.data(), bytes_to_write);
-        AssertInfo(ret == static_cast<ssize_t>(bytes_to_write),
-                   "Failed to write to file");
+        if (ret != static_cast<ssize_t>(bytes_to_write)) {
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "Failed to write to file: {}",
+                      strerror(errno));
+        }
         rest_size -= bytes_to_write;
     }
     auto fsync_ret = ::fsync(fd);
     int saved_errno = errno;
-    AssertInfo(fsync_ret == 0, "Failed to fsync file, errno: {}", saved_errno);
+    if (fsync_ret != 0) {
+        ThrowInfo(ErrorCode::FileWriteFailed,
+                  "Failed to fsync file, errno: {}",
+                  saved_errno);
+    }
     return size;
 }
 

@@ -104,10 +104,12 @@ class TextLobSpillover {
 
         fd_ =
             ::open(path_.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
-        AssertInfo(fd_ >= 0,
-                   "Failed to create LOB spillover file: {} (errno={})",
-                   path_,
-                   errno);
+        if (fd_ < 0) {
+            ThrowInfo(ErrorCode::FileCreateFailed,
+                      "Failed to create LOB spillover file: {} (errno={})",
+                      path_,
+                      errno);
+        }
     }
 
     ~TextLobSpillover() {

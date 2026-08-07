@@ -769,10 +769,12 @@ IndexEntryReader::PrepareEntryDownload(const std::string& name,
             state.expected_crc = meta.enc.crc32;
             state.range_crcs.resize(meta.enc.slices.size());
             auto trc_ret = ::ftruncate(fd, meta.enc.original_size);
-            AssertInfo(trc_ret == 0,
-                       "Failed to ftruncate file {}: {}",
-                       local_path,
-                       strerror(errno));
+            if (trc_ret != 0) {
+                ThrowInfo(ErrorCode::FileWriteFailed,
+                          "Failed to ftruncate file {}: {}",
+                          local_path,
+                          strerror(errno));
+            }
         } else {
             state.expected_crc = meta.plain.crc32;
             size_t num_ranges = DownloadRangeCount(meta.plain.size);
