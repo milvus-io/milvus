@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -1318,6 +1319,7 @@ func TestResolveMilvusTableSnapshotMetadataPathRejectsNonJSONPath(t *testing.T) 
 	t.Run("rejects base path", func(t *testing.T) {
 		_, err := resolveMilvusTableSnapshotMetadataPath("s3://bucket", spec)
 		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 		assert.Contains(t, err.Error(), "snapshot metadata JSON path")
 	})
 }

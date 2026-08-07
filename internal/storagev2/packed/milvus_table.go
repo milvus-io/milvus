@@ -94,7 +94,7 @@ func resolveMilvusTableSnapshotMetadataPath(externalSource, externalSpec string)
 	if strings.HasSuffix(strings.ToLower(externalSource), ".json") {
 		return externalSource, nil
 	}
-	return "", merr.WrapErrServiceInternalMsg("milvus-table requires external_source to be a snapshot metadata JSON path")
+	return "", merr.WrapErrParameterInvalidMsg("milvus-table requires external_source to be a snapshot metadata JSON path")
 }
 
 // buildMilvusTableFileInfosFromSnapshotMetadata converts snapshot metadata into
