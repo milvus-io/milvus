@@ -7,13 +7,16 @@ class FakeMilvusClient:
         self,
         indexed_fields=(),
         create_index_error=None,
+        create_index_errors=(),
         list_indexes_error=None,
         collection_exists=True,
     ):
         self.indexed_fields = tuple(indexed_fields)
         self.create_index_error = create_index_error
+        self.create_index_errors = list(create_index_errors)
         self.list_indexes_error = list_indexes_error
         self.collection_exists = collection_exists
+        self.add_collection_field_calls = 0
         self.create_index_calls = 0
         self.load_collection_calls = 0
 
@@ -33,8 +36,15 @@ class FakeMilvusClient:
 
     def create_index(self, **kwargs):
         self.create_index_calls += 1
+        if self.create_index_errors:
+            error = self.create_index_errors.pop(0)
+            if error is not None:
+                raise error
         if self.create_index_error is not None:
             raise self.create_index_error
+
+    def add_collection_field(self, **kwargs):
+        self.add_collection_field_calls += 1
 
     def create_collection(self, **kwargs):
         self.collection_exists = True
@@ -44,6 +54,9 @@ class FakeMilvusClient:
 
     def get_collection_stats(self, collection_name):
         return {"row_count": 1}
+
+    def query(self, **kwargs):
+        return [{}]
 
 
 def patch_checker_constructor(monkeypatch, client, *, scalar_fields=(), float_vector_fields=()):
@@ -131,23 +144,46 @@ def test_checker_initialization_fails_fast_when_indexes_cannot_be_listed(monkeyp
     assert client.create_index_calls == 0
 
 
-def test_add_vector_field_checker_reuses_first_attempt_result(monkeypatch):
+def test_add_vector_field_checker_retries_until_first_success(monkeypatch):
     client = FakeMilvusClient(indexed_fields=("base_vector",))
     patch_checker_constructor(monkeypatch, client, float_vector_fields=("base_vector",))
     checker = checker_module.AddVectorFieldChecker(collection_name="existing_collection")
     attempts = []
+    attempt_results = iter((("server unavailable", False), (None, True)))
 
     def attempt_once():
         attempts.append(1)
-        return "index creation timed out", False
+        return next(attempt_results)
 
     monkeypatch.setattr(checker, "_add_vector_field_once", attempt_once, raising=False)
 
     first_result = checker.add_vector_field()
     second_result = checker.add_vector_field()
+    third_result = checker.add_vector_field()
 
-    assert attempts == [1]
-    assert first_result == second_result == ("index creation timed out", False)
+    assert attempts == [1, 1]
+    assert first_result == ("server unavailable", False)
+    assert second_result == third_result == (None, True)
+
+
+def test_add_vector_field_checker_retries_same_field_after_index_timeout(monkeypatch):
+    client = FakeMilvusClient(
+        indexed_fields=("base_vector",),
+        create_index_errors=(TimeoutError("index creation timed out"), None),
+    )
+    patch_checker_constructor(monkeypatch, client, float_vector_fields=("base_vector",))
+    checker = checker_module.AddVectorFieldChecker(collection_name="existing_collection")
+    monkeypatch.setattr(checker_module.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(checker, "insert_data", lambda: (None, True))
+
+    first_result = checker.add_vector_field()
+    second_result = checker.add_vector_field()
+    third_result = checker.add_vector_field()
+
+    assert first_result[1] is False
+    assert second_result == third_result == (None, True)
+    assert client.add_collection_field_calls == 1
+    assert client.create_index_calls == 2
 
 
 @pytest.mark.parametrize(

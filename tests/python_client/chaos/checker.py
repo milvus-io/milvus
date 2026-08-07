@@ -4313,46 +4313,56 @@ class AddVectorFieldChecker(Checker):
         stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
         self.initial_entities = stats.get("row_count", 0)
         self._add_vector_field_result = None
+        self._new_vector_field_name = cf.gen_unique_str("new_vec_")
+        self._vector_field_added = False
+        self._vector_index_created = False
 
     @trace()
     def add_vector_field(self):
         """Run one vector-field mutation per checker lifecycle."""
         if self._add_vector_field_result is None:
-            self._add_vector_field_result = self._add_vector_field_once()
+            result = self._add_vector_field_once()
+            if result[1]:
+                self._add_vector_field_result = result
+            return result
         else:
-            log.debug("[AddVectorFieldChecker] reusing the first mutation result")
+            log.debug("[AddVectorFieldChecker] reusing the first successful mutation result")
         return self._add_vector_field_result
 
     def _add_vector_field_once(self):
         """Add a nullable FLOAT_VECTOR field, create index, insert data, and query to verify."""
         try:
-            new_vec_field = cf.gen_unique_str("new_vec_")
+            new_vec_field = self._new_vector_field_name
             dim = self.VECTOR_DIM
-            self.milvus_client.add_collection_field(
-                collection_name=self.c_name,
-                field_name=new_vec_field,
-                data_type=DataType.FLOAT_VECTOR,
-                dim=dim,
-                nullable=True,
-                timeout=timeout,
-            )
-            log.debug(f"[AddVectorFieldChecker] added field {new_vec_field} (dim={dim})")
-            time.sleep(1)
+            if not self._vector_field_added:
+                self.milvus_client.add_collection_field(
+                    collection_name=self.c_name,
+                    field_name=new_vec_field,
+                    data_type=DataType.FLOAT_VECTOR,
+                    dim=dim,
+                    nullable=True,
+                    timeout=timeout,
+                )
+                self._vector_field_added = True
+                log.debug(f"[AddVectorFieldChecker] added field {new_vec_field} (dim={dim})")
+                time.sleep(1)
 
             # Create HNSW index for new vector field
-            index_params = IndexParams()
-            index_params.add_index(
-                field_name=new_vec_field,
-                index_type="HNSW",
-                metric_type="COSINE",
-                params={"M": 16, "efConstruction": 200},
-            )
-            self.milvus_client.create_index(
-                collection_name=self.c_name,
-                index_params=index_params,
-                timeout=timeout,
-            )
-            log.debug(f"[AddVectorFieldChecker] created index for {new_vec_field}")
+            if not self._vector_index_created:
+                index_params = IndexParams()
+                index_params.add_index(
+                    field_name=new_vec_field,
+                    index_type="HNSW",
+                    metric_type="COSINE",
+                    params={"M": 16, "efConstruction": 200},
+                )
+                self.milvus_client.create_index(
+                    collection_name=self.c_name,
+                    index_params=index_params,
+                    timeout=timeout,
+                )
+                self._vector_index_created = True
+                log.debug(f"[AddVectorFieldChecker] created index for {new_vec_field}")
 
             # Insert data (gen_row_data_by_schema handles nullable vectors)
             _, insert_result = self.insert_data()
