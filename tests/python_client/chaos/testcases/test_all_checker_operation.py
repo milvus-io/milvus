@@ -121,28 +121,28 @@ class TestOperations(TestBase):
         self.init_health_checkers(collection_name=c_name)
         event_records.insert("init_health_checkers", "finished")
         tasks = cc.start_monitor_threads(self.health_checkers)
-        log.info("*********************Load Start**********************")
-        # wait request_duration
-        request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
-        if request_duration[-1] == "+":
-            request_duration = request_duration[:-1]
-        request_duration = eval(request_duration)
-        for i in range(10):
-            sleep(request_duration // 10)
-            # add an event so that the chaos can start to apply
-            if i == 3:
-                event_records.insert("init_chaos", "ready")
-            for k, v in self.health_checkers.items():
-                v.check_result()
-        if is_check:
-            assert_statistic(self.health_checkers, succ_rate_threshold=0.98)
-            assert_expectations()
-        # wait all pod ready
-        wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
-        time.sleep(60)
-        cc.check_thread_status(tasks)
-        for k, v in self.health_checkers.items():
-            v.pause()
+        try:
+            log.info("*********************Load Start**********************")
+            # wait request_duration
+            request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
+            if request_duration[-1] == "+":
+                request_duration = request_duration[:-1]
+            request_duration = eval(request_duration)
+            for i in range(10):
+                sleep(request_duration // 10)
+                # add an event so that the chaos can start to apply
+                if i == 3:
+                    event_records.insert("init_chaos", "ready")
+                for k, v in self.health_checkers.items():
+                    v.check_result()
+            if is_check:
+                assert_statistic(self.health_checkers, succ_rate_threshold=0.98)
+                assert_expectations()
+            # wait all pod ready
+            wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
+            time.sleep(60)
+        finally:
+            cc.stop_monitor_threads(self.health_checkers, tasks)
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()
         ra.show_result_table()
