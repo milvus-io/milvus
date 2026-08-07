@@ -429,7 +429,7 @@ func Test_parquetNumRows_hostileFooterLength(t *testing.T) {
 	runtime.ReadMemStats(&after)
 
 	require.Error(t, err)
-	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(maxParquetFooterLen),
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(parquetFooterMaxSize()),
 		"sizing must reject the declared footer length instead of allocating it")
 }
 
@@ -456,7 +456,7 @@ func Test_validateParquetFooter(t *testing.T) {
 		assert.NoError(t, validateParquetFooter(readerAt(tail(4096, parquetMagicEncrypted), 1<<20), 1<<20, "a.parquet"))
 	})
 	t.Run("rejects a footer over the cap", func(t *testing.T) {
-		err := validateParquetFooter(readerAt(tail(maxParquetFooterLen+1, parquetMagic), 1<<30), 1<<30, "a.parquet")
+		err := validateParquetFooter(readerAt(tail(uint32(parquetFooterMaxSize())+1, parquetMagic), 1<<30), 1<<30, "a.parquet")
 		assert.ErrorIs(t, err, merr.ErrImportFailed)
 	})
 	t.Run("rejects a zero-length footer", func(t *testing.T) {
@@ -595,7 +595,7 @@ func Test_minRowTextBytes_skipsLegacyDynamicField(t *testing.T) {
 }
 
 func Test_parquetNumRows_boundsConcurrentFooterParses(t *testing.T) {
-	// maxParquetFooterLen bounds the bytes read, not what Arrow's thrift decoder
+	// parquetFooterMaxSize bounds the bytes read, not what Arrow's thrift decoder
 	// allocates from them, so the number of decodes in flight is what caps the
 	// coordinator's exposure. The gate wraps only the decode -- the ranged reads
 	// before it are ordinary storage traffic -- so concurrency is measured on the
@@ -704,4 +704,37 @@ func Test_assignPKRangesToFiles_singleColumnCSVAboveOneBatchIsRefused(t *testing
 		require.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
+}
+
+func Test_validateParquetFooter_capIsConfigurable(t *testing.T) {
+	// The cap is stricter than the DataNode reader, which bounds the footer only
+	// by file size, so a legitimate file with a large footer would be refused at
+	// submit with no way out. It is configurable for exactly that reason.
+	paramtable.Init()
+	key := paramtable.Get().DataCoordCfg.ImportParquetFooterMaxSize.Key
+
+	const declared = uint32(32 << 20) // above the old fixed 16 MiB cap
+	probe := func() error {
+		b := make([]byte, 8)
+		binary.LittleEndian.PutUint32(b[:4], declared)
+		copy(b[4:], parquetMagic)
+		const size = int64(1) << 30
+		ra := readerAtFunc(func(p []byte, off int64) (int, error) {
+			if off == size-8 {
+				return copy(p, b), nil
+			}
+			return 0, io.EOF
+		})
+		return validateParquetFooter(ra, size, "a.parquet")
+	}
+
+	paramtable.Get().Save(key, "16777216")
+	t.Cleanup(func() { paramtable.Get().Reset(key) })
+	require.Error(t, probe(), "a 32 MiB footer must be refused under a 16 MiB cap")
+
+	paramtable.Get().Save(key, "67108864")
+	assert.NoError(t, probe(), "the same footer must pass under the 64 MiB default")
+
+	paramtable.Get().Save(key, "0")
+	assert.NoError(t, probe(), "a nonsensical value falls back to the default rather than refusing everything")
 }
