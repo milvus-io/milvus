@@ -4312,9 +4312,18 @@ class AddVectorFieldChecker(Checker):
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
         self.initial_entities = stats.get("row_count", 0)
+        self._add_vector_field_result = None
 
     @trace()
     def add_vector_field(self):
+        """Run one vector-field mutation per checker lifecycle."""
+        if self._add_vector_field_result is None:
+            self._add_vector_field_result = self._add_vector_field_once()
+        else:
+            log.debug("[AddVectorFieldChecker] reusing the first mutation result")
+        return self._add_vector_field_result
+
+    def _add_vector_field_once(self):
         """Add a nullable FLOAT_VECTOR field, create index, insert data, and query to verify."""
         try:
             new_vec_field = cf.gen_unique_str("new_vec_")

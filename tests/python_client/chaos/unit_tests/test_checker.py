@@ -131,6 +131,25 @@ def test_checker_initialization_fails_fast_when_indexes_cannot_be_listed(monkeyp
     assert client.create_index_calls == 0
 
 
+def test_add_vector_field_checker_reuses_first_attempt_result(monkeypatch):
+    client = FakeMilvusClient(indexed_fields=("base_vector",))
+    patch_checker_constructor(monkeypatch, client, float_vector_fields=("base_vector",))
+    checker = checker_module.AddVectorFieldChecker(collection_name="existing_collection")
+    attempts = []
+
+    def attempt_once():
+        attempts.append(1)
+        return "index creation timed out", False
+
+    monkeypatch.setattr(checker, "_add_vector_field_once", attempt_once, raising=False)
+
+    first_result = checker.add_vector_field()
+    second_result = checker.add_vector_field()
+
+    assert attempts == [1]
+    assert first_result == second_result == ("index creation timed out", False)
+
+
 @pytest.mark.parametrize(
     "checker_class",
     (
