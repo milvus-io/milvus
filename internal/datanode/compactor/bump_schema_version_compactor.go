@@ -131,19 +131,19 @@ func (t *bumpSchemaVersionCompactionTask) preCompact() error {
 	return nil
 }
 
-func (t *bumpSchemaVersionCompactionTask) missingFunctionInputSchema(missingFunctions []*schemapb.FunctionSchema) (*schemapb.CollectionSchema, []int64, error) {
+func (t *bumpSchemaVersionCompactionTask) buildFunctionBackfillReadSchema(missingFunctions []*schemapb.FunctionSchema, sourceFields map[int64]struct{}) (*schemapb.CollectionSchema, []int64, error) {
 	schema := t.plan.GetSchema()
 	seen := make(map[int64]struct{})
-	var fields []*schemapb.FieldSchema
-	var fieldIDs []int64
-	addInputField := func(field *schemapb.FieldSchema) {
+	var readFields []*schemapb.FieldSchema
+	var readFieldIDs []int64
+	addReadField := func(field *schemapb.FieldSchema) {
 		fieldID := field.GetFieldID()
 		if _, ok := seen[fieldID]; ok {
 			return
 		}
 		seen[fieldID] = struct{}{}
-		fields = append(fields, field)
-		fieldIDs = append(fieldIDs, fieldID)
+		readFields = append(readFields, field)
+		readFieldIDs = append(readFieldIDs, fieldID)
 	}
 	for _, functionSchema := range missingFunctions {
 		if err := validateSupportedMissingFunctionMaterialization(functionSchema); err != nil {
@@ -157,30 +157,50 @@ func (t *bumpSchemaVersionCompactionTask) missingFunctionInputSchema(missingFunc
 			if err := validateMaterializationInputField(functionSchema, inputField); err != nil {
 				return nil, nil, err
 			}
-			addInputField(inputField)
+			addReadField(inputField)
 
-			additionalFields, err := additionalFunctionInputFields(schema, functionSchema, inputField)
+			implicitFields, err := implicitFunctionInputFields(schema, functionSchema, inputField)
 			if err != nil {
 				return nil, nil, err
 			}
-			for _, additionalField := range additionalFields {
-				if err := validateMaterializationInputField(functionSchema, additionalField); err != nil {
+			for _, implicitField := range implicitFields {
+				if err := validateMaterializationInputField(functionSchema, implicitField); err != nil {
 					return nil, nil, err
 				}
-				addInputField(additionalField)
+				addReadField(implicitField)
+			}
+		}
+	}
+	// If no explicit or implicit input exists physically, the filtered read
+	// schema would be empty. Add one system column as a row-count anchor.
+	hasReadableSourceField := false
+	for _, fieldID := range readFieldIDs {
+		if _, ok := sourceFields[fieldID]; ok {
+			hasReadableSourceField = true
+			break
+		}
+	}
+	if !hasReadableSourceField {
+		for _, fieldID := range []int64{common.RowIDField, common.TimeStampField} {
+			if _, ok := sourceFields[fieldID]; !ok {
+				continue
+			}
+			if field := typeutil.GetField(schema, fieldID); field != nil {
+				addReadField(field)
+				break
 			}
 		}
 	}
 	return &schemapb.CollectionSchema{
 		Name:               schema.GetName(),
 		Description:        schema.GetDescription(),
-		Fields:             fields,
+		Fields:             readFields,
 		EnableDynamicField: schema.GetEnableDynamicField(),
 		Properties:         schema.GetProperties(),
-	}, fieldIDs, nil
+	}, readFieldIDs, nil
 }
 
-func additionalFunctionInputFields(schema *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema, inputField *schemapb.FieldSchema) ([]*schemapb.FieldSchema, error) {
+func implicitFunctionInputFields(schema *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema, inputField *schemapb.FieldSchema) ([]*schemapb.FieldSchema, error) {
 	switch functionSchema.GetType() {
 	case schemapb.FunctionType_BM25:
 		return bm25AdditionalInputFields(schema, functionSchema, inputField)
@@ -296,16 +316,6 @@ func validateMaterializationOutputField(functionSchema *schemapb.FunctionSchema,
 		}
 	}
 	return nil
-}
-
-func partialMaterializerExistingFields(schema *schemapb.CollectionSchema, missingFunctions []*schemapb.FunctionSchema, existingFields map[int64]struct{}) map[int64]struct{} {
-	fields := collectionSchemaFields(schema)
-	for _, functionSchema := range missingFunctions {
-		for _, outputIndex := range functionOutputIndexesToMaterialize(functionSchema, existingFields) {
-			delete(fields, functionSchema.GetOutputFieldIds()[outputIndex])
-		}
-	}
-	return fields
 }
 
 func (t *bumpSchemaVersionCompactionTask) openRecordReader(segment *datapb.CompactionSegmentBinlogs, schema *schemapb.CollectionSchema) (storage.RecordReader, map[int64]struct{}, error) {
@@ -958,7 +968,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 	partitionID := segment.GetPartitionID()
 	segmentID := segment.GetSegmentID()
 
-	inputSchema, inputFieldIDs, err := t.missingFunctionInputSchema(missingFunctions)
+	readSchema, readFieldIDs, err := t.buildFunctionBackfillReadSchema(missingFunctions, existingFields)
 	if err != nil {
 		return nil, err
 	}
@@ -972,13 +982,13 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		mlog.FieldCollectionID(collectionID),
 		mlog.FieldPartitionID(partitionID),
 		mlog.FieldSegmentID(segmentID),
-		mlog.Int64s("inputFieldIDs", inputFieldIDs),
+		mlog.Int64s("readFieldIDs", readFieldIDs),
 		mlog.Int64s("outputFieldIDs", outputFieldIDs),
 	)
 
 	var readDuration, computeDuration, writeDuration, updateStatsDuration time.Duration
 
-	reader, _, err := t.openRecordReader(segment, inputSchema)
+	reader, _, err := t.openRecordReader(segment, readSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -993,7 +1003,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		mlog.Int64("effectiveStorageVersion", writerResult.storageVersion),
 		mlog.Int64("clusterStorageVersion", t.compactionParams.StorageVersion),
 		mlog.Bool("segmentHasManifest", segment.GetManifest() != ""),
-		mlog.Int64s("inputFieldIDs", inputFieldIDs),
+		mlog.Int64s("readFieldIDs", readFieldIDs),
 		mlog.Int64s("outputFieldIDs", outputFieldIDs),
 	)
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "BumpSchemaVersionCompact.batchProcess")
@@ -1005,8 +1015,7 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 			statsByField[outputFieldID] = storage.NewBM25Stats()
 		}
 	}
-	existingFields = partialMaterializerExistingFields(t.plan.GetSchema(), missingFunctions, existingFields)
-	materializer, err := NewRecordMaterializer(t.plan.GetSchema(), missingFunctions, existingFields)
+	materializer, err := NewFunctionBackfillMaterializer(t.plan.GetSchema(), missingFunctions, existingFields)
 	if err != nil {
 		span.End()
 		return nil, err
