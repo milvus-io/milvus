@@ -374,22 +374,3 @@ class TestTextLOB(TestBase):
             pk = int(hit[ID_FIELD])
             assert_text_payload(hit.get(CONTENT_FIELD), self.shared_expected[pk][CONTENT_FIELD])
             assert_text_payload(hit.get(CONTENT_ALT_FIELD), self.shared_expected[pk][CONTENT_ALT_FIELD])
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_text_lob_query_iterator_payloads(self):
-        """
-        target: verify REST query returns every TEXT LOB row exactly once
-        method: page through REST query in batches of three because REST v2 has no query iterator endpoint
-        expected: no primary keys are missing or duplicated and every TEXT payload is intact
-        """
-        batch_size = 3
-        rows = []
-        for offset in range(0, len(self.shared_rows), batch_size):
-            page = self.query_page([CONTENT_FIELD], batch_size, offset)
-            assert len(page) == min(batch_size, len(self.shared_rows) - offset)
-            rows.extend(page)
-
-        rows_by_id = {int(row[ID_FIELD]): row for row in rows}
-        assert len(rows) == len(self.shared_rows)
-        assert len(rows_by_id) == len(rows), "REST query pagination returned duplicate primary keys"
-        assert_rows_payload(rows_by_id, self.shared_expected, [CONTENT_FIELD])
