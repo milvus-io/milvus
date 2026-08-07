@@ -807,7 +807,12 @@ func (sm *snapshotManager) RestoreCollection(
 	}
 
 	// preserve field ids
-	properties := collection.Properties
+	properties := common.CloneKeyValuePairs(collection.GetProperties())
+	if len(properties) == 0 {
+		// Snapshots created before collection metadata was populated in
+		// CollectionDescription keep these values in schema properties.
+		properties = common.CloneKeyValuePairs(schema.GetProperties())
+	}
 	properties = append(properties, &commonpb.KeyValuePair{
 		Key:   util.PreserveFieldIdsKey,
 		Value: strconv.FormatBool(true),
