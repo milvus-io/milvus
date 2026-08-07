@@ -44,8 +44,8 @@ def _parse_order_by_field(order_by_field):
 def _expected_rows(order_by_fields, limit, row_filter=None, offset=0):
     """Build a deterministic reference order for local assertions.
 
-    Query ORDER BY uses the primary key as a stable tie-breaker when all
-    explicit sort fields match, so the reference order includes the ID key.
+    The final ID key stabilizes this test helper only. Query ORDER BY does not
+    guarantee an implicit PK tie-breaker when all explicit sort fields match.
     """
     rows = [row for row in _rows() if row_filter is None or row_filter(row)]
     order_specs = [_parse_order_by_field(field) for field in order_by_fields]
@@ -230,7 +230,6 @@ class TestQueryOrderBy(TestBase):
         assert secondary_sort_tested, "No duplicate price values found; secondary sort was not verified"
         expected = _expected_rows(["price:asc", "rating:desc"], limit=80)
         self._assert_expected_values(rows, expected, ["price", "rating"])
-        self._assert_expected_ids(rows, expected)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_order_by_with_filter(self):
@@ -283,15 +282,15 @@ class TestQueryOrderBy(TestBase):
     def test_query_order_by_with_offset(self):
         """
         target: verify REST query applies offset after ordering
-        method: compare the second ordered page with a larger ordered baseline
-        expected: offset page equals the matching slice of the baseline result
+        method: use an explicit id tie-breaker and compare the second ordered page with a larger baseline
+        expected: offset is applied after a deterministic global order and repeated requests return the same page
         """
         base_payload = {
             "collectionName": self.collection_name,
             "filter": "id >= 0",
             "limit": 20,
             "outputFields": ["id", "price"],
-            "orderByFields": ["price:asc"],
+            "orderByFields": ["price:asc", "id:asc"],
         }
         baseline = self._query(base_payload)
         page_payload = {**base_payload, "limit": 10, "offset": 10}
@@ -302,7 +301,7 @@ class TestQueryOrderBy(TestBase):
         assert len({row["price"] for row in baseline}) == 1
         assert [row["id"] for row in page] == [row["id"] for row in baseline[10:20]]
         assert [row["id"] for row in repeated_page] == [row["id"] for row in page]
-        expected = _expected_rows(["price:asc"], limit=10, offset=10)
+        expected = _expected_rows(["price:asc", "id:asc"], limit=10, offset=10)
         self._assert_expected_ids(page, expected)
 
     @pytest.mark.tags(CaseLabel.L1)

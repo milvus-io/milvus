@@ -10,13 +10,6 @@ ROWS = [
     {"id": 4, "category": "C", "brand": "Y", "price": 40, "vector": [0.7, 0.0]},
     {"id": 5, "category": "A", "brand": "X", "price": 5, "vector": [0.6, 0.0]},
 ]
-SEARCH_LIMIT = 3
-SEARCH_FILTER = "id <= 3"
-# The selective filter establishes the exact aggregation candidates as IDs 1, 2, and 3.
-# IDs 4 and 5 must not contribute to buckets, metrics, or topHits even though they exist in the collection.
-CANDIDATE_ROWS = ROWS[:SEARCH_LIMIT]
-LEGACY_CANDIDATE_ROWS = [ROWS[0], ROWS[2]]
-LEGACY_SEARCH_FILTER = "id in [1, 3]"
 
 
 class TestSearchAggregation(TestBase):
@@ -72,17 +65,17 @@ class TestSearchAggregation(TestBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_aggregation_single_field_with_all_metrics(self):
         """
-        target: verify all supported metric operations with one grouping field
-        method: retain all bucket rows with topHits, then group by category and calculate count/sum/avg/min/max
-        expected: every bucket key, count, and metric matches the inserted rows
+        target: verify aggregation size and metrics are independent of the ordinary search limit
+        method: filter five rows, request limit 1, and aggregate three category buckets with three topHits per bucket
+        expected: all three buckets and every filtered row contribute to the exact metrics despite limit 1
         """
         rsp = self.vector_client.vector_search(
             {
                 "collectionName": self.collection_name,
                 "data": [[1.0, 0.0]],
                 "annsField": "vector",
-                "limit": SEARCH_LIMIT,
-                "filter": SEARCH_FILTER,
+                "limit": 1,
+                "filter": "id < 10",
                 "outputFields": ["category", "price"],
                 "searchAggregation": {
                     "fields": ["category"],
@@ -95,18 +88,18 @@ class TestSearchAggregation(TestBase):
                         "maximum_price": {"op": "max", "fieldName": "price"},
                     },
                     "order": [{"key": "_key", "direction": "asc"}],
-                    "topHits": {"size": SEARCH_LIMIT, "sort": [{"fieldName": "price", "direction": "asc"}]},
+                    "topHits": {"size": 3, "sort": [{"fieldName": "price", "direction": "asc"}]},
                 },
             }
         )
         assert rsp["code"] == 0, rsp
-        assert rsp["aggTopks"] == [2]
+        assert rsp["aggTopks"] == [3]
 
         buckets = rsp["data"][0]["buckets"]
-        assert [self._bucket_key(bucket, "category") for bucket in buckets] == ["A", "B"]
+        assert [self._bucket_key(bucket, "category") for bucket in buckets] == ["A", "B", "C"]
         for bucket in buckets:
             category = self._bucket_key(bucket, "category")
-            expected_rows = [row for row in CANDIDATE_ROWS if row["category"] == category]
+            expected_rows = [row for row in ROWS if row["category"] == category]
             expected_prices = [row["price"] for row in expected_rows]
             metrics = bucket["metrics"]
             assert int(bucket["count"]) == len(expected_prices)
@@ -117,6 +110,7 @@ class TestSearchAggregation(TestBase):
             assert int(metrics["maximum_price"]) == max(expected_prices)
             expected_hits = sorted(expected_rows, key=lambda row: row["price"])
             assert [int(hit["id"]) for hit in bucket["hits"]] == [row["id"] for row in expected_hits]
+            assert [int(hit["price"]) for hit in bucket["hits"]] == [row["price"] for row in expected_hits]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_aggregation_composite_fields_ordered_by_metric(self):
@@ -130,12 +124,12 @@ class TestSearchAggregation(TestBase):
                 "collectionName": self.collection_name,
                 "data": [[1.0, 0.0]],
                 "annsField": "vector",
-                "limit": SEARCH_LIMIT,
-                "filter": SEARCH_FILTER,
+                "limit": 3,
+                "filter": "id <= 3",
                 "outputFields": ["category", "brand", "price"],
                 "searchAggregation": {
                     "fields": ["category", "brand"],
-                    "size": SEARCH_LIMIT,
+                    "size": 3,
                     "metrics": {"total_price": {"op": "sum", "fieldName": "price"}},
                     "order": [{"key": "total_price", "direction": "desc"}],
                     "topHits": {"size": 2, "sort": [{"fieldName": "price", "direction": "asc"}]},
@@ -144,8 +138,9 @@ class TestSearchAggregation(TestBase):
         )
         assert rsp["code"] == 0, rsp
 
+        candidate_rows = [row for row in ROWS if row["id"] <= 3]
         expected_groups = {}
-        for row in CANDIDATE_ROWS:
+        for row in candidate_rows:
             expected_groups.setdefault((row["category"], row["brand"]), []).append(row)
         assert rsp["aggTopks"] == [len(expected_groups)]
 
@@ -178,29 +173,29 @@ class TestSearchAggregation(TestBase):
     def test_search_aggregation_nested_groups_with_top_hits(self):
         """
         target: verify nested grouping and topHits through the REST request and response
-        method: group by category, subgroup by brand, and sort representative hits by price
-        expected: parent and child buckets contain the correct rows and sorted top hits
+        method: retain two rows per composite key through child topHits, but request only one parent topHit
+        expected: parent metrics cover all bucket rows while parent topHits is truncated to its requested size
         """
         rsp = self.vector_client.vector_search(
             {
                 "collectionName": self.collection_name,
                 "data": [[1.0, 0.0]],
                 "annsField": "vector",
-                "limit": SEARCH_LIMIT,
-                "filter": SEARCH_FILTER,
+                "limit": 3,
+                "filter": "id <= 3",
                 "outputFields": ["category", "brand", "price"],
                 "searchAggregation": {
                     "fields": ["category"],
                     "size": 3,
                     "metrics": {"item_count": {"op": "count", "fieldName": "*"}},
                     "order": [{"key": "_key", "direction": "asc"}],
-                    "topHits": {"size": 2, "sort": [{"fieldName": "price", "direction": "asc"}]},
+                    "topHits": {"size": 1, "sort": [{"fieldName": "price", "direction": "asc"}]},
                     "subAggregation": {
                         "fields": ["brand"],
                         "size": 2,
                         "metrics": {"total_price": {"op": "sum", "fieldName": "price"}},
                         "order": [{"key": "_key", "direction": "asc"}],
-                        "topHits": {"size": 1, "sort": [{"fieldName": "price", "direction": "asc"}]},
+                        "topHits": {"size": 2, "sort": [{"fieldName": "price", "direction": "asc"}]},
                     },
                 },
             }
@@ -210,12 +205,13 @@ class TestSearchAggregation(TestBase):
 
         buckets = rsp["data"][0]["buckets"]
         assert [self._bucket_key(bucket, "category") for bucket in buckets] == ["A", "B"]
+        candidate_rows = [row for row in ROWS if row["id"] <= 3]
         for bucket in buckets:
             category = self._bucket_key(bucket, "category")
-            category_rows = [row for row in CANDIDATE_ROWS if row["category"] == category]
+            category_rows = [row for row in candidate_rows if row["category"] == category]
             assert int(bucket["count"]) == len(category_rows)
             assert int(bucket["metrics"]["item_count"]) == len(category_rows)
-            expected_parent_hits = sorted(category_rows, key=lambda row: row["price"])[:2]
+            expected_parent_hits = sorted(category_rows, key=lambda row: row["price"])[:1]
             assert [int(hit["id"]) for hit in bucket["hits"]] == [row["id"] for row in expected_parent_hits]
             assert [int(hit["price"]) for hit in bucket["hits"]] == [row["price"] for row in expected_parent_hits]
             assert all(hit["category"] == category for hit in bucket["hits"])
@@ -228,9 +224,9 @@ class TestSearchAggregation(TestBase):
                 expected_rows = [row for row in category_rows if row["brand"] == brand]
                 assert int(sub_group["count"]) == len(expected_rows)
                 assert int(sub_group["metrics"]["total_price"]) == sum(row["price"] for row in expected_rows)
-                expected_child_hit = min(expected_rows, key=lambda row: row["price"])
-                assert [int(hit["id"]) for hit in sub_group["hits"]] == [expected_child_hit["id"]]
-                assert [int(hit["price"]) for hit in sub_group["hits"]] == [expected_child_hit["price"]]
+                expected_child_hits = sorted(expected_rows, key=lambda row: row["price"])
+                assert [int(hit["id"]) for hit in sub_group["hits"]] == [row["id"] for row in expected_child_hits]
+                assert [int(hit["price"]) for hit in sub_group["hits"]] == [row["price"] for row in expected_child_hits]
                 assert all(hit["category"] == category and hit["brand"] == brand for hit in sub_group["hits"])
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -245,7 +241,7 @@ class TestSearchAggregation(TestBase):
                 "collectionName": self.collection_name,
                 "data": [[1.0, 0.0]],
                 "annsField": "vector",
-                "limit": SEARCH_LIMIT,
+                "limit": 3,
                 "orderByFields": ["price:asc"],
                 "searchAggregation": {"fields": ["category"], "size": 3},
             }
@@ -265,8 +261,8 @@ class TestSearchAggregation(TestBase):
                 "collectionName": self.collection_name,
                 "data": [[1.0, 0.0]],
                 "annsField": "vector",
-                "limit": len(LEGACY_CANDIDATE_ROWS),
-                "filter": LEGACY_SEARCH_FILTER,
+                "limit": 2,
+                "filter": "id in [1, 3]",
                 "searchParams": {"order_by_fields": "price:asc"},
                 "searchAggregation": {
                     "fields": ["category"],
@@ -279,7 +275,8 @@ class TestSearchAggregation(TestBase):
         assert rsp["aggTopks"] == [2]
         buckets = rsp["data"][0]["buckets"]
         assert [bucket["key"][0]["value"] for bucket in buckets] == ["A", "B"]
+        candidate_rows = [row for row in ROWS if row["id"] in {1, 3}]
         expected_counts = {
-            category: sum(row["category"] == category for row in LEGACY_CANDIDATE_ROWS) for category in {"A", "B"}
+            category: sum(row["category"] == category for row in candidate_rows) for category in {"A", "B"}
         }
         assert {bucket["key"][0]["value"]: int(bucket["count"]) for bucket in buckets} == expected_counts

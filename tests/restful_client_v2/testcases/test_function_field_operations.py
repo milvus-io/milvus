@@ -86,6 +86,32 @@ class TestCollectionFunctionField(TestBase):
         assert indexes["code"] == 0, indexes
         assert indexes["data"] == ["dense_idx"]
 
+    def _assert_bm25_function_schema_state(self, collection_name):
+        desc = self.collection_client.collection_describe(collection_name)
+        assert desc["code"] == 0, desc
+        fields = {field["name"]: field for field in desc["data"]["fields"]}
+        assert set(fields) == {"id", "text", "dense", OUTPUT_FIELD_NAME}
+        assert fields[OUTPUT_FIELD_NAME]["type"] == "SparseFloatVector"
+
+        functions = {function["name"]: function for function in desc["data"].get("functions", [])}
+        assert set(functions) == {FUNCTION_NAME}
+        assert functions[FUNCTION_NAME]["type"] == BM25_FUNCTION_TYPE
+        assert functions[FUNCTION_NAME]["inputFieldNames"] == ["text"]
+        assert functions[FUNCTION_NAME]["outputFieldNames"] == [OUTPUT_FIELD_NAME]
+
+        indexes = self.index_client.index_list(collection_name=collection_name)
+        assert indexes["code"] == 0, indexes
+        assert set(indexes["data"]) == {"dense_idx", INDEX_NAME}
+
+        index_desc = self.index_client.index_describe(collection_name=collection_name, index_name=INDEX_NAME)
+        assert index_desc["code"] == 0, index_desc
+        assert len(index_desc["data"]) == 1, index_desc
+        index = index_desc["data"][0]
+        assert index["fieldName"] == OUTPUT_FIELD_NAME
+        assert index["indexName"] == INDEX_NAME
+        assert index["metricType"] == "BM25"
+        assert index["indexType"] == "SPARSE_INVERTED_INDEX"
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_function_field_creates_function_output_field_and_index(self):
         """
@@ -215,10 +241,10 @@ class TestCollectionFunctionField(TestBase):
         self._assert_base_schema_state(collection_name)
 
     @pytest.mark.parametrize(
-        "function_name,expected_code,expected_message",
+        "function_name,expected_code,expected_message,seed_function",
         [
-            ("", 1802, "required"),
-            ("missing_fn", 1100, "function not found"),
+            ("", 1802, "required", False),
+            ("missing_fn", 1100, "function not found", True),
         ],
         ids=["empty-name", "unknown-function"],
     )
@@ -227,19 +253,28 @@ class TestCollectionFunctionField(TestBase):
         function_name,
         expected_code,
         expected_message,
+        seed_function,
     ):
         """
         target: verify drop_function_field validates the functionName parameter
-        method: send an empty name and a name absent from the collection schema
-        expected: REST returns binding or invalid-parameter errors respectively
+        method: send an empty name or seed BM25 and send a different, absent function name
+        expected: REST returns the expected error without changing any field, function, or index
         """
         collection_name = self._create_base_collection()
+        if seed_function:
+            self._add_bm25_function_field(collection_name)
+            self._assert_bm25_function_schema_state(collection_name)
 
         rsp = self.collection_client.drop_function_field(
             {"collectionName": collection_name, "functionName": function_name}
         )
         assert rsp["code"] == expected_code, rsp
         assert expected_message in rsp["message"], rsp
+
+        if seed_function:
+            self._assert_bm25_function_schema_state(collection_name)
+        else:
+            self._assert_base_schema_state(collection_name)
 
     def test_drop_function_field_second_request_is_rejected(self):
         """
@@ -265,14 +300,27 @@ class TestCollectionFunctionField(TestBase):
         """
         collection_name = self._create_base_collection()
         self._add_bm25_function_field(collection_name)
+        self._assert_bm25_function_schema_state(collection_name)
 
         blocked = self.collection_client.drop_field(collection_name, field_name="text")
         assert blocked["code"] == 1100, blocked
         assert "referenced by function" in blocked["message"], blocked
+        self._assert_bm25_function_schema_state(collection_name)
 
         dropped = self.collection_client.drop_function_field(
             {"collectionName": collection_name, "functionName": FUNCTION_NAME}
         )
         assert dropped["code"] == 0, dropped
+        self._assert_base_schema_state(collection_name)
+
         unblocked = self.collection_client.drop_field(collection_name, field_name="text")
         assert unblocked["code"] == 0, unblocked
+
+        desc = self.collection_client.collection_describe(collection_name)
+        assert desc["code"] == 0, desc
+        assert {field["name"] for field in desc["data"]["fields"]} == {"id", "dense"}
+        assert desc["data"].get("functions", []) == []
+
+        indexes = self.index_client.index_list(collection_name=collection_name)
+        assert indexes["code"] == 0, indexes
+        assert indexes["data"] == ["dense_idx"]

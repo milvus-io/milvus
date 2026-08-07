@@ -35,6 +35,16 @@ class TestCollectionDropField(TestBase):
         assert rsp["code"] == 0, rsp
         return collection_name
 
+    def _assert_collection_state(self, collection_name, *, expected_fields, expected_indexes):
+        desc = self.collection_client.collection_describe(collection_name)
+        assert desc["code"] == 0, desc
+        actual_fields = sorted(field["name"] for field in desc["data"]["fields"])
+        assert actual_fields == sorted(expected_fields), desc
+
+        indexes = self.index_client.index_list(collection_name=collection_name)
+        assert indexes["code"] == 0, indexes
+        assert sorted(indexes["data"]) == sorted(expected_indexes), indexes
+
     @pytest.mark.parametrize(
         "field_name,field_id,expected_message",
         [
@@ -76,13 +86,21 @@ class TestCollectionDropField(TestBase):
         """
         collection_name = self._create_collection()
 
+        self._assert_collection_state(
+            collection_name,
+            expected_fields=["id", "tag", "dense"],
+            expected_indexes=["dense_idx"],
+        )
+
         rsp = self.collection_client.drop_field(collection_name, field_name=field_name)
         assert rsp["code"] == 1100, rsp
         assert expected_message in rsp["message"], rsp
 
-        desc = self.collection_client.collection_describe(collection_name)
-        assert desc["code"] == 0, desc
-        assert {field["name"] for field in desc["data"]["fields"]} == {"id", "tag", "dense"}
+        self._assert_collection_state(
+            collection_name,
+            expected_fields=["id", "tag", "dense"],
+            expected_indexes=["dense_idx"],
+        )
 
     def test_drop_field_second_request_is_rejected(self):
         """
@@ -92,8 +110,25 @@ class TestCollectionDropField(TestBase):
         """
         collection_name = self._create_collection()
 
+        self._assert_collection_state(
+            collection_name,
+            expected_fields=["id", "tag", "dense"],
+            expected_indexes=["dense_idx"],
+        )
+
         first = self.collection_client.drop_field(collection_name, field_name="tag")
         assert first["code"] == 0, first
+        self._assert_collection_state(
+            collection_name,
+            expected_fields=["id", "dense"],
+            expected_indexes=["dense_idx"],
+        )
+
         second = self.collection_client.drop_field(collection_name, field_name="tag")
         assert second["code"] == 1100, second
         assert "field not found" in second["message"], second
+        self._assert_collection_state(
+            collection_name,
+            expected_fields=["id", "dense"],
+            expected_indexes=["dense_idx"],
+        )
