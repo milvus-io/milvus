@@ -305,6 +305,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
+		"",
 		[]string{"v1"},
 	)
 
@@ -353,6 +354,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
+		"",
 		[]string{"v1"},
 	)
 
@@ -411,6 +413,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
+		"",
 		[]string{"v1"},
 	)
 
@@ -474,6 +477,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
+		"",
 		[]string{"v1"},
 	)
 
@@ -535,6 +539,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
+		"",
 		[]string{"v1"},
 	)
 
@@ -595,6 +600,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
+		"",
 		[]string{"v1"},
 	)
 

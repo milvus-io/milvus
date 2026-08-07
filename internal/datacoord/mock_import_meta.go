@@ -115,6 +115,72 @@ func (_c *MockImportMeta_AddTask_Call) RunAndReturn(run func(context.Context, Im
 	return _c
 }
 
+// CheckAndReserveIdempotencyKey provides a mock function with given fields: ctx, collectionID, idempotencyKey, jobID
+func (_m *MockImportMeta) CheckAndReserveIdempotencyKey(ctx context.Context, collectionID int64, idempotencyKey string, jobID int64) (int64, bool, error) {
+	ret := _m.Called(ctx, collectionID, idempotencyKey, jobID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckAndReserveIdempotencyKey")
+	}
+
+	var r0 int64
+	var r1 bool
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string, int64) (int64, bool, error)); ok {
+		return rf(ctx, collectionID, idempotencyKey, jobID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string, int64) int64); ok {
+		r0 = rf(ctx, collectionID, idempotencyKey, jobID)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, string, int64) bool); ok {
+		r1 = rf(ctx, collectionID, idempotencyKey, jobID)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, int64, string, int64) error); ok {
+		r2 = rf(ctx, collectionID, idempotencyKey, jobID)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// MockImportMeta_CheckAndReserveIdempotencyKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckAndReserveIdempotencyKey'
+type MockImportMeta_CheckAndReserveIdempotencyKey_Call struct {
+	*mock.Call
+}
+
+// CheckAndReserveIdempotencyKey is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - idempotencyKey string
+//   - jobID int64
+func (_e *MockImportMeta_Expecter) CheckAndReserveIdempotencyKey(ctx interface{}, collectionID interface{}, idempotencyKey interface{}, jobID interface{}) *MockImportMeta_CheckAndReserveIdempotencyKey_Call {
+	return &MockImportMeta_CheckAndReserveIdempotencyKey_Call{Call: _e.mock.On("CheckAndReserveIdempotencyKey", ctx, collectionID, idempotencyKey, jobID)}
+}
+
+func (_c *MockImportMeta_CheckAndReserveIdempotencyKey_Call) Run(run func(ctx context.Context, collectionID int64, idempotencyKey string, jobID int64)) *MockImportMeta_CheckAndReserveIdempotencyKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(string), args[3].(int64))
+	})
+	return _c
+}
+
+func (_c *MockImportMeta_CheckAndReserveIdempotencyKey_Call) Return(_a0 int64, _a1 bool, _a2 error) *MockImportMeta_CheckAndReserveIdempotencyKey_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *MockImportMeta_CheckAndReserveIdempotencyKey_Call) RunAndReturn(run func(context.Context, int64, string, int64) (int64, bool, error)) *MockImportMeta_CheckAndReserveIdempotencyKey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CountJobBy provides a mock function with given fields: ctx, filters
 func (_m *MockImportMeta) CountJobBy(ctx context.Context, filters ...ImportJobFilter) int {
 	_va := make([]interface{}, len(filters))
@@ -449,6 +515,54 @@ func (_c *MockImportMeta_HandleCommitVchannel_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// ReleaseIdempotencyKey provides a mock function with given fields: ctx, collectionID, idempotencyKey
+func (_m *MockImportMeta) ReleaseIdempotencyKey(ctx context.Context, collectionID int64, idempotencyKey string) error {
+	ret := _m.Called(ctx, collectionID, idempotencyKey)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReleaseIdempotencyKey")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string) error); ok {
+		r0 = rf(ctx, collectionID, idempotencyKey)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockImportMeta_ReleaseIdempotencyKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReleaseIdempotencyKey'
+type MockImportMeta_ReleaseIdempotencyKey_Call struct {
+	*mock.Call
+}
+
+// ReleaseIdempotencyKey is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - idempotencyKey string
+func (_e *MockImportMeta_Expecter) ReleaseIdempotencyKey(ctx interface{}, collectionID interface{}, idempotencyKey interface{}) *MockImportMeta_ReleaseIdempotencyKey_Call {
+	return &MockImportMeta_ReleaseIdempotencyKey_Call{Call: _e.mock.On("ReleaseIdempotencyKey", ctx, collectionID, idempotencyKey)}
+}
+
+func (_c *MockImportMeta_ReleaseIdempotencyKey_Call) Run(run func(ctx context.Context, collectionID int64, idempotencyKey string)) *MockImportMeta_ReleaseIdempotencyKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockImportMeta_ReleaseIdempotencyKey_Call) Return(_a0 error) *MockImportMeta_ReleaseIdempotencyKey_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImportMeta_ReleaseIdempotencyKey_Call) RunAndReturn(run func(context.Context, int64, string) error) *MockImportMeta_ReleaseIdempotencyKey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoveJob provides a mock function with given fields: ctx, jobID
 func (_m *MockImportMeta) RemoveJob(ctx context.Context, jobID int64) error {
 	ret := _m.Called(ctx, jobID)
@@ -539,6 +653,64 @@ func (_c *MockImportMeta_RemoveTask_Call) Return(_a0 error) *MockImportMeta_Remo
 }
 
 func (_c *MockImportMeta_RemoveTask_Call) RunAndReturn(run func(context.Context, int64) error) *MockImportMeta_RemoveTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ResolveIdempotencyKey provides a mock function with given fields: ctx, collectionID, idempotencyKey
+func (_m *MockImportMeta) ResolveIdempotencyKey(ctx context.Context, collectionID int64, idempotencyKey string) (int64, bool) {
+	ret := _m.Called(ctx, collectionID, idempotencyKey)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ResolveIdempotencyKey")
+	}
+
+	var r0 int64
+	var r1 bool
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string) (int64, bool)); ok {
+		return rf(ctx, collectionID, idempotencyKey)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string) int64); ok {
+		r0 = rf(ctx, collectionID, idempotencyKey)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, string) bool); ok {
+		r1 = rf(ctx, collectionID, idempotencyKey)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	return r0, r1
+}
+
+// MockImportMeta_ResolveIdempotencyKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResolveIdempotencyKey'
+type MockImportMeta_ResolveIdempotencyKey_Call struct {
+	*mock.Call
+}
+
+// ResolveIdempotencyKey is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - idempotencyKey string
+func (_e *MockImportMeta_Expecter) ResolveIdempotencyKey(ctx interface{}, collectionID interface{}, idempotencyKey interface{}) *MockImportMeta_ResolveIdempotencyKey_Call {
+	return &MockImportMeta_ResolveIdempotencyKey_Call{Call: _e.mock.On("ResolveIdempotencyKey", ctx, collectionID, idempotencyKey)}
+}
+
+func (_c *MockImportMeta_ResolveIdempotencyKey_Call) Run(run func(ctx context.Context, collectionID int64, idempotencyKey string)) *MockImportMeta_ResolveIdempotencyKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockImportMeta_ResolveIdempotencyKey_Call) Return(_a0 int64, _a1 bool) *MockImportMeta_ResolveIdempotencyKey_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockImportMeta_ResolveIdempotencyKey_Call) RunAndReturn(run func(context.Context, int64, string) (int64, bool)) *MockImportMeta_ResolveIdempotencyKey_Call {
 	_c.Call.Return(run)
 	return _c
 }

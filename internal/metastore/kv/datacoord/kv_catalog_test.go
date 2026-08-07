@@ -146,6 +146,45 @@ var (
 	}
 )
 
+func Test_ImportIdempotencyKey(t *testing.T) {
+	t.Run("save creates mapping when absent", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().CompareVersionAndSwap(mock.Anything, mock.Anything, int64(0), "1000").Return(true, nil)
+		catalog := NewCatalog(metakv, rootPath, "")
+		created, jobID, err := catalog.SaveImportIdempotencyKeyIfAbsent(context.TODO(), 100, "run-1", 1000)
+		assert.NoError(t, err)
+		assert.True(t, created)
+		assert.Equal(t, int64(1000), jobID)
+	})
+
+	t.Run("save returns existing jobID on conflict", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().CompareVersionAndSwap(mock.Anything, mock.Anything, int64(0), "1000").Return(false, nil)
+		metakv.EXPECT().Load(mock.Anything, mock.Anything).Return("777", nil)
+		catalog := NewCatalog(metakv, rootPath, "")
+		created, jobID, err := catalog.SaveImportIdempotencyKeyIfAbsent(context.TODO(), 100, "run-1", 1000)
+		assert.NoError(t, err)
+		assert.False(t, created)
+		assert.Equal(t, int64(777), jobID)
+	})
+
+	t.Run("save propagates CAS error", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().CompareVersionAndSwap(mock.Anything, mock.Anything, int64(0), "1000").Return(false, errors.New("etcd error"))
+		catalog := NewCatalog(metakv, rootPath, "")
+		_, _, err := catalog.SaveImportIdempotencyKeyIfAbsent(context.TODO(), 100, "run-1", 1000)
+		assert.Error(t, err)
+	})
+
+	t.Run("drop removes the mapping", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
+		catalog := NewCatalog(metakv, rootPath, "")
+		err := catalog.DropImportIdempotencyKey(context.TODO(), 100, "run-1")
+		assert.NoError(t, err)
+	})
+}
+
 func Test_ListSegments(t *testing.T) {
 	t.Run("load failed", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)

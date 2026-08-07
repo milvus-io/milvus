@@ -310,6 +310,7 @@ type ImportReq struct {
 	PartitionName  string            `json:"partitionName"`
 	Files          [][]string        `json:"files" binding:"required"`
 	Options        map[string]string `json:"options"`
+	IdempotencyKey string            `json:"idempotencyKey"`
 }
 
 const (
@@ -324,6 +325,7 @@ func (req *ImportReq) UnmarshalJSON(data []byte) error {
 		PartitionName  string             `json:"partitionName"`
 		Files          [][]string         `json:"files" binding:"required"`
 		Options        map[string]*string `json:"options"`
+		IdempotencyKey string             `json:"idempotencyKey"`
 	}
 	var decoded importReqAlias
 	if err := json.Unmarshal(data, &decoded); err != nil {
@@ -350,11 +352,16 @@ func (req *ImportReq) UnmarshalJSON(data []byte) error {
 	req.PartitionName = decoded.PartitionName
 	req.Files = decoded.Files
 	req.Options = options
+	req.IdempotencyKey = decoded.IdempotencyKey
 	return nil
 }
 
 func (req *ImportReq) GetDbName() string {
 	return req.DbName
+}
+
+func (req *ImportReq) GetIdempotencyKey() string {
+	return req.IdempotencyKey
 }
 
 func (req *ImportReq) GetCollectionName() string {
@@ -378,6 +385,21 @@ type JobIDReq struct {
 }
 
 func (req *JobIDReq) GetJobID() string { return req.JobID }
+
+// ImportProgressReq queries an import job's progress by jobId, or (when jobId is
+// omitted) by its per-collection idempotency key. Exactly one of the two forms
+// must be supplied; this is validated in the handler.
+type ImportProgressReq struct {
+	DbName         string `json:"dbName"`
+	JobID          string `json:"jobId"`
+	CollectionName string `json:"collectionName"`
+	IdempotencyKey string `json:"idempotencyKey"`
+}
+
+func (req *ImportProgressReq) GetJobID() string          { return req.JobID }
+func (req *ImportProgressReq) GetDbName() string         { return req.DbName }
+func (req *ImportProgressReq) GetCollectionName() string { return req.CollectionName }
+func (req *ImportProgressReq) GetIdempotencyKey() string { return req.IdempotencyKey }
 
 type RestoreExternalSnapshotReq struct {
 	DbName               string `json:"dbName"`
@@ -636,6 +658,13 @@ type OptionsGetter interface {
 }
 type JobIDGetter interface {
 	GetJobID() string
+}
+
+// ImportLookupGetter is implemented by requests that can address an import job by
+// its per-collection idempotency key instead of a jobId.
+type ImportLookupGetter interface {
+	GetCollectionName() string
+	GetIdempotencyKey() string
 }
 type TimestampGetter interface {
 	GetTimestamp() uint64

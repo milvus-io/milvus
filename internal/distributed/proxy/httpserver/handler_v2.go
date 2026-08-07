@@ -332,8 +332,8 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 
 	router.POST(ImportJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listImportJob))))
 	router.POST(ImportJobCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &ImportReq{} }, wrapperTraceLog(h.createImportJob))))
-	router.POST(ImportJobCategory+GetProgressAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getImportJobProcess))))
-	router.POST(ImportJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getImportJobProcess))))
+	router.POST(ImportJobCategory+GetProgressAction, timeoutMiddleware(wrapperPost(func() any { return &ImportProgressReq{} }, wrapperTraceLog(h.getImportJobProcess))))
+	router.POST(ImportJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &ImportProgressReq{} }, wrapperTraceLog(h.getImportJobProcess))))
 	router.POST(ImportJobCategory+CommitAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.commitImportJob))))
 	router.POST(ImportJobCategory+AbortAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.abortImportJob))))
 	router.POST(SnapshotJobCategory+RestoreExternalAction, timeoutMiddleware(wrapperPost(func() any { return &RestoreExternalSnapshotReq{} }, wrapperTraceLog(h.restoreExternalSnapshot))))
@@ -3725,6 +3725,9 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 		}),
 		Options: funcutil.Map2KeyValuePair(optionsGetter.GetOptions()),
 	}
+	if keyGetter, ok := anyReq.(interface{ GetIdempotencyKey() string }); ok {
+		req.IdempotencyKey = keyGetter.GetIdempotencyKey()
+	}
 	c.Set(ContextRequest, req)
 
 	if h.checkAuth {
@@ -3751,7 +3754,20 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 
 func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	jobIDGetter := anyReq.(JobIDGetter)
-	response, err := h.getImportProgress(ctx, c, dbName, jobIDGetter.GetJobID())
+	jobID := jobIDGetter.GetJobID()
+	var collectionName, idempotencyKey string
+	if lookupGetter, ok := anyReq.(ImportLookupGetter); ok {
+		collectionName = lookupGetter.GetCollectionName()
+		idempotencyKey = lookupGetter.GetIdempotencyKey()
+	}
+	// Require exactly one lookup form: a jobId, or a (collectionName, idempotencyKey) pair.
+	if jobID == "" && idempotencyKey == "" {
+		return nil, merr.WrapErrParameterInvalidMsg("either jobId or idempotencyKey must be provided")
+	}
+	if idempotencyKey != "" && collectionName == "" {
+		return nil, merr.WrapErrParameterInvalidMsg("collectionName is required when looking up an import job by idempotencyKey")
+	}
+	response, err := h.getImportProgress(ctx, c, dbName, jobID, collectionName, idempotencyKey)
 	if err != nil {
 		return response, err
 	}
@@ -3760,7 +3776,13 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 	}
 
 	returnData := make(map[string]interface{})
-	returnData["jobId"] = jobIDGetter.GetJobID()
+	// Prefer the resolved jobID from the response (set for idempotency-key lookups);
+	// fall back to the request jobID for the normal jobId-addressed path.
+	resolvedJobID := response.GetJobID()
+	if resolvedJobID == "" {
+		resolvedJobID = jobID
+	}
+	returnData["jobId"] = resolvedJobID
 	returnData["createTime"] = response.GetCreateTime()
 	returnData["collectionName"] = response.GetCollectionName()
 	returnData["completeTime"] = response.GetCompleteTime()
@@ -3796,10 +3818,12 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 	return response, nil
 }
 
-func (h *HandlersV2) getImportProgress(ctx context.Context, c *gin.Context, dbName string, jobID string) (*internalpb.GetImportProgressResponse, error) {
+func (h *HandlersV2) getImportProgress(ctx context.Context, c *gin.Context, dbName string, jobID string, collectionName string, idempotencyKey string) (*internalpb.GetImportProgressResponse, error) {
 	req := &internalpb.GetImportProgressRequest{
-		DbName: dbName,
-		JobID:  jobID,
+		DbName:         dbName,
+		JobID:          jobID,
+		CollectionName: collectionName,
+		IdempotencyKey: idempotencyKey,
 	}
 	c.Set(ContextRequest, req)
 
@@ -3838,7 +3862,7 @@ func (h *HandlersV2) checkImportJobAuth(ctx context.Context, c *gin.Context, dbN
 
 	// Commit/abort requests only carry jobID. Import privilege is collection-scoped,
 	// so resolve the job's collection before checking PrivilegeImport.
-	response, err := h.getImportProgress(ctx, c, dbName, jobID)
+	response, err := h.getImportProgress(ctx, c, dbName, jobID, "", "")
 	if err != nil {
 		return err
 	}

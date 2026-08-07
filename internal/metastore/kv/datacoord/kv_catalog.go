@@ -776,6 +776,33 @@ func (kc *Catalog) DropImportJob(ctx context.Context, jobID int64) error {
 	return kc.MetaKv.Remove(ctx, key)
 }
 
+func (kc *Catalog) SaveImportIdempotencyKeyIfAbsent(ctx context.Context, collectionID int64, idempotencyKey string, jobID int64) (bool, int64, error) {
+	key := buildImportIdempotencyKey(collectionID, idempotencyKey)
+	// version 0 => the swap only applies when the key does not yet exist, giving
+	// an atomic put-if-absent that serializes concurrent submissions of the same key.
+	created, err := kc.MetaKv.CompareVersionAndSwap(ctx, key, 0, strconv.FormatInt(jobID, 10))
+	if err != nil {
+		return false, 0, err
+	}
+	if created {
+		return true, jobID, nil
+	}
+	// A mapping already exists (a prior submission won the race); return its jobID.
+	val, err := kc.MetaKv.Load(ctx, key)
+	if err != nil {
+		return false, 0, err
+	}
+	existing, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		return false, 0, errors.Wrapf(err, "parse existing import idempotency jobID failed, key=%s, value=%s", key, val)
+	}
+	return false, existing, nil
+}
+
+func (kc *Catalog) DropImportIdempotencyKey(ctx context.Context, collectionID int64, idempotencyKey string) error {
+	return kc.MetaKv.Remove(ctx, buildImportIdempotencyKey(collectionID, idempotencyKey))
+}
+
 func (kc *Catalog) SavePreImportTask(ctx context.Context, task *datapb.PreImportTask) error {
 	key := buildPreImportTaskKey(task.GetTaskID())
 	value, err := proto.Marshal(task)

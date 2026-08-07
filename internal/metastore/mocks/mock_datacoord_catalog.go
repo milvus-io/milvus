@@ -655,6 +655,54 @@ func (_c *DataCoordCatalog_DropCurrentPartitionStatsVersion_Call) RunAndReturn(r
 	return _c
 }
 
+// DropImportIdempotencyKey provides a mock function with given fields: ctx, collectionID, idempotencyKey
+func (_m *DataCoordCatalog) DropImportIdempotencyKey(ctx context.Context, collectionID int64, idempotencyKey string) error {
+	ret := _m.Called(ctx, collectionID, idempotencyKey)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropImportIdempotencyKey")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string) error); ok {
+		r0 = rf(ctx, collectionID, idempotencyKey)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropImportIdempotencyKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropImportIdempotencyKey'
+type DataCoordCatalog_DropImportIdempotencyKey_Call struct {
+	*mock.Call
+}
+
+// DropImportIdempotencyKey is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - idempotencyKey string
+func (_e *DataCoordCatalog_Expecter) DropImportIdempotencyKey(ctx interface{}, collectionID interface{}, idempotencyKey interface{}) *DataCoordCatalog_DropImportIdempotencyKey_Call {
+	return &DataCoordCatalog_DropImportIdempotencyKey_Call{Call: _e.mock.On("DropImportIdempotencyKey", ctx, collectionID, idempotencyKey)}
+}
+
+func (_c *DataCoordCatalog_DropImportIdempotencyKey_Call) Run(run func(ctx context.Context, collectionID int64, idempotencyKey string)) *DataCoordCatalog_DropImportIdempotencyKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropImportIdempotencyKey_Call) Return(_a0 error) *DataCoordCatalog_DropImportIdempotencyKey_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropImportIdempotencyKey_Call) RunAndReturn(run func(context.Context, int64, string) error) *DataCoordCatalog_DropImportIdempotencyKey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropImportJob provides a mock function with given fields: ctx, jobID
 func (_m *DataCoordCatalog) DropImportJob(ctx context.Context, jobID int64) error {
 	ret := _m.Called(ctx, jobID)
@@ -2748,6 +2796,72 @@ func (_c *DataCoordCatalog_SaveFileResource_Call) Return(_a0 error) *DataCoordCa
 }
 
 func (_c *DataCoordCatalog_SaveFileResource_Call) RunAndReturn(run func(context.Context, *internalpb.FileResourceInfo, uint64) error) *DataCoordCatalog_SaveFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveImportIdempotencyKeyIfAbsent provides a mock function with given fields: ctx, collectionID, idempotencyKey, jobID
+func (_m *DataCoordCatalog) SaveImportIdempotencyKeyIfAbsent(ctx context.Context, collectionID int64, idempotencyKey string, jobID int64) (bool, int64, error) {
+	ret := _m.Called(ctx, collectionID, idempotencyKey, jobID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveImportIdempotencyKeyIfAbsent")
+	}
+
+	var r0 bool
+	var r1 int64
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string, int64) (bool, int64, error)); ok {
+		return rf(ctx, collectionID, idempotencyKey, jobID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string, int64) bool); ok {
+		r0 = rf(ctx, collectionID, idempotencyKey, jobID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, string, int64) int64); ok {
+		r1 = rf(ctx, collectionID, idempotencyKey, jobID)
+	} else {
+		r1 = ret.Get(1).(int64)
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, int64, string, int64) error); ok {
+		r2 = rf(ctx, collectionID, idempotencyKey, jobID)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// DataCoordCatalog_SaveImportIdempotencyKeyIfAbsent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveImportIdempotencyKeyIfAbsent'
+type DataCoordCatalog_SaveImportIdempotencyKeyIfAbsent_Call struct {
+	*mock.Call
+}
+
+// SaveImportIdempotencyKeyIfAbsent is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - idempotencyKey string
+//   - jobID int64
+func (_e *DataCoordCatalog_Expecter) SaveImportIdempotencyKeyIfAbsent(ctx interface{}, collectionID interface{}, idempotencyKey interface{}, jobID interface{}) *DataCoordCatalog_SaveImportIdempotencyKeyIfAbsent_Call {
+	return &DataCoordCatalog_SaveImportIdempotencyKeyIfAbsent_Call{Call: _e.mock.On("SaveImportIdempotencyKeyIfAbsent", ctx, collectionID, idempotencyKey, jobID)}
+}
+
+func (_c *DataCoordCatalog_SaveImportIdempotencyKeyIfAbsent_Call) Run(run func(ctx context.Context, collectionID int64, idempotencyKey string, jobID int64)) *DataCoordCatalog_SaveImportIdempotencyKeyIfAbsent_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(string), args[3].(int64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveImportIdempotencyKeyIfAbsent_Call) Return(_a0 bool, _a1 int64, _a2 error) *DataCoordCatalog_SaveImportIdempotencyKeyIfAbsent_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveImportIdempotencyKeyIfAbsent_Call) RunAndReturn(run func(context.Context, int64, string, int64) (bool, int64, error)) *DataCoordCatalog_SaveImportIdempotencyKeyIfAbsent_Call {
 	_c.Call.Return(run)
 	return _c
 }

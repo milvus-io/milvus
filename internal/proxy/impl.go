@@ -4840,7 +4840,8 @@ func convertToV2ImportRequest(req *milvuspb.ImportRequest) *internalpb.ImportReq
 		Files: []*internalpb.ImportFile{{
 			Paths: req.GetFiles(),
 		}},
-		Options: req.GetOptions(),
+		Options:        req.GetOptions(),
+		IdempotencyKey: req.GetIdempotencyKey(),
 	}
 }
 
@@ -6391,6 +6392,22 @@ func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImp
 	mlog.Info(ctx, rpcReceived(method))
 
 	nodeID := paramtable.GetStringNodeID()
+	// Idempotency-key lookup: resolve collection_name -> collectionID (keys are
+	// scoped per-collection) so DataCoord can map the key to its jobID.
+	if req.GetJobID() == "" && req.GetIdempotencyKey() != "" {
+		if req.GetCollectionName() == "" {
+			return &internalpb.GetImportProgressResponse{
+				Status: merr.Status(merr.WrapErrParameterInvalidMsg("collectionName is required when looking up an import job by idempotency_key")),
+			}, nil
+		}
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		if err != nil {
+			return &internalpb.GetImportProgressResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+		req.CollectionID = collectionID
+	}
 	resp, err := node.mixCoord.GetImportProgress(ctx, req)
 	if resp.GetStatus().GetCode() != 0 || err != nil {
 		mlog.Warn(context.TODO(), "get import progress failed", mlog.String("reason", resp.GetStatus().GetReason()), mlog.Err(err))

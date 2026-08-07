@@ -19,6 +19,7 @@ package importutilv2
 import (
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
+
+func TestOption_ValidateIdempotencyKey(t *testing.T) {
+	// valid keys
+	assert.NoError(t, ValidateIdempotencyKey("run_id_batch_1"))
+	assert.NoError(t, ValidateIdempotencyKey("550e8400-e29b-41d4-a716-446655440000"))
+	assert.NoError(t, ValidateIdempotencyKey(""))                                        // empty is allowed (caller opts in)
+	assert.NoError(t, ValidateIdempotencyKey(strings.Repeat("a", IdempotencyKeyMaxLen))) // at the bound
+
+	// too long
+	assert.Error(t, ValidateIdempotencyKey(strings.Repeat("a", IdempotencyKeyMaxLen+1)))
+
+	// contains '/' (would break the etcd key layout)
+	assert.Error(t, ValidateIdempotencyKey("run/1"))
+
+	// contains a control character
+	assert.Error(t, ValidateIdempotencyKey("run\n1"))
+}
 
 func TestOption_GetTimeout(t *testing.T) {
 	const delta = 3 * time.Second
