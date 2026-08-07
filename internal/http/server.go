@@ -180,13 +180,12 @@ func RegisterCheckComponentReady(checkActive func(role string) error) {
 			mlog.Info(ctx, "start to check component ready", mlog.String("role", role))
 			if err := checkActive(role); err != nil {
 				mlog.Warn(ctx, "failed to check component ready", mlog.Err(err))
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, `{"msg": "failed to to check component ready, %s"}`, err.Error())
+				writeJSONWithMsg(w, http.StatusInternalServerError,
+					fmt.Sprintf("failed to to check component ready, %s", err.Error()))
 				return
 			}
 			mlog.Info(ctx, "finish to check component ready", mlog.String("role", role))
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"msg": "OK"}`))
+			writeJSONWithMsg(w, http.StatusOK, "OK")
 		},
 	})
 }

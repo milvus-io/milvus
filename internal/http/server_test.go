@@ -24,12 +24,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -166,6 +168,44 @@ func (suite *HTTPServerTestSuite) TestStopComponentHandler() {
 		suite.Equal(test.expectedCode, resp.StatusCode)
 		suite.Equal("application/json", resp.Header.Get("Content-Type"))
 		suite.Equal(test.expectedBody, string(body))
+	}
+}
+
+func TestCheckComponentReadyHandler(t *testing.T) {
+	originalMetricsServer := metricsServer
+	metricsServer = http.NewServeMux()
+	t.Cleanup(func() {
+		metricsServer = originalMetricsServer
+	})
+
+	RegisterCheckComponentReady(func(role string) error {
+		if role != "proxy" {
+			return fmt.Errorf("role %q is not ready", role)
+		}
+		return nil
+	})
+
+	tests := []struct {
+		role         string
+		expectedCode int
+		expectedMsg  string
+	}{
+		{role: "proxy", expectedCode: http.StatusOK, expectedMsg: "OK"},
+		{role: `query"node`, expectedCode: http.StatusInternalServerError, expectedMsg: `failed to to check component ready, role "query\"node" is not ready`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.role, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, RouteCheckComponentReady+"?role="+url.QueryEscape(test.role), nil)
+			recorder := httptest.NewRecorder()
+			metricsServer.ServeHTTP(recorder, req)
+
+			assert.Equal(t, test.expectedCode, recorder.Code)
+			assert.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
+			var response map[string]string
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Equal(t, test.expectedMsg, response["msg"])
+		})
 	}
 }
 
