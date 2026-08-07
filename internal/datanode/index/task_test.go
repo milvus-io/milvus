@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
@@ -52,6 +53,23 @@ type IndexBuildTaskSuite struct {
 
 	numRows int
 	dim     int
+}
+
+type emptyIndex struct {
+	deleted bool
+}
+
+func (*emptyIndex) Build(*indexcgowrapper.Dataset) error                        { return nil }
+func (*emptyIndex) Serialize() ([]*indexcgowrapper.Blob, error)                 { return nil, nil }
+func (*emptyIndex) GetIndexFileInfo() ([]*indexcgowrapper.IndexFileInfo, error) { return nil, nil }
+func (*emptyIndex) Load([]*indexcgowrapper.Blob) error                          { return nil }
+func (index *emptyIndex) Delete() error {
+	index.deleted = true
+	return nil
+}
+func (*emptyIndex) CleanLocalData() error { return nil }
+func (*emptyIndex) UpLoad() (*cgopb.IndexStats, error) {
+	return &cgopb.IndexStats{}, nil
 }
 
 func (suite *IndexBuildTaskSuite) SetupSuite() {
@@ -134,6 +152,41 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 	suite.NoError(err)
 	err = t.PostExecute(context.Background())
 	suite.NoError(err)
+}
+
+func (suite *IndexBuildTaskSuite) TestPostExecuteAcceptsEmptyIndexStats() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const (
+		clusterID                 = "empty-nested-index"
+		buildID                   = int64(1)
+		currentIndexVersion       = int32(2)
+		currentScalarIndexVersion = int32(3)
+	)
+	manager := NewTaskManager(ctx)
+	manager.LoadOrStoreIndexTask(clusterID, buildID, &IndexTaskInfo{})
+
+	req := &workerpb.CreateJobRequest{
+		ClusterID:                 clusterID,
+		BuildID:                   buildID,
+		CurrentIndexVersion:       currentIndexVersion,
+		CurrentScalarIndexVersion: currentScalarIndexVersion,
+	}
+	task := NewIndexBuildTask(ctx, cancel, req, nil, manager, nil)
+	index := &emptyIndex{}
+	task.index = index
+
+	suite.NoError(task.PostExecute(ctx))
+	suite.True(index.deleted)
+
+	info := manager.GetIndexTaskInfo(clusterID, buildID)
+	suite.Require().NotNil(info)
+	suite.Empty(info.FileKeys)
+	suite.Zero(info.SerializedSize)
+	suite.Zero(info.MemSize)
+	suite.Equal(currentIndexVersion, info.CurrentIndexVersion)
+	suite.Equal(currentScalarIndexVersion, info.CurrentScalarIndexVersion)
 }
 
 func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
@@ -282,10 +335,10 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var captured *clusteringpb.AnalyzeInfo
+	var capturedMaxConnections uint32
 	patch := mockey.Mock(analyzecgowrapper.Analyze).To(
 		func(_ context.Context, info *clusteringpb.AnalyzeInfo, _ *indexcgopb.StoragePluginContext) (analyzecgowrapper.CodecAnalyze, error) {
-			captured = info
+			capturedMaxConnections = info.GetStorageConfig().GetMaxConnections()
 			return nil, nil
 		}).Build()
 	defer patch.UnPatch()
@@ -313,8 +366,7 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 
 	err := task.Execute(ctx)
 	suite.NoError(err)
-	suite.Require().NotNil(captured)
-	suite.Equal(uint32(237), captured.GetStorageConfig().GetMaxConnections())
+	suite.Equal(uint32(237), capturedMaxConnections)
 }
 
 func TestAnalyzeTaskSuite(t *testing.T) {
