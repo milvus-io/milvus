@@ -3,6 +3,7 @@ package adaptor
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -85,6 +86,50 @@ func newTestCurrentWAL(t *testing.T, channel types.PChannelInfo) walimpls.ROWALI
 	return currentWAL
 }
 
+type switchableScannerResult struct {
+	next switchableScanner
+	err  error
+}
+
+func runSwitchableScannerUntil(
+	t *testing.T,
+	scanner switchableScanner,
+	outputCh <-chan message.ImmutableMessage,
+	stopWhen func(message.ImmutableMessage) bool,
+) []message.ImmutableMessage {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	resultCh := make(chan switchableScannerResult, 1)
+	go func() {
+		next, err := scanner.Do(ctx)
+		resultCh <- switchableScannerResult{next: next, err: err}
+	}()
+
+	messages := make([]message.ImmutableMessage, 0)
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case msg := <-outputCh:
+			messages = append(messages, msg)
+			if !stopWhen(msg) {
+				continue
+			}
+			cancel()
+			result := <-resultCh
+			require.Nil(t, result.next)
+			require.ErrorIs(t, result.err, context.Canceled)
+			return messages
+		case result := <-resultCh:
+			t.Fatalf("switchable scanner stopped before the expected message: next=%T err=%v", result.next, result.err)
+		case <-deadline.C:
+			t.Fatal("timed out waiting for switchable scanner output")
+		}
+	}
+}
+
 func TestNewSwitchableScannerUsesCurrentWALDirectly(t *testing.T) {
 	channel := types.PChannelInfo{Name: "test-channel"}
 	currentWAL := newTestCurrentWAL(t, channel)
@@ -114,7 +159,10 @@ func TestSwitchableScannerSwitchesImmediatelyOnAlterWAL(t *testing.T) {
 	currentWAL := newTestCurrentWAL(t, channel)
 	marker := newTestAlterWALMessage(commonpb.WALName_Test, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
 	oldWAL := newTestReadWAL(t, message.WALNameRocksmq, channel, marker)
-	outputCh := make(chan message.ImmutableMessage, 1)
+	currentMessage := newTestTimeTickMessage(101, walimplstest.NewTestMessageID(1), walimplstest.NewTestMessageID(1))
+	currentReadWAL := newTestReadWAL(t, message.WALNameTest, channel, currentMessage)
+	outputCh := make(chan message.ImmutableMessage, 2)
+	opened := make([]message.WALName, 0, 2)
 
 	scanner := newSwitchableScanner(
 		"switch-reader",
@@ -124,45 +172,57 @@ func TestSwitchableScannerSwitchesImmediatelyOnAlterWAL(t *testing.T) {
 		options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
 		outputCh,
 		func(_ context.Context, walName message.WALName, gotChannel types.PChannelInfo) (walimpls.ROWALImpls, error) {
-			require.Equal(t, message.WALNameRocksmq, walName)
+			opened = append(opened, walName)
 			require.Equal(t, channel, gotChannel)
-			return oldWAL, nil
+			switch walName {
+			case message.WALNameRocksmq:
+				return oldWAL, nil
+			case message.WALNameTest:
+				return currentReadWAL, nil
+			default:
+				t.Fatalf("unexpected WAL name %s", walName)
+				return nil, nil
+			}
 		},
 		nil,
 	)
 
-	next, err := scanner.Do(context.Background())
-	require.NoError(t, err)
-	catchup, ok := next.(*catchupScanner)
-	require.True(t, ok)
-	require.Equal(t, uint64(100), catchup.exclusiveStartTimeTick)
-	_, ok = catchup.deliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
-	require.True(t, ok)
-	require.Equal(t, marker, <-outputCh)
+	messages := runSwitchableScannerUntil(t, scanner, outputCh, func(msg message.ImmutableMessage) bool {
+		return msg.MessageType() == message.MessageTypeTimeTick && msg.TimeTick() == 101
+	})
+	require.Equal(t, []message.WALName{message.WALNameRocksmq, message.WALNameTest}, opened)
+	require.Len(t, messages, 2)
+	require.Equal(t, marker, messages[0])
+	require.Equal(t, currentMessage, messages[1])
 }
 
-func TestSwitchableScannerFollowsMigrationChainAndFiltersRepeatedWAL(t *testing.T) {
+func TestSwitchableScannerFollowsMigrationChainWithCleanRepeatedWAL(t *testing.T) {
 	channel := types.PChannelInfo{Name: "test-channel"}
 	currentWAL := newTestCurrentWAL(t, channel)
 
-	firstRocksmqWAL := newTestReadWAL(t, message.WALNameRocksmq, channel,
+	firstRocksmqWAL := newTestReadWAL(
+		t, message.WALNameRocksmq, channel,
 		newTestAlterWALMessage(commonpb.WALName_WoodPecker, 100, rmq.NewRmqID(2), rmq.NewRmqID(1)),
 	)
-	woodpeckerWAL := newTestReadWAL(t, message.WALNameWoodpecker, channel,
+	woodpeckerWAL := newTestReadWAL(
+		t, message.WALNameWoodpecker, channel,
 		newTestTimeTickMessage(150, rmq.NewRmqID(3), rmq.NewRmqID(2)),
 		newTestAlterWALMessage(commonpb.WALName_RocksMQ, 200, rmq.NewRmqID(4), rmq.NewRmqID(3)),
 	)
-	secondRocksmqWAL := newTestReadWAL(t, message.WALNameRocksmq, channel,
-		// These records belong to the first RocksMQ epoch and must be skipped.
-		newTestTimeTickMessage(50, rmq.NewRmqID(1), rmq.NewRmqID(1)),
-		newTestAlterWALMessage(commonpb.WALName_WoodPecker, 100, rmq.NewRmqID(2), rmq.NewRmqID(1)),
-		newTestTimeTickMessage(250, rmq.NewRmqID(5), rmq.NewRmqID(4)),
-		newTestAlterWALMessage(commonpb.WALName_Test, 300, rmq.NewRmqID(6), rmq.NewRmqID(5)),
+	secondRocksmqWAL := newTestReadWAL(
+		t, message.WALNameRocksmq, channel,
+		// A WAL backend must be empty before it is selected as the switch target.
+		newTestTimeTickMessage(250, rmq.NewRmqID(1), rmq.NewRmqID(1)),
+		newTestAlterWALMessage(commonpb.WALName_Test, 300, rmq.NewRmqID(2), rmq.NewRmqID(1)),
+	)
+	currentReadWAL := newTestReadWAL(
+		t, message.WALNameTest, channel,
+		newTestTimeTickMessage(350, walimplstest.NewTestMessageID(1), walimplstest.NewTestMessageID(1)),
 	)
 
 	opened := 0
 	readerSwitches := make([]message.WALName, 0, 3)
-	outputCh := make(chan message.ImmutableMessage, 8)
+	outputCh := make(chan message.ImmutableMessage, 10)
 	scanner := newSwitchableScanner(
 		"migration-chain-reader",
 		mlog.With(),
@@ -182,6 +242,9 @@ func TestSwitchableScannerFollowsMigrationChainAndFiltersRepeatedWAL(t *testing.
 			case 3:
 				require.Equal(t, message.WALNameRocksmq, walName)
 				return secondRocksmqWAL, nil
+			case 4:
+				require.Equal(t, message.WALNameTest, walName)
+				return currentReadWAL, nil
 			default:
 				t.Fatalf("unexpected WAL open %d for %s", opened, walName)
 				return nil, nil
@@ -192,12 +255,10 @@ func TestSwitchableScannerFollowsMigrationChainAndFiltersRepeatedWAL(t *testing.
 		},
 	)
 
-	next, err := scanner.Do(context.Background())
-	require.NoError(t, err)
-	catchup, ok := next.(*catchupScanner)
-	require.True(t, ok)
-	require.Equal(t, uint64(300), catchup.exclusiveStartTimeTick)
-	require.Equal(t, 3, opened)
+	messages := runSwitchableScannerUntil(t, scanner, outputCh, func(msg message.ImmutableMessage) bool {
+		return msg.MessageType() == message.MessageTypeTimeTick && msg.TimeTick() == 350
+	})
+	require.Equal(t, 4, opened)
 	require.Equal(t, []message.WALName{
 		message.WALNameWoodpecker,
 		message.WALNameRocksmq,
@@ -205,23 +266,25 @@ func TestSwitchableScannerFollowsMigrationChainAndFiltersRepeatedWAL(t *testing.
 	}, readerSwitches)
 
 	var timeTicks []uint64
-	for len(outputCh) > 0 {
-		msg := <-outputCh
+	for _, msg := range messages {
 		if msg.MessageType() == message.MessageTypeTimeTick {
 			timeTicks = append(timeTicks, msg.TimeTick())
 		}
 	}
-	require.Equal(t, []uint64{150, 250}, timeTicks)
+	require.Equal(t, []uint64{150, 250, 350}, timeTicks)
 }
 
 func TestSwitchableScannerStartAfterAlterWALMarker(t *testing.T) {
 	channel := types.PChannelInfo{Name: "test-channel"}
 	currentWAL := newTestCurrentWAL(t, channel)
 	markerID := rmq.NewRmqID(2)
-	oldWAL := newTestReadWAL(t, message.WALNameRocksmq, channel,
+	oldWAL := newTestReadWAL(
+		t, message.WALNameRocksmq, channel,
 		newTestAlterWALMessage(commonpb.WALName_Test, 100, markerID, rmq.NewRmqID(1)),
 	)
-	outputCh := make(chan message.ImmutableMessage, 1)
+	currentMessage := newTestTimeTickMessage(101, walimplstest.NewTestMessageID(1), walimplstest.NewTestMessageID(1))
+	currentReadWAL := newTestReadWAL(t, message.WALNameTest, channel, currentMessage)
+	outputCh := make(chan message.ImmutableMessage, 2)
 
 	scanner := newSwitchableScanner(
 		"start-after-marker-reader",
@@ -230,18 +293,20 @@ func TestSwitchableScannerStartAfterAlterWALMarker(t *testing.T) {
 		nil,
 		options.DeliverPolicyStartAfter(markerID),
 		outputCh,
-		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
-			return oldWAL, nil
+		func(_ context.Context, walName message.WALName, _ types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			if walName == message.WALNameRocksmq {
+				return oldWAL, nil
+			}
+			require.Equal(t, message.WALNameTest, walName)
+			return currentReadWAL, nil
 		},
 		nil,
 	)
 
-	next, err := scanner.Do(context.Background())
-	require.NoError(t, err)
-	catchup, ok := next.(*catchupScanner)
-	require.True(t, ok)
-	require.Equal(t, uint64(100), catchup.exclusiveStartTimeTick)
-	require.Empty(t, outputCh)
+	messages := runSwitchableScannerUntil(t, scanner, outputCh, func(msg message.ImmutableMessage) bool {
+		return msg.MessageType() == message.MessageTypeTimeTick && msg.TimeTick() == 101
+	})
+	require.Equal(t, []message.ImmutableMessage{currentMessage}, messages)
 }
 
 func TestSwitchableScannerFailsWhenReadWALIsUnavailable(t *testing.T) {
@@ -263,7 +328,8 @@ func TestSwitchableScannerFailsWhenReadWALIsUnavailable(t *testing.T) {
 
 	next, err := scanner.Do(context.Background())
 	require.Nil(t, next)
-	require.ErrorIs(t, err, merr.ErrMqTopicNotFound)
+	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
+	require.Contains(t, err.Error(), merr.ErrMqTopicNotFound.Error())
 }
 
 func TestSwitchableScannerRejectsInvalidHistoricalStartPosition(t *testing.T) {
@@ -336,7 +402,8 @@ func TestSwitchableScannerFailsWhenHistoricalWALExhaustsBeforeBoundary(t *testin
 func TestSwitchableScannerRejectsInvalidAlterWALTarget(t *testing.T) {
 	channel := types.PChannelInfo{Name: "test-channel"}
 	currentWAL := newTestCurrentWAL(t, channel)
-	historicalWAL := newTestReadWAL(t, message.WALNameRocksmq, channel,
+	historicalWAL := newTestReadWAL(
+		t, message.WALNameRocksmq, channel,
 		newTestAlterWALMessage(commonpb.WALName(12345), 100, rmq.NewRmqID(2), rmq.NewRmqID(1)),
 	)
 
@@ -376,11 +443,14 @@ func TestSwitchableScannerReopensWALAfterReaderFailure(t *testing.T) {
 	failedWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(failedScanner, nil).Once()
 	failedWAL.EXPECT().Close().Return().Once()
 
-	recoveredWAL := newTestReadWAL(t, message.WALNameRocksmq, channel,
+	recoveredWAL := newTestReadWAL(
+		t, message.WALNameRocksmq, channel,
 		newTestAlterWALMessage(commonpb.WALName_Test, 100, rmq.NewRmqID(3), rmq.NewRmqID(2)),
 	)
+	currentMessage := newTestTimeTickMessage(101, walimplstest.NewTestMessageID(1), walimplstest.NewTestMessageID(1))
+	currentReadWAL := newTestReadWAL(t, message.WALNameTest, channel, currentMessage)
 	openCount := 0
-	outputCh := make(chan message.ImmutableMessage, 2)
+	outputCh := make(chan message.ImmutableMessage, 4)
 	scanner := newSwitchableScanner(
 		"retry-reader",
 		mlog.With(),
@@ -388,8 +458,12 @@ func TestSwitchableScannerReopensWALAfterReaderFailure(t *testing.T) {
 		nil,
 		options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
 		outputCh,
-		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
+		func(_ context.Context, walName message.WALName, _ types.PChannelInfo) (walimpls.ROWALImpls, error) {
 			openCount++
+			if walName == message.WALNameTest {
+				return currentReadWAL, nil
+			}
+			require.Equal(t, message.WALNameRocksmq, walName)
 			if openCount == 1 {
 				return failedWAL, nil
 			}
@@ -398,14 +472,14 @@ func TestSwitchableScannerReopensWALAfterReaderFailure(t *testing.T) {
 		nil,
 	)
 
-	next, err := scanner.Do(context.Background())
-	require.NoError(t, err)
-	catchup, ok := next.(*catchupScanner)
-	require.True(t, ok)
-	require.Equal(t, uint64(100), catchup.exclusiveStartTimeTick)
-	require.Equal(t, 2, openCount)
-	require.Equal(t, uint64(90), (<-outputCh).TimeTick())
-	require.Equal(t, message.MessageTypeAlterWAL, (<-outputCh).MessageType())
+	messages := runSwitchableScannerUntil(t, scanner, outputCh, func(msg message.ImmutableMessage) bool {
+		return msg.MessageType() == message.MessageTypeTimeTick && msg.TimeTick() == 101
+	})
+	require.Equal(t, 3, openCount)
+	require.Len(t, messages, 3)
+	require.Equal(t, uint64(90), messages[0].TimeTick())
+	require.Equal(t, message.MessageTypeAlterWAL, messages[1].MessageType())
+	require.Equal(t, currentMessage, messages[2])
 }
 
 func TestNormalizeSwitchableDeliverPolicy(t *testing.T) {

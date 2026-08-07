@@ -141,7 +141,12 @@ func TestROWALReadBridgesHistoricalAndCurrentWAL(t *testing.T) {
 	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
 	currentWAL.EXPECT().Channel().Return(channel).Maybe()
 	currentWAL.EXPECT().Close().Return().Once()
-	currentWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
+
+	currentReadWAL := mock_walimpls.NewMockWALImpls(t)
+	currentReadWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
+	currentReadWAL.EXPECT().Channel().Return(channel).Maybe()
+	currentReadWAL.EXPECT().Close().Return().Once()
+	currentReadWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
 		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
 		return ok
 	})).Return(currentScanner, nil).Once()
@@ -165,9 +170,16 @@ func TestROWALReadBridgesHistoricalAndCurrentWAL(t *testing.T) {
 		walName message.WALName,
 		gotChannel types.PChannelInfo,
 	) (walimpls.ROWALImpls, error) {
-		assert.Equal(t, message.WALNameRocksmq, walName)
 		assert.Equal(t, channel, gotChannel)
-		return historicalWAL, nil
+		switch walName {
+		case message.WALNameRocksmq:
+			return historicalWAL, nil
+		case message.WALNameTest:
+			return currentReadWAL, nil
+		default:
+			t.Fatalf("unexpected WAL name %s", walName)
+			return nil, nil
+		}
 	})
 	defer roWAL.Close()
 
@@ -204,7 +216,12 @@ func TestROWALReadStartAfterAlterWALMarker(t *testing.T) {
 	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
 	currentWAL.EXPECT().Channel().Return(channel).Maybe()
 	currentWAL.EXPECT().Close().Return().Once()
-	currentWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
+
+	currentReadWAL := mock_walimpls.NewMockWALImpls(t)
+	currentReadWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
+	currentReadWAL.EXPECT().Channel().Return(channel).Maybe()
+	currentReadWAL.EXPECT().Close().Return().Once()
+	currentReadWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
 		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
 		return ok
 	})).Return(currentScanner, nil).Once()
@@ -232,9 +249,16 @@ func TestROWALReadStartAfterAlterWALMarker(t *testing.T) {
 		walName message.WALName,
 		gotChannel types.PChannelInfo,
 	) (walimpls.ROWALImpls, error) {
-		assert.Equal(t, message.WALNameRocksmq, walName)
 		assert.Equal(t, channel, gotChannel)
-		return historicalWAL, nil
+		switch walName {
+		case message.WALNameRocksmq:
+			return historicalWAL, nil
+		case message.WALNameTest:
+			return currentReadWAL, nil
+		default:
+			t.Fatalf("unexpected WAL name %s", walName)
+			return nil, nil
+		}
 	})
 	defer roWAL.Close()
 

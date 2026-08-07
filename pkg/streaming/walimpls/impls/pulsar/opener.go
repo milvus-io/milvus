@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/admin"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
@@ -37,8 +38,9 @@ func (t tenant) MustGetFullTopicName(topic string) string {
 
 // openerImpl is the opener for pulsar wal.
 type openerImpl struct {
-	tenant tenant
-	c      pulsar.Client
+	tenant      tenant
+	c           pulsar.Client
+	adminClient admin.Client
 }
 
 // Open opens a wal instance.
@@ -62,6 +64,7 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 		notifier:           syncutil.NewAsyncTaskNotifier[struct{}](),
 		backlogClearHelper: backlogClearHelper,
 		tenant:             o.tenant,
+		adminClient:        o.adminClient,
 	}
 	// because the producer of pulsar cannot be created if the topic is backlog exceeded,
 	// so we need to set the producer at background with backoff retry.
