@@ -21,7 +21,15 @@ from utils.util_log import test_log as log
 
 class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
     @staticmethod
-    def _search_hit_ids_match(hit_ids, expected_id, exact_ids=False, expected_ids=None):
+    def _search_hit_ids_match(
+        hit_ids,
+        expected_id,
+        exact_ids=False,
+        expected_ids=None,
+        expected_count=None,
+    ):
+        if expected_count is not None and len(hit_ids) != expected_count:
+            return False
         if expected_ids is not None:
             return bool(hit_ids) and all(hit_id in expected_ids for hit_id in hit_ids)
         if exact_ids:
@@ -57,6 +65,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         rounds=5,
         exact_ids=False,
         expected_ids=None,
+        expected_count=None,
     ):
         verification_start = time.monotonic()
         last_search_res = None
@@ -78,10 +87,12 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
                 expected_id,
                 exact_ids=exact_ids,
                 expected_ids=expected_ids,
+                expected_count=expected_count,
             )
             assert matched, (
                 f"{label} post-hit search returned unexpected ids on round={round_no}/{rounds}: "
-                f"expected_id={expected_id}, expected_ids={expected_ids}, hit_ids={hit_ids}"
+                f"expected_id={expected_id}, expected_ids={expected_ids}, "
+                f"expected_count={expected_count}, hit_ids={hit_ids}"
             )
 
         log.info(
@@ -105,6 +116,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         interval=1,
         filter=None,
         expected_ids=None,
+        expected_count=None,
     ):
         poll_start = time.monotonic()
         deadline = poll_start + timeout
@@ -151,7 +163,12 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
                     )
             else:
                 hit_ids = [hit["id"] for hit in search_res[0]]
-                if self._search_hit_ids_match(hit_ids, expected_id, expected_ids=expected_ids):
+                if self._search_hit_ids_match(
+                    hit_ids,
+                    expected_id,
+                    expected_ids=expected_ids,
+                    expected_count=expected_count,
+                ):
                     log.info(
                         f"{label} search ready after {time.monotonic() - poll_start:.2f}s, "
                         f"attempts={attempts}, hit_ids={hit_ids}, "
@@ -167,11 +184,13 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
                         expected_id,
                         label,
                         expected_ids=expected_ids,
+                        expected_count=expected_count,
                     )
                 if hit_ids:
                     raise AssertionError(
                         f"{label} search returned unexpected ids={hit_ids}, "
-                        f"expected_id={expected_id}, expected_ids={expected_ids}"
+                        f"expected_id={expected_id}, expected_ids={expected_ids}, "
+                        f"expected_count={expected_count}"
                     )
                 elapsed = time.monotonic() - poll_start
                 empty_result_count += 1
@@ -188,6 +207,7 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             index_info = f"describe_index failed: {exc}"
         raise AssertionError(
             f"{label} search was not ready within {timeout}s, attempts={attempts}, "
+            f"expected_id={expected_id}, expected_ids={expected_ids}, expected_count={expected_count}, "
             f"last_error={last_error}, empty_result_count={empty_result_count}, "
             f"first_empty_result_seconds={first_empty_result_seconds}, "
             f"last_empty_result_seconds={last_empty_result_seconds}, "
@@ -3375,14 +3395,16 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         TC-35 / #51366: Post-create base index with total rows below the physical-index threshold.
 
         target: verify added BM25 field becomes searchable when the base vec index is created after collection
-        method: create vec index separately, insert 12 old rows, add BM25 field, then insert 500 rows and search
-        expected: with 512 total rows, BM25 search converges without release/reload
+        method: create vec index separately, insert 12 old rows, add BM25 field, insert 500 rows, wait for the
+            sparse index to report all 512 rows ready, then search without reloading
+        expected: after the sparse index is ready, BM25 search returns all five requested hits without release/reload
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         query_text = "bm25_repro_token"
         historical_row_count = 12
         post_add_row_count = 500
+        search_limit = 5
         total_row_count = historical_row_count + post_add_row_count
         assert total_row_count == 512
         assert total_row_count < 1024
@@ -3458,8 +3480,14 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         stats = client.get_collection_stats(collection_name)
         assert stats["row_count"] == total_row_count
 
-        # Function-output backfill and QueryNode visibility are not represented by
-        # describe_index readiness. Poll the actual BM25 search directly.
+        # Reproduce the post-index-ready state from #51366 before checking search visibility.
+        assert self.wait_for_index_ready(client, collection_name, index_name="sparse_bm25", timeout=180)
+        sparse_index_info = client.describe_index(collection_name, index_name="sparse_bm25")
+        assert sparse_index_info["state"] == "Finished"
+        assert sparse_index_info["total_rows"] == total_row_count
+        assert sparse_index_info["indexed_rows"] == total_row_count
+        assert sparse_index_info["pending_index_rows"] == 0
+
         search_result = self.wait_for_search_hit(
             client,
             collection_name,
@@ -3469,11 +3497,13 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
             label="#51366 BM25 with post-create base index and 512 total rows",
             search_params={"metric_type": "BM25"},
             output_fields=["id"],
+            limit=search_limit,
             timeout=60,
             expected_ids=range(30000, 30000 + post_add_row_count),
+            expected_count=search_limit,
         )
         hit_ids = [hit["id"] for hit in search_result[0]]
-        assert hit_ids
+        assert len(hit_ids) == search_limit
         assert all(30000 <= row_id < 30000 + post_add_row_count for row_id in hit_ids)
 
         self.drop_collection(client, collection_name)
