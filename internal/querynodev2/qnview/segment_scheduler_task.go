@@ -172,6 +172,10 @@ type transformStartSegment struct {
 	startAfter uint64
 }
 
+func (s *transformStartSegment) UnwrapTransformSegment() TransformSegment {
+	return s.TransformSegment
+}
+
 func (s *transformStartSegment) TransformStartAfterTimeTick() uint64 {
 	return s.startAfter
 }

@@ -94,6 +94,7 @@ type CompactionMeta interface {
 var _ CompactionMeta = (*meta)(nil)
 
 type meta struct {
+ queryViewLoadInfoNotifier QueryViewLoadInfoNotifier
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog
 
