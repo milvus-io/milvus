@@ -131,9 +131,11 @@ ReadJsonStatsParquetMetadata(const std::string& file) {
     }
 
     auto schema = reader.get_schema();
-    AssertInfo(schema != nullptr,
-               "[JsonStats] failed to read parquet schema for {}",
-               file);
+    if (!(schema != nullptr)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "[JsonStats] failed to read parquet schema for {}",
+                  file);
+    }
     return JsonStatsParquetMetadata{std::move(schema), num_rows};
 }
 
@@ -1459,10 +1461,12 @@ JsonKeyStats::Upload(const Config& config) {
 
     // upload meta file
     auto meta_file_path = GetMetaFilePath();
-    AssertInfo(disk_file_manager_->AddJsonStatsMetaLog(meta_file_path),
-               "failed to upload meta file: {} for segment {}",
-               meta_file_path,
-               segment_id_);
+    if (!(disk_file_manager_->AddJsonStatsMetaLog(meta_file_path))) {
+        ThrowInfo(ErrorCode::FileWriteFailed,
+                  "failed to upload meta file: {} for segment {}",
+                  meta_file_path,
+                  segment_id_);
+    }
 
     // upload parquet file, parquet writer has already upload file to remote
     auto shredding_remote_paths_to_size = parquet_writer_->GetPathsToSize();

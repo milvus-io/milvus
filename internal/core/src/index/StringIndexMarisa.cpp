@@ -897,10 +897,12 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
         local_cm ? local_cm->GetRootPath() : std::string("/tmp");
     std::error_code ec;
     std::filesystem::create_directories(tmp_dir, ec);
-    AssertInfo(!ec,
-               "failed to create string index temp directory: {}, error: {}",
-               tmp_dir,
-               ec.message());
+    if (!(!ec)) {
+        ThrowInfo(ErrorCode::FileCreateFailed,
+                  "failed to create string index temp directory: {}, error: {}",
+                  tmp_dir,
+                  ec.message());
+    }
     auto uuid = boost::uuids::random_generator()();
     auto uuid_string = boost::uuids::to_string(uuid);
     auto file = tmp_dir + "/" + uuid_string;
@@ -953,10 +955,12 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
         local_cm ? local_cm->GetRootPath() : std::string("/tmp");
     std::error_code ec;
     std::filesystem::create_directories(tmp_dir, ec);
-    AssertInfo(!ec,
-               "failed to create string index temp directory: {}, error: {}",
-               tmp_dir,
-               ec.message());
+    if (!(!ec)) {
+        ThrowInfo(ErrorCode::FileCreateFailed,
+                  "failed to create string index temp directory: {}, error: {}",
+                  tmp_dir,
+                  ec.message());
+    }
     auto uuid = boost::uuids::random_generator()();
     auto uuid_string = boost::uuids::to_string(uuid);
     auto file_name = tmp_dir + "/" + uuid_string;
