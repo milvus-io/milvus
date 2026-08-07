@@ -49,20 +49,6 @@ KNOWN_ISSUE_51568_ERROR_VALUE_CASES = {
     "float_int_or_20": "kInt64Val",
     "str_int_or_3": "kStringVal",
 }
-KNOWN_ISSUE_51489_IN_ERROR_VALUE_CASES = {
-    "int_string_in": "kStringVal",
-    "string_int_in": "kInt64Val",
-    "int_unrelated_string_in": "kStringVal",
-    "json_array_subscript_mixed_in": "kStringVal",
-}
-KNOWN_ISSUE_51567_IN_ERROR_VALUE_CASES = {
-    "bool_int_in_true_one": "kInt64Val",
-    "bool_string_in": "kStringVal",
-    "bool_int_string_in": "kInt64Val",
-}
-KNOWN_ISSUE_51567_IN_SUCCESS_IDS = {
-    "bool_int_in_false_one": [3, 4],
-}
 KNOWN_ISSUE_51567_OR_LOSS_IDS = {
     "bool_int_or_bool_first_three": [5, 6],
     "bool_int_or_bool_last_three": [5, 6],
@@ -83,18 +69,14 @@ L0_51567_BOOL_IN_CASE_NAMES = set()
 L0_51567_BOOL_OR_CASE_NAMES = {"bool_int_or_int_first_three", "bool_int_or_bool_first_three"}
 L1_51568_CASE_NAMES = {"mixed_numeric_in_5_control", "str_int_or_3"}
 L1_51567_BOOL_IN_CASE_NAMES = {"bool_int_in_true_one", "bool_int_in_false_one"}
-MIXED_LITERAL_TYPE_TOKENS = {
-    "int": ("int64_val", "int64", "integer"),
-    "string": ("string_val", "varchar", "string"),
-    "bool": ("bool_val", "bool"),
-}
-MIXED_IN_LITERAL_TYPES_51489 = {case_name: {"int", "string"} for case_name, _ in JSON_MIXED_TYPE_IN_51489_CASES}
-MIXED_IN_LITERAL_TYPES_51567 = {
-    "bool_int_in_true_one": {"bool", "int"},
-    "bool_int_in_false_one": {"bool", "int"},
-    "bool_string_in": {"bool", "string"},
-    "bool_int_string_in": {"bool", "int", "string"},
-}
+# Index the case tables by name so the single-case search variants below reuse the exact
+# same expression / OR expansion / expected IDs as their query counterparts.
+MIXED_IN_CASES_BY_NAME = {case[0]: case for case in JSON_MIXED_TYPE_IN_51489_CASES + JSON_BOOL_MIXED_IN_51567_CASES}
+# limit used by the mixed-type IN search variants. Comfortably larger than anything these
+# filters can match, so a short result is attributable to the filter rather than to top-k.
+# No assertion depends on it being large enough -- see the search helper on why exact ANN
+# recall is never required.
+MIXED_IN_SEARCH_LIMIT = 20
 JSON_HOMOGENEOUS_IN_CONTROL_CASES = [
     ("numeric_in", 'meta["p"] in [1, 2]', [1, 2]),
     ("bool_in", 'meta["b"] in [true, false]', [1, 2, 3, 4]),
@@ -285,79 +267,125 @@ def result_ids(result):
     return sorted(hit_id(row) for row in rows)
 
 
-def assert_meaningful_type_mismatch_rejection(
-    call,
-    expr,
-    expected_literal_types,
-    known_issue=None,
-    known_executor_value_case=None,
-    known_success_ids=None,
-    known_success_baseline=None,
+def assert_mixed_type_in_matches_or_expansion(
+    client,
+    collection_name,
+    mixed_in_expr,
+    or_expansion_expr,
+    expected_ids=None,
+    context="",
 ):
+    """Assert the milvus-io/milvus#51625 canonicalization contract for mixed-type JSON IN.
+
+    A mixed-type term list is partitioned by concrete literal kind and the per-kind
+    predicates are OR-ed back together, so the IN form must be *exactly* equivalent to the
+    explicit OR expansion carried by the case table. Asserting that equivalence -- rather
+    than a hard-coded ID list -- is what the fix actually promises. It is not sufficient on
+    its own, though: both expressions travel the same rewrite and execution path, so a
+    regression there could make them agree on the same wrong answer. `expected_ids` is the
+    independent oracle, derived from the deterministic fixture, that closes that hole.
+    """
     try:
-        result = call()
+        rows = client.query(collection_name, filter=mixed_in_expr, output_fields=[default_pk])
     except MilvusException as exc:
-        message = str(exc).lower()
-        if (
-            known_issue
-            and known_executor_value_case
-            and is_known_executor_type_assertion(exc, known_executor_value_case)
-        ):
-            pytest.xfail(f"Known issue {known_issue}: expected planner rejection, got {exc}")
-
-        assert exc.code == 1100, f"expected planner invalid-parameter code 1100, got code={exc.code}: {exc}"
-        assert any(
-            marker in message
-            for marker in (
-                "failed to create query plan",
-                "cannot parse expression",
-                "query plan failed",
-            )
-        ), f"expected planner-stage rejection, got: {exc}"
-        assert "phyfilterbitsnode" not in message and "segcore" not in message, (
-            f"mixed types reached executor instead of planner rejection: {exc}"
-        )
-        assert any(
-            signature in message
-            for signature in (
-                "value type mismatch",
-                "type mismatch",
-                "cannot be casted",
-                "mixed types",
-            )
-        ), f"expected a meaningful type-mismatch error, got: {exc}"
-        assert " in " in message or "in list" in message, f"expected IN operator context in planner error: {exc}"
-
-        field_expression = expr.lower().split(" in ", 1)[0].replace(" ", "")
-        assert field_expression in message.replace(" ", ""), (
-            f"expected field path {field_expression!r} in planner error: {exc}"
-        )
-        for literal_type in expected_literal_types:
-            assert any(token in message for token in MIXED_LITERAL_TYPE_TOKENS[literal_type]), (
-                f"expected literal type {literal_type!r} in planner error: {exc}"
-            )
-        return
-
-    actual_ids = result_ids(result)
-    if known_issue and known_success_ids is not None and actual_ids == sorted(known_success_ids):
-        if known_success_baseline is None:
-            pytest.xfail(f"Known issue {known_issue}: mixed-type JSON IN returned exact known IDs {actual_ids}")
-        try:
-            baseline_result = known_success_baseline()
-        except MilvusException as exc:
-            if known_executor_value_case and is_known_executor_type_assertion(exc, known_executor_value_case):
-                pytest.xfail(f"Known issue {known_issue}: scalar baseline failed with {exc}")
-            pytest.fail(f"search accepted mixed-type IN while scalar baseline rejected it: {exc}")
-        baseline_ids = result_ids(baseline_result)
-        if baseline_ids == actual_ids:
-            pytest.xfail(
-                f"Known issue {known_issue}: scalar query and search returned the same mixed-type IDs {actual_ids}"
-            )
+        # Pre-#51625 this raised: the planner emitted one heterogeneous TermExpr and segcore
+        # picked its executor from the first value, tripping a type assertion. Any exception
+        # here now means canonicalization was skipped or reverted.
         pytest.fail(
-            f"search returned known mixed-type IDs {actual_ids}, but scalar baseline returned {baseline_ids}; "
-            "do not classify ANN recall loss as a filtering xfail"
+            f"{context}: mixed-type JSON IN {mixed_in_expr!r} raised {exc}; "
+            "milvus-io/milvus#51625 requires it to be canonicalized into "
+            f"{or_expansion_expr!r} instead of rejected"
         )
-    pytest.fail(f"mixed-type JSON IN unexpectedly succeeded with IDs {actual_ids}; planner rejection is required")
+
+    mixed_ids = sorted(row[default_pk] for row in rows)
+    expansion_rows = client.query(collection_name, filter=or_expansion_expr, output_fields=[default_pk])
+    expansion_ids = sorted(row[default_pk] for row in expansion_rows)
+
+    missing, extra = id_delta(mixed_ids, expansion_ids)
+    assert mixed_ids == expansion_ids, (
+        f"{context}: {mixed_in_expr!r} returned {mixed_ids} but its canonical expansion "
+        f"{or_expansion_expr!r} returned {expansion_ids}, missing={missing}, extra={extra}"
+    )
+
+    if expected_ids is not None:
+        assert mixed_ids == sorted(expected_ids), (
+            f"{context}: {mixed_in_expr!r} and its expansion agree on {mixed_ids}, "
+            f"but the confirmed result is {sorted(expected_ids)}; both sides regressed together"
+        )
+    return mixed_ids
+
+
+def assert_mixed_type_in_search_matches_or_expansion(
+    client,
+    collection_name,
+    mixed_in_expr,
+    or_expansion_expr,
+    expected_ids=None,
+    context="",
+):
+    """Search-path counterpart of the #51625 contract check.
+
+    The ground truth is deliberately taken from a *query* on the OR expansion, never from a
+    second search: two ANN searches would put recall on both sides of the comparison and any
+    disagreement would be unattributable. A scalar query does exhaustive filtering, so
+    `expansion_ids` is the exact predicate result.
+
+    Only the subset relation is asserted against the search result, because it is the one
+    direction that holds unconditionally: ANN can drop candidates but never invent them, so
+    a row present in the search and absent from the expansion always means the filter is
+    wrong. Exact recall is deliberately not required of an approximate index -- exactness is
+    covered by a scalar query on the same mixed-type expression instead.
+    """
+    try:
+        result = client.search(
+            collection_name,
+            data=[[0.1] * default_dim],
+            anns_field=default_vec,
+            search_params={"metric_type": "COSINE", "params": {}},
+            filter=mixed_in_expr,
+            output_fields=[default_pk],
+            limit=MIXED_IN_SEARCH_LIMIT,
+        )
+    except MilvusException as exc:
+        pytest.fail(
+            f"{context}: mixed-type JSON IN {mixed_in_expr!r} raised {exc} on the search path; "
+            "milvus-io/milvus#51625 requires canonicalization for search filters too"
+        )
+
+    search_ids = result_ids(result)
+    expansion_rows = client.query(collection_name, filter=or_expansion_expr, output_fields=[default_pk])
+    expansion_ids = sorted(row[default_pk] for row in expansion_rows)
+
+    if expected_ids is not None:
+        assert expansion_ids == sorted(expected_ids), (
+            f"{context}: scalar baseline {or_expansion_expr!r} returned {expansion_ids}, "
+            f"expected {sorted(expected_ids)}"
+        )
+
+    unexpected = sorted(set(search_ids) - set(expansion_ids))
+    assert not unexpected, (
+        f"{context}: search on {mixed_in_expr!r} returned rows {unexpected} that do not satisfy "
+        f"its canonical expansion {or_expansion_expr!r} (={expansion_ids}); the filter is unsound"
+    )
+
+    # Deliberately no `search_ids == expansion_ids`. HNSW is approximate, so it may miss a
+    # qualifying row for reasons that have nothing to do with canonicalization, and keeping
+    # the match count under the top-k limit does not make the index exhaustive -- see the
+    # note in tests/integration/bloommatch/bloom_match_test.go, where residual differences
+    # remain ANN recall even at topK == rowNum. Requiring exact recall here would buy no
+    # coverage and would make the case flaky.
+    #
+    # Exactness is instead asserted through a scalar query on the same mixed-type
+    # expression, which filters exhaustively. Together the two checks pin the whole
+    # contract: the predicate resolves to the right row set, and the search path applies
+    # that same predicate soundly.
+    query_rows = client.query(collection_name, filter=mixed_in_expr, output_fields=[default_pk])
+    query_ids = sorted(row[default_pk] for row in query_rows)
+    missing, extra = id_delta(query_ids, expansion_ids)
+    assert query_ids == expansion_ids, (
+        f"{context}: {mixed_in_expr!r} returned {query_ids} but its canonical expansion "
+        f"{or_expansion_expr!r} returned {expansion_ids}, missing={missing}, extra={extra}"
+    )
 
 
 def mark_51568_cases(cases):
@@ -691,47 +719,43 @@ class TestFilterRegressions(TestMilvusClientV2Base):
         )
 
     @pytest.mark.parametrize(
-        "case_name, expr",
+        "case_name, expr, or_expansion_expr, expected_ids",
         mark_json_mixed_type_in_cases(JSON_MIXED_TYPE_IN_51489_CASES),
     )
     @pytest.mark.xdist_group("TestFilterIssueRegressions")
-    def test_json_mixed_type_in_rejected_at_planner_51489(
+    def test_json_mixed_type_in_matches_or_expansion_51489(
         self,
         regression_51568_collection,
         case_name,
         expr,
+        or_expansion_expr,
+        expected_ids,
     ):
         client = self._client(alias=self.shared_alias)
-        assert_meaningful_type_mismatch_rejection(
-            lambda: client.query(
-                regression_51568_collection,
-                filter=expr,
-                output_fields=[default_pk],
-            ),
-            expr=expr,
-            expected_literal_types=MIXED_IN_LITERAL_TYPES_51489[case_name],
-            known_issue="https://github.com/milvus-io/milvus/issues/51489",
-            known_executor_value_case=KNOWN_ISSUE_51489_IN_ERROR_VALUE_CASES[case_name],
+        assert_mixed_type_in_matches_or_expansion(
+            client,
+            regression_51568_collection,
+            expr,
+            or_expansion_expr,
+            expected_ids=expected_ids,
+            context=f"{case_name} query",
         )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xdist_group("TestFilterIssueRegressions")
-    def test_json_mixed_type_in_search_rejected_at_planner_51489(self, regression_51568_collection):
+    def test_json_mixed_type_in_search_matches_or_expansion_51489(self, regression_51568_collection):
         client = self._client(alias=self.shared_alias)
-        assert_meaningful_type_mismatch_rejection(
-            lambda: client.search(
-                regression_51568_collection,
-                data=[[0.1] * default_dim],
-                anns_field=default_vec,
-                search_params={"metric_type": "COSINE", "params": {}},
-                filter='meta["p"] in [1, "2"]',
-                output_fields=[default_pk],
-                limit=20,
-            ),
-            expr='meta["p"] in [1, "2"]',
-            expected_literal_types={"int", "string"},
-            known_issue="https://github.com/milvus-io/milvus/issues/51489",
-            known_executor_value_case=KNOWN_ISSUE_51489_IN_ERROR_VALUE_CASES["int_string_in"],
+        # Canonicalization happens in the planner, which both query and search share, but the
+        # search path builds its filter bitset separately -- keep one search case so a
+        # regression confined to that path cannot hide behind the query cases above.
+        case_name, expr, or_expansion_expr, expected_ids = MIXED_IN_CASES_BY_NAME["int_string_in"]
+        assert_mixed_type_in_search_matches_or_expansion(
+            client,
+            regression_51568_collection,
+            expr,
+            or_expansion_expr,
+            expected_ids=expected_ids,
+            context=f"{case_name} search",
         )
 
     @pytest.mark.parametrize(
@@ -757,54 +781,43 @@ class TestFilterRegressions(TestMilvusClientV2Base):
         assert_query_ids(self, client, regression_51568_collection, expr, expected_ids, pk_field=default_pk)
 
     @pytest.mark.parametrize(
-        "case_name, expr",
+        "case_name, expr, or_expansion_expr, expected_ids",
         mark_json_bool_mixed_in_cases(JSON_BOOL_MIXED_IN_51567_CASES),
     )
     @pytest.mark.xdist_group("TestFilterIssueRegressions")
-    def test_json_bool_mixed_type_in_rejected_at_planner_51567(
+    def test_json_bool_mixed_type_in_matches_or_expansion_51567(
         self,
         regression_51568_collection,
         case_name,
         expr,
+        or_expansion_expr,
+        expected_ids,
     ):
         client = self._client(alias=self.shared_alias)
-        assert_meaningful_type_mismatch_rejection(
-            lambda: client.query(
-                regression_51568_collection,
-                filter=expr,
-                output_fields=[default_pk],
-            ),
-            expr=expr,
-            expected_literal_types=MIXED_IN_LITERAL_TYPES_51567[case_name],
-            known_issue="https://github.com/milvus-io/milvus/issues/51567",
-            known_executor_value_case=KNOWN_ISSUE_51567_IN_ERROR_VALUE_CASES.get(case_name),
-            known_success_ids=KNOWN_ISSUE_51567_IN_SUCCESS_IDS.get(case_name),
+        assert_mixed_type_in_matches_or_expansion(
+            client,
+            regression_51568_collection,
+            expr,
+            or_expansion_expr,
+            expected_ids=expected_ids,
+            context=f"{case_name} query",
         )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xdist_group("TestFilterIssueRegressions")
-    def test_json_bool_mixed_type_in_search_rejected_at_planner_51567(self, regression_51568_collection):
+    def test_json_bool_mixed_type_in_search_matches_or_expansion_51567(self, regression_51568_collection):
         client = self._client(alias=self.shared_alias)
-        case_name = "bool_int_in_false_one"
-        assert_meaningful_type_mismatch_rejection(
-            lambda: client.search(
-                regression_51568_collection,
-                data=[[0.1] * default_dim],
-                anns_field=default_vec,
-                search_params={"metric_type": "COSINE", "params": {}},
-                filter='meta["b"] in [false, 1]',
-                output_fields=[default_pk],
-                limit=20,
-            ),
-            expr='meta["b"] in [false, 1]',
-            expected_literal_types={"bool", "int"},
-            known_issue="https://github.com/milvus-io/milvus/issues/51567",
-            known_success_ids=KNOWN_ISSUE_51567_IN_SUCCESS_IDS[case_name],
-            known_success_baseline=lambda: client.query(
-                regression_51568_collection,
-                filter='meta["b"] in [false, 1]',
-                output_fields=[default_pk],
-            ),
+        # bool + int is the sharpest case: `false` and `1` land in different buckets, so a
+        # regression that collapses them into one TermExpr changes the result instead of
+        # raising, and only the ID comparison would catch it.
+        case_name, expr, or_expansion_expr, expected_ids = MIXED_IN_CASES_BY_NAME["bool_int_in_false_one"]
+        assert_mixed_type_in_search_matches_or_expansion(
+            client,
+            regression_51568_collection,
+            expr,
+            or_expansion_expr,
+            expected_ids=expected_ids,
+            context=f"{case_name} search",
         )
 
     @pytest.mark.xdist_group("TestFilterIssueRegressions")
