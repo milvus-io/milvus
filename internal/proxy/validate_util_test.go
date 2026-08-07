@@ -7988,9 +7988,9 @@ func TestValidateUtil_ElementNullableArray(t *testing.T) {
 		}
 	}
 
-	t.Run("skip invalid element for max length", func(t *testing.T) {
+	t.Run("compact null element skips max length", func(t *testing.T) {
 		v := newValidateUtil(withMaxLenCheck(), withMaxCapCheck())
-		err := v.checkArrayFieldData(makeField([]string{"ok", "placeholder-too-long"}, []bool{true, false}), makeSchema("2", "2", false))
+		err := v.checkArrayFieldData(makeField([]string{"ok"}, []bool{true, false}), makeSchema("2", "2", false))
 		require.NoError(t, err)
 	})
 
@@ -8000,7 +8000,7 @@ func TestValidateUtil_ElementNullableArray(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("valid data length must match payload length", func(t *testing.T) {
+	t.Run("valid element count must match compact payload length", func(t *testing.T) {
 		v := newValidateUtil()
 		err := v.checkArrayFieldData(makeField([]string{"a", "b"}, []bool{true}), makeSchema("8", "8", false))
 		require.Error(t, err)
@@ -8009,7 +8009,7 @@ func TestValidateUtil_ElementNullableArray(t *testing.T) {
 
 	t.Run("max capacity counts null slots", func(t *testing.T) {
 		v := newValidateUtil(withMaxCapCheck())
-		err := v.checkArrayFieldData(makeField([]string{"a", ""}, []bool{true, false}), makeSchema("8", "1", false))
+		err := v.checkArrayFieldData(makeField([]string{"a"}, []bool{true, false}), makeSchema("8", "1", false))
 		require.Error(t, err)
 	})
 
@@ -8034,8 +8034,18 @@ func TestValidateUtil_ElementNullableArray(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("validate expands row null after element validation", func(t *testing.T) {
-		field := makeField([]string{"a"}, []bool{true})
+	t.Run("row null fill preserves compact element payload", func(t *testing.T) {
+		field := makeField([]string{"a"}, []bool{true, false})
+		typeutil.SetFieldDataValidData(field, []bool{true})
+
+		require.NoError(t, FillWithNullValue(field, makeSchema("8", "8", true), 1))
+		row := field.GetScalars().GetArrayData().GetData()[0]
+		assert.Equal(t, []string{"a"}, row.GetStringData().GetData())
+		assert.Equal(t, []bool{true, false}, row.GetValidData())
+	})
+
+	t.Run("validate expands element and row null after validation", func(t *testing.T) {
+		field := makeField([]string{"a"}, []bool{true, false})
 		typeutil.SetFieldDataValidData(field, []bool{true, false})
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{makeSchema("8", "8", true)},
@@ -8048,9 +8058,287 @@ func TestValidateUtil_ElementNullableArray(t *testing.T) {
 		rows := field.GetScalars().GetArrayData().GetData()
 		require.Len(t, rows, 2)
 		assert.NotNil(t, rows[0].GetData())
+		assert.Equal(t, []string{"a", ""}, rows[0].GetStringData().GetData())
+		assert.Equal(t, []bool{true, false}, rows[0].GetValidData())
 		assert.Nil(t, rows[1].GetData())
 		assert.Equal(t, []bool{true, false}, typeutil.GetFieldDataValidData(field))
 	})
+
+	t.Run("validate expands all-null compact element payload", func(t *testing.T) {
+		field := makeField(nil, []bool{false, false})
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{makeSchema("8", "8", false)},
+		}
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+
+		require.NoError(t, newValidateUtil().Validate([]*schemapb.FieldData{field}, helper, 1))
+		row := field.GetScalars().GetArrayData().GetData()[0]
+		assert.Equal(t, []string{"", ""}, row.GetStringData().GetData())
+		assert.Equal(t, []bool{false, false}, row.GetValidData())
+	})
+}
+
+func TestValidateUtil_ElementNullableArrayCompactExpansion(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		row         *schemapb.ScalarField
+		assertData  func(t *testing.T, row *schemapb.ScalarField)
+	}{
+		{
+			name:        "bool",
+			elementType: schemapb.DataType_Bool,
+			row: &schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{
+				BoolData: &schemapb.BoolArray{Data: []bool{true, true}},
+			}},
+			assertData: func(t *testing.T, row *schemapb.ScalarField) {
+				assert.Equal(t, []bool{true, false, true}, row.GetBoolData().GetData())
+			},
+		},
+		{
+			name:        "int",
+			elementType: schemapb.DataType_Int32,
+			row: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{Data: []int32{1, 3}},
+			}},
+			assertData: func(t *testing.T, row *schemapb.ScalarField) {
+				assert.Equal(t, []int32{1, 0, 3}, row.GetIntData().GetData())
+			},
+		},
+		{
+			name:        "long",
+			elementType: schemapb.DataType_Int64,
+			row: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{
+				LongData: &schemapb.LongArray{Data: []int64{1, 3}},
+			}},
+			assertData: func(t *testing.T, row *schemapb.ScalarField) {
+				assert.Equal(t, []int64{1, 0, 3}, row.GetLongData().GetData())
+			},
+		},
+		{
+			name:        "float",
+			elementType: schemapb.DataType_Float,
+			row: &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{
+				FloatData: &schemapb.FloatArray{Data: []float32{1, 3}},
+			}},
+			assertData: func(t *testing.T, row *schemapb.ScalarField) {
+				assert.Equal(t, []float32{1, 0, 3}, row.GetFloatData().GetData())
+			},
+		},
+		{
+			name:        "double",
+			elementType: schemapb.DataType_Double,
+			row: &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{
+				DoubleData: &schemapb.DoubleArray{Data: []float64{1, 3}},
+			}},
+			assertData: func(t *testing.T, row *schemapb.ScalarField) {
+				assert.Equal(t, []float64{1, 0, 3}, row.GetDoubleData().GetData())
+			},
+		},
+		{
+			name:        "string",
+			elementType: schemapb.DataType_VarChar,
+			row: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{Data: []string{"a", "c"}},
+			}},
+			assertData: func(t *testing.T, row *schemapb.ScalarField) {
+				assert.Equal(t, []string{"a", "", "c"}, row.GetStringData().GetData())
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.row.ValidData = []bool{true, false, true}
+			field := &schemapb.FieldData{
+				FieldName: "array_field",
+				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+						ElementType: test.elementType,
+						Data:        []*schemapb.ScalarField{test.row},
+					}},
+				}},
+			}
+			fieldSchema := &schemapb.FieldSchema{
+				Name:            "array_field",
+				DataType:        schemapb.DataType_Array,
+				ElementType:     test.elementType,
+				ElementNullable: true,
+			}
+			helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{fieldSchema},
+			})
+			require.NoError(t, err)
+
+			require.NoError(t, newValidateUtil().Validate([]*schemapb.FieldData{field}, helper, 1))
+			test.assertData(t, test.row)
+			assert.Equal(t, []bool{true, false, true}, test.row.GetValidData())
+		})
+	}
+}
+
+func TestValidateUtil_ElementNullableErrorIndices(t *testing.T) {
+	makeArrayField := func(elementType schemapb.DataType, row *schemapb.ScalarField) *schemapb.FieldData {
+		field := &schemapb.FieldData{
+			FieldName: "array_field",
+			Type:      schemapb.DataType_Array,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+					ElementType: elementType,
+					Data:        []*schemapb.ScalarField{row},
+				}},
+			}},
+		}
+		typeutil.SetFieldDataValidData(field, []bool{false, true})
+		return field
+	}
+	makeArraySchema := func(elementType schemapb.DataType, typeParams ...*commonpb.KeyValuePair) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name:            "array_field",
+			DataType:        schemapb.DataType_Array,
+			ElementType:     elementType,
+			Nullable:        true,
+			ElementNullable: true,
+			TypeParams:      typeParams,
+		}
+	}
+
+	t.Run("compact count reports physical row", func(t *testing.T) {
+		field := makeArrayField(schemapb.DataType_VarChar, &schemapb.ScalarField{
+			Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a"}}},
+			ValidData: []bool{true, true},
+		})
+		err := newValidateUtil().checkArrayFieldData(field, makeArraySchema(schemapb.DataType_VarChar))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "row 0")
+	})
+
+	t.Run("max length reports physical row and element", func(t *testing.T) {
+		field := makeArrayField(schemapb.DataType_VarChar, &schemapb.ScalarField{
+			Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"too-long"}}},
+			ValidData: []bool{false, true},
+		})
+		err := newValidateUtil(withMaxLenCheck()).checkArrayFieldData(field, makeArraySchema(
+			schemapb.DataType_VarChar,
+			&commonpb.KeyValuePair{Key: common.MaxLengthKey, Value: "3"},
+		))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "row number: 0")
+		assert.Contains(t, err.Error(), "array index: 0")
+	})
+
+	t.Run("overflow reports physical element", func(t *testing.T) {
+		field := makeArrayField(schemapb.DataType_Int8, &schemapb.ScalarField{
+			Data:      &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{math.MaxInt8 + 1}}},
+			ValidData: []bool{false, true},
+		})
+		err := newValidateUtil(withOverflowCheck()).checkArrayFieldData(field, makeArraySchema(schemapb.DataType_Int8))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "0th element")
+	})
+
+	t.Run("capacity reports physical row", func(t *testing.T) {
+		field := makeArrayField(schemapb.DataType_Int32, &schemapb.ScalarField{
+			Data:      &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2}}},
+			ValidData: []bool{true, true},
+		})
+		err := newValidateUtil(withMaxCapCheck()).checkArrayFieldData(field, makeArraySchema(
+			schemapb.DataType_Int32,
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "1"},
+		))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "0th array")
+	})
+
+	t.Run("array of vector errors report physical row", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			FieldName: "vector_array",
+			Type:      schemapb.DataType_ArrayOfVector,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+					Dim:         2,
+					ElementType: schemapb.DataType_FloatVector,
+					Data: []*schemapb.VectorField{
+						{
+							Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}},
+							ValidData: []bool{true, false, false},
+						},
+					},
+				}},
+			}},
+		}
+		typeutil.SetFieldDataValidData(field, []bool{false, true})
+		schema := &schemapb.FieldSchema{
+			Name:            "vector_array",
+			DataType:        schemapb.DataType_ArrayOfVector,
+			ElementType:     schemapb.DataType_FloatVector,
+			Nullable:        true,
+			ElementNullable: true,
+			TypeParams:      []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+		}
+		err := newValidateUtil().checkArrayOfVectorFieldData(field, schema)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "vector_array[0]")
+
+		row := field.GetVectors().GetVectorArray().GetData()[0]
+		row.ValidData = []bool{true, false, true}
+		schema.TypeParams = append(schema.TypeParams, &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "2"})
+		err = newValidateUtil(withMaxCapCheck()).checkArrayOfVectorFieldData(field, schema)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "row 0")
+	})
+}
+
+func TestValidateUtil_ElementNullableArrayOfVector(t *testing.T) {
+	fieldName := typeutil.ConcatStructFieldName("test_struct", "vector_array")
+	physicalRow := &schemapb.VectorField{
+		Data: &schemapb.VectorField_FloatVector{
+			FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
+		},
+		ValidData: []bool{true, false, true},
+	}
+	field := &schemapb.FieldData{
+		FieldName: fieldName,
+		Type:      schemapb.DataType_ArrayOfVector,
+		Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+			Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+				Dim:         2,
+				ElementType: schemapb.DataType_FloatVector,
+				Data:        []*schemapb.VectorField{physicalRow},
+			}},
+		}},
+	}
+	typeutil.SetFieldDataValidData(field, []bool{true, false})
+	fieldSchema := &schemapb.FieldSchema{
+		Name:            fieldName,
+		DataType:        schemapb.DataType_ArrayOfVector,
+		ElementType:     schemapb.DataType_FloatVector,
+		Nullable:        true,
+		ElementNullable: true,
+		TypeParams:      []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+	}
+	helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name:   "test_struct",
+				Fields: []*schemapb.FieldSchema{fieldSchema},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, newValidateUtil().Validate([]*schemapb.FieldData{field}, helper, 2))
+	rows := field.GetVectors().GetVectorArray().GetData()
+	require.Len(t, rows, 2)
+	assert.Same(t, physicalRow, rows[0])
+	assert.Equal(t, []float32{1, 2, 3, 4}, rows[0].GetFloatVector().GetData())
+	assert.Equal(t, []bool{true, false, true}, rows[0].GetValidData())
+	assert.NotNil(t, rows[1].GetFloatVector())
+	assert.Empty(t, rows[1].GetFloatVector().GetData())
+	assert.Empty(t, rows[1].GetValidData())
+	assert.Equal(t, []bool{true, false}, typeutil.GetFieldDataValidData(field))
 }
 
 func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
@@ -8091,6 +8379,83 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
 		assert.Error(t, err)
 	})
+
+	typedEmptyTests := []struct {
+		name        string
+		elementType schemapb.DataType
+		dim         string
+		row         *schemapb.VectorField
+	}{
+		{
+			name:        "float vector",
+			elementType: schemapb.DataType_FloatVector,
+			dim:         "2",
+			row: &schemapb.VectorField{
+				Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
+				ValidData: []bool{false, false},
+			},
+		},
+		{
+			name:        "binary vector",
+			elementType: schemapb.DataType_BinaryVector,
+			dim:         "16",
+			row: &schemapb.VectorField{
+				Data:      &schemapb.VectorField_BinaryVector{BinaryVector: nil},
+				ValidData: []bool{false, false},
+			},
+		},
+		{
+			name:        "float16 vector",
+			elementType: schemapb.DataType_Float16Vector,
+			dim:         "2",
+			row: &schemapb.VectorField{
+				Data:      &schemapb.VectorField_Float16Vector{Float16Vector: nil},
+				ValidData: []bool{false, false},
+			},
+		},
+		{
+			name:        "bfloat16 vector",
+			elementType: schemapb.DataType_BFloat16Vector,
+			dim:         "2",
+			row: &schemapb.VectorField{
+				Data:      &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: nil},
+				ValidData: []bool{false, false},
+			},
+		},
+		{
+			name:        "int8 vector",
+			elementType: schemapb.DataType_Int8Vector,
+			dim:         "2",
+			row: &schemapb.VectorField{
+				Data:      &schemapb.VectorField_Int8Vector{Int8Vector: nil},
+				ValidData: []bool{false, false},
+			},
+		},
+	}
+	for _, tt := range typedEmptyTests {
+		t.Run("element nullable typed empty "+tt.name, func(t *testing.T) {
+			f := &schemapb.FieldData{
+				FieldName: "test",
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_VectorArray{
+							VectorArray: &schemapb.VectorArray{
+								Data: []*schemapb.VectorField{tt.row},
+							},
+						},
+					},
+				},
+			}
+			fieldSchema := &schemapb.FieldSchema{
+				DataType:        schemapb.DataType_ArrayOfVector,
+				ElementType:     tt.elementType,
+				ElementNullable: true,
+				TypeParams:      []*commonpb.KeyValuePair{{Key: common.DimKey, Value: tt.dim}},
+			}
+
+			require.NoError(t, newValidateUtil().checkArrayOfVectorFieldData(f, fieldSchema))
+		})
+	}
 
 	t.Run("no check", func(t *testing.T) {
 		f := &schemapb.FieldData{
@@ -8295,7 +8660,7 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 		assert.Contains(t, err.Error(), "requires valid_data")
 	})
 
-	t.Run("element nullable rejects missing typed vector data", func(t *testing.T) {
+	t.Run("element nullable preserves vector type validation", func(t *testing.T) {
 		f := &schemapb.FieldData{
 			FieldName: "test",
 			Field: &schemapb.FieldData_Vectors{
@@ -8317,7 +8682,7 @@ func Test_validateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 		v := newValidateUtil()
 		err := v.checkArrayOfVectorFieldData(f, fieldSchema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "requires typed vector data")
+		assert.Contains(t, err.Error(), "array type mismatch")
 	})
 
 	t.Run("element nullable validates compact true count", func(t *testing.T) {

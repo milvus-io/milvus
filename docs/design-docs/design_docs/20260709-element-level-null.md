@@ -114,19 +114,30 @@ still represented by its existing `ScalarField` or `VectorField`, with
 ```text
 int_array = [10, null, 30]
 
+SDK payload before Proxy normalization:
 ScalarField {
+  long_data.data = [10, 30]
+  valid_data = [true, false, true]
+}
+```
+
+Scalar array payload is compact at the Proxy input boundary. Proxy validates
+the compact payload and expands it before the insert message enters the WAL:
+
+```text
+Normalized ScalarField {
   long_data.data = [10, 0, 30]
   valid_data = [true, false, true]
 }
 ```
 
-Scalar array payload is dense in logical element space. A null element keeps a
-typed placeholder, and the placeholder value has no semantic meaning.
+The normalized payload is dense in logical element space. A null element keeps
+a typed placeholder, and the placeholder value has no semantic meaning.
 
-The required invariant is:
+The Proxy input invariant is:
 
 ```text
-len(row.valid_data) = number of scalar payload values
+count(row.valid_data == true) = number of compact scalar payload values
 ```
 
 ### ArrayOfVector
@@ -152,7 +163,8 @@ count(row.valid_data == true) = physical vector count
 Proxy validates the request against the schema:
 
 - child `valid_data` is allowed only when `element_nullable=true`;
-- scalar array child validity length equals the scalar payload length;
+- scalar array physical value count equals the number of valid elements;
+- scalar array child payload is expanded to dense form after validation;
 - ArrayOfVector physical vector count equals the number of valid elements;
 - max capacity counts logical elements, including null elements;
 - row validity has exactly one source;

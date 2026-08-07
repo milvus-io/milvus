@@ -449,16 +449,15 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				return nil
 			}
 			if builder, ok := b.(*array.BinaryBuilder); ok {
-				vv, ok := v.(*schemapb.ScalarField)
-				if !ok {
-					return merr.WrapErrServiceInternalMsg("expected *schemapb.ScalarField value, got %T", v)
+				if vv, ok := v.(*schemapb.ScalarField); ok {
+					if bytes, err := proto.Marshal(vv); err == nil {
+						builder.Append(bytes)
+						return nil
+					} else {
+						return merr.WrapErrSerializationFailed(err, "failed to marshal ScalarField")
+					}
 				}
-				if bytes, err := proto.Marshal(vv); err == nil {
-					builder.Append(bytes)
-					return nil
-				} else {
-					return merr.WrapErrSerializationFailed(err, "failed to marshal ScalarField")
-				}
+				return merr.WrapErrServiceInternalMsg("expected *schemapb.ScalarField value, got %T", v)
 			}
 			return merr.WrapErrServiceInternalMsg("expected *array.BinaryBuilder, got %T", b)
 		},
@@ -526,10 +525,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return getArrayOfVectorArrowType(elementType, dim)
 		},
 		deserialize: func(a arrow.Array, i int, elementType schemapb.DataType, dim int, shouldCopy bool, elementNullable bool) (any, error) {
-			if elementNullable {
-				return deserializeElementNullableArrayOfVector(a, i, elementType, int64(dim))
-			}
-			return deserializeArrayOfVector(a, i, elementType, int64(dim), shouldCopy)
+			return deserializeArrayOfVector(a, i, elementType, int64(dim), shouldCopy, elementNullable)
 		},
 		serialize: func(b array.Builder, v any, elementType schemapb.DataType) error {
 			if v == nil {
@@ -546,25 +542,6 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				return nil
 			}
 			elementValidData := vf.GetValidData()
-			validateCompactElementPayload := func(physicalVectors int) error {
-				if len(elementValidData) == 0 {
-					return nil
-				}
-				validVectors := 0
-				for _, valid := range elementValidData {
-					if valid {
-						validVectors++
-					}
-				}
-				if validVectors != physicalVectors {
-					return merr.WrapErrStorageMsg(
-						"ArrayOfVector element valid_data has %d valid vectors, but compact physical payload has %d",
-						validVectors,
-						physicalVectors,
-					)
-				}
-				return nil
-			}
 
 			builder, ok := b.(*array.ListBuilder)
 			if !ok {
@@ -577,9 +554,6 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			appendVectorChunks := func(data []byte) error {
 				numVectors, err := validateVectorArrayElementCount(len(data), bytesPerVector)
 				if err != nil {
-					return err
-				}
-				if err := validateCompactElementPayload(numVectors); err != nil {
 					return err
 				}
 				builder.Append(true)
@@ -614,9 +588,6 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				floatsPerVector := bytesPerVector / 4
 				numVectors, err := validateVectorArrayElementCount(len(data), floatsPerVector)
 				if err != nil {
-					return err
-				}
-				if err := validateCompactElementPayload(numVectors); err != nil {
 					return err
 				}
 
@@ -654,28 +625,32 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				return nil
 
 			case schemapb.DataType_BinaryVector:
-				if vf.GetBinaryVector() == nil {
+				binaryVector, ok := vf.GetData().(*schemapb.VectorField_BinaryVector)
+				if !ok || binaryVector == nil {
 					return merr.WrapErrServiceInternalMsg("BinaryVector data is nil for elementType BinaryVector")
 				}
-				return appendVectorChunks(vf.GetBinaryVector())
+				return appendVectorChunks(binaryVector.BinaryVector)
 
 			case schemapb.DataType_Float16Vector:
-				if vf.GetFloat16Vector() == nil {
+				float16Vector, ok := vf.GetData().(*schemapb.VectorField_Float16Vector)
+				if !ok || float16Vector == nil {
 					return merr.WrapErrServiceInternalMsg("Float16Vector data is nil for elementType Float16Vector")
 				}
-				return appendVectorChunks(vf.GetFloat16Vector())
+				return appendVectorChunks(float16Vector.Float16Vector)
 
 			case schemapb.DataType_BFloat16Vector:
-				if vf.GetBfloat16Vector() == nil {
+				bfloat16Vector, ok := vf.GetData().(*schemapb.VectorField_Bfloat16Vector)
+				if !ok || bfloat16Vector == nil {
 					return merr.WrapErrServiceInternalMsg("BFloat16Vector data is nil for elementType BFloat16Vector")
 				}
-				return appendVectorChunks(vf.GetBfloat16Vector())
+				return appendVectorChunks(bfloat16Vector.Bfloat16Vector)
 
 			case schemapb.DataType_Int8Vector:
-				if vf.GetInt8Vector() == nil {
+				int8Vector, ok := vf.GetData().(*schemapb.VectorField_Int8Vector)
+				if !ok || int8Vector == nil {
 					return merr.WrapErrServiceInternalMsg("Int8Vector data is nil for elementType Int8Vector")
 				}
-				return appendVectorChunks(vf.GetInt8Vector())
+				return appendVectorChunks(int8Vector.Int8Vector)
 
 			case schemapb.DataType_SparseFloatVector:
 				return merr.WrapErrServiceInternalMsg("SparseFloatVector in VectorArray not implemented yet")
@@ -1059,52 +1034,8 @@ func getArrayOfVectorArrowType(elementType schemapb.DataType, dim int) arrow.Dat
 	}
 }
 
-// createEmptyVectorField creates an empty VectorField with the correct Data type based on elementType
-func createEmptyVectorField(elementType schemapb.DataType, dim int64) (*schemapb.VectorField, error) {
-	switch elementType {
-	case schemapb.DataType_FloatVector:
-		return &schemapb.VectorField{
-			Dim: dim,
-			Data: &schemapb.VectorField_FloatVector{
-				FloatVector: &schemapb.FloatArray{Data: []float32{}},
-			},
-		}, nil
-	case schemapb.DataType_BinaryVector:
-		return &schemapb.VectorField{
-			Dim: dim,
-			Data: &schemapb.VectorField_BinaryVector{
-				BinaryVector: []byte{},
-			},
-		}, nil
-	case schemapb.DataType_Float16Vector:
-		return &schemapb.VectorField{
-			Dim: dim,
-			Data: &schemapb.VectorField_Float16Vector{
-				Float16Vector: []byte{},
-			},
-		}, nil
-	case schemapb.DataType_BFloat16Vector:
-		return &schemapb.VectorField{
-			Dim: dim,
-			Data: &schemapb.VectorField_Bfloat16Vector{
-				Bfloat16Vector: []byte{},
-			},
-		}, nil
-	case schemapb.DataType_Int8Vector:
-		return &schemapb.VectorField{
-			Dim: dim,
-			Data: &schemapb.VectorField_Int8Vector{
-				Int8Vector: []byte{},
-			},
-		}, nil
-	case schemapb.DataType_SparseFloatVector:
-		return nil, merr.WrapErrServiceInternalMsg("SparseFloatVector in empty VectorArray not implemented yet")
-	default:
-		return nil, merr.WrapErrServiceInternalMsg("unsupported element type for empty ArrayOfVector: %s", elementType.String())
-	}
-}
-
-func deserializeElementNullableArrayOfVector(a arrow.Array, i int, elementType schemapb.DataType, dim int64) (any, error) {
+// deserializeArrayOfVector deserializes ArrayOfVector data with known element type.
+func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataType, dim int64, _ bool, elementNullable bool) (any, error) {
 	if a.IsNull(i) {
 		return nil, nil
 	}
@@ -1119,24 +1050,35 @@ func deserializeElementNullableArrayOfVector(a arrow.Array, i int, elementType s
 
 	start, end := arr.ValueOffsets(i)
 	totalElements := int(end - start)
-	validData := make([]bool, 0, totalElements)
 
 	valuesArray := arr.ListValues()
 	binaryArray, ok := valuesArray.(*array.FixedSizeBinary)
 	if !ok {
 		return nil, merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinary for ArrayOfVector values, got %T", valuesArray)
 	}
+
 	byteWidth := binaryArray.DataType().(*arrow.FixedSizeBinaryType).ByteWidth
+	var validData []bool
+	if elementNullable {
+		validData = make([]bool, 0, totalElements)
+	}
+
+	isElementValid := func(idx int) bool {
+		if !elementNullable {
+			return true
+		}
+		valid := !binaryArray.IsNull(idx)
+		validData = append(validData, valid)
+		return valid
+	}
 
 	extractByteVectors := func() []byte {
 		data := make([]byte, 0, totalElements*byteWidth)
 		for j := start; j < end; j++ {
 			idx := int(j)
-			if binaryArray.IsNull(idx) {
-				validData = append(validData, false)
+			if !isElementValid(idx) {
 				continue
 			}
-			validData = append(validData, true)
 			data = append(data, binaryArray.Value(idx)...)
 		}
 		return data
@@ -1147,11 +1089,9 @@ func deserializeElementNullableArrayOfVector(a arrow.Array, i int, elementType s
 		floatData := make([]float32, 0, totalElements*int(dim))
 		for j := start; j < end; j++ {
 			idx := int(j)
-			if binaryArray.IsNull(idx) {
-				validData = append(validData, false)
+			if !isElementValid(idx) {
 				continue
 			}
-			validData = append(validData, true)
 			floatData = append(floatData, arrow.Float32Traits.CastFromBytes(binaryArray.Value(idx))...)
 		}
 		return &schemapb.VectorField{
@@ -1184,107 +1124,6 @@ func deserializeElementNullableArrayOfVector(a arrow.Array, i int, elementType s
 			Dim:       dim,
 			Data:      &schemapb.VectorField_Int8Vector{Int8Vector: extractByteVectors()},
 			ValidData: validData,
-		}, nil
-	case schemapb.DataType_SparseFloatVector:
-		return nil, merr.WrapErrServiceInternalMsg("SparseFloatVector in VectorArray deserialization not implemented yet")
-	default:
-		return nil, merr.WrapErrServiceInternalMsg("unsupported element type for ArrayOfVector deserialization: %s", elementType.String())
-	}
-}
-
-// deserializeArrayOfVector deserializes ArrayOfVector data with known element type
-func deserializeArrayOfVector(a arrow.Array, i int, elementType schemapb.DataType, dim int64, shouldCopy bool) (any, error) {
-	if a.IsNull(i) {
-		return nil, nil
-	}
-
-	arr, ok := a.(*array.List)
-	if !ok {
-		return nil, merr.WrapErrServiceInternalMsg("expected *array.List for ArrayOfVector, got %T", a)
-	}
-	if i >= arr.Len() {
-		return nil, merr.WrapErrServiceInternalMsg("index %d out of bounds for array of length %d", i, arr.Len())
-	}
-
-	start, end := arr.ValueOffsets(i)
-	totalElements := end - start
-
-	// Handle empty vector array - return empty VectorField based on element type
-	if totalElements == 0 {
-		// empty array, return empty VectorField with correct Data type
-		return createEmptyVectorField(elementType, dim)
-	}
-
-	valuesArray := arr.ListValues()
-	binaryArray, ok := valuesArray.(*array.FixedSizeBinary)
-	if !ok {
-		return nil, merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinary for ArrayOfVector values, got %T", valuesArray)
-	}
-
-	numVectors := int(totalElements)
-
-	// Helper function to extract byte vectors from FixedSizeBinary array
-	extractByteVectors := func(bytesPerVector int64) []byte {
-		totalBytes := numVectors * int(bytesPerVector)
-		data := make([]byte, totalBytes)
-		for j := 0; j < numVectors; j++ {
-			vectorIndex := int(start) + j
-			vectorData := binaryArray.Value(vectorIndex)
-			copy(data[j*int(bytesPerVector):], vectorData)
-		}
-		return data
-	}
-
-	switch elementType {
-	case schemapb.DataType_FloatVector:
-		totalFloats := numVectors * int(dim)
-		floatData := make([]float32, totalFloats)
-		for j := 0; j < numVectors; j++ {
-			vectorIndex := int(start) + j
-			binaryData := binaryArray.Value(vectorIndex)
-			vectorFloats := arrow.Float32Traits.CastFromBytes(binaryData)
-			copy(floatData[j*int(dim):], vectorFloats)
-		}
-
-		return &schemapb.VectorField{
-			Dim: dim,
-			Data: &schemapb.VectorField_FloatVector{
-				FloatVector: &schemapb.FloatArray{
-					Data: floatData,
-				},
-			},
-		}, nil
-
-	case schemapb.DataType_BinaryVector:
-		return &schemapb.VectorField{
-			Dim: dim,
-			Data: &schemapb.VectorField_BinaryVector{
-				BinaryVector: extractByteVectors((dim + 7) / 8),
-			},
-		}, nil
-
-	case schemapb.DataType_Float16Vector:
-		return &schemapb.VectorField{
-			Dim: dim,
-			Data: &schemapb.VectorField_Float16Vector{
-				Float16Vector: extractByteVectors(dim * 2),
-			},
-		}, nil
-
-	case schemapb.DataType_BFloat16Vector:
-		return &schemapb.VectorField{
-			Dim: dim,
-			Data: &schemapb.VectorField_Bfloat16Vector{
-				Bfloat16Vector: extractByteVectors(dim * 2),
-			},
-		}, nil
-
-	case schemapb.DataType_Int8Vector:
-		return &schemapb.VectorField{
-			Dim: dim,
-			Data: &schemapb.VectorField_Int8Vector{
-				Int8Vector: extractByteVectors(dim),
-			},
 		}, nil
 	case schemapb.DataType_SparseFloatVector:
 		return nil, merr.WrapErrServiceInternalMsg("SparseFloatVector in VectorArray deserialization not implemented yet")

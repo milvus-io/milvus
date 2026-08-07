@@ -458,7 +458,8 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 //  2. has default_value,
 //     will fill default_value when passed num_rows not equal to expected num_rows,
 //
-// after fillWithValue, only nullable field will has valid_data, the length of all data will be passed num_rows
+// after fillWithValue, only nullable field will has valid_data, the length of all data will be passed num_rows.
+// Element-nullable scalar Array rows are also expanded from compact input to dense payload.
 func (v *validateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeutil.SchemaHelper, numRows int) error {
 	for _, field := range data {
 		fieldSchema, err := schema.GetFieldFromName(field.GetFieldName())
@@ -480,6 +481,39 @@ func (v *validateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeuti
 			err = FillWithDefaultValue(field, fieldSchema, numRows)
 			if err != nil {
 				return err
+			}
+		}
+
+		if fieldSchema.GetDataType() == schemapb.DataType_Array && fieldSchema.GetElementNullable() {
+			arrayData := field.GetScalars().GetArrayData()
+			if arrayData == nil {
+				return merr.WrapErrParameterInvalidMsg("array data is nil, field: %s", field.GetFieldName())
+			}
+			rowValidData := typeutil.GetFieldDataValidData(field)
+			for rowIdx, row := range arrayData.GetData() {
+				if len(rowValidData) > 0 && !rowValidData[rowIdx] {
+					continue
+				}
+				elementValidData := row.GetValidData()
+				switch rowData := row.GetData().(type) {
+				case *schemapb.ScalarField_BoolData:
+					rowData.BoolData.Data, err = fillWithNullValueImpl(rowData.BoolData.Data, elementValidData)
+				case *schemapb.ScalarField_IntData:
+					rowData.IntData.Data, err = fillWithNullValueImpl(rowData.IntData.Data, elementValidData)
+				case *schemapb.ScalarField_LongData:
+					rowData.LongData.Data, err = fillWithNullValueImpl(rowData.LongData.Data, elementValidData)
+				case *schemapb.ScalarField_FloatData:
+					rowData.FloatData.Data, err = fillWithNullValueImpl(rowData.FloatData.Data, elementValidData)
+				case *schemapb.ScalarField_DoubleData:
+					rowData.DoubleData.Data, err = fillWithNullValueImpl(rowData.DoubleData.Data, elementValidData)
+				case *schemapb.ScalarField_StringData:
+					rowData.StringData.Data, err = fillWithNullValueImpl(rowData.StringData.Data, elementValidData)
+				default:
+					return merr.WrapErrParameterInvalidMsg("undefined array element type:%s", fieldSchema.GetElementType().String())
+				}
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -1082,7 +1116,12 @@ func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemapb.ScalarField, []bool), field *schemapb.FieldSchema, elementNullable bool) error {
 	validateValidity := func(validData []bool, payloadLen, rowIdx int) error {
 		if elementNullable {
-			return validateElementValidDataLength(validData, payloadLen, field.GetName(), rowIdx)
+			validElements := getValidNumber(validData)
+			if validElements != payloadLen {
+				return merr.WrapErrParameterInvalid(validElements, payloadLen,
+					fmt.Sprintf("field %s row %d has %d valid elements, but compact payload has %d elements", field.GetName(), rowIdx, validElements, payloadLen))
+			}
+			return nil
 		}
 		if len(validData) > 0 {
 			return merr.WrapErrParameterInvalidMsg("field %s is not element nullable but row %d has element valid_data", field.GetName(), rowIdx)
@@ -1092,8 +1131,8 @@ func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemap
 
 	switch field.GetElementType() {
 	case schemapb.DataType_Bool:
-		for rowCnt := 0; rowCnt < rows; rowCnt++ {
-			row, validData := rowAt(rowCnt)
+		for rowIdx := 0; rowIdx < rows; rowIdx++ {
+			row, validData := rowAt(rowIdx)
 			if row.GetData() == nil {
 				return merr.WrapErrParameterInvalid("bool array", "nil array", "insert data does not match")
 			}
@@ -1102,13 +1141,13 @@ func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemap
 				return merr.WrapErrParameterInvalid("bool array",
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
 			}
-			if err := validateValidity(validData, len(row.GetBoolData().GetData()), rowCnt); err != nil {
+			if err := validateValidity(validData, len(row.GetBoolData().GetData()), rowIdx); err != nil {
 				return err
 			}
 		}
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-		for rowCnt := 0; rowCnt < rows; rowCnt++ {
-			row, validData := rowAt(rowCnt)
+		for rowIdx := 0; rowIdx < rows; rowIdx++ {
+			row, validData := rowAt(rowIdx)
 			if row.GetData() == nil {
 				return merr.WrapErrParameterInvalid("int array", "nil array", "insert data does not match")
 			}
@@ -1118,33 +1157,25 @@ func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemap
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
 			}
 			values := row.GetIntData().GetData()
-			if err := validateValidity(validData, len(values), rowCnt); err != nil {
+			if err := validateValidity(validData, len(values), rowIdx); err != nil {
 				return err
 			}
 			if v.checkOverflow {
 				if field.GetElementType() == schemapb.DataType_Int8 {
-					if elementNullable {
-						if err := verifyOverflowByRangeWithValidity(values, validData, math.MinInt8, math.MaxInt8); err != nil {
-							return err
-						}
-					} else if err := verifyOverflowByRange(values, math.MinInt8, math.MaxInt8); err != nil {
+					if err := verifyOverflowByRange(values, math.MinInt8, math.MaxInt8); err != nil {
 						return err
 					}
 				}
 				if field.GetElementType() == schemapb.DataType_Int16 {
-					if elementNullable {
-						if err := verifyOverflowByRangeWithValidity(values, validData, math.MinInt16, math.MaxInt16); err != nil {
-							return err
-						}
-					} else if err := verifyOverflowByRange(values, math.MinInt16, math.MaxInt16); err != nil {
+					if err := verifyOverflowByRange(values, math.MinInt16, math.MaxInt16); err != nil {
 						return err
 					}
 				}
 			}
 		}
 	case schemapb.DataType_Int64:
-		for rowCnt := 0; rowCnt < rows; rowCnt++ {
-			row, validData := rowAt(rowCnt)
+		for rowIdx := 0; rowIdx < rows; rowIdx++ {
+			row, validData := rowAt(rowIdx)
 			if row.GetData() == nil {
 				return merr.WrapErrParameterInvalid("int64 array", "nil array", "insert data does not match")
 			}
@@ -1153,13 +1184,13 @@ func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemap
 				return merr.WrapErrParameterInvalid("int64 array",
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
 			}
-			if err := validateValidity(validData, len(row.GetLongData().GetData()), rowCnt); err != nil {
+			if err := validateValidity(validData, len(row.GetLongData().GetData()), rowIdx); err != nil {
 				return err
 			}
 		}
 	case schemapb.DataType_Float:
-		for rowCnt := 0; rowCnt < rows; rowCnt++ {
-			row, validData := rowAt(rowCnt)
+		for rowIdx := 0; rowIdx < rows; rowIdx++ {
+			row, validData := rowAt(rowIdx)
 			if row.GetData() == nil {
 				return merr.WrapErrParameterInvalid("float array", "nil array", "insert data does not match")
 			}
@@ -1168,13 +1199,13 @@ func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemap
 				return merr.WrapErrParameterInvalid("float array",
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
 			}
-			if err := validateValidity(validData, len(row.GetFloatData().GetData()), rowCnt); err != nil {
+			if err := validateValidity(validData, len(row.GetFloatData().GetData()), rowIdx); err != nil {
 				return err
 			}
 		}
 	case schemapb.DataType_Double:
-		for rowCnt := 0; rowCnt < rows; rowCnt++ {
-			row, validData := rowAt(rowCnt)
+		for rowIdx := 0; rowIdx < rows; rowIdx++ {
+			row, validData := rowAt(rowIdx)
 			if row.GetData() == nil {
 				return merr.WrapErrParameterInvalid("double array", "nil array", "insert data does not match")
 			}
@@ -1183,13 +1214,13 @@ func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemap
 				return merr.WrapErrParameterInvalid("double array",
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
 			}
-			if err := validateValidity(validData, len(row.GetDoubleData().GetData()), rowCnt); err != nil {
+			if err := validateValidity(validData, len(row.GetDoubleData().GetData()), rowIdx); err != nil {
 				return err
 			}
 		}
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
-		for rowCnt := 0; rowCnt < rows; rowCnt++ {
-			row, validData := rowAt(rowCnt)
+		for rowIdx := 0; rowIdx < rows; rowIdx++ {
+			row, validData := rowAt(rowIdx)
 			if row.GetData() == nil {
 				return merr.WrapErrParameterInvalid("string array", "nil array", "insert data does not match")
 			}
@@ -1199,7 +1230,7 @@ func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemap
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
 			}
 			values := row.GetStringData().GetData()
-			if err := validateValidity(validData, len(values), rowCnt); err != nil {
+			if err := validateValidity(validData, len(values), rowIdx); err != nil {
 				return err
 			}
 			if v.checkMaxLen {
@@ -1208,12 +1239,9 @@ func (v *validateUtil) checkArrayElementRows(rows int, rowAt func(int) (*schemap
 					return err
 				}
 				i, ok := verifyLengthPerRow(values, maxLength)
-				if elementNullable {
-					i, ok = verifyLengthPerRowWithValidity(values, validData, maxLength)
-				}
 				if !ok {
 					return merr.WrapErrParameterInvalidMsg("length of %s array field \"%s\" exceeds max length, row number: %d, array index: %d, length: %d, max length: %d",
-						field.GetDataType().String(), field.GetName(), rowCnt, i, len(values[i]), maxLength,
+						field.GetDataType().String(), field.GetName(), rowIdx, i, len(values[i]), maxLength,
 					)
 				}
 			}
@@ -1238,7 +1266,7 @@ func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchem
 		if err != nil {
 			return err
 		}
-		if err := verifyArrayCapacityPerRow(data, maxCapacity, fieldSchema.GetElementType()); err != nil {
+		if err := verifyCapacityPerRow(data, maxCapacity, fieldSchema.GetElementType(), fieldSchema.GetElementNullable()); err != nil {
 			return err
 		}
 	}
@@ -1267,11 +1295,11 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 		}
 	}
 
-	checkCapacity := func(vectorCount int) error {
+	checkCapacity := func(vectorCount, rowIdx int) error {
 		if !v.checkMaxCap || int64(vectorCount) <= maxCapacity {
 			return nil
 		}
-		msg := fmt.Sprintf("the length (%d) of array of vector field %s exceeds max capacity (%d)", vectorCount, field.GetFieldName(), maxCapacity)
+		msg := fmt.Sprintf("the length (%d) of array of vector field %s row %d exceeds max capacity (%d)", vectorCount, field.GetFieldName(), rowIdx, maxCapacity)
 		return merr.WrapErrParameterInvalid("valid length array", "array length exceeds max capacity", msg)
 	}
 
@@ -1290,11 +1318,11 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 	checkVector := func(vector *schemapb.VectorField) (int, error) {
 		switch fieldSchema.GetElementType() {
 		case schemapb.DataType_FloatVector:
-			if _, ok := vector.GetData().(*schemapb.VectorField_FloatVector); !ok {
+			floatVector := vector.GetFloatVector()
+			if floatVector == nil {
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return 0, merr.WrapErrParameterInvalid("need float vector array", "got nil", msg)
 			}
-			floatVector := vector.GetFloatVector()
 			vectorCount, err := validateVectorCount(len(floatVector.GetData()), int(dim))
 			if err != nil {
 				return 0, err
@@ -1306,55 +1334,55 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 			}
 			return vectorCount, nil
 		case schemapb.DataType_BinaryVector:
-			if _, ok := vector.GetData().(*schemapb.VectorField_BinaryVector); !ok {
+			binaryVector, ok := vector.GetData().(*schemapb.VectorField_BinaryVector)
+			if !ok || binaryVector == nil {
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return 0, merr.WrapErrParameterInvalid("need binary vector array", "got nil", msg)
 			}
-			binaryVector := vector.GetBinaryVector()
-			vectorCount, err := validateVectorCount(len(binaryVector), int((dim+7)/8))
+			vectorCount, err := validateVectorCount(len(binaryVector.BinaryVector), int((dim+7)/8))
 			if err != nil {
 				return 0, err
 			}
 			return vectorCount, nil
 		case schemapb.DataType_Float16Vector:
-			if _, ok := vector.GetData().(*schemapb.VectorField_Float16Vector); !ok {
+			float16Vector, ok := vector.GetData().(*schemapb.VectorField_Float16Vector)
+			if !ok || float16Vector == nil {
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return 0, merr.WrapErrParameterInvalid("need float16 vector array", "got nil", msg)
 			}
-			float16Vector := vector.GetFloat16Vector()
-			vectorCount, err := validateVectorCount(len(float16Vector), int(dim)*2)
+			vectorCount, err := validateVectorCount(len(float16Vector.Float16Vector), int(dim)*2)
 			if err != nil {
 				return 0, err
 			}
 			if v.checkNAN {
-				if err := typeutil.VerifyFloats16(float16Vector); err != nil {
+				if err := typeutil.VerifyFloats16(float16Vector.Float16Vector); err != nil {
 					return 0, err
 				}
 			}
 			return vectorCount, nil
 		case schemapb.DataType_BFloat16Vector:
-			if _, ok := vector.GetData().(*schemapb.VectorField_Bfloat16Vector); !ok {
+			bfloat16Vector, ok := vector.GetData().(*schemapb.VectorField_Bfloat16Vector)
+			if !ok || bfloat16Vector == nil {
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return 0, merr.WrapErrParameterInvalid("need bfloat16 vector array", "got nil", msg)
 			}
-			bfloat16Vector := vector.GetBfloat16Vector()
-			vectorCount, err := validateVectorCount(len(bfloat16Vector), int(dim)*2)
+			vectorCount, err := validateVectorCount(len(bfloat16Vector.Bfloat16Vector), int(dim)*2)
 			if err != nil {
 				return 0, err
 			}
 			if v.checkNAN {
-				if err := typeutil.VerifyBFloats16(bfloat16Vector); err != nil {
+				if err := typeutil.VerifyBFloats16(bfloat16Vector.Bfloat16Vector); err != nil {
 					return 0, err
 				}
 			}
 			return vectorCount, nil
 		case schemapb.DataType_Int8Vector:
-			if _, ok := vector.GetData().(*schemapb.VectorField_Int8Vector); !ok {
+			int8Vector, ok := vector.GetData().(*schemapb.VectorField_Int8Vector)
+			if !ok || int8Vector == nil {
 				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 				return 0, merr.WrapErrParameterInvalid("need int8 vector array", "got nil", msg)
 			}
-			int8Vector := vector.GetInt8Vector()
-			vectorCount, err := validateVectorCount(len(int8Vector), int(dim))
+			vectorCount, err := validateVectorCount(len(int8Vector.Int8Vector), int(dim))
 			if err != nil {
 				return 0, err
 			}
@@ -1366,9 +1394,6 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 	}
 
 	for rowIdx, vector := range data.GetData() {
-		if vector == nil || vector.GetData() == nil {
-			return merr.WrapErrParameterInvalidMsg("array of vector field %s row %d requires typed vector data", field.GetFieldName(), rowIdx)
-		}
 		vectorCount, err := checkVector(vector)
 		if err != nil {
 			return err
@@ -1385,14 +1410,14 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 			); err != nil {
 				return merr.WrapErrParameterInvalidMsg(err.Error())
 			}
-			if err := checkCapacity(len(validData)); err != nil {
+			if err := checkCapacity(len(validData), rowIdx); err != nil {
 				return err
 			}
 		} else {
 			if len(validData) > 0 {
 				return merr.WrapErrParameterInvalidMsg("array of vector field %s is not element nullable but row %d has element valid_data", field.GetFieldName(), rowIdx)
 			}
-			if err := checkCapacity(vectorCount); err != nil {
+			if err := checkCapacity(vectorCount, rowIdx); err != nil {
 				return err
 			}
 		}
@@ -1447,38 +1472,27 @@ func verifyLengthPerRow[E interface{ ~string | ~[]byte }](strArr []E, maxLength 
 	return 0, true
 }
 
-func verifyLengthPerRowWithValidity[E interface{ ~string | ~[]byte }](strArr []E, validData []bool, maxLength int64) (int, bool) {
-	for i, s := range strArr {
-		if len(validData) > 0 && !validData[i] {
-			continue
-		}
-		if int64(len(s)) > maxLength {
-			return i, false
-		}
-	}
-
-	return 0, true
-}
-
-func verifyArrayCapacityPerRow(arrayArray *schemapb.ArrayArray, maxCapacity int64, elementType schemapb.DataType) error {
+func verifyCapacityPerRow(arrayArray *schemapb.ArrayArray, maxCapacity int64, elementType schemapb.DataType, elementNullable bool) error {
 	for i, array := range arrayArray.GetData() {
-		arrayLen := 0
-		switch elementType {
-		case schemapb.DataType_Bool:
-			arrayLen = len(array.GetBoolData().GetData())
-		case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-			arrayLen = len(array.GetIntData().GetData())
-		case schemapb.DataType_Int64:
-			arrayLen = len(array.GetLongData().GetData())
-		case schemapb.DataType_String, schemapb.DataType_VarChar:
-			arrayLen = len(array.GetStringData().GetData())
-		case schemapb.DataType_Float:
-			arrayLen = len(array.GetFloatData().GetData())
-		case schemapb.DataType_Double:
-			arrayLen = len(array.GetDoubleData().GetData())
-		default:
-			msg := fmt.Sprintf("array element type: %s is not supported", elementType.String())
-			return merr.WrapErrParameterInvalid("valid array element type", "array element type is not supported", msg)
+		arrayLen := len(array.GetValidData())
+		if !elementNullable {
+			switch elementType {
+			case schemapb.DataType_Bool:
+				arrayLen = len(array.GetBoolData().GetData())
+			case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+				arrayLen = len(array.GetIntData().GetData())
+			case schemapb.DataType_Int64:
+				arrayLen = len(array.GetLongData().GetData())
+			case schemapb.DataType_String, schemapb.DataType_VarChar:
+				arrayLen = len(array.GetStringData().GetData())
+			case schemapb.DataType_Float:
+				arrayLen = len(array.GetFloatData().GetData())
+			case schemapb.DataType_Double:
+				arrayLen = len(array.GetDoubleData().GetData())
+			default:
+				msg := fmt.Sprintf("array element type: %s is not supported", elementType.String())
+				return merr.WrapErrParameterInvalid("valid array element type", "array element type is not supported", msg)
+			}
 		}
 
 		if int64(arrayLen) <= maxCapacity {
@@ -1491,29 +1505,8 @@ func verifyArrayCapacityPerRow(arrayArray *schemapb.ArrayArray, maxCapacity int6
 	return nil
 }
 
-func validateElementValidDataLength(validData []bool, payloadLen int, fieldName string, rowIdx int) error {
-	if len(validData) == payloadLen {
-		return nil
-	}
-	return merr.WrapErrParameterInvalid(payloadLen, len(validData),
-		fmt.Sprintf("element valid data length does not match element count for field %s row %d", fieldName, rowIdx))
-}
-
 func verifyOverflowByRange(arr []int32, lb int64, ub int64) error {
 	for idx, e := range arr {
-		if lb > int64(e) || ub < int64(e) {
-			msg := fmt.Sprintf("the %dth element (%d) out of range: [%d, %d]", idx, e, lb, ub)
-			return merr.WrapErrParameterInvalid("integer doesn't overflow", "out of range", msg)
-		}
-	}
-	return nil
-}
-
-func verifyOverflowByRangeWithValidity(arr []int32, validData []bool, lb int64, ub int64) error {
-	for idx, e := range arr {
-		if len(validData) > 0 && !validData[idx] {
-			continue
-		}
 		if lb > int64(e) || ub < int64(e) {
 			msg := fmt.Sprintf("the %dth element (%d) out of range: [%d, %d]", idx, e, lb, ub)
 			return merr.WrapErrParameterInvalid("integer doesn't overflow", "out of range", msg)

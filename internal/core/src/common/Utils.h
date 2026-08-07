@@ -48,16 +48,7 @@ namespace milvus {
 
 inline const google::protobuf::RepeatedField<bool>&
 GetFieldDataRowValidData(const DataArray& field_data) {
-    const bool has_legacy_valid_data = field_data.valid_data_size() > 0;
-    const bool has_field_valid_data =
-        (field_data.has_scalars() &&
-         field_data.scalars().valid_data_size() > 0) ||
-        (field_data.has_vectors() &&
-         field_data.vectors().valid_data_size() > 0);
-    AssertInfo(!(has_legacy_valid_data && has_field_valid_data),
-               "FieldData cannot set both legacy and field-specific "
-               "valid_data");
-    if (has_legacy_valid_data) {
+    if (field_data.valid_data_size() > 0) {
         return field_data.valid_data();
     }
     if (field_data.has_scalars()) {

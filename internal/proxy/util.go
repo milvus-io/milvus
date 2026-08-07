@@ -578,6 +578,7 @@ func validateElementNullable(field *schemapb.FieldSchema) error {
 	if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
 		return merr.WrapErrParameterInvalidMsg("element_nullable is only valid for Array and ArrayOfVector fields, field name = %s", field.GetName())
 	}
+	// TODO: temporarily disable element nullable until all parts ready
 	return merr.WrapErrParameterInvalidMsg("element_nullable is not supported yet, field name = %s", field.GetName())
 }
 

@@ -232,7 +232,7 @@ func TestCheckAndFlattenStructFieldDataAllowsElementNullableSubFields(t *testing
 	}
 	insertMsg := structElementCountTestInsertMsg(structElementCountTestStructData(
 		structElementCountTestNullableScalarArray("field1", nullableIntArrayRow{
-			values:    []int32{1, 0, 3},
+			values:    []int32{1, 3},
 			validData: []bool{true, false, true},
 		}),
 		structElementCountTestNullableVectorArray("field2", nullableFloatVectorArrayRow{
@@ -307,7 +307,7 @@ func TestCheckAndFlattenStructFieldDataRejectsMismatchedElementNullableElementCo
 	}
 	insertMsg := structElementCountTestInsertMsg(structElementCountTestStructData(
 		structElementCountTestNullableScalarArray("field1", nullableIntArrayRow{
-			values:    []int32{1, 0},
+			values:    []int32{1},
 			validData: []bool{true, false},
 		}),
 		structElementCountTestNullableVectorArray("field2", nullableFloatVectorArrayRow{
@@ -347,7 +347,7 @@ func TestCheckAndFlattenStructFieldDataAllowsNullableStructWithElementNullableSu
 		},
 	}
 	field1 := structElementCountTestNullableScalarArray("field1", nullableIntArrayRow{
-		values:    []int32{1, 0},
+		values:    []int32{1},
 		validData: []bool{true, false},
 	})
 	typeutil.SetFieldDataValidData(field1, validData)
@@ -366,6 +366,68 @@ func TestCheckAndFlattenStructFieldDataAllowsNullableStructWithElementNullableSu
 	assert.Equal(t, validData, insertMsg.FieldsData[1].GetVectors().GetValidData())
 	assert.Len(t, insertMsg.FieldsData[0].GetScalars().GetArrayData().GetData(), 1)
 	assert.Len(t, insertMsg.FieldsData[1].GetVectors().GetVectorArray().GetData(), 1)
+}
+
+func TestStructElementNullableFlattenFillAndValidate(t *testing.T) {
+	const structName = "test_struct"
+	scalarFieldName := typeutil.ConcatStructFieldName(structName, "field1")
+	vectorFieldName := typeutil.ConcatStructFieldName(structName, "field2")
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name: structName,
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:         101,
+						Name:            scalarFieldName,
+						DataType:        schemapb.DataType_Array,
+						ElementType:     schemapb.DataType_Int32,
+						ElementNullable: true,
+					},
+					{
+						FieldID:         102,
+						Name:            vectorFieldName,
+						DataType:        schemapb.DataType_ArrayOfVector,
+						ElementType:     schemapb.DataType_FloatVector,
+						ElementNullable: true,
+						TypeParams:      []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+					},
+				},
+			},
+		},
+	}
+	scalarField := structElementCountTestNullableScalarArray("field1", nullableIntArrayRow{
+		values:    []int32{1, 3},
+		validData: []bool{true, false, true},
+	})
+	vectorField := structElementCountTestNullableVectorArray("field2", nullableFloatVectorArrayRow{
+		values:    []float32{0.1, 0.2, 0.3, 0.4},
+		validData: []bool{true, false, true},
+	})
+	vectorField.GetVectors().GetVectorArray().Dim = 2
+	insertMsg := structElementCountTestInsertMsg(structElementCountTestStructData(scalarField, vectorField))
+
+	require.NoError(t, checkAndFlattenStructFieldData(schema, insertMsg))
+	require.Len(t, insertMsg.FieldsData, 2)
+	assert.Equal(t, scalarFieldName, insertMsg.FieldsData[0].GetFieldName())
+	assert.Equal(t, vectorFieldName, insertMsg.FieldsData[1].GetFieldName())
+
+	schemaInfo := mustNewSchemaInfo(schema)
+	require.NoError(t, fillFieldPropertiesOnly(insertMsg.FieldsData, schemaInfo))
+	require.NoError(t, newValidateUtil().Validate(insertMsg.FieldsData, schemaInfo.schemaHelper, 1))
+
+	scalarArray := insertMsg.FieldsData[0].GetScalars().GetArrayData()
+	assert.Equal(t, int64(101), insertMsg.FieldsData[0].GetFieldId())
+	assert.Equal(t, schemapb.DataType_Int32, scalarArray.GetElementType())
+	assert.Equal(t, []int32{1, 0, 3}, scalarArray.GetData()[0].GetIntData().GetData())
+	assert.Equal(t, []bool{true, false, true}, scalarArray.GetData()[0].GetValidData())
+
+	vectorArray := insertMsg.FieldsData[1].GetVectors().GetVectorArray()
+	assert.Equal(t, int64(102), insertMsg.FieldsData[1].GetFieldId())
+	assert.Equal(t, schemapb.DataType_FloatVector, vectorArray.GetElementType())
+	assert.Equal(t, []float32{0.1, 0.2, 0.3, 0.4}, vectorArray.GetData()[0].GetFloatVector().GetData())
+	assert.Equal(t, []bool{true, false, true}, vectorArray.GetData()[0].GetValidData())
 }
 
 func TestCheckAndFlattenStructFieldDataAllowsRawPayloadNamesWithStoredStructSubFieldNames(t *testing.T) {

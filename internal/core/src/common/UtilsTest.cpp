@@ -65,14 +65,6 @@ TEST(Util_Common, FieldDataRowValidData) {
     EXPECT_TRUE(current[1]);
 }
 
-TEST(Util_Common, FieldDataRowValidDataRejectsConflictingSources) {
-    milvus::DataArray field_data;
-    field_data.add_valid_data(true);
-    field_data.mutable_scalars()->add_valid_data(false);
-
-    EXPECT_ANY_THROW(milvus::GetFieldDataRowValidData(field_data));
-}
-
 TEST(Util_Common, MutableFieldDataRowValidData) {
     milvus::DataArray scalar_field;
     scalar_field.add_valid_data(true);

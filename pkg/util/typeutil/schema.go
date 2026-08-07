@@ -266,11 +266,10 @@ func CalcScalarSize(column *schemapb.FieldData) int {
 			res += len(str)
 		}
 	case schemapb.DataType_Array:
-		arrayData := column.GetScalars().GetArrayData()
-		for _, array := range arrayData.GetData() {
+		for _, array := range column.GetScalars().GetArrayData().GetData() {
 			res += CalcScalarSize(&schemapb.FieldData{
 				Field: &schemapb.FieldData_Scalars{Scalars: array},
-				Type:  arrayData.GetElementType(),
+				Type:  column.GetScalars().GetArrayData().GetElementType(),
 			})
 		}
 	case schemapb.DataType_JSON:
@@ -332,14 +331,13 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 			}
 			res += len(fs.GetScalars().GetStringData().Data[rowOffset])
 		case schemapb.DataType_Array:
-			arrayData := fs.GetScalars().GetArrayData()
-			if rowOffset >= len(arrayData.GetData()) {
+			if rowOffset >= len(fs.GetScalars().GetArrayData().GetData()) {
 				return 0, merr.WrapErrParameterInvalidMsg("offset out range of field datas")
 			}
-			array := arrayData.GetData()[rowOffset]
+			array := fs.GetScalars().GetArrayData().GetData()[rowOffset]
 			res += CalcScalarSize(&schemapb.FieldData{
 				Field: &schemapb.FieldData_Scalars{Scalars: array},
-				Type:  arrayData.GetElementType(),
+				Type:  fs.GetScalars().GetArrayData().GetElementType(),
 			})
 		case schemapb.DataType_JSON:
 			if rowOffset >= len(fs.GetScalars().GetJsonData().GetData()) {
@@ -876,11 +874,12 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 					},
 				}
 			case *schemapb.ScalarField_ArrayData:
-				arrayData := &schemapb.ArrayArray{
-					ElementType: scalarField.GetArrayData().GetElementType(),
-					Data:        make([]*schemapb.ScalarField, 0, topK),
+				scalar.Scalars.Data = &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						Data:        make([]*schemapb.ScalarField, 0, topK),
+						ElementType: scalarField.GetArrayData().GetElementType(),
+					},
 				}
-				scalar.Scalars.Data = &schemapb.ScalarField_ArrayData{ArrayData: arrayData}
 			}
 			fd.Field = scalar
 		case *schemapb.FieldData_Vectors:
@@ -924,12 +923,13 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 					Int8Vector: make([]byte, 0, topK*dim),
 				}
 			case *schemapb.VectorField_VectorArray:
-				vectorArray := &schemapb.VectorArray{
-					Dim:         vectorField.GetVectorArray().GetDim(),
-					ElementType: vectorField.GetVectorArray().GetElementType(),
-					Data:        make([]*schemapb.VectorField, 0, topK),
+				vectors.Vectors.Data = &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Dim:         vectorField.GetVectorArray().GetDim(),
+						ElementType: vectorField.GetVectorArray().GetElementType(),
+						Data:        make([]*schemapb.VectorField, 0, topK),
+					},
 				}
-				vectors.Vectors.Data = &schemapb.VectorField_VectorArray{VectorArray: vectorArray}
 			}
 			fd.Field = vectors
 		case *schemapb.FieldData_StructArrays:
@@ -1417,12 +1417,11 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 			}
 		case *schemapb.ScalarField_ArrayData:
 			if dstScalar.GetArrayData() == nil {
-				arrayData := &schemapb.ArrayArray{
-					ElementType: srcScalar.ArrayData.ElementType,
-					Data:        make([]*schemapb.ScalarField, 0, len(dataIndices)),
-				}
 				dstScalar.Data = &schemapb.ScalarField_ArrayData{
-					ArrayData: arrayData,
+					ArrayData: &schemapb.ArrayArray{
+						Data:        make([]*schemapb.ScalarField, 0, len(dataIndices)),
+						ElementType: srcScalar.ArrayData.ElementType,
+					},
 				}
 			}
 			for _, idx := range dataIndices {
@@ -1556,13 +1555,12 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 				return
 			}
 			if dstVector.GetVectorArray() == nil {
-				vectorArray := &schemapb.VectorArray{
-					Dim:         srcVector.VectorArray.Dim,
-					ElementType: srcVector.VectorArray.ElementType,
-					Data:        make([]*schemapb.VectorField, 0, len(dataIndices)),
-				}
 				dstVector.Data = &schemapb.VectorField_VectorArray{
-					VectorArray: vectorArray,
+					VectorArray: &schemapb.VectorArray{
+						Data:        make([]*schemapb.VectorField, 0, len(dataIndices)),
+						Dim:         srcVector.VectorArray.Dim,
+						ElementType: srcVector.VectorArray.ElementType,
+					},
 				}
 			}
 			for _, idx := range dataIndices {
@@ -2441,12 +2439,11 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				}
 			case *schemapb.ScalarField_ArrayData:
 				if dstScalar.GetArrayData() == nil {
-					arrayData := &schemapb.ArrayArray{
-						ElementType: srcScalar.ArrayData.ElementType,
-						Data:        srcScalar.ArrayData.Data,
-					}
 					dstScalar.Data = &schemapb.ScalarField_ArrayData{
-						ArrayData: arrayData,
+						ArrayData: &schemapb.ArrayArray{
+							Data:        srcScalar.ArrayData.Data,
+							ElementType: srcScalar.ArrayData.ElementType,
+						},
 					}
 				} else {
 					dstScalar.GetArrayData().Data = append(dstScalar.GetArrayData().Data, srcScalar.ArrayData.Data...)
@@ -2549,13 +2546,12 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				}
 			case *schemapb.VectorField_VectorArray:
 				if dstVector.GetVectorArray() == nil {
-					vectorArray := &schemapb.VectorArray{
-						Dim:         srcVector.VectorArray.Dim,
-						ElementType: srcVector.VectorArray.ElementType,
-						Data:        srcVector.VectorArray.Data,
-					}
 					dstVector.Data = &schemapb.VectorField_VectorArray{
-						VectorArray: vectorArray,
+						VectorArray: &schemapb.VectorArray{
+							Dim:         srcVector.VectorArray.Dim,
+							ElementType: srcVector.VectorArray.ElementType,
+							Data:        srcVector.VectorArray.Data,
+						},
 					}
 				} else {
 					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data...)

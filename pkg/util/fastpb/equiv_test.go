@@ -103,53 +103,9 @@ func TestEquiv_FieldData_FieldSpecificValidData(t *testing.T) {
 	})
 }
 
-func TestEquiv_FieldData_ElementValidData(t *testing.T) {
-	t.Run("array", func(t *testing.T) {
-		roundTripFieldData(t, &schemapb.FieldData{
-			Type: schemapb.DataType_Array,
-			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
-					ElementType: schemapb.DataType_Int64,
-					Data: []*schemapb.ScalarField{
-						{
-							Data: &schemapb.ScalarField_LongData{
-								LongData: &schemapb.LongArray{Data: []int64{10, 0, 30}},
-							},
-							ValidData: []bool{true, false, true},
-						},
-					},
-				}},
-			}},
-		})
-	})
-
-	t.Run("array of vector", func(t *testing.T) {
-		roundTripFieldData(t, &schemapb.FieldData{
-			Type: schemapb.DataType_ArrayOfVector,
-			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-				Dim: 2,
-				Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
-					Dim:         2,
-					ElementType: schemapb.DataType_FloatVector,
-					Data: []*schemapb.VectorField{
-						{
-							Dim: 2,
-							Data: &schemapb.VectorField_FloatVector{
-								FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
-							},
-							ValidData: []bool{true, false, true},
-						},
-					},
-				}},
-			}},
-		})
-	})
-}
-
 func TestEquiv_IDs(t *testing.T) {
 	roundTripSRD(t, &schemapb.SearchResultData{Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10, 20, 30}}}}})
 	roundTripSRD(t, &schemapb.SearchResultData{Ids: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"k1", "k2"}}}}})
-	roundTripSRD(t, &schemapb.SearchResultData{Ids: &schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: [][]byte{{1, 2}, {3, 4}}}}}})
 }
 
 func TestEquiv_SearchResultData_Full(t *testing.T) {

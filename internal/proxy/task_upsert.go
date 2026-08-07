@@ -948,10 +948,6 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 		}, nil
 
 	case schemapb.DataType_Array:
-		arrayData := &schemapb.ArrayArray{
-			ElementType: field.GetElementType(),
-			Data:        make([]*schemapb.ScalarField, upsertIDSize),
-		}
 		return &schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
@@ -961,7 +957,10 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 				Scalars: &schemapb.ScalarField{
 					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_ArrayData{
-						ArrayData: arrayData,
+						ArrayData: &schemapb.ArrayArray{
+							Data:        make([]*schemapb.ScalarField, upsertIDSize),
+							ElementType: field.GetElementType(),
+						},
 					},
 				},
 			},
