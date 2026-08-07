@@ -470,7 +470,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 				expectedDBID: 100,
 			},
 			{
-				name: "restore snapshot to default database",
+				name: "restore snapshot to source database",
 				request: &milvuspb.RestoreSnapshotRequest{
 					DbName:               "source_db",
 					CollectionName:       "source",
@@ -523,7 +523,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 				n:               1,
 			}, limiter.checks[i])
 		}
-		assert.Equal(t, []string{"db1", "db1", "target_db", util.DefaultDBName, "db1"}, databaseNames)
+		assert.Equal(t, []string{"db1", "db1", "target_db", "source_db", "db1"}, databaseNames)
 	})
 
 	t.Run("test RateLimitInterceptor", func(t *testing.T) {
