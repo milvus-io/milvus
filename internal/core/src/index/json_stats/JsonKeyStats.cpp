@@ -274,23 +274,27 @@ JsonKeyStats::TraverseJsonForStats(const char* json,
                                    std::vector<std::string>& path,
                                    std::map<JsonKey, KeyStatsInfo>& infos) {
     jsmntok current = tokens[0];
-    AssertInfo(current.type != JSMN_UNDEFINED,
-               "current token type is undefined for json: {}.",
-               json);
+    if (!(current.type != JSMN_UNDEFINED)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "current token type is undefined for json: {}.",
+                  json);
+    }
     if (current.type == JSMN_OBJECT) {
         if (!path.empty()) {
             AddKeyStatsInfo(path, JSONType::OBJECT, nullptr, infos);
         }
         int j = 1;
         for (int i = 0; i < current.size; i++) {
-            AssertInfo(tokens[j].type == JSMN_STRING && tokens[j].size != 0,
-                       "current token type is not string for json: {} at "
-                       "type: {}, size: {}, value: {}",
-                       json,
-                       int(tokens[j].type),
-                       tokens[j].size,
-                       std::string(json + tokens[j].start,
-                                   tokens[j].end - tokens[j].start));
+            if (!(tokens[j].type == JSMN_STRING && tokens[j].size != 0)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "current token type is not string for json: {} at "
+                          "type: {}, size: {}, value: {}",
+                          json,
+                          int(tokens[j].type),
+                          tokens[j].size,
+                          std::string(json + tokens[j].start,
+                                      tokens[j].end - tokens[j].start));
+            }
             std::string key(json + tokens[j].start,
                             tokens[j].end - tokens[j].start);
             path.push_back(key);
@@ -520,9 +524,11 @@ JsonKeyStats::TraverseJsonForBuildStats(
     std::vector<std::string>& path,
     std::map<JsonKey, std::string>& values) {
     jsmntok current = tokens[0];
-    AssertInfo(current.type != JSMN_UNDEFINED,
-               "current token type is undefined for json: {}",
-               json);
+    if (!(current.type != JSMN_UNDEFINED)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "current token type is undefined for json: {}",
+                  json);
+    }
     if (current.type == JSMN_OBJECT) {
         if (!path.empty() && current.size == 0) {
             AddKeyStats(
@@ -535,14 +541,16 @@ JsonKeyStats::TraverseJsonForBuildStats(
         }
         int j = 1;
         for (int i = 0; i < current.size; i++) {
-            AssertInfo(tokens[j].type == JSMN_STRING && tokens[j].size != 0,
-                       "current token type is not string for json: {} at "
-                       "type: {}, size: {}, value: {}",
-                       json,
-                       int(tokens[j].type),
-                       tokens[j].size,
-                       std::string(json + tokens[j].start,
-                                   tokens[j].end - tokens[j].start));
+            if (!(tokens[j].type == JSMN_STRING && tokens[j].size != 0)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "current token type is not string for json: {} at "
+                          "type: {}, size: {}, value: {}",
+                          json,
+                          int(tokens[j].type),
+                          tokens[j].size,
+                          std::string(json + tokens[j].start,
+                                      tokens[j].end - tokens[j].start));
+            }
 
             std::string key(json + tokens[j].start,
                             tokens[j].end - tokens[j].start);

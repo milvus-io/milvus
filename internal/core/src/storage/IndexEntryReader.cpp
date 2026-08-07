@@ -160,11 +160,13 @@ ReadOrderedEntryStream(
     ThrowIfCancelled(cancellation_token, "ReadEntryStream");
     if (num_slices == 0) {
         auto actual_crc = Crc32cValue(nullptr, 0);
-        AssertInfo(actual_crc == expected_crc,
-                   "{}: expected {}, actual {}",
-                   crc_error_context,
-                   Crc32cToHex(expected_crc),
-                   Crc32cToHex(actual_crc));
+        if (!(actual_crc == expected_crc)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "{}: expected {}, actual {}",
+                      crc_error_context,
+                      Crc32cToHex(expected_crc),
+                      Crc32cToHex(actual_crc));
+        }
         return;
     }
 
@@ -326,11 +328,13 @@ ReadOrderedEntryStream(
         std::rethrow_exception(first_error);
     }
 
-    AssertInfo(running_crc == expected_crc,
-               "{}: expected {}, actual {}",
-               crc_error_context,
-               Crc32cToHex(expected_crc),
-               Crc32cToHex(running_crc));
+    if (!(running_crc == expected_crc)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "{}: expected {}, actual {}",
+                  crc_error_context,
+                  Crc32cToHex(expected_crc),
+                  Crc32cToHex(running_crc));
+    }
 }
 
 }  // namespace
@@ -446,14 +450,19 @@ IndexEntryReader::ReadFooterAndDirectory() {
         &meta_entry_size, footer_ptr + 24, sizeof(uint32_t));
     milvus::fastmem::FastMemcpy(&dir_size, footer_ptr + 28, sizeof(uint32_t));
 
-    AssertInfo(version == MILVUS_V3_FORMAT_VERSION,
-               "Unsupported V3 format version: {}",
-               version);
+    if (!(version == MILVUS_V3_FORMAT_VERSION)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Unsupported V3 format version: {}",
+                  version);
+    }
     AssertInfo(dir_size > 0, "Directory table size is zero");
-    AssertInfo(static_cast<size_t>(dir_size) + meta_entry_size +
-                       MILVUS_V3_FOOTER_SIZE + MILVUS_V3_MAGIC_SIZE <=
-                   static_cast<size_t>(file_size_),
-               "Directory table + meta entry + footer size exceeds file size");
+    if (!(static_cast<size_t>(dir_size) + meta_entry_size +
+              MILVUS_V3_FOOTER_SIZE + MILVUS_V3_MAGIC_SIZE <=
+          static_cast<size_t>(file_size_))) {
+        ThrowInfo(
+            ErrorCode::DataFormatBroken,
+            "Directory table + meta entry + footer size exceeds file size");
+    }
 
     // Check if the directory itself needs a second read. The meta entry is
     // loaded separately by Open() and is not needed for directory parsing.
@@ -496,7 +505,10 @@ IndexEntryReader::ReadFooterAndDirectory() {
                   e.what());
     }
 
-    AssertInfo(dir_json.contains("entries"), "Directory table missing entries");
+    if (!(dir_json.contains("entries"))) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Directory table missing entries");
+    }
 
     if (dir_json.contains("__edek__")) {
         is_encrypted_ = true;
@@ -614,7 +626,9 @@ IndexEntryReader::ReadEntry(const std::string& name) {
     }
 
     auto it = entry_index_.find(name);
-    AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+    if (!(it != entry_index_.end())) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Entry not found: {}", name);
+    }
     const auto& meta = it->second;
 
     Entry result;
@@ -1126,7 +1140,9 @@ IndexEntryReader::ReadEntryToFile(const std::string& name,
                                   const std::string& local_path) {
     CheckCancelled("IndexEntryReader::ReadEntryToFile");
     auto it = entry_index_.find(name);
-    AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+    if (!(it != entry_index_.end())) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Entry not found: {}", name);
+    }
     const auto& meta = it->second;
 
     auto state = PrepareEntryDownload(name, local_path, meta);
@@ -1180,7 +1196,10 @@ IndexEntryReader::ReadEntriesToFiles(
         size_t total_task_count = 0;
         for (const auto& [name, path] : name_path_pairs) {
             auto it = entry_index_.find(name);
-            AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+            if (!(it != entry_index_.end())) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken, "Entry not found: {}", name);
+            }
             states.push_back(PrepareEntryDownload(name, path, it->second));
             total_task_count += DownloadTaskCount(it->second);
         }
@@ -1216,7 +1235,9 @@ IndexEntryReader::ReadEntryStreamToFile(const std::string& name,
                                         const std::string& local_path,
                                         io::Priority write_priority) {
     CheckCancelled("IndexEntryReader::ReadEntryStreamToFile");
-    AssertInfo(HasEntry(name), "Entry not found: {}", name);
+    if (!(HasEntry(name))) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Entry not found: {}", name);
+    }
     auto writer = FileWriter(local_path, write_priority);
     ReadEntryStream(name, [&writer](const uint8_t* data, size_t len) {
         writer.Write(data, len);
@@ -1241,7 +1262,10 @@ IndexEntryReader::ReadEntriesStreamToFiles(
         size_t total_task_count = 0;
         for (const auto& [name, path] : name_path_pairs) {
             auto it = entry_index_.find(name);
-            AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+            if (!(it != entry_index_.end())) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken, "Entry not found: {}", name);
+            }
             states.push_back(PrepareEntryStreamDownload(
                 name, path, it->second, write_priority));
             total_task_count += StreamDownloadTaskCount(it->second);
@@ -1276,7 +1300,9 @@ size_t
 IndexEntryReader::GetEntrySize(const std::string& name) const {
     CheckCancelled("IndexEntryReader::GetEntrySize");
     auto it = entry_index_.find(name);
-    AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+    if (!(it != entry_index_.end())) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Entry not found: {}", name);
+    }
     if (it->second.encrypted) {
         return it->second.enc.original_size;
     }
@@ -1290,7 +1316,9 @@ IndexEntryReader::ReadEntryStream(
     size_t slice_size) {
     CheckCancelled("IndexEntryReader::ReadEntryStream");
     auto it = entry_index_.find(name);
-    AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+    if (!(it != entry_index_.end())) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Entry not found: {}", name);
+    }
     const auto& meta = it->second;
 
     if (meta.encrypted) {
