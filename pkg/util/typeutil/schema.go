@@ -1051,10 +1051,17 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				FieldId:   fieldData.FieldId,
 				IsDynamic: fieldData.IsDynamic,
 			}
-			// Callers size dst to at least len(src); the bound is explicit here
-			// so the write is provably safe.
+			// Callers size dst to at least len(src). Keep that a hard failure
+			// rather than silently dropping the column: the pre-existing code
+			// wrote dst[i] unguarded and panicked here, and a silent drop would
+			// surface much later as missing data. The write stays inside the
+			// bounds-checked branch because gosec's G602 does not treat a
+			// preceding panic as terminating.
 			if i < len(dst) {
 				dst[i] = dstFieldData
+			} else {
+				panic(fmt.Sprintf("AppendFieldData: dst has %d columns, src has %d; "+
+					"callers must size dst to at least len(src)", len(dst), len(src)))
 			}
 		}
 		// assign null data

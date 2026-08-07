@@ -43,6 +43,21 @@ func floatVec(fieldID int64, name string, dim int64, data []float32) *schemapb.F
 	}
 }
 
+// A dst shorter than src violates the caller contract. The pre-existing code
+// wrote dst[i] unguarded and panicked; keep it a hard failure so a broken
+// caller cannot silently drop a column.
+func TestAppendFieldDataPanicsOnShortDst(t *testing.T) {
+	src := []*schemapb.FieldData{
+		scalarInt64(100, "pk", []int64{10}),
+		scalarInt64(101, "age", []int64{20}),
+	}
+	dst := make([]*schemapb.FieldData, 1) // one column short
+
+	assert.PanicsWithValue(t,
+		"AppendFieldData: dst has 1 columns, src has 2; callers must size dst to at least len(src)",
+		func() { AppendFieldData(dst, src, 0) })
+}
+
 // AppendFieldData now resolves the destination column by index and only falls
 // back to a FieldId map when dst and src are not parallel. This checks the two
 // paths agree, including the cases that force the fallback.
