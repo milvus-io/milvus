@@ -13,12 +13,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/registry"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var testRocksMQPath string
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
+	paramtable.SetRole(typeutil.StandaloneRole)
 	var err error
 	testRocksMQPath, err = os.MkdirTemp("", "rocksdb_test")
 	if err != nil {
@@ -28,6 +30,16 @@ func TestMain(m *testing.M) {
 	paramtable.Get().Save(paramtable.Get().RocksmqCfg.Path.Key, testRocksMQPath)
 	defer server.CloseRocksMQ()
 	m.Run()
+}
+
+func TestBuilderRejectsClusterMode(t *testing.T) {
+	oldRole := paramtable.GetRole()
+	paramtable.SetRole(typeutil.StreamingNodeRole)
+	defer paramtable.SetRole(oldRole)
+
+	opener, err := (&builderImpl{}).Build()
+	require.Nil(t, opener)
+	require.Error(t, err)
 }
 
 func TestRegistry(t *testing.T) {

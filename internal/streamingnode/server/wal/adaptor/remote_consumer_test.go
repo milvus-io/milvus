@@ -33,6 +33,8 @@ import (
 	clientconsumer "github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
+	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -66,7 +68,12 @@ func TestRemoteConsumerTransparentlyBridgesHistoricalAndCurrentWAL(t *testing.T)
 	currentWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
 	currentWAL.EXPECT().Channel().Return(channel).Maybe()
 	currentWAL.EXPECT().Close().Return().Once()
-	currentWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
+
+	currentReadWAL := mock_walimpls.NewMockWALImpls(t)
+	currentReadWAL.EXPECT().WALName().Return(message.WALNameTest).Maybe()
+	currentReadWAL.EXPECT().Channel().Return(channel).Maybe()
+	currentReadWAL.EXPECT().Close().Return().Once()
+	currentReadWAL.EXPECT().Read(mock.Anything, mock.MatchedBy(func(opt walimpls.ReadOption) bool {
 		_, ok := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_All)
 		return ok
 	})).Return(currentScanner, nil).Once()
@@ -93,14 +100,22 @@ func TestRemoteConsumerTransparentlyBridgesHistoricalAndCurrentWAL(t *testing.T)
 		walName message.WALName
 		channel types.PChannelInfo
 	}
-	historicalOpenCh := make(chan historicalOpen, 1)
+	historicalOpenCh := make(chan historicalOpen, 2)
 	roWAL := adaptImplsToROWAL(currentWAL, func() {}, func(
 		_ context.Context,
 		walName message.WALName,
 		gotChannel types.PChannelInfo,
 	) (walimpls.ROWALImpls, error) {
 		historicalOpenCh <- historicalOpen{walName: walName, channel: gotChannel}
-		return historicalWAL, nil
+		switch walName {
+		case message.WALNameRocksmq:
+			return historicalWAL, nil
+		case message.WALNameTest:
+			return currentReadWAL, nil
+		default:
+			t.Fatalf("unexpected WAL name %s", walName)
+			return nil, nil
+		}
 	})
 	defer roWAL.Close()
 
@@ -143,6 +158,9 @@ func TestRemoteConsumerTransparentlyBridgesHistoricalAndCurrentWAL(t *testing.T)
 	require.Equal(t, []message.WALName{message.WALNameTest}, walNames)
 	opened := <-historicalOpenCh
 	require.Equal(t, message.WALNameRocksmq, opened.walName)
+	require.Equal(t, channel, opened.channel)
+	opened = <-historicalOpenCh
+	require.Equal(t, message.WALNameTest, opened.walName)
 	require.Equal(t, channel, opened.channel)
 	require.NoError(t, consumer.Close())
 }
@@ -193,7 +211,7 @@ func TestRemoteConsumerDoesNotAdvanceWhenHistoricalWALIsUnavailable(t *testing.T
 	case msg := <-resultCh:
 		t.Fatalf("received current WAL message after historical WAL failure: %s", msg.MessageID())
 	case <-consumer.Done():
-		require.Error(t, consumer.Error())
+		require.True(t, streamingstatus.AsStreamingError(consumer.Error()).IsUnrecoverable())
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for the consumer to fail-stop")
 	}
@@ -286,7 +304,9 @@ func (s *remoteConsumerTestServer) Consume(stream streamingpb.StreamingNodeHandl
 func startRemoteConsumerTestServer(t *testing.T, l wal.WAL) (*grpc.Server, *grpc.ClientConn) {
 	t.Helper()
 	listener := bufconn.Listen(1024 * 1024)
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(grpc.StreamInterceptor(
+		streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
+	))
 	streamingpb.RegisterStreamingNodeHandlerServiceServer(grpcServer, &remoteConsumerTestServer{wal: l})
 	go func() {
 		_ = grpcServer.Serve(listener)
@@ -302,6 +322,9 @@ func startRemoteConsumerTestServer(t *testing.T, l wal.WAL) (*grpc.Server, *grpc
 			return listener.Dial()
 		}),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainStreamInterceptor(
+			streamingserviceinterceptor.NewStreamingServiceStreamClientInterceptor(),
+		),
 	)
 	require.NoError(t, err)
 	return grpcServer, conn
