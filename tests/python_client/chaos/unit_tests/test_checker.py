@@ -108,6 +108,71 @@ def test_checker_initialization_fails_fast_on_index_creation_error(monkeypatch):
     assert client.create_index_calls == 1
 
 
+def test_checker_initialization_emits_structured_timing_events(monkeypatch):
+    client = FakeMilvusClient()
+    patch_checker_constructor(monkeypatch, client)
+    messages = []
+    monkeypatch.setattr(checker_module.log, "info", messages.append)
+
+    checker = checker_module.Checker(collection_name="existing_collection", insert_data=False)
+
+    assert checker.init_duration_seconds >= 0
+    assert any('"event":"checker_init_start"' in message for message in messages)
+    assert any('"stage":"collection_resolved"' in message for message in messages)
+    assert any('"stage":"index_discovery_complete"' in message for message in messages)
+    assert any('"stage":"index_setup_complete"' in message for message in messages)
+    assert any('"event":"checker_base_init_complete"' in message for message in messages)
+
+
+def test_trace_tracks_in_flight_and_last_operation_state():
+    checker = object.__new__(checker_module.Checker)
+    checker.c_name = "trace_collection"
+    checker.rsp_times = []
+    checker.average_time = 0
+    checker._succ = 0
+    checker._fail = 0
+    checker.fail_records = []
+    seen = {}
+
+    @checker_module.trace(flag=False)
+    def operation(self):
+        seen["current_operation"] = self.current_operation
+        seen["started"] = self.current_operation_started_at
+        return None, True
+
+    assert operation(checker) == (None, True)
+    assert seen["current_operation"] == "operation"
+    assert seen["started"] is not None
+    assert checker.current_operation is None
+    assert checker.current_operation_started_at is None
+    assert checker.last_operation == "operation"
+    assert checker.last_operation_result == "success"
+    assert checker.last_operation_elapsed >= 0
+
+
+def test_exception_handler_logs_one_line_without_traceback(monkeypatch):
+    checker = object.__new__(checker_module.Checker)
+    checker.c_name = "error_collection"
+    checker.error_messages = set()
+    checker.error_message_samples = {}
+    error_messages = []
+    exception_messages = []
+    monkeypatch.setattr(checker_module, "enable_traceback", False)
+    monkeypatch.setattr(checker_module.log, "error", error_messages.append)
+    monkeypatch.setattr(checker_module.log, "exception", exception_messages.append)
+
+    @checker_module.exception_handler()
+    def operation(self):
+        raise RuntimeError("expected test failure")
+
+    _, result = operation(checker)
+
+    assert result is False
+    assert len(error_messages) == 1
+    assert '"event":"operation_exception"' in error_messages[0]
+    assert exception_messages == []
+
+
 def test_checker_initialization_skips_runtime_added_fields(monkeypatch):
     client = FakeMilvusClient(indexed_fields=("base_scalar", "base_vector"))
     patch_checker_constructor(
@@ -243,6 +308,7 @@ def test_heavy_checker_waits_between_operations(monkeypatch, checker_class):
 
 def test_collection_drop_checker_uses_bounded_pool(monkeypatch):
     checker = object.__new__(checker_module.CollectionDropChecker)
+    checker.c_name = "drop_checker"
     checker.milvus_client = FakeMilvusClient()
     checker.collection_pool = []
     generated_names = iter(f"drop_pool_{index}" for index in range(checker_module.DROP_COLLECTION_POOL_SIZE))

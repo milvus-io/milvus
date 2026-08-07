@@ -153,9 +153,7 @@ class TestOperations(TestBase):
             request_duration = eval(request_duration)
             for i in range(10):
                 sleep(request_duration // 10)
-                for k, v in self.health_checkers.items():
-                    v.check_result()
-                    # log.info(v.check_result())
+                cc.log_monitor_heartbeat(self.health_checkers, phase=f"workload_{i + 1}_of_10")
             # The pod-failure experiment can still have most of its seven-minute
             # window remaining when the request loop ends. Keep the recovery
             # wait bounded, but allow the fault to expire and Milvus to restart.
