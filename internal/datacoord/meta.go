@@ -3539,6 +3539,14 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	// Clone the segment for update
 	cloned := oldSegment.Clone()
 
+	// SegmentInfo.Binlogs is where a field's data becomes visible: this array's
+	// ChildFields carry the real field IDs of a StorageV2/V3 column group, and a
+	// function-output field with no data here has nothing to index.
+	// Materialization exists precisely to make such a field indexable, and
+	// compaction_task_bump_schema_version enqueues the segment for index
+	// building right after this mutation — so the column groups this run wrote
+	// must land here, or the index on the materialized field is never built.
+	//
 	// This is an upsert, not an assignment: the compactor ships only the groups
 	// it just wrote, so overwriting would drop the segment's other groups. Same
 	// semantics as the backfill path's UpdateSegmentColumnGroupsOperator, shared

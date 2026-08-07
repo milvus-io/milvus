@@ -25,7 +25,18 @@ import (
 )
 
 func TestGenericIndex(t *testing.T) {
-	// idx := NewGenericIndex("auto_scalar_index")
+	params := map[string]string{
+		IndexTypeKey: string(FMINDEX),
+		"custom_key": "custom_value",
+	}
+	idx := NewGenericIndex("fm_index", params)
+
+	assert.Equal(t, "fm_index", idx.Name())
+	assert.EqualValues(t, FMINDEX, idx.IndexType())
+	assert.Equal(t, params, idx.Params())
+
+	idxWithoutType := NewGenericIndex("legacy_index", map[string]string{"custom_key": "custom_value"})
+	assert.Empty(t, idxWithoutType.IndexType())
 }
 
 func TestWithExtraIndexParams(t *testing.T) {

@@ -2341,10 +2341,14 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			lo.Map(replayed[0].GetBinlogs(), func(fb *datapb.FieldBinlog, _ int) int64 { return fb.GetFieldID() }))
 	})
 
-	suite.Run("materialization advances index eligibility state", func() {
-		// The index inspector gates function-output indexes by the segment schema
-		// version. Schema-bump materialization must advance that version before the
-		// task enqueues the segment for index building.
+	suite.Run("materialized column group is visible to the index-eligibility gate", func() {
+		// Regression pin: compaction_task_bump_schema_version enqueues the
+		// segment for index building right after this mutation, so the
+		// materialized column group must land in SegmentInfo.Binlogs — a
+		// function-output field with no data there gets no index. StorageV2/V3
+		// column groups report their real field IDs through ChildFields. The
+		// segment schema version must advance at the same time so the index
+		// inspector admits the materialized function-output field.
 		currentManifest := packed.MarshalManifestPath("/data/segments/1", 10)
 		resultManifest := packed.MarshalManifestPath("/data/segments/1", 12)
 		segs := makeSegments(1, commonpb.SegmentState_Flushed)
@@ -2380,6 +2384,15 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.NoError(err)
 
 		updated := m.segments.GetSegment(1)
+		fields := make(map[int64]struct{})
+		for _, binlog := range updated.GetBinlogs() {
+			for _, childFieldID := range binlog.GetChildFields() {
+				fields[childFieldID] = struct{}{}
+			}
+		}
+		suite.Contains(fields, int64(102), "materialized function-output field must have data")
+		suite.Contains(fields, int64(100), "pre-existing fields must keep their data")
+
 		handler := NewNMockHandler(suite.T())
 		handler.EXPECT().GetCollection(mock.Anything, updated.GetCollectionID()).Return(&collectionInfo{
 			ID: updated.GetCollectionID(),
