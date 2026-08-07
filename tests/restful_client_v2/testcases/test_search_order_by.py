@@ -4,12 +4,13 @@ from utils.constant import CaseLabel
 from utils.utils import gen_collection_name
 
 ROWS = [
-    {"id": 1, "category": "A", "price": 30, "rating": 1.0, "vector": [1.0, 0.0]},
-    {"id": 2, "category": "A", "price": 10, "rating": 3.0, "vector": [0.9, 0.0]},
-    {"id": 3, "category": "B", "price": 20, "rating": 2.0, "vector": [0.8, 0.0]},
-    {"id": 4, "category": "C", "price": 5, "rating": 4.0, "vector": [0.7, 0.0]},
+    {"id": 1, "category": "A", "price": 30, "rating": 5.0, "vector": [0.8, 0.0]},
+    {"id": 2, "category": "A", "price": 10, "rating": 2.0, "vector": [0.7, 0.0]},
+    {"id": 3, "category": "B", "price": 20, "rating": 1.0, "vector": [1.0, 0.0]},
+    {"id": 4, "category": "C", "price": 5, "rating": 4.0, "vector": [0.9, 0.0]},
+    {"id": 5, "category": "A", "price": 25, "rating": 3.0, "vector": [0.6, 0.0]},
 ]
-EXPECTED_DISTANCE_BY_ID = {1: 1.0, 2: 0.9, 3: 0.8, 4: 0.7}
+EXPECTED_DISTANCE_BY_ID = {1: 0.8, 2: 0.7, 3: 1.0, 4: 0.9, 5: 0.6}
 
 
 class TestSearchOrderBy(TestBase):
@@ -81,15 +82,15 @@ class TestSearchOrderBy(TestBase):
     @pytest.mark.parametrize(
         "order_by,field_name,expected_values,expected_ids",
         [
-            (["price"], "price", [5, 10, 20, 30], [4, 2, 3, 1]),
-            (["rating:desc"], "rating", [4.0, 3.0, 2.0, 1.0], [4, 2, 3, 1]),
+            (["price"], "price", [5, 10, 20, 25, 30], [4, 2, 3, 5, 1]),
+            (["rating:desc"], "rating", [5.0, 4.0, 3.0, 2.0, 1.0], [1, 4, 5, 2, 3]),
         ],
     )
     def test_search_order_by_single_field(self, order_by, field_name, expected_values, expected_ids):
         """
         target: verify REST search supports top-level orderByFields in ascending and descending order
-        method: search all deterministic ANN candidates and sort them by one scalar field
-        expected: result values follow the requested scalar order
+        method: search deterministic candidates whose ANN, price, and rating orders are deliberately distinct
+        expected: each scalar field produces its own exact requested value and ID order
         """
         rows = self._search(orderByFields=order_by)
         assert [row[field_name] for row in rows] == expected_values
@@ -99,12 +100,14 @@ class TestSearchOrderBy(TestBase):
     def test_search_order_by_with_filter(self):
         """
         target: verify REST search combines filter with top-level orderByFields
-        method: restrict results to category A and sort the matching rows by price ascending
-        expected: filtering happens before ordering and returns ids 2 and 1
+        method: request three category-A rows even though the global top-three ANN candidates include B and C
+        expected: filtering happens before candidate selection, then price ordering returns ids 2, 5, and 1
         """
-        rows = self._search(filter='category == "A"', orderByFields=["price:asc"])
-        assert [row["id"] for row in rows] == [2, 1]
-        assert [row["price"] for row in rows] == [10, 30]
+        rows = self._search(limit=3, filter='category == "A"', orderByFields=["price:asc"])
+        assert len(rows) == 3
+        assert all(row["category"] == "A" for row in rows)
+        assert [row["id"] for row in rows] == [2, 5, 1]
+        assert [row["price"] for row in rows] == [10, 25, 30]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_order_by_sort_field_not_in_output(self):
@@ -114,21 +117,23 @@ class TestSearchOrderBy(TestBase):
         expected: ids follow price order and the response does not expose price or vector
         """
         rows = self._search(outputFields=["id", "category"], orderByFields=["price:asc"])
-        assert [row["id"] for row in rows] == [4, 2, 3, 1]
+        expected_rows = sorted(ROWS, key=lambda row: row["price"])
+        assert [(row["id"], row["category"]) for row in rows] == [(row["id"], row["category"]) for row in expected_rows]
         assert all(set(row) == {"id", "category", "distance"} for row in rows)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_order_by_multi_fields(self):
         """
         target: verify REST search supports multiple top-level orderByFields
-        method: sort by category ascending and price descending
-        expected: secondary sorting is applied within the duplicate category
+        method: sort by category and price so the secondary key differs from ANN, rating, and PK order within category A
+        expected: both sort keys are applied and return ids 2, 5, 1, 3, and 4
         """
-        rows = self._search(orderByFields=["category:asc", "price:desc"])
-        assert [row["id"] for row in rows] == [1, 2, 3, 4]
+        rows = self._search(orderByFields=["category:asc", "price:asc"])
+        assert [row["id"] for row in rows] == [2, 5, 1, 3, 4]
         assert [(row["category"], row["price"]) for row in rows] == [
-            ("A", 30),
             ("A", 10),
+            ("A", 25),
+            ("A", 30),
             ("B", 20),
             ("C", 5),
         ]

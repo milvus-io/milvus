@@ -44,8 +44,8 @@ def _parse_order_by_field(order_by_field):
 def _expected_rows(order_by_fields, limit, row_filter=None, offset=0):
     """Build a deterministic reference order for local assertions.
 
-    Query ORDER BY uses the primary key as a stable tie-breaker when all
-    explicit sort fields match, so the reference order includes the ID key.
+    The final ID key stabilizes this test helper only. Query ORDER BY does not
+    guarantee an implicit PK tie-breaker when all explicit sort fields match.
     """
     rows = [row for row in _rows() if row_filter is None or row_filter(row)]
     order_specs = [_parse_order_by_field(field) for field in order_by_fields]
@@ -139,6 +139,14 @@ class TestQueryOrderBy(TestBase):
         assert actual == expected
 
     @staticmethod
+    def _assert_expected_members(rows, expected_rows, fields):
+        actual_ids = [row["id"] for row in rows]
+        assert len(actual_ids) == len(set(actual_ids)), f"duplicate IDs returned: {actual_ids}"
+        actual = {(row["id"], *(row[field] for field in fields)) for row in rows}
+        expected = {(row["id"], *(row[field] for field in fields)) for row in expected_rows}
+        assert actual == expected
+
+    @staticmethod
     def _assert_nulls_at_end(values):
         first_null = next((i for i, value in enumerate(values) if value is None), len(values))
         non_nulls = values[:first_null]
@@ -206,8 +214,8 @@ class TestQueryOrderBy(TestBase):
     def test_query_order_by_multi_fields(self):
         """
         target: verify REST query supports multi-field orderByFields
-        method: sort by price ascending and rating descending
-        expected: primary and secondary sort orders are both respected
+        method: sort 80 rows by price ascending and rating descending across four complete tied-price groups
+        expected: primary and secondary value order is correct and the exact row members are returned once each
         """
         rows = self._query(
             {
@@ -230,7 +238,7 @@ class TestQueryOrderBy(TestBase):
         assert secondary_sort_tested, "No duplicate price values found; secondary sort was not verified"
         expected = _expected_rows(["price:asc", "rating:desc"], limit=80)
         self._assert_expected_values(rows, expected, ["price", "rating"])
-        self._assert_expected_ids(rows, expected)
+        self._assert_expected_members(rows, expected, ["price", "rating"])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_order_by_with_filter(self):
@@ -283,15 +291,15 @@ class TestQueryOrderBy(TestBase):
     def test_query_order_by_with_offset(self):
         """
         target: verify REST query applies offset after ordering
-        method: compare the second ordered page with a larger ordered baseline
-        expected: offset page equals the matching slice of the baseline result
+        method: use an explicit id tie-breaker and compare the second ordered page with a larger baseline
+        expected: offset is applied after a deterministic global order and repeated requests return the same page
         """
         base_payload = {
             "collectionName": self.collection_name,
             "filter": "id >= 0",
             "limit": 20,
             "outputFields": ["id", "price"],
-            "orderByFields": ["price:asc"],
+            "orderByFields": ["price:asc", "id:asc"],
         }
         baseline = self._query(base_payload)
         page_payload = {**base_payload, "limit": 10, "offset": 10}
@@ -302,7 +310,7 @@ class TestQueryOrderBy(TestBase):
         assert len({row["price"] for row in baseline}) == 1
         assert [row["id"] for row in page] == [row["id"] for row in baseline[10:20]]
         assert [row["id"] for row in repeated_page] == [row["id"] for row in page]
-        expected = _expected_rows(["price:asc"], limit=10, offset=10)
+        expected = _expected_rows(["price:asc", "id:asc"], limit=10, offset=10)
         self._assert_expected_ids(page, expected)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -325,6 +333,7 @@ class TestQueryOrderBy(TestBase):
         asc_non_nulls = self._assert_nulls_at_end([row["nullable_score"] for row in asc_rows])
         for i in range(len(asc_non_nulls) - 1):
             assert asc_non_nulls[i] <= asc_non_nulls[i + 1]
+        self._assert_expected_members(asc_rows, _rows(), ["nullable_score"])
 
         desc_rows = self._query(
             {
@@ -339,6 +348,7 @@ class TestQueryOrderBy(TestBase):
         desc_non_nulls = self._assert_nulls_at_beginning([row["nullable_score"] for row in desc_rows])
         for i in range(len(desc_non_nulls) - 1):
             assert desc_non_nulls[i] >= desc_non_nulls[i + 1]
+        self._assert_expected_members(desc_rows, _rows(), ["nullable_score"])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_order_by_nulls_override(self):
@@ -360,6 +370,7 @@ class TestQueryOrderBy(TestBase):
         non_nulls = self._assert_nulls_at_beginning([row["nullable_score"] for row in nulls_first_rows])
         for i in range(len(non_nulls) - 1):
             assert non_nulls[i] <= non_nulls[i + 1]
+        self._assert_expected_members(nulls_first_rows, _rows(), ["nullable_score"])
 
         nulls_last_rows = self._query(
             {
@@ -374,6 +385,27 @@ class TestQueryOrderBy(TestBase):
         non_nulls = self._assert_nulls_at_end([row["nullable_score"] for row in nulls_last_rows])
         for i in range(len(non_nulls) - 1):
             assert non_nulls[i] >= non_nulls[i + 1]
+        self._assert_expected_members(nulls_last_rows, _rows(), ["nullable_score"])
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_order_by_varchar_desc(self):
+        """
+        target: verify REST query orders VarChar fields in descending lexical order
+        method: sort category descending with an explicit descending ID tie-breaker opposing insertion order
+        expected: exact IDs and categories follow both explicit comparators without relying on stable input order
+        """
+        rows = self._query(
+            {
+                "collectionName": self.collection_name,
+                "filter": "id >= 0",
+                "limit": 80,
+                "outputFields": ["id", "category"],
+                "orderByFields": ["category:desc", "id:desc"],
+            }
+        )
+        expected_ids = sorted(range(NB), key=lambda row_id: (-(row_id % 5), -row_id))[:80]
+        assert [row["id"] for row in rows] == expected_ids
+        assert [row["category"] for row in rows] == [f"category_{row_id % 5}" for row_id in expected_ids]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_order_by_sort_field_not_in_output(self):
@@ -395,6 +427,7 @@ class TestQueryOrderBy(TestBase):
         assert all(set(row) == {"id", "category"} for row in rows)
         expected = _expected_rows(["price:asc"], limit=20)
         expected_prices = [row["price"] for row in expected]
+        self._assert_expected_members(rows, expected, ["category"])
 
         ids = [row["id"] for row in rows]
         verify_rows = self._query(

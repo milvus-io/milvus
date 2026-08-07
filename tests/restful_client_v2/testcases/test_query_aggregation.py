@@ -131,9 +131,13 @@ class TestQueryAggregation(TestBase):
     def test_query_group_by_nullable_count_min_max_avg(self):
         """
         target: verify REST query supports count(field), min, max, and avg aggregation expressions
-        method: group nullable numeric values by category and request all four aggregate functions together
-        expected: field count excludes NULL values; min, max, and avg match the non-NULL source values
+        method: filter an uneven prefix, group nullable numeric values by category, and request four aggregate functions
+        expected: non-uniform group counts and each aggregate match the filtered non-NULL source values
         """
+
+        def row_filter(row):
+            return row["id"] < 97
+
         aggregate_fields = (
             "count(*)",
             "count(nullable_value)",
@@ -144,7 +148,7 @@ class TestQueryAggregation(TestBase):
         rows = self._query(
             {
                 "collectionName": self.collection_name,
-                "filter": "id >= 0",
+                "filter": "id < 97",
                 "limit": 10,
                 "outputFields": ["category", *aggregate_fields],
                 "groupByFields": ["category"],
@@ -153,7 +157,11 @@ class TestQueryAggregation(TestBase):
         )
 
         expected = sorted(
-            _expected_grouped_rows(["category"], aggregate_fields=aggregate_fields),
+            _expected_grouped_rows(
+                ["category"],
+                aggregate_fields=aggregate_fields,
+                row_filter=row_filter,
+            ),
             key=lambda row: row["category"],
         )
         assert len(rows) == len(expected)
@@ -238,9 +246,9 @@ class TestQueryAggregation(TestBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_group_by_count_with_limit_offset(self):
         """
-        target: verify grouped count(*) forwards limit and offset for pagination
-        method: order category groups, skip the first group, and return the next two groups
-        expected: REST returns the exact ordered page instead of applying global count(*) behavior
+        target: verify grouped aggregates apply limit and offset after explicit group ordering
+        method: order category groups descending, skip the first group, and return two count/sum rows
+        expected: REST returns exact category_3 and category_2 aggregate rows in that order
         """
         rows = self._query(
             {
@@ -248,15 +256,16 @@ class TestQueryAggregation(TestBase):
                 "filter": "id >= 0",
                 "limit": 2,
                 "offset": 1,
-                "outputFields": ["category", "count(*)"],
+                "outputFields": ["category", "count(*)", "sum(score)"],
                 "groupByFields": ["category"],
-                "orderByFields": ["category:asc"],
+                "orderByFields": ["category:desc"],
             }
         )
 
-        expected = sorted(_expected_grouped_rows(["category"]), key=lambda row: row["category"])[1:3]
-        expected = [{"category": row["category"], "count(*)": row["count(*)"]} for row in expected]
-        assert rows == expected
+        assert rows == [
+            {"category": "category_3", "count(*)": 40, "sum(score)": 3980},
+            {"category": "category_2", "count(*)": 40, "sum(score)": 3900},
+        ]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_global_count_star_keeps_legacy_limit_behavior(self):
