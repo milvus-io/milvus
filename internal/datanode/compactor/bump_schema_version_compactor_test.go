@@ -1477,3 +1477,40 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionInputSchemaByF
 	s.ErrorContains(err, "references by_field lang of type")
 	s.ErrorContains(err, "only VarChar is allowed")
 }
+
+// TestFullRewriteMissingTTLFieldDoesNotProbeRecord is the real-cgo regression
+// for the source-TTL presence check: the target schema designates a TTL field that
+// old segments do not carry, and a dropped field routes them through full rewrite.
+// Presence must be decided from existingFields; probing record.Column(ttlFieldID)
+// panics on V3 records ("no such field") before the materializer can fill the null
+// TTL column.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteMissingTTLFieldDoesNotProbeRecord() {
+	const newTTLFieldID = int64(105)
+	// Target schema gains a nullable Timestamptz field absent from the source
+	// segment and designates it as the collection TTL field.
+	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
+		FieldID:  newTTLFieldID,
+		Name:     "expire_at",
+		DataType: schemapb.DataType_Timestamptz,
+		Nullable: true,
+	})
+	s.task.plan.Schema.Properties = append(s.task.plan.Schema.Properties, &commonpb.KeyValuePair{
+		Key:   common.CollectionTTLFieldKey,
+		Value: "expire_at",
+	})
+	params, err := compaction.GenerateJSONParams(s.task.plan.GetSchema())
+	s.Require().NoError(err)
+	s.task.plan.JsonParams = params
+
+	// Source segment carries a dropped field (103) -> droppedFieldIDs>0 -> full rewrite.
+	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+	s.Require().Len(result.GetSegments(), 1)
+
+	segment := result.GetSegments()[0]
+	s.EqualValues(3, segment.GetNumOfRows())
+}

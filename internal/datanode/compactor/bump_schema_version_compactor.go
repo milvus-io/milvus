@@ -514,6 +514,11 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		}
 	}()
 
+	// Source TTL presence is decided from existingFields, never by probing the
+	// record: V2/V3 records panic on Column for a field they do not carry.
+	_, sourceHasTTL := existingFields[ttlFieldID]
+	sourceHasTTLField := ttlFieldID >= common.StartOfUserFieldID && sourceHasTTL
+	preMaterializeFilter := len(delta) > 0 || t.plan.GetCollectionTtl() > 0 || sourceHasTTLField
 	var totalRows int64
 	for {
 		record, err := reader.Next()
@@ -524,8 +529,6 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 			return nil, err
 		}
 
-		sourceHasTTLField := ttlFieldID >= common.StartOfUserFieldID && record.Column(ttlFieldID) != nil
-		preMaterializeFilter := len(delta) > 0 || t.plan.GetCollectionTtl() > 0 || sourceHasTTLField
 		var selection *recordSelection
 		if preMaterializeFilter {
 			selection, _, err = selectFullRewriteRecord(record, pkField, entityFilter, ttlFieldID, sourceHasTTLField, nil)
