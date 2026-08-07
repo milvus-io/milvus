@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -102,6 +103,25 @@ func (w *fakeBinlogRecordWriter) GetRowNum() int64                   { return w.
 func (w *fakeBinlogRecordWriter) FlushChunk() error                  { return nil }
 func (w *fakeBinlogRecordWriter) GetBufferUncompressed() uint64      { return 0 }
 func (w *fakeBinlogRecordWriter) Schema() *schemapb.CollectionSchema { return w.schema }
+
+type fakeBumpSchemaVersionBatchWriter struct {
+	closeCalls int
+	abortCalls int
+	output     packed.WriterOutput
+	closeErr   error
+}
+
+func (w *fakeBumpSchemaVersionBatchWriter) Abort() { w.abortCalls++ }
+
+func (w *fakeBumpSchemaVersionBatchWriter) Write(storage.Record) error { return nil }
+func (w *fakeBumpSchemaVersionBatchWriter) GetWrittenUncompressed() uint64 {
+	return 0
+}
+func (w *fakeBumpSchemaVersionBatchWriter) AsNewColumnGroups() {}
+func (w *fakeBumpSchemaVersionBatchWriter) Close() (packed.WriterOutput, error) {
+	w.closeCalls++
+	return w.output, w.closeErr
+}
 
 type BumpSchemaVersionCompactionTaskSuite struct {
 	suite.Suite
@@ -1019,7 +1039,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestValidateSupportedMissingFunct
 	s.NoError(err)
 }
 
-func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionInputSchemaIncludesAdditionalInputFields() {
+func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildFunctionBackfillReadSchemaIncludesImplicitInputFields() {
 	s.task.plan.Schema = &schemapb.CollectionSchema{
 		Name: "schema",
 		Fields: []*schemapb.FieldSchema{
@@ -1047,11 +1067,57 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionInputSchemaInc
 		OutputFieldIds:   []int64{102},
 	}}
 
-	inputSchema, inputFieldIDs, err := s.task.missingFunctionInputSchema(missingFunctions)
+	readSchema, readFieldIDs, err := s.task.buildFunctionBackfillReadSchema(missingFunctions, map[int64]struct{}{101: {}, 115: {}})
 	s.NoError(err)
-	s.ElementsMatch([]int64{101, 115}, inputFieldIDs)
-	s.Require().Len(inputSchema.GetFields(), 2)
-	s.ElementsMatch([]string{"text", "lang"}, []string{inputSchema.GetFields()[0].GetName(), inputSchema.GetFields()[1].GetName()})
+	s.ElementsMatch([]int64{101, 115}, readFieldIDs)
+	s.Require().Len(readSchema.GetFields(), 2)
+	s.ElementsMatch([]string{"text", "lang"}, []string{readSchema.GetFields()[0].GetName(), readSchema.GetFields()[1].GetName()})
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildFunctionBackfillReadSchemaMalformedMultiAnalyzerParamsIsDataIntegrityError() {
+	functionSchema := &schemapb.FunctionSchema{
+		Name: "BM25", Type: schemapb.FunctionType_BM25,
+		InputFieldIds: []int64{101}, OutputFieldIds: []int64{102},
+	}
+	s.task.plan.Schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+				{Key: "multi_analyzer_params", Value: "{bad"},
+			}},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+		},
+		Functions: []*schemapb.FunctionSchema{functionSchema},
+	}
+
+	_, _, err := s.task.buildFunctionBackfillReadSchema([]*schemapb.FunctionSchema{functionSchema}, map[int64]struct{}{101: {}})
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "failed to parse multi_analyzer_params for function BM25")
+	s.ErrorContains(err, "invalid character")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildFunctionBackfillReadSchemaAddsRowCountAnchor() {
+	functionSchema := &schemapb.FunctionSchema{
+		Name: "BM25", Type: schemapb.FunctionType_BM25,
+		InputFieldIds: []int64{101}, OutputFieldIds: []int64{102},
+	}
+	s.task.plan.Schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "new_text", DataType: schemapb.DataType_VarChar, Nullable: true},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+		},
+		Functions: []*schemapb.FunctionSchema{functionSchema},
+	}
+
+	readSchema, readFieldIDs, err := s.task.buildFunctionBackfillReadSchema(
+		[]*schemapb.FunctionSchema{functionSchema},
+		map[int64]struct{}{common.RowIDField: {}},
+	)
+	s.NoError(err)
+	s.Equal([]int64{101, common.RowIDField}, readFieldIDs)
+	s.Require().Len(readSchema.GetFields(), 2)
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionMissingOutputFieldInMultiOutputFunction() {
@@ -1373,20 +1439,138 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionOutputFieldsSe
 	s.Equal(int64(103), outputFields[1].GetFieldID())
 }
 
-func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialMaterializerExistingFieldsTreatsAllFunctionOutputsAsMissing() {
-	schema := schemaBumpMultiOutputBM25Schema()
-	existingFields := map[int64]struct{}{
+// schemaBumpBM25SchemaWithUnrelatedGeo is a legal single-output BM25 schema
+// (input 101 -> output 102) plus an earlier add_field column that is
+// physically absent from the segment and unrelated to the backfill.
+func schemaBumpBM25SchemaWithUnrelatedGeo() *schemapb.CollectionSchema {
+	fields := append(schemaBumpBaseFields(),
+		&schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "sparse",
+			DataType: schemapb.DataType_SparseFloatVector,
+		},
+		&schemapb.FieldSchema{
+			FieldID:  110,
+			Name:     "geo_added",
+			DataType: schemapb.DataType_Geometry,
+			Nullable: true,
+			DefaultValue: &schemapb.ValueField{
+				Data: &schemapb.ValueField_StringData{StringData: "POINT (1 2)"},
+			},
+		},
+	)
+	return &schemapb.CollectionSchema{
+		Name:   "schema",
+		Fields: fields,
+		Functions: []*schemapb.FunctionSchema{{
+			Name:             "BM25",
+			Id:               100,
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			InputFieldIds:    []int64{101},
+			OutputFieldNames: []string{"sparse"},
+			OutputFieldIds:   []int64{102},
+		}},
+	}
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFunctionBackfillMaterializerPrefillsOnlyAbsentFunctionInputs() {
+	schema := schemaBumpBM25SchemaWithUnrelatedGeo()
+	sourceFields := map[int64]struct{}{
+		common.RowIDField:     {},
+		common.TimeStampField: {},
+		100:                   {},
+	}
+
+	backfill, err := NewFunctionBackfillMaterializer(schema, schema.GetFunctions(), sourceFields)
+	s.Require().NoError(err)
+	defer backfill.Close()
+
+	// prefill scope = the absent function input only; the unrelated absent
+	// field is ignored even though it is missing from storage too
+	s.Require().Len(backfill.missingFields, 1)
+	s.Equal(int64(101), backfill.missingFields[0].GetFieldID())
+	s.Len(backfill.materializers, 1)
+
+	// differential proof: a full materializer over the same storage truth WOULD
+	// prefill the unrelated field — the backfill scoping is what excludes it
+	full, err := NewRecordMaterializer(schema, schema.GetFunctions(), sourceFields)
+	s.Require().NoError(err)
+	defer full.Close()
+	fullPrefillsGeo := false
+	for _, field := range full.missingFields {
+		if field.GetFieldID() == int64(110) {
+			fullPrefillsGeo = true
+		}
+	}
+	s.True(fullPrefillsGeo)
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFunctionBackfillMaterializerNothingToPrefillWhenInputsPresent() {
+	schema := schemaBumpBM25SchemaWithUnrelatedGeo()
+	// input present, output and the unrelated geo absent
+	sourceFields := map[int64]struct{}{
 		common.RowIDField:     {},
 		common.TimeStampField: {},
 		100:                   {},
 		101:                   {},
-		102:                   {},
 	}
 
-	materializerFields := partialMaterializerExistingFields(schema, schema.GetFunctions(), existingFields)
+	backfill, err := NewFunctionBackfillMaterializer(schema, schema.GetFunctions(), sourceFields)
+	s.Require().NoError(err)
+	defer backfill.Close()
 
-	s.NotContains(materializerFields, int64(102))
-	s.NotContains(materializerFields, int64(103))
+	s.Empty(backfill.missingFields, "nothing to prefill when the function inputs are all present")
+	s.Len(backfill.materializers, 1)
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFunctionBackfillMaterializerPrefillsImplicitMultiAnalyzerInput() {
+	schema := &schemapb.CollectionSchema{
+		Name: "schema",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:  101,
+				Name:     "text",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "128"},
+					{Key: common.EnableAnalyzerKey, Value: "true"},
+					{Key: "multi_analyzer_params", Value: `{"by_field":"lang","analyzers":{"default":{"type":"standard"}}}`},
+				},
+			},
+			{FieldID: 115, Name: "lang", DataType: schemapb.DataType_VarChar, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "32"}}},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name:             "BM25",
+			Id:               100,
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			InputFieldIds:    []int64{101},
+			OutputFieldNames: []string{"sparse"},
+			OutputFieldIds:   []int64{102},
+		}},
+	}
+	// the implicit by_field column (115) was added by an earlier add_field and
+	// is absent from the segment; InputFieldIds only lists the text field
+	sourceFields := map[int64]struct{}{
+		common.RowIDField:     {},
+		common.TimeStampField: {},
+		100:                   {},
+		101:                   {},
+	}
+
+	backfill, err := NewFunctionBackfillMaterializer(schema, schema.GetFunctions(), sourceFields)
+	s.Require().NoError(err)
+	defer backfill.Close()
+
+	// prefill must follow the runner-declared inputs, which include the
+	// implicit multi-analyzer by_field the schema's InputFieldIds never lists
+	s.Require().Len(backfill.missingFields, 1)
+	s.Equal(int64(115), backfill.missingFields[0].GetFieldID())
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestFinalizeMergedLogsReplacesExistingOutputFieldLogs() {
@@ -1455,4 +1639,125 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestCompleteAndStop() {
 func (s *BumpSchemaVersionCompactionTaskSuite) TestGetStorageConfig() {
 	s.setupTest()
 	s.NotNil(s.task.GetStorageConfig())
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) configureMissingBM25InputSchema() int64 {
+	const inputFieldID = int64(104)
+	const outputFieldID = int64(105)
+	inputField := &schemapb.FieldSchema{
+		FieldID: inputFieldID, Name: "new_text", DataType: schemapb.DataType_VarChar, Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}},
+	}
+	outputField := &schemapb.FieldSchema{
+		FieldID: outputFieldID, Name: "new_sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true,
+	}
+	functionSchema := &schemapb.FunctionSchema{
+		Name: "new_bm25", Type: schemapb.FunctionType_BM25,
+		InputFieldNames: []string{inputField.GetName()}, InputFieldIds: []int64{inputFieldID},
+		OutputFieldNames: []string{outputField.GetName()}, OutputFieldIds: []int64{outputFieldID},
+	}
+	s.task.plan.Schema = &schemapb.CollectionSchema{
+		Name: "missing_function_input", Fields: append(schemaBumpBaseFields(), inputField, outputField),
+		Functions: []*schemapb.FunctionSchema{functionSchema},
+	}
+	s.task.plan.Functions = []*schemapb.FunctionSchema{functionSchema}
+	params, err := compaction.GenerateJSONParams(s.task.plan.GetSchema())
+	s.Require().NoError(err)
+	s.task.plan.JsonParams = params
+	return outputFieldID
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialMaterializationUsesMissingNullableFunctionInput() {
+	outputFieldID := s.configureMissingBM25InputSchema()
+	s.prepareBumpSchemaVersionCompaction()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().Len(result.GetSegments(), 1)
+	s.EqualValues(3, result.GetSegments()[0].GetNumOfRows())
+	var found bool
+	for _, fieldBinlog := range result.GetSegments()[0].GetInsertLogs() {
+		if compactionFieldBinlogReadable(fieldBinlog, map[int64]struct{}{outputFieldID: {}}) {
+			found = true
+			break
+		}
+	}
+	s.True(found, "partial backfill must write the function output computed from the missing nullable input")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteUsesMissingNullableFunctionInput() {
+	outputFieldID := s.configureMissingBM25InputSchema()
+	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().Len(result.GetSegments(), 1)
+	s.EqualValues(3, result.GetSegments()[0].GetNumOfRows())
+	var found bool
+	for _, fieldBinlog := range result.GetSegments()[0].GetInsertLogs() {
+		if compactionFieldBinlogReadable(fieldBinlog, map[int64]struct{}{outputFieldID: {}}) {
+			found = true
+			break
+		}
+	}
+	s.True(found, "full rewrite must write the function output computed from the missing nullable input")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialWriterLeaseCleanupAbortsOnceWithoutFlush() {
+	writer := &fakeBumpSchemaVersionBatchWriter{output: &packed.ColumnGroups{}}
+	lease := &bumpSchemaVersionWriterLease{writer: writer}
+	lease.Cleanup()
+	lease.Cleanup()
+
+	s.Equal(1, writer.abortCalls)
+	s.Zero(writer.closeCalls, "Cleanup must not finalize the writer: Close flushes pending column groups that will never be committed")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialWriterLeaseSuccessfulCloseSkipsAbort() {
+	output := &packed.ColumnGroups{}
+	writer := &fakeBumpSchemaVersionBatchWriter{output: output}
+	lease := &bumpSchemaVersionWriterLease{writer: writer}
+
+	gotOutput, err := lease.Close()
+	s.NoError(err)
+	s.Same(output, gotOutput)
+	lease.Cleanup()
+
+	s.Equal(1, writer.closeCalls)
+	s.Zero(writer.abortCalls)
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialWriterLeaseCloseErrorDoesNotDoubleClose() {
+	output := &packed.ColumnGroups{}
+	destroyCalls := 0
+	destroyPatch := mockey.Mock((*packed.ColumnGroups).Destroy).To(func(*packed.ColumnGroups) {
+		destroyCalls++
+	}).Build()
+	defer destroyPatch.UnPatch()
+
+	writer := &fakeBumpSchemaVersionBatchWriter{output: output, closeErr: assert.AnError}
+	lease := &bumpSchemaVersionWriterLease{writer: writer}
+	gotOutput, err := lease.Close()
+	s.ErrorIs(err, assert.AnError)
+	s.Same(output, gotOutput)
+	gotOutput.Destroy()
+	lease.Cleanup()
+
+	s.Equal(1, writer.closeCalls)
+	s.Equal(1, destroyCalls)
+	s.Zero(writer.abortCalls, "explicit Close consumed the writer; Cleanup must not abort it again")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialWriterLeaseSecondCloseFailsWithoutTouchingWriter() {
+	writer := &fakeBumpSchemaVersionBatchWriter{output: &packed.ColumnGroups{}, closeErr: assert.AnError}
+	lease := &bumpSchemaVersionWriterLease{writer: writer}
+
+	_, err := lease.Close()
+	s.ErrorIs(err, assert.AnError)
+
+	output, err := lease.Close()
+	s.Nil(output)
+	s.ErrorIs(err, merr.ErrServiceInternal)
+	s.Equal(1, writer.closeCalls, "second Close must not touch the consumed native writer")
+	s.Zero(writer.abortCalls)
 }
