@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// L0 CRUD coverage for TEXT LOB through the public Go SDK.
+// L0 CRUD and execution-path coverage for TEXT LOB through the public Go SDK.
 package testcases
 
 import (
@@ -39,29 +39,46 @@ import (
 )
 
 const (
-	textLOBIDField       = "id"
-	textLOBVectorField   = "vector"
-	textLOBContentField  = "content"
-	textLOBAltField      = "content_alt"
-	textLOBSentinelField = "content_sentinel"
-	textLOBSparseField   = "content_sparse"
-	textLOBVectorIndex   = "text_lob_vector_idx"
-	textLOBSparseIndex   = "text_lob_sparse_idx"
-	textLOBVectorDim     = 16
+	textLOBIDField             = "id"
+	textLOBVectorField         = "vector"
+	textLOBContentField        = "content"
+	textLOBZHField             = "content_zh"
+	textLOBAltField            = "content_alt"
+	textLOBSentinelField       = "content_sentinel"
+	textLOBSparseField         = "content_sparse"
+	textLOBZHSparseField       = "content_zh_sparse"
+	textLOBSentinelSparseField = "content_sentinel_sparse"
+	textLOBVectorIndex         = "text_lob_vector_idx"
+	textLOBSparseIndex         = "text_lob_sparse_idx"
+	textLOBZHSparseIndex       = "text_lob_zh_sparse_idx"
+	textLOBSentinelSparseIndex = "text_lob_sentinel_sparse_idx"
+	textLOBVectorDim           = 16
+
+	textLOBIndexedSealedRows   = 3000
+	textLOBUnindexedSealedRows = 500
+	textLOBGrowingRows         = 500
+	textLOBTotalRows           = textLOBIndexedSealedRows + textLOBUnindexedSealedRows + textLOBGrowingRows
+
+	textLOBIndexedMarkerID   = int64(7)
+	textLOBUnindexedMarkerID = int64(textLOBIndexedSealedRows + textLOBUnindexedSealedRows/2)
+	textLOBGrowingMarkerID   = int64(textLOBIndexedSealedRows + textLOBUnindexedSealedRows + textLOBGrowingRows/2)
 )
 
 type textLOBRow struct {
-	id       int64
-	vector   []float32
-	content  *string
-	alt      *string
-	sentinel string
+	id        int64
+	vector    []float32
+	content   *string
+	contentZH *string
+	alt       *string
+	sentinel  string
 }
 
 type textLOBFixture struct {
 	collectionName string
 	rows           []textLOBRow
 	rowsByID       map[int64]textLOBRow
+	markerIDs      []int64
+	sealedIDs      []int64
 }
 
 func textLOBValue(value string) *string {
@@ -76,57 +93,119 @@ func makeTextLOB(size int, seed string) string {
 	return strings.Repeat(base, size/len(base)+1)[:size]
 }
 
-func newTextLOBRows() []textLOBRow {
-	contents := []*string{
-		textLOBValue("vector database milvus text lob smoke"),
-		textLOBValue(""),
-		nil,
-		textLOBValue("Milvus stores multilingual text: English 中文 日本語 Русский العربية emoji 😀🚀 데이터베이스"),
-		textLOBValue(makeTextLOB(64*1024-17, "below-64k")),
-		textLOBValue(makeTextLOB(64*1024, "at-64k")),
-		textLOBValue(makeTextLOB(64*1024+4096, "above-64k")),
-		textLOBValue(makeTextLOB(1024*1024, "one-mib")),
-	}
-	alternates := []*string{
-		textLOBValue("alternate vector database payload"),
-		textLOBValue(""),
-		nil,
-		textLOBValue("alternate multilingual 中文 payload 😀"),
-		textLOBValue("alternate below boundary payload"),
-		textLOBValue("alternate at boundary payload"),
-		textLOBValue("alternate above boundary payload"),
-		textLOBValue(makeTextLOB(128*1024, "alternate-one-mib")),
+func textLOBVector(id int64, marker bool) []float32 {
+	vector := make([]float32, textLOBVectorDim)
+	if marker {
+		vector[0] = 1
+		return vector
 	}
 
-	rows := make([]textLOBRow, len(contents))
-	for i := range contents {
-		vector := make([]float32, textLOBVectorDim)
-		vector[i] = 1
+	state := uint64(19530) + uint64(id)
+	for i := range vector {
+		state = state*6364136223846793005 + 1442695040888963407
+		vector[i] = float32(state>>40) / float32(1<<24)
+	}
+	return vector
+}
+
+func newTextLOBRows() []textLOBRow {
+	rows := make([]textLOBRow, textLOBTotalRows)
+	for i := range rows {
+		id := int64(i)
+		content := textLOBValue(fmt.Sprintf("text lob fixture row %d vector database", id))
+		contentZH := textLOBValue(fmt.Sprintf("向量数据库 中文检索 文本行 %d", id))
+		alt := textLOBValue(fmt.Sprintf("alternate text lob fixture row %d", id))
+		marker := id == textLOBIndexedMarkerID || id == textLOBUnindexedMarkerID || id == textLOBGrowingMarkerID
+
+		switch id {
+		case 0:
+			content = textLOBValue("vector database milvus text lob smoke")
+		case 1:
+			content = textLOBValue("")
+			contentZH = textLOBValue("")
+			alt = textLOBValue("")
+		case 2:
+			content = nil
+			contentZH = nil
+			alt = nil
+		case 3:
+			content = textLOBValue("Milvus stores multilingual text: English 中文 日本語 Русский العربية emoji 😀🚀 데이터베이스")
+			contentZH = textLOBValue("向量数据库 支持 中文检索 和 混合搜索")
+			alt = textLOBValue("alternate multilingual 中文 payload 😀")
+		case 4:
+			content = textLOBValue(makeTextLOB(64*1024-17, "below-64k"))
+			contentZH = nil
+		case 5:
+			content = textLOBValue(makeTextLOB(64*1024, "at-64k"))
+			contentZH = nil
+		case 6:
+			content = textLOBValue(makeTextLOB(64*1024+4096, "above-64k"))
+			contentZH = nil
+		case textLOBIndexedMarkerID:
+			content = textLOBValue(makeTextLOB(1024*1024, "indexed-sealed-one-mib"))
+			contentZH = nil
+			alt = textLOBValue(makeTextLOB(128*1024, "indexed-sealed-alt"))
+		case 8:
+			content = textLOBValue("vector database")
+		case 9:
+			content = textLOBValue(strings.Repeat("vector database ", 4) + "milvus retrieval")
+		case 10:
+			content = textLOBValue(strings.Repeat("vector database ", 12) + "milvus bm25 ranking ranking")
+		case 11:
+			content = textLOBValue("english sidecar text for chinese bm25")
+			contentZH = textLOBValue("向量数据库 支持 中文检索。Milvus 提供 混合搜索 和 稀疏向量 检索。")
+		case textLOBUnindexedMarkerID:
+			content = textLOBValue(makeTextLOB(256*1024, "unindexed-sealed"))
+			contentZH = nil
+			alt = textLOBValue(makeTextLOB(128*1024, "unindexed-sealed-alt"))
+		case textLOBGrowingMarkerID:
+			content = textLOBValue(makeTextLOB(256*1024, "growing"))
+			contentZH = nil
+			alt = textLOBValue(makeTextLOB(128*1024, "growing-alt"))
+		}
+
 		rows[i] = textLOBRow{
-			id:       int64(i),
-			vector:   vector,
-			content:  contents[i],
-			alt:      alternates[i],
-			sentinel: fmt.Sprintf("sentinel text output %d", i),
+			id:        id,
+			vector:    textLOBVector(id, marker),
+			content:   content,
+			contentZH: contentZH,
+			alt:       alt,
+			sentinel:  fmt.Sprintf("sentinel text output %d", id),
 		}
 	}
 	return rows
 }
 
 func textLOBCollectionSchema(collectionName string) *entity.Schema {
-	analyzerParams := map[string]any{"tokenizer": "standard"}
+	standardAnalyzer := map[string]any{"tokenizer": "standard"}
+	jiebaAnalyzer := map[string]any{
+		"tokenizer": map[string]any{
+			"type": "jieba",
+			"dict": []string{"向量数据库", "混合搜索", "稀疏向量"},
+			"mode": "exact",
+			"hmm":  false,
+		},
+	}
 	return entity.NewSchema().WithName(collectionName).
 		WithField(entity.NewField().WithName(textLOBIDField).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 		WithField(entity.NewField().WithName(textLOBVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(textLOBVectorDim)).
 		WithField(entity.NewField().WithName(textLOBContentField).WithDataType(entity.FieldTypeText).WithNullable(true).
-			WithEnableAnalyzer(true).WithEnableMatch(true).WithAnalyzerParams(analyzerParams)).
+			WithEnableAnalyzer(true).WithEnableMatch(true).WithAnalyzerParams(standardAnalyzer)).
+		WithField(entity.NewField().WithName(textLOBZHField).WithDataType(entity.FieldTypeText).WithNullable(true).
+			WithEnableAnalyzer(true).WithEnableMatch(true).WithAnalyzerParams(jiebaAnalyzer)).
 		WithField(entity.NewField().WithName(textLOBAltField).WithDataType(entity.FieldTypeText).WithNullable(true).
-			WithEnableAnalyzer(true).WithEnableMatch(true).WithAnalyzerParams(analyzerParams)).
+			WithEnableAnalyzer(true).WithEnableMatch(true).WithAnalyzerParams(standardAnalyzer)).
 		WithField(entity.NewField().WithName(textLOBSentinelField).WithDataType(entity.FieldTypeText).
-			WithEnableAnalyzer(true).WithEnableMatch(true).WithAnalyzerParams(analyzerParams)).
+			WithEnableAnalyzer(true).WithEnableMatch(true).WithAnalyzerParams(standardAnalyzer)).
 		WithField(entity.NewField().WithName(textLOBSparseField).WithDataType(entity.FieldTypeSparseVector)).
+		WithField(entity.NewField().WithName(textLOBZHSparseField).WithDataType(entity.FieldTypeSparseVector)).
+		WithField(entity.NewField().WithName(textLOBSentinelSparseField).WithDataType(entity.FieldTypeSparseVector)).
 		WithFunction(entity.NewFunction().WithName("content_bm25").WithType(entity.FunctionTypeBM25).
-			WithInputFields(textLOBContentField).WithOutputFields(textLOBSparseField))
+			WithInputFields(textLOBContentField).WithOutputFields(textLOBSparseField)).
+		WithFunction(entity.NewFunction().WithName("content_zh_bm25").WithType(entity.FunctionTypeBM25).
+			WithInputFields(textLOBZHField).WithOutputFields(textLOBZHSparseField)).
+		WithFunction(entity.NewFunction().WithName("content_sentinel_bm25").WithType(entity.FunctionTypeBM25).
+			WithInputFields(textLOBSentinelField).WithOutputFields(textLOBSentinelSparseField))
 }
 
 func nullableTextLOBColumn(t *testing.T, fieldName string, rows []textLOBRow, value func(textLOBRow) *string) *column.ColumnText {
@@ -145,6 +224,78 @@ func nullableTextLOBColumn(t *testing.T, fieldName string, rows []textLOBRow, va
 	return result
 }
 
+func insertTextLOBRows(
+	t *testing.T,
+	ctx context.Context,
+	mc *base.MilvusClient,
+	collectionName string,
+	rows []textLOBRow,
+) {
+	t.Helper()
+
+	ids := make([]int64, len(rows))
+	vectors := make([][]float32, len(rows))
+	sentinels := make([]string, len(rows))
+	for i, row := range rows {
+		ids[i] = row.id
+		vectors[i] = row.vector
+		sentinels[i] = row.sentinel
+	}
+
+	contentColumn := nullableTextLOBColumn(t, textLOBContentField, rows, func(row textLOBRow) *string {
+		return row.content
+	})
+	contentZHColumn := nullableTextLOBColumn(t, textLOBZHField, rows, func(row textLOBRow) *string {
+		return row.contentZH
+	})
+	altColumn := nullableTextLOBColumn(t, textLOBAltField, rows, func(row textLOBRow) *string {
+		return row.alt
+	})
+	insertResult, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collectionName).
+		WithInt64Column(textLOBIDField, ids).
+		WithFloatVectorColumn(textLOBVectorField, textLOBVectorDim, vectors).
+		WithColumns(contentColumn, contentZHColumn, altColumn).
+		WithTextColumn(textLOBSentinelField, sentinels))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, len(rows), insertResult.InsertCount)
+}
+
+func waitForTextLOBSealedLayout(
+	t *testing.T,
+	ctx context.Context,
+	mc *base.MilvusClient,
+	collectionName string,
+) []int64 {
+	t.Helper()
+
+	waitCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	var lastSegments []*entity.Segment
+	for {
+		segments, err := mc.GetPersistentSegmentInfo(waitCtx, client.NewGetPersistentSegmentInfoOption(collectionName))
+		if err == nil {
+			lastSegments = segments
+			if len(segments) == 2 {
+				first, second := segments[0], segments[1]
+				hasExpectedRows := first.NumRows == textLOBIndexedSealedRows && second.NumRows == textLOBUnindexedSealedRows ||
+					first.NumRows == textLOBUnindexedSealedRows && second.NumRows == textLOBIndexedSealedRows
+				if hasExpectedRows && first.Flushed() && second.Flushed() {
+					return []int64{first.ID, second.ID}
+				}
+			}
+		}
+
+		select {
+		case <-waitCtx.Done():
+			t.Fatalf("expected 3,000-row and 500-row flushed segments, last segments: %+v", lastSegments)
+		case <-ticker.C:
+		}
+	}
+}
+
 func prepareTextLOBFixture(t *testing.T, ctx context.Context, mc *base.MilvusClient) textLOBFixture {
 	t.Helper()
 
@@ -160,59 +311,72 @@ func prepareTextLOBFixture(t *testing.T, ctx context.Context, mc *base.MilvusCli
 	})
 
 	rows := newTextLOBRows()
-	ids := make([]int64, len(rows))
-	vectors := make([][]float32, len(rows))
-	sentinels := make([]string, len(rows))
 	rowsByID := make(map[int64]textLOBRow, len(rows))
-	for i, row := range rows {
-		ids[i] = row.id
-		vectors[i] = row.vector
-		sentinels[i] = row.sentinel
+	for _, row := range rows {
 		rowsByID[row.id] = row
 	}
 
-	contentColumn := nullableTextLOBColumn(t, textLOBContentField, rows, func(row textLOBRow) *string {
-		return row.content
-	})
-	altColumn := nullableTextLOBColumn(t, textLOBAltField, rows, func(row textLOBRow) *string {
-		return row.alt
-	})
-	insertResult, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collectionName).
-		WithInt64Column(textLOBIDField, ids).
-		WithFloatVectorColumn(textLOBVectorField, textLOBVectorDim, vectors).
-		WithColumns(contentColumn, altColumn).
-		WithTextColumn(textLOBSentinelField, sentinels))
-	common.CheckErr(t, err, true)
-	require.EqualValues(t, len(rows), insertResult.InsertCount)
-
-	flushTask, err := mc.Flush(ctx, client.NewFlushOption(collectionName))
-	common.CheckErr(t, err, true)
-	common.CheckErr(t, flushTask.Await(ctx), true)
+	insertTextLOBRows(t, ctx, mc, collectionName, rows[:textLOBIndexedSealedRows])
+	common.CheckErr(t, flushTextLOBCollectionWithRetry(ctx, mc, collectionName), true)
+	insertTextLOBRows(t, ctx, mc, collectionName,
+		rows[textLOBIndexedSealedRows:textLOBIndexedSealedRows+textLOBUnindexedSealedRows])
+	common.CheckErr(t, flushTextLOBCollectionWithRetry(ctx, mc, collectionName), true)
 
 	vectorIndexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(
 		collectionName,
 		textLOBVectorField,
-		index.NewFlatIndex(entity.COSINE),
+		index.NewHNSWIndex(entity.COSINE, 16, 200),
 	).WithIndexName(textLOBVectorIndex))
 	common.CheckErr(t, err, true)
 	common.CheckErr(t, vectorIndexTask.Await(ctx), true)
 
-	sparseIndexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(
-		collectionName,
-		textLOBSparseField,
-		index.NewSparseInvertedIndex(entity.BM25, 0.1),
-	).WithIndexName(textLOBSparseIndex))
-	common.CheckErr(t, err, true)
-	common.CheckErr(t, sparseIndexTask.Await(ctx), true)
+	for _, sparse := range []struct {
+		fieldName string
+		indexName string
+	}{
+		{fieldName: textLOBSparseField, indexName: textLOBSparseIndex},
+		{fieldName: textLOBZHSparseField, indexName: textLOBZHSparseIndex},
+		{fieldName: textLOBSentinelSparseField, indexName: textLOBSentinelSparseIndex},
+	} {
+		sparseIndexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(
+			collectionName,
+			sparse.fieldName,
+			index.NewSparseInvertedIndex(entity.BM25, 0.1),
+		).WithIndexName(sparse.indexName))
+		common.CheckErr(t, err, true)
+		common.CheckErr(t, sparseIndexTask.Await(ctx), true)
+	}
 
 	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collectionName))
 	common.CheckErr(t, err, true)
 	common.CheckErr(t, loadTask.Await(ctx), true)
+	sealedIDs := waitForTextLOBSealedLayout(t, ctx, mc, collectionName)
+
+	insertTextLOBRows(t, ctx, mc, collectionName,
+		rows[textLOBIndexedSealedRows+textLOBUnindexedSealedRows:])
+	countResult, err := mc.Query(ctx, client.NewQueryOption(collectionName).
+		WithFilter(fmt.Sprintf("%s >= 0", textLOBIDField)).
+		WithOutputFields("count(*)").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	count, err := countResult.GetColumn("count(*)").GetAsInt64(0)
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, textLOBTotalRows, count)
+
+	segmentsAfterGrowing, err := mc.GetPersistentSegmentInfo(ctx, client.NewGetPersistentSegmentInfoOption(collectionName))
+	common.CheckErr(t, err, true)
+	require.Len(t, segmentsAfterGrowing, 2)
+	remainingSealedIDs := []int64{segmentsAfterGrowing[0].ID, segmentsAfterGrowing[1].ID}
+	require.ElementsMatch(t, sealedIDs, remainingSealedIDs)
+	require.EqualValues(t, textLOBIndexedSealedRows+textLOBUnindexedSealedRows,
+		segmentsAfterGrowing[0].NumRows+segmentsAfterGrowing[1].NumRows)
 
 	return textLOBFixture{
 		collectionName: collectionName,
 		rows:           rows,
 		rowsByID:       rowsByID,
+		markerIDs:      []int64{textLOBIndexedMarkerID, textLOBUnindexedMarkerID, textLOBGrowingMarkerID},
+		sealedIDs:      sealedIDs,
 	}
 }
 
@@ -268,12 +432,15 @@ func requireTextLOBResultRows(
 
 	require.NotNil(t, idColumn)
 	contentColumn := result.GetColumn(textLOBContentField)
+	contentZHColumn := result.GetColumn(textLOBZHField)
 	altColumn := result.GetColumn(textLOBAltField)
 	sentinelColumn := result.GetColumn(textLOBSentinelField)
 	require.IsType(t, &column.ColumnText{}, contentColumn)
+	require.IsType(t, &column.ColumnText{}, contentZHColumn)
 	require.IsType(t, &column.ColumnText{}, altColumn)
 	require.IsType(t, &column.ColumnText{}, sentinelColumn)
 	require.Equal(t, entity.FieldTypeText, contentColumn.Type())
+	require.Equal(t, entity.FieldTypeText, contentZHColumn.Type())
 	require.Equal(t, entity.FieldTypeText, altColumn.Type())
 	require.Equal(t, entity.FieldTypeText, sentinelColumn.Type())
 
@@ -290,6 +457,7 @@ func requireTextLOBResultRows(
 			expected *string
 		}{
 			{column: contentColumn, expected: row.content},
+			{column: contentZHColumn, expected: row.contentZH},
 			{column: altColumn, expected: row.alt},
 		} {
 			isNull, err := field.column.IsNull(i)
@@ -329,52 +497,120 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 		for _, field := range description.Schema.Fields {
 			fields[field.Name] = field
 		}
-		for _, fieldName := range []string{textLOBContentField, textLOBAltField, textLOBSentinelField} {
+		for _, fieldName := range []string{textLOBContentField, textLOBZHField, textLOBAltField, textLOBSentinelField} {
 			require.Contains(t, fields, fieldName)
 			require.Equal(t, entity.FieldTypeText, fields[fieldName].DataType)
 		}
-		require.Len(t, description.Schema.Functions, 1)
-		function := description.Schema.Functions[0]
-		require.Equal(t, entity.FunctionTypeBM25, function.Type)
-		require.Equal(t, []string{textLOBContentField}, function.InputFieldNames)
-		require.Equal(t, []string{textLOBSparseField}, function.OutputFieldNames)
+		require.Len(t, description.Schema.Functions, 3)
+		functions := make(map[string]*entity.Function, len(description.Schema.Functions))
+		for _, function := range description.Schema.Functions {
+			functions[function.Name] = function
+		}
+		for _, expected := range []struct {
+			name        string
+			inputField  string
+			outputField string
+		}{
+			{name: "content_bm25", inputField: textLOBContentField, outputField: textLOBSparseField},
+			{name: "content_zh_bm25", inputField: textLOBZHField, outputField: textLOBZHSparseField},
+			{name: "content_sentinel_bm25", inputField: textLOBSentinelField, outputField: textLOBSentinelSparseField},
+		} {
+			function := functions[expected.name]
+			require.NotNil(t, function)
+			require.Equal(t, entity.FunctionTypeBM25, function.Type)
+			require.Equal(t, []string{expected.inputField}, function.InputFieldNames)
+			require.Equal(t, []string{expected.outputField}, function.OutputFieldNames)
+		}
 
-		sparseIndex, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(fixture.collectionName, textLOBSparseIndex))
+		vectorIndex, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(fixture.collectionName, textLOBVectorIndex))
 		common.CheckErr(t, err, true)
-		require.Equal(t, index.SparseInverted, sparseIndex.IndexType())
-		require.Equal(t, string(entity.BM25), sparseIndex.Params()[index.MetricTypeKey])
+		require.Equal(t, index.HNSW, vectorIndex.IndexType())
+		require.Equal(t, string(entity.COSINE), vectorIndex.Params()[index.MetricTypeKey])
+		for _, indexName := range []string{textLOBSparseIndex, textLOBZHSparseIndex, textLOBSentinelSparseIndex} {
+			sparseIndex, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(fixture.collectionName, indexName))
+			common.CheckErr(t, err, true)
+			require.Equal(t, index.SparseInverted, sparseIndex.IndexType())
+			require.Equal(t, string(entity.BM25), sparseIndex.Params()[index.MetricTypeKey])
+		}
+		require.Len(t, fixture.sealedIDs, 2)
 
 		result, err := mc.Query(ctx, client.NewQueryOption(fixture.collectionName).
 			WithFilter(fmt.Sprintf("%s >= 0", textLOBIDField)).
-			WithOutputFields(textLOBIDField, textLOBContentField, textLOBAltField, textLOBSentinelField).
+			WithOutputFields(textLOBIDField, textLOBContentField, textLOBZHField, textLOBAltField, textLOBSentinelField).
 			WithConsistencyLevel(entity.ClStrong).
 			WithLimit(len(fixture.rows)))
 		common.CheckErr(t, err, true)
 		require.Equal(t, len(fixture.rows), result.Len())
 		ids := requireTextLOBResultRows(t, result, result.GetColumn(textLOBIDField), fixture.rowsByID)
-		require.ElementsMatch(t, []int64{0, 1, 2, 3, 4, 5, 6, 7}, ids)
+		seen := make(map[int64]struct{}, len(ids))
+		pathCounts := [3]int{}
+		for _, id := range ids {
+			_, duplicated := seen[id]
+			require.False(t, duplicated, "duplicate primary key %d", id)
+			seen[id] = struct{}{}
+			switch {
+			case id < textLOBIndexedSealedRows:
+				pathCounts[0]++
+			case id < textLOBIndexedSealedRows+textLOBUnindexedSealedRows:
+				pathCounts[1]++
+			default:
+				pathCounts[2]++
+			}
+		}
+		require.Equal(t, [3]int{textLOBIndexedSealedRows, textLOBUnindexedSealedRows, textLOBGrowingRows}, pathCounts)
+		for _, markerID := range fixture.markerIDs {
+			require.Greater(t, len(*fixture.rowsByID[markerID].content), 64*1024)
+			require.Greater(t, len(*fixture.rowsByID[markerID].alt), 64*1024)
+		}
 	})
 
 	t.Run("dense_search_output_fields", func(t *testing.T) {
 		results, err := mc.Search(ctx, client.NewSearchOption(
 			fixture.collectionName,
 			3,
-			[]entity.Vector{entity.FloatVector(fixture.rows[0].vector)},
+			[]entity.Vector{entity.FloatVector(textLOBVector(textLOBIndexedMarkerID, true))},
 		).WithANNSField(textLOBVectorField).
-			WithOutputFields(textLOBContentField, textLOBAltField, textLOBSentinelField).
+			WithOutputFields(textLOBContentField, textLOBZHField, textLOBAltField, textLOBSentinelField).
+			WithSearchParam("ef", "64").
 			WithConsistencyLevel(entity.ClStrong))
 		common.CheckErr(t, err, true)
 		require.Len(t, results, 1)
 		require.Equal(t, 3, results[0].Len())
 		ids := requireTextLOBResultRows(t, results[0], results[0].IDs, fixture.rowsByID)
-		require.Equal(t, int64(0), ids[0])
+		require.ElementsMatch(t, fixture.markerIDs, ids)
+	})
+
+	t.Run("bm25_search_output_fields", func(t *testing.T) {
+		for _, test := range []struct {
+			name     string
+			annField string
+			query    string
+		}{
+			{name: "standard_analyzer", annField: textLOBSparseField, query: "vector database"},
+			{name: "jieba_analyzer", annField: textLOBZHSparseField, query: "向量数据库 中文检索"},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				results, err := mc.Search(ctx, client.NewSearchOption(
+					fixture.collectionName,
+					3,
+					[]entity.Vector{entity.Text(test.query)},
+				).WithANNSField(test.annField).
+					WithOutputFields(textLOBContentField, textLOBZHField, textLOBAltField, textLOBSentinelField).
+					WithConsistencyLevel(entity.ClStrong))
+				common.CheckErr(t, err, true)
+				require.Len(t, results, 1)
+				require.NotZero(t, results[0].Len())
+				require.LessOrEqual(t, results[0].Len(), 3)
+				requireTextLOBResultRows(t, results[0], results[0].IDs, fixture.rowsByID)
+			})
+		}
 	})
 
 	t.Run("query_iterator_payloads", func(t *testing.T) {
 		iterator, err := mc.QueryIterator(ctx, client.NewQueryIteratorOption(fixture.collectionName).
-			WithBatchSize(3).
+			WithBatchSize(512).
 			WithFilter(fmt.Sprintf("%s >= 0", textLOBIDField)).
-			WithOutputFields(textLOBIDField, textLOBContentField, textLOBAltField, textLOBSentinelField).
+			WithOutputFields(textLOBIDField, textLOBContentField, textLOBZHField, textLOBAltField, textLOBSentinelField).
 			WithConsistencyLevel(entity.ClStrong))
 		common.CheckErr(t, err, true)
 
@@ -386,7 +622,7 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 			}
 			common.CheckErr(t, err, true)
 			require.NotZero(t, batch.Len())
-			require.LessOrEqual(t, batch.Len(), 3)
+			require.LessOrEqual(t, batch.Len(), 512)
 			ids := requireTextLOBResultRows(t, batch, batch.GetColumn(textLOBIDField), fixture.rowsByID)
 			for _, id := range ids {
 				_, duplicated := seen[id]
@@ -400,18 +636,20 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 	t.Run("upsert_payloads", func(t *testing.T) {
 		upsertRows := []textLOBRow{
 			{
-				id:       2,
-				vector:   fixture.rows[2].vector,
-				content:  textLOBValue(makeTextLOB(128*1024, "upsert-null-to-large")),
-				alt:      textLOBValue("upserted multilingual alternate 中文 payload 😀"),
-				sentinel: "sentinel text upsert 2",
+				id:        2,
+				vector:    fixture.rows[2].vector,
+				content:   textLOBValue(makeTextLOB(128*1024, "upsert-null-to-large")),
+				contentZH: textLOBValue("更新后的向量数据库 中文检索 文本"),
+				alt:       textLOBValue("upserted multilingual alternate 中文 payload 😀"),
+				sentinel:  "sentinel text upsert 2",
 			},
 			{
-				id:       6,
-				vector:   fixture.rows[6].vector,
-				content:  textLOBValue(makeTextLOB(256*1024, "upsert-large")),
-				alt:      nil,
-				sentinel: "sentinel text upsert 6",
+				id:        6,
+				vector:    fixture.rows[6].vector,
+				content:   textLOBValue(makeTextLOB(256*1024, "upsert-large")),
+				contentZH: nil,
+				alt:       nil,
+				sentinel:  "sentinel text upsert 6",
 			},
 		}
 		ids := []int64{upsertRows[0].id, upsertRows[1].id}
@@ -420,6 +658,9 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 		contentColumn := nullableTextLOBColumn(t, textLOBContentField, upsertRows, func(row textLOBRow) *string {
 			return row.content
 		})
+		contentZHColumn := nullableTextLOBColumn(t, textLOBZHField, upsertRows, func(row textLOBRow) *string {
+			return row.contentZH
+		})
 		altColumn := nullableTextLOBColumn(t, textLOBAltField, upsertRows, func(row textLOBRow) *string {
 			return row.alt
 		})
@@ -427,7 +668,7 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 		upsertResult, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(fixture.collectionName).
 			WithInt64Column(textLOBIDField, ids).
 			WithFloatVectorColumn(textLOBVectorField, textLOBVectorDim, vectors).
-			WithColumns(contentColumn, altColumn).
+			WithColumns(contentColumn, contentZHColumn, altColumn).
 			WithTextColumn(textLOBSentinelField, sentinels))
 		common.CheckErr(t, err, true)
 		require.EqualValues(t, len(upsertRows), upsertResult.UpsertCount)
@@ -439,7 +680,7 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 		}
 		result, err := mc.Query(ctx, client.NewQueryOption(fixture.collectionName).
 			WithFilter(fmt.Sprintf("%s in [2, 6]", textLOBIDField)).
-			WithOutputFields(textLOBIDField, textLOBContentField, textLOBAltField, textLOBSentinelField).
+			WithOutputFields(textLOBIDField, textLOBContentField, textLOBZHField, textLOBAltField, textLOBSentinelField).
 			WithConsistencyLevel(entity.ClStrong).
 			WithLimit(len(upsertRows)))
 		common.CheckErr(t, err, true)
@@ -478,7 +719,7 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 		}
 		result, err := mc.Query(ctx, client.NewQueryOption(fixture.collectionName).
 			WithFilter(fmt.Sprintf("%s >= 0", textLOBIDField)).
-			WithOutputFields(textLOBIDField, textLOBContentField, textLOBAltField, textLOBSentinelField).
+			WithOutputFields(textLOBIDField, textLOBContentField, textLOBZHField, textLOBAltField, textLOBSentinelField).
 			WithConsistencyLevel(entity.ClStrong).
 			WithLimit(len(survivors)))
 		common.CheckErr(t, err, true)
