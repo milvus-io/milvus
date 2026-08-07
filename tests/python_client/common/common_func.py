@@ -5617,7 +5617,7 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
             target_tz = ZoneInfo(timezone)
             if dt.tzinfo is None:
                 localized = _localize_naive(dt, timezone)
-                dt = localized if localized else dt.replace(tzinfo=target_tz)
+                dt = localized or dt.replace(tzinfo=target_tz)
             else:
                 dt = dt.astimezone(target_tz)
             return _format_dt(dt)

@@ -20,7 +20,7 @@
 # Requires `uvx` (ships with `uv`). Ruff is fetched & cached on first run.
 # Auto-detection requires `gh` authenticated (`gh auth status`).
 
-RUFF_VERSION ?= 0.15.11
+RUFF_VERSION ?= 0.16.1
 RUFF         := uvx ruff@$(RUFF_VERSION)
 REPO_ROOT    := $(shell git rev-parse --show-toplevel)
 

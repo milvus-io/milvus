@@ -5828,7 +5828,7 @@ class TestMilvusClientStructArrayElementRangeSearch(TestMilvusClientV2Base):
 
         def _gen_row(i):
             rng = random.Random(i)
-            num_elems = elems_per_row if elems_per_row else rng.randint(3, 8)
+            num_elems = elems_per_row or rng.randint(3, 8)
             struct_array = [
                 {
                     "embedding": _seed_vector(i * 1000 + j),
@@ -6568,7 +6568,7 @@ class TestMilvusClientStructArrayElementSearchIterator(TestMilvusClientV2Base):
 
         def _gen_row(i):
             rng = random.Random(i)
-            num_elems = elems_per_row if elems_per_row else rng.randint(3, 8)
+            num_elems = elems_per_row or rng.randint(3, 8)
             sa = [
                 {
                     "embedding": _seed_vector(i * 1000 + j),
