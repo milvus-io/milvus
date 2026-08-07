@@ -4346,6 +4346,7 @@ class AddVectorFieldChecker(Checker):
                     collection_name=self.c_name,
                     index_params=index_params,
                     timeout=timeout,
+                    sync=False,
                 )
                 self._vector_index_created = True
                 log.debug(f"[AddVectorFieldChecker] created index for {new_vec_field}")

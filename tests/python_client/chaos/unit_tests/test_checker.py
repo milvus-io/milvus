@@ -199,6 +199,7 @@ def test_add_vector_field_checker_retries_same_field_after_index_timeout(monkeyp
     index_param = client.create_index_kwargs[-1]["index_params"][0].to_dict()
     assert index_param["index_type"] == "FLAT"
     assert index_param["metric_type"] == "COSINE"
+    assert client.create_index_kwargs[-1]["sync"] is False
 
 
 @pytest.mark.parametrize(
