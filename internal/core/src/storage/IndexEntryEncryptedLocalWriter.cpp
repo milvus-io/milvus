@@ -174,8 +174,10 @@ IndexEntryEncryptedLocalWriter::WriteEntry(const std::string& name,
             pending.pop_front();
             auto written =
                 ::write(local_fd_, encrypted.data(), encrypted.size());
-            AssertInfo(written == static_cast<ssize_t>(encrypted.size()),
-                       "Failed to write encrypted slice");
+            if (!(written == static_cast<ssize_t>(encrypted.size()))) {
+                ThrowInfo(ErrorCode::FileWriteFailed,
+                          "Failed to write encrypted slice");
+            }
             slices.push_back(
                 {current_offset_, static_cast<uint64_t>(encrypted.size())});
             current_offset_ += encrypted.size();
@@ -219,8 +221,10 @@ IndexEntryEncryptedLocalWriter::EncryptAndWriteSlices(const std::string& name,
             pending.pop_front();
             auto written =
                 ::write(local_fd_, encrypted.data(), encrypted.size());
-            AssertInfo(written == static_cast<ssize_t>(encrypted.size()),
-                       "Failed to write encrypted slice");
+            if (!(written == static_cast<ssize_t>(encrypted.size()))) {
+                ThrowInfo(ErrorCode::FileWriteFailed,
+                          "Failed to write encrypted slice");
+            }
             slices.push_back(
                 {current_offset_, static_cast<uint64_t>(encrypted.size())});
             current_offset_ += encrypted.size();
@@ -267,8 +271,10 @@ IndexEntryEncryptedLocalWriter::Finish() {
 
     auto dir_str = dir_json.dump();
     auto written = ::write(local_fd_, dir_str.data(), dir_str.size());
-    AssertInfo(written == static_cast<ssize_t>(dir_str.size()),
-               "Failed to write directory table");
+    if (!(written == static_cast<ssize_t>(dir_str.size()))) {
+        ThrowInfo(ErrorCode::FileWriteFailed,
+                  "Failed to write directory table");
+    }
 
     // Write 32-byte Footer
     uint8_t footer[MILVUS_V3_FOOTER_SIZE] = {};
@@ -281,8 +287,9 @@ IndexEntryEncryptedLocalWriter::Finish() {
     milvus::fastmem::FastMemcpy(footer + 28, &dir_size_u32, sizeof(uint32_t));
 
     written = ::write(local_fd_, footer, MILVUS_V3_FOOTER_SIZE);
-    AssertInfo(written == static_cast<ssize_t>(MILVUS_V3_FOOTER_SIZE),
-               "Failed to write footer");
+    if (!(written == static_cast<ssize_t>(MILVUS_V3_FOOTER_SIZE))) {
+        ThrowInfo(ErrorCode::FileWriteFailed, "Failed to write footer");
+    }
 
     ::close(local_fd_);
     local_fd_ = -1;
@@ -309,8 +316,11 @@ IndexEntryEncryptedLocalWriter::UploadLocalFile() {
         std::make_shared<RemoteOutputStream>(std::move(result.ValueOrDie()));
 
     int read_fd = ::open(local_path_.c_str(), O_RDONLY);
-    AssertInfo(
-        read_fd != -1, "Failed to open local file for upload: {}", local_path_);
+    if (!(read_fd != -1)) {
+        ThrowInfo(ErrorCode::FileOpenFailed,
+                  "Failed to open local file for upload: {}",
+                  local_path_);
+    }
     auto close_read_fd = folly::makeGuard([read_fd]() { ::close(read_fd); });
 
     constexpr size_t kBufSize = 16 * 1024 * 1024;

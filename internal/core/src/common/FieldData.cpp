@@ -427,7 +427,10 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 }
                 ScalarFieldProto field_data;
                 auto success = field_data.ParseFromString(str);
-                AssertInfo(success, "parse from string failed");
+                if (!(success)) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "parse from string failed");
+                }
                 values[index] = Array(field_data);
             }
             if (nullable_) {

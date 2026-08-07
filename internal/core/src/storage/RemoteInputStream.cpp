@@ -194,13 +194,16 @@ RemoteInputStream::Read(int fd, size_t size) {
                 status.status().ToString());
         }
         auto bytes_read = status.ValueOrDie();
-        AssertInfo(bytes_read > 0,
-                   "Failed to read from remote input stream, operation: read "
-                   "to file, offset: {}, read zero bytes, rest size: {}, file "
-                   "size: {}",
-                   offset,
-                   rest_size,
-                   file_size_);
+        if (!(bytes_read > 0)) {
+            ThrowInfo(
+                ErrorCode::FileReadFailed,
+                "Failed to read from remote input stream, operation: read "
+                "to file, offset: {}, read zero bytes, rest size: {}, file "
+                "size: {}",
+                offset,
+                rest_size,
+                file_size_);
+        }
         AssertInfo(bytes_read <= static_cast<int64_t>(read_size),
                    "Remote input stream returned more bytes than requested, "
                    "operation: read to file, offset: {}, bytes read: {}, "

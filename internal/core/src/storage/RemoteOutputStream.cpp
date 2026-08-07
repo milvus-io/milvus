@@ -56,8 +56,9 @@ RemoteOutputStream::Write(int fd, size_t size) {
     while (rest_size > 0) {
         size_t read_size = std::min(rest_size, read_batch_size);
         auto read_status = ::read(fd, data.data(), read_size);
-        AssertInfo(read_status == static_cast<ssize_t>(read_size),
-                   "Failed to read from file");
+        if (!(read_status == static_cast<ssize_t>(read_size))) {
+            ThrowInfo(ErrorCode::FileReadFailed, "Failed to read from file");
+        }
         auto write_status = output_stream_->Write(data.data(), read_size);
         if (!write_status.ok()) {
             ThrowInfo(ArrowStatusToErrorCode(write_status),

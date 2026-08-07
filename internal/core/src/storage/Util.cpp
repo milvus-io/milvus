@@ -164,7 +164,10 @@ ReadMediumType(BinlogReaderPtr reader) {
         // truncated binlog); preserve its code instead of collapsing to 2001.
         ThrowInfo(ret.get_error_code(), "read binlog failed: {}", ret.what());
     }
-    AssertInfo(magic_num == MAGIC_NUM, "invalid magic num: {}", magic_num);
+    if (!(magic_num == MAGIC_NUM)) {
+        ThrowInfo(
+            ErrorCode::DataFormatBroken, "invalid magic num: {}", magic_num);
+    }
 }
 
 void
@@ -1955,7 +1958,9 @@ IterateFieldDataFromManifest(
     auto reader = milvus_storage::api::Reader::create(
         column_groups, reader_schema, needed_cols_ptr, *loon_ffi_properties);
 
-    AssertInfo(reader != nullptr, "Failed to create reader");
+    if (!(reader != nullptr)) {
+        ThrowInfo(ErrorCode::FileReadFailed, "Failed to create reader");
+    }
     std::shared_ptr<arrow::RecordBatch> batch;
 
     // Decode batches on a background thread pool while this thread keeps

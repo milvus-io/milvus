@@ -986,7 +986,11 @@ InvertedIndexTantivy<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     for (const auto& file_path : files) {
         auto file_name = file_path.filename().string();
         int fd = open(file_path.c_str(), O_RDONLY | O_CLOEXEC);
-        AssertInfo(fd != -1, "failed to open file: {}", file_path.string());
+        if (!(fd != -1)) {
+            ThrowInfo(ErrorCode::FileOpenFailed,
+                      "failed to open file: {}",
+                      file_path.string());
+        }
         auto file_size = boost::filesystem::file_size(file_path);
         writer->WriteEntry(file_name, fd, file_size);
         close(fd);

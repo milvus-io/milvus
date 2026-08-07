@@ -42,9 +42,11 @@ struct FixedLengthChunk {
         : mmap_descriptor_(descriptor), size_(size) {
         auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
         data_ = (Type*)(mcm->Allocate(mmap_descriptor_, sizeof(Type) * size));
-        AssertInfo(data_ != nullptr,
-                   "failed to create a mmapchunk, map_size={}",
-                   sizeof(Type) * size);
+        if (!(data_ != nullptr)) {
+            ThrowInfo(ErrorCode::MmapError,
+                      "failed to create a mmapchunk, map_size={}",
+                      sizeof(Type) * size);
+        }
     };
     void*
     data() {
