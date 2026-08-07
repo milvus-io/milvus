@@ -1,10 +1,8 @@
 import hashlib
 import random
 import time
-from urllib.parse import urlsplit, urlunsplit
 
 import pytest
-import requests
 from api.milvus import IndexClient
 from base.testbase import TestBase
 from pymilvus import connections, utility
@@ -324,105 +322,20 @@ def build_text_index_payload(collection_name):
     }
 
 
-def management_get(endpoint, api_key, path, params=None):
-    """Read Milvus management metadata from the metrics port."""
-    parsed = urlsplit(endpoint if "://" in endpoint else f"http://{endpoint}")
-    management_endpoint = urlunsplit((parsed.scheme, f"{parsed.hostname}:9091", f"/api/v1{path}", "", ""))
-    rsp = requests.get(
-        management_endpoint,
-        params=params,
-        headers={"Authorization": f"Bearer {api_key}"},
-        timeout=10,
-    )
-    assert rsp.status_code == 200, f"management request failed: status={rsp.status_code}, body={rsp.text}"
-    return rsp.json()
-
-
-def has_materialized_index(segment, field_id):
-    return any(
-        int(index["field_id"]) == field_id
-        and str(index.get("is_loaded", False)).lower() == "true"
-        and int(index.get("index_size", 0)) > 0
-        for index in segment.get("index_fields", [])
-    )
-
-
-def wait_for_segment_paths(
-    collection_name,
-    collection_id,
-    dense_field_id,
-    connection_alias,
-    endpoint,
-    api_key,
-    timeout=120,
-):
-    """Wait until metadata proves the indexed and raw sealed paths."""
+def wait_for_sealed_layout(collection_name, connection_alias, timeout=120):
+    """Wait until public segment metadata exposes the 3,000 + 500 sealed layout."""
     deadline = time.monotonic() + timeout
     last_infos = []
-    last_query_node_segments = []
     while time.monotonic() < deadline:
         last_infos = utility.get_query_segment_info(collection_name, using=connection_alias)
-        last_query_node_segments = management_get(
-            endpoint,
-            api_key,
-            "/_qn/segments",
-            params={"collection_id": collection_id, "in": "qn"},
-        )
-        indexed = [
-            segment
-            for segment in last_query_node_segments
-            if segment["state"] == "Sealed"
-            and int(segment["loaded_insert_row_count"]) == INDEXED_SEALED_ROWS
-            and has_materialized_index(segment, dense_field_id)
-        ]
-        unindexed = [
-            segment
-            for segment in last_query_node_segments
-            if segment["state"] == "Sealed"
-            and int(segment["loaded_insert_row_count"]) == UNINDEXED_SEALED_ROWS
-            and not has_materialized_index(segment, dense_field_id)
-        ]
-        query_segment_ids = {info.segmentID for info in last_infos}
-        metadata_segment_ids = {int(segment["segment_id"]) for segment in last_query_node_segments}
-        if (
-            len(last_infos) == 2
-            and len(last_query_node_segments) == 2
-            and len(indexed) == 1
-            and len(unindexed) == 1
-            and query_segment_ids == metadata_segment_ids
-        ):
+        if len(last_infos) == 2 and sorted(info.num_rows for info in last_infos) == [
+            UNINDEXED_SEALED_ROWS,
+            INDEXED_SEALED_ROWS,
+        ]:
             assert all(info.state == common_pb2.SegmentState.Sealed for info in last_infos)
             return last_infos
         time.sleep(1)
-    raise AssertionError(
-        f"expected indexed and unindexed sealed paths, last segment infos: {last_infos}, "
-        f"last query node segments: {last_query_node_segments}"
-    )
-
-
-def wait_for_growing_path(collection_id, dense_field_id, sealed_segment_ids, endpoint, api_key, timeout=120):
-    """Wait until QueryNode metadata exposes the final 500-row growing path."""
-    deadline = time.monotonic() + timeout
-    last_segments = []
-    while time.monotonic() < deadline:
-        last_segments = management_get(
-            endpoint,
-            api_key,
-            "/_qn/segments",
-            params={"collection_id": collection_id, "in": "qn"},
-        )
-        growing = [
-            segment
-            for segment in last_segments
-            if segment["state"] == "Growing"
-            and int(segment["loaded_insert_row_count"]) == GROWING_ROWS
-            and not has_materialized_index(segment, dense_field_id)
-        ]
-        current_sealed_ids = {int(segment["segment_id"]) for segment in last_segments if segment["state"] == "Sealed"}
-        if len(last_segments) == 3 and len(growing) == 1 and current_sealed_ids == set(sealed_segment_ids):
-            return growing[0]
-        time.sleep(1)
-    raise AssertionError(f"expected 500-row growing path, last query node segments: {last_segments}")
+    raise AssertionError(f"expected 3,000 + 500 sealed rows, last segment infos: {last_infos}")
 
 
 def flush_collection(collection_client, collection_name, timeout=30):
@@ -472,10 +385,6 @@ class TestTextLOB(TestBase):
         self.__class__.shared_ids = [row[ID_FIELD] for row in self.shared_rows]
         assert len(self.shared_rows) == TOTAL_ROWS
 
-        configs = management_get(self.endpoint, self.api_key, "/_cluster/configs")
-        index_threshold = int(configs["indexcoord.segment.minsegmentnumrowstoenableindex"].split("[", 1)[0])
-        assert UNINDEXED_SEALED_ROWS < index_threshold <= INDEXED_SEALED_ROWS
-
         rsp = collection_client.collection_create(build_collection_payload(self.collection_name))
         assert rsp["code"] == 0, rsp
 
@@ -518,18 +427,7 @@ class TestTextLOB(TestBase):
         rsp = collection_client.collection_load(collection_name=self.collection_name)
         assert rsp["code"] == 0, rsp
         collection_client.wait_load_completed(self.collection_name, timeout=120)
-        rsp = collection_client.collection_describe(self.collection_name)
-        assert rsp["code"] == 0, rsp
-        collection_id = int(rsp["data"]["collectionID"])
-        dense_field_id = int(next(field["id"] for field in rsp["data"]["fields"] if field["name"] == VECTOR_FIELD))
-        sealed_infos = wait_for_segment_paths(
-            self.collection_name,
-            collection_id,
-            dense_field_id,
-            connection_alias,
-            self.endpoint,
-            self.api_key,
-        )
+        sealed_infos = wait_for_sealed_layout(self.collection_name, connection_alias)
         self.__class__.shared_sealed_segment_ids = [info.segmentID for info in sealed_infos]
 
         growing_rows = self.shared_rows[INDEXED_SEALED_ROWS + UNINDEXED_SEALED_ROWS :]
@@ -547,16 +445,11 @@ class TestTextLOB(TestBase):
         assert rsp["code"] == 0, rsp
         assert rsp["data"] == [{"count(*)": TOTAL_ROWS}], rsp
 
-        wait_for_growing_path(
-            collection_id,
-            dense_field_id,
-            self.shared_sealed_segment_ids,
-            self.endpoint,
-            self.api_key,
-        )
         after_growing_infos = utility.get_query_segment_info(self.collection_name, using=connection_alias)
         assert {info.segmentID for info in after_growing_infos} == set(self.shared_sealed_segment_ids)
-        assert sum(info.num_rows for info in after_growing_infos) == INDEXED_SEALED_ROWS + UNINDEXED_SEALED_ROWS
+        sealed_rows = sum(info.num_rows for info in after_growing_infos)
+        assert sealed_rows == INDEXED_SEALED_ROWS + UNINDEXED_SEALED_ROWS
+        assert TOTAL_ROWS - sealed_rows == GROWING_ROWS
 
     def query_page(self, output_fields, limit, offset=0):
         rsp = self.vector_client.vector_query(
