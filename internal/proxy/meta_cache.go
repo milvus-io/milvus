@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -472,6 +473,47 @@ type MetaCache struct {
 	closeOnce sync.Once
 }
 
+const (
+	metaCacheOpCollectionFill       = "collection_fill"
+	metaCacheOpPartitionFill        = "partition_fill"
+	metaCacheOpDatabaseFill         = "database_fill"
+	metaCacheOpCollectionInvalidate = "collection_invalidate"
+	metaCacheOpAliasInvalidate      = "alias_invalidate"
+	metaCacheOpAliasHolderFallback  = "alias_holder_fallback"
+	metaCacheOpPartitionInvalidate  = "partition_invalidate"
+	metaCacheOpDatabaseDrop         = "database_drop"
+	metaCacheOpDatabaseInvalidate   = "database_info_invalidate"
+)
+
+func (m *MetaCache) lockFillRead(operation string) func() {
+	observer := metrics.ProxyMetaCacheLockWaitLatency.
+		WithLabelValues(paramtable.GetStringNodeID(), "read", operation)
+	started := time.Now()
+	m.fillMu.RLock()
+	elapsed := time.Since(started)
+	observer.Observe(float64(elapsed.Microseconds()) / 1000.0)
+	return m.fillMu.RUnlock
+}
+
+func (m *MetaCache) lockFillWrite(operation string) func() {
+	observer := metrics.ProxyMetaCacheLockWaitLatency.
+		WithLabelValues(paramtable.GetStringNodeID(), "write", operation)
+	started := time.Now()
+	m.fillMu.Lock()
+	elapsed := time.Since(started)
+	observer.Observe(float64(elapsed.Microseconds()) / 1000.0)
+	return m.fillMu.Unlock
+}
+
+func observeMetaCacheInvalidation(operation string) func() {
+	observer := metrics.ProxyMetaCacheInvalidationLatency.
+		WithLabelValues(paramtable.GetStringNodeID(), operation)
+	started := time.Now()
+	return func() {
+		observer.Observe(float64(time.Since(started).Microseconds()) / 1000.0)
+	}
+}
+
 // globalMetaCache is singleton instance of Cache
 var globalMetaCache Cache
 
@@ -733,8 +775,8 @@ func (m *MetaCache) updateWithSingleflight(
 	// runs. Releasing fillMu inside update would let an invalidation evict the
 	// write-back while a post-invalidation caller could still join that old flight
 	// and receive its pre-DDL result directly, bypassing the cache maps.
-	m.fillMu.RLock()
-	defer m.fillMu.RUnlock()
+	unlockFill := m.lockFillRead(metaCacheOpCollectionFill)
+	defer unlockFill()
 
 	collection, err, _ := m.sfGlobal.Do(key, func() (*collectionInfo, error) {
 		info, err := m.update(ctx, database, collectionName, collectionID)
@@ -899,10 +941,11 @@ func (m *MetaCache) removeAliasLocked(database, alias string) {
 }
 
 func (m *MetaCache) RemoveAlias(ctx context.Context, database, alias string) {
+	defer observeMetaCacheInvalidation(metaCacheOpAliasInvalidate)()
 	// Invalidation: drain in-flight fills (e.g. a DescribeAlias write-back racing
 	// this alias DDL) before removing, see fillMu.
-	m.fillMu.Lock()
-	defer m.fillMu.Unlock()
+	unlockFill := m.lockFillWrite(metaCacheOpAliasInvalidate)
+	defer unlockFill()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.removeAliasLocked(database, alias)
@@ -922,9 +965,10 @@ func (m *MetaCache) RemoveAlias(ctx context.Context, database, alias string) {
 // unrelated eviction (a stable, name-addressed collection might never get one).
 // O(cached collections), paid only when the old target id is absent.
 func (m *MetaCache) RemoveAliasHolders(ctx context.Context, database, alias string) {
+	defer observeMetaCacheInvalidation(metaCacheOpAliasHolderFallback)()
 	// Invalidation: drain in-flight fills first, see fillMu.
-	m.fillMu.Lock()
-	defer m.fillMu.Unlock()
+	unlockFill := m.lockFillWrite(metaCacheOpAliasHolderFallback)
+	defer unlockFill()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1088,8 +1132,8 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 	// Keep the fill lock through singleflight cleanup, not only its callback.
 	// Otherwise a partition invalidation can finish after the callback unlocks
 	// while a new caller still joins the completed pre-invalidation flight.
-	m.fillMu.RLock()
-	defer m.fillMu.RUnlock()
+	unlockFill := m.lockFillRead(metaCacheOpPartitionFill)
+	defer unlockFill()
 	partitionsInfo, err, _ := m.sfPartitionCache.Do(key, func() (*partitionInfos, error) {
 		// Describe/show BY ID (collectionID resolved above), not by name: the
 		// cache key is that id, and resolving by name here would let a
@@ -1319,9 +1363,10 @@ func (m *MetaCache) removeCollectionByAliasLocked(ctx context.Context, database,
 }
 
 func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionName string) {
+	defer observeMetaCacheInvalidation(metaCacheOpCollectionInvalidate)()
 	// Invalidation: drain in-flight fills first, see fillMu.
-	m.fillMu.Lock()
-	defer m.fillMu.Unlock()
+	unlockFill := m.lockFillWrite(metaCacheOpCollectionInvalidate)
+	defer unlockFill()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1356,8 +1401,9 @@ func (m *MetaCache) InvalidateCollectionMeta(
 	collectionID UniqueID,
 	removeAlias bool,
 ) []string {
-	m.fillMu.Lock()
-	defer m.fillMu.Unlock()
+	defer observeMetaCacheInvalidation(metaCacheOpCollectionInvalidate)()
+	unlockFill := m.lockFillWrite(metaCacheOpCollectionInvalidate)
+	defer unlockFill()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1413,9 +1459,10 @@ func (m *MetaCache) InvalidateCollectionMeta(
 }
 
 func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string {
+	defer observeMetaCacheInvalidation(metaCacheOpCollectionInvalidate)()
 	// Invalidation: drain in-flight fills first, see fillMu.
-	m.fillMu.Lock()
-	defer m.fillMu.Unlock()
+	unlockFill := m.lockFillWrite(metaCacheOpCollectionInvalidate)
+	defer unlockFill()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1481,6 +1528,7 @@ func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID Uniqu
 }
 
 func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
+	defer observeMetaCacheInvalidation(metaCacheOpDatabaseDrop)()
 	mlog.Debug(ctx, "remove database", mlog.String("name", database))
 	// Invalidation: drain in-flight fills first, so a describe issued before the
 	// DropDatabase broadcast cannot write its pre-DDL response back
@@ -1501,7 +1549,7 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	// validating name hint in its database's nameIdx bucket -- update() writes
 	// both together, and a hint is only removed by the eviction that removes
 	// its entry -- so the bucket reaches every entry of this db.
-	m.fillMu.Lock()
+	unlockFill := m.lockFillWrite(metaCacheOpDatabaseDrop)
 	m.mu.Lock()
 	// O(1) under the lock: DETACH the db's hint bucket by reference and drop it
 	// from the maps -- do NOT iterate it here. Once detached, no fill or eviction
@@ -1515,7 +1563,7 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	delete(m.nameIdx, database)
 	delete(m.aliasInfo, database)
 	m.mu.Unlock()
-	m.fillMu.Unlock()
+	unlockFill()
 
 	// Collect the doomed ids from the detached bucket OUTSIDE the locks.
 	ids := make([]UniqueID, 0, len(bucket))
@@ -1555,8 +1603,9 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 // properties after this method returns. Collection metadata is deliberately
 // left untouched: AlterDatabase changes database properties only.
 func (m *MetaCache) RemoveDatabaseInfo(ctx context.Context, database string) {
-	m.fillMu.Lock()
-	defer m.fillMu.Unlock()
+	defer observeMetaCacheInvalidation(metaCacheOpDatabaseInvalidate)()
+	unlockFill := m.lockFillWrite(metaCacheOpDatabaseInvalidate)
+	defer unlockFill()
 
 	m.mu.Lock()
 	delete(m.dbInfo, database)
@@ -1581,8 +1630,8 @@ func (m *MetaCache) GetDatabaseInfo(ctx context.Context, database string) (*data
 	// Keep the fill lock through singleflight cleanup, matching collection and
 	// partition fills. RemoveDatabase/RemoveDatabaseInfo must not finish while a
 	// new caller can still join a completed pre-invalidation database flight.
-	m.fillMu.RLock()
-	defer m.fillMu.RUnlock()
+	unlockFill := m.lockFillRead(metaCacheOpDatabaseFill)
+	defer unlockFill()
 	dbInfo, err, _ := m.sfDB.Do(database, func() (*databaseInfo, error) {
 		resp, err := m.describeDatabase(ctx, database)
 		if err != nil {
@@ -1644,9 +1693,10 @@ func (m *MetaCache) AllocID(ctx context.Context) (int64, error) {
 }
 
 func (m *MetaCache) RemovePartition(ctx context.Context, database string, collectionID UniqueID, collectionName string, partitionName string) {
+	defer observeMetaCacheInvalidation(metaCacheOpPartitionInvalidate)()
 	// Invalidation: drain in-flight fills first, see fillMu.
-	m.fillMu.Lock()
-	defer m.fillMu.Unlock()
+	unlockFill := m.lockFillWrite(metaCacheOpPartitionInvalidate)
+	defer unlockFill()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

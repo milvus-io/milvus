@@ -732,12 +732,13 @@ func (ex *Executor) getCollectionInfo(ctx context.Context, collectionID int64) (
 		return nil, err
 	}
 
-	ch := ex.collectionInfoSingleflight.DoChan(fmt.Sprint(collectionID), func() (*milvuspb.DescribeCollectionResponse, error) {
+	ch := ex.collectionInfoSingleflight.DoChanRaw(fmt.Sprint(collectionID), func() (*milvuspb.DescribeCollectionResponse, error) {
 		return ex.broker.DescribeCollection(context.WithoutCancel(ctx), collectionID)
 	})
 	select {
 	case result := <-ch:
-		return result.Val, result.Err
+		collection, err, _ := conc.UnwrapSingleflightRawResult[*milvuspb.DescribeCollectionResponse](result)
+		return collection, err
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
