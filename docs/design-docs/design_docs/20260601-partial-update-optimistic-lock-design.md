@@ -2,10 +2,9 @@
 
 - **Created:** 2026-06-01
 - **Feature DRI:** @weiliu1031
-- **Primary Approver:** TBD
-- **Independent Approver:** TBD
-- **Design Review:** TBD
-- **Status:** Under Review
+- **Primary Approver:** @chyezh
+- **Independent Approver:** @liliu-z
+- **Design Review:** 2026-08-07
 - **Component:** Proxy / StreamingNode / Streaming
 - **Related Issues:** [#49980](https://github.com/milvus-io/milvus/issues/49980)
 - **Released:** N/A
