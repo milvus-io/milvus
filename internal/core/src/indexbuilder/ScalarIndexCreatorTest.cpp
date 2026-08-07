@@ -9,9 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/filesystem/operations.hpp>
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 #include <knowhere/comp/index_param.h>
 
+#include "common/Array.h"
 #include "common/CDataType.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -19,6 +22,8 @@
 #include "index/Utils.h"
 #include "storage/Util.h"
 #include "indexbuilder/IndexFactory.h"
+#include "storage/InsertData.h"
+#include "storage/PayloadReader.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -189,6 +194,126 @@ TEST(ScalarIndexCreatorTest, CreateTextMatchIndexForTextField) {
         milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
             milvus::DataType::TEXT, config, ctx);
     ASSERT_NE(creator, nullptr);
+}
+
+TEST(ScalarIndexCreatorTest, EmptyNestedIndexBuildSkipsPersistence) {
+    constexpr int64_t row_count = 8;
+    constexpr int64_t field_id = 101;
+
+    struct TestCase {
+        const char* index_type;
+        schemapb::DataType element_type;
+    };
+    const std::vector<TestCase> test_cases = {
+        {milvus::index::ASCENDING_SORT, schemapb::DataType::Int32},
+        {milvus::index::ASCENDING_SORT, schemapb::DataType::String},
+        {milvus::index::BITMAP_INDEX_TYPE, schemapb::DataType::Int32},
+        {milvus::index::BITMAP_INDEX_TYPE, schemapb::DataType::String},
+    };
+
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+
+    int64_t build_id = 2000;
+    for (const auto& test_case : test_cases) {
+        for (const auto engine_version : {1, 3}) {
+            SCOPED_TRACE(
+                fmt::format("index={}, element={}, version={}",
+                            test_case.index_type,
+                            schemapb::DataType_Name(test_case.element_type),
+                            engine_version));
+
+            schemapb::FieldSchema field_schema;
+            field_schema.set_fieldid(field_id);
+            field_schema.set_name("profile[values]");
+            field_schema.set_data_type(schemapb::DataType::Array);
+            field_schema.set_element_type(test_case.element_type);
+
+            milvus::storage::FieldDataMeta field_meta{
+                1, 2, 3, field_id, field_schema};
+            milvus::storage::IndexMeta index_meta{3, field_id, build_id, 1};
+
+            std::vector<schemapb::ScalarField> scalar_arrays(row_count);
+            std::vector<milvus::Array> arrays;
+            arrays.reserve(row_count);
+            for (auto& scalar_array : scalar_arrays) {
+                if (test_case.element_type == schemapb::DataType::String) {
+                    scalar_array.mutable_string_data();
+                } else {
+                    scalar_array.mutable_int_data();
+                }
+                arrays.emplace_back(scalar_array);
+            }
+
+            auto field_data = milvus::storage::CreateFieldData(
+                milvus::DataType::ARRAY, milvus::DataType::NONE, false);
+            field_data->FillFieldData(arrays.data(), arrays.size());
+
+            auto payload_reader =
+                std::make_shared<milvus::storage::PayloadReader>(field_data);
+            milvus::storage::InsertData insert_data(payload_reader);
+            insert_data.SetFieldDataMeta(field_meta);
+            insert_data.SetTimestamps(0, 100);
+            auto serialized =
+                insert_data.Serialize(milvus::storage::StorageType::Remote);
+
+            auto log_root = fmt::format(
+                "{}/scalar_creator_empty_nested_{}", TestRemotePath, build_id);
+            boost::filesystem::remove_all(log_root);
+            auto log_path = fmt::format("{}/insert_log", log_root);
+            chunk_manager->Write(
+                log_path, serialized.data(), serialized.size());
+
+            milvus::storage::FileManagerContext ctx(
+                field_meta, index_meta, chunk_manager, fs);
+            milvus::Config config;
+            config[milvus::index::INDEX_TYPE] = test_case.index_type;
+            config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+            config[INDEX_NUM_ROWS_KEY] = row_count;
+            config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = engine_version;
+
+            auto creator = milvus::indexbuilder::CreateScalarIndex(
+                milvus::DataType::ARRAY, config, ctx);
+            ASSERT_NO_THROW(creator->Build());
+
+            auto binary_set = creator->Serialize();
+            EXPECT_TRUE(binary_set.binary_map_.empty());
+
+            auto stats = creator->Upload();
+            ASSERT_NE(stats, nullptr);
+            EXPECT_EQ(stats->GetMemSize(), 0);
+            EXPECT_EQ(stats->GetSerializedSize(), 0);
+            EXPECT_TRUE(stats->GetIndexFiles().empty());
+
+            boost::filesystem::remove_all(log_root);
+            ++build_id;
+        }
+    }
+}
+
+TEST(ScalarIndexCreatorTest, EmptyRawIndexBuildSkipsPersistence) {
+    for (const auto* index_type :
+         {milvus::index::ASCENDING_SORT, milvus::index::BITMAP_INDEX_TYPE}) {
+        SCOPED_TRACE(fmt::format("index={}", index_type));
+
+        milvus::Config config;
+        config[milvus::index::INDEX_TYPE] = index_type;
+        auto creator = milvus::indexbuilder::CreateScalarIndex(
+            milvus::DataType::INT32,
+            config,
+            milvus::storage::FileManagerContext());
+
+        const std::vector<int32_t> data;
+        ASSERT_NO_THROW(build_index<int32_t>(creator, data));
+        EXPECT_TRUE(creator->Serialize().binary_map_.empty());
+
+        auto stats = creator->Upload();
+        ASSERT_NE(stats, nullptr);
+        EXPECT_EQ(stats->GetMemSize(), 0);
+        EXPECT_EQ(stats->GetSerializedSize(), 0);
+        EXPECT_TRUE(stats->GetIndexFiles().empty());
+    }
 }
 
 TEST(ScalarIndexCreatorTest, FMIndexParamsRejectInvalidValuesWithInputCode) {
