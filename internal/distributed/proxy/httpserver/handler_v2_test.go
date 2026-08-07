@@ -1668,11 +1668,11 @@ func TestCreateCollection(t *testing.T) {
 			return merr.Status(merr.WrapErrParameterInvalidMsg("collection TTL is out of range, expect [-1, 3155760000], got -100")), nil
 		}
 		return commonSuccessStatus, nil
-	}).Times(17)
+	}).Times(18)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(8)
 	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(7)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Times(4)
 	testEngine := initHTTPServerV2(mp, false)
 	path := versionalV2(CollectionCategory, CreateAction)
 	// quickly create collection
