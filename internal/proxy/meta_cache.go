@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -40,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -482,19 +480,12 @@ func InitMetaCache(ctx context.Context, mixCoord types.MixCoordClient) error {
 	if err != nil {
 		return err
 	}
-	expr.Register("cache", globalMetaCache)
 
 	err = privilege.InitPrivilegeCache(ctx, mixCoord)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to init privilege cache", mlog.Err(err))
 		return err
 	}
-
-	// Register password verify function for /expr endpoint authentication
-	internalhttp.RegisterPasswordVerifyFunc(PasswordVerify)
-
-	// Register get user role function for /expr endpoint RBAC check
-	internalhttp.RegisterGetUserRoleFunc(GetRole)
 
 	return nil
 }
