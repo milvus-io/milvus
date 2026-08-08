@@ -906,8 +906,8 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithAllNullVectors) {
 // This test verifies:
 // 1. CachedSearchIterator uses valid_count_per_chunk (not total row count)
 //    as chunk_size, preventing out-of-bounds reads
-// 2. TransformOffset is applied after NextBatch, converting physical offsets
-//    (valid-only) back to logical offsets (including nulls)
+// 2. Knowhere BF receives each chunk's physical->logical id window and returns
+//    logical offsets directly.
 TEST(test_chunk_segment, TestSearchIteratorOnSealedWithPartialNullVectors) {
     int dim = 16;
     int chunk_num = 2;
@@ -1020,9 +1020,6 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithPartialNullVectors) {
     SearchResult search_result;
     milvus::OpContext op_context;
 
-    // This exercises both fixes:
-    // Fix 1: CachedSearchIterator uses valid_count_per_chunk as chunk_size
-    // Fix 2: TransformOffset converts physical -> logical offsets
     query::SearchOnSealedColumn(*schema,
                                 column.get(),
                                 search_info,

@@ -90,38 +90,16 @@ SearchOnSealedIndex(const Schema& schema,
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 
-    const auto& offset_mapping = vec_index->GetOffsetMapping();
     const bool is_element_level_search = search_info.array_offsets_ != nullptr;
     search_result.element_level_ = is_element_level_search;
-    TargetBitmap transformed_bitset;
     BitsetView search_bitset = bitset;
-    const auto has_offset_mapping =
-        offset_mapping.IsEnabled() && !is_element_level_search;
-    if (has_offset_mapping) {
-        if (offset_mapping.GetValidCount() == 0) {
-            FillEmptySearchResult(search_result, num_queries, topK);
-            return;
-        }
-        if (!bitset.empty()) {
-            auto status =
-                offset_mapping.TransformBitset(bitset, transformed_bitset);
-            if (status == OffsetMapping::BitsetTransformStatus::AllFiltered) {
-                FillEmptySearchResult(search_result, num_queries, topK);
-                return;
-            }
-            search_bitset =
-                status == OffsetMapping::BitsetTransformStatus::NoFilter
-                    ? BitsetView{}
-                    : search_result.PinBitset(std::move(transformed_bitset));
-        }
-    }
 
     if (search_info.iterator_v2_info_.has_value()) {
         CachedSearchIterator cached_iter(
             *vec_index, dataset, search_info, search_bitset, op_context);
         cached_iter.NextBatch(search_info, search_result);
-        FinalizeVectorSearchOffsets(
-            search_result, offset_mapping, search_info.array_offsets_.get());
+        FinalizeVectorSearchOffsets(search_result,
+                                    search_info.array_offsets_.get());
         return;
     }
 
@@ -139,7 +117,6 @@ SearchOnSealedIndex(const Schema& schema,
     }
     FinalizeVectorSearchOffsets(
         search_result,
-        offset_mapping,
         use_iterator ? nullptr : search_info.array_offsets_.get());
     if (use_iterator) {
         search_result.resource_pins_.emplace_back(std::move(accessor));
@@ -198,7 +175,6 @@ SearchOnSealedColumn(const Schema& schema,
         field.get_data_type() == DataType::VECTOR_ARRAY &&
         search_info.array_offsets_ != nullptr;
     result.element_level_ = is_element_level_search;
-    TargetBitmap transformed_bitset;
     BitsetView search_bitview = bitview;
     const auto has_offset_mapping =
         needs_offset_mapping && offset_mapping.IsEnabled();
@@ -207,18 +183,6 @@ SearchOnSealedColumn(const Schema& schema,
             // All vectors are null, return empty result
             FillEmptySearchResult(result, num_queries, search_info.topk_);
             return;
-        }
-        if (!bitview.empty()) {
-            auto status =
-                offset_mapping.TransformBitset(bitview, transformed_bitset);
-            if (status == OffsetMapping::BitsetTransformStatus::AllFiltered) {
-                FillEmptySearchResult(result, num_queries, search_info.topk_);
-                return;
-            }
-            search_bitview =
-                status == OffsetMapping::BitsetTransformStatus::NoFilter
-                    ? BitsetView{}
-                    : result.PinBitset(std::move(transformed_bitset));
         }
     }
 
@@ -245,8 +209,7 @@ SearchOnSealedColumn(const Schema& schema,
                                          search_bitview,
                                          data_type);
         cached_iter.NextBatch(search_info, result);
-        FinalizeVectorSearchOffsets(
-            result, offset_mapping, search_info.array_offsets_.get());
+        FinalizeVectorSearchOffsets(result, search_info.array_offsets_.get());
         return;
     }
 
@@ -259,7 +222,7 @@ SearchOnSealedColumn(const Schema& schema,
                              search_info.metric_type_,
                              search_info.round_decimal_);
 
-    auto offset = 0;
+    int64_t offset = 0;
     auto vector_chunks = column->GetAllChunks(op_context);
     for (int i = 0; i < num_chunk; ++i) {
         const auto& pw = vector_chunks[i];
@@ -278,6 +241,12 @@ SearchOnSealedColumn(const Schema& schema,
 
         auto raw_dataset =
             query::dataset::RawDataset{offset, dim, chunk_size, vec_data};
+        auto chunk_bitview = search_bitview;
+        if (has_offset_mapping) {
+            chunk_bitview = AttachOffsetMappingIds(
+                search_bitview,
+                offset_mapping.GetPhysicalToLogicalIds(offset, chunk_size));
+        }
 
         PinWrapper<const size_t*> offsets_pw;
         if (data_type == DataType::VECTOR_ARRAY) {
@@ -302,7 +271,7 @@ SearchOnSealedColumn(const Schema& schema,
                                                            raw_dataset,
                                                            search_info,
                                                            index_info,
-                                                           search_bitview,
+                                                           chunk_bitview,
                                                            data_type);
             final_qr.merge(sub_qr);
         } else {
@@ -310,7 +279,7 @@ SearchOnSealedColumn(const Schema& schema,
                                            raw_dataset,
                                            search_info,
                                            index_info,
-                                           search_bitview,
+                                           chunk_bitview,
                                            data_type,
                                            element_type,
                                            op_context);
@@ -320,16 +289,9 @@ SearchOnSealedColumn(const Schema& schema,
     }
     if (use_vector_iterator) {
         bool larger_is_closer = PositivelyRelated(search_info.metric_type_);
-        // Element-level search skips row-level mapping (element IDs are
-        // not row-aligned); see ChunkMergeIterator ctor.
-        const milvus::OffsetMapping* iter_offset_mapping =
-            (search_info.array_offsets_ != nullptr || !has_offset_mapping)
-                ? nullptr
-                : &offset_mapping;
         result.AssembleChunkVectorIterators(num_queries,
                                             num_chunk,
                                             final_qr.chunk_iterators(),
-                                            iter_offset_mapping,
                                             larger_is_closer);
     } else {
         // See FinalizeVectorSearchOffsets for the rationale: element-level
@@ -342,9 +304,6 @@ SearchOnSealedColumn(const Schema& schema,
             result.element_indices_ = std::move(elem_indicies);
             result.element_level_ = true;
         } else {
-            if (has_offset_mapping) {
-                offset_mapping.TransformOffsets(final_qr.mutable_offsets());
-            }
             result.seg_offsets_ = std::move(final_qr.mutable_offsets());
         }
         result.distances_ = std::move(final_qr.mutable_distances());
