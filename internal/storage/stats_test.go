@@ -277,6 +277,7 @@ func TestBM25Stats_MemSize(t *testing.T) {
 	}
 	bytesPerEntry := paramtable.Get().QueryNodeCfg.BM25StatsBytesPerEntry.GetAsInt64()
 	assert.Equal(t, int64(120)+100*bytesPerEntry, stats.MemSize())
+	assert.Equal(t, int64(820), stats.MemSizeWithBytesPerEntry(7))
 }
 
 func TestBM25Stats_DeserializeFromReader(t *testing.T) {

@@ -90,6 +90,29 @@ func (u *ManifestUpdates) isEmpty() bool {
 func CommitManifestUpdates(basePath string, baseVersion int64,
 	storageConfig *indexpb.StorageConfig, updates *ManifestUpdates,
 ) (string, error) {
+	return commitManifestUpdates(basePath, baseVersion, storageConfig, updates,
+		C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
+}
+
+// CommitManifestUpdatesStrict commits without letting the transaction resolve a
+// conflict on its own: read_version is pinned and a conflict is an error.
+//
+// Use this whenever the staged operations are NOT idempotent. OVERWRITE resolves
+// a conflict by re-reading the latest version and re-applying the staged
+// changes on top of it (see getRetryLimit), which is correct for update_stat —
+// replace-by-key — and wrong for add_column_group / add_delta_log, where
+// re-applying appends the same files a second time.
+func CommitManifestUpdatesStrict(basePath string, baseVersion int64,
+	storageConfig *indexpb.StorageConfig, updates *ManifestUpdates,
+) (string, error) {
+	return commitManifestUpdates(basePath, baseVersion, storageConfig, updates,
+		C.LOON_TRANSACTION_RESOLVE_FAIL, C.uint32_t(1))
+}
+
+func commitManifestUpdates(basePath string, baseVersion int64,
+	storageConfig *indexpb.StorageConfig, updates *ManifestUpdates,
+	resolveID C.int32_t, retryLimit C.uint32_t,
+) (string, error) {
 	if updates.isEmpty() {
 		return MarshalManifestPath(basePath, baseVersion), nil
 	}
@@ -111,9 +134,7 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 	// AddStatsToManifest behavior.
 	var handle C.LoonTransactionHandle
 	res := C.loon_transaction_begin(cBasePath, cProperties,
-		C.int64_t(baseVersion),
-		C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
-		getRetryLimit(), &handle)
+		C.int64_t(baseVersion), resolveID, retryLimit, &handle)
 	if err := HandleLoonFFIResult(res); err != nil {
 		// HandleLoonFFIResult returns a bare ErrLoonTransient chain; give it the
 		// storage wire code like transaction.go does, instead of leaking 65535.

@@ -114,6 +114,52 @@ func (_c *MockTask_Checkpoint_Call) RunAndReturn(run func() *msgpb.MsgPosition) 
 	return _c
 }
 
+// Commit provides a mock function with given fields: _a0
+func (_m *MockTask) Commit(_a0 context.Context) error {
+	ret := _m.Called(_a0)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Commit")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(_a0)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockTask_Commit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Commit'
+type MockTask_Commit_Call struct {
+	*mock.Call
+}
+
+// Commit is a helper method to define mock.On call
+//   - _a0 context.Context
+func (_e *MockTask_Expecter) Commit(_a0 interface{}) *MockTask_Commit_Call {
+	return &MockTask_Commit_Call{Call: _e.mock.On("Commit", _a0)}
+}
+
+func (_c *MockTask_Commit_Call) Run(run func(_a0 context.Context)) *MockTask_Commit_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockTask_Commit_Call) Return(_a0 error) *MockTask_Commit_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTask_Commit_Call) RunAndReturn(run func(context.Context) error) *MockTask_Commit_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // HandleError provides a mock function with given fields: _a0
 func (_m *MockTask) HandleError(_a0 error) {
 	_m.Called(_a0)
@@ -237,12 +283,12 @@ func (_c *MockTask_IsFlush_Call) RunAndReturn(run func() bool) *MockTask_IsFlush
 	return _c
 }
 
-// Run provides a mock function with given fields: _a0
-func (_m *MockTask) Run(_a0 context.Context) error {
+// Prepare provides a mock function with given fields: _a0
+func (_m *MockTask) Prepare(_a0 context.Context) error {
 	ret := _m.Called(_a0)
 
 	if len(ret) == 0 {
-		panic("no return value specified for Run")
+		panic("no return value specified for Prepare")
 	}
 
 	var r0 error
@@ -255,30 +301,30 @@ func (_m *MockTask) Run(_a0 context.Context) error {
 	return r0
 }
 
-// MockTask_Run_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Run'
-type MockTask_Run_Call struct {
+// MockTask_Prepare_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Prepare'
+type MockTask_Prepare_Call struct {
 	*mock.Call
 }
 
-// Run is a helper method to define mock.On call
+// Prepare is a helper method to define mock.On call
 //   - _a0 context.Context
-func (_e *MockTask_Expecter) Run(_a0 interface{}) *MockTask_Run_Call {
-	return &MockTask_Run_Call{Call: _e.mock.On("Run", _a0)}
+func (_e *MockTask_Expecter) Prepare(_a0 interface{}) *MockTask_Prepare_Call {
+	return &MockTask_Prepare_Call{Call: _e.mock.On("Prepare", _a0)}
 }
 
-func (_c *MockTask_Run_Call) Run(run func(_a0 context.Context)) *MockTask_Run_Call {
+func (_c *MockTask_Prepare_Call) Run(run func(_a0 context.Context)) *MockTask_Prepare_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context))
 	})
 	return _c
 }
 
-func (_c *MockTask_Run_Call) Return(_a0 error) *MockTask_Run_Call {
+func (_c *MockTask_Prepare_Call) Return(_a0 error) *MockTask_Prepare_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockTask_Run_Call) RunAndReturn(run func(context.Context) error) *MockTask_Run_Call {
+func (_c *MockTask_Prepare_Call) RunAndReturn(run func(context.Context) error) *MockTask_Prepare_Call {
 	_c.Call.Return(run)
 	return _c
 }

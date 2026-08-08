@@ -21,7 +21,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -97,12 +96,6 @@ func (f SegmentFilterFunc) AddFilter(criterion *segmentCriterion) {
 	criterion.others = append(criterion.others, f)
 }
 
-func WithPartitionID(partitionID int64) SegmentFilter {
-	return SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return partitionID == common.AllPartitionsID || info.partitionID == partitionID
-	})
-}
-
 func WithPartitionIDs(partitionIDs []int64) SegmentFilter {
 	return SegmentFilterFunc(func(info *SegmentInfo) bool {
 		idSet := typeutil.NewSet(partitionIDs...)
@@ -129,14 +122,6 @@ func WithNoSyncingTask() SegmentFilter {
 }
 
 type SegmentAction func(info *SegmentInfo)
-
-func SegmentActions(actions ...SegmentAction) SegmentAction {
-	return func(info *SegmentInfo) {
-		for _, act := range actions {
-			act(info)
-		}
-	}
-}
 
 func UpdateBinlogs(binlogs []*datapb.FieldBinlog) SegmentAction {
 	return func(info *SegmentInfo) {
@@ -188,12 +173,6 @@ func SetStartPositionIfNil(startPos *msgpb.MsgPosition) SegmentAction {
 	}
 }
 
-func SetStorageVersion(version int64) SegmentAction {
-	return func(info *SegmentInfo) {
-		info.storageVersion = version
-	}
-}
-
 func UpdateBufferedRows(bufferedRows int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.bufferRows = bufferedRows
@@ -239,6 +218,16 @@ func AbortSyncing(batchSize int64) SegmentAction {
 	}
 }
 
+// DiscardSyncing removes a task's syncing ownership without pretending that
+// its payload was restored to the write buffer. Use AbortSyncing only when the
+// exact batch is actually put back into a buffer.
+func DiscardSyncing(batchSize int64) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.syncingRows -= batchSize
+		info.syncingTasks--
+	}
+}
+
 func FinishSyncing(batchSize int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.flushedRows += batchSize
@@ -250,6 +239,18 @@ func FinishSyncing(batchSize int64) SegmentAction {
 func UpdateCurrentSplit(split []storagecommon.ColumnGroup) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.currentSplit = split
+	}
+}
+
+// SetCurrentSplitIfNil fixes a segment's physical column layout before
+// concurrent storage prepares start. The split is derived state: installing it
+// early does not advance the segment checkpoint, and a WAL replay can derive it
+// again if the process exits before metadata commit.
+func SetCurrentSplitIfNil(split []storagecommon.ColumnGroup) SegmentAction {
+	return func(info *SegmentInfo) {
+		if info.currentSplit == nil {
+			info.currentSplit = split
+		}
 	}
 }
 

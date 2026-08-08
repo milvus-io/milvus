@@ -38,7 +38,7 @@ type BufferManager interface {
 	// RemoveChannel removes a write buffer from manager.
 	RemoveChannel(channel string)
 	// DropChannel remove write buffer and perform drop.
-	DropChannel(channel string)
+	DropChannel(ctx context.Context, channel string)
 	DropPartitions(channel string, partitionIDs []int64)
 	// BufferData put data into channel write buffer.
 	BufferData(channel string, insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error
@@ -81,6 +81,10 @@ type bufferManager struct {
 
 	wg sync.WaitGroup
 	ch lifetime.SafeChan
+}
+
+type evictableMemoryWriteBuffer interface {
+	EvictableMemorySize() int64
 }
 
 func (m *bufferManager) Start() {
@@ -141,8 +145,12 @@ func (m *bufferManager) memoryCheck() {
 		m.buffers.Range(func(chanName string, buf WriteBuffer) bool {
 			size := buf.MemorySize()
 			total += size
-			if size > candiSize {
-				candiSize = size
+			evictable := size
+			if sized, ok := buf.(evictableMemoryWriteBuffer); ok {
+				evictable = sized.EvictableMemorySize()
+			}
+			if evictable > candiSize {
+				candiSize = evictable
 				candidate = buf
 				candiChan = chanName
 			}
@@ -158,10 +166,21 @@ func (m *bufferManager) memoryCheck() {
 			return
 		}
 
-		if candidate != nil {
-			candidate.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
-			mlog.Info(context.TODO(), "notify writebuffer to sync",
-				mlog.String("channel", candiChan), mlog.Float64("bufferSize(MB)", logutil.ToMB(float64(candiSize))))
+		if candidate == nil {
+			mlog.RatedWarn(context.TODO(), rate.Limit(20), "memory watermark exceeded by in-flight flush payload",
+				mlog.Float64("current_total_memory_usage", logutil.ToMB(float64(total))),
+				mlog.Float64("current_memory_watermark", logutil.ToMB(memoryWatermark)))
+			return
+		}
+
+		candidate.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
+		mlog.Info(context.TODO(), "notify writebuffer to sync",
+			mlog.String("channel", candiChan), mlog.Float64("bufferSize(MB)", logutil.ToMB(float64(candiSize))))
+		if sized, ok := candidate.(evictableMemoryWriteBuffer); ok && sized.EvictableMemorySize() >= candiSize {
+			mlog.RatedWarn(context.TODO(), rate.Limit(20), "memory force sync made no progress",
+				mlog.String("channel", candiChan),
+				mlog.Float64("evictable_memory", logutil.ToMB(float64(candiSize))))
+			return
 		}
 	}
 }
@@ -319,19 +338,32 @@ func (m *bufferManager) RemoveChannel(channel string) {
 		return
 	}
 
-	buf.Close(context.Background(), false)
+	// Bound the shutdown drain the same way DropChannel is bounded: the
+	// non-drop Close waits for in-flight syncs, and an unbounded wait here
+	// hangs channel release / flusher shutdown behind a stuck native write.
+	closeCtx, cancel := context.WithTimeout(
+		context.Background(),
+		paramtable.Get().DataNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second),
+	)
+	defer cancel()
+	buf.Close(closeCtx, false)
 }
 
 // DropChannel removes channel WriteBuffer and process `DropChannel`
 // this method will save all buffered data
-func (m *bufferManager) DropChannel(channel string) {
+func (m *bufferManager) DropChannel(ctx context.Context, channel string) {
 	buf, loaded := m.buffers.GetAndRemove(channel)
 	if !loaded {
 		mlog.Warn(context.TODO(), "failed to drop channel, channel not maintained in manager", mlog.String("channel", channel))
 		return
 	}
 
-	buf.Close(context.Background(), true)
+	dropCtx, cancel := context.WithTimeout(
+		ctx,
+		paramtable.Get().DataNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second),
+	)
+	defer cancel()
+	buf.Close(dropCtx, true)
 }
 
 func (m *bufferManager) DropPartitions(channel string, partitionIDs []int64) {

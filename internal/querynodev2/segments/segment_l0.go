@@ -92,6 +92,10 @@ func (s *L0Segment) RowNum() int64 {
 	return 0
 }
 
+func (s *L0Segment) AckedRowCount() int64 {
+	return 0
+}
+
 func (s *L0Segment) MemSize() int64 {
 	s.dataGuard.RLock()
 	defer s.dataGuard.RUnlock()

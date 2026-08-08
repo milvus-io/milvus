@@ -60,6 +60,10 @@ type SyncPack struct {
 	level        datapb.SegmentLevel
 	// error handler function
 	errHandler func(err error)
+
+	// Prepared per-batch statistics are immutable task output. They are folded
+	// into the live metacache only by the segment-ordered Commit stage.
+	preparedPKStats *storage.PrimaryKeyStats
 }
 
 func (p *SyncPack) WithInsertData(insertData []*storage.InsertData) *SyncPack {
@@ -144,8 +148,11 @@ func (p *SyncPack) WithDataSource(source string) *SyncPack {
 	return p
 }
 
+// ReleaseData frees the row payload. bm25Stats is deliberately NOT cleared
+// here: it is not row data but metadata Commit still needs — the metacache
+// merge moved from the writers into the Commit transaction, and Prepare
+// releases the payload before Commit runs. Commit clears it after merging.
 func (p *SyncPack) ReleaseData() {
 	p.insertData = nil
 	p.deltaData = nil
-	p.bm25Stats = nil
 }

@@ -74,12 +74,195 @@ type BulkPackWriterV3 struct {
 	statsBlobSize int64
 }
 
+type preparedV3Write struct {
+	bw           *BulkPackWriterV3
+	segmentID    int64
+	basePath     string
+	initialStats map[string]packed.ManifestStat
+	updates      *packed.ManifestUpdates
+
+	// commitAttempted records that THIS handle already ran a commit whose
+	// answer may have been lost. It is what licenses Commit to adopt a landed
+	// base+1 version as its own: a fresh handle (for example a task rebuilt
+	// from WAL replay after a restart) sees the same base+1, but that version
+	// belongs to a previous incarnation whose batch boundary may differ, and
+	// adopting it would advance the checkpoint past data the manifest does
+	// not cover.
+	commitAttempted bool
+}
+
+type preparedV3Result struct {
+	inserts       map[int64]*datapb.FieldBinlog
+	deltas        *datapb.FieldBinlog
+	stats         map[int64]*datapb.FieldBinlog
+	bm25Stats     map[int64]*datapb.FieldBinlog
+	size          int64
+	statsBlobSize int64
+	digested      bool
+	commit        *preparedV3Write
+}
+
+func manifestStatMemory(stat packed.ManifestStat) int64 {
+	value, _ := strconv.ParseInt(stat.Metadata["memory_size"], 10, 64)
+	return value
+}
+
+func rebaseManifestStats(current, initial map[string]packed.ManifestStat, updates []packed.StatEntry) []packed.StatEntry {
+	result := make([]packed.StatEntry, 0, len(updates))
+	for _, update := range updates {
+		seen := make(map[string]struct{})
+		files := make([]string, 0)
+		if stat, ok := current[update.Key]; ok {
+			for _, file := range stat.Paths {
+				if _, exists := seen[file]; !exists {
+					seen[file] = struct{}{}
+					files = append(files, file)
+				}
+			}
+		}
+		initialFiles := make(map[string]struct{})
+		for _, file := range initial[update.Key].Paths {
+			initialFiles[file] = struct{}{}
+		}
+		for _, file := range update.Files {
+			if _, old := initialFiles[file]; old {
+				continue
+			}
+			if _, exists := seen[file]; !exists {
+				seen[file] = struct{}{}
+				files = append(files, file)
+			}
+		}
+
+		metadata := make(map[string]string)
+		if stat, ok := current[update.Key]; ok {
+			for key, value := range stat.Metadata {
+				metadata[key] = value
+			}
+		}
+		for key, value := range update.Metadata {
+			metadata[key] = value
+		}
+		if _, ok := update.Metadata["memory_size"]; ok {
+			delta := manifestStatMemory(packed.ManifestStat{Metadata: update.Metadata}) - manifestStatMemory(initial[update.Key])
+			if delta < 0 {
+				delta = 0
+			}
+			metadata["memory_size"] = strconv.FormatInt(manifestStatMemory(current[update.Key])+delta, 10)
+		}
+		result = append(result, packed.StatEntry{Key: update.Key, Files: files, Metadata: metadata})
+	}
+	return result
+}
+
+func (p *preparedV3Write) Commit(ctx context.Context) (string, error) {
+	segment, ok := p.bw.metaCache.GetSegmentByID(p.segmentID)
+	if !ok {
+		return "", merr.WrapErrSegmentNotFound(p.segmentID)
+	}
+	currentPath := segment.ManifestPath()
+	basePath, baseVersion, err := packed.UnmarshalManifestPath(currentPath)
+	if err != nil {
+		return "", err
+	}
+	preparedBasePath, preparedBaseVersion, err := packed.UnmarshalManifestPath(p.bw.initialManifestPath)
+	if err != nil {
+		return "", err
+	}
+	// SyncTask Prepare may have observed an older manifest than the one now in
+	// metacache, while direct BulkPackWriterV3.Write callers may explicitly pass
+	// a newer manifest before updating metacache. In both cases Commit must rebase
+	// on the newest known version.
+	if basePath == "" || preparedBaseVersion > baseVersion {
+		currentPath = p.bw.initialManifestPath
+		basePath = preparedBasePath
+		baseVersion = preparedBaseVersion
+	}
+	if basePath == "" {
+		basePath = p.basePath
+	}
+	// In the normal path currentPath IS the manifest Prepare already read
+	// (single writer per segment, version unchanged), so p.initialStats holds
+	// the identical content and re-reading it would be one more object-storage
+	// GET per sync for the same bytes. Only a genuinely newer manifest — the
+	// metacache advanced past what Prepare observed — needs a fresh read to
+	// rebase onto.
+	currentStats := p.initialStats
+	if baseVersion != packed.ManifestEarliest && currentPath != p.bw.initialManifestPath {
+		currentStats, err = packed.GetManifestStats(currentPath, p.bw.storageConfig)
+		if err != nil {
+			return "", err
+		}
+	}
+	updates := &packed.ManifestUpdates{
+		NewFiles:  p.updates.NewFiles,
+		DeltaLogs: p.updates.DeltaLogs,
+		Stats:     rebaseManifestStats(currentStats, p.initialStats, p.updates.Stats),
+	}
+	// Nobody else writes this segment's manifest while it is being flushed: the
+	// dispatcher serializes commits per segment, and the stats tasks that DO
+	// share a manifest only run once the segment is flushed. So any version
+	// beyond the one we based on can only be our own previous attempt, landed
+	// but unacknowledged.
+	//
+	// That is why this must not use the resolving commit: OVERWRITE recovers
+	// from a conflict by re-reading the latest version and re-applying the
+	// staged changes on top of it, which for add_column_group / add_delta_log
+	// means registering the same files twice.
+	// A brand-new segment has no manifest yet and the read fails; that is the
+	// one case where there is nothing to compare against.
+	if latest, err := packed.GetLatestManifestVersion(basePath, p.bw.storageConfig); err == nil {
+		switch {
+		case latest == baseVersion:
+			// Nothing landed since we read; commit normally below.
+		case latest == baseVersion+1 && p.commitAttempted:
+			// Our previous attempt committed and we never saw the answer. The
+			// version it produced already IS the intended result, so adopt it
+			// instead of writing another one. Adoption is gated on
+			// commitAttempted: only the handle that ran that attempt may claim
+			// it. A fresh handle seeing base+1 means a PREVIOUS incarnation
+			// (crashed before its DataCoord ack) landed it, and its batch
+			// boundary is unknown — that falls through to the terminal branch
+			// below instead of silently adopting a manifest that may not cover
+			// this task's rows.
+			return packed.MarshalManifestPath(basePath, latest), nil
+		default:
+			// Either the single-writer assumption is broken, or versions do not
+			// advance by one. Both mean this task cannot reason about what it
+			// would be committing on top of.
+			return "", merr.WrapErrDataIntegrityMsg(
+				"unexpected manifest version for segment %d: based on %d, storage has %d, commitAttempted=%t, basePath=%s",
+				p.segmentID, baseVersion, latest, p.commitAttempted, basePath)
+		}
+	} else if baseVersion != packed.ManifestEarliest {
+		return "", err
+	}
+
+	// From here on a lost answer is indistinguishable from a lost commit, so
+	// mark the attempt BEFORE issuing it — that is what licenses the next run
+	// of this same handle to adopt a landed base+1.
+	p.commitAttempted = true
+	manifest, commitErr := packed.CommitManifestUpdatesStrict(basePath, baseVersion, p.bw.storageConfig, updates)
+	if commitErr != nil {
+		return "", classifyLoonErr(commitErr)
+	}
+	return manifest, nil
+}
+
+func (p *preparedV3Write) Destroy() {
+	if p != nil && p.updates != nil && p.updates.NewFiles != nil {
+		p.updates.NewFiles.Destroy()
+		p.updates.NewFiles = nil
+	}
+}
+
 func NewBulkPackWriterV3(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
 	allocator allocator.Interface, bufferSize, multiPartUploadSize int64,
-	storageConfig *indexpb.StorageConfig, columnGroups []storagecommon.ColumnGroup, curManifestPath string, writeRetryOpts ...retry.Option,
+	storageConfig *indexpb.StorageConfig, columnGroups []storagecommon.ColumnGroup, curManifestPath string,
+	ioRetryAttempts uint,
 ) *BulkPackWriterV3 {
 	bwV2 := NewBulkPackWriterV2(metaCache, schema, chunkManager, allocator, bufferSize,
-		multiPartUploadSize, storageConfig, columnGroups, writeRetryOpts...)
+		multiPartUploadSize, storageConfig, columnGroups, ioRetryAttempts)
 	return &BulkPackWriterV3{
 		BulkPackWriterV2: bwV2,
 		manifestPath:     curManifestPath,
@@ -173,13 +356,43 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	segmentStats *datapb.Statistics,
 	err error,
 ) {
+	prepared, err := bw.Prepare(ctx, pack)
+	if err != nil {
+		return nil, nil, nil, nil, "", 0, nil, err
+	}
+	defer prepared.commit.Destroy()
+	manifest, err = prepared.commit.Commit(ctx)
+	if err != nil {
+		return nil, nil, nil, nil, "", 0, nil, err
+	}
+	bw.manifestPath = manifest
+	segmentStats, err = bw.finalizeStats(pack, prepared.digested, prepared.inserts, prepared.deltas, prepared.statsBlobSize)
+	return prepared.inserts, prepared.deltas, prepared.stats, prepared.bm25Stats, manifest, prepared.size, segmentStats, err
+}
+
+func (bw *BulkPackWriterV3) Prepare(ctx context.Context, pack *SyncPack) (result *preparedV3Result, err error) {
 	bw.initialManifestPath = bw.manifestPath
 	bw.statsBlobSize = 0
 
-	basePath, baseVersion, parseErr := packed.UnmarshalManifestPath(bw.initialManifestPath)
+	basePath, _, parseErr := packed.UnmarshalManifestPath(bw.initialManifestPath)
 	if parseErr != nil {
-		err = parseErr
-		return
+		return nil, parseErr
+	}
+
+	// Read the manifest stats ONCE for the whole Prepare. Nobody else writes
+	// this segment's manifest while it is being flushed, so writeStats,
+	// writeBM25Stasts and the Commit-rebase baseline would all read the exact
+	// same bytes — at one object-storage GET each, on the critical path, per
+	// sync. A transient read failure must NOT be swallowed: under loon replace
+	// semantics a committed StatEntry missing the prior per-batch paths would
+	// silently truncate the flush compound (bloom PKs / BM25 IDF), so
+	// propagate and let the sync retry.
+	initialStats := map[string]packed.ManifestStat{}
+	if bw.hasExistingManifest() {
+		initialStats, err = packed.GetManifestStats(bw.initialManifestPath, bw.storageConfig)
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to read manifest stats")
+		}
 	}
 
 	// Phase 1: write files. Each helper returns its contribution to the
@@ -191,26 +404,30 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 		bm25Entries  []packed.StatEntry
 	)
 	defer func() {
-		if insertFiles != nil {
+		if err != nil && insertFiles != nil {
 			insertFiles.Destroy()
 		}
 	}()
 
-	if inserts, insertFiles, err = bw.writeInserts(ctx, pack, basePath); err != nil {
+	inserts, insertFiles, err := bw.writeInserts(ctx, pack, basePath)
+	if err != nil {
 		mlog.Warn(ctx, "failed to write insert data", mlog.Err(err))
-		return
+		return nil, err
 	}
-	if statEntries, err = bw.writeStats(ctx, pack, basePath); err != nil {
+	statEntries, err = bw.writeStats(ctx, pack, basePath, initialStats)
+	if err != nil {
 		mlog.Warn(ctx, "failed to process stats blob", mlog.Err(err))
-		return
+		return nil, err
 	}
-	if deltas, deltaEntries, err = bw.writeDelta(ctx, pack, basePath); err != nil {
+	deltas, deltaEntries, err := bw.writeDelta(ctx, pack, basePath)
+	if err != nil {
 		mlog.Warn(ctx, "failed to process delta blob", mlog.Err(err))
-		return
+		return nil, err
 	}
-	if bm25Entries, err = bw.writeBM25Stasts(ctx, pack, basePath); err != nil {
+	bm25Entries, err = bw.writeBM25Stasts(ctx, pack, basePath, initialStats)
+	if err != nil {
 		mlog.Warn(ctx, "failed to process bm25 stats blob", mlog.Err(err))
-		return
+		return nil, err
 	}
 
 	updates := &packed.ManifestUpdates{
@@ -219,32 +436,23 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 		Stats:     append(statEntries, bm25Entries...),
 	}
 
-	// Phase 2: commit the assembled updates. CommitManifestUpdates short-
-	// circuits to the unchanged manifest path when updates carry nothing.
-	// The outer retry.Do handles transient FFI errors classified as
-	// packed.ErrLoonTransient; loon's own optimistic retry covers
-	// manifest-version conflicts within a single attempt.
-	err = retry.Do(ctx, func() error {
-		newPath, commitErr := packed.CommitManifestUpdates(basePath, baseVersion, bw.storageConfig, updates)
-		if commitErr != nil {
-			return classifyLoonErr(commitErr)
-		}
-		bw.manifestPath = newPath
-		return nil
-	}, bw.writeRetryOpts...)
-	if err != nil {
-		return
-	}
-
 	digested := len(inserts) > 0 || bw.statsBlobSize > 0 || len(deltas.GetBinlogs()) > 0
-
-	manifest = bw.manifestPath
-	size = bw.sizeWritten
-
-	// V3 feeds the tracked statsBlobSize instead of summing a stats array (it
-	// returns no stats array); finalizeStats produces the cumulative Statistics.
-	segmentStats, err = bw.finalizeStats(pack, digested, inserts, deltas, bw.statsBlobSize)
-	return
+	return &preparedV3Result{
+		inserts:       inserts,
+		deltas:        deltas,
+		stats:         make(map[int64]*datapb.FieldBinlog),
+		bm25Stats:     make(map[int64]*datapb.FieldBinlog),
+		size:          bw.sizeWritten,
+		statsBlobSize: bw.statsBlobSize,
+		digested:      digested,
+		commit: &preparedV3Write{
+			bw:           bw,
+			segmentID:    pack.segmentID,
+			basePath:     basePath,
+			initialStats: initialStats,
+			updates:      updates,
+		},
+	}, nil
 }
 
 // classifyLoonErr maps loon FFI failures to retryable errors and everything
@@ -498,7 +706,7 @@ func (bw *BulkPackWriterV3) hasExistingManifest() bool {
 // writeStats writes bloom filter stat blobs under basePath/_stats and
 // returns the resulting StatEntry list. The caller folds the entries into
 // a ManifestUpdates that commits atomically with inserts / delta / bm25.
-func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, basePath string) ([]packed.StatEntry, error) {
+func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, basePath string, manifestStats map[string]packed.ManifestStat) ([]packed.StatEntry, error) {
 	if len(pack.insertData) == 0 {
 		return nil, nil
 	}
@@ -527,17 +735,9 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, base
 	// merge previously written files into the new entry.
 	statKey := fmt.Sprintf("bloom_filter.%d", pkFieldID)
 	var priorBloomPaths []string
-	if bw.hasExistingManifest() {
-		// A transient manifest read failure must NOT be swallowed: under loon
-		// replace semantics the committed StatEntry would then drop the prior
-		// per-batch paths, so the flush compound would hold only this sync's PKs
-		// — losing prior-batch PKs for delete-routing / PK-pruning. Propagate so
-		// the sync retries instead of persisting a truncated bloom set.
-		existingStats, err := packed.GetManifestStats(bw.initialManifestPath, bw.storageConfig)
-		if err != nil {
-			return nil, merr.Wrap(err, "failed to read prior bloom stats from manifest")
-		}
-		if existing, ok := existingStats[statKey]; ok && len(existing.Paths) > 0 {
+	{
+		// manifestStats is Prepare's single read of the pre-commit manifest.
+		if existing, ok := manifestStats[statKey]; ok && len(existing.Paths) > 0 {
 			// These are the prior syncs' per-batch bloom paths (already absolute,
 			// chunkManager-readable). Reused by the flush merge below so we don't
 			// re-read the manifest via a StatsResolver. Exclude any compound blob
@@ -610,7 +810,7 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack, base
 // writeBM25Stasts writes BM25 stat blobs under basePath/_stats and returns
 // the resulting StatEntry list. The caller folds the entries into a
 // ManifestUpdates that commits atomically with inserts / delta / stats.
-func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack, basePath string) ([]packed.StatEntry, error) {
+func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack, basePath string, manifestStats map[string]packed.ManifestStat) ([]packed.StatEntry, error) {
 	if len(pack.bm25Stats) == 0 {
 		return nil, nil
 	}
@@ -641,14 +841,9 @@ func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack,
 	// captures them per field (already absolute, chunkManager-readable) for the
 	// flush merge below, so we don't re-read the manifest via a StatsResolver.
 	priorBM25Paths := make(map[int64][]string)
-	if bw.hasExistingManifest() {
-		// Same as the bloom path: propagate a transient read failure rather than
-		// silently dropping prior BM25 blobs and committing a truncated set.
-		existingStats, err := packed.GetManifestStats(bw.initialManifestPath, bw.storageConfig)
-		if err != nil {
-			return nil, merr.Wrap(err, "failed to read prior bm25 stats from manifest")
-		}
-		for key, existing := range existingStats {
+	{
+		// manifestStats is Prepare's single read of the pre-commit manifest.
+		for key, existing := range manifestStats {
 			prefix, fieldID, ok := packed.ParseStatKey(key)
 			if !ok || prefix != "bm25" || len(existing.Paths) == 0 {
 				continue

@@ -1942,7 +1942,7 @@ func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterPreparedHandoff() {
 	segment.EXPECT().Type().Return(segments.SegmentTypeGrowing).Maybe()
 	segment.EXPECT().Level().Return(datapb.SegmentLevel_Legacy).Maybe()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(targetOffset).Once()
+	segment.EXPECT().AckedRowCount().Return(targetOffset).Once()
 	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 	segment.EXPECT().Unpin().Maybe()
 

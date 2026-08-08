@@ -4,6 +4,7 @@ import (
 	"context"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
@@ -105,6 +106,38 @@ func (s *MetaWriterSuite) TestReturnError() {
 	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(new(SyncPack))
 	err := s.writer.UpdateSync(ctx, task)
 	s.Error(err)
+}
+
+func (s *MetaWriterSuite) TestDropChannelPropagatesCallerContext() {
+	type contextKey struct{}
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), contextKey{}, "caller"))
+	received := make(chan context.Context, 1)
+	s.broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).RunAndReturn(
+		func(callCtx context.Context, _ *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
+			received <- callCtx
+			<-callCtx.Done()
+			return nil, callCtx.Err()
+		}).Once()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- s.writer.DropChannel(ctx, "channel")
+	}()
+
+	select {
+	case callCtx := <-received:
+		s.Equal("caller", callCtx.Value(contextKey{}))
+	case <-time.After(time.Second):
+		s.FailNow("DropVirtualChannel was not called")
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		s.ErrorIs(err, context.Canceled)
+	case <-time.After(time.Second):
+		s.FailNow("DropChannel ignored caller cancellation")
+	}
 }
 
 func (s *MetaWriterSuite) TestGrowingSourceSyncPersistsColumnGroupBinlogs() {
