@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 type ColumnBasedDataOptionSuite struct {
@@ -45,6 +46,36 @@ func (s *ColumnBasedDataOptionSuite) NullableCompatible() {
 	fd := req.GetFieldsData()[0]
 	s.ElementsMatch([]int64{1, 2, 3}, fd.GetScalars().GetLongData())
 	s.ElementsMatch([]bool{true, true, true}, fd.GetValidData())
+}
+
+func (s *ColumnBasedDataOptionSuite) TestWithIdempotencyKey() {
+	opt := NewColumnBasedInsertOption("c", column.NewColumnInt64("id", []int64{1})).
+		WithIdempotencyKey("key-1")
+	s.Equal("key-1", opt.IdempotencyKey())
+
+	rowOpt := NewRowBasedInsertOption("c", map[string]any{"id": int64(1)}).
+		WithIdempotencyKey("key-1")
+	s.Equal("key-1", rowOpt.IdempotencyKey())
+
+	s.Empty(NewColumnBasedInsertOption("c", column.NewColumnInt64("id", []int64{1})).IdempotencyKey())
+}
+
+func (s *ColumnBasedDataOptionSuite) TestUpsertRejectsIdempotencyKey() {
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64)),
+	}
+
+	_, err := NewColumnBasedInsertOption("c", column.NewColumnInt64("id", []int64{1})).
+		WithIdempotencyKey("key-1").
+		UpsertRequest(coll)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.ErrorContains(err, "only supported for Insert")
+
+	_, err = NewRowBasedInsertOption("c", map[string]any{"id": int64(1)}).
+		WithIdempotencyKey("key-1").
+		UpsertRequest(coll)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.ErrorContains(err, "only supported for Insert")
 }
 
 func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumn() {

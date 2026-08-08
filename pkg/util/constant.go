@@ -65,6 +65,9 @@ const (
 
 	HeaderUserAgent = "user-agent"
 	HeaderDBName    = "dbName"
+	// HeaderIdempotencyKey carries the client-supplied idempotency key for
+	// Insert via gRPC metadata; other operations ignore it.
+	HeaderIdempotencyKey = "idempotency-key"
 
 	RoleConfigPrivileges = "privileges"
 	RoleConfigObjectType = "object_type"

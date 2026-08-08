@@ -13,8 +13,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -32,6 +35,12 @@ import (
 //	│   │   │   └── schema/version-2
 //	│   │   ├── vchannel-2
 //	│   │   │   └── schema/version-1
+//	│   ├── window-store
+//	│   │   ├── pchannel-meta
+//	│   │   └── vchannels
+//	│   │       └── idempotency
+//	│   │           ├── vchannel-1
+//	│   │           └── vchannel-2
 //	│   └── segment-assign
 //	│       ├── 456398247934
 //	│       ├── 456398247936
@@ -41,6 +50,12 @@ import (
 //	    ├── vchannels
 //	    │   ├── vchannel-1
 //	    │   └── vchannel-2
+//	    ├── window-store
+//	    │   ├── pchannel-meta
+//	    │   └── vchannels
+//	    │       └── idempotency
+//	    │           ├── vchannel-1
+//	    │           └── vchannel-2
 //	    └── segment-assign
 //	        ├── 456398247934
 //	        ├── 456398247935
@@ -156,6 +171,208 @@ func (c *catalog) getRemovalAndSaveForVChannel(pchannelName string, info *stream
 	return removes, kvs, nil
 }
 
+// ListVChannelWindowMetas lists the window metadata of the pchannel for the given view type.
+func (c *catalog) ListVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string) ([]*streamingpb.VChannelWindowMeta, error) {
+	if viewType == "" {
+		return nil, merr.WrapErrServiceInternalMsg("vchannel window meta view type is empty")
+	}
+	prefix := buildVChannelWindowMetaPrefix(pchannelName, viewType)
+	keys, values, err := c.metaKV.LoadWithPrefix(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	metas := make([]*streamingpb.VChannelWindowMeta, 0, len(values))
+	for i, value := range values {
+		meta := &streamingpb.VChannelWindowMeta{}
+		if err := proto.Unmarshal([]byte(value), meta); err != nil {
+			return nil, errors.Wrapf(err, "unmarshal vchannel window meta %s failed", keys[i])
+		}
+		// LoadWithPrefix returns full keys including the metaKV rootPath, so strip the
+		// prefix rootPath-tolerantly like removePrefix does; a plain strings.TrimPrefix
+		// would be a no-op and leave the whole key as the vchannel name.
+		vchannelName := typeutil.After(keys[i], prefix)
+		meta, _, err = normalizeVChannelWindowMeta(pchannelName, viewType, vchannelName, meta)
+		if err != nil {
+			return nil, errors.Wrapf(err, "invalid vchannel window meta %s", keys[i])
+		}
+		metas = append(metas, meta)
+	}
+	return metas, nil
+}
+
+// SaveVChannelWindowMetas saves the window metadata of the pchannel for the given view type.
+func (c *catalog) SaveVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string, windows map[string]*streamingpb.VChannelWindowMeta) error {
+	if viewType == "" {
+		return merr.WrapErrServiceInternalMsg("vchannel window meta view type is empty")
+	}
+	kvs := make(map[string]string, len(windows))
+	for vchannel, meta := range windows {
+		if meta == nil {
+			continue
+		}
+		stored, vchannelName, err := normalizeVChannelWindowMeta(pchannelName, viewType, vchannel, meta)
+		if err != nil {
+			return errors.Wrapf(err, "invalid vchannel window meta %s at pchannel %s view %s", vchannel, pchannelName, viewType)
+		}
+		data, err := proto.Marshal(stored)
+		if err != nil {
+			return errors.Wrapf(err, "marshal vchannel window meta %s at pchannel %s view %s failed", vchannelName, pchannelName, viewType)
+		}
+		kvs[buildVChannelWindowMetaKey(pchannelName, viewType, vchannelName)] = string(data)
+	}
+
+	if len(kvs) == 0 {
+		return nil
+	}
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	return etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
+		return c.metaKV.MultiSave(ctx, partialKvs)
+	})
+}
+
+// RemoveVChannelWindowMetas removes the window metadata of the pchannel for the given view type.
+func (c *catalog) RemoveVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string, vchannels []string) error {
+	if viewType == "" {
+		return merr.WrapErrServiceInternalMsg("vchannel window meta view type is empty")
+	}
+	if len(vchannels) == 0 {
+		return nil
+	}
+	removes := make([]string, 0, len(vchannels))
+	for _, vchannel := range vchannels {
+		removes = append(removes, buildVChannelWindowMetaKey(pchannelName, viewType, vchannel))
+	}
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	return etcd.RemoveByBatchWithLimit(removes, maxTxnNum, func(partialRemoves []string) error {
+		return c.metaKV.MultiRemove(ctx, partialRemoves)
+	})
+}
+
+// GetPChannelWindowMeta gets the pchannel-level physical window metadata.
+func (c *catalog) GetPChannelWindowMeta(ctx context.Context, pchannelName string) (*streamingpb.PChannelWindowMeta, error) {
+	key := buildPChannelWindowMetaKey(pchannelName)
+	value, err := c.metaKV.Load(ctx, key)
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	meta := &streamingpb.PChannelWindowMeta{}
+	if err := proto.Unmarshal([]byte(value), meta); err != nil {
+		return nil, errors.Wrapf(err, "unmarshal pchannel window meta %s failed", key)
+	}
+	meta, err = normalizePChannelWindowMeta(pchannelName, meta)
+	if err != nil {
+		return nil, errors.Wrapf(err, "invalid pchannel window meta %s", key)
+	}
+	return meta, nil
+}
+
+// SavePChannelWindowMeta saves the pchannel-level physical window metadata.
+func (c *catalog) SavePChannelWindowMeta(ctx context.Context, pchannelName string, meta *streamingpb.PChannelWindowMeta) error {
+	if meta == nil {
+		return nil
+	}
+	stored, err := normalizePChannelWindowMeta(pchannelName, meta)
+	if err != nil {
+		return err
+	}
+	data, err := proto.Marshal(stored)
+	if err != nil {
+		return errors.Wrapf(err, "marshal pchannel window meta at pchannel %s failed", pchannelName)
+	}
+	return c.metaKV.Save(ctx, buildPChannelWindowMetaKey(pchannelName), string(data))
+}
+
+// CompareAndSwapPChannelWindowMeta atomically replaces pchannel window metadata
+// when the stored value still equals expected. A nil expected value means
+// create-if-absent.
+func (c *catalog) CompareAndSwapPChannelWindowMeta(ctx context.Context, pchannelName string, expected *streamingpb.PChannelWindowMeta, target *streamingpb.PChannelWindowMeta) (bool, error) {
+	if target == nil {
+		return true, nil
+	}
+	storedTarget, err := normalizePChannelWindowMeta(pchannelName, target)
+	if err != nil {
+		return false, err
+	}
+	targetData, err := proto.Marshal(storedTarget)
+	if err != nil {
+		return false, errors.Wrapf(err, "marshal target pchannel window meta at pchannel %s failed", pchannelName)
+	}
+	key := buildPChannelWindowMetaKey(pchannelName)
+	if expected == nil {
+		return c.metaKV.CompareVersionAndSwap(ctx, key, 0, string(targetData))
+	}
+
+	storedExpected, err := normalizePChannelWindowMeta(pchannelName, expected)
+	if err != nil {
+		return false, err
+	}
+	expectedData, err := proto.Marshal(storedExpected)
+	if err != nil {
+		return false, errors.Wrapf(err, "marshal expected pchannel window meta at pchannel %s failed", pchannelName)
+	}
+	if err := c.metaKV.MultiSaveAndRemove(ctx, map[string]string{key: string(targetData)}, nil, predicates.ValueEqual(key, string(expectedData))); err != nil {
+		if errors.Is(err, merr.ErrIoFailed) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// RemovePChannelWindowMeta removes the pchannel-level physical window metadata.
+func (c *catalog) RemovePChannelWindowMeta(ctx context.Context, pchannelName string) error {
+	return c.metaKV.Remove(ctx, buildPChannelWindowMetaKey(pchannelName))
+}
+
+func normalizeVChannelWindowMeta(pchannelName string, viewType string, vchannelName string, meta *streamingpb.VChannelWindowMeta) (*streamingpb.VChannelWindowMeta, string, error) {
+	if meta == nil {
+		return nil, "", merr.WrapErrServiceInternalMsg("nil vchannel window meta")
+	}
+	if viewType == "" {
+		return nil, "", merr.WrapErrServiceInternalMsg("vchannel window meta view type is empty")
+	}
+	stored := proto.Clone(meta).(*streamingpb.VChannelWindowMeta)
+	if stored.GetPchannel() == "" {
+		stored.Pchannel = pchannelName
+	} else if stored.GetPchannel() != pchannelName {
+		return nil, "", merr.WrapErrServiceInternalMsg("pchannel mismatch: path %s, meta %s", pchannelName, stored.GetPchannel())
+	}
+	if stored.GetViewType() == "" {
+		stored.ViewType = viewType
+	} else if stored.GetViewType() != viewType {
+		return nil, "", merr.WrapErrServiceInternalMsg("view type mismatch: path %s, meta %s", viewType, stored.GetViewType())
+	}
+	if stored.GetVchannel() == "" {
+		if vchannelName == "" {
+			return nil, "", merr.WrapErrServiceInternalMsg("vchannel is empty")
+		}
+		stored.Vchannel = vchannelName
+	} else {
+		if vchannelName != "" && stored.GetVchannel() != vchannelName {
+			return nil, "", merr.WrapErrServiceInternalMsg("vchannel mismatch: path %s, meta %s", vchannelName, stored.GetVchannel())
+		}
+		vchannelName = stored.GetVchannel()
+	}
+	return stored, vchannelName, nil
+}
+
+func normalizePChannelWindowMeta(pchannelName string, meta *streamingpb.PChannelWindowMeta) (*streamingpb.PChannelWindowMeta, error) {
+	if meta == nil {
+		return nil, merr.WrapErrServiceInternalMsg("nil pchannel window meta")
+	}
+	stored := proto.Clone(meta).(*streamingpb.PChannelWindowMeta)
+	if stored.GetPchannel() == "" {
+		stored.Pchannel = pchannelName
+	} else if stored.GetPchannel() != pchannelName {
+		return nil, merr.WrapErrServiceInternalMsg("pchannel mismatch: path %s, meta %s", pchannelName, stored.GetPchannel())
+	}
+	return stored, nil
+}
+
 // ListSegmentAssignment lists the segment assignment info of the pchannel.
 func (c *catalog) ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error) {
 	prefix := buildSegmentAssignmentPrefix(pChannelName)
@@ -237,6 +454,16 @@ func buildSegmentAssignmentPrefix(pChannelName string) string {
 	return buildWALPrefix(pChannelName) + DirectorySegmentAssign + "/"
 }
 
+// buildWindowStorePrefix returns the prefix for all physical window store metadata under a pchannel.
+func buildWindowStorePrefix(pchannelName string) string {
+	return buildWALPrefix(pchannelName) + DirectoryWindowStore + "/"
+}
+
+// buildVChannelWindowMetaPrefix returns the prefix for all vchannel window metadata of a view type under a pchannel.
+func buildVChannelWindowMetaPrefix(pchannelName string, viewType string) string {
+	return buildWindowStorePrefix(pchannelName) + DirectoryWindowVChannel + "/" + viewType + "/"
+}
+
 // Key functions: return exact keys for individual records.
 
 // buildVChannelKey returns the key for a specific vchannel's metadata.
@@ -252,6 +479,16 @@ func buildVChannelSchemaKey(pChannelName string, vchannelName string, version ui
 // buildSegmentAssignmentKey returns the key for a specific segment assignment.
 func buildSegmentAssignmentKey(pChannelName string, segmentID int64) string {
 	return buildSegmentAssignmentPrefix(pChannelName) + strconv.FormatInt(segmentID, 10)
+}
+
+// buildVChannelWindowMetaKey returns the key for a specific vchannel window metadata under a view type.
+func buildVChannelWindowMetaKey(pchannelName string, viewType string, vchannelName string) string {
+	return buildVChannelWindowMetaPrefix(pchannelName, viewType) + vchannelName
+}
+
+// buildPChannelWindowMetaKey returns the key for pchannel-level physical window metadata.
+func buildPChannelWindowMetaKey(pchannelName string) string {
+	return buildWindowStorePrefix(pchannelName) + KeyPChannelWindowMeta
 }
 
 // buildConsumeCheckpointKey returns the key for the consume checkpoint of a pchannel.

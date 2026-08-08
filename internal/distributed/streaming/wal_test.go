@@ -218,6 +218,70 @@ func newInsertMessage(vChannel string) message.MutableMessage {
 	return msg
 }
 
+func TestAppendMessagesWithOptionsGroupsSameVChannelIdempotentBodiesIntoTxn(t *testing.T) {
+	ctx := context.Background()
+	w, _, _, handler := createMockWAL(t)
+	defer w.Close()
+
+	p := mock_producer.NewMockProducer(t)
+	p.EXPECT().IsAvailable().Return(true).Maybe()
+	p.EXPECT().Available().Return(make(chan struct{})).Maybe()
+	p.EXPECT().Close().Return().Maybe()
+
+	bodyCount := atomic.NewInt32(0)
+	var mu sync.Mutex
+	var bodyTxnIDs []message.TxnID
+	var commitKey string
+	var committedTxn message.TxnID
+	p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+			switch mm.MessageType() {
+			case message.MessageTypeBeginTxn:
+				return &types.AppendResult{
+					TxnCtx: &message.TxnContext{TxnID: 100, Keepalive: time.Second},
+				}, nil
+			case message.MessageTypeInsert:
+				bodyCount.Inc()
+				mu.Lock()
+				bodyTxnIDs = append(bodyTxnIDs, mm.TxnContext().TxnID)
+				mu.Unlock()
+				return &types.AppendResult{}, nil
+			case message.MessageTypeCommitTxn:
+				commitMsg, err := message.AsMutableCommitTxnMessageV2(mm)
+				if err != nil {
+					return nil, err
+				}
+				mu.Lock()
+				commitKey = commitMsg.Header().GetIdempotencyKey()
+				committedTxn = mm.TxnContext().TxnID
+				mu.Unlock()
+				return &types.AppendResult{
+					MessageID: walimplstest.NewTestMessageID(1000),
+					TimeTick:  1000,
+				}, nil
+			default:
+				return nil, status.NewInner("unexpected message type %s", mm.MessageType())
+			}
+		}).Times(4)
+	handler.EXPECT().CreateProducer(mock.Anything, mock.Anything).Return(p, nil)
+
+	msgs := []message.MutableMessage{
+		newInsertMessage(vChannel1),
+		newInsertMessage(vChannel1),
+	}
+	resp := w.AppendMessagesWithOptions(ctx, msgs, AppendOption{IdempotencyKey: "key-1"})
+	assert.NoError(t, resp.UnwrapFirstError())
+	assert.Len(t, resp.Responses, 2)
+	assert.Equal(t, resp.Responses[0].AppendResult.MessageID, resp.Responses[1].AppendResult.MessageID)
+	assert.Equal(t, int32(2), bodyCount.Load())
+
+	mu.Lock()
+	assert.Equal(t, []message.TxnID{100, 100}, bodyTxnIDs)
+	assert.Equal(t, "key-1", commitKey)
+	assert.Equal(t, message.TxnID(100), committedTxn)
+	mu.Unlock()
+}
+
 func TestAppendMessagesOrderConsistency(t *testing.T) {
 	ctx := context.Background()
 	w, _, _, handler := createMockWAL(t)

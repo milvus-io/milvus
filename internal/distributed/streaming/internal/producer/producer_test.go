@@ -123,17 +123,25 @@ func TestResumableProducer(t *testing.T) {
 	rp.Close()
 }
 
-func createRealInsertMessage(t *testing.T, vchannel string) message.MutableMessage {
-	msg := message.NewInsertMessageBuilderV1().
+func createRealInsertMessage(t *testing.T, vchannel string, properties ...map[string]string) message.MutableMessage {
+	builder := message.NewInsertMessageBuilderV1().
+		WithProperties(firstProperties(properties...)).
 		WithHeader(&message.InsertMessageHeader{
 			CollectionId: 1,
 		}).
 		WithBody(&msgpb.InsertRequest{
 			CollectionID: 1,
 		}).
-		WithVChannel(vchannel).
-		MustBuildMutable()
+		WithVChannel(vchannel)
+	msg := builder.MustBuildMutable()
 	return msg
+}
+
+func firstProperties(properties ...map[string]string) map[string]string {
+	if len(properties) == 0 {
+		return nil
+	}
+	return properties[0]
 }
 
 func TestResumableProducer_BeginProduce(t *testing.T) {
