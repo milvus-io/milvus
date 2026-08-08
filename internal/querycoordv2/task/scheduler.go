@@ -28,12 +28,15 @@ import (
 	"go.uber.org/atomic"
 	"golang.org/x/time/rate"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/querycoordv2/autoscale"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -554,6 +557,8 @@ type Scheduler interface {
 	// collectionID == -1 means the collection-scoped snapshot covers all collections.
 	GetSegmentTaskDeltaSnapshot(nodeIDs []int64, collectionID int64) *SegmentTaskDeltaSnapshot
 	GetChannelTaskDelta(nodeID int64, collectionID int64) int
+	// GetAutoscaleInflightLoadResource returns the selected nodes' usage from one scheduler snapshot.
+	GetAutoscaleInflightLoadResource(nodeIDs []int64) autoscale.ResourceUsage
 }
 
 type taskScheduler struct {
@@ -579,8 +584,10 @@ type taskScheduler struct {
 	taskStats            *expirable.LRU[UniqueID, Task]
 	lastUpdateMetricTime atomic.Time
 
-	segmentTaskDelta *SegmentTaskDelta
-	channelTaskDelta *ChannelTaskDelta
+	segmentTaskDelta           *SegmentTaskDelta
+	channelTaskDelta           *ChannelTaskDelta
+	inflightLoadResourceMu     sync.RWMutex
+	inflightLoadResourceByNode map[int64]autoscale.ResourceUsage
 }
 
 func NewScheduler(ctx context.Context,
@@ -606,15 +613,16 @@ func NewScheduler(ctx context.Context,
 		cluster:   cluster,
 		nodeMgr:   nodeMgr,
 
-		collKeyLock:      lock.NewKeyLock[int64](),
-		tasks:            NewConcurrentMap[UniqueID, struct{}](),
-		segmentTasks:     NewConcurrentMap[replicaSegmentIndex, Task](),
-		channelTasks:     NewConcurrentMap[replicaChannelIndex, Task](),
-		processQueue:     newNodeTaskQueue(),
-		waitQueue:        newTaskQueue(),
-		taskStats:        expirable.NewLRU[UniqueID, Task](256, nil, time.Minute*15),
-		segmentTaskDelta: NewSegmentTaskDelta(),
-		channelTaskDelta: NewChannelTaskDelta(),
+		collKeyLock:                lock.NewKeyLock[int64](),
+		tasks:                      NewConcurrentMap[UniqueID, struct{}](),
+		segmentTasks:               NewConcurrentMap[replicaSegmentIndex, Task](),
+		channelTasks:               NewConcurrentMap[replicaChannelIndex, Task](),
+		processQueue:               newNodeTaskQueue(),
+		waitQueue:                  newTaskQueue(),
+		taskStats:                  expirable.NewLRU[UniqueID, Task](256, nil, time.Minute*15),
+		segmentTaskDelta:           NewSegmentTaskDelta(),
+		channelTaskDelta:           NewChannelTaskDelta(),
+		inflightLoadResourceByNode: make(map[int64]autoscale.ResourceUsage),
 	}
 }
 
@@ -669,7 +677,10 @@ func (scheduler *taskScheduler) Add(task Task) error {
 		return err
 	}
 
+	inflightLoadUsage := scheduler.estimateAutoscaleInflightLoadResourceForTask(task)
+
 	task.SetID(scheduler.idAllocator())
+	scheduler.addAutoscaleInflightLoadResource(task, inflightLoadUsage)
 	scheduler.waitQueue.Add(task)
 	scheduler.tasks.Insert(task.ID(), struct{}{})
 	scheduler.incExecutingTaskDelta(task)
@@ -756,6 +767,167 @@ func (scheduler *taskScheduler) updateTaskMetrics() {
 	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelReduceTaskLabel).Set(float64(channelReduceNum))
 	metrics.QueryCoordTaskNum.WithLabelValues(metrics.ChannelMoveTaskLabel).Set(float64(channelMoveNum))
 	scheduler.lastUpdateMetricTime.Store(time.Now())
+}
+
+func (scheduler *taskScheduler) addAutoscaleInflightLoadResource(task Task, usage *autoscale.ResourceUsage) {
+	segmentTask, action, isInflightLoadTask := getAutoscaleInflightLoadTask(task)
+	if !isInflightLoadTask {
+		return
+	}
+	if usage == nil {
+		return
+	}
+	if usage.MemoryBytes == 0 && usage.DiskBytes == 0 {
+		return
+	}
+
+	nodeID := action.Node()
+	nodeHost := fmt.Sprint(nodeID)
+	if node := scheduler.nodeMgr.Get(nodeID); node != nil && node.Hostname() != "" {
+		nodeHost = node.Hostname()
+	}
+	segmentTask.inflightLoadUsage.Store(&inflightLoadUsage{
+		memoryBytes: usage.MemoryBytes,
+		diskBytes:   usage.DiskBytes,
+		nodeID:      nodeID,
+		nodeHost:    nodeHost,
+	})
+	scheduler.updateAutoscaleInflightLoadResource(nodeID, nodeHost, usage.MemoryBytes, usage.DiskBytes)
+
+	action.SetFinishCallback(func() {
+		scheduler.finishAutoscaleInflightLoadResource(segmentTask)
+	})
+}
+
+func (scheduler *taskScheduler) finishAutoscaleInflightLoadResource(task Task) {
+	segmentTask, ok := task.(*SegmentTask)
+	if !ok {
+		return
+	}
+
+	usage := segmentTask.inflightLoadUsage.Swap(nil)
+	if usage == nil {
+		return
+	}
+	scheduler.updateAutoscaleInflightLoadResource(usage.nodeID, usage.nodeHost, -usage.memoryBytes, -usage.diskBytes)
+}
+
+type inflightLoadUsage struct {
+	memoryBytes int64
+	diskBytes   int64
+	nodeID      int64
+	nodeHost    string
+}
+
+func (scheduler *taskScheduler) updateAutoscaleInflightLoadResource(nodeID int64, nodeHost string, memoryBytes int64, diskBytes int64) {
+	scheduler.inflightLoadResourceMu.Lock()
+	usage := scheduler.inflightLoadResourceByNode[nodeID]
+	usage.MemoryBytes += memoryBytes
+	usage.DiskBytes += diskBytes
+	if usage.MemoryBytes == 0 && usage.DiskBytes == 0 {
+		delete(scheduler.inflightLoadResourceByNode, nodeID)
+	} else {
+		scheduler.inflightLoadResourceByNode[nodeID] = usage
+	}
+	scheduler.inflightLoadResourceMu.Unlock()
+
+	// The gauges are observability projections. Admission reads the in-memory snapshot above.
+	nodeIDLabel := fmt.Sprint(nodeID)
+	metrics.QueryCoordAutoscaleInflightLoadMemoryBytes.WithLabelValues(nodeIDLabel, nodeHost).Add(float64(memoryBytes))
+	metrics.QueryCoordAutoscaleInflightLoadDiskBytes.WithLabelValues(nodeIDLabel, nodeHost).Add(float64(diskBytes))
+}
+
+func (scheduler *taskScheduler) GetAutoscaleInflightLoadResource(nodeIDs []int64) autoscale.ResourceUsage {
+	scheduler.inflightLoadResourceMu.RLock()
+	defer scheduler.inflightLoadResourceMu.RUnlock()
+
+	usage := autoscale.ResourceUsage{}
+	for _, nodeID := range nodeIDs {
+		nodeUsage := scheduler.inflightLoadResourceByNode[nodeID]
+		usage.MemoryBytes += nodeUsage.MemoryBytes
+		usage.DiskBytes += nodeUsage.DiskBytes
+	}
+	return usage
+}
+
+func (scheduler *taskScheduler) estimateAutoscaleInflightLoadResourceForTask(task Task) *autoscale.ResourceUsage {
+	segmentTask, _, ok := getAutoscaleInflightLoadTask(task)
+	if !ok {
+		return nil
+	}
+	segment := scheduler.targetMgr.GetSealedSegment(scheduler.ctx, segmentTask.CollectionID(), segmentTask.SegmentID(), meta.NextTargetFirst)
+	if segment == nil {
+		return nil
+	}
+	return scheduler.estimateAutoscaleInflightLoadResource(segmentTask.CollectionID(), []*datapb.SegmentInfo{segment})
+}
+
+func (scheduler *taskScheduler) estimateAutoscaleInflightLoadResource(collectionID int64, segments []*datapb.SegmentInfo) *autoscale.ResourceUsage {
+	schema, ok := scheduler.describeCollectionSchema(collectionID)
+	if !ok {
+		return nil
+	}
+	loadFields := scheduler.meta.GetLoadFields(scheduler.ctx, collectionID)
+	fieldIndexID := scheduler.meta.GetFieldIndex(scheduler.ctx, collectionID)
+	segmentIDs := lo.Map(segments, func(segment *datapb.SegmentInfo, _ int) int64 {
+		return segment.GetID()
+	})
+	indexes, err := scheduler.broker.GetIndexInfo(scheduler.ctx, collectionID, segmentIDs...)
+	if err != nil && !errors.Is(err, merr.ErrIndexNotFound) {
+		mlog.Warn(scheduler.ctx, "failed to get segment index info for autoscale in-flight load resource estimation",
+			mlog.Int64("collectionID", collectionID),
+			mlog.Int64s("segmentIDs", segmentIDs),
+			mlog.Err(err),
+		)
+		return nil
+	}
+	if err != nil {
+		indexes = nil
+	}
+	usage, err := autoscale.EstimateSegmentsLoadResourceForLoadConfig(schema, segments, indexes, loadFields, fieldIndexID, autoscale.DefaultEstimateOptions())
+	if err != nil {
+		mlog.RatedWarn(scheduler.ctx, rate.Limit(1), "failed to estimate autoscale in-flight load resource usage",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Int64s("segmentIDs", segmentIDs),
+			mlog.Err(err),
+		)
+		return nil
+	}
+	return &usage
+}
+
+func (scheduler *taskScheduler) describeCollectionSchema(collectionID int64) (*schemapb.CollectionSchema, bool) {
+	collection, err := scheduler.broker.DescribeCollection(scheduler.ctx, collectionID)
+	if err != nil {
+		mlog.Warn(scheduler.ctx, "failed to describe collection for autoscale in-flight load resource estimation",
+			mlog.Int64("collectionID", collectionID),
+			mlog.Err(err),
+		)
+		return nil, false
+	}
+	if collection == nil {
+		return nil, false
+	}
+	return collection.GetSchema(), collection.GetSchema() != nil
+}
+
+func getAutoscaleInflightLoadTask(t Task) (*SegmentTask, *SegmentAction, bool) {
+	if t.GetReason() != ReasonLacksOfSegment {
+		return nil, nil, false
+	}
+	segmentTask, ok := t.(*SegmentTask)
+	if !ok {
+		return nil, nil, false
+	}
+	actions := t.Actions()
+	if len(actions) == 0 {
+		return nil, nil, false
+	}
+	if GetTaskType(t) != TaskTypeGrow {
+		return nil, nil, false
+	}
+	action, ok := actions[0].(*SegmentAction)
+	return segmentTask, action, ok && action.Type() == ActionTypeGrow
 }
 
 // check whether the task is valid to add,
@@ -1312,6 +1484,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		scheduler.segmentTasks.Remove(index)
 		log = mlog.With(mlog.Int64("segmentID", task.SegmentID()))
 	}
+	scheduler.finishAutoscaleInflightLoadResource(task)
 
 	log.Info(task.Context(), "task removed")
 
