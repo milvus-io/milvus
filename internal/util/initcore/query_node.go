@@ -38,6 +38,7 @@ import (
 	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -92,6 +93,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 
 	SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
 	SyncEnableGrowingSourceFlush(ctx, paramtable.Get())
+	SyncAsyncGrowingIndexBuild(ctx, paramtable.Get())
 
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
@@ -135,6 +137,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	mlog.Info(ctx, "set up knowhere build pool size", mlog.Uint32("pool_size", knowhereBuildPoolSize))
 	cKnowhereBuildPoolSize := C.uint32_t(knowhereBuildPoolSize)
 	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereBuildPoolSize)
+
+	cGrowingBuildPoolRatio := C.float(paramtable.Get().QueryNodeCfg.InterimIndexBuildParallelRate.GetAsFloat())
+	C.SegcoreSetGrowingIndexBuildPoolRatio(cGrowingBuildPoolRatio)
 
 	cExprBatchSize := C.int64_t(paramtable.Get().QueryNodeCfg.ExprEvalBatchSize.GetAsInt64())
 	C.SetDefaultExprEvalBatchSize(cExprBatchSize)
@@ -263,4 +268,20 @@ func SyncEnableGrowingSourceFlush(ctx context.Context, params *paramtable.Compon
 	if v {
 		mlog.Info(ctx, "enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")
 	}
+}
+
+// SyncAsyncGrowingIndexBuild pushes the async growing-index first-build switch
+// into segcore and registers a hot-update watcher. SegmentGrowingImpl copies
+// SegcoreConfig at segment creation, so a runtime change only affects growing
+// segments created afterwards.
+func SyncAsyncGrowingIndexBuild(ctx context.Context, params *paramtable.ComponentParam) {
+	v := params.QueryNodeCfg.InterimIndexAsyncBuild.GetAsBool()
+	C.SegcoreSetEnableAsyncGrowingIndexBuild(C.bool(v))
+	params.Watch(params.QueryNodeCfg.InterimIndexAsyncBuild.Key,
+		config.NewHandler("qn.segcore.asyncGrowingBuild", func(evt *config.Event) {
+			nv := params.QueryNodeCfg.InterimIndexAsyncBuild.GetAsBool()
+			C.SegcoreSetEnableAsyncGrowingIndexBuild(C.bool(nv))
+			mlog.Info(ctx, "asyncGrowingBuild updated, affects growing segments created afterwards",
+				mlog.Bool("value", nv))
+		}))
 }

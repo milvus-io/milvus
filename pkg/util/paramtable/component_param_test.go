@@ -583,6 +583,9 @@ func TestComponentParam(t *testing.T) {
 		nprobe = Params.InterimIndexNProbe.GetAsInt64()
 		assert.Equal(t, int64(16), nprobe)
 
+		assert.Equal(t, true, Params.InterimIndexAsyncBuild.GetAsBool())
+		assert.Equal(t, "queryNode.segcore.interimIndex.asyncGrowingBuild", Params.InterimIndexAsyncBuild.Key)
+
 		params.Remove("queryNode.segcore.growing.nlist")
 		params.Remove("queryNode.segcore.growing.nprobe")
 		params.Save("queryNode.segcore.chunkRows", "64")
