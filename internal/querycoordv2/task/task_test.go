@@ -18,6 +18,7 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"testing"
 	"time"
@@ -27,6 +28,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -178,6 +181,8 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 	switch testName {
 	case "TestSubscribeChannelTask",
 		"TestUnsubscribeChannelTask",
+		"TestExecutorRawLoadSegmentsErrorIsAmbiguous",
+		"TestExecutorRawWatchDmChannelsErrorIsAmbiguous",
 		"TestLoadSegmentTask",
 		"TestLoadSegmentTaskNotIndex",
 		"TestSegmentTaskWaitsDistAfterLoadRPC",
@@ -207,6 +212,302 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 		})
 		suite.meta.Put(suite.ctx, utils.CreateTestReplica(suite.replica.GetID(), suite.collection, []int64{1, 2, 3}))
 	}
+}
+
+func (suite *TaskSuite) TestTaskDoneClosesOnTerminalState() {
+	testCases := []struct {
+		name      string
+		terminate func(Task, error)
+	}{
+		{
+			name: "Fail",
+			terminate: func(task Task, err error) {
+				task.Fail(err)
+			},
+		},
+		{
+			name: "Cancel",
+			terminate: func(task Task, err error) {
+				task.Cancel(err)
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		suite.Run(testCase.name, func() {
+			task, err := NewChannelTask(
+				context.Background(),
+				time.Second,
+				WrapIDSource(0),
+				100,
+				meta.NewReplica(&querypb.Replica{ID: 10, CollectionID: 100, ResourceGroup: "rg1"}),
+				NewChannelAction(2, ActionTypeGrow, "ch-1"),
+			)
+			suite.Require().NoError(err)
+
+			select {
+			case <-task.Done():
+				suite.Fail("new task must not be done")
+			default:
+			}
+
+			terminalErr := errors.New("terminal")
+			testCase.terminate(task, terminalErr)
+			<-task.Done()
+			suite.ErrorIs(task.Err(), terminalErr)
+
+			// A second terminal transition must neither close again nor replace
+			// the first terminal error.
+			testCase.terminate(task, errors.New("second terminal error"))
+			select {
+			case <-task.Done():
+			default:
+				suite.Fail("terminal task must remain done")
+			}
+			suite.ErrorIs(task.Err(), terminalErr)
+		})
+	}
+}
+
+func (suite *TaskSuite) TestExecutorRawLoadSegmentsErrorIsAmbiguous() {
+	ctx := context.Background()
+	targetNode := int64(3)
+	segmentID := suite.loadSegments[0]
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-ambiguous-load",
+	}
+	rpcErr := status.Error(codes.Unavailable, "load response lost")
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Name: "TestExecutorRawLoadSegmentsErrorIsAmbiguous",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
+		},
+	}, nil)
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).
+		Return([]*indexpb.IndexInfo{{CollectionID: suite.collection}}, nil)
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segmentID).Return([]*datapb.SegmentInfo{{
+		ID: segmentID, CollectionID: suite.collection, PartitionID: 1, InsertChannel: channel.ChannelName,
+	}}, nil)
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segmentID).Return(nil, nil)
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).
+		Return((*commonpb.Status)(nil), rpcErr).Once()
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID: targetNode, CollectionID: suite.collection, Channel: channel.ChannelName,
+			Status: &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+
+	segmentInfo := &datapb.SegmentInfo{
+		ID: segmentID, CollectionID: suite.collection, PartitionID: 1, InsertChannel: channel.ChannelName,
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).
+		Return([]*datapb.VchannelInfo{channel}, []*datapb.SegmentInfo{segmentInfo}, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
+
+	balanceTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeGrow, channel.ChannelName, segmentID),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(balanceTask))
+
+	suite.scheduler.Dispatch(targetNode)
+	err = suite.waitForTaskTerminal(balanceTask)
+	suite.Equal(TaskStatusFailed, balanceTask.Status())
+	suite.True(IsAmbiguousExecutionError(err))
+	suite.ErrorIs(err, rpcErr)
+	suite.Equal(codes.Unavailable, status.Code(err))
+
+	suite.scheduler.Dispatch(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+}
+
+func (suite *TaskSuite) TestExecutorRawReleaseSegmentsErrorIsAmbiguous() {
+	ctx := context.Background()
+	targetNode := int64(3)
+	segmentID := suite.releaseSegments[0]
+	channelName := Params.CommonCfg.RootCoordDml.GetValue() + "-ambiguous-release"
+	rpcErr := status.Error(codes.DeadlineExceeded, "release response lost")
+
+	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, targetNode, mock.Anything).
+		Return((*commonpb.Status)(nil), rpcErr).Once()
+	suite.dist.SegmentDistManager.Update(targetNode, utils.CreateTestSegment(
+		suite.collection, 1, segmentID, targetNode, 1, channelName,
+	))
+	balanceTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeReduce, channelName, segmentID),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(balanceTask))
+
+	suite.scheduler.Dispatch(targetNode)
+	err = suite.waitForTaskTerminal(balanceTask)
+	suite.Equal(TaskStatusFailed, balanceTask.Status())
+	suite.True(IsAmbiguousExecutionError(err))
+	suite.ErrorIs(err, rpcErr)
+	suite.Equal(codes.DeadlineExceeded, status.Code(err))
+
+	suite.scheduler.Dispatch(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+}
+
+func (suite *TaskSuite) TestExecutorRawWatchDmChannelsErrorIsAmbiguous() {
+	ctx := context.Background()
+	targetNode := int64(3)
+	channel := &datapb.VchannelInfo{CollectionID: suite.collection, ChannelName: "ambiguous-watch"}
+	rpcErr := status.Error(codes.Unavailable, "watch response lost")
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{Name: "TestExecutorRawWatchDmChannelsErrorIsAmbiguous"},
+	}, nil)
+	suite.broker.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).
+		Return(&rootcoordpb.DescribeDatabaseResponse{}, nil)
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return(nil, nil)
+	suite.cluster.EXPECT().WatchDmChannels(mock.Anything, targetNode, mock.Anything).
+		Return((*commonpb.Status)(nil), rpcErr).Once()
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).
+		Return([]*datapb.VchannelInfo{channel}, nil, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
+
+	balanceTask, err := NewChannelTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		NewChannelAction(targetNode, ActionTypeGrow, channel.ChannelName),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(balanceTask))
+
+	suite.scheduler.Dispatch(targetNode)
+	err = suite.waitForTaskTerminal(balanceTask)
+	suite.Equal(TaskStatusFailed, balanceTask.Status())
+	suite.True(IsAmbiguousExecutionError(err))
+	suite.ErrorIs(err, rpcErr)
+	suite.Equal(codes.Unavailable, status.Code(err))
+
+	suite.scheduler.Dispatch(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+}
+
+func (suite *TaskSuite) TestExecutorRawUnsubDmChannelErrorIsAmbiguous() {
+	ctx := context.Background()
+	sourceNode := int64(1)
+	channel := &datapb.VchannelInfo{CollectionID: suite.collection, ChannelName: "ambiguous-unsub"}
+	rpcErr := status.Error(codes.DeadlineExceeded, "unsubscribe response lost")
+
+	suite.cluster.EXPECT().UnsubDmChannel(mock.Anything, sourceNode, mock.Anything).
+		Return((*commonpb.Status)(nil), rpcErr).Once()
+	suite.dist.ChannelDistManager.Update(sourceNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         sourceNode,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID: sourceNode, CollectionID: suite.collection, Channel: channel.ChannelName,
+			Status: &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+	balanceTask, err := NewChannelTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		NewChannelAction(sourceNode, ActionTypeReduce, channel.ChannelName),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(balanceTask))
+
+	suite.scheduler.Dispatch(sourceNode)
+	err = suite.waitForTaskTerminal(balanceTask)
+	suite.Equal(TaskStatusFailed, balanceTask.Status())
+	suite.True(IsAmbiguousExecutionError(err))
+	suite.ErrorIs(err, rpcErr)
+	suite.Equal(codes.DeadlineExceeded, status.Code(err))
+
+	suite.scheduler.Dispatch(sourceNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+}
+
+func (suite *TaskSuite) TestExecutorRPCNotSentReleaseErrorIsDefinitive() {
+	ctx := context.Background()
+	targetNode := int64(3)
+	segmentID := suite.releaseSegments[0]
+	sentinel := errors.New("query node client unavailable before dispatch")
+
+	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, targetNode, mock.Anything).
+		Return((*commonpb.Status)(nil), session.NewRPCNotSentError(sentinel)).Once()
+	balanceTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeReduce, "definitive-pre-dispatch", segmentID),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(balanceTask))
+
+	suite.scheduler.Dispatch(targetNode)
+	err = suite.waitForTaskTerminal(balanceTask)
+	suite.Equal(TaskStatusFailed, balanceTask.Status())
+	suite.False(IsAmbiguousExecutionError(err))
+	suite.ErrorIs(err, sentinel)
+
+	suite.scheduler.Dispatch(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+}
+
+func (suite *TaskSuite) TestExecutorNonOKReleaseStatusIsDefinitive() {
+	ctx := context.Background()
+	targetNode := int64(3)
+	segmentID := suite.releaseSegments[0]
+
+	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, targetNode, mock.Anything).Return(&commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "release rejected",
+	}, nil).Once()
+	balanceTask, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeReduce, "definitive-status", segmentID),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(balanceTask))
+
+	suite.scheduler.Dispatch(targetNode)
+	err = suite.waitForTaskTerminal(balanceTask)
+	suite.Equal(TaskStatusFailed, balanceTask.Status())
+	suite.False(IsAmbiguousExecutionError(err))
+	suite.ErrorContains(err, "release rejected")
+
+	suite.scheduler.Dispatch(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
 }
 
 func (suite *TaskSuite) TestSubscribeChannelTask() {
@@ -1632,6 +1933,17 @@ func (suite *TaskSuite) AssertTaskNum(process, wait, channel, segment int) {
 	suite.Equal(scheduler.tasks.Len(), segment+channel)
 }
 
+func (suite *TaskSuite) waitForTaskTerminal(balanceTask Task) error {
+	suite.T().Helper()
+	select {
+	case <-balanceTask.Done():
+		return balanceTask.Err()
+	case <-time.After(10 * time.Second):
+		suite.FailNow("task did not reach a terminal state")
+		return nil
+	}
+}
+
 func (suite *TaskSuite) dispatchAndWait(node int64) {
 	timeout := 10 * time.Second
 	suite.scheduler.Dispatch(node)
@@ -2172,6 +2484,153 @@ func (suite *TaskSuite) TestSegmentTaskDeltaSnapshotKeepsStreamingReduceUntilGro
 	scheduler.decExecutingTaskDelta(reduceTask)
 }
 
+func (suite *TaskSuite) newChannelMoveTask(collectionID, replicaID int64, resourceGroup, channelName string, sourceNode, targetNode int64) *ChannelTask {
+	task, err := NewChannelTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		collectionID,
+		meta.NewReplica(&querypb.Replica{
+			ID:            replicaID,
+			CollectionID:  collectionID,
+			ResourceGroup: resourceGroup,
+		}),
+		NewChannelAction(targetNode, ActionTypeGrow, channelName),
+		NewChannelAction(sourceNode, ActionTypeReduce, channelName),
+	)
+	suite.Require().NoError(err)
+	return task
+}
+
+func (suite *TaskSuite) channel(collectionID int64, channelName string, nodeID int64) *meta.DmChannel {
+	return utils.CreateTestChannel(collectionID, nodeID, 1, channelName)
+}
+
+func (suite *TaskSuite) TestChannelTaskDeltaSnapshotMoveIntermediateState() {
+	move := suite.newChannelMoveTask(100, 10, "rg1", "ch-1", 1, 2)
+	move.SetID(101)
+	delta := NewChannelTaskDelta()
+	delta.Add(move)
+
+	// Before Grow is visible: target +1 and source -1 are pending.
+	suite.dist.ChannelDistManager.Update(1, suite.channel(100, "ch-1", 1))
+	snapshot := delta.GetChannelSnapshot([]int64{1, 2}, 100, suite.dist)
+	suite.Equal(-1, snapshot.GetByNodeInCollection(1))
+	suite.Equal(1, snapshot.GetByNodeInCollection(2))
+
+	// After Grow is visible but before Reduce: only source -1 remains pending.
+	suite.dist.ChannelDistManager.Update(2, suite.channel(100, "ch-1", 2))
+	snapshot = delta.GetChannelSnapshot([]int64{1, 2}, 100, suite.dist)
+	suite.Equal(-1, snapshot.GetByNodeInCollection(1))
+	suite.Zero(snapshot.GetByNodeInCollection(2))
+
+	// After source disappears: no projected effect remains.
+	suite.dist.ChannelDistManager.Update(1)
+	snapshot = delta.GetChannelSnapshot([]int64{1, 2}, 100, suite.dist)
+	suite.Zero(snapshot.GetByNodeInCollection(1))
+	suite.Zero(snapshot.GetByNodeInCollection(2))
+}
+
+func (suite *TaskSuite) TestChannelTaskDeltaSnapshotStandaloneGrow() {
+	grow, err := NewChannelTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		100,
+		suite.replica,
+		NewChannelAction(2, ActionTypeGrow, "ch-grow"),
+	)
+	suite.Require().NoError(err)
+	grow.SetID(102)
+	delta := NewChannelTaskDelta()
+	delta.Add(grow)
+
+	snapshot := delta.GetChannelSnapshot([]int64{2}, 100, suite.dist)
+	suite.Equal(1, snapshot.GetByNode(2))
+	suite.Equal(1, snapshot.GetByNodeInCollection(2))
+
+	suite.dist.ChannelDistManager.Update(2, suite.channel(100, "ch-grow", 2))
+	snapshot = delta.GetChannelSnapshot([]int64{2}, 100, suite.dist)
+	suite.Zero(snapshot.GetByNode(2))
+	suite.Zero(snapshot.GetByNodeInCollection(2))
+}
+
+func (suite *TaskSuite) TestChannelTaskDeltaSnapshotStandaloneReduce() {
+	suite.dist.ChannelDistManager.Update(1, suite.channel(100, "ch-reduce", 1))
+	reduce, err := NewChannelTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		100,
+		suite.replica,
+		NewChannelAction(1, ActionTypeReduce, "ch-reduce"),
+	)
+	suite.Require().NoError(err)
+	reduce.SetID(103)
+	delta := NewChannelTaskDelta()
+	delta.Add(reduce)
+
+	snapshot := delta.GetChannelSnapshot([]int64{1}, 100, suite.dist)
+	suite.Equal(-1, snapshot.GetByNode(1))
+	suite.Equal(-1, snapshot.GetByNodeInCollection(1))
+
+	suite.dist.ChannelDistManager.Update(1)
+	snapshot = delta.GetChannelSnapshot([]int64{1}, 100, suite.dist)
+	suite.Zero(snapshot.GetByNode(1))
+	suite.Zero(snapshot.GetByNodeInCollection(1))
+}
+
+func (suite *TaskSuite) TestChannelTaskDeltaSnapshotAllCollections() {
+	delta := NewChannelTaskDelta()
+
+	for i, collectionID := range []int64{100, 200} {
+		grow, err := NewChannelTask(
+			context.Background(),
+			time.Second,
+			WrapIDSource(0),
+			collectionID,
+			suite.replica,
+			NewChannelAction(2, ActionTypeGrow, fmt.Sprintf("ch-%d", collectionID)),
+		)
+		suite.Require().NoError(err)
+		grow.SetID(int64(104 + i))
+		delta.Add(grow)
+	}
+
+	snapshot := delta.GetChannelSnapshot([]int64{2}, 100, suite.dist)
+	suite.Equal(2, snapshot.GetByNode(2))
+	suite.Equal(1, snapshot.GetByNodeInCollection(2))
+
+	snapshot = delta.GetChannelSnapshot([]int64{2}, -1, suite.dist)
+	suite.Equal(2, snapshot.GetByNode(2))
+	suite.Equal(2, snapshot.GetByNodeInCollection(2))
+}
+
+func (suite *TaskSuite) TestChannelTaskDeltaSnapshotSchedulerCompatibility() {
+	scheduler := suite.newScheduler()
+	grow, err := NewChannelTask(
+		context.Background(),
+		time.Second,
+		WrapIDSource(0),
+		100,
+		suite.replica,
+		NewChannelAction(2, ActionTypeGrow, "ch-scheduler"),
+	)
+	suite.Require().NoError(err)
+	grow.SetID(106)
+	scheduler.incExecutingTaskDelta(grow)
+
+	suite.Equal(1, scheduler.GetChannelTaskDelta(2, 100))
+	suite.Equal(1, scheduler.GetChannelTaskDelta(2, -1))
+	suite.Equal(1, scheduler.GetChannelTaskDelta(-1, 100))
+	suite.Equal(1, scheduler.GetChannelTaskDelta(-1, -1))
+	suite.dist.ChannelDistManager.Update(2, suite.channel(100, "ch-scheduler", 2))
+	suite.Zero(scheduler.GetChannelTaskDelta(2, 100))
+	suite.Zero(scheduler.GetChannelTaskDelta(2, -1))
+	suite.Zero(scheduler.GetChannelTaskDelta(-1, 100))
+	suite.Zero(scheduler.GetChannelTaskDelta(-1, -1))
+}
+
 func (suite *TaskSuite) TestChannelTaskDeltaCache() {
 	delta := NewChannelTaskDelta()
 
@@ -2203,9 +2662,7 @@ func (suite *TaskSuite) TestChannelTaskDeltaCache() {
 	for i := 0; i < len(taskDelta); i++ {
 		delta.Sub(tasks[i].(*ChannelTask))
 	}
-	suite.Equal(0, delta.Get(nodeID, collectionID))
-	suite.Equal(0, delta.Get(nodeID, -1))
-	suite.Equal(0, delta.Get(-1, -1))
+	suite.Empty(delta.records)
 }
 
 func (suite *TaskSuite) TestRemoveTaskWithError() {
@@ -2345,16 +2802,24 @@ func TestChannelTaskDeltaDefensiveBranches(t *testing.T) {
 	delta.Add(channelTask)
 	delta.printDetailInfos()
 	delta.Add(channelTask)
-	assert.Equal(t, 1, delta.Get(1, 100))
+	assert.Len(t, delta.records[channelTask.ID()], 1)
+	snapshot := delta.GetChannelSnapshot([]int64{1}, 100, nil)
+	assert.Equal(t, 1, snapshot.GetByNodeInCollection(1))
 
 	delta.Sub(channelTask)
 	delta.Sub(channelTask)
-	assert.Equal(t, 0, delta.Get(1, 100))
+	snapshot = delta.GetChannelSnapshot([]int64{1}, 100, nil)
+	assert.Equal(t, 0, snapshot.GetByNodeInCollection(1))
 
-	delta.taskIDRecords.Insert(channelTask.ID())
-	delete(delta.data, int64(1))
-	delta.Sub(channelTask)
-	assert.Equal(t, -1, delta.Get(1, 100))
+	base := newBaseTask(context.Background(), WrapIDSource(0), 100, replica, "ch", "MalformedChannelTask")
+	base.SetID(2)
+	base.actions = []Action{NewSegmentAction(1, ActionTypeGrow, "ch", 10)}
+	malformedTask := &ChannelTask{baseTask: base}
+	delta.Add(malformedTask)
+	assert.Empty(t, delta.records[malformedTask.ID()])
+
+	dist := meta.NewDistributionManager(nil)
+	assert.True(t, channelDeltaRecord{nodeID: 1, channelName: "ch", actionType: ActionTypeUpdate}.isChannelDistMatched(dist))
 }
 
 func TestMockSchedulerGetSegmentTaskDeltaSnapshot(t *testing.T) {

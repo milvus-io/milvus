@@ -93,12 +93,15 @@ type Task interface {
 	// fail the task as we encounter some error so be unable to continue,
 	// this error will be recorded for response to user requests
 	Fail(err error)
+	Done() <-chan struct{}
 	Wait() error
 	Actions() []Action
 	Step() int
 	StepUp() int
 	IsFinished(dist *meta.DistributionManager) bool
 	SetReason(reason string)
+	SetBalanceEpoch(meta BalanceEpochMeta)
+	BalanceEpoch() BalanceEpochMeta
 	String() string
 
 	// MarshalJSON marshal task info to json
@@ -122,13 +125,14 @@ type baseTask struct {
 	shard        string
 	loadType     querypb.LoadType
 
-	source   Source
-	status   *atomic.String
-	priority Priority
-	err      error
-	actions  []Action
-	step     int
-	reason   string
+	source       Source
+	status       *atomic.String
+	priority     Priority
+	err          error
+	actions      []Action
+	step         int
+	reason       string
+	balanceEpoch BalanceEpochMeta
 
 	// span for tracing
 	span trace.Span
@@ -261,6 +265,10 @@ func (task *baseTask) Fail(err error) {
 	}
 }
 
+func (task *baseTask) Done() <-chan struct{} {
+	return task.doneCh
+}
+
 func (task *baseTask) Wait() error {
 	<-task.doneCh
 	return task.err
@@ -294,6 +302,14 @@ func (task *baseTask) GetReason() string {
 	return task.reason
 }
 
+func (task *baseTask) SetBalanceEpoch(meta BalanceEpochMeta) {
+	task.balanceEpoch = meta
+}
+
+func (task *baseTask) BalanceEpoch() BalanceEpochMeta {
+	return task.balanceEpoch
+}
+
 func (task *baseTask) MarshalJSON() ([]byte, error) {
 	return marshalJSON(task)
 }
@@ -303,7 +319,7 @@ func (task *baseTask) String() string {
 	for _, action := range task.actions {
 		actionsStr += action.String() + ","
 	}
-	return fmt.Sprintf(
+	result := fmt.Sprintf(
 		"[id=%d] [type=%s] [source=%s] [reason=%s] [collectionID=%d] [replicaID=%d] [resourceGroup=%s] [priority=%s] [actionsCount=%d] [actions=%s]",
 		task.id,
 		GetTaskType(task).String(),
@@ -316,6 +332,15 @@ func (task *baseTask) String() string {
 		len(task.actions),
 		actionsStr,
 	)
+	if task.balanceEpoch.Sequence != 0 {
+		result += fmt.Sprintf(
+			" [balanceResourceGroup=%s] [balanceLeaderTerm=%d] [balanceSequence=%d]",
+			task.balanceEpoch.ResourceGroup,
+			task.balanceEpoch.LeaderTerm,
+			task.balanceEpoch.Sequence,
+		)
+	}
+	return result
 }
 
 func (task *baseTask) Name() string {

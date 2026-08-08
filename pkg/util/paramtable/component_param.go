@@ -2879,6 +2879,16 @@ type queryCoordConfig struct {
 	GrowingRowCountWeight               ParamItem `refreshable:"true"`
 	DelegatorMemoryOverloadFactor       ParamItem `refreshable:"true"`
 	BalanceCostThreshold                ParamItem `refreshable:"true"`
+	BalanceEpochEnabled                 ParamItem `refreshable:"true"`
+	BalanceEpochShadowMode              ParamItem `refreshable:"true"`
+	BalanceEpochDeadline                ParamItem `refreshable:"true"`
+	BalanceEpochNoProgressDeadline      ParamItem `refreshable:"true"`
+	BalanceEpochMaxSegmentTasks         ParamItem `refreshable:"true"`
+	BalanceEpochMaxChannelTasks         ParamItem `refreshable:"true"`
+	BalanceEpochMaxTasksPerNode         ParamItem `refreshable:"true"`
+	BalanceEpochMaxTasksPerCollection   ParamItem `refreshable:"true"`
+	BalanceEpochMaxObjectRetries        ParamItem `refreshable:"true"`
+	BalanceEpochQuarantineBackoff       ParamItem `refreshable:"true"`
 
 	SegmentCheckInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval       ParamItem `refreshable:"true"`
@@ -3183,6 +3193,104 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.BalanceCostThreshold.Init(base.mgr)
+
+	p.BalanceEpochEnabled = ParamItem{
+		Key:          "queryCoord.balanceEpoch.enabled",
+		Version:      "2.7.0",
+		DefaultValue: "false",
+		Doc:          "Whether to enable resource-group balance epochs.",
+		Export:       true,
+	}
+	p.BalanceEpochEnabled.Init(base.mgr)
+
+	p.BalanceEpochShadowMode = ParamItem{
+		Key:          "queryCoord.balanceEpoch.shadowMode",
+		Version:      "2.7.0",
+		DefaultValue: "false",
+		Doc:          "Whether to plan resource-group balance epochs without admitting tasks.",
+		Export:       true,
+	}
+	p.BalanceEpochShadowMode.Init(base.mgr)
+
+	p.BalanceEpochDeadline = ParamItem{
+		Key:          "queryCoord.balanceEpoch.deadline",
+		Version:      "2.7.0",
+		DefaultValue: "120000",
+		Doc:          "Maximum balance epoch duration in milliseconds.",
+		Export:       true,
+	}
+	p.BalanceEpochDeadline.Init(base.mgr)
+
+	p.BalanceEpochNoProgressDeadline = ParamItem{
+		Key:          "queryCoord.balanceEpoch.noProgressDeadline",
+		Version:      "2.7.0",
+		DefaultValue: "30000",
+		Doc:          "Maximum balance epoch duration without progress in milliseconds.",
+		Export:       true,
+	}
+	p.BalanceEpochNoProgressDeadline.Init(base.mgr)
+
+	p.BalanceEpochMaxSegmentTasks = ParamItem{
+		Key: "queryCoord.balanceEpoch.maxSegmentTasks",
+		FallbackKeys: []string{
+			"queryCoord.balanceSegmentBatchSize",
+			"queryCoord.collectionBalanceSegmentBatchSize",
+		},
+		Version:      "2.7.0",
+		DefaultValue: "5",
+		Doc:          "Maximum segment tasks admitted by one balance epoch wave.",
+		Export:       true,
+	}
+	p.BalanceEpochMaxSegmentTasks.Init(base.mgr)
+
+	p.BalanceEpochMaxChannelTasks = ParamItem{
+		Key: "queryCoord.balanceEpoch.maxChannelTasks",
+		FallbackKeys: []string{
+			"queryCoord.balanceChannelBatchSize",
+			"queryCoord.collectionBalanceChannelBatchSize",
+		},
+		Version:      "2.7.0",
+		DefaultValue: "1",
+		Doc:          "Maximum channel tasks admitted by one balance epoch wave.",
+		Export:       true,
+	}
+	p.BalanceEpochMaxChannelTasks.Init(base.mgr)
+
+	p.BalanceEpochMaxTasksPerNode = ParamItem{
+		Key:          "queryCoord.balanceEpoch.maxTasksPerNode",
+		Version:      "2.7.0",
+		DefaultValue: "5",
+		Doc:          "Maximum balance epoch tasks charged to one node.",
+		Export:       true,
+	}
+	p.BalanceEpochMaxTasksPerNode.Init(base.mgr)
+
+	p.BalanceEpochMaxTasksPerCollection = ParamItem{
+		Key:          "queryCoord.balanceEpoch.maxTasksPerCollection",
+		Version:      "2.7.0",
+		DefaultValue: "5",
+		Doc:          "Maximum balance epoch tasks admitted for one collection.",
+		Export:       true,
+	}
+	p.BalanceEpochMaxTasksPerCollection.Init(base.mgr)
+
+	p.BalanceEpochMaxObjectRetries = ParamItem{
+		Key:          "queryCoord.balanceEpoch.maxObjectRetries",
+		Version:      "2.7.0",
+		DefaultValue: "3",
+		Doc:          "Maximum failed attempts before quarantining a balance object.",
+		Export:       true,
+	}
+	p.BalanceEpochMaxObjectRetries.Init(base.mgr)
+
+	p.BalanceEpochQuarantineBackoff = ParamItem{
+		Key:          "queryCoord.balanceEpoch.quarantineBackoff",
+		Version:      "2.7.0",
+		DefaultValue: "60000",
+		Doc:          "Balance object quarantine duration in milliseconds.",
+		Export:       true,
+	}
+	p.BalanceEpochQuarantineBackoff.Init(base.mgr)
 
 	p.MemoryUsageMaxDifferencePercentage = ParamItem{
 		Key:          "queryCoord.memoryUsageMaxDifferencePercentage",

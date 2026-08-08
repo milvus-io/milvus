@@ -238,7 +238,8 @@ func (suite *ClusterTestSuite) TestLoadSegments() {
 		Infos: []*querypb.SegmentLoadInfo{{}},
 	})
 	suite.Error(err)
-	suite.IsType(merr.WrapErrNodeNotFound(3), err)
+	suite.True(IsRPCNotSentError(err))
+	suite.ErrorIs(err, merr.ErrNodeNotFound)
 }
 
 func (suite *ClusterTestSuite) TestWatchDmChannels() {
@@ -287,6 +288,53 @@ func (suite *ClusterTestSuite) TestReleaseSegments() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 	suite.Equal("unexpected error", status.GetReason())
+}
+
+func (suite *ClusterTestSuite) TestBalanceRPCPreDispatchErrorsAreMarkedNotSent() {
+	ctx := context.Background()
+	missingNode := int64(99)
+	testCases := []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "load segments",
+			call: func() error {
+				_, err := suite.cluster.LoadSegments(ctx, missingNode, &querypb.LoadSegmentsRequest{Base: &commonpb.MsgBase{}})
+				return err
+			},
+		},
+		{
+			name: "release segments",
+			call: func() error {
+				_, err := suite.cluster.ReleaseSegments(ctx, missingNode, &querypb.ReleaseSegmentsRequest{Base: &commonpb.MsgBase{}})
+				return err
+			},
+		},
+		{
+			name: "watch dm channels",
+			call: func() error {
+				_, err := suite.cluster.WatchDmChannels(ctx, missingNode, &querypb.WatchDmChannelsRequest{Base: &commonpb.MsgBase{}})
+				return err
+			},
+		},
+		{
+			name: "unsubscribe dm channel",
+			call: func() error {
+				_, err := suite.cluster.UnsubDmChannel(ctx, missingNode, &querypb.UnsubDmChannelRequest{Base: &commonpb.MsgBase{}})
+				return err
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		suite.Run(testCase.name, func() {
+			err := testCase.call()
+			suite.Error(err)
+			suite.True(IsRPCNotSentError(err))
+			suite.ErrorIs(err, merr.ErrNodeNotFound)
+		})
+	}
 }
 
 func (suite *ClusterTestSuite) TestLoadAndReleasePartitions() {
