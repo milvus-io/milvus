@@ -32,7 +32,6 @@ func (c *columnArrayBase[T]) FieldData() *schemapb.FieldData {
 	fd := &schemapb.FieldData{
 		Type:      schemapb.DataType_Array,
 		FieldName: c.name,
-		ValidData: c.validData,
 	}
 
 	data := make([]*schemapb.ScalarField, 0, c.Len())
@@ -49,6 +48,9 @@ func (c *columnArrayBase[T]) FieldData() *schemapb.FieldData {
 				},
 			},
 		},
+	}
+	if c.nullable {
+		setFieldDataValidData(fd, c.validData)
 	}
 	return fd
 }

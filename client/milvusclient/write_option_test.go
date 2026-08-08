@@ -44,7 +44,7 @@ func (s *ColumnBasedDataOptionSuite) NullableCompatible() {
 	s.Require().Len(req.GetFieldsData(), 1)
 	fd := req.GetFieldsData()[0]
 	s.ElementsMatch([]int64{1, 2, 3}, fd.GetScalars().GetLongData())
-	s.ElementsMatch([]bool{true, true, true}, fd.GetValidData())
+	s.ElementsMatch([]bool{true, true, true}, fd.GetScalars().GetValidData())
 }
 
 func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumn() {
@@ -159,7 +159,11 @@ func (s *ColumnBasedDataOptionSuite) TestWithNullableStructArrayColumn() {
 	subs := clipsFD.GetStructArrays().GetFields()
 	s.Require().Len(subs, 2)
 	for _, sub := range subs {
-		s.Equal([]bool{true, false, true}, sub.GetValidData())
+		if sub.GetScalars() != nil {
+			s.Equal([]bool{true, false, true}, sub.GetScalars().GetValidData())
+		} else {
+			s.Equal([]bool{true, false, true}, sub.GetVectors().GetValidData())
+		}
 	}
 	s.Len(subs[0].GetScalars().GetArrayData().GetData(), 2)
 	s.Len(subs[1].GetVectors().GetVectorArray().GetData(), 2)

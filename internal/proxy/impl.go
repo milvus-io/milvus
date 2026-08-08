@@ -3560,7 +3560,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		PlaceholderGroup: placeholderBytes,
 	}
 
-	return fieldData.GetValidData(), nil
+	return typeutil.GetFieldDataValidData(fieldData), nil
 }
 
 // Flush notify data nodes to persist the data of collection.

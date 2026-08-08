@@ -194,9 +194,10 @@ func (d dec) fieldData(b []byte, fd *schemapb.FieldData) error {
 }
 
 // scalarField decodes a wire-format schemapb.ScalarField into sf.
-// Hot array types (bool/int/long/float/double/string/bytes/json) are hand-decoded;
-// rarer variants (array/geometry/timestamptz/mol/date/time/...) decode in-pass
-// via the official codec (decodeScalarFallback) to preserve oneof ordering.
+// Hot array types (bool/int/long/float/double/string/bytes/json) and row
+// validity are hand-decoded; rarer variants
+// (array/geometry/timestamptz/mol/date/time/...) decode in-pass via the
+// official codec (decodeScalarFallback) to preserve oneof ordering.
 func (d dec) scalarField(b []byte, sf *schemapb.ScalarField) error {
 	full := b
 	var rest []byte
@@ -210,6 +211,29 @@ func (d dec) scalarField(b []byte, sf *schemapb.ScalarField) error {
 		b = b[tn:]
 		if isProto2Group(wtype) {
 			return errProto2
+		}
+		if num == 17 { // ValidData (repeated bool, packed)
+			switch wtype {
+			case 2:
+				v, vn := consumeBytes(b)
+				if vn <= 0 {
+					return errMalformed
+				}
+				if err := appendPackedBool(v, &sf.ValidData); err != nil {
+					return err
+				}
+				b = b[vn:]
+			case 0:
+				v, vn := consumeVarint(b)
+				if vn <= 0 {
+					return errMalformed
+				}
+				sf.ValidData = append(sf.ValidData, v != 0)
+				b = b[vn:]
+			default:
+				return fallbackUnmarshal(full, sf)
+			}
+			continue
 		}
 		if wtype != 2 { // members are all length-delimited; anything else is unknown
 			sn := skipField(b, wtype)
@@ -327,9 +351,13 @@ func unmarshalVectorField(b []byte, vf *schemapb.VectorField) error {
 		if isProto2Group(wtype) {
 			return errProto2
 		}
-		// Known field with an unexpected wire type (Dim=varint; 2..8=length-delimited)
-		// → official codec, to match proto.Unmarshal instead of misdecoding it.
+		// Known field with an unexpected wire type (Dim=varint;
+		// 2..8=length-delimited; ValidData=varint or packed bytes) → official
+		// codec, to match proto.Unmarshal instead of misdecoding it.
 		if (num == 1 && wtype != 0) || (num >= 2 && num <= 8 && wtype != 2) {
+			return fallbackUnmarshal(full, vf)
+		}
+		if num == 9 && wtype != 0 && wtype != 2 {
 			return fallbackUnmarshal(full, vf)
 		}
 		if num >= 2 && num <= 8 {
@@ -407,6 +435,24 @@ func unmarshalVectorField(b []byte, vf *schemapb.VectorField) error {
 			}
 			vf.Data = &schemapb.VectorField_VectorArray{VectorArray: va}
 			b = b[n:]
+		case 9: // ValidData (repeated bool, packed)
+			if wtype == 2 {
+				v, n := consumeBytes(b)
+				if n <= 0 {
+					return errMalformed
+				}
+				if err := appendPackedBool(v, &vf.ValidData); err != nil {
+					return err
+				}
+				b = b[n:]
+			} else {
+				v, n := consumeVarint(b)
+				if n <= 0 {
+					return errMalformed
+				}
+				vf.ValidData = append(vf.ValidData, v != 0)
+				b = b[n:]
+			}
 		default: // unhandled (future) field → fold into official merge
 			n2 := skipField(b, wtype)
 			if n2 <= 0 {

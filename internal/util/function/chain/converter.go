@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // =============================================================================
@@ -449,7 +450,7 @@ func importFieldDataWithName(builder *DataFrameBuilder, fieldData *schemapb.Fiel
 
 	totalRows := offsets[len(offsets)-1]
 
-	validData := fieldData.GetValidData()
+	validData := typeutil.GetFieldDataValidData(fieldData)
 	nullable := len(validData) > 0
 	if nullable && int64(len(validData)) < totalRows {
 		return merr.WrapErrServiceInternalMsg("field %s: validData length (%d) is less than totalRows (%d)", fieldName, len(validData), totalRows)
@@ -933,7 +934,7 @@ func exportFieldData(df *DataFrame, name string) (*schemapb.FieldData, error) {
 	// Export validity data for nullable fields
 	if df.fieldNullables[name] {
 		if validData := exportValidData(col); validData != nil {
-			fieldData.ValidData = validData
+			typeutil.SetFieldDataValidData(fieldData, validData)
 		}
 	}
 

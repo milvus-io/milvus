@@ -1181,12 +1181,11 @@ BuildFixedWidthVectorArrayFromBulkSubscript(
             return arrow::Status::Invalid("not a fixed-width vector field");
     }
 
-    bool has_valid_data = data_array.valid_data_size() > 0;
-    int64_t valid_count = has_valid_data
-                              ? std::count(data_array.valid_data().begin(),
-                                           data_array.valid_data().end(),
-                                           true)
-                              : num_rows;
+    const auto& valid_data = milvus::GetFieldDataRowValidData(data_array);
+    bool has_valid_data = !valid_data.empty();
+    int64_t valid_count =
+        has_valid_data ? std::count(valid_data.begin(), valid_data.end(), true)
+                       : num_rows;
     if (data_size != valid_count * byte_width) {
         return arrow::Status::Invalid(fmt::format(
             "bulk_subscript vector payload size mismatch, field={}, bytes={}, "
@@ -1203,7 +1202,7 @@ BuildFixedWidthVectorArrayFromBulkSubscript(
         auto bytes = static_cast<const uint8_t*>(data);
         int64_t physical = 0;
         for (int64_t i = 0; i < num_rows; i++) {
-            bool is_valid = !has_valid_data || data_array.valid_data(i);
+            bool is_valid = !has_valid_data || valid_data[i];
             if (!is_valid) {
                 ARROW_RETURN_NOT_OK(builder.AppendNull());
                 continue;
@@ -1230,12 +1229,11 @@ arrow::Result<std::shared_ptr<arrow::Array>>
 BuildSparseVectorArrayFromBulkSubscript(
     const milvus::proto::schema::FieldData& data_array, int64_t num_rows) {
     const auto& sparse = data_array.vectors().sparse_float_vector();
-    bool has_valid_data = data_array.valid_data_size() > 0;
-    int64_t valid_count = has_valid_data
-                              ? std::count(data_array.valid_data().begin(),
-                                           data_array.valid_data().end(),
-                                           true)
-                              : num_rows;
+    const auto& valid_data = milvus::GetFieldDataRowValidData(data_array);
+    bool has_valid_data = !valid_data.empty();
+    int64_t valid_count =
+        has_valid_data ? std::count(valid_data.begin(), valid_data.end(), true)
+                       : num_rows;
     if (sparse.contents_size() != valid_count) {
         return arrow::Status::Invalid(
             fmt::format("bulk_subscript sparse payload size mismatch, rows={}, "
@@ -1249,7 +1247,7 @@ BuildSparseVectorArrayFromBulkSubscript(
     ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
     int64_t physical = 0;
     for (int64_t i = 0; i < num_rows; i++) {
-        bool is_valid = !has_valid_data || data_array.valid_data(i);
+        bool is_valid = !has_valid_data || valid_data[i];
         if (!is_valid) {
             ARROW_RETURN_NOT_OK(builder.AppendNull());
             continue;
