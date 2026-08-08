@@ -1646,12 +1646,22 @@ class SegmentExpr : public Expr {
 
             if (size == 0)
                 continue;  //do not go empty-loop at the bound of the chunk
-            std::vector<int32_t> segment_offsets_array(size);
-            auto start_offset =
-                segment_->num_rows_until_chunk(field_id_, i) + data_pos;
-            for (int64_t j = 0; j < size; ++j) {
-                int64_t offset = start_offset + j;
-                segment_offsets_array[j] = static_cast<int32_t>(offset);
+            // Only GIS functions consume the segment offsets. Building the
+            // array unconditionally costs an allocation plus size int32 stores
+            // per batch for every other expression, and the result is never
+            // read. Default-constructing the empty vector is free; it stays in
+            // scope because the three call sites below are in different
+            // branches. Cf. ProcessDataChunksForSingleChunk, which already
+            // builds it inside the guard.
+            std::vector<int32_t> segment_offsets_array;
+            if constexpr (NeedSegmentOffsets) {
+                segment_offsets_array.resize(size);
+                auto start_offset =
+                    segment_->num_rows_until_chunk(field_id_, i) + data_pos;
+                for (int64_t j = 0; j < size; ++j) {
+                    int64_t offset = start_offset + j;
+                    segment_offsets_array[j] = static_cast<int32_t>(offset);
+                }
             }
             auto skip_index = segment_->GetSkipIndex();
             if (!skip_func || !skip_func(*skip_index, field_id_, i)) {
