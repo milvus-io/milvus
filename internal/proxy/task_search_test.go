@@ -3783,6 +3783,30 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		assert.Equal(t, Params.QuotaConfig.TopKLimit.GetAsInt64(), searchInfo.planInfo.GetTopk())
 	})
 
+	t.Run("order_by expands ANN topK while keeping user limit", func(t *testing.T) {
+		Params.Save(Params.QuotaConfig.TopKLimit.Key, "100")
+		defer Params.Reset(Params.QuotaConfig.TopKLimit.Key)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "price", DataType: schemapb.DataType_Int64},
+			},
+		}
+		param := getValidSearchParams()
+		resetSearchParamsValue(param, TopKKey, "2")
+		param = append(param, &commonpb.KeyValuePair{
+			Key:   OrderByFieldsKey,
+			Value: "price:asc",
+		})
+
+		searchInfo, err := parseSearchInfo(param, schema, nil, false)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(2), searchInfo.limit)
+		assert.Equal(t, int64(100), searchInfo.planInfo.GetTopk())
+		assert.Len(t, searchInfo.orderByFields, 1)
+	})
+
 	t.Run("check largeTopK uses dedicated topK limit", func(t *testing.T) {
 		Params.Save(Params.QuotaConfig.TopKLimit.Key, "100")
 		Params.Save(Params.QuotaConfig.LargeTopKLimit.Key, "200")
@@ -5641,7 +5665,6 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "function rerank is not supported with search iterator v2")
 	})
-
 	t.Run("ordinary search routes l0 chain to querynode plan", func(t *testing.T) {
 		request, chainPB := newL0FunctionChainRequest()
 		task := newTask(request)
