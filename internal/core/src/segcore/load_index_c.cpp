@@ -167,15 +167,17 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
         // start loading. Keep that admission path metadata-only: exact scalar
         // V3 directory inspection belongs to SealedIndexTranslator, where the
         // result is used for the actual MCL loading reservation.
-        return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-            field_type,
-            element_type,
-            load_index_info->index_engine_version,
-            load_index_info->index_size,
-            index_params,
-            load_index_info->enable_mmap,
-            load_index_info->num_rows,
-            load_index_info->dim);
+        return milvus::index::IndexFactory::GetInstance()
+            .EstimateIndexLoadResource(milvus::index::IndexLoadSpec{
+                .field_type = field_type,
+                .element_type = element_type,
+                .index_version = load_index_info->index_engine_version,
+                .index_size_in_bytes = load_index_info->index_size,
+                .index_params = index_params,
+                .mmap_enable = load_index_info->enable_mmap,
+                .num_rows = load_index_info->num_rows,
+                .dim = load_index_info->dim,
+            });
     } catch (std::exception& e) {
         ThrowInfo(milvus::UnexpectedError,
                   fmt::format("failed to estimate index load resource, "

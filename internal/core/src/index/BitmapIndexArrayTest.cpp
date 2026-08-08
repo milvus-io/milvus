@@ -1454,8 +1454,17 @@ TEST(ScalarIndexSortArrayNestedTest, ArraySortIndexDoesNotExposeRawArrayData) {
 
     std::map<std::string, std::string> index_params{
         {index::INDEX_TYPE, index::ASCENDING_SORT}};
-    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
-        DataType::ARRAY, 0, 1024, index_params, false, 10);
+    auto request = index::IndexFactory::GetInstance().EstimateIndexLoadResource(
+        index::IndexLoadSpec{
+            .field_type = DataType::ARRAY,
+            .element_type = DataType::NONE,
+            .index_version = 0,
+            .index_size_in_bytes = 1024,
+            .index_params = index_params,
+            .mmap_enable = false,
+            .num_rows = 10,
+            .dim = 0,
+        });
     EXPECT_FALSE(request.has_raw_data);
 
     boost::filesystem::remove_all(numeric_root_path);
@@ -1479,8 +1488,17 @@ TEST(BitmapIndexLoadResourceTest,
     std::map<std::string, std::string> index_params{
         {index::INDEX_TYPE, index::BITMAP_INDEX_TYPE},
         {index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
-    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
-        DataType::INT64, 0, index_size, index_params, false, 1024);
+    auto request = index::IndexFactory::GetInstance().EstimateIndexLoadResource(
+        index::IndexLoadSpec{
+            .field_type = DataType::INT64,
+            .element_type = DataType::NONE,
+            .index_version = 0,
+            .index_size_in_bytes = index_size,
+            .index_params = index_params,
+            .mmap_enable = false,
+            .num_rows = 1024,
+            .dim = 0,
+        });
 
     EXPECT_EQ(request.final_memory_cost, index_size);
     EXPECT_EQ(request.max_memory_cost, 4 * index_size);

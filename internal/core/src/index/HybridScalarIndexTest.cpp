@@ -91,6 +91,63 @@ class CountingOpenFileSystem : public arrow::fs::SubTreeFileSystem {
     size_t open_input_file_count_{0};
 };
 
+TEST(SealedIndexTranslatorTest, CachedVectorRequestSkipsResourceEstimate) {
+    milvus::segcore::LoadIndexInfo load_info{};
+    load_info.field_type = DataType::VECTOR_FLOAT;
+    load_info.element_type = DataType::NONE;
+    // Deliberately omit index_type: any estimator call would reject this spec.
+    load_info.load_resource_request =
+        LoadResourceRequest{/*max_memory_cost=*/10,
+                            /*max_disk_cost=*/20,
+                            /*final_memory_cost=*/3,
+                            /*final_disk_cost=*/4,
+                            /*has_raw_data=*/true};
+
+    index::CreateIndexInfo index_info{};
+    index_info.index_type = "HNSW";
+    index_info.field_type = DataType::VECTOR_FLOAT;
+
+    Config config{};
+    milvus::segcore::storagev1translator::SealedIndexTranslator translator(
+        index_info,
+        &load_info,
+        milvus::tracer::TraceContext{},
+        storage::FileManagerContext{},
+        std::move(config));
+
+    auto [loaded_resource, loading_overhead] =
+        translator.estimated_byte_size_of_cell(0);
+    EXPECT_EQ(loaded_resource, (milvus::cachinglayer::ResourceUsage{3, 4}));
+    EXPECT_EQ(loading_overhead, (milvus::cachinglayer::ResourceUsage{7, 36}));
+}
+
+TEST(SealedIndexTranslatorTest, CachedRequestDoesNotBypassConfigV3Inspection) {
+    milvus::segcore::LoadIndexInfo load_info{};
+    load_info.field_type = DataType::INT64;
+    load_info.element_type = DataType::NONE;
+    load_info.index_params = {{"index_type", ASCENDING_SORT}};
+    load_info.load_resource_request =
+        LoadResourceRequest{/*max_memory_cost=*/10,
+                            /*max_disk_cost=*/20,
+                            /*final_memory_cost=*/3,
+                            /*final_disk_cost=*/4,
+                            /*has_raw_data=*/true};
+
+    index::CreateIndexInfo index_info{};
+    index_info.index_type = ASCENDING_SORT;
+    index_info.field_type = DataType::INT64;
+
+    Config config = load_info.index_params;
+    config[SCALAR_INDEX_ENGINE_VERSION] = "3";
+    EXPECT_THROW(milvus::segcore::storagev1translator::SealedIndexTranslator(
+                     index_info,
+                     &load_info,
+                     milvus::tracer::TraceContext{},
+                     storage::FileManagerContext{},
+                     std::move(config)),
+                 milvus::SegcoreError);
+}
+
 TEST(HybridScalarIndexPlannerPolicy, ShouldUseOpDelegatesToInternalIndex) {
     HybridScalarIndex<int64_t> int_index(7);
     std::vector<int64_t> int_data{1, 2, 3, 4};
@@ -650,21 +707,32 @@ TYPED_TEST_P(HybridIndexTestV1, ResourceEstimateUsesInternalIndexType) {
         this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
     ctx.set_for_loading_index(true);
 
-    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
-        this->type_,
-        0,
-        index_size,
-        index_params,
-        false,
-        this->nb_,
-        this->index_files_,
-        ctx);
+    const auto spec = index::IndexLoadSpec{
+        .field_type = this->type_,
+        .element_type = DataType::NONE,
+        .index_version = 0,
+        .index_size_in_bytes = index_size,
+        .index_params = index_params,
+        .mmap_enable = false,
+        .num_rows = this->nb_,
+        .dim = 0,
+    };
+    auto& factory = index::IndexFactory::GetInstance();
+    auto inspection =
+        factory.InspectScalarIndexFiles(spec,
+                                        index::IndexFileContext{
+                                            .index_files = this->index_files_,
+                                            .file_manager_context = ctx,
+                                        });
+    auto plan = factory.PlanScalarIndexLoad(spec, inspection);
+    const auto& request = plan.request;
 
     EXPECT_EQ(request.final_memory_cost, index_size);
     EXPECT_EQ(request.final_disk_cost, 0);
     EXPECT_EQ(request.max_memory_cost, 2 * index_size);
     EXPECT_EQ(request.max_disk_cost, 0);
     EXPECT_FALSE(request.has_raw_data);
+    EXPECT_FALSE(plan.shared_memory_runtime_unit_bytes.has_value());
 }
 
 TYPED_TEST_P(HybridIndexTestV1, BitmapResourceEstimateKeepsFullStreamOverhead) {
@@ -712,21 +780,30 @@ TYPED_TEST_P(HybridIndexTestV1, BitmapResourceEstimateKeepsFullStreamOverhead) {
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
-    std::optional<storage::EntryStreamLoadInfo> stream_load_info;
-
-    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
-        this->type_,
-        0,
-        index_size,
-        index_params,
-        false,
-        this->nb_,
-        {remote_path},
-        ctx,
-        &stream_load_info);
+    const auto spec = index::IndexLoadSpec{
+        .field_type = this->type_,
+        .element_type = DataType::NONE,
+        .index_version = 0,
+        .index_size_in_bytes = index_size,
+        .index_params = index_params,
+        .mmap_enable = false,
+        .num_rows = this->nb_,
+        .dim = 0,
+    };
+    auto& factory = index::IndexFactory::GetInstance();
+    auto inspection =
+        factory.InspectScalarIndexFiles(spec,
+                                        index::IndexFileContext{
+                                            .index_files = {remote_path},
+                                            .file_manager_context = ctx,
+                                        });
+    auto plan = factory.PlanScalarIndexLoad(spec, inspection);
+    const auto& request = plan.request;
+    const auto& stream_load_info = inspection.stream_load_info;
 
     ASSERT_TRUE(stream_load_info.has_value());
     EXPECT_TRUE(stream_load_info->encrypted);
+    EXPECT_FALSE(plan.shared_memory_runtime_unit_bytes.has_value());
     auto bounded_stream_overhead = storage::EntryStreamMaxTransientBytes(
         stream_load_info->total_transient_bytes,
         stream_load_info->max_task_transient_bytes);
@@ -937,21 +1014,35 @@ TYPED_TEST_P(HybridIndexTestInverted,
                                     counting_fs);
     ctx.set_for_loading_index(true);
 
-    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
-        this->type_,
-        0,
-        index_size,
-        index_params,
-        false,
-        this->nb_,
-        this->index_files_,
-        ctx);
+    const auto spec = index::IndexLoadSpec{
+        .field_type = this->type_,
+        .element_type = DataType::NONE,
+        .index_version = 0,
+        .index_size_in_bytes = index_size,
+        .index_params = index_params,
+        .mmap_enable = false,
+        .num_rows = this->nb_,
+        .dim = 0,
+    };
+    auto& factory = index::IndexFactory::GetInstance();
+    auto inspection =
+        factory.InspectScalarIndexFiles(spec,
+                                        index::IndexFileContext{
+                                            .index_files = this->index_files_,
+                                            .file_manager_context = ctx,
+                                        });
+    auto plan = factory.PlanScalarIndexLoad(spec, inspection);
+    const auto& request = plan.request;
 
     EXPECT_EQ(request.final_memory_cost, 0);
     EXPECT_EQ(request.final_disk_cost, index_size);
     EXPECT_EQ(request.max_memory_cost, stream_overhead);
     EXPECT_EQ(request.max_disk_cost, index_size);
     EXPECT_FALSE(request.has_raw_data);
+    ASSERT_TRUE(inspection.stream_load_info.has_value());
+    EXPECT_FALSE(inspection.stream_load_info->encrypted);
+    ASSERT_TRUE(plan.shared_memory_runtime_unit_bytes.has_value());
+    EXPECT_EQ(*plan.shared_memory_runtime_unit_bytes, max_task_transient_bytes);
     EXPECT_EQ(counting_fs->OpenInputFileCount(), 1);
 }
 
@@ -1127,23 +1218,34 @@ TYPED_TEST_P(HybridIndexTestInverted,
     auto file_info = this->fs_->GetFileInfo(remote_path).ValueOrDie();
     auto index_size = static_cast<uint64_t>(file_info.size());
     std::map<std::string, std::string> index_params{
-        {"index_type", milvus::index::HYBRID_INDEX_TYPE},
+        {"index_type", milvus::index::INVERTED_INDEX_TYPE},
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
-    std::optional<storage::EntryStreamLoadInfo> stream_load_info;
-
-    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
-        this->type_,
-        0,
-        index_size,
-        index_params,
-        false,
-        this->nb_,
-        {remote_path},
-        ctx,
-        &stream_load_info);
+    const auto spec = index::IndexLoadSpec{
+        .field_type = this->type_,
+        .element_type = DataType::NONE,
+        .index_version = 0,
+        .index_size_in_bytes = index_size,
+        .index_params = index_params,
+        .mmap_enable = false,
+        .num_rows = this->nb_,
+        .dim = 0,
+    };
+    auto& factory = index::IndexFactory::GetInstance();
+    auto inspection =
+        factory.InspectScalarIndexFiles(spec,
+                                        index::IndexFileContext{
+                                            .index_files = {remote_path},
+                                            .file_manager_context = ctx,
+                                        });
+    auto plan = factory.PlanScalarIndexLoad(spec, inspection);
+    const auto& request = plan.request;
+    const auto& stream_load_info = inspection.stream_load_info;
 
     ASSERT_TRUE(stream_load_info.has_value());
     EXPECT_TRUE(stream_load_info->encrypted);
+    ASSERT_TRUE(plan.shared_memory_runtime_unit_bytes.has_value());
+    EXPECT_EQ(*plan.shared_memory_runtime_unit_bytes,
+              stream_load_info->max_task_transient_bytes);
     ASSERT_GT(stream_load_info->total_transient_bytes,
               stream_load_info->max_task_transient_bytes);
     ASSERT_LT(storage::EntryStreamMaxTransientBytes(

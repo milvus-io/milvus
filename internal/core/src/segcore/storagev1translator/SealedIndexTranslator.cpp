@@ -1,7 +1,6 @@
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 
 #include <filesystem>
-#include <limits>
 #include <optional>
 #include <utility>
 
@@ -20,21 +19,10 @@
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
-#include "storage/EntryStreamUtils.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/ThreadPools.h"
 
 namespace milvus::segcore::storagev1translator {
-
-namespace {
-
-int64_t
-PolicyBytes(size_t bytes) {
-    return static_cast<int64_t>(std::min(
-        bytes, static_cast<size_t>(std::numeric_limits<int64_t>::max())));
-}
-
-}  // namespace
 
 SealedIndexTranslator::SealedIndexTranslator(
     milvus::index::CreateIndexInfo index_info,
@@ -92,66 +80,74 @@ SealedIndexTranslator::SealedIndexTranslator(
                 index_info_.index_type, knowhere::feature::LAZY_LOAD)),
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
-    std::optional<milvus::storage::EntryStreamLoadInfo> stream_load_info;
-    bool use_shared_memory_overhead_group = false;
-    load_resource_request_ = EstimateLoadResource(
-        &stream_load_info, &use_shared_memory_overhead_group);
+    const auto load_spec = milvus::index::IndexLoadSpec{
+        .field_type = index_load_info_.field_type,
+        .element_type = index_load_info_.element_type,
+        .index_version =
+            static_cast<IndexVersion>(index_load_info_.index_engine_version),
+        .index_size_in_bytes =
+            static_cast<uint64_t>(index_load_info_.index_size),
+        .index_params = index_load_info_.index_params,
+        .mmap_enable = index_load_info_.enable_mmap,
+        .num_rows = index_load_info_.num_rows,
+        .dim = index_load_info_.dim,
+    };
+    auto& index_factory = milvus::index::IndexFactory::GetInstance();
+    const auto is_vector = IsVectorDataType(index_load_info_.field_type);
+    const auto config_scalar_version =
+        is_vector ? 1
+                  : milvus::index::GetValueFromConfig<int32_t>(
+                        config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+                        .value_or(1);
+    const auto requires_file_context =
+        milvus::index::IndexFactory::RequiresFileContextForLoadResource(
+            load_spec) ||
+        config_scalar_version >= 3;
+    if (index_load_info_.load_resource_request.has_value() &&
+        !requires_file_context) {
+        load_resource_request_ = *index_load_info_.load_resource_request;
+        return;
+    }
 
-    auto scalar_version =
-        milvus::index::GetValueFromConfig<int32_t>(
-            config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
-            .value_or(1);
-    if (scalar_version >= 3 && !IsVectorDataType(index_load_info_.field_type)) {
-        AssertInfo(stream_load_info.has_value(),
-                   "missing stream load info for packed scalar V3 index");
-        if (use_shared_memory_overhead_group) {
-            auto max_task_overhead =
-                stream_load_info->encrypted
-                    ? stream_load_info->max_task_transient_bytes
-                    : milvus::storage::SaturatingMultiply(
-                          milvus::storage::MaxEntryStreamTaskBytes(),
-                          milvus::storage::kFileStreamBufferMultiplier);
-            auto memory_group =
-                milvus::storage::LoadMemoryOverheadController::GetInstance()
-                    .GetOrCreate(milvus::ThreadPools::GetLoadExecutorWorkers());
-            meta_.loading_overhead_config =
-                milvus::cachinglayer::LoadingOverheadConfig{
-                    milvus::cachinglayer::LoadingOverheadGroupBinding{
-                        std::move(memory_group),
-                        PolicyBytes(max_task_overhead)},
-                    // FIXME: Bind scalar V3 file overhead to the executor-backed
-                    // file group after every file-backed load path writes through
-                    // positioned tasks on the HIGH/LOW load executors. Some paths
-                    // still use FileWriter or its independent worker pool, so
-                    // binding them now would under-reserve concurrent disk
-                    // overhead.
-                    std::nullopt};
+    if (is_vector) {
+        load_resource_request_ =
+            index_factory.EstimateIndexLoadResource(load_spec);
+    } else {
+        auto inspection = index_factory.InspectScalarIndexFiles(
+            load_spec,
+            milvus::index::IndexFileContext{
+                .index_files = index_load_info_.index_files,
+                .file_manager_context = file_manager_context_,
+            });
+        auto plan = index_factory.PlanScalarIndexLoad(load_spec, inspection);
+        load_resource_request_ = plan.request;
+
+        if (config_scalar_version >= 3) {
+            AssertInfo(inspection.stream_load_info.has_value(),
+                       "missing stream load info for packed scalar V3 index");
+            if (plan.shared_memory_runtime_unit_bytes.has_value()) {
+                auto max_runtime_unit = *plan.shared_memory_runtime_unit_bytes;
+                auto memory_group =
+                    milvus::storage::LoadMemoryOverheadController::GetInstance()
+                        .GetOrCreate(
+                            milvus::ThreadPools::GetLoadExecutorWorkers());
+                meta_.loading_overhead_config =
+                    milvus::cachinglayer::LoadingOverheadConfig{
+                        milvus::cachinglayer::LoadingOverheadGroupBinding{
+                            std::move(memory_group), max_runtime_unit},
+                        // FIXME: Bind scalar V3 file overhead to the
+                        // executor-backed file group after every file-backed
+                        // load path writes through positioned tasks on the
+                        // HIGH/LOW load executors. Some paths still use
+                        // FileWriter or its independent worker pool, so binding
+                        // them now would under-reserve concurrent disk overhead.
+                        std::nullopt};
+            }
         }
     }
-}
-
-LoadResourceRequest
-SealedIndexTranslator::EstimateLoadResource(
-    std::optional<milvus::storage::EntryStreamLoadInfo>* stream_load_info,
-    bool* use_shared_memory_overhead_group) const {
-    auto estimated =
-        milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-            index_load_info_.field_type,
-            index_load_info_.element_type,
-            index_load_info_.index_engine_version,
-            index_load_info_.index_size,
-            index_load_info_.index_params,
-            index_load_info_.enable_mmap,
-            index_load_info_.num_rows,
-            index_load_info_.dim,
-            index_load_info_.index_files,
-            file_manager_context_,
-            stream_load_info,
-            use_shared_memory_overhead_group);
     if (index_load_info_.load_resource_request.has_value()) {
-        return *index_load_info_.load_resource_request;
+        load_resource_request_ = *index_load_info_.load_resource_request;
     }
-    return estimated;
 }
 
 size_t
