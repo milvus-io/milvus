@@ -1887,10 +1887,9 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             AssertInfo(vec, "Pointer of vec_ptr is nullptr for DECIMAL field");
             auto dst =
                 result->mutable_scalars()->mutable_bytes_data()->mutable_data();
-            auto valid_data_ptr =
-                field_meta.is_nullable()
-                    ? insert_record_.get_valid_data(field_id)
-                    : nullptr;
+            auto valid_data_ptr = field_meta.is_nullable()
+                                      ? insert_record_.get_valid_data(field_id)
+                                      : nullptr;
             for (int64_t i = 0; i < count; ++i) {
                 auto offset = seg_offsets[i];
                 if (offset != INVALID_SEG_OFFSET &&
