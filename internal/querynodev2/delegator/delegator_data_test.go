@@ -1930,7 +1930,7 @@ func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterPreparedHandoff() {
 	const (
 		segmentID    = int64(1001)
 		partitionID  = int64(500)
-		targetOffset = int64(10)
+		targetOffset = uint64(10)
 	)
 
 	segment := segments.NewMockSegment(s.T())
@@ -1942,7 +1942,6 @@ func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterPreparedHandoff() {
 	segment.EXPECT().Type().Return(segments.SegmentTypeGrowing).Maybe()
 	segment.EXPECT().Level().Return(datapb.SegmentLevel_Legacy).Maybe()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(targetOffset).Once()
 	segment.EXPECT().MemSize().Return(int64(1024)).Once()
 	segment.EXPECT().Unpin().Maybe()
 
@@ -1959,8 +1958,8 @@ func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterPreparedHandoff() {
 
 	err = sd.growingSourceProvider.PrepareGrowingSourceReleaseHandoff(ctx, 10000, []syncmgr.GrowingSourceReleaseHandoffSegment{
 		{
-			SegmentID:    segmentID,
-			TargetOffset: targetOffset,
+			SegmentID:      segmentID,
+			FlushThroughTs: targetOffset,
 		},
 	})
 	s.Require().NoError(err)

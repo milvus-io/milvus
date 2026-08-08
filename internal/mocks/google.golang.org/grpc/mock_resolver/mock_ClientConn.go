@@ -5,7 +5,6 @@ package mock_resolver
 import (
 	mock "github.com/stretchr/testify/mock"
 	resolver "google.golang.org/grpc/resolver"
-
 	serviceconfig "google.golang.org/grpc/serviceconfig"
 )
 

@@ -85,12 +85,21 @@ func (s *SyncPolicySuite) TestSyncDroppedPolicy() {
 func (s *SyncPolicySuite) TestSealedSegmentsPolicy() {
 	metacache := metacache.NewMockMetaCache(s.T())
 	policy := GetSealedSegmentsPolicy(metacache)
-	ids := []int64{1, 2, 3}
-	metacache.EXPECT().GetSegmentIDsBy(mock.Anything).Return(ids)
-	metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
+	claimed := []int64{7, 8}
+	due := []int64{1, 2, 3}
+	// Two queries, in this order: already-claimed flushes (Flushing), then the
+	// ones still waiting to be claimed (Sealed).
+	metacache.EXPECT().GetSegmentIDsBy(mock.Anything).Return(claimed).Once()
+	metacache.EXPECT().GetSegmentIDsBy(mock.Anything).Return(due).Once()
+	// Deliberately no UpdateSegments expectation: the policy must NOT claim.
+	// Claiming here would be claiming before knowing whether the flush can be
+	// produced, which is what forced the old Flushing->Sealed rollback. The mock
+	// fails the test if the policy touches segment state.
 
 	result := policy.SelectSegments([]*segmentBuffer{}, tsoutil.ComposeTSByTime(time.Now()))
-	s.ElementsMatch(ids, result)
+	// Order, not just membership: the claim is one-way now, so this ordering is
+	// what finishes a claimed flush before starting a new one.
+	s.Equal([]int64{7, 8, 1, 2, 3}, result)
 }
 
 func (s *SyncPolicySuite) TestOlderBufferPolicy() {

@@ -211,7 +211,7 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 		pack.WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithFlush()
 
 		s.mockCache.EXPECT().GetSegmentByID(s.segmentID).Return(nil, false).Once()
-		_, err := s.serializer.serializeMergedPkStats(pack)
+		_, err := s.serializer.serializeMergedPkStatsWith(pack, nil)
 		s.Error(err)
 	})
 
@@ -235,7 +235,7 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 		s.NotNil(blob)
 		action := metacache.RollStats(stats)
 		action(segInfo)
-		blob, err = s.serializer.serializeMergedPkStats(pack)
+		blob, err = s.serializer.serializeMergedPkStatsWith(pack, nil)
 		s.NoError(err)
 		s.NotNil(blob)
 	})

@@ -168,7 +168,7 @@ func (s *SyncManagerSuite) TestResizePool() {
 	syncMgr, ok := manager.(*syncManager)
 	s.Require().True(ok)
 
-	cap := syncMgr.workerPool.Cap()
+	cap := syncMgr.preparePool.Cap()
 	s.NotZero(cap)
 
 	params := paramtable.Get()
@@ -181,21 +181,21 @@ func (s *SyncManagerSuite) TestResizePool() {
 		HasUpdated: true,
 	})
 
-	s.Equal(cap, syncMgr.workerPool.Cap())
+	s.Equal(cap, syncMgr.preparePool.Cap())
 
 	syncMgr.resizeHandler(&config.Event{
 		Key:        configKey,
 		Value:      "-1",
 		HasUpdated: true,
 	})
-	s.Equal(cap, syncMgr.workerPool.Cap())
+	s.Equal(cap, syncMgr.preparePool.Cap())
 
 	syncMgr.resizeHandler(&config.Event{
 		Key:        configKey,
 		Value:      strconv.FormatInt(int64(oldValue*2), 10),
 		HasUpdated: true,
 	})
-	s.Equal(cap*2, syncMgr.workerPool.Cap())
+	s.Equal(cap*2, syncMgr.preparePool.Cap())
 }
 
 func (s *SyncManagerSuite) TestUnexpectedError() {
@@ -204,8 +204,11 @@ func (s *SyncManagerSuite) TestUnexpectedError() {
 	task := NewMockTask(s.T())
 	task.EXPECT().SegmentID().Return(1000)
 	task.EXPECT().Checkpoint().Return(&msgpb.MsgPosition{})
-	task.EXPECT().Run(mock.Anything).Return(merr.WrapErrServiceInternal("mocked")).Once()
+	task.EXPECT().Prepare(mock.Anything).Return(merr.WrapErrServiceInternal("mocked")).Once()
 	task.EXPECT().HandleError(mock.Anything)
+	// SyncData injects the chunk manager through the Task interface now, rather
+	// than type-switching to the two concrete task types.
+	task.EXPECT().SetChunkManager(mock.Anything).Return()
 
 	f, _ := manager.SyncData(context.Background(), task)
 	_, err := f.Await()
@@ -218,8 +221,9 @@ func (s *SyncManagerSuite) TestTargetUpdateSameID() {
 	task := NewMockTask(s.T())
 	task.EXPECT().SegmentID().Return(1000)
 	task.EXPECT().Checkpoint().Return(&msgpb.MsgPosition{})
-	task.EXPECT().Run(mock.Anything).Return(errors.New("mock err")).Once()
+	task.EXPECT().Prepare(mock.Anything).Return(errors.New("mock err")).Once()
 	task.EXPECT().HandleError(mock.Anything)
+	task.EXPECT().SetChunkManager(mock.Anything).Return()
 
 	f, _ := manager.SyncData(context.Background(), task)
 	_, err := f.Await()

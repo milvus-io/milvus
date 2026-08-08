@@ -357,9 +357,25 @@ typedef struct CPrimaryKeysResult {
  * - Writing to storage with TEXT column LOB handling
  * - Creating manifest with committed version
  *
+ * The flush range is given as a TIMESTAMP fence, not as row offsets. Row
+ * offsets exist only inside this segment and have no meaning to the caller:
+ * after a restart the segment is rebuilt from a WAL replay and its offsets
+ * restart at zero, while the caller's notion of "what I already flushed" is a
+ * WAL position. Timestamps are the one coordinate both sides share, so both
+ * fences are resolved here, against this segment's own rows, via
+ * get_active_count() — the same primitive the query path uses for MVCC
+ * visibility. That keeps both ends of the range in one coordinate system and
+ * makes the resolution correct regardless of where the replay started.
+ *
+ * get_active_count() is bounded by the acknowledged insert prefix, so the
+ * resolved range never covers a row whose write has not completed. The caller
+ * is responsible for only passing an end_ts it knows the segment has fully
+ * received (on the Milvus side: tSafe >= end_ts).
+ *
  * @param c_segment The growing segment to flush
- * @param start_offset Start row offset (inclusive)
- * @param end_offset End row offset (exclusive)
+ * @param start_ts Rows with timestamp <= start_ts are already flushed and are
+ *                 excluded
+ * @param end_ts Rows with timestamp <= end_ts are included
  * @param config Flush configuration
  * @param result Output flush result (caller must free manifest_path)
  * @return CStatus indicating success or failure
@@ -376,15 +392,21 @@ GetGrowingSegmentMaterializedFieldIDs(CSegmentInterface c_segment,
 
 CStatus
 FlushGrowingSegmentData(CSegmentInterface c_segment,
-                        int64_t start_offset,
-                        int64_t end_offset,
+                        uint64_t start_ts,
+                        uint64_t end_ts,
                         const CFlushConfig* config,
                         CFlushResult* result);
 
+/**
+ * @brief Read the primary keys of the rows in (start_ts, end_ts].
+ *
+ * Same range and same resolution as FlushGrowingSegmentData, so the statistics
+ * built from these keys describe exactly the rows that flush writes.
+ */
 CStatus
 GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
-                             int64_t start_offset,
-                             int64_t end_offset,
+                             uint64_t start_ts,
+                             uint64_t end_ts,
                              CPrimaryKeysResult* result);
 
 /**

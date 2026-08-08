@@ -9,7 +9,6 @@ import (
 	mock "github.com/stretchr/testify/mock"
 
 	ratelimit "github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
-
 	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 

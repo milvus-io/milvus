@@ -48,7 +48,15 @@ type delegatorGrowingSourceProvider struct {
 	active          int
 	retained        map[int64]*retainedGrowingFlushSource
 	releaseAllowed  map[int64]uint64
-	releasePrepared map[int64]int64
+	releasePrepared map[int64]uint64
+	// committedFences is the highest flush fence each segment has committed,
+	// recorded whether or not a retained entry exists at that moment. The
+	// final flush's CommitGrowingFlush can race the release handoff's
+	// registerRetained: a commit landing in between would be a no-op on the
+	// retained map, and the entry created right after would wait forever on a
+	// fence that has already been reached. registerRetained inherits from
+	// this map so a commit is never lost to that ordering.
+	committedFences map[int64]uint64
 	handoffOnly     bool
 	handoffAllowed  map[int64]struct{}
 }
@@ -60,8 +68,9 @@ func newDelegatorGrowingSourceProvider(segmentManager segments.SegmentManager, w
 		channelName:     unknownGrowingSourceChannel,
 		retained:        make(map[int64]*retainedGrowingFlushSource),
 		releaseAllowed:  make(map[int64]uint64),
-		releasePrepared: make(map[int64]int64),
+		releasePrepared: make(map[int64]uint64),
 		handoffAllowed:  make(map[int64]struct{}),
+		committedFences: make(map[int64]uint64),
 	}
 	if len(getTSafe) > 0 {
 		provider.getTSafe = getTSafe[0]
@@ -90,7 +99,11 @@ func (p *delegatorGrowingSourceProvider) SetRegistration(registration *syncmgr.G
 	p.registration = registration
 }
 
-func (p *delegatorGrowingSourceProvider) GetGrowingFlushSource(segmentID int64, targetOffset int64, endPos *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+// GetGrowingFlushSource resolves the source for a flush running up to endPos.
+// No row bound is taken: endPos carries its own fence (its timestamp), and the
+// caller checks TSafe() against it. Usable here means "the segment exists and is
+// pinned", not "it has caught up".
+func (p *delegatorGrowingSourceProvider) GetGrowingFlushSource(segmentID int64, endPos *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 	if !p.acquireLease(segmentID) {
 		return nil, syncmgr.GrowingSourceUnavailable
 	}
@@ -117,10 +130,7 @@ func (p *delegatorGrowingSourceProvider) GetGrowingFlushSource(segmentID int64, 
 		p.releaseLease()
 		return nil, syncmgr.GrowingSourceUnavailable
 	}
-	source := &delegatorGrowingFlushSource{segmentID: segmentID, segment: segment, provider: p, targetOffset: targetOffset, retained: retained}
-	if p.currentOffset(segment) < targetOffset {
-		return source, syncmgr.GrowingSourcePending
-	}
+	source := &delegatorGrowingFlushSource{segmentID: segmentID, segment: segment, provider: p, retained: retained}
 	return source, syncmgr.GrowingSourceUsable
 }
 
@@ -164,10 +174,10 @@ func (p *delegatorGrowingSourceProvider) PrepareGrowingSourceReleaseHandoff(ctx 
 	preparedSegments := make([]syncmgr.GrowingSourceReleaseHandoffSegment, 0, len(segments))
 	for _, segment := range segments {
 		allowedSegments = append(allowedSegments, segment)
-		if segment.TargetOffset <= 0 {
+		if segment.FlushThroughTs == 0 {
 			continue
 		}
-		if err := p.registerRetained(segment.SegmentID, segment.TargetOffset); err != nil {
+		if err := p.registerRetained(segment.SegmentID, segment.FlushThroughTs); err != nil {
 			if errors.Is(err, merr.ErrSegmentNotFound) {
 				continue
 			}
@@ -191,31 +201,38 @@ func (p *delegatorGrowingSourceProvider) prepareDeactivatedGrowingSourceReleaseH
 		if !ok {
 			continue
 		}
-		if segment.TargetOffset > retained.targetOffset {
+		if segment.FlushThroughTs > retained.flushThroughTs {
 			continue
 		}
 		if current, ok := p.releaseAllowed[segment.SegmentID]; !ok || current < fenceTs {
 			p.releaseAllowed[segment.SegmentID] = fenceTs
 		}
-		if segment.TargetOffset <= 0 {
+		if segment.FlushThroughTs == 0 {
 			continue
 		}
-		if current, ok := p.releasePrepared[segment.SegmentID]; !ok || current < segment.TargetOffset {
-			p.releasePrepared[segment.SegmentID] = segment.TargetOffset
+		if current, ok := p.releasePrepared[segment.SegmentID]; !ok || current < segment.FlushThroughTs {
+			p.releasePrepared[segment.SegmentID] = segment.FlushThroughTs
 		}
 	}
 	return nil
 }
 
-func (p *delegatorGrowingSourceProvider) registerRetained(segmentID int64, targetOffset int64) error {
+func (p *delegatorGrowingSourceProvider) getTSafeOrZero() uint64 {
+	if p.getTSafe == nil {
+		return 0
+	}
+	return p.getTSafe()
+}
+
+func (p *delegatorGrowingSourceProvider) registerRetained(segmentID int64, flushThroughTs uint64) error {
 	p.mu.Lock()
 	if p.closing {
 		p.mu.Unlock()
 		return errGrowingSourceProviderClosed
 	}
 	if retained, ok := p.retained[segmentID]; ok {
-		if retained.targetOffset < targetOffset {
-			retained.targetOffset = targetOffset
+		if retained.flushThroughTs < flushThroughTs {
+			retained.flushThroughTs = flushThroughTs
 			p.observeRetainedMetricsLocked()
 		}
 		p.mu.Unlock()
@@ -230,10 +247,18 @@ func (p *delegatorGrowingSourceProvider) registerRetained(segmentID int64, targe
 	if err := segment.PinIfNotReleased(); err != nil {
 		return err
 	}
-	currentOffset := p.currentOffset(segment)
-	if currentOffset < targetOffset {
-		segment.Unpin()
-		return merr.WrapErrServiceInternalMsg("growing-source segment %d is behind target offset, current=%d target=%d", segmentID, currentOffset, targetOffset)
+	// The segment must already hold everything the handoff fence names, or
+	// retaining it cannot serve the flush that fence was issued for.
+	//
+	// Only checkable when a watermark is available. Treating an absent one as
+	// zero would read as "always behind" and refuse every retention — the exact
+	// opposite of what a provider with no tsafe source should do, since it has
+	// no evidence the segment is short of anything.
+	if p.getTSafe != nil {
+		if tsafe := p.getTSafe(); tsafe < flushThroughTs {
+			segment.Unpin()
+			return merr.WrapErrServiceInternalMsg("growing-source segment %d has not consumed the handoff fence, tsafe=%d fence=%d", segmentID, tsafe, flushThroughTs)
+		}
 	}
 
 	p.mu.Lock()
@@ -243,28 +268,32 @@ func (p *delegatorGrowingSourceProvider) registerRetained(segmentID int64, targe
 		return errGrowingSourceProviderClosed
 	}
 	if retained, ok := p.retained[segmentID]; ok {
-		if retained.targetOffset < targetOffset {
-			retained.targetOffset = targetOffset
+		if retained.flushThroughTs < flushThroughTs {
+			retained.flushThroughTs = flushThroughTs
 		}
 		segment.Unpin()
 		p.observeRetainedMetricsLocked()
 		return nil
 	}
 	p.retained[segmentID] = &retainedGrowingFlushSource{
-		segment:      segment,
-		targetOffset: targetOffset,
-		bytes:        segmentMemSize(segment),
+		segment:        segment,
+		flushThroughTs: flushThroughTs,
+		// Inherit any fence committed before this entry existed — the final
+		// flush's commit can land between the caller reading the flush
+		// progress and this registration.
+		committedFlushedTs: p.committedFences[segmentID],
+		bytes:              segmentMemSize(segment),
 	}
 	p.observeRetainedMetricsLocked()
 	return nil
 }
 
 type retainedSnapshot struct {
-	existed         bool
-	source          *retainedGrowingFlushSource
-	targetOffset    int64
-	committedOffset int64
-	detached        bool
+	existed            bool
+	source             *retainedGrowingFlushSource
+	flushThroughTs     uint64
+	committedFlushedTs uint64
+	detached           bool
 }
 
 func (p *delegatorGrowingSourceProvider) snapshotRetained(segments []syncmgr.GrowingSourceReleaseHandoffSegment) map[int64]retainedSnapshot {
@@ -279,8 +308,8 @@ func (p *delegatorGrowingSourceProvider) snapshotRetained(segments []syncmgr.Gro
 		retained, existed := p.retained[segment.SegmentID]
 		entry := retainedSnapshot{existed: existed, source: retained}
 		if existed {
-			entry.targetOffset = retained.targetOffset
-			entry.committedOffset = retained.committedOffset
+			entry.flushThroughTs = retained.flushThroughTs
+			entry.committedFlushedTs = retained.committedFlushedTs
 			entry.detached = retained.detached
 		}
 		snapshot[segment.SegmentID] = entry
@@ -295,8 +324,8 @@ func (p *delegatorGrowingSourceProvider) rollbackRetained(snapshot map[int64]ret
 		current, exists := p.retained[segmentID]
 		if entry.existed {
 			p.retained[segmentID] = entry.source
-			entry.source.targetOffset = entry.targetOffset
-			entry.source.committedOffset = entry.committedOffset
+			entry.source.flushThroughTs = entry.flushThroughTs
+			entry.source.committedFlushedTs = entry.committedFlushedTs
 			entry.source.detached = entry.detached
 			if exists && current != entry.source {
 				toUnpin = append(toUnpin, current.segment)
@@ -364,8 +393,8 @@ func (p *delegatorGrowingSourceProvider) markReleasePrepared(fenceTs uint64, seg
 		if current, ok := p.releaseAllowed[segment.SegmentID]; !ok || current < fenceTs {
 			p.releaseAllowed[segment.SegmentID] = fenceTs
 		}
-		if current, ok := p.releasePrepared[segment.SegmentID]; !ok || current < segment.TargetOffset {
-			p.releasePrepared[segment.SegmentID] = segment.TargetOffset
+		if current, ok := p.releasePrepared[segment.SegmentID]; !ok || current < segment.FlushThroughTs {
+			p.releasePrepared[segment.SegmentID] = segment.FlushThroughTs
 		}
 	}
 }
@@ -435,15 +464,20 @@ func (p *delegatorGrowingSourceProvider) getRetained(segmentID int64) (segments.
 	return retained.segment, true
 }
 
-func (p *delegatorGrowingSourceProvider) releaseRetainedIfComplete(segmentID int64, targetOffset int64) {
+func (p *delegatorGrowingSourceProvider) releaseRetainedIfComplete(segmentID int64, flushThroughTs uint64) {
 	p.mu.Lock()
+	// Recorded before the retained lookup, so a commit that arrives before the
+	// handoff registers its entry is not lost — see committedFences.
+	if flushThroughTs > p.committedFences[segmentID] {
+		p.committedFences[segmentID] = flushThroughTs
+	}
 	retained, ok := p.retained[segmentID]
 	if !ok {
 		p.mu.Unlock()
 		return
 	}
-	if retained.committedOffset < targetOffset {
-		retained.committedOffset = targetOffset
+	if retained.committedFlushedTs < flushThroughTs {
+		retained.committedFlushedTs = flushThroughTs
 	}
 	registration, released := p.tryReleaseRetainedLocked(segmentID, retained)
 	p.observeRetainedMetricsLocked()
@@ -454,10 +488,11 @@ func (p *delegatorGrowingSourceProvider) releaseRetainedIfComplete(segmentID int
 func (p *delegatorGrowingSourceProvider) tryReleaseRetainedLocked(segmentID int64, retained *retainedGrowingFlushSource) (*syncmgr.GrowingSourceRegistration, *retainedGrowingFlushSource) {
 	if retained == nil ||
 		!retained.detached ||
-		retained.committedOffset < retained.targetOffset {
+		retained.committedFlushedTs < retained.flushThroughTs {
 		return nil, nil
 	}
 	delete(p.retained, segmentID)
+	delete(p.committedFences, segmentID)
 	return p.unregisterIfInactiveLocked(), retained
 }
 
@@ -528,7 +563,8 @@ func (p *delegatorGrowingSourceProvider) Close() {
 	retained := p.retained
 	p.retained = make(map[int64]*retainedGrowingFlushSource)
 	p.releaseAllowed = make(map[int64]uint64)
-	p.releasePrepared = make(map[int64]int64)
+	p.releasePrepared = make(map[int64]uint64)
+	p.committedFences = make(map[int64]uint64)
 	p.handoffOnly = false
 	p.handoffAllowed = make(map[int64]struct{})
 	registration := p.registration
@@ -548,18 +584,11 @@ func (p *delegatorGrowingSourceProvider) unregisterIfInactiveLocked() *syncmgr.G
 	registration := p.registration
 	p.registration = nil
 	p.releaseAllowed = make(map[int64]uint64)
-	p.releasePrepared = make(map[int64]int64)
+	p.releasePrepared = make(map[int64]uint64)
 	p.handoffOnly = false
 	p.handoffAllowed = make(map[int64]struct{})
 	p.deleteRetainedMetricsLocked()
 	return registration
-}
-
-func (p *delegatorGrowingSourceProvider) currentOffset(segment segments.Segment) int64 {
-	if segment == nil {
-		return 0
-	}
-	return segment.InsertCount()
 }
 
 func (p *delegatorGrowingSourceProvider) observeRetainedMetricsLocked() {
@@ -593,35 +622,49 @@ func segmentMemSize(segment segments.Segment) int64 {
 	return size
 }
 
+// retainedGrowingFlushSource is a growing segment held past its normal release
+// because a flush still has to read from it.
+//
+// Both marks are WAL timestamps: flushThroughTs is how far it must be flushed
+// before release, committedFlushedTs is how far it has been. Comparing a row
+// count against either would silently read as "done" — an HLC timestamp is
+// vastly larger than any row count.
 type retainedGrowingFlushSource struct {
-	segment         segments.Segment
-	targetOffset    int64
-	committedOffset int64
-	detached        bool
-	bytes           int64
+	segment            segments.Segment
+	flushThroughTs     uint64
+	committedFlushedTs uint64
+	detached           bool
+	bytes              int64
 }
 
 type delegatorGrowingFlushSource struct {
-	segmentID    int64
-	segment      segments.Segment
-	provider     *delegatorGrowingSourceProvider
-	targetOffset int64
-	retained     bool
-	once         sync.Once
+	segmentID int64
+	segment   segments.Segment
+	provider  *delegatorGrowingSourceProvider
+	retained  bool
+	once      sync.Once
 }
 
-func (s *delegatorGrowingFlushSource) CurrentOffset() int64 {
-	if s.provider != nil {
-		return s.provider.currentOffset(s.segment)
-	}
-	if s.segment == nil {
+// TSafe is the delegator's consumption watermark: a raw read of the value the
+// pipeline publishes at the END of each message pack (deleteNode), after every
+// insert in that pack has been applied to its growing segment and acknowledged.
+// So tsafe >= T means every row with timestamp <= T is present and complete.
+//
+// Deliberately NOT shardDelegator.waitTSafe: that is a query-serving policy
+// function whose external-table and DowngradeTsafe branches return success
+// without the watermark having advanced. Fine for serving a slightly stale read;
+// fatal for a flush, which would then publish a checkpoint past rows that were
+// never written. And deliberately not a wait at all — see
+// syncmgr.GrowingFlushSource.TSafe.
+func (s *delegatorGrowingFlushSource) TSafe() uint64 {
+	if s.provider == nil || s.provider.getTSafe == nil {
 		return 0
 	}
-	return s.segment.InsertCount()
+	return s.provider.getTSafe()
 }
 
-func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
-	result, err := s.segment.FlushData(ctx, startOffset, endOffset, &segments.FlushConfig{
+func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, startTs, endTs uint64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+	result, err := s.segment.FlushData(ctx, startTs, endTs, &segments.FlushConfig{
 		SegmentBasePath:         config.SegmentBasePath,
 		PartitionBasePath:       config.PartitionBasePath,
 		CollectionID:            config.CollectionID,
@@ -676,15 +719,15 @@ func (s *delegatorGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) 
 }
 
 type primaryKeysProvider interface {
-	PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error)
+	PrimaryKeys(ctx context.Context, startTs, endTs uint64) ([]storage.PrimaryKey, error)
 }
 
-func (s *delegatorGrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
+func (s *delegatorGrowingFlushSource) PrimaryKeys(ctx context.Context, startTs, endTs uint64) ([]storage.PrimaryKey, error) {
 	provider, ok := s.segment.(primaryKeysProvider)
 	if !ok {
 		return nil, merr.WrapErrServiceInternalMsg("growing flush source segment does not expose primary keys")
 	}
-	return provider.PrimaryKeys(ctx, startOffset, endOffset)
+	return provider.PrimaryKeys(ctx, startTs, endTs)
 }
 
 func (s *delegatorGrowingFlushSource) Release() {
@@ -698,8 +741,16 @@ func (s *delegatorGrowingFlushSource) Release() {
 	})
 }
 
-func (s *delegatorGrowingFlushSource) CommitGrowingFlush(targetOffset int64) {
-	if s.retained && s.provider != nil {
-		s.provider.releaseRetainedIfComplete(s.segmentID, targetOffset)
+func (s *delegatorGrowingFlushSource) CommitGrowingFlush(flushThroughTs uint64) {
+	// Deliberately NOT gated on s.retained. That flag is a snapshot taken when
+	// the source was resolved; a release handoff can establish retention AFTER
+	// that, and the commit that reaches the handoff fence may well come from a
+	// source resolved before it. Gating on the stale snapshot left the retained
+	// entry's committedFlushedTs at zero forever — the release condition could
+	// never be met, leaking the pinned segment, its provider registration and
+	// the on-releasing state. releaseRetainedIfComplete is a no-op when no
+	// retained entry exists, so propagating unconditionally costs nothing.
+	if s.provider != nil {
+		s.provider.releaseRetainedIfComplete(s.segmentID, flushThroughTs)
 	}
 }

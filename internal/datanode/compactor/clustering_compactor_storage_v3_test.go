@@ -224,7 +224,7 @@ func (s *ClusteringCompactionTaskStorageV3Suite) initStorageV3Segments(rows int,
 	bw := syncmgr.NewBulkPackWriterV3(mc, sch, cm, s.mockAlloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
 		StorageType: "local",
 		RootPath:    rootPath,
-	}, columnGroups, manifestPath)
+	}, columnGroups, manifestPath, syncmgr.DefaultIORetryAttempts)
 	return bw.Write(context.Background(), pack)
 }
 
@@ -424,7 +424,7 @@ func (s *MixCompactionTaskStorageV3Suite) initStorageV3Segments(rows int, segmen
 	bw := syncmgr.NewBulkPackWriterV3(mc, schema, cm, alloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
 		StorageType: "local",
 		RootPath:    rootPath,
-	}, columnGroups, manifestPath)
+	}, columnGroups, manifestPath, syncmgr.DefaultIORetryAttempts)
 	return bw.Write(context.Background(), pack)
 }
 
@@ -472,7 +472,7 @@ func (s *MixCompactionTaskStorageV3Suite) initTextLOBStorageV3Segment(rows int, 
 	bw := syncmgr.NewBulkPackWriterV3(mc, schema, cm, alloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
 		StorageType: "local",
 		RootPath:    rootPath,
-	}, columnGroups, manifestPath)
+	}, columnGroups, manifestPath, syncmgr.DefaultIORetryAttempts)
 	return bw.Write(context.Background(), pack)
 }
 

@@ -524,6 +524,18 @@ var (
 		Buckets: prometheus.ExponentialBucketsRange(0.001, 60, 15),
 	})
 
+	WALFlusherSyncDispatcherCommitWaitDuration = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "flusher_sync_dispatcher_commit_wait_duration_seconds",
+		Help:    "Time between a sync task's Prepare returning and its Commit starting (earlier commits of the key, their callbacks, and commit pool queueing)",
+		Buckets: prometheus.ExponentialBucketsRange(0.001, 60, 15),
+	})
+
+	WALFlusherSyncDispatcherCommitDuration = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "flusher_sync_dispatcher_commit_duration_seconds",
+		Help:    "Time a sync task spends executing Commit (metadata publication)",
+		Buckets: prometheus.ExponentialBucketsRange(0.001, 60, 15),
+	})
+
 	WALRateLimitControllerState = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "rate_limit_controller_state",
 		Help: "Current state of adaptive rate limit controller",
@@ -694,6 +706,8 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALFlusherSyncDispatcherTaskTotal)
 	registry.MustRegister(WALFlusherSyncDispatcherQueueDuration)
 	registry.MustRegister(WALFlusherSyncDispatcherExecuteDuration)
+	registry.MustRegister(WALFlusherSyncDispatcherCommitWaitDuration)
+	registry.MustRegister(WALFlusherSyncDispatcherCommitDuration)
 
 	registry.MustRegister(WALRateLimitControllerState)
 	registry.MustRegister(WALRateLimitState)

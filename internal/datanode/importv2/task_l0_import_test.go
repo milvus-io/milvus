@@ -131,7 +131,7 @@ func (s *L0ImportSuite) TestL0PreImport() {
 }
 
 func (s *L0ImportSuite) TestL0Import() {
-	s.syncMgr.EXPECT().SyncDataWithChunkManager(mock.Anything, mock.Anything, mock.Anything).
+	s.syncMgr.EXPECT().SyncDataWithChunkManager(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(ctx context.Context, task syncmgr.Task, cm storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 			alloc := allocator.NewMockAllocator(s.T())
 			alloc.EXPECT().AllocOne().Return(1, nil)
@@ -141,7 +141,11 @@ func (s *L0ImportSuite) TestL0Import() {
 			s.cm.(*mocks.ChunkManager).EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			task.(*syncmgr.SyncTask).WithChunkManager(s.cm)
 
-			err := task.Run(context.Background())
+			taskCtx := context.Background()
+			err := task.Prepare(taskCtx)
+			if err == nil {
+				err = task.Commit(taskCtx)
+			}
 			s.NoError(err)
 
 			future := conc.Go(func() (struct{}, error) {
@@ -196,7 +200,7 @@ func (s *L0ImportSuite) TestL0Import() {
 
 func (s *L0ImportSuite) TestL0ImportForcesStorageV2ForSyncTask() {
 	var task *L0ImportTask
-	s.syncMgr.EXPECT().SyncDataWithChunkManager(mock.Anything, mock.Anything, mock.Anything).
+	s.syncMgr.EXPECT().SyncDataWithChunkManager(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(ctx context.Context, syncTask syncmgr.Task, cm storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 			segment, ok := task.metaCaches[s.channel].GetSegmentByID(s.segmentID)
 			s.True(ok)

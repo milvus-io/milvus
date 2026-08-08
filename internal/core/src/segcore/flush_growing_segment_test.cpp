@@ -376,7 +376,7 @@ TEST_F(FlushGrowingSegmentTest, BasicFlushScalarFields) {
 
     // generate and insert data
     int N = 100;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -448,7 +448,7 @@ TEST_F(FlushGrowingSegmentTest, FlushAllowsStaleReadVersionOverwrite) {
     ASSERT_NE(segment, nullptr);
 
     int N = 100;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -517,7 +517,7 @@ TEST_F(FlushGrowingSegmentTest, FlushUsesWriterFormatFromConfig) {
     ASSERT_NE(segment, nullptr);
 
     int N = 10;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -559,7 +559,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithVectorFields) {
 
     // generate and insert data
     int N = 50;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -603,7 +603,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithStringFields) {
 
     // generate and insert data
     int N = 30;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -647,7 +647,7 @@ TEST_F(FlushGrowingSegmentTest, FlushPartialRange) {
 
     // generate and insert data
     int N = 100;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -696,7 +696,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithTextColumnConfig) {
 
     // generate and insert data
     int N = 20;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -747,7 +747,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithNullableFields) {
 
     // generate and insert data
     int N = 50;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -800,7 +800,7 @@ TEST_F(FlushGrowingSegmentTest, FlushOrdinaryFieldSemanticsRoundTrip) {
 
     constexpr int N = 3;
     std::vector<int64_t> row_ids = {10, 11, 12};
-    std::vector<Timestamp> timestamps = {100, 101, 102};
+    std::vector<Timestamp> timestamps = {1, 2, 3};
     std::vector<int64_t> pks = {1000, 1001, 1002};
     std::vector<std::string> nullable_strings = {"alpha", "", "gamma"};
     bool nullable_string_valid[N] = {true, false, true};
@@ -950,7 +950,7 @@ TEST_F(FlushGrowingSegmentTest, FlushTimestamptzPartialRangeRoundTrip) {
 
     constexpr int N = 5;
     std::vector<int64_t> row_ids = {0, 1, 2, 3, 4};
-    std::vector<Timestamp> timestamps = {100, 101, 102, 103, 104};
+    std::vector<Timestamp> timestamps = {1, 2, 3, 4, 5};
     std::vector<int64_t> pks = {10, 11, 12, 13, 14};
     std::vector<int64_t> event_times = {1700000000000,
                                         1700000001000,
@@ -1023,7 +1023,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableScalarTypesPartialRangeRoundTrip) {
 
     constexpr int N = 5;
     std::vector<int64_t> row_ids = {0, 1, 2, 3, 4};
-    std::vector<Timestamp> timestamps = {100, 101, 102, 103, 104};
+    std::vector<Timestamp> timestamps = {1, 2, 3, 4, 5};
     std::vector<int64_t> pks = {10, 11, 12, 13, 14};
     bool bool_values[N] = {true, false, true, false, true};
     std::vector<int8_t> int8_values = {-2, -1, 0, 1, 2};
@@ -1160,7 +1160,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayRoundTrip) {
 
     constexpr int N = 4;
     constexpr int array_len = 3;
-    auto dataset = DataGen(schema, N, 42, 0, 1, array_len);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1, 1, array_len);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -1219,7 +1219,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableVectorArrayRoundTrip) {
 
     constexpr int N = 4;
     std::vector<int64_t> row_ids = {10, 11, 12, 13};
-    std::vector<Timestamp> timestamps = {100, 101, 102, 103};
+    std::vector<Timestamp> timestamps = {1, 2, 3, 4};
     std::vector<int64_t> pks = {1000, 1001, 1002, 1003};
     std::vector<VectorFieldProto> vec_arrays(N);
 
@@ -1325,7 +1325,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayElementTypesRoundTrip) {
 
         constexpr int N = 4;
         constexpr int array_len = 3;
-        auto dataset = DataGen(schema, N, 42, 0, 1, array_len);
+        auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1, 1, array_len);
         segment->PreInsert(N);
         segment->Insert(0,
                         N,
@@ -1387,7 +1387,7 @@ TEST_F(FlushGrowingSegmentTest, FlushStringAndTextRoundTrip) {
 
     constexpr int N = 3;
     std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<Timestamp> timestamps = {1, 2, 3};
     std::vector<int64_t> pks = {100, 101, 102};
     std::vector<std::string> strings = {"plain-string", "", "tail-string"};
     bool string_valid[N] = {true, false, true};
@@ -1470,7 +1470,7 @@ TEST_F(FlushGrowingSegmentTest, FlushArrayElementTypesRoundTrip) {
 
     constexpr int N = 3;
     std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<Timestamp> timestamps = {1, 2, 3};
     std::vector<int64_t> pks = {100, 101, 102};
     std::vector<ScalarFieldProto> bool_arrays(N);
     bool_arrays[0].mutable_bool_data()->add_data(true);
@@ -1627,7 +1627,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFloatVectorKeepsCompactMapping) {
 
     constexpr int N = 3;
     std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<Timestamp> timestamps = {1, 2, 3};
     std::vector<int64_t> pks = {100, 101, 102};
     bool valid_data[N] = {false, true, true};
     std::vector<float> compact_vectors = {1.0F, 2.0F, 3.0F, 4.0F};
@@ -1694,7 +1694,7 @@ TEST_F(FlushGrowingSegmentTest, FlushRejectsEndOffsetBeyondRowCount) {
     ASSERT_NE(segment, nullptr);
 
     constexpr int N = 3;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     auto offset = segment->PreInsert(N);
     segment->Insert(offset,
                     N,
@@ -1708,13 +1708,15 @@ TEST_F(FlushGrowingSegmentTest, FlushRejectsEndOffsetBeyondRowCount) {
     config.read_version = -1;
     config.retry_limit = 3;
 
+    // A fence past the data is legal now — it simply covers everything the
+    // segment has. The only rejected shape is an inverted range.
     CFlushResult result{};
     auto status =
-        FlushGrowingSegmentData(segment.get(), 0, N + 1, &config, &result);
+        FlushGrowingSegmentData(segment.get(), N + 1, N, &config, &result);
 
     EXPECT_NE(status.error_code, Success);
     ASSERT_NE(status.error_msg, nullptr);
-    EXPECT_NE(std::string(status.error_msg).find("exceeds growing segment"),
+    EXPECT_NE(std::string(status.error_msg).find("invalid flush range"),
               std::string::npos);
     free(const_cast<char*>(status.error_msg));
 
@@ -1758,7 +1760,7 @@ TEST_F(FlushGrowingSegmentTest, FlushFloatVectorFromIndexAfterChunksCleared) {
     auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
 
-    auto dataset = DataGen(schema, row_count);
+    auto dataset = DataGen(schema, row_count, 42, /*ts_offset=*/1);
     auto offset = segment->PreInsert(row_count);
     segment->Insert(offset,
                     row_count,
@@ -1845,7 +1847,7 @@ TEST_F(FlushGrowingSegmentTest,
     compact_vectors.reserve(row_count * dim);
     for (int64_t i = 0; i < row_count; i++) {
         row_ids[i] = i;
-        timestamps[i] = 1000 + i;
+        timestamps[i] = i + 1;
         pks[i] = 10000 + i;
         valid[i] = i % 7 != 0;
         if (valid[i]) {
@@ -1949,7 +1951,7 @@ TEST_F(FlushGrowingSegmentTest,
     int64_t expected_num_token = 0;
     for (int64_t i = 0; i < row_count; i++) {
         row_ids[i] = i;
-        timestamps[i] = 1000 + i;
+        timestamps[i] = i + 1;
         pks[i] = 10000 + i;
         sparse_vectors[i] = knowhere::sparse::SparseRow<SparseValueType>(2);
         auto common_token = static_cast<uint32_t>(10 + i % 3);
@@ -2038,7 +2040,7 @@ TEST_F(FlushGrowingSegmentTest, FlushPrimaryKeyStatsManifestAndCompound) {
     ASSERT_NE(segment, nullptr);
 
     constexpr int N = 4;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     auto offset = segment->PreInsert(N);
     segment->Insert(offset,
                     N,
@@ -2128,7 +2130,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableInt8VectorKeepsCompactMapping) {
 
     constexpr int N = 3;
     std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<Timestamp> timestamps = {1, 2, 3};
     std::vector<int64_t> pks = {100, 101, 102};
     bool valid_data[N] = {true, false, true};
     std::vector<int8> compact_vectors = {1, 2, 3, 4, 5, 6, 7, 8};
@@ -2212,7 +2214,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFixedWidthVectorTypesRoundTrip) {
 
         constexpr int N = 3;
         std::vector<int64_t> row_ids = {0, 1, 2};
-        std::vector<Timestamp> timestamps = {10, 11, 12};
+        std::vector<Timestamp> timestamps = {1, 2, 3};
         std::vector<int64_t> pks = {100, 101, 102};
         bool valid_data[N] = {true, false, true};
 
@@ -2339,7 +2341,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableSparseVectorKeepsCompactMapping) {
 
     constexpr int N = 3;
     std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<Timestamp> timestamps = {1, 2, 3};
     std::vector<int64_t> pks = {100, 101, 102};
     bool valid_data[N] = {false, true, true};
     auto sparse_vectors = GenerateRandomSparseFloatVector(2, 16, 0.5);
@@ -2412,7 +2414,7 @@ TEST_F(FlushGrowingSegmentTest, FlushBM25StatsRangeAndCompoundManifest) {
 
     constexpr int N = 4;
     std::vector<int64_t> row_ids = {0, 1, 2, 3};
-    std::vector<Timestamp> timestamps = {10, 11, 12, 13};
+    std::vector<Timestamp> timestamps = {1, 2, 3, 4};
     std::vector<int64_t> pks = {100, 101, 102, 103};
     auto sparse_vectors =
         std::make_unique<knowhere::sparse::SparseRow<SparseValueType>[]>(N);
@@ -2552,7 +2554,7 @@ TEST_F(FlushGrowingSegmentTest, FlushEmptyRange) {
 
     // generate and insert data
     int N = 50;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -2598,7 +2600,7 @@ TEST_F(FlushGrowingSegmentTest, FlushLargeDataMultipleChunks) {
     // generate and insert large data that spans multiple chunks
     // default chunk size is typically 32K rows
     int N = 50000;  // should span multiple chunks
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -2646,7 +2648,7 @@ TEST_F(FlushGrowingSegmentTest, FlushMultipleTextColumns) {
 
     // generate and insert data
     int N = 20;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -2699,7 +2701,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithBoolField) {
 
     // generate and insert data
     int N = 50;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -2747,7 +2749,7 @@ TEST_F(FlushGrowingSegmentTest, FlushAllNumericTypes) {
 
     // generate and insert data
     int N = 50;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -2791,7 +2793,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
         ASSERT_NE(segment, nullptr);
 
         int N = 30;
-        auto dataset = DataGen(schema, N);
+        auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
         segment->PreInsert(N);
         segment->Insert(0,
                         N,
@@ -2830,7 +2832,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
         ASSERT_NE(segment, nullptr);
 
         int N = 30;
-        auto dataset = DataGen(schema, N);
+        auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
         segment->PreInsert(N);
         segment->Insert(0,
                         N,
@@ -2869,7 +2871,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
         ASSERT_NE(segment, nullptr);
 
         int N = 30;
-        auto dataset = DataGen(schema, N);
+        auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
         segment->PreInsert(N);
         segment->Insert(0,
                         N,
@@ -2960,7 +2962,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableEmbListMixedRows) {
         expected_target.mutable_float_vector()->add_data(1.0f + d);
     }
 
-    auto dataset = DataGen(schema, N, 42, 0, 1, 1);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1, 1, 1);
     for (int i = 0; i < dataset.raw_->fields_data_size(); ++i) {
         auto* field_data = dataset.raw_->mutable_fields_data(i);
         if (field_data->field_id() != vec_fid.get()) {
@@ -3070,7 +3072,7 @@ TEST_F(FlushGrowingSegmentTest,
     // > 2x the default 8192-row batch limit, so the reader must produce
     // several batches and their delivery order becomes observable.
     const int N = 20000;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,

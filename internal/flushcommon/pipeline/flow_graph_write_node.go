@@ -24,6 +24,7 @@ import (
 type writeNode struct {
 	BaseNode
 
+	ctx          context.Context
 	channelName  string
 	collectionID int64
 	wbManager    writebuffer.BufferManager
@@ -154,7 +155,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 	}
 
 	if fgMsg.dropCollection {
-		wNode.wbManager.DropChannel(wNode.channelName)
+		wNode.wbManager.DropChannel(wNode.ctx, wNode.channelName)
 	}
 
 	if len(fgMsg.dropPartitions) > 0 {
@@ -166,7 +167,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 }
 
 func newWriteNode(
-	_ context.Context,
+	ctx context.Context,
 	writeBufferManager writebuffer.BufferManager,
 	updater util.StatsUpdater,
 	config *nodeConfig,
@@ -184,6 +185,7 @@ func newWriteNode(
 
 	wNode := &writeNode{
 		BaseNode:     baseNode,
+		ctx:          ctx,
 		channelName:  config.vChannelName,
 		collectionID: config.collectionID,
 		wbManager:    writeBufferManager,

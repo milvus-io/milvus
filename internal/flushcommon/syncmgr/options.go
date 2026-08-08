@@ -6,11 +6,10 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 func NewSyncTask() *SyncTask {
-	return new(SyncTask)
+	return &SyncTask{ioRetryAttempts: DefaultIORetryAttempts}
 }
 
 func (t *SyncTask) WithSyncPack(pack *SyncPack) *SyncTask {
@@ -38,6 +37,10 @@ func (t *SyncTask) WithChunkManager(cm storage.ChunkManager) *SyncTask {
 	t.chunkManager = cm
 	return t
 }
+
+func (t *SyncTask) SetChunkManager(cm storage.ChunkManager) { t.chunkManager = cm }
+
+func (t *SyncTask) SetDrop() { t.pack.isDrop = true }
 
 func (t *SyncTask) WithStorageConfig(storageConfig *indexpb.StorageConfig) *SyncTask {
 	t.storageConfig = storageConfig
@@ -69,12 +72,25 @@ func (t *SyncTask) WithMetaWriter(metaWriter MetaWriter) *SyncTask {
 	return t
 }
 
-func (t *SyncTask) WithWriteRetryOptions(opts ...retry.Option) *SyncTask {
-	t.writeRetryOpts = opts
+func (t *SyncTask) WithFailureCallback(callback func(error)) *SyncTask {
+	t.failureCallback = callback
 	return t
 }
 
-func (t *SyncTask) WithFailureCallback(callback func(error)) *SyncTask {
-	t.failureCallback = callback
+// WithPayloadAccounting tracks the in-memory row payload until ReleaseData is
+// actually called. The callback runs exactly once, including terminal discard
+// paths (Abandon) that never reach Prepare.
+func (t *SyncTask) WithPayloadAccounting(insertBytes, deleteBytes int64, onRelease func(int64)) *SyncTask {
+	t.payload = &syncTaskPayloadAccounting{onRelease: onRelease}
+	t.payload.insertBytes.Store(insertBytes)
+	t.payload.deleteBytes.Store(deleteBytes)
+	return t
+}
+
+// WithIORetryAttempts sets this task's budget for the retries inside the object
+// storage and meta writers. 0 means unlimited. Callers whose own failure
+// recovery is expensive raise it; see DefaultIORetryAttempts.
+func (t *SyncTask) WithIORetryAttempts(attempts uint) *SyncTask {
+	t.ioRetryAttempts = attempts
 	return t
 }

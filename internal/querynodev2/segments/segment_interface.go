@@ -130,7 +130,9 @@ type Segment interface {
 	//   - Returns binlog paths and metadata (all processing in C++ side)
 	// Go layer only provides thin wrapper for FFI call - no business logic.
 	// TODO: Implement C++ FlushData interface (Phase 1.3, 1.4, 2.3)
-	FlushData(ctx context.Context, startOffset, endOffset int64, config *FlushConfig) (*FlushResult, error)
+	// FlushData writes rows in the timestamp range (startTs, endTs] to storage.
+	// The range is a position fence, not a row range — see LocalSegment.FlushData.
+	FlushData(ctx context.Context, startTs, endTs uint64, config *FlushConfig) (*FlushResult, error)
 	IsLazyLoad() bool
 	ResetIndexesLazyLoad(lazyState bool)
 

@@ -2,6 +2,7 @@ package syncmgr
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -49,7 +50,8 @@ func (a *fakeAllocator) AllocOne() (allocator.UniqueID, error) {
 }
 
 type fakeCommitGrowingFlushSource struct {
-	commits     []int64
+	rows        int64
+	commits     []uint64
 	primaryKeys []storage.PrimaryKey
 	primaryErr  error
 	checkConfig func(*GrowingFlushConfig)
@@ -59,25 +61,34 @@ func (s *fakeCommitGrowingFlushSource) MaterializedFieldIDs(ctx context.Context)
 	return []int64{0, 1, 100, 101, 102}, nil
 }
 
-func (s *fakeCommitGrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
+func (s *fakeCommitGrowingFlushSource) PrimaryKeys(ctx context.Context, startTs, endTs uint64) ([]storage.PrimaryKey, error) {
 	if s.primaryErr != nil {
 		return nil, s.primaryErr
 	}
 	if s.primaryKeys != nil {
 		return s.primaryKeys, nil
 	}
-	pks := make([]storage.PrimaryKey, 0, endOffset-startOffset)
-	for i := startOffset; i < endOffset; i++ {
+	// The fences are timestamps, so a double cannot derive a row count from
+	// them. Default to the batch size these tests build their tasks with;
+	// a test that needs a different count sets rows or primaryKeys.
+	rows := s.rows
+	if rows == 0 {
+		rows = 10
+	}
+	pks := make([]storage.PrimaryKey, 0, rows)
+	for i := int64(0); i < rows; i++ {
 		pks = append(pks, storage.NewInt64PrimaryKey(i))
 	}
 	return pks, nil
 }
 
-func (s *fakeCommitGrowingFlushSource) CurrentOffset() int64 {
-	return 10
+// Always caught up: these doubles exercise the flush path, not the readiness
+// gate. A test that wants the source to look behind overrides this.
+func (s *fakeCommitGrowingFlushSource) TSafe() uint64 {
+	return math.MaxUint64
 }
 
-func (s *fakeCommitGrowingFlushSource) FlushGrowingData(_ context.Context, _, _ int64, config *GrowingFlushConfig) (*GrowingFlushResult, error) {
+func (s *fakeCommitGrowingFlushSource) FlushGrowingData(_ context.Context, startTs, endTs uint64, config *GrowingFlushConfig) (*GrowingFlushResult, error) {
 	if s.checkConfig != nil {
 		s.checkConfig(config)
 	}
@@ -100,8 +111,8 @@ func (s *fakeCommitGrowingFlushSource) FlushGrowingData(_ context.Context, _, _ 
 func (s *fakeCommitGrowingFlushSource) Release() {
 }
 
-func (s *fakeCommitGrowingFlushSource) CommitGrowingFlush(targetOffset int64) {
-	s.commits = append(s.commits, targetOffset)
+func (s *fakeCommitGrowingFlushSource) CommitGrowingFlush(flushThroughTs uint64) {
+	s.commits = append(s.commits, flushThroughTs)
 }
 
 func TestGrowingSourceSyncTaskHandleErrorSkipsFailureCallbackForStaleMetaErrors(t *testing.T) {
@@ -337,7 +348,9 @@ func TestGrowingSourceSyncTaskBuildFlushConfigUsesCurrentSplitPattern(t *testing
 	require.Equal(t, "100,101,102", config.SchemaBasedPattern)
 	require.Equal(t, "parquet,vortex,parquet", config.SchemaBasedFormats)
 	require.Equal(t, []int64{100, 101, 102}, config.AllowedFieldIDs)
-	require.Equal(t, columnGroups, segment.GetCurrentSplit())
+	require.Equal(t, []int{0}, columnGroups[0].Columns)
+	require.Empty(t, segment.GetCurrentSplit()[0].Columns,
+		"resolving a layout must not mutate the shared metacache segment during parallel Prepare")
 	require.NotEmpty(t, config.WriterFormat)
 }
 
@@ -466,6 +479,48 @@ func TestGrowingSourceSyncTaskBuildFlushConfigProjectsToCurrentSplit(t *testing.
 	require.True(t, config.WriteMergedBM25Stats)
 }
 
+func TestGrowingSourceSyncTaskPrepareFailsWhenSegmentMissing(t *testing.T) {
+	segmentID := int64(1)
+
+	newTask := func(mc metacache.MetaCache) *GrowingSourceSyncTask {
+		return NewGrowingSourceSyncTask().
+			WithCollectionID(3).
+			WithPartitionID(2).
+			WithSegmentID(segmentID).
+			WithChannelName("ch").
+			WithFlushFromTs(0).
+			WithMetaCache(mc)
+	}
+
+	t.Run("missing_segment_fails", func(t *testing.T) {
+		mc := metacache.NewMockMetaCache(t)
+		mc.EXPECT().GetSegmentByID(segmentID).Return(nil, false)
+		// Skipping instead of failing would let finishGrowingSourceSync ack
+		// targetOffset and advance the channel checkpoint for rows that were
+		// never materialized.
+		task := newTask(mc)
+
+		err := task.Prepare(context.Background())
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, merr.ErrSegmentNotFound)
+	})
+
+	t.Run("missing_segment_on_drop_fails_too", func(t *testing.T) {
+		// progress.syncing keeps at most one growing-source task in flight per
+		// segment, so a drop task finding its segment gone is the same invariant
+		// violation as any other task — no silent skip.
+		mc := metacache.NewMockMetaCache(t)
+		mc.EXPECT().GetSegmentByID(segmentID).Return(nil, false)
+		task := newTask(mc).WithDrop()
+
+		err := task.Prepare(context.Background())
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, merr.ErrSegmentNotFound)
+	})
+}
+
 func TestGrowingSourceSyncTaskBuildsColumnGroupBinlogs(t *testing.T) {
 	segmentID := int64(1)
 	schema := &schemapb.CollectionSchema{
@@ -520,7 +575,7 @@ func TestGrowingSourceSyncTaskBuildsColumnGroupBinlogs(t *testing.T) {
 		WithStartPosition(&msgpb.MsgPosition{Timestamp: 100}).
 		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}).
 		WithBatchRows(10).
-		WithTargetOffset(10).
+		WithFlushFromTs(0).
 		WithMetaCache(mc).
 		WithMetaWriter(metaWriter).
 		WithSchema(schema).
@@ -528,7 +583,7 @@ func TestGrowingSourceSyncTaskBuildsColumnGroupBinlogs(t *testing.T) {
 		WithAllocator(&fakeAllocator{next: 500}).
 		WithSource(source)
 
-	require.NoError(t, task.Run(context.Background()))
+	require.NoError(t, runTaskForTest(context.Background(), task))
 	require.Len(t, segment.GetCurrentSplit(), 3)
 	require.Equal(t, []int64{100}, segment.GetCurrentSplit()[0].Fields)
 	require.Len(t, segment.GetHistory(), 1)
@@ -566,7 +621,7 @@ func TestGrowingSourceSyncTaskBuildsMergedPKStatsForFlush(t *testing.T) {
 	task := NewGrowingSourceSyncTask().
 		WithCollectionID(3).
 		WithSegmentID(segmentID).
-		WithTargetOffset(10).
+		WithFlushFromTs(0).
 		WithLevel(datapb.SegmentLevel_L1).
 		WithFlush().
 		WithMetaCache(mc).
@@ -587,7 +642,7 @@ func TestGrowingSourceSyncTaskBuildsMergedPKStatsForFlush(t *testing.T) {
 			},
 		})
 
-	require.NoError(t, task.fillPrimaryKeyStatsConfig(context.Background(), 0, 10, config))
+	require.NoError(t, task.fillPrimaryKeyStatsConfig(context.Background(), 0, 10, 10, config))
 	require.EqualValues(t, 100, config.PKStatsFieldID)
 	require.EqualValues(t, 500, config.PKStatsLogID)
 	require.NotEmpty(t, config.PKStatsBlob)
@@ -627,7 +682,7 @@ func TestGrowingSourceSyncTaskBuildsVarCharPKStatsContent(t *testing.T) {
 	task := NewGrowingSourceSyncTask().
 		WithCollectionID(3).
 		WithSegmentID(segmentID).
-		WithTargetOffset(3).
+		WithFlushFromTs(0).
 		WithSchema(schema).
 		WithAllocator(&fakeAllocator{next: 500}).
 		WithSource(&fakeCommitGrowingFlushSource{
@@ -638,7 +693,7 @@ func TestGrowingSourceSyncTaskBuildsVarCharPKStatsContent(t *testing.T) {
 			},
 		})
 
-	require.NoError(t, task.fillPrimaryKeyStatsConfig(context.Background(), 0, 3, config))
+	require.NoError(t, task.fillPrimaryKeyStatsConfig(context.Background(), 0, 3, int64(3-0), config))
 	require.EqualValues(t, 100, config.PKStatsFieldID)
 	require.EqualValues(t, 500, config.PKStatsLogID)
 	require.NotEmpty(t, config.PKStatsBlob)
@@ -687,14 +742,14 @@ func TestGrowingSourceSyncTaskRequiresPrimaryKeysForGrowingFlush(t *testing.T) {
 		WithStartPosition(&msgpb.MsgPosition{Timestamp: 100}).
 		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}).
 		WithBatchRows(10).
-		WithTargetOffset(10).
+		WithFlushFromTs(0).
 		WithMetaCache(mc).
 		WithSchema(schema).
 		WithChunkManager(cm).
 		WithAllocator(&fakeAllocator{next: 500}).
 		WithSource(source)
 
-	err := task.Run(context.Background())
+	err := runTaskForTest(context.Background(), task)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, merr.ErrDataIntegrity), err.Error())
 	require.ErrorContains(t, err, "primary key count mismatch")
@@ -741,16 +796,18 @@ func TestGrowingSourceSyncTaskCommitRetainedSourceOnlyOnFinalization(t *testing.
 			WithStartPosition(&msgpb.MsgPosition{Timestamp: 100}).
 			WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}).
 			WithBatchRows(0).
-			WithTargetOffset(10).
+			WithFlushFromTs(0).
 			WithMetaCache(mc).
 			WithSource(source)
 		if finalize != nil {
 			finalize(task)
 		}
 
-		require.NoError(t, task.Run(context.Background()))
+		require.NoError(t, runTaskForTest(context.Background(), task))
 		if expectCommit {
-			require.Equal(t, []int64{10}, source.commits)
+			// The source is told to release the rows through the POSITION that
+			// was flushed — the same fence the flush used — not a row count.
+			require.Equal(t, []uint64{200}, source.commits)
 		} else {
 			require.Empty(t, source.commits)
 		}
@@ -774,6 +831,7 @@ func TestGrowingSourceSyncTaskCommitRetainedSourceOnlyOnFinalization(t *testing.
 }
 
 type fakeBM25GrowingFlushSource struct {
+	rows  int64
 	stats map[int64]*storage.BM25Stats
 }
 
@@ -781,19 +839,23 @@ func (s *fakeBM25GrowingFlushSource) MaterializedFieldIDs(ctx context.Context) (
 	return []int64{0, 1, 100, 101, 102}, nil
 }
 
-func (s *fakeBM25GrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
-	pks := make([]storage.PrimaryKey, 0, endOffset-startOffset)
-	for i := startOffset; i < endOffset; i++ {
+func (s *fakeBM25GrowingFlushSource) PrimaryKeys(ctx context.Context, startTs, endTs uint64) ([]storage.PrimaryKey, error) {
+	rows := s.rows
+	if rows == 0 {
+		rows = 10
+	}
+	pks := make([]storage.PrimaryKey, 0, rows)
+	for i := int64(0); i < rows; i++ {
 		pks = append(pks, storage.NewInt64PrimaryKey(i))
 	}
 	return pks, nil
 }
 
-func (s *fakeBM25GrowingFlushSource) CurrentOffset() int64 {
-	return 10
+func (s *fakeBM25GrowingFlushSource) TSafe() uint64 {
+	return math.MaxUint64
 }
 
-func (s *fakeBM25GrowingFlushSource) FlushGrowingData(_ context.Context, _, _ int64, config *GrowingFlushConfig) (*GrowingFlushResult, error) {
+func (s *fakeBM25GrowingFlushSource) FlushGrowingData(_ context.Context, startTs, endTs uint64, config *GrowingFlushConfig) (*GrowingFlushResult, error) {
 	return &GrowingFlushResult{
 		ManifestPath:           "manifest-after-flush",
 		NumRows:                10,
@@ -819,6 +881,8 @@ func fakeColumnGroupMemorySizes(config *GrowingFlushConfig, sizes map[int64]int6
 
 func (s *fakeBM25GrowingFlushSource) Release() {
 }
+
+func (s *fakeBM25GrowingFlushSource) CommitGrowingFlush(uint64) {}
 
 func TestGrowingSourceSyncTaskMergesReturnedBM25Stats(t *testing.T) {
 	segmentID := int64(1)
@@ -857,14 +921,14 @@ func TestGrowingSourceSyncTaskMergesReturnedBM25Stats(t *testing.T) {
 		WithStartPosition(&msgpb.MsgPosition{Timestamp: 100}).
 		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}).
 		WithBatchRows(10).
-		WithTargetOffset(10).
+		WithFlushFromTs(0).
 		WithMetaCache(mc).
 		WithSchema(schema).
 		WithChunkManager(cm).
 		WithAllocator(&fakeAllocator{next: 500}).
 		WithSource(&fakeBM25GrowingFlushSource{stats: map[int64]*storage.BM25Stats{102: stats}})
 
-	require.NoError(t, task.Run(context.Background()))
+	require.NoError(t, runTaskForTest(context.Background(), task))
 	serialized, _, err := segment.GetBM25Stats().Serialize()
 	require.NoError(t, err)
 	require.Contains(t, serialized, int64(102))
@@ -878,9 +942,9 @@ type fakeMaterializedGrowingFlushSource struct {
 	materialized []int64
 }
 
-func (s *fakeMaterializedGrowingFlushSource) CurrentOffset() int64 { return 0 }
+func (s *fakeMaterializedGrowingFlushSource) TSafe() uint64 { return math.MaxUint64 }
 
-func (s *fakeMaterializedGrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
+func (s *fakeMaterializedGrowingFlushSource) PrimaryKeys(ctx context.Context, startTs, endTs uint64) ([]storage.PrimaryKey, error) {
 	return nil, nil
 }
 
@@ -888,11 +952,13 @@ func (s *fakeMaterializedGrowingFlushSource) MaterializedFieldIDs(ctx context.Co
 	return s.materialized, nil
 }
 
-func (s *fakeMaterializedGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *GrowingFlushConfig) (*GrowingFlushResult, error) {
+func (s *fakeMaterializedGrowingFlushSource) FlushGrowingData(ctx context.Context, startTs, endTs uint64, config *GrowingFlushConfig) (*GrowingFlushResult, error) {
 	return nil, nil
 }
 
 func (s *fakeMaterializedGrowingFlushSource) Release() {}
+
+func (s *fakeMaterializedGrowingFlushSource) CommitGrowingFlush(uint64) {}
 
 func TestTrimColumnGroupsToMaterialized(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
@@ -925,7 +991,7 @@ func TestTrimColumnGroupsToMaterialized(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, trimmed, 2)
 
-	// A non-materialized dropped ordinary field is trimmed the same way;
+	// A non-materialized dropped write-buffer field is trimmed the same way;
 	// system fields stay even though they live outside the insert record.
 	task = NewGrowingSourceSyncTask().WithSchema(schema).
 		WithSource(&fakeMaterializedGrowingFlushSource{materialized: []int64{100}})

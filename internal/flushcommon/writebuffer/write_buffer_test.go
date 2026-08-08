@@ -92,6 +92,624 @@ func (s *WriteBufferSuite) TestHasSegment() {
 	s.True(s.wb.HasSegment(segmentID))
 }
 
+func (s *WriteBufferSuite) TestWriteBufferSyncSyncWindowBlocksSixthTask() {
+	segmentID := int64(1101)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:    segmentID,
+		State: commonpb.SegmentState_Growing,
+	}, nil, nil, metacache.NewEmptySegmentStats())
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
+	s.wb.mut.Lock()
+	for i := 0; i < segmentReorderWindow; i++ {
+		task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+			WithSegmentID(segmentID).
+			WithCheckpoint(&msgpb.MsgPosition{Timestamp: uint64(200 + i)}))
+		s.wb.registerWriteBufferSyncLocked(&writeBufferSyncEntry{
+			task:      task,
+			done:      make(chan struct{}),
+			submitted: true,
+		})
+	}
+	s.wb.buffers[segmentID] = &segmentBuffer{
+		segmentID:    segmentID,
+		insertBuffer: &InsertBuffer{},
+		deltaBuffer:  &DeltaBuffer{},
+	}
+	tasks := s.wb.getSyncTasksLocked(context.Background(), []int64{segmentID})
+	_, buffered := s.wb.buffers[segmentID]
+	s.wb.mut.Unlock()
+
+	s.Empty(tasks)
+	s.True(s.wb.writeBufferSyncQueues[segmentID].intent.owes)
+	s.True(buffered, "the sixth batch must stay buffered until the reorder window advances")
+}
+
+func (s *WriteBufferSuite) TestWriteBufferSyncPendingAdmissionPreservesTaskOrder() {
+	segmentID := int64(1118)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		State:          commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV2,
+	}, nil, nil, metacache.NewEmptySegmentStats())
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
+
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	state := &writeBufferSyncEntry{
+		task: task,
+		done: make(chan struct{}),
+	}
+	s.wb.mut.Lock()
+	s.wb.registerWriteBufferSyncLocked(state)
+	s.wb.buffers[segmentID] = &segmentBuffer{
+		segmentID:    segmentID,
+		insertBuffer: &InsertBuffer{},
+		deltaBuffer:  &DeltaBuffer{},
+	}
+	tasks := s.wb.getSyncTasksLocked(context.Background(), []int64{segmentID})
+	_, buffered := s.wb.buffers[segmentID]
+	queuePending := s.wb.writeBufferSyncQueues[segmentID].intent.owes
+	s.wb.mut.Unlock()
+
+	s.Empty(tasks)
+	s.True(queuePending)
+	s.True(buffered, "task7 must stay buffered until task6 finishes dispatcher admission")
+}
+
+func (s *WriteBufferSuite) TestBeginDropSnapshotsEveryReorderEntry() {
+	segmentID := int64(1119)
+	states := make([]*writeBufferSyncEntry, 0, 2)
+	s.wb.mut.Lock()
+	for i := range 2 {
+		task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+			WithSegmentID(segmentID).
+			WithCheckpoint(&msgpb.MsgPosition{Timestamp: uint64(200 + i)}))
+		state := &writeBufferSyncEntry{
+			task:      task,
+			done:      make(chan struct{}),
+			submitted: true,
+		}
+		states = append(states, state)
+		s.wb.registerWriteBufferSyncLocked(state)
+	}
+	s.wb.dropping = true
+	waiters := s.wb.allWriteBufferSyncEntriesLocked()
+	s.wb.mut.Unlock()
+
+	s.ElementsMatch(states, waiters)
+}
+
+func (s *WriteBufferSuite) TestWriteBufferSyncPayloadCountsTowardFlushCapacity() {
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key, "100")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key)
+
+	segmentID := int64(1102)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:    segmentID,
+		State: commonpb.SegmentState_Growing,
+	}, nil, nil, metacache.NewEmptySegmentStats())
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
+	payloadReleased := make(chan struct{})
+	releasedBytes := make(chan int64, 1)
+	task := syncmgr.NewSyncTask().
+		WithSyncPack(new(syncmgr.SyncPack).WithSegmentID(segmentID)).
+		WithPayloadAccounting(60, 0, func(released int64) {
+			releasedBytes <- released
+			close(payloadReleased)
+		})
+	state := &writeBufferSyncEntry{
+		task:            task,
+		payloadReleased: payloadReleased,
+		done:            make(chan struct{}),
+		submitted:       true,
+	}
+	s.wb.mut.Lock()
+	s.wb.registerWriteBufferSyncLocked(state)
+	s.wb.buffers[segmentID] = &segmentBuffer{
+		segmentID: segmentID,
+		insertBuffer: &InsertBuffer{BufferBase: BufferBase{
+			size: 40,
+		}},
+		deltaBuffer: &DeltaBuffer{},
+	}
+	s.wb.mut.Unlock()
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- s.wb.waitFlushCapacity()
+	}()
+	select {
+	case err := <-waitDone:
+		s.FailNow("flush capacity did not apply backpressure", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	s.EqualValues(100, s.wb.MemorySize())
+	s.EqualValues(40, s.wb.EvictableMemorySize())
+	task.Abandon()
+	s.EqualValues(60, <-releasedBytes)
+
+	select {
+	case err := <-waitDone:
+		s.NoError(err)
+	case <-time.After(time.Second):
+		s.FailNow("payload release did not unblock flush capacity")
+	}
+	s.EqualValues(40, s.wb.MemorySize())
+}
+
+func (s *WriteBufferSuite) TestBM25StatsAreNotCountedTowardSyncPayload() {
+	segmentID := int64(1108)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    10,
+		State:          commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV2,
+	}, nil, nil, metacache.NewEmptySegmentStats())
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Once()
+
+	stats := storage.NewBM25Stats()
+	stats.Append(map[uint32]float32{1: 1, 2: 1, 3: 1})
+	statsBuffer := newStatsBuffer()
+	statsBuffer.Buffer(map[int64]*storage.BM25Stats{101: stats})
+	s.wb.buffers[segmentID] = &segmentBuffer{
+		segmentID: segmentID,
+		insertBuffer: &InsertBuffer{
+			collSchema:  s.collSchema,
+			statsBuffer: statsBuffer,
+		},
+		deltaBuffer: NewDeltaBuffer(),
+	}
+	s.wb.checkpoint = &msgpb.MsgPosition{Timestamp: 200}
+
+	// BM25 stats survive the payload release — SyncPack.ReleaseData keeps them
+	// for Commit — so they are deliberately outside the payload budget. The
+	// buffer reports nothing for them...
+	s.Zero(s.wb.MemorySize())
+
+	s.wb.mut.Lock()
+	task, err := s.wb.getSyncTask(context.Background(), segmentID)
+	s.wb.mut.Unlock()
+	s.Require().NoError(err)
+	writeBufferTask := task.(*syncmgr.SyncTask)
+
+	// ...and neither does the task, which still carries them to the flush.
+	s.Zero(writeBufferTask.InsertPayloadBytes())
+	s.Zero(writeBufferTask.PayloadBytes())
+	s.Zero(s.wb.MemorySize())
+}
+
+func (s *WriteBufferSuite) TestGrowingObserverPanicHappensAfterLifecycleCleanup() {
+	segmentID := int64(1109)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil, nil)
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Maybe()
+	s.wb.growingSourceProgress[segmentID] = &growingSourceProgress{
+		segmentID: segmentID,
+		syncing:   true,
+	}
+	s.wb.taskObserverCallback = func(syncmgr.Task, error) {
+		panic("observer failure")
+	}
+	task := syncmgr.NewGrowingSourceSyncTask().
+		WithSegmentID(segmentID).
+		WithChannelName(s.channelName).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200})
+	s.syncMgr.EXPECT().SyncData(mock.Anything, task, mock.Anything).RunAndReturn(
+		func(_ context.Context, _ syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+			func() {
+				defer func() { _ = recover() }()
+				_ = callbacks[0](nil)
+			}()
+			return conc.Go(func() (struct{}, error) { return struct{}{}, nil }), nil
+		}).Once()
+
+	_ = s.wb.submitSyncTasks(context.Background(), []syncmgr.Task{task})
+	s.False(s.wb.growingSourceProgress[segmentID].syncing)
+}
+
+func (s *WriteBufferSuite) TestDropRetriesGrowingSourceFailure() {
+	segmentID := int64(1110)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    10,
+		State:          commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV3,
+	}, nil, nil, metacache.NewEmptySegmentStats())
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Maybe()
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
+
+	s.wb.checkpoint = &msgpb.MsgPosition{Timestamp: 200}
+	s.wb.flushRetryInterval = time.Millisecond
+	s.wb.growingSourceResolver = func(int64, *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+		return fakeGrowingFlushSource{}, syncmgr.GrowingSourceUsable
+	}
+	s.wb.growingSourceProgress[segmentID] = &growingSourceProgress{
+		segmentID: segmentID,
+	}
+
+	transientErr := errors.New("transient growing-source sync failure")
+	var attempts atomic.Int32
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.MatchedBy(func(task syncmgr.Task) bool {
+		return task.SegmentID() == segmentID && task.IsDrop()
+	}), mock.Anything).RunAndReturn(
+		func(_ context.Context, _ syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+			attempt := attempts.Add(1)
+			var callbackErr error
+			if attempt == 1 {
+				callbackErr = transientErr
+			}
+			for _, callback := range callbacks {
+				callbackErr = callback(callbackErr)
+			}
+			return conc.Go(func() (struct{}, error) { return struct{}{}, callbackErr }), nil
+		}).Twice()
+	metaWriter := syncmgr.NewMockMetaWriter(s.T())
+	metaWriter.EXPECT().DropChannel(mock.Anything, s.channelName).Return(nil).Once()
+	s.wb.metaWriter = metaWriter
+
+	s.NotPanics(func() { s.wb.Close(context.Background(), true) })
+	s.EqualValues(2, attempts.Load())
+	s.NotContains(s.wb.growingSourceProgress, segmentID)
+}
+
+func (s *WriteBufferSuite) TestCloseWaitsForWriteBufferSyncAndGrowingCleanup() {
+	segmentID := int64(1107)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil, metacache.NewEmptySegmentStats())
+	metacache.UpdateBufferedRows(10)(segment)
+	metacache.StartSyncing(10)(segment)
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(
+		func(action metacache.SegmentAction, _ ...metacache.SegmentFilter) {
+			action(segment)
+		}).Return().Once()
+
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithBatchRows(10).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	state := &writeBufferSyncEntry{
+		task:      task,
+		done:      make(chan struct{}),
+		submitted: true,
+	}
+	s.wb.registerWriteBufferSyncLocked(state)
+	s.wb.growingSourceProgress[2207] = &growingSourceProgress{segmentID: 2207, syncing: true}
+
+	closeDone := make(chan struct{})
+	go func() {
+		defer close(closeDone)
+		s.wb.Close(context.Background(), false)
+	}()
+
+	select {
+	case <-closeDone:
+		s.FailNow("Close returned before the write-buffer callback cleaned its state")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	s.ErrorIs(s.wb.finishWriteBufferSync(context.Background(), state, task, context.Canceled), context.Canceled)
+	select {
+	case <-closeDone:
+		s.FailNow("Close returned before growing-source cleanup")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	s.wb.mut.Lock()
+	s.wb.failGrowingSyncLocked(s.wb.growingSourceProgress[2207], context.Canceled)
+	s.wb.mut.Unlock()
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		s.FailNow("Close did not finish after all sync ownership was cleaned")
+	}
+	s.Zero(segment.BufferRows(), "discard must not claim the payload was restored to the buffer")
+	s.Zero(segment.SyncingRows())
+	s.True(metacache.WithNoSyncingTask().Filter(segment))
+	s.Zero(s.wb.MemorySize())
+}
+
+func (s *WriteBufferSuite) TestDropCancellationDiscardsWriteBufferSyncTask() {
+	segmentID := int64(1111)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil, metacache.NewEmptySegmentStats())
+	metacache.UpdateBufferedRows(10)(segment)
+	metacache.StartSyncing(10)(segment)
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(
+		func(action metacache.SegmentAction, _ ...metacache.SegmentFilter) {
+			action(segment)
+		}).Return().Once()
+
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithBatchRows(10).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	state := &writeBufferSyncEntry{
+		task:      task,
+		done:      make(chan struct{}),
+		submitted: true,
+	}
+	s.wb.registerWriteBufferSyncLocked(state)
+	s.wb.dropping = true
+
+	s.ErrorIs(s.wb.finishWriteBufferSync(context.Background(), state, task, context.Canceled), context.Canceled)
+	s.NotContains(s.wb.writeBufferSyncQueues, segmentID)
+	s.Zero(s.wb.MemorySize())
+	s.Zero(segment.BufferRows())
+	s.Zero(segment.SyncingRows())
+	s.True(metacache.WithNoSyncingTask().Filter(segment))
+}
+
+func (s *WriteBufferSuite) TestWriteBufferSyncFailureKeepsCheckpointForReplay() {
+	segmentID := int64(1120)
+	start := &msgpb.MsgPosition{Timestamp: 200}
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithStartPosition(start).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 300}))
+	state := &writeBufferSyncEntry{task: task, done: make(chan struct{}), submitted: true}
+	s.wb.registerWriteBufferSyncLocked(state)
+	s.wb.syncCheckpoint.Add(segmentID, start, "syncing task")
+	s.wb.errHandler = func(error) {}
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Once()
+
+	// A terminal error is what ends a segment stream; a retryable one keeps the
+	// task queued instead. See TestWriteBufferSyncRetryableFailureKeepsTaskQueued.
+	taskErr := merr.WrapErrDataIntegrityMsg("segment stream aborted")
+	s.ErrorIs(s.wb.finishWriteBufferSync(context.Background(), state, task, taskErr), taskErr)
+	candidate := s.wb.syncCheckpoint.GetEarliestWithDefault(nil)
+	s.Require().NotNil(candidate)
+	s.Equal(segmentID, candidate.segmentID)
+	s.Equal(start.GetTimestamp(), candidate.position.GetTimestamp())
+	s.NotContains(s.wb.writeBufferSyncQueues, segmentID)
+}
+
+func (s *WriteBufferSuite) TestWriteBufferSyncDoneWaitsForObserverCompletion() {
+	segmentID := int64(1114)
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	state := &writeBufferSyncEntry{
+		task:      task,
+		done:      make(chan struct{}),
+		submitted: true,
+	}
+	s.wb.registerWriteBufferSyncLocked(state)
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
+
+	observerEntered := make(chan struct{})
+	releaseObserver := make(chan struct{})
+	s.wb.taskObserverCallback = func(syncmgr.Task, error) {
+		close(observerEntered)
+		<-releaseObserver
+	}
+	finishDone := make(chan error, 1)
+	go func() {
+		finishDone <- s.wb.finishWriteBufferSync(context.Background(), state, task, nil)
+	}()
+
+	select {
+	case <-observerEntered:
+	case <-time.After(time.Second):
+		s.FailNow("write-buffer observer was not invoked")
+	}
+	select {
+	case <-state.done:
+		s.FailNow("write-buffer done was published before observer completion")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseObserver)
+	select {
+	case err := <-finishDone:
+		s.NoError(err)
+	case <-time.After(time.Second):
+		s.FailNow("write-buffer completion did not finish after observer returned")
+	}
+	<-state.done
+	s.NoError(state.terminalErr)
+}
+
+func (s *WriteBufferSuite) TestWriteBufferSyncObserverPanicDoesNotSkipFatalHandler() {
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(1115).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	state := &writeBufferSyncEntry{task: task, done: make(chan struct{}), submitted: true}
+	fatalErr := merr.WrapErrDataIntegrityMsg("fatal write-buffer sync")
+	fatalCalled := false
+	s.wb.registerWriteBufferSyncLocked(state)
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Once()
+	s.wb.taskObserverCallback = func(syncmgr.Task, error) {
+		panic("observer panic")
+	}
+	s.wb.errHandler = func(err error) {
+		fatalCalled = true
+		s.ErrorIs(err, fatalErr)
+	}
+
+	s.PanicsWithValue("observer panic", func() {
+		_ = s.wb.finishWriteBufferSync(context.Background(), state, task, fatalErr)
+	})
+	s.True(fatalCalled)
+	<-state.done
+	s.ErrorIs(state.terminalErr, fatalErr)
+}
+
+func (s *WriteBufferSuite) TestWriteBufferSyncWaitersObserveLaterTerminalErrorAndSettleAll() {
+	segmentID := int64(1116)
+	terminalErr := errors.New("terminal sync failure")
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	retrying := &writeBufferSyncEntry{
+		task:      task,
+		done:      make(chan struct{}),
+		submitted: true,
+	}
+	terminal := &writeBufferSyncEntry{done: make(chan struct{})}
+	terminal.complete(terminalErr)
+	s.wb.registerWriteBufferSyncLocked(retrying)
+	s.wb.dropping = true
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Once()
+
+	dropCtx, dropCancel := context.WithCancel(context.Background())
+	defer dropCancel()
+	cancelObserved := make(chan struct{})
+	settleRelease := make(chan struct{})
+	go func() {
+		<-dropCtx.Done()
+		close(cancelObserved)
+		<-settleRelease
+		_ = s.wb.finishWriteBufferSync(dropCtx, retrying, task, context.Canceled)
+	}()
+
+	result := make(chan error, 1)
+	go func() {
+		result <- s.wb.waitSyncsSettled(dropCtx, dropCancel, []*writeBufferSyncEntry{retrying, terminal})
+	}()
+
+	select {
+	case <-cancelObserved:
+	case <-time.After(time.Second):
+		s.FailNow("later terminal waiter did not cancel the Drop context")
+	}
+	select {
+	case <-result:
+		s.FailNow("wait returned before the retrying owner settled")
+	default:
+	}
+	close(settleRelease)
+	select {
+	case err := <-result:
+		s.ErrorIs(err, terminalErr)
+	case <-time.After(time.Second):
+		s.FailNow("wait did not return after every owner settled")
+	}
+	s.NotContains(s.wb.writeBufferSyncQueues, segmentID)
+}
+
+func (s *WriteBufferSuite) TestBeginDropSnapshotsWriteBufferSyncTerminalErrorAtomically() {
+	segmentID := int64(1117)
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	state := &writeBufferSyncEntry{
+		task:      task,
+		done:      make(chan struct{}),
+		submitted: true,
+	}
+	s.wb.registerWriteBufferSyncLocked(state)
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Once()
+
+	dropCtx, dropCancel := context.WithCancel(context.Background())
+	defer dropCancel()
+	s.wb.mut.Lock()
+	s.wb.dropping = true
+	waiters := s.wb.allWriteBufferSyncEntriesLocked()
+	s.Equal([]*writeBufferSyncEntry{state}, waiters)
+
+	callbackStarted := make(chan struct{})
+	callbackDone := make(chan struct{})
+	go func() {
+		defer close(callbackDone)
+		close(callbackStarted)
+		_ = s.wb.finishWriteBufferSync(dropCtx, state, task, context.Canceled)
+	}()
+	<-callbackStarted
+	s.wb.mut.Unlock()
+
+	s.ErrorIs(s.wb.waitSyncsSettled(dropCtx, dropCancel, waiters), context.Canceled)
+	<-callbackDone
+	s.NotContains(s.wb.writeBufferSyncQueues, segmentID)
+}
+
+func (s *WriteBufferSuite) TestGrowingAndWriteBufferSyncShareSegmentAdmissionGate() {
+	segmentID := int64(1108)
+	s.wb.growingSourceProgress[segmentID] = &growingSourceProgress{
+		segmentID: segmentID,
+		syncing:   true,
+	}
+	s.wb.buffers[segmentID] = &segmentBuffer{
+		segmentID:    segmentID,
+		insertBuffer: &InsertBuffer{},
+		deltaBuffer:  &DeltaBuffer{},
+	}
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(
+		metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil, nil), true).Maybe()
+
+	futures := s.wb.syncSegments(context.Background(), []int64{segmentID})
+	s.Empty(futures)
+	s.Contains(s.wb.buffers, segmentID)
+	s.NotContains(s.wb.writeBufferSyncQueues, segmentID)
+}
+
+func (s *WriteBufferSuite) TestDropDrainsOutstandingBeforeBufferedTail() {
+	segmentID := int64(1105)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    10,
+		State:          commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV2,
+	}, nil, nil, metacache.NewEmptySegmentStats())
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Maybe()
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(
+		func(action metacache.SegmentAction, _ ...metacache.SegmentFilter) {
+			action(segment)
+		}).Return().Maybe()
+
+	metaWriter := syncmgr.NewMockMetaWriter(s.T())
+	metaWriter.EXPECT().DropChannel(mock.Anything, s.channelName).Return(nil).Once()
+	s.wb.metaWriter = metaWriter
+	s.wb.checkpoint = &msgpb.MsgPosition{Timestamp: 300}
+
+	firstTask := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithBatchRows(10).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 200}))
+	firstState := &writeBufferSyncEntry{
+		task:      firstTask,
+		done:      make(chan struct{}),
+		submitted: true,
+	}
+	s.wb.registerWriteBufferSyncLocked(firstState)
+	tail, err := newSegmentBuffer(segmentID, s.collSchema)
+	s.Require().NoError(err)
+	s.wb.buffers[segmentID] = tail
+
+	var submitted []syncmgr.Task
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+			submitted = append(submitted, task)
+			var callbackErr error
+			for _, callback := range callbacks {
+				callbackErr = callback(callbackErr)
+			}
+			return conc.Go(func() (struct{}, error) { return struct{}{}, callbackErr }), nil
+		}).Once()
+
+	closeDone := make(chan struct{})
+	go func() {
+		defer close(closeDone)
+		s.wb.Close(context.Background(), true)
+	}()
+	s.Eventually(func() bool {
+		s.wb.mut.RLock()
+		defer s.wb.mut.RUnlock()
+		return s.wb.dropping
+	}, time.Second, time.Millisecond)
+	select {
+	case <-closeDone:
+		s.FailNow("drop overtook the outstanding task")
+	default:
+	}
+	s.NoError(s.wb.finishWriteBufferSync(context.Background(), firstState, firstTask, nil))
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		s.FailNow("drop did not finish after the outstanding task")
+	}
+	s.Require().Len(submitted, 1)
+	s.True(submitted[0].IsDrop(), "the buffered tail must become the final drop task")
+}
+
 func (s *WriteBufferSuite) TestFlushSourceModeNotifier() {
 	segmentID := int64(1001)
 	var notifiedSegmentID int64
@@ -131,7 +749,7 @@ func (s *WriteBufferSuite) TestFlushSourceModeNotifier() {
 			segmentID:   segmentID,
 			partitionID: 10,
 			rowNum:      3,
-		}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 1, 3)
+		}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 1)
 		s.NoError(err)
 		s.Equal(segmentID, notifiedSegmentID)
 		s.Equal(metacache.FlushSourceGrowing, notifiedMode)
@@ -615,11 +1233,15 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		syncMgr.EXPECT().SyncData(mock.Anything, mock.MatchedBy(func(task syncmgr.Task) bool {
 			return task != nil && task.SegmentID() == 5 && task.IsDrop()
 		}), mock.Anything).RunAndReturn(
-			func(context.Context, syncmgr.Task, ...func(error) error) (*conc.Future[struct{}], error) {
+			func(_ context.Context, _ syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 				close(submitEntered)
 				<-releaseSubmit
+				var callbackErr error
+				for _, callback := range callbacks {
+					callbackErr = callback(callbackErr)
+				}
 				return conc.Go[struct{}](func() (struct{}, error) {
-					return struct{}{}, nil
+					return struct{}{}, callbackErr
 				}), nil
 			},
 		).Once()
@@ -789,8 +1411,8 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 
 	s.Run("pending_flush", func() {
 		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1001, &growingSourceProgress{
-			segmentID:    1001,
-			pendingFlush: true,
+			segmentID: 1001,
+			owesFlush: true,
 		})
 		s.True(selected)
 	})
@@ -798,7 +1420,7 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 	s.Run("non_retryable_failure", func() {
 		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1007, &growingSourceProgress{
 			segmentID:           1007,
-			pendingFlush:        true,
+			owesFlush:           true,
 			nonRetryableFailure: true,
 		})
 		s.False(selected)
@@ -836,8 +1458,8 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 		s.metacache.EXPECT().GetSegmentByID(int64(1004)).Return(segment, true).Once()
 
 		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1004, &growingSourceProgress{
-			segmentID:    1004,
-			targetOffset: 9,
+			segmentID:     1004,
+			lastFlushedTs: 9,
 			batches: []growingSourceProgressBatch{
 				{startPosition: &msgpb.MsgPosition{Timestamp: startTs}},
 			},
@@ -851,9 +1473,13 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 		}, nil, nil, nil)
 		s.metacache.EXPECT().GetSegmentByID(int64(1005)).Return(segment, true).Once()
 
+		// The row count now comes from the recorded packs, not from a cumulative
+		// offset: pendingRows() sums what has been recorded and not yet flushed.
 		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1005, &growingSourceProgress{
-			segmentID:    1005,
-			targetOffset: 10,
+			segmentID: 1005,
+			batches: []growingSourceProgressBatch{
+				{endPosition: &msgpb.MsgPosition{Timestamp: startTs}, rowNum: 10},
+			},
 		})
 		s.True(selected)
 	})
@@ -872,10 +1498,10 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 }
 
 func (s *WriteBufferSuite) TestGrowingSourceLayoutMismatch() {
-	s.True(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: Invalid: Column count mismatch at index 0: existing has 21 columns, but appended has 44 columns: segcore error[segcoreCode=2001]")))
-	s.True(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: Invalid: Column group size mismatch: existing has 10 groups, but appended has 1 groups: segcore error[segcoreCode=2001]")))
-	s.False(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: mock transient error")))
-	s.False(isGrowingSourceLayoutMismatch(nil))
+	s.Equal(syncmgr.SyncTerminal, syncmgr.ClassifySyncError(context.Background(), errors.New("flush growing source data: Invalid: Column count mismatch at index 0: existing has 21 columns, but appended has 44 columns: segcore error[segcoreCode=2001]")))
+	s.Equal(syncmgr.SyncTerminal, syncmgr.ClassifySyncError(context.Background(), errors.New("flush growing source data: Invalid: Column group size mismatch: existing has 10 groups, but appended has 1 groups: segcore error[segcoreCode=2001]")))
+	s.Equal(syncmgr.SyncRetry, syncmgr.ClassifySyncError(context.Background(), errors.New("flush growing source data: mock transient error")))
+	s.Equal(syncmgr.SyncRetry, syncmgr.ClassifySyncError(context.Background(), nil))
 }
 
 func (s *WriteBufferSuite) TestGrowingSourceProgressSyncableSkipsNonRetryableFailure() {
@@ -883,9 +1509,9 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSyncableSkipsNonRetryableFai
 		segmentID:           1001,
 		nonRetryableFailure: true,
 		batches: []growingSourceProgressBatch{
-			{endPosition: &msgpb.MsgPosition{Timestamp: 100}, endOffset: 10},
+			{endPosition: &msgpb.MsgPosition{Timestamp: 100}},
 		},
-	}, false, true)
+	})
 	s.False(syncable)
 	s.False(retry)
 }
@@ -895,13 +1521,13 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressRetrySkipsNonRetryableFailur
 		segmentID:           1001,
 		nonRetryableFailure: true,
 		batches: []growingSourceProgressBatch{
-			{endPosition: &msgpb.MsgPosition{Timestamp: 100}, endOffset: 10},
+			{endPosition: &msgpb.MsgPosition{Timestamp: 100}},
 		},
 	}
 
-	segments, retry := s.wb.getGrowingSourceSegmentsToRetry()
+	segments, stillArmed := s.wb.getGrowingSourceSegmentsToRetry(time.Now(), 0)
 	s.Empty(segments)
-	s.False(retry)
+	s.Empty(stillArmed)
 }
 
 func (s *WriteBufferSuite) TestDropPartitions() {
@@ -1165,4 +1791,204 @@ func TestPrepareInsertMaterializesLegacyBM25Output(t *testing.T) {
 	assert.Equal(t, int64(3), result[0].bm25Stats[102].NumRow())
 	assert.NotNil(t, insertMsg.GetFieldsData()[2])
 	assert.Equal(t, int64(102), insertMsg.GetFieldsData()[2].GetFieldId())
+}
+
+// A retryable failure must change nothing the retry depends on: the task keeps
+// its payload, its place in the queue and its metacache syncing counters, and
+// nobody is told the flush is finished.
+func (s *WriteBufferSuite) TestWriteBufferSyncRetryableFailureKeepsTaskQueued() {
+	segmentID := int64(1130)
+	start := &msgpb.MsgPosition{Timestamp: 200}
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithStartPosition(start).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 300}))
+	entry := &writeBufferSyncEntry{task: task, done: make(chan struct{}), submitted: true}
+	s.wb.registerWriteBufferSyncLocked(entry)
+	s.wb.syncCheckpoint.Add(segmentID, start, "syncing task")
+	fatalCalled := false
+	s.wb.errHandler = func(error) { fatalCalled = true }
+
+	taskErr := merr.WrapErrServiceInternalMsg("object storage unavailable")
+	s.Require().Equal(syncmgr.SyncRetry, syncmgr.ClassifySyncError(context.Background(), taskErr))
+	s.ErrorIs(s.wb.finishWriteBufferSync(context.Background(), entry, task, taskErr), taskErr)
+
+	s.False(fatalCalled, "a retryable failure must not escalate")
+	s.Contains(s.wb.writeBufferSyncQueues, segmentID)
+	s.True(entry.failed)
+	s.False(entry.submitted)
+	select {
+	case <-entry.done:
+		s.Fail("the task is not finished, so waiters must not be released")
+	default:
+	}
+	candidate := s.wb.syncCheckpoint.GetEarliestWithDefault(nil)
+	s.Require().NotNil(candidate)
+	s.Equal(start.GetTimestamp(), candidate.position.GetTimestamp())
+}
+
+// driveRetries only re-submits after the configured interval has passed, so a
+// dense timetick stream cannot turn into a retry storm.
+func (s *WriteBufferSuite) TestDriveRetriesHonorsInterval() {
+	segmentID := int64(1131)
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 300}))
+	entry := &writeBufferSyncEntry{
+		task:   task,
+		done:   make(chan struct{}),
+		failed: true,
+	}
+	s.wb.registerWriteBufferSyncLocked(entry)
+	// backoff, not want: the entry is marked failed, i.e. an attempt was just
+	// made and the interval has to elapse before the next one.
+	s.wb.writeBufferSyncQueues[segmentID].intent.backoff(time.Now())
+
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushRetryInterval.Key, "3000")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.FlushRetryInterval.Key)
+
+	s.wb.driveRetries(context.Background())
+	s.True(entry.failed, "retry must wait for the interval to elapse")
+
+	s.wb.writeBufferSyncQueues[segmentID].intent.since = time.Now().Add(-time.Hour)
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, nil).Maybe()
+	s.wb.driveRetries(context.Background())
+	s.False(entry.failed, "an elapsed interval must re-drive the segment")
+}
+
+// A retryable failure during Drop keeps the task queued: Drop is a synchronous
+// wait and waitSyncsSettled drives these retries itself. Only a terminal
+// error may end the entry while dropping.
+func (s *WriteBufferSuite) TestWriteBufferSyncRetryableFailureDuringDropStaysQueued() {
+	segmentID := int64(1132)
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 300}))
+	entry := &writeBufferSyncEntry{task: task, done: make(chan struct{}), submitted: true}
+	s.wb.registerWriteBufferSyncLocked(entry)
+	s.wb.dropping = true
+	fatalCalled := false
+	s.wb.errHandler = func(error) { fatalCalled = true }
+
+	taskErr := merr.WrapErrServiceInternalMsg("object storage throttled")
+	s.Require().Equal(syncmgr.SyncRetry, syncmgr.ClassifySyncError(context.Background(), taskErr))
+	s.ErrorIs(s.wb.finishWriteBufferSync(context.Background(), entry, task, taskErr), taskErr)
+
+	s.False(fatalCalled, "a retryable failure during drop must not crash the process")
+	s.Contains(s.wb.writeBufferSyncQueues, segmentID)
+	s.True(entry.failed)
+	s.True(s.wb.writeBufferSyncQueues[segmentID].intent.owes, "the failed attempt must arm the segment clock so flushRetryInterval is honored")
+	select {
+	case <-entry.done:
+		s.Fail("a queued retry must not release drop waiters")
+	default:
+	}
+}
+
+// A terminal failure during Drop surfaces through entry.terminalErr to the
+// synchronous drop wait, whose caller escalates. Feeding it to the fatal
+// errHandler as well would crash the process twice for one failure.
+func (s *WriteBufferSuite) TestWriteBufferSyncTerminalFailureDuringDropDoesNotDoubleEscalate() {
+	segmentID := int64(1133)
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 300}))
+	entry := &writeBufferSyncEntry{task: task, done: make(chan struct{}), submitted: true}
+	s.wb.registerWriteBufferSyncLocked(entry)
+	s.wb.dropping = true
+	fatalCalled := false
+	s.wb.errHandler = func(error) { fatalCalled = true }
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Once()
+
+	taskErr := merr.WrapErrDataIntegrityMsg("row count mismatch")
+	s.ErrorIs(s.wb.finishWriteBufferSync(context.Background(), entry, task, taskErr), taskErr)
+
+	s.False(fatalCalled, "drop escalation is owned by the drop wait, not the fatal handler")
+	s.NotContains(s.wb.writeBufferSyncQueues, segmentID)
+	select {
+	case <-entry.done:
+		s.ErrorIs(entry.terminalErr, taskErr)
+	default:
+		s.Fail("a terminal entry must release its drop waiters")
+	}
+}
+
+// The first failed attempt must honor flushRetryInterval too: an unstamped
+// lastAttempt used to make the very next timetick retry immediately.
+func (s *WriteBufferSuite) TestFirstFailureHonorsRetryInterval() {
+	segmentID := int64(1134)
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 300}))
+	entry := &writeBufferSyncEntry{task: task, done: make(chan struct{}), submitted: true}
+	s.wb.registerWriteBufferSyncLocked(entry)
+	s.wb.errHandler = func(error) {}
+
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushRetryInterval.Key, "3000")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.FlushRetryInterval.Key)
+
+	taskErr := merr.WrapErrServiceInternalMsg("object storage unavailable")
+	s.ErrorIs(s.wb.finishWriteBufferSync(context.Background(), entry, task, taskErr), taskErr)
+	s.Require().True(entry.failed)
+
+	s.wb.driveRetries(context.Background())
+	s.True(entry.failed, "the interval must be measured from the first failure, not from zero")
+}
+
+// Once nothing can drive retries again, parked entries must be released or
+// their payload is retained forever.
+func (s *WriteBufferSuite) TestParkedEntriesReleasedWhenRetryStops() {
+	segmentID := int64(1135)
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 300}))
+	parkedEntry := &writeBufferSyncEntry{task: task, done: make(chan struct{}), failed: true}
+	s.wb.registerWriteBufferSyncLocked(parkedEntry)
+
+	inflightTask := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID + 1).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 300}))
+	inflight := &writeBufferSyncEntry{task: inflightTask, done: make(chan struct{}), submitted: true}
+	s.wb.registerWriteBufferSyncLocked(inflight)
+
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Once()
+
+	s.wb.mut.Lock()
+	parked := s.wb.takeParkedWriteBufferSyncsLocked()
+	s.wb.mut.Unlock()
+	s.Require().Len(parked, 1)
+	s.Same(parkedEntry, parked[0])
+	s.Contains(s.wb.writeBufferSyncQueues, segmentID+1, "in-flight entries are settled by their own callback")
+	s.NotContains(s.wb.writeBufferSyncQueues, segmentID)
+
+	s.wb.abandonParkedWriteBufferSyncs(parked, context.Canceled)
+	select {
+	case <-parkedEntry.done:
+		s.ErrorIs(parkedEntry.terminalErr, context.Canceled)
+	default:
+		s.Fail("an abandoned parked entry must release its waiters")
+	}
+}
+
+// A segment whose flush has failed at least once gets completion-based
+// backpressure even after its payload was released (a stuck Commit holds no
+// payload); a healthy over-budget queue does not.
+func (s *WriteBufferSuite) TestBackpressureWaitsOnImpairedQueueCompletion() {
+	segmentID := int64(1136)
+	task := syncmgr.NewSyncTask().WithSyncPack(new(syncmgr.SyncPack).
+		WithSegmentID(segmentID).
+		WithCheckpoint(&msgpb.MsgPosition{Timestamp: 300}))
+	entry := &writeBufferSyncEntry{task: task, done: make(chan struct{}), failed: true, everFailed: true}
+	s.wb.registerWriteBufferSyncLocked(entry)
+	s.wb.buffers[segmentID] = &segmentBuffer{
+		segmentID:    segmentID,
+		insertBuffer: &InsertBuffer{BufferBase: BufferBase{size: int64(1) << 40}},
+	}
+	defer delete(s.wb.buffers, segmentID)
+
+	s.NotNil(s.wb.backpressureWaiterLocked(), "an impaired over-budget queue must backpressure on completion")
+
+	entry.everFailed = false
+	s.Nil(s.wb.backpressureWaiterLocked(), "a healthy over-budget pipeline must not wait on completion")
 }

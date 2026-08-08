@@ -75,12 +75,33 @@ func (s *ManagerSuite) SetupTest() {
 func (s *ManagerSuite) TestRegister() {
 	manager := s.manager
 
-	err := manager.Register(s.channelName, s.metacache, WithIDAllocator(s.allocator))
+	err := manager.Register(context.Background(), s.channelName, s.metacache, WithIDAllocator(s.allocator))
 	s.NoError(err)
 
-	err = manager.Register(s.channelName, s.metacache, WithIDAllocator(s.allocator))
+	err = manager.Register(context.Background(), s.channelName, s.metacache, WithIDAllocator(s.allocator))
 	s.Error(err)
 	s.ErrorIs(err, merr.ErrChannelReduplicate)
+}
+
+func (s *ManagerSuite) TestDropChannelPropagatesBoundedContext() {
+	param := paramtable.Get()
+	param.Save(param.DataNodeCfg.GracefulStopTimeout.Key, "2")
+	defer param.Reset(param.DataNodeCfg.GracefulStopTimeout.Key)
+
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "caller")
+	wb := NewMockWriteBuffer(s.T())
+	wb.EXPECT().Close(mock.MatchedBy(func(dropCtx context.Context) bool {
+		deadline, ok := dropCtx.Deadline()
+		remaining := time.Until(deadline)
+		return ok && dropCtx.Value(contextKey{}) == "caller" && remaining > 0 && remaining <= 2*time.Second
+	}), true).Return().Once()
+	s.manager.buffers.Insert(s.channelName, wb)
+
+	s.manager.DropChannel(ctx, s.channelName)
+
+	_, loaded := s.manager.buffers.Get(s.channelName)
+	s.False(loaded)
 }
 
 func (s *ManagerSuite) TestFlushSegments() {
@@ -235,7 +256,7 @@ func (s *ManagerSuite) TestRemoveChannel() {
 	})
 
 	s.Run("remove_channel", func() {
-		err := manager.Register(s.channelName, s.metacache, WithIDAllocator(s.allocator))
+		err := manager.Register(context.Background(), s.channelName, s.metacache, WithIDAllocator(s.allocator))
 		s.Require().NoError(err)
 
 		s.NotPanics(func() {
@@ -287,6 +308,16 @@ func (s *ManagerSuite) TestMemoryCheck() {
 		}
 		return int64(float64(memoryLimit) * 0.6)
 	})
+	// EvictableMemorySize is on the WriteBuffer interface now, so memoryCheck
+	// calls it on every candidate instead of falling back to MemorySize when the
+	// buffer happened not to implement it. This test only exercises the
+	// watermark, so report the whole buffer as evictable.
+	wb.EXPECT().EvictableMemorySize().RunAndReturn(func() int64 {
+		if flag.Load() {
+			return int64(float64(memoryLimit) * 0.4)
+		}
+		return int64(float64(memoryLimit) * 0.6)
+	}).Maybe()
 	wb.EXPECT().EvictBuffer(mock.Anything).Run(func(polices ...SyncPolicy) {
 		select {
 		case signal <- struct{}{}:
@@ -333,6 +364,7 @@ func (s *ManagerSuite) TestStopDuringMemoryCheck() {
 		return int64(float64(memoryLimit) * 0.8)
 	}).Maybe()
 	//.Return(int64(float64(memoryLimit) * 0.6))
+	wb.EXPECT().EvictableMemorySize().Return(int64(0)).Maybe()
 	wb.EXPECT().EvictBuffer(mock.Anything).Maybe()
 	manager.buffers.Insert(s.channelName, wb)
 	manager.Start()
@@ -342,6 +374,37 @@ func (s *ManagerSuite) TestStopDuringMemoryCheck() {
 
 	// expect stop operation won't stuck
 	manager.Stop()
+}
+
+func (s *ManagerSuite) TestMemoryCheckDoesNotSpinOnInFlightPayload() {
+	param := paramtable.Get()
+	param.Save(param.DataNodeCfg.MemoryForceSyncEnable.Key, "true")
+	param.Save(param.DataNodeCfg.MemoryForceSyncWatermark.Key, "0")
+	defer param.Reset(param.DataNodeCfg.MemoryForceSyncEnable.Key)
+	defer param.Reset(param.DataNodeCfg.MemoryForceSyncWatermark.Key)
+
+	segmentID := int64(1001)
+	task := syncmgr.NewSyncTask().
+		WithSyncPack(new(syncmgr.SyncPack).WithSegmentID(segmentID)).
+		WithPayloadAccounting(100, 0, nil)
+	entry := &writeBufferSyncEntry{task: task}
+	wb := &l0WriteBuffer{writeBufferBase: &writeBufferBase{
+		buffers:               make(map[int64]*segmentBuffer),
+		writeBufferSyncQueues: map[int64]*writeBufferSyncQueue{segmentID: {entries: []*writeBufferSyncEntry{entry}}},
+		growingSourceProgress: make(map[int64]*growingSourceProgress),
+	}}
+	s.manager.buffers.Insert(s.channelName, wb)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.manager.memoryCheck()
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		s.FailNow("memory check spun on non-evictable in-flight payload")
+	}
 }
 
 func TestManager(t *testing.T) {
