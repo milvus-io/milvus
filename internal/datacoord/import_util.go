@@ -22,6 +22,7 @@ import (
 	"math"
 	"path"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -756,6 +757,101 @@ func LogResultSegmentsInfo(jobID int64, meta *meta, segmentIDs []int64) {
 	}
 	mlog.Info(context.TODO(), "import result info", mlog.FieldJobID(jobID),
 		mlog.Int64("totalRows", totalRows), mlog.Int64("totalSize", totalSize))
+}
+
+// normalizeStorageKey folds a storage key into a single namespace so that a
+// candidate path and a deny-list entry are always comparable.
+//
+// Rooting at "/" before cleaning does three things at once:
+//   - an absolute storage root (localStorage.path, e.g. /var/lib/milvus/data)
+//     and a relative one (minio.rootPath, e.g. files) end up in the same
+//     namespace, so the deny list applies to both;
+//   - any number of leading slashes collapses to one, so "//files/insert_log"
+//     cannot dodge an entry that "/files/insert_log" matches;
+//   - a leading ".." is resolved away rather than preserved, which path.Clean
+//     cannot do for a relative path. This matters because LocalChunkManager
+//     opens the caller's path with os.Open, where "../files/insert_log/x"
+//     resolves against the process working directory.
+//
+// Applying POSIX cleaning to REMOTE object keys is deliberate, not an oversight.
+// An S3/MinIO key is an opaque string and RemoteChunkManager passes it through
+// verbatim, so literal prefix matching would describe what a single backend does
+// more precisely -- and would let "files/../files/insert_log/x" and every other
+// syntactic variant of an internal prefix through. RemoteChunkManager fronts
+// MinIO, S3, GCS, Azure Blob, OSS and COS, whose key normalization is not uniform
+// and has historically included key-to-filesystem-path mappings; on any backend
+// that does normalize, those variants read real internal data. The deny list
+// therefore compares the cleaned form on purpose, accepting that a caller key
+// which cleans onto an internal prefix (say "files//insert_log/x", a distinct
+// object on a literal backend) is over-rejected. Over-rejecting is recoverable;
+// under-rejecting is not, and no syntax distinguishes an accidental doubled
+// slash from a deliberate one.
+func normalizeStorageKey(key string) string {
+	return path.Clean("/" + key)
+}
+
+// ValidateImportFilePaths rejects ordinary imports whose caller-supplied paths
+// point into Milvus's own internal storage layout under the storage root path.
+//
+// RBAC authorizes an import against the target collection name only; the file
+// paths never participate in that decision. Refusing Milvus's own data
+// directories keeps an ordinary import inside caller-supplied staging data.
+//
+// Binlog import (backup=true) and L0 import are exempt: reading insert_log and
+// delta_log is exactly what they do. They are gated instead by the cluster-level
+// ImportBinlog privilege, checked in the proxy.
+func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
+	if importutilv2.IsBackup(options) || importutilv2.IsL0Import(options) {
+		return nil
+	}
+
+	// Segments rooted at localStorage.path share the ChunkManager root only when
+	// the storage type is local. Denying them on a MinIO-backed cluster would
+	// reject caller paths Milvus never writes -- <minio.rootPath>/tmp/... being
+	// the one people actually stage imports under.
+	localStorage := paramtable.Get().CommonCfg.StorageType.GetValue() == "local"
+
+	segments := make([]string, 0,
+		len(common.InternalStorageRootSegments)+len(common.LocalOnlyStorageRootSegments))
+	segments = append(segments, common.InternalStorageRootSegments...)
+	if localStorage {
+		segments = append(segments, common.LocalOnlyStorageRootSegments...)
+	}
+
+	rootPath := cm.RootPath()
+	denied := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		denied = append(denied, normalizeStorageKey(path.Join(rootPath, segment)))
+	}
+
+	for _, file := range files {
+		for _, filePath := range file.GetPaths() {
+			// The deny entries are anchored at the storage root, but under local
+			// storage the read is os.Open, which resolves a relative key against
+			// the datanode's working directory instead. The two namespaces never
+			// meet, so a relative key can never match a deny entry no matter how
+			// it is normalized -- with WORKDIR /milvus and
+			// localStorage.path=/milvus/data, "data/snapshots/..." reads the
+			// snapshot directory while comparing as "/data/snapshots/...".
+			// Every legitimate local staging path is absolute, so refuse the rest.
+			if localStorage && !path.IsAbs(filePath) {
+				return merr.WrapErrImportFailedMsg(
+					"import path %s must be absolute under common.storageType=local", filePath)
+			}
+
+			cleaned := normalizeStorageKey(filePath)
+			for _, deniedPath := range denied {
+				// Boundary match, not a raw prefix match: a raw prefix would also
+				// reject a caller's own "files/insert_logs_2026/a.json".
+				if cleaned == deniedPath || strings.HasPrefix(cleaned, deniedPath+"/") {
+					return merr.WrapErrImportFailedMsg(
+						"import path %s is not allowed: %s is a Milvus internal storage directory",
+						filePath, deniedPath)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // ValidateBinlogImportRequest validates the binlog import request.

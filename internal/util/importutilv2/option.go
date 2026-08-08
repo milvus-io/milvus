@@ -75,6 +75,59 @@ const (
 
 type Options []*commonpb.KeyValuePair
 
+// foldMatchedKeys are the only option keys any reader on the import path matches
+// case-insensitively: ParseTimeRange's getTimestamp compares against exactly these
+// (option.go's getTimestamp is the sole strings.EqualFold on the path). Every other
+// reader matches byte-exactly, so two keys differing only in case are distinct to
+// them and need no dedup.
+var foldMatchedKeys = []string{StartTs, StartTs2, EndTs, EndTs2}
+
+// ValidateNoDuplicateKeys rejects an option list carrying the same key twice.
+//
+// Import options are read in two incompatible ways. Every check reads them as a
+// repeated KV list via funcutil.GetAttrByKeyFromRepeatedKV, which returns the
+// FIRST match, while the broadcast body folds them into a map via
+// funcutil.KeyValuePair2Map, where the LAST value wins. A duplicate key
+// therefore lets a request be validated under one value and executed under
+// another: options=[{backup,false},{backup,true}] passes as an ordinary import,
+// skipping the ImportBinlog privilege check, then runs as a binlog import.
+//
+// Keys are compared with strings.EqualFold, not byte equality, because
+// ParseTimeRange matches its keys that way (see getTimestamp, the only
+// fold-matching reader on the import path). Under byte equality
+// [{start_ts,A},{START_TS,B}] would pass here and then resolve to A or B
+// depending on map iteration order, so a restore would filter different files
+// by different time windows. strings.ToLower is not a substitute:
+// EqualFold("ſtart_ts", "start_ts") is true while ToLower leaves U+017F alone.
+//
+// Call this before any option is read.
+func ValidateNoDuplicateKeys(options Options) error {
+	seen := make(map[string]struct{}, len(options))
+	// Which fold-matched key each request key has already claimed. Comparing every
+	// pair would also be correct but quadratic, and nothing bounds how many options
+	// a request may carry: the only ceiling is the 256 MiB gRPC body, and 20k keys
+	// fit in 352 KB. Scanning the fixed foldMatchedKeys per option keeps it linear.
+	claimed := make(map[string]string, len(foldMatchedKeys))
+	for _, kv := range options {
+		key := kv.GetKey()
+		if _, ok := seen[key]; ok {
+			return merr.WrapErrParameterInvalidMsg("duplicate import option key: %s", key)
+		}
+		seen[key] = struct{}{}
+		for _, target := range foldMatchedKeys {
+			if !strings.EqualFold(key, target) {
+				continue
+			}
+			if prev, ok := claimed[target]; ok {
+				return merr.WrapErrParameterInvalidMsg(
+					"duplicate import option key: %s, which matches %s case-insensitively", key, prev)
+			}
+			claimed[target] = key
+		}
+	}
+	return nil
+}
+
 func GetTimeoutTs(options Options) (uint64, error) {
 	var timeoutTs uint64 = math.MaxUint64
 	timeoutStr, err := funcutil.GetAttrByKeyFromRepeatedKV(Timeout, options)

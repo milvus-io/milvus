@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -44,9 +45,6 @@ import (
 //	    └── {snapshot_id}/         # Directory for each snapshot
 //	        └── {segment_id}.avro  # Individual segment manifest file
 const (
-	// SnapshotRootPath is the root directory for all snapshots in object storage.
-	SnapshotRootPath = "snapshots"
-
 	// SnapshotMetadataSubPath is the subdirectory under collection path for metadata JSON files.
 	SnapshotMetadataSubPath = "metadata"
 
@@ -191,7 +189,7 @@ func NewSnapshotWriter(cm storage.ChunkManager) *SnapshotWriter {
 //   - manifestDir: Directory for segment manifest files ({rootPath}/snapshots/{collection_id}/manifests/{snapshot_id}/)
 //   - metadataPath: Full path to metadata JSON file ({rootPath}/snapshots/{collection_id}/metadata/{snapshot_id}.json)
 func GetSnapshotPaths(rootPath string, collectionID int64, snapshotID int64) (manifestDir, metadataPath string) {
-	basePath := path.Join(rootPath, SnapshotRootPath, strconv.FormatInt(collectionID, 10))
+	basePath := path.Join(rootPath, common.SnapshotRootPath, strconv.FormatInt(collectionID, 10))
 	snapshotIDStr := strconv.FormatInt(snapshotID, 10)
 	// Manifest directory: snapshots/{collection_id}/manifests/{snapshot_id}/
 	manifestDir = path.Join(basePath, SnapshotManifestsSubPath, snapshotIDStr)
@@ -601,7 +599,7 @@ func (r *SnapshotReader) ListSnapshots(ctx context.Context, collectionID int64) 
 	}
 
 	// Construct metadata directory path
-	basePath := path.Join(SnapshotRootPath, strconv.FormatInt(collectionID, 10))
+	basePath := path.Join(common.SnapshotRootPath, strconv.FormatInt(collectionID, 10))
 	metadataDir := path.Join(basePath, SnapshotMetadataSubPath)
 
 	// List all files in the metadata directory
