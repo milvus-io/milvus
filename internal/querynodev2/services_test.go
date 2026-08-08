@@ -3039,3 +3039,31 @@ func TestQueryNodeService(t *testing.T) {
 
 	suite.Run(t, new(ServiceSuite))
 }
+
+func TestDeleteRequestStringerEmpty(t *testing.T) {
+	// String() is evaluated by zap on the Delete logging path and must never
+	// panic, including when primary keys or timestamps are empty (the legacy
+	// splitDeleteBatch fallback forwards requests verbatim).
+	emptyCases := []*querypb.DeleteRequest{
+		{},
+		{
+			PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}},
+			Timestamps:  []uint64{},
+		},
+		{
+			PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{}}}},
+			Timestamps:  []uint64{},
+		},
+	}
+	for _, req := range emptyCases {
+		s := (&deleteRequestStringer{DeleteRequest: req}).String()
+		assert.Contains(t, s, "timestamp range")
+	}
+
+	// a populated request still renders the pk and timestamp ranges.
+	full := &deleteRequestStringer{DeleteRequest: &querypb.DeleteRequest{
+		PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 5}}}},
+		Timestamps:  []uint64{10, 20},
+	}}
+	assert.Equal(t, "Pks range[1-5], len: 2, timestamp range: [10-20]", full.String())
+}
