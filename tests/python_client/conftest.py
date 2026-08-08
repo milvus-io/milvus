@@ -34,7 +34,12 @@ def pytest_addoption(parser):
     parser.addoption("--password", action="store", default="Milvus", help="password for connection")
     parser.addoption("--db_name", action="store", default="default", help="database name for connection")
     parser.addoption("--secure", action="store", default=False, help="secure for connection")
-    parser.addoption("--milvus_ns", action="store", default="chaos-testing", help="milvus_ns")
+    parser.addoption(
+        "--milvus_ns",
+        action="store",
+        default=os.getenv("MILVUS_NS", os.getenv("MILVUS_HELM_NAMESPACE", "chaos-testing")),
+        help="milvus_ns",
+    )
     parser.addoption("--http_port", action="store", default=19121, help="http's port")
     parser.addoption("--handler", action="store", default="GRPC", help="handler of request")
     parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
