@@ -3770,7 +3770,7 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             metric_type=STRUCT_VECTOR_METRIC_TYPE,
             params=INDEX_PARAMS,
         )
-        res, _ = self.create_index(client, collection_name, index_params)
+        res, _ = self.create_index(client, collection_name, index_params, timeout=300)
 
         assert self.wait_for_index_ready(client, collection_name, VECTOR_FIELD, timeout=300)
         assert self.wait_for_index_ready(client, collection_name, STRUCT_VECTOR_FIELD, timeout=300)
