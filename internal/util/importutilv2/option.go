@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/samber/lo"
 
@@ -48,6 +49,27 @@ const (
 
 // AutoCommitKey is the option key for enabling/disabling auto-commit of import jobs.
 const AutoCommitKey = "auto_commit"
+
+// IdempotencyKeyMaxLen bounds the client-supplied import idempotency key length.
+const IdempotencyKeyMaxLen = 256
+
+// ValidateIdempotencyKey validates a non-empty client-supplied import idempotency
+// key. The key is scoped per-collection and is used verbatim to build an etcd
+// mapping key (import-idempotency/{collectionID}/{key}), so it must stay within
+// the length bound and must not contain '/' or control characters. A malformed
+// key is request content that always fails, so this returns a terminal
+// (non-retriable) import error rather than a transient one.
+func ValidateIdempotencyKey(key string) error {
+	if len(key) > IdempotencyKeyMaxLen {
+		return merr.WrapErrImportFailedMsg("idempotency_key too long: %d > %d", len(key), IdempotencyKeyMaxLen)
+	}
+	for _, r := range key {
+		if r == '/' || unicode.IsControl(r) {
+			return merr.WrapErrImportFailedMsg("idempotency_key contains invalid character %q", r)
+		}
+	}
+	return nil
+}
 
 // Options for backup-restore mode.
 const (

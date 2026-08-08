@@ -77,6 +77,103 @@ func TestImportMeta_Restore(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestImportMeta_IdempotencyKey(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	ctx := context.TODO()
+
+	im, err := NewImportMeta(ctx, catalog, nil, nil)
+	assert.NoError(t, err)
+
+	const collID = int64(100)
+	const key = "run-1"
+
+	// First reserve: the catalog CAS creates the mapping.
+	catalog.EXPECT().SaveImportIdempotencyKeyIfAbsent(mock.Anything, collID, key, int64(1)).
+		Return(true, int64(1), nil).Once()
+	reserved, isNew, err := im.CheckAndReserveIdempotencyKey(ctx, collID, key, 1)
+	assert.NoError(t, err)
+	assert.True(t, isNew)
+	assert.Equal(t, int64(1), reserved)
+
+	// Resolve is served from the in-memory index.
+	got, ok := im.ResolveIdempotencyKey(ctx, collID, key)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), got)
+
+	// Second reserve with the same key hits the in-memory index (no catalog call),
+	// and returns the original jobID instead of the new candidate (2).
+	reserved, isNew, err = im.CheckAndReserveIdempotencyKey(ctx, collID, key, 2)
+	assert.NoError(t, err)
+	assert.False(t, isNew)
+	assert.Equal(t, int64(1), reserved)
+
+	// Release drops the mapping from both the catalog and the index.
+	catalog.EXPECT().DropImportIdempotencyKey(mock.Anything, collID, key).Return(nil).Once()
+	err = im.ReleaseIdempotencyKey(ctx, collID, key)
+	assert.NoError(t, err)
+	_, ok = im.ResolveIdempotencyKey(ctx, collID, key)
+	assert.False(t, ok)
+
+	// After release, a fresh reserve goes to the catalog again; simulate a
+	// concurrent winner already persisted -> CAS reports not-created and returns
+	// the winner's jobID.
+	catalog.EXPECT().SaveImportIdempotencyKeyIfAbsent(mock.Anything, collID, key, int64(3)).
+		Return(false, int64(1), nil).Once()
+	reserved, isNew, err = im.CheckAndReserveIdempotencyKey(ctx, collID, key, 3)
+	assert.NoError(t, err)
+	assert.False(t, isNew)
+	assert.Equal(t, int64(1), reserved)
+}
+
+func TestImportMeta_RestoreIdempotencyIndex(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{
+		{JobID: 7, CollectionID: 100, IdempotencyKey: "run-7"},
+		{JobID: 8, CollectionID: 100}, // no idempotency key
+	}, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	ctx := context.TODO()
+
+	im, err := NewImportMeta(ctx, catalog, nil, nil)
+	assert.NoError(t, err)
+
+	got, ok := im.ResolveIdempotencyKey(ctx, 100, "run-7")
+	assert.True(t, ok)
+	assert.Equal(t, int64(7), got)
+
+	_, ok = im.ResolveIdempotencyKey(ctx, 100, "missing")
+	assert.False(t, ok)
+}
+
+func TestImportMeta_RemoveJobDropsIdempotencyKey(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().DropImportIdempotencyKey(mock.Anything, int64(100), "run-9").Return(nil).Once()
+	ctx := context.TODO()
+
+	im, err := NewImportMeta(ctx, catalog, nil, nil)
+	assert.NoError(t, err)
+
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID:          9,
+		CollectionID:   100,
+		IdempotencyKey: "run-9",
+		State:          internalpb.ImportJobState_Pending,
+	}}
+	assert.NoError(t, im.AddJob(ctx, job))
+	assert.NoError(t, im.RemoveJob(ctx, 9))
+	_, ok := im.ResolveIdempotencyKey(ctx, 100, "run-9")
+	assert.False(t, ok)
+}
+
 func TestImportMeta_Job(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)

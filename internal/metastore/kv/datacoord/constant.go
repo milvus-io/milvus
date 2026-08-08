@@ -26,6 +26,7 @@ const (
 	ChannelRemovePrefix                 = MetaPrefix + "/channel-removal"
 	ChannelCheckpointPrefix             = MetaPrefix + "/channel-cp"
 	ImportJobPrefix                     = MetaPrefix + "/import-job"
+	ImportIdempotencyPrefix             = MetaPrefix + "/import-idempotency"
 	ImportTaskPrefix                    = MetaPrefix + "/import-task"
 	PreImportTaskPrefix                 = MetaPrefix + "/preimport-task"
 	CopySegmentJobPrefix                = MetaPrefix + "/copy-segment-job"

@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -42,6 +43,17 @@ type ImportMeta interface {
 	CountJobBy(ctx context.Context, filters ...ImportJobFilter) int
 	RemoveJob(ctx context.Context, jobID int64) error
 	HandleCommitVchannel(ctx context.Context, jobID int64, vchannel string, callback func() error) error
+
+	// CheckAndReserveIdempotencyKey atomically reserves (collectionID, idempotencyKey)
+	// -> jobID. It returns (reservedJobID, isNew, err): when the key was never seen it
+	// persists the mapping and returns (jobID, true, nil); when a mapping already exists
+	// it returns (existingJobID, false, nil) and the caller must reuse existingJobID.
+	CheckAndReserveIdempotencyKey(ctx context.Context, collectionID int64, idempotencyKey string, jobID int64) (int64, bool, error)
+	// ReleaseIdempotencyKey removes a reservation, allowing the key to be retried.
+	// Used when the broadcast that would create the job fails after reservation.
+	ReleaseIdempotencyKey(ctx context.Context, collectionID int64, idempotencyKey string) error
+	// ResolveIdempotencyKey returns the jobID reserved for (collectionID, idempotencyKey).
+	ResolveIdempotencyKey(ctx context.Context, collectionID int64, idempotencyKey string) (int64, bool)
 
 	AddTask(ctx context.Context, task ImportTask) error
 	UpdateTask(ctx context.Context, taskID int64, actions ...UpdateAction) error
@@ -93,10 +105,14 @@ func (t *importTasks) listTaskStats() []ImportTask {
 }
 
 type importMeta struct {
-	mu      lock.RWMutex // guards jobs and tasks
-	jobs    map[int64]ImportJob
-	tasks   *importTasks
-	catalog metastore.DataCoordCatalog
+	mu    lock.RWMutex // guards jobs, tasks and idempotencyIndex
+	jobs  map[int64]ImportJob
+	tasks *importTasks
+	// idempotencyIndex maps "{collectionID}/{idempotencyKey}" -> jobID. It is the
+	// in-memory view of the persisted import-idempotency mappings and is rebuilt
+	// from the catalog on startup.
+	idempotencyIndex map[string]int64
+	catalog          metastore.DataCoordCatalog
 }
 
 func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog, alloc allocator.Allocator, meta *meta) (ImportMeta, error) {
@@ -138,17 +154,62 @@ func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog, allo
 	}
 
 	jobs := make(map[int64]ImportJob)
+	// Rebuild the idempotency index from the persisted jobs. The etcd
+	// import-idempotency mapping remains the authoritative reservation store
+	// (CheckAndReserveIdempotencyKey falls through to it on an index miss); this
+	// in-memory index is a cache used for the reserve fast-path and for key lookups.
+	idempotencyIndex := make(map[string]int64)
 	for _, job := range restoredJobs {
 		jobs[job.GetJobID()] = &importJob{
 			ImportJob: job,
 			tr:        timerecord.NewTimeRecorder("import job"),
 		}
+		if key := job.GetIdempotencyKey(); key != "" {
+			idempotencyIndex[importIdempotencyIndexKey(job.GetCollectionID(), key)] = job.GetJobID()
+		}
 	}
 
 	importMeta.jobs = jobs
 	importMeta.tasks = tasks
+	importMeta.idempotencyIndex = idempotencyIndex
 	importMeta.catalog = catalog
 	return importMeta, nil
+}
+
+func importIdempotencyIndexKey(collectionID int64, idempotencyKey string) string {
+	return fmt.Sprintf("%d/%s", collectionID, idempotencyKey)
+}
+
+func (m *importMeta) CheckAndReserveIdempotencyKey(ctx context.Context, collectionID int64, idempotencyKey string, jobID int64) (int64, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	indexKey := importIdempotencyIndexKey(collectionID, idempotencyKey)
+	if existing, ok := m.idempotencyIndex[indexKey]; ok {
+		return existing, false, nil
+	}
+	created, reserved, err := m.catalog.SaveImportIdempotencyKeyIfAbsent(ctx, collectionID, idempotencyKey, jobID)
+	if err != nil {
+		return 0, false, err
+	}
+	m.idempotencyIndex[indexKey] = reserved
+	return reserved, created, nil
+}
+
+func (m *importMeta) ReleaseIdempotencyKey(ctx context.Context, collectionID int64, idempotencyKey string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.catalog.DropImportIdempotencyKey(ctx, collectionID, idempotencyKey); err != nil {
+		return err
+	}
+	delete(m.idempotencyIndex, importIdempotencyIndexKey(collectionID, idempotencyKey))
+	return nil
+}
+
+func (m *importMeta) ResolveIdempotencyKey(ctx context.Context, collectionID int64, idempotencyKey string) (int64, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	jobID, ok := m.idempotencyIndex[importIdempotencyIndexKey(collectionID, idempotencyKey)]
+	return jobID, ok
 }
 
 func (m *importMeta) AddJob(ctx context.Context, job ImportJob) error {
@@ -226,10 +287,17 @@ func (m *importMeta) CountJobBy(ctx context.Context, filters ...ImportJobFilter)
 func (m *importMeta) RemoveJob(ctx context.Context, jobID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.jobs[jobID]; ok {
+	if job, ok := m.jobs[jobID]; ok {
 		err := m.catalog.DropImportJob(ctx, jobID)
 		if err != nil {
 			return err
+		}
+		// Drop the idempotency mapping so the key can be reused once the job is GC'd.
+		if key := job.GetIdempotencyKey(); key != "" {
+			if err := m.catalog.DropImportIdempotencyKey(ctx, job.GetCollectionID(), key); err != nil {
+				return err
+			}
+			delete(m.idempotencyIndex, importIdempotencyIndexKey(job.GetCollectionID(), key))
 		}
 		delete(m.jobs, jobID)
 	}
