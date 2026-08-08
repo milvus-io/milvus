@@ -235,8 +235,8 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 
 	for i := 1; i < len(entity); i++ {
 		c := entity[i]
-		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			return merr.WrapErrParameterInvalidMsg("%s collection %s can only contain numbers, letters and underscores", invalidMsg, entityType)
+		if c != '_' && c != '-' && !isAlpha(c) && !isNumber(c) {
+			return merr.WrapErrParameterInvalidMsg("%s collection %s can only contain numbers, letters, underscores and hyphens", invalidMsg, entityType)
 		}
 	}
 	return nil
