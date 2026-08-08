@@ -223,8 +223,15 @@ func (bt *BaseTable) initConfigsFromRemote() {
 		mlog.Info(context.TODO(), "init with etcd failed", mlog.Err(err))
 		return
 	}
-	bt.mgr.AddSource(s)
-	s.SetEventHandler(bt.mgr)
+	bt.addRemoteSource(s)
+}
+
+func (bt *BaseTable) addRemoteSource(s config.Source) {
+	err := bt.mgr.AddSource(s)
+	if err != nil {
+		mlog.Warn(context.TODO(), "init baseTable with etcd failed", mlog.Err(err))
+		return
+	}
 }
 
 // GetConfigDir returns the config directory

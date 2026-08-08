@@ -18,12 +18,15 @@ package paramtable
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 var baseParams = NewBaseTable(SkipRemote(true))
@@ -150,4 +153,68 @@ func TestNewBaseTableFromYamlOnly(t *testing.T) {
 	yaml = "not_exist.yaml"
 	gp = NewBaseTableFromYamlOnly(yaml)
 	assert.Empty(t, gp.Get("key"))
+}
+
+func TestAddRemoteSourceLogsAddSourceError(t *testing.T) {
+	logDir := t.TempDir()
+	logger, props, err := mlog.InitLogger(&mlog.Config{
+		Level:             "debug",
+		Format:            "json",
+		DisableTimestamp:  true,
+		DisableCaller:     true,
+		DisableStacktrace: true,
+		File: mlog.FileLogConfig{
+			RootPath: logDir,
+			Filename: "test.log",
+		},
+	})
+	assert.NoError(t, err)
+	previousLogger := mlog.L()
+	mlog.ReplaceGlobals(logger, props)
+	t.Cleanup(func() {
+		_ = logger.Sync()
+		mlog.ReplaceGlobals(previousLogger, nil)
+	})
+
+	bt := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	t.Cleanup(bt.mgr.Close)
+
+	bt.addRemoteSource(errRemoteSource{})
+	assert.NoError(t, logger.Sync())
+
+	logBytes, err := os.ReadFile(filepath.Join(logDir, "test.log"))
+	assert.NoError(t, err)
+	logs := string(logBytes)
+	assert.Contains(t, logs, "init baseTable with etcd failed")
+	assert.Contains(t, logs, "failed to load source EtcdSource")
+}
+
+type errRemoteSource struct{}
+
+func (errRemoteSource) GetConfigurations() (map[string]string, error) {
+	return nil, errors.New("load remote config")
+}
+
+func (errRemoteSource) GetConfigurationByKey(string) (string, error) {
+	return "", errors.New("load remote config")
+}
+
+func (errRemoteSource) GetPriority() int {
+	return config.HighPriority
+}
+
+func (errRemoteSource) GetSourceName() string {
+	return "EtcdSource"
+}
+
+func (errRemoteSource) SetEventHandler(config.EventHandler) {
+}
+
+func (errRemoteSource) SetManager(config.ConfigManager) {
+}
+
+func (errRemoteSource) UpdateOptions(config.Options) {
+}
+
+func (errRemoteSource) Close() {
 }
