@@ -66,6 +66,7 @@ func NewReader(ctx context.Context,
 	tsEnd uint64,
 	bufferSize int,
 	importEz string,
+	l0DeltaPaths ...string,
 ) (*reader, error) {
 	systemFieldsAbsent := true
 	for _, field := range schema.Fields {
@@ -91,6 +92,13 @@ func NewReader(ctx context.Context,
 	err := r.init(paths, tsStart, tsEnd)
 	if err != nil {
 		return nil, err
+	}
+	// Load and apply L0 deletes if provided
+	if len(l0DeltaPaths) > 0 {
+		err := r.initWithL0Deletes(l0DeltaPaths, tsStart, tsEnd)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return r, nil
 }
@@ -186,6 +194,64 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		return err
 	}
 	r.filters = append(r.filters, deleteFilter)
+	return nil
+}
+
+// initWithL0Deletes loads additional L0 delta logs and applies them to deleteData.
+// This is used to apply L0 deletes from backup restore.
+func (r *reader) initWithL0Deletes(l0DeltaPaths []string, tsStart, tsEnd uint64) error {
+	if len(l0DeltaPaths) == 0 {
+		return nil
+	}
+
+	mlog.Info(r.ctx, "loading L0 deletes for binlog import", mlog.Strings("l0_delta_paths", l0DeltaPaths))
+
+	l0DeleteData, err := r.readDelete(l0DeltaPaths, tsStart, tsEnd)
+	if err != nil {
+		return err
+	}
+
+	if len(l0DeleteData) == 0 {
+		return nil
+	}
+
+	// Merge L0 deletes into existing deleteData
+	if r.deleteData == nil {
+		r.deleteData = make(map[any]typeutil.Timestamp)
+	}
+
+	for pk, ts := range l0DeleteData {
+		if tsExisting, ok := r.deleteData[pk]; ok && tsExisting > ts {
+			// Keep the newer delete timestamp
+			continue
+		}
+		r.deleteData[pk] = ts
+	}
+
+	mlog.Info(context.TODO(), "merged L0 deletes",
+		mlog.String("collection", r.schema.GetName()),
+		mlog.Int("totalDeleteRows", len(r.deleteData)),
+	)
+
+	// Re-create the delete filter to include merged deletes
+	if len(r.deleteData) > 0 {
+		// Remove old delete filter if it exists
+		for i, f := range r.filters {
+			// Check if this is a FilterWithDelete (it's harder to identify, so we just re-add it)
+			if i == len(r.filters)-1 {
+				// Last filter is typically FilterWithDelete, remove it
+				r.filters = r.filters[:len(r.filters)-1]
+				break
+			}
+		}
+
+		deleteFilter, err := FilterWithDelete(r)
+		if err != nil {
+			return err
+		}
+		r.filters = append(r.filters, deleteFilter)
+	}
+
 	return nil
 }
 
