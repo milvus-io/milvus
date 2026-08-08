@@ -25,6 +25,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
@@ -34,6 +35,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/RoaringMembership.h"
 #include "common/SystemProperty.h"
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -57,6 +59,41 @@
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
+
+struct RoaringPlanParseContext {
+    std::unordered_map<std::string_view, RoaringMembership::ValidationSummary>
+        validated;
+    std::unordered_map<std::string_view,
+                       std::shared_ptr<const RoaringMembership>>
+        decoded;
+    uint64_t estimated_decoded_bytes = 0;
+};
+
+namespace {
+
+class ScopedRoaringPlanParseContext {
+ public:
+    ScopedRoaringPlanParseContext(RoaringPlanParseContext*& slot,
+                                  RoaringPlanParseContext* context)
+        : slot_(slot), previous_(slot) {
+        slot_ = context;
+    }
+
+    ~ScopedRoaringPlanParseContext() {
+        slot_ = previous_;
+    }
+
+    ScopedRoaringPlanParseContext(const ScopedRoaringPlanParseContext&) =
+        delete;
+    ScopedRoaringPlanParseContext&
+    operator=(const ScopedRoaringPlanParseContext&) = delete;
+
+ private:
+    RoaringPlanParseContext*& slot_;
+    RoaringPlanParseContext* previous_;
+};
+
+}  // namespace
 
 void
 ProtoParser::PlanOptionsFromProto(
@@ -243,6 +280,58 @@ getAggregateOpName(planpb::AggregateOp op) {
 }
 
 namespace {
+
+void
+PrepareRoaringPlanParseContext(const google::protobuf::Message& message,
+                               RoaringPlanParseContext& context) {
+    if (message.GetDescriptor() ==
+        proto::plan::RoaringFilterExpr::descriptor()) {
+        const auto& roaring =
+            static_cast<const proto::plan::RoaringFilterExpr&>(message);
+        const std::string_view blob = roaring.bitmap_blob();
+        auto it = context.validated.find(blob);
+        if (it == context.validated.end()) {
+            it = context.validated
+                     .emplace(blob, RoaringMembership::Validate(blob))
+                     .first;
+        }
+        const auto cost = it->second.estimated_decoded_bytes;
+        if (context.estimated_decoded_bytes >
+                RoaringMembership::kMaxEstimatedDecodedBytes ||
+            cost > RoaringMembership::kMaxEstimatedDecodedBytes -
+                       context.estimated_decoded_bytes) {
+            ThrowInfo(
+                ExprInvalid,
+                "aggregate roaring membership estimated decoded size {} + "
+                "{} exceeds maximum {} bytes",
+                context.estimated_decoded_bytes,
+                cost,
+                RoaringMembership::kMaxEstimatedDecodedBytes);
+        }
+        context.estimated_decoded_bytes += cost;
+        return;
+    }
+
+    const auto* descriptor = message.GetDescriptor();
+    const auto* reflection = message.GetReflection();
+    for (int i = 0; i < descriptor->field_count(); ++i) {
+        const auto* field = descriptor->field(i);
+        if (field->cpp_type() !=
+            google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+            continue;
+        }
+        if (field->is_repeated()) {
+            const auto size = reflection->FieldSize(message, field);
+            for (int j = 0; j < size; ++j) {
+                PrepareRoaringPlanParseContext(
+                    reflection->GetRepeatedMessage(message, field, j), context);
+            }
+        } else if (reflection->HasField(message, field)) {
+            PrepareRoaringPlanParseContext(
+                reflection->GetMessage(message, field), context);
+        }
+    }
+}
 
 // Adds a non-zero field id once while preserving first-seen order.
 void
@@ -953,13 +1042,102 @@ ProtoParser::RetrievePlanNodeFromProto(
     return plan_node;
 }
 
-// A plan may carry a large bloom_match filter_blob (up to 128 MiB). Expanding it
-// via ShortDebugString() octal-escapes every non-printable byte (~4x blow-up), so
-// a full dump could allocate a multi-hundred-MiB string per debug log and OOM
-// under concurrent plan creation. Elide the dump for oversized plans, logging
-// only the serialized size. Gated on VLOG_IS_ON so the ByteSizeLong() proto
-// walk costs nothing on the per-request path when debug logging is off.
+// A plan may carry a large bloom_match or roaring_match blob. Expanding it via
+// ShortDebugString() octal-escapes every non-printable byte (~4x blow-up), and a
+// compact Roaring body can encode millions of exact member values while the
+// whole plan still fits below a generic byte threshold. Large plans are elided
+// entirely; small plans are cheap to copy and have every membership blob
+// replaced before rendering.
 static constexpr size_t kMaxPlanDebugBytes = 4096;
+
+// Counts what was dropped so the rendered line can still say it happened.
+struct UnknownFieldElision {
+    size_t field_count = 0;
+    size_t byte_count = 0;
+};
+
+// Unknown fields are, by definition, bytes this build cannot interpret, so it
+// cannot judge whether they are sensitive: a membership blob from a newer peer
+// arrives this way and ShortDebugString() would print it verbatim. Drop the
+// content but keep the fact, which is the useful signal when diagnosing a
+// version skew.
+static void
+ClearUnknownFields(google::protobuf::Message* message,
+                   UnknownFieldElision* elision) {
+    auto* unknown = message->GetReflection()->MutableUnknownFields(message);
+    if (unknown->empty()) {
+        return;
+    }
+    const auto before = message->ByteSizeLong();
+    elision->field_count += static_cast<size_t>(unknown->field_count());
+    unknown->Clear();
+    elision->byte_count += before - message->ByteSizeLong();
+}
+
+static void
+RedactMembershipFilterBlobs(google::protobuf::Message* message,
+                            UnknownFieldElision* elision) {
+    ClearUnknownFields(message, elision);
+
+    // Elide the blob, then fall through to the recursive walk below rather
+    // than returning: these messages own submessages (column_info) that can
+    // carry unknown fields of their own, and returning here left them intact.
+    if (message->GetDescriptor() ==
+        proto::plan::BloomFilterExpr::descriptor()) {
+        auto* bloom = static_cast<proto::plan::BloomFilterExpr*>(message);
+        const auto size = bloom->filter_blob().size();
+        bloom->set_filter_blob("<" + std::to_string(size) + " bytes elided>");
+    } else if (message->GetDescriptor() ==
+               proto::plan::RoaringFilterExpr::descriptor()) {
+        auto* roaring = static_cast<proto::plan::RoaringFilterExpr*>(message);
+        const auto size = roaring->bitmap_blob().size();
+        roaring->set_bitmap_blob("<" + std::to_string(size) + " bytes elided>");
+    }
+
+    const auto* descriptor = message->GetDescriptor();
+    const auto* reflection = message->GetReflection();
+
+    for (int i = 0; i < descriptor->field_count(); ++i) {
+        const auto* field = descriptor->field(i);
+        if (field->cpp_type() !=
+            google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+            continue;
+        }
+        if (field->is_repeated()) {
+            const auto size = reflection->FieldSize(*message, field);
+            for (int j = 0; j < size; ++j) {
+                RedactMembershipFilterBlobs(
+                    reflection->MutableRepeatedMessage(message, field, j),
+                    elision);
+            }
+        } else if (reflection->HasField(*message, field)) {
+            RedactMembershipFilterBlobs(
+                reflection->MutableMessage(message, field), elision);
+        }
+    }
+}
+
+std::string
+PlanProtoDebugString(const proto::plan::PlanNode& plan_node_proto) {
+    const auto size = plan_node_proto.ByteSizeLong();
+    if (size > kMaxPlanDebugBytes) {
+        return "<" + std::to_string(size) + " bytes, elided>";
+    }
+
+    // Copying is bounded by kMaxPlanDebugBytes. This avoids mutating a plan that
+    // may be read concurrently while still retaining useful non-sensitive plan
+    // structure in debug logs.
+    auto redacted = plan_node_proto;
+    UnknownFieldElision elision;
+    RedactMembershipFilterBlobs(&redacted, &elision);
+    auto rendered = redacted.ShortDebugString();
+    if (elision.field_count != 0) {
+        rendered += " <" + std::to_string(elision.field_count) +
+                    " unknown fields, " + std::to_string(elision.byte_count) +
+                    " bytes elided>";
+    }
+    return rendered;
+}
 
 static void
 LogPlanProtoDebug(const char* what,
@@ -967,22 +1145,28 @@ LogPlanProtoDebug(const char* what,
     if (!VLOG_IS_ON(GLOG_DEBUG)) {
         return;
     }
-    if (const auto size = plan_node_proto.ByteSizeLong();
-        size <= kMaxPlanDebugBytes) {
-        LOG_DEBUG("create {} plan from proto: {}",
-                  what,
-                  plan_node_proto.ShortDebugString());
-    } else {
-        LOG_DEBUG("create {} plan from proto: <{} bytes, elided>", what, size);
-    }
+    LOG_DEBUG("create {} plan from proto: {}",
+              what,
+              PlanProtoDebugString(plan_node_proto));
 }
 
 std::unique_ptr<Plan>
 ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     LogPlanProtoDebug("search", plan_node_proto);
+    RoaringPlanParseContext roaring_context;
+    PrepareRoaringPlanParseContext(plan_node_proto, roaring_context);
     auto plan = std::make_unique<Plan>(schema);
 
-    auto plan_node = PlanNodeFromProto(plan_node_proto);
+    std::unique_ptr<VectorPlanNode> plan_node;
+    {
+        ScopedRoaringPlanParseContext scoped_roaring_context(
+            roaring_plan_context_, &roaring_context);
+        plan_node = PlanNodeFromProto(plan_node_proto);
+        plan->scorers_.reserve(plan_node_proto.scorers_size());
+        for (const auto& scorer : plan_node_proto.scorers()) {
+            plan->scorers_.push_back(ParseScorer(scorer));
+        }
+    }
     plan->plan_node_ = std::move(plan_node);
     plan->tag2field_["$0"] = plan->plan_node_->search_info_.field_id_;
     plan->access_entries_ = CollectAccessFieldIDs(plan_node_proto);
@@ -1004,9 +1188,16 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
 std::unique_ptr<RetrievePlan>
 ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
     LogPlanProtoDebug("retrieve", plan_node_proto);
+    RoaringPlanParseContext roaring_context;
+    PrepareRoaringPlanParseContext(plan_node_proto, roaring_context);
     auto retrieve_plan = std::make_unique<RetrievePlan>(schema);
 
-    auto plan_node = RetrievePlanNodeFromProto(plan_node_proto);
+    std::unique_ptr<RetrievePlanNode> plan_node;
+    {
+        ScopedRoaringPlanParseContext scoped_roaring_context(
+            roaring_plan_context_, &roaring_context);
+        plan_node = RetrievePlanNodeFromProto(plan_node_proto);
+    }
 
     retrieve_plan->plan_node_ = std::move(plan_node);
     retrieve_plan->access_entries_ = CollectAccessFieldIDs(plan_node_proto);
@@ -1127,6 +1318,51 @@ ProtoParser::ParseMatchExprs(const proto::plan::MatchExpr& expr_pb) {
     auto predicate = this->ParseExprs(expr_pb.predicate());
     return std::make_shared<expr::MatchExpr>(
         struct_name, match_type, count, predicate);
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseRoaringFilterExprs(
+    const proto::plan::RoaringFilterExpr& expr_pb) {
+    auto& column_info = expr_pb.column_info();
+    auto field_id = FieldId(column_info.field_id());
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    // Mirrors the proxy's accepted type set exactly. Roaring indexes integers,
+    // so there is no VARCHAR or JSON path: hashing a string into the key space
+    // would reintroduce the false positives this expression exists to avoid.
+    switch (data_type) {
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+            break;
+        default:
+            ThrowInfo(ExprInvalid,
+                      "roaring_match does not support field data type: {}",
+                      data_type);
+    }
+    // CreatePlan/CreateRetrievePlan preflight the aggregate decoded estimate
+    // before any CRoaring allocation. Within that admitted plan, identical
+    // blobs share one immutable membership instance across logical occurrences
+    // and all per-segment physical expressions.
+    std::shared_ptr<const RoaringMembership> membership;
+    const std::string_view blob = expr_pb.bitmap_blob();
+    if (roaring_plan_context_ != nullptr) {
+        const auto cached = roaring_plan_context_->decoded.find(blob);
+        if (cached != roaring_plan_context_->decoded.end()) {
+            membership = cached->second;
+        } else {
+            membership = RoaringMembership::Parse(blob);
+            roaring_plan_context_->decoded.emplace(blob, membership);
+        }
+    } else {
+        // ParseExprs is also a public test/internal entrypoint outside a whole
+        // plan. Retain the per-bitmap validation and admission in that path.
+        membership = RoaringMembership::Parse(blob);
+    }
+    return std::make_shared<expr::RoaringFilterExpr>(
+        expr::ColumnInfo(column_info), std::move(membership));
 }
 
 expr::TypedExprPtr
@@ -1445,10 +1681,20 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
             result = ParseBloomFilterExprs(expr_pb.bloom_filter_expr());
             break;
         }
+        case ppe::kRoaringFilterExpr: {
+            result = ParseRoaringFilterExprs(expr_pb.roaring_filter_expr());
+            break;
+        }
         default: {
-            std::string s;
-            google::protobuf::TextFormat::PrintToString(expr_pb, &s);
-            ThrowInfo(ExprInvalid, "unsupported expr proto node: {}", s);
+            // Report only the oneof discriminant. Printing the node would put
+            // the whole expression into the message, and a membership-filter
+            // node carries a client blob up to 128 MiB of user values — which
+            // then travels back to the client and into logs. An old QueryNode
+            // that does not know a newer node type lands here, so this is
+            // exactly the path a rolling upgrade exercises.
+            ThrowInfo(ExprInvalid,
+                      "unsupported or unset expr proto node (expr_case: {})",
+                      static_cast<int>(expr_pb.expr_case()));
         }
     }
     if (type_check(result->type())) {

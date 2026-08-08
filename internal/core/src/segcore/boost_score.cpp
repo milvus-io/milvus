@@ -107,6 +107,34 @@ ParseScorer(milvus::query::Plan* plan,
     return parser.ParseScorer(score_function);
 }
 
+void
+ValidatePlanScorerScoreInputs(CSegmentInterface c_segment,
+                              CSearchPlan c_plan,
+                              int64_t scorer_index,
+                              ArrowArray* offset_chunks,
+                              ArrowSchema* offset_schemas,
+                              int64_t num_chunks,
+                              float* const* output_score_chunks,
+                              bool* const* output_has_score_chunks) {
+    AssertInfo(c_segment != nullptr, "segment is null");
+    AssertInfo(c_plan != nullptr, "search plan is null");
+    auto plan = static_cast<milvus::query::Plan*>(c_plan);
+    AssertInfo(scorer_index >= 0 &&
+                   static_cast<size_t>(scorer_index) < plan->scorers_.size(),
+               "scorer index {} is out of range for {} plan scorers",
+               scorer_index,
+               plan->scorers_.size());
+    AssertInfo(num_chunks >= 0, "chunk count must be non-negative");
+    if (num_chunks > 0) {
+        AssertInfo(offset_chunks != nullptr, "offset chunks is null");
+        AssertInfo(offset_schemas != nullptr, "offset schemas is null");
+        AssertInfo(output_score_chunks != nullptr,
+                   "output score chunks is null");
+        AssertInfo(output_has_score_chunks != nullptr,
+                   "output has score chunks is null");
+    }
+}
+
 OffsetChunks
 BuildScorerOffsetChunks(ArrowArray* offset_chunks,
                         ArrowSchema* offset_schemas,
@@ -347,6 +375,131 @@ AsyncComputeScorerScoresOnOffsetChunks(CSegmentInterface c_segment,
                 (void)cancel_token;
                 ThrowInfo(milvus::UnexpectedError,
                           "AsyncComputeScorerScoresOnOffsetChunks preflight "
+                          "failed: {}",
+                          error_msg);
+                return nullptr;
+            });
+        return static_cast<CFuture*>(static_cast<void*>(
+            static_cast<milvus::futures::IFuture*>(future.release())));
+    }
+}
+
+CStatus
+ComputePlanScorerScoresOnOffsetChunks(CSegmentInterface c_segment,
+                                      CSearchPlan c_plan,
+                                      int64_t scorer_index,
+                                      ArrowArray* offset_chunks,
+                                      ArrowSchema* offset_schemas,
+                                      int64_t num_chunks,
+                                      uint64_t timestamp,
+                                      uint64_t collection_ttl,
+                                      int32_t consistency_level,
+                                      uint64_t entity_ttl_physical_time_us,
+                                      float* const* output_score_chunks,
+                                      bool* const* output_has_score_chunks) {
+    try {
+        ValidatePlanScorerScoreInputs(c_segment,
+                                      c_plan,
+                                      scorer_index,
+                                      offset_chunks,
+                                      offset_schemas,
+                                      num_chunks,
+                                      output_score_chunks,
+                                      output_has_score_chunks);
+
+        auto segment =
+            static_cast<milvus::segcore::SegmentInternalInterface*>(c_segment);
+        auto plan = static_cast<milvus::query::Plan*>(c_plan);
+        auto scorer = plan->scorers_[scorer_index];
+        auto scorer_offset_chunks =
+            BuildScorerOffsetChunks(offset_chunks, offset_schemas, num_chunks);
+        ComputeScorerScoresOnPreparedChunks(segment,
+                                            plan,
+                                            scorer,
+                                            scorer_offset_chunks,
+                                            timestamp,
+                                            collection_ttl,
+                                            consistency_level,
+                                            entity_ttl_physical_time_us,
+                                            output_score_chunks,
+                                            output_has_score_chunks);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CFuture*
+AsyncComputePlanScorerScoresOnOffsetChunks(
+    CSegmentInterface c_segment,
+    CSearchPlan c_plan,
+    int64_t scorer_index,
+    ArrowArray* offset_chunks,
+    ArrowSchema* offset_schemas,
+    int64_t num_chunks,
+    uint64_t timestamp,
+    uint64_t collection_ttl,
+    int32_t consistency_level,
+    uint64_t entity_ttl_physical_time_us,
+    float* const* output_score_chunks,
+    bool* const* output_has_score_chunks) {
+    try {
+        ValidatePlanScorerScoreInputs(c_segment,
+                                      c_plan,
+                                      scorer_index,
+                                      offset_chunks,
+                                      offset_schemas,
+                                      num_chunks,
+                                      output_score_chunks,
+                                      output_has_score_chunks);
+
+        auto segment =
+            static_cast<milvus::segcore::SegmentInternalInterface*>(c_segment);
+        auto plan = static_cast<milvus::query::Plan*>(c_plan);
+        auto scorer = plan->scorers_[scorer_index];
+        auto scorer_offset_chunks = std::make_shared<OffsetChunks>(
+            BuildScorerOffsetChunks(offset_chunks, offset_schemas, num_chunks));
+        auto future = milvus::futures::Future<bool>::async(
+            milvus::futures::getSearchCPUExecutor(),
+            milvus::futures::ExecutePriority::HIGH,
+            [segment,
+             plan,
+             scorer = std::move(scorer),
+             scorer_offset_chunks = std::move(scorer_offset_chunks),
+             timestamp,
+             collection_ttl,
+             consistency_level,
+             entity_ttl_physical_time_us,
+             output_score_chunks,
+             output_has_score_chunks](
+                folly::CancellationToken cancel_token) -> bool* {
+                ComputeScorerScoresOnPreparedChunks(segment,
+                                                    plan,
+                                                    scorer,
+                                                    *scorer_offset_chunks,
+                                                    timestamp,
+                                                    collection_ttl,
+                                                    consistency_level,
+                                                    entity_ttl_physical_time_us,
+                                                    output_score_chunks,
+                                                    output_has_score_chunks,
+                                                    cancel_token);
+                return nullptr;
+            });
+
+        return static_cast<CFuture*>(static_cast<void*>(
+            static_cast<milvus::futures::IFuture*>(future.release())));
+    } catch (std::exception& e) {
+        std::string error_msg = e.what();
+        auto future = milvus::futures::Future<bool>::async(
+            milvus::futures::getSearchCPUExecutor(),
+            milvus::futures::ExecutePriority::HIGH,
+            [error_msg = std::move(error_msg)](
+                folly::CancellationToken cancel_token) -> bool* {
+                (void)cancel_token;
+                ThrowInfo(milvus::UnexpectedError,
+                          "AsyncComputePlanScorerScoresOnOffsetChunks "
+                          "preflight "
                           "failed: {}",
                           error_msg);
                 return nullptr;

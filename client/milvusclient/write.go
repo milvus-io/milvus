@@ -75,15 +75,27 @@ type DeleteResult struct {
 	DeleteCount int64
 }
 
+type deleteRequestBuilder interface {
+	request() (*milvuspb.DeleteRequest, error)
+}
+
 func (c *Client) Delete(ctx context.Context, option DeleteOption, callOptions ...grpc.CallOption) (DeleteResult, error) {
 	startTime := time.Now()
-	req := option.Request()
+	var req *milvuspb.DeleteRequest
+	var err error
+	if builder, ok := option.(deleteRequestBuilder); ok {
+		req, err = builder.request()
+	} else {
+		req = option.Request()
+	}
 	collectionName := req.GetCollectionName()
 	result := DeleteResult{}
-	var err error
 	defer func() {
 		c.recordOperation("Delete", collectionName, startTime, err)
 	}()
+	if err != nil {
+		return result, err
+	}
 
 	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.Delete(ctx, req, callOptions...)

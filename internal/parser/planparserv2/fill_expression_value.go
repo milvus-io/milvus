@@ -1,13 +1,210 @@
 package planparserv2
 
 import (
+	"bytes"
+	"fmt"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/roaringfilter"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// MembershipPreflightBudget carries the membership-filter preflight state that
+// must be shared by every expression in one request: the main predicate, each
+// hybrid sub-request predicate, and each function-scorer filter.
+//
+// Scope matters. proxy.maxBloomFilterPlanSize is documented as a per-request
+// ceiling, but the preflight state used to be local to a single expression
+// parse. A request parses one expression per sub-request plus one per scorer,
+// so every scorer silently received its own full quota, and the same template
+// blob was re-validated once per scorer. Threading one budget through the whole
+// request makes the configured ceiling mean what it says.
+//
+// A nil *MembershipPreflightBudget is not shared state; callers that parse a
+// standalone expression can pass nil and get single-expression scope.
+type MembershipPreflightBudget struct {
+	maxSize               int64
+	budgetInitialized     bool
+	occurrenceBytes       int64
+	aggregateDecodedBytes uint64
+
+	// validated caches structural validation across parses within the request.
+	// Keyed by template name, but only reused when the bytes are identical:
+	// hybrid sub-requests carry independent template maps, so the same name can
+	// legitimately refer to different blobs.
+	validated map[string]validatedRoaringBitmapBlob
+}
+
+func NewMembershipPreflightBudget() *MembershipPreflightBudget {
+	return &MembershipPreflightBudget{}
+}
+
+func (b *MembershipPreflightBudget) lookup(name string, blob []byte) (validatedRoaringBitmapBlob, bool) {
+	if b == nil || b.validated == nil {
+		return validatedRoaringBitmapBlob{}, false
+	}
+	cached, ok := b.validated[name]
+	if !ok || !bytes.Equal(cached.blob, blob) {
+		return validatedRoaringBitmapBlob{}, false
+	}
+	return cached, true
+}
+
+func (b *MembershipPreflightBudget) store(name string, validated validatedRoaringBitmapBlob) {
+	if b == nil {
+		return
+	}
+	if b.validated == nil {
+		b.validated = make(map[string]validatedRoaringBitmapBlob)
+	}
+	b.validated[name] = validated
+}
+
 func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.GenericValue) error {
+	return FillExpressionValueWithBudget(expr, templateValues, nil)
+}
+
+// FillExpressionValueWithBudget is FillExpressionValue with an explicit
+// request-scoped budget. Pass nil for single-expression scope.
+func FillExpressionValueWithBudget(
+	expr *planpb.Expr,
+	templateValues map[string]*planpb.GenericValue,
+	budget *MembershipPreflightBudget,
+) error {
+	if budget == nil {
+		budget = NewMembershipPreflightBudget()
+	}
+	ctx, err := preflightMembershipFilterValues(expr, templateValues, budget)
+	if err != nil {
+		return err
+	}
+	return fillExpressionValue(expr, templateValues, ctx)
+}
+
+type fillExpressionContext struct {
+	validatedRoaringBlobs map[string]validatedRoaringBitmapBlob
+}
+
+type roaringTemplateBlob struct {
+	name string
+	blob []byte
+}
+
+// preflightMembershipFilterValues charges every deferred blob occurrence
+// before any Roaring body is validated or materialized. This makes a repeated
+// reference to one template cheap to reject and validates each unique Roaring
+// template exactly once.
+func preflightMembershipFilterValues(
+	expr *planpb.Expr,
+	templateValues map[string]*planpb.GenericValue,
+	budget *MembershipPreflightBudget,
+) (*fillExpressionContext, error) {
+	ctx := &fillExpressionContext{}
+	if expr == nil || !expr.GetIsTemplate() {
+		return ctx, nil
+	}
+
+	var seenRoaringTemplates map[string]struct{}
+	var roaringOccurrenceCounts map[string]uint64
+	var orderedRoaringTemplates []roaringTemplateBlob
+	var preflightErr error
+	walkExpr(expr, func(node *planpb.Expr) bool {
+		call := node.GetCallExpr()
+		if call == nil || (call.GetFunctionName() != BloomMatchFunctionName &&
+			call.GetFunctionName() != RoaringMatchFunctionName) {
+			return false
+		}
+		params := call.GetFunctionParameters()
+		if len(params) != 2 || params[1] == nil || !params[1].GetIsTemplate() {
+			return false
+		}
+		templateName := params[1].GetValueExpr().GetTemplateVariableName()
+		if templateName == "" {
+			return false
+		}
+		value, ok := templateValues[templateName]
+		if !ok || value == nil {
+			return false
+		}
+		blobValue, ok := value.GetVal().(*planpb.GenericValue_BytesVal)
+		if !ok {
+			return false
+		}
+
+		if !budget.budgetInitialized {
+			budget.maxSize = paramtable.Get().ProxyCfg.MaxBloomFilterPlanSize.GetAsInt64()
+			budget.budgetInitialized = true
+		}
+		blobBytes := int64(len(blobValue.BytesVal))
+		if budget.occurrenceBytes > budget.maxSize || blobBytes > budget.maxSize-budget.occurrenceBytes {
+			preflightErr = merr.WrapErrParameterTooLarge(fmt.Sprintf(
+				"aggregate membership-filter template bytes exceed proxy.maxBloomFilterPlanSize before plan materialization: %d + %d > %d bytes",
+				budget.occurrenceBytes, blobBytes, budget.maxSize))
+			return true
+		}
+		budget.occurrenceBytes += blobBytes
+
+		if call.GetFunctionName() == RoaringMatchFunctionName {
+			if seenRoaringTemplates == nil {
+				seenRoaringTemplates = make(map[string]struct{})
+				roaringOccurrenceCounts = make(map[string]uint64)
+			}
+			roaringOccurrenceCounts[templateName]++
+			if _, seen := seenRoaringTemplates[templateName]; !seen {
+				seenRoaringTemplates[templateName] = struct{}{}
+				orderedRoaringTemplates = append(orderedRoaringTemplates, roaringTemplateBlob{
+					name: templateName,
+					blob: blobValue.BytesVal,
+				})
+			}
+		}
+		return false
+	})
+	if preflightErr != nil {
+		return nil, preflightErr
+	}
+
+	if len(orderedRoaringTemplates) > 0 {
+		ctx.validatedRoaringBlobs = make(map[string]validatedRoaringBitmapBlob, len(orderedRoaringTemplates))
+	}
+	for _, template := range orderedRoaringTemplates {
+		// Structural validation is a pure function of the bytes, so a blob
+		// already validated earlier in this request (another sub-request, or
+		// another scorer filter) does not need a second linear pass.
+		validated, cached := budget.lookup(template.name, template.blob)
+		if !cached {
+			var err error
+			validated, err = validateRoaringBitmapBlob(template.blob)
+			if err != nil {
+				return nil, err
+			}
+			budget.store(template.name, validated)
+		}
+		occurrences := roaringOccurrenceCounts[template.name]
+		cost := validated.summary.EstimatedDecodedBytes
+		remaining := uint64(0)
+		if budget.aggregateDecodedBytes <= roaringfilter.MaxEstimatedDecodedBytes {
+			remaining = roaringfilter.MaxEstimatedDecodedBytes - budget.aggregateDecodedBytes
+		}
+		if cost != 0 && occurrences > remaining/cost {
+			return nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
+				"aggregate roaring_match estimated decoded size exceeds maximum before plan materialization: %d + %d*%d > %d bytes",
+				budget.aggregateDecodedBytes, occurrences, cost, roaringfilter.MaxEstimatedDecodedBytes))
+		}
+		budget.aggregateDecodedBytes += occurrences * cost
+		ctx.validatedRoaringBlobs[template.name] = validated
+	}
+	return ctx, nil
+}
+
+func fillExpressionValue(
+	expr *planpb.Expr,
+	templateValues map[string]*planpb.GenericValue,
+	ctx *fillExpressionContext,
+) error {
 	if !expr.GetIsTemplate() {
 		return nil
 	}
@@ -16,12 +213,12 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 	case *planpb.Expr_TermExpr:
 		return FillTermExpressionValue(e.TermExpr, templateValues)
 	case *planpb.Expr_UnaryExpr:
-		return FillExpressionValue(e.UnaryExpr.GetChild(), templateValues)
+		return fillExpressionValue(e.UnaryExpr.GetChild(), templateValues, ctx)
 	case *planpb.Expr_BinaryExpr:
-		if err := FillExpressionValue(e.BinaryExpr.GetLeft(), templateValues); err != nil {
+		if err := fillExpressionValue(e.BinaryExpr.GetLeft(), templateValues, ctx); err != nil {
 			return err
 		}
-		if err := FillExpressionValue(e.BinaryExpr.GetRight(), templateValues); err != nil {
+		if err := fillExpressionValue(e.BinaryExpr.GetRight(), templateValues, ctx); err != nil {
 			return err
 		}
 		switch e.BinaryExpr.GetOp() {
@@ -42,32 +239,36 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 	case *planpb.Expr_BinaryArithOpEvalRangeExpr:
 		return FillBinaryArithOpEvalRangeExpressionValue(e.BinaryArithOpEvalRangeExpr, templateValues)
 	case *planpb.Expr_BinaryArithExpr:
-		if err := FillExpressionValue(e.BinaryArithExpr.GetLeft(), templateValues); err != nil {
+		if err := fillExpressionValue(e.BinaryArithExpr.GetLeft(), templateValues, ctx); err != nil {
 			return err
 		}
-		return FillExpressionValue(e.BinaryArithExpr.GetRight(), templateValues)
+		return fillExpressionValue(e.BinaryArithExpr.GetRight(), templateValues, ctx)
 	case *planpb.Expr_JsonContainsExpr:
 		return FillJSONContainsExpressionValue(e.JsonContainsExpr, templateValues)
 	case *planpb.Expr_RandomSampleExpr:
-		return FillExpressionValue(expr.GetExpr().(*planpb.Expr_RandomSampleExpr).RandomSampleExpr.GetPredicate(), templateValues)
+		return fillExpressionValue(expr.GetExpr().(*planpb.Expr_RandomSampleExpr).RandomSampleExpr.GetPredicate(), templateValues, ctx)
 	case *planpb.Expr_GisfunctionFilterExpr:
 		return FillGISFunctionFilterExpressionValue(e.GisfunctionFilterExpr, templateValues)
 	case *planpb.Expr_ElementFilterExpr:
-		if err := FillExpressionValue(e.ElementFilterExpr.GetElementExpr(), templateValues); err != nil {
+		if err := fillExpressionValue(e.ElementFilterExpr.GetElementExpr(), templateValues, ctx); err != nil {
 			return err
 		}
 		if e.ElementFilterExpr.GetPredicate() != nil {
-			return FillExpressionValue(e.ElementFilterExpr.GetPredicate(), templateValues)
+			return fillExpressionValue(e.ElementFilterExpr.GetPredicate(), templateValues, ctx)
 		}
 		return nil
 	case *planpb.Expr_MatchExpr:
-		return FillExpressionValue(e.MatchExpr.GetPredicate(), templateValues)
+		return fillExpressionValue(e.MatchExpr.GetPredicate(), templateValues, ctx)
 	case *planpb.Expr_CallExpr:
-		// Only a deferred bloom_match call carries IsTemplate today; once the
-		// template value is known, its client-built blob is validated and the
-		// call is materialized into a BloomFilterExpr here.
+		// Only the deferred membership-filter calls carry IsTemplate today; once
+		// the template value is known, the client-built blob is validated and the
+		// call is materialized into its dedicated plan node here.
 		if e.CallExpr.GetFunctionName() == BloomMatchFunctionName {
 			return FillBloomMatchExpressionValue(expr, e.CallExpr, templateValues)
+		}
+		if e.CallExpr.GetFunctionName() == RoaringMatchFunctionName {
+			return fillRoaringMatchExpressionValue(
+				expr, e.CallExpr, templateValues, ctx.validatedRoaringBlobs)
 		}
 		return merr.WrapErrQueryPlanMsg("this expression no need to fill placeholder with expr type: %T", e)
 	default:

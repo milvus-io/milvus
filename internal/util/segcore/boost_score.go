@@ -46,44 +46,36 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func ComputeScorerScoresOnChunkedOffsets(segment CSegment, searchReq *SearchRequest, scoreFunction *planpb.ScoreFunction, offsets *arrow.Chunked) (*arrow.Chunked, error) {
-	return computeScorerScoresOnChunkedOffsets(context.Background(), segment, searchReq, scoreFunction, offsets, false)
+func ComputeScorerScoresOnChunkedOffsets(segment CSegment, searchReq *SearchRequest, scorerIndex int, offsets *arrow.Chunked) (*arrow.Chunked, error) {
+	return computeScorerScoresOnChunkedOffsets(context.Background(), segment, searchReq, scorerIndex, offsets, false)
 }
 
-func AsyncComputeScorerScoresOnChunkedOffsets(ctx context.Context, segment CSegment, searchReq *SearchRequest, scoreFunction *planpb.ScoreFunction, offsets *arrow.Chunked) (*arrow.Chunked, error) {
-	return computeScorerScoresOnChunkedOffsets(ctx, segment, searchReq, scoreFunction, offsets, true)
+func AsyncComputeScorerScoresOnChunkedOffsets(ctx context.Context, segment CSegment, searchReq *SearchRequest, scorerIndex int, offsets *arrow.Chunked) (*arrow.Chunked, error) {
+	return computeScorerScoresOnChunkedOffsets(ctx, segment, searchReq, scorerIndex, offsets, true)
 }
 
-func computeScorerScoresOnChunkedOffsets(ctx context.Context, segment CSegment, searchReq *SearchRequest, scoreFunction *planpb.ScoreFunction, offsets *arrow.Chunked, async bool) (*arrow.Chunked, error) {
+func computeScorerScoresOnChunkedOffsets(ctx context.Context, segment CSegment, searchReq *SearchRequest, scorerIndex int, offsets *arrow.Chunked, async bool) (*arrow.Chunked, error) {
 	if segment == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("segment is nil")
 	}
 	if searchReq == nil || searchReq.plan == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("search request or plan is nil")
 	}
-	if scoreFunction == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("score function is nil")
+	if scorerIndex < 0 {
+		// The scorer ordinal is assigned from the already-parsed internal plan;
+		// a negative value is a QueryNode contract violation, not client input.
+		return nil, merr.WrapErrServiceInternalMsg("scorer index must be non-negative, got %d", scorerIndex)
 	}
 	if offsets == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("offsets is nil")
 	}
 	if offsets.DataType().ID() != arrow.INT64 {
 		return nil, merr.WrapErrParameterInvalidMsg("offset column must be Int64, got %s", offsets.DataType())
-	}
-
-	scoreFunctionBlob, err := proto.Marshal(scoreFunction)
-	if err != nil {
-		return nil, merr.Wrap(err, "failed to marshal score function")
-	}
-	if len(scoreFunctionBlob) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("empty score function")
 	}
 
 	numChunks := len(offsets.Chunks())
@@ -157,8 +149,7 @@ func computeScorerScoresOnChunkedOffsets(ctx context.Context, segment CSegment, 
 
 	cSegment := C.CSegmentInterface(segment.RawPointer())
 	cPlan := searchReq.plan.cSearchPlan
-	scoreFunctionPtr := unsafe.Pointer(&scoreFunctionBlob[0])
-	scoreFunctionSize := C.int64_t(len(scoreFunctionBlob))
+	cScorerIndex := C.int64_t(scorerIndex)
 	offsetArrayPtr := &offsetArrays[0]
 	offsetSchemaPtr := &offsetSchemas[0]
 	numChunk := C.int64_t(numChunks)
@@ -172,11 +163,10 @@ func computeScorerScoresOnChunkedOffsets(ctx context.Context, segment CSegment, 
 	if async {
 		future := cgo.Async(ctx,
 			func() cgo.CFuturePtr {
-				return (cgo.CFuturePtr)(C.AsyncComputeScorerScoresOnOffsetChunks(
+				return (cgo.CFuturePtr)(C.AsyncComputePlanScorerScoresOnOffsetChunks(
 					cSegment,
 					cPlan,
-					scoreFunctionPtr,
-					scoreFunctionSize,
+					cScorerIndex,
 					offsetArrayPtr,
 					offsetSchemaPtr,
 					numChunk,
@@ -195,11 +185,10 @@ func computeScorerScoresOnChunkedOffsets(ctx context.Context, segment CSegment, 
 			return nil, err
 		}
 	} else {
-		status := C.ComputeScorerScoresOnOffsetChunks(
+		status := C.ComputePlanScorerScoresOnOffsetChunks(
 			cSegment,
 			cPlan,
-			scoreFunctionPtr,
-			scoreFunctionSize,
+			cScorerIndex,
 			offsetArrayPtr,
 			offsetSchemaPtr,
 			numChunk,
@@ -236,8 +225,6 @@ func computeScorerScoresOnChunkedOffsets(ctx context.Context, segment CSegment, 
 
 	runtime.KeepAlive(segment)
 	runtime.KeepAlive(searchReq)
-	runtime.KeepAlive(scoreFunction)
-	runtime.KeepAlive(scoreFunctionBlob)
 	runtime.KeepAlive(offsets)
 	runtime.KeepAlive(scoreChunks)
 	runtime.KeepAlive(hasScoreChunks)

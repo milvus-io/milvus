@@ -85,11 +85,11 @@ func boostModeToScoreCombineMode(mode planpb.BoostMode) (string, error) {
 
 var boostScoreRunnerFactory = newSegmentBoostScoreRunner
 
-type boostScoreFunc func(context.Context, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction, *arrow.Chunked) (*arrow.Chunked, error)
+type boostScoreFunc func(context.Context, segments.Segment, *segcore.SearchRequest, int, *arrow.Chunked) (*arrow.Chunked, error)
 
-func newSegmentBoostScoreRunner(scoreFunc boostScoreFunc, segment segments.Segment, searchReq *segcore.SearchRequest, scorer *planpb.ScoreFunction) expr.BoostScoreRunner {
+func newSegmentBoostScoreRunner(scoreFunc boostScoreFunc, segment segments.Segment, searchReq *segcore.SearchRequest, scorerIndex int) expr.BoostScoreRunner {
 	return func(ctx context.Context, offsets *arrow.Chunked) (*arrow.Chunked, error) {
-		return scoreFunc(ctx, segment, searchReq, scorer, offsets)
+		return scoreFunc(ctx, segment, searchReq, scorerIndex, offsets)
 	}
 }
 
@@ -131,9 +131,9 @@ func appendBoostScoreColumns(
 	scoreFunc boostScoreFunc,
 ) ([]string, error) {
 	boostScoreColumns := make([]string, 0, len(scorers))
-	for scorerIdx, scorer := range scorers {
+	for scorerIdx := range scorers {
 		outputCol := boostScoreColumn(scorerIdx)
-		boostExpr, err := expr.NewBoostScoreExpr(boostScoreRunnerFactory(scoreFunc, segment, searchReq, scorer))
+		boostExpr, err := expr.NewBoostScoreExpr(boostScoreRunnerFactory(scoreFunc, segment, searchReq, scorerIdx))
 		if err != nil {
 			return nil, err
 		}

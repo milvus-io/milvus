@@ -146,9 +146,9 @@ type boostScoreOutput struct {
 	hasScore []bool
 }
 
-func mockBoostScoreRunnerFactory(outputs ...boostScoreOutput) func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) expr.BoostScoreRunner {
+func mockBoostScoreRunnerFactory(outputs ...boostScoreOutput) func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, int) expr.BoostScoreRunner {
 	call := 0
-	return func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) expr.BoostScoreRunner {
+	return func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, int) expr.BoostScoreRunner {
 		idx := call
 		call++
 		return func(ctx context.Context, offsets *arrow.Chunked) (*arrow.Chunked, error) {
@@ -552,7 +552,7 @@ func TestApplyBoostScoresUsesAsyncBoostScoreFunc(t *testing.T) {
 	oldFactory := boostScoreRunnerFactory
 	defer func() { boostScoreRunnerFactory = oldFactory }()
 
-	boostScoreRunnerFactory = func(scoreFunc boostScoreFunc, segment segments.Segment, searchReq *segcore.SearchRequest, scorer *planpb.ScoreFunction) expr.BoostScoreRunner {
+	boostScoreRunnerFactory = func(scoreFunc boostScoreFunc, segment segments.Segment, searchReq *segcore.SearchRequest, scorerIndex int) expr.BoostScoreRunner {
 		require.Equal(t,
 			reflect.ValueOf(segments.AsyncComputeScorerScoresOnChunkedOffsets).Pointer(),
 			reflect.ValueOf(scoreFunc).Pointer(),
@@ -576,6 +576,34 @@ func TestApplyBoostScoresUsesAsyncBoostScoreFunc(t *testing.T) {
 	defer segDFs[0].Release()
 }
 
+func TestBuildBoostScoreChainUsesPlanScorerIndices(t *testing.T) {
+	withBoostScoreCheckedAllocator(t)
+	df := makeBoostScoreTestDF(t, []int64{1}, []float32{0.5}, []int64{10}, []int64{1})
+	defer df.Release()
+
+	oldFactory := boostScoreRunnerFactory
+	defer func() { boostScoreRunnerFactory = oldFactory }()
+	var scorerIndices []int
+	boostScoreRunnerFactory = func(_ boostScoreFunc, _ segments.Segment, _ *segcore.SearchRequest, scorerIndex int) expr.BoostScoreRunner {
+		scorerIndices = append(scorerIndices, scorerIndex)
+		return func(_ context.Context, offsets *arrow.Chunked) (*arrow.Chunked, error) {
+			return newConstantBoostScoreTestChunked(offsets, 1.0), nil
+		}
+	}
+
+	_, err := buildBoostScoreChain(
+		df,
+		nil,
+		nil,
+		[]*planpb.ScoreFunction{{Weight: 1}, {Weight: 2}},
+		segments.AsyncComputeScorerScoresOnChunkedOffsets,
+		expr.ModeSum,
+		expr.ModeMultiply,
+	)
+	require.NoError(t, err)
+	require.Equal(t, []int{0, 1}, scorerIndices)
+}
+
 func TestApplyBoostScoresRunsSegmentsConcurrently(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
 
@@ -585,7 +613,7 @@ func TestApplyBoostScoresRunsSegmentsConcurrently(t *testing.T) {
 	var started atomic.Int32
 	var releaseBoth sync.Once
 	bothStarted := make(chan struct{})
-	boostScoreRunnerFactory = func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) expr.BoostScoreRunner {
+	boostScoreRunnerFactory = func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, int) expr.BoostScoreRunner {
 		return func(ctx context.Context, offsets *arrow.Chunked) (*arrow.Chunked, error) {
 			if started.Add(1) == 2 {
 				releaseBoth.Do(func() { close(bothStarted) })
@@ -628,7 +656,7 @@ func TestApplyBoostScoresReleasesBoostedFramesOnError(t *testing.T) {
 	defer func() { boostScoreRunnerFactory = oldFactory }()
 
 	var calls atomic.Int32
-	boostScoreRunnerFactory = func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) expr.BoostScoreRunner {
+	boostScoreRunnerFactory = func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, int) expr.BoostScoreRunner {
 		return func(ctx context.Context, offsets *arrow.Chunked) (*arrow.Chunked, error) {
 			if calls.Add(1) == 1 {
 				return newConstantBoostScoreTestChunked(offsets, 1.0), nil
@@ -752,7 +780,7 @@ func TestBuildBoostScoreChainPropagatesBuilderErrors(t *testing.T) {
 	defer df.Release()
 
 	oldFactory := boostScoreRunnerFactory
-	boostScoreRunnerFactory = func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) expr.BoostScoreRunner {
+	boostScoreRunnerFactory = func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, int) expr.BoostScoreRunner {
 		return nil
 	}
 	defer func() { boostScoreRunnerFactory = oldFactory }()

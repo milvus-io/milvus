@@ -203,8 +203,16 @@ func any2TmplValue(val any) (*schemapb.TemplateValue, error) {
 		// no UTF-8 constraint, so the ~32 MB blob rides the wire with zero
 		// base64 inflation.
 		result.Val = &schemapb.TemplateValue_BytesVal{BytesVal: v}
+	case RoaringBitmapBlob:
+		// Same raw-bytes carriage as BloomFilterBlob. The two blob types are
+		// distinct Go types rather than one []byte alias so that passing a
+		// bloom blob to roaring_match (or the reverse) is a compile-time
+		// mismatch at the call site instead of an envelope-magic error after a
+		// round trip to the proxy.
+		result.Val = &schemapb.TemplateValue_BytesVal{BytesVal: v}
 	default:
-		if reflect.TypeOf(val).Kind() == reflect.Slice {
+		valueType := reflect.TypeOf(val)
+		if valueType != nil && valueType.Kind() == reflect.Slice {
 			return slice2TmplValue(val)
 		}
 		return nil, fmt.Errorf("unsupported template value type: %T", val)

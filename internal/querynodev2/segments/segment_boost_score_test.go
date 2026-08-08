@@ -29,12 +29,12 @@ import (
 )
 
 func TestComputeScorerScoresOnChunkedOffsetsNilSegment(t *testing.T) {
-	scores, err := ComputeScorerScoresOnChunkedOffsets(context.Background(), nil, nil, nil, nil)
+	scores, err := ComputeScorerScoresOnChunkedOffsets(context.Background(), nil, nil, 0, nil)
 	require.Error(t, err)
 	require.Nil(t, scores)
 	require.Contains(t, err.Error(), "segment is nil")
 
-	scores, err = AsyncComputeScorerScoresOnChunkedOffsets(context.Background(), nil, nil, nil, nil)
+	scores, err = AsyncComputeScorerScoresOnChunkedOffsets(context.Background(), nil, nil, 0, nil)
 	require.Error(t, err)
 	require.Nil(t, scores)
 	require.Contains(t, err.Error(), "segment is nil")
@@ -44,7 +44,7 @@ func TestComputeScorerScoresOnChunkedOffsetsNonLocalSegment(t *testing.T) {
 	segment := NewMockSegment(t)
 	segment.EXPECT().ID().Return(int64(1001))
 
-	scores, err := ComputeScorerScoresOnChunkedOffsets(context.Background(), segment, nil, nil, nil)
+	scores, err := ComputeScorerScoresOnChunkedOffsets(context.Background(), segment, nil, 0, nil)
 	require.Error(t, err)
 	require.Nil(t, scores)
 	require.Contains(t, err.Error(), "does not support boost score")
@@ -57,7 +57,7 @@ func TestComputeScorerScoresOnChunkedOffsetsNilCSegment(t *testing.T) {
 		},
 	}
 
-	scores, err := ComputeScorerScoresOnChunkedOffsets(context.Background(), segment, nil, nil, nil)
+	scores, err := ComputeScorerScoresOnChunkedOffsets(context.Background(), segment, nil, 0, nil)
 	require.Error(t, err)
 	require.Nil(t, scores)
 	require.Contains(t, err.Error(), "has nil CSegment")
@@ -74,7 +74,7 @@ func TestComputeScorerScoresOnChunkedOffsetsReleasedSegment(t *testing.T) {
 	guard := segment.ptrLock.StartReleaseAll()
 	require.NotNil(t, guard)
 
-	scores, err := AsyncComputeScorerScoresOnChunkedOffsets(context.Background(), segment, nil, nil, nil)
+	scores, err := AsyncComputeScorerScoresOnChunkedOffsets(context.Background(), segment, nil, 0, nil)
 	require.Error(t, err)
 	require.Nil(t, scores)
 	require.Contains(t, err.Error(), "segment released")

@@ -56,7 +56,8 @@ const (
 	DefaultSessionRetryTimes = 30
 
 	// DefaultMaxBloomFilterPlanSize is the aggregate serialized size budget for
-	// bloom-bearing plans in one Search, HybridSearch, or Query request. It is
+	// membership-filter-bearing plans in one Search, HybridSearch, Query, or
+	// complex Delete request. It is
 	// deliberately below the default 256 MiB proxy gRPC client send limit so
 	// placeholders and the rest of the internal request retain ample headroom.
 	DefaultMaxBloomFilterPlanSize = 128 * 1024 * 1024
@@ -2091,6 +2092,7 @@ type proxyConfig struct {
 	MaxShardNum                       ParamItem `refreshable:"true"`
 	MaxBloomFilterSize                ParamItem `refreshable:"true"`
 	MaxBloomFilterPlanSize            ParamItem `refreshable:"true"`
+	MaxRoaringFilterSize              ParamItem `refreshable:"true"`
 	MaxDimension                      ParamItem `refreshable:"true"`
 	GinLogging                        ParamItem `refreshable:"false"`
 	GinLogSkipPaths                   ParamItem `refreshable:"false"`
@@ -2301,11 +2303,12 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Key:          "proxy.maxBloomFilterPlanSize",
 		DefaultValue: strconv.Itoa(DefaultMaxBloomFilterPlanSize),
 		Version:      "3.0.0",
-		Doc: "The maximum aggregate serialized byte size of bloom-bearing expression plans " +
-			"in one Search, HybridSearch, or Query request. The proxy checks the assembled plans " +
-			"before proto.Marshal, so repeated references to one bloom_match template value and " +
-			"Bloom filters across hybrid sub-searches cannot amplify past the configured budget " +
-			"before the QueryNode RPC. Must be positive; invalid values fall back to 128 MiB.",
+		Doc: "The maximum aggregate serialized byte size of membership-filter-bearing expression plans " +
+			"in one Search, HybridSearch, Query, or complex Delete request. The proxy checks the assembled plans " +
+			"before proto.Marshal and preflights each deferred membership-filter AST occurrence by " +
+			"its blob length before validation, so repeated references and filters across hybrid " +
+			"sub-searches cannot amplify past the configured budget before the QueryNode RPC. Must " +
+			"be positive; invalid values fall back to 128 MiB.",
 		Export:       true,
 		PanicIfEmpty: true,
 		Formatter: func(v string) string {
@@ -2316,6 +2319,29 @@ func (p *proxyConfig) init(base *BaseTable) {
 		},
 	}
 	p.MaxBloomFilterPlanSize.Init(base.mgr)
+
+	p.MaxRoaringFilterSize = ParamItem{
+		Key: "proxy.maxRoaringFilterSize",
+		// 32 MiB of MRB1 body. Unlike the Bloom cap this is not a member-count
+		// ceiling: a Roaring bitmap's size follows the value distribution, so the
+		// same budget holds ~16M members spread over the whole int32 domain but
+		// tens of millions when the values are dense or contiguous. Sizing by
+		// bytes rather than members is the point — it is the bytes that get
+		// fanned out to every QueryNode.
+		DefaultValue: "33554432",
+		Version:      "3.0.0",
+		Doc: "The maximum byte size of the portable Roaring64 body in a client pre-built " +
+			"roaring_match bitmap blob accepted by the proxy (the fixed 32-byte MRB1 header is " +
+			"allowed on top). The blob is embedded into the query plan and fanned out to every " +
+			"QueryNode, so this bounds per-request memory/network amplification. A Roaring " +
+			"bitmap's size depends on how the member values are distributed, not on the member " +
+			"count alone: a dense or contiguous set of tens of millions of values costs far less " +
+			"than a sparse set of a few million. Independent fixed admission also limits each MRB1 " +
+			"bitmap to 262144 high containers and a 64 MiB decoded-memory estimate; the same " +
+			"64 MiB ceiling applies to the aggregate of all roaring_match occurrences in one request/plan.",
+		Export: true,
+	}
+	p.MaxRoaringFilterSize.Init(base.mgr)
 
 	p.MaxDimension = ParamItem{
 		Key:          "proxy.maxDimension",
