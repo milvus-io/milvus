@@ -363,6 +363,10 @@ func (w *SegmentWriter) WriteRecord(r storage.Record) error {
 			pkArray := r.Column(w.GetPkID()).(*array.String)
 			pk := storage.NewVarCharPrimaryKey(pkArray.Value(i))
 			w.pkstats.Update(pk)
+		case schemapb.DataType_UUID:
+			pkArray := r.Column(w.GetPkID()).(*array.String)
+			pk := storage.NewVarCharPrimaryKey(pkArray.Value(i))
+			w.pkstats.Update(pk)
 		default:
 			panic("invalid data type")
 		}

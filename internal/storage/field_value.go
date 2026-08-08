@@ -1072,6 +1072,9 @@ func NewScalarFieldValueFromGenericValue(dtype schemapb.DataType, gVal *planpb.G
 	case schemapb.DataType_VarChar:
 		strVal := gVal.Val.(*planpb.GenericValue_StringVal)
 		return NewVarCharFieldValue(strVal.StringVal), nil
+	case schemapb.DataType_UUID:
+		strVal := gVal.Val.(*planpb.GenericValue_StringVal)
+		return NewVarCharFieldValue(strVal.StringVal), nil
 	default:
 		// should not be reach
 		panic(fmt.Sprintf("not supported datatype: %s", dtype.String()))
@@ -1097,6 +1100,8 @@ func NewScalarFieldValue(dtype schemapb.DataType, data interface{}) ScalarFieldV
 	case schemapb.DataType_String:
 		return NewStringFieldValue(data.(string))
 	case schemapb.DataType_VarChar:
+		return NewVarCharFieldValue(data.(string))
+	case schemapb.DataType_UUID:
 		return NewVarCharFieldValue(data.(string))
 	default:
 		// should not be reach

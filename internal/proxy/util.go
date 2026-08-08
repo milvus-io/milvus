@@ -452,6 +452,11 @@ func validateDimension(field *schemapb.FieldSchema) error {
 }
 
 func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema) error {
+	// UUID is fixed-length: canonical form is exactly 36 bytes,
+	// so no max_length type param is required.
+	if typeutil.IsUUIDType(field.DataType) || typeutil.IsUUIDType(field.ElementType) {
+		return nil
+	}
 	exist := false
 	for _, param := range field.TypeParams {
 		if param.Key != common.MaxLengthKey {
@@ -565,6 +570,8 @@ func validateElementType(dataType schemapb.DataType) error {
 		return nil
 	case schemapb.DataType_String:
 		return merr.WrapErrParameterInvalidMsg("string data type not supported yet, please use VarChar type instead")
+	case schemapb.DataType_UUID:
+		return merr.WrapErrParameterInvalidMsg("array element type UUID is not supported in this phase")
 	case schemapb.DataType_None:
 		return merr.WrapErrParameterInvalidMsg("element data type None is not valid")
 	}
@@ -607,6 +614,9 @@ func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 			if !field.IsPrimaryKey {
 				return merr.WrapErrParameterInvalidMsg("only primary field can speficy AutoID with true, field name = %s", field.Name)
 			}
+			if field.DataType == schemapb.DataType_UUID {
+				return merr.WrapErrParameterInvalidMsg("autoID is not supported for UUID primary key, use Int64 instead")
+			}
 		}
 	}
 	for _, structArrayField := range coll.StructArrayFields {
@@ -636,7 +646,9 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	// valid max length per row parameters
 	// if max_length not specified, return error
 	if field.DataType == schemapb.DataType_VarChar ||
-		(field.GetDataType() == schemapb.DataType_Array && field.GetElementType() == schemapb.DataType_VarChar) {
+		field.DataType == schemapb.DataType_UUID ||
+		(field.GetDataType() == schemapb.DataType_Array &&
+			(field.GetElementType() == schemapb.DataType_VarChar || field.GetElementType() == schemapb.DataType_UUID)) {
 		err = validateMaxLengthPerRow(schema.Name, field)
 		if err != nil {
 			return err
@@ -707,7 +719,7 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 
 	// valid max length per row parameters
 	// if max_length not specified, return error
-	if field.ElementType == schemapb.DataType_VarChar {
+	if field.ElementType == schemapb.DataType_VarChar || field.ElementType == schemapb.DataType_UUID {
 		err = validateMaxLengthPerRow(schema.Name, field)
 		if err != nil {
 			return err
@@ -801,9 +813,9 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 				return merr.WrapErrParameterInvalidMsg("there are more than one primary key, field name = %s, %s", coll.Fields[idx].Name, field.Name)
 			}
 
-			// The type of the primary key field can only be int64 and varchar
-			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar {
-				return merr.WrapErrParameterInvalidMsg("the data type of primary key should be Int64 or VarChar")
+			// The type of the primary key field can only be int64, varchar, and uuid
+			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar && field.DataType != schemapb.DataType_UUID {
+				return merr.WrapErrParameterInvalidMsg("the data type of primary key should be Int64, VarChar, or UUID")
 			}
 
 			// varchar field do not support autoID
@@ -1044,7 +1056,7 @@ func parsePrimaryFieldData2IDs(fieldData *schemapb.FieldData) (*schemapb.IDs, er
 				StrId: scalarField.GetStringData(),
 			}
 		default:
-			return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64 or VarChar as PrimaryField")
+			return nil, merr.WrapErrParameterInvalidMsg("currently only support DataType Int64, VarChar, or UUID as PrimaryField")
 		}
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("currently not support vector field as PrimaryField")

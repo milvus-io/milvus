@@ -99,7 +99,7 @@ func (st *PkStatistics) PkExist(pk PrimaryKey) bool {
 		int64Pk := pk.(*Int64PrimaryKey)
 		common.Endian.PutUint64(buf, uint64(int64Pk.Value))
 		return st.PkFilter.Test(buf)
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		varCharPk := pk.(*VarCharPrimaryKey)
 		return st.PkFilter.TestString(varCharPk.Value)
 	default:
@@ -117,7 +117,7 @@ func Locations(pk PrimaryKey, k uint, bfType bloomfilter.BFType) []uint64 {
 		int64Pk := pk.(*Int64PrimaryKey)
 		common.Endian.PutUint64(buf, uint64(int64Pk.Value))
 		return bloomfilter.Locations(buf, k, bfType)
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		varCharPk := pk.(*VarCharPrimaryKey)
 		return bloomfilter.Locations(unsafe.Slice(unsafe.StringData(varCharPk.Value), len(varCharPk.Value)), k, bfType)
 	default:

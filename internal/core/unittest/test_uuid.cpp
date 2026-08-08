@@ -1,0 +1,81 @@
+// Copyright (C) 2019-2025 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
+
+#include <gtest/gtest.h>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "common/FieldData.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "pb/schema.pb.h"
+
+using namespace milvus;
+
+// Verify the DataType enum value for UUID.
+TEST(UuidTest, EnumValue) {
+    ASSERT_EQ(static_cast<int>(DataType::UUID), 31);
+}
+
+// Verify that UUID is treated as a string data type for storage purposes.
+// UUID is stored as a canonical string at the storage layer, reusing the
+// string/VarChar path (PayloadWriter string payloads, Arrow string builders).
+TEST(UuidTest, IsStringDataType) {
+    ASSERT_TRUE(IsStringDataType(DataType::UUID));
+}
+
+// Verify that UUID is not a fixed-size type. UUID is variable-width
+// (string-backed), so IsFixedSizeType must return false, matching the
+// IsStringDataType(UUID)==true assertion above and allowing RowContainer
+// and other variable-width paths to allocate pointers instead of inline data.
+TEST(UuidTest, IsFixedSizeType) {
+    ASSERT_FALSE(IsFixedSizeType(DataType::UUID));
+}
+
+// Verify ToProtoDataType maps internal DataType::UUID to proto DataType::UUID.
+TEST(UuidTest, ToProtoDataTypeMapping) {
+    auto proto_type = ToProtoDataType(DataType::UUID);
+    ASSERT_EQ(proto_type, proto::schema::DataType::UUID);
+}
+
+// Verify that InitScalarFieldData creates a std::string-backed FieldData
+// for UUID, consistent with STRING/VARCHAR handling.
+TEST(UuidTest, InitScalarFieldData) {
+    auto field_data = InitScalarFieldData(DataType::UUID, false, 10);
+    ASSERT_NE(field_data, nullptr);
+    ASSERT_EQ(field_data->get_data_type(), DataType::UUID);
+}
+
+// Verify that InitScalarFieldDataWithLength creates a std::string-backed
+// FieldData for UUID at a given capacity.
+TEST(UuidTest, InitScalarFieldDataWithLength) {
+    constexpr int64_t kLength = 100;
+    auto field_data = InitScalarFieldDataWithLength(DataType::UUID, kLength);
+    ASSERT_NE(field_data, nullptr);
+    ASSERT_EQ(field_data->get_data_type(), DataType::UUID);
+    ASSERT_EQ(field_data->Length(), kLength);
+}
+
+// Verify that a UUID field can be added to a Schema via AddDebugField.
+// IsStringDataType(UUID) is true, but UUID carries no max_length type param;
+// FieldMeta defaults it to the fixed 36-char canonical length.
+TEST(UuidTest, SchemaAddField) {
+    auto schema = std::make_shared<Schema>();
+    auto field_id = schema->AddDebugField("uuid_field", DataType::UUID);
+    ASSERT_NE(field_id.get(), -1);
+
+    auto& field_meta = schema->operator[](field_id);
+    ASSERT_EQ(field_meta.get_data_type(), DataType::UUID);
+    ASSERT_EQ(field_meta.get_name().get(), "uuid_field");
+}

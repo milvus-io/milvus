@@ -72,6 +72,10 @@ func (c *PkStatsCollector) Collect(r Record) error {
 			pkArray := r.Column(c.pkstats.FieldID).(*array.String)
 			pk := NewVarCharPrimaryKey(pkArray.Value(i))
 			c.pkstats.Update(pk)
+		case schemapb.DataType_UUID:
+			pkArray := r.Column(c.pkstats.FieldID).(*array.String)
+			pk := NewVarCharPrimaryKey(pkArray.Value(i))
+			c.pkstats.Update(pk)
 		default:
 			panic("invalid data type")
 		}

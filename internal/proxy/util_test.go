@@ -661,11 +661,41 @@ func TestValidatePrimaryKey(t *testing.T) {
 	}))
 }
 
+func TestValidatePrimaryKey_AcceptsUUID(t *testing.T) {
+	uuidField := &schemapb.FieldSchema{
+		Name:         "uuidField",
+		IsPrimaryKey: true,
+		DataType:     schemapb.DataType_UUID,
+	}
+
+	assert.NoError(t, validatePrimaryKey(&schemapb.CollectionSchema{
+		Name:   "coll1",
+		Fields: []*schemapb.FieldSchema{uuidField},
+	}))
+}
+
+func TestValidateFieldAutoID_RejectsUUID(t *testing.T) {
+	uuidField := &schemapb.FieldSchema{
+		Name:         "uuidField",
+		IsPrimaryKey: true,
+		AutoID:       true,
+		DataType:     schemapb.DataType_UUID,
+	}
+
+	err := ValidateFieldAutoID(&schemapb.CollectionSchema{
+		Name:   "coll1",
+		Fields: []*schemapb.FieldSchema{uuidField},
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "autoID is not supported for UUID")
+}
+
 func TestValidateFieldType(t *testing.T) {
 	type testCase struct {
 		dt       schemapb.DataType
 		et       schemapb.DataType
 		validate bool
+		expected string
 	}
 	cases := []testCase{
 		{
@@ -786,6 +816,12 @@ func TestValidateFieldType(t *testing.T) {
 			et:       schemapb.DataType_BinaryVector,
 			validate: false,
 		},
+		{
+			dt:       schemapb.DataType_Array,
+			et:       schemapb.DataType_UUID,
+			validate: false,
+			expected: "UUID",
+		},
 	}
 
 	for _, tc := range cases {
@@ -803,6 +839,9 @@ func TestValidateFieldType(t *testing.T) {
 				assert.NoError(t, err)
 			} else {
 				assert.Error(t, err)
+				if tc.expected != "" {
+					assert.Contains(t, err.Error(), tc.expected)
+				}
 			}
 		})
 	}

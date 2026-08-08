@@ -337,9 +337,9 @@ func (t *createCollectionTask) validatePartitionKey(ctx context.Context) error {
 				return merr.WrapErrParameterInvalidMsg("partition key field not support nullable")
 			}
 
-			// The type of the partition key field can only be int64 and varchar
-			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar {
-				return merr.WrapErrParameterInvalidMsg("the data type of partition key should be Int64 or VarChar")
+			// The type of the partition key field can only be int64, varchar, and uuid
+			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar && field.DataType != schemapb.DataType_UUID {
+				return merr.WrapErrParameterInvalidMsg("the data type of partition key should be Int64, VarChar, or UUID")
 			}
 
 			if t.GetNumPartitions() < 0 {

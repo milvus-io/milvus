@@ -812,7 +812,7 @@ func pks2Expr(ids column.Column) string {
 	switch ids.Type() {
 	case entity.FieldTypeInt64:
 		expr = fmt.Sprintf("%s in %s", pkName, strings.Join(strings.Fields(fmt.Sprint(ids.FieldData().GetScalars().GetLongData().GetData())), ","))
-	case entity.FieldTypeVarChar:
+	case entity.FieldTypeVarChar, entity.FieldTypeUUID:
 		data := ids.FieldData().GetScalars().GetData().(*schemapb.ScalarField_StringData).StringData.GetData()
 		for i := range data {
 			data[i] = fmt.Sprintf("\"%s\"", data[i])
@@ -838,7 +838,7 @@ func column2IDs(ids column.Column) (*schemapb.IDs, error) {
 				Data: data,
 			},
 		}
-	case entity.FieldTypeVarChar, entity.FieldTypeString:
+	case entity.FieldTypeVarChar, entity.FieldTypeString, entity.FieldTypeUUID:
 		data := ids.FieldData().GetScalars().GetStringData().GetData()
 		result.IdField = &schemapb.IDs_StrId{
 			StrId: &schemapb.StringArray{

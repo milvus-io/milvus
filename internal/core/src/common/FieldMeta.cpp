@@ -235,8 +235,10 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         if (type_map.count(MAX_LENGTH)) {
             max_len = boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
         } else {
-            AssertInfo(data_type == DataType::TEXT,
-                       "max_length not found for non-Text string field");
+            AssertInfo(
+                data_type == DataType::TEXT || data_type == DataType::UUID,
+                "max_length not found for non-Text string field");
+            max_len = (data_type == DataType::UUID) ? 36 : 0;
         }
 
         auto get_bool_value = [&](const std::string& key) -> bool {

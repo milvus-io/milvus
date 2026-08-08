@@ -266,7 +266,7 @@ func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (Primary
 		result = &Int64PrimaryKey{
 			Value: data.(int64),
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		result = &VarCharPrimaryKey{
 			Value: data.(string),
 		}
@@ -317,7 +317,7 @@ func ParseFieldData2PrimaryKeys(data *schemapb.FieldData) ([]PrimaryKey, error) 
 			pk := NewInt64PrimaryKey(value)
 			ret = append(ret, pk)
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		for _, value := range scalarData.GetStringData().GetData() {
 			pk := NewVarCharPrimaryKey(value)
 			ret = append(ret, pk)
@@ -383,7 +383,7 @@ func ParsePrimaryKeysBatch2IDs(pks PrimaryKeys) (*schemapb.IDs, error) {
 				Data: int64Pks.values,
 			},
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		varcharPks := pks.(*VarcharPrimaryKeys)
 		ret.IdField = &schemapb.IDs_StrId{
 			StrId: &schemapb.StringArray{
@@ -413,7 +413,7 @@ func ParsePrimaryKeys2IDs(pks []PrimaryKey) *schemapb.IDs {
 				Data: int64Pks,
 			},
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		stringPks := make([]string, 0)
 		for _, pk := range pks {
 			stringPks = append(stringPks, pk.(*VarCharPrimaryKey).Value)

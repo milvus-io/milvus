@@ -31,8 +31,8 @@ namespace exec {
 
 bool
 PhyCompareFilterExpr::IsStringExpr() {
-    return expr_->left_data_type_ == DataType::VARCHAR ||
-           expr_->right_data_type_ == DataType::VARCHAR;
+    return IsStringDataType(expr_->left_data_type_) ||
+           IsStringDataType(expr_->right_data_type_);
 }
 
 bool

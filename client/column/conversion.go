@@ -96,6 +96,16 @@ func slice2Scalar[T any](values []T, elementType entity.FieldType) *schemapb.Sca
 				Data: strings,
 			},
 		}
+	case entity.FieldTypeUUID:
+		var strings []string
+		strings, ok = any(values).([]string)
+		if ok {
+			scalarField.Data = &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{
+					Data: strings,
+				},
+			}
+		}
 	}
 
 	if !ok {
@@ -117,6 +127,7 @@ func values2FieldData[T any](values []T, fieldType entity.FieldType, dim int) *s
 		entity.FieldTypeInt64,
 		entity.FieldTypeVarChar,
 		entity.FieldTypeString,
+		entity.FieldTypeUUID,
 		entity.FieldTypeJSON,
 		entity.FieldTypeGeometry,
 		entity.FieldTypeTimestamptz:
@@ -180,6 +191,14 @@ func values2Scalars[T any](values []T, fieldType entity.FieldType) *schemapb.Sca
 		strVals, ok = any(values).([]string)
 		scalars.Data = &schemapb.ScalarField_StringData{
 			StringData: &schemapb.StringArray{Data: strVals},
+		}
+	case entity.FieldTypeUUID:
+		var strVals []string
+		strVals, ok = any(values).([]string)
+		if ok {
+			scalars.Data = &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{Data: strVals},
+			}
 		}
 	case entity.FieldTypeFloat:
 		var floats []float32

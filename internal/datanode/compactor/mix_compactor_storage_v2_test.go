@@ -87,6 +87,64 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK() {
 	s.Equal(1, len(result.GetSegments()[0].GetField2StatslogPaths()))
 }
 
+func (s *MixCompactionTaskStorageV2Suite) TestCompactUUIDPK() {
+	// UUID-PK collection through the mergeSplit path (default; useMergeSort not
+	// set), which previously panicked with "invalid data type" in writeSegment.
+	s.meta = genTestCollectionMetaWithUUID()
+	params, err := compaction.GenerateJSONParams(s.meta.GetSchema())
+	s.Require().NoError(err)
+
+	plan := &datapb.CompactionPlan{
+		PlanID: 999,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+			CollectionID: 1,
+			SegmentID:    100,
+		}},
+		Type:                   datapb.CompactionType_MixCompaction,
+		Schema:                 s.meta.GetSchema(),
+		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 19531, End: math.MaxInt64},
+		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 9530, End: 19530},
+		MaxSize:                64 * 1024 * 1024,
+		JsonParams:             params,
+	}
+
+	pk, err := typeutil.GetPrimaryFieldSchema(s.meta.GetSchema())
+	s.Require().NoError(err)
+	s.Require().Equal(schemapb.DataType_UUID, pk.GetDataType())
+	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, nil, plan, compaction.GenParams(), []int64{pk.FieldID})
+
+	segments := []int64{7, 8, 9}
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
+	alloc := allocator.NewLocalAllocator(7777777, math.MaxInt64)
+
+	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
+	for _, segID := range segments {
+		s.initUUIDSegBuffer(1, segID)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+		s.Require().NoError(err)
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+			left, right := lo.Difference(keys, lo.Keys(kvs))
+			return len(left) == 0 && len(right) == 0
+		})).Return(lo.Values(kvs), nil).Once()
+
+		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+			CollectionID: 1,
+			SegmentID:    segID,
+			FieldBinlogs: lo.Values(fBinlogs),
+		})
+	}
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.NotNil(result)
+
+	s.Equal(s.task.plan.GetPlanID(), result.GetPlanID())
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+	s.Equal(1, len(result.GetSegments()))
+	s.EqualValues(3, result.GetSegments()[0].GetNumOfRows())
+	s.NotEmpty(result.GetSegments()[0].GetInsertLogs())
+}
+
 func (s *MixCompactionTaskStorageV2Suite) TestCompactMetrics() {
 	s.prepareCompactDupPKSegments()
 

@@ -596,6 +596,7 @@ create_chunk_writer(const FieldMeta& field_meta) {
         case milvus::DataType::VARCHAR:
         case milvus::DataType::STRING:
         case milvus::DataType::TEXT:
+        case milvus::DataType::UUID:
             return std::make_shared<StringChunkWriter>(nullable);
         case milvus::DataType::JSON:
             return std::make_shared<JSONChunkWriter>(nullable);
@@ -734,6 +735,7 @@ make_chunk(const FieldMeta& field_meta,
         case milvus::DataType::VARCHAR:
         case milvus::DataType::STRING:
         case milvus::DataType::TEXT:
+        case milvus::DataType::UUID:
             return std::make_unique<StringChunk>(
                 row_nums, data, size, nullable, chunk_mmap_guard);
         case milvus::DataType::JSON:

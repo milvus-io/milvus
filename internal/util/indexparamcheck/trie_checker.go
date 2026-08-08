@@ -16,8 +16,8 @@ func (c *TRIEChecker) CheckTrain(dataType schemapb.DataType, elementType schemap
 }
 
 func (c *TRIEChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
-	if !typeutil.IsStringType(field.GetDataType()) {
-		return merr.WrapErrParameterInvalidMsg("TRIE are only supported on varchar field")
+	if !typeutil.IsStringType(field.GetDataType()) && field.GetDataType() != schemapb.DataType_UUID {
+		return merr.WrapErrParameterInvalidMsg("TRIE are only supported on varchar or uuid field")
 	}
 	return nil
 }

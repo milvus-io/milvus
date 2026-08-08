@@ -382,7 +382,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			data.ValidData = make([]bool, 0, cap)
 		}
 		return data, nil
-	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
+	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_UUID:
 		data := &StringFieldData{
 			Data:     make([]string, 0, cap),
 			DataType: dataType,
@@ -2046,7 +2046,7 @@ func (data *ArrayFieldData) GetMemorySize() int {
 			size += binary.Size(val.GetFloatData().GetData())
 		case schemapb.DataType_Double:
 			size += binary.Size(val.GetDoubleData().GetData())
-		case schemapb.DataType_String, schemapb.DataType_VarChar:
+		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_UUID:
 			size += (&StringFieldData{Data: val.GetStringData().GetData()}).GetMemorySize()
 		}
 	}
@@ -2131,7 +2131,7 @@ func (data *ArrayFieldData) GetRowSize(i int) int {
 		return binary.Size(data.Data[i].GetFloatData().GetData())
 	case schemapb.DataType_Double:
 		return binary.Size(data.Data[i].GetDoubleData().GetData())
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
+	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		return (&StringFieldData{Data: data.Data[i].GetStringData().GetData()}).GetMemorySize()
 	}
 	return 0

@@ -1260,7 +1260,7 @@ func NewInsertData(segmentID, partitionID int64, cap int, pkType schemapb.DataTy
 	switch pkType {
 	case schemapb.DataType_Int64:
 		data.intPKTs = make(map[int64]int64)
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		data.strPKTs = make(map[string]int64)
 	}
 
@@ -1283,7 +1283,7 @@ func (id *InsertData) Append(data *storage.InsertData, pkFieldData storage.Field
 				id.intPKTs[pk] = timestamps[idx]
 			}
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		pks := pkFieldData.GetDataRows().([]string)
 		for idx, pk := range pks {
 			ts, ok := id.strPKTs[pk]
@@ -1312,7 +1312,7 @@ func (id *InsertData) pkExists(pk storage.PrimaryKey, ts uint64) bool {
 	switch pk.Type() {
 	case schemapb.DataType_Int64:
 		minTs, ok = id.intPKTs[pk.GetValue().(int64)]
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		minTs, ok = id.strPKTs[pk.GetValue().(string)]
 	}
 
@@ -1333,7 +1333,7 @@ func (id *InsertData) batchPkExists(pks []storage.PrimaryKey, tss []uint64, hits
 				hits[i] = ok && tss[i] > uint64(minTs)
 			}
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		for i := range pks {
 			if !hits[i] {
 				minTs, ok := id.strPKTs[pks[i].GetValue().(string)]
@@ -1721,7 +1721,7 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 		switch pkField.GetDataType() {
 		case schemapb.DataType_Int64:
 			inData.intPKTs = make(map[int64]int64)
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 			inData.strPKTs = make(map[string]int64)
 		}
 
@@ -1768,7 +1768,7 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 						inData.intPKTs[pk] = timestamps[idx]
 					}
 				}
-			case schemapb.DataType_VarChar:
+			case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 				pks := pkFieldData.GetDataRows().([]string)
 				for idx, pk := range pks {
 					ts, ok := inData.strPKTs[pk]

@@ -223,6 +223,9 @@ func getColumnCreators(sch *entity.Schema) map[string]columnCreator {
 			case entity.FieldTypeString, entity.FieldTypeVarChar:
 				data := make([]string, 0, rowsLen)
 				col = column.NewColumnVarChar(field.Name, data)
+			case entity.FieldTypeUUID:
+				data := make([]string, 0, rowsLen)
+				col = column.NewColumnUUID(field.Name, data)
 			case entity.FieldTypeJSON:
 				data := make([][]byte, 0, rowsLen)
 				col = column.NewColumnJSONBytes(field.Name, data)

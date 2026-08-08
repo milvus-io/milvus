@@ -706,7 +706,7 @@ func getPrimaryKeysFromUnaryRangeExpr(schema *schemapb.CollectionSchema, unaryRa
 				Data: []int64{unaryRangeExpr.UnaryRangeExpr.GetValue().GetInt64Val()},
 			},
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		pks.IdField = &schemapb.IDs_StrId{
 			StrId: &schemapb.StringArray{
 				Data: []string{unaryRangeExpr.UnaryRangeExpr.GetValue().GetStringVal()},
@@ -733,7 +733,7 @@ func getPrimaryKeysFromTermExpr(schema *schemapb.CollectionSchema, termExpr *pla
 				Data: ids,
 			},
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		ids := make([]string, 0)
 		for _, v := range termExpr.TermExpr.Values {
 			ids = append(ids, v.GetStringVal())

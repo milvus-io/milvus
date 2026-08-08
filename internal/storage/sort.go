@@ -75,7 +75,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 				ri := len(records)
 				records = append(records, rec)
 				for i := 0; i < rec.Len(); i++ {
-					if predicate(rec, ri, i) {
+					if predicate == nil || predicate(rec, ri, i) {
 						indices = append(indices, rowIndex{int32(ri), int32(i)})
 					}
 				}
@@ -409,7 +409,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		hasValid := false
 		endPosition := 0
 		for j := 0; j < r.Len(); j++ {
-			if predicate(r, ri, j) {
+			if predicate == nil || predicate(r, ri, j) {
 				pq.Enqueue(&index{
 					ri: ri,
 					i:  j,

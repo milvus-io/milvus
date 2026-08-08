@@ -460,7 +460,8 @@ ChunkedSegmentSealedImpl::Contain(const PkType& pk) const {
                     }
                     return false;
                 }
-                case DataType::VARCHAR: {
+                case DataType::VARCHAR:
+                case DataType::UUID: {
                     auto& target = std::get<std::string>(pk);
                     for (int64_t i = 0; i < num_chunks; ++i) {
                         auto* chunk =
@@ -4213,6 +4214,7 @@ ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
                 bitset_view, pks, pk_column);
             break;
         case DataType::VARCHAR:
+        case DataType::UUID:
             search_pks_with_two_pointers_impl<std::string>(
                 bitset_view, pks, pk_column);
             break;
@@ -4381,7 +4383,8 @@ ChunkedSegmentSealedImpl::search_batch_pks(
 
             break;
         }
-        case DataType::VARCHAR: {
+        case DataType::VARCHAR:
+        case DataType::UUID: {
             auto num_chunk = pk_column->num_chunks();
             for (int i = 0; i < num_chunk; ++i) {
                 // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
@@ -4462,6 +4465,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(
                 op, std::get<int64_t>(pk), pk_column, bitset);
             break;
         case DataType::VARCHAR:
+        case DataType::UUID:
             search_sorted_pk_range_impl<std::string>(
                 op, std::get<std::string>(pk), pk_column, bitset);
             break;
@@ -4538,6 +4542,7 @@ ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
                 bitset);
             break;
         case DataType::VARCHAR:
+        case DataType::UUID:
             search_sorted_pk_binary_range_impl<std::string>(
                 std::get<std::string>(lower_pk),
                 lower_inclusive,
@@ -4643,6 +4648,7 @@ ChunkedSegmentSealedImpl::find_first_n_element(
                     std::get<int64_t>(cursor->last_pk), pk_column);
                 break;
             case DataType::VARCHAR:
+            case DataType::UUID:
                 cursor_doc_offset = find_sorted_pk_doc_offset<std::string>(
                     std::get<std::string>(cursor->last_pk), pk_column);
                 break;
@@ -4793,7 +4799,8 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                               }
                               break;
                           }
-                          case DataType::VARCHAR: {
+                          case DataType::VARCHAR:
+                          case DataType::UUID: {
                               auto num_chunk = pk_column->num_chunks();
                               for (int i = 0; i < num_chunk; ++i) {
                                   auto num_rows_until_chunk =
@@ -4997,7 +5004,8 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
         }
         case DataType::VARCHAR:
         case DataType::STRING:
-        case DataType::TEXT: {
+        case DataType::TEXT:
+        case DataType::UUID: {
             // dst must have at least count elements; the callback's offset
             // parameter is guaranteed to be in [0, count)
             bulk_subscript_ptr_impl<std::string>(
@@ -5800,7 +5808,7 @@ ChunkedSegmentSealedImpl::FillPrimaryKeys(const query::Plan* plan,
         auto pk_type = schema_snapshot->operator[](pk_field_id).get_data_type();
         AssertInfo(IsPrimaryKeyDataType(pk_type),
                    "Primary key field is not INT64 or VARCHAR type");
-        if (pk_type == DataType::VARCHAR) {
+        if (pk_type == DataType::VARCHAR || pk_type == DataType::UUID) {
             auto column = get_column(snapshot->runtime, pk_field_id);
             if (column != nullptr) {
                 Assert(results.primary_keys_.size() == 0);
@@ -5888,7 +5896,8 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
 
     switch (field_meta.get_data_type()) {
         case DataType::VARCHAR:
-        case DataType::STRING: {
+        case DataType::STRING:
+        case DataType::UUID: {
             bulk_subscript_ptr_impl<std::string>(
                 op_ctx,
                 column.get(),
@@ -9180,7 +9189,8 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             break;
         }
         case DataType::VARCHAR:
-        case DataType::STRING: {
+        case DataType::STRING:
+        case DataType::UUID: {
             auto typed = std::static_pointer_cast<arrow::StringArray>(arr);
             auto obj = data_array->mutable_scalars()->mutable_string_data();
             for (int64_t i = 0; i < size; i++) {
@@ -9714,7 +9724,8 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
                                                  src_data.data().end());
                     break;
                 }
-                case DataType::VARCHAR: {
+                case DataType::VARCHAR:
+                case DataType::UUID: {
                     auto str_ids = ids->mutable_str_id();
                     auto& src_data = data_array->scalars().string_data();
                     for (auto i = 0; i < src_data.data_size(); ++i) {

@@ -1136,6 +1136,8 @@ func MilvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 		return &arrow.Float64Type{}
 	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
 		return &arrow.StringType{}
+	case schemapb.DataType_UUID:
+		return &arrow.StringType{}
 	case schemapb.DataType_Array:
 		return &arrow.BinaryType{}
 	case schemapb.DataType_JSON:

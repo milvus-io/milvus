@@ -40,7 +40,8 @@ RowContainer::RowContainer(const std::vector<DataType>& keyTypes,
             variable_idxes_.emplace_back(idx);
         }
         offsets_.push_back(offset);
-        if (type == DataType::VARCHAR || type == DataType::STRING) {
+        if (type == DataType::VARCHAR || type == DataType::STRING ||
+            type == DataType::UUID) {
             offset += 8;  //use a pointer to store string
         } else {
             offset += GetDataTypeSize(type, 1);

@@ -409,7 +409,7 @@ func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, ba
 				pk := vv.Pk.GetValue().(int64)
 				pb.Append(pk)
 			}
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 			pb := builder.Field(0).(*array.StringBuilder)
 			for _, vv := range v {
 				pk := vv.Pk.GetValue().(string)
@@ -557,7 +557,7 @@ func (w *LegacyDeltalogWriter) Write(rec Record) error {
 		case schemapb.DataType_Int64:
 			pk := NewInt64PrimaryKey(rec.Column(0).(*array.Int64).Value(i))
 			return NewDeleteLog(pk, ts), nil
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 			pk := NewVarCharPrimaryKey(rec.Column(0).(*array.String).Value(i))
 			return NewDeleteLog(pk, ts), nil
 		default:
@@ -634,7 +634,7 @@ func (r *deleteLogToRecordReader) Next() (Record, error) {
 			builder.Append(dl.Pk.GetValue().(int64))
 		}
 		pkArray = builder.NewArray()
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		builder := array.NewStringBuilder(allocator)
 		defer builder.Release()
 		for _, dl := range deleteLogs {

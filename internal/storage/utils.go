@@ -90,6 +90,10 @@ func WriteFile(filepath string, data []byte, perm fs.FileMode) error {
 // ValidateStorageV1InsertWritableSchema validates schema constraints required by V1 insert binlogs.
 func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_UUID {
+			return merr.WrapErrParameterInvalidMsg("UUID field type is not supported in V1 storage format, please use the default storage format, fieldName=%s",
+				field.GetName())
+		}
 		if isNullableArrayOfVectorField(field) {
 			return merr.WrapErrParameterInvalidMsg("nullable ArrayOfVector is not supported in V1 storage format, fieldName=%s", field.GetName())
 		}
@@ -97,6 +101,10 @@ func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) er
 
 	for _, structField := range schema.GetStructArrayFields() {
 		for _, field := range structField.GetFields() {
+			if field.GetDataType() == schemapb.DataType_UUID {
+				return merr.WrapErrParameterInvalidMsg("UUID field type is not supported in V1 storage format, please use the default storage format, structName=%s, fieldName=%s",
+					structField.GetName(), field.GetName())
+			}
 			if isNullableArrayOfVectorField(field) {
 				return merr.WrapErrParameterInvalidMsg("nullable ArrayOfVector is not supported in V1 storage format, structName=%s, fieldName=%s",
 					structField.GetName(), field.GetName())
@@ -855,7 +863,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				Nullable:  field.GetNullable(),
 			}
 
-		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
+		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_UUID:
 			srcData := srcField.GetScalars().GetStringData().GetData()
 			validData := srcField.GetValidData()
 
@@ -1325,7 +1333,7 @@ func GetPkFromInsertData(collSchema *schemapb.CollectionSchema, data *InsertData
 	switch pf.DataType {
 	case schemapb.DataType_Int64:
 		realPfData, ok = pfData.(*Int64FieldData)
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		realPfData, ok = pfData.(*StringFieldData)
 	default:
 		// TODO
@@ -1808,7 +1816,7 @@ func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 		return fieldSchema.GetDefaultValue().GetFloatData()
 	case schemapb.DataType_Double:
 		return fieldSchema.GetDefaultValue().GetDoubleData()
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_UUID:
 		return fieldSchema.GetDefaultValue().GetStringData()
 	case schemapb.DataType_Timestamptz:
 		return fieldSchema.GetDefaultValue().GetTimestamptzData()

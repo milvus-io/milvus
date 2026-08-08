@@ -68,6 +68,7 @@ registerMin(const std::string& name) {
                 case DataType::VARCHAR:
                 case DataType::STRING:
                 case DataType::TEXT:
+                case DataType::UUID:
                     return std::make_unique<MinStringAggregate>(inputType);
                 default:
                     ThrowInfo(UnexpectedError,

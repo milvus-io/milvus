@@ -122,6 +122,36 @@ func TestStatsWriter_VarCharPrimaryKey(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestStatsWriter_UUIDPrimaryKey(t *testing.T) {
+	uuids := []string{
+		"550e8400-e29b-41d4-a716-446655440000",
+		"6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+		"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+	}
+
+	stat, err := NewPrimaryKeyStats(common.RowIDField, int64(schemapb.DataType_UUID), int64(len(uuids)))
+	assert.NoError(t, err)
+	for _, uuid := range uuids {
+		stat.Update(NewVarCharPrimaryKey(uuid))
+	}
+
+	for _, uuid := range uuids {
+		assert.True(t, stat.BF.TestString(uuid))
+	}
+	assert.False(t, stat.BF.TestString("00000000-0000-0000-0000-000000000000"))
+
+	assert.True(t, stat.MinPk.EQ(NewVarCharPrimaryKey("550e8400-e29b-41d4-a716-446655440000")))
+	assert.True(t, stat.MaxPk.EQ(NewVarCharPrimaryKey("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")))
+
+	sw := &StatsWriter{}
+	err = sw.GenerateByData(common.RowIDField, schemapb.DataType_UUID, &StringFieldData{Data: uuids})
+	assert.NoError(t, err)
+	assert.NotEmpty(t, sw.GetBuffer())
+
+	err = sw.GenerateByData(common.RowIDField, schemapb.DataType_UUID, &StringFieldData{Data: []string{}})
+	assert.NoError(t, err)
+}
+
 func TestStatsWriter_UpgradePrimaryKey(t *testing.T) {
 	data := &Int64FieldData{
 		Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9},

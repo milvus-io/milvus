@@ -163,7 +163,7 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, []bool, int, error) {
 	case schemapb.DataType_Int8Vector:
 		val, dim, validData, _, err := r.GetInt8VectorFromPayload()
 		return val, validData, dim, err
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
+	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		val, validData, err := r.GetStringFromPayload()
 		return val, validData, 0, err
 	case schemapb.DataType_Array:

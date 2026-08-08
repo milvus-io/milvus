@@ -3341,7 +3341,7 @@ func validateIDsType(pkField *schemapb.FieldSchema, ids *schemapb.IDs) error {
 			return merr.WrapErrParameterInvalid("int64 IDs", "got other type",
 				"primary key is int64, but IDs type mismatch")
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		if ids.GetStrId() == nil {
 			return merr.WrapErrParameterInvalid("string IDs", "got other type",
 				"primary key is varchar, but IDs type mismatch")
@@ -3510,6 +3510,10 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 				returnedPKSet[pk] = struct{}{}
 			}
 		case schemapb.DataType_VarChar:
+			for _, pk := range pkFieldData.GetScalars().GetStringData().GetData() {
+				returnedPKSet[pk] = struct{}{}
+			}
+		case schemapb.DataType_UUID:
 			for _, pk := range pkFieldData.GetScalars().GetStringData().GetData() {
 				returnedPKSet[pk] = struct{}{}
 			}

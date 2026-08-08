@@ -54,7 +54,7 @@ func (dd *DeltaData) initPkType(pkType schemapb.DataType) error {
 		switch pkType {
 		case schemapb.DataType_Int64:
 			dd.deletePks = NewInt64PrimaryKeys(dd.initCap)
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 			dd.deletePks = NewVarcharPrimaryKeys(dd.initCap)
 		default:
 			err = merr.WrapErrServiceInternal("unsupported pk type", pkType.String())
@@ -175,7 +175,7 @@ func (dl *DeleteLog) Parse(val string) error {
 				return merr.WrapErrDataIntegrityMsg("invalid delete log: pkType is Int64 but pk is not a number in %s", val)
 			}
 			dl.Pk = &Int64PrimaryKey{Value: pkRes.Int()}
-		case int64(schemapb.DataType_VarChar):
+		case int64(schemapb.DataType_VarChar), int64(schemapb.DataType_UUID):
 			if pkRes.Type != gjson.String {
 				return merr.WrapErrDataIntegrityMsg("invalid delete log: pkType is VarChar but pk is not a string in %s", val)
 			}
@@ -221,7 +221,7 @@ func (dl *DeleteLog) UnmarshalJSON(data []byte) error {
 	switch schemapb.DataType(dl.PkType) {
 	case schemapb.DataType_Int64:
 		dl.Pk = &Int64PrimaryKey{}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		dl.Pk = &VarCharPrimaryKey{}
 	default:
 		return merr.WrapErrDataIntegrityMsg("unsupported primary key type: %v", schemapb.DataType(dl.PkType))

@@ -234,7 +234,7 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 				switch pkField.DataType {
 				case schemapb.DataType_Int64:
 					pk = rec.Column(0).(*array.Int64).Value(i)
-				case schemapb.DataType_VarChar:
+				case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 					pk = strings.Clone(rec.Column(0).(*array.String).Value(i))
 				}
 				if tsExisting, ok := tempData[pk]; ok && tsExisting > ts {

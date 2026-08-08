@@ -64,7 +64,7 @@ func TestProtoContract_FieldSetsPinned(t *testing.T) {
 		{"schemapb.FieldData", &schemapb.FieldData{}, []int{1, 2, 3, 4, 5, 6, 7, 8}},
 		{"schemapb.ScalarField", &schemapb.ScalarField{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
 		{"schemapb.VectorField", &schemapb.VectorField{}, []int{1, 2, 3, 4, 5, 6, 7, 8}},
-		{"schemapb.IDs", &schemapb.IDs{}, []int{1, 2}},
+		{"schemapb.IDs", &schemapb.IDs{}, []int{1, 2, 3}},
 		// leaf arrays with their own hand-written field switches (no unknown-field
 		// fallback in some — a new field here would mis-parse)
 		{"schemapb.SparseFloatArray", &schemapb.SparseFloatArray{}, []int{1, 2}},

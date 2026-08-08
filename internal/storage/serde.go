@@ -375,6 +375,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 
 	m[schemapb.DataType_VarChar] = stringEntry
 	m[schemapb.DataType_String] = stringEntry
+	m[schemapb.DataType_UUID] = stringEntry
 	m[schemapb.DataType_Text] = serdeEntry{
 		arrowType: stringEntry.arrowType,
 		deserialize: func(a arrow.Array, i int, elementType schemapb.DataType, dim int, shouldCopy bool) (any, error) {

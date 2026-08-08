@@ -47,6 +47,29 @@ func TestFieldData_AsSchemapb(t *testing.T) {
 		_, err := fieldData.AsSchemapb()
 		assert.Error(t, err)
 	})
+	t.Run("uuid_ok", func(t *testing.T) {
+		uuidData := []string{"3F2504E0-4F89-41D3-9A0C-0305E82C3301", "2F2504E0-4F89-41D3-9A0C-0305E82C3301"}
+		fieldData := FieldData{
+			Type:  schemapb.DataType_UUID,
+			Field: []byte(`["3F2504E0-4F89-41D3-9A0C-0305E82C3301", "2F2504E0-4F89-41D3-9A0C-0305E82C3301"]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		ret, err := fieldData.AsSchemapb()
+		assert.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_UUID, ret.GetType())
+		assert.Equal(t, uuidData, ret.GetScalars().GetStringData().GetData())
+	})
+	t.Run("uuid_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_UUID,
+			Field: []byte("[1, 2, 3]"),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
 	t.Run("bool_ok", func(t *testing.T) {
 		fieldData := FieldData{
 			Type:  schemapb.DataType_Bool,

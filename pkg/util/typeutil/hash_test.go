@@ -307,6 +307,34 @@ func TestHashKey2PartitionsMatchesLegacyModulo(t *testing.T) {
 	})
 }
 
+func TestHashKey2Partitions_UUID(t *testing.T) {
+	partitions := []string{"p_0", "p_1", "p_2"}
+	uuidStrs := []string{
+		"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+		"550e8400-e29b-41d4-a716-446655440000",
+		"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+	}
+	fieldData := &schemapb.FieldData{
+		Type: schemapb.DataType_UUID,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{Data: uuidStrs},
+				},
+			},
+		},
+	}
+	expected := make([]uint32, 0, len(uuidStrs))
+	for _, key := range uuidStrs {
+		expected = append(expected, HashString2Uint32(key)%uint32(len(partitions)))
+	}
+	got, err := HashKey2Partitions(fieldData, partitions)
+	assert.NoError(t, err)
+	assert.Equal(t, expected, got)
+	// same UUID hashes to same partition
+	assert.Equal(t, got[0], got[2])
+}
+
 func TestRearrangePartitionsForPartitionKey(t *testing.T) {
 	// invalid partition name
 	partitions := map[string]int64{

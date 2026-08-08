@@ -1141,7 +1141,8 @@ class InsertRecordSealed {
                         is_int64_pk_ = true;
                         break;
                     }
-                    case DataType::VARCHAR: {
+                    case DataType::VARCHAR:
+                    case DataType::UUID: {
                         pk2offset_ =
                             std::make_unique<OffsetOrderedArray<std::string>>();
                         is_int64_pk_ = false;
@@ -1265,7 +1266,8 @@ class InsertRecordSealed {
                 }
                 break;
             }
-            case DataType::VARCHAR: {
+            case DataType::VARCHAR:
+            case DataType::UUID: {
                 auto num_chunk = data->num_chunks();
                 for (int i = 0; i < num_chunk; ++i) {
                     auto column =
@@ -1465,7 +1467,8 @@ class InsertRecordGrowing {
                             std::make_unique<OffsetOrderedMap<int64_t>>();
                         break;
                     }
-                    case DataType::VARCHAR: {
+                    case DataType::VARCHAR:
+                    case DataType::UUID: {
                         pk2offset_ =
                             std::make_unique<OffsetOrderedMap<std::string>>();
                         break;
@@ -1543,7 +1546,8 @@ class InsertRecordGrowing {
                     }
                     break;
                 }
-                case DataType::VARCHAR: {
+                case DataType::VARCHAR:
+                case DataType::UUID: {
                     for (int i = 0; i < row_count; ++i) {
                         pk2offset_->insert(
                             *static_cast<const std::string*>(data->RawValue(i)),
@@ -1728,7 +1732,8 @@ class InsertRecordGrowing {
             }
             case DataType::STRING:
             case DataType::VARCHAR:
-            case DataType::TEXT: {
+            case DataType::TEXT:
+            case DataType::UUID: {
                 this->append_data<std::string>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;

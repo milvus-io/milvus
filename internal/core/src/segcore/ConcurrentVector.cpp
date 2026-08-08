@@ -138,7 +138,8 @@ VectorBase::set_data_raw(ssize_t element_offset,
         }
         case DataType::STRING:
         case DataType::VARCHAR:
-        case DataType::TEXT: {
+        case DataType::TEXT:
+        case DataType::UUID: {
             auto& field_data = FIELD_DATA(data, string);
             std::vector<std::string> data_raw(field_data.begin(),
                                               field_data.end());
