@@ -102,6 +102,18 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	if r, ok := req.(*milvuspb.RenameCollectionRequest); ok && r.GetDbName() != r.GetNewDBName() {
 		dbName = util.AnyWord
 	}
+	// RestoreSnapshot is collection-scoped within one database. Restoring into
+	// another database creates a collection there, so require the same privilege
+	// at cluster scope (db="*") instead of authorizing only against the source.
+	if r, ok := req.(*milvuspb.RestoreSnapshotRequest); ok {
+		targetDBName := r.GetTargetDbName()
+		if targetDBName == "" {
+			targetDBName = dbName
+		}
+		if dbName != targetDBName {
+			dbName = util.AnyWord
+		}
+	}
 
 	// Resolve alias to actual collection name for RBAC checks
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
