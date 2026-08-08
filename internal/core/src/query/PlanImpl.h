@@ -25,6 +25,10 @@
 #include "common/Schema.h"
 #include "common/Utils.h"
 
+namespace milvus::rescores {
+class Scorer;
+}
+
 namespace milvus::query {
 
 using Json = nlohmann::json;
@@ -56,6 +60,11 @@ struct Plan {
  public:
     SchemaPtr schema_;
     std::unique_ptr<VectorPlanNode> plan_node_;
+    // Parsed once with the search plan and shared by every segment execution.
+    // In particular, scorer filters carrying roaring_match keep the same
+    // immutable RoaringMembership as the main predicate instead of reparsing
+    // and decoding the bitmap once per segment.
+    std::vector<std::shared_ptr<rescores::Scorer>> scorers_;
     std::map<std::string, FieldId> tag2field_;  // PlaceholderName -> FieldId
     // Requested output fields, kept in request order for result materialization.
     // access_entries_ also includes them for external manifest checks.

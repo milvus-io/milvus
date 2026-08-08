@@ -61,6 +61,38 @@ AsyncComputeScorerScoresOnOffsetChunks(CSegmentInterface segment,
                                        float* const* output_score_chunks,
                                        bool* const* output_has_score_chunks);
 
+// Uses a scorer parsed and retained by the search plan. Production QueryNode
+// calls this indexed path so segment fan-out does not marshal or parse the same
+// ScoreFunction (and its membership blob) independently for every segment.
+CStatus
+ComputePlanScorerScoresOnOffsetChunks(CSegmentInterface segment,
+                                      CSearchPlan plan,
+                                      int64_t scorer_index,
+                                      struct ArrowArray* offset_chunks,
+                                      struct ArrowSchema* offset_schemas,
+                                      int64_t num_chunks,
+                                      uint64_t timestamp,
+                                      uint64_t collection_ttl,
+                                      int32_t consistency_level,
+                                      uint64_t entity_ttl_physical_time_us,
+                                      float* const* output_score_chunks,
+                                      bool* const* output_has_score_chunks);
+
+CFuture*
+AsyncComputePlanScorerScoresOnOffsetChunks(
+    CSegmentInterface segment,
+    CSearchPlan plan,
+    int64_t scorer_index,
+    struct ArrowArray* offset_chunks,
+    struct ArrowSchema* offset_schemas,
+    int64_t num_chunks,
+    uint64_t timestamp,
+    uint64_t collection_ttl,
+    int32_t consistency_level,
+    uint64_t entity_ttl_physical_time_us,
+    float* const* output_score_chunks,
+    bool* const* output_has_score_chunks);
+
 #ifdef __cplusplus
 }
 #endif

@@ -341,9 +341,9 @@ func TestExpr_BloomMatch_Errors(t *testing.T) {
 		// blob). Bound to any comparison it must die at the proxy, not fan out
 		// a kBytesVal GenericValue that segcore cannot evaluate.
 		expectError(t, `JSONField["a"] == {bf}`, bf,
-			"bytes template value can only be used as the bloom_match filter argument")
+			"bytes template value can only be used as the bloom_match or roaring_match filter argument")
 		expectError(t, "Int64Field == {bf}", bf,
-			"bytes template value can only be used as the bloom_match filter argument")
+			"bytes template value can only be used as the bloom_match or roaring_match filter argument")
 		expectError(t, "Int64Field in {bf}", bf, "")
 	})
 }
@@ -436,7 +436,7 @@ func TestRedactPlanForLog(t *testing.T) {
 		// The raw blob bytes must not appear; a size marker must.
 		assert.NotContains(t, out, string(blob))
 		assert.Contains(t, out, "bytes elided")
-		// The original plan is untouched (redaction works on a clone).
+		// The original plan is restored after rendering.
 		require.True(t, PlanContainsBloomFilter(plan))
 		assert.Equal(t, blob, findFirstBloomBlob(plan))
 	})
@@ -506,6 +506,10 @@ func unaryNode(c *planpb.Expr) *planpb.Expr {
 
 func binNode(l, r *planpb.Expr) *planpb.Expr {
 	return &planpb.Expr{Expr: &planpb.Expr_BinaryExpr{BinaryExpr: &planpb.BinaryExpr{Left: l, Right: r}}}
+}
+
+func binaryArithNode(l, r *planpb.Expr) *planpb.Expr {
+	return &planpb.Expr{Expr: &planpb.Expr_BinaryArithExpr{BinaryArithExpr: &planpb.BinaryArithExpr{Left: l, Right: r}}}
 }
 
 func sampleNode(p *planpb.Expr) *planpb.Expr {
@@ -592,6 +596,8 @@ func TestBloomExprTreeWalk(t *testing.T) {
 	assert.True(t, hasBloomFilterExpr(unaryNode(leaf())))
 	assert.True(t, hasBloomFilterExpr(binNode(nonBloomLeaf(), leaf())))
 	assert.True(t, hasBloomFilterExpr(binNode(leaf(), nonBloomLeaf())))
+	assert.True(t, hasBloomFilterExpr(binaryArithNode(nonBloomLeaf(), leaf())))
+	assert.True(t, hasBloomFilterExpr(binaryArithNode(leaf(), nonBloomLeaf())))
 	assert.True(t, hasBloomFilterExpr(sampleNode(bloomCallNode())))
 	assert.True(t, hasBloomFilterExpr(elemFilterNode(leaf(), nonBloomLeaf())))
 	assert.True(t, hasBloomFilterExpr(elemFilterNode(nonBloomLeaf(), bloomCallNode())))
@@ -614,6 +620,7 @@ func TestBloomExprTreeWalk(t *testing.T) {
 	assert.Equal(t, 0, count(bloomCallNode()))
 	assert.Equal(t, 1, count(unaryNode(leaf())))
 	assert.Equal(t, 2, count(binNode(leaf(), leaf())))
+	assert.Equal(t, 2, count(binaryArithNode(leaf(), leaf())))
 	assert.Equal(t, 1, count(sampleNode(leaf())))
 	assert.Equal(t, 2, count(elemFilterNode(leaf(), leaf())))
 	assert.Equal(t, 1, count(matchNode(leaf())))
@@ -649,8 +656,8 @@ func TestPlanContainsBloomFilterAndPredicates(t *testing.T) {
 	assert.Nil(t, planPredicates(empty))
 }
 
-// TestRedactPlanForLogEdgeCases covers the bloomRedactedPlan branches the parsed-
-// plan test does not: a nil plan and a bloom blob carried in a scorer filter.
+// TestRedactPlanForLogEdgeCases covers membershipRedactedPlan branches the
+// parsed-plan test does not: a nil plan and a bloom blob in a scorer filter.
 func TestRedactPlanForLogEdgeCases(t *testing.T) {
 	assert.Equal(t, "<nil>", RedactPlanForLog(nil).String())
 

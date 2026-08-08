@@ -25,12 +25,16 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -40,33 +44,39 @@ func TestComputeScorerScoresOnChunkedOffsetsValidation(t *testing.T) {
 	offsets := newInt64Chunked(t, []int64{0})
 	defer offsets.Release()
 
-	scoreFunction := &planpb.ScoreFunction{Weight: 1}
 	segment := newBoostScoreTestSegment(t)
 	searchReq := newBoostScoreTestSearchRequest(t)
 
 	t.Run("nil segment", func(t *testing.T) {
-		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(nil, searchReq, scoreFunction, offsets)
+		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(nil, searchReq, 0, offsets)
 		require.Error(t, err)
 		require.Nil(t, scores)
 		require.Contains(t, err.Error(), "segment is nil")
 	})
 
 	t.Run("nil search request", func(t *testing.T) {
-		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(segment, nil, scoreFunction, offsets)
+		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(segment, nil, 0, offsets)
 		require.Error(t, err)
 		require.Nil(t, scores)
 		require.Contains(t, err.Error(), "search request or plan is nil")
 	})
 
-	t.Run("nil score function", func(t *testing.T) {
-		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(segment, searchReq, nil, offsets)
+	t.Run("negative scorer index", func(t *testing.T) {
+		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(segment, searchReq, -1, offsets)
 		require.Error(t, err)
 		require.Nil(t, scores)
-		require.Contains(t, err.Error(), "score function is nil")
+		require.Contains(t, err.Error(), "scorer index must be non-negative")
+	})
+
+	t.Run("scorer index out of range", func(t *testing.T) {
+		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(segment, searchReq, 2, offsets)
+		require.Error(t, err)
+		require.Nil(t, scores)
+		require.Contains(t, err.Error(), "scorer index 2 is out of range")
 	})
 
 	t.Run("nil offsets", func(t *testing.T) {
-		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(segment, searchReq, scoreFunction, nil)
+		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(segment, searchReq, 0, nil)
 		require.Error(t, err)
 		require.Nil(t, scores)
 		require.Contains(t, err.Error(), "offsets is nil")
@@ -76,7 +86,7 @@ func TestComputeScorerScoresOnChunkedOffsetsValidation(t *testing.T) {
 		badOffsets := newFloat32Chunked(t, []float32{0})
 		defer badOffsets.Release()
 
-		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(segment, searchReq, scoreFunction, badOffsets)
+		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(segment, searchReq, 0, badOffsets)
 		require.Error(t, err)
 		require.Nil(t, scores)
 		require.Contains(t, err.Error(), "offset column must be Int64")
@@ -86,7 +96,7 @@ func TestComputeScorerScoresOnChunkedOffsetsValidation(t *testing.T) {
 		badOffsets := newNullableInt64Chunked(t)
 		defer badOffsets.Release()
 
-		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(segment, searchReq, scoreFunction, badOffsets)
+		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(segment, searchReq, 0, badOffsets)
 		require.Error(t, err)
 		require.Nil(t, scores)
 		require.Contains(t, err.Error(), "offset chunk 0 contains null")
@@ -96,7 +106,7 @@ func TestComputeScorerScoresOnChunkedOffsetsValidation(t *testing.T) {
 		emptyOffsets := arrow.NewChunked(arrow.PrimitiveTypes.Int64, nil)
 		defer emptyOffsets.Release()
 
-		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(segment, searchReq, scoreFunction, emptyOffsets)
+		scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(segment, searchReq, 0, emptyOffsets)
 		require.NoError(t, err)
 		require.NotNil(t, scores)
 		defer scores.Release()
@@ -117,10 +127,7 @@ func TestComputeScorerScoresOnChunkedOffsets(t *testing.T) {
 	scores, err := segcore.ComputeScorerScoresOnChunkedOffsets(
 		segment,
 		searchReq,
-		&planpb.ScoreFunction{
-			Weight: 2.5,
-			Type:   planpb.FunctionType_FunctionTypeWeight,
-		},
+		0,
 		offsets,
 	)
 	require.NoError(t, err)
@@ -140,10 +147,7 @@ func TestAsyncComputeScorerScoresOnChunkedOffsets(t *testing.T) {
 		context.Background(),
 		segment,
 		searchReq,
-		&planpb.ScoreFunction{
-			Weight: 3.5,
-			Type:   planpb.FunctionType_FunctionTypeWeight,
-		},
+		1,
 		offsets,
 	)
 	require.NoError(t, err)
@@ -188,10 +192,60 @@ func newBoostScoreTestContext(t *testing.T) (*segcore.CCollection, segcore.CSegm
 	})
 	require.NoError(t, err)
 
-	searchReq, err := mock_segcore.GenSearchPlanAndRequestsWithTopK(collection, []int64{segmentID}, 1, 10)
-	require.NoError(t, err)
+	searchReq := newBoostScoreTestSearchRequestForCollection(t, collection, segmentID)
 
 	return collection, segment, searchReq
+}
+
+func newBoostScoreTestSearchRequestForCollection(t *testing.T, collection *segcore.CCollection, segmentID int64) *segcore.SearchRequest {
+	t.Helper()
+	var vectorField *schemapb.FieldSchema
+	for _, field := range collection.Schema().GetFields() {
+		if field.GetDataType() == schemapb.DataType_FloatVector {
+			vectorField = field
+			break
+		}
+	}
+	require.NotNil(t, vectorField)
+
+	plan := &planpb.PlanNode{
+		Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{
+			VectorType:     planpb.VectorType_FloatVector,
+			FieldId:        vectorField.GetFieldID(),
+			QueryInfo:      &planpb.QueryInfo{Topk: 10, MetricType: "L2", SearchParams: `{"nprobe":10}`, RoundDecimal: -1},
+			PlaceholderTag: "$0",
+		}},
+		Scorers: []*planpb.ScoreFunction{
+			{Weight: 2.5, Type: planpb.FunctionType_FunctionTypeWeight},
+			{Weight: 3.5, Type: planpb.FunctionType_FunctionTypeWeight},
+		},
+	}
+	serializedPlan, err := proto.Marshal(plan)
+	require.NoError(t, err)
+	placeholderGroup, err := proto.Marshal(&commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{{
+			Tag:    "$0",
+			Type:   commonpb.PlaceholderType_FloatVector,
+			Values: [][]byte{make([]byte, mock_segcore.DefaultDim*4)},
+		}},
+	})
+	require.NoError(t, err)
+
+	req := &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			CollectionID:       collection.ID(),
+			PlaceholderGroup:   placeholderGroup,
+			SerializedExprPlan: serializedPlan,
+			DslType:            commonpb.DslType_BoolExprV1,
+			Nq:                 1,
+			MvccTimestamp:      typeutil.MaxTimestamp,
+		},
+		SegmentIDs: []int64{segmentID},
+		Scope:      querypb.DataScope_Historical,
+	}
+	searchReq, err := segcore.NewSearchRequest(collection, req, placeholderGroup)
+	require.NoError(t, err)
+	return searchReq
 }
 
 func initBoostScoreTestEnv(t *testing.T) {

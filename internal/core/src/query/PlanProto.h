@@ -14,6 +14,7 @@
 #include <boost/dynamic_bitset.hpp>
 #include <functional>
 #include <memory>
+#include <string>
 
 #include "Plan.h"
 #include "PlanNode.h"
@@ -23,6 +24,13 @@
 #include "rescores/Scorer.h"
 
 namespace milvus::query {
+
+struct RoaringPlanParseContext;
+
+// Returns a bounded plan-proto diagnostic string with client-supplied
+// membership blobs replaced by size markers. Intended only for debug logging.
+std::string
+PlanProtoDebugString(const proto::plan::PlanNode& plan_node_proto);
 
 class ProtoParser {
  public:
@@ -124,6 +132,9 @@ class ProtoParser {
     ParseBloomFilterExprs(const proto::plan::BloomFilterExpr& expr_pb);
 
     expr::TypedExprPtr
+    ParseRoaringFilterExprs(const proto::plan::RoaringFilterExpr& expr_pb);
+
+    expr::TypedExprPtr
     ParseValueExprs(const proto::plan::ValueExpr& expr_pb);
 
     void
@@ -135,6 +146,7 @@ class ProtoParser {
 
  private:
     const SchemaPtr schema;
+    RoaringPlanParseContext* roaring_plan_context_ = nullptr;
 };
 
 }  // namespace milvus::query

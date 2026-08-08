@@ -342,6 +342,21 @@ func (s *DeleteOptionSuite) TestWithNamespace() {
 	s.Equal(namespace, req.GetNamespace())
 }
 
+func (s *DeleteOptionSuite) TestWithTemplateParam() {
+	blob, err := NewRoaringBitmapBlob([]int64{-1, 0, 42})
+	s.Require().NoError(err)
+
+	req := NewDeleteOption("collection").
+		WithExpr("roaring_match(id, {ids})").
+		WithTemplateParam("ids", blob).
+		Request()
+	value := req.GetExprTemplateValues()["ids"]
+	s.Require().NotNil(value)
+	bytesValue, ok := value.GetVal().(*schemapb.TemplateValue_BytesVal)
+	s.Require().True(ok)
+	s.Equal([]byte(blob), bytesValue.BytesVal)
+}
+
 func TestDeleteOption(t *testing.T) {
 	suite.Run(t, new(DeleteOptionSuite))
 }

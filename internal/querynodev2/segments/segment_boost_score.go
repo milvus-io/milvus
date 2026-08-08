@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -32,27 +31,27 @@ func ComputeScorerScoresOnChunkedOffsets(
 	ctx context.Context,
 	segment Segment,
 	searchReq *segcore.SearchRequest,
-	scorer *planpb.ScoreFunction,
+	scorerIndex int,
 	offsets *arrow.Chunked,
 ) (*arrow.Chunked, error) {
-	return computeScorerScoresOnChunkedOffsets(ctx, segment, searchReq, scorer, offsets, false)
+	return computeScorerScoresOnChunkedOffsets(ctx, segment, searchReq, scorerIndex, offsets, false)
 }
 
 func AsyncComputeScorerScoresOnChunkedOffsets(
 	ctx context.Context,
 	segment Segment,
 	searchReq *segcore.SearchRequest,
-	scorer *planpb.ScoreFunction,
+	scorerIndex int,
 	offsets *arrow.Chunked,
 ) (*arrow.Chunked, error) {
-	return computeScorerScoresOnChunkedOffsets(ctx, segment, searchReq, scorer, offsets, true)
+	return computeScorerScoresOnChunkedOffsets(ctx, segment, searchReq, scorerIndex, offsets, true)
 }
 
 func computeScorerScoresOnChunkedOffsets(
 	ctx context.Context,
 	segment Segment,
 	searchReq *segcore.SearchRequest,
-	scorer *planpb.ScoreFunction,
+	scorerIndex int,
 	offsets *arrow.Chunked,
 	async bool,
 ) (*arrow.Chunked, error) {
@@ -73,7 +72,7 @@ func computeScorerScoresOnChunkedOffsets(
 	defer local.ptrLock.Unpin()
 
 	if async {
-		return segcore.AsyncComputeScorerScoresOnChunkedOffsets(ctx, local.csegment, searchReq, scorer, offsets)
+		return segcore.AsyncComputeScorerScoresOnChunkedOffsets(ctx, local.csegment, searchReq, scorerIndex, offsets)
 	}
-	return segcore.ComputeScorerScoresOnChunkedOffsets(local.csegment, searchReq, scorer, offsets)
+	return segcore.ComputeScorerScoresOnChunkedOffsets(local.csegment, searchReq, scorerIndex, offsets)
 }

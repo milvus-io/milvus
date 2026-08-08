@@ -367,39 +367,54 @@ func FillBloomMatchExpressionValue(expr *planpb.Expr, call *planpb.CallExpr, tem
 	return nil
 }
 
+// walkExpr visits every expression node until visit returns true. Keeping the
+// recursion in one place prevents blob accounting, delete safety, element-level
+// guards, and log redaction from drifting as new container nodes are added.
+func walkExpr(expr *planpb.Expr, visit func(*planpb.Expr) bool) bool {
+	if expr == nil {
+		return false
+	}
+	if visit(expr) {
+		return true
+	}
+	switch e := expr.GetExpr().(type) {
+	case *planpb.Expr_CallExpr:
+		for _, param := range e.CallExpr.GetFunctionParameters() {
+			if walkExpr(param, visit) {
+				return true
+			}
+		}
+	case *planpb.Expr_UnaryExpr:
+		return walkExpr(e.UnaryExpr.GetChild(), visit)
+	case *planpb.Expr_BinaryExpr:
+		return walkExpr(e.BinaryExpr.GetLeft(), visit) || walkExpr(e.BinaryExpr.GetRight(), visit)
+	case *planpb.Expr_BinaryArithExpr:
+		return walkExpr(e.BinaryArithExpr.GetLeft(), visit) || walkExpr(e.BinaryArithExpr.GetRight(), visit)
+	case *planpb.Expr_RandomSampleExpr:
+		return walkExpr(e.RandomSampleExpr.GetPredicate(), visit)
+	case *planpb.Expr_ElementFilterExpr:
+		return walkExpr(e.ElementFilterExpr.GetElementExpr(), visit) ||
+			walkExpr(e.ElementFilterExpr.GetPredicate(), visit)
+	case *planpb.Expr_MatchExpr:
+		return walkExpr(e.MatchExpr.GetPredicate(), visit)
+	}
+	return false
+}
+
 // hasBloomFilterExpr reports whether the expression tree contains a bloom
 // filter membership node — either a materialized BloomFilterExpr or a
 // still-deferred bloom_match call.
 func hasBloomFilterExpr(expr *planpb.Expr) bool {
-	switch e := expr.GetExpr().(type) {
-	case *planpb.Expr_BloomFilterExpr:
-		return true
-	case *planpb.Expr_CallExpr:
-		if e.CallExpr.GetFunctionName() == BloomMatchFunctionName {
+	return walkExpr(expr, func(node *planpb.Expr) bool {
+		switch e := node.GetExpr().(type) {
+		case *planpb.Expr_BloomFilterExpr:
 			return true
+		case *planpb.Expr_CallExpr:
+			return e.CallExpr.GetFunctionName() == BloomMatchFunctionName
+		default:
+			return false
 		}
-		for _, param := range e.CallExpr.GetFunctionParameters() {
-			if hasBloomFilterExpr(param) {
-				return true
-			}
-		}
-		return false
-	case *planpb.Expr_UnaryExpr:
-		return hasBloomFilterExpr(e.UnaryExpr.GetChild())
-	case *planpb.Expr_BinaryExpr:
-		return hasBloomFilterExpr(e.BinaryExpr.GetLeft()) || hasBloomFilterExpr(e.BinaryExpr.GetRight())
-	case *planpb.Expr_RandomSampleExpr:
-		return hasBloomFilterExpr(e.RandomSampleExpr.GetPredicate())
-	case *planpb.Expr_ElementFilterExpr:
-		return hasBloomFilterExpr(e.ElementFilterExpr.GetElementExpr()) ||
-			hasBloomFilterExpr(e.ElementFilterExpr.GetPredicate())
-	case *planpb.Expr_MatchExpr:
-		// MATCH_*(struct_array, <predicate>) nests a predicate that may itself
-		// contain bloom_match; recurse so the delete-safety guard is not bypassed.
-		return hasBloomFilterExpr(e.MatchExpr.GetPredicate())
-	default:
-		return false
-	}
+	})
 }
 
 // PlanContainsBloomFilter reports whether the plan's main predicate or any
@@ -430,29 +445,12 @@ func PlanContainsBloomFilter(plan *planpb.PlanNode) bool {
 // collectBloomFilterExprs appends every BloomFilterExpr node in the tree.
 // Mirrors the node set of hasBloomFilterExpr.
 func collectBloomFilterExprs(expr *planpb.Expr, out *[]*planpb.BloomFilterExpr) {
-	if expr == nil {
-		return
-	}
-	switch e := expr.GetExpr().(type) {
-	case *planpb.Expr_BloomFilterExpr:
-		*out = append(*out, e.BloomFilterExpr)
-	case *planpb.Expr_CallExpr:
-		for _, param := range e.CallExpr.GetFunctionParameters() {
-			collectBloomFilterExprs(param, out)
+	walkExpr(expr, func(node *planpb.Expr) bool {
+		if e, ok := node.GetExpr().(*planpb.Expr_BloomFilterExpr); ok {
+			*out = append(*out, e.BloomFilterExpr)
 		}
-	case *planpb.Expr_UnaryExpr:
-		collectBloomFilterExprs(e.UnaryExpr.GetChild(), out)
-	case *planpb.Expr_BinaryExpr:
-		collectBloomFilterExprs(e.BinaryExpr.GetLeft(), out)
-		collectBloomFilterExprs(e.BinaryExpr.GetRight(), out)
-	case *planpb.Expr_RandomSampleExpr:
-		collectBloomFilterExprs(e.RandomSampleExpr.GetPredicate(), out)
-	case *planpb.Expr_ElementFilterExpr:
-		collectBloomFilterExprs(e.ElementFilterExpr.GetElementExpr(), out)
-		collectBloomFilterExprs(e.ElementFilterExpr.GetPredicate(), out)
-	case *planpb.Expr_MatchExpr:
-		collectBloomFilterExprs(e.MatchExpr.GetPredicate(), out)
-	}
+		return false
+	})
 }
 
 func planPredicates(plan *planpb.PlanNode) *planpb.Expr {
@@ -467,48 +465,61 @@ func planPredicates(plan *planpb.PlanNode) *planpb.Expr {
 	return nil
 }
 
-// bloomRedactedPlan wraps a plan so its String() elides bloom_match blobs. As a
-// fmt.Stringer, mlog.Stringer defers the work: when the log level is disabled,
-// String() is never called and there is zero cost.
-type bloomRedactedPlan struct{ plan *planpb.PlanNode }
+// membershipRedactedPlan wraps a plan so its String() elides both approximate
+// bloom_match blobs and exact roaring_match blobs. As a fmt.Stringer,
+// mlog.Stringer defers the work: when the log level is disabled, String() is
+// never called and there is zero cost.
+type membershipRedactedPlan struct{ plan *planpb.PlanNode }
 
-func (p bloomRedactedPlan) String() string {
+func (p membershipRedactedPlan) String() string {
 	if p.plan == nil {
 		return "<nil>"
 	}
 	var blooms []*planpb.BloomFilterExpr
+	var roarings []*planpb.RoaringFilterExpr
 	collectBloomFilterExprs(planPredicates(p.plan), &blooms)
-	// Scorer filters carry their own predicate tree and can embed a bloom blob
-	// too (function-score / rerank filters); redact those as well.
+	collectRoaringFilterExprs(planPredicates(p.plan), &roarings)
+	// Scorer filters carry their own predicate tree and can embed membership
+	// blobs too (function-score / rerank filters); redact those as well.
 	for _, sc := range p.plan.GetScorers() {
 		collectBloomFilterExprs(sc.GetFilter(), &blooms)
+		collectRoaringFilterExprs(sc.GetFilter(), &roarings)
 	}
-	if len(blooms) == 0 {
+	if len(blooms) == 0 && len(roarings) == 0 {
 		return p.plan.String()
 	}
 	// Swap each blob for a short {N bytes} marker (a byte-slice pointer
 	// assignment — no copy, unlike proto.Clone which would duplicate the
 	// up-to-tens-of-MiB body), stringify, then restore the originals via defer.
 	// Safe because zap evaluates a Stringer field synchronously in this
-	// goroutine at the log call, before the plan is marshaled downstream, so no
-	// other reader observes the temporary state.
+	// goroutine at the log call, and these call sites own the task-local plan, so
+	// no other reader observes the temporary state.
 	saved := make([][]byte, len(blooms))
 	for i, bf := range blooms {
 		saved[i] = bf.FilterBlob
 		bf.FilterBlob = []byte(fmt.Sprintf("<%d bytes elided>", len(saved[i])))
 	}
+	savedRoarings := make([][]byte, len(roarings))
+	for i, rf := range roarings {
+		savedRoarings[i] = rf.BitmapBlob
+		rf.BitmapBlob = []byte(fmt.Sprintf("<%d bytes elided>", len(savedRoarings[i])))
+	}
 	defer func() {
 		for i, bf := range blooms {
 			bf.FilterBlob = saved[i]
+		}
+		for i, rf := range roarings {
+			rf.BitmapBlob = savedRoarings[i]
 		}
 	}()
 	return p.plan.String()
 }
 
 // RedactPlanForLog returns a fmt.Stringer that renders the plan with every
-// bloom_match filter blob replaced by a {size} marker, so a client's up-to-tens
-// -of-MiB blob never lands verbatim in a proxy debug log. Cheap when logging is
-// disabled (lazy) and when the plan has no bloom_match (no clone).
+// bloom_match or roaring_match blob replaced by a {size} marker, so a client's
+// up-to-tens-of-MiB membership payload never lands verbatim in a proxy debug
+// log. Cheap when logging is disabled (lazy) and when the plan has no
+// membership blob (no clone).
 func RedactPlanForLog(plan *planpb.PlanNode) fmt.Stringer {
-	return bloomRedactedPlan{plan: plan}
+	return membershipRedactedPlan{plan: plan}
 }

@@ -10,15 +10,28 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <google/protobuf/io/coded_stream.h>
+#include <google/protobuf/io/zero_copy_stream_impl_lite.h>
+#include <roaring/roaring64map.hh>
+
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <initializer_list>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "common/Schema.h"
+#include "common/EasyAssert.h"
+#include "common/RoaringMembership.h"
 #include "common/Types.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
+#include "plan/PlanNode.h"
 #include "query/Plan.h"
+#include "query/PlanImpl.h"
 #include "query/PlanProto.h"
 
 namespace {
@@ -55,6 +68,98 @@ BuildSearchPlanNode(float search_topk_ratio,
     return plan_node;
 }
 
+void
+AppendU16(std::string& out, uint16_t value) {
+    out.push_back(static_cast<char>(value & 0xff));
+    out.push_back(static_cast<char>((value >> 8) & 0xff));
+}
+
+void
+AppendU32(std::string& out, uint32_t value) {
+    for (int i = 0; i < 4; ++i) {
+        out.push_back(static_cast<char>((value >> (8 * i)) & 0xff));
+    }
+}
+
+void
+AppendU64(std::string& out, uint64_t value) {
+    for (int i = 0; i < 8; ++i) {
+        out.push_back(static_cast<char>((value >> (8 * i)) & 0xff));
+    }
+}
+
+std::string
+WrapMrb1(std::string body, uint64_t cardinality) {
+    std::string blob(milvus::RoaringMembership::kHeaderSize, '\0');
+    std::memcpy(blob.data(), "MRB1", 4);
+    blob[4] = static_cast<char>(milvus::RoaringMembership::kVersion);
+    blob[6] =
+        static_cast<char>(milvus::RoaringMembership::kFormatPortableRoaring64);
+    for (int i = 0; i < 8; ++i) {
+        blob[8 + i] = static_cast<char>((cardinality >> (8 * i)) & 0xff);
+        blob[16 + i] = static_cast<char>((body.size() >> (8 * i)) & 0xff);
+    }
+    blob.append(body);
+    return blob;
+}
+
+std::string
+BuildCompactHighContainerMrb1(uint64_t count) {
+    std::string child;
+    AppendU16(child, 12347);
+    AppendU16(child, 0);
+    child.push_back('\0');
+    AppendU16(child, 0);
+    AppendU16(child, 0);
+    AppendU16(child, 0);
+
+    std::string body;
+    body.reserve(8 + static_cast<size_t>(count) * 15);
+    AppendU64(body, count);
+    for (uint64_t i = 0; i < count; ++i) {
+        AppendU32(body, static_cast<uint32_t>(i));
+        body.append(child);
+    }
+    return WrapMrb1(std::move(body), count);
+}
+
+std::string
+BuildMrb1(std::initializer_list<int64_t> values) {
+    roaring::Roaring64Map bitmap;
+    for (auto value : values) {
+        bitmap.add(static_cast<uint64_t>(value));
+    }
+    bitmap.runOptimize();
+    std::string body(bitmap.getSizeInBytes(true), '\0');
+    EXPECT_EQ(bitmap.write(body.data(), true), body.size());
+    return WrapMrb1(std::move(body), bitmap.cardinality());
+}
+
+void
+SetRoaringExpr(milvus::proto::plan::Expr* expr,
+               milvus::FieldId field_id,
+               const std::string& blob) {
+    auto* roaring = expr->mutable_roaring_filter_expr();
+    roaring->mutable_column_info()->set_field_id(field_id.get());
+    roaring->mutable_column_info()->set_data_type(
+        milvus::proto::schema::DataType::Int64);
+    roaring->set_bitmap_blob(blob);
+}
+
+std::shared_ptr<milvus::plan::FilterBitsNode>
+FindFilterBitsNode(const std::shared_ptr<milvus::plan::PlanNode>& node) {
+    if (auto filter =
+            std::dynamic_pointer_cast<milvus::plan::FilterBitsNode>(node)) {
+        return filter;
+    }
+    for (const auto& source : node->sources()) {
+        if (auto filter = FindFilterBitsNode(source)) {
+            return filter;
+        }
+    }
+    return nullptr;
+}
+
 }  // namespace
 
 TEST(PlanProto, NotSetUnsupported) {
@@ -63,8 +168,213 @@ TEST(PlanProto, NotSetUnsupported) {
     auto schema = BuildSchema();
 
     proto::plan::Expr expr_pb;
-    ProtoParser parser(schema);
+    query::ProtoParser parser(schema);
     ASSERT_ANY_THROW(parser.ParseExprs(expr_pb));
+}
+
+TEST(PlanProto, DebugStringRedactsMembershipBlobs) {
+    namespace planpb = milvus::proto::plan;
+    using milvus::query::PlanProtoDebugString;
+
+    const std::string roaring_secret = "MRB1-exact-member-set";
+    const std::string bloom_secret = "MBF1-approximate-member-set";
+
+    planpb::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_limit(10);
+    query->mutable_predicates()->mutable_roaring_filter_expr()->set_bitmap_blob(
+        roaring_secret);
+    plan_node.add_scorers()
+        ->mutable_filter()
+        ->mutable_bloom_filter_expr()
+        ->set_filter_blob(bloom_secret);
+
+    const auto debug = PlanProtoDebugString(plan_node);
+    EXPECT_EQ(debug.find(roaring_secret), std::string::npos);
+    EXPECT_EQ(debug.find(bloom_secret), std::string::npos);
+    EXPECT_NE(debug.find("bytes elided"), std::string::npos);
+    EXPECT_EQ(
+        plan_node.query().predicates().roaring_filter_expr().bitmap_blob(),
+        roaring_secret);
+    EXPECT_EQ(plan_node.scorers(0).filter().bloom_filter_expr().filter_blob(),
+              bloom_secret);
+
+    planpb::PlanNode oversized;
+    oversized.mutable_query()
+        ->mutable_predicates()
+        ->mutable_roaring_filter_expr()
+        ->set_bitmap_blob("MRB1" + std::string(5000, 'x'));
+    const auto oversized_debug = PlanProtoDebugString(oversized);
+    EXPECT_EQ(oversized_debug.find("MRB1"), std::string::npos);
+    EXPECT_NE(oversized_debug.find("bytes, elided"), std::string::npos);
+}
+
+// A node whose descriptor pool predates a membership field keeps the blob in
+// the UnknownFieldSet, where per-field redaction cannot reach it and
+// ShortDebugString() would print it as raw bytes. Simulated by appending a
+// field number this build does not know to a serialized plan.
+TEST(PlanProto, DebugStringDropsUnknownFieldBlobs) {
+    namespace planpb = milvus::proto::plan;
+    using milvus::query::PlanProtoDebugString;
+
+    const std::string secret = "MRB1-secret-member-bytes";
+
+    planpb::PlanNode plan_node;
+    plan_node.mutable_query()->set_limit(10);
+    std::string wire;
+    ASSERT_TRUE(plan_node.SerializeToString(&wire));
+
+    // Field 4095, length-delimited (wire type 2), carrying the blob. No such
+    // field exists in PlanNode, so it parses into the UnknownFieldSet exactly
+    // as a newer peer's field would on an older node.
+    {
+        google::protobuf::io::StringOutputStream out(&wire);
+        google::protobuf::io::CodedOutputStream coded(&out);
+        coded.WriteVarint32((4095u << 3) | 2u);
+        coded.WriteVarint32(static_cast<uint32_t>(secret.size()));
+        coded.WriteString(secret);
+    }
+
+    planpb::PlanNode unaware;
+    ASSERT_TRUE(unaware.ParseFromString(wire));
+    ASSERT_GT(unaware.GetReflection()->GetUnknownFields(unaware).field_count(),
+              0)
+        << "precondition: the blob must land in unknown fields";
+    ASSERT_NE(unaware.ShortDebugString().find("MRB1"), std::string::npos)
+        << "precondition: an unredacted dump would leak the blob";
+
+    const auto debug = PlanProtoDebugString(unaware);
+    EXPECT_EQ(debug.find(secret), std::string::npos);
+    EXPECT_EQ(debug.find("MRB1"), std::string::npos);
+    // The content is gone but the fact is kept: a version skew is exactly what
+    // someone reading this log line needs to see.
+    EXPECT_NE(debug.find("1 unknown fields"), std::string::npos) << debug;
+    EXPECT_NE(debug.find("bytes elided>"), std::string::npos) << debug;
+
+    // The caller's plan is untouched; only the rendered copy is scrubbed.
+    EXPECT_GT(unaware.GetReflection()->GetUnknownFields(unaware).field_count(),
+              0);
+}
+
+// The membership branches used to return right after eliding the blob, so a
+// nested message under them -- column_info -- was never walked and kept its
+// unknown fields. Exercises a deeper path than the root-level test above.
+TEST(PlanProto, DebugStringDropsUnknownFieldsNestedUnderMembershipExpr) {
+    namespace planpb = milvus::proto::plan;
+    using milvus::query::PlanProtoDebugString;
+
+    const std::string secret = "future-sensitive-secret";
+
+    planpb::PlanNode plan_node;
+    plan_node.mutable_query()->set_limit(10);
+    auto* roaring = plan_node.mutable_query()
+                        ->mutable_predicates()
+                        ->mutable_roaring_filter_expr();
+    roaring->set_bitmap_blob("MRB1-blob-bytes");
+    roaring->mutable_column_info()->set_field_id(101);
+
+    // Append an unknown field to column_info, nested two levels below the
+    // membership expression whose branch used to return early.
+    {
+        std::string column_wire;
+        ASSERT_TRUE(roaring->column_info().SerializeToString(&column_wire));
+        google::protobuf::io::StringOutputStream out(&column_wire);
+        google::protobuf::io::CodedOutputStream coded(&out);
+        coded.WriteVarint32((4095u << 3) | 2u);
+        coded.WriteVarint32(static_cast<uint32_t>(secret.size()));
+        coded.WriteString(secret);
+        coded.Trim();
+        ASSERT_TRUE(
+            roaring->mutable_column_info()->ParseFromString(column_wire));
+    }
+    ASSERT_GT(roaring->column_info()
+                  .GetReflection()
+                  ->GetUnknownFields(roaring->column_info())
+                  .field_count(),
+              0)
+        << "precondition: the secret must live in a nested unknown field";
+    ASSERT_NE(plan_node.ShortDebugString().find(secret), std::string::npos)
+        << "precondition: an unredacted dump would leak it";
+
+    const auto debug = PlanProtoDebugString(plan_node);
+    EXPECT_EQ(debug.find(secret), std::string::npos) << debug;
+    EXPECT_EQ(debug.find("MRB1"), std::string::npos) << debug;
+    EXPECT_NE(debug.find("bytes elided"), std::string::npos) << debug;
+    EXPECT_NE(debug.find("unknown fields"), std::string::npos) << debug;
+}
+
+TEST(PlanProto, RejectsAggregateRoaringDecodedMemoryBeforePlanDecode) {
+    using namespace milvus;
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    const auto vector_field_id = schema->get_field_id(FieldName("fakevec"));
+    const auto blob = BuildCompactHighContainerMrb1(170'000);
+    const auto summary = RoaringMembership::Validate(blob);
+    ASSERT_LE(summary.estimated_decoded_bytes,
+              RoaringMembership::kMaxEstimatedDecodedBytes);
+    ASSERT_GT(summary.estimated_decoded_bytes * 2,
+              RoaringMembership::kMaxEstimatedDecodedBytes);
+
+    auto plan_node = BuildSearchPlanNode(1.0f, 1.0f, vector_field_id);
+    for (int i = 0; i < 2; ++i) {
+        auto* scorer = plan_node.add_scorers();
+        scorer->mutable_filter()
+            ->mutable_roaring_filter_expr()
+            ->set_bitmap_blob(blob);
+    }
+
+    query::ProtoParser parser(schema);
+    try {
+        static_cast<void>(parser.CreatePlan(plan_node));
+        FAIL() << "aggregate decoded-memory budget must reject the plan";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::ExprInvalid);
+        EXPECT_NE(
+            std::string(error.what()).find("aggregate roaring membership"),
+            std::string::npos);
+    }
+}
+
+TEST(PlanProto, SharesIdenticalRoaringMembershipAcrossPlanAndScorers) {
+    using namespace milvus;
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    const auto vector_field_id = schema->get_field_id(FieldName("fakevec"));
+    const auto age_field_id = schema->get_field_id(FieldName("age"));
+    const auto blob = BuildMrb1({-1, 0, 42});
+    auto plan_node = BuildSearchPlanNode(1.0f, 1.0f, vector_field_id);
+    auto* binary = plan_node.mutable_vector_anns()
+                       ->mutable_predicates()
+                       ->mutable_binary_expr();
+    binary->set_op(planpb::BinaryExpr::LogicalAnd);
+    SetRoaringExpr(binary->mutable_left(), age_field_id, blob);
+    SetRoaringExpr(binary->mutable_right(), age_field_id, blob);
+    auto* scorer_proto = plan_node.add_scorers();
+    scorer_proto->set_type(planpb::FunctionTypeWeight);
+    scorer_proto->set_weight(2.0F);
+    SetRoaringExpr(scorer_proto->mutable_filter(), age_field_id, blob);
+
+    query::ProtoParser parser(schema);
+    auto plan = parser.CreatePlan(plan_node);
+    auto filter_node = FindFilterBitsNode(plan->plan_node_->plannodes_);
+    ASSERT_NE(filter_node, nullptr);
+    const auto& children = filter_node->filter()->inputs();
+    ASSERT_EQ(children.size(), 2);
+    const auto left =
+        std::dynamic_pointer_cast<const expr::RoaringFilterExpr>(children[0]);
+    const auto right =
+        std::dynamic_pointer_cast<const expr::RoaringFilterExpr>(children[1]);
+    ASSERT_NE(left, nullptr);
+    ASSERT_NE(right, nullptr);
+    EXPECT_EQ(left->membership_, right->membership_);
+    ASSERT_EQ(plan->scorers_.size(), 1);
+    const auto scorer_filter =
+        std::dynamic_pointer_cast<const expr::RoaringFilterExpr>(
+            plan->scorers_[0]->filter());
+    ASSERT_NE(scorer_filter, nullptr);
+    EXPECT_EQ(left->membership_, scorer_filter->membership_);
 }
 
 TEST(PlanProto, RejectsGlobalRefineRatiosBelowOne) {

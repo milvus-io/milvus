@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/binary"
 	"strconv"
 	"testing"
 
@@ -36,13 +37,64 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/roaringfilter"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
+
+func TestWrapPlanCreationError(t *testing.T) {
+	t.Run("preserves parameter too large", func(t *testing.T) {
+		cause := merr.WrapErrParameterTooLarge("membership filter plan")
+		err := wrapPlanCreationError(cause, "failed to create query plan")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		assert.Equal(t, int32(1102), merr.Code(err))
+		assert.Contains(t, err.Error(), "failed to create query plan")
+	})
+
+	t.Run("keeps ordinary parser failures parameter invalid", func(t *testing.T) {
+		cause := merr.WrapErrQueryPlanMsg("invalid expression")
+		err := wrapPlanCreationError(cause, "failed to create query plan")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, cause)
+		assert.ErrorIs(t, err, merr.ErrQueryPlan)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Equal(t, int32(1100), merr.Code(err))
+		assert.Equal(t, "failed to create query plan: invalid expression: query plan failed: invalid parameter", err.Error())
+	})
+}
 
 func bloomPlanSizeTestLeaf(blob []byte) *planpb.Expr {
 	return &planpb.Expr{Expr: &planpb.Expr_BloomFilterExpr{
 		BloomFilterExpr: &planpb.BloomFilterExpr{FilterBlob: blob},
 	}}
+}
+
+func roaringPlanSizeTestLeaf(blob []byte) *planpb.Expr {
+	return &planpb.Expr{Expr: &planpb.Expr_RoaringFilterExpr{
+		RoaringFilterExpr: &planpb.RoaringFilterExpr{BitmapBlob: blob},
+	}}
+}
+
+func compactRoaringPlanTestBlob(count uint64) []byte {
+	child := make([]byte, 11)
+	binary.LittleEndian.PutUint16(child[0:2], 12347)
+	body := make([]byte, 8, 8+int(count)*15)
+	binary.LittleEndian.PutUint64(body, count)
+	var key [4]byte
+	for i := uint64(0); i < count; i++ {
+		binary.LittleEndian.PutUint32(key[:], uint32(i))
+		body = append(body, key[:]...)
+		body = append(body, child...)
+	}
+
+	blob := make([]byte, roaringfilter.HeaderSize+len(body))
+	copy(blob[:4], roaringfilter.Magic)
+	binary.LittleEndian.PutUint16(blob[4:6], roaringfilter.Version)
+	binary.LittleEndian.PutUint16(blob[6:8], roaringfilter.FormatPortableRoaring64)
+	binary.LittleEndian.PutUint64(blob[8:16], count)
+	binary.LittleEndian.PutUint64(blob[16:24], uint64(len(body)))
+	copy(blob[roaringfilter.HeaderSize:], body)
+	return blob
 }
 
 func bloomPlanSizeTestPlan(blob []byte, copies int) *planpb.PlanNode {
@@ -75,7 +127,7 @@ func TestMarshalPlanWithBloomFilterSizeLimit(t *testing.T) {
 
 	t.Run("exact limit succeeds", func(t *testing.T) {
 		params.Save(key, strconv.Itoa(repeatedPlanSize))
-		serialized, accumulated, err := marshalPlanWithBloomFilterSizeLimit(repeatedPlan, 0)
+		serialized, accumulated, err := marshalPlanWithFilterSizeLimit(repeatedPlan, 0)
 		require.NoError(t, err)
 		assert.Len(t, serialized, repeatedPlanSize)
 		assert.Equal(t, int64(repeatedPlanSize), accumulated)
@@ -83,7 +135,7 @@ func TestMarshalPlanWithBloomFilterSizeLimit(t *testing.T) {
 
 	t.Run("repeated reference over limit is input error 1102", func(t *testing.T) {
 		params.Save(key, strconv.Itoa(repeatedPlanSize-1))
-		serialized, accumulated, err := marshalPlanWithBloomFilterSizeLimit(repeatedPlan, 0)
+		serialized, accumulated, err := marshalPlanWithFilterSizeLimit(repeatedPlan, 0)
 		require.Error(t, err)
 		assert.Nil(t, serialized, "the amplified plan must be rejected before proto.Marshal allocates its output")
 		assert.Zero(t, accumulated)
@@ -105,12 +157,12 @@ func TestMarshalPlanWithBloomFilterSizeLimit(t *testing.T) {
 		singlePlanSize := proto.Size(singlePlan)
 		params.Save(key, strconv.Itoa(singlePlanSize*2-1))
 
-		first, accumulated, err := marshalPlanWithBloomFilterSizeLimit(singlePlan, 0)
+		first, accumulated, err := marshalPlanWithFilterSizeLimit(singlePlan, 0)
 		require.NoError(t, err)
 		assert.Len(t, first, singlePlanSize)
 		assert.Equal(t, int64(singlePlanSize), accumulated)
 
-		second, unchanged, err := marshalPlanWithBloomFilterSizeLimit(singlePlan, accumulated)
+		second, unchanged, err := marshalPlanWithFilterSizeLimit(singlePlan, accumulated)
 		require.Error(t, err)
 		assert.Nil(t, second)
 		assert.Equal(t, accumulated, unchanged)
@@ -125,19 +177,70 @@ func TestMarshalPlanWithBloomFilterSizeLimit(t *testing.T) {
 			}},
 		}
 		params.Save(key, strconv.Itoa(proto.Size(scorerPlan)-1))
-		serialized, _, err := marshalPlanWithBloomFilterSizeLimit(scorerPlan, 0)
+		serialized, _, err := marshalPlanWithFilterSizeLimit(scorerPlan, 0)
 		require.Error(t, err)
 		assert.Nil(t, serialized)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	})
 
-	t.Run("large non-bloom plan is unaffected", func(t *testing.T) {
+	t.Run("roaring filter is included", func(t *testing.T) {
+		roaringPlan := &planpb.PlanNode{Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{Predicates: roaringPlanSizeTestLeaf(blob)},
+		}}
+		params.Save(key, strconv.Itoa(proto.Size(roaringPlan)-1))
+		serialized, accumulated, err := marshalPlanWithFilterSizeLimit(roaringPlan, 0)
+		require.Error(t, err)
+		assert.Nil(t, serialized)
+		assert.Zero(t, accumulated)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	})
+
+	t.Run("roaring decoded cost is bounded before marshal", func(t *testing.T) {
+		blob := compactRoaringPlanTestBlob(170_000)
+		plan := &planpb.PlanNode{Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{Predicates: &planpb.Expr{Expr: &planpb.Expr_BinaryExpr{
+				BinaryExpr: &planpb.BinaryExpr{
+					Op:    planpb.BinaryExpr_LogicalAnd,
+					Left:  roaringPlanSizeTestLeaf(blob),
+					Right: roaringPlanSizeTestLeaf(blob),
+				},
+			}}},
+		}}
+		params.Save(key, strconv.Itoa(paramtable.DefaultMaxBloomFilterPlanSize))
+
+		serialized, accumulated, err := marshalPlanWithFilterSizeLimit(plan, 0)
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		assert.Nil(t, serialized)
+		assert.Zero(t, accumulated)
+		assert.Contains(t, err.Error(), "estimated decoded size")
+	})
+
+	t.Run("hybrid sub-plans share the roaring decoded budget", func(t *testing.T) {
+		blob := compactRoaringPlanTestBlob(170_000)
+		plan := &planpb.PlanNode{Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{Predicates: roaringPlanSizeTestLeaf(blob)},
+		}}
+		params.Save(key, strconv.Itoa(paramtable.DefaultMaxBloomFilterPlanSize))
+
+		first, planBytes, decodedBytes, err := marshalPlanWithFilterSizeLimits(plan, 0, 0)
+		require.NoError(t, err)
+		assert.NotEmpty(t, first)
+		assert.NotZero(t, decodedBytes)
+
+		second, unchangedPlanBytes, unchangedDecodedBytes, err := marshalPlanWithFilterSizeLimits(plan, planBytes, decodedBytes)
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		assert.Nil(t, second)
+		assert.Equal(t, planBytes, unchangedPlanBytes)
+		assert.Equal(t, decodedBytes, unchangedDecodedBytes)
+	})
+
+	t.Run("large non-membership plan is unaffected", func(t *testing.T) {
 		nonBloomPlan := &planpb.PlanNode{
 			Node:           &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{}},
 			OutputFieldIds: make([]int64, 4096),
 		}
 		params.Save(key, "1")
-		serialized, accumulated, err := marshalPlanWithBloomFilterSizeLimit(nonBloomPlan, 0)
+		serialized, accumulated, err := marshalPlanWithFilterSizeLimit(nonBloomPlan, 0)
 		require.NoError(t, err)
 		assert.NotEmpty(t, serialized)
 		assert.Zero(t, accumulated)
@@ -255,8 +358,6 @@ func TestQueryTaskBloomFilterPlanSizeLimit(t *testing.T) {
 		Return(&collectionInfo{}, nil).Maybe()
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
 		Return(schema, nil).Maybe()
-	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(map[string]int64{}, nil)
 
 	oldCache := globalMetaCache
 	globalMetaCache = cache
