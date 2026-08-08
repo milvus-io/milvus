@@ -297,8 +297,8 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 
 	job := c.importMeta.GetJob(ctx, jobID)
 	if job == nil {
-		mlog.Warn(ctx, "RollbackImport: job not found, skipping", mlog.FieldJobID(jobID))
-		return nil
+		mlog.Info(ctx, "RollbackImport: job not found, retry later", mlog.FieldJobID(jobID))
+		return merr.WrapErrImportSysFailedMsg("job %d not found, waiting for import job creation", jobID)
 	}
 	state := job.GetState()
 	if state == internalpb.ImportJobState_Committing ||
