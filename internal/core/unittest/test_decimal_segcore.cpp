@@ -72,18 +72,21 @@ TEST(DecimalSegcore, GrowingSegmentInsertAndBulkSubscript) {
         vec_floats->add_data(0.1f * i);
     }
 
-    // Timestamps
+    // Timestamps and row IDs are passed as separate arrays to segment->Insert(),
+    // not stored inside InsertRecord (which only carries fields_data + num_rows).
+    std::vector<int64_t> row_ids(num_rows);
+    std::vector<Timestamp> timestamps(num_rows);
     for (int i = 0; i < num_rows; ++i) {
-        insert_record->add_timestamps(100 + i);
-        insert_record->add_row_ids(i);
+        row_ids[i] = i;
+        timestamps[i] = 100 + i;
     }
 
     auto reserved_offset = segment->PreInsert(num_rows);
     ASSERT_EQ(reserved_offset, 0);
     segment->Insert(reserved_offset,
                     num_rows,
-                    insert_record->row_ids().data(),
-                    insert_record->timestamps().data(),
+                    row_ids.data(),
+                    timestamps.data(),
                     insert_record.get());
 
     // Retrieve via bulk_subscript

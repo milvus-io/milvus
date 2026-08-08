@@ -765,6 +765,8 @@ func (s *NumRowsWithSchemaSuite) SetupSuite() {
 			{FieldID: 114, Name: "sparse_vector", DataType: schemapb.DataType_SparseFloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 			{FieldID: 115, Name: "int8_vector", DataType: schemapb.DataType_Int8Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 			{FieldID: 116, Name: "array_vector_float16", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+			{FieldID: 117, Name: "decimal", DataType: schemapb.DataType_Decimal,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "precision", Value: "18"}, {Key: "scale", Value: "4"}}},
 			{FieldID: 999, Name: "unknown", DataType: schemapb.DataType_None},
 		},
 	}
@@ -980,6 +982,31 @@ func (s *NumRowsWithSchemaSuite) TestNormalCases() {
 				},
 			},
 			expect: 2,
+		},
+		{
+			tag: "decimal",
+			input: &schemapb.FieldData{
+				FieldName: "decimal",
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_BytesData{
+						BytesData: &schemapb.BytesArray{Data: [][]byte{{0x01}, {0x02}, {0x03}, {0x04}, {0x05}}},
+					}},
+				},
+			},
+			expect: 5,
+		},
+		{
+			tag: "decimal_nullable",
+			input: &schemapb.FieldData{
+				FieldName: "decimal",
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_BytesData{
+						BytesData: &schemapb.BytesArray{Data: [][]byte{{0x01}, {}, {0x03}}},
+					}},
+				},
+				ValidData: []bool{true, false, true},
+			},
+			expect: 3,
 		},
 	}
 	for _, tc := range cases {
