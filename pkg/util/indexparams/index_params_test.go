@@ -620,3 +620,11 @@ func TestAppendPrepareInfo_parse(t *testing.T) {
 		assert.Equal(t, indexParams["adapt_for_cpu"], "true")
 	})
 }
+
+func TestConfigableIndexParams(t *testing.T) {
+	assert.True(t, IsConfigableIndexParam(common.MmapEnabledKey))
+	assert.True(t, IsConfigableIndexParam(common.WarmupKey))
+	assert.True(t, IsConfigableIndexParam(common.IndexOffsetCacheEnabledKey))
+	assert.True(t, IsConfigableIndexParam(common.EvictableEnabledKey))
+	assert.False(t, IsConfigableIndexParam(common.EvictableScalarFieldKey))
+}
