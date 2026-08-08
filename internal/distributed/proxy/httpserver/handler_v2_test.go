@@ -475,7 +475,7 @@ func TestTimeoutResponseRecorderIsolation(t *testing.T) {
 	assert.Equal(t, 4, recorder.Size())
 	assert.True(t, recorder.Written())
 
-	assert.NoError(t, recorder.CommitTo(realCtx.Writer))
+	assert.NoError(t, recorder.CommitTo(context.Background(), realCtx.Writer))
 	assert.Equal(t, http.StatusAccepted, realResponse.Code)
 	assert.Equal(t, "value", realResponse.Header().Get("X-Test"))
 	assert.Equal(t, "body", realResponse.Body.String())
@@ -2466,7 +2466,7 @@ func versionalV2(category string, action string) string {
 }
 
 func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
-	h := NewHandlersV2(proxy)
+	h := NewHandlersV2(proxy, 0)
 	ginHandler := gin.Default()
 	appV2 := ginHandler.Group("/v2/vectordb", genAuthMiddleWare(needAuth))
 	h.RegisterRoutesToV2(appV2)
