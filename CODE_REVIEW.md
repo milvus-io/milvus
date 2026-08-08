@@ -7,7 +7,11 @@ All PRs are checked in automatically by the sre-robot, with the following condit
    - Notes: If there is a `[skip e2e]` tag in the commit message, it skips running e2e tests automatically,
      but it still runs UT tests and code checkers.
 3. Reviewer passed, with a `/lgtm` label
-4. Approver passed, with a `/approve` label
+4. All required Approver approvals passed, with the Prow `approved` label and any additional policy label required for the changed files
+
+Every pull request requires approval from at least one Approver other than its author. Approvers can use the existing Prow flow by commenting `/approve`; GitHub review approvals continue to work when Prow recognizes them, but clicking the GitHub Review `Approve` button is not required. An author self-approval does not count even when Prow adds its normal `approved` label.
+
+A pull request that adds, modifies, renames, or deletes a formal Design Doc, as defined in [`docs/design-docs/README.md`](docs/design-docs/README.md), requires approval from at least two distinct Approvers, neither of whom may be the pull request author. After the two valid approvals are present, repository automation adds the dedicated `approved/design-doc` label. `/approve cancel`, `/remove-approve`, or a Request Changes review causes the policy to be recalculated.
 
 Generally speaking, reviewer is volunteered and can be anyone in the community who is familiar with the packages the PR modifies.
 Reviewers are responsible for the logic correctness, error handling, unit test coverage and code readability.

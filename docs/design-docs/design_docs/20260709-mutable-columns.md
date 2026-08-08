@@ -915,17 +915,6 @@ part of the segment's file set and are reloaded with the segment (see
 ## Validation Status
 
 Stated explicitly so a reviewer can see the confidence level of each claim.
-Prototypes live in `mutable-columns-prototype/`.
-
-**Validated by standalone prototype (executable evidence):**
-
-- Read-path performance: clean-chunk zero-overhead, the dense-chunk cost
-  curve, and the **refutation of materialize-then-scan** (`patch_bench.cpp`).
-  The design was corrected as a result.
-- Folding algebra + MVCC correctness for scalar SET/INCR, the `fold_ts`
-  watermark, and array APPEND/REMOVE `(R,S)` — 200k property-test cases each
-  (`fold_correctness.cpp`). This pass **refuted the original
-  APPEND/POP_FRONT `(k,S)` claim** and the design was corrected.
 
 **Asserted from code/doc reading, not build-verified:**
 
@@ -934,9 +923,6 @@ Prototypes live in `mutable-columns-prototype/`.
 - Streaming integration: the new codegen message type, PK→channel affinity,
   L0 routing, and CDC/recovery reuse (checked against the streaming-system
   docs, not a build).
-- Bit-packed `TargetBitmap` makes the clean scan cheaper than the prototype's
-  `uint8` buffer — which makes the dense-chunk multipliers *larger* than
-  reported (the prototype numbers are conservative).
 - PK→offset apply cost is delete-equivalent.
 
 **To validate during implementation (Phase-1 gates, in priority order):**
@@ -944,10 +930,12 @@ Prototypes live in `mutable-columns-prototype/`.
 1. **Overlay concurrency (I1–I5) under TSan** with concurrent readers +
    writer + pruner + an in-flight fold. Highest-risk unproven piece; the
    model is designed but not stress-tested.
-2. **POP_FRONT prune-materialization** end-to-end: prune collapses the chain
-   to a floor list at `safe_ts`, later ops still materialize correctly.
-   Extend `fold_correctness.cpp` to cover it.
-3. **Overlay memory and PK-apply throughput** at the target write rate,
+2. **Folding algebra and MVCC correctness** with implementation-level
+   property tests covering scalar SET/INCR, the `fold_ts` watermark, array
+   APPEND/REMOVE, and POP_FRONT prune-materialization end to end.
+3. **Read-path performance** in the production segcore path: clean-chunk
+   overhead, patched-row fix-up cost across densities, and fold thresholds.
+4. **Overlay memory and PK-apply throughput** at the target write rate,
    benchmarked against the delete-path baseline; ARRAY arena memory density
    separately.
 

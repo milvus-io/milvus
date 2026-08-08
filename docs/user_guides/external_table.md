@@ -688,4 +688,4 @@ client.drop_field(
 
 ## 11. Related Documentation
 
-- [Design Document: External Table](../design_docs/20260105-external_table.md)
+- [Design Document: External Table](../design-docs/design_docs/20260105-external_table.md)

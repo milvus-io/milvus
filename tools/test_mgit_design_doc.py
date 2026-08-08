@@ -11,11 +11,17 @@ spec.loader.exec_module(mgit)
 
 class DesignDocRefTest(unittest.TestCase):
     def test_accepts_in_repo_markdown_path(self):
-        self.assertTrue(
-            mgit.is_valid_design_doc_ref(
-                "docs/design-docs/design_docs/20260128-vector-compression.md"
-            )
-        )
+        accepted = [
+            "docs/design-docs/design_docs/20260128-vector-compression.md",
+            "docs/design-docs/design_docs/cdc/20260128-vector_compression.md",
+            "docs/design-docs/design_docs/README.md",
+            "docs/design-docs/design_docs/segcore/Search.md",
+            "docs/design-docs/design_docs/Legacy Topic/Old Design.md",
+            r"docs\design-docs\design_docs\20260128-vector-compression.md",
+        ]
+        for path in accepted:
+            with self.subTest(path=path):
+                self.assertTrue(mgit.is_valid_design_doc_ref(path))
 
     def test_rejects_github_url_even_when_it_contains_the_path(self):
         self.assertFalse(
@@ -32,12 +38,15 @@ class DesignDocRefTest(unittest.TestCase):
         )
 
     def test_rejects_directory_or_non_markdown_path(self):
-        self.assertFalse(mgit.is_valid_design_doc_ref("docs/design-docs/design_docs/"))
-        self.assertFalse(
-            mgit.is_valid_design_doc_ref(
-                "docs/design-docs/design_docs/20260128-vector-compression.txt"
-            )
-        )
+        rejected = [
+            "docs/design-docs/design_docs/",
+            "docs/design-docs/design_docs/20260128-vector-compression.txt",
+            "docs/design-docs/design_docs/../20260128-vector-compression.md",
+            "docs/design-docs/design_docs//20260128-vector-compression.md",
+        ]
+        for path in rejected:
+            with self.subTest(path=path):
+                self.assertFalse(mgit.is_valid_design_doc_ref(path))
 
 
 if __name__ == "__main__":

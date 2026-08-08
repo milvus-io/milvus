@@ -2,7 +2,7 @@
 
 Contributions to Milvus are welcome from everyone. We strive to make the contribution process simple and straightforward. Up-to-date information can be found at [milvus.io](https://milvus.io/).
 
-The following are a set of guidelines for contributing to Milvus. Following these guidelines makes contributing to this project easy and transparent. These are mostly guidelines, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
+The following are a set of guidelines for contributing to Milvus. Following these guidelines makes contributing to this project easy and transparent. Most of these are guidelines, but requirements explicitly stated with "must" or "required" are mandatory. Use your best judgment, and feel free to propose changes to this document in a pull request.
 
 As for everything else in the project, the contributions to Milvus are governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
@@ -67,9 +67,7 @@ As for everything else in the project, the contributions to Milvus are governed 
 If you want to become a contributor of Milvus, submit your pull requests! For those just getting started, see [GitHub workflow](#github-workflow) below.
 
 All submissions will be reviewed as quickly as possible.
-There will be a reviewer to review the codes, and an approver to review everything aside the codes, see [code review](CODE_REVIEW.md) for details.
-If everything is perfect, the reviewer will label `/lgtm`, and the approver will label `/approve`.
-Once the 2 labels are on your PR, and all actions pass, your PR will be merged into base branch automatically by our @sre-ci-robot
+See [code review](CODE_REVIEW.md) for the general review process. Every pull request must receive at least one approval from an Approver other than the pull request author; self-approval does not count. Pull requests that contain a formal Design Doc have the additional approval requirement described below.
 
 ### GitHub workflow
 
@@ -87,7 +85,7 @@ In your local repo:
 4.  Once getting approved, your code can be merged to `master`, yay!
 
 Here is the process illustrated in details:
-![](docs/developer_guides/figs/fork-and-pull.png)
+![](docs/dev/assets/fork-and-pull.png)
 
 Remember to [sync your forked repository](https://docs.github.com/en/github/getting-started-with-github/fork-a-repo#keep-your-fork-synced) _before_ submitting proposed changes upstream. If you have an existing local repository, please update it before you start, to minimize the chance of merge conflicts.
 
@@ -97,37 +95,46 @@ git fetch upstream
 git checkout upstream/master -b my-topic-branch
 ```
 
-![](docs/developer_guides/figs/local-develop-steps.png)
+![](docs/dev/assets/local-develop-steps.png)
 
 ### Design documents
 
-Milvus feature pull requests must provide a design document. This applies when the pull request title starts with `feat:` or the pull request is labeled `kind/feature`. Large enhancements that introduce new architecture, storage formats, public behavior, or upgrade impact should also include a design document; reviewers may add `kind/feature` when the design-doc requirement applies.
+Milvus feature pull requests must provide a design document. Large enhancements that introduce new architecture, storage formats, public behavior, or upgrade impact should also include one.
 
 To satisfy the requirement, do one of the following:
 
 - Add or update the design document in the same pull request as the related implementation.
 - Link an existing in-repo design document in the pull request description.
 
+For a release-branch pull request, the referenced Design Doc may exist only on
+the base repository's default branch and does not need to be copied to the
+target release branch.
+
 Use this pull request description format when linking an existing document:
 
 ```markdown
-design doc: docs/design-docs/design_docs/YYYYMMDD-short-descriptive-name.md
+design doc: docs/design-docs/design_docs/path/to/design.md
 ```
 
-Design documents must live under `docs/design-docs/design_docs/`. Name each file `YYYYMMDD-short-descriptive-name.md`, keep one design per file, and put images or diagrams under `docs/design-docs/assets/graphs/` or `docs/design-docs/assets/images/`. External design-doc repository links do not satisfy this requirement. Mergify adds the `do-not-merge/missing-design-doc` label to feature PRs until this requirement is met.
+Formal Design Docs are Markdown files under `docs/design-docs/design_docs/`, including documents in legacy or topic subdirectories. Existing documents remain formal Design Docs even when their historical filename or subdirectory does not follow the current recommendation. External repository links and user guides do not satisfy the feature Design Doc requirement.
 
-Start each design document with a clear title and metadata block:
+For new documents, use the recommended `YYYYMMDD-short-descriptive-name.md` filename with lowercase letters, numbers, hyphens, or underscores, and keep one design per file. Put images or diagrams under `docs/design-docs/assets/graphs/` or `docs/design-docs/assets/images/`. See [the Design Doc guide](docs/design-docs/README.md) for more details.
+
+Any pull request that adds, modifies, renames, or deletes a formal Design Doc must be approved by at least two distinct Approvers, neither of whom may be the pull request author. Approvers can record approval through the existing Prow process by commenting `/approve`; clicking the GitHub Review `Approve` button is not required. When both valid approvals are present, automation adds the dedicated `approved/design-doc` label. Renaming or moving a Design Doc out of the formal directory still counts as a Design Doc change.
+
+Start each design document with a clear title and metadata block. Every new or substantively revised Design Doc must include the four review fields below in the exact unbolded, machine-readable format shown:
 
 ```markdown
 # MEP: <Title>
 
-- **Created:** YYYY-MM-DD
-- **Author(s):** @github-handle
-- **Status:** Draft | Under Review | Approved | Implemented | Deprecated
-- **Component:** DataNode | QueryNode | Proxy | Coordinator | Storage | Index | SDK | Other
-- **Related Issues:** #xxx
-- **Released:** Milvus release version, if applicable
+- Feature DRI: @github-login
+- Primary Approver: @github-login
+- Independent Approver: @github-login
+- Design Review: YYYY-MM-DD
 ```
+
+The Feature DRI, Primary Approver, and Independent Approver must be three distinct GitHub users.
+The Design Doc template includes additional recommended lifecycle and discovery fields, but the four fields above are required for new or substantively revised Design Docs.
 
 Every design document should explain the problem, the proposed design, and how the design will be verified. Use these sections:
 

@@ -1034,7 +1034,7 @@ Extend beyond BM25 to support user-defined function types.
 
 ## 14. References
 
-- Milvus Architecture: [docs/architecture.md](../architecture.md)
-- Segcore Pipeline: [docs/segcore-pipeline.md](../segcore-pipeline.md)
-- Reduce Mechanism: [docs/reduce-mechanism.md](../reduce-mechanism.md)
-- BM25 Algorithm: [pkg/util/bm25/bm25.go](../../pkg/util/bm25/bm25.go)
+- Current subsystem guides: [docs/agent_guides](../../agent_guides/)
+- Historical Segcore overview: [segment_overview.md](../../archive/milvus-2.0/segcore/segment_overview.md)
+- Historical Milvus 2.5-2.6 load segment pipeline: [load-segment-pipeline.md](../../archive/milvus-2.5-2.6/load-segment-pipeline.md)
+- BM25 implementation: [pkg/util/bm25/bm25.go](../../../pkg/util/bm25/bm25.go)

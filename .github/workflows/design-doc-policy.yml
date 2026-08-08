@@ -1,0 +1,197 @@
+name: Design Doc Policy
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review]
+  issue_comment:
+    types: [created, edited, deleted]
+  workflow_run:
+    workflows: [Design Doc Policy Review Signal]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: >-
+    design-doc-policy-${{ github.event.pull_request.number ||
+    github.event.issue.number ||
+    github.event.workflow_run.display_title || github.run_id }}
+  # A canceled run could leave its explicit head-SHA check in progress.
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Publish Design Doc Policy check
+    if: ${{ github.event_name != 'issue_comment' || github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Invalidate previous head-SHA policy result
+        id: start-policy-check
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            let pullNumber =
+              context.payload.pull_request?.number ??
+              context.payload.issue?.number;
+            const workflowRun = context.payload.workflow_run;
+            if (!pullNumber && workflowRun) {
+              const match = workflowRun.display_title?.match(/^([1-9][0-9]*)$/);
+              if (!match) {
+                throw new Error("Review signal run name does not identify a PR");
+              }
+              pullNumber = Number(match[1]);
+            }
+            if (!pullNumber) {
+              throw new Error("Could not determine the pull request number");
+            }
+            const pullResponse = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: pullNumber,
+            });
+            if (workflowRun) {
+              const supportedEvents = new Set([
+                "pull_request_review",
+                "pull_request_review_comment",
+              ]);
+              if (
+                !supportedEvents.has(workflowRun.event) ||
+                pullResponse.data.head.sha !== workflowRun.head_sha ||
+                pullResponse.data.head.ref !== workflowRun.head_branch
+              ) {
+                throw new Error(
+                  "Review signal does not match the identified pull request",
+                );
+              }
+            }
+            const headSha = pullResponse.data.head.sha;
+            const externalId = `design-doc-policy-pr-${pullNumber}`;
+            const checkIds = [];
+
+            for (let page = 1; page <= 10; page += 1) {
+              const response = await github.rest.checks.listForRef({
+                owner,
+                repo,
+                ref: headSha,
+                check_name: "Design Doc Policy",
+                filter: "all",
+                per_page: 100,
+                page,
+              });
+              for (const check of response.data.check_runs) {
+                if (
+                  check.external_id === externalId &&
+                  check.app?.slug === "github-actions"
+                ) {
+                  checkIds.push(check.id);
+                }
+              }
+              if (response.data.check_runs.length < 100) {
+                break;
+              }
+              if (page === 10) {
+                throw new Error("Too many Design Doc Policy checks on one commit");
+              }
+            }
+
+            const output = {
+              title: "Design Doc policy is being evaluated",
+              summary:
+                "Validating Prow approvals, feature documentation, repository " +
+                "governance, and changed Design Doc headers.",
+            };
+            const startedAt = new Date().toISOString();
+            const uniqueCheckIds = [...new Set(checkIds)].sort((a, b) => a - b);
+
+            if (uniqueCheckIds.length === 0) {
+              const response = await github.rest.checks.create({
+                owner,
+                repo,
+                name: "Design Doc Policy",
+                head_sha: headSha,
+                status: "in_progress",
+                external_id: externalId,
+                output,
+              });
+              uniqueCheckIds.push(response.data.id);
+            } else {
+              for (const check_run_id of uniqueCheckIds) {
+                await github.rest.checks.update({
+                  owner,
+                  repo,
+                  check_run_id,
+                  status: "in_progress",
+                  started_at: startedAt,
+                  output,
+                });
+              }
+            }
+
+            return uniqueCheckIds;
+
+      - name: Checkout trusted workflow revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Test validator
+        run: >-
+          python3 -m unittest discover
+          -s .github/scripts
+          -p 'test_check_design_doc_policy.py'
+
+      - name: Validate Design Doc policy
+        id: validate-policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 .github/scripts/check_design_doc_policy.py
+          --event "$GITHUB_EVENT_PATH"
+
+      - name: Fail any unfinished head-SHA policy check
+        if: ${{ failure() && steps.start-policy-check.outcome == 'success' }}
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
+        env:
+          POLICY_CHECK_IDS: ${{ steps.start-policy-check.outputs.result }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const checkIds = JSON.parse(process.env.POLICY_CHECK_IDS || "[]");
+            const completedAt = new Date().toISOString();
+            for (const check_run_id of checkIds) {
+              const existing = await github.rest.checks.get({
+                owner,
+                repo,
+                check_run_id,
+              });
+              if (existing.data.status === "completed") {
+                continue;
+              }
+              await github.rest.checks.update({
+                owner,
+                repo,
+                check_run_id,
+                status: "completed",
+                conclusion: "failure",
+                completed_at: completedAt,
+                output: {
+                  title: "Design Doc policy could not complete",
+                  summary:
+                    "The trusted workflow failed before publishing a final " +
+                    "policy result. The check is failed closed; inspect this " +
+                    "workflow run.",
+                },
+              });
+            }
