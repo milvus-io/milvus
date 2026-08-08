@@ -1334,8 +1334,7 @@ class TestImport2PCRestOperation(TestBase):
     def _write_jsonl_and_upload(self, rows, file_name):
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
-            for row in rows:
-                f.write(json.dumps(row) + "\n")
+            f.writelines(json.dumps(row) + "\n" for row in rows)
         self.storage_client.upload_file(file_path, file_name)
         return file_path
 

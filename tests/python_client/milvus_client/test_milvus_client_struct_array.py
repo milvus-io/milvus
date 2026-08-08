@@ -5244,8 +5244,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
                     raise AssertionError(f"Bulk import job {job_id} unexpectedly completed")
                 log.info(f"Bulk import job {job_id} completed successfully")
                 return {"state": "Completed", "reason": None}
-        else:
-            raise Exception(f"Bulk import job {job_id} timeout after {timeout}s")
+        raise Exception(f"Bulk import job {job_id} timeout after {timeout}s")
 
         log.info("Bulk import finished")
 

@@ -3940,8 +3940,7 @@ class TestMinHashBulkImport(TestMilvusClientV2Base):
             elif state == "Completed" and progress == 100:
                 log.info(f"Bulk import job {job_id} completed successfully")
                 return {"state": "Completed", "reason": None}
-        else:
-            raise Exception(f"Bulk import job {job_id} timeout after {timeout}s")
+        raise Exception(f"Bulk import job {job_id} timeout after {timeout}s")
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("file_type", ["PARQUET", "JSON"])

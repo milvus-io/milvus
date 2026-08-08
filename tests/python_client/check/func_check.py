@@ -27,8 +27,7 @@ def _normalize_consistency_level(level):
         if level.isdigit():
             return _CONSISTENCY_LEVEL_NAMES.get(int(level), level)
         name = level.rsplit("_", 1)[-1]
-        if name.startswith("Cl"):
-            name = name[2:]
+        name = name.removeprefix("Cl")
         return _CONSISTENCY_LEVEL_NAME_BY_LOWER.get(name.lower(), level)
     try:
         return _CONSISTENCY_LEVEL_NAMES.get(int(level), level)

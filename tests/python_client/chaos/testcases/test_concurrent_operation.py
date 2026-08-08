@@ -139,7 +139,7 @@ class TestOperations(TestBase):
         log.info("*********************Test Start**********************")
         log.info(connections.get_connection_addr("default"))
         # event_records = EventRecords()
-        c_name = collection_name if collection_name else cf.gen_unique_str("Checker_")
+        c_name = collection_name or cf.gen_unique_str("Checker_")
         # event_records.insert("init_health_checkers", "start")
         self.init_health_checkers(collection_name=c_name)
         # event_records.insert("init_health_checkers", "finished")
