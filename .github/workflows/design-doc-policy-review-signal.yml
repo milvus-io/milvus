@@ -1,0 +1,22 @@
+name: Design Doc Policy Review Signal
+run-name: "${{ github.event.pull_request.number }}"
+
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+
+# This workflow is intentionally unprivileged. Its completed workflow_run is
+# only a signal; the default-branch Design Doc Policy workflow refetches all PR
+# state and never consumes code or artifacts from this run.
+permissions: {}
+
+jobs:
+  signal:
+    name: Signal trusted policy reevaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Complete review signal
+        run: "true"

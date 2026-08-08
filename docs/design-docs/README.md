@@ -69,6 +69,9 @@ Use [`TEMPLATE.md`](TEMPLATE.md) as the starting point for a new document.
 - A pull request that adds, modifies, renames, or removes a formal design
   document requires two distinct non-author Approver approvals.
 - Pull-request authors cannot satisfy either required approval themselves.
+- Approvers can use the existing Prow flow by commenting `/approve`; a GitHub
+  Review approval is not required. Automation adds `approved/design-doc` while
+  two valid non-author approvals are active and removes it when they are not.
 - The trusted Design Doc Policy workflow comments on missing or invalid review
   metadata. A nonexistent feature Design Doc reference fails the pull request
   check. Files removed by a pull request still trigger the two-Approver policy,

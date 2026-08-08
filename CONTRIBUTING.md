@@ -120,7 +120,7 @@ Formal Design Docs are Markdown files under `docs/design-docs/design_docs/`, inc
 
 For new documents, use the recommended `YYYYMMDD-short-descriptive-name.md` filename with lowercase letters, numbers, hyphens, or underscores, and keep one design per file. Put images or diagrams under `docs/design-docs/assets/graphs/` or `docs/design-docs/assets/images/`. See [the Design Doc guide](docs/design-docs/README.md) for more details.
 
-Any pull request that adds, modifies, renames, or deletes a formal Design Doc must be approved by at least two distinct Approvers, neither of whom may be the pull request author. Renaming or moving a Design Doc out of the formal directory still counts as a Design Doc change.
+Any pull request that adds, modifies, renames, or deletes a formal Design Doc must be approved by at least two distinct Approvers, neither of whom may be the pull request author. Approvers can record approval through the existing Prow process by commenting `/approve`; clicking the GitHub Review `Approve` button is not required. When both valid approvals are present, automation adds the dedicated `approved/design-doc` label. Renaming or moving a Design Doc out of the formal directory still counts as a Design Doc change.
 
 Start each design document with a clear title and metadata block. Every new or substantively revised Design Doc must include the four review fields below in the exact unbolded, machine-readable format shown:
 

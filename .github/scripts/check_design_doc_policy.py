@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Enforce the Design Doc policy and maintain one PR reminder."""
+"""Enforce Prow approval and Design Doc policy and maintain one PR reminder."""
 
 import argparse
 import base64
 import binascii
 import datetime
 import html
-import itertools
 import json
 import os
 import re
@@ -29,10 +28,10 @@ POLICY_CHECK_NAME = "Design Doc Policy"
 BOT_LOGIN = "github-actions[bot]"
 OWNERS_ALIASES_PATH = "OWNERS_ALIASES"
 MERGIFY_CONFIG_PATH = ".github/mergify.yml"
-DESIGN_DOC_AREA_MATCHER = "files~=^docs/design-docs/design_docs/"
+DESIGN_DOC_AREA_MATCHER = r"files~=^docs/design-docs/design_docs/.+\.md$"
 GOVERNANCE_AREA_MATCHER = (
     r"files~=^(OWNERS_ALIASES|\.github/mergify\.yml|"
-    r"\.github/workflows/design-doc-policy\.yml|"
+    r"\.github/workflows/design-doc-policy(-review-signal)?\.yml|"
     r"\.github/scripts/(check_design_doc_policy|test_check_design_doc_policy)\.py)$"
 )
 POLICY_CHECK_SUCCESS_LINE = (
@@ -54,8 +53,21 @@ POLICY_CHECK_SUCCESS_LINES = (
     POLICY_CHECK_SUCCESS_LINE,
     *POLICY_CHECK_STATE_GUARD_LINES,
 )
-AUTHOR_EXCLUSION_LINE = "      - '-approved-reviews-by = {{ author }}'"
+APPROVED_LABEL_LINE = "      - label=approved"
+DESIGN_DOC_APPROVAL_LABEL = "approved/design-doc"
+DESIGN_DOC_APPROVAL_LABEL_LINE = f"      - label={DESIGN_DOC_APPROVAL_LABEL}"
+DESIGN_DOC_APPROVAL_LABEL_COLOR = "0ffa16"
+DESIGN_DOC_APPROVAL_LABEL_DESCRIPTION = (
+    "Two distinct non-author Approvers approved a formal Design Doc change."
+)
+GENERAL_REVIEW_SUCCESS_LINES = (
+    APPROVED_LABEL_LINE,
+    *POLICY_CHECK_SUCCESS_LINES,
+)
+DESIGN_DOC_REVIEW_SUCCESS_LINES = (DESIGN_DOC_APPROVAL_LABEL_LINE,)
+MASTER_ONLY_IF_LINES = ("      - base=master",)
 FEATURE_POLICY_IF_LINES = (
+    "      - base=master",
     "      - or:",
     "          - 'title~=^feat:'",
     "          - label=kind/feature",
@@ -72,6 +84,7 @@ GOVERNANCE_ENFORCEMENT_PATHS = frozenset(
         OWNERS_ALIASES_PATH,
         MERGIFY_CONFIG_PATH,
         ".github/workflows/design-doc-policy.yml",
+        ".github/workflows/design-doc-policy-review-signal.yml",
         ".github/scripts/check_design_doc_policy.py",
         ".github/scripts/test_check_design_doc_policy.py",
     }
@@ -101,9 +114,27 @@ class PullRequestState:
     head_sha: str
     base_sha: str
     head_repository: str
+    base_repository: str
+    author: str
     title: str
     body: str
     labels: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ApprovalRequirement:
+    approvers: tuple[str, ...]
+    required: int
+    formal_design_doc: bool
+    governance_enforcement: bool
+
+    @property
+    def satisfied(self) -> bool:
+        return len(self.approvers) >= self.required
+
+
+SLASH_COMMAND_PATTERN = re.compile(r"^/([^\s]+)[\t ]*([^\n\r]*)", re.MULTILINE)
+REVIEW_SIGNAL_RUN_TITLE_PATTERN = re.compile(r"^([1-9][0-9]*)$")
 LOGIN_PATTERN = re.compile(r"^@[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
 LOGIN_PLACEHOLDERS = {
     "@github-handle",
@@ -271,6 +302,48 @@ class GitHubClient:
                 return comments
         raise RuntimeError("The pull request has too many comments to update safely")
 
+    def list_pull_request_review_comments(
+        self, repository: str, pull_number: int
+    ) -> list[dict[str, Any]]:
+        repository_path = urllib.parse.quote(repository, safe="/")
+        comments: list[dict[str, Any]] = []
+        for page in range(1, 101):
+            page_items = self.request(
+                "GET",
+                f"/repos/{repository_path}/pulls/{pull_number}/comments"
+                f"?per_page=100&page={page}",
+            )
+            if not isinstance(page_items, list):
+                raise RuntimeError(
+                    "GitHub returned an invalid pull-request review-comment list"
+                )
+            comments.extend(page_items)
+            if len(page_items) < 100:
+                return comments
+        raise RuntimeError(
+            "The pull request has too many review comments to evaluate safely"
+        )
+
+    def list_pull_request_reviews(
+        self, repository: str, pull_number: int
+    ) -> list[dict[str, Any]]:
+        repository_path = urllib.parse.quote(repository, safe="/")
+        reviews: list[dict[str, Any]] = []
+        for page in range(1, 101):
+            page_items = self.request(
+                "GET",
+                f"/repos/{repository_path}/pulls/{pull_number}/reviews"
+                f"?per_page=100&page={page}",
+            )
+            if not isinstance(page_items, list):
+                raise RuntimeError(
+                    "GitHub returned an invalid pull-request review list"
+                )
+            reviews.extend(page_items)
+            if len(page_items) < 100:
+                return reviews
+        raise RuntimeError("The pull request has too many reviews to evaluate safely")
+
     def get_pull_request_state(
         self, repository: str, pull_number: int
     ) -> PullRequestState:
@@ -280,22 +353,42 @@ class GitHubClient:
         )
         try:
             head_repository_info = pull_request["head"].get("repo")
-            head_repository = (
-                str(head_repository_info["full_name"])
-                if isinstance(head_repository_info, dict)
-                else repository
-            )
+            if isinstance(head_repository_info, dict):
+                head_repository = head_repository_info.get("full_name")
+                if not isinstance(head_repository, str) or not head_repository:
+                    raise TypeError("invalid head repository")
+            else:
+                head_repository = repository
+            base_repository_info = pull_request["base"].get("repo")
+            if isinstance(base_repository_info, dict):
+                base_repository = base_repository_info.get("full_name")
+                if not isinstance(base_repository, str) or not base_repository:
+                    raise TypeError("invalid base repository")
+            else:
+                base_repository = repository
+            author_info = pull_request.get("user")
+            author = author_info.get("login") if isinstance(author_info, dict) else None
+            if not isinstance(author, str) or not author:
+                raise TypeError("invalid pull-request author")
+            head_sha = pull_request["head"]["sha"]
+            base_sha = pull_request["base"]["sha"]
+            if not isinstance(head_sha, str) or not head_sha:
+                raise TypeError("invalid head SHA")
+            if not isinstance(base_sha, str) or not base_sha:
+                raise TypeError("invalid base SHA")
             labels = tuple(
                 sorted(
-                    str(label["name"])
+                    label["name"]
                     for label in pull_request.get("labels", [])
-                    if isinstance(label, dict) and "name" in label
+                    if isinstance(label, dict) and isinstance(label.get("name"), str)
                 )
             )
             return PullRequestState(
-                head_sha=str(pull_request["head"]["sha"]),
-                base_sha=str(pull_request["base"]["sha"]),
+                head_sha=head_sha,
+                base_sha=base_sha,
                 head_repository=head_repository,
+                base_repository=base_repository,
+                author=author,
                 title=str(pull_request.get("title", "")),
                 body=str(pull_request.get("body") or ""),
                 labels=labels,
@@ -304,6 +397,65 @@ class GitHubClient:
             raise RuntimeError(
                 "GitHub returned an invalid pull-request response"
             ) from error
+
+    def ensure_repository_label(
+        self,
+        repository: str,
+        name: str,
+        color: str,
+        description: str,
+    ) -> None:
+        repository_path = urllib.parse.quote(repository, safe="/")
+        label_path = urllib.parse.quote(name, safe="")
+        existing = self.request(
+            "GET",
+            f"/repos/{repository_path}/labels/{label_path}",
+            allow_not_found=True,
+        )
+        if existing is not None:
+            if not isinstance(existing, dict) or existing.get("name") != name:
+                raise RuntimeError(
+                    "GitHub returned an invalid repository-label response"
+                )
+            return
+        try:
+            created = self.request(
+                "POST",
+                f"/repos/{repository_path}/labels",
+                {"name": name, "color": color, "description": description},
+            )
+        except RuntimeError as create_error:
+            raced_label = self.request(
+                "GET",
+                f"/repos/{repository_path}/labels/{label_path}",
+                allow_not_found=True,
+            )
+            if isinstance(raced_label, dict) and raced_label.get("name") == name:
+                return
+            raise create_error
+        if not isinstance(created, dict) or created.get("name") != name:
+            raise RuntimeError("GitHub returned an invalid created-label response")
+
+    def add_pull_request_label(
+        self, repository: str, pull_number: int, label: str
+    ) -> None:
+        repository_path = urllib.parse.quote(repository, safe="/")
+        self.request(
+            "POST",
+            f"/repos/{repository_path}/issues/{pull_number}/labels",
+            {"labels": [label]},
+        )
+
+    def remove_pull_request_label(
+        self, repository: str, pull_number: int, label: str
+    ) -> None:
+        repository_path = urllib.parse.quote(repository, safe="/")
+        label_path = urllib.parse.quote(label, safe="")
+        self.request(
+            "DELETE",
+            f"/repos/{repository_path}/issues/{pull_number}/labels/{label_path}",
+            allow_not_found=True,
+        )
 
     def create_policy_check(
         self, repository: str, head_sha: str, pull_number: int
@@ -354,8 +506,9 @@ class GitHubClient:
                         .replace("+00:00", "Z"),
                         "output": {
                             "title": "Design Doc policy is being evaluated",
-                            "summary": "Validating feature documentation, repository "
-                            "governance, and changed Design Doc headers.",
+                            "summary": "Validating Prow approvals, feature "
+                            "documentation, repository governance, and changed "
+                            "Design Doc headers.",
                         },
                     },
                 )
@@ -373,8 +526,8 @@ class GitHubClient:
                 "external_id": external_id,
                 "output": {
                     "title": "Design Doc policy is being evaluated",
-                    "summary": "Validating feature documentation, repository "
-                    "governance, and changed Design Doc headers.",
+                    "summary": "Validating Prow approvals, feature documentation, "
+                    "repository governance, and changed Design Doc headers.",
                 },
             },
         )
@@ -393,9 +546,7 @@ class GitHubClient:
         summary: str,
     ) -> None:
         repository_path = urllib.parse.quote(repository, safe="/")
-        check_run_ids = self._policy_check_groups.pop(
-            check_run_id, (check_run_id,)
-        )
+        check_run_ids = self._policy_check_groups.pop(check_run_id, (check_run_id,))
         completed_at = (
             datetime.datetime.now(datetime.timezone.utc)
             .isoformat()
@@ -443,6 +594,193 @@ def is_design_doc_path(path: str) -> bool:
     return bool(relative_path) and all(
         part not in {"", ".", ".."} and not any(char in part for char in "\r\n\t")
         for part in parts
+    )
+
+
+def formal_design_doc_changed(files: list[dict[str, Any]]) -> bool:
+    return any(
+        isinstance(file_info.get(field), str) and is_design_doc_path(file_info[field])
+        for file_info in files
+        for field in ("filename", "previous_filename")
+    )
+
+
+def _timeline_timestamp(value: Any, source: str) -> datetime.datetime:
+    if not isinstance(value, str) or not value:
+        raise RuntimeError(f"GitHub returned a {source} without a timestamp")
+    try:
+        timestamp = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise RuntimeError(
+            f"GitHub returned a {source} with an invalid timestamp"
+        ) from error
+    if timestamp.tzinfo is None:
+        raise RuntimeError(f"GitHub returned a {source} without a timezone")
+    return timestamp
+
+
+def _slash_approval_updates(body: str) -> list[bool]:
+    updates: list[bool] = []
+    for match in SLASH_COMMAND_PATTERN.finditer(body):
+        command = match.group(1).casefold()
+        arguments = match.group(2).strip().casefold()
+        if command == "approve":
+            updates.append("cancel" not in arguments)
+        elif command == "remove-approve":
+            updates.append(False)
+    return updates
+
+
+def reconstruct_active_approvers(
+    issue_comments: list[dict[str, Any]],
+    review_comments: list[dict[str, Any]],
+    reviews: list[dict[str, Any]],
+    maintainers: list[str],
+    author: str,
+) -> tuple[str, ...]:
+    """Rebuild Prow-compatible sticky approval state from the full PR timeline."""
+
+    timeline: list[tuple[datetime.datetime, int, int, str, dict[str, Any]]] = []
+    sources = (
+        (review_comments, 0, "review comment", "created_at"),
+        (issue_comments, 1, "issue comment", "created_at"),
+        (reviews, 2, "review", "submitted_at"),
+    )
+    for items, source_priority, source, timestamp_field in sources:
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                raise RuntimeError(f"GitHub returned an invalid {source}")
+            if (
+                source == "review"
+                and item.get("submitted_at") is None
+                and str(item.get("state", "")).upper() == "PENDING"
+            ):
+                continue
+            timeline.append(
+                (
+                    _timeline_timestamp(item.get(timestamp_field), source),
+                    source_priority,
+                    index,
+                    source,
+                    item,
+                )
+            )
+    timeline.sort(key=lambda event: event[:3])
+
+    approval_state: dict[str, bool] = {}
+    for _, _, _, source, item in timeline:
+        user = item.get("user")
+        login = user.get("login") if isinstance(user, dict) else None
+        if not isinstance(login, str) or not login:
+            raise RuntimeError(f"GitHub returned a {source} without an author")
+        normalized_login = login.casefold()
+
+        if source == "review":
+            state = item.get("state")
+            if not isinstance(state, str):
+                raise RuntimeError("GitHub returned a review without a state")
+            normalized_state = state.upper()
+            if normalized_state == "APPROVED":
+                approval_state[normalized_login] = True
+            elif normalized_state == "CHANGES_REQUESTED":
+                approval_state[normalized_login] = False
+
+        body = item.get("body")
+        if body is None:
+            body = ""
+        if not isinstance(body, str):
+            raise RuntimeError(f"GitHub returned a {source} with an invalid body")
+        for approved in _slash_approval_updates(body):
+            approval_state[normalized_login] = approved
+
+    trusted_logins = {login.casefold(): login for login in maintainers}
+    author_login = author.casefold()
+    return tuple(
+        sorted(
+            (
+                canonical_login
+                for normalized_login, canonical_login in trusted_logins.items()
+                if normalized_login != author_login
+                and approval_state.get(normalized_login, False)
+            ),
+            key=str.casefold,
+        )
+    )
+
+
+def evaluate_approval_requirement(
+    client: GitHubClient,
+    state: PullRequestState,
+    files: list[dict[str, Any]],
+    issue_comments: list[dict[str, Any]],
+    review_comments: list[dict[str, Any]],
+    reviews: list[dict[str, Any]],
+) -> ApprovalRequirement:
+    try:
+        owners_aliases = client.get_repository_file(
+            state.base_repository, OWNERS_ALIASES_PATH, state.base_sha
+        )
+        maintainers = extract_maintainers(owners_aliases)
+    except (RuntimeError, ValueError) as error:
+        raise RuntimeError(
+            "Could not load trusted Approvers from the target base revision: "
+            f"{error}"
+        ) from error
+
+    formal_design_doc = formal_design_doc_changed(files)
+    governance_enforcement = governance_enforcement_changed(files)
+    required = 2 if formal_design_doc or governance_enforcement else 1
+    return ApprovalRequirement(
+        approvers=reconstruct_active_approvers(
+            issue_comments,
+            review_comments,
+            reviews,
+            maintainers,
+            state.author,
+        ),
+        required=required,
+        formal_design_doc=formal_design_doc,
+        governance_enforcement=governance_enforcement,
+    )
+
+
+def sync_design_doc_approval_label(
+    client: GitHubClient,
+    repository: str,
+    pull_number: int,
+    labels: tuple[str, ...],
+    approval: ApprovalRequirement,
+) -> None:
+    label_present = DESIGN_DOC_APPROVAL_LABEL in labels
+    should_be_present = approval.formal_design_doc and approval.satisfied
+    if should_be_present and not label_present:
+        client.ensure_repository_label(
+            repository,
+            DESIGN_DOC_APPROVAL_LABEL,
+            DESIGN_DOC_APPROVAL_LABEL_COLOR,
+            DESIGN_DOC_APPROVAL_LABEL_DESCRIPTION,
+        )
+        client.add_pull_request_label(
+            repository, pull_number, DESIGN_DOC_APPROVAL_LABEL
+        )
+    elif label_present and not should_be_present:
+        client.remove_pull_request_label(
+            repository, pull_number, DESIGN_DOC_APPROVAL_LABEL
+        )
+
+
+def stable_pull_request_state(state: PullRequestState) -> tuple[Any, ...]:
+    """Ignore only the label managed by this workflow during race detection."""
+
+    return (
+        state.head_sha,
+        state.base_sha,
+        state.head_repository,
+        state.base_repository,
+        state.author.casefold(),
+        state.title,
+        state.body,
+        tuple(label for label in state.labels if label != DESIGN_DOC_APPROVAL_LABEL),
     )
 
 
@@ -721,15 +1059,13 @@ def extract_maintainers(owners_aliases: str) -> list[str]:
 
     if not in_maintainers or not maintainers:
         raise ValueError("OWNERS_ALIASES does not define any maintainers")
-    if len(set(maintainers)) != len(maintainers):
+    if len({login.casefold() for login in maintainers}) != len(maintainers):
         raise ValueError("OWNERS_ALIASES contains duplicate maintainers")
     return maintainers
 
 
 def merge_protections_section(mergify: str) -> str:
-    markers = list(
-        re.finditer(r"^merge_protections:$", mergify, re.MULTILINE)
-    )
+    markers = list(re.finditer(r"^merge_protections:$", mergify, re.MULTILINE))
     if len(markers) != 1:
         raise ValueError(
             "Mergify must define exactly one active merge_protections section"
@@ -778,9 +1114,7 @@ def has_exact_shared_anchor(mergify: str, name: str, matcher: str) -> bool:
     expected_line = f"  {name}: &{name} '{matcher}'"
     key_pattern = re.compile(rf"^  {re.escape(name)}:")
     anchor_pattern = re.compile(rf"&{re.escape(name)}(?=\s|$)")
-    key_definitions = [
-        line for line in mergify.splitlines() if key_pattern.match(line)
-    ]
+    key_definitions = [line for line in mergify.splitlines() if key_pattern.match(line)]
     anchor_definitions = [
         line for line in mergify.splitlines() if anchor_pattern.search(line)
     ]
@@ -789,11 +1123,7 @@ def has_exact_shared_anchor(mergify: str, name: str, matcher: str) -> bool:
 
 def rule_block_lines(rule: str, declaration: str) -> tuple[str, ...] | None:
     lines = rule.splitlines()
-    markers = [
-        index
-        for index, line in enumerate(lines)
-        if line == declaration
-    ]
+    markers = [index for index, line in enumerate(lines) if line == declaration]
     if len(markers) != 1:
         return None
 
@@ -832,41 +1162,21 @@ def validate_approver_governance(
 ) -> list[str]:
     issues: list[str] = []
     try:
-        maintainers = extract_maintainers(owners_aliases)
+        extract_maintainers(owners_aliases)
     except ValueError as error:
         return [str(error)]
 
-    if not has_exact_shared_anchor(
-        mergify, "design_doc_area", DESIGN_DOC_AREA_MATCHER
-    ):
-        issues.append(
-            "The Mergify Design Doc area matcher must use the canonical path"
-        )
-    if not has_exact_shared_anchor(
-        mergify, "governance_area", GOVERNANCE_AREA_MATCHER
-    ):
+    if not has_exact_shared_anchor(mergify, "design_doc_area", DESIGN_DOC_AREA_MATCHER):
+        issues.append("The Mergify Design Doc area matcher must use the canonical path")
+    if not has_exact_shared_anchor(mergify, "governance_area", GOVERNANCE_AREA_MATCHER):
         issues.append(
             "The Mergify governance area matcher must cover every enforcement file"
         )
 
-    anchor_matches = re.findall(
-        r"^  (approved_by_[a-z0-9_]+): &(approved_by_[a-z0-9_]+) "
-        r"'approved-reviews-by = ([A-Za-z0-9-]+)'$",
-        mergify,
-        re.MULTILINE,
-    )
-    if any(key != anchor for key, anchor, _ in anchor_matches):
-        issues.append("Mergify Approver anchor keys and anchor names must match")
-    anchor_names = [anchor for _, anchor, _ in anchor_matches]
-    anchor_logins = [login for _, _, login in anchor_matches]
-    if len(set(anchor_names)) != len(anchor_names) or len(set(anchor_logins)) != len(
-        anchor_logins
-    ):
-        issues.append("Mergify contains duplicate Approver anchors or logins")
-    anchors = dict(zip(anchor_names, anchor_logins))
-    if set(maintainers) != set(anchor_logins):
+    if re.search(r"approved-reviews-by|approved_by_", mergify):
         issues.append(
-            "Mergify Approver anchors do not match OWNERS_ALIASES maintainers"
+            "Mergify must use Prow approval labels instead of GitHub review Approver "
+            "conditions"
         )
 
     try:
@@ -878,35 +1188,18 @@ def validate_approver_governance(
     try:
         general_rule = configuration_rule(
             merge_protections,
-            "Review / non-author Approver",
+            "Review / Prow approval",
         )
-        if not has_exact_rule_scalar(general_rule, "if", "true"):
-            issues.append("The general review rule must always apply")
-
-        general_conditions = success_condition_lines(general_rule)
-        general_anchor_names: list[str] = []
-        if general_conditions is not None:
-            for line in general_conditions[1:-1]:
-                match = re.fullmatch(
-                    r"          - \*(approved_by_[a-z0-9_]+)", line
-                )
-                if match is not None:
-                    general_anchor_names.append(match.group(1))
-        general_anchor_structure_valid = (
-            general_conditions is not None
-            and len(general_conditions) == len(anchors) + 2
-            and general_conditions[0] == "      - or:"
-            and len(general_anchor_names) == len(anchors)
-            and set(general_anchor_names) == set(anchors)
-        )
-        if not general_anchor_structure_valid:
-            issues.append("The general review rule does not include every Approver")
-        if not (
-            general_conditions is not None
-            and general_conditions.count(AUTHOR_EXCLUSION_LINE) == 1
-            and general_conditions[-1] == AUTHOR_EXCLUSION_LINE
-        ):
-            issues.append("The general review rule does not exclude the PR author")
+        if if_condition_lines(general_rule) != MASTER_ONLY_IF_LINES:
+            issues.append(
+                "The general review rule must apply exactly to master during "
+                "the staged rollout"
+            )
+        if success_condition_lines(general_rule) != GENERAL_REVIEW_SUCCESS_LINES:
+            issues.append(
+                "The general review rule must require the Prow approved label and "
+                "exact trusted Design Doc Policy success"
+            )
     except ValueError as error:
         issues.append(str(error))
 
@@ -915,81 +1208,19 @@ def validate_approver_governance(
             merge_protections,
             "Review / formal Design Doc",
         )
-        if if_condition_lines(design_rule) != ("      - *design_doc_area",):
-            issues.append("The two-Approver rule does not cover the Design Doc area")
-
-        design_conditions = rule_block_lines(
-            design_rule,
-            "    success_conditions: &TWO_APPROVER_SUCCESS_CONDITIONS",
-        )
-        has_author_exclusion = (
-            design_conditions is not None
-            and design_conditions.count(AUTHOR_EXCLUSION_LINE) == 1
-            and design_conditions[-1] == AUTHOR_EXCLUSION_LINE
-        )
-        if not has_author_exclusion:
-            issues.append("The two-Approver rule does not exclude the PR author")
-
-        pair_anchor_names: list[tuple[str, str]] = []
-        matrix_structure_valid = (
-            design_conditions is not None
-            and len(design_conditions) > 1
-            and design_conditions[0] == "      - or:"
-        )
-        if design_conditions is None:
-            matrix_lines: tuple[str, ...] = ()
-        elif has_author_exclusion:
-            matrix_lines = design_conditions[1:-1]
-        else:
-            matrix_lines = design_conditions[1:]
-
-        if len(matrix_lines) % 3 != 0:
-            matrix_structure_valid = False
-        else:
-            for index in range(0, len(matrix_lines), 3):
-                and_line, first_line, second_line = matrix_lines[index : index + 3]
-                first_match = re.fullmatch(
-                    r"              - \*(approved_by_[a-z0-9_]+)", first_line
-                )
-                second_match = re.fullmatch(
-                    r"              - \*(approved_by_[a-z0-9_]+)", second_line
-                )
-                if (
-                    and_line != "          - and:"
-                    or first_match is None
-                    or second_match is None
-                ):
-                    matrix_structure_valid = False
-                    continue
-                pair_anchor_names.append(
-                    (first_match.group(1), second_match.group(1))
-                )
-
-        unknown_pair_anchors = {
-            anchor
-            for pair in pair_anchor_names
-            for anchor in pair
-            if anchor not in anchors
-        }
-        if unknown_pair_anchors:
-            issues.append("The two-Approver matrix references unknown Approvers")
-        else:
-            actual_pairs = {
-                frozenset((anchors[first], anchors[second]))
-                for first, second in pair_anchor_names
-            }
-            expected_pairs = {
-                frozenset(pair) for pair in itertools.combinations(maintainers, 2)
-            }
-            if (
-                not matrix_structure_valid
-                or actual_pairs != expected_pairs
-                or len(pair_anchor_names) != len(expected_pairs)
-            ):
-                issues.append(
-                    "The two-Approver matrix is not the complete set of distinct "
-                    "maintainer pairs"
-                )
+        if if_condition_lines(design_rule) != (
+            *MASTER_ONLY_IF_LINES,
+            "      - *design_doc_area",
+        ):
+            issues.append(
+                "The Design Doc approval-label rule does not cover the formal "
+                "Design Doc area"
+            )
+        if success_condition_lines(design_rule) != DESIGN_DOC_REVIEW_SUCCESS_LINES:
+            issues.append(
+                "Formal Design Doc changes do not require exactly the "
+                f"{DESIGN_DOC_APPROVAL_LABEL} label"
+            )
     except ValueError as error:
         issues.append(str(error))
 
@@ -999,16 +1230,20 @@ def validate_approver_governance(
             "Review / governance enforcement",
         )
         if if_condition_lines(governance_review_rule) != (
+            *MASTER_ONLY_IF_LINES,
             "      - *governance_area",
         ):
-            issues.append("Governance enforcement changes do not require two Approvers")
-        if not has_exact_rule_scalar(
-            governance_review_rule,
-            "success_conditions",
-            "*TWO_APPROVER_SUCCESS_CONDITIONS",
+            issues.append(
+                "Governance enforcement changes do not require the trusted policy "
+                "check"
+            )
+        if (
+            success_condition_lines(governance_review_rule)
+            != POLICY_CHECK_SUCCESS_LINES
         ):
             issues.append(
-                "Governance enforcement changes do not reuse the two-Approver gate"
+                "Governance enforcement changes do not require exact Design Doc "
+                "Policy success"
             )
     except ValueError as error:
         issues.append(str(error))
@@ -1019,12 +1254,14 @@ def validate_approver_governance(
             "Docs / repository governance policy",
         )
         if if_condition_lines(governance_policy_rule) != (
+            *MASTER_ONLY_IF_LINES,
             "      - *governance_area",
         ):
             issues.append("Governance changes do not require the trusted policy check")
-        if success_condition_lines(
-            governance_policy_rule
-        ) != POLICY_CHECK_SUCCESS_LINES:
+        if (
+            success_condition_lines(governance_policy_rule)
+            != POLICY_CHECK_SUCCESS_LINES
+        ):
             issues.append(
                 "Governance changes do not require exact Design Doc Policy success"
             )
@@ -1037,6 +1274,7 @@ def validate_approver_governance(
             "Docs / formal Design Doc policy",
         )
         if if_condition_lines(design_policy_rule) != (
+            *MASTER_ONLY_IF_LINES,
             "      - *design_doc_area",
         ):
             issues.append("Design Doc changes do not require the trusted policy check")
@@ -1141,9 +1379,7 @@ def build_comment(
                 "The proposed governance files do not preserve the trusted "
                 "Approver policy:",
                 "",
-                *[
-                    f"- {html.escape(issue)}" for issue in governance_issues
-                ],
+                *[f"- {html.escape(issue)}" for issue in governance_issues],
                 "",
             ]
         )
@@ -1222,9 +1458,24 @@ def build_check_summary(
     issues: dict[str, list[str]],
     feature_requirement_issue: str | None,
     governance_issues: list[str] | None = None,
+    approval: ApprovalRequirement | None = None,
 ) -> str:
     governance_issues = governance_issues or []
     lines = ["## Design Doc policy"]
+    if approval is not None:
+        approval_result = "passed" if approval.satisfied else "failed"
+        approvers = (
+            ", ".join(f"@{login}" for login in approval.approvers)
+            if approval.approvers
+            else "none"
+        )
+        lines.extend(
+            [
+                f"- Non-author Approver requirement: {approval_result} "
+                f"({len(approval.approvers)}/{approval.required})",
+                f"  - Current valid Approvers: {approvers}",
+            ]
+        )
     if feature_requirement_issue is None:
         lines.append("- Feature Design Doc requirement: passed or not applicable")
     else:
@@ -1309,8 +1560,23 @@ def load_event(
         event = json.load(event_file)
     try:
         repository = str(event["repository"]["full_name"])
-        pull_request = event["pull_request"]
-        pull_number = int(pull_request["number"])
+        pull_request = event.get("pull_request")
+        issue = event.get("issue")
+        workflow_run = event.get("workflow_run")
+        if isinstance(pull_request, dict):
+            pull_number = int(pull_request["number"])
+        elif isinstance(issue, dict) and isinstance(issue.get("pull_request"), dict):
+            pull_number = int(issue["number"])
+        elif isinstance(workflow_run, dict):
+            display_title = workflow_run.get("display_title")
+            if not isinstance(display_title, str):
+                raise KeyError("workflow_run.display_title")
+            match = REVIEW_SIGNAL_RUN_TITLE_PATTERN.fullmatch(display_title)
+            if match is None:
+                raise ValueError("invalid workflow_run.display_title")
+            pull_number = int(match.group(1))
+        else:
+            raise KeyError("pull_request")
     except (KeyError, TypeError, ValueError) as error:
         raise RuntimeError("The workflow event is not a valid pull request") from error
     return repository, pull_number
@@ -1368,8 +1634,22 @@ def run(event_path: str) -> int:
         )
 
         existing_comments = client.list_issue_comments(repository, pull_number)
+        review_comments = client.list_pull_request_review_comments(
+            repository, pull_number
+        )
+        reviews = client.list_pull_request_reviews(repository, pull_number)
+        approval = evaluate_approval_requirement(
+            client,
+            initial_state,
+            files,
+            existing_comments,
+            review_comments,
+            reviews,
+        )
         current_state = client.get_pull_request_state(repository, pull_number)
-        if current_state != initial_state:
+        if stable_pull_request_state(current_state) != stable_pull_request_state(
+            initial_state
+        ):
             complete_stale_policy_check(client, repository, check_run_id)
             print(
                 "The pull request changed while this evaluation was running; "
@@ -1377,9 +1657,21 @@ def run(event_path: str) -> int:
             )
             return 0
 
+        sync_design_doc_approval_label(
+            client,
+            repository,
+            pull_number,
+            current_state.labels,
+            approval,
+        )
+
         body = (
-            build_comment(issues, feature_requirement_issue, governance_issues)
-            if issues or feature_requirement_issue is not None or governance_issues
+            build_comment(
+                issues,
+                feature_requirement_issue,
+                governance_issues,
+            )
+            if (issues or feature_requirement_issue is not None or governance_issues)
             else None
         )
         sync_comment(
@@ -1391,7 +1683,9 @@ def run(event_path: str) -> int:
         )
 
         final_state = client.get_pull_request_state(repository, pull_number)
-        if final_state != initial_state:
+        if stable_pull_request_state(final_state) != stable_pull_request_state(
+            initial_state
+        ):
             complete_stale_policy_check(client, repository, check_run_id)
             print(
                 "The pull request changed while the policy comment was being "
@@ -1399,8 +1693,37 @@ def run(event_path: str) -> int:
             )
             return 0
 
-        failed = feature_requirement_issue is not None or bool(governance_issues)
-        if failed:
+        final_approval = evaluate_approval_requirement(
+            client,
+            final_state,
+            files,
+            client.list_issue_comments(repository, pull_number),
+            client.list_pull_request_review_comments(repository, pull_number),
+            client.list_pull_request_reviews(repository, pull_number),
+        )
+        if final_approval != approval:
+            if approval.formal_design_doc or final_approval.formal_design_doc:
+                # The label may have been synchronized from an approval snapshot
+                # that changed while this run was active. Remove it fail-closed;
+                # the queued event for the new snapshot will restore it if valid.
+                client.remove_pull_request_label(
+                    repository, pull_number, DESIGN_DOC_APPROVAL_LABEL
+                )
+            complete_stale_policy_check(client, repository, check_run_id)
+            print(
+                "The approval timeline changed while this evaluation was running; "
+                "a newer workflow run will evaluate it."
+            )
+            return 0
+
+        failed = (
+            not approval.satisfied
+            or feature_requirement_issue is not None
+            or bool(governance_issues)
+        )
+        if not approval.satisfied:
+            check_title = "Required non-author approval is missing"
+        elif failed:
             check_title = "Design Doc policy failed"
         elif issues:
             check_title = "Design Doc policy passed with header reminders"
@@ -1412,7 +1735,10 @@ def run(event_path: str) -> int:
             "failure" if failed else "success",
             check_title,
             build_check_summary(
-                issues, feature_requirement_issue, governance_issues
+                issues,
+                feature_requirement_issue,
+                governance_issues,
+                approval,
             ),
         )
 
@@ -1431,6 +1757,16 @@ def run(event_path: str) -> int:
             print("Repository governance enforcement is inconsistent.")
         else:
             print("Repository governance enforcement is valid or does not apply.")
+        if approval.satisfied:
+            print(
+                f"The non-author Approver requirement is satisfied "
+                f"({len(approval.approvers)}/{approval.required})."
+            )
+        else:
+            print(
+                f"The non-author Approver requirement is not satisfied "
+                f"({len(approval.approvers)}/{approval.required})."
+            )
         return 1 if failed else 0
     except Exception as error:
         try:
