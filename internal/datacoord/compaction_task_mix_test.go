@@ -302,3 +302,149 @@ func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 
 	s.Equal(taskcommon.Retry, t1.GetTaskState())
 }
+
+func (s *MixCompactionTaskSuite) TestCleanRestoresOriginalSortInputVisibility() {
+	realMeta, err := newMemoryMeta(s.T())
+	s.Require().NoError(err)
+	collectionID := int64(10)
+	segmentID := int64(100)
+	s.Require().NoError(realMeta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           segmentID,
+		CollectionID: collectionID,
+		State:        commonpb.SegmentState_Flushed,
+		IsInvisible:  true,
+	})))
+	realMeta.SetSegmentsCompacting(context.Background(), []int64{segmentID}, true)
+
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		CollectionID:  collectionID,
+		Type:          datapb.CompactionType_SortCompaction,
+		State:         datapb.CompactionTaskState_executing,
+		NodeID:        11,
+		InputSegments: []int64{segmentID},
+	}, nil, s.mockMeta, newMockVersionManager())
+	cluster := session.NewMockCluster(s.T())
+
+	cluster.EXPECT().QueryCompaction(int64(11), mock.Anything).Return(&datapb.CompactionPlanResult{
+		PlanID: 1,
+		State:  datapb.CompactionTaskState_completed,
+	}, nil).Once()
+	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).
+		Return(merr.WrapErrCompactionBlocked("input segment is protected by a snapshot")).Once()
+	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, operators ...UpdateOperator) error {
+			return realMeta.UpdateSegmentsInfo(ctx, operators...)
+		}).Once()
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, saved *datapb.CompactionTask) error {
+			segment := realMeta.GetSegment(ctx, segmentID)
+			switch saved.GetState() {
+			case datapb.CompactionTaskState_failed:
+				s.True(segment.GetIsInvisible(), "the failed task is cleaned asynchronously")
+			case datapb.CompactionTaskState_cleaned:
+				s.False(segment.GetIsInvisible(), "visibility must be persisted before the task is marked cleaned")
+				s.True(segment.isCompacting, "the compaction lock must be released last")
+			default:
+				s.Fail("unexpected saved compaction state", saved.GetState().String())
+			}
+			return nil
+		}).Twice()
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, []int64{segmentID}, false).
+		Run(func(ctx context.Context, segmentIDs []int64, compacting bool) {
+			realMeta.SetSegmentsCompacting(ctx, segmentIDs, compacting)
+		}).Once()
+
+	task.QueryTaskOnWorker(cluster)
+	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+	s.Contains(task.GetTaskProto().GetFailReason(), "compaction blocked")
+	s.True(realMeta.GetSegment(context.Background(), segmentID).GetIsInvisible())
+	s.True(task.Process())
+	s.True(task.Clean())
+	segment := realMeta.GetSegment(context.Background(), segmentID)
+	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+	s.False(segment.GetIsInvisible())
+	s.False(segment.isCompacting)
+
+	persisted, err := realMeta.catalog.ListSegments(context.Background(), collectionID)
+	s.Require().NoError(err)
+	s.Require().Len(persisted, 1)
+	s.False(persisted[0].GetIsInvisible(), "the visibility rollback must survive DataCoord restart")
+}
+
+func (s *MixCompactionTaskSuite) TestCleanRetriesWhenVisibilityRestoreFails() {
+	segmentID := int64(100)
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_SortCompaction,
+		State:         datapb.CompactionTaskState_timeout,
+		InputSegments: []int64{segmentID},
+	}, nil, s.mockMeta, newMockVersionManager())
+
+	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).
+		Return(merr.WrapErrServiceInternalMsg("mock visibility persistence failure")).Once()
+
+	s.False(task.Clean())
+	s.Equal(datapb.CompactionTaskState_timeout, task.GetTaskProto().GetState())
+}
+
+func (s *MixCompactionTaskSuite) TestCleanRetriesWhenCleanedStatePersistenceFails() {
+	realMeta, err := newMemoryMeta(s.T())
+	s.Require().NoError(err)
+	collectionID := int64(10)
+	segmentID := int64(100)
+	s.Require().NoError(realMeta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:           segmentID,
+		CollectionID: collectionID,
+		State:        commonpb.SegmentState_Flushed,
+		IsInvisible:  true,
+	})))
+	realMeta.SetSegmentsCompacting(context.Background(), []int64{segmentID}, true)
+
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		CollectionID:  collectionID,
+		Type:          datapb.CompactionType_SortCompaction,
+		State:         datapb.CompactionTaskState_timeout,
+		InputSegments: []int64{segmentID},
+	}, nil, s.mockMeta, newMockVersionManager())
+	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, operators ...UpdateOperator) error {
+			return realMeta.UpdateSegmentsInfo(ctx, operators...)
+		}).Twice()
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).
+		Return(merr.WrapErrServiceInternalMsg("mock task persistence failure")).Once()
+	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
+	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, []int64{segmentID}, false).
+		Run(func(ctx context.Context, segmentIDs []int64, compacting bool) {
+			realMeta.SetSegmentsCompacting(ctx, segmentIDs, compacting)
+		}).Once()
+
+	s.False(task.Clean())
+	s.Equal(datapb.CompactionTaskState_timeout, task.GetTaskProto().GetState())
+	segment := realMeta.GetSegment(context.Background(), segmentID)
+	s.False(segment.GetIsInvisible(), "the already-persisted visibility restore is safe to retry")
+	s.True(segment.isCompacting, "the segment lock must remain held until cleaned is durable")
+
+	s.True(task.Clean())
+	s.Equal(datapb.CompactionTaskState_cleaned, task.GetTaskProto().GetState())
+	segment = realMeta.GetSegment(context.Background(), segmentID)
+	s.False(segment.GetIsInvisible())
+	s.False(segment.isCompacting)
+}
+
+func (s *MixCompactionTaskSuite) TestWorkerCallbacksIgnoreCleanedTask() {
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID: 1,
+		State:  datapb.CompactionTaskState_cleaned,
+		NodeID: 11,
+	}, nil, s.mockMeta, newMockVersionManager())
+	cluster := session.NewMockCluster(s.T())
+
+	// No cluster or metadata expectations are registered: a stale callback that
+	// performs an RPC or tries to persist a non-terminal state fails this test.
+	task.QueryTaskOnWorker(cluster)
+	task.CreateTaskOnWorker(11, cluster)
+
+	s.Equal(datapb.CompactionTaskState_cleaned, task.GetTaskProto().GetState())
+}

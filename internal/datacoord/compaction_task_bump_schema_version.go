@@ -184,6 +184,10 @@ func (t *bumpSchemaVersionTask) SaveTaskMeta() error {
 }
 
 func (t *bumpSchemaVersionTask) Clean() bool {
+	// Runs under the scheduler's per-task lock, handed over by Finalize.
+	if t.GetTaskProto().GetState() == datapb.CompactionTaskState_cleaned {
+		return true
+	}
 	return t.doClean() == nil
 }
 
@@ -212,6 +216,16 @@ func (t *bumpSchemaVersionTask) processFailed() bool {
 }
 
 func (t *bumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+	// Serialized by the scheduler's per-task lock; see task.GlobalScheduler.
+	//
+	// Bail out on any terminal state, not just cleaned. The inspector has already
+	// decided this task is finished and queued it for cleanup, so proceeding
+	// would mutate segment metadata -- clustering persists its result segments
+	// before recording their IDs on the task -- that cleanup no longer knows
+	// about, stranding those segments for good.
+	if isTerminalCompactionTaskState(t.GetTaskProto().GetState()) {
+		return
+	}
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		mlog.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()),
@@ -250,6 +264,16 @@ func (t *bumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 }
 
 func (t *bumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
+	// Serialized by the scheduler's per-task lock; see task.GlobalScheduler.
+	//
+	// Bail out on any terminal state, not just cleaned. The inspector has already
+	// decided this task is finished and queued it for cleanup, so proceeding
+	// would mutate segment metadata -- clustering persists its result segments
+	// before recording their IDs on the task -- that cleanup no longer knows
+	// about, stranding those segments for good.
+	if isTerminalCompactionTaskState(t.GetTaskProto().GetState()) {
+		return
+	}
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		mlog.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()))
@@ -413,6 +437,13 @@ func (t *bumpSchemaVersionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt)
 	}
 
 	task := t.ShadowClone(opts...)
+	if regressesTerminalState(t.GetTaskProto().GetState(), task.GetState()) {
+		mlog.Info(context.TODO(), "dropping stale compaction task state write",
+			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+			mlog.String("current", t.GetTaskProto().GetState().String()),
+			mlog.String("rejected", task.GetState().String()))
+		return nil
+	}
 	err := t.saveTaskMeta(task)
 	if err != nil {
 		return err

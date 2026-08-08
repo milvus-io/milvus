@@ -46,7 +46,7 @@ func TestIndexInspector_inspect(t *testing.T) {
 	t.Run("normal test", func(t *testing.T) {
 		ctx := context.Background()
 		notifyChan := make(chan int64, 1)
-		scheduler := task.NewMockGlobalScheduler(t)
+		scheduler := newOwnershipScheduler(t)
 		alloc := allocator.NewMockAllocator(t)
 		handler := NewNMockHandler(t)
 		storage := mocks.NewChunkManager(t)
@@ -139,7 +139,7 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storage := mocks.NewChunkManager(t)
@@ -211,7 +211,7 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 	defer pt.Reset(scalarKey)
 
 	ctx := context.Background()
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storage := mocks.NewChunkManager(t)
@@ -266,7 +266,7 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 func TestIndexInspector_isExternalCollection(t *testing.T) {
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storageCli := mocks.NewChunkManager(t)
@@ -325,7 +325,7 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storageCli := mocks.NewChunkManager(t)
@@ -422,7 +422,7 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storage := mocks.NewChunkManager(t)
@@ -489,7 +489,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
-	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler := newOwnershipScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
 	handler := NewNMockHandler(t)
 	storageCli := mocks.NewChunkManager(t)

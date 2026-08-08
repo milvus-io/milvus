@@ -22,6 +22,87 @@ func (_m *MockGlobalScheduler) AbortAndRemoveTask(taskID int64) {
 	_m.Called(taskID)
 }
 
+// Finalize provides a mock function with given fields: taskID, fn
+func (_m *MockGlobalScheduler) Finalize(taskID int64, fn func()) {
+	_m.Called(taskID, fn)
+}
+
+// MockGlobalScheduler_Finalize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Finalize'
+type MockGlobalScheduler_Finalize_Call struct {
+	*mock.Call
+}
+
+// Finalize is a helper method to define mock.On call
+//   - taskID int64
+//   - fn func()
+func (_e *MockGlobalScheduler_Expecter) Finalize(taskID interface{}, fn interface{}) *MockGlobalScheduler_Finalize_Call {
+	return &MockGlobalScheduler_Finalize_Call{Call: _e.mock.On("Finalize", taskID, fn)}
+}
+
+func (_c *MockGlobalScheduler_Finalize_Call) Run(run func(taskID int64, fn func())) *MockGlobalScheduler_Finalize_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(func()))
+	})
+	return _c
+}
+
+func (_c *MockGlobalScheduler_Finalize_Call) Return() *MockGlobalScheduler_Finalize_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockGlobalScheduler_Finalize_Call) RunAndReturn(run func(int64, func())) *MockGlobalScheduler_Finalize_Call {
+	_c.Run(run)
+	return _c
+}
+
+// TryUpdate provides a mock function with given fields: taskID, fn
+func (_m *MockGlobalScheduler) TryUpdate(taskID int64, fn func()) bool {
+	ret := _m.Called(taskID, fn)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TryUpdate")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(int64, func()) bool); ok {
+		r0 = rf(taskID, fn)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockGlobalScheduler_TryUpdate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TryUpdate'
+type MockGlobalScheduler_TryUpdate_Call struct {
+	*mock.Call
+}
+
+// TryUpdate is a helper method to define mock.On call
+//   - taskID int64
+//   - fn func()
+func (_e *MockGlobalScheduler_Expecter) TryUpdate(taskID interface{}, fn interface{}) *MockGlobalScheduler_TryUpdate_Call {
+	return &MockGlobalScheduler_TryUpdate_Call{Call: _e.mock.On("TryUpdate", taskID, fn)}
+}
+
+func (_c *MockGlobalScheduler_TryUpdate_Call) Run(run func(taskID int64, fn func())) *MockGlobalScheduler_TryUpdate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(func()))
+	})
+	return _c
+}
+
+func (_c *MockGlobalScheduler_TryUpdate_Call) Return(_a0 bool) *MockGlobalScheduler_TryUpdate_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockGlobalScheduler_TryUpdate_Call) RunAndReturn(run func(int64, func()) bool) *MockGlobalScheduler_TryUpdate_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // MockGlobalScheduler_AbortAndRemoveTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AbortAndRemoveTask'
 type MockGlobalScheduler_AbortAndRemoveTask_Call struct {
 	*mock.Call

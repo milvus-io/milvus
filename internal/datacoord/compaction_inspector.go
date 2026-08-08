@@ -24,11 +24,13 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -39,6 +41,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// maxConcurrentCleanups bounds the cleanup fan-out. Cleanup is metadata work
+// that may first wait out a worker callback, so it needs a ceiling, but it is
+// also on the path that frees input segments, so the ceiling is not tight.
+const maxConcurrentCleanups = 16
 
 var maxCompactionTaskExecutionDuration = map[datapb.CompactionType]time.Duration{
 	datapb.CompactionType_MixCompaction:               30 * time.Minute,
@@ -81,11 +88,27 @@ type compactionInspector struct {
 
 	cleaningGuard lock.RWMutex
 	cleaningTasks map[int64]CompactionTask // planID -> task
+	// cleaningInFlight holds the planIDs whose cleanup goroutine has not
+	// finished, so a slow cleanup is not re-dispatched every schedule round.
+	cleaningInFlight *typeutil.ConcurrentSet[int64]
+	// cleanupLimiter caps how many cleanups run at once.
+	cleanupLimiter chan struct{}
+	// pendingWorkerDrops carries recovered terminal tasks whose worker-side plan
+	// still needs dropping. Collected during loadMeta, drained after start() so
+	// an unresponsive DataNode cannot delay DataCoord readiness.
+	//
+	// Only start() drains this, so with compaction disabled the drops are never
+	// sent -- acceptable, since nothing is producing new worker entries either.
+	// stop() waits for the drain, which can cost one in-flight RPC
+	// (dataCoord.requestTimeoutSeconds); the loop checks stopCh between drops so
+	// it gives up after that one rather than working through the backlog.
+	pendingWorkerDrops []CompactionTask
 
 	meta             CompactionMeta
 	allocator        allocator.Allocator
 	analyzeScheduler task.GlobalScheduler
 	handler          Handler
+	cluster          session.Cluster
 	scheduler        task.GlobalScheduler
 	ievm             IndexEngineVersionManager
 
@@ -179,7 +202,7 @@ func (c *compactionInspector) getCompactionTasksNumBySignalID(triggerID int64) i
 }
 
 func newCompactionInspector(meta CompactionMeta,
-	allocator allocator.Allocator, handler Handler, scheduler task.GlobalScheduler, analyzeScheduler task.GlobalScheduler, ievm IndexEngineVersionManager,
+	allocator allocator.Allocator, handler Handler, cluster session.Cluster, scheduler task.GlobalScheduler, analyzeScheduler task.GlobalScheduler, ievm IndexEngineVersionManager,
 ) *compactionInspector {
 	capacity := paramtable.Get().DataCoordCfg.CompactionTaskQueueCapacity.GetAsInt()
 	return &compactionInspector{
@@ -189,7 +212,10 @@ func newCompactionInspector(meta CompactionMeta,
 		stopCh:           make(chan struct{}),
 		executingTasks:   make(map[int64]CompactionTask),
 		cleaningTasks:    make(map[int64]CompactionTask),
+		cleaningInFlight: typeutil.NewConcurrentSet[int64](),
+		cleanupLimiter:   make(chan struct{}, maxConcurrentCleanups),
 		handler:          handler,
+		cluster:          cluster,
 		scheduler:        scheduler,
 		analyzeScheduler: analyzeScheduler,
 		ievm:             ievm,
@@ -217,8 +243,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 	mixLabelExcludes := typeutil.NewSet[string]()
 	clusterLabelExcludes := typeutil.NewSet[string]()
 
-	c.executingGuard.RLock()
-	for _, t := range c.executingTasks {
+	exclude := func(t CompactionTask) {
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
@@ -230,7 +255,22 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			clusterLabelExcludes.Insert(t.GetLabel())
 		}
 	}
+
+	c.executingGuard.RLock()
+	for _, t := range c.executingTasks {
+		exclude(t)
+	}
 	c.executingGuard.RUnlock()
+
+	// A task awaiting cleanup has left executingTasks but still owns its input
+	// segments until cleanup releases them, and a worker callback for it may
+	// still be submitting results. Keep excluding its channel and label, or a
+	// same-label task could start while the old one is still finishing.
+	c.cleaningGuard.RLock()
+	for _, t := range c.cleaningTasks {
+		exclude(t)
+	}
+	c.cleaningGuard.RUnlock()
 
 	excluded := make([]CompactionTask, 0)
 	defer func() {
@@ -307,14 +347,37 @@ func (c *compactionInspector) start() {
 	c.stopWg.Add(2)
 	go c.loopSchedule()
 	go c.loopClean()
+	if len(c.pendingWorkerDrops) > 0 {
+		c.stopWg.Add(1)
+		go c.dropRecoveredTasksOnWorker()
+	}
 }
 
-func (c *compactionInspector) loadMeta() {
+func (c *compactionInspector) loadMeta() error {
 	// TODO: make it compatible to all types of compaction with persist meta
 	triggers := c.meta.GetCompactionTasks(context.TODO())
+	cleanedSortInputs := make(map[int64]struct{})
+	activeSortInputs := make(map[int64]struct{})
+	recordSortInputs := func(target map[int64]struct{}, task *datapb.CompactionTask) {
+		if task.GetType() != datapb.CompactionType_SortCompaction {
+			return
+		}
+		for _, segmentID := range task.GetInputSegments() {
+			target[segmentID] = struct{}{}
+		}
+	}
 	for _, tasks := range triggers {
 		for _, task := range tasks {
 			if isCompactionTaskCleaned(task) {
+				// Older DataCoord versions could persist cleaned before restoring a
+				// rejected sort input's visibility. The task metadata is the durable
+				// evidence that this invisible segment is safe to publish. Do not scan
+				// arbitrary invisible originals here: a freshly flushed segment has
+				// the same shape while it legitimately waits for sort compaction.
+				if task.GetState() == datapb.CompactionTaskState_cleaned &&
+					task.GetType() == datapb.CompactionType_SortCompaction {
+					recordSortInputs(cleanedSortInputs, task)
+				}
 				mlog.Info(context.TODO(), "compactionInspector loadMeta abandon compactionTask",
 					mlog.Int64("planID", task.GetPlanID()),
 					mlog.String("type", task.GetType().String()),
@@ -333,6 +396,19 @@ func (c *compactionInspector) loadMeta() {
 					c.meta.DropCompactionTask(context.TODO(), task)
 					continue
 				}
+				if isMixOrSortCompaction(task.GetType()) && compactionTaskNeedsCleanup(task.GetState()) {
+					if !t.Clean() {
+						return merr.WrapErrServiceInternalMsg(
+							"failed to clean recovered terminal %s task %d in state %s",
+							task.GetType().String(), task.GetPlanID(), task.GetState().String())
+					}
+					c.pendingWorkerDrops = append(c.pendingWorkerDrops, t)
+					mlog.Info(context.TODO(), "compactionInspector loadMeta cleaned recovered terminal task",
+						mlog.Int64("planID", task.GetPlanID()),
+						mlog.String("type", task.GetType().String()),
+						mlog.String("state", task.GetState().String()))
+					continue
+				}
 				if t.NeedReAssignNodeID() {
 					if err = c.submitTask(t); err != nil {
 						mlog.Info(context.TODO(), "compactionInspector loadMeta submit task failed, try to clean it",
@@ -345,6 +421,7 @@ func (c *compactionInspector) loadMeta() {
 						c.meta.DropCompactionTask(context.Background(), task)
 						continue
 					}
+					recordSortInputs(activeSortInputs, task)
 					mlog.Info(context.TODO(), "compactionInspector loadMeta submitTask",
 						mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
 						mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
@@ -353,6 +430,7 @@ func (c *compactionInspector) loadMeta() {
 						mlog.String("state", t.GetTaskProto().GetState().String()))
 				} else {
 					c.restoreTask(t)
+					recordSortInputs(activeSortInputs, task)
 					mlog.Info(context.TODO(), "compactionInspector loadMeta restoreTask",
 						mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
 						mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
@@ -363,6 +441,87 @@ func (c *compactionInspector) loadMeta() {
 			}
 		}
 	}
+	return c.restoreCleanedSortInputVisibility(cleanedSortInputs, activeSortInputs)
+}
+
+// dropRecoveredTasksOnWorker releases the worker-side entries of the recovered
+// terminal tasks that this inspector cleaned synchronously instead of handing
+// to the scheduler. DropCompaction is the only path that removes a non-L0 task
+// from the DataNode executor, and the executor keeps a terminal entry -- result
+// binlog lists included -- resident until it is dropped, so skipping the
+// scheduler would leak one entry per recovered task on every DataCoord restart.
+//
+// This runs after start() rather than inside loadMeta: each drop is an RPC
+// bounded only by dataCoord.requestTimeoutSeconds, and DataCoord readiness must
+// not depend on an unresponsive DataNode.
+//
+// Best-effort by nature. The DataNode drops a terminal entry but keeps one that
+// is still executing (datanode/compactor/executor.go RemoveTask) while still
+// reporting success, so an entry for a task the worker is still running stays
+// until that DataNode restarts. Closing that gap needs a durable, retryable
+// worker-cleanup state on the DataNode side.
+func (c *compactionInspector) dropRecoveredTasksOnWorker() {
+	defer c.stopWg.Done()
+	for _, t := range c.pendingWorkerDrops {
+		select {
+		case <-c.stopCh:
+			return
+		default:
+		}
+		c.dropTaskOnWorker(t)
+	}
+}
+
+// dropTaskOnWorker releases the worker-side entry of a task this inspector has
+// finished with. Best-effort by nature: the DataNode defers a drop it cannot
+// honor yet, but a request lost to an unreachable node is not retried.
+func (c *compactionInspector) dropTaskOnWorker(t CompactionTask) {
+	if c.cluster == nil || t.GetTaskProto().GetNodeID() <= 0 {
+		return
+	}
+	t.DropTaskOnWorker(c.cluster)
+}
+
+func isMixOrSortCompaction(compactionType datapb.CompactionType) bool {
+	return compactionType == datapb.CompactionType_MixCompaction ||
+		compactionType == datapb.CompactionType_SortCompaction
+}
+
+func compactionTaskNeedsCleanup(state datapb.CompactionTaskState) bool {
+	return state == datapb.CompactionTaskState_completed ||
+		state == datapb.CompactionTaskState_failed ||
+		state == datapb.CompactionTaskState_timeout
+}
+
+func (c *compactionInspector) restoreCleanedSortInputVisibility(
+	cleanedSortInputs map[int64]struct{},
+	activeSortInputs map[int64]struct{},
+) error {
+	segmentIDs := make([]int64, 0, len(cleanedSortInputs))
+	for segmentID := range cleanedSortInputs {
+		if _, active := activeSortInputs[segmentID]; !active {
+			segmentIDs = append(segmentIDs, segmentID)
+		}
+	}
+	if len(segmentIDs) == 0 {
+		return nil
+	}
+	sort.Slice(segmentIDs, func(i, j int) bool { return segmentIDs[i] < segmentIDs[j] })
+
+	operators := make([]UpdateOperator, 0, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		operators = append(operators, RestoreSegmentVisibilityForTerminatedSortCompaction(segmentID))
+	}
+	ctx := context.TODO()
+	if err := c.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+		mlog.Warn(ctx, "failed to restore cleaned sort compaction input visibility",
+			mlog.Int64s("segmentIDs", segmentIDs),
+			mlog.Err(err))
+		return merr.Wrap(err, "restore cleaned sort compaction input visibility")
+	}
+	mlog.Info(ctx, "restored cleaned sort compaction input visibility",
+		mlog.Int64s("segmentIDs", segmentIDs))
+	return nil
 }
 
 func (c *compactionInspector) loopSchedule() {
@@ -613,20 +772,49 @@ func (c *compactionInspector) checkCompaction() error {
 	// Get executing executingTasks before GetCompactionState from DataNode to prevent false failure,
 	//  for DC might add new task while GetCompactionState.
 
-	var finishedTasks []CompactionTask
+	type finishedCompactionTask struct {
+		task         CompactionTask
+		needsCleanup bool
+	}
+	var finishedTasks []finishedCompactionTask
 	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
 		c.checkDelay(t)
-		finished := t.Process()
-		if finished {
-			finishedTasks = append(finishedTasks, t)
+		// Decide cleanup from immutable snapshots taken around Process, never from
+		// a later re-read. Between this loop and the cleaningTasks insert below the
+		// lock is released, and an in-flight scheduler callback can rewrite a
+		// terminal state back to pipelining when it fails to probe its worker
+		// (compaction_task_l0.go:153, compaction_task_mix.go:144). A task removed
+		// from executingTasks without entering cleaningTasks is never cleaned, so
+		// its input segments stay isCompacting until DataCoord restarts.
+		// The scheduler owns this task's state; borrow it under its per-task
+		// lock so Process cannot interleave with a worker callback. Never wait:
+		// a task whose callback is mid-RPC simply gets its round skipped.
+		planID := t.GetTaskProto().GetPlanID()
+		var stateBeforeProcess, stateAfterProcess datapb.CompactionTaskState
+		var finished bool
+		if !c.scheduler.TryUpdate(planID, func() {
+			stateBeforeProcess = t.GetTaskProto().GetState()
+			finished = t.Process()
+			stateAfterProcess = t.GetTaskProto().GetState()
+		}) {
+			continue
+		}
+		needsCleanup := compactionTaskNeedsCleanup(stateBeforeProcess) ||
+			compactionTaskNeedsCleanup(stateAfterProcess)
+		if finished || needsCleanup {
+			finishedTasks = append(finishedTasks, finishedCompactionTask{
+				task:         t,
+				needsCleanup: needsCleanup,
+			})
 		}
 	}
 	c.executingGuard.RUnlock()
 
 	// delete all finished
 	c.executingGuard.Lock()
-	for _, t := range finishedTasks {
+	for _, finishedTask := range finishedTasks {
+		t := finishedTask.task
 		delete(c.executingTasks, t.GetTaskProto().GetPlanID())
 		mlog.Info(context.TODO(), "compaction task finished",
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
@@ -645,10 +833,9 @@ func (c *compactionInspector) checkCompaction() error {
 
 	// insert task need to clean
 	c.cleaningGuard.Lock()
-	for _, t := range finishedTasks {
-		if t.GetTaskProto().GetState() == datapb.CompactionTaskState_failed ||
-			t.GetTaskProto().GetState() == datapb.CompactionTaskState_timeout ||
-			t.GetTaskProto().GetState() == datapb.CompactionTaskState_completed {
+	for _, finishedTask := range finishedTasks {
+		t := finishedTask.task
+		if finishedTask.needsCleanup {
 			mlog.Info(context.TODO(), "task need to clean",
 				mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()),
 				mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
@@ -665,19 +852,61 @@ func (c *compactionInspector) checkCompaction() error {
 // while compactionInspector.Clean is to do garbage collection for cleaned tasks
 func (c *compactionInspector) cleanFailedTasks() {
 	c.cleaningGuard.RLock()
-	cleanedTasks := make([]CompactionTask, 0)
-	for _, t := range c.cleaningTasks {
-		clean := t.Clean()
-		if clean {
-			cleanedTasks = append(cleanedTasks, t)
-		}
-	}
+	tasks := lo.Values(c.cleaningTasks)
 	c.cleaningGuard.RUnlock()
-	c.cleaningGuard.Lock()
-	for _, t := range cleanedTasks {
-		delete(c.cleaningTasks, t.GetTaskProto().GetPlanID())
+
+	for _, t := range tasks {
+		planID := t.GetTaskProto().GetPlanID()
+		select {
+		case <-c.stopCh:
+			return
+		default:
+		}
+		// Cleanup persists metadata and may have to wait out an in-flight worker
+		// callback, so it must not run inline: the caller is the single
+		// checkSchedule goroutine that also drives checkCompaction and schedule
+		// for every other compaction task. One slow cleanup would stall them all.
+		// cleaningInFlight keeps a task from being dispatched twice while its
+		// previous attempt is still running.
+		if !c.cleaningInFlight.Insert(planID) {
+			continue
+		}
+		// Take the slot before spawning, not inside the goroutine: the queue holds
+		// up to CompactionTaskQueueCapacity tasks, and acquiring afterwards would
+		// bound only how many run at once, leaving that many goroutines parked on
+		// the semaphore and draining at shutdown.
+		select {
+		case c.cleanupLimiter <- struct{}{}:
+		default:
+			c.cleaningInFlight.Remove(planID)
+			continue
+		}
+		// In production this runs on the loopSchedule goroutine, which holds a
+		// stopWg count of its own, so Add never races the Wait inside stop().
+		c.stopWg.Add(1)
+		go func(t CompactionTask, planID int64) {
+			defer c.stopWg.Done()
+			defer c.cleaningInFlight.Remove(planID)
+			defer func() { <-c.cleanupLimiter }()
+			// Finalize drops the task from dispatch first, so no further plan can
+			// be handed to a worker, then runs cleanup under the same per-task
+			// lock as the callbacks -- waiting for any in-flight one to drain.
+			cleaned := false
+			c.scheduler.Finalize(planID, func() { cleaned = t.Clean() })
+			if !cleaned {
+				return
+			}
+			// Finalize took the task out of dispatch, so the scheduler's own
+			// terminal-state branch will never run DropTaskOnWorker for it. Send
+			// the drop here instead, or the worker keeps the plan and its result
+			// binlogs until that DataNode restarts. Outside the per-task lock: it
+			// is an RPC, and the task is ours now.
+			c.dropTaskOnWorker(t)
+			c.cleaningGuard.Lock()
+			delete(c.cleaningTasks, planID)
+			c.cleaningGuard.Unlock()
+		}(t, planID)
 	}
-	c.cleaningGuard.Unlock()
 }
 
 // isFull return true if the task pool is full

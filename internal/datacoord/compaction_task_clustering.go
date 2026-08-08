@@ -110,6 +110,16 @@ func (t *clusteringCompactionTask) retryOnError(err error) {
 }
 
 func (t *clusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+	// Serialized by the scheduler's per-task lock; see task.GlobalScheduler.
+	//
+	// Bail out on any terminal state, not just cleaned. The inspector has already
+	// decided this task is finished and queued it for cleanup, so proceeding
+	// would mutate segment metadata -- clustering persists its result segments
+	// before recording their IDs on the task -- that cleanup no longer knows
+	// about, stranding those segments for good.
+	if isTerminalCompactionTaskState(t.GetTaskProto().GetState()) {
+		return
+	}
 	var err error
 	defer func() {
 		t.retryOnError(err)
@@ -134,6 +144,16 @@ func (t *clusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster sess
 }
 
 func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
+	// Serialized by the scheduler's per-task lock; see task.GlobalScheduler.
+	//
+	// Bail out on any terminal state, not just cleaned. The inspector has already
+	// decided this task is finished and queued it for cleanup, so proceeding
+	// would mutate segment metadata -- clustering persists its result segments
+	// before recording their IDs on the task -- that cleanup no longer knows
+	// about, stranding those segments for good.
+	if isTerminalCompactionTaskState(t.GetTaskProto().GetState()) {
+		return
+	}
 	// If task is in analyzing state, skip querying the DataNode — the compaction has not been
 	// submitted yet. The state transition (analyzing → pipelining) is driven by Process() /
 	// processAnalyzing(). Once the state becomes pipelining, the scheduler will move the task
@@ -332,6 +352,10 @@ func (t *clusteringCompactionTask) retryableProcess(ctx context.Context) error {
 }
 
 func (t *clusteringCompactionTask) Clean() bool {
+	// Runs under the scheduler's per-task lock, handed over by Finalize.
+	if t.GetTaskProto().GetState() == datapb.CompactionTaskState_cleaned {
+		return true
+	}
 	mlog.Info(context.TODO(), "clean task", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.String("type", t.GetTaskProto().GetType().String()))
 	return t.doClean() == nil
 }
@@ -807,6 +831,13 @@ func (t *clusteringCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskO
 	}
 
 	task := t.ShadowClone(opts...)
+	if regressesTerminalState(t.GetTaskProto().GetState(), task.GetState()) {
+		mlog.Info(context.TODO(), "dropping stale compaction task state write",
+			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+			mlog.String("current", t.GetTaskProto().GetState().String()),
+			mlog.String("rejected", task.GetState().String()))
+		return nil
+	}
 	err := t.saveTaskMeta(task)
 	if err != nil {
 		mlog.Warn(context.TODO(), "Failed to saveTaskMeta", mlog.Err(err))

@@ -85,6 +85,16 @@ func (t *l0CompactionTask) GetTaskVersion() int64 {
 }
 
 func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+	// Serialized by the scheduler's per-task lock; see task.GlobalScheduler.
+	//
+	// Bail out on any terminal state, not just cleaned. The inspector has already
+	// decided this task is finished and queued it for cleanup, so proceeding
+	// would mutate segment metadata -- clustering persists its result segments
+	// before recording their IDs on the task -- that cleanup no longer knows
+	// about, stranding those segments for good.
+	if isTerminalCompactionTaskState(t.GetTaskProto().GetState()) {
+		return
+	}
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()), mlog.FieldNodeID(t.GetTaskProto().GetNodeID()))
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
@@ -146,6 +156,16 @@ func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 }
 
 func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
+	// Serialized by the scheduler's per-task lock; see task.GlobalScheduler.
+	//
+	// Bail out on any terminal state, not just cleaned. The inspector has already
+	// decided this task is finished and queued it for cleanup, so proceeding
+	// would mutate segment metadata -- clustering persists its result segments
+	// before recording their IDs on the task -- that cleanup no longer knows
+	// about, stranding those segments for good.
+	if isTerminalCompactionTaskState(t.GetTaskProto().GetState()) {
+		return
+	}
 	log := mlog.With(mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.FieldNodeID(t.GetTaskProto().GetNodeID()))
 	result, err := cluster.QueryCompaction(t.GetTaskProto().GetNodeID(), &datapb.CompactionStateRequest{
 		PlanID: t.GetTaskProto().GetPlanID(),
@@ -255,7 +275,8 @@ func (t *l0CompactionTask) processMetaSaved() bool {
 }
 
 func (t *l0CompactionTask) processCompleted() bool {
-	t.resetSegmentCompacting()
+	// See mixCompactionTask.processCompleted: doClean is the only place that
+	// releases the input segments.
 	task := t.taskProto.Load().(*datapb.CompactionTask)
 	mlog.Info(context.TODO(), "l0CompactionTask processCompleted done", mlog.Int64("planID", task.GetPlanID()),
 		mlog.Duration("costs", time.Duration(task.GetEndTime()-task.GetStartTime())*time.Second))
@@ -278,6 +299,10 @@ func (t *l0CompactionTask) doClean() error {
 }
 
 func (t *l0CompactionTask) Clean() bool {
+	// Runs under the scheduler's per-task lock, handed over by Finalize.
+	if t.GetTaskProto().GetState() == datapb.CompactionTaskState_cleaned {
+		return true
+	}
 	return t.doClean() == nil
 }
 
@@ -436,6 +461,13 @@ func (t *l0CompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) erro
 	}
 
 	task := t.ShadowClone(opts...)
+	if regressesTerminalState(t.GetTaskProto().GetState(), task.GetState()) {
+		mlog.Info(context.TODO(), "dropping stale compaction task state write",
+			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+			mlog.String("current", t.GetTaskProto().GetState().String()),
+			mlog.String("rejected", task.GetState().String()))
+		return nil
+	}
 	err := t.saveTaskMeta(task)
 	if err != nil {
 		return err

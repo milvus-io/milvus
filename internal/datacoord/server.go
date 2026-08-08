@@ -319,7 +319,9 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
-	s.initCompaction()
+	if err = s.initCompaction(); err != nil {
+		return err
+	}
 	mlog.Info(s.ctx, "init compaction done")
 
 	s.initAnalyzeInspector()
@@ -673,13 +675,16 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 	}
 }
 
-func (s *Server) initCompaction() {
-	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
-	cph.loadMeta()
+func (s *Server) initCompaction() error {
+	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.cluster2, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	if err := cph.loadMeta(); err != nil {
+		return err
+	}
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
+	return nil
 }
 
 func (s *Server) stopCompaction() {

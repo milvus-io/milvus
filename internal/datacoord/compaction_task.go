@@ -47,6 +47,32 @@ type CompactionTask interface {
 	SaveTaskMeta() error
 }
 
+// isTerminalCompactionTaskState reports whether a state ends the task's
+// execution. Only cleanup may follow one.
+func isTerminalCompactionTaskState(state datapb.CompactionTaskState) bool {
+	return state == datapb.CompactionTaskState_completed ||
+		state == datapb.CompactionTaskState_failed ||
+		state == datapb.CompactionTaskState_timeout ||
+		state == datapb.CompactionTaskState_cleaned
+}
+
+// regressesTerminalState reports whether writing next over current would undo a
+// terminal decision.
+//
+// A worker callback that fails to probe its node writes pipelining back
+// unconditionally, without looking at the state it overwrites. Once the task is
+// terminal that write is stale: the inspector has already decided the task is
+// finished and queued it for cleanup, and resurrecting it would let the
+// scheduler dispatch a plan for segments cleanup is about to release. Drop the
+// write instead of letting it land.
+func regressesTerminalState(current, next datapb.CompactionTaskState) bool {
+	if !isTerminalCompactionTaskState(current) {
+		return false
+	}
+	// Cleanup is the one transition out of a terminal state.
+	return next != current && next != datapb.CompactionTaskState_cleaned
+}
+
 type compactionTaskOpt func(task *datapb.CompactionTask)
 
 func setNodeID(nodeID int64) compactionTaskOpt {

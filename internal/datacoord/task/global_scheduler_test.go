@@ -492,3 +492,108 @@ func TestGlobalScheduler_TerminalTaskClearsBackoff(t *testing.T) {
 	assert.Equal(t, 0, scheduler.runningTasks.Len())
 	assert.Equal(t, 0, len(scheduler.pendingTasks.TaskIDs()))
 }
+
+// Finalize is how an owner takes a task back from the scheduler. Two properties
+// make it the handover point: the task can no longer be dispatched, and the
+// callback the owner runs cannot interleave with a worker callback.
+func TestGlobalScheduler_FinalizeRemovesTaskFromDispatch(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().Return(1).Maybe()
+	task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
+	task.EXPECT().GetTaskSlot().Return(1).Maybe()
+	task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+	task.EXPECT().GetTaskTime(mock.Anything).Return(time.Now()).Maybe()
+	task.EXPECT().GetTaskVersion().Return(0).Maybe()
+	scheduler.Enqueue(task)
+	assert.NotNil(t, scheduler.pendingTasks.Get(1))
+
+	ran := false
+	scheduler.Finalize(1, func() { ran = true })
+
+	assert.True(t, ran, "Finalize must run the owner's callback")
+	assert.Nil(t, scheduler.pendingTasks.Get(1),
+		"a finalized task must not be dispatchable again")
+	assert.False(t, scheduler.runningTasks.Contain(1))
+}
+
+func TestGlobalScheduler_FinalizeWaitsForInFlightCallback(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+	// Stand in for a worker callback holding the per-task lock across its RPC.
+	scheduler.mu.Lock(int64(1))
+
+	done := make(chan struct{})
+	go func() {
+		scheduler.Finalize(1, func() { close(done) })
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("Finalize ran the owner's callback while a worker callback held the task")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	scheduler.mu.Unlock(int64(1))
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Finalize did not proceed after the worker callback drained")
+	}
+}
+
+func TestGlobalScheduler_TryUpdateNeverWaits(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+	scheduler.mu.Lock(int64(1))
+	defer scheduler.mu.Unlock(int64(1))
+
+	returned := make(chan bool, 1)
+	go func() {
+		returned <- scheduler.TryUpdate(1, func() { t.Error("callback must not run") })
+	}()
+
+	select {
+	case ok := <-returned:
+		assert.False(t, ok, "TryUpdate must report that it did not run")
+	case <-time.After(5 * time.Second):
+		t.Fatal("TryUpdate blocked; the scheduling loop would stall")
+	}
+}
+
+// A dispatch that already popped a task re-inserts it while still holding the
+// per-task lock. Finalize must therefore remove under the lock, or the handover
+// is silently undone and the task gets dispatched again after cleanup.
+func TestGlobalScheduler_FinalizeOutlastsInFlightDispatchReinsert(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().Return(1).Maybe()
+	task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
+	task.EXPECT().GetTaskSlot().Return(1).Maybe()
+	task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+	task.EXPECT().GetTaskTime(mock.Anything).Return(time.Now()).Maybe()
+	task.EXPECT().GetTaskVersion().Return(0).Maybe()
+
+	// Stand in for a dispatch that popped the task and is mid-CreateTaskOnWorker:
+	// it holds the lock and will push the task back when its RPC fails.
+	scheduler.mu.Lock(int64(1))
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		scheduler.pendingTasks.Push(task)
+		scheduler.mu.Unlock(int64(1))
+	}()
+
+	scheduler.Finalize(1, func() {})
+
+	assert.Nil(t, scheduler.pendingTasks.Get(1),
+		"a task re-inserted by an in-flight dispatch must not survive Finalize")
+	assert.False(t, scheduler.runningTasks.Contain(1))
+}
