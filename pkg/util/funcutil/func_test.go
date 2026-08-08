@@ -765,8 +765,7 @@ func (s *NumRowsWithSchemaSuite) SetupSuite() {
 			{FieldID: 114, Name: "sparse_vector", DataType: schemapb.DataType_SparseFloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 			{FieldID: 115, Name: "int8_vector", DataType: schemapb.DataType_Int8Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 			{FieldID: 116, Name: "array_vector_float16", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
-			{FieldID: 117, Name: "decimal", DataType: schemapb.DataType_Decimal,
-				TypeParams: []*commonpb.KeyValuePair{{Key: "precision", Value: "18"}, {Key: "scale", Value: "4"}}},
+			{FieldID: 117, Name: "decimal", DataType: schemapb.DataType_Decimal, TypeParams: []*commonpb.KeyValuePair{{Key: "precision", Value: "18"}, {Key: "scale", Value: "4"}}},
 			{FieldID: 999, Name: "unknown", DataType: schemapb.DataType_None},
 		},
 	}
