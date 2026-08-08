@@ -29,20 +29,118 @@ import (
 )
 
 var (
-	execPool         *conc.Pool[any]
+	execPool         *orderedExecPool
 	execPoolInitOnce sync.Once
 )
+
+// orderedExecPool preserves Submit start order before handing work to the inner pool.
+// Task completion remains independent, so later short work can finish first.
+type orderedExecPool struct {
+	inner *conc.Pool[any]
+
+	queue   conc.ConcurrentQueue[*orderedExecJob]
+	notify  chan struct{}
+	closeCh chan struct{}
+}
+
+type orderedExecJob struct {
+	action func() (any, error)
+	future chan *conc.Future[any]
+}
+
+func newOrderedExecPool(inner *conc.Pool[any]) *orderedExecPool {
+	pool := &orderedExecPool{
+		inner:   inner,
+		notify:  make(chan struct{}, 1),
+		closeCh: make(chan struct{}),
+	}
+	go pool.dispatch()
+	return pool
+}
+
+func (pool *orderedExecPool) Submit(fn func() (any, error)) *conc.Future[any] {
+	job := &orderedExecJob{
+		action: fn,
+		future: make(chan *conc.Future[any], 1),
+	}
+	pool.queue.Enqueue(job)
+	select {
+	case pool.notify <- struct{}{}:
+	default:
+	}
+
+	return conc.Go(func() (any, error) {
+		future := <-job.future
+		return future.Await()
+	})
+}
+
+func (pool *orderedExecPool) dispatch() {
+	for {
+		job, ok := pool.queue.Dequeue()
+		if !ok {
+			select {
+			case <-pool.notify:
+				continue
+			case <-pool.closeCh:
+				return
+			}
+		}
+
+		started := make(chan struct{})
+		future := pool.inner.Submit(func() (any, error) {
+			close(started)
+			return job.action()
+		})
+
+		select {
+		case <-started:
+			job.future <- future
+		case <-future.Inner():
+			job.future <- future
+		}
+		close(job.future)
+	}
+}
+
+func (pool *orderedExecPool) Cap() int {
+	return pool.inner.Cap()
+}
+
+func (pool *orderedExecPool) Running() int {
+	return pool.inner.Running()
+}
+
+func (pool *orderedExecPool) Free() int {
+	return pool.inner.Free()
+}
+
+func (pool *orderedExecPool) Waiting() int {
+	return pool.inner.Waiting() + pool.queue.Len()
+}
+
+func (pool *orderedExecPool) IsClosed() bool {
+	return pool.inner.IsClosed()
+}
+
+// Release and ReleaseTimeout is not implemented
+// since it is not used in the current implementation.
+
+func (pool *orderedExecPool) Resize(size int) error {
+	return pool.inner.Resize(size)
+}
 
 func initExecPool() {
 	pt := paramtable.Get()
 	cpuNum := hardware.GetCPUNum()
 	initPoolSize := cpuNum * pt.DataNodeCfg.ImportConcurrencyPerCPUCore.GetAsInt()
-	execPool = conc.NewPool[any](
+	innerPool := conc.NewPool[any](
 		initPoolSize,
 		conc.WithPreAlloc(false), // pre alloc must be false to resize pool dynamically, use warmup to alloc worker here
 		conc.WithDisablePurge(true),
 	)
-	conc.WarmupPool(execPool, runtime.LockOSThread)
+	conc.WarmupPool(innerPool, runtime.LockOSThread)
+	execPool = newOrderedExecPool(innerPool)
 
 	watchKey := pt.DataNodeCfg.ImportConcurrencyPerCPUCore.Key
 	pt.Watch(watchKey, config.NewHandler(watchKey, resizeExecPool))
@@ -64,7 +162,7 @@ func resizeExecPool(evt *config.Event) {
 	}
 }
 
-func GetExecPool() *conc.Pool[any] {
+func GetExecPool() *orderedExecPool {
 	execPoolInitOnce.Do(initExecPool)
 	return execPool
 }

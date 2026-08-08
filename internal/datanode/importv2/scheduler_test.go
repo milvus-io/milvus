@@ -28,6 +28,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -65,6 +66,78 @@ type mockReader struct {
 
 func (mr *mockReader) Size() (int64, error) {
 	return mr.size, nil
+}
+
+type schedulerTestTask struct {
+	taskID int64
+	state  *atomic.Int32
+
+	execute func() []*conc.Future[any]
+}
+
+func newSchedulerTestTask(taskID int64, execute func() []*conc.Future[any]) *schedulerTestTask {
+	task := &schedulerTestTask{
+		taskID:  taskID,
+		state:   atomic.NewInt32(int32(datapb.ImportTaskStateV2_Pending)),
+		execute: execute,
+	}
+	return task
+}
+
+func (t *schedulerTestTask) Execute() []*conc.Future[any] {
+	t.state.Store(int32(datapb.ImportTaskStateV2_InProgress))
+	return t.execute()
+}
+
+func (t *schedulerTestTask) GetJobID() int64 {
+	return 1
+}
+
+func (t *schedulerTestTask) GetTaskID() int64 {
+	return t.taskID
+}
+
+func (t *schedulerTestTask) GetCollectionID() int64 {
+	return 1
+}
+
+func (t *schedulerTestTask) GetPartitionIDs() []int64 {
+	return nil
+}
+
+func (t *schedulerTestTask) GetVchannels() []string {
+	return nil
+}
+
+func (t *schedulerTestTask) GetType() TaskType {
+	return TaskType(-1)
+}
+
+func (t *schedulerTestTask) GetState() datapb.ImportTaskStateV2 {
+	return datapb.ImportTaskStateV2(t.state.Load())
+}
+
+func (t *schedulerTestTask) GetReason() string {
+	return ""
+}
+
+func (t *schedulerTestTask) GetSchema() *schemapb.CollectionSchema {
+	return nil
+}
+
+func (t *schedulerTestTask) GetSlots() int64 {
+	return 1
+}
+
+func (t *schedulerTestTask) GetBufferSize() int64 {
+	return 0
+}
+
+func (t *schedulerTestTask) Cancel() {
+}
+
+func (t *schedulerTestTask) Clone() Task {
+	return t
 }
 
 type SchedulerSuite struct {
@@ -141,6 +214,94 @@ func (s *SchedulerSuite) TestScheduler_Slots() {
 
 	slots := s.scheduler.Slots()
 	s.Equal(int64(10), slots)
+}
+
+func (s *SchedulerSuite) TestScheduler_DoesNotBlockShortTaskBehindLongFuture() {
+	longDone := make(chan struct{})
+	longStarted := make(chan struct{})
+	shortStarted := make(chan struct{})
+	var longFuture *conc.Future[any]
+
+	longTask := newSchedulerTestTask(1, func() []*conc.Future[any] {
+		close(longStarted)
+		longFuture = conc.Go(func() (any, error) {
+			<-longDone
+			return nil, nil
+		})
+		return []*conc.Future[any]{longFuture}
+	})
+	shortTask := newSchedulerTestTask(2, func() []*conc.Future[any] {
+		close(shortStarted)
+		return []*conc.Future[any]{
+			conc.Go(func() (any, error) {
+				return nil, nil
+			}),
+		}
+	})
+	s.manager.Add(longTask)
+	s.manager.Add(shortTask)
+
+	s.scheduler.scheduleTasks()
+	requireClosed(s.T(), longStarted)
+	requireClosed(s.T(), shortStarted)
+	s.Require().NotNil(longFuture)
+	s.False(longFuture.Done())
+
+	select {
+	case <-longDone:
+		s.Fail("long task completed before short task started")
+	default:
+	}
+	close(longDone)
+}
+
+func (s *SchedulerSuite) TestScheduler_FreesCompletedTaskInSameSchedule() {
+	doneFuture := conc.Go(func() (any, error) {
+		return nil, nil
+	})
+	_, err := doneFuture.Await()
+	s.NoError(err)
+
+	task := newSchedulerTestTask(1, func() []*conc.Future[any] {
+		return []*conc.Future[any]{
+			doneFuture,
+		}
+	})
+	s.manager.Add(task)
+
+	s.scheduler.scheduleTasks()
+
+	s.Empty(s.scheduler.futures)
+}
+
+func (s *SchedulerSuite) TestScheduler_FreesFailedTaskWithUnfinishedFutures() {
+	task := newSchedulerTestTask(1, func() []*conc.Future[any] {
+		return nil
+	})
+	task.state.Store(int32(datapb.ImportTaskStateV2_Failed))
+	s.manager.Add(task)
+
+	block := make(chan struct{})
+	defer close(block)
+	future := conc.Go(func() (any, error) {
+		<-block
+		return nil, nil
+	})
+	s.scheduler.futures[task.GetTaskID()] = []*conc.Future[any]{future}
+
+	s.scheduler.tryFreeFutures()
+
+	s.Empty(s.scheduler.futures)
+}
+
+func requireClosed(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+
+	select {
+	case <-ch:
+	default:
+		t.Fatal("channel is not closed")
+	}
 }
 
 func (s *SchedulerSuite) TestScheduler_Start_Preimport() {
