@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -126,6 +127,49 @@ func (s *InsertBufferSuite) TestBasic() {
 		s.True(insertBuffer.IsFull())
 		s.False(insertBuffer.IsEmpty())
 	})
+}
+
+func (s *InsertBufferSuite) TestBM25StatsAreNotCountedTowardBufferSize() {
+	schema := &schemapb.CollectionSchema{
+		Name:      s.collSchema.Name,
+		Fields:    s.collSchema.Fields,
+		Functions: []*schemapb.FunctionSchema{{Name: "bm25"}},
+	}
+	insertBuffer, err := NewInsertBuffer(schema)
+	s.Require().NoError(err)
+
+	stats := storage.NewBM25Stats()
+	stats.Append(map[uint32]float32{1: 1, 2: 1})
+	insertData := &InsertData{
+		data:      []*storage.InsertData{{}},
+		tsField:   []*storage.Int64FieldData{{Data: []int64{100}}},
+		bm25Stats: map[int64]*storage.BM25Stats{101: stats},
+	}
+
+	// The stats are buffered but contribute nothing to the payload budget: they
+	// outlive the payload release (SyncPack.ReleaseData keeps them for Commit),
+	// so counting them here would claim memory back while it is still held.
+	buffered := insertBuffer.Buffer(insertData,
+		&msgpb.MsgPosition{Timestamp: 100},
+		&msgpb.MsgPosition{Timestamp: 200})
+	s.Zero(buffered, "an insert carrying only BM25 stats buffers no payload bytes")
+	s.Zero(insertBuffer.size)
+	s.False(insertBuffer.IsFull())
+
+	// Merging into an existing field, and a nil stat, are still handled.
+	more := storage.NewBM25Stats()
+	more.Append(map[uint32]float32{2: 1, 3: 1})
+	insertData.bm25Stats = map[int64]*storage.BM25Stats{101: more, 102: nil}
+	s.Zero(insertBuffer.Buffer(insertData,
+		&msgpb.MsgPosition{Timestamp: 201},
+		&msgpb.MsgPosition{Timestamp: 300}))
+	s.Zero(insertBuffer.size)
+
+	// And they are still yielded to the flush.
+	yielded := insertBuffer.YieldStats()
+	s.Len(yielded, 1)
+	s.Contains(yielded, int64(101))
+	s.Empty(insertBuffer.YieldStats(), "yield resets the stats buffer")
 }
 
 func (s *InsertBufferSuite) TestBuffer() {

@@ -201,6 +201,8 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 
 func (t *L0ImportTask) importL0(reader binlog.L0Reader) error {
 	syncFutures := make([]*conc.Future[struct{}], 0)
+	// Same ownership rule as ImportTask.importFile: every submitted task settles
+	// itself through releaseOnDone.
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
 		data, err := reader.Read()
@@ -215,13 +217,13 @@ func (t *L0ImportTask) importL0(reader binlog.L0Reader) error {
 			return err
 		}
 		fs, sts, err := t.syncDelete(delData)
+		syncFutures = append(syncFutures, fs...)
+		syncTasks = append(syncTasks, sts...)
 		if err != nil {
 			return err
 		}
-		syncFutures = append(syncFutures, fs...)
-		syncTasks = append(syncTasks, sts...)
 	}
-	err := conc.AwaitAll(syncFutures...)
+	err := conc.BlockOnAll(syncFutures...)
 	if err != nil {
 		return err
 	}
@@ -254,12 +256,15 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 			segmentID, partitionID, t.GetCollectionID(), channel, nil, data,
 			nil, storage.StorageV2, false, t.req.GetStorageConfig())
 		if err != nil {
-			return nil, nil, err
+			return futures, syncTasks, err
 		}
-		future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm)
+		future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm, releaseOnDone(syncTask))
 		if err != nil {
 			mlog.Error(t.ctx, "failed to sync l0 delete data", WrapLogFields(t, mlog.Err(err))...)
-			return nil, nil, err
+			// Refused before the dispatcher accepted it; releaseOnDone will
+			// never fire for this one.
+			syncTask.Abandon()
+			return futures, syncTasks, err
 		}
 		futures = append(futures, future)
 		syncTasks = append(syncTasks, syncTask)

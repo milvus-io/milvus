@@ -3,6 +3,7 @@ package writebuffer
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"sync/atomic"
 	"testing"
@@ -44,33 +45,48 @@ type L0WriteBufferSuite struct {
 }
 
 type fakeGrowingFlushSource struct {
-	currentOffset int64
-	flushFunc     func(context.Context, int64, int64, *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error)
-	releaseFunc   func()
+	// tsafe is the consumption watermark this double reports. Zero means "far
+	// ahead of anything the tests fence on", which is the usual case; a test
+	// that wants the source to look behind sets it explicitly.
+	tsafe uint64
+	rows  int64
+	// pkRows, when set, decides how many primary keys each call returns. Needed
+	// where consecutive flushes carry different row counts: the fences are
+	// timestamps, so the double cannot derive the count from them.
+	pkRows      func() int64
+	flushFunc   func(context.Context, uint64, uint64, *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error)
+	releaseFunc func()
 }
 
-func (s fakeGrowingFlushSource) CurrentOffset() int64 {
-	if s.currentOffset > 0 {
-		return s.currentOffset
+func (s fakeGrowingFlushSource) TSafe() uint64 {
+	if s.tsafe > 0 {
+		return s.tsafe
 	}
-	return 10
+	return math.MaxUint64
 }
 
 func (s fakeGrowingFlushSource) MaterializedFieldIDs(ctx context.Context) ([]int64, error) {
 	return []int64{0, 1, 100, 101, 102}, nil
 }
 
-func (s fakeGrowingFlushSource) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
-	pks := make([]storage.PrimaryKey, 0, endOffset-startOffset)
-	for i := startOffset; i < endOffset; i++ {
+func (s fakeGrowingFlushSource) PrimaryKeys(ctx context.Context, startTs, endTs uint64) ([]storage.PrimaryKey, error) {
+	rows := s.rows
+	if s.pkRows != nil {
+		rows = s.pkRows()
+	}
+	if rows == 0 {
+		rows = 10
+	}
+	pks := make([]storage.PrimaryKey, 0, rows)
+	for i := int64(0); i < rows; i++ {
 		pks = append(pks, storage.NewInt64PrimaryKey(i))
 	}
 	return pks, nil
 }
 
-func (s fakeGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+func (s fakeGrowingFlushSource) FlushGrowingData(ctx context.Context, startTs, endTs uint64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 	if s.flushFunc != nil {
-		return s.flushFunc(ctx, startOffset, endOffset, config)
+		return s.flushFunc(ctx, startTs, endTs, config)
 	}
 	return &syncmgr.GrowingFlushResult{
 		ManifestPath:           "manifest",
@@ -88,6 +104,8 @@ func (s fakeGrowingFlushSource) Release() {
 	}
 }
 
+func (s fakeGrowingFlushSource) CommitGrowingFlush(uint64) {}
+
 type fakeGrowingSourceProvider struct {
 	source syncmgr.GrowingFlushSource
 	state  syncmgr.GrowingSourceState
@@ -104,7 +122,7 @@ func fakeColumnGroupMemorySizes(config *syncmgr.GrowingFlushConfig, size int64) 
 	return result
 }
 
-func (p fakeGrowingSourceProvider) GetGrowingFlushSource(int64, int64, *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+func (p fakeGrowingSourceProvider) GetGrowingFlushSource(int64, *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 	return p.source, p.state
 }
 
@@ -129,7 +147,7 @@ func (p *fakeGrowingSourceReleaseHandoffProvider) IsReleasePrepared(segmentID in
 		return false
 	}
 	for _, segment := range p.segments {
-		if segment.SegmentID == segmentID && segment.TargetOffset > 0 {
+		if segment.SegmentID == segmentID && segment.FlushThroughTs > 0 {
 			return true
 		}
 	}
@@ -380,6 +398,81 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 	})
 }
 
+func (s *L0WriteBufferSuite) TestWriteBufferSyncPayloadBackpressureStartsAfterSubmit() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key)
+
+	const segmentID = int64(1000)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		PartitionID:    10,
+		CollectionID:   s.collID,
+		State:          commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV2,
+	}, pkoracle.NewBloomFilterSet(), nil, metacache.NewEmptySegmentStats())
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Maybe()
+	s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Once()
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
+
+	wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
+		idAllocator:  s.allocator,
+		syncPolicies: []SyncPolicy{GetFullBufferPolicy()},
+	})
+	s.Require().NoError(err)
+	l0wb := wb.(*l0WriteBuffer)
+
+	submitted := make(chan *syncmgr.SyncTask, 1)
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, task syncmgr.Task, _ ...func(error) error) (*conc.Future[struct{}], error) {
+			writeBufferTask := task.(*syncmgr.SyncTask)
+			submitted <- writeBufferTask
+			return conc.Go(func() (struct{}, error) { return struct{}{}, nil }), nil
+		}).Once()
+
+	_, msg := s.composeInsertMsg(segmentID, 1, 128, schemapb.DataType_Int64)
+	insertData, err := PrepareInsert(s.collSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
+	s.Require().NoError(err)
+	metrics.DataNodeFlowGraphBufferDataSize.Reset()
+
+	bufferDone := make(chan error, 1)
+	go func() {
+		bufferDone <- wb.BufferData(insertData, nil,
+			&msgpb.MsgPosition{Timestamp: 100},
+			&msgpb.MsgPosition{Timestamp: 200}, 100)
+	}()
+
+	var task *syncmgr.SyncTask
+	select {
+	case task = <-submitted:
+	case <-time.After(time.Second):
+		s.FailNow("full payload was not submitted before backpressure")
+	}
+	select {
+	case err := <-bufferDone:
+		s.FailNow("BufferData returned before the in-flight payload was released", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	s.Equal(task.PayloadBytes(), l0wb.MemorySize())
+	value, err := metrics.DataNodeFlowGraphBufferDataSize.GetMetricWithLabelValues(
+		paramtable.GetStringNodeID(), fmt.Sprint(s.metacache.Collection()))
+	s.Require().NoError(err)
+	s.MetricsEqual(value, float64(task.PayloadBytes()))
+
+	task.Abandon()
+	select {
+	case err := <-bufferDone:
+		s.NoError(err)
+	case <-time.After(time.Second):
+		s.FailNow("payload release did not remove BufferData backpressure")
+	}
+	s.Zero(l0wb.MemorySize())
+	s.MetricsEqual(value, 0)
+}
+
 func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")
@@ -398,11 +491,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
 
-		// GetSegmentByID is invoked three times per BufferData on the first
-		// insert: (1) decideGrowingFlushSource reads the sticky flushSourceMode,
-		// (2) growingSourceBaseOffset reads the row counter, (3) CreateNewGrowingSegment
-		// checks for prior existence.
-		metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false).Times(3)
+		// Twice per BufferData on the first insert: decideGrowingFlushSource
+		// reads the sticky flushSourceMode, then CreateNewGrowingSegment checks
+		// for prior existence. The third read is gone with the row counter the
+		// flush range no longer needs.
+		metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false).Times(2)
 		metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 		metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
@@ -420,15 +513,15 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		textSchema := s.textSchema()
 		mc := s.newTextMetaCache(textSchema)
 		var resolvedSegmentID int64
-		var resolvedTargetOffset int64
+		var resolvedFenceTs uint64
 		resolveCalls := 0
 		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			growingSourceRetryInterval: time.Hour,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			idAllocator:        s.allocator,
+			flushRetryInterval: time.Hour,
+			growingSourceResolver: func(segmentID int64, endPos *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				resolveCalls++
 				resolvedSegmentID = segmentID
-				resolvedTargetOffset = targetOffset
+				resolvedFenceTs = endPos.GetTimestamp()
 				if resolveCalls == 1 {
 					return fakeGrowingFlushSource{}, syncmgr.GrowingSourceUsable
 				}
@@ -452,10 +545,10 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			SchemaVersion:  100,
 		}, pkoracle.NewBloomFilterSet(), nil, nil)
 
-		// growingSourceBaseOffset and CreateNewGrowingSegment see a new
+		// CreateNewGrowingSegment sees a new
 		// segment; recordGrowingSourceProgress and triggerSync see the segment
 		// created by AddSegment.
-		mc.EXPECT().GetSegmentByID(int64(1001)).Return(nil, false).Times(3)
+		mc.EXPECT().GetSegmentByID(int64(1001)).Return(nil, false).Times(2)
 		mc.EXPECT().GetSegmentByID(int64(1001)).Return(segmentInfo, true).Times(2)
 		mc.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 		mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
@@ -467,7 +560,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.Nil(l0wb.buffers[int64(1001)])
 		s.Contains(l0wb.growingSourceProgress, int64(1001))
 		s.EqualValues(1001, resolvedSegmentID)
-		s.EqualValues(10, resolvedTargetOffset)
+		// The fence is the position the flush runs to, not a row count.
+		s.NotZero(resolvedFenceTs)
 		s.EqualValues(100, wb.GetCheckpoint().GetTimestamp())
 	})
 
@@ -476,9 +570,9 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		metacache := s.newTextRealMetaCache(textSchema)
 		sourceState := syncmgr.GrowingSourceUnavailable
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			growingSourceRetryInterval: time.Hour,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			idAllocator:        s.allocator,
+			flushRetryInterval: time.Hour,
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return fakeGrowingFlushSource{}, sourceState
 			},
 		})
@@ -516,9 +610,9 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		metacache := s.newTextRealMetaCache(textSchema)
 		sourceState := syncmgr.GrowingSourcePending
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			growingSourceRetryInterval: time.Hour,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			idAllocator:        s.allocator,
+			flushRetryInterval: time.Hour,
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return fakeGrowingFlushSource{}, sourceState
 			},
 		})
@@ -532,26 +626,38 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.NoError(err)
 
 		l0wb := wb.(*l0WriteBuffer)
-		s.False(l0wb.growingSourceRetryScheduled)
+		s.False(anyGrowingRetryArmed(l0wb.writeBufferBase))
 		err = wb.SealSegments(context.Background(), []int64{1102})
 		s.NoError(err)
 		l0wb.EvictBuffer()
-		s.True(l0wb.growingSourceRetryScheduled)
+		s.True(anyGrowingRetryArmed(l0wb.writeBufferBase))
 		wb.Close(context.Background(), false)
 		sourceState = syncmgr.GrowingSourceUsable
 		time.Sleep(50 * time.Millisecond)
 	})
 
-	s.Run("drop_close_skips_unavailable_growing_source", func() {
+	s.Run("drop_close_waits_for_pending_growing_source", func() {
 		textSchema := s.textSchema()
-		metacache := s.newTextRealMetaCache(textSchema)
+		metaCache := s.newTextRealMetaCache(textSchema)
 		metaWriter := syncmgr.NewMockMetaWriter(s.T())
-		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			metaWriter:                 metaWriter,
-			growingSourceRetryInterval: time.Hour,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
-				return fakeGrowingFlushSource{}, syncmgr.GrowingSourcePending
+		syncManager := syncmgr.NewMockSyncManager(s.T())
+		var sourceState atomic.Int32
+		sourceState.Store(int32(syncmgr.GrowingSourcePending))
+		var dropStarted atomic.Bool
+		pendingObserved := make(chan struct{}, 1)
+		wb, err := NewL0WriteBuffer(s.channelName, metaCache, syncManager, &writeBufferOption{
+			idAllocator:        s.allocator,
+			metaWriter:         metaWriter,
+			flushRetryInterval: 10 * time.Millisecond,
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+				state := syncmgr.GrowingSourceState(sourceState.Load())
+				if dropStarted.Load() && state == syncmgr.GrowingSourcePending {
+					select {
+					case pendingObserved <- struct{}{}:
+					default:
+					}
+				}
+				return fakeGrowingFlushSource{}, state
 			},
 		})
 		s.NoError(err)
@@ -563,25 +669,177 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
 		s.NoError(err)
 
-		metaWriter.EXPECT().DropChannel(mock.Anything, s.channelName).Return(nil).Once()
-		s.NotPanics(func() {
-			wb.Close(context.Background(), true)
-		})
+		var syncCompleted atomic.Bool
+		var dropAfterSync atomic.Bool
+		submitted := make(chan *syncmgr.GrowingSourceSyncTask, 1)
+		syncManager.EXPECT().SyncData(mock.Anything, mock.AnythingOfType("*syncmgr.GrowingSourceSyncTask"), mock.Anything).
+			RunAndReturn(func(_ context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+				textTask := task.(*syncmgr.GrowingSourceSyncTask)
+				submitted <- textTask
+				return conc.Go(func() (struct{}, error) {
+					if textTask.BatchRows() > 0 {
+						metaCache.UpdateSegments(
+							metacache.FinishSyncing(textTask.BatchRows()),
+							metacache.WithSegmentIDs(textTask.SegmentID()),
+						)
+					}
+					var callbackErr error
+					for _, callback := range callbacks {
+						callbackErr = callback(callbackErr)
+					}
+					syncCompleted.Store(true)
+					return struct{}{}, callbackErr
+				}), nil
+			}).Once()
+		metaWriter.EXPECT().DropChannel(mock.Anything, s.channelName).
+			Run(func(context.Context, string) {
+				dropAfterSync.Store(syncCompleted.Load())
+			}).
+			Return(nil).
+			Once()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		closeResult := make(chan any, 1)
+		dropStarted.Store(true)
+		go func() {
+			var panicValue any
+			func() {
+				defer func() {
+					panicValue = recover()
+				}()
+				wb.Close(ctx, true)
+			}()
+			closeResult <- panicValue
+		}()
+
+		select {
+		case <-pendingObserved:
+		case <-time.After(time.Second):
+			s.FailNow("drop did not observe the pending growing source")
+		}
+		select {
+		case panicValue := <-closeResult:
+			s.FailNow("drop returned before the growing source became usable", "panic", panicValue)
+		case <-time.After(20 * time.Millisecond):
+		}
+
+		sourceState.Store(int32(syncmgr.GrowingSourceUsable))
+		select {
+		case panicValue := <-closeResult:
+			s.Nil(panicValue)
+		case <-time.After(time.Second):
+			s.FailNow("drop did not finish after the growing source became usable")
+		}
+
+		select {
+		case task := <-submitted:
+			s.True(task.IsDrop())
+			s.EqualValues(10, task.BatchRows())
+		case <-time.After(time.Second):
+			s.FailNow("drop did not submit the final growing-source task")
+		}
 
 		l0wb := wb.(*l0WriteBuffer)
 		s.NotContains(l0wb.growingSourceProgress, int64(1103))
-		// flushSourceMode lives on metacache.SegmentInfo and is reclaimed
-		// when the segment is removed from metacache by the drop path; no
-		// dedicated map to assert against on the writeBuffer side anymore.
+		s.False(anyGrowingRetryArmed(l0wb.writeBufferBase))
+		s.True(dropAfterSync.Load(), "DropChannel must run after the final source sync commits")
+		segment, ok := metaCache.GetSegmentByID(1103)
+		if ok {
+			s.Zero(segment.SyncingRows())
+			s.True(metacache.WithNoSyncingTask().Filter(segment))
+		}
+	})
+
+	s.Run("drop_close_pending_growing_source_honors_caller_timeout", func() {
+		textSchema := s.textSchema()
+		metaCache := s.newTextRealMetaCache(textSchema)
+		metaWriter := syncmgr.NewMockMetaWriter(s.T())
+		syncManager := syncmgr.NewMockSyncManager(s.T())
+		pendingObserved := make(chan struct{}, 1)
+		var dropStarted atomic.Bool
+		wb, err := NewL0WriteBuffer(s.channelName, metaCache, syncManager, &writeBufferOption{
+			idAllocator:        s.allocator,
+			metaWriter:         metaWriter,
+			flushRetryInterval: 5 * time.Millisecond,
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+				if dropStarted.Load() {
+					select {
+					case pendingObserved <- struct{}{}:
+					default:
+					}
+				}
+				return fakeGrowingFlushSource{}, syncmgr.GrowingSourcePending
+			},
+		})
+		s.NoError(err)
+
+		_, msg := s.composeTextInsertMsg(1104, 10)
+		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
+		s.NoError(err)
+		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
+		s.NoError(err)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		closeResult := make(chan any, 1)
+		dropStarted.Store(true)
+		go func() {
+			var panicValue any
+			func() {
+				defer func() {
+					panicValue = recover()
+				}()
+				wb.Close(ctx, true)
+			}()
+			closeResult <- panicValue
+		}()
+
+		select {
+		case <-pendingObserved:
+		case <-time.After(time.Second):
+			s.FailNow("drop did not observe the pending growing source")
+		}
+
+		var panicValue any
+		select {
+		case panicValue = <-closeResult:
+		case <-time.After(time.Second):
+			s.FailNow("drop did not honor the caller deadline")
+		}
+		s.Require().NotNil(panicValue)
+		panicErr, ok := panicValue.(error)
+		s.Require().True(ok, "drop should propagate the caller context error")
+		s.ErrorIs(panicErr, context.DeadlineExceeded)
+
+		l0wb := wb.(*l0WriteBuffer)
+		// The progress is deliberately KEPT. It is one of the candidate sources
+		// GetCheckpoint pins on, and this drop just declared its rows
+		// un-committed: clearing it would let the checkpoint fall back to
+		// wb.checkpoint — the latest CONSUMED position — past data WAL replay
+		// still has to redo.
+		s.Contains(l0wb.growingSourceProgress, int64(1104))
+		s.EqualValues(100, wb.GetCheckpoint().GetTimestamp(),
+			"checkpoint must stay pinned at the un-committed data, not advance to the consumed position")
+		s.False(anyGrowingRetryArmed(l0wb.writeBufferBase))
+		s.True(l0wb.closed)
+		s.False(l0wb.dropping)
+		segment, ok := metaCache.GetSegmentByID(1104)
+		if ok {
+			s.Zero(segment.SyncingRows())
+			s.True(metacache.WithNoSyncingTask().Filter(segment))
+		}
+		metaWriter.AssertNotCalled(s.T(), "DropChannel", mock.Anything, s.channelName)
+		syncManager.AssertNotCalled(s.T(), "SyncData", mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	s.Run("pending_source_records_progress_instead_of_falling_back_to_writebuffer", func() {
 		textSchema := s.textSchema()
 		mc := s.newTextMetaCache(textSchema)
 		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			growingSourceRetryInterval: time.Hour,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			idAllocator:        s.allocator,
+			flushRetryInterval: time.Hour,
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return fakeGrowingFlushSource{}, syncmgr.GrowingSourcePending
 			},
 		})
@@ -602,10 +860,10 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			SchemaVersion:  100,
 		}, pkoracle.NewBloomFilterSet(), nil, nil)
 
-		// growingSourceBaseOffset and CreateNewGrowingSegment see a new
+		// CreateNewGrowingSegment sees a new
 		// segment; recordGrowingSourceProgress and triggerSync see the segment
 		// created by AddSegment.
-		mc.EXPECT().GetSegmentByID(int64(1002)).Return(nil, false).Times(3)
+		mc.EXPECT().GetSegmentByID(int64(1002)).Return(nil, false).Times(2)
 		mc.EXPECT().GetSegmentByID(int64(1002)).Return(segmentInfo, true).Times(2)
 		mc.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 		mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
@@ -624,9 +882,9 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		metacache := s.newTextRealMetaCache(textSchema)
 		sourceState := syncmgr.GrowingSourcePending
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			growingSourceRetryInterval: time.Hour,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			idAllocator:        s.allocator,
+			flushRetryInterval: time.Hour,
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return fakeGrowingFlushSource{}, sourceState
 			},
 		})
@@ -665,7 +923,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.NoError(conc.AwaitAll(futures...))
 		textTask := <-taskCh
 		s.EqualValues(1003, textTask.SegmentID())
-		s.EqualValues(10, textTask.TargetOffset())
+		s.NotZero(textTask.FlushThroughTs())
 		s.EqualValues(10, textTask.BatchRows())
 		s.EqualValues(100, textTask.StartPosition().GetTimestamp())
 		s.EqualValues(200, textTask.Checkpoint().GetTimestamp())
@@ -679,9 +937,9 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		metacache := s.newTextRealMetaCache(textSchema)
 		resolveCalls := 0
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			growingSourceRetryInterval: time.Hour,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			idAllocator:        s.allocator,
+			flushRetryInterval: time.Hour,
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				resolveCalls++
 				if resolveCalls <= 3 {
 					return fakeGrowingFlushSource{}, syncmgr.GrowingSourceUsable
@@ -712,9 +970,9 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		sourceState := atomic.Int32{}
 		sourceState.Store(int32(syncmgr.GrowingSourcePending))
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			growingSourceRetryInterval: time.Hour,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			idAllocator:        s.allocator,
+			flushRetryInterval: time.Hour,
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return fakeGrowingFlushSource{}, syncmgr.GrowingSourceState(sourceState.Load())
 			},
 		})
@@ -765,7 +1023,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 			idAllocator: s.allocator,
 			metaWriter:  metaWriter,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return fakeGrowingFlushSource{}, syncmgr.GrowingSourceUsable
 			},
 		})
@@ -787,7 +1045,12 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				textTask.WithChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(s.T().TempDir())))
 				return conc.Go(func() (struct{}, error) {
 					defer close(done)
-					err := textTask.Run(ctx)
+					err := runSyncTaskInline(ctx, textTask)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -819,10 +1082,12 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		metacache := s.newTextRealMetaCache(textSchema)
 		flushCalls := 0
 		source := fakeGrowingFlushSource{
-			flushFunc: func(_ context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+			flushFunc: func(_ context.Context, startTs, endTs uint64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 				flushCalls++
-				s.EqualValues(0, startOffset)
-				s.EqualValues(10, endOffset)
+				// First flush of the segment: the lower fence is unset, and the
+				// upper one is the position being flushed to.
+				s.EqualValues(0, startTs)
+				s.NotZero(endTs)
 				return &syncmgr.GrowingFlushResult{
 					ManifestPath:           "manifest-0-10",
 					NumRows:                10,
@@ -834,7 +1099,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 			idAllocator: s.allocator,
 			metaWriter:  metaWriter,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return source, syncmgr.GrowingSourceUsable
 			},
 		})
@@ -861,7 +1126,12 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				textTask := task.(*syncmgr.GrowingSourceSyncTask)
 				textTask.WithChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(s.T().TempDir())))
 				return conc.Go(func() (struct{}, error) {
-					err := textTask.Run(ctx)
+					err := runSyncTaskInline(ctx, textTask)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -896,7 +1166,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		metacache := s.newTextRealMetaCache(textSchema)
 		flushCalls := 0
 		source := fakeGrowingFlushSource{
-			flushFunc: func(_ context.Context, _, _ int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+			flushFunc: func(_ context.Context, _, _ uint64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 				flushCalls++
 				if flushCalls == 1 {
 					return nil, fmt.Errorf("mock growing source flush error")
@@ -909,13 +1179,17 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			},
 		}
 		var errorHandlerCalls atomic.Int32
+		var growingHandlerCalls atomic.Int32
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			growingSourceRetryInterval: time.Hour,
+			idAllocator:        s.allocator,
+			flushRetryInterval: time.Hour,
 			errorHandler: func(error) {
 				errorHandlerCalls.Add(1)
 			},
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			growingSourceErrorHandler: func(error) {
+				growingHandlerCalls.Add(1)
+			},
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return source, syncmgr.GrowingSourceUsable
 			},
 		})
@@ -930,7 +1204,12 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 					defer func() {
 						done <- textTask
 					}()
-					err := textTask.Run(ctx)
+					err := runSyncTaskInline(ctx, textTask)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -951,7 +1230,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.ErrorContains(conc.AwaitAll(futures...), "mock growing source flush error")
 		firstTask := <-done
 
-		s.EqualValues(1, errorHandlerCalls.Load())
+		// A retryable growing-source failure is reported through the
+		// non-fatal handler and never escalated: the rows stay in the growing
+		// segment and the write buffer re-submits the task.
+		s.EqualValues(1, growingHandlerCalls.Load())
+		s.EqualValues(0, errorHandlerCalls.Load())
 		progress, ok := l0wb.growingSourceProgress[int64(1010)]
 		s.True(ok)
 		s.EqualValues(1, progress.failureCount)
@@ -967,7 +1250,9 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.Require().Len(futures, 1)
 		s.NoError(conc.AwaitAll(futures...))
 		secondTask := <-done
-		s.EqualValues(1, errorHandlerCalls.Load())
+		// The retry succeeded, so neither handler fires again.
+		s.EqualValues(1, growingHandlerCalls.Load())
+		s.EqualValues(0, errorHandlerCalls.Load())
 		s.EqualValues(10, secondTask.BatchRows())
 		segment, ok = metacache.GetSegmentByID(1010)
 		s.True(ok)
@@ -980,18 +1265,18 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		textSchema := s.textSchema()
 		metacache := s.newTextRealMetaCache(textSchema)
 		source := fakeGrowingFlushSource{
-			flushFunc: func(context.Context, int64, int64, *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+			flushFunc: func(context.Context, uint64, uint64, *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 				return nil, fmt.Errorf("Invalid: Column group size mismatch: existing has 10 groups, but appended has 1 groups: segcore error[segcoreCode=2001]")
 			},
 		}
 		var errorHandlerCalls atomic.Int32
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			growingSourceRetryInterval: time.Hour,
+			idAllocator:        s.allocator,
+			flushRetryInterval: time.Hour,
 			errorHandler: func(error) {
 				errorHandlerCalls.Add(1)
 			},
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return source, syncmgr.GrowingSourceUsable
 			},
 		})
@@ -1004,7 +1289,12 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				textTask.WithChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(s.T().TempDir())))
 				return conc.Go(func() (struct{}, error) {
 					defer close(done)
-					err := textTask.Run(ctx)
+					err := runSyncTaskInline(ctx, textTask)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -1031,11 +1321,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.EqualValues(1, progress.failureCount)
 		s.Contains(progress.lastFailure, "Column group size mismatch")
 		s.True(progress.nonRetryableFailure)
-		s.False(l0wb.growingSourceRetryScheduled)
+		s.False(anyGrowingRetryArmed(l0wb.writeBufferBase))
 
-		segments, retry := l0wb.getGrowingSourceSegmentsToRetry()
+		segments, stillArmed := l0wb.getGrowingSourceSegmentsToRetry(time.Now(), 0)
 		s.Empty(segments)
-		s.False(retry)
+		s.Empty(stillArmed)
 
 		segment, ok := metacache.GetSegmentByID(1014)
 		s.True(ok)
@@ -1048,7 +1338,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		textSchema := s.textSchema()
 		metacache := s.newTextRealMetaCache(textSchema)
 		source := fakeGrowingFlushSource{
-			flushFunc: func(_ context.Context, _, _ int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+			flushFunc: func(_ context.Context, _, _ uint64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 				return &syncmgr.GrowingFlushResult{
 					ManifestPath:           "manifest-mismatch",
 					NumRows:                9,
@@ -1058,14 +1348,18 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		}
 		metaWriter := syncmgr.NewMockMetaWriter(s.T())
 		var errorHandlerCalls atomic.Int32
+		var growingHandlerCalls atomic.Int32
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			metaWriter:                 metaWriter,
-			growingSourceRetryInterval: time.Hour,
+			idAllocator:        s.allocator,
+			metaWriter:         metaWriter,
+			flushRetryInterval: time.Hour,
 			errorHandler: func(error) {
 				errorHandlerCalls.Add(1)
 			},
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			growingSourceErrorHandler: func(error) {
+				growingHandlerCalls.Add(1)
+			},
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return source, syncmgr.GrowingSourceUsable
 			},
 		})
@@ -1078,7 +1372,12 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				textTask.WithChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(s.T().TempDir())))
 				return conc.Go(func() (struct{}, error) {
 					defer close(done)
-					err := textTask.Run(ctx)
+					err := runSyncTaskInline(ctx, textTask)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -1099,6 +1398,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.ErrorContains(conc.AwaitAll(futures...), "row count mismatch")
 		<-done
 
+		// A row-count mismatch is a data-integrity violation: the task
+		// re-derives it from the same segment state and the same offset range,
+		// so retrying reproduces it forever while pinning the checkpoint. It
+		// escalates to the fatal handler instead.
+		s.EqualValues(1, growingHandlerCalls.Load())
 		s.EqualValues(1, errorHandlerCalls.Load())
 		progress, ok := l0wb.growingSourceProgress[int64(1011)]
 		s.True(ok)
@@ -1110,24 +1414,26 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		s.NotEqual("manifest-mismatch", segment.ManifestPath())
 	})
 
-	s.Run("source_task_uses_absolute_target_offset_after_partial_flush", func() {
+	s.Run("consecutive_flushes_cover_adjacent_position_ranges", func() {
 		textSchema := s.textSchema()
 		metacache := s.newTextRealMetaCache(textSchema)
-		var ranges [][2]int64
+		var ranges [][2]uint64
+		rowsPerCall := []int64{10, 5}
 		source := fakeGrowingFlushSource{
-			currentOffset: 15,
-			flushFunc: func(_ context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
-				ranges = append(ranges, [2]int64{startOffset, endOffset})
+			pkRows: func() int64 { return rowsPerCall[len(ranges)] },
+			flushFunc: func(_ context.Context, startTs, endTs uint64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+				rows := rowsPerCall[len(ranges)]
+				ranges = append(ranges, [2]uint64{startTs, endTs})
 				return &syncmgr.GrowingFlushResult{
-					ManifestPath:           packed.MarshalManifestPath(config.SegmentBasePath, endOffset),
-					NumRows:                endOffset - startOffset,
+					ManifestPath:           packed.MarshalManifestPath(config.SegmentBasePath, int64(len(ranges))),
+					NumRows:                rows,
 					ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, 80),
 				}, nil
 			},
 		}
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 			idAllocator: s.allocator,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return source, syncmgr.GrowingSourceUsable
 			},
 		})
@@ -1139,7 +1445,12 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				textTask := task.(*syncmgr.GrowingSourceSyncTask)
 				textTask.WithChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(s.T().TempDir())))
 				return conc.Go(func() (struct{}, error) {
-					err := textTask.Run(ctx)
+					err := runSyncTaskInline(ctx, textTask)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -1178,18 +1489,20 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		segment, ok = metacache.GetSegmentByID(1008)
 		s.True(ok)
 		s.EqualValues(15, segment.FlushedRows())
-		s.Equal([][2]int64{{0, 10}, {10, 15}}, ranges)
+		// Adjacent and non-overlapping: the second flush starts exactly where
+		// the first stopped, so no row is written twice and none is skipped.
+		// The fences are the packs' end positions (200, then 400).
+		s.Equal([][2]uint64{{0, 200}, {200, 400}}, ranges)
 	})
 
 	s.Run("inflight_source_sync_gets_finalized_when_segment_is_flushed", func() {
 		textSchema := s.textSchema()
 		metacache := s.newTextRealMetaCache(textSchema)
 		source := fakeGrowingFlushSource{
-			currentOffset: 10,
-			flushFunc: func(_ context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+			flushFunc: func(_ context.Context, startTs, endTs uint64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
 				return &syncmgr.GrowingFlushResult{
-					ManifestPath:           fmt.Sprintf("manifest-%d-%d", startOffset, endOffset),
-					NumRows:                endOffset - startOffset,
+					ManifestPath:           fmt.Sprintf("manifest-%d-%d", startTs, endTs),
+					NumRows:                10,
 					ColumnGroupMemorySizes: fakeColumnGroupMemorySizes(config, 80),
 				}, nil
 			},
@@ -1198,7 +1511,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 			idAllocator: s.allocator,
 			metaWriter:  metaWriter,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return source, syncmgr.GrowingSourceUsable
 			},
 		})
@@ -1208,11 +1521,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			Run(func(_ context.Context, task *syncmgr.GrowingSourceSyncTask) {
 				if task.IsFlush() {
 					s.EqualValues(0, task.BatchRows())
-					s.Equal("manifest-0-10", task.ManifestPath())
+					s.Equal("manifest-0-200", task.ManifestPath())
 					return
 				}
 				s.EqualValues(10, task.BatchRows())
-				s.Equal("manifest-0-10", task.ManifestPath())
+				s.Equal("manifest-0-200", task.ManifestPath())
 			}).Return(nil).Twice()
 
 		firstMayRun := make(chan struct{})
@@ -1226,7 +1539,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				if callCount == 1 {
 					return conc.Go(func() (struct{}, error) {
 						<-firstMayRun
-						err := textTask.Run(ctx)
+						err := runSyncTaskInline(ctx, textTask)
 						for _, callback := range callbacks {
 							if cbErr := callback(err); cbErr != nil {
 								return struct{}{}, cbErr
@@ -1237,7 +1550,12 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				}
 				secondTaskCh <- textTask
 				return conc.Go(func() (struct{}, error) {
-					err := textTask.Run(ctx)
+					err := runSyncTaskInline(ctx, textTask)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -1265,7 +1583,9 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		secondTask := <-secondTaskCh
 		s.True(secondTask.IsFlush())
 		s.EqualValues(1012, secondTask.SegmentID())
-		s.EqualValues(10, secondTask.TargetOffset())
+		// A re-flush of an already-drained segment carries no rows but still
+		// names the position it flushes through.
+		s.NotZero(secondTask.FlushThroughTs())
 		s.EqualValues(0, secondTask.BatchRows())
 
 		s.Eventually(func() bool {
@@ -1280,9 +1600,9 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		metacache := s.newTextRealMetaCache(textSchema)
 		sourceState := syncmgr.GrowingSourcePending
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			growingSourceRetryInterval: time.Hour,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			idAllocator:        s.allocator,
+			flushRetryInterval: time.Hour,
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return fakeGrowingFlushSource{}, sourceState
 			},
 		})
@@ -1320,7 +1640,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				}), nil
 			}).Once()
 
-		l0wb.retryGrowingSourceProgress()
+		l0wb.driveGrowingSourceRetries(context.Background(), time.Now(), 0)
 		textTask := <-taskCh
 		s.EqualValues(1005, textTask.SegmentID())
 		s.True(textTask.IsFlush())
@@ -1339,9 +1659,9 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		resolveCalls := 0
 		sourceState := syncmgr.GrowingSourcePending
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			growingSourceRetryInterval: time.Hour,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			idAllocator:        s.allocator,
+			flushRetryInterval: time.Hour,
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				resolveCalls++
 				if resolveCalls == 1 {
 					return fakeGrowingFlushSource{}, syncmgr.GrowingSourceUsable
@@ -1405,7 +1725,7 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
 			idAllocator: s.allocator,
 			metaWriter:  metaWriter,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return fakeGrowingFlushSource{}, syncmgr.GrowingSourceUsable
 			},
 		})
@@ -1419,7 +1739,12 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 				textTask.WithChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(s.T().TempDir())))
 				return conc.Go(func() (struct{}, error) {
 					defer close(done)
-					err := textTask.Run(ctx)
+					err := runSyncTaskInline(ctx, textTask)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -1448,9 +1773,9 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		s.Len(progress, 1)
 		s.EqualValues(1200, progress[0].SegmentID)
 		s.True(progress[0].NeedReleaseHandoff)
-		s.EqualValues(10, progress[0].TargetOffset)
+		s.EqualValues(200, progress[0].FlushThroughTs)
 		s.Equal(metacache.FlushSourceGrowing, progress[0].SourceMode)
-		s.Equal([]syncmgr.GrowingSourceReleaseHandoffSegment{{SegmentID: 1200, TargetOffset: 10}}, handoffProvider.segments)
+		s.Equal([]syncmgr.GrowingSourceReleaseHandoffSegment{{SegmentID: 1200, FlushThroughTs: 200}}, handoffProvider.segments)
 	})
 
 	s.Run("dropped_growing_source_segment_is_still_handoff_candidate_until_progress_done", func() {
@@ -1464,7 +1789,7 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
 			idAllocator: s.allocator,
 			metaWriter:  metaWriter,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return fakeGrowingFlushSource{}, syncmgr.GrowingSourceUsable
 			},
 		})
@@ -1478,7 +1803,12 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 				textTask.WithChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(s.T().TempDir())))
 				return conc.Go(func() (struct{}, error) {
 					defer close(done)
-					err := textTask.Run(ctx)
+					err := runSyncTaskInline(ctx, textTask)
+					// Mirror syncManager.submit, which prepends a handler
+					// invoking HandleError before the caller's callbacks.
+					if err != nil {
+						textTask.HandleError(err)
+					}
 					for _, callback := range callbacks {
 						if cbErr := callback(err); cbErr != nil {
 							return struct{}{}, cbErr
@@ -1509,9 +1839,9 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		s.Len(progress, 1)
 		s.EqualValues(1203, progress[0].SegmentID)
 		s.True(progress[0].NeedReleaseHandoff)
-		s.EqualValues(10, progress[0].TargetOffset)
+		s.EqualValues(200, progress[0].FlushThroughTs)
 		s.Equal(metacache.FlushSourceGrowing, progress[0].SourceMode)
-		s.Equal([]syncmgr.GrowingSourceReleaseHandoffSegment{{SegmentID: 1203, TargetOffset: 10}}, handoffProvider.segments)
+		s.Equal([]syncmgr.GrowingSourceReleaseHandoffSegment{{SegmentID: 1203, FlushThroughTs: 200}}, handoffProvider.segments)
 	})
 
 	s.Run("waits_until_fence_processed_and_returns_growing_progress", func() {
@@ -1522,9 +1852,9 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		textSchema := s.textSchema()
 		mc := s.newTextRealMetaCache(textSchema)
 		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			growingSourceRetryInterval: time.Hour,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			idAllocator:        s.allocator,
+			flushRetryInterval: time.Hour,
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return fakeGrowingFlushSource{}, syncmgr.GrowingSourcePending
 			},
 		})
@@ -1564,10 +1894,10 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 			s.Len(progress, 1)
 			s.EqualValues(1201, progress[0].SegmentID)
 			s.True(progress[0].NeedReleaseHandoff)
-			s.EqualValues(10, progress[0].TargetOffset)
+			s.EqualValues(200, progress[0].FlushThroughTs)
 			s.Equal(metacache.FlushSourceGrowing, progress[0].SourceMode)
 			s.EqualValues(300, handoffProvider.fenceTs)
-			s.Equal([]syncmgr.GrowingSourceReleaseHandoffSegment{{SegmentID: 1201, TargetOffset: 10}}, handoffProvider.segments)
+			s.Equal([]syncmgr.GrowingSourceReleaseHandoffSegment{{SegmentID: 1201, FlushThroughTs: 200}}, handoffProvider.segments)
 		case err := <-errCh:
 			s.NoError(err)
 		case <-ctx.Done():
@@ -1589,9 +1919,9 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		textSchema := s.textSchema()
 		mc := s.newTextRealMetaCache(textSchema)
 		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			growingSourceRetryInterval: time.Hour,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			idAllocator:        s.allocator,
+			flushRetryInterval: time.Hour,
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return nil, syncmgr.GrowingSourceUnavailable
 			},
 		})
@@ -1608,7 +1938,7 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		s.Len(progress, 1)
 		s.EqualValues(1202, progress[0].SegmentID)
 		s.False(progress[0].NeedReleaseHandoff)
-		s.Zero(progress[0].TargetOffset)
+		s.Zero(progress[0].FlushThroughTs)
 		s.Equal(metacache.FlushSourceWriteBuffer, progress[0].SourceMode)
 		s.Zero(handoffProvider.fenceTs)
 		s.Empty(handoffProvider.segments)
@@ -1622,8 +1952,8 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		textSchema := s.textSchema()
 		mc := s.newTextRealMetaCache(textSchema)
 		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
-			idAllocator:                s.allocator,
-			growingSourceRetryInterval: time.Hour,
+			idAllocator:        s.allocator,
+			flushRetryInterval: time.Hour,
 		})
 		s.NoError(err)
 		wb.SetFlushTimestamp(200)
@@ -1633,7 +1963,7 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		s.Len(progress, 1)
 		s.EqualValues(1204, progress[0].SegmentID)
 		s.False(progress[0].NeedReleaseHandoff)
-		s.Zero(progress[0].TargetOffset)
+		s.Zero(progress[0].FlushThroughTs)
 		s.Equal(metacache.FlushSourceUnknown, progress[0].SourceMode)
 		s.Zero(handoffProvider.fenceTs)
 		s.Empty(handoffProvider.segments)
@@ -1648,7 +1978,7 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		mc := s.newTextRealMetaCache(textSchema)
 		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
 			idAllocator: s.allocator,
-			growingSourceResolver: func(segmentID int64, targetOffset int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+			growingSourceResolver: func(segmentID int64, _ *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 				return fakeGrowingFlushSource{}, syncmgr.GrowingSourceUsable
 			},
 		})
@@ -1671,12 +2001,12 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		s.False(progressBySegment[1204].NeedReleaseHandoff)
 		for _, segmentID := range []int64{1205, 1206} {
 			s.True(progressBySegment[segmentID].NeedReleaseHandoff)
-			s.EqualValues(10, progressBySegment[segmentID].TargetOffset)
+			s.EqualValues(200, progressBySegment[segmentID].FlushThroughTs)
 			s.Equal(metacache.FlushSourceGrowing, progressBySegment[segmentID].SourceMode)
 		}
 		s.ElementsMatch([]syncmgr.GrowingSourceReleaseHandoffSegment{
-			{SegmentID: 1205, TargetOffset: 10},
-			{SegmentID: 1206, TargetOffset: 10},
+			{SegmentID: 1205, FlushThroughTs: 200},
+			{SegmentID: 1206, FlushThroughTs: 200},
 		}, handoffProvider.segments)
 	})
 }
@@ -1690,8 +2020,8 @@ func (s *L0WriteBufferSuite) TestCheckReleaseManualFlushNeed() {
 	textSchema := s.textSchema()
 	mc := s.newTextRealMetaCache(textSchema)
 	wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
-		idAllocator:                s.allocator,
-		growingSourceRetryInterval: time.Hour,
+		idAllocator:        s.allocator,
+		flushRetryInterval: time.Hour,
 	})
 	s.NoError(err)
 
@@ -1744,47 +2074,47 @@ func (s *L0WriteBufferSuite) TestGrowingSourceRegistryResolveMultipleProviders()
 	channel := "by-dev-rootcoord-dml_1v0"
 
 	pendingReg := registry.Register(channel, fakeGrowingSourceProvider{
-		source: fakeGrowingFlushSource{currentOffset: 8},
+		source: fakeGrowingFlushSource{tsafe: 8},
 		state:  syncmgr.GrowingSourcePending,
 	})
 	pendingReg2 := registry.Register(channel, fakeGrowingSourceProvider{
-		source: fakeGrowingFlushSource{currentOffset: 9},
+		source: fakeGrowingFlushSource{tsafe: 9},
 		state:  syncmgr.GrowingSourcePending,
 	})
 	registry.Register(channel, fakeGrowingSourceProvider{state: syncmgr.GrowingSourceUnavailable})
 
-	resolved, state := registry.Resolve(channel, 1000, 10, &msgpb.MsgPosition{Timestamp: 200})
+	resolved, state := registry.Resolve(channel, 1000, &msgpb.MsgPosition{Timestamp: 200})
 	s.Equal(syncmgr.GrowingSourcePending, state)
 	s.Nil(resolved)
 
 	usableReg := registry.Register(channel, fakeGrowingSourceProvider{
-		source: fakeGrowingFlushSource{currentOffset: 10},
+		source: fakeGrowingFlushSource{tsafe: 10},
 		state:  syncmgr.GrowingSourceUsable,
 	})
 	usableReg2 := registry.Register(channel, fakeGrowingSourceProvider{
-		source: fakeGrowingFlushSource{currentOffset: 12},
+		source: fakeGrowingFlushSource{tsafe: 12},
 		state:  syncmgr.GrowingSourceUsable,
 	})
-	resolved, state = registry.Resolve(channel, 1000, 10, &msgpb.MsgPosition{Timestamp: 200})
+	resolved, state = registry.Resolve(channel, 1000, &msgpb.MsgPosition{Timestamp: 200})
 	s.Equal(syncmgr.GrowingSourceUsable, state)
 	s.NotNil(resolved)
-	s.EqualValues(10, resolved.CurrentOffset())
+	s.EqualValues(10, resolved.TSafe())
 
 	registry.Unregister(pendingReg)
 	registry.Unregister(pendingReg2)
-	resolved, state = registry.Resolve(channel, 1000, 10, &msgpb.MsgPosition{Timestamp: 200})
+	resolved, state = registry.Resolve(channel, 1000, &msgpb.MsgPosition{Timestamp: 200})
 	s.Equal(syncmgr.GrowingSourceUsable, state)
 	s.NotNil(resolved)
-	s.EqualValues(10, resolved.CurrentOffset())
+	s.EqualValues(10, resolved.TSafe())
 
 	registry.Unregister(usableReg2)
-	resolved, state = registry.Resolve(channel, 1000, 10, &msgpb.MsgPosition{Timestamp: 200})
+	resolved, state = registry.Resolve(channel, 1000, &msgpb.MsgPosition{Timestamp: 200})
 	s.Equal(syncmgr.GrowingSourceUsable, state)
 	s.NotNil(resolved)
-	s.EqualValues(10, resolved.CurrentOffset())
+	s.EqualValues(10, resolved.TSafe())
 
 	registry.Unregister(usableReg)
-	resolved, state = registry.Resolve(channel, 1000, 10, &msgpb.MsgPosition{Timestamp: 200})
+	resolved, state = registry.Resolve(channel, 1000, &msgpb.MsgPosition{Timestamp: 200})
 	s.Equal(syncmgr.GrowingSourceUnavailable, state)
 	s.Nil(resolved)
 }
@@ -1796,7 +2126,7 @@ func (s *L0WriteBufferSuite) TestGrowingSourceRegistryResolveNilPendingProvider(
 	registry.Register(channel, fakeGrowingSourceProvider{state: syncmgr.GrowingSourcePending})
 	registry.Register(channel, fakeGrowingSourceProvider{state: syncmgr.GrowingSourceUnavailable})
 
-	resolved, state := registry.Resolve(channel, 1000, 10, &msgpb.MsgPosition{Timestamp: 200})
+	resolved, state := registry.Resolve(channel, 1000, &msgpb.MsgPosition{Timestamp: 200})
 	s.Equal(syncmgr.GrowingSourcePending, state)
 	s.Nil(resolved)
 }
@@ -1807,22 +2137,22 @@ func (s *L0WriteBufferSuite) TestGrowingSourceRegistryResolveReleasesUnselectedS
 	released := 0
 
 	registry.Register(channel, fakeGrowingSourceProvider{
-		source: fakeGrowingFlushSource{currentOffset: 10, releaseFunc: func() { released++ }},
+		source: fakeGrowingFlushSource{tsafe: 10, releaseFunc: func() { released++ }},
 		state:  syncmgr.GrowingSourceUsable,
 	})
 	registry.Register(channel, fakeGrowingSourceProvider{
-		source: fakeGrowingFlushSource{currentOffset: 12, releaseFunc: func() { released++ }},
+		source: fakeGrowingFlushSource{tsafe: 12, releaseFunc: func() { released++ }},
 		state:  syncmgr.GrowingSourceUsable,
 	})
 	registry.Register(channel, fakeGrowingSourceProvider{
-		source: fakeGrowingFlushSource{currentOffset: 11, releaseFunc: func() { released++ }},
+		source: fakeGrowingFlushSource{tsafe: 11, releaseFunc: func() { released++ }},
 		state:  syncmgr.GrowingSourcePending,
 	})
 
-	resolved, state := registry.Resolve(channel, 1000, 10, &msgpb.MsgPosition{Timestamp: 200})
+	resolved, state := registry.Resolve(channel, 1000, &msgpb.MsgPosition{Timestamp: 200})
 	s.Equal(syncmgr.GrowingSourceUsable, state)
 	s.NotNil(resolved)
-	s.EqualValues(10, resolved.CurrentOffset())
+	s.EqualValues(10, resolved.TSafe())
 	s.Equal(0, released)
 }
 

@@ -6,6 +6,7 @@ import (
 	context "context"
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	storage "github.com/milvus-io/milvus/internal/storage"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -110,6 +111,52 @@ func (_c *MockTask_Checkpoint_Call) Return(_a0 *msgpb.MsgPosition) *MockTask_Che
 }
 
 func (_c *MockTask_Checkpoint_Call) RunAndReturn(run func() *msgpb.MsgPosition) *MockTask_Checkpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Commit provides a mock function with given fields: _a0
+func (_m *MockTask) Commit(_a0 context.Context) error {
+	ret := _m.Called(_a0)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Commit")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(_a0)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockTask_Commit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Commit'
+type MockTask_Commit_Call struct {
+	*mock.Call
+}
+
+// Commit is a helper method to define mock.On call
+//   - _a0 context.Context
+func (_e *MockTask_Expecter) Commit(_a0 interface{}) *MockTask_Commit_Call {
+	return &MockTask_Commit_Call{Call: _e.mock.On("Commit", _a0)}
+}
+
+func (_c *MockTask_Commit_Call) Run(run func(_a0 context.Context)) *MockTask_Commit_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockTask_Commit_Call) Return(_a0 error) *MockTask_Commit_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTask_Commit_Call) RunAndReturn(run func(context.Context) error) *MockTask_Commit_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -237,12 +284,12 @@ func (_c *MockTask_IsFlush_Call) RunAndReturn(run func() bool) *MockTask_IsFlush
 	return _c
 }
 
-// Run provides a mock function with given fields: _a0
-func (_m *MockTask) Run(_a0 context.Context) error {
+// Prepare provides a mock function with given fields: _a0
+func (_m *MockTask) Prepare(_a0 context.Context) error {
 	ret := _m.Called(_a0)
 
 	if len(ret) == 0 {
-		panic("no return value specified for Run")
+		panic("no return value specified for Prepare")
 	}
 
 	var r0 error
@@ -255,30 +302,30 @@ func (_m *MockTask) Run(_a0 context.Context) error {
 	return r0
 }
 
-// MockTask_Run_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Run'
-type MockTask_Run_Call struct {
+// MockTask_Prepare_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Prepare'
+type MockTask_Prepare_Call struct {
 	*mock.Call
 }
 
-// Run is a helper method to define mock.On call
+// Prepare is a helper method to define mock.On call
 //   - _a0 context.Context
-func (_e *MockTask_Expecter) Run(_a0 interface{}) *MockTask_Run_Call {
-	return &MockTask_Run_Call{Call: _e.mock.On("Run", _a0)}
+func (_e *MockTask_Expecter) Prepare(_a0 interface{}) *MockTask_Prepare_Call {
+	return &MockTask_Prepare_Call{Call: _e.mock.On("Prepare", _a0)}
 }
 
-func (_c *MockTask_Run_Call) Run(run func(_a0 context.Context)) *MockTask_Run_Call {
+func (_c *MockTask_Prepare_Call) Run(run func(_a0 context.Context)) *MockTask_Prepare_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context))
 	})
 	return _c
 }
 
-func (_c *MockTask_Run_Call) Return(_a0 error) *MockTask_Run_Call {
+func (_c *MockTask_Prepare_Call) Return(_a0 error) *MockTask_Prepare_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockTask_Run_Call) RunAndReturn(run func(context.Context) error) *MockTask_Run_Call {
+func (_c *MockTask_Prepare_Call) RunAndReturn(run func(context.Context) error) *MockTask_Prepare_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -325,6 +372,71 @@ func (_c *MockTask_SegmentID_Call) Return(_a0 int64) *MockTask_SegmentID_Call {
 
 func (_c *MockTask_SegmentID_Call) RunAndReturn(run func() int64) *MockTask_SegmentID_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// SetChunkManager provides a mock function with given fields: _a0
+func (_m *MockTask) SetChunkManager(_a0 storage.ChunkManager) {
+	_m.Called(_a0)
+}
+
+// MockTask_SetChunkManager_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetChunkManager'
+type MockTask_SetChunkManager_Call struct {
+	*mock.Call
+}
+
+// SetChunkManager is a helper method to define mock.On call
+//   - _a0 storage.ChunkManager
+func (_e *MockTask_Expecter) SetChunkManager(_a0 interface{}) *MockTask_SetChunkManager_Call {
+	return &MockTask_SetChunkManager_Call{Call: _e.mock.On("SetChunkManager", _a0)}
+}
+
+func (_c *MockTask_SetChunkManager_Call) Run(run func(_a0 storage.ChunkManager)) *MockTask_SetChunkManager_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ChunkManager))
+	})
+	return _c
+}
+
+func (_c *MockTask_SetChunkManager_Call) Return() *MockTask_SetChunkManager_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockTask_SetChunkManager_Call) RunAndReturn(run func(storage.ChunkManager)) *MockTask_SetChunkManager_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetDrop provides a mock function with no fields
+func (_m *MockTask) SetDrop() {
+	_m.Called()
+}
+
+// MockTask_SetDrop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetDrop'
+type MockTask_SetDrop_Call struct {
+	*mock.Call
+}
+
+// SetDrop is a helper method to define mock.On call
+func (_e *MockTask_Expecter) SetDrop() *MockTask_SetDrop_Call {
+	return &MockTask_SetDrop_Call{Call: _e.mock.On("SetDrop")}
+}
+
+func (_c *MockTask_SetDrop_Call) Run(run func()) *MockTask_SetDrop_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTask_SetDrop_Call) Return() *MockTask_SetDrop_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockTask_SetDrop_Call) RunAndReturn(run func()) *MockTask_SetDrop_Call {
+	_c.Run(run)
 	return _c
 }
 

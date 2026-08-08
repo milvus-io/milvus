@@ -890,6 +890,10 @@ dataNode:
     insertBufSize: 16777216
     deleteBufBytes: 16777216 # Max buffer size in bytes to flush del for a single channel, default as 16MB
     syncPeriod: 600 # The period to sync segments if buffer is not empty.
+  # The minimum interval between two flush attempts for one segment, in milliseconds.
+  # A failed flush keeps its buffered data and its position in the segment's queue; the next
+  # timetick that arrives after this interval re-drives it, starting from the oldest pending batch.
+  flushRetryInterval: 3000
   memory:
     forceSyncEnable: true # Set true to force sync if memory usage is too high
     forceSyncSegmentNum: 1 # number of segments to sync, segments with top largest buffer will be synced.

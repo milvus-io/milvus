@@ -1476,15 +1476,14 @@ func (s *LocalSegment) MaterializedFieldIDs(ctx context.Context) ([]int64, error
 	return ids, nil
 }
 
-func (s *LocalSegment) PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error) {
+// PrimaryKeys returns the primary keys of the rows in (startTs, endTs].
+// Resolved exactly like FlushData's range, so the two describe the same rows.
+func (s *LocalSegment) PrimaryKeys(ctx context.Context, startTs, endTs uint64) ([]storage.PrimaryKey, error) {
 	if s.Type() != SegmentTypeGrowing {
 		return nil, merr.WrapErrServiceInternalMsg("unexpected segmentType for PrimaryKeys, segmentType = %s", s.segmentType.String())
 	}
-	if startOffset < 0 || endOffset < startOffset {
-		return nil, merr.WrapErrServiceInternalMsg("invalid primary key offsets: start=%d end=%d", startOffset, endOffset)
-	}
-	if startOffset == endOffset {
-		return nil, nil
+	if endTs < startTs {
+		return nil, merr.WrapErrServiceInternalMsg("invalid primary key range: startTs=%d endTs=%d", startTs, endTs)
 	}
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
@@ -1496,8 +1495,8 @@ func (s *LocalSegment) PrimaryKeys(ctx context.Context, startOffset, endOffset i
 	GetDynamicPool().Submit(func() (any, error) {
 		status = C.GetGrowingSegmentPrimaryKeys(
 			s.ptr,
-			C.int64_t(startOffset),
-			C.int64_t(endOffset),
+			C.uint64_t(startTs),
+			C.uint64_t(endTs),
 			&cResult,
 		)
 		return nil, nil
@@ -1506,11 +1505,9 @@ func (s *LocalSegment) PrimaryKeys(ctx context.Context, startOffset, endOffset i
 	if err := HandleCStatus(ctx, &status, "GetGrowingSegmentPrimaryKeys"); err != nil {
 		return nil, err
 	}
-	if int64(cResult.num_primary_keys) != endOffset-startOffset {
-		return nil, merr.WrapErrDataIntegrityMsg(
-			"growing source primary key count mismatch, expected=%d actual=%d",
-			endOffset-startOffset, cResult.num_primary_keys)
-	}
+	// No count assertion here: the expected number of rows is the flush
+	// caller's own WAL tally, not something derivable from a timestamp range.
+	// fillPrimaryKeyStatsConfig compares against it.
 
 	pks := make([]storage.PrimaryKey, 0, int(cResult.num_primary_keys))
 	switch schemapb.DataType(cResult.pk_data_type) {
@@ -1555,20 +1552,32 @@ func (s *LocalSegment) PrimaryKeys(ctx context.Context, startOffset, endOffset i
 // This is a unified interface that combines data extraction from segcore and writing to storage.
 // The C++ side handles: extracting raw field data from ConcurrentVector, converting to Arrow,
 // and writing to storage via milvus-storage with TEXT column LOB handling.
-func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int64, config *FlushConfig) (*FlushResult, error) {
+// FlushData writes this growing segment's rows in the timestamp range
+// (startTs, endTs] to storage.
+//
+// The range is a POSITION fence, not a row range. Row offsets exist only inside
+// segcore: after a restart the segment is rebuilt from a WAL replay and its
+// offsets start over, while the caller's notion of "what I already flushed" is a
+// WAL position. Timestamps are the coordinate both sides share, so segcore
+// resolves both ends itself (get_active_count, the query path's MVCC primitive),
+// keeping them in one coordinate system.
+//
+// The caller must only pass an endTs the segment has fully received — on the
+// Milvus side that means tSafe >= endTs. segcore's resolution is additionally
+// bounded by the acknowledged insert prefix, so it can never read a row whose
+// write is still in flight, but that bound alone would silently flush LESS than
+// the fence names.
+//
+// The segment must be pinned by the caller for the duration of this call; this
+// function does not pin it.
+func (s *LocalSegment) FlushData(ctx context.Context, startTs, endTs uint64, config *FlushConfig) (*FlushResult, error) {
 	// currently only growing segments support FlushData
 	if s.Type() != SegmentTypeGrowing {
 		return nil, merr.WrapErrServiceInternalMsg("FlushData is only supported for growing segments, got %s", s.Type().String())
 	}
 
-	// validate offsets
-	if startOffset < 0 || endOffset < startOffset {
-		return nil, merr.WrapErrServiceInternalMsg("invalid offsets: start=%d, end=%d", startOffset, endOffset)
-	}
-
-	// no data to flush
-	if startOffset == endOffset {
-		return nil, nil
+	if endTs < startTs {
+		return nil, merr.WrapErrServiceInternalMsg("invalid flush range: startTs=%d endTs=%d", startTs, endTs)
 	}
 	if config == nil {
 		return nil, merr.WrapErrServiceInternalMsg("flush config is nil")
@@ -1735,8 +1744,8 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 	var cResult C.CFlushResult
 	status := C.FlushGrowingSegmentData(
 		s.ptr,
-		C.int64_t(startOffset),
-		C.int64_t(endOffset),
+		C.uint64_t(startTs),
+		C.uint64_t(endTs),
 		&cConfig,
 		&cResult,
 	)

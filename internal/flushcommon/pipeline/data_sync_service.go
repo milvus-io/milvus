@@ -302,7 +302,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	nodeList = append(nodeList, ddNode)
 
 	// 2.writeNode
-	writeNode, err := newWriteNode(params.Ctx, params.WriteBufferManager, ds.timetickSender, config)
+	writeNode, err := newWriteNode(ds.ctx, params.WriteBufferManager, ds.timetickSender, config)
 	if err != nil {
 		return nil, err
 	}
@@ -328,7 +328,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	if params.FlushSourceModeNotifier != nil {
 		writeBufferOptions = append(writeBufferOptions, writebuffer.WithFlushSourceModeNotifier(params.FlushSourceModeNotifier))
 	}
-	err = params.WriteBufferManager.Register(channelName, metacache, writeBufferOptions...)
+	err = params.WriteBufferManager.Register(initCtx, channelName, metacache, writeBufferOptions...)
 	if err != nil {
 		mlog.Warn(initCtx, "failed to register channel buffer", mlog.String("channel", channelName), mlog.Err(err))
 		return nil, err

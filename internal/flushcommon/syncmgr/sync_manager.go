@@ -51,13 +51,15 @@ type SyncManager interface {
 	SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error)
 	SyncDataWithChunkManager(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error)
 
-	// Close waits for the task to finish and then shuts down the sync manager.
+	// Close fences new submissions and shuts down the sync manager. A nil return
+	// means every accepted task has completed callbacks, Future publication, and
+	// dispatcher accounting. On timeout, running tasks may complete asynchronously.
 	Close() error
 	TaskStatsJSON() string
 }
 
 type syncManager struct {
-	*keyLockDispatcher[int64]
+	*reorderDispatcher[int64]
 	chunkManager storage.ChunkManager
 
 	tasks     *typeutil.ConcurrentMap[string, Task]
@@ -69,11 +71,13 @@ func NewSyncManager(chunkManager storage.ChunkManager) SyncManager {
 	params := paramtable.Get()
 	cpuNum := hardware.GetCPUNum()
 	initPoolSize := cpuNum * params.DataNodeCfg.MaxParallelSyncMgrTasksPerCPUCore.GetAsInt()
-	dispatcher := newKeyLockDispatcher[int64](initPoolSize)
-	mlog.Info(context.TODO(), "sync manager initialized", mlog.Int("initPoolSize", initPoolSize), mlog.Int("cpuNum", cpuNum))
+	dispatcher := newReorderDispatcher[int64](initPoolSize)
+	mlog.Info(context.TODO(), "sync manager initialized",
+		mlog.Int("initPoolSize", initPoolSize),
+		mlog.Int("cpuNum", cpuNum))
 
 	syncMgr := &syncManager{
-		keyLockDispatcher: dispatcher,
+		reorderDispatcher: dispatcher,
 		chunkManager:      chunkManager,
 		tasks:             typeutil.NewConcurrentMap[string, Task](),
 		taskStats:         expirable.NewLRU[string, Task](64, nil, time.Minute*15),
@@ -98,76 +102,54 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 			return
 		}
 		newPoolSize := cpuNum * int(size)
-		err = mgr.workerPool.Resize(newPoolSize)
-		if err != nil {
-			log.Warn(context.TODO(), "failed to resize datanode syncmgr pool size", mlog.String("key", evt.Key), mlog.String("value", evt.Value), mlog.Err(err))
+		if err := mgr.resize(newPoolSize); err != nil {
+			log.Warn(context.TODO(), "failed to resize datanode syncmgr pool size", mlog.Err(err))
 			return
 		}
-		semCap := newPoolSize * 2
-		if semCap < 4 {
-			semCap = 4
-		}
-		mgr.SetSemaphoreCapacity(semCap)
-		log.Info(context.TODO(), "sync mgr pool size updated", mlog.Int64("newSize", size), mlog.Int("semaphoreCapacity", semCap))
+		log.Info(context.TODO(), "sync mgr pool size updated", mlog.Int64("newSize", size))
 	}
 }
 
 func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
-	if mgr.workerPool.IsClosed() {
+	if mgr.preparePool.IsClosed() {
 		return nil, merr.WrapErrServiceInternalMsg("sync manager is closed")
 	}
 
-	switch t := task.(type) {
-	case *SyncTask:
-		t.WithChunkManager(mgr.chunkManager)
-	case *GrowingSourceSyncTask:
-		t.WithChunkManager(mgr.chunkManager)
-	}
+	task.SetChunkManager(mgr.chunkManager)
 
 	return mgr.safeSubmitTask(ctx, task, callbacks...), nil
 }
 
 func (mgr *syncManager) SyncDataWithChunkManager(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
-	if mgr.workerPool.IsClosed() {
+	if mgr.preparePool.IsClosed() {
 		return nil, merr.WrapErrServiceInternalMsg("sync manager is closed")
 	}
 
-	switch t := task.(type) {
-	case *SyncTask:
-		t.WithChunkManager(chunkManager)
-	case *GrowingSourceSyncTask:
-		t.WithChunkManager(chunkManager)
-	}
+	task.SetChunkManager(chunkManager)
 
 	return mgr.safeSubmitTask(ctx, task, callbacks...), nil
 }
 
-// safeSubmitTask submits task to SyncManager
+// safeSubmitTask registers the task for stats and submits it to the dispatcher,
+// which serializes completion per segment.
 func (mgr *syncManager) safeSubmitTask(ctx context.Context, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
-	taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
+	// The pointer keeps the key unique: one segment can have several admitted
+	// tasks sharing a checkpoint timestamp.
+	taskKey := fmt.Sprintf("%d-%d-%p", task.SegmentID(), task.Checkpoint().GetTimestamp(), task)
 	mgr.tasks.Insert(taskKey, task)
 	mgr.taskStats.Add(taskKey, task)
 
-	key := task.SegmentID()
-	return mgr.submit(ctx, key, task, callbacks...)
-}
-
-func (mgr *syncManager) submit(ctx context.Context, key int64, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	handler := func(err error) error {
-		taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
-		defer func() {
-			mgr.tasks.Remove(taskKey)
-		}()
-		if err == nil {
-			return nil
+		defer mgr.tasks.Remove(taskKey)
+		if err != nil {
+			task.HandleError(err)
 		}
-		task.HandleError(err)
 		return err
 	}
 	callbacks = append([]func(error) error{handler}, callbacks...)
-	mlog.Info(ctx, "sync mgr sumbit task with key", mlog.Int64("key", key))
+	mlog.Info(ctx, "sync mgr submit task", mlog.Int64("segmentID", task.SegmentID()))
 
-	return mgr.Submit(ctx, key, task, callbacks...)
+	return mgr.Submit(ctx, task.SegmentID(), task, callbacks...)
 }
 
 func (mgr *syncManager) TaskStatsJSON() string {
@@ -187,8 +169,16 @@ func (mgr *syncManager) TaskStatsJSON() string {
 func (mgr *syncManager) Close() error {
 	paramtable.Get().Unwatch(paramtable.Get().DataNodeCfg.MaxParallelSyncMgrTasksPerCPUCore.Key, mgr.handler)
 	timeout := paramtable.Get().CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second)
-	err := mgr.workerPool.ReleaseTimeout(timeout)
-	// Drain all remaining queued tasks that were never dispatched.
-	mgr.keyLockDispatcher.Close()
+	deadline := time.Now().Add(timeout)
+
+	// Fence submissions and abort queued work first, then shut the pools down,
+	// then wait for the accounting of everything that was still running.
+	mgr.beginClose()
+	err := mgr.releasePools(timeout)
+	if err == nil {
+		ctx, cancel := context.WithDeadline(context.Background(), deadline)
+		err = mgr.waitClosed(ctx)
+		cancel()
+	}
 	return err
 }

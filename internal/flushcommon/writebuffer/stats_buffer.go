@@ -20,18 +20,31 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
-// stats buffer used for bm25 stats
+// statsBuffer accumulates a segment's BM25 stats until the next flush yields
+// them.
+//
+// Its footprint is deliberately NOT accounted against the write buffer's memory
+// budget. It used to be, and that was worse than not counting it: the bytes were
+// folded into insertBuffer.size, handed to the task as payload, and released by
+// Prepare — while SyncPack.ReleaseData deliberately keeps bm25Stats alive until
+// Commit. So the accounting claimed the memory was gone during exactly the
+// window it was still held. BM25 stats grow with distinct terms rather than with
+// rows, so they are small next to the row payload; counting them consistently
+// nowhere beats counting them wrong.
 type statsBuffer struct {
 	bm25Stats map[int64]*storage.BM25Stats
 }
 
 func (b *statsBuffer) Buffer(stats map[int64]*storage.BM25Stats) {
 	for fieldID, stat := range stats {
-		if fieldMeta, ok := b.bm25Stats[fieldID]; ok {
-			fieldMeta.Merge(stat)
-		} else {
-			b.bm25Stats[fieldID] = stat
+		if stat == nil {
+			continue
 		}
+		if fieldMeta, ok := b.bm25Stats[fieldID]; ok && fieldMeta != nil {
+			fieldMeta.Merge(stat)
+			continue
+		}
+		b.bm25Stats[fieldID] = stat
 	}
 }
 

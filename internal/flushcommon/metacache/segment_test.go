@@ -17,6 +17,7 @@
 package metacache
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -87,6 +88,60 @@ func (s *SegmentSuite) TestRecoverCurrentSplitFormat() {
 
 	s.Equal("parquet", segment.GetCurrentSplit()[0].Format)
 	s.Equal("vortex", segment.GetCurrentSplit()[1].Format)
+}
+
+// The growing-source flush resumes from a POSITION, so recovery has to restore
+// one. A row count cannot serve: after a restart the growing segment is rebuilt
+// by a WAL replay and its offsets start over at zero, sharing no origin with any
+// count persisted before the restart.
+//
+// The position DataCoord hands back is the one the last successful flush
+// reported through SaveBinlogPaths CheckPoints[].Position, which DataCoord
+// stores verbatim as the segment's DML position.
+func (s *SegmentSuite) TestRecoverLastFlushPositionFromDmlPosition() {
+	flushedThrough := &msgpb.MsgPosition{
+		ChannelName: "by-dev-rootcoord-dml_0_1v0",
+		MsgID:       []byte{1, 2, 3, 4},
+		Timestamp:   4242,
+	}
+	info := &datapb.SegmentInfo{
+		ID:          11,
+		NumOfRows:   100,
+		DmlPosition: flushedThrough,
+	}
+
+	segment := NewSegmentInfo(info, pkoracle.NewBloomFilterSet(), nil, NewEmptySegmentStats())
+
+	s.Require().NotNil(segment.LastFlushPosition())
+	s.EqualValues(4242, segment.LastFlushPosition().GetTimestamp())
+	// The MsgID has to survive too: it is the only thing the WAL can seek by,
+	// and it exists nowhere else once the process restarts.
+	s.Equal([]byte{1, 2, 3, 4}, segment.LastFlushPosition().GetMsgID())
+
+	// A segment that has never been flushed reports no fence, which resolves to
+	// "flush from the beginning" rather than to some row offset.
+	fresh := NewSegmentInfo(&datapb.SegmentInfo{ID: 12}, pkoracle.NewBloomFilterSet(), nil, NewEmptySegmentStats())
+	s.Nil(fresh.LastFlushPosition())
+	s.Zero(fresh.LastFlushPosition().GetTimestamp())
+}
+
+// The fence only ever moves forward, and only in the transaction that publishes
+// the data it names. An out-of-order or stale commit must not walk it back —
+// doing so would re-flush rows that are already persisted.
+func (s *SegmentSuite) TestSetLastFlushPositionOnlyAdvances() {
+	segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 13}, pkoracle.NewBloomFilterSet(), nil, NewEmptySegmentStats())
+
+	SetLastFlushPosition(&msgpb.MsgPosition{Timestamp: 200})(segment)
+	s.EqualValues(200, segment.LastFlushPosition().GetTimestamp())
+
+	SetLastFlushPosition(&msgpb.MsgPosition{Timestamp: 100})(segment)
+	s.EqualValues(200, segment.LastFlushPosition().GetTimestamp())
+
+	SetLastFlushPosition(&msgpb.MsgPosition{Timestamp: 300})(segment)
+	s.EqualValues(300, segment.LastFlushPosition().GetTimestamp())
+
+	SetLastFlushPosition(nil)(segment)
+	s.EqualValues(300, segment.LastFlushPosition().GetTimestamp())
 }
 
 func TestSegment(t *testing.T) {

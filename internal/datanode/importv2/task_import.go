@@ -214,6 +214,9 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 
 func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 	syncFutures := make([]*conc.Future[struct{}], 0)
+	// Each task settles itself through releaseOnDone, so an early return here
+	// leaves nothing to clean up: tasks still running finish and release on the
+	// dispatcher's own completion path.
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
 		data, err := reader.Read()
@@ -258,13 +261,15 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 			return err
 		}
 		fs, sts, err := t.sync(hashedData)
+		// Accumulate before the error check: sync returns the tasks it managed
+		// to build even when a later one fails, and they are already submitted.
+		syncFutures = append(syncFutures, fs...)
+		syncTasks = append(syncTasks, sts...)
 		if err != nil {
 			return err
 		}
-		syncFutures = append(syncFutures, fs...)
-		syncTasks = append(syncTasks, sts...)
 	}
-	err := conc.AwaitAll(syncFutures...)
+	err := conc.BlockOnAll(syncFutures...)
 	if err != nil {
 		return err
 	}
@@ -307,12 +312,16 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 				segmentID, partitionID, t.GetCollectionID(), channel, data, nil,
 				bm25Stats, t.req.GetStorageVersion(), t.req.GetUseLoonFfi(), t.req.GetStorageConfig())
 			if err != nil {
-				return nil, nil, err
+				return futures, syncTasks, err
 			}
-			future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm)
+			future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm, releaseOnDone(syncTask))
 			if err != nil {
 				mlog.Error(context.TODO(), "sync data failed", WrapLogFields(t, mlog.Err(err))...)
-				return nil, nil, err
+				// Refused before the dispatcher accepted it, so releaseOnDone
+				// will never fire. This is the one task import has to settle by
+				// hand.
+				syncTask.Abandon()
+				return futures, syncTasks, err
 			}
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)

@@ -1739,8 +1739,8 @@ GetGrowingSegmentMaterializedFieldIDs(CSegmentInterface c_segment,
 
 CStatus
 GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
-                             int64_t start_offset,
-                             int64_t end_offset,
+                             uint64_t start_ts,
+                             uint64_t end_ts,
                              CPrimaryKeysResult* result) {
     SCOPE_CGO_CALL_METRIC();
 
@@ -1758,13 +1758,10 @@ GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
         result->varchar_primary_keys_size = 0;
         result->num_primary_keys = 0;
 
-        if (start_offset < 0 || end_offset < start_offset) {
+        if (end_ts < start_ts) {
             return milvus::FailureCStatus(
                 milvus::UnexpectedError,
-                "invalid offsets: start_offset must be >= 0 and <= end_offset");
-        }
-        if (start_offset == end_offset) {
-            return milvus::SuccessCStatus();
+                "invalid range: start_ts must be <= end_ts");
         }
 
         auto segment_interface =
@@ -1780,16 +1777,31 @@ GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
         const auto field_id = growing_segment->get_primary_key_field_id();
         const auto pk_data_type = growing_segment->get_primary_key_data_type();
 
-        const auto row_count = growing_segment->get_row_count();
-        if (end_offset > row_count) {
+        // Resolved exactly like the flush range, so the keys returned here and
+        // the rows the flush writes are the same set. See
+        // FlushGrowingSegmentData for why the fences are timestamps.
+        const int64_t start_offset =
+            growing_segment->get_active_count(start_ts);
+        const int64_t end_offset = growing_segment->get_active_count(end_ts);
+        if (end_offset < start_offset) {
             return milvus::FailureCStatus(
                 milvus::UnexpectedError,
-                fmt::format("primary key offset range [{}, {}) exceeds "
-                            "growing segment {} row count {}",
+                fmt::format("resolved primary key range [{}, {}) is inverted "
+                            "for growing segment {} (start_ts={}, end_ts={})",
                             start_offset,
                             end_offset,
                             growing_segment->get_segment_id(),
-                            row_count));
+                            start_ts,
+                            end_ts));
+        }
+        // An empty range is a legal outcome now that the fences are
+        // timestamps, so it must still describe the key type. Returning with
+        // pk_data_type left at its zero value makes the caller decode a valid
+        // empty result as DataType_None and report it as unsupported.
+        result->pk_field_id = field_id.get();
+        result->pk_data_type = static_cast<int64_t>(pk_data_type);
+        if (start_offset == end_offset) {
+            return milvus::SuccessCStatus();
         }
 
         const auto& insert_record = growing_segment->get_insert_record();
@@ -1802,8 +1814,6 @@ GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
                             growing_segment->get_segment_id()));
         }
 
-        result->pk_field_id = field_id.get();
-        result->pk_data_type = static_cast<int64_t>(pk_data_type);
         result->num_primary_keys =
             static_cast<size_t>(end_offset - start_offset);
 
@@ -1889,8 +1899,8 @@ GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
 
 CStatus
 FlushGrowingSegmentData(CSegmentInterface c_segment,
-                        int64_t start_offset,
-                        int64_t end_offset,
+                        uint64_t start_ts,
+                        uint64_t end_ts,
                         const CFlushConfig* config,
                         CFlushResult* result) {
     SCOPE_CGO_CALL_METRIC();
@@ -1920,10 +1930,10 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         result->bm25_stats_sizes = nullptr;
         result->num_bm25_stats = 0;
 
-        if (start_offset < 0 || end_offset < start_offset) {
+        if (end_ts < start_ts) {
             return milvus::FailureCStatus(
                 milvus::UnexpectedError,
-                "invalid offsets: start_offset must be >= 0 and <= end_offset");
+                "invalid flush range: start_ts must be <= end_ts");
         }
         if (config->num_bm25_fields > 0 && config->bm25_field_ids == nullptr) {
             return milvus::FailureCStatus(
@@ -1969,11 +1979,6 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 "schema_length is not positive");
         }
 
-        // no data to flush
-        if (start_offset == end_offset) {
-            return milvus::SuccessCStatus();
-        }
-
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         auto growing_segment =
@@ -1983,16 +1988,35 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             return milvus::FailureCStatus(milvus::UnexpectedError,
                                           "segment is not a growing segment");
         }
-        const auto row_count = growing_segment->get_row_count();
-        if (end_offset > row_count) {
+
+        // Resolve both fences against THIS segment's rows. get_active_count is
+        // an upper_bound over the timestamp vector bounded by the acknowledged
+        // insert prefix, so:
+        //  - it never returns an offset whose row is still being written;
+        //  - a whole insert request shares one timestamp, so the cut can never
+        //    split one request's rows;
+        //  - resolving both ends here keeps them in one coordinate system, which
+        //    is what makes this correct after a restart, when the segment has
+        //    been rebuilt by a WAL replay and its offsets no longer line up with
+        //    any row count the caller kept.
+        const int64_t start_offset =
+            growing_segment->get_active_count(start_ts);
+        const int64_t end_offset = growing_segment->get_active_count(end_ts);
+        if (end_offset < start_offset) {
             return milvus::FailureCStatus(
                 milvus::UnexpectedError,
-                fmt::format("flush offset range [{}, {}) exceeds growing "
-                            "segment {} row count {}",
+                fmt::format("resolved flush range [{}, {}) is inverted for "
+                            "growing segment {} (start_ts={}, end_ts={})",
                             start_offset,
                             end_offset,
                             growing_segment->get_segment_id(),
-                            row_count));
+                            start_ts,
+                            end_ts));
+        }
+
+        // Nothing acknowledged in this range yet; not an error.
+        if (start_offset == end_offset) {
+            return milvus::SuccessCStatus();
         }
 
         // Use the schema selected by the flush task. The growing segment's

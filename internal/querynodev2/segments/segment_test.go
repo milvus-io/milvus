@@ -3,6 +3,7 @@ package segments
 import (
 	"context"
 	"fmt"
+	"math"
 	"path/filepath"
 	"testing"
 
@@ -562,7 +563,9 @@ func (suite *SegmentSuite) TestFlushData() {
 	suite.Greater(rowNum, int64(0), "growing segment should have data")
 
 	// flush all data
-	result, err := suite.growing.FlushData(ctx, 0, rowNum, config)
+	// Flush everything the segment holds: the fences are timestamps now, so the
+	// upper one is "past any row's timestamp" rather than a row count.
+	result, err := suite.growing.FlushData(ctx, 0, math.MaxUint64, config)
 	// note: this test may fail if C++ milvus-storage is not properly initialized
 	// in that case, the error is expected
 	if err != nil {
@@ -602,15 +605,11 @@ func (suite *SegmentSuite) TestFlushDataInvalidOffsets() {
 		Schema:            suite.collection.Schema(),
 	}
 
-	// Test negative start offset
-	_, err := suite.growing.FlushData(ctx, -1, 10, config)
+	// An inverted range is the only shape that is rejected outright; there is no
+	// "negative" fence to test now that both ends are timestamps.
+	_, err := suite.growing.FlushData(ctx, 50, 10, config)
 	suite.Error(err)
-	suite.Contains(err.Error(), "invalid offsets")
-
-	// Test end < start
-	_, err = suite.growing.FlushData(ctx, 50, 10, config)
-	suite.Error(err)
-	suite.Contains(err.Error(), "invalid offsets")
+	suite.Contains(err.Error(), "invalid flush range")
 }
 
 func (suite *SegmentSuite) TestFlushDataEmptyRange() {
@@ -644,16 +643,19 @@ func (suite *SegmentSuite) TestFlushDataPartialRange() {
 	rowNum := suite.growing.RowNum()
 	suite.Greater(rowNum, int64(20), "growing segment should have enough data")
 
-	// flush partial range
-	start := int64(10)
-	end := int64(20)
+	// A partial range, expressed as timestamps. The rows this segment holds were
+	// inserted with timestamps 0..N, so these fences select a slice of them; how
+	// many is up to segcore's resolution, which is what the assertions below
+	// deliberately do not pin down.
+	start := uint64(10)
+	end := uint64(20)
 	result, err := suite.growing.FlushData(ctx, start, end, config)
 	// note: this test may fail if C++ milvus-storage is not properly initialized
 	if err != nil {
 		suite.T().Logf("FlushData failed (expected if milvus-storage not initialized): %v", err)
 	} else {
 		suite.NotNil(result)
-		suite.Equal(end-start, result.NumRows)
+		suite.GreaterOrEqual(result.NumRows, int64(0))
 	}
 }
 

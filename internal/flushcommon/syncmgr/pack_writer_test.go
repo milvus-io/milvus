@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 func TestBulkPackWriter_Write(t *testing.T) {
@@ -204,10 +203,9 @@ func TestBulkPackWriter_WriteDelta_RetryTransientWriteFailure(t *testing.T) {
 	}
 
 	bw := &BulkPackWriter{
-		schema:         schema,
-		chunkManager:   cm,
-		allocator:      allocator.NewLocalAllocator(10000, 100000),
-		writeRetryOpts: []retry.Option{retry.AttemptAlways(), retry.Sleep(time.Millisecond), retry.MaxSleepTime(time.Millisecond)},
+		schema:       schema,
+		chunkManager: cm,
+		allocator:    allocator.NewLocalAllocator(10000, 100000),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -358,11 +356,10 @@ func TestBulkPackWriter_WriteLog_NonRetryableError(t *testing.T) {
 	}
 
 	bw := &BulkPackWriter{
-		metaCache:      mc,
-		schema:         schema,
-		chunkManager:   cm,
-		allocator:      allocator.NewLocalAllocator(10000, 100000),
-		writeRetryOpts: []retry.Option{retry.AttemptAlways(), retry.MaxSleepTime(10 * time.Second)},
+		metaCache:    mc,
+		schema:       schema,
+		chunkManager: cm,
+		allocator:    allocator.NewLocalAllocator(10000, 100000),
 	}
 
 	// Use a timeout context so the test doesn't hang if retry loop is infinite

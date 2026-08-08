@@ -33,7 +33,7 @@ func (m *releaseManualFlushCheckBufferManager) CheckReleaseManualFlushNeed(ctx c
 	return m.needManualFlush, m.err
 }
 
-func (p *releaseManualFlushHandoffProvider) GetGrowingFlushSource(segmentID int64, targetOffset int64, endPos *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+func (p *releaseManualFlushHandoffProvider) GetGrowingFlushSource(segmentID int64, endPos *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
 	return nil, syncmgr.GrowingSourceUnavailable
 }
 
@@ -107,7 +107,7 @@ func TestReleaseManualFlushPreparer(t *testing.T) {
 		Return([]writebuffer.GrowingFlushSegmentProgress{
 			{
 				SegmentID:          1001,
-				TargetOffset:       10,
+				FlushThroughTs:     10,
 				NeedReleaseHandoff: true,
 				SourceMode:         metacache.FlushSourceGrowing,
 			},
@@ -204,7 +204,7 @@ func TestReleaseManualFlushPreparerPreparesExistingProgressWithoutManualFlush(t 
 		Return([]writebuffer.GrowingFlushSegmentProgress{
 			{
 				SegmentID:          1001,
-				TargetOffset:       10,
+				FlushThroughTs:     10,
 				NeedReleaseHandoff: true,
 				SourceMode:         metacache.FlushSourceGrowing,
 			},
@@ -265,7 +265,7 @@ func TestReleaseManualFlushPreparerFencesEmptyInitialSegments(t *testing.T) {
 		Return([]writebuffer.GrowingFlushSegmentProgress{
 			{
 				SegmentID:          1002,
-				TargetOffset:       10,
+				FlushThroughTs:     10,
 				NeedReleaseHandoff: true,
 				SourceMode:         metacache.FlushSourceGrowing,
 			},
