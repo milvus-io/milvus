@@ -37,7 +37,7 @@
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "storage/ChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
+#include "local/FileSystem.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/AssertUtils.h"
@@ -61,7 +61,12 @@ CreateStringTestFileManagerContext(const std::string& root_path) {
     storage::FieldDataMeta field_meta{1, 2, 3, 101};
     field_meta.field_schema.set_data_type(proto::schema::DataType::VarChar);
     storage::IndexMeta index_meta{3, 101, 1000, 10000};
-    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+    storage::FileManagerContext ctx(
+        field_meta,
+        index_meta,
+        chunk_manager,
+        fs,
+        local::FileSystem::Open(std::filesystem::absolute(root_path)));
     return ctx;
 }
 
@@ -443,11 +448,8 @@ TEST_F(StringIndexMarisaTest, UnifiedCodecRecreatesMissingLocalChunkDir) {
 
     index->Build(nb, strings.data());
 
-    auto local_cm =
-        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    ASSERT_NE(local_cm, nullptr);
-    auto local_root = local_cm->GetRootPath();
-    ASSERT_FALSE(local_root.empty());
+    auto local_root = std::filesystem::absolute(
+        TestRemotePath + "string_marisa_missing_local_chunk/");
 
     std::error_code ec;
     std::filesystem::remove_all(local_root, ec);

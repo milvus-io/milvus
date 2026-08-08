@@ -25,9 +25,10 @@
 #include <unordered_map>
 #include <vector>
 
+#include "local/ManagedSubtree.h"
+#include "local/Path.h"
 #include "storage/IndexData.h"
 #include "storage/FileManager.h"
-#include "storage/LocalChunkManager.h"
 #include "common/Consts.h"
 #include "storage/Types.h"
 #include "storage/ThreadPools.h"
@@ -35,35 +36,8 @@
 namespace milvus::storage {
 
 class DiskFileManagerImpl : public FileManagerImpl {
- private:
-    struct LocalDirState;
-
  public:
-    class LocalDirWriteLease {
-     public:
-        LocalDirWriteLease() = default;
-        LocalDirWriteLease(LocalDirWriteLease&& other) noexcept = default;
-        LocalDirWriteLease&
-        operator=(LocalDirWriteLease&& other) noexcept;
-        LocalDirWriteLease(const LocalDirWriteLease&) = delete;
-        LocalDirWriteLease&
-        operator=(const LocalDirWriteLease&) = delete;
-        ~LocalDirWriteLease();
-
-        explicit operator bool() const {
-            return state_ != nullptr;
-        }
-
-     private:
-        friend class DiskFileManagerImpl;
-
-        explicit LocalDirWriteLease(std::shared_ptr<LocalDirState> state);
-
-        void
-        Release() noexcept;
-
-        std::shared_ptr<LocalDirState> state_;
-    };
+    using LocalDirWriteLease = local::ManagedSubtree::WriteLease;
 
     explicit DiskFileManagerImpl(const FileManagerContext& fileManagerContext);
 
@@ -260,16 +234,34 @@ class DiskFileManagerImpl : public FileManagerImpl {
     GetRemoteTextLogPath(const std::string& file_name, int64_t slice_num) const;
 
     std::string
-    AppendLocalPathGeneration(const std::string& prefix) const;
+    ResolveLocalPrefix(const local::Path& path) const;
 
-    static void
-    RemoveLocalDirBestEffort(const std::string& dir) noexcept;
+    local::Path
+    LocalIndexObjectPath(bool temporary) const;
+
+    local::Path
+    LocalTextIndexPath(bool temporary) const;
+
+    local::Path
+    LocalJsonStatsPath(bool temporary) const;
+
+    local::Path
+    LocalNgramIndexPath(bool temporary) const;
+
+    local::Path
+    LocalRawDataPath() const;
 
     void
-    CloseAndRemoveLocalDir(const std::string& dir) noexcept;
+    CloseAndRemoveLocalDir(const local::Path& path) noexcept;
 
-    std::shared_ptr<LocalDirState>
-    GetOrCreateLocalDirState(const std::string& dir);
+    LocalDirWriteLease
+    AcquireLocalDirWriteLease(const local::Path& path);
+
+    local::Path
+    LocalPathForResolvedPrefix(const std::string& dir) const;
+
+    std::shared_ptr<local::ManagedSubtree>
+    GetOrCreateManagedSubtree(const local::Path& path);
 
     bool
     AddFileInternal(const std::string& file_name,
@@ -300,9 +292,8 @@ class DiskFileManagerImpl : public FileManagerImpl {
     void
     cache_raw_data_to_disk_common(
         const FieldDataPtr& field_data,
-        const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
+        std::optional<local::io::WritableFile>& local_file,
         std::string& local_data_path,
-        bool& file_created,
         uint32_t& dim,
         int64_t& write_offset,
         std::vector<size_t>* offsets = nullptr);
@@ -313,11 +304,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
     }
 
     void
-    write_valid_data_file(
-        const std::shared_ptr<LocalChunkManager>& local_chunk_manager,
-        const std::string& valid_data_path,
-        std::vector<uint8_t>& valid_bitmap,
-        uint64_t total_num_rows);
+    write_valid_data_file(const std::string& valid_data_path,
+                          std::vector<uint8_t>& valid_bitmap,
+                          uint64_t total_num_rows);
 
  private:
     // local file path (abs path)
@@ -326,9 +315,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
     // remote file path
     std::map<std::string, int64_t> remote_paths_to_size_;
 
-    mutable std::mutex local_dir_states_mutex_;
-    std::unordered_map<std::string, std::shared_ptr<LocalDirState>>
-        local_dir_states_;
+    mutable std::mutex managed_subtrees_mutex_;
+    std::unordered_map<std::string, std::shared_ptr<local::ManagedSubtree>>
+        managed_subtrees_;
 
     size_t added_total_file_size_ = 0;
 

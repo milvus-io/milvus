@@ -16,7 +16,6 @@
 
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 
-#include <fcntl.h>
 #include <folly/ScopeGuard.h>
 #include <unistd.h>
 #include <cerrno>
@@ -40,6 +39,22 @@
 
 namespace milvus::storage {
 
+namespace {
+
+local::FileSystem
+OpenLegacyTempFiles(const std::string& temp_dir) {
+    auto root = temp_dir.empty() ? std::filesystem::path("/tmp")
+                                 : std::filesystem::path(temp_dir);
+    return local::FileSystem::Open(std::filesystem::absolute(root));
+}
+
+std::span<const std::byte>
+AsBytes(const void* data, size_t size) {
+    return {reinterpret_cast<const std::byte*>(data), size};
+}
+
+}  // namespace
+
 IndexEntryEncryptedLocalWriter::IndexEntryEncryptedLocalWriter(
     const std::string& remote_path,
     milvus_storage::ArrowFileSystemPtr fs,
@@ -48,13 +63,31 @@ IndexEntryEncryptedLocalWriter::IndexEntryEncryptedLocalWriter(
     int64_t collection_id,
     const std::string& temp_dir,
     size_t slice_size)
+    : IndexEntryEncryptedLocalWriter(remote_path,
+                                     std::move(fs),
+                                     std::move(cipher_plugin),
+                                     ez_id,
+                                     collection_id,
+                                     OpenLegacyTempFiles(temp_dir),
+                                     slice_size) {
+}
+
+IndexEntryEncryptedLocalWriter::IndexEntryEncryptedLocalWriter(
+    const std::string& remote_path,
+    milvus_storage::ArrowFileSystemPtr fs,
+    std::shared_ptr<plugin::ICipherPlugin> cipher_plugin,
+    int64_t ez_id,
+    int64_t collection_id,
+    local::FileSystem local_files,
+    size_t slice_size)
     : remote_path_(remote_path),
       fs_(std::move(fs)),
       cipher_plugin_(std::move(cipher_plugin)),
       ez_id_(ez_id),
       collection_id_(collection_id),
       slice_size_(slice_size),
-      pool_(ThreadPools::GetThreadPool(ThreadPoolPriority::MIDDLE)) {
+      pool_(ThreadPools::GetThreadPool(ThreadPoolPriority::MIDDLE)),
+      local_files_(std::move(local_files)) {
     AssertInfo(IsStreamSliceSizeAligned(slice_size_),
                "Encrypted entry slice_size must be {}-byte aligned, got {}",
                kStreamSliceAlignment,
@@ -65,31 +98,37 @@ IndexEntryEncryptedLocalWriter::IndexEntryEncryptedLocalWriter(
     edek_ = std::move(edek);
 
     auto uuid = boost::uuids::random_generator()();
-    std::string dir = temp_dir.empty() ? "/tmp" : temp_dir;
-    local_path_ = dir + "/milvus_enc_" + boost::uuids::to_string(uuid);
-
-    local_fd_ = ::open(local_path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    AssertInfo(
-        local_fd_ != -1, "Failed to create temp file: {}", strerror(errno));
+    local_path_.emplace("milvus_enc_" + boost::uuids::to_string(uuid));
+    local_file_.emplace(local_files_.OpenForWrite(
+        *local_path_, local::WriteOptions{.create = true, .truncate = true}));
 
     try {
         auto written =
-            ::write(local_fd_, MILVUS_V3_MAGIC, MILVUS_V3_MAGIC_SIZE);
-        AssertInfo(written == static_cast<ssize_t>(MILVUS_V3_MAGIC_SIZE),
+            local_file_->Write(AsBytes(MILVUS_V3_MAGIC, MILVUS_V3_MAGIC_SIZE));
+        AssertInfo(written == MILVUS_V3_MAGIC_SIZE,
                    "Failed to write magic number");
     } catch (...) {
-        ::close(local_fd_);
-        local_fd_ = -1;
-        ::unlink(local_path_.c_str());
+        local_file_.reset();
+        RemoveLocalFile();
         throw;
     }
 }
 
 IndexEntryEncryptedLocalWriter::~IndexEntryEncryptedLocalWriter() {
-    if (local_fd_ != -1) {
-        ::close(local_fd_);
-        ::unlink(local_path_.c_str());
+    local_file_.reset();
+    RemoveLocalFile();
+}
+
+void
+IndexEntryEncryptedLocalWriter::RemoveLocalFile() noexcept {
+    if (!local_path_.has_value()) {
+        return;
     }
+    try {
+        local_files_.RemoveFile(*local_path_);
+    } catch (...) {
+    }
+    local_path_.reset();
 }
 
 void
@@ -155,8 +194,8 @@ IndexEntryEncryptedLocalWriter::WriteEntry(const std::string& name,
             auto encrypted = pending.front().get();
             pending.pop_front();
             auto written =
-                ::write(local_fd_, encrypted.data(), encrypted.size());
-            AssertInfo(written == static_cast<ssize_t>(encrypted.size()),
+                local_file_->Write(AsBytes(encrypted.data(), encrypted.size()));
+            AssertInfo(written == encrypted.size(),
                        "Failed to write encrypted slice");
             slices.push_back(
                 {current_offset_, static_cast<uint64_t>(encrypted.size())});
@@ -202,8 +241,8 @@ IndexEntryEncryptedLocalWriter::EncryptAndWriteSlices(const std::string& name,
             auto encrypted = pending.front().get();
             pending.pop_front();
             auto written =
-                ::write(local_fd_, encrypted.data(), encrypted.size());
-            AssertInfo(written == static_cast<ssize_t>(encrypted.size()),
+                local_file_->Write(AsBytes(encrypted.data(), encrypted.size()));
+            AssertInfo(written == encrypted.size(),
                        "Failed to write encrypted slice");
             slices.push_back(
                 {current_offset_, static_cast<uint64_t>(encrypted.size())});
@@ -250,9 +289,8 @@ IndexEntryEncryptedLocalWriter::Finish() {
     dir_json["__ez_id__"] = std::to_string(ez_id_);
 
     auto dir_str = dir_json.dump();
-    auto written = ::write(local_fd_, dir_str.data(), dir_str.size());
-    AssertInfo(written == static_cast<ssize_t>(dir_str.size()),
-               "Failed to write directory table");
+    auto written = local_file_->Write(AsBytes(dir_str.data(), dir_str.size()));
+    AssertInfo(written == dir_str.size(), "Failed to write directory table");
 
     // Write 32-byte Footer
     uint8_t footer[MILVUS_V3_FOOTER_SIZE] = {};
@@ -264,18 +302,15 @@ IndexEntryEncryptedLocalWriter::Finish() {
     milvus::fastmem::FastMemcpy(footer + 24, &meta_size_u32, sizeof(uint32_t));
     milvus::fastmem::FastMemcpy(footer + 28, &dir_size_u32, sizeof(uint32_t));
 
-    written = ::write(local_fd_, footer, MILVUS_V3_FOOTER_SIZE);
-    AssertInfo(written == static_cast<ssize_t>(MILVUS_V3_FOOTER_SIZE),
-               "Failed to write footer");
+    written = local_file_->Write(AsBytes(footer, MILVUS_V3_FOOTER_SIZE));
+    AssertInfo(written == MILVUS_V3_FOOTER_SIZE, "Failed to write footer");
 
-    ::close(local_fd_);
-    local_fd_ = -1;
+    local_file_.reset();
 
     total_bytes_written_ = MILVUS_V3_MAGIC_SIZE + current_offset_ +
                            dir_str.size() + MILVUS_V3_FOOTER_SIZE;
 
-    auto cleanup_local_file =
-        folly::makeGuard([this]() { ::unlink(local_path_.c_str()); });
+    auto cleanup_local_file = folly::makeGuard([this]() { RemoveLocalFile(); });
     UploadLocalFile();
 
     finished_ = true;
@@ -290,28 +325,21 @@ IndexEntryEncryptedLocalWriter::UploadLocalFile() {
     auto remote_stream =
         std::make_shared<RemoteOutputStream>(std::move(result.ValueOrDie()));
 
-    int read_fd = ::open(local_path_.c_str(), O_RDONLY);
-    AssertInfo(
-        read_fd != -1, "Failed to open local file for upload: {}", local_path_);
-    auto close_read_fd = folly::makeGuard([read_fd]() { ::close(read_fd); });
+    auto local_file = local_files_.OpenForRead(*local_path_);
 
     constexpr size_t kBufSize = 16 * 1024 * 1024;
-    std::vector<char> buf(kBufSize);
-    while (true) {
-        ssize_t n = ::read(read_fd, buf.data(), kBufSize);
-        if (n > 0) {
-            remote_stream->Write(buf.data(), n);
-        } else if (n == 0) {
-            break;  // EOF
-        } else {
-            if (errno == EINTR) {
-                continue;
-            }
-            ThrowInfo(ErrorCode::UnexpectedError,
-                      fmt::format("Failed to read local file {}: {}",
-                                  local_path_,
-                                  strerror(errno)));
-        }
+    std::vector<std::byte> buf(kBufSize);
+    uint64_t offset = 0;
+    auto size = local_file.Size();
+    while (offset < size) {
+        auto bytes_to_read = std::min<uint64_t>(buf.size(), size - offset);
+        auto bytes_read = local_file.ReadAt(
+            offset, std::span<std::byte>(buf.data(), bytes_to_read));
+        AssertInfo(bytes_read == bytes_to_read,
+                   "short read from encrypted staging file at offset {}",
+                   offset);
+        remote_stream->Write(buf.data(), bytes_read);
+        offset += bytes_read;
     }
     remote_stream->Close();
 }

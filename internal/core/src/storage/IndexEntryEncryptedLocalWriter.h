@@ -21,9 +21,11 @@
 #include <deque>
 #include <future>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "local/FileSystem.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/plugin/PluginInterface.h"
 #include "storage/ThreadPools.h"
@@ -40,6 +42,15 @@ class IndexEntryEncryptedLocalWriter : public IndexEntryWriter {
         int64_t ez_id,
         int64_t collection_id,
         const std::string& temp_dir = "",
+        size_t slice_size = 16 * 1024 * 1024);
+
+    IndexEntryEncryptedLocalWriter(
+        const std::string& remote_path,
+        milvus_storage::ArrowFileSystemPtr fs,
+        std::shared_ptr<plugin::ICipherPlugin> cipher_plugin,
+        int64_t ez_id,
+        int64_t collection_id,
+        local::FileSystem local_files,
         size_t slice_size = 16 * 1024 * 1024);
     ~IndexEntryEncryptedLocalWriter();
 
@@ -63,6 +74,9 @@ class IndexEntryEncryptedLocalWriter : public IndexEntryWriter {
     void
     UploadLocalFile();
 
+    void
+    RemoveLocalFile() noexcept;
+
     std::string remote_path_;
     milvus_storage::ArrowFileSystemPtr fs_;
     std::shared_ptr<plugin::ICipherPlugin> cipher_plugin_;
@@ -72,8 +86,9 @@ class IndexEntryEncryptedLocalWriter : public IndexEntryWriter {
     size_t slice_size_;
 
     ThreadPool& pool_;
-    std::string local_path_;
-    int local_fd_ = -1;
+    local::FileSystem local_files_;
+    std::optional<local::Path> local_path_;
+    std::optional<local::io::WritableFile> local_file_;
     size_t current_offset_ = 0;
     size_t total_bytes_written_ = 0;
     bool finished_ = false;
