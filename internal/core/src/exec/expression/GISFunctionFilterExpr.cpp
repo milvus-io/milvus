@@ -570,6 +570,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
         processed_rows += size;
         current_index_chunk_pos_ += size;
     } else {
+        EnsureDataChunkCursorAt(current_data_global_pos_);
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
@@ -609,6 +610,13 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                "expect batch size {}",
                batch_valid.size(),
                real_batch_size);
+    if (segment_->type() != SegmentType::Sealed) {
+        CommitDataChunkProgress(processed_rows);
+        AssertInfo(current_data_global_pos_ == current_index_chunk_pos_,
+                   "growing GIS data cursor at {}, index cursor at {}",
+                   current_data_global_pos_,
+                   current_index_chunk_pos_);
+    }
     return std::make_shared<ColumnVector>(std::move(batch_result),
                                           std::move(batch_valid));
 }

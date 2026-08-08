@@ -199,7 +199,7 @@ class Chunk {
 // for fixed size data, includes fixed size array
 class FixedWidthChunk : public Chunk {
  public:
-    FixedWidthChunk(int32_t row_nums,
+    FixedWidthChunk(int64_t row_nums,
                     int32_t dim,
                     char* data,
                     uint64_t size,

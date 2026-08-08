@@ -195,14 +195,30 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
 
     PinWrapper<Chunk*>
     GetChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "GetChunk not supported for VirtualPKChunkedColumn");
+        AssertInfo(chunk_id == 0, "VirtualPKChunkedColumn has only 1 chunk");
+        EnsureMaterialized();
+        return PinWrapper<Chunk*>(materialized_chunk_,
+                                  materialized_chunk_.get());
+    }
+
+    std::vector<PinWrapper<Chunk*>>
+    PinChunks(milvus::OpContext* op_ctx,
+              const std::vector<int64_t>& chunk_ids) const override {
+        if (chunk_ids.empty()) {
+            return {};
+        }
+        AssertInfo(chunk_ids.size() == 1 && chunk_ids.front() == 0,
+                   "VirtualPKChunkedColumn has only 1 chunk");
+        std::vector<PinWrapper<Chunk*>> chunks;
+        chunks.emplace_back(GetChunk(op_ctx, 0));
+        return chunks;
     }
 
     std::vector<PinWrapper<Chunk*>>
     GetAllChunks(milvus::OpContext* op_ctx) const override {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "GetAllChunks not supported for VirtualPKChunkedColumn");
+        std::vector<PinWrapper<Chunk*>> chunks;
+        chunks.emplace_back(GetChunk(op_ctx, 0));
+        return chunks;
     }
 
     int64_t
@@ -274,6 +290,15 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
         return truncated_segment_id_;
     }
 
+ protected:
+    std::optional<DataType>
+    GetDefaultScanDataType() const override {
+        // The system-injected __virtual_pk__ field is always INT64. External
+        // collections with a user-defined VARCHAR primary key load that field
+        // through the regular string column implementation instead.
+        return DataType::INT64;
+    }
+
  private:
     // Compute virtual PK from an offset using the pre-shifted segment ID.
     // Centralizes the inlined formula so all call sites stay consistent.
@@ -289,6 +314,14 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
             for (int64_t i = 0; i < num_rows_; i++) {
                 materialized_pks_[i] = ComputeVirtualPK(i);
             }
+            materialized_chunk_ = std::make_shared<FixedWidthChunk>(
+                num_rows_,
+                1,
+                reinterpret_cast<char*>(materialized_pks_.data()),
+                materialized_pks_.size() * sizeof(int64_t),
+                sizeof(int64_t),
+                /*nullable=*/false,
+                nullptr);
         });
     }
 
@@ -299,6 +332,7 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
     std::vector<int64_t> num_rows_until_chunk_;
     mutable std::once_flag materialize_once_;
     mutable std::vector<int64_t> materialized_pks_;
+    mutable std::shared_ptr<FixedWidthChunk> materialized_chunk_;
 };
 
 }  // namespace milvus
