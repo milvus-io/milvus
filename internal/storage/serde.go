@@ -1366,6 +1366,99 @@ func NewSimpleArrowRecord(r arrow.Record, field2Col map[FieldID]int) *simpleArro
 	}
 }
 
+func appendFloatVectorFieldData(
+	builder array.Builder,
+	data *FloatVectorFieldData,
+	nullable bool,
+) error {
+	if data.Dim <= 0 {
+		return merr.WrapErrServiceInternalMsg("invalid float vector dimension %d", data.Dim)
+	}
+	if data.Nullable != nullable {
+		return merr.WrapErrServiceInternalMsg(
+			"float vector nullable mismatch, schema=%t, data=%t",
+			nullable,
+			data.Nullable,
+		)
+	}
+
+	byteWidth := data.Dim * 4
+	logicalRows := data.RowNum()
+	physicalRows := logicalRows
+	if nullable {
+		physicalRows = 0
+		for _, valid := range data.ValidData {
+			if valid {
+				physicalRows++
+			}
+		}
+	}
+	if len(data.Data) != physicalRows*data.Dim {
+		return merr.WrapErrServiceInternalMsg(
+			"float vector data length mismatch, dim=%d, rows=%d, data=%d",
+			data.Dim,
+			physicalRows,
+			len(data.Data),
+		)
+	}
+
+	// Milvus' supported amd64 and arm64 targets are little-endian, matching the
+	// existing Arrow float-vector representation. CastToBytes is a zero-copy
+	// view and avoids one temporary []byte allocation per row.
+	bytesData := arrow.Float32Traits.CastToBytes(data.Data)
+	var appendValue func([]byte)
+	var appendNull func()
+	switch typedBuilder := builder.(type) {
+	case *array.FixedSizeBinaryBuilder:
+		dtype := typedBuilder.Type().(*arrow.FixedSizeBinaryType)
+		if dtype.ByteWidth != byteWidth {
+			return merr.WrapErrServiceInternalMsg(
+				"float vector arrow byte width mismatch, expected=%d, actual=%d",
+				byteWidth,
+				dtype.ByteWidth,
+			)
+		}
+		if remaining := typedBuilder.Cap() - typedBuilder.Len(); remaining < logicalRows {
+			typedBuilder.Resize(typedBuilder.Len() + logicalRows)
+		}
+		appendValue = typedBuilder.Append
+		appendNull = typedBuilder.AppendNull
+	case *array.BinaryBuilder:
+		if remaining := typedBuilder.Cap() - typedBuilder.Len(); remaining < logicalRows {
+			typedBuilder.Resize(typedBuilder.Len() + logicalRows)
+		}
+		typedBuilder.ReserveData(len(bytesData))
+		appendValue = typedBuilder.UnsafeAppend
+		appendNull = typedBuilder.AppendNull
+	default:
+		return merr.WrapErrServiceInternalMsg(
+			"expected float vector binary builder, got %T",
+			builder,
+		)
+	}
+
+	physicalIdx := 0
+	if nullable {
+		for _, valid := range data.ValidData {
+			if !valid {
+				appendNull()
+				continue
+			}
+			start := physicalIdx * byteWidth
+			appendValue(bytesData[start : start+byteWidth])
+			physicalIdx++
+		}
+		return nil
+	}
+
+	for physicalIdx < logicalRows {
+		start := physicalIdx * byteWidth
+		appendValue(bytesData[start : start+byteWidth])
+		physicalIdx++
+	}
+	return nil
+}
+
 func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.CollectionSchema) error {
 	if data == nil {
 		return nil
@@ -1385,6 +1478,20 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 
 		if fieldData.RowNum() == 0 {
 			return merr.WrapErrServiceInternalMsg("row num is 0 for field %s", field.Name)
+		}
+
+		if field.DataType == schemapb.DataType_FloatVector {
+			floatData, ok := fieldData.(*FloatVectorFieldData)
+			if !ok {
+				return merr.WrapErrServiceInternalMsg(
+					"expected float vector field data, got %T",
+					fieldData,
+				)
+			}
+			if err := appendFloatVectorFieldData(fBuilder, floatData, field.GetNullable()); err != nil {
+				return merr.Wrapf(err, "serialize error on type %s", field.DataType.String())
+			}
+			return nil
 		}
 
 		// Get element type for ArrayOfVector, otherwise use None
