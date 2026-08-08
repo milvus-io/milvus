@@ -17,7 +17,10 @@
 #include <string>
 
 #include "cachinglayer/Manager.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
+#include "log/Log.h"
+#include "monitor/Monitor.h"
 #include "common/FastMem.h"
 #include "config/ConfigKnowhere.h"
 #include "glog/logging.h"
@@ -34,6 +37,17 @@ std::once_flag close_glog_once;
 extern "C" void
 SegcoreInit(const char* conf_file) {
     milvus::config::KnowhereInitImpl(conf_file);
+    // Ring-3 observability: count every exception that reaches the cgo
+    // boundary without a typed error code (it collapses to
+    // UnexpectedError/2001). A shrinking rate means explicit classification
+    // coverage is improving; a spike points at an unclassified throw site.
+    milvus::RegisterUntypedCgoExceptionObserver([](const char* what) {
+        milvus::monitor::internal_cgo_untyped_exception_total.Increment();
+        LOG_WARN(
+            "untyped exception crossed the cgo boundary (error code "
+            "collapsed to UnexpectedError): {}",
+            what);
+    });
 }
 
 // TODO merge small index config into one config map, including enable/disable small_index
@@ -126,9 +140,8 @@ SegcoreSetDenseVectorInterminIndexType(const char* value) {
         status.error_code = Success;
         status.error_msg = "";
         return status;
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 extern "C" CStatus
@@ -141,9 +154,8 @@ SegcoreSetDenseVectorInterminIndexRefineQuantType(const char* value) {
         status.error_code = Success;
         status.error_msg = "";
         return status;
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 extern "C" void

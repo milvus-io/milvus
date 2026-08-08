@@ -20,6 +20,7 @@
 #include "common/VectorTrait.h"
 #include "common/Utils.h"
 #include "storage/MmapManager.h"
+#include "common/EasyAssert.h"
 
 namespace milvus {
 /**
@@ -34,9 +35,11 @@ struct FixedLengthChunk {
         : mmap_descriptor_(descriptor), size_(size) {
         auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
         data_ = (Type*)(mcm->Allocate(mmap_descriptor_, sizeof(Type) * size));
-        AssertInfo(data_ != nullptr,
-                   "failed to create a mmapchunk, map_size={}",
-                   sizeof(Type) * size);
+        if (!(data_ != nullptr)) {
+            ThrowInfo(ErrorCode::MmapError,
+                      "failed to create a mmapchunk, map_size={}",
+                      sizeof(Type) * size);
+        }
     };
     void*
     data() {
@@ -75,8 +78,10 @@ struct VariableLengthChunk {
         uint32_t begin,
         uint32_t length,
         const std::optional<CheckDataValid>& check_data_valid = std::nullopt) {
-        throw std::runtime_error(
-            "set should be a template specialization function");
+        ThrowInfo(
+            ErrorCode::UnexpectedError,
+            "{}",
+            std::string("set should be a template specialization function"));
     }
     const ChunkViewType<Type>&
     view(const int i) const {

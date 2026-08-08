@@ -67,7 +67,10 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
                    "cipher plugin missing for an encrypted file");
 
         int64_t ez_id = descriptor_event.GetEZFromExtra();
-        AssertInfo(ez_id != -1, "ez_id meta not exist for a encrypted file");
+        if (!(ez_id != -1)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "ez_id meta not exist for a encrypted file");
+        }
         auto decryptor = cipherPlugin->GetDecryptor(
             ez_id, descriptor_fix_part.collection_id, edek);
 
@@ -87,7 +90,14 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
 
         auto err =
             reader->Read(left_size, reinterpret_cast<void*>(cipher_str.data()));
-        AssertInfo(err.ok(), "Read binlog failed, err = {}", err.what());
+        // Preserve the typed code BinlogReader stamped (e.g. DataFormatBroken
+        // for a truncated binlog) instead of collapsing it via AssertInfo,
+        // while keeping the call-site context in the message.
+        if (!err.ok()) {
+            throw SegcoreError(
+                err.get_error_code(),
+                fmt::format("read binlog failed: {}", err.what()));
+        }
 
         auto decrypted_str = decryptor->Decrypt(cipher_str);
         LOG_INFO(
@@ -131,15 +141,19 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
 
             if (index_event_data.payload_reader->get_payload_datatype() ==
                 DataType::STRING) {
-                AssertInfo(index_event_data.payload_reader->has_field_data(),
-                           "old index having no field_data");
+                if (!(index_event_data.payload_reader->has_field_data())) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "old index having no field_data");
+                }
                 auto field_data =
                     index_event_data.payload_reader->get_field_data();
                 AssertInfo(field_data->get_data_type() == DataType::STRING,
                            "wrong index type in index binlog file");
-                AssertInfo(
-                    field_data->get_num_rows() == 1,
-                    "wrong length of string num in old index binlog file");
+                if (!(field_data->get_num_rows() == 1)) {
+                    ThrowInfo(
+                        ErrorCode::DataFormatBroken,
+                        "wrong length of string num in old index binlog file");
+                }
                 auto new_field_data =
                     CreateFieldData(DataType::INT8, DataType::NONE, nullable);
                 new_field_data->FillFieldData(
@@ -156,8 +170,10 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
             index_meta.segment_id = data_meta.segment_id;
             index_meta.field_id = data_meta.field_id;
             auto& extras = descriptor_event.event_data.extras;
-            AssertInfo(extras.find(INDEX_BUILD_ID_KEY) != extras.end(),
-                       "index build id not exist");
+            if (!(extras.find(INDEX_BUILD_ID_KEY) != extras.end())) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "index build id not exist");
+            }
             index_meta.build_id = std::stol(
                 std::any_cast<std::string>(extras[INDEX_BUILD_ID_KEY]));
             index_data->set_index_meta(index_meta);

@@ -14,6 +14,7 @@
 #include <string>
 
 #include "cachinglayer/Metrics.h"
+#include "common/CGoCatch.h"
 #include "common/FastMem.h"
 #include "common/init_c.h"
 #include "common/PrometheusClient.h"
@@ -21,13 +22,24 @@
 
 char*
 GetCoreMetrics() {
-    UpdateArrowIOThreadPoolMetrics();
-    static_cast<void>(
-        milvus::cachinglayer::monitor::collect_cache_shard_disk_usage_stats());
-    auto str = milvus::monitor::getPrometheusClient().GetMetrics();
-    auto len = str.length();
-    char* res = static_cast<char*>(malloc(len + 1));
-    milvus::fastmem::FastMemcpy(res, str.data(), len);
-    res[len] = '\0';
-    return res;
+    // Returns NULL on failure. The Go caller converts with C.GoString, which
+    // maps NULL to "" — metrics gathering degrades gracefully instead of an
+    // exception crossing the C boundary and terminating the process. Mirrors
+    // GetKnowhereMetrics in segcore/metrics_c.cpp.
+    try {
+        UpdateArrowIOThreadPoolMetrics();
+        static_cast<void>(milvus::cachinglayer::monitor::
+                              collect_cache_shard_disk_usage_stats());
+        auto str = milvus::monitor::getPrometheusClient().GetMetrics();
+        auto len = str.length();
+        char* res = static_cast<char*>(malloc(len + 1));
+        if (res == nullptr) {
+            return nullptr;
+        }
+        milvus::fastmem::FastMemcpy(res, str.data(), len);
+        res[len] = '\0';
+        return res;
+    }
+    CGO_CATCH_AND_LOG("GetCoreMetrics")
+    return nullptr;
 }

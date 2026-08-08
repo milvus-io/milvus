@@ -21,6 +21,7 @@
 #include "PluginInterface.h"
 #include "arrow/result.h"
 #include "arrow/status.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "milvus-storage/column_groups.h"
@@ -37,6 +38,7 @@
 #include "storage/loon_ffi/util.h"
 #include <arrow/array.h>
 #include <arrow/record_batch.h>
+#include "storage/StatusToErrorCode.h"
 
 /**
  * @brief Creates a Loon reader with optional CMEK decryption support.
@@ -66,7 +68,10 @@ GetLoonReader(
     const std::shared_ptr<milvus_storage::api::Properties>& properties,
     CPluginContext* c_plugin_context) {
     auto result = arrow::ImportSchema(schema);
-    AssertInfo(result.ok(), "Import arrow schema failed");
+    if (!result.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(result),
+                  "Import arrow schema failed");
+    }
     auto arrow_schema = result.ValueOrDie();
     auto reader = milvus_storage::api::Reader::create(
         column_groups,
@@ -122,9 +127,8 @@ NewPackedFFIReader(const char* manifest_path,
 
         *c_packed_reader = static_cast<CFFIPackedReader>(reader.release());
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -169,9 +173,8 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
 
         *c_loon_reader = static_cast<CFFIPackedReader>(reader.release());
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -216,9 +219,8 @@ NewPackedFFIReaderWithColumnGroups(const LoonColumnGroups* column_groups,
 
         *c_loon_reader = static_cast<CFFIPackedReader>(reader.release());
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -241,14 +243,15 @@ GetFFIReaderStream(CFFIPackedReader c_packed_reader,
 
         arrow::Status status =
             arrow::ExportRecordBatchReader(array_stream, out_stream);
-        AssertInfo(status.ok(),
-                   "failed to export record batch reader, {}",
-                   status.ToString());
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "failed to export record batch reader, {}",
+                      status.ToString());
+        }
 
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -264,7 +267,6 @@ CloseFFIReader(CFFIPackedReader c_packed_reader) {
         AssertInfo(reader, "cannot close nullptr ffi reader");
         delete reader;
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

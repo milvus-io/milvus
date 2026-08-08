@@ -73,6 +73,23 @@ var (
 			nodeIDLabelName,
 		},
 	)
+
+	// UnmappedSegcoreCodeTotal counts segcore (C++ ErrorCode) values that arrive
+	// over the cgo boundary but are not registered in merr's segcore code table,
+	// so they fall back to a generic non-retriable error. A non-zero, growing
+	// value means the C++ side added an ErrorCode the Go classifier has not been
+	// taught about yet (classification drift) -- the precise retry/ownership
+	// policy is degraded until it is registered.
+	UnmappedSegcoreCodeTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subsystemCGO,
+			Name:      "unmapped_segcore_code_total",
+			Help:      "Total number of unregistered segcore error codes seen at the cgo boundary, by code.",
+		}, []string{
+			"code",
+		},
+	)
 )
 
 // RegisterCGOMetrics registers the cgo metrics.
@@ -82,5 +99,6 @@ func RegisterCGOMetrics(registry *prometheus.Registry) {
 		registry.MustRegister(RunningCgoCallTotal)
 		registry.MustRegister(CGODuration)
 		registry.MustRegister(CGOQueueDuration)
+		registry.MustRegister(UnmappedSegcoreCodeTotal)
 	})
 }

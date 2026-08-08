@@ -229,6 +229,8 @@ static-check: getdeps
 	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
 	@echo "Start check go_client e2e package"
 	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags L0,L1,L2,test --timeout=30m --config $(PWD)/tests/go_client/.golangci.yml
+	@echo "Start check segcore error boundaries"
+	@$(PWD)/scripts/check_segcore_error_boundaries.sh
 
 verifiers: build-cpp getdeps cppcheck rustcheck fmt static-check
 
@@ -291,6 +293,18 @@ generated-proto-without-cpp: download-milvus-proto get-proto-deps
 generated-proto: download-milvus-proto build-3rdparty get-proto-deps
 	@echo "Generate proto ..."
 	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
+
+generate-segcore-codes:
+	@echo "Generating segcore error code list from milvus-common ..."
+	@(env bash $(PWD)/scripts/generate_segcore_codes.sh)
+
+# CI gate: regenerate the segcore code list and fail on drift, so a
+# milvus-common pin bump that adds an ErrorCode cannot ship without the
+# generated snapshot (and therefore the classForCode switch) catching up.
+# Mirrors check-proto-product.
+check-segcore-codes-product: generate-segcore-codes
+	@git diff --exit-code -- pkg/util/merr/segcore_codes_gen.go || \
+		(echo "segcore_codes_gen.go is out of date with milvus-common's EasyAssert.h; run 'make generate-segcore-codes' and classify any new code in classForCode" && exit 1)
 
 build-cpp: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library ..."

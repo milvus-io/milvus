@@ -90,6 +90,7 @@
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/lob_column/lob_column_reader.h"
 #include "segcore/TextColumnCache.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus::segcore {
 
@@ -128,13 +129,15 @@ AssertLoadedFieldRows(
         return;
     }
     auto rows = GetLoadedFieldRows(column_group_results, field_id);
-    AssertInfo(rows == expected_rows,
-               "growing segment StorageV3 manifest loads {} rows for {} "
-               "field {}, but SegmentLoadInfo expects {} rows",
-               rows,
-               field_name,
-               field_id.get(),
-               expected_rows);
+    if (!(rows == expected_rows)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "growing segment StorageV3 manifest loads {} rows for {} "
+                  "field {}, but SegmentLoadInfo expects {} rows",
+                  rows,
+                  field_name,
+                  field_id.get(),
+                  expected_rows);
+    }
 }
 
 void
@@ -157,12 +160,14 @@ AssertAllLoadedFieldRows(
     }
 
     for (const auto& [field_id, rows] : loaded_rows) {
-        AssertInfo(rows == expected_rows,
-                   "growing segment StorageV3 manifest loads {} rows for "
-                   "field {}, but SegmentLoadInfo expects {} rows",
-                   rows,
-                   field_id.get(),
-                   expected_rows);
+        if (!(rows == expected_rows)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "growing segment StorageV3 manifest loads {} rows for "
+                      "field {}, but SegmentLoadInfo expects {} rows",
+                      rows,
+                      field_id.get(),
+                      expected_rows);
+        }
     }
 }
 
@@ -1151,9 +1156,12 @@ SegmentGrowingImpl::load_column_group_data_internal(
                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
                 storage::GetReaderProperties(),
                 storage::GetArrowReaderProperties());
-            AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create file row group reader: " +
-                           result.status().ToString());
+            if (!result.ok()) {
+                ThrowInfo(
+                    milvus::storage::ArrowStatusToErrorCode(result),
+                    "[StorageV2] Failed to create file row group reader: " +
+                        result.status().ToString());
+            }
             auto reader = result.ValueOrDie();
             auto row_group_num =
                 reader->file_metadata()->GetRowGroupMetadataVector().size();
@@ -1161,12 +1169,14 @@ SegmentGrowingImpl::load_column_group_data_internal(
             std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
             row_group_lists.push_back(all_row_groups);
             auto status = reader->Close();
-            AssertInfo(
-                status.ok(),
-                "[StorageV2] failed to close file reader when get row group "
-                "metadata from file {} with error {}",
-                file,
-                status.ToString());
+            if (!status.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                          "[StorageV2] failed to close file reader when get "
+                          "row group "
+                          "metadata from file {} with error {}",
+                          file,
+                          status.ToString());
+            }
         }
 
         // create parallel degree split strategy

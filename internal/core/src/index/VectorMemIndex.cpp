@@ -311,7 +311,7 @@ VectorMemIndex<T>::Serialize(const Config& config) {
     } else if (!all_null_nullable) {
         auto stat = index_.Serialize(ret);
         if (stat != knowhere::Status::success)
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(KnowhereStatusToErrorCode(stat),
                       "failed to serialize index: {}",
                       KnowhereStatusString(stat));
     }
@@ -338,7 +338,7 @@ VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
     } else {
         auto stat = index_.Deserialize(binary_set, config);
         if (stat != knowhere::Status::success)
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(KnowhereStatusToErrorCode(stat),
                       "failed to Deserialize index: {}",
                       KnowhereStatusString(stat));
         SetDim(index_.Dim());
@@ -429,9 +429,11 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                 for (const auto& file_path : batch) {
                     const std::string file_name =
                         file_path.substr(file_path.find_last_of('/') + 1);
-                    AssertInfo(batch_data.find(file_name) != batch_data.end(),
-                               "lost index slice data: {}",
-                               file_name);
+                    if (!(batch_data.find(file_name) != batch_data.end())) {
+                        ThrowInfo(ErrorCode::DataFormatBroken,
+                                  "lost index slice data: {}",
+                                  file_name);
+                    }
                     payload_size += batch_data[file_name]->PayloadSize();
                     index_data_codec.codecs_.push_back(
                         std::move(batch_data[file_name]));
@@ -439,9 +441,11 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
                 for (auto& file : batch) {
                     pending_index_files.erase(file);
                 }
-                AssertInfo(
-                    payload_size == total_len,
-                    "index len is inconsistent after disassemble and assemble");
+                if (!(payload_size == total_len)) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "index len is inconsistent after disassemble and "
+                              "assemble");
+                }
                 index_data_codec.size_ = payload_size;
             }
         }
@@ -497,7 +501,7 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
              config.value("build_id", "unknown"));
     auto stat = index_.Build(dataset, index_config, use_knowhere_build_pool_);
     if (stat != knowhere::Status::success)
-        ThrowInfo(ErrorCode::IndexBuildError,
+        ThrowInfo(KnowhereBuildStatusToErrorCode(stat),
                   "failed to build index, {}",
                   KnowhereStatusString(stat));
     rc.ElapseFromBegin("Done");
@@ -711,7 +715,7 @@ VectorMemIndex<T>::AddWithDataset(const DatasetPtr& dataset,
     knowhere::TimeRecorder rc("AddWithDataset", 1);
     auto stat = index_.Add(dataset, index_config, use_knowhere_build_pool_);
     if (stat != knowhere::Status::success)
-        ThrowInfo(ErrorCode::IndexBuildError,
+        ThrowInfo(KnowhereBuildStatusToErrorCode(stat),
                   "failed to append index, {}",
                   KnowhereStatusString(stat));
     rc.ElapseFromBegin("Done");
@@ -765,7 +769,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
                 index_.RangeSearch(dataset, search_conf, bitset, op_context);
             milvus::tracer::AddEvent("finish_knowhere_index_range_search");
             if (!res.has_value()) {
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                           "failed to range search: {}: {}",
                           KnowhereStatusString(res.error()),
                           res.what());
@@ -780,7 +784,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             milvus::tracer::AddEvent("finish_knowhere_index_search");
             if (!res.has_value()) {
                 ThrowInfo(
-                    ErrorCode::UnexpectedError,
+                    KnowhereStatusToErrorCode(res.error()),
                     // escape json brace in case of using message as format
                     "failed to search: config={} {}: {}",
                     milvus::EscapeBraces(search_conf.dump()),
@@ -848,7 +852,7 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
 
     auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                   "failed to get vector, {}",
                   KnowhereStatusString(res.error()));
     }
@@ -879,7 +883,7 @@ VectorMemIndex<T>::GetEmbListByIds(const DatasetPtr dataset,
     auto res = index_.GetEmbListByIds(dataset, metric_type);
     if (!res.has_value()) {
         ThrowInfo(
-            ErrorCode::UnexpectedError,
+            KnowhereStatusToErrorCode(res.error()),
             "failed to get emb list, " + KnowhereStatusString(res.error()));
     }
     return this->template DecodeEmbListByIdsResult<T>(res.value());
@@ -894,7 +898,7 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
 
     auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                   "failed to get vector, {}",
                   KnowhereStatusString(res.error()));
     }
@@ -1052,8 +1056,10 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
                     (std::chrono::system_clock::now() - start_load2_mem);
                 for (int j = index - batch.size() + 1; j <= index; j++) {
                     std::string file_name = GenSlicedFileName(prefix, j);
-                    AssertInfo(batch_data.find(file_name) != batch_data.end(),
-                               "lost index slice data");
+                    if (!(batch_data.find(file_name) != batch_data.end())) {
+                        ThrowInfo(ErrorCode::DataFormatBroken,
+                                  "lost index slice data");
+                    }
                     auto&& data = batch_data[file_name];
                     auto start_write_file = std::chrono::system_clock::now();
                     WriteIndexData(prefix, data);
@@ -1132,7 +1138,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
         deserialize_duration =
             std::chrono::system_clock::now() - start_deserialize;
         if (stat != knowhere::Status::success) {
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(KnowhereStatusToErrorCode(stat),
                       "failed to Deserialize index: {}",
                       KnowhereStatusString(stat));
         }

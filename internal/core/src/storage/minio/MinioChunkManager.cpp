@@ -252,12 +252,18 @@ MinioChunkManager::BuildS3Client(
         auto provider =
             std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>();
         auto aws_credentials = provider->GetAWSCredentials();
-        AssertInfo(!aws_credentials.GetAWSAccessKeyId().empty(),
-                   "if use iam, access key id should not be empty");
-        AssertInfo(!aws_credentials.GetAWSSecretKey().empty(),
-                   "if use iam, secret key should not be empty");
-        AssertInfo(!aws_credentials.GetSessionToken().empty(),
-                   "if use iam, token should not be empty");
+        if (!(!aws_credentials.GetAWSAccessKeyId().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, access key id should not be empty");
+        }
+        if (!(!aws_credentials.GetAWSSecretKey().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, secret key should not be empty");
+        }
+        if (!(!aws_credentials.GetSessionToken().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, token should not be empty");
+        }
 
         client_ = std::make_shared<Aws::S3::S3Client>(
             provider,
@@ -290,7 +296,10 @@ MinioChunkManager::PreCheck(const StorageConfig& config) {
         LOG_ERROR("{}", err_message);
         throw SegcoreError(e.get_error_code(), err_message);
     } catch (std::exception& e) {
-        throw e;
+        // Bare rethrow: `throw e;` would copy-construct a plain std::exception,
+        // slicing off any derived type (and its error code) before it reaches
+        // the cgo boundary.
+        throw;
     }
 };
 
@@ -298,10 +307,14 @@ void
 MinioChunkManager::BuildAccessKeyClient(
     const StorageConfig& storage_config,
     const Aws::Client::ClientConfiguration& config) {
-    AssertInfo(!storage_config.access_key_id.empty(),
-               "if not use iam, access key should not be empty");
-    AssertInfo(!storage_config.access_key_value.empty(),
-               "if not use iam, access value should not be empty");
+    if (!(!storage_config.access_key_id.empty())) {
+        ThrowInfo(ErrorCode::ConfigInvalid,
+                  "if not use iam, access key should not be empty");
+    }
+    if (!(!storage_config.access_key_value.empty())) {
+        ThrowInfo(ErrorCode::ConfigInvalid,
+                  "if not use iam, access value should not be empty");
+    }
 
     client_ = std::make_shared<Aws::S3::S3Client>(
         Aws::Auth::AWSCredentials(
@@ -324,12 +337,18 @@ MinioChunkManager::BuildAliyunCloudClient(
             Aws::Auth::AliyunSTSAssumeRoleWebIdentityCredentialsProvider>(
             "AliyunSTSAssumeRoleWebIdentityCredentialsProvider");
         auto aliyun_credentials = aliyun_provider->GetAWSCredentials();
-        AssertInfo(!aliyun_credentials.GetAWSAccessKeyId().empty(),
-                   "if use iam, access key id should not be empty");
-        AssertInfo(!aliyun_credentials.GetAWSSecretKey().empty(),
-                   "if use iam, secret key should not be empty");
-        AssertInfo(!aliyun_credentials.GetSessionToken().empty(),
-                   "if use iam, token should not be empty");
+        if (!(!aliyun_credentials.GetAWSAccessKeyId().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, access key id should not be empty");
+        }
+        if (!(!aliyun_credentials.GetAWSSecretKey().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, secret key should not be empty");
+        }
+        if (!(!aliyun_credentials.GetSessionToken().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, token should not be empty");
+        }
         client_ = std::make_shared<Aws::S3::S3Client>(
             aliyun_provider,
             config,

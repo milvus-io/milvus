@@ -16,7 +16,28 @@
 
 package merr
 
+// The segcore code list (generatedSegcoreCppCodes / segcore_codes_gen.go) is
+// generated from milvus-common's enum ErrorCode. Regenerate with
+// `make generate-segcore-codes` (which resolves the pinned header), or directly:
+//go:generate sh -c "go run ./internal/segcoregen/main.go -header \"$MILVUS_COMMON_HEADER\" -out segcore_codes_gen.go"
+
 import "github.com/cockroachdb/errors"
+
+// onUnmappedSegcoreCode, if set, is invoked once per occurrence whenever a C++
+// segcore code arrives that is not classified by classForCode (classification
+// drift). merr is a leaf package and cannot import pkg/metrics or pkg/mlog (both
+// import merr, directly or transitively, which would create an import cycle), so
+// the observability side-effect (a counter + a rate-limited WARN) is injected by
+// a node-side package via RegisterUnmappedSegcoreCodeObserver. It is set once at
+// init time and only read afterward, so no locking is needed.
+var onUnmappedSegcoreCode func(code int32)
+
+// RegisterUnmappedSegcoreCodeObserver installs the callback invoked for every
+// unregistered segcore code seen by classifySegcoreError. Call it once at init
+// from a package that may import metrics/logging.
+func RegisterUnmappedSegcoreCodeObserver(fn func(code int32)) {
+	onUnmappedSegcoreCode = fn
+}
 
 // segcore error codes are produced by the C++ core (milvus::ErrorCode, defined
 // in milvus-common's EasyAssert.h, value range 2000-2099) and travel to Go via
@@ -56,96 +77,105 @@ type segcoreClass struct {
 	retriable bool
 }
 
-// segcoreCodeTable is the registry of known C++ segcore error codes. Codes
-// absent here fall back to ErrSegcore (see classifySegcoreError).
+// classForCode maps every SegcoreCode constant to its Go classification. It is
+// the single source of the retry/ownership policy; segcore_codes_gen.go is the
+// single source of the code list. The two are tied together by //exhaustive:enforce:
+// the `exhaustive` linter fails the build when a generated SegcoreCode constant
+// has no case here, so a code the C++ side adds cannot ship unclassified -- the
+// near-compile-time analog of the C++ -Werror=switch, across the C++->Go seam.
 //
-// Codes carry two orthogonal classifications:
-//   - inputError: the caller's fault (bad request) -> InputError, non-retriable
-//     by construction.
-//   - retriable: a transient system failure where a retry / reroute can succeed.
+// It is written as a switch with NO default plus a post-switch fallback: the
+// absent default is what lets `exhaustive` demand every constant, while the
+// post-switch return keeps an unknown raw int32 (a code not yet regenerated, or
+// garbage) safe at runtime -- classifySegcoreError degrades it to a non-retriable
+// ErrSegcore and reports it through the unmapped-code observer.
 //
-// They are mutually exclusive: a code is either the caller's fault (then a retry
-// of the same request is pointless) or a server-side condition that is either
-// transient (retriable) or permanent (neither flag). ConfigInvalid (2006) is a
-// server-side yaml/config error (not the API caller's fault), so it is left as a
-// plain system error until the C++ source splits its mixed user/server semantics.
-var segcoreCodeTable = map[int32]segcoreClass{
-	// Already-named segcore sentinels (identity preserved).
-	2000: {sentinel: ErrSegcore},
-	// C++ UnexpectedError(2001) is the generic catch-all the C++ core throws for
-	// any unclassified std::exception (EasyAssert.h default). It must stay generic
-	// ErrSegcore so the index/analyze scheduler retries it (master parity), NOT
-	// ErrSegcoreUnsupported — whose merr-code 2001 only coincides and would make
-	// scheduler.go fail the task permanently. The real C++ Unsupported is 2003.
-	2001: {sentinel: ErrSegcore},
-	// C++ NotImplemented(2002) is a real build/runtime failure, not a signal.
-	// ErrSegcorePretendFinished's merr-code 2002 only coincides; the real
-	// pretend-finished code is C++ ClusterSkip 2033. Keep generic so a failed
-	// build retries instead of being reported as JobStateFinished.
-	2002: {sentinel: ErrSegcore},
-	2037: {sentinel: ErrSegcoreFollyOtherException, retriable: true},      // FollyOtherException (folly async failure; retry/reroute)
-	2038: {sentinel: ErrSegcoreFollyCancel},                               // FollyCancel (cancellation; not a pretend-finished signal — sentinel identity preserved, scheduler retries)
-	2039: {sentinel: ErrSegcoreOutOfRange},                                // OutOfRange (internal bounds bug, not a signal)
-	2040: {sentinel: ErrSegcoreGCPNativeError, retriable: true},           // GcpNativeError (object storage; transient)
-	2046: {sentinel: ErrCollectionSchemaVersionNotReady, retriable: true}, // CollectionSchemaVersionNotReady (stale QueryNode schema snapshot; retry with fresh schema)
-	2099: {sentinel: KnowhereError},                                       // KnowhereError
+// inputError and retriable are mutually exclusive: a code is either the caller's
+// fault (retrying the same request is pointless) or a server-side condition that
+// is transient (retriable) or permanent (neither flag).
+func classForCode(c SegcoreCode) (segcoreClass, bool) {
+	//exhaustive:enforce
+	switch c {
+	// Named sentinels: identity preserved so existing errors.Is guards keep
+	// working (datanode/index/scheduler.go matches Unsupported / ClusterSkip).
+	case CodeUnsupported:
+		return segcoreClass{sentinel: ErrSegcoreUnsupported}, true
+	case CodeClusterSkip:
+		return segcoreClass{sentinel: ErrSegcorePretendFinished, signal: true}, true
+	case CodeFollyOtherException:
+		return segcoreClass{sentinel: ErrSegcoreFollyOtherException, retriable: true}, true
+	case CodeFollyCancel:
+		return segcoreClass{sentinel: ErrSegcoreFollyCancel}, true
+	case CodeOutOfRange:
+		return segcoreClass{sentinel: ErrSegcoreOutOfRange}, true
+	case CodeGcpNativeError:
+		return segcoreClass{sentinel: ErrSegcoreGCPNativeError, retriable: true}, true
+	case CodeKnowhereError:
+		return segcoreClass{sentinel: KnowhereError}, true
 
-	// Wrapper-path special cases (preserve existing errors.Is behavior that
-	// datanode/index/scheduler.go relies on):
-	//   2003 Unsupported    -> ErrSegcoreUnsupported (scheduler.go:221 matches)
-	//   2033 ClusterSkip     -> ErrSegcorePretendFinished signal (scheduler.go:224)
-	2003: {sentinel: ErrSegcoreUnsupported},
-	2033: {sentinel: ErrSegcorePretendFinished, signal: true},
+	// Caller-input errors -> InputError (non-retriable by construction).
+	case CodeJsonKeyInvalid, CodeMetricTypeInvalid, CodeExprInvalid,
+		CodeMetricTypeNotMatch, CodeDimNotMatch, CodeInvalidParameter:
+		return segcoreClass{sentinel: ErrSegcore, inputError: true}, true
 
-	// Caller-input errors (errType=input => non-retriable by construction).
-	2020: {sentinel: ErrSegcore, inputError: true}, // FieldIDInvalid: field id not in schema
-	2023: {sentinel: ErrSegcore, inputError: true}, // DataIsEmpty: indexing empty/all-null source data
-	2025: {sentinel: ErrSegcore, inputError: true}, // JsonKeyInvalid
-	2026: {sentinel: ErrSegcore, inputError: true}, // MetricTypeInvalid
-	2028: {sentinel: ErrSegcore, inputError: true}, // ExprInvalid: filter expression invalid
-	2031: {sentinel: ErrSegcore, inputError: true}, // MetricTypeNotMatch
-	2032: {sentinel: ErrSegcore, inputError: true}, // DimNotMatch: query vector dim != schema
-	2042: {sentinel: ErrSegcore, inputError: true}, // InvalidParameter: rescorer params
+	// Mixed-semantics codes that LOOK like input validation but whose producers
+	// are predominantly or exclusively internal guards (producer audit, review
+	// finding on this PR):
+	//   - FieldIDInvalid(2020): all 4 sites are load-order guards / "unsupported
+	//     system field id" (load_field_data_c.cpp, SegmentInterface.cpp) — zero
+	//     user-request sites;
+	//   - FieldAlreadyExist(2021): both sites are internal load-path invariants
+	//     (load_field_data_c.cpp:65, GroupChunk.h);
+	//   - DataTypeInvalid(2007): ~100 sites, overwhelmingly `default:` /
+	//     "logical error" guards; only a handful are genuine request validation.
+	// Marking them InputError would make lb_policy abort the cross-replica
+	// sweep on what is really an internal failure of one replica — an
+	// availability regression. Default them to plain (non-retriable) system
+	// errors; the few genuine request-validation sites can be tagged at the
+	// request boundary (WrapErrAsInputErrorWhen) or split at the C++ source.
+	//   - OpTypeInvalid(2022): thrown while decoding internally generated plans
+	//     (PlanProto/expr op switches) — an unknown enum there is an internal
+	//     protocol or rolling-upgrade mismatch, not the caller's request;
+	//   - DataIsEmpty(2023): thrown by index builders when an internally
+	//     scheduled build sees zero/null rows.
+	// A request boundary that can prove the value came from the user may mark
+	// that specific error input; the global table stays system-classified.
+	case CodeDataTypeInvalid, CodeFieldIDInvalid, CodeFieldAlreadyExist,
+		CodeOpTypeInvalid, CodeDataIsEmpty:
+		return segcoreClass{sentinel: ErrSegcore}, true
 
-	// Transient system errors (retriable: a retry / reroute to another replica
-	// can succeed).
-	2012: {sentinel: ErrSegcore, retriable: true}, // FileOpenFailed
-	2014: {sentinel: ErrSegcore, retriable: true}, // FileReadFailed
-	2015: {sentinel: ErrSegcore, retriable: true}, // FileWriteFailed
-	2018: {sentinel: ErrSegcore, retriable: true}, // S3Error: object-storage transient (throttling/timeout)
-	2027: {sentinel: ErrSegcore, retriable: true}, // FieldNotLoaded: another replica may have it loaded
-	2034: {sentinel: ErrSegcore, retriable: true}, // MemAllocateFailed: OOM
-	2036: {sentinel: ErrSegcore, retriable: true}, // MmapError
-	2043: {sentinel: ErrSegcore, retriable: true}, // InsufficientResource
-	2045: {sentinel: ErrSegcore, retriable: true}, // StorageTransientError: retryable storage/network failure
+	// Transient system errors -> retriable (a retry / reroute to another replica
+	// can succeed): object storage, local IO, OOM, mmap, field-not-loaded,
+	// insufficient resource, and the retriable storage fallback (2045).
+	case CodeFileOpenFailed, CodeFileCreateFailed, CodeFileReadFailed, CodeFileWriteFailed,
+		CodeS3Error, CodeFieldNotLoaded, CodeMemAllocateFailed, CodeMmapError,
+		CodeInsufficientResource, CodeStorageTransientError:
+		return segcoreClass{sentinel: ErrSegcore, retriable: true}, true
 
-	// Permanent system errors registered explicitly so a future reader does not
-	// mistake them for "unclassified" and flip them to retriable. They map to the
-	// same non-retriable ErrSegcore as the fallback; the raw code is kept in
-	// segcoreCode.
-	2004: {sentinel: ErrSegcore}, // IndexBuildError: build failed (bad data / permanent)
-	2016: {sentinel: ErrSegcore}, // BucketInvalid: misconfigured bucket (same on every replica)
-	2017: {sentinel: ErrSegcore}, // ObjectNotExist: object missing in shared storage (reroute won't help)
-	2044: {sentinel: ErrSegcore}, // StorageError: permanent storage failure
-
-	// Previously-unclassified C++ codes registered explicitly (review §2): an
-	// unknown code still falls back to non-retriable ErrSegcore, but registering
-	// them lets the drift-guard test fail on any genuinely new/unmapped code and
-	// fixes the wrong-class fallback for the caller-input ones.
-	2007: {sentinel: ErrSegcore, inputError: true}, // DataTypeInvalid: caller data type wrong
-	2021: {sentinel: ErrSegcore, inputError: true}, // FieldAlreadyExist: caller adds a duplicate field
-	2022: {sentinel: ErrSegcore, inputError: true}, // OpTypeInvalid: caller op type invalid
-	2013: {sentinel: ErrSegcore, retriable: true},  // FileCreateFailed: transient IO (sibling of 2012/2014/2015)
-	2005: {sentinel: ErrSegcore},                   // IndexAlreadyBuild: internal state (proxy already dedups)
-	2006: {sentinel: ErrSegcore},                   // ConfigInvalid: mixed user/server config; default system, split later
-	2009: {sentinel: ErrSegcore},                   // PathInvalid (storage; classify with storage PR)
-	2010: {sentinel: ErrSegcore},                   // PathAlreadyExist (storage)
-	2011: {sentinel: ErrSegcore},                   // PathNotExist (storage)
-	2019: {sentinel: ErrSegcore},                   // RetrieveError: generic retrieve failure
-	2024: {sentinel: ErrSegcore},                   // DataFormatBroken: data corruption (permanent)
-	2030: {sentinel: ErrSegcore},                   // UnistdError: syscall failure
-	2035: {sentinel: ErrSegcore},                   // MemAllocateSizeNotMatch: size logic bug (not OOM)
-	2041: {sentinel: ErrSegcore},                   // TextIndexNotFound
+	// Permanent system errors -> non-retriable ErrSegcore. UnexpectedError(2001)
+	// and NotImplemented(2002) stay generic ErrSegcore on purpose: their merr-codes
+	// only coincide with ErrSegcoreUnsupported/PretendFinished, and the index/analyze
+	// scheduler must retry them rather than fail permanently. ConfigInvalid(2006) is
+	// a server-side yaml/config error (not the API caller's fault). StorageError(2044)
+	// is the permanent storage fallback.
+	case CodeUnexpectedError, CodeNotImplemented, CodeIndexBuildError, CodeIndexAlreadyBuild,
+		CodeConfigInvalid, CodePathInvalid, CodePathAlreadyExist, CodePathNotExist,
+		CodeBucketInvalid, CodeObjectNotExist, CodeRetrieveError, CodeDataFormatBroken,
+		CodeUnistdError, CodeMemAllocateSizeNotMatch, CodeTextIndexNotFound, CodeStorageError:
+		return segcoreClass{sentinel: ErrSegcore}, true
+	}
+	// kCollectionSchemaVersionNotReady(2046) is minted by
+	// ChunkedSegmentSealedImpl.cpp OUTSIDE milvus-common's ErrorCode enum
+	// (constexpr static_cast<ErrorCode>(2046)), so the generator cannot emit a
+	// constant for it and it cannot appear as a case above. Classify it
+	// explicitly: a stale QueryNode schema snapshot is retriable once the
+	// schema refreshes. Fold the code into EasyAssert.h upstream, regenerate,
+	// then lift this into the switch — this hand-minted code is exactly the
+	// drift the exhaustive gate exists to surface.
+	if int32(c) == 2046 {
+		return segcoreClass{sentinel: ErrCollectionSchemaVersionNotReady, retriable: true}, true
+	}
+	return segcoreClass{}, false
 }
 
 // classifySegcoreError converts a C++ segcore error code + message into a
@@ -159,9 +189,16 @@ var segcoreCodeTable = map[int32]segcoreClass{
 //   - is retriable only for transient system codes (object storage / IO / OOM /
 //     field-not-loaded); all other codes stay non-retriable.
 func classifySegcoreError(code int32, msg string) error {
-	cls, ok := segcoreCodeTable[code]
+	cls, ok := classForCode(SegcoreCode(code))
 	if !ok {
+		// Runtime degrade (never panic): an unclassified C++ code falls back to a
+		// generic non-retriable system error. Notify the observer (if installed)
+		// so this classification drift is observable -- a growing counter means
+		// the C++ side added an ErrorCode classForCode has not been taught yet.
 		cls = segcoreClass{sentinel: ErrSegcore}
+		if onUnmappedSegcoreCode != nil {
+			onUnmappedSegcoreCode(code)
+		}
 	}
 
 	// Stamp the original C++ code into the segcoreCode field on the sentinel,
@@ -175,6 +212,24 @@ func classifySegcoreError(code int32, msg string) error {
 	if cls.retriable {
 		base.retriable = true
 	}
+	// Wire the ORIGINAL C++ code through instead of collapsing every
+	// pass-through code onto ErrSegcore(2000): a client receives the precise
+	// segcore code (2009 stays 2009, 2024 stays 2024). The family sentinel
+	// stays reachable via inner/Unwrap, so existing errors.Is guards (the
+	// ErrSegcore umbrella and the named segcore sentinels) keep matching.
+	// Constraints:
+	//   - only in-band codes (2000-2099) pass through; a garbage code from a
+	//     corrupted CStatus stays on ErrSegcore(2000);
+	//   - cross-family mappings (e.g. 2046 -> ErrCollectionSchemaVersionNotReady,
+	//     wire 110) keep their sentinel's wire code: those are deliberate
+	//     remappings, not collapses.
+	if code >= 2000 && code <= 2099 &&
+		base.errCode >= 2000 && base.errCode <= 2099 && code != base.errCode {
+		relabeled := base
+		relabeled.errCode = code
+		relabeled.inner = base
+		base = relabeled
+	}
 	err := wrapFields(base, value("segcoreCode", code))
 	if msg != "" {
 		err = errors.Wrap(err, msg)
@@ -186,6 +241,6 @@ func classifySegcoreError(code int32, msg string) error {
 // (pretend-finished / cluster-skip) that callers treat as a normal outcome
 // rather than a failure.
 func IsSegcoreSignal(code int32) bool {
-	cls, ok := segcoreCodeTable[code]
+	cls, ok := classForCode(SegcoreCode(code))
 	return ok && cls.signal
 }

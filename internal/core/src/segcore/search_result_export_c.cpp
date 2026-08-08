@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "log/Log.h"
@@ -876,9 +877,8 @@ ExportSearchResultAsArrowRecordBatch(CSearchResult c_search_result,
         return milvus::SuccessCStatus();
     } catch (folly::FutureCancellation& e) {
         return milvus::FailureCStatus(milvus::ErrorCode::FollyCancel, e.what());
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -1074,9 +1074,8 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
             out_result,
             "failed to allocate memory for proto serialization",
             "failed to serialize SearchResultData proto");
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -1088,9 +1087,20 @@ FillOutputFieldsOrdered(CSearchResult* search_results,
                         int64_t total_rows,
                         CProto* out_result,
                         void* cancellation_source) {
-    if (cancellation_source != nullptr) {
-        auto source =
-            static_cast<folly::CancellationSource*>(cancellation_source);
+    try {
+        if (cancellation_source != nullptr) {
+            auto source =
+                static_cast<folly::CancellationSource*>(cancellation_source);
+            return FillOutputFieldsOrderedImpl(search_results,
+                                               num_search_results,
+                                               c_plan,
+                                               result_seg_indices,
+                                               result_seg_offsets,
+                                               total_rows,
+                                               out_result,
+                                               source->getToken());
+        }
+
         return FillOutputFieldsOrderedImpl(search_results,
                                            num_search_results,
                                            c_plan,
@@ -1098,17 +1108,9 @@ FillOutputFieldsOrdered(CSearchResult* search_results,
                                            result_seg_offsets,
                                            total_rows,
                                            out_result,
-                                           source->getToken());
+                                           folly::CancellationToken());
     }
-
-    return FillOutputFieldsOrderedImpl(search_results,
-                                       num_search_results,
-                                       c_plan,
-                                       result_seg_indices,
-                                       result_seg_offsets,
-                                       total_rows,
-                                       out_result,
-                                       folly::CancellationToken());
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -1117,13 +1119,16 @@ GetSearchResultMetadata(CSearchResult c_search_result,
                         int64_t* group_size,
                         int64_t* scanned_remote_bytes,
                         int64_t* scanned_total_bytes) {
-    auto search_result = static_cast<SearchResult*>(c_search_result);
-    *has_group_by = search_result->composite_group_by_values_.has_value();
-    *group_size = search_result->group_size_.value_or(0);
-    *scanned_remote_bytes =
-        search_result->search_storage_cost_.scanned_remote_bytes;
-    *scanned_total_bytes =
-        search_result->search_storage_cost_.scanned_total_bytes;
+    try {
+        auto search_result = static_cast<SearchResult*>(c_search_result);
+        *has_group_by = search_result->composite_group_by_values_.has_value();
+        *group_size = search_result->group_size_.value_or(0);
+        *scanned_remote_bytes =
+            search_result->search_storage_cost_.scanned_remote_bytes;
+        *scanned_total_bytes =
+            search_result->search_storage_cost_.scanned_total_bytes;
+    }
+    CGO_CATCH_AND_LOG("GetSearchResultMetadata")
 }
 
 CStatus
@@ -1176,9 +1181,8 @@ PrepareSearchResultsForExportImpl(
             *all_search_count = helper.GetAllSearchCount();
         }
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -1192,9 +1196,22 @@ PrepareSearchResultsForExport(CTraceContext c_trace,
                               int64_t* slice_topKs,
                               int64_t* all_search_count,
                               void* cancellation_source) {
-    if (cancellation_source != nullptr) {
-        auto source =
-            static_cast<folly::CancellationSource*>(cancellation_source);
+    try {
+        if (cancellation_source != nullptr) {
+            auto source =
+                static_cast<folly::CancellationSource*>(cancellation_source);
+            return PrepareSearchResultsForExportImpl(c_trace,
+                                                     c_plan,
+                                                     c_placeholder_group,
+                                                     c_search_results,
+                                                     num_segments,
+                                                     slice_nqs,
+                                                     num_slices,
+                                                     slice_topKs,
+                                                     all_search_count,
+                                                     source->getToken());
+        }
+
         return PrepareSearchResultsForExportImpl(c_trace,
                                                  c_plan,
                                                  c_placeholder_group,
@@ -1204,17 +1221,7 @@ PrepareSearchResultsForExport(CTraceContext c_trace,
                                                  num_slices,
                                                  slice_topKs,
                                                  all_search_count,
-                                                 source->getToken());
+                                                 folly::CancellationToken());
     }
-
-    return PrepareSearchResultsForExportImpl(c_trace,
-                                             c_plan,
-                                             c_placeholder_group,
-                                             c_search_results,
-                                             num_segments,
-                                             slice_nqs,
-                                             num_slices,
-                                             slice_topKs,
-                                             all_search_count,
-                                             folly::CancellationToken());
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

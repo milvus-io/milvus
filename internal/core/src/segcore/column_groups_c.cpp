@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/CGoCatch.h"
 #include "monitor/scope_metric.h"
 #include "segcore/column_groups_c.h"
 
@@ -27,20 +28,29 @@ CColumnSplits
 NewCColumnSplits() {
     SCOPE_CGO_CALL_METRIC();
 
-    auto vv = std::make_unique<VecVecInt>();
-    return vv.release();
+    try {
+        auto vv = std::make_unique<VecVecInt>();
+        return vv.release();
+    }
+    CGO_CATCH_AND_LOG("NewCColumnSplits")
+    return nullptr;
 }
 
-void
+bool
 AddCColumnSplit(CColumnSplits cgs, int* group, int group_size) {
     SCOPE_CGO_CALL_METRIC();
 
     if (!cgs || !group)
-        return;
+        return false;
 
-    auto vv = static_cast<VecVecInt*>(cgs);
-    std::vector<int> new_group(group, group + group_size);
-    vv->emplace_back(std::move(new_group));
+    try {
+        auto vv = static_cast<VecVecInt*>(cgs);
+        std::vector<int> new_group(group, group + group_size);
+        vv->emplace_back(std::move(new_group));
+        return true;
+    }
+    CGO_CATCH_AND_LOG("AddCColumnSplit")
+    return false;
 }
 
 int
