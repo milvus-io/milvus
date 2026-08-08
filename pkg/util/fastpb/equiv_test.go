@@ -79,6 +79,7 @@ func TestEquiv_FieldData_ValidData(t *testing.T) {
 func TestEquiv_IDs(t *testing.T) {
 	roundTripSRD(t, &schemapb.SearchResultData{Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10, 20, 30}}}}})
 	roundTripSRD(t, &schemapb.SearchResultData{Ids: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"k1", "k2"}}}}})
+	roundTripSRD(t, &schemapb.SearchResultData{Ids: &schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: [][]byte{{1, 2}, {3, 4}}}}}})
 }
 
 func TestEquiv_SearchResultData_Full(t *testing.T) {

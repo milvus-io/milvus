@@ -19,6 +19,10 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"path"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -31,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -166,12 +171,34 @@ type CopySegmentTask interface {
 type copySegmentTask struct {
 	task atomic.Pointer[datapb.CopySegmentTask] // Atomic pointer for concurrent access
 
+	ctx          context.Context
 	copyMeta     CopySegmentMeta          // For accessing job metadata and updating task state
 	meta         *meta                    // For accessing segment metadata and collection schema
 	snapshotMeta *snapshotMeta            // For accessing snapshot data (source binlogs)
 	alloc        allocator.Allocator      // For allocating new build IDs to avoid buildID reuse
 	tr           *timerecord.TimeRecorder // For measuring task duration (pending, executing, total)
 	times        *taskcommon.Times        // For tracking task lifecycle timestamps
+}
+
+type copySegmentSnapshotCache struct {
+	mu   sync.Mutex
+	data *snapshotstorage.SnapshotData
+}
+
+func (c *copySegmentSnapshotCache) load(
+	loader func() (*snapshotstorage.SnapshotData, error),
+) (*snapshotstorage.SnapshotData, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.data != nil {
+		return c.data, nil
+	}
+	data, err := loader()
+	if err != nil {
+		return nil, err
+	}
+	c.data = data
+	return data, nil
 }
 
 // ===========================================================================================
@@ -235,6 +262,7 @@ func (t *copySegmentTask) GetTR() *timerecord.TimeRecorder {
 // would leave memory and etcd out of sync.
 func (t *copySegmentTask) Clone() CopySegmentTask {
 	cloned := &copySegmentTask{
+		ctx:          t.ctx,
 		copyMeta:     t.copyMeta,
 		meta:         t.meta,
 		snapshotMeta: t.snapshotMeta,
@@ -307,42 +335,47 @@ func (t *copySegmentTask) GetTaskVersion() int64 {
 //   - cluster: Cluster session manager for RPC communication
 //
 // Error handling:
-// - Logs warnings but does not retry (scheduler will retry on next cycle)
-// - Task remains in Pending state if dispatch fails
+//   - Permanent snapshot assembly errors mark the task and job failed
+//   - Transient assembly or DataNode RPC errors leave the task Pending so the
+//     scheduler can retry it on a later cycle
 //
-// Why read snapshot on every dispatch:
+// Why load the snapshot during dispatch:
 // - Snapshot data contains full binlog paths needed for copy
-// - Reading from S3 is necessary to populate CopySegmentRequest
-// - Cached in snapshotMeta to avoid redundant reads
+// - The first task for a job reads it from storage to populate CopySegmentRequest
+// - Tasks in the same job share a cache to avoid redundant remote reads
 func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
-	mlog.Info(context.TODO(), "processing pending copy segment task...", WrapCopySegmentTaskLog(t)...)
-	job := t.copyMeta.GetJob(context.TODO(), t.GetJobId())
+	ctx := t.ctx
+	mlog.Info(ctx, "processing pending copy segment task...", WrapCopySegmentTaskLog(t)...)
+	job := t.copyMeta.GetJob(ctx, t.GetJobId())
 	req, err := AssembleCopySegmentRequest(t, job)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to assemble copy segment request",
+		mlog.Warn(ctx, "failed to assemble copy segment request",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+		if isPermanentSnapshotError(err) {
+			t.markTaskAndJobFailed(merr.Wrap(err, "failed to assemble copy segment request").Error())
+		}
 		return
 	}
 	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId())
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to create copy segment task on datanode",
+		mlog.Warn(ctx, "failed to create copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 		return
 	}
-	mlog.Info(context.TODO(), "create copy segment task on datanode done",
+	mlog.Info(ctx, "create copy segment task on datanode done",
 		WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
-	err = t.copyMeta.UpdateTask(context.TODO(), t.GetTaskId(),
+	err = t.copyMeta.UpdateTask(ctx, t.GetTaskId(),
 		UpdateCopyTaskNodeID(nodeID),
 		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskInProgress))
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to update copy segment task state",
+		mlog.Warn(ctx, "failed to update copy segment task state",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 		return
 	}
 	// Record pending duration
 	pendingDuration := t.GetTR().RecordSpan()
 	metrics.CopySegmentTaskLatency.WithLabelValues(metrics.Pending).Observe(float64(pendingDuration.Milliseconds()))
-	mlog.Info(context.TODO(), "copy segment task start to execute",
+	mlog.Info(ctx, "copy segment task start to execute",
 		WrapCopySegmentTaskLog(t, mlog.Int64("scheduledNodeID", nodeID),
 			mlog.Duration("taskTimeCost/pending", pendingDuration))...)
 }
@@ -579,14 +612,77 @@ func WrapCopySegmentTaskLog(task CopySegmentTask, fields ...mlog.Field) []mlog.F
 // - Target: Only IDs (where to copy, paths generated on DataNode)
 func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*datapb.CopySegmentRequest, error) {
 	t := task.(*copySegmentTask)
-	ctx := context.Background()
+	ctx := t.ctx
+	if job == nil {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"copy segment job %d not found while assembling task %d",
+			t.GetJobId(),
+			t.GetTaskId(),
+		)
+	}
 
 	// Read complete snapshot data from S3 to retrieve source segment binlogs
-	snapshotData, err := t.snapshotMeta.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
+	var (
+		snapshotData *snapshotstorage.SnapshotData
+		err          error
+	)
+	concreteJob, ok := job.(*copySegmentJob)
+	if !ok || concreteJob.snapshotCache == nil {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"copy segment job %d has no snapshot cache",
+			job.GetJobId(),
+		)
+	}
+	snapshotData, err = concreteJob.snapshotCache.load(func() (*snapshotstorage.SnapshotData, error) {
+		var loaded *snapshotstorage.SnapshotData
+		if job.GetExternal() {
+			resolved, resolveErr := snapshotstorage.ResolveForeignStorage(
+				ctx,
+				snapshotstorage.InstanceConfigFromParamtable(Params),
+				snapshotstorage.DirectionRestore,
+				job.GetSnapshotS3Location(),
+				job.GetExternalSpec(),
+			)
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			loaded, err = t.snapshotMeta.ReadExternalSnapshotDataWithChunkManager(
+				ctx,
+				resolved.ForeignCM,
+				job.GetSnapshotS3Location(),
+				true,
+			)
+		} else {
+			loaded, err = t.snapshotMeta.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if expected := job.GetSnapshotFingerprint(); expected != "" {
+			actual, fingerprintErr := snapshotstorage.SnapshotFingerprint(loaded)
+			if fingerprintErr != nil {
+				return nil, fingerprintErr
+			}
+			if actual != expected {
+				return nil, merr.WrapErrDataIntegrityMsg("external snapshot changed after restore job creation")
+			}
+		}
+		return loaded, nil
+	})
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to read snapshot data for copy segment task",
 			append(WrapCopySegmentTaskLog(task), mlog.Err(err))...)
 		return nil, err
+	}
+	storageConfig := createStorageConfig()
+	sourceRootPath := ""
+	if job.GetExternal() {
+		// DataNode uses SourceRootPath both to detect a foreign source bucket and
+		// to rebase source object keys into the target storage root.
+		sourceRootPath, err = deriveSnapshotSourceRootURI(job.GetSnapshotS3Location(), snapshotData.Layout)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Build source segment map for quick lookup
@@ -632,6 +728,8 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			ManifestPath:         sourceSegDesc.GetManifestPath(),      // manifest path for StorageV3+
 			StorageVersion:       sourceSegDesc.GetStorageVersion(),    // storage version for binlog format decision
 			IsExternalCollection: isExternalCollection,
+			SourceRootPath:       sourceRootPath,
+			NumOfRows:            sourceSegDesc.GetNumOfRows(),
 		}
 		sources = append(sources, source)
 
@@ -670,10 +768,11 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		}
 		// Build target with IDs and buildID mappings
 		target := &datapb.CopySegmentTarget{
-			CollectionId: job.GetCollectionId(),
-			PartitionId:  partitionID,
-			SegmentId:    targetSegID,
-			NewBuildIds:  newBuildIDs,
+			CollectionId:   job.GetCollectionId(),
+			PartitionId:    partitionID,
+			SegmentId:      targetSegID,
+			NewBuildIds:    newBuildIDs,
+			TargetRootPath: storageConfig.GetRootPath(),
 		}
 		mlog.Info(ctx, "prepare copy segment source and target",
 			WrapCopySegmentTaskLog(task,
@@ -695,9 +794,40 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		TaskID:        task.GetTaskId(),
 		Sources:       sources,
 		Targets:       targets,
-		StorageConfig: createStorageConfig(),
+		StorageConfig: storageConfig,
 		TaskSlot:      task.GetTaskSlot(),
+		ExternalSpec:  job.GetExternalSpec(),
 	}, nil
+}
+
+func deriveSnapshotSourceRootURI(snapshotS3Location string, layout datapb.SnapshotLayout) (string, error) {
+	root, found := snapshotstorage.DeriveSnapshotRootPath(snapshotS3Location)
+	if !found {
+		return "", merr.WrapErrServiceInternalMsg("validated snapshot URI has no snapshot root")
+	}
+	objectKey := strings.TrimSuffix(root, "/")
+	if layout == datapb.SnapshotLayout_SnapshotLayoutSelfContained {
+		// Exported bundles store data under bundleRoot/files, while referenced
+		// snapshots point directly at the original Milvus storage root.
+		objectKey = path.Join(objectKey, snapshotstorage.ExportedSnapshotFilesPath)
+	}
+	parsed, err := url.Parse(snapshotS3Location)
+	if err != nil {
+		return "", merr.WrapErrServiceInternalErr(err, "failed to parse validated snapshot URI")
+	}
+
+	bucket, _, endpointHost, err := snapshotstorage.ParseForeignURI(snapshotS3Location)
+	if err != nil {
+		return "", merr.WrapErrServiceInternalErr(err, "failed to parse validated snapshot URI")
+	}
+	if endpointHost != "" {
+		parsed.Path = "/" + path.Join(bucket, objectKey)
+	} else {
+		parsed.Path = "/" + objectKey
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return strings.TrimSuffix(parsed.String(), "/"), nil
 }
 
 // ===========================================================================================
@@ -889,6 +1019,15 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			break
 		}
 	}
+	numRows := result.GetImportedRows()
+	if meta.segments != nil {
+		// StorageV3 bundles intentionally omit legacy PB insert binlogs, so
+		// DataNode cannot derive row count from EntriesNum. The target segment was
+		// pre-registered from snapshot metadata and remains the authoritative value.
+		if segment := meta.GetSegment(ctx, result.GetSegmentId()); segment != nil {
+			numRows = segment.GetNumOfRows()
+		}
+	}
 
 	// Sync each vector/scalar index
 	for _, indexInfo := range result.GetIndexInfos() {
@@ -920,7 +1059,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			CurrentScalarIndexVersion: indexInfo.GetCurrentScalarIndexVersion(),
 			CreatedUTCTime:            uint64(now),
 			FinishedUTCTime:           uint64(now),
-			NumRows:                   result.GetImportedRows(),
+			NumRows:                   numRows,
 			IndexStorePathVersion:     indexInfo.GetIndexStorePathVersion(),
 		}
 

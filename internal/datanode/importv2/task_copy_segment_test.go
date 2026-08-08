@@ -17,19 +17,57 @@
 package importv2
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 )
+
+type crossBucketCopyCall struct {
+	srcBucket string
+	srcObject string
+	dstBucket string
+	dstObject string
+}
+
+type copySegmentChunkManagerTarget struct {
+	storage.ChunkManager
+}
+
+func copySegmentTaskTestDependencies(
+	t *testing.T,
+	req *datapb.CopySegmentRequest,
+	cm storage.ChunkManager,
+	copiers ...storage.CrossBucketCopier,
+) (*indexpb.StorageConfig, storage.CrossBucketCopier, string) {
+	t.Helper()
+	storageConfig := req.GetStorageConfig()
+	if storageConfig == nil {
+		storageConfig = &indexpb.StorageConfig{BucketName: "test-bucket"}
+	}
+	var copier storage.CrossBucketCopier
+	if len(copiers) > 0 {
+		copier = copiers[0]
+	} else {
+		copier = newCopySegmentCopierMock(t, func(ctx context.Context, _, srcObject, _, dstObject string) error {
+			return cm.Copy(ctx, srcObject, dstObject)
+		})
+	}
+	return storageConfig, copier, storageConfig.GetBucketName()
+}
 
 func TestNewCopySegmentTask(t *testing.T) {
 	mockCM := mocks.NewChunkManager(t)
@@ -61,7 +99,21 @@ func TestNewCopySegmentTask(t *testing.T) {
 	}
 
 	t.Run("create task", func(t *testing.T) {
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig := &indexpb.StorageConfig{BucketName: "test-bucket"}
+		task := NewCopySegmentTask(
+			context.Background(),
+			req,
+			mockManager,
+			mockCM,
+			mockCM,
+			storageConfig,
+			newCopySegmentCopierMock(t, func(ctx context.Context, _, srcObject, _, dstObject string) error {
+				return mockCM.Copy(ctx, srcObject, dstObject)
+			}),
+			storageConfig.GetBucketName(),
+			storageConfig.GetBucketName(),
+		)
+
 		assert.NotNil(t, task)
 
 		copyTask := task.(*CopySegmentTask)
@@ -84,7 +136,21 @@ func TestNewCopySegmentTask(t *testing.T) {
 	})
 
 	t.Run("task methods", func(t *testing.T) {
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig := &indexpb.StorageConfig{BucketName: "test-bucket"}
+		task := NewCopySegmentTask(
+			context.Background(),
+			req,
+			mockManager,
+			mockCM,
+			mockCM,
+			storageConfig,
+			newCopySegmentCopierMock(t, func(ctx context.Context, _, srcObject, _, dstObject string) error {
+				return mockCM.Copy(ctx, srcObject, dstObject)
+			}),
+			storageConfig.GetBucketName(),
+			storageConfig.GetBucketName(),
+		)
+
 		copyTask := task.(*CopySegmentTask)
 
 		// Test GetVchannels (should return nil for CopySegmentTask)
@@ -108,7 +174,21 @@ func TestNewCopySegmentTask(t *testing.T) {
 	})
 
 	t.Run("clone task", func(t *testing.T) {
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig := &indexpb.StorageConfig{BucketName: "test-bucket"}
+		task := NewCopySegmentTask(
+			context.Background(),
+			req,
+			mockManager,
+			mockCM,
+			mockCM,
+			storageConfig,
+			newCopySegmentCopierMock(t, func(ctx context.Context, _, srcObject, _, dstObject string) error {
+				return mockCM.Copy(ctx, srcObject, dstObject)
+			}),
+			storageConfig.GetBucketName(),
+			storageConfig.GetBucketName(),
+		)
+
 		cloned := task.Clone()
 		assert.NotNil(t, cloned)
 
@@ -120,6 +200,161 @@ func TestNewCopySegmentTask(t *testing.T) {
 		assert.Equal(t, copyTask.GetCollectionID(), clonedTask.GetCollectionID())
 		assert.Equal(t, copyTask.GetState(), clonedTask.GetState())
 	})
+}
+
+func TestCopySegmentTask_CleanupUsesTargetManager(t *testing.T) {
+	sourceCM := &copySegmentChunkManagerTarget{}
+	targetCM := &copySegmentChunkManagerTarget{}
+	var sourceRemovedFiles, targetRemovedFiles [][]string
+	mockRemove := mockey.Mock((*copySegmentChunkManagerTarget).MultiRemove).To(
+		func(cm *copySegmentChunkManagerTarget, _ context.Context, filePaths []string) error {
+			removed := append([]string(nil), filePaths...)
+			if cm == sourceCM {
+				sourceRemovedFiles = append(sourceRemovedFiles, removed)
+			} else {
+				targetRemovedFiles = append(targetRemovedFiles, removed)
+			}
+			return nil
+		},
+	).Build()
+	defer mockRemove.UnPatch()
+
+	var copyCalls []crossBucketCopyCall
+	copier := newCopySegmentCopierMock(t, func(_ context.Context, srcBucket, srcObject, dstBucket, dstObject string) error {
+		copyCalls = append(copyCalls, crossBucketCopyCall{
+			srcBucket: srcBucket,
+			srcObject: srcObject,
+			dstBucket: dstBucket,
+			dstObject: dstObject,
+		})
+		if len(copyCalls) > 1 {
+			return errors.New("copy failed")
+		}
+		return nil
+	})
+	sourceStorageConfig := &indexpb.StorageConfig{
+		BucketName: "foreign-source",
+		RootPath:   "foreign-root",
+	}
+	manager := NewTaskManager()
+
+	req := &datapb.CopySegmentRequest{
+		JobID:    100,
+		TaskID:   201,
+		TaskSlot: 1,
+		Sources: []*datapb.CopySegmentSource{{
+			CollectionId:   100,
+			PartitionId:    1,
+			SegmentId:      10,
+			SourceRootPath: "s3://foreign-source/foreign-root",
+			StorageVersion: storage.StorageV2,
+			InsertBinlogs: []*datapb.FieldBinlog{{
+				FieldID: 101,
+				Binlogs: []*datapb.Binlog{
+					{EntriesNum: 10, LogPath: "foreign-root/files/insert_log/100/1/10/101/1"},
+					{EntriesNum: 20, LogPath: "foreign-root/files/insert_log/100/1/10/101/2"},
+				},
+			}},
+		}},
+		Targets: []*datapb.CopySegmentTarget{{
+			CollectionId:   200,
+			PartitionId:    2,
+			SegmentId:      20,
+			TargetRootPath: "local-root",
+		}},
+	}
+
+	task := NewCopySegmentTask(
+		context.Background(),
+		req,
+		manager,
+		sourceCM,
+		targetCM,
+		sourceStorageConfig,
+		copier,
+		"foreign-source",
+		"local-target",
+	)
+
+	manager.Add(task)
+
+	futures := task.Execute()
+	assert.Len(t, futures, 1)
+	_, err := futures[0].Await()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "copy failed")
+
+	copyTask := task.(*CopySegmentTask)
+	copyTask.CleanupCopiedFiles()
+
+	assert.Empty(t, sourceRemovedFiles)
+	assert.Len(t, targetRemovedFiles, 1)
+	assert.Len(t, targetRemovedFiles[0], 1)
+	assert.Len(t, copyCalls, 2)
+	assert.Equal(t, copyCalls[0].dstObject, targetRemovedFiles[0][0])
+}
+
+func TestCopySegmentTask_CopySingleSegmentAllowsManifestOnlyStorageV3(t *testing.T) {
+	manager := NewTaskManager()
+	source := &datapb.CopySegmentSource{
+		CollectionId:   100,
+		PartitionId:    10,
+		SegmentId:      1001,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("source-root/files/insert_log/100/10/1001", 1),
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 200,
+		PartitionId:  20,
+		SegmentId:    2001,
+	}
+	req := &datapb.CopySegmentRequest{
+		JobID:    100,
+		TaskID:   202,
+		TaskSlot: 1,
+		Sources:  []*datapb.CopySegmentSource{source},
+		Targets:  []*datapb.CopySegmentTarget{target},
+	}
+	task := NewCopySegmentTask(
+		context.Background(),
+		req,
+		manager,
+		&struct{ storage.ChunkManager }{},
+		&struct{ storage.ChunkManager }{},
+		&indexpb.StorageConfig{BucketName: "source-bucket", RootPath: "source-root"},
+		newCopySegmentCopierMock(t, func(context.Context, string, string, string, string) error {
+			return errors.New("copy failed")
+		}),
+		"source-bucket",
+		"target-bucket",
+	)
+
+	manager.Add(task)
+
+	called := false
+	mockCopy := mockey.Mock(CopySegmentAndIndexFiles).To(
+		func(
+			_ context.Context,
+			_ storage.ChunkManager,
+			_ *indexpb.StorageConfig,
+			_ storage.CrossBucketCopier,
+			_ string,
+			_ string,
+			gotSource *datapb.CopySegmentSource,
+			gotTarget *datapb.CopySegmentTarget,
+			_ []mlog.Field,
+		) (*datapb.CopySegmentResult, []string, error) {
+			called = true
+			assert.Same(t, source, gotSource)
+			assert.Same(t, target, gotTarget)
+			return &datapb.CopySegmentResult{SegmentId: target.GetSegmentId()}, nil, nil
+		}).Build()
+	defer mockCopy.UnPatch()
+
+	_, err := task.(*CopySegmentTask).copySingleSegment(source, target)
+
+	assert.NoError(t, err)
+	assert.True(t, called)
 }
 
 func TestCopySegmentTaskExecute(t *testing.T) {
@@ -134,7 +369,8 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 			Targets: []*datapb.CopySegmentTarget{},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		mockManager.Add(task)
 
 		futures := task.Execute()
@@ -159,7 +395,8 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 			},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		mockManager.Add(task)
 
 		futures := task.Execute()
@@ -189,7 +426,8 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 			},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		mockManager.Add(task)
 
 		futures := task.Execute()
@@ -233,7 +471,8 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 			},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		mockManager.Add(task)
 
 		futures := task.Execute()
@@ -323,7 +562,8 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 			},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		mockManager.Add(task)
 
 		futures := task.Execute()
@@ -405,7 +645,8 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 			},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		mockManager.Add(task)
 
 		futures := task.Execute()
@@ -458,7 +699,8 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 			},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		mockManager.Add(task)
 
 		futures := task.Execute()
@@ -484,7 +726,8 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 			Targets: []*datapb.CopySegmentTarget{},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 
 		// Verify task is created with empty collection and partition IDs
 		copyTask := task.(*CopySegmentTask)
@@ -508,7 +751,8 @@ func TestCopySegmentTaskGetSegmentResults(t *testing.T) {
 		},
 	}
 
-	task := NewCopySegmentTask(req, mockManager, mockCM)
+	storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+	task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 	copyTask := task.(*CopySegmentTask)
 
 	t.Run("initial segment results", func(t *testing.T) {
@@ -571,7 +815,8 @@ func TestCopySegmentTaskStateManagement(t *testing.T) {
 		},
 	}
 
-	task := NewCopySegmentTask(req, mockManager, mockCM)
+	storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+	task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 	mockManager.Add(task)
 
 	t.Run("initial state", func(t *testing.T) {
@@ -646,7 +891,8 @@ func TestCopySegmentTaskWithIndexFiles(t *testing.T) {
 			},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		mockManager.Add(task)
 
 		futures := task.Execute()
@@ -704,7 +950,8 @@ func TestCopySegmentTaskWithIndexFiles(t *testing.T) {
 			},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		mockManager.Add(task)
 
 		futures := task.Execute()
@@ -759,7 +1006,8 @@ func TestCopySegmentTaskWithIndexFiles(t *testing.T) {
 			},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		mockManager.Add(task)
 
 		futures := task.Execute()
@@ -857,7 +1105,8 @@ func TestCopySegmentTaskWithIndexFiles(t *testing.T) {
 			},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		mockManager.Add(task)
 
 		futures := task.Execute()
@@ -887,6 +1136,7 @@ func TestCopySegmentTaskConcurrency(t *testing.T) {
 	t.Run("concurrent execution of multiple tasks", func(t *testing.T) {
 		// Create multiple tasks
 		tasks := make([]Task, 0, 5)
+		copier := newCopySegmentCopierMock(t, nil)
 		for i := 0; i < 5; i++ {
 			taskID := int64(600 + i)
 			mockCM := mocks.NewChunkManager(t)
@@ -919,7 +1169,8 @@ func TestCopySegmentTaskConcurrency(t *testing.T) {
 				},
 			}
 
-			task := NewCopySegmentTask(req, mockManager, mockCM)
+			storageConfig, _, bucket := copySegmentTaskTestDependencies(t, req, mockCM, copier)
+			task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 			mockManager.Add(task)
 			tasks = append(tasks, task)
 		}
@@ -985,7 +1236,8 @@ func TestCopySegmentTaskEdgeCases(t *testing.T) {
 			},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		mockManager.Add(task)
 
 		futures := task.Execute()
@@ -1013,7 +1265,8 @@ func TestCopySegmentTaskEdgeCases(t *testing.T) {
 			},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		copyTask := task.(*CopySegmentTask)
 
 		assert.Equal(t, int64(0), copyTask.GetSlots())
@@ -1034,7 +1287,8 @@ func TestCopySegmentTaskEdgeCases(t *testing.T) {
 			},
 		}
 
-		task := NewCopySegmentTask(req, mockManager, mockCM)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, mockCM)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, mockCM, mockCM, storageConfig, copier, bucket, bucket)
 		copyTask := task.(*CopySegmentTask)
 
 		// Should only have one unique partition ID
@@ -1070,7 +1324,8 @@ func TestCopySegmentTask_RecordCopiedFiles(t *testing.T) {
 	}
 
 	mockManager := NewMockTaskManager(t)
-	task := NewCopySegmentTask(req, mockManager, cm).(*CopySegmentTask)
+	storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, cm)
+	task := NewCopySegmentTask(context.Background(), req, mockManager, cm, cm, storageConfig, copier, bucket, bucket).(*CopySegmentTask)
 
 	t.Run("record files sequentially", func(t *testing.T) {
 		files1 := []string{"10001", "10002"}
@@ -1090,7 +1345,8 @@ func TestCopySegmentTask_RecordCopiedFiles(t *testing.T) {
 	})
 
 	t.Run("record empty files", func(t *testing.T) {
-		newTask := NewCopySegmentTask(req, mockManager, cm).(*CopySegmentTask)
+		storageConfig, _, bucket := copySegmentTaskTestDependencies(t, req, cm, copier)
+		newTask := NewCopySegmentTask(context.Background(), req, mockManager, cm, cm, storageConfig, copier, bucket, bucket).(*CopySegmentTask)
 		newTask.recordCopiedFiles([]string{})
 
 		newTask.copiedFilesMu.Lock()
@@ -1100,7 +1356,8 @@ func TestCopySegmentTask_RecordCopiedFiles(t *testing.T) {
 	})
 
 	t.Run("concurrent recording", func(t *testing.T) {
-		newTask := NewCopySegmentTask(req, mockManager, cm).(*CopySegmentTask)
+		storageConfig, _, bucket := copySegmentTaskTestDependencies(t, req, cm, copier)
+		newTask := NewCopySegmentTask(context.Background(), req, mockManager, cm, cm, storageConfig, copier, bucket, bucket).(*CopySegmentTask)
 		var wg sync.WaitGroup
 
 		// Simulate 10 concurrent goroutines recording files
@@ -1141,7 +1398,8 @@ func TestCopySegmentTask_CleanupCopiedFiles(t *testing.T) {
 		}
 
 		mockManager := NewMockTaskManager(t)
-		task := NewCopySegmentTask(req, mockManager, cm).(*CopySegmentTask)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, cm)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, cm, cm, storageConfig, copier, bucket, bucket).(*CopySegmentTask)
 
 		// Record some files
 		files := []string{
@@ -1179,7 +1437,8 @@ func TestCopySegmentTask_CleanupCopiedFiles(t *testing.T) {
 		}
 
 		mockManager := NewMockTaskManager(t)
-		task := NewCopySegmentTask(req, mockManager, cm).(*CopySegmentTask)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, cm)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, cm, cm, storageConfig, copier, bucket, bucket).(*CopySegmentTask)
 
 		// Don't record any files
 		// MultiRemove should NOT be called
@@ -1209,7 +1468,8 @@ func TestCopySegmentTask_CleanupCopiedFiles(t *testing.T) {
 		}
 
 		mockManager := NewMockTaskManager(t)
-		task := NewCopySegmentTask(req, mockManager, cm).(*CopySegmentTask)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, cm)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, cm, cm, storageConfig, copier, bucket, bucket).(*CopySegmentTask)
 
 		// Record some files
 		files := []string{"10001", "10002"}
@@ -1245,7 +1505,8 @@ func TestCopySegmentTask_CleanupCopiedFiles(t *testing.T) {
 		}
 
 		mockManager := NewMockTaskManager(t)
-		task := NewCopySegmentTask(req, mockManager, cm).(*CopySegmentTask)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, cm)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, cm, cm, storageConfig, copier, bucket, bucket).(*CopySegmentTask)
 
 		// Record some files
 		files := []string{"10001", "10002"}
@@ -1289,7 +1550,8 @@ func TestCopySegmentTask_CopySingleSegment_WithCleanup(t *testing.T) {
 
 		mockManager := NewMockTaskManager(t)
 		mockManager.EXPECT().Update(mock.Anything, mock.Anything).Return()
-		task := NewCopySegmentTask(req, mockManager, cm).(*CopySegmentTask)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, cm)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, cm, cm, storageConfig, copier, bucket, bucket).(*CopySegmentTask)
 
 		// Mock successful copy
 		cm.EXPECT().Copy(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
@@ -1333,7 +1595,8 @@ func TestCopySegmentTask_CopySingleSegment_WithCleanup(t *testing.T) {
 		mockManager := NewMockTaskManager(t)
 		// Update is called twice on failure: UpdateState and UpdateReason
 		mockManager.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return()
-		task := NewCopySegmentTask(req, mockManager, cm).(*CopySegmentTask)
+		storageConfig, copier, bucket := copySegmentTaskTestDependencies(t, req, cm)
+		task := NewCopySegmentTask(context.Background(), req, mockManager, cm, cm, storageConfig, copier, bucket, bucket).(*CopySegmentTask)
 
 		// First copy succeeds, second fails
 		cm.EXPECT().Copy(mock.Anything, "files/insert_log/111/222/333/1/10001", "files/insert_log/444/555/666/1/10001").Return(nil).Maybe()

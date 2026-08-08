@@ -170,6 +170,7 @@ func TestMalformedWirePerField(t *testing.T) {
 		{"IDs/member-len-overruns-buffer", cat(wtag(1, protowire.BytesType), []byte{0x05}), newIDs, decIDs},
 		{"IDs/intid-malformed", wfield(1, truncTag), newIDs, decIDs},
 		{"IDs/strid-malformed", wfield(2, truncTag), newIDs, decIDs},
+		{"IDs/uuidid-malformed", wfield(3, truncTag), newIDs, decIDs},
 
 		// --- SearchResultData: error propagation per field ---
 		{"SRD/numqueries-truncated-varint", cat(wtag(1, protowire.VarintType), truncTag), newSearchResult, decSearchResult},

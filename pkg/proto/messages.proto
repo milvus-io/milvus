@@ -639,6 +639,7 @@ message RestoreSnapshotMessageHeader {
     bool external = 6;           // True for external snapshot restore
     string snapshot_s3_location = 7; // Metadata file path for external snapshot restore
     string external_spec = 8; // Optional external storage spec for external snapshot restore
+    string snapshot_fingerprint = 9; // SHA-256 of validated external snapshot metadata
 }
 
 // RestoreSnapshotMessageBody is the body of restore snapshot message.
