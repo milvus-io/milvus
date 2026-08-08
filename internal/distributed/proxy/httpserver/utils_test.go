@@ -1855,6 +1855,106 @@ func TestBuildQueryResp(t *testing.T) {
 	assert.Equal(t, true, compareRows(rows, exceptRows, compareRow))
 }
 
+func TestBuildSearchResp(t *testing.T) {
+	t.Run("element offsets", func(t *testing.T) {
+		rows, err := buildSearchResp(&schemapb.SearchResultData{
+			Ids:            generateIDs(schemapb.DataType_Int64, 3),
+			Scores:         DefaultScores,
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 1}},
+		}, true, nil)
+		require.NoError(t, err)
+		require.Equal(t, int64(0), rows[0][HTTPReturnElementOffset])
+		require.Equal(t, int64(2), rows[1][HTTPReturnElementOffset])
+		require.Equal(t, int64(1), rows[2][HTTPReturnElementOffset])
+	})
+
+	t.Run("no element offsets", func(t *testing.T) {
+		rows, err := buildSearchResp(&schemapb.SearchResultData{
+			Ids:    generateIDs(schemapb.DataType_Int64, 1),
+			Scores: DefaultScores[:1],
+		}, true, nil)
+		require.NoError(t, err)
+		require.NotContains(t, rows[0], HTTPReturnElementOffset)
+	})
+
+	t.Run("mismatched element offsets", func(t *testing.T) {
+		_, err := buildSearchResp(&schemapb.SearchResultData{
+			Ids:            generateIDs(schemapb.DataType_Int64, 2),
+			Scores:         DefaultScores[:2],
+			ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+		}, true, nil)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.ErrorContains(t, err, "element_indices length (1) does not match row count (2)")
+	})
+
+	t.Run("empty element offsets with rows", func(t *testing.T) {
+		_, err := buildSearchResp(&schemapb.SearchResultData{
+			Ids:            generateIDs(schemapb.DataType_Int64, 1),
+			Scores:         DefaultScores[:1],
+			ElementIndices: &schemapb.LongArray{},
+		}, true, nil)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.ErrorContains(t, err, "element_indices length (0) does not match row count (1)")
+	})
+
+	t.Run("empty element offsets without rows", func(t *testing.T) {
+		rows, err := buildSearchResp(&schemapb.SearchResultData{
+			ElementIndices: &schemapb.LongArray{},
+		}, true, nil)
+		require.NoError(t, err)
+		require.Empty(t, rows)
+	})
+
+	t.Run("primary key named offset", func(t *testing.T) {
+		_, err := buildSearchResp(&schemapb.SearchResultData{
+			Ids:            generateIDs(schemapb.DataType_Int64, 1),
+			Scores:         DefaultScores[:1],
+			ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+		}, true, &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{Name: HTTPReturnElementOffset, IsPrimaryKey: true},
+		}})
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, `field "offset" conflicts with the reserved REST search element offset field`)
+	})
+
+	t.Run("output field named offset", func(t *testing.T) {
+		_, err := buildSearchResp(&schemapb.SearchResultData{
+			OutputFields: []string{HTTPReturnElementOffset},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: HTTPReturnElementOffset,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{42}}},
+					}},
+				},
+			},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+		}, true, nil)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, `field "offset" conflicts with the reserved REST search element offset field`)
+	})
+
+	t.Run("absent dynamic output field named offset", func(t *testing.T) {
+		_, err := buildSearchResp(&schemapb.SearchResultData{
+			OutputFields: []string{HTTPReturnElementOffset},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_JSON,
+					FieldName: common.MetaFieldName,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(`{}`)}}},
+					}},
+					IsDynamic: true,
+				},
+			},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+		}, true, nil)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, `field "offset" conflicts with the reserved REST search element offset field`)
+	})
+}
+
 func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
 	t.Run("nullable vector derives logical rows from ValidData", func(t *testing.T) {
 		fieldData := &schemapb.FieldData{
