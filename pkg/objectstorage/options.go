@@ -22,6 +22,10 @@ type Config struct {
 	GcpCredentialJSON    string
 	GcpNativeWithoutAuth bool // used for Unit Testing
 	ReadRetryAttempts    uint
+
+	// HDFS-specific config
+	HDFSAddress string
+	HDFSUser    string
 }
 
 func NewDefaultConfig() *Config {
@@ -126,5 +130,17 @@ func RequestTimeout(requestTimeoutMs int64) Option {
 func GcpCredentialJSON(gcpCredentialJSON string) Option {
 	return func(c *Config) {
 		c.GcpCredentialJSON = gcpCredentialJSON
+	}
+}
+
+func HDFSAddress(addr string) Option {
+	return func(c *Config) {
+		c.HDFSAddress = addr
+	}
+}
+
+func HDFSUser(user string) Option {
+	return func(c *Config) {
+		c.HDFSUser = user
 	}
 }

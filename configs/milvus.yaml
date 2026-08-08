@@ -91,6 +91,16 @@ localStorage:
   # It is recommended to change this parameter before starting Milvus for the first time.
   path: /var/lib/milvus/data/
 
+# Configuration for HDFS storage backend.
+# Set common.storageType to "hdfs" to activate this backend.
+hdfs:
+  # Address of the HDFS NameNode in host:port format.
+  address: localhost:9000
+  # HDFS user used for authentication (simple auth). Maps to HADOOP_USER_NAME.
+  user: hdfs
+  # Root path inside HDFS where Milvus will store all its data.
+  rootPath: milvus
+
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
 minio:
