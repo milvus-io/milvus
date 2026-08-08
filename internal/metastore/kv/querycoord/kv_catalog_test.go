@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -337,6 +338,118 @@ func (suite *CatalogTestSuite) TestRemoveCollectionTargets() {
 
 func (suite *CatalogTestSuite) TestLoadRelease() {
 	// TODO(sunby): add ut
+}
+
+// releaseFailKV wraps a real MetaKv and fails selected removal ops to
+// simulate a crash between the two legacy release steps.
+type releaseFailKV struct {
+	kv.MetaKv
+	removeWithPrefixErr error
+	mixedErr            error
+}
+
+func (f *releaseFailKV) RemoveWithPrefix(ctx context.Context, key string) error {
+	if f.removeWithPrefixErr != nil {
+		return f.removeWithPrefixErr
+	}
+	return f.MetaKv.RemoveWithPrefix(ctx, key)
+}
+
+func (f *releaseFailKV) MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error {
+	if f.mixedErr != nil {
+		return f.mixedErr
+	}
+	return f.MetaKv.MultiSaveAndRemoveMixed(ctx, saves, removals, prefixRemovals, preds...)
+}
+
+func (suite *CatalogTestSuite) saveCollectionWithPartitions(ctx context.Context, collection int64, partitions ...int64) {
+	err := suite.catalog.SaveCollection(ctx, &querypb.CollectionLoadInfo{
+		CollectionID: collection,
+	}, lo.Map(partitions, func(partition int64, _ int) *querypb.PartitionLoadInfo {
+		return &querypb.PartitionLoadInfo{
+			CollectionID: collection,
+			PartitionID:  partition,
+		}
+	})...)
+	suite.Require().NoError(err)
+}
+
+func (suite *CatalogTestSuite) TestReleaseCollectionRemovesAllKeys() {
+	ctx := context.Background()
+	suite.saveCollectionWithPartitions(ctx, 1, 100, 101)
+	suite.saveCollectionWithPartitions(ctx, 10, 110)
+
+	otherCollectionValue, err := suite.kv.Load(ctx, EncodeCollectionLoadInfoKey(10))
+	suite.NoError(err)
+	otherPartitionValue, err := suite.kv.Load(ctx, EncodePartitionLoadInfoKey(10, 110))
+	suite.NoError(err)
+
+	suite.NoError(suite.catalog.ReleaseCollection(ctx, 1))
+
+	_, err = suite.kv.Load(ctx, EncodeCollectionLoadInfoKey(1))
+	suite.Error(err)
+	keys, _, err := suite.kv.LoadWithPrefix(ctx, EncodePartitionLoadInfoPrefix(1))
+	suite.NoError(err)
+	suite.Empty(keys)
+
+	// collection 10 shares the "1" digit prefix and must be untouched, byte for byte
+	value, err := suite.kv.Load(ctx, EncodeCollectionLoadInfoKey(10))
+	suite.NoError(err)
+	suite.Equal(otherCollectionValue, value)
+	value, err = suite.kv.Load(ctx, EncodePartitionLoadInfoKey(10, 110))
+	suite.NoError(err)
+	suite.Equal(otherPartitionValue, value)
+}
+
+func (suite *CatalogTestSuite) TestReleaseCollectionAtomicUnderFailure() {
+	ctx := context.Background()
+	injected := errors.New("injected failure")
+
+	assertIntact := func(collection int64, partitions ...int64) {
+		_, err := suite.kv.Load(ctx, EncodeCollectionLoadInfoKey(collection))
+		suite.NoError(err)
+		keys, _, err := suite.kv.LoadWithPrefix(ctx, EncodePartitionLoadInfoPrefix(collection))
+		suite.NoError(err)
+		suite.Len(keys, len(partitions))
+	}
+
+	// prefix removal fails while exact removal would succeed: the release must
+	// not leave partitions behind without the collection load info
+	suite.saveCollectionWithPartitions(ctx, 1, 100, 101)
+	suite.catalog.cli = &releaseFailKV{MetaKv: suite.kv, removeWithPrefixErr: injected}
+	err := suite.catalog.ReleaseCollection(ctx, 1)
+	if err != nil {
+		assertIntact(1, 100, 101)
+	} else {
+		_, err = suite.kv.Load(ctx, EncodeCollectionLoadInfoKey(1))
+		suite.Error(err)
+		keys, _, err := suite.kv.LoadWithPrefix(ctx, EncodePartitionLoadInfoPrefix(1))
+		suite.NoError(err)
+		suite.Empty(keys)
+	}
+
+	// whole transaction fails: nothing may be removed
+	suite.catalog.cli = suite.kv
+	suite.saveCollectionWithPartitions(ctx, 2, 200, 201)
+	suite.catalog.cli = &releaseFailKV{MetaKv: suite.kv, removeWithPrefixErr: injected, mixedErr: injected}
+	err = suite.catalog.ReleaseCollection(ctx, 2)
+	suite.ErrorIs(err, injected)
+	assertIntact(2, 200, 201)
+}
+
+func (suite *CatalogTestSuite) TestReleaseCollectionSingleTxn() {
+	ctx := context.Background()
+	mockStore := mocks.NewMetaKv(suite.T())
+	mockStore.EXPECT().MultiSaveAndRemoveMixed(mock.Anything, mock.Anything,
+		[]string{"querycoord-collection-loadinfo/1"},
+		[]string{"querycoord-partition-loadinfo/1/"}).Return(nil).Once()
+
+	suite.catalog.cli = mockStore
+	suite.NoError(suite.catalog.ReleaseCollection(ctx, 1))
+
+	mockErr := errors.New("failed to access etcd")
+	mockStore.EXPECT().MultiSaveAndRemoveMixed(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr).Once()
+	suite.ErrorIs(suite.catalog.ReleaseCollection(ctx, 1), mockErr)
 }
 
 func TestCatalogSuite(t *testing.T) {

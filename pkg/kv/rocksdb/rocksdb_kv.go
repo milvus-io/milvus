@@ -23,13 +23,13 @@ import (
 	"github.com/samber/lo"
 	"github.com/tecbot/gorocksdb"
 
-	"github.com/milvus-io/milvus/pkg/v3/kv"
+	kvpkg "github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-var _ kv.BaseKV = (*RocksdbKV)(nil)
+var _ kvpkg.BaseKV = (*RocksdbKV)(nil)
 
 // RocksdbKV is KV implemented by rocksdb
 type RocksdbKV struct {
@@ -452,6 +452,38 @@ func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map
 	for k, v := range saves {
 		writeBatch.Put([]byte(k), []byte(v))
 	}
+	err := kv.DB.Write(kv.WriteOptions, writeBatch)
+	return err
+}
+
+// MultiSaveAndRemoveMixed saves kv in @saves, removes the exact keys in
+// @removals and removes every key under the prefixes in @prefixRemovals in a
+// single write batch.
+func (kv *RocksdbKV) MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error {
+	if len(preds) > 0 {
+		return merr.WrapErrServiceUnavailable("predicates not supported")
+	}
+	if err := kvpkg.ValidateNoSaveUnderRemovedPrefix(saves, prefixRemovals); err != nil {
+		return err
+	}
+	if kv.DB == nil {
+		return merr.WrapErrServiceInternalMsg("Rocksdb instance is nil when do MultiSaveAndRemoveMixed")
+	}
+	writeBatch := gorocksdb.NewWriteBatch()
+	defer writeBatch.Destroy()
+	// use complement to remove keys that are not in saves
+	saveKeys := typeutil.NewSet(lo.Keys(saves)...)
+	removeKeys := typeutil.NewSet(removals...)
+	removals = removeKeys.Complement(saveKeys).Collect()
+
+	for _, key := range removals {
+		writeBatch.Delete([]byte(key))
+	}
+	kv.prepareRemovePrefix(prefixRemovals, writeBatch)
+	for k, v := range saves {
+		writeBatch.Put([]byte(k), []byte(v))
+	}
+
 	err := kv.DB.Write(kv.WriteOptions, writeBatch)
 	return err
 }

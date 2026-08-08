@@ -659,6 +659,70 @@ func (_c *MockMetaKv_MultiSaveAndRemove_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// MultiSaveAndRemoveMixed provides a mock function with given fields: ctx, saves, removals, prefixRemovals, preds
+func (_m *MockMetaKv) MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error {
+	_va := make([]interface{}, len(preds))
+	for _i := range preds {
+		_va[_i] = preds[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, saves, removals, prefixRemovals)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MultiSaveAndRemoveMixed")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, map[string]string, []string, []string, ...predicates.Predicate) error); ok {
+		r0 = rf(ctx, saves, removals, prefixRemovals, preds...)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockMetaKv_MultiSaveAndRemoveMixed_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MultiSaveAndRemoveMixed'
+type MockMetaKv_MultiSaveAndRemoveMixed_Call struct {
+	*mock.Call
+}
+
+// MultiSaveAndRemoveMixed is a helper method to define mock.On call
+//   - ctx context.Context
+//   - saves map[string]string
+//   - removals []string
+//   - prefixRemovals []string
+//   - preds ...predicates.Predicate
+func (_e *MockMetaKv_Expecter) MultiSaveAndRemoveMixed(ctx interface{}, saves interface{}, removals interface{}, prefixRemovals interface{}, preds ...interface{}) *MockMetaKv_MultiSaveAndRemoveMixed_Call {
+	return &MockMetaKv_MultiSaveAndRemoveMixed_Call{Call: _e.mock.On("MultiSaveAndRemoveMixed",
+		append([]interface{}{ctx, saves, removals, prefixRemovals}, preds...)...)}
+}
+
+func (_c *MockMetaKv_MultiSaveAndRemoveMixed_Call) Run(run func(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate)) *MockMetaKv_MultiSaveAndRemoveMixed_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]predicates.Predicate, len(args)-4)
+		for i, a := range args[4:] {
+			if a != nil {
+				variadicArgs[i] = a.(predicates.Predicate)
+			}
+		}
+		run(args[0].(context.Context), args[1].(map[string]string), args[2].([]string), args[3].([]string), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMetaKv_MultiSaveAndRemoveMixed_Call) Return(_a0 error) *MockMetaKv_MultiSaveAndRemoveMixed_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMetaKv_MultiSaveAndRemoveMixed_Call) RunAndReturn(run func(context.Context, map[string]string, []string, []string, ...predicates.Predicate) error) *MockMetaKv_MultiSaveAndRemoveMixed_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // MultiSaveAndRemoveWithPrefix provides a mock function with given fields: ctx, saves, removals, preds
 func (_m *MockMetaKv) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	_va := make([]interface{}, len(preds))
