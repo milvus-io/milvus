@@ -291,23 +291,13 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	mlog.Debug(context.TODO(), "Get proxy rate limiter done")
 
 	var unaryServerOption grpc.ServerOption
+	var streamServerOption grpc.ServerOption
 	if enableCustomInterceptor {
-		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
-			proxy.DatabaseInterceptor(),
-			UnaryRequestStatsInterceptor,
-			accesslog.UnaryAccessLogInterceptor,
-			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
-			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
-			proxy.UnaryServerHookInterceptor(),
-			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
-			proxy.RateLimitInterceptor(limiter),
-			accesslog.UnaryUpdateAccessInfoInterceptor,
-			proxy.TraceLogInterceptor,
-			connection.KeepActiveInterceptor,
-		))
+		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(buildExternalProxyUnaryInterceptors(limiter)...))
+		streamServerOption = grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(buildExternalProxyStreamInterceptors()...))
 	} else {
 		unaryServerOption = grpc.EmptyServerOption{}
+		streamServerOption = grpc.EmptyServerOption{}
 	}
 
 	grpcOpts := []grpc.ServerOption{
@@ -316,6 +306,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		unaryServerOption,
+		streamServerOption,
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 		grpc.StatsHandler(metrics.NewGRPCSizeStatsHandler().
 			// both inbound and outbound
@@ -394,6 +385,31 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	mlog.Info(context.TODO(), "Proxy external grpc server exited")
 }
 
+func buildExternalProxyUnaryInterceptors(limiter types.Limiter) []grpc.UnaryServerInterceptor {
+	return []grpc.UnaryServerInterceptor{
+		streaming.ForwardLegacyProxyUnaryServerInterceptor(),
+		proxy.DatabaseInterceptor(),
+		UnaryRequestStatsInterceptor,
+		mlog.UnaryServerInterceptor(typeutil.ProxyRole),
+		interceptor.NewObservabilityServerUnaryInterceptor(),
+		accesslog.UnaryAccessLogInterceptor,
+		proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
+		proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
+		proxy.UnaryServerHookInterceptor(),
+		proxy.RateLimitInterceptor(limiter),
+		accesslog.UnaryUpdateAccessInfoInterceptor,
+		proxy.TraceLogInterceptor,
+		connection.KeepActiveInterceptor,
+	}
+}
+
+func buildExternalProxyStreamInterceptors() []grpc.StreamServerInterceptor {
+	return []grpc.StreamServerInterceptor{
+		mlog.StreamServerInterceptor(typeutil.ProxyRole),
+		interceptor.NewObservabilityServerStreamInterceptor(),
+	}
+}
+
 func (s *Server) startInternalGrpc(errChan chan error) {
 	defer s.wg.Done()
 	Params := &paramtable.Get().ProxyGrpcServerCfg
@@ -416,6 +432,7 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			otelgrpc.UnaryServerInterceptor(opts...),
 			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
+			interceptor.NewObservabilityServerUnaryInterceptor(),
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
@@ -426,6 +443,7 @@ func (s *Server) startInternalGrpc(errChan chan error) {
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			mlog.StreamServerInterceptor(typeutil.ProxyRole),
+			interceptor.NewObservabilityServerStreamInterceptor(),
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
