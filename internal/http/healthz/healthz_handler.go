@@ -114,22 +114,28 @@ func (handler *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		mlog.Info(context.TODO(), "check health failed", mlog.Strings("UnhealthyComponent", unhealthyComponent))
 	}
 
+	// for compatibility
+	isJSON := r.Header.Get(ContentTypeHeader) == ContentTypeJSON
+	if isJSON {
+		w.Header().Set(ContentTypeHeader, ContentTypeJSON)
+	} else {
+		w.Header().Set(ContentTypeHeader, ContentTypeText)
+	}
+
 	if resp.State == "OK" {
 		w.WriteHeader(http.StatusOK)
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
 	}
-	// for compatibility
-	if r.Header.Get(ContentTypeHeader) != ContentTypeJSON {
-		writeText(w, r, resp.State)
+	if !isJSON {
+		writeText(w, resp.State)
 		return
 	}
 
-	writeJSON(w, r, resp)
+	writeJSON(w, resp)
 }
 
-func writeJSON(w http.ResponseWriter, r *http.Request, resp *HealthResponse) {
-	w.Header().Set(ContentTypeHeader, ContentTypeJSON)
+func writeJSON(w http.ResponseWriter, resp *HealthResponse) {
 	bs, err := json.Marshal(resp)
 	if err != nil {
 		mlog.Warn(context.TODO(), "faild to send response", mlog.Err(err))
@@ -137,8 +143,7 @@ func writeJSON(w http.ResponseWriter, r *http.Request, resp *HealthResponse) {
 	w.Write(bs)
 }
 
-func writeText(w http.ResponseWriter, r *http.Request, reason string) {
-	w.Header().Set(ContentTypeHeader, ContentTypeText)
+func writeText(w http.ResponseWriter, reason string) {
 	_, err := fmt.Fprint(w, reason)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to send response",
