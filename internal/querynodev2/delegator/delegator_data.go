@@ -727,6 +727,17 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			log.Warn(ctx, "failed to load bloom filter set for segment", mlog.Err(err))
 			return err
 		}
+		candidatesPublished := false
+		defer func() {
+			if candidatesPublished {
+				return
+			}
+			for _, candidate := range candidates {
+				if candidate != nil {
+					candidate.Refund()
+				}
+			}
+		}()
 
 		// Load BM25 stats BEFORE loadStreamDelete so stats are ready before segment becomes visible
 		err = sd.loadBM25Stats(ctx, infos, req)
@@ -767,6 +778,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 			// automatically by SyncDistribution when the segment is not in target.
 			return err
 		}
+		candidatesPublished = true
 		log.Debug(ctx, "load stream delete done")
 
 		return nil
