@@ -12,6 +12,7 @@ pk_field_name = "id"
 vector_field_name = "vector"
 dim = ct.default_dim
 default_nb = ct.default_nb
+index_build_timeout = 600
 default_build_params = {"M": 16, "efConstruction": 200, "m": 64, "nbits": 8}
 default_search_params = {"ef": 64, "refine_k": 1}
 
@@ -50,7 +51,7 @@ class TestHnswPQBuildParams(TestMilvusClientV2Base):
                 client, collection_name, index_params, check_task=CheckTasks.err_res, check_items=params.get("expected")
             )
         else:
-            self.create_index(client, collection_name, index_params)
+            self.create_index(client, collection_name, index_params, timeout=index_build_timeout)
             self.wait_for_index_ready(client, collection_name, index_name=vector_field_name)
 
             # load collection
