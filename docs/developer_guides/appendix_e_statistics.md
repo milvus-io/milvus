@@ -1,1 +1,0 @@
-## Appendix E. Statistics

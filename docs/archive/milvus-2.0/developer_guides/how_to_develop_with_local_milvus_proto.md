@@ -110,4 +110,3 @@ type SyncSegmentsRequest struct {
 ```
 
 Feel free to debug and POC your new API locally!
-

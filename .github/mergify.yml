@@ -7,68 +7,88 @@
 # GLOBAL CONFIGURATIONS AND ALIASES
 # Define reusable conditions and patterns for better maintainability
 # ==============================================================================
-misc:
+shared:
   # File pattern matchers
-  - &source_code_files files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
-  - &no_source_code_files -files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
-  - &only_go_unittest_files -files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
-  - &morethan_go_unittest_files files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
+  source_code_files: &source_code_files files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+  no_source_code_files: &no_source_code_files -files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+  only_go_unittest_files: &only_go_unittest_files -files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
+  morethan_go_unittest_files: &morethan_go_unittest_files files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
+  design_doc_area: &design_doc_area 'files~=^docs/design-docs/design_docs/'
+  governance_area: &governance_area 'files~=^(OWNERS_ALIASES|\.github/mergify\.yml|\.github/workflows/design-doc-policy\.yml|\.github/scripts/(check_design_doc_policy|test_check_design_doc_policy)\.py)$'
+  design_doc_file: &design_doc_file 'files~=^docs/design-docs/design_docs/.+\.md$'
+  added_design_doc: &added_design_doc 'added-files~=^docs/design-docs/design_docs/.+\.md$'
+  modified_design_doc: &modified_design_doc 'modified-files~=^docs/design-docs/design_docs/.+\.md$'
+  design_doc_body: &design_doc_body 'body~=(^|\s)docs/design-docs/design_docs/[^\r\n]+\.md(\s|$)'
+  no_design_doc_body: &no_design_doc_body '-body~=(^|\s)docs/design-docs/design_docs/[^\r\n]+\.md(\s|$)'
+
+  # Keep these approval anchors synchronized with OWNERS_ALIASES. The merge
+  # protection rules below intentionally enumerate the maintainers because
+  # Mergify cannot count the intersection of a team and approved-reviews-by.
+  approved_by_congqixia: &approved_by_congqixia 'approved-reviews-by = congqixia'
+  approved_by_czs007: &approved_by_czs007 'approved-reviews-by = czs007'
+  approved_by_xiaofan_luan: &approved_by_xiaofan_luan 'approved-reviews-by = xiaofan-luan'
+  approved_by_yanliang567: &approved_by_yanliang567 'approved-reviews-by = yanliang567'
+  approved_by_tedxu: &approved_by_tedxu 'approved-reviews-by = tedxu'
+  approved_by_liliu_z: &approved_by_liliu_z 'approved-reviews-by = liliu-z'
+  approved_by_zhengbuqian: &approved_by_zhengbuqian 'approved-reviews-by = zhengbuqian'
+  approved_by_chyezh: &approved_by_chyezh 'approved-reviews-by = chyezh'
+  approved_by_weiliu1031: &approved_by_weiliu1031 'approved-reviews-by = weiliu1031'
   
   # Build and test status conditions
-  - when_build_and_test_status_successs: &Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
+  when_build_and_test_status_successs: &Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=Build and test AMD64 Ubuntu 22.04'
-  - when_build_and_test_status_failed: &Build_AND_TEST_STATUS_FAILED_ON_UBUNTU_20_OR_UBUNTU_22
+  when_build_and_test_status_failed: &Build_AND_TEST_STATUS_FAILED_ON_UBUNTU_20_OR_UBUNTU_22
       - &failed_on_ubuntu_20 'check-failure=Build and test AMD64 Ubuntu 20.04'
       - &failed_on_ubuntu_22 'check-failure=Build and test AMD64 Ubuntu 22.04'
-  - when_go_sdk_status_success: &WHEN_GO_SDK_STATUS_SUCCESS
+  when_go_sdk_status_success: &WHEN_GO_SDK_STATUS_SUCCESS
       - 'status-success=go-sdk'
       - 'status-success=milvus-sdk-go'
       - 'status-success=ci-v2/go-sdk'
-  - when_cpp_unit_test_success: &WHEN_CPP_UNIT_TEST_SUCCESS
+  when_cpp_unit_test_success: &WHEN_CPP_UNIT_TEST_SUCCESS
       - 'status-success=cpp-unit-test'
       - 'status-success=UT for Cpp'
       - 'status-success=ci-v2/ut-cpp'
-  - when_go_unit_test_success: &WHEN_GO_UNIT_TEST_SUCCESS
+  when_go_unit_test_success: &WHEN_GO_UNIT_TEST_SUCCESS
       - 'status-success=go-unit-test'
       - 'status-success=UT for Go'
       - 'status-success=ci-v2/ut-go'
-  - when_integration_unit_test_success: &WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+  when_integration_unit_test_success: &WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - 'status-success=integration-test'
       - 'status-success=Integration Test'
       - 'status-success=ci-v2/integration-test'
-  - when_e2e_test_success: &WHEN_E2E_TEST_SUCCESS
+  when_e2e_test_success: &WHEN_E2E_TEST_SUCCESS
       - 'status-success=cpu-e2e'
       - 'status-success=ci-v2/e2e-default'
-  - when_build_success: &WHEN_BUILD_SUCCESS
+  when_build_success: &WHEN_BUILD_SUCCESS
       - 'status-success=Build and test AMD64 Ubuntu 22.04'
       - 'status-success=ci-v2/build'
-  - when_code_check_ubuntu_success: &WHEN_CODE_CHECK_UBUNTU_SUCCESS
+  when_code_check_ubuntu_success: &WHEN_CODE_CHECK_UBUNTU_SUCCESS
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - 'status-success=ci-v2/code-check'
 
   # CI-v2 checker conditions (3.0 branch)
-  - when_build_ut_cov_success: &WHEN_BUILD_UT_COV_SUCCESS
+  when_build_ut_cov_success: &WHEN_BUILD_UT_COV_SUCCESS
       - 'status-success=ci-v2/build-ut-cov'
-  - when_e2e_amd_success: &WHEN_E2E_AMD_SUCCESS
+  when_e2e_amd_success: &WHEN_E2E_AMD_SUCCESS
       - 'status-success=ci-v2/e2e-amd'
-  - when_master_legacy_build_ut_cov_success: &WHEN_MASTER_LEGACY_BUILD_UT_COV_SUCCESS
+  when_master_legacy_build_ut_cov_success: &WHEN_MASTER_LEGACY_BUILD_UT_COV_SUCCESS
       and:
         - or: *WHEN_BUILD_SUCCESS
         - or: *WHEN_CPP_UNIT_TEST_SUCCESS
         - or: *WHEN_GO_UNIT_TEST_SUCCESS
         - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
         - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
-  - when_master_go_unit_legacy_build_ut_cov_success: &WHEN_MASTER_GO_UNIT_LEGACY_BUILD_UT_COV_SUCCESS
+  when_master_go_unit_legacy_build_ut_cov_success: &WHEN_MASTER_GO_UNIT_LEGACY_BUILD_UT_COV_SUCCESS
       and:
         - or: *WHEN_BUILD_SUCCESS
         - or: *WHEN_GO_UNIT_TEST_SUCCESS
         - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
-  - when_master_build_ut_cov_gate_success: &WHEN_MASTER_BUILD_UT_COV_GATE_SUCCESS
+  when_master_build_ut_cov_gate_success: &WHEN_MASTER_BUILD_UT_COV_GATE_SUCCESS
       status-success=ci-v2/build-ut-cov
-  - when_master_go_unit_build_ut_cov_gate_success: &WHEN_MASTER_GO_UNIT_BUILD_UT_COV_GATE_SUCCESS
+  when_master_go_unit_build_ut_cov_gate_success: &WHEN_MASTER_GO_UNIT_BUILD_UT_COV_GATE_SUCCESS
       status-success=ci-v2/build-ut-cov
-  - when_master_legacy_build_ut_cov_failure: &WHEN_MASTER_LEGACY_BUILD_UT_COV_FAILURE
+  when_master_legacy_build_ut_cov_failure: &WHEN_MASTER_LEGACY_BUILD_UT_COV_FAILURE
       or:
         - and:
             - not:
@@ -111,7 +131,7 @@ misc:
             - or:
                 - 'status-failure=Code Checker AMD64 Ubuntu 22.04'
                 - 'status-failure=ci-v2/code-check'
-  - when_master_go_unit_legacy_build_ut_cov_failure: &WHEN_MASTER_GO_UNIT_LEGACY_BUILD_UT_COV_FAILURE
+  when_master_go_unit_legacy_build_ut_cov_failure: &WHEN_MASTER_GO_UNIT_LEGACY_BUILD_UT_COV_FAILURE
       or:
         - and:
             - not:
@@ -137,20 +157,217 @@ misc:
             - or:
                 - 'status-failure=Code Checker AMD64 Ubuntu 22.04'
                 - 'status-failure=ci-v2/code-check'
-  - when_master_build_ut_cov_gate_failure: &WHEN_MASTER_BUILD_UT_COV_GATE_FAILURE
+  when_master_build_ut_cov_gate_failure: &WHEN_MASTER_BUILD_UT_COV_GATE_FAILURE
       and:
         - -status-success=ci-v2/build-ut-cov
         - status-failure=ci-v2/build-ut-cov
-  - when_master_go_unit_build_ut_cov_gate_failure: &WHEN_MASTER_GO_UNIT_BUILD_UT_COV_GATE_FAILURE
+  when_master_go_unit_build_ut_cov_gate_failure: &WHEN_MASTER_GO_UNIT_BUILD_UT_COV_GATE_FAILURE
       and:
         - -status-success=ci-v2/build-ut-cov
         - status-failure=ci-v2/build-ut-cov
 
   # Branch configurations
-  - branch: &BRANCHES
+  branch: &BRANCHES
       - &MASTER_BRANCH base=master
       - &2X_BRANCH base~=^2(\.\d+){1,2}$
       - &3X_BRANCH base=3.0
+
+# ==============================================================================
+# MERGE PROTECTIONS
+# These rules become a hard gate when the `Mergify Merge Protections` check is
+# enabled in Mergify and required by the GitHub branch protection/ruleset.
+# ==============================================================================
+
+merge_protections_settings:
+  reporting_method: check-runs
+  post_comment: false
+
+merge_protections:
+  - name: Review / non-author Approver
+    description: Every pull request needs a current GitHub approval from a Milvus Approver other than its author.
+    if: true
+    success_conditions:
+      - or:
+          - *approved_by_congqixia
+          - *approved_by_czs007
+          - *approved_by_xiaofan_luan
+          - *approved_by_yanliang567
+          - *approved_by_tedxu
+          - *approved_by_liliu_z
+          - *approved_by_zhengbuqian
+          - *approved_by_chyezh
+          - *approved_by_weiliu1031
+      - '-approved-reviews-by = {{ author }}'
+
+  - name: Review / formal Design Doc
+    description: A pull request touching the formal Design Doc area needs two distinct non-author Milvus Approvers.
+    if:
+      - *design_doc_area
+    success_conditions: &TWO_APPROVER_SUCCESS_CONDITIONS
+      - or:
+          - and:
+              - *approved_by_congqixia
+              - *approved_by_czs007
+          - and:
+              - *approved_by_congqixia
+              - *approved_by_xiaofan_luan
+          - and:
+              - *approved_by_congqixia
+              - *approved_by_yanliang567
+          - and:
+              - *approved_by_congqixia
+              - *approved_by_tedxu
+          - and:
+              - *approved_by_congqixia
+              - *approved_by_liliu_z
+          - and:
+              - *approved_by_congqixia
+              - *approved_by_zhengbuqian
+          - and:
+              - *approved_by_congqixia
+              - *approved_by_chyezh
+          - and:
+              - *approved_by_congqixia
+              - *approved_by_weiliu1031
+          - and:
+              - *approved_by_czs007
+              - *approved_by_xiaofan_luan
+          - and:
+              - *approved_by_czs007
+              - *approved_by_yanliang567
+          - and:
+              - *approved_by_czs007
+              - *approved_by_tedxu
+          - and:
+              - *approved_by_czs007
+              - *approved_by_liliu_z
+          - and:
+              - *approved_by_czs007
+              - *approved_by_zhengbuqian
+          - and:
+              - *approved_by_czs007
+              - *approved_by_chyezh
+          - and:
+              - *approved_by_czs007
+              - *approved_by_weiliu1031
+          - and:
+              - *approved_by_xiaofan_luan
+              - *approved_by_yanliang567
+          - and:
+              - *approved_by_xiaofan_luan
+              - *approved_by_tedxu
+          - and:
+              - *approved_by_xiaofan_luan
+              - *approved_by_liliu_z
+          - and:
+              - *approved_by_xiaofan_luan
+              - *approved_by_zhengbuqian
+          - and:
+              - *approved_by_xiaofan_luan
+              - *approved_by_chyezh
+          - and:
+              - *approved_by_xiaofan_luan
+              - *approved_by_weiliu1031
+          - and:
+              - *approved_by_yanliang567
+              - *approved_by_tedxu
+          - and:
+              - *approved_by_yanliang567
+              - *approved_by_liliu_z
+          - and:
+              - *approved_by_yanliang567
+              - *approved_by_zhengbuqian
+          - and:
+              - *approved_by_yanliang567
+              - *approved_by_chyezh
+          - and:
+              - *approved_by_yanliang567
+              - *approved_by_weiliu1031
+          - and:
+              - *approved_by_tedxu
+              - *approved_by_liliu_z
+          - and:
+              - *approved_by_tedxu
+              - *approved_by_zhengbuqian
+          - and:
+              - *approved_by_tedxu
+              - *approved_by_chyezh
+          - and:
+              - *approved_by_tedxu
+              - *approved_by_weiliu1031
+          - and:
+              - *approved_by_liliu_z
+              - *approved_by_zhengbuqian
+          - and:
+              - *approved_by_liliu_z
+              - *approved_by_chyezh
+          - and:
+              - *approved_by_liliu_z
+              - *approved_by_weiliu1031
+          - and:
+              - *approved_by_zhengbuqian
+              - *approved_by_chyezh
+          - and:
+              - *approved_by_zhengbuqian
+              - *approved_by_weiliu1031
+          - and:
+              - *approved_by_chyezh
+              - *approved_by_weiliu1031
+      - '-approved-reviews-by = {{ author }}'
+
+  - name: Review / governance enforcement
+    description: Changes to repository governance enforcement need two distinct non-author Milvus Approvers.
+    if:
+      - *governance_area
+    success_conditions: *TWO_APPROVER_SUCCESS_CONDITIONS
+
+  - name: Docs / repository governance policy
+    description: Governance enforcement changes must preserve the trusted Approver matrix and policy check.
+    if:
+      - *governance_area
+    success_conditions:
+      - 'check-success = @github-actions/Design Doc Policy'
+      - '-check-failure = @github-actions/Design Doc Policy'
+      - '-check-neutral = @github-actions/Design Doc Policy'
+      - '-check-skipped = @github-actions/Design Doc Policy'
+      - '-check-cancelled = @github-actions/Design Doc Policy'
+      - '-check-timed-out = @github-actions/Design Doc Policy'
+      - '-check-pending = @github-actions/Design Doc Policy'
+      - '-check-stale = @github-actions/Design Doc Policy'
+
+  - name: Docs / formal Design Doc policy
+    description: Changes under the formal Design Doc area must run the trusted policy check so header findings are reported.
+    if:
+      - *design_doc_area
+    success_conditions:
+      - 'check-success = @github-actions/Design Doc Policy'
+      - '-check-failure = @github-actions/Design Doc Policy'
+      - '-check-neutral = @github-actions/Design Doc Policy'
+      - '-check-skipped = @github-actions/Design Doc Policy'
+      - '-check-cancelled = @github-actions/Design Doc Policy'
+      - '-check-timed-out = @github-actions/Design Doc Policy'
+      - '-check-pending = @github-actions/Design Doc Policy'
+      - '-check-stale = @github-actions/Design Doc Policy'
+
+  - name: Docs / feature Design Doc policy
+    description: Feature pull requests must add, update, or link an existing formal in-repo Design Doc.
+    if:
+      - or:
+          - 'title~=^feat:'
+          - label=kind/feature
+    success_conditions:
+      - or:
+          - *added_design_doc
+          - *modified_design_doc
+          - *design_doc_body
+      - 'check-success = @github-actions/Design Doc Policy'
+      - '-check-failure = @github-actions/Design Doc Policy'
+      - '-check-neutral = @github-actions/Design Doc Policy'
+      - '-check-skipped = @github-actions/Design Doc Policy'
+      - '-check-cancelled = @github-actions/Design Doc Policy'
+      - '-check-timed-out = @github-actions/Design Doc Policy'
+      - '-check-pending = @github-actions/Design Doc Policy'
+      - '-check-stale = @github-actions/Design Doc Policy'
 
 # ==============================================================================
 # PULL REQUEST RULES
@@ -639,7 +856,6 @@ pull_request_rules:
         remove:
           - do-not-merge/missing-related-issue
           - do-not-merge/missing-related-pr
-          - do-not-merge/missing-design-doc
 
   - name: Blocking PR if feat PR missing design doc
     conditions:
@@ -647,10 +863,12 @@ pull_request_rules:
       - or:
           - 'title~=^feat:'
           - label=kind/feature
-      - -title~=\[automated\]
       # PR body does not reference an in-repo design doc, and the PR does not add one
-      - '-body~=(^|\s)docs/design-docs/design_docs/[^\s]+\.md'
-      - -files~=^docs/design-docs/design_docs/.*\.md$
+      - *no_design_doc_body
+      - not:
+          or:
+            - *added_design_doc
+            - *modified_design_doc
     actions:
       label:
         add:
@@ -662,7 +880,7 @@ pull_request_rules:
           **How to resolve:**
           Add a design document under `docs/design-docs/design_docs/` in this PR, or link an existing in-repo design document in the PR description:
           ```
-          design doc: docs/design-docs/design_docs/YYYYMMDD-your_design.md
+          design doc: docs/design-docs/design_docs/path/to/design.md
           ```
 
   - name: Dismiss block label if design doc is provided
@@ -670,8 +888,9 @@ pull_request_rules:
       - or: *BRANCHES
       - label=do-not-merge/missing-design-doc
       - or:
-          - 'body~=(^|\s)docs/design-docs/design_docs/[^\s]+\.md'
-          - files~=^docs/design-docs/design_docs/.*\.md$
+          - *design_doc_body
+          - *added_design_doc
+          - *modified_design_doc
     actions:
       label:
         remove:

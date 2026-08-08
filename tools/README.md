@@ -293,4 +293,6 @@ Ensure you're in the Milvus repository root, or skip formatting step
 
 ### Contributing
 
-For improvements to `mgit.py`, refer to the design document: `docs/plans/2026-01-10-mgit-design.md`
+For improvements to `mgit.py`, follow the repository contribution rules. A
+change that introduces feature-level behavior must add or link a formal Design
+Doc as described in [`docs/design-docs/README.md`](../docs/design-docs/README.md).

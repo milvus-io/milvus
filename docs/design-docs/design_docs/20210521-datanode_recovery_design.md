@@ -143,8 +143,6 @@ WatchDmChannels -> new dataSyncService -> HEALTH
 2. If vchannel name of `VchannelPair` is not in `DataNode.vchan2Sync`, create a new dataSyncService.
 3. If vchannel name of `VchannelPair` is in `DataNode.vchan2Sync`, ignore.
 
-```
-
 #### The boring design
 
 • If collection:flowgraph = 1 : 1, datanode must have the ability to scale flowgraph.

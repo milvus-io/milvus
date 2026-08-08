@@ -63,16 +63,16 @@ To learn how to choose an appropriate index for a metric, see [Similarity Metric
 
 Different index types use different index params in construction and query. All index params are represented by the structure of the map. This doc shows the map code in python.
 
-[IVF_FLAT](#IVF_FLAT)
-[BIN_IVF_FLAT](#BIN_IVF_FLAT)
-[IVF_PQ](#IVF_PQ)
-[IVF_SQ8](#IVF_SQ8)
-[IVF_SQ8_HYBRID](#IVF_SQ8_HYBRID)
-[ANNOY](#ANNOY)
-[HNSW](#HNSW)
-[RHNSW_PQ](#RHNSW_PQ)
-[RHNSW_SQ](#RHNSW_SQ)
-[NSG](#NSG)
+[IVF_FLAT](#ivf_flat)
+[BIN_IVF_FLAT](#bin_ivf_flat)
+[IVF_PQ](#ivf_pq)
+[IVF_SQ8](#ivf_sq8)
+[IVF_SQ8_HYBRID](#ivf_sq8_hybrid)
+[ANNOY](#annoy)
+[HNSW](#hnsw)
+[RHNSW_PQ](#rhnsw_pq)
+[RHNSW_SQ](#rhnsw_sq)
+[NSG](#nsg)
 
 ## IVF_FLAT
 

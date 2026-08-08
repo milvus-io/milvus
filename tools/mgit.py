@@ -87,9 +87,21 @@ def print_header(msg: str):
     print(f"\n{Colors.BOLD}{msg}{Colors.RESET}")
 
 
+DESIGN_DOC_REF_PREFIX = "docs/design-docs/design_docs/"
+
+
 def is_valid_design_doc_ref(design_doc_ref: str) -> bool:
     normalized_ref = design_doc_ref.replace("\\", "/")
-    return re.fullmatch(r"docs/design-docs/design_docs/\S+\.md", normalized_ref) is not None
+    if not normalized_ref.startswith(DESIGN_DOC_REF_PREFIX) or not normalized_ref.endswith(
+        ".md"
+    ):
+        return False
+
+    relative_path = normalized_ref[len(DESIGN_DOC_REF_PREFIX) :]
+    return bool(relative_path) and all(
+        part not in {"", ".", ".."} and not any(char in part for char in "\r\n\t")
+        for part in relative_path.split("/")
+    )
 
 
 # ============================================================================
@@ -2837,7 +2849,10 @@ def workflow_pr():
             "Feature PRs require a design document under docs/design-docs/design_docs/"
         )
         print_info("The design document can be included in the same PR as the implementation.")
-        print_info("Example: docs/design-docs/design_docs/YYYYMMDD-short-descriptive-name.md")
+        print_info(
+            "Recommended for new docs: "
+            "docs/design-docs/design_docs/YYYYMMDD-short-descriptive-name.md"
+        )
 
         # Get diff for validation
         upstream_master = GitOperations.get_upstream_master()
@@ -2864,7 +2879,8 @@ def workflow_pr():
 
             if not is_valid_design_doc_ref(design_doc_url):
                 print_error(
-                    "Design doc must be a markdown file under docs/design-docs/design_docs/"
+                    "Design doc must be a Markdown file under "
+                    "docs/design-docs/design_docs/"
                 )
                 continue
 
