@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -68,12 +69,41 @@ type shardClientMgrImpl struct {
 	// leaders under another's name after an alias repoint or a cross-db rename. Eviction is by
 	// collection id only -- the cache deliberately does not depend on the mutable
 	// collection->database mapping. See issue #51533.
-	collLeader map[int64]*shardLeaders // collectionID -> collection_leaders
+	collLeader   map[int64]*shardLeaders // collectionID -> collection_leaders
+	sfShardCache conc.Singleflight[*shardLeaders]
+	refreshSeq   uint64
+	refreshes    map[shardCacheRefreshKey]*shardCacheRefreshToken
+	// refreshWriteSeq fences cache publication across normal and forced refresh flights.
+	refreshWriteSeq map[int64]uint64
+
+	shardCacheRefreshTimeout time.Duration
+	shardCacheTTL            time.Duration
+
+	testHookAfterShardCacheDoChan       func()
+	testHookListShardLocationReadLocked func()
+	testHookBeforeShardLocationDelete   func()
 }
+
+type (
+	shardCacheRefreshKey struct {
+		collectionID int64
+		force        bool
+	}
+	shardCacheRefreshToken struct {
+		id uint64
+	}
+	shardCacheEntryRef struct {
+		collectionID int64
+		leaders      *shardLeaders
+	}
+)
 
 const (
 	defaultPurgeInterval   = 600 * time.Second
 	defaultExpiredDuration = 60 * time.Minute
+
+	defaultShardCacheRefreshTimeout = 10 * time.Second
+	defaultShardCacheTTL            = defaultPurgeInterval
 )
 
 // SessionOpt provides a way to set params in ShardClientMgr
@@ -96,8 +126,13 @@ func NewShardClientMgr(mixCoord types.MixCoordClient, options ...shardClientMgrO
 		purgeInterval:   defaultPurgeInterval,
 		expiredDuration: defaultExpiredDuration,
 
-		collLeader: make(map[int64]*shardLeaders),
-		mixCoord:   mixCoord,
+		collLeader:      make(map[int64]*shardLeaders),
+		refreshes:       make(map[shardCacheRefreshKey]*shardCacheRefreshToken),
+		refreshWriteSeq: make(map[int64]uint64),
+		mixCoord:        mixCoord,
+
+		shardCacheRefreshTimeout: defaultShardCacheRefreshTimeout,
+		shardCacheTTL:            defaultShardCacheTTL,
 	}
 	for _, opt := range options {
 		opt(s)
@@ -111,41 +146,31 @@ func (c *shardClientMgrImpl) SetClientCreatorFunc(creator queryNodeCreatorFunc) 
 }
 
 func (m *shardClientMgrImpl) GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]NodeInfo, error) {
-	method := "GetShard"
-	// check cache first
-	cacheShardLeaders := m.getCachedShardLeaders(collectionID, method)
-	if cacheShardLeaders == nil || !withCache {
-		// refresh shard leader cache
-		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
-		if err != nil {
-			return nil, err
-		}
-		cacheShardLeaders = newShardLeaders
+	shardLeaders, err := m.getShardLeaders(ctx, withCache, database, collectionName, collectionID, "GetShard")
+	if err != nil {
+		return nil, err
 	}
 
-	return cacheShardLeaders.Get(channel), nil
+	return shardLeaders.Get(channel), nil
 }
 
 func (m *shardClientMgrImpl) GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error) {
-	method := "GetShardLeaderList"
-	// check cache first
-	cacheShardLeaders := m.getCachedShardLeaders(collectionID, method)
-	if cacheShardLeaders == nil || !withCache {
-		// refresh shard leader cache
-		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
-		if err != nil {
-			return nil, err
-		}
-		cacheShardLeaders = newShardLeaders
+	shardLeaders, err := m.getShardLeaders(ctx, withCache, database, collectionName, collectionID, "GetShardLeaderList")
+	if err != nil {
+		return nil, err
 	}
 
-	return cacheShardLeaders.GetShardLeaderList(), nil
+	return shardLeaders.GetShardLeaderList(), nil
+}
+
+func (m *shardClientMgrImpl) loadCachedShardLeaders(collectionID int64) *shardLeaders {
+	m.leaderMut.RLock()
+	defer m.leaderMut.RUnlock()
+	return m.collLeader[collectionID]
 }
 
 func (m *shardClientMgrImpl) getCachedShardLeaders(collectionID int64, caller string) *shardLeaders {
-	m.leaderMut.RLock()
-	cacheShardLeaders := m.collLeader[collectionID]
-	m.leaderMut.RUnlock()
+	cacheShardLeaders := m.loadCachedShardLeaders(collectionID)
 
 	if cacheShardLeaders != nil {
 		metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), caller, metrics.CacheHitLabel).Inc()
@@ -156,7 +181,96 @@ func (m *shardClientMgrImpl) getCachedShardLeaders(collectionID int64, caller st
 	return cacheShardLeaders
 }
 
-func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, database, collectionName string, collectionID int64) (*shardLeaders, error) {
+func (m *shardClientMgrImpl) acquireShardCacheRefresh(key shardCacheRefreshKey) *shardCacheRefreshToken {
+	m.leaderMut.Lock()
+	defer m.leaderMut.Unlock()
+
+	if refresh := m.refreshes[key]; refresh != nil {
+		return refresh
+	}
+	if m.refreshes == nil {
+		m.refreshes = make(map[shardCacheRefreshKey]*shardCacheRefreshToken)
+	}
+	if m.refreshWriteSeq == nil {
+		m.refreshWriteSeq = make(map[int64]uint64)
+	}
+	m.refreshSeq++
+	refresh := &shardCacheRefreshToken{id: m.refreshSeq}
+	m.refreshes[key] = refresh
+	m.refreshWriteSeq[key.collectionID] = refresh.id
+	return refresh
+}
+
+func (m *shardClientMgrImpl) finishShardCacheRefresh(key shardCacheRefreshKey, refresh *shardCacheRefreshToken) {
+	m.leaderMut.Lock()
+	defer m.leaderMut.Unlock()
+	if m.refreshes[key] == refresh {
+		delete(m.refreshes, key)
+	}
+	if m.refreshWriteSeq[key.collectionID] == refresh.id {
+		delete(m.refreshWriteSeq, key.collectionID)
+	}
+}
+
+func (m *shardClientMgrImpl) getShardLeaders(
+	ctx context.Context,
+	withCache bool,
+	database string,
+	collectionName string,
+	collectionID int64,
+	caller string,
+) (*shardLeaders, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	cacheShardLeaders := m.getCachedShardLeaders(collectionID, caller)
+	if cacheShardLeaders != nil && withCache {
+		cacheShardLeaders.touch(time.Now())
+		return cacheShardLeaders, nil
+	}
+
+	refreshKey := shardCacheRefreshKey{collectionID: collectionID, force: !withCache}
+	refresh := m.acquireShardCacheRefresh(refreshKey)
+	singleflightKey := fmt.Sprintf("%d/%t/%d", collectionID, refreshKey.force, refresh.id)
+	resultCh := m.sfShardCache.DoChanRaw(singleflightKey, func() (*shardLeaders, error) {
+		defer m.finishShardCacheRefresh(refreshKey, refresh)
+		if withCache {
+			if cached := m.loadCachedShardLeaders(collectionID); cached != nil {
+				cached.touch(time.Now())
+				return cached, nil
+			}
+		}
+
+		refreshTimeout := m.shardCacheRefreshTimeout
+		if refreshTimeout <= 0 {
+			refreshTimeout = defaultShardCacheRefreshTimeout
+		}
+		refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refreshTimeout)
+		defer cancel()
+		return m.updateShardLocationCache(refreshCtx, database, collectionName, collectionID, refreshKey, refresh)
+	})
+	if m.testHookAfterShardCacheDoChan != nil {
+		m.testHookAfterShardCacheDoChan()
+	}
+
+	select {
+	case result := <-resultCh:
+		leaders, err, _ := conc.UnwrapSingleflightRawResult[*shardLeaders](result)
+		return leaders, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (m *shardClientMgrImpl) updateShardLocationCache(
+	ctx context.Context,
+	database string,
+	collectionName string,
+	collectionID int64,
+	refreshKey shardCacheRefreshKey,
+	refresh *shardCacheRefreshToken,
+) (*shardLeaders, error) {
 	log := mlog.With(
 		mlog.String("db", database),
 		mlog.FieldCollectionName(collectionName),
@@ -203,12 +317,25 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 		shardLeaders: shards,
 		idx:          atomic.NewInt64(0),
 	}
+	newShardLeaders.touch(time.Now())
 
-	m.leaderMut.Lock()
-	m.collLeader[collectionID] = newShardLeaders
-	m.leaderMut.Unlock()
+	m.cacheShardLeaders(collectionID, refreshKey, refresh, newShardLeaders)
 
 	return newShardLeaders, nil
+}
+
+func (m *shardClientMgrImpl) cacheShardLeaders(
+	collectionID int64,
+	refreshKey shardCacheRefreshKey,
+	refresh *shardCacheRefreshToken,
+	leaders *shardLeaders,
+) {
+	m.leaderMut.Lock()
+	defer m.leaderMut.Unlock()
+	if m.refreshes[refreshKey] != refresh || m.refreshWriteSeq[collectionID] != refresh.id {
+		return
+	}
+	m.collLeader[collectionID] = leaders
 }
 
 func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) map[string][]NodeInfo {
@@ -229,12 +356,50 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 
 // used for Garbage collection shard client
 func (m *shardClientMgrImpl) ListShardLocation() map[int64]NodeInfo {
-	m.leaderMut.RLock()
-	defer m.leaderMut.RUnlock()
 	shardLeaderInfo := make(map[int64]NodeInfo)
+	ttl := m.shardCacheTTL
+	if ttl <= 0 {
+		ttl = defaultShardCacheTTL
+	}
+	cutoff := time.Now().Add(-ttl)
+	expired := make([]shardCacheEntryRef, 0)
 
-	for _, shardLeaders := range m.collLeader {
-		for _, nodeInfos := range shardLeaders.shardLeaders {
+	m.leaderMut.RLock()
+	if m.testHookListShardLocationReadLocked != nil {
+		m.testHookListShardLocationReadLocked()
+	}
+	for collectionID, leaders := range m.collLeader {
+		if leaders.idleBefore(cutoff) {
+			expired = append(expired, shardCacheEntryRef{collectionID: collectionID, leaders: leaders})
+			continue
+		}
+		for _, nodeInfos := range leaders.shardLeaders {
+			for _, node := range nodeInfos {
+				shardLeaderInfo[node.NodeID] = node
+			}
+		}
+	}
+	m.leaderMut.RUnlock()
+
+	if len(expired) == 0 {
+		return shardLeaderInfo
+	}
+	if m.testHookBeforeShardLocationDelete != nil {
+		m.testHookBeforeShardLocationDelete()
+	}
+
+	m.leaderMut.Lock()
+	defer m.leaderMut.Unlock()
+	for _, candidate := range expired {
+		leaders := m.collLeader[candidate.collectionID]
+		if leaders == nil {
+			continue
+		}
+		if leaders == candidate.leaders && leaders.idleBefore(cutoff) {
+			delete(m.collLeader, candidate.collectionID)
+			continue
+		}
+		for _, nodeInfos := range leaders.shardLeaders {
 			for _, node := range nodeInfos {
 				shardLeaderInfo[node.NodeID] = node
 			}
@@ -261,6 +426,9 @@ func (m *shardClientMgrImpl) InvalidateShardLeaderCache(collections []int64) {
 	defer m.leaderMut.Unlock()
 	for _, collectionID := range collections {
 		delete(m.collLeader, collectionID)
+		delete(m.refreshes, shardCacheRefreshKey{collectionID: collectionID})
+		delete(m.refreshes, shardCacheRefreshKey{collectionID: collectionID, force: true})
+		delete(m.refreshWriteSeq, collectionID)
 	}
 }
 

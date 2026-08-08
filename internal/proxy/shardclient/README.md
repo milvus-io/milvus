@@ -65,7 +65,10 @@ The central manager for QueryNode client connections and shard leader informatio
 
 **Key Responsibilities**:
 - Cache shard leader mappings from QueryCoord, keyed by the cluster-unique collection id (`collectionID → channel → []nodeInfo`); name/alias/database are resolved upstream against the meta cache and are never part of the key
+- Coalesce refreshes per `(collectionID, force)` while allowing each caller to honor its own context
+- Fence in-flight refreshes so an invalidated collection id cannot be written back by an older RPC
 - Manage `shardClient` instances for each QueryNode
+- Expire idle shard-cache entries before deciding which QueryNode clients remain protected
 - Automatically purge expired clients (default: 60 minutes of inactivity)
 - Invalidate cache when shard leaders change
 
@@ -86,6 +89,8 @@ type ShardClientMgr interface {
 **Configuration**:
 - `purgeInterval`: Interval for checking expired clients (default: 600s)
 - `expiredDuration`: Time after which inactive clients are purged (default: 60min)
+- `shardCacheRefreshTimeout`: Hard timeout for a shared QueryCoord refresh (default: 10s)
+- `shardCacheTTL`: Idle lifetime of a shard leader cache entry (default: 600s)
 
 ### 2. shardClient
 
@@ -259,9 +264,11 @@ collectionID → shardLeaders {
 **Cache Operations**:
 - **Hit**: When cached shard leaders are used (tracked via `ProxyCacheStatsCounter`)
 - **Miss**: When cache lookup fails, triggers RPC to QueryCoord via `GetShardLeaders`
+- **Refresh coalescing**: Concurrent misses for the same collection id share one RPC, but callers wait using their own contexts. The shared RPC does not inherit the first caller's cancellation and has a ten-second hard timeout.
 - **Invalidation** (the cache is keyed by the cluster-unique collection id):
-  - `InvalidateShardLeaderCache(collectionIDs)`: Remove collections by id (called on shard-leader changes, collection drop, and search/query retry). O(len(collectionIDs)) direct deletes.
+  - `InvalidateShardLeaderCache(collectionIDs)`: Remove collections by id and revoke their in-flight refresh generations (called on shard-leader changes, collection drop, and search/query retry). O(len(collectionIDs)) direct deletes.
   - `RemoveDatabase(db)`: No-op. DropDatabase requires an empty database, so its collections were already dropped and evicted by id; the id-keyed cache does not track database membership.
+- **Idle cleanup**: `ListShardLocation` scans with a read lock, then briefly takes the write lock to revalidate and delete expired entries. Cache hits remain concurrent with the scan.
 
 ### Client Purging
 
@@ -345,5 +352,4 @@ Potential areas for enhancement:
 1. **Adaptive pooling**: Dynamically adjust connection pool size based on load
 2. **Circuit breaker**: Add circuit breaker pattern for consistently failing nodes
 3. **Advanced metrics**: Export more detailed metrics (per-node latency, error rates, etc.)
-4. **Smart caching**: Use TTL-based cache expiration instead of invalidation-only
-5. **Connection warming**: Pre-establish connections to known QueryNodes
+4. **Connection warming**: Pre-establish connections to known QueryNodes
