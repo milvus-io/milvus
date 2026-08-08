@@ -1289,6 +1289,66 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		s.Error(err)
 	})
 
+	s.Run("post_load_failure_refunds_bloom_filter_set", func() {
+		defer func() {
+			s.workerManager.ExpectedCalls = nil
+			s.loader.ExpectedCalls = nil
+		}()
+
+		bfs := pkoracle.NewBloomFilterSet(100, 500, commonpb.SegmentState_Sealed)
+		bf := bloomfilter.NewBloomFilterWithType(
+			paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+			paramtable.Get().CommonCfg.BloomFilterType.GetValue())
+		pks := &storage.PkStatistics{
+			PkFilter: bf,
+		}
+		pks.UpdatePKRange(&storage.Int64FieldData{
+			Data: []int64{10, 20, 30},
+		})
+		bfs.AddHistoricalStats(pks)
+		bfs.SetResourceCharged(true)
+		s.True(bfs.IsResourceCharged())
+
+		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+			Return([]*pkoracle.BloomFilterSet{bfs}, nil)
+
+		workers := make(map[int64]*cluster.MockWorker)
+		worker1 := &cluster.MockWorker{}
+		workers[1] = worker1
+
+		worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+			Return(nil)
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+			return workers[nodeID]
+		}, nil)
+
+		s.delegator.schemaBarrierTs = 1
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			LoadMeta: &querypb.LoadMetaInfo{
+				SchemaBarrierTs: 0,
+			},
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:     100,
+					PartitionID:   500,
+					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					Level:         datapb.SegmentLevel_L1,
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				},
+			},
+		})
+
+		s.ErrorIs(err, merr.ErrServiceInternal)
+		s.False(bfs.IsResourceCharged())
+	})
+
 	s.Run("worker_load_fail", func() {
 		defer func() {
 			s.workerManager.ExpectedCalls = nil
