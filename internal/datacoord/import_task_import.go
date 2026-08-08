@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -135,6 +136,33 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
 		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
+		if errors.Is(err, ErrPKRangeTooSmall) {
+			// The one assemble failure a retry cannot fix: the reservation was
+			// sized from an upper bound and preimport produced a larger exact
+			// count. Fail now and keep the precise reason, instead of leaving the
+			// task Pending to be rescheduled every tick until the job's import
+			// timeout overwrites the reason with a generic message.
+			if updateErr := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
+				UpdateState(datapb.ImportTaskStateV2_Failed),
+				UpdateReason(err.Error())); updateErr != nil {
+				mlog.Warn(context.TODO(), "failed to mark import task failed after assemble error",
+					WrapTaskLog(t, mlog.Err(updateErr))...)
+			}
+			// Fail the job too, the way the DataNode-reported failure path below
+			// does. Failing only the task leaves the job Importing:
+			// checkImportingJob skips any task that is not Completed and
+			// processFailed only drops segments, so nothing propagates upward and
+			// tryTimeoutJob eventually overwrites the reason with a generic
+			// timeout message -- the exact outcome this branch exists to avoid.
+			if updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(),
+				UpdateJobState(internalpb.ImportJobState_Failed),
+				UpdateJobReason(err.Error())); updateErr != nil {
+				mlog.Warn(context.TODO(), "failed to mark import job failed after assemble error",
+					WrapTaskLog(t, mlog.Err(updateErr))...)
+			}
+			return
+		}
+		t.retryTimes++
 		return
 	}
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())

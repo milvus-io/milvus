@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // importV1AckCallback handles the ack callback for import messages.
@@ -66,9 +67,13 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 		ChannelNames:   vchannels,
 		Schema:         body.GetSchema(),
 		Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
+			// Carry the primary-allocated PK range (nil for legacy/non-autoID/backup)
+			// so both clusters derive identical autoID primary keys.
 			return &internalpb.ImportFile{
-				Id:    file.GetId(),
-				Paths: file.GetPaths(),
+				Id:        file.GetId(),
+				Paths:     file.GetPaths(),
+				PkIdBegin: file.GetPreAllocatedAutoIds().GetBegin(),
+				PkIdEnd:   file.GetPreAllocatedAutoIds().GetEnd(),
 			}
 		}),
 		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
@@ -191,6 +196,36 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return merr.Wrap(err, "failed to validate import request")
 	}
 
+	// Per-file PK ranges are the default path for every autoID import. The
+	// coordinator allocates each file a range once and ships it on the ImportMsg, so
+	// the datanode derives primary keys from literal values instead of allocating
+	// them locally. On a replicating cluster that is what makes both clusters produce
+	// identical primary keys; elsewhere it costs a little ID space and keeps one
+	// well-exercised code path instead of a rarely-taken special case.
+	//
+	// The local-allocator path in the datanode remains only for compatibility:
+	// backup imports keep their embedded PKs (UnsetAutoID), L0 imports carry no
+	// autoID PKs, non-autoID collections never allocate, and jobs created before
+	// this version carry no range. A schema without a resolvable primary key is
+	// left to normal validation.
+	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(schema); pkErr == nil &&
+		pkField.GetAutoID() && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
+		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, files,
+			s.allocator.AllocN,
+			Params.CommonCfg.ClusterID.GetAsUint64(),
+		); err != nil {
+			return merr.Wrap(err, "failed to assign per-file PK ranges")
+		}
+		// msgFiles is a 1:1 lo.Map of files; bound the walk by both lengths so the
+		// pairing stays provable rather than assumed.
+		for i := 0; i < len(files) && i < len(msgFiles); i++ {
+			msgFiles[i].PreAllocatedAutoIds = &commonpb.IDRange{
+				Begin: files[i].GetPkIdBegin(),
+				End:   files[i].GetPkIdEnd(),
+			}
+		}
+	}
+
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
@@ -198,6 +233,16 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return merr.Wrap(err, "failed to start broadcast with collection id")
 	}
 	defer broadcaster.Close()
+
+	// Re-check the replication state now that the broadcast holds the shared-cluster
+	// resource key. AlterReplicateConfig takes the exclusive-cluster key, so it cannot
+	// change the replication topology while this lock is held. The pre-lock check in
+	// validateImportRequest can go stale during the sizing I/O above: if CDC was enabled
+	// in that window, an auto_commit / non-enableInReplicatingCluster import would
+	// otherwise be broadcast into a replicating topology and diverge.
+	if err := s.validateImportReplication(ctx, options); err != nil {
+		return merr.Wrap(err, "failed to re-validate import replication under broadcast lock")
+	}
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err := merr.CheckRPCCall(coll, err); err != nil {
