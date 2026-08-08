@@ -603,6 +603,49 @@ func TestPrimaryField(t *testing.T) {
 	assert.Equal(t, `book_id in ["1","2","3"]`, filter)
 }
 
+func TestCheckAndSetTextData(t *testing.T) {
+	textField := &schemapb.FieldSchema{
+		FieldID:  common.StartOfUserFieldID + 1,
+		Name:     "doc",
+		DataType: schemapb.DataType_Text,
+	}
+	textSchema := &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			generatePrimaryField(schemapb.DataType_Int64, false),
+			textField,
+		},
+	}
+
+	t.Run("missing required Text field", func(t *testing.T) {
+		_, _, err := checkAndSetData([]byte(`{"data": [{"book_id": 1}]}`), textSchema, false)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterMissing)
+		assert.Contains(t, err.Error(), "doc")
+	})
+
+	t.Run("null required Text field", func(t *testing.T) {
+		_, _, err := checkAndSetData([]byte(`{"data": [{"book_id": 1, "doc": null}]}`), textSchema, false)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "doc")
+	})
+
+	t.Run("explicit empty Text field", func(t *testing.T) {
+		rows, _, err := checkAndSetData([]byte(`{"data": [{"book_id": 1, "doc": ""}]}`), textSchema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, "", rows[0]["doc"])
+	})
+
+	t.Run("missing required Text field in partial update", func(t *testing.T) {
+		rows, _, err := checkAndSetData([]byte(`{"data": [{"book_id": 1}]}`), textSchema, true)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.NotContains(t, rows[0], "doc")
+	})
+}
+
 func TestAnyToColumns(t *testing.T) {
 	t.Run("insert with dynamic field", func(t *testing.T) {
 		body := []byte("{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
@@ -1853,6 +1896,28 @@ func TestBuildQueryResp(t *testing.T) {
 	assert.Equal(t, nil, err)
 	exceptRows := generateSearchResult(schemapb.DataType_Int64)
 	assert.Equal(t, true, compareRows(rows, exceptRows, compareRow))
+}
+
+func TestBuildQueryRespTextField(t *testing.T) {
+	fieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Text,
+		FieldName: FieldBookIntro,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{Data: []string{"hello", strings.Repeat("文", 32)}},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true},
+	}
+
+	rows, err := buildQueryResp(0, []string{FieldBookIntro}, []*schemapb.FieldData{fieldData}, nil, nil, true, nil)
+	require.NoError(t, err)
+	require.Len(t, rows, 3)
+	assert.Equal(t, "hello", rows[0][FieldBookIntro])
+	assert.Nil(t, rows[1][FieldBookIntro])
+	assert.Equal(t, strings.Repeat("文", 32), rows[2][FieldBookIntro])
 }
 
 func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {

@@ -773,11 +773,15 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
 					}
 					reallyData[fieldName] = result
-				case schemapb.DataType_Timestamptz:
+				case schemapb.DataType_Timestamptz, schemapb.DataType_VarChar, schemapb.DataType_String:
 					reallyData[fieldName] = dataString
-				case schemapb.DataType_VarChar:
-					reallyData[fieldName] = dataString
-				case schemapb.DataType_String:
+				case schemapb.DataType_Text:
+					if !fieldValue.Exists() {
+						return reallyDataArray, validDataMap, merr.WrapErrParameterMissingMsg("field %s is required", fieldName)
+					}
+					if fieldValue.Type == gjson.Null {
+						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalidMsg("field %s does not accept null", fieldName)
+					}
 					reallyData[fieldName] = dataString
 				default:
 					return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid("", schemapb.DataType_name[int32(fieldType)], "fieldName: "+fieldName)
@@ -1853,11 +1857,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			data = make([]float32, 0, rowsLen)
 		case schemapb.DataType_Double:
 			data = make([]float64, 0, rowsLen)
-		case schemapb.DataType_Timestamptz:
-			data = make([]string, 0, rowsLen)
-		case schemapb.DataType_String:
-			data = make([]string, 0, rowsLen)
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_Timestamptz, schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			data = make([]string, 0, rowsLen)
 		case schemapb.DataType_Array:
 			data = make([]*schemapb.ScalarField, 0, rowsLen)
@@ -1954,13 +1954,9 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]int64), candi.v.Interface().(int64))
 			case schemapb.DataType_Float:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]float32), candi.v.Interface().(float32))
-			case schemapb.DataType_Timestamptz:
-				nameColumns[field.Name] = append(nameColumns[field.Name].([]string), candi.v.Interface().(string))
 			case schemapb.DataType_Double:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]float64), candi.v.Interface().(float64))
-			case schemapb.DataType_String:
-				nameColumns[field.Name] = append(nameColumns[field.Name].([]string), candi.v.Interface().(string))
-			case schemapb.DataType_VarChar:
+			case schemapb.DataType_Timestamptz, schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]string), candi.v.Interface().(string))
 			case schemapb.DataType_Array:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]*schemapb.ScalarField), candi.v.Interface().(*schemapb.ScalarField))
@@ -2125,27 +2121,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					},
 				},
 			}
-		case schemapb.DataType_Timestamptz:
-			colData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_StringData{
-						StringData: &schemapb.StringArray{
-							Data: column.([]string),
-						},
-					},
-				},
-			}
-		case schemapb.DataType_String:
-			colData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_StringData{
-						StringData: &schemapb.StringArray{
-							Data: column.([]string),
-						},
-					},
-				},
-			}
-		case schemapb.DataType_VarChar:
+		case schemapb.DataType_Timestamptz, schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			colData.Field = &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
@@ -2527,7 +2503,7 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 			return int64(len(fieldData.GetScalars().GetTimestamptzData().GetData())), nil
 		}
 		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
+	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return int64(len(fieldData.GetScalars().GetStringData().GetData())), nil
 	case schemapb.DataType_Array:
 		return int64(len(fieldData.GetScalars().GetArrayData().GetData())), nil
@@ -2761,9 +2737,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 					} else {
 						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
 					}
-				case schemapb.DataType_String:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
-				case schemapb.DataType_VarChar:
+				case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
 				case schemapb.DataType_BinaryVector:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBinaryVector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()/8) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()/8)]
