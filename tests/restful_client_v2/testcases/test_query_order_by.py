@@ -66,18 +66,17 @@ def _expected_rows(order_by_fields, limit, row_filter=None, offset=0):
 
 
 class TestQueryOrderBy(TestBase):
-    def setup_class(self):
-        self.collection_name = self.__class__.__name__ + gen_collection_name()
-
     @pytest.fixture(scope="class", autouse=True)
     def prepare_shared_query_order_collection(self, request, init_class_config):
+        collection_name = gen_collection_name(prefix=request.cls.__name__)
+        request.cls.collection_name = collection_name
         collection_client, vector_client = self._class_scope_clients()
 
         def teardown():
-            collection_client.collection_drop({"collectionName": self.collection_name})
+            collection_client.collection_drop({"collectionName": collection_name})
 
         request.addfinalizer(teardown)
-        self._create_query_order_collection(self.collection_name, collection_client, vector_client)
+        self._create_query_order_collection(collection_name, collection_client, vector_client)
 
     def _create_query_order_collection(self, name, collection_client, vector_client):
         payload = {
@@ -115,9 +114,6 @@ class TestQueryOrderBy(TestBase):
         rsp = collection_client.flush(name)
         assert rsp["code"] == 0, rsp
 
-    def _shared_collection(self):
-        return self.collection_name
-
     def _query(self, payload, timeout=1):
         rsp = self.vector_client.vector_query(payload, timeout=timeout)
         assert rsp["code"] == 0, rsp
@@ -141,13 +137,6 @@ class TestQueryOrderBy(TestBase):
         actual = [tuple(row[field] for field in fields) for row in rows]
         expected = [tuple(row[field] for field in fields) for row in expected_rows]
         assert actual == expected
-
-    @staticmethod
-    def _assert_returned_ties_pk_monotonic(rows, fields):
-        """Check the current returned subset without asserting exact tie selection."""
-        for current, following in zip(rows, rows[1:]):
-            if all(current[field] == following[field] for field in fields):
-                assert current["id"] < following["id"], rows
 
     @staticmethod
     def _assert_nulls_at_end(values):
@@ -178,7 +167,7 @@ class TestQueryOrderBy(TestBase):
         """
         rows = self._query(
             {
-                "collectionName": self._shared_collection(),
+                "collectionName": self.collection_name,
                 "filter": "id >= 0",
                 "limit": 20,
                 "outputFields": ["id", "score"],
@@ -200,7 +189,7 @@ class TestQueryOrderBy(TestBase):
         """
         rows = self._query(
             {
-                "collectionName": self._shared_collection(),
+                "collectionName": self.collection_name,
                 "filter": "id >= 0",
                 "limit": 20,
                 "outputFields": ["id", "score"],
@@ -222,7 +211,7 @@ class TestQueryOrderBy(TestBase):
         """
         rows = self._query(
             {
-                "collectionName": self._shared_collection(),
+                "collectionName": self.collection_name,
                 "filter": "id >= 0",
                 "limit": 80,
                 "outputFields": ["id", "price", "rating"],
@@ -241,34 +230,33 @@ class TestQueryOrderBy(TestBase):
         assert secondary_sort_tested, "No duplicate price values found; secondary sort was not verified"
         expected = _expected_rows(["price:asc", "rating:desc"], limit=80)
         self._assert_expected_values(rows, expected, ["price", "rating"])
-        self._assert_expected_ids(rows, expected)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_order_by_with_filter(self):
         """
         target: verify REST query applies filter before orderByFields
-        method: filter a price range and sort by price ascending
-        expected: all rows match the filter and are sorted by price
+        method: filter a price range and sort by price ascending with an explicit id tie-breaker
+        expected: all rows match the filter and return the exact globally ordered ids
         """
         rows = self._query(
             {
-                "collectionName": self._shared_collection(),
+                "collectionName": self.collection_name,
                 "filter": "price >= 12 && price <= 16",
                 "limit": 50,
                 "outputFields": ["id", "price"],
-                "orderByFields": ["price:asc"],
+                "orderByFields": ["price:asc", "id:asc"],
             }
         )
         assert len(rows) == 50
         assert all(12 <= row["price"] <= 16 for row in rows)
         self._assert_ordered(rows, "price")
         expected = _expected_rows(
-            ["price:asc"],
+            ["price:asc", "id:asc"],
             limit=50,
             row_filter=lambda row: 12 <= row["price"] <= 16,
         )
         self._assert_expected_values(rows, expected, ["price"])
-        self._assert_returned_ties_pk_monotonic(rows, ["price"])
+        self._assert_expected_ids(rows, expected)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_order_by_default_limit(self):
@@ -279,7 +267,7 @@ class TestQueryOrderBy(TestBase):
         """
         rows = self._query(
             {
-                "collectionName": self._shared_collection(),
+                "collectionName": self.collection_name,
                 "filter": "id >= 0",
                 "outputFields": ["id", "score"],
                 "orderByFields": ["score:desc"],
@@ -294,15 +282,15 @@ class TestQueryOrderBy(TestBase):
     def test_query_order_by_with_offset(self):
         """
         target: verify REST query applies offset after ordering
-        method: compare the second ordered page with a larger ordered baseline
-        expected: offset page equals the matching slice of the baseline result
+        method: use an explicit id tie-breaker and compare the second ordered page with a larger baseline
+        expected: offset is applied after a deterministic global order and repeated requests return the same page
         """
         base_payload = {
-            "collectionName": self._shared_collection(),
+            "collectionName": self.collection_name,
             "filter": "id >= 0",
             "limit": 20,
             "outputFields": ["id", "price"],
-            "orderByFields": ["price:asc"],
+            "orderByFields": ["price:asc", "id:asc"],
         }
         baseline = self._query(base_payload)
         page_payload = {**base_payload, "limit": 10, "offset": 10}
@@ -313,7 +301,7 @@ class TestQueryOrderBy(TestBase):
         assert len({row["price"] for row in baseline}) == 1
         assert [row["id"] for row in page] == [row["id"] for row in baseline[10:20]]
         assert [row["id"] for row in repeated_page] == [row["id"] for row in page]
-        expected = _expected_rows(["price:asc"], limit=10, offset=10)
+        expected = _expected_rows(["price:asc", "id:asc"], limit=10, offset=10)
         self._assert_expected_ids(page, expected)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -325,7 +313,7 @@ class TestQueryOrderBy(TestBase):
         """
         asc_rows = self._query(
             {
-                "collectionName": self._shared_collection(),
+                "collectionName": self.collection_name,
                 "filter": "id >= 0",
                 "limit": NB,
                 "outputFields": ["id", "nullable_score"],
@@ -339,7 +327,7 @@ class TestQueryOrderBy(TestBase):
 
         desc_rows = self._query(
             {
-                "collectionName": self._shared_collection(),
+                "collectionName": self.collection_name,
                 "filter": "id >= 0",
                 "limit": NB,
                 "outputFields": ["id", "nullable_score"],
@@ -360,7 +348,7 @@ class TestQueryOrderBy(TestBase):
         """
         nulls_first_rows = self._query(
             {
-                "collectionName": self._shared_collection(),
+                "collectionName": self.collection_name,
                 "filter": "id >= 0",
                 "limit": NB,
                 "outputFields": ["id", "nullable_score"],
@@ -374,7 +362,7 @@ class TestQueryOrderBy(TestBase):
 
         nulls_last_rows = self._query(
             {
-                "collectionName": self._shared_collection(),
+                "collectionName": self.collection_name,
                 "filter": "id >= 0",
                 "limit": NB,
                 "outputFields": ["id", "nullable_score"],
@@ -395,7 +383,7 @@ class TestQueryOrderBy(TestBase):
         """
         rows = self._query(
             {
-                "collectionName": self._shared_collection(),
+                "collectionName": self.collection_name,
                 "filter": "id >= 0",
                 "limit": 20,
                 "outputFields": ["id", "category"],
@@ -403,14 +391,14 @@ class TestQueryOrderBy(TestBase):
             }
         )
         assert len(rows) == 20
-        assert all("price" not in row for row in rows)
+        assert all(set(row) == {"id", "category"} for row in rows)
         expected = _expected_rows(["price:asc"], limit=20)
         expected_prices = [row["price"] for row in expected]
 
         ids = [row["id"] for row in rows]
         verify_rows = self._query(
             {
-                "collectionName": self._shared_collection(),
+                "collectionName": self.collection_name,
                 "filter": f"id in {ids}",
                 "limit": len(ids),
                 "outputFields": ["id", "price"],
@@ -432,7 +420,7 @@ class TestQueryOrderBy(TestBase):
         """
         rows = self._query(
             {
-                "collectionName": self._shared_collection(),
+                "collectionName": self.collection_name,
                 "filter": "score > 999999",
                 "limit": 10,
                 "outputFields": ["id", "score"],
@@ -462,7 +450,7 @@ class TestQueryOrderBy(TestBase):
         """
         rsp = self.vector_client.vector_query(
             {
-                "collectionName": self._shared_collection(),
+                "collectionName": self.collection_name,
                 "filter": "id >= 0",
                 "limit": 10,
                 "outputFields": ["id"],

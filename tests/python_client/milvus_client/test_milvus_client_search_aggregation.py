@@ -191,6 +191,60 @@ class TestSearchAggregation(TestMilvusClientV2Base):
             assert buckets[0].count >= 1
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "limit,bucket_size",
+        [(1, 1), (1, 2), (1, 4), (3, 4), (4, 4), (10, 2)],
+        ids=[
+            "limit-equals-size-one",
+            "limit-less-than-size-two",
+            "limit-less-than-size-four",
+            "limit-three-size-four",
+            "limit-equals-size-four",
+            "limit-greater-than-size",
+        ],
+    )
+    def test_search_aggregation_limit_and_size_combinations(self, limit, bucket_size):
+        """
+        target: verify ordinary search limit does not cap search_aggregation buckets or topHits
+        method: combine limit smaller than, equal to, and greater than aggregation size on four populated brands
+        expected: size controls bucket count and every bucket retains two hits for every limit combination
+        """
+        top_hit_size = 2
+        client = self._client(alias=self.shared_alias)
+        res, _ = self.search(
+            client,
+            self.collection_name,
+            data=[self._query_vectors()[0]],
+            anns_field=self.vector_field,
+            search_params=self._search_params(),
+            limit=limit,
+            filter=self._non_null_expr(self.brand_field),
+            output_fields=[self.brand_field],
+            search_aggregation=SearchAggregation(
+                fields=[self.brand_field],
+                size=bucket_size,
+                metrics={"doc_count": {"count": "*"}},
+                order=[{"_key": "asc"}],
+                top_hits=TopHits(size=top_hit_size, sort=[{"_score": "asc"}]),
+            ),
+        )
+
+        assert len(res.agg_buckets) == 1
+        buckets = res.agg_buckets[0]
+        assert len(buckets) == bucket_size
+        keys = [self._key_value(bucket, self.brand_field) for bucket in buckets]
+        assert len(set(keys)) == bucket_size
+        assert keys == sorted(keys)
+        assert sum(len(bucket.hits) for bucket in buckets) == bucket_size * top_hit_size
+        for bucket in buckets:
+            brand = self._key_value(bucket, self.brand_field)
+            assert bucket.count == top_hit_size
+            assert bucket.metrics["doc_count"] == top_hit_size
+            assert len(bucket.hits) == top_hit_size
+            self._assert_scores_ascending(bucket.hits)
+            assert all(hit.fields[self.brand_field] == brand for hit in bucket.hits)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_aggregation_range_search(self):
         """
         target: verify range search supports search_aggregation on a regular vector field.

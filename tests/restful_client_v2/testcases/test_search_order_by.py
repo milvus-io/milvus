@@ -1,0 +1,199 @@
+import pytest
+from base.testbase import TestBase
+from utils.constant import CaseLabel
+from utils.utils import gen_collection_name
+
+ROWS = [
+    {"id": 1, "category": "A", "price": 30, "rating": 1.0, "vector": [1.0, 0.0]},
+    {"id": 2, "category": "A", "price": 10, "rating": 3.0, "vector": [0.9, 0.0]},
+    {"id": 3, "category": "B", "price": 20, "rating": 2.0, "vector": [0.8, 0.0]},
+    {"id": 4, "category": "C", "price": 5, "rating": 4.0, "vector": [0.7, 0.0]},
+]
+EXPECTED_DISTANCE_BY_ID = {1: 1.0, 2: 0.9, 3: 0.8, 4: 0.7}
+
+
+class TestSearchOrderBy(TestBase):
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_shared_search_order_collection(self, request, init_class_config):
+        collection_name = gen_collection_name(prefix=request.cls.__name__)
+        request.cls.collection_name = collection_name
+        collection_client, vector_client = self._class_scope_clients()
+
+        def teardown():
+            collection_client.collection_drop({"collectionName": collection_name})
+
+        request.addfinalizer(teardown)
+        payload = {
+            "collectionName": collection_name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "category", "dataType": "VarChar", "elementTypeParams": {"max_length": "16"}},
+                    {"fieldName": "price", "dataType": "Int64"},
+                    {"fieldName": "rating", "dataType": "Double"},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
+                ],
+            },
+            "indexParams": [
+                {
+                    "fieldName": "vector",
+                    "indexName": "vector_index",
+                    "indexType": "FLAT",
+                    "metricType": "IP",
+                }
+            ],
+        }
+        rsp = collection_client.collection_create(payload)
+        assert rsp["code"] == 0, rsp
+        collection_client.wait_load_completed(collection_name, timeout=60)
+
+        rsp = vector_client.vector_insert({"collectionName": collection_name, "data": ROWS})
+        assert rsp["code"] == 0, rsp
+        assert rsp["data"]["insertCount"] == len(ROWS)
+        rsp = collection_client.flush(collection_name)
+        assert rsp["code"] == 0, rsp
+
+    def _search(self, **overrides):
+        payload = {
+            "collectionName": self.collection_name,
+            "data": [[1.0, 0.0]],
+            "annsField": "vector",
+            "limit": len(ROWS),
+            "outputFields": ["id", "category", "price", "rating"],
+            "consistencyLevel": "Strong",
+        }
+        payload.update(overrides)
+        rsp = self.vector_client.vector_search(payload)
+        assert rsp["code"] == 0, rsp
+        rows = rsp.get("data", [])
+        self._assert_id_distance_association(rows)
+        return rows
+
+    @staticmethod
+    def _assert_id_distance_association(rows):
+        for row in rows:
+            assert row["id"] in EXPECTED_DISTANCE_BY_ID
+            assert row["distance"] == pytest.approx(EXPECTED_DISTANCE_BY_ID[row["id"]])
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize(
+        "order_by,field_name,expected_values,expected_ids",
+        [
+            (["price"], "price", [5, 10, 20, 30], [4, 2, 3, 1]),
+            (["rating:desc"], "rating", [4.0, 3.0, 2.0, 1.0], [4, 2, 3, 1]),
+        ],
+    )
+    def test_search_order_by_single_field(self, order_by, field_name, expected_values, expected_ids):
+        """
+        target: verify REST search supports top-level orderByFields in ascending and descending order
+        method: search all deterministic ANN candidates and sort them by one scalar field
+        expected: result values follow the requested scalar order
+        """
+        rows = self._search(orderByFields=order_by)
+        assert [row[field_name] for row in rows] == expected_values
+        assert [row["id"] for row in rows] == expected_ids
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_order_by_with_filter(self):
+        """
+        target: verify REST search combines filter with top-level orderByFields
+        method: restrict results to category A and sort the matching rows by price ascending
+        expected: filtering happens before ordering and returns ids 2 and 1
+        """
+        rows = self._search(filter='category == "A"', orderByFields=["price:asc"])
+        assert [row["id"] for row in rows] == [2, 1]
+        assert [row["price"] for row in rows] == [10, 30]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_order_by_sort_field_not_in_output(self):
+        """
+        target: verify REST search can sort by a field omitted from outputFields
+        method: sort by price while requesting only id and category
+        expected: ids follow price order and the response does not expose price or vector
+        """
+        rows = self._search(outputFields=["id", "category"], orderByFields=["price:asc"])
+        assert [row["id"] for row in rows] == [4, 2, 3, 1]
+        assert all(set(row) == {"id", "category", "distance"} for row in rows)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_order_by_multi_fields(self):
+        """
+        target: verify REST search supports multiple top-level orderByFields
+        method: sort by category ascending and price descending
+        expected: secondary sorting is applied within the duplicate category
+        """
+        rows = self._search(orderByFields=["category:asc", "price:desc"])
+        assert [row["id"] for row in rows] == [1, 2, 3, 4]
+        assert [(row["category"], row["price"]) for row in rows] == [
+            ("A", 30),
+            ("A", 10),
+            ("B", 20),
+            ("C", 5),
+        ]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_order_by_with_offset(self):
+        """
+        target: verify REST search applies offset after top-level orderByFields
+        method: take the top three ANN candidates, sort by price ascending, skip one, and return two
+        expected: pagination returns ids 3 and 1 after scalar ordering
+        """
+        rows = self._search(limit=2, offset=1, orderByFields=["price:asc"])
+        assert [row["id"] for row in rows] == [3, 1]
+        assert [row["price"] for row in rows] == [20, 30]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "search_params",
+        [
+            {"order_by_fields": "price:desc"},
+            {"params": {"order_by_fields": "price:desc"}},
+        ],
+    )
+    def test_search_order_by_with_legacy_parameter_rejected(self, search_params):
+        """
+        target: verify top-level orderByFields rejects ambiguous legacy order_by_fields
+        method: provide the same semantic parameter at the top level and in either legacy location
+        expected: REST rejects both ambiguous payload forms with code 1100
+        """
+        rsp = self.vector_client.vector_search(
+            {
+                "collectionName": self.collection_name,
+                "data": [[1.0, 0.0]],
+                "annsField": "vector",
+                "limit": len(ROWS),
+                "orderByFields": ["price:asc"],
+                "searchParams": search_params,
+            }
+        )
+        assert rsp["code"] == 1100, rsp
+        assert "ambiguous order by" in rsp["message"], rsp
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "order_by,message",
+        [
+            (["unknown_field:asc"], "does not exist"),
+            (["vector:asc"], "unsortable type"),
+            (["price:invalid"], "invalid order direction"),
+        ],
+    )
+    def test_search_order_by_invalid_params(self, order_by, message):
+        """
+        target: verify REST search surfaces server validation for invalid orderByFields
+        method: send an unknown field, vector field, and invalid direction
+        expected: each request fails with parameter error code 1100
+        """
+        rsp = self.vector_client.vector_search(
+            {
+                "collectionName": self.collection_name,
+                "data": [[1.0, 0.0]],
+                "annsField": "vector",
+                "limit": len(ROWS),
+                "orderByFields": order_by,
+            }
+        )
+        assert rsp["code"] == 1100, rsp
+        assert message in rsp["message"], rsp
