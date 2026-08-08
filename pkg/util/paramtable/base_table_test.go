@@ -39,7 +39,7 @@ func TestBaseTable_DuplicateValues(t *testing.T) {
 	baseParams.Save("rootcoorddmlchannelnum", "11")
 
 	prefix := "rootcoord."
-	configs := baseParams.mgr.GetConfigs()
+	configs := baseParams.mgr.GetConfigsRaw()
 
 	configsWithPrefix := make(map[string]string)
 	for k, v := range configs {
@@ -48,7 +48,7 @@ func TestBaseTable_DuplicateValues(t *testing.T) {
 		}
 	}
 
-	rootconfigs := baseParams.mgr.GetBy(config.WithPrefix(prefix))
+	rootconfigs := baseParams.mgr.GetByRaw(config.WithPrefix(prefix))
 
 	assert.Equal(t, len(rootconfigs), len(configsWithPrefix))
 	assert.Equal(t, "11", rootconfigs["rootcoord.dmlchannelnum"])

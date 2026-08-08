@@ -471,7 +471,7 @@ func registerCallback() {
 	mlog.Info(context.TODO(), "cipher config callbacks registered")
 }
 
-func reloadCipherConfig(ctx context.Context, key, oldValue, newValue string) error {
+func reloadCipherConfig(ctx context.Context, key, _, _ string) error {
 	cipher := GetCipher()
 	if cipher == nil {
 		mlog.Warn(ctx, "cipher plugin not loaded, skip config reload", mlog.String("key", key))
@@ -481,10 +481,7 @@ func reloadCipherConfig(ctx context.Context, key, oldValue, newValue string) err
 	cipherReloadMutex.Lock()
 	defer cipherReloadMutex.Unlock()
 
-	mlog.Info(ctx, "reloading cipher plugin config",
-		mlog.String("key", key),
-		mlog.String("oldValue", oldValue),
-		mlog.String("newValue", newValue))
+	mlog.Info(ctx, "reloading cipher plugin config", mlog.String("key", key))
 
 	initConfigs := buildCipherInitConfig()
 	if err := cipher.Init(initConfigs); err != nil {

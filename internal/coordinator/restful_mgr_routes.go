@@ -1404,10 +1404,11 @@ func (s *mixCoordImpl) HandleGetConfig(writer http.ResponseWriter, request *http
 		if key == "" {
 			continue
 		}
-		// Redact sensitive config keys (passwords, secrets, tokens).
-		normalizedKey := strings.ToLower(key)
-		if strings.Contains(normalizedKey, "password") || strings.Contains(normalizedKey, "secret") ||
-			strings.Contains(normalizedKey, "token") || strings.Contains(normalizedKey, "credential") {
+		if !paramMgr.IsConfigRegistered(key) {
+			results = append(results, configResult{Key: key, Error: "access to unregistered config key is denied"})
+			continue
+		}
+		if paramMgr.IsSensitive(key) {
 			results = append(results, configResult{Key: key, Error: "access to sensitive config key is denied"})
 			continue
 		}

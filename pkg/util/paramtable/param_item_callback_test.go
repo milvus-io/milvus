@@ -22,8 +22,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func TestParamItem_RegisterCallback(t *testing.T) {
@@ -109,6 +114,64 @@ func TestParamItem_CallbackErrorHandling(t *testing.T) {
 	param.handleConfigChange(event)
 
 	assert.True(t, callbackCalled)
+}
+
+func TestParamItem_SensitiveCallbackLogsAreRedacted(t *testing.T) {
+	originalLogger := mlog.L()
+	originalLevel := mlog.GetLevel()
+	core, observedLogs := observer.New(zapcore.DebugLevel)
+	mlog.ReplaceGlobals(zap.New(core), &mlog.ZapProperties{
+		Core:  core,
+		Level: zap.NewAtomicLevelAt(zapcore.DebugLevel),
+	})
+	t.Cleanup(func() {
+		mlog.ReplaceGlobals(originalLogger, nil)
+		mlog.SetLevel(originalLevel)
+	})
+
+	const (
+		oldSecret = "old-cipher-root-key"
+		newSecret = "new-cipher-root-key"
+	)
+
+	for _, test := range []struct {
+		name        string
+		callbackErr error
+		message     string
+	}{
+		{name: "success", message: "param value changed"},
+		{name: "error", callbackErr: fmt.Errorf("callback error"), message: "param change callback failed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			observedLogs.TakeAll()
+			manager := config.NewManager()
+			param := &ParamItem{
+				Key:          "cipherPlugin.kms.defaultKey",
+				DefaultValue: oldSecret,
+				Sensitive:    true,
+			}
+			param.Init(manager)
+
+			param.RegisterCallback(func(_ context.Context, _ string, oldValue, newValue string) error {
+				assert.Equal(t, oldSecret, oldValue)
+				assert.Equal(t, newSecret, newValue)
+				return test.callbackErr
+			})
+			param.handleConfigChange(&config.Event{
+				EventType: config.UpdateType,
+				Key:       param.Key,
+				Value:     newSecret,
+			})
+
+			entries := observedLogs.FilterMessage(test.message).All()
+			require.Len(t, entries, 1)
+			fields := entries[0].ContextMap()
+			assert.Equal(t, config.RedactedValue, fields["oldValue"])
+			assert.Equal(t, config.RedactedValue, fields["newValue"])
+			assert.NotContains(t, fmt.Sprint(fields), oldSecret)
+			assert.NotContains(t, fmt.Sprint(fields), newSecret)
+		})
+	}
 }
 
 func TestParamItem_NoValueChange(t *testing.T) {

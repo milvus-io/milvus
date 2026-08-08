@@ -309,6 +309,11 @@ func TestHandleGetConfig(t *testing.T) {
 	mgr.SetConfig("test.getconfig.key1", "val1")
 	mgr.SetConfig("test.getconfig.key2", "val2")
 	mgr.SetConfig("test.getconfig.key3", "val3")
+	mgr.SetConfig("test.getconfig.opaque", "opaque-secret")
+	for _, key := range []string{"test.getconfig.key1", "test.getconfig.key2", "test.getconfig.key3", "test.getconfig.opaque"} {
+		mgr.RegisterConfigKey(key)
+	}
+	mgr.RegisterSensitiveKey("test.getconfig.opaque")
 
 	type configResult struct {
 		Key    string `json:"key"`
@@ -409,16 +414,31 @@ func TestHandleGetConfig(t *testing.T) {
 	})
 
 	t.Run("sensitive keys are redacted", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=minio.secretAccessKey,test.getconfig.key1,etcd.auth.password", nil)
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=minio.secretAccessKey,test.getconfig.key1,etcd.auth.password,test.getconfig.opaque", nil)
 		w := httptest.NewRecorder()
 		coord.HandleGetConfig(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		configs := parseResponse(t, w)
-		require.Len(t, configs, 3)
+		require.Len(t, configs, 4)
 		assert.Contains(t, configs[0].Error, "sensitive")
 		assert.Equal(t, "val1", configs[1].Value)
 		assert.Contains(t, configs[2].Error, "sensitive")
+		assert.Contains(t, configs[3].Error, "sensitive")
+		assert.NotContains(t, w.Body.String(), "opaque-secret")
+	})
+
+	t.Run("unregistered keys are denied", func(t *testing.T) {
+		mgr.SetConfig("test.getconfig.unknown", "unknown-secret")
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=test.getconfig.unknown", nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		configs := parseResponse(t, w)
+		require.Len(t, configs, 1)
+		assert.Contains(t, configs[0].Error, "unregistered")
+		assert.NotContains(t, w.Body.String(), "unknown-secret")
 	})
 
 	t.Run("all empty keys should fail", func(t *testing.T) {

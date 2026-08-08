@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,8 +38,14 @@ func TestAllConfigFromManager(t *testing.T) {
 	assert.Equal(t, 0, len(all))
 
 	mgr, _ = Init(WithEnvSource(formatKey))
+	raw := mgr.GetConfigsRaw()
+	assert.Less(t, 0, len(raw))
+
 	all = mgr.GetConfigs()
-	assert.Less(t, 0, len(all))
+	assert.Equal(t, len(raw), len(all))
+	for _, value := range all {
+		assert.Equal(t, RedactedValue, value)
+	}
 }
 
 func TestConfigChangeEvent(t *testing.T) {
@@ -199,7 +206,7 @@ func TestGetConfigAndSource(t *testing.T) {
 	assert.Equal(t, value, "ac-value")
 
 	// test get all configs
-	configs := mgr.GetConfigsView()
+	configs := mgr.GetConfigsViewRaw()
 	v, ok := configs["ab-key"]
 	assert.True(t, ok)
 	assert.Contains(t, v, "EnvironmentSource")
@@ -207,6 +214,118 @@ func TestGetConfigAndSource(t *testing.T) {
 	v, ok = configs["ac-key"]
 	assert.True(t, ok)
 	assert.Contains(t, v, RuntimeSource)
+}
+
+func TestConfigProjectionsRedactByDefault(t *testing.T) {
+	mgr, _ := Init()
+
+	mgr.RegisterConfigKey("public.key")
+	mgr.RegisterConfigKey("opaque.key")
+	mgr.RegisterSensitiveKey("opaque.key")
+	mgr.RegisterConfigPrefix("dynamic.")
+	mgr.RegisterConfigPrefix("sensitive.group.")
+	mgr.RegisterSensitivePrefix("sensitive.group.")
+
+	mgr.SetConfig("public.key", "visible")
+	mgr.SetConfig("opaque.key", "opaque-secret")
+	mgr.SetConfig("unknown.key", "unknown-secret")
+	mgr.SetMapConfig("dynamic.visible", "dynamic-value")
+	mgr.SetMapConfig("dynamic.password", "dynamic-secret")
+	mgr.SetMapConfig("sensitive.group.value", "group-secret")
+
+	publicKey := formatKey("public.key")
+	opaqueKey := formatKey("opaque.key")
+	unknownKey := formatKey("unknown.key")
+	dynamicKey := "dynamic.visible"
+	dynamicSecretKey := "dynamic.password"
+	groupKey := "sensitive.group.value"
+
+	safe := mgr.GetConfigs()
+	assert.Equal(t, "visible", safe[publicKey])
+	assert.Equal(t, RedactedValue, safe[opaqueKey])
+	assert.Equal(t, RedactedValue, safe[unknownKey])
+	assert.Equal(t, "dynamic-value", safe[dynamicKey])
+	assert.Equal(t, RedactedValue, safe[dynamicSecretKey])
+	assert.Equal(t, RedactedValue, safe[groupKey])
+
+	raw := mgr.GetConfigsRaw()
+	assert.Equal(t, "opaque-secret", raw[opaqueKey])
+	assert.Equal(t, "unknown-secret", raw[unknownKey])
+	assert.Equal(t, "group-secret", raw[groupKey])
+	assert.Equal(t, "dynamic-secret", raw[dynamicSecretKey])
+
+	safeView := mgr.GetConfigsView()
+	assert.Contains(t, safeView[publicKey], RuntimeSource)
+	assert.Equal(t, RedactedValue, safeView[opaqueKey])
+	assert.Equal(t, RedactedValue, safeView[unknownKey])
+
+	rawView := mgr.GetConfigsViewRaw()
+	assert.Contains(t, rawView[opaqueKey], "opaque-secret")
+	assert.Contains(t, rawView[unknownKey], "unknown-secret")
+
+	assert.Equal(t, "dynamic-value", mgr.GetBy(WithPrefix("dynamic"))[dynamicKey])
+	assert.Equal(t, RedactedValue, mgr.GetBy(WithPrefix("dynamic"))[dynamicSecretKey])
+	assert.Equal(t, "group-secret", mgr.GetByRaw(WithPrefix("sensitive"))[groupKey])
+}
+
+func TestEnvironmentSecretsAreRedacted(t *testing.T) {
+	const secret = "config-view-sentinel-secret"
+	t.Setenv("MILVUS_CONF_SERVICE_TOKEN", secret)
+	t.Setenv("AWS_SESSION_TOKEN", secret)
+	t.Setenv("OPENAI_API_KEY", secret)
+	t.Setenv("DATABASE_URL", secret)
+	t.Setenv("PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL", secret)
+
+	mgr, _ := Init(WithEnvSource(formatKey))
+	mgr.RegisterConfigPrefix("proxy.accessLog.formatters.")
+	assert.False(t, mgr.IsConfigRegistered("PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL"))
+	assert.False(t, mgr.IsConfigRegistered(formatKey("PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL")))
+	for key, value := range mgr.GetConfigsView() {
+		assert.NotContains(t, value, secret, key)
+	}
+
+	foundRaw := false
+	for _, value := range mgr.GetConfigsViewRaw() {
+		if strings.Contains(value, secret) {
+			foundRaw = true
+			break
+		}
+	}
+	assert.True(t, foundRaw)
+}
+
+func TestRegisteredMetadataOverridesSecretNameFallback(t *testing.T) {
+	mgr := NewManager()
+	for _, key := range []string{
+		"proxy.minPasswordLength",
+		"proxy.maxPasswordLength",
+		"dataCoord.compaction.storageVersion.rateLimitTokens",
+	} {
+		mgr.RegisterConfigKey(key)
+		mgr.RegisterNonSensitiveKey(key)
+		mgr.SetConfig(key, "visible")
+		assert.False(t, mgr.IsSensitive(key), key)
+		assert.Equal(t, "visible", mgr.GetConfigs()[formatKey(key)], key)
+	}
+}
+
+func TestFileConfigProjectionRedactsByDefault(t *testing.T) {
+	yamlFile := path.Join(t.TempDir(), "milvus.yaml")
+	require.NoError(t, os.WriteFile(yamlFile, []byte("public.key: visible\nopaque.key: opaque-secret\nunknown.key: unknown-secret\n"), 0o600))
+
+	mgr, _ := Init(WithFilesSource(&FileInfo{Files: []string{yamlFile}}))
+	mgr.RegisterConfigKey("public.key")
+	mgr.RegisterConfigKey("opaque.key")
+	mgr.RegisterSensitiveKey("opaque.key")
+
+	safe := mgr.FileConfigs()
+	assert.Equal(t, "visible", safe["public.key"])
+	assert.Equal(t, RedactedValue, safe["opaque.key"])
+	assert.Equal(t, RedactedValue, safe["unknown.key"])
+
+	raw := mgr.FileConfigsRaw()
+	assert.Equal(t, "opaque-secret", raw["opaque.key"])
+	assert.Equal(t, "unknown-secret", raw["unknown.key"])
 }
 
 func TestDeadlock(t *testing.T) {
