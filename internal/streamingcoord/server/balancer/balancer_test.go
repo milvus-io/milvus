@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"sync"
 	"testing"
 	"time"
 
@@ -283,6 +284,128 @@ func TestBalancer(t *testing.T) {
 
 	b.Close()
 	assert.ErrorIs(t, f.Get(), balancer.ErrBalancerClosed)
+}
+
+func TestBalancerAcceptsUnavailableReportsWhileAssignmentIsInFlight(t *testing.T) {
+	paramtable.Init()
+	oldRootPath := paramtable.Get().EtcdCfg.RootPath.SwapTempValue(fmt.Sprintf("balancer-concurrent-assignment-%d", time.Now().UnixNano()))
+	oldExpectedStreamingNodeNum := paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("0")
+	oldTriggerInterval := paramtable.Get().StreamingCfg.WALBalancerTriggerInterval.SwapTempValue("1h")
+	defer paramtable.Get().EtcdCfg.RootPath.SwapTempValue(oldRootPath)
+	defer paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue(oldExpectedStreamingNodeNum)
+	defer paramtable.Get().StreamingCfg.WALBalancerTriggerInterval.SwapTempValue(oldTriggerInterval)
+
+	etcdClient, _ := kvfactory.GetEtcdAndPath()
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+
+	assignmentStarted := make(chan string, 2)
+	releaseAssignments := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() {
+			close(releaseAssignments)
+		})
+	}
+	defer release()
+
+	streamingNodeManager := mock_manager.NewMockManagerClient(t)
+	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
+	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
+		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+	}, nil).Maybe()
+	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, mock.Anything).Return(map[int64]*types.StreamingNodeStatus{
+		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+	}, nil).Maybe()
+	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Twice()
+	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, assignment types.PChannelInfoAssigned) error {
+		assignmentStarted <- assignment.Channel.Name
+		select {
+		case <-releaseAssignments:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}).Twice()
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(
+		resource.OptETCD(etcdClient),
+		resource.OptStreamingCatalog(catalog),
+		resource.OptStreamingManagerClient(streamingNodeManager),
+		resource.OptSession(s),
+	)
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: channel.StreamingVersion260}, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{
+			Channel: &streamingpb.PChannelInfo{Name: "test-channel-1", Term: 1, AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE},
+			State:   streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
+			Node:    &streamingpb.StreamingNodeInfo{ServerId: 1},
+		},
+		{
+			Channel: &streamingpb.PChannelInfo{Name: "test-channel-2", Term: 1, AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE},
+			State:   streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
+			Node:    &streamingpb.StreamingNodeInfo{ServerId: 1},
+		},
+	}, nil)
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+
+	b, err := balancer.RecoverBalancer(context.Background(), newStaticChannelProvider("test-channel-1", "test-channel-2"))
+	assert.NoError(t, err)
+	assert.NotNil(t, b)
+	defer b.Close()
+
+	doneErr := errors.New("done")
+	err = b.WatchChannelAssignments(context.Background(), func(param balancer.WatchChannelAssignmentsCallbackParam) error {
+		if len(param.Relations) == 2 {
+			return doneErr
+		}
+		return nil
+	})
+	assert.ErrorIs(t, err, doneErr)
+
+	assert.NoError(t, b.MarkAsUnavailable(context.Background(), []types.PChannelInfo{{Name: "test-channel-1", Term: 1}}))
+	select {
+	case name := <-assignmentStarted:
+		assert.Equal(t, "test-channel-1", name)
+	case <-time.After(time.Second):
+		assert.FailNow(t, "first assignment did not start")
+	}
+
+	secondReportDone := make(chan error, 1)
+	go func() {
+		secondReportDone <- b.MarkAsUnavailable(context.Background(), []types.PChannelInfo{{Name: "test-channel-2", Term: 1}})
+	}()
+	select {
+	case err := <-secondReportDone:
+		assert.NoError(t, err)
+	case <-time.After(time.Second):
+		assert.FailNow(t, "second unavailable report was blocked by the first assignment")
+	}
+	select {
+	case name := <-assignmentStarted:
+		assert.Equal(t, "test-channel-2", name)
+	case <-time.After(time.Second):
+		assert.FailNow(t, "second assignment did not start while the first was in flight")
+	}
+
+	release()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	err = b.WatchChannelAssignments(ctx, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
+		if len(param.Relations) == 2 &&
+			param.Relations[0].Channel.Term == 2 &&
+			param.Relations[1].Channel.Term == 2 {
+			return doneErr
+		}
+		return nil
+	})
+	assert.ErrorIs(t, err, doneErr)
 }
 
 func TestBalancerWaitUntilSchemaDropReady(t *testing.T) {

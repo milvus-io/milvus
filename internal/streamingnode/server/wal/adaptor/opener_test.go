@@ -259,3 +259,20 @@ func TestHandleAlterWALFlushingStagePassesRateLimitComponent(t *testing.T) {
 	assert.Same(t, snapshot, capturedParam.RecoverySnapshot)
 	assert.Equal(t, streamingpb.AlterWALStage_ADVANCE_CHECKPOINT, snapshot.Checkpoint.AlterWalState.Stage)
 }
+
+func TestWALSwitchFlushBackoff(t *testing.T) {
+	flushCheckBackoff := newWALSwitchFlushBackoff()
+	expected := []time.Duration{
+		20 * time.Millisecond,
+		40 * time.Millisecond,
+		80 * time.Millisecond,
+		160 * time.Millisecond,
+		320 * time.Millisecond,
+		640 * time.Millisecond,
+		1 * time.Second,
+		1 * time.Second,
+	}
+	for _, interval := range expected {
+		assert.Equal(t, interval, flushCheckBackoff.NextBackOff())
+	}
+}
