@@ -418,6 +418,17 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
 	}
+	if functionName := dropReq.GetFunctionName(); functionName != "" {
+		if err := validateRLSFunctionOutputNotReferenced(ctx, c.meta, req.GetDbName(), req.GetCollectionName(), coll, findRLSFunctionByName(coll, functionName), "dropped"); err != nil {
+			return err
+		}
+	}
+	if err := validateRLSNoReferencedFieldDropped(ctx, c.meta, req.GetDbName(), req.GetCollectionName(), coll, droppedFieldIds); err != nil {
+		return err
+	}
+	if err := validateRLSPoliciesWithSchema(ctx, c.meta, req.GetDbName(), req.GetCollectionName(), schema); err != nil {
+		return err
+	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {

@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/tso"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -966,6 +967,23 @@ func TestDDLCallbacksAlterCollectionDropField(t *testing.T) {
 	assertFieldExists(t, ctx, core, dbName, collectionName, "field4", 103)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
 	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 103)
+
+	policy, err := core.meta.PrepareCreateRLSPolicy(ctx, &rlsutil.CreateRowPolicyRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PolicyName:     "field4_guard",
+		PolicyType:     rlsutil.PolicyTypePermissive,
+		Actions:        []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+		UsingExpr:      "field4 == 1",
+	}, 1001)
+	require.NoError(t, err)
+	require.NoError(t, core.meta.ApplyAlterRLSPolicy(ctx, policy))
+
+	resp, err = core.AlterCollectionSchema(ctx, dropFieldReq("field4"))
+	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
+	require.Contains(t, resp.GetAlterStatus().GetReason(), "RLS policies")
+	assertFieldExists(t, ctx, core, dbName, collectionName, "field4", 103)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
 }
 
 func TestDDLCallbacksAlterCollectionDropFieldWaitsForSchemaDropReady(t *testing.T) {

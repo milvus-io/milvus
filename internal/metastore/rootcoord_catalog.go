@@ -97,6 +97,15 @@ type RootCoordCatalog interface {
 	SavePrivilegeGroup(ctx context.Context, data *milvuspb.PrivilegeGroupInfo) error
 	ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error)
 
+	SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error
+	GetRLSPolicy(ctx context.Context, collectionID int64, policyName string) (*model.RLSPolicy, error)
+	DropRLSPolicy(ctx context.Context, collectionID int64, policyName string) error
+	ListRLSPolicies(ctx context.Context, collectionID int64) ([]*model.RLSPolicy, error)
+	SaveRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error
+	GetRLSPrincipal(ctx context.Context, collectionID int64, principalName string) (*model.RLSPrincipal, error)
+	DropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error
+	ListRLSPrincipals(ctx context.Context, collectionID int64) ([]*model.RLSPrincipal, error)
+
 	// File resource related
 	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error
 	RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error
