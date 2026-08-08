@@ -174,6 +174,24 @@ class FieldMeta {
         Assert(IsVectorDataType(element_type_));
     }
 
+    FieldMeta(FieldName name,
+              FieldId id,
+              DataType type,
+              int64_t precision,
+              int64_t scale,
+              bool nullable,
+              std::optional<DefaultValueType> default_value,
+              std::string external_field_mapping = "")
+        : name_(std::move(name)),
+          id_(id),
+          type_(type),
+          nullable_(nullable),
+          decimal_info_(DecimalInfo{precision, scale}),
+          default_value_(std::move(default_value)),
+          external_field_mapping_(std::move(external_field_mapping)) {
+        Assert(type_ == DataType::DECIMAL);
+    }
+
     // for json stats shredding column field meta,
     // we need to pass in the main field id
     FieldMeta(FieldName name,
@@ -209,6 +227,20 @@ class FieldMeta {
         Assert(IsStringDataType(type_));
         Assert(string_info_.has_value());
         return string_info_->max_length;
+    }
+
+    int64_t
+    get_decimal_precision() const {
+        Assert(type_ == DataType::DECIMAL);
+        Assert(decimal_info_.has_value());
+        return decimal_info_->precision_;
+    }
+
+    int64_t
+    get_decimal_scale() const {
+        Assert(type_ == DataType::DECIMAL);
+        Assert(decimal_info_.has_value());
+        return decimal_info_->scale_;
     }
 
     int64_t
@@ -356,6 +388,10 @@ class FieldMeta {
         bool enable_analyzer;
         std::map<std::string, std::string> params;
     };
+    struct DecimalInfo {
+        int64_t precision_;
+        int64_t scale_;
+    };
     FieldName name_;
     FieldId id_;
     DataType type_ = DataType::NONE;
@@ -364,6 +400,7 @@ class FieldMeta {
     std::optional<DefaultValueType> default_value_;
     std::optional<VectorInfo> vector_info_;
     std::optional<StringInfo> string_info_;
+    std::optional<DecimalInfo> decimal_info_;
     // for json stats, the main field id is the real field id
     // of collection schema, the field id is the json shredding field id
     int64_t main_field_id_ = INVALID_FIELD_ID;

@@ -550,6 +550,7 @@ create_chunk_writer(const FieldMeta& field_meta) {
             return std::make_shared<ChunkWriter<arrow::DoubleArray, double>>(
                 dim, nullable);
         case milvus::DataType::TIMESTAMPTZ:
+        case milvus::DataType::DECIMAL:
             return std::make_shared<ChunkWriter<arrow::Int64Array, int64_t>>(
                 dim, nullable);
         case milvus::DataType::VECTOR_FLOAT:
@@ -684,6 +685,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      nullable,
                                                      chunk_mmap_guard);
         case milvus::DataType::TIMESTAMPTZ:
+        case milvus::DataType::DECIMAL:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
                                                      data,

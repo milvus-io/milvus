@@ -227,6 +227,8 @@ const (
 	DimKey         = "dim"
 	MaxLengthKey   = "max_length"
 	MaxCapacityKey = "max_capacity"
+	PrecisionKey   = "precision"
+	ScaleKey       = "scale"
 
 	DropRatioBuildKey = "drop_ratio_build"
 

@@ -340,6 +340,38 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return merr.WrapErrServiceInternalMsg("expected *array.Int64Builder, got %T", b)
 		},
 	}
+	// Decimal is stored on disk as its unscaled int64 representation (e.g. "19.99" at
+	// scale 4 -> 199900), never as the original decimal-literal text — the text->int64
+	// decode already happened upstream, in ColumnBasedInsertMsgToInsertData. So the Arrow
+	// encoding is identical to Timestamptz's: a plain Int64 column.
+	m[schemapb.DataType_Decimal] = serdeEntry{
+		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
+			return arrow.PrimitiveTypes.Int64
+		},
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, _ int, shouldCopy bool) (any, error) {
+			if a.IsNull(i) {
+				return nil, nil
+			}
+			if arr, ok := a.(*array.Int64); ok && i < arr.Len() {
+				return arr.Value(i), nil
+			}
+			return nil, merr.WrapErrServiceInternalMsg("expected *array.Int64, got %T", a)
+		},
+		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
+			if v == nil {
+				b.AppendNull()
+				return nil
+			}
+			if builder, ok := b.(*array.Int64Builder); ok {
+				if v, ok := v.(int64); ok {
+					builder.Append(v)
+					return nil
+				}
+				return merr.WrapErrServiceInternalMsg("expected int64 value, got %T", v)
+			}
+			return merr.WrapErrServiceInternalMsg("expected *array.Int64Builder, got %T", b)
+		},
+	}
 	stringEntry := serdeEntry{
 		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
 			return arrow.BinaryTypes.String

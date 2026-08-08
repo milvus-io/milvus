@@ -444,6 +444,16 @@ SetUpScalarFieldData(milvus::proto::schema::ScalarField*& scalar_array,
             obj->mutable_data()->Resize(count, 0);
             break;
         }
+        case DataType::DECIMAL: {
+            // Client-facing value is decimal text, carried in bytes_data (same
+            // shape as string_data) — not a plain int64 Resize like TIMESTAMPTZ.
+            auto obj = scalar_array->mutable_bytes_data();
+            obj->mutable_data()->Reserve(count);
+            for (auto i = 0; i < count; i++) {
+                *(obj->mutable_data()->Add()) = std::string();
+            }
+            break;
+        }
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT: {

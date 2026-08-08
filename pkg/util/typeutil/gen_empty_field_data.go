@@ -122,6 +122,20 @@ func genEmptyJSONFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
 	}
 }
 
+func genEmptyDecimalFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      field.GetDataType(),
+		FieldName: field.GetName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BytesData{BytesData: &schemapb.BytesArray{Data: nil}},
+			},
+		},
+		FieldId:   field.GetFieldID(),
+		IsDynamic: field.GetIsDynamic(),
+	}
+}
+
 func genEmptyGeometryFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      field.GetDataType(),
@@ -309,6 +323,8 @@ func GenEmptyFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error)
 		return genEmptyJSONFieldData(field), nil
 	case schemapb.DataType_Geometry:
 		return genEmptyGeometryFieldData(field), nil
+	case schemapb.DataType_Decimal:
+		return genEmptyDecimalFieldData(field), nil
 	case schemapb.DataType_BinaryVector:
 		return genEmptyBinaryVectorFieldData(field)
 	case schemapb.DataType_FloatVector:

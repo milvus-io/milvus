@@ -65,6 +65,7 @@ class IndexFactory {
             case DataType::JSON:
             case DataType::GEOMETRY:
             case DataType::TIMESTAMPTZ:
+            case DataType::DECIMAL:
                 return CreateScalarIndex(type, config, context);
 
             case DataType::VECTOR_FLOAT:
