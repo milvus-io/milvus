@@ -2732,8 +2732,10 @@ TEST(SchemaExternalColumns, ResolveColumnFieldIdConsistency) {
     ASSERT_EQ(columns->size(), 2);
 
     // Each column name should resolve to the correct FieldId
-    EXPECT_EQ(schema->ResolveColumnFieldId((*columns)[0]), FieldId(100));
-    EXPECT_EQ(schema->ResolveColumnFieldId((*columns)[1]), FieldId(101));
+    EXPECT_EQ(schema->ResolveColumnFieldId((*columns)[0]).value(),
+              FieldId(100));
+    EXPECT_EQ(schema->ResolveColumnFieldId((*columns)[1]).value(),
+              FieldId(101));
 }
 
 TEST(SchemaExternalColumns, MilvusTableUsesFieldIdPhysicalColumns) {
@@ -2765,8 +2767,8 @@ TEST(SchemaExternalColumns, MilvusTableUsesFieldIdPhysicalColumns) {
     ASSERT_EQ(columns->size(), 2);
     EXPECT_EQ((*columns)[0], "100");
     EXPECT_EQ((*columns)[1], "101");
-    EXPECT_EQ(schema->ResolveColumnFieldId("100"), FieldId(100));
-    EXPECT_EQ(schema->ResolveColumnFieldId("101"), FieldId(101));
+    EXPECT_EQ(schema->ResolveColumnFieldId("100").value(), FieldId(100));
+    EXPECT_EQ(schema->ResolveColumnFieldId("101").value(), FieldId(101));
     EXPECT_EQ(schema->GetPhysicalColumnName(FieldId(100)), "100");
 }
 
