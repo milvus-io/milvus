@@ -54,6 +54,15 @@ reviewer-visible reminders. Publishing an explicit head-SHA check is required
 because the workflow job's own
 `pull_request_target` status belongs to the base branch SHA.
 
+A referenced Design Doc path is accepted when it exists at the pull-request
+head, the target base SHA, or the base repository's current default branch.
+This lets release backports reference the durable Design Doc on the default
+branch without copying it into every release branch, while misspelled or
+nonexistent paths still fail the policy check. A path that the current pull
+request deletes or renames out of the formal Design Doc directory is excluded
+from this lookup and cannot satisfy the feature requirement through an older
+copy at the base or default branch.
+
 The current workflow publishes through the repository's `github-actions` App.
 Mergify requires a successful check and rejects any same-name check from that
 App that is pending, stale, skipped, neutral, cancelled, timed out, or failed;
@@ -87,8 +96,10 @@ following before relying on them:
    two approvals.
 4. Modifying a legacy Markdown Design Doc whose name does not follow the
    current recommendation still triggers header inspection and two approvals.
-5. A feature pull request with a nonexistent Design Doc path fails the Design
-   Doc Policy check.
+5. A release-branch feature pull request can reference a Design Doc that exists
+   only on the repository default branch, while a path absent from the
+   pull-request head, target base, and default branch fails the Design Doc Policy
+   check.
 6. Removing a visual blocking label does not allow a failing required check to
    merge.
 7. Pushing a new commit dismisses stale approvals and requires a fresh approval

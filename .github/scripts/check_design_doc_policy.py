@@ -241,6 +241,18 @@ class GitHubClient:
         )
         return isinstance(content, dict) and content.get("type") == "file"
 
+    def get_default_branch(self, repository: str) -> str:
+        repository_path = urllib.parse.quote(repository, safe="/")
+        repository_info = self.request("GET", f"/repos/{repository_path}")
+        default_branch = (
+            repository_info.get("default_branch")
+            if isinstance(repository_info, dict)
+            else None
+        )
+        if not isinstance(default_branch, str) or not default_branch:
+            raise RuntimeError("GitHub returned an invalid repository response")
+        return default_branch
+
     def list_issue_comments(
         self, repository: str, pull_number: int
     ) -> list[dict[str, Any]]:
@@ -500,6 +512,7 @@ def validate_feature_design_doc_requirement(
         if status == "renamed" and isinstance(previous_filename, str):
             removed_paths.add(previous_filename)
 
+    unresolved_paths: list[str] = []
     for path in references:
         if path in removed_paths:
             continue
@@ -507,11 +520,18 @@ def validate_feature_design_doc_requirement(
             base_repository, path, base_sha
         ):
             return None
+        unresolved_paths.append(path)
+
+    if unresolved_paths:
+        default_branch = client.get_default_branch(base_repository)
+        for path in unresolved_paths:
+            if client.file_exists(base_repository, path, default_branch):
+                return None
 
     return (
         "None of the formal design-document paths listed in the pull request "
-        "description exists at the pull request head or base. Correct the path "
-        "or add the document to this repository."
+        "description exists at the pull request head, target base, or repository "
+        "default branch. Correct the path or add the document to this repository."
     )
 
 

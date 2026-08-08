@@ -1095,29 +1095,57 @@ inline docs/design-docs/design_docs/20260728-inline.md reference
         self.assertIn("must add or update", issue)
         client.file_exists.assert_not_called()
 
-    def test_changed_formal_doc_satisfies_feature_requirement(self):
+    def test_added_or_modified_formal_doc_satisfies_feature_requirement(self):
+        for status in ("added", "modified"):
+            with self.subTest(status=status):
+                client = mock.Mock()
+                files = [
+                    {
+                        "filename": (
+                            "docs/design-docs/design_docs/Legacy Topic/Old Design.md"
+                        ),
+                        "status": status,
+                        "sha": "doc",
+                    }
+                ]
+                self.assertIsNone(
+                    checker.validate_feature_design_doc_requirement(
+                        client,
+                        "milvus-io/milvus",
+                        "base",
+                        "contributor/milvus",
+                        "head",
+                        "feat: example",
+                        [],
+                        "",
+                        files,
+                    )
+                )
+                client.file_exists.assert_not_called()
+                client.get_default_branch.assert_not_called()
+
+    def test_referenced_doc_at_pr_head_satisfies_feature_requirement(self):
         client = mock.Mock()
-        files = [
-            {
-                "filename": "docs/design-docs/design_docs/Legacy Topic/Old Design.md",
-                "status": "modified",
-                "sha": "doc",
-            }
-        ]
+        client.file_exists.return_value = True
+        path = "docs/design-docs/design_docs/20260728-new.md"
+
         self.assertIsNone(
             checker.validate_feature_design_doc_requirement(
                 client,
                 "milvus-io/milvus",
-                "base",
+                "release-base",
                 "contributor/milvus",
                 "head",
                 "feat: example",
                 [],
-                "",
-                files,
+                f"design doc: {path}",
+                [],
             )
         )
-        client.file_exists.assert_not_called()
+        client.file_exists.assert_called_once_with(
+            "contributor/milvus", path, "head"
+        )
+        client.get_default_branch.assert_not_called()
 
     def test_existing_referenced_doc_satisfies_feature_requirement(self):
         client = mock.Mock()
@@ -1142,10 +1170,41 @@ inline docs/design-docs/design_docs/20260728-inline.md reference
                 mock.call("milvus-io/milvus", path, "base"),
             ]
         )
+        client.get_default_branch.assert_not_called()
+
+    def test_default_branch_doc_satisfies_release_feature_requirement(self):
+        client = mock.Mock()
+        client.file_exists.side_effect = [False, False, True]
+        client.get_default_branch.return_value = "trunk"
+        path = "docs/design-docs/design_docs/Legacy Topic/Old Design.md"
+
+        self.assertIsNone(
+            checker.validate_feature_design_doc_requirement(
+                client,
+                "milvus-io/milvus",
+                "release-base",
+                "contributor/milvus",
+                "head",
+                "feat: release backport",
+                [],
+                f"design doc: {path}",
+                [],
+            )
+        )
+        client.get_default_branch.assert_called_once_with("milvus-io/milvus")
+        self.assertEqual(
+            [
+                mock.call("contributor/milvus", path, "head"),
+                mock.call("milvus-io/milvus", path, "release-base"),
+                mock.call("milvus-io/milvus", path, "trunk"),
+            ],
+            client.file_exists.call_args_list,
+        )
 
     def test_missing_or_nonexistent_reference_fails_feature_requirement(self):
         client = mock.Mock()
         client.file_exists.return_value = False
+        client.get_default_branch.return_value = "trunk"
         missing = checker.validate_feature_design_doc_requirement(
             client,
             "milvus-io/milvus",
@@ -1158,6 +1217,8 @@ inline docs/design-docs/design_docs/20260728-inline.md reference
             [],
         )
         self.assertIn("must add or update", missing)
+        client.file_exists.assert_not_called()
+        client.get_default_branch.assert_not_called()
 
         nonexistent = checker.validate_feature_design_doc_requirement(
             client,
@@ -1171,6 +1232,71 @@ inline docs/design-docs/design_docs/20260728-inline.md reference
             [],
         )
         self.assertIn("None of the formal design-document paths", nonexistent)
+        client.get_default_branch.assert_called_once_with("milvus-io/milvus")
+        self.assertEqual(
+            [
+                mock.call(
+                    "contributor/milvus",
+                    "docs/design-docs/design_docs/20260728-missing.md",
+                    "head",
+                ),
+                mock.call(
+                    "milvus-io/milvus",
+                    "docs/design-docs/design_docs/20260728-missing.md",
+                    "base",
+                ),
+                mock.call(
+                    "milvus-io/milvus",
+                    "docs/design-docs/design_docs/20260728-missing.md",
+                    "trunk",
+                ),
+            ],
+            client.file_exists.call_args_list,
+        )
+
+    def test_default_branch_is_loaded_once_for_multiple_missing_references(self):
+        client = mock.Mock()
+        client.file_exists.return_value = False
+        client.get_default_branch.return_value = "mainline"
+
+        issue = checker.validate_feature_design_doc_requirement(
+            client,
+            "milvus-io/milvus",
+            "release-base",
+            "contributor/milvus",
+            "head",
+            "feat: example",
+            [],
+            "\n".join(
+                [
+                    "design doc: docs/design-docs/design_docs/20260728-a.md",
+                    "design doc: docs/design-docs/design_docs/20260728-b.md",
+                ]
+            ),
+            [],
+        )
+
+        self.assertIn("None of the formal design-document paths", issue)
+        client.get_default_branch.assert_called_once_with("milvus-io/milvus")
+        self.assertEqual(6, client.file_exists.call_count)
+
+    def test_default_branch_lookup_failure_propagates(self):
+        client = mock.Mock()
+        client.file_exists.return_value = False
+        client.get_default_branch.side_effect = RuntimeError("repository unavailable")
+
+        with self.assertRaisesRegex(RuntimeError, "repository unavailable"):
+            checker.validate_feature_design_doc_requirement(
+                client,
+                "milvus-io/milvus",
+                "release-base",
+                "contributor/milvus",
+                "head",
+                "feat: example",
+                [],
+                "design doc: docs/design-docs/design_docs/20260728-example.md",
+                [],
+            )
 
     def test_deletion_or_rename_out_does_not_satisfy_feature_requirement(self):
         client = mock.Mock()
@@ -1203,6 +1329,26 @@ inline docs/design-docs/design_docs/20260728-inline.md reference
         )
         self.assertIn("None of the formal design-document paths", issue)
         client.file_exists.assert_not_called()
+        client.get_default_branch.assert_not_called()
+
+
+class GitHubClientRepositoryTest(unittest.TestCase):
+    def test_reads_default_branch_from_repository_metadata(self):
+        client = checker.GitHubClient("token", "https://api.github.test")
+        client.request = mock.Mock(return_value={"default_branch": "trunk"})
+
+        self.assertEqual("trunk", client.get_default_branch("milvus-io/milvus"))
+        client.request.assert_called_once_with("GET", "/repos/milvus-io/milvus")
+
+    def test_rejects_invalid_default_branch_metadata(self):
+        client = checker.GitHubClient("token", "https://api.github.test")
+        for response in (None, {}, {"default_branch": ""}, {"default_branch": 1}):
+            with self.subTest(response=response):
+                client.request = mock.Mock(return_value=response)
+                with self.assertRaisesRegex(
+                    RuntimeError, "invalid repository response"
+                ):
+                    client.get_default_branch("milvus-io/milvus")
 
 
 class CommentTest(unittest.TestCase):

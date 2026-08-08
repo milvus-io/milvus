@@ -106,6 +106,10 @@ To satisfy the requirement, do one of the following:
 - Add or update the design document in the same pull request as the related implementation.
 - Link an existing in-repo design document in the pull request description.
 
+For a release-branch pull request, the referenced Design Doc may exist only on
+the base repository's default branch and does not need to be copied to the
+target release branch.
+
 Use this pull request description format when linking an existing document:
 
 ```markdown

@@ -73,6 +73,9 @@ Use [`TEMPLATE.md`](TEMPLATE.md) as the starting point for a new document.
   metadata. A nonexistent feature Design Doc reference fails the pull request
   check. Files removed by a pull request still trigger the two-Approver policy,
   but naturally have no header to validate.
+- A release-branch pull request may reference a Design Doc that exists only on
+  the base repository's default branch; it does not need a duplicate copy on
+  the target release branch.
 
 ## Content expectations
 
