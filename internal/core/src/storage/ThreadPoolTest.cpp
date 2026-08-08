@@ -19,6 +19,7 @@
 #include <concepts>
 #include <future>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 
@@ -189,7 +190,7 @@ TEST_F(ThreadPoolTest, LoadFileOverheadControllerIsLazyAndStable) {
     EXPECT_EQ(file_group, file_owner.GetOrCreate(/*executor_workers=*/8));
 }
 
-TEST_F(ThreadPoolTest, WorkerSpawnFailureDoesNotFailQueuedTask) {
+TEST_F(ThreadPoolTest, WorkerSpawnFailureRejectsUnqueuedTask) {
     ThreadPool pool(1.0, "test_pool");
 
     std::promise<void> blocker_started;
@@ -208,18 +209,24 @@ TEST_F(ThreadPoolTest, WorkerSpawnFailureDoesNotFailQueuedTask) {
     };
 
     std::atomic<int> task_runs{0};
-    std::future<void> task_future;
-    EXPECT_NO_THROW(
-        task_future = pool.Submit([&task_runs]() { task_runs.fetch_add(1); }));
+    EXPECT_THROW(pool.Submit([&task_runs]() { task_runs.fetch_add(1); }),
+                 std::system_error);
 
     unblock_worker.set_value();
     blocker.get();
 
-    ASSERT_TRUE(task_future.valid());
-    ASSERT_EQ(task_future.wait_for(std::chrono::seconds(2)),
-              std::future_status::ready);
-    task_future.get();
-    EXPECT_EQ(task_runs.load(), 1);
+    EXPECT_EQ(task_runs.load(), 0);
+}
+
+TEST_F(ThreadPoolTest, SubmissionPreservesResultAndTaskException) {
+    ThreadPool pool(1.0, "test_pool");
+
+    auto result = pool.Submit([](int value) { return value + 1; }, 41);
+    EXPECT_EQ(result.get(), 42);
+
+    auto failure =
+        pool.Submit([]() { throw std::runtime_error("task failed"); });
+    EXPECT_THROW(failure.get(), std::runtime_error);
 }
 
 }  // namespace milvus

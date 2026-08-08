@@ -139,64 +139,67 @@ class ThreadPool {
         std::function<decltype(f(args...))()> func =
             std::bind(std::forward<F>(f), std::forward<Args>(args)...);
         auto task_ptr =
-            std::make_shared<std::packaged_task<decltype(f(args...))()>>(func);
-
-        auto enqueue_time = std::chrono::steady_clock::now();
-        auto* queue_metric = metric_queue_duration_;
-        auto* execute_metric = metric_execute_duration_;
-        std::function<void()> wrap_func = [task_ptr,
-                                           enqueue_time,
-                                           queue_metric,
-                                           execute_metric]() {
-            auto execute_start = std::chrono::steady_clock::now();
-            if (queue_metric) {
-                queue_metric->Observe(
-                    std::chrono::duration<double>(execute_start - enqueue_time)
-                        .count());
-            }
-            auto observe_execute = [&]() {
-                if (execute_metric) {
-                    execute_metric->Observe(
-                        std::chrono::duration<double>(
-                            std::chrono::steady_clock::now() - execute_start)
-                            .count());
-                }
-            };
-            try {
-                (*task_ptr)();
-            } catch (...) {
-                observe_execute();
-                throw;
-            }
-            observe_execute();
-        };
-
+            std::make_shared<std::packaged_task<decltype(f(args...))()>>(
+                std::move(func));
         auto future = task_ptr->get_future();
 
-        std::unique_lock<std::mutex> lock(mutex_);
-        work_queue_.enqueue(std::move(wrap_func));
+        auto* queue_metric = metric_queue_duration_;
+        auto* execute_metric = metric_execute_duration_;
 
-        if (idle_threads_size_ > 0) {
-            condition_lock_.notify_one();
-        }
-        if (work_queue_.size() > static_cast<size_t>(idle_threads_size_) &&
-            current_threads_size_ < max_threads_size_.load()) {
-            // Dynamic increase thread number
-            try {
+        // Lifetime-safety contract: do not move work_queue_.enqueue() above
+        // this block. Every fallible worker-provisioning step must finish
+        // before task publication. A caller may release task-captured state
+        // when Submit() throws; enqueueing first could leave an accepted but
+        // untracked task using that state after the caller unwinds.
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (work_queue_.size() >= static_cast<size_t>(idle_threads_size_) &&
+                current_threads_size_ < max_threads_size_.load()) {
+                // Dynamic increase thread number
                 if (worker_spawn_hook_for_test_) {
                     worker_spawn_hook_for_test_();
                 }
                 threads_.emplace_back(&ThreadPool::Worker, this);
                 current_threads_size_++;
-            } catch (const std::exception& e) {
-                LOG_WARN(
-                    "Failed to expand thread pool {}: {}", name_, e.what());
-            } catch (...) {
-                LOG_WARN("Failed to expand thread pool {}", name_);
+            }
+
+            // Queue duration starts after lock wait and worker provisioning, so
+            // it measures time from queue publication to task execution.
+            auto enqueue_time = std::chrono::steady_clock::now();
+            std::function<void()> wrap_func =
+                [task_ptr, enqueue_time, queue_metric, execute_metric]() {
+                    auto execute_start = std::chrono::steady_clock::now();
+                    if (queue_metric) {
+                        queue_metric->Observe(std::chrono::duration<double>(
+                                                  execute_start - enqueue_time)
+                                                  .count());
+                    }
+                    auto observe_execute = [&]() {
+                        if (execute_metric) {
+                            execute_metric->Observe(
+                                std::chrono::duration<double>(
+                                    std::chrono::steady_clock::now() -
+                                    execute_start)
+                                    .count());
+                        }
+                    };
+                    try {
+                        (*task_ptr)();
+                    } catch (...) {
+                        observe_execute();
+                        throw;
+                    }
+                    observe_execute();
+                };
+            work_queue_.enqueue(wrap_func);
+            if (idle_threads_size_ > 0) {
+                condition_lock_.notify_one();
             }
         }
-        lock.unlock();
 
+        // Queue publication is the acceptance boundary. Do not let optional
+        // post-enqueue metrics prevent the accepted task's future from being
+        // returned.
         try {
             if (metric_submitted_) {
                 metric_submitted_->Increment();
@@ -204,14 +207,10 @@ class ThreadPool {
             if (metric_queue_depth_) {
                 metric_queue_depth_->Set(work_queue_.size());
             }
-        } catch (const std::exception& e) {
-            LOG_WARN("Failed to update thread pool {} submit metrics: {}",
-                     name_,
-                     e.what());
         } catch (...) {
-            LOG_WARN("Failed to update thread pool {} submit metrics", name_);
+            // Metrics are best-effort. Nothing after queue publication may
+            // throw before the accepted task's future is returned.
         }
-
         return future;
     }
 
@@ -289,7 +288,7 @@ class ThreadPool {
     prometheus::Histogram* metric_execute_duration_{nullptr};
 
  private:
-    friend class ThreadPoolTest_WorkerSpawnFailureDoesNotFailQueuedTask_Test;
+    friend class ThreadPoolTest_WorkerSpawnFailureRejectsUnqueuedTask_Test;
 
     // Deterministic test seam for worker-spawn failure coverage.
     std::function<void()> worker_spawn_hook_for_test_;
