@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -759,6 +760,33 @@ func Test_updateMaxFieldIDProperty(t *testing.T) {
 		assert.Equal(t, common.MaxFieldIDKey, result[1].Key)
 		assert.Equal(t, "103", result[1].Value)
 	})
+}
+
+func TestCheckFieldSchemaNestedArrayTypeRepresentation(t *testing.T) {
+	typeSchema := &schemapb.TypeSchema{
+		Kind: &schemapb.TypeSchema_ArrayElement{
+			ArrayElement: &schemapb.TypeSchema{
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+					},
+				},
+			},
+		},
+	}
+
+	require.NoError(t, checkFieldSchema([]*schemapb.FieldSchema{{
+		Name:        "nested_array",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Array,
+		TypeSchema:  typeSchema,
+	}}))
+
+	err := checkFieldSchema([]*schemapb.FieldSchema{{
+		Name:       "nested_array",
+		TypeSchema: typeSchema,
+	}})
+	require.ErrorContains(t, err, "must specify data_type Array and element_type Array")
 }
 
 func TestValidateLocalFormat(t *testing.T) {

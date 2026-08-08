@@ -1002,6 +1002,9 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 	}
 
 	// --- new field property constraints ---
+	if err := typeutil.ValidateFieldTypeSchema(newFieldSchema); err != nil {
+		return err
+	}
 	if _, ok := schemapb.DataType_name[int32(newFieldSchema.GetDataType())]; !ok || newFieldSchema.GetDataType() == schemapb.DataType_None {
 		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", newFieldSchema.GetDataType()))
 	}

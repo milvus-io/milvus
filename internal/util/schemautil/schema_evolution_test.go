@@ -211,6 +211,39 @@ func TestValidateSchemaEvolutionRejectsKeptFieldReinterpretation(t *testing.T) {
 	}
 }
 
+func TestValidateSchemaEvolutionRejectsNestedArrayTypeSchemaChange(t *testing.T) {
+	nestedArray := func(leafType schemapb.DataType) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			FieldID:     106,
+			Name:        "nested_array",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			Nullable:    true,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
+			TypeSchema: &schemapb.TypeSchema{
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_LeafType{LeafType: leafType},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	oldSchema := evolutionBaseSchema()
+	oldSchema.Fields = append(oldSchema.Fields, nestedArray(schemapb.DataType_Int64))
+	setMaxFieldID(oldSchema, 106)
+	newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+	evolutionFieldByID(newSchema, 106).TypeSchema = nestedArray(schemapb.DataType_VarChar).GetTypeSchema()
+
+	require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot change the type schema")
+}
+
 func TestValidateSchemaEvolutionRejectsNonMonotonicBounds(t *testing.T) {
 	tests := []struct {
 		name   string

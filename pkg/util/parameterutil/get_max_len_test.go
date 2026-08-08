@@ -105,4 +105,27 @@ func TestGetMaxCapacity(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int64(100), maxCap)
 	})
+
+	t.Run("type schema", func(t *testing.T) {
+		typeSchema := &schemapb.TypeSchema{
+			Kind: &schemapb.TypeSchema_ArrayElement{
+				ArrayElement: &schemapb.TypeSchema{
+					Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+				},
+			},
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "10"}},
+		}
+		maxCap, err := GetMaxCapacityFromTypeSchema(typeSchema)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(10), maxCap)
+	})
+
+	t.Run("type schema must be array", func(t *testing.T) {
+		typeSchema := &schemapb.TypeSchema{
+			Kind:       &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+		}
+		_, err := GetMaxCapacityFromTypeSchema(typeSchema)
+		assert.Error(t, err)
+	})
 }

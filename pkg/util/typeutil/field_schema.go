@@ -89,3 +89,82 @@ func CreateFieldSchemaHelper(schema *schemapb.FieldSchema) *FieldSchemaHelper {
 		indexParams: NewKvPairs(schema.GetIndexParams()),
 	}
 }
+
+// validateTypeSchemaNode validates the recursive encoding of a TypeSchema node.
+// Array nodes must use array_element; all other types must use leaf_type.
+func validateTypeSchemaNode(fieldName string, typeSchema *schemapb.TypeSchema) error {
+	if typeSchema == nil {
+		return merr.WrapErrParameterInvalidMsg(
+			"type_schema kind should be specified for field %s", fieldName)
+	}
+
+	switch kind := typeSchema.GetKind().(type) {
+	case *schemapb.TypeSchema_ArrayElement:
+		if kind.ArrayElement == nil {
+			return merr.WrapErrParameterInvalidMsg(
+				"type_schema array_element should be specified for field %s", fieldName)
+		}
+		return validateTypeSchemaNode(fieldName, kind.ArrayElement)
+	case *schemapb.TypeSchema_LeafType:
+		if _, ok := schemapb.DataType_name[int32(kind.LeafType)]; !ok || kind.LeafType == schemapb.DataType_None {
+			return merr.WrapErrParameterInvalidMsg(
+				"type_schema leaf_type %s is not valid for field %s",
+				kind.LeafType.String(), fieldName)
+		}
+		if kind.LeafType == schemapb.DataType_Array {
+			return merr.WrapErrParameterInvalidMsg(
+				"type_schema leaf_type Array must use array_element for field %s", fieldName)
+		}
+		return nil
+	default:
+		return merr.WrapErrParameterInvalidMsg(
+			"type_schema kind should be specified for field %s", fieldName)
+	}
+}
+
+// IsNestedArrayTypeSchema reports whether typeSchema describes an Array whose
+// direct element is another Array.
+func IsNestedArrayTypeSchema(typeSchema *schemapb.TypeSchema) bool {
+	if typeSchema == nil {
+		return false
+	}
+	elementSchema := typeSchema.GetArrayElement()
+	if elementSchema == nil {
+		return false
+	}
+	_, ok := elementSchema.GetKind().(*schemapb.TypeSchema_ArrayElement)
+	return ok
+}
+
+// ValidateFieldTypeSchema validates the wire representation of nested Arrays.
+// Non-nested fields use only data_type/element_type. Nested Arrays use
+// data_type=Array, element_type=Array, and a recursive type_schema.
+func ValidateFieldTypeSchema(field *schemapb.FieldSchema) error {
+	typeSchema := field.GetTypeSchema()
+	if typeSchema == nil {
+		if field.GetDataType() == schemapb.DataType_Array &&
+			field.GetElementType() == schemapb.DataType_Array {
+			return merr.WrapErrParameterInvalidMsg(
+				"element type Array is not supported without type_schema; nested array field %s must specify type_schema",
+				field.GetName())
+		}
+		return nil
+	}
+
+	if err := validateTypeSchemaNode(field.GetName(), typeSchema); err != nil {
+		return err
+	}
+	if !IsNestedArrayTypeSchema(typeSchema) {
+		return merr.WrapErrParameterInvalidMsg(
+			"type_schema is only supported for nested array field %s",
+			field.GetName())
+	}
+	if field.GetDataType() != schemapb.DataType_Array ||
+		field.GetElementType() != schemapb.DataType_Array {
+		return merr.WrapErrParameterInvalidMsg(
+			"nested array field %s must specify data_type Array and element_type Array",
+			field.GetName())
+	}
+
+	return nil
+}

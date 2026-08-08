@@ -33,6 +33,7 @@
 #include "bitset/detail/element_wise.h"
 #include "bitset/detail/popcount.h"
 #include "common/Array.h"
+#include "common/ArrayValue.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
 #include "common/Geometry.h"
@@ -41,6 +42,90 @@
 #include "simdjson/padded_string.h"
 
 namespace milvus {
+
+void
+FieldData<ArrayValue>::FillFieldData(
+    const std::shared_ptr<arrow::Array> array) {
+    AssertInfo(array != nullptr, "null Arrow array for nested ARRAY field");
+    AssertInfo(array->type_id() == arrow::Type::BINARY,
+               "nested ARRAY field expects Arrow BinaryArray, got {}",
+               array->type()->ToString());
+    auto binary_array = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+
+    const auto element_count = binary_array->length();
+    if (element_count == 0) {
+        return;
+    }
+
+    std::vector<ArrayValue> values;
+    values.reserve(element_count);
+    for (int64_t index = 0; index < element_count; ++index) {
+        ScalarFieldProto row;
+        if (binary_array->IsValid(index)) {
+            const auto value = binary_array->GetView(index);
+            AssertInfo(row.ParseFromArray(value.data(), value.size()),
+                       "failed to parse nested ARRAY row {}",
+                       index);
+            AssertInfo(row.data_case() != ScalarFieldProto::DATA_NOT_SET,
+                       "valid nested ARRAY row {} has no ScalarField payload",
+                       index);
+        }
+        values.emplace_back(ArrayValue::FromProto(row, array_type_));
+    }
+
+    if (this->nullable_) {
+        this->null_count_ += binary_array->null_count();
+        return Base::FillFieldData(values.data(),
+                                   binary_array->null_bitmap_data(),
+                                   element_count,
+                                   binary_array->offset());
+    }
+
+    AssertInfo(binary_array->null_count() == 0,
+               "non-nullable nested ARRAY field contains {} null rows",
+               binary_array->null_count());
+    return Base::FillFieldData(values.data(), element_count);
+}
+
+void
+FieldData<ArrayValue>::FillFieldData(
+    const std::optional<DefaultValueType> default_value,
+    ssize_t element_count) {
+    AssertInfo(this->nullable_, "added nested ARRAY field must be nullable");
+    AssertInfo(!default_value.has_value(),
+               "nested ARRAY default values are not supported");
+    if (element_count == 0) {
+        return;
+    }
+
+    ScalarFieldProto null_row;
+    std::vector<ArrayValue> values;
+    values.reserve(element_count);
+    for (ssize_t i = 0; i < element_count; ++i) {
+        values.emplace_back(ArrayValue::FromProto(null_row, array_type_));
+    }
+    std::vector<uint8_t> valid_data((element_count + 7) / 8, 0);
+    this->null_count_ += element_count;
+    Base::FillFieldData(values.data(), valid_data.data(), element_count, 0);
+}
+
+int64_t
+FieldData<ArrayValue>::DataSize() const {
+    int64_t data_size = 0;
+    for (size_t offset = 0; offset < this->length(); ++offset) {
+        data_size += static_cast<int64_t>(this->data_[offset].byte_size());
+    }
+    return data_size;
+}
+
+int64_t
+FieldData<ArrayValue>::DataSize(ssize_t offset) const {
+    AssertInfo(offset >= 0 && offset < this->get_num_rows(),
+               "field data subscript out of range");
+    AssertInfo(static_cast<size_t>(offset) < this->length(),
+               "subscript position doesn't have a value");
+    return static_cast<int64_t>(this->data_[offset].byte_size());
+}
 
 template <typename Type, bool is_type_entire_row>
 void
@@ -654,6 +739,7 @@ template class FieldDataImpl<std::string, true>;
 template class FieldDataImpl<Json, true>;
 template class FieldDataImpl<Geometry, true>;
 template class FieldDataImpl<Array, true>;
+template class FieldDataImpl<ArrayValue, true>;
 
 // vector data
 template class FieldDataImpl<int8_t, false>;

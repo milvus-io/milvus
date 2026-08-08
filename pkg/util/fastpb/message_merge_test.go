@@ -144,6 +144,19 @@ func TestRepeatedMessageOneofMerge(t *testing.T) {
 		assert.True(t, proto.Equal(got, want), "got=%v want=%v", got, want)
 	})
 
+	t.Run("IDs different variants including UUID remain last-wins", func(t *testing.T) {
+		wire := concat(t,
+			&schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: [][]byte{{1, 2, 3}}}}},
+			&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{4}}}},
+			&schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: [][]byte{{5, 6, 7}}}}},
+		)
+		want := &schemapb.IDs{}
+		require.NoError(t, proto.Unmarshal(wire, want))
+		got := &schemapb.IDs{}
+		require.NoError(t, dec{}.ids(wire, got))
+		assert.True(t, proto.Equal(got, want), "got=%v want=%v", got, want)
+	})
+
 	t.Run("different variants remain last-wins", func(t *testing.T) {
 		wire := concat(t,
 			&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{}}},
