@@ -151,6 +151,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 		}
 		_, err := NewModelProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
+		s.ErrorContains(err, "[truncation_direction param's value: unknow] is invalid, only supports [Left/Right]")
 	}
 	{
 		params := []*commonpb.KeyValuePair{

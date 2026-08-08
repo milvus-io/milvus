@@ -72,7 +72,7 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 			}
 		case models.TruncationDirectionParamKey:
 			if truncationDirection = param.Value; truncationDirection != "Left" && truncationDirection != "Right" {
-				return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is not invalid, only supports [Left/Right]", models.TruncationDirectionParamKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is invalid, only supports [Left/Right]", models.TruncationDirectionParamKey, param.Value)
 			}
 		case models.TruncateParamKey:
 			if truncate, err = strconv.ParseBool(param.Value); err != nil {
