@@ -214,7 +214,10 @@ case "${unameOut}" in
     export CMAKE_CXX_COMPILER_LAUNCHER=ccache
     echo "Using CXX: $CXX"
     echo "Using CC: $CC"
-    CONAN_ARGS="--output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=20 -u"
+    # protobuf is built twice (host lib + build-tool variant). The default Conan
+    # build profile uses gnu17/clang-21; abseil needs C++20 std::weak_ordering.
+    # Align the build profile with the host profile (-s:b ...).
+    CONAN_ARGS="--output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=20 -s:b compiler=clang -s:b compiler.version=${llvm_version} -s:b compiler.libcxx=libc++ -s:b compiler.cppstd=20 -u"
 
     # On macOS, Conan packages with shared libraries (protobuf, grpc) produce
     # binaries (protoc, grpc_cpp_plugin) whose install rpaths don't include
