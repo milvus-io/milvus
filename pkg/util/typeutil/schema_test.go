@@ -7116,3 +7116,15 @@ func TestGetTotalFieldsNumIncludesStructParent(t *testing.T) {
 	assert.Equal(t, 5, GetTotalFieldsNum(schema))
 	assert.Len(t, GetAllFieldSchemas(schema), 4)
 }
+
+// Decoding a dynamic field into map[string]interface{} rounds every number to
+// float64, so a partial update of one key silently rewrote the others.
+func TestMergeDynamicJSONKeepsUntouchedValues(t *testing.T) {
+	merged, err := mergeDynamicJSON(
+		[]byte(`{"untouched":9007199254740993,"big":12345678901234567890,"tag":"old"}`),
+		[]byte(`{"tag":"new"}`))
+	require.NoError(t, err)
+	assert.Contains(t, string(merged), `"untouched":9007199254740993`)
+	assert.Contains(t, string(merged), `"big":12345678901234567890`)
+	assert.Contains(t, string(merged), `"tag":"new"`)
+}

@@ -1724,23 +1724,9 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 					if baseFieldData.GetIsDynamic() {
 						// dynamic field is a json with only 1 level nested struct,
 						// so we need to unmarshal and iterate updateData's key value, and update the baseData's key value
-						var baseMap map[string]interface{}
-						var updateMap map[string]interface{}
-						// unmarshal base and update
-						if err := json.Unmarshal(baseData.Data[baseIdx], &baseMap); err != nil {
-							return merr.Wrap(err, "failed to unmarshal base json")
-						}
-						if err := json.Unmarshal(updateData.Data[updateIdx], &updateMap); err != nil {
-							return merr.Wrap(err, "failed to unmarshal update json")
-						}
-						// merge
-						for k, v := range updateMap {
-							baseMap[k] = v
-						}
-						// marshal back
-						newJSON, err := json.Marshal(baseMap)
+						newJSON, err := mergeDynamicJSON(baseData.Data[baseIdx], updateData.Data[updateIdx])
 						if err != nil {
-							return merr.Wrap(err, "failed to marshal merged json")
+							return err
 						}
 						baseScalar.GetJsonData().Data[baseIdx] = newJSON
 					} else {
@@ -1990,23 +1976,9 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 				// so we need to unmarshal and iterate updateData's key value, and update the baseData's key value
 				for i, baseIdx := range baseIndices {
 					updateIdx := updateIndices[i]
-					var baseMap map[string]interface{}
-					var updateMap map[string]interface{}
-					// unmarshal base and update
-					if err := json.Unmarshal(baseData[baseIdx], &baseMap); err != nil {
-						return merr.Wrap(err, "failed to unmarshal base json")
-					}
-					if err := json.Unmarshal(updateData[updateIdx], &updateMap); err != nil {
-						return merr.Wrap(err, "failed to unmarshal update json")
-					}
-					// merge
-					for k, v := range updateMap {
-						baseMap[k] = v
-					}
-					// marshal back
-					newJSON, err := json.Marshal(baseMap)
+					newJSON, err := mergeDynamicJSON(baseData[baseIdx], updateData[updateIdx])
 					if err != nil {
-						return merr.Wrap(err, "failed to marshal merged json")
+						return err
 					}
 					baseData[baseIdx] = newJSON
 				}
@@ -2316,6 +2288,32 @@ func countValid(validData []bool) int {
 }
 
 // MergeFieldData appends fields data to dst
+// mergeDynamicJSON merges an update document over a base document without
+// decoding the values.
+//
+// Decoding into map[string]interface{} rounds every number to float64, so a
+// partial update of one key silently rewrote every other key in the row:
+// 9007199254740993 came back as ...992 even though the caller never touched it.
+// json.RawMessage keeps each value as the bytes it already was.
+func mergeDynamicJSON(base []byte, update []byte) ([]byte, error) {
+	baseMap := make(map[string]json.RawMessage)
+	updateMap := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(base, &baseMap); err != nil {
+		return nil, merr.Wrap(err, "failed to unmarshal base json")
+	}
+	if err := json.Unmarshal(update, &updateMap); err != nil {
+		return nil, merr.Wrap(err, "failed to unmarshal update json")
+	}
+	for k, v := range updateMap {
+		baseMap[k] = v
+	}
+	merged, err := json.Marshal(baseMap)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to marshal merged json")
+	}
+	return merged, nil
+}
+
 func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error {
 	fieldID2Data := make(map[int64]*schemapb.FieldData)
 	for _, data := range dst {
