@@ -11,15 +11,18 @@ func TestDialOptionsAlwaysIncludesDefaults(t *testing.T) {
 	c := &Client{config: &ClientConfig{
 		DialOptions: []grpc.DialOption{grpc.WithAuthority("test")},
 	}}
-	opts := c.dialOptions()
-	// TLS/insecure (1) + DefaultGrpcOpts (len) + user option (1) + interceptors (2)
-	assert.True(t, len(opts) >= len(DefaultGrpcOpts)+1, "dialOptions should include DefaultGrpcOpts plus user options")
+	opts := c.connectionOptions()
+	assert.Len(t, opts.DialOptions, len(DefaultGrpcOpts)+1)
+	assert.Len(t, opts.UnaryInterceptors, 2)
+	assert.NotNil(t, opts.TransportCredentials)
 }
 
 func TestDialOptionsWithNilDialOptions(t *testing.T) {
 	c := &Client{config: &ClientConfig{}}
-	opts := c.dialOptions()
-	assert.True(t, len(opts) >= len(DefaultGrpcOpts), "dialOptions should include DefaultGrpcOpts even when DialOptions is nil")
+	opts := c.connectionOptions()
+	assert.Len(t, opts.DialOptions, len(DefaultGrpcOpts))
+	assert.Len(t, opts.UnaryInterceptors, 2)
+	assert.NotNil(t, opts.TransportCredentials)
 }
 
 func TestWithGrpcAuthority(t *testing.T) {
