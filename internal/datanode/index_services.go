@@ -83,7 +83,7 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
-	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
+	cm, err := node.storageFactory.NewChunkManager(ctx, req.GetStorageConfig())
 	if err != nil {
 		mlog.Error(context.TODO(), "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
 			mlog.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
@@ -285,7 +285,7 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
-	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
+	cm, err := node.storageFactory.NewChunkManager(ctx, req.GetStorageConfig())
 	if err != nil {
 		mlog.Error(context.TODO(), "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
 			mlog.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
@@ -396,7 +396,7 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 		mlog.Warn(context.TODO(), "duplicated stats task", mlog.Err(err))
 		return merr.Status(err), nil
 	}
-	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
+	cm, err := node.storageFactory.NewChunkManager(ctx, req.GetStorageConfig())
 	if err != nil {
 		mlog.Error(context.TODO(), "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
 			mlog.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),

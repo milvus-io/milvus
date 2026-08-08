@@ -209,7 +209,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 	if err != nil {
 		return merr.Status(err), err
 	}
-	cm, err := node.storageFactory.NewChunkManager(node.ctx, compactionParams.StorageConfig)
+	cm, err := node.storageFactory.NewChunkManager(ctx, compactionParams.StorageConfig)
 	if err != nil {
 		mlog.Error(context.TODO(), "create chunk manager failed",
 			mlog.String("bucket", compactionParams.StorageConfig.GetBucketName()),
@@ -368,7 +368,7 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 		return merr.Status(err), nil
 	}
 
-	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
+	cm, err := node.storageFactory.NewChunkManager(ctx, req.GetStorageConfig())
 	if err != nil {
 		mlog.Error(context.TODO(), "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
 			mlog.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
@@ -396,7 +396,7 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 		return merr.Status(err), nil
 	}
 
-	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
+	cm, err := node.storageFactory.NewChunkManager(ctx, req.GetStorageConfig())
 	if err != nil {
 		mlog.Error(context.TODO(), "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
 			mlog.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
@@ -516,7 +516,7 @@ func (node *DataNode) CopySegment(ctx context.Context, req *datapb.CopySegmentRe
 		return merr.Status(err), nil
 	}
 
-	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
+	cm, err := node.storageFactory.NewChunkManager(ctx, req.GetStorageConfig())
 	if err != nil {
 		mlog.Error(context.TODO(), "create chunk manager failed",
 			mlog.String("bucket", req.GetStorageConfig().GetBucketName()),

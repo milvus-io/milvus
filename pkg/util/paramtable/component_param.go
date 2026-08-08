@@ -7062,10 +7062,17 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.JSONStatsTriggerInterval.Init(base.mgr)
 
 	p.RequestTimeoutSeconds = ParamItem{
-		Key:          "dataCoord.requestTimeoutSeconds",
-		Version:      "2.5.5",
-		Doc:          "request timeout interval",
-		DefaultValue: "600",
+		Key:     "dataCoord.requestTimeoutSeconds",
+		Version: "2.5.5",
+		Doc: `Timeout for DataCoord's requests to a worker node.
+
+These are control-plane calls -- create/query/drop a task, query free slots --
+which a healthy node answers in microseconds: creating a task hands it to a
+background queue rather than running it. The timeout therefore only ever
+applies to a node that is already unwell, and there the useful behavior is to
+give up quickly and re-dispatch the task elsewhere. The previous 600s let one
+unresponsive node stall a whole scheduling round instead.`,
+		DefaultValue: "30",
 		PanicIfEmpty: false,
 		Export:       false,
 	}
