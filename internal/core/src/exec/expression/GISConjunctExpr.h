@@ -304,11 +304,14 @@ class PhyGISRefineConjunctExpr : public SegmentExpr {
     // Evaluate one predicate against an already-constructed left geometry using
     // a per-thread prepared query geometry (within/contains semantics swapped,
     // mirroring PhyGISFunctionFilterExpr::evaluate_geometry_prepared).
+    // `ctx` must be the calling thread's GEOS context: `left` may be a
+    // cache-owned geometry whose context is shared across concurrent queries.
     bool
     EvalPrepared(proto::plan::GISFunctionFilterExpr_GISOp op,
                  const PreparedGeometry& prepared,
                  const Geometry& query_geom,
-                 const Geometry& left) const;
+                 const Geometry& left,
+                 GEOSContextHandle_t ctx) const;
 
     GISGroupStatePtr st_;
     int64_t current_pos_{0};
