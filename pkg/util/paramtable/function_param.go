@@ -30,6 +30,11 @@ type functionConfig struct {
 	ZillizProviders               ParamGroup `refreshable:"true"`
 	AnalyzerConcurrencyPerCPUCore ParamItem  `refreshable:"true"`
 	AnalyzerRunnerConcurrency     ParamItem  `refreshable:"true"`
+	PyUDFEnabled                  ParamItem  `refreshable:"false"`
+	PyUDFLoadTimeout              ParamItem  `refreshable:"false"`
+	PyUDFExecutorThreads          ParamItem  `refreshable:"false"`
+	PyUDFMaxQueueSize             ParamItem  `refreshable:"false"`
+	PyUDFInstancesPerResource     ParamItem  `refreshable:"false"`
 }
 
 func (p *functionConfig) init(base *BaseTable) {
@@ -214,6 +219,51 @@ func (p *functionConfig) init(base *BaseTable) {
 		DefaultValue: "8",
 	}
 	p.AnalyzerRunnerConcurrency.Init(base.mgr)
+
+	p.PyUDFEnabled = ParamItem{
+		Key:          "function.pyUDF.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Export:       true,
+		Doc:          "Whether to enable the embedded PyUDF runtime in processes that use PyUDF. Restart is required after changing this value.",
+	}
+	p.PyUDFEnabled.Init(base.mgr)
+
+	p.PyUDFLoadTimeout = ParamItem{
+		Key:          "function.pyUDF.loadTimeout",
+		Version:      "3.0.0",
+		DefaultValue: "30s",
+		Export:       true,
+		Doc:          "Timeout for loading a PyUDF wheel and initializing its UDF instances. Restart is required after changing this value.",
+	}
+	p.PyUDFLoadTimeout.Init(base.mgr)
+
+	p.PyUDFExecutorThreads = ParamItem{
+		Key:          "function.pyUDF.executorThreads",
+		Version:      "3.0.0",
+		DefaultValue: "1",
+		Export:       true,
+		Doc:          "Number of dedicated embedded PyUDF executor threads. Restart is required after changing this value.",
+	}
+	p.PyUDFExecutorThreads.Init(base.mgr)
+
+	p.PyUDFMaxQueueSize = ParamItem{
+		Key:          "function.pyUDF.maxQueueSize",
+		Version:      "3.0.0",
+		DefaultValue: "64",
+		Export:       true,
+		Doc:          "Maximum number of requests waiting for the embedded PyUDF executor. Zero disables waiting. Restart is required after changing this value.",
+	}
+	p.PyUDFMaxQueueSize.Init(base.mgr)
+
+	p.PyUDFInstancesPerResource = ParamItem{
+		Key:          "function.pyUDF.instancesPerResource",
+		Version:      "3.0.0",
+		DefaultValue: "1",
+		Export:       true,
+		Doc:          "Number of UDF object instances created for each PyUDF resource. Restart is required after changing this value.",
+	}
+	p.PyUDFInstancesPerResource.Init(base.mgr)
 }
 
 func (p *functionConfig) GetTextEmbeddingProviderConfig(providerName string) map[string]string {

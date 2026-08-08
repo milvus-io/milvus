@@ -67,6 +67,20 @@ func (e *doubleScoreExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunke
 	return []*arrow.Chunked{result}, nil
 }
 
+type captureInputsExpr struct {
+	inputs []*arrow.Chunked
+}
+
+func (e *captureInputsExpr) Name() string { return "capture_inputs" }
+func (e *captureInputsExpr) OutputDataTypes() []arrow.DataType {
+	return []arrow.DataType{arrow.PrimitiveTypes.Float32}
+}
+func (e *captureInputsExpr) IsRunnable(stage string) bool { return true }
+func (e *captureInputsExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
+	e.inputs = append([]*arrow.Chunked(nil), inputs...)
+	return (&doubleScoreExpr{}).Execute(ctx, inputs[:1])
+}
+
 // errorExpr always returns an error on Execute.
 type errorExpr struct{}
 
@@ -237,6 +251,33 @@ func (s *MapOpTestSuite) TestMapOpExecuteMultiChunk() {
 	s.InDelta(4.0, float64(scores0.Value(1)), 1e-6)
 	s.InDelta(6.0, float64(scores1.Value(0)), 1e-6)
 	s.InDelta(8.0, float64(scores1.Value(1)), 1e-6)
+}
+
+func (s *MapOpTestSuite) TestMapOpExecutePreservesDuplicateInputPositions() {
+	df := s.createTestDF(
+		[]int64{1, 2},
+		[]float32{1.0, 2.0},
+		[]int64{2},
+	)
+	defer df.Release()
+
+	fn := &captureInputsExpr{}
+	op, err := NewMapOp(
+		fn,
+		[]string{types.ScoreFieldName, types.ScoreFieldName, types.IDFieldName},
+		[]string{types.ScoreFieldName},
+	)
+	s.Require().NoError(err)
+
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+	result, err := op.Execute(ctx, df)
+	s.Require().NoError(err)
+	defer result.Release()
+
+	s.Require().Len(fn.inputs, 3)
+	s.Same(df.Column(types.ScoreFieldName), fn.inputs[0])
+	s.Same(df.Column(types.ScoreFieldName), fn.inputs[1])
+	s.Same(df.Column(types.IDFieldName), fn.inputs[2])
 }
 
 func (s *MapOpTestSuite) TestMapOpExecuteColumnNotFound() {

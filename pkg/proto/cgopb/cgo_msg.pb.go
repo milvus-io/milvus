@@ -317,6 +317,156 @@ func (x *SerializedIndexFileInfo) GetFileSize() int64 {
 	return 0
 }
 
+type PyUDFLoadRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	ResourceName  string `protobuf:"bytes,1,opt,name=resource_name,json=resourceName,proto3" json:"resource_name,omitempty"`
+	ResourceId    int64  `protobuf:"varint,2,opt,name=resource_id,json=resourceId,proto3" json:"resource_id,omitempty"`
+	ResourcePath  string `protobuf:"bytes,3,opt,name=resource_path,json=resourcePath,proto3" json:"resource_path,omitempty"`
+	LocalPath     string `protobuf:"bytes,4,opt,name=local_path,json=localPath,proto3" json:"local_path,omitempty"`
+	Stage         string `protobuf:"bytes,5,opt,name=stage,proto3" json:"stage,omitempty"`
+	InstanceCount int32  `protobuf:"varint,6,opt,name=instance_count,json=instanceCount,proto3" json:"instance_count,omitempty"`
+}
+
+func (x *PyUDFLoadRequest) Reset() {
+	*x = PyUDFLoadRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_cgo_msg_proto_msgTypes[3]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *PyUDFLoadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PyUDFLoadRequest) ProtoMessage() {}
+
+func (x *PyUDFLoadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cgo_msg_proto_msgTypes[3]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PyUDFLoadRequest.ProtoReflect.Descriptor instead.
+func (*PyUDFLoadRequest) Descriptor() ([]byte, []int) {
+	return file_cgo_msg_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *PyUDFLoadRequest) GetResourceName() string {
+	if x != nil {
+		return x.ResourceName
+	}
+	return ""
+}
+
+func (x *PyUDFLoadRequest) GetResourceId() int64 {
+	if x != nil {
+		return x.ResourceId
+	}
+	return 0
+}
+
+func (x *PyUDFLoadRequest) GetResourcePath() string {
+	if x != nil {
+		return x.ResourcePath
+	}
+	return ""
+}
+
+func (x *PyUDFLoadRequest) GetLocalPath() string {
+	if x != nil {
+		return x.LocalPath
+	}
+	return ""
+}
+
+func (x *PyUDFLoadRequest) GetStage() string {
+	if x != nil {
+		return x.Stage
+	}
+	return ""
+}
+
+func (x *PyUDFLoadRequest) GetInstanceCount() int32 {
+	if x != nil {
+		return x.InstanceCount
+	}
+	return 0
+}
+
+type PyUDFRunParams struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	ResourceName string                        `protobuf:"bytes,1,opt,name=resource_name,json=resourceName,proto3" json:"resource_name,omitempty"`
+	Stage        string                        `protobuf:"bytes,2,opt,name=stage,proto3" json:"stage,omitempty"`
+	UdfParams    *schemapb.FunctionParamObject `protobuf:"bytes,3,opt,name=udf_params,json=udfParams,proto3" json:"udf_params,omitempty"`
+}
+
+func (x *PyUDFRunParams) Reset() {
+	*x = PyUDFRunParams{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_cgo_msg_proto_msgTypes[4]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *PyUDFRunParams) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PyUDFRunParams) ProtoMessage() {}
+
+func (x *PyUDFRunParams) ProtoReflect() protoreflect.Message {
+	mi := &file_cgo_msg_proto_msgTypes[4]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PyUDFRunParams.ProtoReflect.Descriptor instead.
+func (*PyUDFRunParams) Descriptor() ([]byte, []int) {
+	return file_cgo_msg_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *PyUDFRunParams) GetResourceName() string {
+	if x != nil {
+		return x.ResourceName
+	}
+	return ""
+}
+
+func (x *PyUDFRunParams) GetStage() string {
+	if x != nil {
+		return x.Stage
+	}
+	return ""
+}
+
+func (x *PyUDFRunParams) GetUdfParams() *schemapb.FunctionParamObject {
+	if x != nil {
+		return x.UdfParams
+	}
+	return nil
+}
+
 var File_cgo_msg_proto protoreflect.FileDescriptor
 
 var file_cgo_msg_proto_rawDesc = []byte{
@@ -392,11 +542,34 @@ var file_cgo_msg_proto_rawDesc = []byte{
 	0x65, 0x49, 0x6e, 0x66, 0x6f, 0x12, 0x1b, 0x0a, 0x09, 0x66, 0x69, 0x6c, 0x65, 0x5f, 0x6e, 0x61,
 	0x6d, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x66, 0x69, 0x6c, 0x65, 0x4e, 0x61,
 	0x6d, 0x65, 0x12, 0x1b, 0x0a, 0x09, 0x66, 0x69, 0x6c, 0x65, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x18,
-	0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x08, 0x66, 0x69, 0x6c, 0x65, 0x53, 0x69, 0x7a, 0x65, 0x42,
-	0x30, 0x5a, 0x2e, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69,
-	0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70,
-	0x6b, 0x67, 0x2f, 0x76, 0x33, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x63, 0x67, 0x6f, 0x70,
-	0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x08, 0x66, 0x69, 0x6c, 0x65, 0x53, 0x69, 0x7a, 0x65, 0x22,
+	0xd9, 0x01, 0x0a, 0x10, 0x50, 0x79, 0x55, 0x44, 0x46, 0x4c, 0x6f, 0x61, 0x64, 0x52, 0x65, 0x71,
+	0x75, 0x65, 0x73, 0x74, 0x12, 0x23, 0x0a, 0x0d, 0x72, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65,
+	0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x72, 0x65, 0x73,
+	0x6f, 0x75, 0x72, 0x63, 0x65, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x1f, 0x0a, 0x0b, 0x72, 0x65, 0x73,
+	0x6f, 0x75, 0x72, 0x63, 0x65, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0a,
+	0x72, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x49, 0x64, 0x12, 0x23, 0x0a, 0x0d, 0x72, 0x65,
+	0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x5f, 0x70, 0x61, 0x74, 0x68, 0x18, 0x03, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x0c, 0x72, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x50, 0x61, 0x74, 0x68, 0x12,
+	0x1d, 0x0a, 0x0a, 0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x5f, 0x70, 0x61, 0x74, 0x68, 0x18, 0x04, 0x20,
+	0x01, 0x28, 0x09, 0x52, 0x09, 0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x50, 0x61, 0x74, 0x68, 0x12, 0x14,
+	0x0a, 0x05, 0x73, 0x74, 0x61, 0x67, 0x65, 0x18, 0x05, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x73,
+	0x74, 0x61, 0x67, 0x65, 0x12, 0x25, 0x0a, 0x0e, 0x69, 0x6e, 0x73, 0x74, 0x61, 0x6e, 0x63, 0x65,
+	0x5f, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x18, 0x06, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0d, 0x69, 0x6e,
+	0x73, 0x74, 0x61, 0x6e, 0x63, 0x65, 0x43, 0x6f, 0x75, 0x6e, 0x74, 0x22, 0x94, 0x01, 0x0a, 0x0e,
+	0x50, 0x79, 0x55, 0x44, 0x46, 0x52, 0x75, 0x6e, 0x50, 0x61, 0x72, 0x61, 0x6d, 0x73, 0x12, 0x23,
+	0x0a, 0x0d, 0x72, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18,
+	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x72, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x4e,
+	0x61, 0x6d, 0x65, 0x12, 0x14, 0x0a, 0x05, 0x73, 0x74, 0x61, 0x67, 0x65, 0x18, 0x02, 0x20, 0x01,
+	0x28, 0x09, 0x52, 0x05, 0x73, 0x74, 0x61, 0x67, 0x65, 0x12, 0x47, 0x0a, 0x0a, 0x75, 0x64, 0x66,
+	0x5f, 0x70, 0x61, 0x72, 0x61, 0x6d, 0x73, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x28, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68,
+	0x65, 0x6d, 0x61, 0x2e, 0x46, 0x75, 0x6e, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x50, 0x61, 0x72, 0x61,
+	0x6d, 0x4f, 0x62, 0x6a, 0x65, 0x63, 0x74, 0x52, 0x09, 0x75, 0x64, 0x66, 0x50, 0x61, 0x72, 0x61,
+	0x6d, 0x73, 0x42, 0x30, 0x5a, 0x2e, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d,
+	0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75,
+	0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76, 0x33, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x63,
+	0x67, 0x6f, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -411,25 +584,29 @@ func file_cgo_msg_proto_rawDescGZIP() []byte {
 	return file_cgo_msg_proto_rawDescData
 }
 
-var file_cgo_msg_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_cgo_msg_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_cgo_msg_proto_goTypes = []interface{}{
-	(*LoadIndexInfo)(nil),              // 0: milvus.proto.cgo.LoadIndexInfo
-	(*IndexStats)(nil),                 // 1: milvus.proto.cgo.IndexStats
-	(*SerializedIndexFileInfo)(nil),    // 2: milvus.proto.cgo.SerializedIndexFileInfo
-	nil,                                // 3: milvus.proto.cgo.LoadIndexInfo.IndexParamsEntry
-	(*schemapb.FieldSchema)(nil),       // 4: milvus.proto.schema.FieldSchema
-	(indexpb.IndexStorePathVersion)(0), // 5: milvus.proto.index.IndexStorePathVersion
+	(*LoadIndexInfo)(nil),                // 0: milvus.proto.cgo.LoadIndexInfo
+	(*IndexStats)(nil),                   // 1: milvus.proto.cgo.IndexStats
+	(*SerializedIndexFileInfo)(nil),      // 2: milvus.proto.cgo.SerializedIndexFileInfo
+	(*PyUDFLoadRequest)(nil),             // 3: milvus.proto.cgo.PyUDFLoadRequest
+	(*PyUDFRunParams)(nil),               // 4: milvus.proto.cgo.PyUDFRunParams
+	nil,                                  // 5: milvus.proto.cgo.LoadIndexInfo.IndexParamsEntry
+	(*schemapb.FieldSchema)(nil),         // 6: milvus.proto.schema.FieldSchema
+	(indexpb.IndexStorePathVersion)(0),   // 7: milvus.proto.index.IndexStorePathVersion
+	(*schemapb.FunctionParamObject)(nil), // 8: milvus.proto.schema.FunctionParamObject
 }
 var file_cgo_msg_proto_depIdxs = []int32{
-	4, // 0: milvus.proto.cgo.LoadIndexInfo.field:type_name -> milvus.proto.schema.FieldSchema
-	3, // 1: milvus.proto.cgo.LoadIndexInfo.index_params:type_name -> milvus.proto.cgo.LoadIndexInfo.IndexParamsEntry
-	5, // 2: milvus.proto.cgo.LoadIndexInfo.index_store_path_version:type_name -> milvus.proto.index.IndexStorePathVersion
+	6, // 0: milvus.proto.cgo.LoadIndexInfo.field:type_name -> milvus.proto.schema.FieldSchema
+	5, // 1: milvus.proto.cgo.LoadIndexInfo.index_params:type_name -> milvus.proto.cgo.LoadIndexInfo.IndexParamsEntry
+	7, // 2: milvus.proto.cgo.LoadIndexInfo.index_store_path_version:type_name -> milvus.proto.index.IndexStorePathVersion
 	2, // 3: milvus.proto.cgo.IndexStats.serialized_index_infos:type_name -> milvus.proto.cgo.SerializedIndexFileInfo
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	8, // 4: milvus.proto.cgo.PyUDFRunParams.udf_params:type_name -> milvus.proto.schema.FunctionParamObject
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_cgo_msg_proto_init() }
@@ -474,6 +651,30 @@ func file_cgo_msg_proto_init() {
 				return nil
 			}
 		}
+		file_cgo_msg_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*PyUDFLoadRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_cgo_msg_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*PyUDFRunParams); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -481,7 +682,7 @@ func file_cgo_msg_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_cgo_msg_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

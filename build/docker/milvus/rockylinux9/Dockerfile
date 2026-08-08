@@ -9,16 +9,28 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
+FROM ghcr.io/astral-sh/uv:0.11.23 AS uv
+
 FROM rockylinux/rockylinux:9
 
 ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
+
+COPY --from=uv /uv /usr/local/bin/uv
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
+ENV UV_PYTHON_BIN_DIR=/usr/local/bin
+ENV PYTHON=python3.12
 
 RUN dnf install -y dnf-plugins-core && \
     dnf config-manager --set-enabled crb && \
     dnf install -y wget libgomp libaio libatomic tzdata && \
     dnf upgrade -y openssl openssl-libs && \
     rm -rf /var/cache/dnf/*
+
+RUN uv python install 3.12.13 && \
+    python_lib="$(python3.12 -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')" && \
+    printf '%s\n' "${python_lib}" > /etc/ld.so.conf.d/milvus-python.conf && \
+    ldconfig
 
 # Add Tini
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
@@ -30,6 +42,10 @@ COPY ./bin/milvus /milvus/bin/milvus
 COPY ./configs/ /milvus/configs/
 
 COPY ./lib/ /milvus/lib/
+
+RUN uv pip install --python python3.12 --system --break-system-packages \
+        /milvus/lib/pyudf/milvus_pyudf_runtime-*.whl && \
+    rm -rf /milvus/lib/pyudf
 
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib

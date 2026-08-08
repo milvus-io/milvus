@@ -11,13 +11,16 @@
 
 Function Chain introduces a typed, ordered, stage-aware pipeline for scoring and reranking search results. A chain is sent as structured protobuf, not as an opaque JSON string, so Milvus can validate dependencies, fetch required fields internally, execute built-in scoring functions, and project final search results back through the existing result schema.
 
-The first release focuses on ordinary `SearchRequest` L2 rerank:
+The initial public API focused on ordinary `SearchRequest` L2 rerank. The current implementation also supports L0 rerank for functions that are explicitly runnable at that stage:
 
-- Users build an L2 chain in SDKs and pass it through `function_chains`.
-- Proxy validates the request, plans required rerank input fields, and reuses the existing rerank pipeline.
-- The function-chain runtime executes `map`, `sort`, and `limit` operators on a DataFrame converted from reduced search results.
+- Proxy validates the request, separates supported L0 and L2 chains, and plans the fields required at each execution boundary.
+- L0 chains are sent to QueryNode and execute per segment before Go reduction.
+- L2 chains remain on Proxy and reuse the existing rerank pipeline after reduction.
+- The function-chain runtime executes the ordered operators on Arrow-backed DataFrames.
 - Final `$score` is serialized through the existing search score/distance field.
 - Intermediate variables and internally fetched fields are not returned unless requested by normal search output projection.
+
+The native XGBoost L0 expression and its execution constraints are described in [XGBoost FunctionChain Expression Design](20260708-xgboost-function-chain.md). The embedded Python L2 expression and its Production Runtime boundary are described in [PyUDF FunctionChain Expression](20260722-pyudf-function-chain.md).
 
 ## Motivation
 
@@ -43,8 +46,8 @@ Representing this as typed operations gives Milvus:
 
 - Add public protobuf messages for a function-chain logical plan.
 - Add SDK builder APIs that compile to the protobuf plan.
-- Support ordinary Search L2 rerank through `SearchRequest.function_chains`.
-- Reuse the existing Proxy rerank pipeline rather than adding a separate search pipeline operator.
+- Support ordinary Search L0 and L2 rerank through `SearchRequest.function_chains` for expressions enabled at each stage.
+- Execute L0 chains on QueryNode before reduction and reuse the existing Proxy rerank pipeline for L2.
 - Fetch function-chain-required schema fields internally even when users do not request them in `output_fields`.
 - Keep final search response projection Search-owned.
 - Support first-version built-in expressions:
@@ -60,13 +63,13 @@ The first release does not include:
 
 - `function_chains` support for hybrid search execution;
 - insert/upsert/ingestion function chains;
-- L0/L1 pushdown to QueryNode or Segcore;
+- L1 pushdown or direct Function Chain execution inside Segcore;
 - arbitrary user-defined expression language;
 - returning intermediate chain variables as user-facing result fields;
 - replacing `function_score` or legacy rank parameters;
 - client-side execution of external model calls.
 
-The public stage enum reserves room for future stages, but ordinary Search initially accepts only `L2_RERANK`.
+The public stage enum reserves room for future stages. Ordinary Search currently accepts `L0_RERANK` and `L2_RERANK`; each expression is still restricted to the stages it explicitly supports.
 
 ## Public Interfaces
 
@@ -148,11 +151,11 @@ client.search(..., function_chains=chain)
 client.search(..., function_chains=[chain])
 ```
 
-SDK and server validation reject ambiguous combinations:
+SDK and server validation reject ambiguous or unsupported combinations:
 
 - `function_chains` with SDK `ranker` / proto `function_score`;
-- non-L2 chains for ordinary Search;
-- `function_chains` for hybrid search in the first release.
+- stages other than supported L0 and L2 chains for ordinary Search;
+- `function_chains` for hybrid search.
 
 ### Protobuf
 
@@ -436,13 +439,16 @@ SDK `ranker` maps to legacy rerank/function-score behavior, so SDK rejects `rank
 
 The same `FunctionChainStage` may appear at most once in one request.
 
-The first release supports only one ordinary Search stage:
+Ordinary Search currently supports:
 
 ```text
+FunctionChainStageL0Rerank
 FunctionChainStageL2Rerank
 ```
 
-Users who need multiple rerank steps should put multiple ops in one L2 chain instead of sending multiple L2 chains.
+Proxy routes L0 chains to QueryNode for per-segment execution before reduction and keeps L2 chains in the Proxy rerank pipeline after reduction. A function must explicitly declare support for its stage; not every expression can run at both stages.
+
+Users who need multiple steps at one stage should put multiple ops in one chain instead of sending duplicate chains for that stage.
 
 #### Hybrid search
 
@@ -483,18 +489,19 @@ The chain builder dispatches by rerank metadata type:
 - legacy rank params -> existing legacy rank builder;
 - public function chain -> `FuncChainFromRepr` / `FuncChainFromReprWithContext`.
 
+### QueryNode L0 execution and Arrow allocation
+
+QueryNode executes an L0 chain independently for each segment before Go heap reduction. It builds a fresh `FuncChain` for each segment so mutable operator or expression state is not shared by concurrent segment execution.
+
+Arrow buffers allocated by QueryNode L0 chain operators through `FuncContext.Pool()` use Arrow Go's libc-backed `mallocator`. This includes intermediate buffers produced by Go expressions before a later native expression exports them through the Arrow C Data Interface. The allocator itself has no `Close` operation; normal Arrow array, chunked-array, and DataFrame release chains return the underlying buffers to libc.
+
+This allocator policy applies to public L0 chains and the operators in the internally generated boost-score chain. It does not replace allocators owned by native helpers or imported arrays; for example, a boost-score runner may return an array with its own allocator. Go-only heap reduction also retains its existing allocator, and imported segment DataFrames retain the ownership supplied by the C++ Arrow exporter.
+
 ### Tail behavior
 
-A public `FunctionChain` is executed as sent.
+A public L2 `FunctionChain` is executed as sent. Milvus does not implicitly append tail operators such as sort, limit, group-by, or round-decimal; users or SDK helpers must add explicit ops when they want those effects.
 
-Milvus does not implicitly append tail operators such as:
-
-- sort;
-- limit;
-- group-by;
-- round-decimal.
-
-Users or SDK helpers must add explicit ops when they want those effects.
+QueryNode L0 is different because Go reduction requires every segment DataFrame to be ordered consistently. QueryNode therefore appends an internal `$score` descending sort with `$id` as the tie-break column after the user-provided L0 operators. It does not append an implicit limit, group-by, or round-decimal operator.
 
 ## Validation Rules
 
@@ -569,14 +576,14 @@ Useful follow-up metrics:
 4. Helper validation for `decay`, `num_combine`, `round_decimal`, and `rerank_model`.
 5. Search request encoding with single chain and list of chains.
 6. Reject `function_chains` plus `ranker`.
-7. Reject non-L2 chains for ordinary Search.
+7. Encode supported L0 and L2 chains for ordinary Search and reject other stages.
 8. Reject `function_chains` for hybrid search.
 
 ### Proxy and chain planning tests
 
 1. `function_score` plus `function_chains` is rejected.
 2. Duplicate L2 chains are rejected.
-3. Non-L2 chain stages are rejected in ordinary Search.
+3. Unsupported chain stages other than L0/L2 are rejected in ordinary Search.
 4. Hybrid Search with `function_chains` is rejected.
 5. `$score`-only chain succeeds with no schema input fields.
 6. `field + $score` chain fetches only required schema fields.
@@ -636,7 +643,7 @@ Rejected because only the caller knows whether a name is a schema field, request
 ## Open Questions
 
 1. What is the best public API for hybrid search support: top-level post-merge chain, per-sub-search chains, or both?
-2. Which functions should be allowed in future L0/L1 stages, and where should they execute?
+2. Which additional functions should be allowed in L0, and which functions should be enabled in a future L1 stage?
 3. Should strict operator ordering rules be enforced, such as one `sort` and only as the last ordering op?
 4. Should users be able to return intermediate variables explicitly in future APIs?
 5. Should provider-specific metrics be standardized across embedding and rerank model providers?

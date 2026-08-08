@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/arrow/memory/mallocator"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -55,6 +56,30 @@ func withBoostScoreCheckedAllocator(t *testing.T) {
 		defaultAllocator = oldAllocator
 		pool.AssertSize(t, 0)
 	})
+}
+
+func withL0RerankMallocator(t *testing.T) *mallocator.Mallocator {
+	pool := mallocator.NewMallocator()
+	oldFactory := newL0RerankAllocator
+	newL0RerankAllocator = func() memory.Allocator {
+		return pool
+	}
+	t.Cleanup(func() {
+		newL0RerankAllocator = oldFactory
+		require.Zero(t, pool.AllocatedBytes())
+	})
+	return pool
+}
+
+func TestNewL0RerankAllocator(t *testing.T) {
+	alloc := newL0RerankAllocator()
+	pool, ok := alloc.(*mallocator.Mallocator)
+	require.True(t, ok)
+	require.NotSame(t, memory.DefaultAllocator, alloc)
+
+	buf := alloc.Allocate(8)
+	alloc.Free(buf)
+	require.Zero(t, pool.AllocatedBytes())
 }
 
 func makeBoostScoreTestDF(t *testing.T, ids []int64, scores []float32, offsets []int64, chunkSizes []int64) *chain.DataFrame {
@@ -197,6 +222,7 @@ func newConstantBoostScoreTestChunked(offsets *arrow.Chunked, score float32) *ar
 
 func TestBuildBoostScoreChainSkipsFunctionCombineForSingleScorer(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
+	withL0RerankMallocator(t)
 
 	oldFactory := boostScoreRunnerFactory
 	boostScoreRunnerFactory = mockBoostScoreRunnerFactory(boostScoreOutput{
@@ -231,6 +257,7 @@ func TestBuildBoostScoreChainSkipsFunctionCombineForSingleScorer(t *testing.T) {
 
 func TestBuildBoostScoreChainCombinesMultipleScorers(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
+	withL0RerankMallocator(t)
 
 	oldFactory := boostScoreRunnerFactory
 	boostScoreRunnerFactory = mockBoostScoreRunnerFactory(
@@ -266,6 +293,7 @@ func TestBuildBoostScoreChainCombinesMultipleScorers(t *testing.T) {
 
 func TestApplyBoostScoresPrunesTempsAndPreservesReduceSystemColumns(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
+	withL0RerankMallocator(t)
 
 	oldFactory := boostScoreRunnerFactory
 	boostScoreRunnerFactory = mockBoostScoreRunnerFactory(boostScoreOutput{
@@ -314,6 +342,7 @@ func TestApplyBoostScoresPrunesTempsAndPreservesReduceSystemColumns(t *testing.T
 
 func TestApplyBoostScoresMultipleScorersCombinesScoresAndSorts(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
+	withL0RerankMallocator(t)
 
 	oldFactory := boostScoreRunnerFactory
 	boostScoreRunnerFactory = mockBoostScoreRunnerFactory(
@@ -355,6 +384,7 @@ func TestApplyBoostScoresMultipleScorersCombinesScoresAndSorts(t *testing.T) {
 
 func TestApplyBoostScoresNoScorersNoop(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
+	withL0RerankMallocator(t)
 
 	df := makeBoostScoreTestDF(t,
 		[]int64{1},
@@ -372,6 +402,7 @@ func TestApplyBoostScoresNoScorersNoop(t *testing.T) {
 
 func TestApplyBoostScoresDistanceMetricKeepsInternalScoreDescending(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
+	withL0RerankMallocator(t)
 
 	oldFactory := boostScoreRunnerFactory
 	boostScoreRunnerFactory = mockBoostScoreRunnerFactory(boostScoreOutput{
@@ -416,6 +447,7 @@ func TestApplyBoostScoresDistanceMetricKeepsInternalScoreDescending(t *testing.T
 
 func TestApplyBoostScoresDistanceMetricSumKeepsInternalScoreDescending(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
+	withL0RerankMallocator(t)
 
 	oldFactory := boostScoreRunnerFactory
 	boostScoreRunnerFactory = mockBoostScoreRunnerFactory(boostScoreOutput{
@@ -460,6 +492,7 @@ func TestApplyBoostScoresDistanceMetricSumKeepsInternalScoreDescending(t *testin
 
 func TestApplyBoostScoresMultipleScorersAllMissKeepOriginalScores(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
+	withL0RerankMallocator(t)
 
 	oldFactory := boostScoreRunnerFactory
 	boostScoreRunnerFactory = mockBoostScoreRunnerFactory(
@@ -548,6 +581,7 @@ func TestExtractPlanScorers(t *testing.T) {
 
 func TestApplyBoostScoresUsesAsyncBoostScoreFunc(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
+	withL0RerankMallocator(t)
 
 	oldFactory := boostScoreRunnerFactory
 	defer func() { boostScoreRunnerFactory = oldFactory }()
@@ -578,6 +612,7 @@ func TestApplyBoostScoresUsesAsyncBoostScoreFunc(t *testing.T) {
 
 func TestApplyBoostScoresRunsSegmentsConcurrently(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
+	withL0RerankMallocator(t)
 
 	oldFactory := boostScoreRunnerFactory
 	defer func() { boostScoreRunnerFactory = oldFactory }()
@@ -623,6 +658,7 @@ func TestApplyBoostScoresRunsSegmentsConcurrently(t *testing.T) {
 
 func TestApplyBoostScoresReleasesBoostedFramesOnError(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
+	withL0RerankMallocator(t)
 
 	oldFactory := boostScoreRunnerFactory
 	defer func() { boostScoreRunnerFactory = oldFactory }()
@@ -700,6 +736,7 @@ func TestApplyBoostScoresValidationErrors(t *testing.T) {
 
 	t.Run("invalid function mode", func(t *testing.T) {
 		withBoostScoreCheckedAllocator(t)
+		withL0RerankMallocator(t)
 		df := makeBoostScoreTestDF(t, []int64{1}, []float32{0.5}, []int64{10}, []int64{1})
 		defer df.Release()
 
@@ -717,6 +754,7 @@ func TestApplyBoostScoresValidationErrors(t *testing.T) {
 
 	t.Run("invalid boost mode", func(t *testing.T) {
 		withBoostScoreCheckedAllocator(t)
+		withL0RerankMallocator(t)
 		df := makeBoostScoreTestDF(t, []int64{1}, []float32{0.5}, []int64{10}, []int64{1})
 		defer df.Release()
 
@@ -747,6 +785,7 @@ func TestApplyBoostScoresValidationErrors(t *testing.T) {
 
 func TestBuildBoostScoreChainPropagatesBuilderErrors(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
+	withL0RerankMallocator(t)
 
 	df := makeBoostScoreTestDF(t, []int64{1}, []float32{0.5}, []int64{10}, []int64{1})
 	defer df.Release()

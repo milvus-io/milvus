@@ -36,3 +36,18 @@ message SerializedIndexFileInfo {
   string file_name = 1;
   int64 file_size = 2;
 }
+
+message PyUDFLoadRequest {
+  string resource_name = 1;
+  int64 resource_id = 2;
+  string resource_path = 3;
+  string local_path = 4;
+  string stage = 5;
+  int32 instance_count = 6;
+}
+
+message PyUDFRunParams {
+  string resource_name = 1;
+  string stage = 2;
+  schema.FunctionParamObject udf_params = 3;
+}

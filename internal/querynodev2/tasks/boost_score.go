@@ -102,7 +102,7 @@ func buildBoostScoreChain(
 	functionMode string,
 	boostMode string,
 ) (*chain.FuncChain, error) {
-	boostChain := chain.NewFuncChainWithAllocator(defaultAllocator).
+	boostChain := chain.NewFuncChainWithAllocator(newL0RerankAllocator()).
 		SetName("l0-rerank").
 		SetStage(types.StageL0Rerank)
 

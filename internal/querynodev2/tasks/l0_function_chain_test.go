@@ -212,6 +212,7 @@ func TestApplyL0RerankRejectsNilPreparedChains(t *testing.T) {
 
 func TestApplyPublicL0RerankPrunesInputsAndPreservesReduceSystemColumns(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
+	pool := withL0RerankMallocator(t)
 
 	df := makeBoostScoreTestDF(t,
 		[]int64{1, 2, 3},
@@ -257,7 +258,6 @@ func TestApplyPublicL0RerankPrunesInputsAndPreservesReduceSystemColumns(t *testi
 	task := &SearchTask{ctx: t.Context()}
 
 	require.NoError(t, task.applyPublicL0Rerank(segDFs, &preparedQueryNodeFunctionChains{l0Chains: []*chain.ChainRepr{repr}}))
-	defer segDFs[0].Release()
 
 	result := segDFs[0]
 	ids := result.Column(types.IDFieldName).Chunk(0).(*array.Int64)
@@ -274,6 +274,9 @@ func TestApplyPublicL0RerankPrunesInputsAndPreservesReduceSystemColumns(t *testi
 	require.InDelta(t, 1.0, scores.Value(1), 1e-6)
 	require.Equal(t, int64(1), ids.Value(2))
 	require.InDelta(t, 0.6, scores.Value(2), 1e-6)
+
+	result.Release()
+	require.Zero(t, pool.AllocatedBytes())
 }
 
 func TestApplyL0RerankMetrics(t *testing.T) {

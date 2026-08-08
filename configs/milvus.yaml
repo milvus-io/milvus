@@ -1611,3 +1611,9 @@ function:
     local_resource_path: /var/lib/milvus/analyzer
     concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included
     runner_concurrency: 8 # The concurrency for each function runner to tokenize text
+  pyUDF:
+    enabled: false # Whether to enable the embedded PyUDF runtime in processes that use PyUDF. Restart is required after changing this value.
+    loadTimeout: 30s # Timeout for loading a PyUDF wheel and initializing its UDF instances.
+    executorThreads: 1 # Number of dedicated embedded PyUDF executor threads.
+    maxQueueSize: 64 # Maximum number of requests waiting for the embedded PyUDF executor. Zero disables waiting.
+    instancesPerResource: 1 # Number of UDF object instances created for each PyUDF resource.

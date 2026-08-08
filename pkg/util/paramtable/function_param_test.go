@@ -104,3 +104,32 @@ func TestFunctionConfig(t *testing.T) {
 
 	assert.Equal(t, 30*time.Second, cfg.ModelRequestTimeout.GetAsDurationByParse())
 }
+
+func TestFunctionConfigPyUDF(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	cfg := &params.FunctionCfg
+
+	assert.False(t, cfg.PyUDFEnabled.GetAsBool())
+	assert.Equal(t, 30*time.Second, cfg.PyUDFLoadTimeout.GetAsDurationByParse())
+	assert.Equal(t, 1, cfg.PyUDFExecutorThreads.GetAsInt())
+	assert.Equal(t, 64, cfg.PyUDFMaxQueueSize.GetAsInt())
+	assert.Equal(t, 1, cfg.PyUDFInstancesPerResource.GetAsInt())
+
+	oldEnabled := cfg.PyUDFEnabled.SwapTempValue("true")
+	oldLoadTimeout := cfg.PyUDFLoadTimeout.SwapTempValue("45s")
+	oldExecutorThreads := cfg.PyUDFExecutorThreads.SwapTempValue("2")
+	oldMaxQueueSize := cfg.PyUDFMaxQueueSize.SwapTempValue("32")
+	oldInstances := cfg.PyUDFInstancesPerResource.SwapTempValue("3")
+	defer cfg.PyUDFEnabled.SwapTempValue(oldEnabled)
+	defer cfg.PyUDFLoadTimeout.SwapTempValue(oldLoadTimeout)
+	defer cfg.PyUDFExecutorThreads.SwapTempValue(oldExecutorThreads)
+	defer cfg.PyUDFMaxQueueSize.SwapTempValue(oldMaxQueueSize)
+	defer cfg.PyUDFInstancesPerResource.SwapTempValue(oldInstances)
+
+	assert.True(t, cfg.PyUDFEnabled.GetAsBool())
+	assert.Equal(t, 45*time.Second, cfg.PyUDFLoadTimeout.GetAsDurationByParse())
+	assert.Equal(t, 2, cfg.PyUDFExecutorThreads.GetAsInt())
+	assert.Equal(t, 32, cfg.PyUDFMaxQueueSize.GetAsInt())
+	assert.Equal(t, 3, cfg.PyUDFInstancesPerResource.GetAsInt())
+}
