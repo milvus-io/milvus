@@ -81,6 +81,17 @@ func (t *mixCompactionTask) GetTaskVersion() int64 {
 }
 
 func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+	// Serialized by the scheduler's per-task lock; see task.GlobalScheduler.
+	//
+	// Bail out on any terminal state, not just cleaned. The inspector has already
+	// decided this task is finished and queued it for cleanup, so proceeding
+	// would mutate segment metadata -- clustering persists its result segments
+	// before recording their IDs on the task -- that cleanup no longer knows
+	// about, stranding those segments for good.
+	if isTerminalCompactionTaskState(t.GetTaskProto().GetState()) {
+		return
+	}
+
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to build compaction request", mlog.Err(err))
@@ -118,6 +129,17 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 }
 
 func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
+	// Serialized by the scheduler's per-task lock; see task.GlobalScheduler.
+	//
+	// Bail out on any terminal state, not just cleaned. The inspector has already
+	// decided this task is finished and queued it for cleanup, so proceeding
+	// would mutate segment metadata -- clustering persists its result segments
+	// before recording their IDs on the task -- that cleanup no longer knows
+	// about, stranding those segments for good.
+	if isTerminalCompactionTaskState(t.GetTaskProto().GetState()) {
+		return
+	}
+
 	result, err := cluster.QueryCompaction(t.GetTaskProto().GetNodeID(), &datapb.CompactionStateRequest{
 		PlanID: t.GetTaskProto().GetPlanID(),
 	})
@@ -279,7 +301,11 @@ func (t *mixCompactionTask) NeedReAssignNodeID() bool {
 }
 
 func (t *mixCompactionTask) processCompleted() bool {
-	t.resetSegmentCompacting()
+	// Releasing the input segments is deliberately left to doClean, which is the
+	// single place that does it. A completed task always reaches cleanup, and
+	// unlocking here as well would mean unlocking twice: by the second call the
+	// segments may already belong to another compaction that legitimately
+	// re-acquired them.
 	mlog.Info(context.TODO(), "mixCompactionTask processCompleted done")
 	return true
 }
@@ -301,10 +327,18 @@ func (t *mixCompactionTask) processFailed() bool {
 }
 
 func (t *mixCompactionTask) Clean() bool {
+	// Runs under the scheduler's per-task lock, handed over by Finalize.
+	if t.GetTaskProto().GetState() == datapb.CompactionTaskState_cleaned {
+		return true
+	}
 	return t.doClean() == nil
 }
 
 func (t *mixCompactionTask) doClean() error {
+	if err := t.restoreOriginalSortInputVisibility(); err != nil {
+		return err
+	}
+
 	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
 	if err != nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask fail to updateAndSaveTaskMeta", mlog.Err(err))
@@ -314,6 +348,31 @@ func (t *mixCompactionTask) doClean() error {
 	// otherwise, it may unlock segments locked by other compaction tasks
 	t.resetSegmentCompacting()
 	mlog.Info(context.TODO(), "mixCompactionTask clean done")
+	return nil
+}
+
+func (t *mixCompactionTask) restoreOriginalSortInputVisibility() error {
+	task := t.GetTaskProto()
+	if task.GetType() != datapb.CompactionType_SortCompaction {
+		return nil
+	}
+	// Do not gate this rollback on the current task state. A recovered timeout
+	// task is observed by both the compaction inspector and the global scheduler;
+	// after the inspector selects it for cleanup, the scheduler may still rewrite
+	// its state to pipelining while probing the old worker. Segment metadata is the
+	// stable discriminator here: completed tasks have already dropped their input,
+	// while failed/timeout tasks still have an original Flushed+Invisible input.
+
+	operators := lo.Map(task.GetInputSegments(), func(segmentID int64, _ int) UpdateOperator {
+		return RestoreSegmentVisibilityForTerminatedSortCompaction(segmentID)
+	})
+	if err := t.meta.UpdateSegmentsInfo(context.TODO(), operators...); err != nil {
+		mlog.Warn(context.TODO(), "failed to restore sort compaction input visibility",
+			mlog.Int64("planID", task.GetPlanID()),
+			mlog.Int64s("inputSegments", task.GetInputSegments()),
+			mlog.Err(err))
+		return merr.Wrapf(err, "restore input visibility for terminated sort compaction %d", task.GetPlanID())
+	}
 	return nil
 }
 
@@ -328,6 +387,13 @@ func (t *mixCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) err
 	}
 
 	task := t.ShadowClone(opts...)
+	if regressesTerminalState(t.GetTaskProto().GetState(), task.GetState()) {
+		mlog.Info(context.TODO(), "dropping stale compaction task state write",
+			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+			mlog.String("current", t.GetTaskProto().GetState().String()),
+			mlog.String("rejected", task.GetState().String()))
+		return nil
+	}
 	err := t.saveTaskMeta(task)
 	if err != nil {
 		return err

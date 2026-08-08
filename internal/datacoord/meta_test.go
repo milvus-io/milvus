@@ -4245,6 +4245,54 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCacheDoesNotRegressManifest(t *t
 }
 
 func TestUpdateSegmentsInfo(t *testing.T) {
+	t.Run("restore original visibility after failed sort compaction", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		segments := []*SegmentInfo{
+			NewSegmentInfo(&datapb.SegmentInfo{
+				ID:          1,
+				State:       commonpb.SegmentState_Flushed,
+				IsInvisible: true,
+			}),
+			NewSegmentInfo(&datapb.SegmentInfo{
+				ID:                  2,
+				State:               commonpb.SegmentState_Flushed,
+				IsInvisible:         true,
+				CreatedByCompaction: true,
+			}),
+			NewSegmentInfo(&datapb.SegmentInfo{
+				ID:          3,
+				State:       commonpb.SegmentState_Growing,
+				IsInvisible: true,
+			}),
+			NewSegmentInfo(&datapb.SegmentInfo{
+				ID:          4,
+				State:       commonpb.SegmentState_Dropped,
+				IsInvisible: true,
+			}),
+		}
+		for _, segment := range segments {
+			require.NoError(t, meta.AddSegment(context.TODO(), segment))
+		}
+
+		require.NoError(t, meta.UpdateSegmentsInfo(context.TODO(),
+			RestoreSegmentVisibilityForTerminatedSortCompaction(1),
+			RestoreSegmentVisibilityForTerminatedSortCompaction(2),
+			RestoreSegmentVisibilityForTerminatedSortCompaction(3),
+			RestoreSegmentVisibilityForTerminatedSortCompaction(4),
+			RestoreSegmentVisibilityForTerminatedSortCompaction(5),
+		))
+
+		require.False(t, meta.GetSegment(context.TODO(), 1).GetIsInvisible())
+		require.True(t, meta.GetSegment(context.TODO(), 2).GetIsInvisible(),
+			"compaction-created intermediate segments must remain hidden")
+		require.True(t, meta.GetSegment(context.TODO(), 3).GetIsInvisible(),
+			"only flushed segments are eligible for sealed handoff")
+		require.True(t, meta.GetSegment(context.TODO(), 4).GetIsInvisible(),
+			"completed sort compaction inputs are already dropped and must not be republished")
+	})
+
 	t.Run("operator error stops update", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		require.NoError(t, err)

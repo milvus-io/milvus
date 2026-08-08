@@ -37,6 +37,17 @@ type GlobalScheduler interface {
 	Enqueue(task Task)
 	AbortAndRemoveTask(taskID int64)
 
+	// Finalize hands ownership of a task back to its owner. The task is removed
+	// from dispatch first -- so no further worker callback can be issued for it
+	// -- and fn then runs under the same per-task lock that guards those
+	// callbacks, waiting for any in-flight one to drain. Use it to run terminal
+	// work (cleanup) that must not interleave with the worker callbacks.
+	Finalize(taskID int64, fn func())
+
+	// TryUpdate runs fn under the per-task lock without waiting, reporting
+	// whether it ran. Use it from a loop that must not block on a worker RPC.
+	TryUpdate(taskID int64, fn func()) bool
+
 	Start()
 	Stop()
 }
@@ -134,6 +145,29 @@ func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {
 		s.pendingTasks.Remove(taskID)
 	}
 	s.backoffs.Remove(taskID)
+}
+
+func (s *globalTaskScheduler) Finalize(taskID int64, fn func()) {
+	s.mu.Lock(taskID)
+	defer s.mu.Unlock(taskID)
+	// Remove under the lock, never before it. A dispatch that already popped the
+	// task holds the lock and re-inserts it into pendingTasks or runningTasks as
+	// its last act, so a removal done earlier would simply be undone. Holding
+	// the lock means no such dispatch is in flight, and one that is still queued
+	// behind us will find the task already terminal and drop it.
+	s.runningTasks.Remove(taskID)
+	s.pendingTasks.Remove(taskID)
+	s.backoffs.Remove(taskID)
+	fn()
+}
+
+func (s *globalTaskScheduler) TryUpdate(taskID int64, fn func()) bool {
+	if !s.mu.TryLock(taskID) {
+		return false
+	}
+	defer s.mu.Unlock(taskID)
+	fn()
+	return true
 }
 
 func (s *globalTaskScheduler) Start() {
@@ -279,8 +313,10 @@ func (s *globalTaskScheduler) schedule() {
 			break
 		}
 		future := s.execPool.Submit(func() (struct{}, error) {
-			s.mu.RLock(task.GetTaskID())
-			defer s.mu.RUnlock(task.GetTaskID())
+			// Exclusive, not shared: this is the only thing serializing the
+			// mutations a task's callbacks make to its own state.
+			s.mu.Lock(task.GetTaskID())
+			defer s.mu.Unlock(task.GetTaskID())
 			mlog.Info(s.ctx, "processing task...", WrapTaskLog(task)...)
 			if task.GetTaskState() == taskcommon.Init {
 				task.CreateTaskOnWorker(nodeID, s.cluster)
@@ -329,8 +365,8 @@ func (s *globalTaskScheduler) check() {
 	futures := make([]*conc.Future[struct{}], 0, len(tasks))
 	for _, task := range tasks {
 		future := s.checkPool.Submit(func() (struct{}, error) {
-			s.mu.RLock(task.GetTaskID())
-			defer s.mu.RUnlock(task.GetTaskID())
+			s.mu.Lock(task.GetTaskID())
+			defer s.mu.Unlock(task.GetTaskID())
 			task.QueryTaskOnWorker(s.cluster)
 			switch task.GetTaskState() {
 			case taskcommon.None:

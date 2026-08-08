@@ -1109,6 +1109,29 @@ func SetSegmentIsInvisible(segmentID int64, isInvisible bool) UpdateOperator {
 	}
 }
 
+// RestoreSegmentVisibilityForTerminatedSortCompaction makes an original flushed
+// segment eligible for sealed loading when its terminal sort-compaction task
+// cannot publish a replacement. Compaction-created segments must stay hidden:
+// clustering compaction deliberately keeps those intermediate results
+// invisible until their own publish workflow completes.
+func RestoreSegmentVisibilityForTerminatedSortCompaction(segmentID int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		current := modPack.meta.segments.GetSegment(segmentID)
+		if current == nil ||
+			current.GetState() != commonpb.SegmentState_Flushed ||
+			!current.GetIsInvisible() ||
+			current.GetCreatedByCompaction() {
+			return false
+		}
+
+		segment := modPack.Get(segmentID)
+		segment.IsInvisible = false
+		mlog.Info(context.TODO(), "restore original segment visibility after sort compaction terminated",
+			mlog.FieldSegmentID(segmentID))
+		return true
+	}
+}
+
 func UpdateSegmentLevelOperator(segmentID int64, level datapb.SegmentLevel) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)

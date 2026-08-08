@@ -53,6 +53,11 @@ type taskState struct {
 	compactor Compactor
 	state     datapb.CompactionTaskState
 	result    *datapb.CompactionPlanResult
+	// dropped records that DataCoord asked to remove this task while it was
+	// still executing. The entry cannot be dropped right then -- the compactor
+	// is running and completeTask still needs it -- so the removal is deferred
+	// to completion instead of being silently ignored.
+	dropped bool
 }
 
 type executor struct {
@@ -154,6 +159,12 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 		if e.usingSlots < 0 {
 			e.usingSlots = 0
 		}
+		// Honor a drop that arrived while this task was still running.
+		if task.dropped {
+			mlog.Info(context.TODO(), "removing compaction task dropped while it was executing",
+				mlog.Int64("planID", planID))
+			delete(e.tasks, planID)
+		}
 		e.mu.Unlock()
 
 		task.compactor.Complete()
@@ -173,16 +184,25 @@ func (e *executor) RemoveTask(planID int64) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if task, exists := e.tasks[planID]; exists {
-		// Only remove completed/failed tasks, not executing ones
-		if task.state != datapb.CompactionTaskState_executing {
-			mlog.Info(context.TODO(), "Compaction task removed",
-				mlog.Int64("planID", planID),
-				mlog.String("channel", task.compactor.GetChannelName()),
-				mlog.String("state", task.state.String()))
-			delete(e.tasks, planID)
-		}
+	task, exists := e.tasks[planID]
+	if !exists {
+		return
 	}
+	if task.state == datapb.CompactionTaskState_executing {
+		// Cannot drop it now, so remember the request. Without this the entry
+		// would stay resident until this DataNode restarts, while DropTask still
+		// reported success -- DataCoord would never ask again.
+		task.dropped = true
+		mlog.Info(context.TODO(), "compaction task drop deferred until it finishes",
+			mlog.Int64("planID", planID),
+			mlog.String("channel", task.compactor.GetChannelName()))
+		return
+	}
+	mlog.Info(context.TODO(), "Compaction task removed",
+		mlog.Int64("planID", planID),
+		mlog.String("channel", task.compactor.GetChannelName()),
+		mlog.String("state", task.state.String()))
+	delete(e.tasks, planID)
 }
 
 func (e *executor) Start(ctx context.Context) {

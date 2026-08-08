@@ -295,6 +295,60 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.True(t, exists)
 	})
 
+	t.Run("Test_RemoveTask_DeferredUntilExecutingTaskFinishes", func(t *testing.T) {
+		// DropTask reports success even for a task the node is still running, so
+		// DataCoord never asks again. The request must therefore be remembered and
+		// honored at completion, or the entry -- result binlogs included -- stays
+		// resident until this DataNode restarts.
+		ex := NewExecutor()
+
+		mockCompactor := NewMockCompactor(t)
+		mockCompactor.EXPECT().GetChannelName().Return("ch1").Maybe()
+		mockCompactor.EXPECT().GetSlotUsage().Return(int64(8)).Maybe()
+		mockCompactor.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction).Maybe()
+		mockCompactor.EXPECT().Complete().Return().Once()
+		mockCompactor.EXPECT().GetStorageConfig().Return(nil).Maybe()
+
+		ex.tasks[1] = &taskState{
+			compactor: mockCompactor,
+			state:     datapb.CompactionTaskState_executing,
+		}
+		ex.usingSlots = 8
+
+		ex.RemoveTask(1)
+		require.Len(t, ex.tasks, 1, "an executing task cannot be removed yet")
+		assert.True(t, ex.tasks[1].dropped, "the drop request must be recorded, not discarded")
+
+		ex.completeTask(1, &datapb.CompactionPlanResult{PlanID: 1})
+
+		_, exists := ex.tasks[1]
+		assert.False(t, exists, "a dropped task must be removed once it finishes")
+		assert.Equal(t, int64(0), ex.Slots(), "its slots must still be returned exactly once")
+	})
+
+	t.Run("Test_CompleteTask_KeepsEntryWhenNotDropped", func(t *testing.T) {
+		// Without a drop request the entry must survive completion: DataCoord
+		// still has to fetch the result through QueryTask.
+		ex := NewExecutor()
+
+		mockCompactor := NewMockCompactor(t)
+		mockCompactor.EXPECT().GetSlotUsage().Return(int64(8)).Maybe()
+		mockCompactor.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction).Maybe()
+		mockCompactor.EXPECT().Complete().Return().Once()
+		mockCompactor.EXPECT().GetStorageConfig().Return(nil).Maybe()
+
+		ex.tasks[1] = &taskState{
+			compactor: mockCompactor,
+			state:     datapb.CompactionTaskState_executing,
+		}
+		ex.usingSlots = 8
+
+		ex.completeTask(1, &datapb.CompactionPlanResult{PlanID: 1})
+
+		require.Len(t, ex.tasks, 1, "the result must remain fetchable until dropped")
+		assert.Equal(t, datapb.CompactionTaskState_completed, ex.tasks[1].state)
+	})
+
 	t.Run("Test_GetResults_SinglePlan", func(t *testing.T) {
 		ex := NewExecutor()
 

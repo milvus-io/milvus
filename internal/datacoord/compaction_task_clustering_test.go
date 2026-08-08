@@ -674,37 +674,15 @@ func (s *ClusteringCompactionTaskSuite) TestExecutingState() {
 	task.QueryTaskOnWorker(cluster)
 	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
 
-	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
-		State: datapb.CompactionTaskState_failed,
-	}, nil).Once()
-	task.QueryTaskOnWorker(cluster)
-	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
-
-	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
-		State: datapb.CompactionTaskState_pipelining,
-	}, nil).Once()
-	task.QueryTaskOnWorker(cluster)
-	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
-
-	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
-		State: datapb.CompactionTaskState_completed,
-	}, nil).Once()
-	task.QueryTaskOnWorker(cluster)
-	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
-
-	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
-		State: datapb.CompactionTaskState_completed,
-		Segments: []*datapb.CompactionSegment{
-			{
-				SegmentID: 1000,
-			},
-			{
-				SegmentID: 1001,
-			},
-		},
-	}, nil).Once()
-	task.QueryTaskOnWorker(cluster)
-	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+	// Once the task is terminal the callback stops at the guard, so no later
+	// worker result can change it -- and, more importantly, none can reach the
+	// segment mutations that cleanup no longer tracks. No expectation is
+	// registered on this cluster, so any probe fails the test.
+	quiet := session.NewMockCluster(s.T())
+	for i := 0; i < 4; i++ {
+		task.QueryTaskOnWorker(quiet)
+		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+	}
 }
 
 func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {

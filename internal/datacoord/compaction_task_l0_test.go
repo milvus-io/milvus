@@ -402,7 +402,9 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
 		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Times(2)
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).Return().Once()
+		// No SetSegmentsCompacting expectation: releasing the inputs belongs to
+		// doClean alone, so reaching completed must not unlock them. An
+		// unexpected call here fails the test.
 
 		t.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_completed, t.GetTaskProto().GetState())
@@ -488,10 +490,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
 
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).RunAndReturn(func(ctx context.Context, segIDs []int64, isCompacting bool) {
-			s.ElementsMatch(segIDs, t.GetTaskProto().GetInputSegments())
-		}).Once()
-
+		// Reaching completed must not unlock the inputs; doClean does that once.
 		got := t.Process()
 		s.True(got)
 		s.Equal(datapb.CompactionTaskState_completed, t.GetTaskProto().GetState())
@@ -515,10 +514,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_completed)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).RunAndReturn(func(ctx context.Context, segIDs []int64, isCompacting bool) {
-			s.ElementsMatch(segIDs, t.GetTaskProto().GetInputSegments())
-		}).Once()
-
+		// Reaching completed must not unlock the inputs; doClean does that once.
 		got := t.Process()
 		s.True(got)
 		s.Equal(datapb.CompactionTaskState_completed, t.GetTaskProto().GetState())
@@ -529,10 +525,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		t := s.generateTestL0Task(datapb.CompactionTaskState_completed)
 		t.updateAndSaveTaskMeta(setNodeID(100))
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
-		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).RunAndReturn(func(ctx context.Context, segIDs []int64, isCompacting bool) {
-			s.ElementsMatch(segIDs, t.GetTaskProto().GetInputSegments())
-		}).Once()
-
+		// Reaching completed must not unlock the inputs; doClean does that once.
 		got := t.Process()
 		s.True(got)
 		s.Equal(datapb.CompactionTaskState_completed, t.GetTaskProto().GetState())
