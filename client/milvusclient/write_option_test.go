@@ -47,6 +47,109 @@ func (s *ColumnBasedDataOptionSuite) NullableCompatible() {
 	s.ElementsMatch([]bool{true, true, true}, fd.GetValidData())
 }
 
+func (s *ColumnBasedDataOptionSuite) TestTextInsertAndUpsertRequests() {
+	collectionName := "text_collection"
+	collection := &entity.Collection{
+		Name: collectionName,
+		Schema: entity.NewSchema().WithName(collectionName).
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("document").WithDataType(entity.FieldTypeText)),
+	}
+
+	newOption := func() *columnBasedDataOption {
+		return NewColumnBasedInsertOption(collectionName).
+			WithInt64Column("id", []int64{1, 2}).
+			WithTextColumn("document", []string{"first", "second"})
+	}
+	insertRequest, err := newOption().InsertRequest(collection)
+	s.Require().NoError(err)
+	upsertRequest, err := newOption().UpsertRequest(collection)
+	s.Require().NoError(err)
+
+	for _, fieldsData := range [][]*schemapb.FieldData{insertRequest.GetFieldsData(), upsertRequest.GetFieldsData()} {
+		var textData *schemapb.FieldData
+		for _, fieldData := range fieldsData {
+			if fieldData.GetFieldName() == "document" {
+				textData = fieldData
+				break
+			}
+		}
+		s.Require().NotNil(textData)
+		s.Equal(schemapb.DataType_Text, textData.GetType())
+		s.Equal([]string{"first", "second"}, textData.GetScalars().GetStringData().GetData())
+	}
+}
+
+func (s *ColumnBasedDataOptionSuite) TestTextAndVarCharTypeMismatchError() {
+	tests := []struct {
+		name          string
+		fieldType     entity.FieldType
+		column        column.Column
+		expectedError string
+	}{
+		{
+			name:          "varchar column for text field",
+			fieldType:     entity.FieldTypeText,
+			column:        column.NewColumnVarChar("document", []string{"first"}),
+			expectedError: "param column document has type VarChar but collection field definition is Text",
+		},
+		{
+			name:          "text column for varchar field",
+			fieldType:     entity.FieldTypeVarChar,
+			column:        column.NewColumnText("document", []string{"first"}),
+			expectedError: "param column document has type Text but collection field definition is VarChar",
+		},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			collection := &entity.Collection{
+				Name: "text_collection",
+				Schema: entity.NewSchema().WithName("text_collection").
+					WithField(entity.NewField().WithName("document").WithDataType(test.fieldType)),
+			}
+			_, err := NewColumnBasedInsertOption(collection.Name, test.column).InsertRequest(collection)
+			s.Require().EqualError(err, test.expectedError)
+		})
+	}
+}
+
+func (s *ColumnBasedDataOptionSuite) TestTextRowInsertAndUpsertRequests() {
+	type TextRow struct {
+		ID       int64  `milvus:"name:id"`
+		Document string `milvus:"name:document"`
+	}
+
+	collectionName := "text_collection"
+	collection := &entity.Collection{
+		Name: collectionName,
+		Schema: entity.NewSchema().WithName(collectionName).
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("document").WithDataType(entity.FieldTypeText)),
+	}
+	rows := []any{
+		&TextRow{ID: 1, Document: "first"},
+		&TextRow{ID: 2, Document: "second"},
+	}
+
+	insertRequest, err := NewRowBasedInsertOption(collectionName, rows...).InsertRequest(collection)
+	s.Require().NoError(err)
+	upsertRequest, err := NewRowBasedInsertOption(collectionName, rows...).UpsertRequest(collection)
+	s.Require().NoError(err)
+
+	for _, fieldsData := range [][]*schemapb.FieldData{insertRequest.GetFieldsData(), upsertRequest.GetFieldsData()} {
+		found := false
+		for _, fieldData := range fieldsData {
+			if fieldData.GetFieldName() == "document" {
+				found = true
+				s.Equal(schemapb.DataType_Text, fieldData.GetType())
+				s.Equal([]string{"first", "second"}, fieldData.GetScalars().GetStringData().GetData())
+			}
+		}
+		s.True(found, "TEXT field data not found")
+	}
+}
+
 func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumn() {
 	dim := 4
 	structSchema := entity.NewStructSchema().
