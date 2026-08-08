@@ -835,3 +835,100 @@ func newInt64Array(t *testing.T, values []int64) *array.Int64 {
 	builder.AppendValues(values, nil)
 	return builder.NewInt64Array()
 }
+
+func TestRecordMaterializerMaterializesFunctionFromMissingNullableInput(t *testing.T) {
+	inputField := &schemapb.FieldSchema{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar, Nullable: true}
+	outputField := &schemapb.FieldSchema{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}
+	functionSchema := &schemapb.FunctionSchema{
+		Name: "bm25", Type: schemapb.FunctionType_BM25,
+		InputFieldIds: []int64{100}, OutputFieldIds: []int64{101},
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{inputField, outputField}, Functions: []*schemapb.FunctionSchema{functionSchema}}
+	emptyRow := typeutil.CreateSparseFloatRow(nil, nil)
+	runner := &materializerTestFunctionRunner{
+		schema: functionSchema, inputFields: []*schemapb.FieldSchema{inputField}, outputFields: []*schemapb.FieldSchema{outputField},
+		outputs: []any{&schemapb.SparseFloatArray{Contents: [][]byte{emptyRow, emptyRow}}},
+	}
+	functionMaterializer, err := newBM25FunctionMaterializer(schema, runner, []int{0}, false)
+	require.NoError(t, err)
+	materializer := &RecordMaterializer{
+		schema: schema, materializers: []FunctionMaterializer{functionMaterializer}, missingFields: []*schemapb.FieldSchema{inputField},
+	}
+	defer materializer.Close()
+
+	record := &materializerTestRecord{len: 2}
+	wrapped, err := materializer.Wrap(record)
+	require.NoError(t, err)
+	defer cleanupMaterializedRecord(wrapped)
+	require.Equal(t, []any{[]string{"", ""}}, runner.inputs)
+	require.Equal(t, 2, wrapped.Column(outputField.GetFieldID()).Len())
+	require.Equal(t, 0, record.releaseCount)
+}
+
+func TestRecordMaterializerMaterializesFunctionFromMissingDefaultInput(t *testing.T) {
+	inputField := &schemapb.FieldSchema{
+		FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar, Nullable: true,
+		DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "fallback"}},
+	}
+	outputField := &schemapb.FieldSchema{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}
+	functionSchema := &schemapb.FunctionSchema{
+		Name: "bm25", Type: schemapb.FunctionType_BM25,
+		InputFieldIds: []int64{100}, OutputFieldIds: []int64{101},
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{inputField, outputField}, Functions: []*schemapb.FunctionSchema{functionSchema}}
+	emptyRow := typeutil.CreateSparseFloatRow(nil, nil)
+	runner := &materializerTestFunctionRunner{
+		schema: functionSchema, inputFields: []*schemapb.FieldSchema{inputField}, outputFields: []*schemapb.FieldSchema{outputField},
+		outputs: []any{&schemapb.SparseFloatArray{Contents: [][]byte{emptyRow, emptyRow}}},
+	}
+	functionMaterializer, err := newBM25FunctionMaterializer(schema, runner, []int{0}, false)
+	require.NoError(t, err)
+	materializer := &RecordMaterializer{
+		schema: schema, materializers: []FunctionMaterializer{functionMaterializer}, missingFields: []*schemapb.FieldSchema{inputField},
+	}
+	defer materializer.Close()
+
+	record := &materializerTestRecord{len: 2}
+	wrapped, err := materializer.Wrap(record)
+	require.NoError(t, err)
+	defer cleanupMaterializedRecord(wrapped)
+	require.Equal(t, []any{[]string{"fallback", "fallback"}}, runner.inputs)
+	require.Equal(t, 2, wrapped.Column(outputField.GetFieldID()).Len())
+}
+
+// Regression for the eager-selection existence probe: V2/V3 records are
+// simpleArrowRecord, whose Column PANICS for a field absent from the source
+// (e.g. the output field just added by add_function_field). Selection building
+// must consult existingFields and never probe the record. With the old
+// Column()==nil probe this test panics with "no such field: 101".
+func TestRecordMaterializerSelectionSkipsAbsentFieldOnPanickyRecord(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "added", DataType: schemapb.DataType_Int64, Nullable: true},
+	}}
+	materializer, err := NewRecordMaterializer(schema, nil, map[int64]struct{}{100: {}})
+	require.NoError(t, err)
+	defer materializer.Close()
+
+	pk := newInt64Array(t, []int64{1, 2, 3})
+	defer pk.Release()
+	arrowSchema := arrow.NewSchema([]arrow.Field{{Name: "pk", Type: arrow.PrimitiveTypes.Int64}}, nil)
+	arrowRecord := array.NewRecord(arrowSchema, []arrow.Array{pk}, 3)
+	defer arrowRecord.Release()
+	record := storage.NewSimpleArrowRecord(arrowRecord, map[storage.FieldID]int{100: 0})
+	selection := &recordSelection{ranges: []rowRange{{start: 1, end: 3}}, length: 2}
+
+	wrapped, err := materializer.WrapWithSelection(record, selection)
+	require.NoError(t, err)
+	require.Equal(t, 2, wrapped.Len())
+
+	pkColumn, ok := wrapped.Column(100).(*array.Int64)
+	require.True(t, ok)
+	require.Equal(t, []int64{2, 3}, []int64{pkColumn.Value(0), pkColumn.Value(1)})
+	addedColumn := wrapped.Column(101)
+	require.NotNil(t, addedColumn)
+	require.Equal(t, 2, addedColumn.Len())
+	require.Equal(t, 2, addedColumn.NullN())
+
+	cleanupMaterializedRecord(wrapped)
+}

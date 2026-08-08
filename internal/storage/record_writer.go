@@ -271,6 +271,17 @@ func (pw *packedRecordBatchWriter) Close() (packed.WriterOutput, error) {
 	return out, nil
 }
 
+// Abort releases the underlying FFI writer without flushing pending column
+// groups — for error paths whose output will not be committed. Files already
+// flushed during Write are not undone; they stay unreferenced by the manifest.
+func (pw *packedRecordBatchWriter) Abort() {
+	if pw.writer == nil {
+		return
+	}
+	pw.writer.Destroy()
+	pw.writer = nil
+}
+
 func (pw *packedRecordBatchWriter) AsNewColumnGroups() {
 	if pw.writer != nil {
 		pw.writer.AsNewColumnGroups()
