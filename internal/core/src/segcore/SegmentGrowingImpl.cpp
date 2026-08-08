@@ -2242,6 +2242,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::TIMESTAMPTZ:
+        case DataType::DECIMAL:
         case DataType::INT64: {
             bulk_subscript_impl<int64_t>(op_ctx,
                                          vec_ptr,
