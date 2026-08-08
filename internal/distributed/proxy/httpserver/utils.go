@@ -17,6 +17,7 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
@@ -2786,7 +2787,14 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 					} else {
 						var dataMap map[string]interface{}
 
-						err := json.Unmarshal(fieldDataList[j].GetScalars().GetJsonData().Data[dataIdx], &dataMap)
+						// Decode with UseNumber so numeric dynamic-field values are kept as
+						// json.Number instead of float64. float64 only has a 53-bit mantissa,
+						// so integers larger than 2^53 (e.g. 9223372036854775807) silently lose
+						// precision when round-tripped through the REST response. json.Number
+						// preserves the exact digits and serializes back as the same integer.
+						decoder := json.NewDecoder(bytes.NewReader(fieldDataList[j].GetScalars().GetJsonData().Data[dataIdx]))
+						decoder.UseNumber()
+						err := decoder.Decode(&dataMap)
 						if err != nil {
 							mlog.Error(context.TODO(),
 								fmt.Sprintf("[BuildQueryResp] Unmarshal error %s", err.Error()))
