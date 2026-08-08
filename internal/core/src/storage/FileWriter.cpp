@@ -15,24 +15,17 @@
 // limitations under the License.
 
 #include <errno.h>
-#include "common/FastMem.h"
 #include <fcntl.h>
-#include <folly/Try.h>
-#include <folly/futures/Future.h>
-#include <folly/futures/Promise.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cassert>
 #include <cstdlib>
-#include <exception>
+#include <thread>
 #include <utility>
 
-#include "folly/ExceptionWrapper.h"
-#include "folly/ScopeGuard.h"
-#include "folly/Unit.h"
-#include "folly/futures/Future.h"
-#include "folly/futures/Promise.h"
+#include "common/FastMem.h"
 #include "storage/FileWriter.h"
+#include "storage/LocalFileIOPool.h"
 
 namespace milvus::storage {
 namespace {
@@ -120,8 +113,6 @@ FileWriter::FileWriter(std::string filename, io::Priority priority)
         priority_ == io::Priority::HIGH ? WriteMode::BUFFERED : GetMode();
 
     use_direct_io_ = mode == WriteMode::DIRECT;
-    use_writer_pool_ = FileWriteWorkerPool::GetInstance().HasPool();
-
     // allocate an internal aligned buffer for both modes to batch writes
     size_t buf_size = GetBufferSize();
     AssertInfo(
@@ -173,6 +164,11 @@ FileWriter::~FileWriter() {
 }
 
 void
+FileWriter::SetFdatasyncOnFinish() {
+    fdatasync_on_finish_ = true;
+}
+
+void
 FileWriter::Cleanup() noexcept {
     if (fd_ != -1) {
         close(fd_);
@@ -208,6 +204,31 @@ FileWriter::PositionedWriteWithCheck(const void* data,
     } catch (...) {
         Cleanup();
         throw;
+    }
+}
+
+void
+FileWriter::SyncWrittenData() {
+    if (!fdatasync_on_finish_ || file_size_ == 0) {
+        return;
+    }
+    SyncFileData();
+}
+
+void
+FileWriter::SyncFileData() {
+#ifdef __APPLE__
+    auto ret = fsync(fd_);
+#else
+    auto ret = fdatasync(fd_);
+#endif
+    if (ret != 0) {
+        auto saved_errno = errno;
+        Cleanup();
+        ThrowInfo(ErrorCode::FileWriteFailed,
+                  "Failed to sync file data: {}, error: {}",
+                  filename_,
+                  strerror(saved_errno));
     }
 }
 
@@ -276,38 +297,8 @@ FileWriter::Write(const void* data, size_t nbyte) {
         return;
     }
 
-    if (!use_writer_pool_) {
-        WriteInternal(data, nbyte);
-        return;
-    }
-
-    auto promise = std::make_shared<folly::Promise<folly::Unit>>();
-    auto future = promise->getFuture();
-    auto task = [this, data, nbyte, promise]() {
-        try {
-            WriteInternal(data, nbyte);
-            promise->setValue(folly::Unit{});
-        } catch (...) {
-            promise->setException(
-                folly::exception_wrapper(std::current_exception()));
-        }
-    };
-
-    // try to add the task to the writer pool
-    // fallback to write the data directly if the task cannot be added to the pool
-    if (FileWriteWorkerPool::GetInstance().AddTask(task)) {
-        try {
-            future.wait();
-        } catch (const std::exception& e) {
-            Cleanup();
-            ThrowInfo(ErrorCode::FileWriteFailed,
-                      "Failed to write to file: {}, error: {}",
-                      filename_,
-                      e.what());
-        }
-    } else {
-        WriteInternal(data, nbyte);
-    }
+    auto permit = LocalFileIOPool::GetInstance().AcquireWritePermit();
+    WriteInternal(data, nbyte);
 }
 
 void
@@ -342,41 +333,20 @@ FileWriter::FlushWithBufferedIO() {
 
 size_t
 FileWriter::Finish() {
-    // if the aligned buffer is not empty, we should flush it to the file
-    if (offset_ != 0) {
-        auto promise = std::make_shared<folly::Promise<folly::Unit>>();
-        auto future = promise->getFuture();
-        auto task = [this, promise]() {
-            try {
-                if (use_direct_io_) {
-                    FlushWithDirectIO();
-                } else {
-                    FlushWithBufferedIO();
-                }
-                promise->setValue(folly::Unit{});
-            } catch (...) {
-                promise->setException(
-                    folly::exception_wrapper(std::current_exception()));
-            }
-        };
+    auto has_file_io =
+        offset_ != 0 || (fdatasync_on_finish_ && file_size_ != 0);
+    if (has_file_io) {
+        auto permit = LocalFileIOPool::GetInstance().AcquireWritePermit();
 
-        if (FileWriteWorkerPool::GetInstance().AddTask(task)) {
-            try {
-                future.wait();
-            } catch (const std::exception& e) {
-                Cleanup();
-                ThrowInfo(ErrorCode::FileWriteFailed,
-                          "Failed to flush file: {}, error: {}",
-                          filename_,
-                          e.what());
-            }
-        } else {
+        // if the aligned buffer is not empty, we should flush it to the file
+        if (offset_ != 0) {
             if (use_direct_io_) {
                 FlushWithDirectIO();
             } else {
                 FlushWithBufferedIO();
             }
         }
+        SyncWrittenData();
     }
 
     // clean up the file writer
