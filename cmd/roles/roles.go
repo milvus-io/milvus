@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
@@ -210,6 +211,21 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool) *conc.Fut
 
 func (mr *MilvusRoles) runCDC(ctx context.Context, localMsg bool) *conc.Future[component] {
 	return runComponent(ctx, localMsg, components.NewCDC, metrics.RegisterCDC)
+}
+
+func (mr *MilvusRoles) resolveFileResourceMode() fileresource.Mode {
+	params := paramtable.Get()
+	modes := make([]fileresource.Mode, 0, 3)
+	if mr.EnableQueryNode || mr.EnableStreamingNode {
+		modes = append(modes, fileresource.ParseMode(params.CommonCfg.QNFileResourceMode.GetValue()))
+	}
+	if mr.EnableDataNode {
+		modes = append(modes, fileresource.ParseMode(params.CommonCfg.DNFileResourceMode.GetValue()))
+	}
+	if mr.EnableProxy {
+		modes = append(modes, fileresource.ParseMode(params.CommonCfg.ProxyFileResourceMode.GetValue()))
+	}
+	return fileresource.ResolveMode(modes...)
 }
 
 // waitForAllComponentsReady waits for all components to be ready.
@@ -481,6 +497,10 @@ func (mr *MilvusRoles) Run() {
 			}
 		}()
 	}
+
+	effectiveFileResourceMode := mr.resolveFileResourceMode()
+	fileresource.SetLocalMode(effectiveFileResourceMode)
+	mlog.Info(ctx, "resolved process file resource mode", mlog.String("mode", effectiveFileResourceMode.String()))
 
 	local := mr.Local
 	componentFutureMap := make(map[string]*conc.Future[component])

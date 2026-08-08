@@ -364,10 +364,13 @@ type commonConfig struct {
 	UsingJSONStatsForQuery ParamItem `refreshable:"true"`
 	ClusterID              ParamItem `refreshable:"false"`
 
-	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
-	SearchRequeryPolicy       ParamItem `refreshable:"true"`
-	QNFileResourceMode        ParamItem `refreshable:"true"`
-	DNFileResourceMode        ParamItem `refreshable:"true"`
+	HybridSearchRequeryPolicy   ParamItem `refreshable:"true"`
+	SearchRequeryPolicy         ParamItem `refreshable:"true"`
+	QNFileResourceMode          ParamItem `refreshable:"false"`
+	DNFileResourceMode          ParamItem `refreshable:"false"`
+	ProxyFileResourceMode       ParamItem `refreshable:"false"`
+	FileResourceMaxFileSize     ParamItem `refreshable:"false"`
+	FileResourceDownloadTimeout ParamItem `refreshable:"false"`
 
 	// group by
 	GroupByMaxGroups ParamItem `refreshable:"false"`
@@ -1577,6 +1580,69 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       true,
 	}
 	p.DNFileResourceMode.Init(base.mgr)
+
+	p.ProxyFileResourceMode = ParamItem{
+		Key:          "common.fileResource.mode.proxy",
+		Version:      "3.0",
+		DefaultValue: "sync",
+		Doc:          "File resource mode for proxy, options: [sync, close]. Default is sync.",
+		Export:       true,
+	}
+	p.ProxyFileResourceMode.Init(base.mgr)
+
+	p.FileResourceMaxFileSize = ParamItem{
+		Key:          "common.fileResource.maxFileSize",
+		Version:      "3.0",
+		DefaultValue: "0",
+		Doc:          "Maximum size of a single file resource accepted by AddFileResource. Set to 0 to disable the admission limit.",
+		Export:       true,
+		Formatter: func(v string) string {
+			value := strings.ToLower(v)
+			multiplier := int64(1)
+			switch {
+			case strings.HasSuffix(value, "gb"):
+				value = strings.TrimSuffix(value, "gb")
+				multiplier = 1024 * 1024 * 1024
+			case strings.HasSuffix(value, "g"):
+				value = strings.TrimSuffix(value, "g")
+				multiplier = 1024 * 1024 * 1024
+			case strings.HasSuffix(value, "mb"):
+				value = strings.TrimSuffix(value, "mb")
+				multiplier = 1024 * 1024
+			case strings.HasSuffix(value, "m"):
+				value = strings.TrimSuffix(value, "m")
+				multiplier = 1024 * 1024
+			case strings.HasSuffix(value, "kb"):
+				value = strings.TrimSuffix(value, "kb")
+				multiplier = 1024
+			case strings.HasSuffix(value, "k"):
+				value = strings.TrimSuffix(value, "k")
+				multiplier = 1024
+			}
+			size, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || size < 0 || size > math.MaxInt64/multiplier {
+				return "0"
+			}
+			return v
+		},
+	}
+	p.FileResourceMaxFileSize.Init(base.mgr)
+
+	p.FileResourceDownloadTimeout = ParamItem{
+		Key:          "common.fileResource.downloadTimeout",
+		Version:      "3.0",
+		DefaultValue: "5m",
+		Doc:          "Timeout for downloading a single file resource. It accepts duration strings such as 30s or 5m.",
+		Export:       true,
+		Formatter: func(v string) string {
+			duration, err := time.ParseDuration(v)
+			if err != nil || duration <= 0 {
+				return "5m"
+			}
+			return v
+		},
+	}
+	p.FileResourceDownloadTimeout.Init(base.mgr)
 
 	p.GroupByMaxGroups = ParamItem{
 		Key:          "common.groupBy.maxGroups",
