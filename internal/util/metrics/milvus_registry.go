@@ -20,6 +20,7 @@ package metrics
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	dto "github.com/prometheus/client_model/go"
 )
 
@@ -29,8 +30,8 @@ func NewMilvusRegistry() *MilvusRegistry {
 		CRegistry:  NewCRegistry(),
 	}
 
-	r.GoRegistry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
-	r.GoRegistry.MustRegister(prometheus.NewGoCollector())
+	r.GoRegistry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	r.GoRegistry.MustRegister(collectors.NewGoCollector(collectors.MetricsAll))
 
 	return r
 }
