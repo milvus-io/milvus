@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -86,13 +87,13 @@ func (f *FunctionTaskSuite) TestValidateAddFunctionInputNotText() {
 	}
 
 	// TEXT input rejected for BM25 and MinHash
-	f.ErrorContains(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "text_in")), "TEXT input field")
-	f.ErrorContains(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "text_in")), "TEXT input field")
+	f.ErrorContains(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "text_in")), "TEXT input field")
+	f.ErrorContains(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "text_in")), "TEXT input field")
 	// VarChar input allowed
-	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "varchar_in")))
-	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "varchar_in")))
+	f.NoError(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "varchar_in")))
+	f.NoError(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "varchar_in")))
 	// non-materialized function type (e.g. TextEmbedding) is out of scope -> allowed even with TEXT input
-	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_TextEmbedding, "text_in")))
+	f.NoError(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_TextEmbedding, "text_in")))
 }
 
 func (f *FunctionTaskSuite) TestFunctionOnType() {

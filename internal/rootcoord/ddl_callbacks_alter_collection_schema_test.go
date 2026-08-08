@@ -1925,3 +1925,29 @@ func TestApplyBoundFieldIndexesInline(t *testing.T) {
 		require.ErrorContains(t, err, "failed to apply bound field index")
 	})
 }
+
+// The proxy runs this gate in alterCollectionSchemaTask.preExecuteAdd, but a
+// request hitting RootCoord directly bypasses the proxy entirely — the
+// broadcast callback must enforce it too.
+func TestDDLCallbacksAlterCollectionSchemaRejectsTextFunctionInput(t *testing.T) {
+	coll := &model.Collection{
+		CollectionID: 1,
+		Name:         "coll",
+		Fields: []*model.Field{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID: 101, Name: "text_input", DataType: schemapb.DataType_Text, Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.EnableAnalyzerKey, Value: "true"},
+					{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
+				},
+			},
+		},
+	}
+	core := &Core{}
+
+	bm25Req := buildAlterSchemaReq("db", coll.Name, "text_input", "sparse_from_text", "bm25_from_text")
+	bm25Err := core.broadcastAlterCollectionSchemaAdd(context.Background(), nil, coll, bm25Req)
+	require.ErrorIs(t, bm25Err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, bm25Err, "TEXT input field")
+}
