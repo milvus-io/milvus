@@ -72,6 +72,7 @@ Priority: `FieldXxx(val)` > typed constructor like `mlog.String(key, val)` > `ml
 | `FieldPChannel(v)` | string | `pchannel` |
 | `FieldMessageID(v)` | ObjectMarshaler | `messageID` |
 | `FieldMessage(v)` | ObjectMarshaler | `message` |
+| `FieldSchema(v)` | *schemapb.CollectionSchema | `schema` (external credentials redacted) |
 
 **Generic typed constructors** (use when no predefined FieldXxx exists; function names match Go types):
 `String` / `Int64` / `Int` / `Float64` / `Bool` / `Duration` / `Time` / `Stringer` / `Binary` / `Err` (key fixed to `"error"`), etc.

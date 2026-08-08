@@ -370,8 +370,7 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
-		mlog.Error(context.TODO(), "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
-			mlog.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
+		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
 			mlog.Err(err),
 		)
 		return merr.Status(err), nil
@@ -398,8 +397,7 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
-		mlog.Error(context.TODO(), "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
-			mlog.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
+		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
 			mlog.Err(err),
 		)
 		return merr.Status(err), nil
@@ -518,9 +516,8 @@ func (node *DataNode) CopySegment(ctx context.Context, req *datapb.CopySegmentRe
 
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
-		mlog.Error(context.TODO(), "create chunk manager failed",
+		mlog.Error(ctx, "create chunk manager failed",
 			mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
-			mlog.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
 			mlog.Err(err),
 		)
 		return merr.Status(err), nil

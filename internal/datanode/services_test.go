@@ -17,6 +17,7 @@
 package datanode
 
 import (
+	"bytes"
 	"context"
 	"math/rand"
 	"strings"
@@ -24,6 +25,8 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
@@ -1318,4 +1321,132 @@ func (s *DataNodeServicesSuite) TestDropTaskCopySegment() {
 		status, err := s.node.DropTask(s.ctx, dropReq)
 		s.NoError(merr.CheckRPCCall(status, err))
 	})
+}
+
+type dataNodeLogBuffer struct {
+	bytes.Buffer
+}
+
+func (*dataNodeLogBuffer) Sync() error {
+	return nil
+}
+
+func captureDataNodeLogs(t *testing.T) *dataNodeLogBuffer {
+	t.Helper()
+
+	oldLogger := mlog.L()
+	oldLevel := mlog.GetAtomicLevel()
+	logs := &dataNodeLogBuffer{}
+	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	}, logs)
+	require.NoError(t, err)
+	mlog.ReplaceGlobals(logger, props)
+	t.Cleanup(func() {
+		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+	})
+	return logs
+}
+
+type failingStorageFactory struct{}
+
+func (failingStorageFactory) NewChunkManager(context.Context, *indexpb.StorageConfig) (storage.ChunkManager, error) {
+	return nil, merr.WrapErrIoFailedReason("storage factory unavailable")
+}
+
+func TestChunkManagerFailureDoesNotLogStorageAccessKey(t *testing.T) {
+	logs := captureDataNodeLogs(t)
+	ctx := context.Background()
+	node := NewDataNode(ctx)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	node.storageFactory = failingStorageFactory{}
+
+	accessKey := "DATANODE_ACCESS_KEY_SENTINEL"
+	storageConfig := &indexpb.StorageConfig{
+		BucketName:  "audit-bucket",
+		AccessKeyID: accessKey,
+	}
+
+	testCases := []struct {
+		name string
+		call func() (*commonpb.Status, error)
+	}{
+		{
+			name: "legacy index job",
+			call: func() (*commonpb.Status, error) {
+				return node.CreateJob(ctx, &workerpb.CreateJobRequest{
+					ClusterID:     "cluster",
+					BuildID:       1,
+					StorageConfig: storageConfig,
+				})
+			},
+		},
+		{
+			name: "v2 index job",
+			call: func() (*commonpb.Status, error) {
+				return node.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
+					ClusterID: "cluster",
+					TaskID:    2,
+					JobType:   indexpb.JobType_JobTypeIndexJob,
+					Request: &workerpb.CreateJobV2Request_IndexRequest{
+						IndexRequest: &workerpb.CreateJobRequest{
+							ClusterID:     "cluster",
+							BuildID:       2,
+							StorageConfig: storageConfig,
+						},
+					},
+				})
+			},
+		},
+		{
+			name: "stats job",
+			call: func() (*commonpb.Status, error) {
+				return node.CreateJobV2(ctx, &workerpb.CreateJobV2Request{
+					ClusterID: "cluster",
+					TaskID:    3,
+					JobType:   indexpb.JobType_JobTypeStatsJob,
+					Request: &workerpb.CreateJobV2Request_StatsRequest{
+						StatsRequest: &workerpb.CreateStatsRequest{
+							ClusterID:     "cluster",
+							TaskID:        3,
+							StorageConfig: storageConfig,
+						},
+					},
+				})
+			},
+		},
+		{
+			name: "pre-import",
+			call: func() (*commonpb.Status, error) {
+				return node.PreImport(ctx, &datapb.PreImportRequest{TaskID: 4, StorageConfig: storageConfig})
+			},
+		},
+		{
+			name: "import",
+			call: func() (*commonpb.Status, error) {
+				return node.ImportV2(ctx, &datapb.ImportRequest{TaskID: 5, StorageConfig: storageConfig})
+			},
+		},
+		{
+			name: "copy segment",
+			call: func() (*commonpb.Status, error) {
+				return node.CopySegment(ctx, &datapb.CopySegmentRequest{TaskID: 6, StorageConfig: storageConfig})
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			status, err := testCase.call()
+			require.NoError(t, err)
+			assert.Error(t, merr.Error(status))
+		})
+	}
+
+	assert.NotContains(t, logs.String(), accessKey)
+	assert.Contains(t, logs.String(), "audit-bucket")
 }
