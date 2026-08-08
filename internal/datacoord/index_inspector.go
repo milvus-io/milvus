@@ -212,6 +212,9 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 	fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, indexID)
 	fieldSize := segment.getFieldBinlogSize(fieldID)
+	if supportsFieldProjection(segment) {
+		fieldSize = i.estimateIndexFieldSize(ctx, resolveCollection(ctx, i.handler, segment.GetCollectionID()), segment, fieldID)
+	}
 	taskSlot := calculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
 
 	// rewrite the index type if needed, and this final index type will be persisted in the meta
@@ -264,8 +267,43 @@ func (i *indexInspector) isExternalCollection(collectionID int64) bool {
 	return coll != nil && coll.IsExternal()
 }
 
+// estimateIndexFieldSize returns the amount of data the index build task reads
+// for fieldID, which drives the task slot estimation.
+//
+// A manifest-backed StorageV3 index build projects the indexed column, while
+// the binlog size covers the whole column group holding it. StorageV2 reads the
+// whole group and therefore keeps the binlog size. An unresolvable schema also
+// keeps that previous conservative behavior.
+func (i *indexInspector) estimateIndexFieldSize(ctx context.Context, coll *collectionInfo, segment *SegmentInfo, fieldID int64) int64 {
+	binlogSize := segment.getFieldBinlogSize(fieldID)
+	if !supportsFieldProjection(segment) {
+		return binlogSize
+	}
+	if coll == nil {
+		mlog.Warn(ctx, "cannot resolve collection, fallback to binlog size for index task slot",
+			mlog.FieldCollectionID(segment.GetCollectionID()),
+			mlog.FieldSegmentID(segment.GetID()),
+			mlog.Int64("binlogSize", binlogSize))
+		return binlogSize
+	}
+
+	fieldSize, err := estimateFieldsReadSize(coll.Schema, segment, []int64{fieldID})
+	if err != nil {
+		mlog.Warn(ctx, "failed to estimate index field size, fallback to binlog size",
+			mlog.FieldSegmentID(segment.GetID()),
+			mlog.FieldFieldID(fieldID),
+			mlog.Int64("binlogSize", binlogSize),
+			mlog.Err(err))
+		return binlogSize
+	}
+	return fieldSize
+}
+
 func (i *indexInspector) reloadFromMeta() {
 	segments := i.meta.GetAllSegmentsUnsafe()
+	// the collection cache is usually not filled yet at startup, and resolving
+	// it hits rootcoord, so memoize it across all recovered tasks
+	collections := newCollectionCache(i.handler)
 	for _, segment := range segments {
 		for _, segIndex := range i.meta.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
 			if segIndex.IsDeleted || (segIndex.IndexState != commonpb.IndexState_Unissued &&
@@ -276,7 +314,7 @@ func (i *indexInspector) reloadFromMeta() {
 
 			indexParams := i.meta.indexMeta.GetIndexParams(segment.CollectionID, segIndex.IndexID)
 			fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
-			fieldSize := segment.getFieldBinlogSize(fieldID)
+			fieldSize := i.estimateIndexFieldSize(i.ctx, collections.get(i.ctx, segment.GetCollectionID()), segment, fieldID)
 			taskSlot := calculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
 
 			i.scheduler.Enqueue(newIndexBuildTask(
