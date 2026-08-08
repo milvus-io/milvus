@@ -19,6 +19,7 @@ package paramtable
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -344,31 +345,7 @@ func (pi *ParamItem) GetAsDurationByParse() time.Duration {
 }
 
 func (pi *ParamItem) GetAsSize() int64 {
-	valueStr := strings.ToLower(pi.GetValue())
-	if strings.HasSuffix(valueStr, "g") || strings.HasSuffix(valueStr, "gb") {
-		size, err := strconv.ParseInt(strings.Split(valueStr, "g")[0], 10, 64)
-		if err != nil {
-			return 0
-		}
-		return size * 1024 * 1024 * 1024
-	} else if strings.HasSuffix(valueStr, "m") || strings.HasSuffix(valueStr, "mb") {
-		size, err := strconv.ParseInt(strings.Split(valueStr, "m")[0], 10, 64)
-		if err != nil {
-			return 0
-		}
-		return size * 1024 * 1024
-	} else if strings.HasSuffix(valueStr, "k") || strings.HasSuffix(valueStr, "kb") {
-		size, err := strconv.ParseInt(strings.Split(valueStr, "k")[0], 10, 64)
-		if err != nil {
-			return 0
-		}
-		return size * 1024
-	}
-	size, err := strconv.ParseInt(valueStr, 10, 64)
-	if err != nil {
-		return 0
-	}
-	return size
+	return getAsSize(pi.GetValue())
 }
 
 type CompositeParamItem struct {
@@ -453,6 +430,40 @@ func getAsFloat(v string) float64 {
 	return getAndConvert(v, func(value string) (float64, error) {
 		return strconv.ParseFloat(value, 64)
 	}, 0.0)
+}
+
+func getAsSize(value string) int64 {
+	number, multiplier := splitSizeUnit(value)
+	integer, err := strconv.ParseInt(number, 10, 64)
+	if err == nil {
+		return integer * multiplier
+	}
+	decimal, err := strconv.ParseFloat(number, 64)
+	if err != nil || math.IsNaN(decimal) || math.IsInf(decimal, 0) {
+		return 0
+	}
+	return int64(decimal * float64(multiplier))
+}
+
+func splitSizeUnit(value string) (string, int64) {
+	lowerValue := strings.ToLower(value)
+	units := []struct {
+		suffix     string
+		multiplier int64
+	}{
+		{suffix: "gb", multiplier: 1024 * 1024 * 1024},
+		{suffix: "g", multiplier: 1024 * 1024 * 1024},
+		{suffix: "mb", multiplier: 1024 * 1024},
+		{suffix: "m", multiplier: 1024 * 1024},
+		{suffix: "kb", multiplier: 1024},
+		{suffix: "k", multiplier: 1024},
+	}
+	for _, unit := range units {
+		if strings.HasSuffix(lowerValue, unit.suffix) {
+			return lowerValue[:len(lowerValue)-len(unit.suffix)], unit.multiplier
+		}
+	}
+	return lowerValue, 1
 }
 
 func getAsDuration(v string, unit time.Duration) time.Duration {

@@ -1718,6 +1718,43 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 	})
 }
 
+func TestCreateCollectionPrepareSchemaValidatesFinalPayload(t *testing.T) {
+	collectionName := funcutil.GenRandomStr()
+	schema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				Name:     "vector",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "8"},
+				},
+			},
+		},
+	}
+	limit := proto.Size(schema) + 1
+	old := paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(strconv.Itoa(limit))
+	defer paramtable.Get().ProxyCfg.MaxCollectionSchemaSize.SwapTempValue(old)
+
+	task := createCollectionTask{
+		Req: &milvuspb.CreateCollectionRequest{
+			CollectionName: collectionName,
+		},
+		body: &message.CreateCollectionRequest{
+			CollectionSchema: schema,
+		},
+	}
+
+	err := task.prepareSchema(context.Background())
+	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	require.Greater(t, proto.Size(task.body.CollectionSchema), limit)
+}
+
 func TestNextMilvusTableTargetOnlyFieldID(t *testing.T) {
 	source := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
