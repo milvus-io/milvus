@@ -432,6 +432,11 @@ proxy:
     debug_mode: false # Whether to enable http server debug mode
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
+    # high-level restful api, whether to return Array fields wrapped in the raw protobuf ScalarField shape
+    # ({"tags":{"Data":{"StringData":{"data":["a","b"]}}}}) instead of a native JSON array ({"tags":["a","b"]}).
+    # Only enable this to keep clients written against the old, incorrect shape working while they migrate;
+    # it will be removed in a future release.
+    legacyArrayResponse: false
     enablePprof: true # Whether to enable pprof middleware on the metrics port
     readHeaderTimeout: 5s # HTTP server timeout for reading request headers
     readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout

@@ -4323,8 +4323,13 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "binaryVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
-		errMsg:      "can only accept json format request, error: Mismatch type uint8",
-		errCode:     1801,
+		// Do not pin the reported Go type here. sonic selects its decoder by
+		// architecture (internal/decoder/api: jitdec on amd64, optdec on arm64) and
+		// the two disagree on which type they blame for a []byte mismatch — jitdec
+		// says "uint8", optdec says "[]uint8". Asserting either one turns this case
+		// red on the other architecture.
+		errMsg:  "can only accept json format request, error: Mismatch type",
+		errCode: 1801,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
