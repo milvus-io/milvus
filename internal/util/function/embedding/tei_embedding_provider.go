@@ -38,6 +38,7 @@ type TeiEmbeddingProvider struct {
 
 	ingestionPrompt     string
 	searchPrompt        string
+	embedDimParam       int64
 	truncate            bool
 	truncationDirection string
 
@@ -57,6 +58,8 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 	truncate := false
 	// TEI default is right
 	truncationDirection := ""
+	// 0 means dimensions is omitted and TEI uses the model's default dimension.
+	var dim int64
 
 	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {
@@ -66,6 +69,11 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 			ingestionPrompt = param.Value
 		case models.SearchPromptParamKey:
 			searchPrompt = param.Value
+		case models.DimParamKey:
+			dim, err = models.ParseAndCheckFieldDim(param.Value, fieldDim, fieldSchema.Name)
+			if err != nil {
+				return nil, err
+			}
 		case models.MaxClientBatchSizeParamKey:
 			if maxBatch, err = strconv.Atoi(param.Value); err != nil {
 				return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is not a valid number", models.MaxClientBatchSizeParamKey, param.Value)
@@ -99,6 +107,7 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 
 		ingestionPrompt:     ingestionPrompt,
 		searchPrompt:        searchPrompt,
+		embedDimParam:       dim,
 		truncationDirection: truncationDirection,
 		maxBatch:            maxBatch,
 		truncate:            truncate,
@@ -131,7 +140,7 @@ func (provider *TeiEmbeddingProvider) CallEmbedding(ctx context.Context, texts [
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(texts[i:end], provider.truncate, provider.truncationDirection, prompt, provider.timeoutMs)
+		resp, err := provider.client.Embedding(texts[i:end], provider.truncate, provider.truncationDirection, prompt, int(provider.embedDimParam), provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
