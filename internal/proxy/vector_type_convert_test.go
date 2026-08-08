@@ -26,6 +26,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -55,10 +57,170 @@ func TestIsVectorTypeMatch(t *testing.T) {
 	}
 }
 
+func TestValidatePlaceholderGroupDimensions(t *testing.T) {
+	newField := func(dataType, elementType schemapb.DataType, dim int64) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name:        "vector",
+			DataType:    dataType,
+			ElementType: elementType,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: fmt.Sprintf("%d", dim)},
+			},
+		}
+	}
+
+	tests := []struct {
+		name            string
+		field           *schemapb.FieldSchema
+		placeholderType commonpb.PlaceholderType
+		valueSizes      []int
+		wantErr         bool
+	}{
+		{"float vector", newField(schemapb.DataType_FloatVector, schemapb.DataType_None, 4), commonpb.PlaceholderType_FloatVector, []int{16, 16}, false},
+		{"float vector mismatch", newField(schemapb.DataType_FloatVector, schemapb.DataType_None, 4), commonpb.PlaceholderType_FloatVector, []int{16, 12}, true},
+		{"float16 vector", newField(schemapb.DataType_Float16Vector, schemapb.DataType_None, 4), commonpb.PlaceholderType_Float16Vector, []int{8}, false},
+		{"bfloat16 vector mismatch", newField(schemapb.DataType_BFloat16Vector, schemapb.DataType_None, 4), commonpb.PlaceholderType_BFloat16Vector, []int{6}, true},
+		{"binary vector", newField(schemapb.DataType_BinaryVector, schemapb.DataType_None, 16), commonpb.PlaceholderType_BinaryVector, []int{2}, false},
+		{"binary vector mismatch", newField(schemapb.DataType_BinaryVector, schemapb.DataType_None, 16), commonpb.PlaceholderType_BinaryVector, []int{1}, true},
+		{"int8 vector", newField(schemapb.DataType_Int8Vector, schemapb.DataType_None, 4), commonpb.PlaceholderType_Int8Vector, []int{4}, false},
+		{"int8 vector mismatch", newField(schemapb.DataType_Int8Vector, schemapb.DataType_None, 4), commonpb.PlaceholderType_Int8Vector, []int{5}, true},
+		{"array element level", newField(schemapb.DataType_ArrayOfVector, schemapb.DataType_FloatVector, 4), commonpb.PlaceholderType_FloatVector, []int{16}, false},
+		{"array element level rejects multiple vectors", newField(schemapb.DataType_ArrayOfVector, schemapb.DataType_FloatVector, 4), commonpb.PlaceholderType_FloatVector, []int{32}, true},
+		{"float embedding list", newField(schemapb.DataType_ArrayOfVector, schemapb.DataType_FloatVector, 4), commonpb.PlaceholderType_EmbListFloatVector, []int{16, 48}, false},
+		{"float embedding list mismatch", newField(schemapb.DataType_ArrayOfVector, schemapb.DataType_FloatVector, 4), commonpb.PlaceholderType_EmbListFloatVector, []int{20}, true},
+		{"float16 embedding list", newField(schemapb.DataType_ArrayOfVector, schemapb.DataType_Float16Vector, 4), commonpb.PlaceholderType_EmbListFloat16Vector, []int{8, 16}, false},
+		{"bfloat16 embedding list mismatch", newField(schemapb.DataType_ArrayOfVector, schemapb.DataType_BFloat16Vector, 4), commonpb.PlaceholderType_EmbListBFloat16Vector, []int{10}, true},
+		{"binary embedding list", newField(schemapb.DataType_ArrayOfVector, schemapb.DataType_BinaryVector, 16), commonpb.PlaceholderType_EmbListBinaryVector, []int{2, 4}, false},
+		{"binary embedding list mismatch", newField(schemapb.DataType_ArrayOfVector, schemapb.DataType_BinaryVector, 16), commonpb.PlaceholderType_EmbListBinaryVector, []int{3}, true},
+		{"int8 embedding list", newField(schemapb.DataType_ArrayOfVector, schemapb.DataType_Int8Vector, 4), commonpb.PlaceholderType_EmbListInt8Vector, []int{4, 12}, false},
+		{"int8 embedding list mismatch", newField(schemapb.DataType_ArrayOfVector, schemapb.DataType_Int8Vector, 4), commonpb.PlaceholderType_EmbListInt8Vector, []int{5}, true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			values := make([][]byte, 0, len(test.valueSizes))
+			for _, size := range test.valueSizes {
+				values = append(values, make([]byte, size))
+			}
+
+			_, _, err := ConvertPlaceholderGroup(
+				mustMarshalPlaceholderGroup(t, test.placeholderType, values),
+				test.field,
+			)
+			if test.wantErr {
+				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+				assert.False(t, merr.IsRetryableErr(err))
+				assert.Contains(t, err.Error(), "vector dimension mismatch")
+				assert.Contains(t, err.Error(), "vector")
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+
+	for _, test := range []struct {
+		name            string
+		field           *schemapb.FieldSchema
+		placeholderType commonpb.PlaceholderType
+		value           []byte
+	}{
+		{"sparse vector uses sparse parser", &schemapb.FieldSchema{Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}, commonpb.PlaceholderType_SparseFloatVector, []byte{1, 2, 3}},
+		{"varchar uses function executor", newField(schemapb.DataType_FloatVector, schemapb.DataType_None, 4), commonpb.PlaceholderType_VarChar, []byte("query")},
+		{"incompatible vector type uses type validation", newField(schemapb.DataType_FloatVector, schemapb.DataType_None, 4), commonpb.PlaceholderType_BinaryVector, []byte{0}},
+		{"incompatible embedding list uses type validation", newField(schemapb.DataType_ArrayOfVector, schemapb.DataType_FloatVector, 4), commonpb.PlaceholderType_EmbListBinaryVector, []byte{0}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, err := ConvertPlaceholderGroup(
+				mustMarshalPlaceholderGroup(t, test.placeholderType, [][]byte{test.value}),
+				test.field,
+			)
+			assert.NoError(t, err)
+		})
+	}
+
+	t.Run("malformed placeholder group", func(t *testing.T) {
+		_, _, err := ConvertPlaceholderGroup(
+			[]byte{0xff},
+			newField(schemapb.DataType_FloatVector, schemapb.DataType_None, 4),
+		)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("invalid collection schema is a system error", func(t *testing.T) {
+		fieldSchema := &schemapb.FieldSchema{
+			Name:     "vector",
+			DataType: schemapb.DataType_FloatVector,
+		}
+		_, _, err := ConvertPlaceholderGroup(
+			mustMarshalPlaceholderGroup(t, commonpb.PlaceholderType_FloatVector, [][]byte{make([]byte, 16)}),
+			fieldSchema,
+		)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+	})
+
+	t.Run("invalid function output is a function error", func(t *testing.T) {
+		err := validatePlaceholderGroupDimensions(
+			mustMarshalPlaceholderGroup(t, commonpb.PlaceholderType_FloatVector, [][]byte{make([]byte, 12)}),
+			newField(schemapb.DataType_FloatVector, schemapb.DataType_None, 4),
+			merr.WrapErrFunctionFailedMsg,
+		)
+		assert.ErrorIs(t, err, merr.ErrFunctionFailed)
+		assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+		assert.False(t, merr.IsRetryableErr(err))
+	})
+}
+
+func TestConvertPlaceholderGroupValidatesDimensionsAfterConversion(t *testing.T) {
+	for _, dataType := range []schemapb.DataType{
+		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
+	} {
+		t.Run(dataType.String(), func(t *testing.T) {
+			fieldSchema := &schemapb.FieldSchema{
+				Name:     "vector",
+				DataType: dataType,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4"},
+				},
+			}
+			_, _, err := ConvertPlaceholderGroup(
+				createFloat32PlaceholderGroup([][]float32{{0.1, 0.2, 0.3}}),
+				fieldSchema,
+			)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "expected dimension 4")
+		})
+	}
+}
+
+func mustMarshalPlaceholderGroup(t *testing.T, placeholderType commonpb.PlaceholderType, values [][]byte) []byte {
+	t.Helper()
+	bytes, err := proto.Marshal(&commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			{
+				Tag:    "$0",
+				Type:   placeholderType,
+				Values: values,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal placeholder group: %v", err)
+	}
+	return bytes
+}
+
 func TestConvertPlaceholderGroupAllowsFloat16Underflow(t *testing.T) {
 	vectors := [][]float32{{0.0, 1e-9, -1e-9, 0.5}}
 	phgBytes := createFloat32PlaceholderGroup(vectors)
-	fieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Float16Vector}
+	fieldSchema := &schemapb.FieldSchema{
+		DataType: schemapb.DataType_Float16Vector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "4"},
+		},
+	}
 
 	convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
 	assert.NoError(t, err)
@@ -192,6 +354,9 @@ func TestConvertPlaceholderGroupToFloat16(t *testing.T) {
 
 	fieldSchema := &schemapb.FieldSchema{
 		DataType: schemapb.DataType_Float16Vector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "4"},
+		},
 	}
 
 	convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
@@ -213,6 +378,9 @@ func TestConvertPlaceholderGroupToBFloat16(t *testing.T) {
 
 	fieldSchema := &schemapb.FieldSchema{
 		DataType: schemapb.DataType_BFloat16Vector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "4"},
+		},
 	}
 
 	convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
@@ -274,6 +442,9 @@ func TestConvertPlaceholderGroupNoConversionNeeded(t *testing.T) {
 
 	fieldSchema := &schemapb.FieldSchema{
 		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "4"},
+		},
 	}
 
 	convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
@@ -427,6 +598,9 @@ func TestConvertPlaceholderGroupIntegration(t *testing.T) {
 	t.Run("convert to float16", func(t *testing.T) {
 		fieldSchema := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_Float16Vector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
 		}
 
 		convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
@@ -444,6 +618,9 @@ func TestConvertPlaceholderGroupIntegration(t *testing.T) {
 	t.Run("convert to bfloat16", func(t *testing.T) {
 		fieldSchema := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_BFloat16Vector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
 		}
 
 		convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)
@@ -461,6 +638,9 @@ func TestConvertPlaceholderGroupIntegration(t *testing.T) {
 	t.Run("no conversion for matching type", func(t *testing.T) {
 		fieldSchema := &schemapb.FieldSchema{
 			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
 		}
 
 		convertedBytes, _, err := ConvertPlaceholderGroup(phgBytes, fieldSchema)

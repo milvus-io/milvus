@@ -1604,6 +1604,43 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 	}
+
+	invalidFunctionOutput := mustMarshalPlaceholderGroup(
+		t,
+		commonpb.PlaceholderType_FloatVector,
+		[][]byte{make([]byte, 3*4)},
+	)
+	mockProcessSearch := mockey.Mock((*embedding.FunctionExecutor).ProcessSearch).
+		To(func(_ *embedding.FunctionExecutor, _ context.Context, req *internalpb.SearchRequest) error {
+			if req.GetIsAdvanced() {
+				req.SubReqs[0].PlaceholderGroup = invalidFunctionOutput
+			} else {
+				req.PlaceholderGroup = invalidFunctionOutput
+			}
+			return nil
+		}).
+		Build()
+	defer mockProcessSearch.UnPatch()
+
+	t.Run("invalid function output dimension", func(t *testing.T) {
+		task := getSearchTask(t, collectionName, []string{"sentence"}, false)
+
+		err := task.PreExecute(ctx)
+
+		assert.ErrorIs(t, err, merr.ErrFunctionFailed)
+		assert.False(t, merr.IsRetryableErr(err))
+		assert.Contains(t, err.Error(), "vector dimension mismatch")
+	})
+
+	t.Run("invalid hybrid function output dimension", func(t *testing.T) {
+		task := getHybridSearchTask(t, collectionName, [][]string{{"sentence1"}, {"sentence2"}})
+
+		err := task.PreExecute(ctx)
+
+		assert.ErrorIs(t, err, merr.ErrFunctionFailed)
+		assert.False(t, merr.IsRetryableErr(err))
+		assert.Contains(t, err.Error(), "vector dimension mismatch")
+	})
 }
 
 func getMixCoord() *mocks.MixCoord {
@@ -6719,16 +6756,19 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 	}
 	schemaInfo := mustNewSchemaInfo(schema)
 
-	makePlaceholderGroup := func(phType commonpb.PlaceholderType) []byte {
+	makePlaceholderGroupWithSize := func(phType commonpb.PlaceholderType, valueSize int) []byte {
 		phg := &commonpb.PlaceholderGroup{
 			Placeholders: []*commonpb.PlaceholderValue{{
 				Tag:    "$0",
 				Type:   phType,
-				Values: [][]byte{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}, // 4 floats
+				Values: [][]byte{make([]byte, valueSize)},
 			}},
 		}
 		bs, _ := proto.Marshal(phg)
 		return bs
+	}
+	makePlaceholderGroup := func(phType commonpb.PlaceholderType) []byte {
+		return makePlaceholderGroupWithSize(phType, 16) // 4 floats
 	}
 
 	// paramsJSON is inlined into the ParamsKey field; iterator flags are
@@ -6787,6 +6827,19 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("element-level dimension mismatch should fail", func(t *testing.T) {
+		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, plainParams, false, false)
+		task.request.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: makePlaceholderGroupWithSize(commonpb.PlaceholderType_FloatVector, 32),
+		}
+
+		err := task.initSearchRequest(ctx)
+
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "vector dimension mismatch")
+		assert.Contains(t, err.Error(), "emb_vec")
+	})
+
 	t.Run("element-level legacy iterator should fail", func(t *testing.T) {
 		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, plainParams, true, false)
 		err := task.initSearchRequest(ctx)
@@ -6818,11 +6871,37 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 		assert.Contains(t, err.Error(), "search iterator is not supported for multi-search-multi")
 	})
 
+	t.Run("emblist dimension mismatch should fail", func(t *testing.T) {
+		task := makeTask("emb_vec", commonpb.PlaceholderType_EmbListFloatVector, plainParams, false, false)
+		task.request.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: makePlaceholderGroupWithSize(commonpb.PlaceholderType_EmbListFloatVector, 20),
+		}
+
+		err := task.initSearchRequest(ctx)
+
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "vector dimension mismatch")
+		assert.Contains(t, err.Error(), "emb_vec")
+	})
+
 	t.Run("regular vector range search should succeed", func(t *testing.T) {
 		// Regression: new checks must not impact plain FloatVector fields.
 		task := makeTask("regular_vec", commonpb.PlaceholderType_FloatVector, rangeParams, false, false)
 		err := task.initSearchRequest(ctx)
 		assert.NoError(t, err)
+	})
+
+	t.Run("regular vector dimension mismatch should fail", func(t *testing.T) {
+		task := makeTask("regular_vec", commonpb.PlaceholderType_FloatVector, plainParams, false, false)
+		task.request.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: makePlaceholderGroupWithSize(commonpb.PlaceholderType_FloatVector, 12),
+		}
+
+		err := task.initSearchRequest(ctx)
+
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "vector dimension mismatch")
+		assert.Contains(t, err.Error(), "regular_vec")
 	})
 
 	t.Run("regular vector with element_filter should fail", func(t *testing.T) {
@@ -6857,6 +6936,26 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 	})
 }
 
+func TestSearchTaskMissingSearchField(t *testing.T) {
+	task := &searchTask{
+		schema: newSchemaInfo(&schemapb.CollectionSchema{Name: "test_collection"}),
+	}
+
+	t.Run("placeholder conversion", func(t *testing.T) {
+		_, _, err := task.convertPlaceholderIfNeeded(nil, 101)
+
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.Contains(t, err.Error(), "search field 101 not found")
+	})
+
+	t.Run("function output validation", func(t *testing.T) {
+		err := task.validateFunctionOutputDimensions(nil, 101)
+
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.Contains(t, err.Error(), "search field 101 not found")
+	})
+}
+
 // TestSearchTask_ArrayOfVectorHybridSearch verifies ArrayOfVector hybrid
 // validation. Hybrid struct sub-searches only support plain top-K here.
 func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
@@ -6884,16 +6983,19 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 	}
 	schemaInfo := mustNewSchemaInfo(schema)
 
-	makePlaceholderGroup := func(phType commonpb.PlaceholderType) []byte {
+	makePlaceholderGroupWithSize := func(phType commonpb.PlaceholderType, valueSize int) []byte {
 		phg := &commonpb.PlaceholderGroup{
 			Placeholders: []*commonpb.PlaceholderValue{{
 				Tag:    "$0",
 				Type:   phType,
-				Values: [][]byte{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+				Values: [][]byte{make([]byte, valueSize)},
 			}},
 		}
 		bs, _ := proto.Marshal(phg)
 		return bs
+	}
+	makePlaceholderGroup := func(phType commonpb.PlaceholderType) []byte {
+		return makePlaceholderGroupWithSize(phType, 16)
 	}
 
 	type hybridSubSpec struct {
@@ -6981,6 +7083,20 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		qt := buildHybridTaskWithMetric("emb_vec", metric.MaxSimCosine, commonpb.PlaceholderType_EmbListFloatVector, "", false, "")
 		err := qt.initAdvancedSearchRequest(ctx)
 		assert.NoError(t, err)
+	})
+
+	t.Run("hybrid sub-request dimension mismatch should fail", func(t *testing.T) {
+		qt := buildHybridTaskWithSubSpecs("",
+			hybridSubSpec{annsField: "regular_vec", metricType: metric.L2, phType: commonpb.PlaceholderType_FloatVector},
+			hybridSubSpec{annsField: "emb_vec", metricType: metric.MaxSimCosine, phType: commonpb.PlaceholderType_EmbListFloatVector},
+		)
+		qt.request.SubReqs[1].PlaceholderGroup = makePlaceholderGroupWithSize(commonpb.PlaceholderType_EmbListFloatVector, 20)
+
+		err := qt.initAdvancedSearchRequest(ctx)
+
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "vector dimension mismatch")
+		assert.Contains(t, err.Error(), "emb_vec")
 	})
 
 	t.Run("hybrid with ArrayOfVector range search should fail", func(t *testing.T) {

@@ -52,6 +52,14 @@ var placeholderTypeToDataType = map[commonpb.PlaceholderType]schemapb.DataType{
 	commonpb.PlaceholderType_SparseFloatVector: schemapb.DataType_SparseFloatVector,
 }
 
+var embeddingListPlaceholderTypeToDataType = map[commonpb.PlaceholderType]schemapb.DataType{
+	commonpb.PlaceholderType_EmbListFloatVector:    schemapb.DataType_FloatVector,
+	commonpb.PlaceholderType_EmbListFloat16Vector:  schemapb.DataType_Float16Vector,
+	commonpb.PlaceholderType_EmbListBFloat16Vector: schemapb.DataType_BFloat16Vector,
+	commonpb.PlaceholderType_EmbListBinaryVector:   schemapb.DataType_BinaryVector,
+	commonpb.PlaceholderType_EmbListInt8Vector:     schemapb.DataType_Int8Vector,
+}
+
 // isVectorTypeMatch checks if the placeholder type matches the field data type exactly.
 func isVectorTypeMatch(placeholderType commonpb.PlaceholderType, fieldType schemapb.DataType) bool {
 	expectedDataType, ok := placeholderTypeToDataType[placeholderType]
@@ -61,7 +69,8 @@ func isVectorTypeMatch(placeholderType commonpb.PlaceholderType, fieldType schem
 	return expectedDataType == fieldType
 }
 
-// ConvertPlaceholderGroup checks and converts placeholder group vector types if needed.
+// ConvertPlaceholderGroup validates vector dimensions and converts placeholder group
+// vector types if needed.
 // If the placeholder type matches the field type, returns the original bytes unchanged.
 // If the placeholder is fp32 and field is fp16/bf16, converts the vectors.
 // Otherwise returns an error for incompatible types.
@@ -79,6 +88,9 @@ func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema)
 	placeholder := phg.Placeholders[0]
 	phType := placeholder.Type
 	fieldType := fieldSchema.GetDataType()
+	if err := validateParsedPlaceholderGroupDimensions(&phg, fieldSchema, merr.WrapErrParameterInvalidMsg); err != nil {
+		return nil, phType, err
+	}
 
 	// Check if types already match
 	if isVectorTypeMatch(placeholder.Type, fieldType) {
@@ -106,10 +118,10 @@ func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema)
 
 	switch fieldType {
 	case schemapb.DataType_Float16Vector:
-		converted, err := convertPlaceholder(&phg, fieldType, commonpb.PlaceholderType_Float16Vector)
+		converted, err := convertPlaceholder(&phg, fieldSchema, commonpb.PlaceholderType_Float16Vector)
 		return converted, phType, err
 	case schemapb.DataType_BFloat16Vector:
-		converted, err := convertPlaceholder(&phg, fieldType, commonpb.PlaceholderType_BFloat16Vector)
+		converted, err := convertPlaceholder(&phg, fieldSchema, commonpb.PlaceholderType_BFloat16Vector)
 		return converted, phType, err
 	default:
 		// This should never be reached due to the check above, but keep for safety
@@ -117,10 +129,119 @@ func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema)
 	}
 }
 
+// validatePlaceholderGroupDimensions verifies the final, encoded query vectors against
+// the collection schema. It intentionally ignores sparse and non-vector placeholders,
+// which have their own parsing or function-execution paths.
+func validatePlaceholderGroupDimensions(
+	phgBytes []byte,
+	fieldSchema *schemapb.FieldSchema,
+	newDimensionError func(string, ...any) error,
+) error {
+	if fieldSchema == nil ||
+		(!typeutil.IsFixDimVectorType(fieldSchema.GetDataType()) && !typeutil.IsArrayOfVectorType(fieldSchema.GetDataType())) {
+		return nil
+	}
+
+	var phg commonpb.PlaceholderGroup
+	if err := proto.Unmarshal(phgBytes, &phg); err != nil {
+		return newDimensionError("failed to unmarshal placeholder group: %v", err)
+	}
+	return validateParsedPlaceholderGroupDimensions(&phg, fieldSchema, newDimensionError)
+}
+
+func validateParsedPlaceholderGroupDimensions(
+	phg *commonpb.PlaceholderGroup,
+	fieldSchema *schemapb.FieldSchema,
+	newDimensionError func(string, ...any) error,
+) error {
+	if fieldSchema == nil ||
+		(!typeutil.IsFixDimVectorType(fieldSchema.GetDataType()) && !typeutil.IsArrayOfVectorType(fieldSchema.GetDataType())) {
+		return nil
+	}
+
+	var dim int64
+	dimLoaded := false
+	for _, placeholder := range phg.GetPlaceholders() {
+		vectorType, isEmbeddingList, matchesField := placeholderVectorType(placeholder.GetType(), fieldSchema)
+		if !matchesField {
+			continue
+		}
+		if !dimLoaded {
+			var err error
+			dim, err = typeutil.GetDim(fieldSchema)
+			if err != nil {
+				return merr.WrapErrServiceInternalErr(err, "failed to get dimension for field %q", fieldSchema.GetName())
+			}
+			dimLoaded = true
+		}
+		bytesPerVector, isFixedDimension := vectorBytesForDimension(vectorType, dim)
+		if !isFixedDimension {
+			continue
+		}
+		if bytesPerVector <= 0 {
+			return merr.WrapErrServiceInternalMsg(
+				"invalid vector dimension %d for field %q", dim, fieldSchema.GetName())
+		}
+
+		for valueIndex, value := range placeholder.GetValues() {
+			actualBytes := int64(len(value))
+			if isEmbeddingList {
+				if actualBytes%bytesPerVector != 0 {
+					return newDimensionError(
+						"vector dimension mismatch for field %q at placeholder %q, value %d: expected each vector to have dimension %d (%d bytes), actual byte length %d is not a multiple of %d",
+						fieldSchema.GetName(), placeholder.GetTag(), valueIndex, dim, bytesPerVector, actualBytes, bytesPerVector)
+				}
+				continue
+			}
+
+			if actualBytes != bytesPerVector {
+				return newDimensionError(
+					"vector dimension mismatch for field %q at placeholder %q, value %d: expected dimension %d (%d bytes), actual byte length %d",
+					fieldSchema.GetName(), placeholder.GetTag(), valueIndex, dim, bytesPerVector, actualBytes)
+			}
+		}
+	}
+
+	return nil
+}
+
+func placeholderVectorType(placeholderType commonpb.PlaceholderType, fieldSchema *schemapb.FieldSchema) (schemapb.DataType, bool, bool) {
+	fieldType := fieldSchema.GetDataType()
+	if typeutil.IsArrayOfVectorType(fieldType) {
+		fieldType = fieldSchema.GetElementType()
+	}
+
+	if vectorType, ok := placeholderTypeToDataType[placeholderType]; ok {
+		return vectorType, false, vectorType == fieldType
+	}
+	if vectorType, ok := embeddingListPlaceholderTypeToDataType[placeholderType]; ok {
+		return vectorType, true, typeutil.IsArrayOfVectorType(fieldSchema.GetDataType()) && vectorType == fieldType
+	}
+	return schemapb.DataType_None, false, false
+}
+
+func vectorBytesForDimension(vectorType schemapb.DataType, dim int64) (int64, bool) {
+	switch vectorType {
+	case schemapb.DataType_FloatVector:
+		return dim * 4, true
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return dim * 2, true
+	case schemapb.DataType_BinaryVector:
+		if dim%8 != 0 {
+			return 0, true
+		}
+		return dim / 8, true
+	case schemapb.DataType_Int8Vector:
+		return dim, true
+	default:
+		return 0, false
+	}
+}
+
 // convertPlaceholder converts fp32 vectors in placeholder to the target type.
 func convertPlaceholder(
 	phg *commonpb.PlaceholderGroup,
-	fieldType schemapb.DataType,
+	fieldSchema *schemapb.FieldSchema,
 	targetType commonpb.PlaceholderType,
 ) ([]byte, error) {
 	placeholder := phg.Placeholders[0]
@@ -132,7 +253,7 @@ func convertPlaceholder(
 			return nil, merr.WrapErrParameterInvalidMsg("failed to parse float32 vector at index %d: %v", i, err)
 		}
 
-		convertedValues[i], err = typeutil.ConvertFloat32ToFP16BF16Bytes(floats, fieldType)
+		convertedValues[i], err = typeutil.ConvertFloat32ToFP16BF16Bytes(floats, fieldSchema.GetDataType())
 		if err != nil {
 			return nil, err
 		}
@@ -140,6 +261,9 @@ func convertPlaceholder(
 
 	placeholder.Type = targetType
 	placeholder.Values = convertedValues
+	if err := validateParsedPlaceholderGroupDimensions(phg, fieldSchema, merr.WrapErrParameterInvalidMsg); err != nil {
+		return nil, err
+	}
 
 	return proto.Marshal(phg)
 }
