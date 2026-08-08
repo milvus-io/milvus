@@ -529,15 +529,16 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *mlog.Logger
 	if !b.dirty {
 		return nil
 	}
-	b.dirty = false
 	logger = logger.With(mlog.String("state", b.task.State.String()), mlog.Int("ackedVChannelCount", ackedCount(b.task)))
 	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.header().BroadcastID, b.task); err != nil {
+		// Keep the task dirty so a later ack/recovery attempt persists it again:
+		// the in-memory task already holds the acked state, and on restart the
+		// recovery path re-derives it. A transient meta-store failure must not
+		// crash the whole streamingcoord.
 		logger.Warn(ctx, "save broadcast task failed", mlog.Err(err))
-		if ctx.Err() == nil {
-			panic("critical error: the save broadcast task is failed before the context is done")
-		}
 		return err
 	}
+	b.dirty = false
 	b.ObserveStateChanged(b.task.State)
 	logger.Info(ctx, "save broadcast task done")
 	return nil

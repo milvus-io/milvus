@@ -708,14 +708,22 @@ func (c *Core) restore(ctx context.Context) error {
 }
 
 func (c *Core) startInternal() error {
-	if err := c.proxyWatcher.WatchProxy(c.ctx); err != nil {
-		mlog.Fatal(context.TODO(), "rootcoord failed to watch proxy", mlog.Err(err))
-		// you can not just stuck here,
-		panic(err)
+	// WatchProxy and restore read from the meta store; retry transient etcd
+	// failures at startup for a bounded budget (~1 min) instead of crashing,
+	// and fail the startup normally when the failure persists. WatchProxy is
+	// safe to retry: it only returns an error before its watch goroutines start.
+	if err := retry.Do(c.ctx, func() error {
+		return c.proxyWatcher.WatchProxy(c.ctx)
+	}, retry.Attempts(20)); err != nil {
+		mlog.Error(c.ctx, "rootcoord failed to watch proxy", mlog.Err(err))
+		return err
 	}
 
-	if err := c.restore(c.ctx); err != nil {
-		panic(err)
+	if err := retry.Do(c.ctx, func() error {
+		return c.restore(c.ctx)
+	}, retry.Attempts(20)); err != nil {
+		mlog.Error(c.ctx, "rootcoord failed to restore", mlog.Err(err))
+		return err
 	}
 
 	if Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
