@@ -346,7 +346,8 @@ func NewRocksMQ(name string) (*rocksmq, error) {
 		for {
 			time.Sleep(10 * time.Minute)
 
-			mlog.Info(ctx, "Rocksmq stats",
+			mlog.Info(
+				ctx, "Rocksmq stats",
 				mlog.String("cache", kv.DB.GetProperty("rocksdb.block-cache-usage")),
 				mlog.String("rockskv memtable ", kv.DB.GetProperty("rocksdb.size-all-mem-tables")),
 				mlog.String("rockskv table readers", kv.DB.GetProperty("rocksdb.estimate-table-readers-mem")),
@@ -465,7 +466,8 @@ func (rmq *rocksmq) Info() bool {
 			return false
 		}
 
-		mlog.Info(context.TODO(), "Rocksmq Info",
+		mlog.Info(
+			context.TODO(), "Rocksmq Info",
 			mlog.String("topic", topic),
 			mlog.Int("consumer num", consumerList.Len()),
 			mlog.String("min position group names", minConsumerGroupName),
@@ -764,7 +766,8 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	// TODO add this to monitor metrics
 	getProduceTime := time.Since(start).Milliseconds()
 	if getProduceTime > 200 {
-		mlog.Warn(rmq.ctx, "rocksmq produce too slowly", mlog.String("topic", topicName),
+		mlog.Warn(
+			rmq.ctx, "rocksmq produce too slowly", mlog.String("topic", topicName),
 			mlog.Int64("get lock elapse", getLockTime),
 			mlog.Int64("alloc elapse", allocTime-getLockTime),
 			mlog.Int64("write elapse", writeTime-allocTime),
@@ -947,6 +950,11 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 	if !ok {
 		return merr.WrapErrMqInternalMsg("ConsumerGroup %s, channel %s not exists", groupName, topicName)
 	}
+	if msgID == DefaultMessageID {
+		// The earliest sentinel does not correspond to a persisted message.
+		// A newly created consumer group is already positioned there.
+		return nil
+	}
 
 	storeKey := path.Join(topicName, strconv.FormatInt(msgID, 10))
 	opts := gorocksdb.NewDefaultReadOptions()
@@ -957,11 +965,9 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 	}
 	defer val.Free()
 	if !val.Exists() {
-		mlog.Warn(rmq.ctx, "RocksMQ: trying to seek to no exist position, reset current id",
+		mlog.Warn(rmq.ctx, "RocksMQ: trying to seek to non-existent position",
 			mlog.String("topic", topicName), mlog.String("group", groupName), mlog.Int64("msgId", msgID))
-		err := rmq.moveConsumePos(topicName, groupName, DefaultMessageID)
-		// skip seek if key is not found, this is the behavior as pulsar
-		return err
+		return merr.WrapErrMqTopicNotFound(topicName, "requested message position "+strconv.FormatInt(msgID, 10)+" does not exist")
 	}
 	/* Step II: update current_id */
 	err = rmq.moveConsumePos(topicName, groupName, msgID)

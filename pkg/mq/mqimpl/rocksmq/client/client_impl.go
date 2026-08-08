@@ -13,7 +13,6 @@ package client
 
 import (
 	"context"
-	"reflect"
 	"sync"
 	"time"
 
@@ -37,7 +36,7 @@ type client struct {
 }
 
 func newClient(options Options) (*client, error) {
-	if options.Server == nil {
+	if isNilRocksMQ(options.Server) {
 		return nil, newError(InvalidConfiguration, "options.Server is nil")
 	}
 
@@ -57,7 +56,7 @@ func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 		return nil, err
 	}
 
-	if reflect.ValueOf(c.server).IsNil() {
+	if isNilRocksMQ(c.server) {
 		return nil, newError(0, "Rmq server is nil")
 	}
 	// Create a topic in rocksmq, ignore if topic exists
@@ -72,7 +71,7 @@ func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 // Subscribe create a rocksmq consumer and start consume in a goroutine
 func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 	// Create a consumer
-	if reflect.ValueOf(c.server).IsNil() {
+	if isNilRocksMQ(c.server) {
 		return nil, newError(0, "Rmq server is nil")
 	}
 

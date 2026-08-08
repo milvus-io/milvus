@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
@@ -79,6 +80,7 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 		metrics:         scanMetrics,
 		readRateCounter: utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
+	s.metrics.SetReaderInfo(l.WALName(), metrics.WALReaderRoleCurrent)
 	go s.execute()
 	return s
 }
@@ -86,8 +88,9 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 // newScannerAdaptor creates a new scanner adaptor.
 func newScannerAdaptor(
 	name string,
-	l walimpls.ROWALImpls,
+	innerWAL walimpls.ROWALImpls,
 	readOption wal.ReadOption,
+	underlyingROWALImplsOpener underlyingROWALImplsOpener,
 	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
 	recovery bool,
@@ -99,22 +102,30 @@ func newScannerAdaptor(
 	logger := resource.Resource().Logger().With(
 		mlog.FieldComponent("scanner"),
 		mlog.String("name", name),
-		mlog.String("channel", l.Channel().Name),
+		mlog.String("channel", innerWAL.Channel().Name),
 	)
 	s := &scannerAdaptorImpl{
-		logger:          logger,
-		recovery:        recovery,
-		innerWAL:        l,
-		readOption:      readOption,
-		filterFunc:      options.GetFilterFunc(readOption.MessageFilter),
-		reorderBuffer:   utility.NewReOrderBuffer(),
-		pendingQueue:    utility.NewPendingQueue(),
-		txnBuffer:       utility.NewTxnBuffer(logger, scanMetrics),
-		cleanup:         cleanup,
-		ScannerHelper:   helper.NewScannerHelper(name),
-		metrics:         scanMetrics,
-		readRateCounter: utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
+		logger:                     logger,
+		recovery:                   recovery,
+		innerWAL:                   innerWAL,
+		readOption:                 readOption,
+		underlyingROWALImplsOpener: underlyingROWALImplsOpener,
+		filterFunc:                 options.GetFilterFunc(readOption.MessageFilter),
+		reorderBuffer:              utility.NewReOrderBuffer(),
+		pendingQueue:               utility.NewPendingQueue(),
+		txnBuffer:                  utility.NewTxnBuffer(logger, scanMetrics),
+		cleanup:                    cleanup,
+		ScannerHelper:              helper.NewScannerHelper(name),
+		metrics:                    scanMetrics,
+		readRateCounter:            utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
+	readerWALName := innerWAL.WALName()
+	readerRole := metrics.WALReaderRoleCurrent
+	if startWALName, ok := getDeliverPolicyWALName(readOption.DeliverPolicy); ok && startWALName != innerWAL.WALName() {
+		readerWALName = startWALName
+		readerRole = metrics.WALReaderRoleHistorical
+	}
+	s.metrics.SetReaderInfo(readerWALName, readerRole)
 	go s.execute()
 	return s
 }
@@ -122,14 +133,15 @@ func newScannerAdaptor(
 // scannerAdaptorImpl is a wrapper of ScannerImpls to extend it into a Scanner interface.
 type scannerAdaptorImpl struct {
 	*helper.ScannerHelper
-	recovery      bool
-	logger        *mlog.Logger
-	innerWAL      walimpls.ROWALImpls
-	readOption    wal.ReadOption
-	filterFunc    func(message.ImmutableMessage) bool
-	reorderBuffer *utility.ReOrderByTimeTickBuffer // support time tick reorder.
-	pendingQueue  *utility.PendingQueue
-	txnBuffer     *utility.TxnBuffer // txn buffer for txn message.
+	recovery                   bool
+	logger                     *mlog.Logger
+	innerWAL                   walimpls.ROWALImpls
+	readOption                 wal.ReadOption
+	underlyingROWALImplsOpener underlyingROWALImplsOpener
+	filterFunc                 func(message.ImmutableMessage) bool
+	reorderBuffer              *utility.ReOrderByTimeTickBuffer // support time tick reorder.
+	pendingQueue               *utility.PendingQueue
+	txnBuffer                  *utility.TxnBuffer // txn buffer for txn message.
 
 	cleanup         func()
 	clearOnce       sync.Once
@@ -167,21 +179,27 @@ func (s *scannerAdaptorImpl) clear() {
 }
 
 func (s *scannerAdaptorImpl) execute() {
+	var executeErr error
 	defer func() {
 		s.readOption.MesasgeHandler.Close()
-		s.Finish(nil)
+		s.Finish(executeErr)
+		if executeErr != nil {
+			s.logger.Info(context.TODO(), "scanner is closed", mlog.Err(executeErr))
+			return
+		}
 		s.logger.Info(context.TODO(), "scanner is closed")
 	}()
 	s.logger.Info(context.TODO(), "scanner start background task")
 
 	msgChan := make(chan message.ImmutableMessage)
-
-	ch := make(chan struct{})
-	defer func() { <-ch }()
+	executeCtx, cancel := context.WithCancel(s.Context())
+	defer cancel()
+	produceResult := make(chan error, 1)
 	// TODO: optimize the extra goroutine here after msgstream is removed.
 	go func() {
-		defer close(ch)
-		err := s.produceEventLoop(msgChan)
+		err := s.produceEventLoop(executeCtx, msgChan)
+		produceResult <- err
+		cancel()
 		if errors.Is(err, context.Canceled) {
 			s.logger.Info(context.TODO(), "the produce event loop of scanner is closed")
 			return
@@ -189,16 +207,27 @@ func (s *scannerAdaptorImpl) execute() {
 		s.logger.Warn(context.TODO(), "the produce event loop of scanner is closed with unexpected error", mlog.Err(err))
 	}()
 
-	err := s.consumeEventLoop(msgChan)
-	if errors.Is(err, context.Canceled) {
+	consumeErr := s.consumeEventLoop(executeCtx, msgChan)
+	cancel()
+	produceErr := <-produceResult
+
+	if errors.Is(consumeErr, context.Canceled) {
 		s.logger.Info(context.TODO(), "the consuming event loop of scanner is closed")
-		return
+	} else if consumeErr != nil {
+		s.logger.Warn(context.TODO(), "the consuming event loop of scanner is closed with unexpected error", mlog.Err(consumeErr))
 	}
-	s.logger.Warn(context.TODO(), "the consuming event loop of scanner is closed with unexpected error", mlog.Err(err))
+
+	executeErr = consumeErr
+	if produceErr != nil && !errors.Is(produceErr, context.Canceled) {
+		executeErr = produceErr
+	}
+	if s.Context().Err() != nil && errors.Is(executeErr, context.Canceled) {
+		executeErr = nil
+	}
 }
 
 // produceEventLoop produces the message from the wal and write ahead buffer.
-func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMessage) error {
+func (s *scannerAdaptorImpl) produceEventLoop(ctx context.Context, msgChan chan<- message.ImmutableMessage) error {
 	var wb wab.ROWriteAheadBuffer
 	var err error
 	if s.Channel().AccessMode == types.AccessModeRW && !s.recovery {
@@ -213,7 +242,18 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 		wb = resource.Resource().TimeTickInspector().MustGetOperator(s.Channel()).WriteAheadBuffer()
 	}
 
-	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan)
+	scanner := newSwitchableScanner(
+		s.Name(),
+		s.logger,
+		s.innerWAL,
+		wb,
+		s.readOption.DeliverPolicy,
+		msgChan,
+		s.underlyingROWALImplsOpener,
+		func(walName message.WALName, role string) {
+			s.metrics.SwitchReaderInfo(walName, role)
+		},
+	)
 	s.logger.Info(context.TODO(), "start produce loop of scanner at model", mlog.String("model", getScannerModel(scanner)))
 	for {
 		if s.readOption.RateLimitControl != nil {
@@ -222,7 +262,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 			// so we need to enter slowdown mode to protect the wal from being overloaded.
 			// 2. when the scanner is working at tailing mode, the write operation is slow than the consume operation,
 			// so we enter into recovery mode to speed up the rate limit.
-			if _, ok := scanner.(*catchupScanner); ok {
+			if getScannerModel(scanner) == metrics.WALScannerModelCatchup {
 				// Create a checker that returns false when read rate > append rate.
 				// This indicates the scanner has caught up and slowdown should stop.
 				checker := s.createSlowdownChecker()
@@ -231,7 +271,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 				s.readOption.RateLimitControl.EnterRecoveryMode()
 			}
 		}
-		if scanner, err = scanner.Do(s.Context()); err != nil {
+		if scanner, err = scanner.Do(ctx); err != nil {
 			return err
 		}
 		m := getScannerModel(scanner)
@@ -241,8 +281,8 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 }
 
 // consumeEventLoop consumes the message from the message channel and handle it.
-func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMessage) error {
-	s.waitUntilStartConsumption()
+func (s *scannerAdaptorImpl) consumeEventLoop(ctx context.Context, msgChan <-chan message.ImmutableMessage) error {
+	s.waitUntilStartConsumption(ctx)
 	for {
 		var upstream <-chan message.ImmutableMessage
 		if s.pendingQueue.Len() > 16 {
@@ -253,7 +293,7 @@ func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMe
 		}
 		// generate the event channel and do the event loop.
 		handleResult := s.readOption.MesasgeHandler.Handle(message.HandleParam{
-			Ctx:      s.Context(),
+			Ctx:      ctx,
 			Upstream: upstream,
 			Message:  s.pendingQueue.Next(),
 		})
@@ -271,7 +311,7 @@ func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMe
 }
 
 // waitUntilStartConsumption is used to wait until the consumption is started.
-func (s *scannerAdaptorImpl) waitUntilStartConsumption() {
+func (s *scannerAdaptorImpl) waitUntilStartConsumption(ctx context.Context) {
 	s.metrics.PauseConsumption()
 	defer s.metrics.ResumeConsumption()
 
@@ -295,7 +335,7 @@ func (s *scannerAdaptorImpl) waitUntilStartConsumption() {
 		select {
 		case <-resumeChan:
 			s.logger.Info(context.TODO(), "continue to consume messages")
-		case <-s.Context().Done():
+		case <-ctx.Done():
 			s.logger.Info(context.TODO(), "pause consumption is canceled")
 		}
 	}

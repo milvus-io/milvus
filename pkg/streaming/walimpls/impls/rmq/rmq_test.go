@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
@@ -12,18 +13,33 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/registry"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+var testRocksMQPath string
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-	tmpPath, err := os.MkdirTemp("", "rocksdb_test")
+	paramtable.SetRole(typeutil.StandaloneRole)
+	var err error
+	testRocksMQPath, err = os.MkdirTemp("", "rocksdb_test")
 	if err != nil {
 		panic(err)
 	}
-	defer os.RemoveAll(tmpPath)
-	server.InitRocksMQ(tmpPath)
+	defer os.RemoveAll(testRocksMQPath)
+	paramtable.Get().Save(paramtable.Get().RocksmqCfg.Path.Key, testRocksMQPath)
 	defer server.CloseRocksMQ()
 	m.Run()
+}
+
+func TestBuilderRejectsClusterMode(t *testing.T) {
+	oldRole := paramtable.GetRole()
+	paramtable.SetRole(typeutil.StreamingNodeRole)
+	defer paramtable.SetRole(oldRole)
+
+	opener, err := (&builderImpl{}).Build()
+	require.Nil(t, opener)
+	require.Error(t, err)
 }
 
 func TestRegistry(t *testing.T) {
@@ -41,6 +57,22 @@ func TestRegistry(t *testing.T) {
 	id, err = message.UnmarshalMessageID(rmqID(-1).IntoProto())
 	assert.NoError(t, err)
 	assert.True(t, id.EQ(rmqID(-1)))
+}
+
+func TestBuilderLazyInitializesRocksMQ(t *testing.T) {
+	const historicalTopic = "historical-topic"
+	existingRocksMQ, err := server.NewRocksMQ(testRocksMQPath)
+	require.NoError(t, err)
+	require.NoError(t, existingRocksMQ.CreateTopic(historicalTopic))
+	existingRocksMQ.Close()
+
+	require.Nil(t, server.Rmq)
+	opener, err := (&builderImpl{}).Build()
+	require.NoError(t, err)
+	require.NotNil(t, opener)
+	require.NotNil(t, server.Rmq)
+	require.NoError(t, server.Rmq.CheckTopicValid(historicalTopic))
+	opener.Close()
 }
 
 func TestWAL(t *testing.T) {

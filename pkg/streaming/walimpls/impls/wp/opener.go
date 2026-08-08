@@ -4,10 +4,13 @@ import (
 	"context"
 
 	"github.com/zilliztech/woodpecker/woodpecker"
+	wp "github.com/zilliztech/woodpecker/woodpecker/log"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var _ walimpls.OpenerImpls = (*openerImpl)(nil)
@@ -19,12 +22,18 @@ type openerImpl struct {
 
 // Open opens a new wal.
 func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimpls.WALImpls, error) {
+	if err := opt.Validate(); err != nil {
+		return nil, err
+	}
 	exists, err := o.c.LogExists(ctx, opt.Channel.Name)
 	if err != nil {
 		mlog.Error(ctx, "failed to check log exists", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
 		return nil, err
 	}
 	if !exists {
+		if opt.Channel.AccessMode == types.AccessModeRO {
+			return nil, merr.WrapErrMqTopicNotFound(opt.Channel.Name, "woodpecker log does not exist")
+		}
 		if err := o.c.CreateLog(ctx, opt.Channel.Name); err != nil {
 			mlog.Error(ctx, "failed to create log", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
 			return nil, err
@@ -35,12 +44,16 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 		mlog.Error(ctx, "failed to open log", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
 		return nil, err
 	}
-	p, err := l.OpenLogWriter(ctx)
-	if err != nil {
-		mlog.Error(ctx, "failed to open log writer", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
-		return nil, err
+	var p wp.LogWriter
+	if opt.Channel.AccessMode == types.AccessModeRW {
+		p, err = l.OpenLogWriter(ctx)
+		if err != nil {
+			mlog.Error(ctx, "failed to open log writer", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
+			_ = l.Close(ctx)
+			return nil, err
+		}
+		mlog.Info(ctx, "finish to open log writer", mlog.String("log_name", opt.Channel.Name))
 	}
-	mlog.Info(ctx, "finish to open log writer", mlog.String("log_name", opt.Channel.Name))
 	return &walImpl{
 		WALHelper: helper.NewWALHelper(opt),
 		p:         p,
