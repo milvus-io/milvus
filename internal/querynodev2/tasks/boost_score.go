@@ -19,6 +19,7 @@ package tasks
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"google.golang.org/protobuf/proto"
@@ -38,7 +39,7 @@ const (
 )
 
 func boostScoreColumn(index int) string {
-	return fmt.Sprintf("%s%d", boostScoreColumnPrefix, index)
+	return boostScoreColumnPrefix + strconv.Itoa(index)
 }
 
 func extractPlanScorers(serializedPlan []byte) ([]*planpb.ScoreFunction, error) {

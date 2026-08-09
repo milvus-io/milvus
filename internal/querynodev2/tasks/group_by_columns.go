@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -11,7 +10,7 @@ import (
 const groupByColumnPrefix = "$group_by_"
 
 func groupByColumnName(fieldID int64) string {
-	return fmt.Sprintf("%s%d", groupByColumnPrefix, fieldID)
+	return groupByColumnPrefix + strconv.FormatInt(fieldID, 10)
 }
 
 func isGroupByColumnName(name string) bool {
