@@ -454,6 +454,10 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
 	ttlFieldID := getTTLFieldID(t.plan.GetSchema())
+	var preserveNullFields map[int64]struct{}
+	if ttlFieldID >= common.StartOfUserFieldID {
+		preserveNullFields = map[int64]struct{}{ttlFieldID: {}}
+	}
 	reader, _, err := newCompactionSegmentRecordReaderWithFields(t.ctx, segment, t.plan.GetSchema(), t.compactionParams.StorageConfig, existingFields,
 		storage.WithCollectionID(collectionID),
 		storage.WithVersion(segment.GetStorageVersion()),
@@ -465,7 +469,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	}
 	defer reader.Close()
 
-	materializer, err := NewRecordMaterializer(t.plan.GetSchema(), t.plan.GetSchema().GetFunctions(), existingFields)
+	materializer, err := newRecordMaterializer(t.plan.GetSchema(), t.plan.GetSchema().GetFunctions(), existingFields, preserveNullFields)
 	if err != nil {
 		return nil, err
 	}

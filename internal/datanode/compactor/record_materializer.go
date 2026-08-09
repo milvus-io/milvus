@@ -22,6 +22,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -54,14 +55,23 @@ func (s *recordSelection) Len() int {
 }
 
 type RecordMaterializer struct {
-	materializers  []FunctionMaterializer
-	missingFields  []*schemapb.FieldSchema
-	schema         *schemapb.CollectionSchema
-	existingFields map[int64]struct{}
+	materializers      []FunctionMaterializer
+	missingFields      []*schemapb.FieldSchema
+	schema             *schemapb.CollectionSchema
+	existingFields     map[int64]struct{}
+	preserveNullFields map[int64]struct{}
 }
 
 func NewRecordMaterializer(schema *schemapb.CollectionSchema, functions []*schemapb.FunctionSchema, existingFields map[int64]struct{}) (*RecordMaterializer, error) {
-	materializer := &RecordMaterializer{schema: schema, existingFields: existingFields}
+	return newRecordMaterializer(schema, functions, existingFields, nil)
+}
+
+func newRecordMaterializer(schema *schemapb.CollectionSchema, functions []*schemapb.FunctionSchema, existingFields, preserveNullFields map[int64]struct{}) (*RecordMaterializer, error) {
+	materializer := &RecordMaterializer{
+		schema:             schema,
+		existingFields:     existingFields,
+		preserveNullFields: preserveNullFields,
+	}
 	materializedFields := make(map[int64]struct{})
 	for _, functionSchema := range functions {
 		outputIndexes := functionOutputIndexesToMaterialize(functionSchema, existingFields)
@@ -106,7 +116,7 @@ func (m *RecordMaterializer) Wrap(rec storage.Record) (storage.Record, error) {
 func (m *RecordMaterializer) WrapWithSelection(rec storage.Record, selection *recordSelection) (storage.Record, error) {
 	base := rec
 	if selection != nil {
-		selected, err := newSelectedRecord(rec, m.schema, m.existingFields, selection)
+		selected, err := newSelectedRecord(rec, m.schema, m.existingFields, m.preserveNullFields, selection)
 		if err != nil {
 			return nil, err
 		}
@@ -133,7 +143,7 @@ func (m *RecordMaterializer) WrapWithSelection(rec storage.Record, selection *re
 		if _, ok := computed[fieldID]; ok {
 			continue
 		}
-		arr, err := storage.GenerateEmptyArrayFromSchema(field, base.Len())
+		arr, err := storage.GenerateEmptyArrayFromSchema(fieldForMaterialization(field, m.preserveNullFields), base.Len())
 		if err != nil {
 			releaseArrowArrays(computed)
 			cleanupMaterializedRecord(base)
@@ -158,6 +168,21 @@ func (m *RecordMaterializer) Close() {
 
 func (m *RecordMaterializer) hasMaterialization() bool {
 	return m != nil && (len(m.materializers) > 0 || len(m.missingFields) > 0)
+}
+
+// fieldForMaterialization returns a schema view that preserves physical NULLs
+// for fields whose defaults must not be applied during compaction. The shared
+// collection schema remains unchanged for all other consumers.
+func fieldForMaterialization(field *schemapb.FieldSchema, preserveNullFields map[int64]struct{}) *schemapb.FieldSchema {
+	if field.GetDefaultValue() == nil {
+		return field
+	}
+	if _, ok := preserveNullFields[field.GetFieldID()]; !ok {
+		return field
+	}
+	cloned := proto.Clone(field).(*schemapb.FieldSchema)
+	cloned.DefaultValue = nil
+	return cloned
 }
 
 type materializedRecord struct {
@@ -215,14 +240,14 @@ var _ storage.Record = (*selectedRecord)(nil)
 // (e.g. timestampOverwriteRecord) would escape the snapshot and be released
 // once more than it was retained. Presence is decided by existingFields, never
 // by probing base.Column: V2/V3 records panic on Column for absent fields.
-func newSelectedRecord(base storage.Record, schema *schemapb.CollectionSchema, existingFields map[int64]struct{}, selection *recordSelection) (*selectedRecord, error) {
+func newSelectedRecord(base storage.Record, schema *schemapb.CollectionSchema, existingFields, preserveNullFields map[int64]struct{}, selection *recordSelection) (*selectedRecord, error) {
 	columns := make(map[int64]arrow.Array)
 	for _, field := range typeutil.GetAllFieldSchemas(schema) {
 		fieldID := field.GetFieldID()
 		if _, ok := existingFields[fieldID]; !ok {
 			continue
 		}
-		col, err := buildSelectedColumn(base, field, selection)
+		col, err := buildSelectedColumn(base, fieldForMaterialization(field, preserveNullFields), selection)
 		if err != nil {
 			releaseArrowArrays(columns)
 			return nil, err

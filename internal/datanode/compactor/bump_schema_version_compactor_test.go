@@ -1486,6 +1486,8 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionInputSchemaByF
 // TTL column.
 func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteMissingTTLFieldDoesNotProbeRecord() {
 	const newTTLFieldID = int64(105)
+	s.task.currentTime = getMilvusBirthday().Add(time.Hour)
+	expiredDefault := s.task.currentTime.Add(-time.Minute).UnixMicro()
 	// Target schema gains a nullable Timestamptz field absent from the source
 	// segment and designates it as the collection TTL field.
 	s.task.plan.Schema.Fields = append(s.task.plan.Schema.Fields, &schemapb.FieldSchema{
@@ -1493,6 +1495,9 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteMissingTTLFieldDoe
 		Name:     "expire_at",
 		DataType: schemapb.DataType_Timestamptz,
 		Nullable: true,
+		DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_TimestamptzData{
+			TimestamptzData: expiredDefault,
+		}},
 	})
 	s.task.plan.Schema.Properties = append(s.task.plan.Schema.Properties, &commonpb.KeyValuePair{
 		Key:   common.CollectionTTLFieldKey,
@@ -1513,4 +1518,21 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteMissingTTLFieldDoe
 
 	segment := result.GetSegments()[0]
 	s.EqualValues(3, segment.GetNumOfRows())
+
+	reader, err := storage.NewManifestRecordReader(
+		context.Background(),
+		segment.GetManifest(),
+		s.task.plan.GetSchema(),
+		storage.WithCollectionID(s.task.plan.GetSegmentBinlogs()[0].GetCollectionID()),
+		storage.WithVersion(segment.GetStorageVersion()),
+		storage.WithStorageConfig(s.task.compactionParams.StorageConfig),
+	)
+	s.Require().NoError(err)
+	defer reader.Close()
+
+	record, err := reader.Next()
+	s.Require().NoError(err)
+	ttlColumn, ok := record.Column(newTTLFieldID).(*array.Int64)
+	s.Require().True(ok)
+	s.Equal(3, ttlColumn.NullN())
 }
