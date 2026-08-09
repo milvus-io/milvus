@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -5762,4 +5763,154 @@ func TestInsertMalformedBodyNeverReachesProxy(t *testing.T) {
 				"a malformed body must not be accepted: %s", tt.body)
 		})
 	}
+}
+
+// The old gate forwarded groupSize only when it was greater than zero, which
+// conflated an absent knob (server default), an explicitly invalid one (the
+// server rejects 0 and negatives, but never saw them), and strictGroupSize on
+// its own (silently dropped behind the same gate).
+func TestAppendGroupParamsValidatesTheKnobs(t *testing.T) {
+	i32 := func(v int32) *int32 { return &v }
+	b := func(v bool) *bool { return &v }
+	kv := func(pairs []*commonpb.KeyValuePair) map[string]string {
+		m := map[string]string{}
+		for _, p := range pairs {
+			m[p.Key] = p.Value
+		}
+		return m
+	}
+
+	t.Run("absent knobs mean the server default", func(t *testing.T) {
+		params, err := appendGroupParams(nil, "cat", nil, nil)
+		require.NoError(t, err)
+		m := kv(params)
+		assert.Equal(t, "cat", m[ParamGroupByField])
+		_, hasSize := m[ParamGroupSize]
+		assert.False(t, hasSize)
+	})
+
+	t.Run("explicit zero and negative are refused, not swallowed", func(t *testing.T) {
+		for _, v := range []int32{0, -1} {
+			_, err := appendGroupParams(nil, "cat", i32(v), nil)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		}
+	})
+
+	t.Run("a positive size is forwarded", func(t *testing.T) {
+		params, err := appendGroupParams(nil, "cat", i32(3), b(true))
+		require.NoError(t, err)
+		m := kv(params)
+		assert.Equal(t, "3", m[ParamGroupSize])
+		assert.Equal(t, "true", m[ParamStrictGroupSize])
+	})
+
+	t.Run("strictGroupSize no longer rides behind groupSize", func(t *testing.T) {
+		params, err := appendGroupParams(nil, "cat", nil, b(true))
+		require.NoError(t, err)
+		assert.Equal(t, "true", kv(params)[ParamStrictGroupSize])
+	})
+
+	t.Run("group knobs without a grouping field are refused", func(t *testing.T) {
+		_, err := appendGroupParams(nil, "", i32(2), nil)
+		require.Error(t, err)
+		_, err = appendGroupParams(nil, "", nil, b(true))
+		require.Error(t, err)
+	})
+
+	t.Run("a grouping field of blanks is absent, not provided", func(t *testing.T) {
+		// the proxy trims the name before resolving it, so blanks must count
+		// as absent here too or the knobs are swallowed downstream again
+		_, err := appendGroupParams(nil, "  ", i32(2), nil)
+		require.Error(t, err)
+
+		params, err := appendGroupParams(nil, " cat ", i32(2), nil)
+		require.NoError(t, err)
+		assert.Equal(t, "cat", kv(params)[ParamGroupByField])
+	})
+}
+
+// The group knobs have two spellings -- the top-level fields and the
+// searchParams keys -- and the searchParams one was appended first, so it
+// silently won any disagreement. The ambiguity is refused now, and the
+// searchParams spelling can no longer smuggle group knobs past the
+// searchAggregation conflict check either.
+func TestGroupKnobSpellingsCannotDisagree(t *testing.T) {
+	postReq := func(body string) (int, string) {
+		paramtable.Init()
+		// tolerated shapes travel the whole handler; keep the limiter out of it
+		quotaKey := paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key
+		paramtable.Get().Save(quotaKey, "false")
+		t.Cleanup(func() { paramtable.Get().Reset(quotaKey) })
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			CollectionName: "book",
+			Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+			ShardsNum:      ShardNumDefault,
+			Status:         &StatusSuccess,
+		}, nil).Maybe()
+		// requests that pass validation reach the proxy; answer them so the
+		// tolerated shapes complete instead of riding the timeout middleware
+		mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
+			Status:  &StatusSuccess,
+			Results: &schemapb.SearchResultData{NumQueries: 1, TopK: 0, Topks: []int64{0}, Ids: &schemapb.IDs{}},
+		}, nil).Maybe()
+		testEngine := initHTTPServerV2(mp, false)
+		req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, SearchAction), strings.NewReader(body))
+		req.Header.Set(HTTPHeaderDBName, DefaultDbName)
+		// requests that pass validation ride into the mocked proxy; a short
+		// per-request timeout keeps the tolerated shapes from idling there
+		req.Header.Set(HTTPHeaderRequestTimeout, "1")
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+		return w.Code, w.Body.String()
+	}
+
+	t.Run("both spellings at once is ambiguous", func(t *testing.T) {
+		code, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"groupingField": "cat",
+			"searchParams": {"group_size": 5}}`)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Contains(t, body, "ambiguous grouping")
+	})
+
+	t.Run("searchParams size knobs alone still need a group field", func(t *testing.T) {
+		code, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"searchParams": {"group_size": 5}}`)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Contains(t, body, "require a group field")
+	})
+
+	t.Run("nested-only group keys are inert and refused", func(t *testing.T) {
+		code, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"searchParams": {"params": {"group_by_field": "cat", "group_size": 2}}}`)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Contains(t, body, "cannot carry")
+	})
+
+	t.Run("nested copies beside a working root spelling are tolerated", func(t *testing.T) {
+		// generateSearchParams itself duplicates root keys into the params
+		// JSON, so this is the shape a previously-working client sends
+		_, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"searchParams": {"group_by_field": "cat", "group_size": 5,
+				"params": {"group_by_field": "cat", "group_size": 5}}}`)
+		assert.NotContains(t, body, "cannot carry")
+		assert.NotContains(t, body, "ambiguous grouping")
+	})
+
+	t.Run("nested copies beside the top-level spelling are tolerated", func(t *testing.T) {
+		_, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"groupingField": "cat",
+			"searchParams": {"params": {"group_size": 5}}}`)
+		assert.NotContains(t, body, "cannot carry")
+		assert.NotContains(t, body, "ambiguous grouping")
+	})
+
+	t.Run("searchParams group size cannot ride under searchAggregation", func(t *testing.T) {
+		code, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"searchParams": {"strict_group_size": true},
+			"searchAggregation": {"fields": ["cat"], "size": 10}}`)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Contains(t, body, "cannot be used simultaneously")
+	})
 }

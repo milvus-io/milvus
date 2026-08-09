@@ -3596,9 +3596,10 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 	t.Run("parseSearchInfo groupBy info for hybrid search", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{FieldID: 101, Name: "c1"},
-				{FieldID: 102, Name: "c2"},
-				{FieldID: 103, Name: "c3"},
+				// group-by now checks the field type, so the fixtures carry one
+				{FieldID: 101, Name: "c1", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "c2", DataType: schemapb.DataType_Int64},
+				{FieldID: 103, Name: "c3", DataType: schemapb.DataType_VarChar},
 			},
 		}
 		// 1. first parse rank params
@@ -3780,8 +3781,9 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		})
 		fields := make([]*schemapb.FieldSchema, 0)
 		fields = append(fields, &schemapb.FieldSchema{
-			FieldID: int64(101),
-			Name:    "string_field",
+			FieldID:  int64(101),
+			Name:     "string_field",
+			DataType: schemapb.DataType_VarChar,
 		})
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
@@ -3799,8 +3801,9 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		})
 		fields := make([]*schemapb.FieldSchema, 0)
 		fields = append(fields, &schemapb.FieldSchema{
-			FieldID: int64(101),
-			Name:    "string_field",
+			FieldID:  int64(101),
+			Name:     "string_field",
+			DataType: schemapb.DataType_VarChar,
 		})
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
@@ -3819,6 +3822,7 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		fields = append(fields, &schemapb.FieldSchema{
 			FieldID:  int64(101),
 			Name:     "string_field",
+			DataType: schemapb.DataType_VarChar,
 			Nullable: true,
 		})
 		schema := &schemapb.CollectionSchema{
@@ -3837,8 +3841,9 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		resetSearchParamsValue(normalParam, TopKKey, `1024000`)
 		fields := make([]*schemapb.FieldSchema, 0)
 		fields = append(fields, &schemapb.FieldSchema{
-			FieldID: int64(101),
-			Name:    "string_field",
+			FieldID:  int64(101),
+			Name:     "string_field",
+			DataType: schemapb.DataType_VarChar,
 		})
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
@@ -3896,8 +3901,9 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		})
 		fields := make([]*schemapb.FieldSchema, 0)
 		fields = append(fields, &schemapb.FieldSchema{
-			FieldID: int64(101),
-			Name:    "string_field",
+			FieldID:  int64(101),
+			Name:     "string_field",
+			DataType: schemapb.DataType_VarChar,
 		})
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
@@ -3972,8 +3978,9 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			})
 			fields := make([]*schemapb.FieldSchema, 0)
 			fields = append(fields, &schemapb.FieldSchema{
-				FieldID: int64(101),
-				Name:    "string_field",
+				FieldID:  int64(101),
+				Name:     "string_field",
+				DataType: schemapb.DataType_VarChar,
 			})
 			schema := &schemapb.CollectionSchema{
 				Fields: fields,
