@@ -17,95 +17,95 @@
 package proxy
 
 import (
-	"context"
-	"fmt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// denseVectorReserveBytes returns the bytes PrepareResultFieldData reserves per
-// row for dense vector columns. Those reservations are sized dim*capacity and
-// do not depend on nullability, unlike EstimateEntitySize which skips null
-// rows. Sparse vectors are excluded: they are reserved per row, not per
-// dimension.
-func denseVectorReserveBytes(fieldsData []*schemapb.FieldData) int {
-	total := 0
-	for _, fd := range fieldsData {
-		dim := int(fd.GetVectors().GetDim())
-		if dim <= 0 {
-			continue
-		}
-		switch fd.GetType() {
-		case schemapb.DataType_FloatVector:
-			total += dim * 4
-		case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-			total += dim * 2
-		case schemapb.DataType_BinaryVector:
-			total += dim / 8
-		case schemapb.DataType_Int8Vector:
-			total += dim
-		}
+// visitInsertRowsByMessageSize partitions a monotonically increasing row
+// selection and synchronously visits each per-message view. The rows slice
+// borrows the backing array of rowOffsets. firstFieldDataIndices is reusable
+// scratch and is valid only until visit returns.
+//
+// Keep the existing entity-size split rule here. This change removes the
+// materialized repack buffers without also changing message boundaries.
+func visitInsertRowsByMessageSize(
+	insertMsg *msgstream.InsertMsg,
+	rowOffsets []int,
+	visit func(rows []int, firstFieldDataIndices []int64) error,
+) error {
+	if len(rowOffsets) == 0 {
+		return nil
 	}
-	return total
+
+	threshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+	fieldsData := insertMsg.GetFieldsData()
+	idxComputer := typeutil.NewFieldDataIdxComputer(fieldsData)
+	firstFieldDataIndices := make([]int64, len(fieldsData))
+
+	start := 0
+	requestSize := 0
+	for i, offset := range rowOffsets {
+		fieldIdxs := idxComputer.Compute(int64(offset))
+		rowSize, err := typeutil.EstimateEntitySize(fieldsData, offset, fieldIdxs...)
+		if err != nil {
+			return err
+		}
+		if i == start {
+			copy(firstFieldDataIndices, fieldIdxs)
+		}
+
+		// A single row may be larger than the threshold. Do not emit an empty
+		// selection before it; match the previous repack behavior exactly.
+		if i > start && requestSize+rowSize >= threshold {
+			if err := visit(rowOffsets[start:i], firstFieldDataIndices); err != nil {
+				return err
+			}
+			start = i
+			requestSize = 0
+			copy(firstFieldDataIndices, fieldIdxs)
+		}
+		requestSize += rowSize
+	}
+
+	return visit(rowOffsets[start:], firstFieldDataIndices)
 }
 
-func genInsertMsgsByPartition(ctx context.Context,
+// splitInsertRowsByMessageSize exposes the borrowed row views for focused
+// message-boundary tests. Production encoding uses the synchronous visitor
+// above so it does not allocate an outer selection slice.
+func splitInsertRowsByMessageSize(insertMsg *msgstream.InsertMsg, rowOffsets []int) ([][]int, error) {
+	var selections [][]int
+	err := visitInsertRowsByMessageSize(insertMsg, rowOffsets, func(rows []int, _ []int64) error {
+		selections = append(selections, rows)
+		return nil
+	})
+	return selections, err
+}
+
+// genInsertMessagesByPartition builds V1 WAL insert messages directly from
+// borrowed row selections. The selected rows are encoded into the final
+// protobuf payload without first materializing a second InsertRequest.
+func genInsertMessagesByPartition(
 	segmentID UniqueID,
 	partitionID UniqueID,
 	partitionName string,
 	rowOffsets []int,
 	channelName string,
 	insertMsg *msgstream.InsertMsg,
-	walName message.WALName,
-) ([]msgstream.TsMsg, error) {
-	// Keep the existing cross-WAL packing threshold separate from the
-	// backend-specific hard limit for a row that cannot be split further.
-	splitThreshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
-	singleRowLimit, hasSingleRowLimit := getMaxSingleRowSize(walName)
-
-	// PrepareResultFieldData sizes a dense vector column's backing array as
-	// dim*capacity regardless of nullability, while EstimateEntitySize skips
-	// null rows entirely. Deriving capacity from a row whose vectors happen to
-	// be null would therefore over-reserve by orders of magnitude -- 10k rows
-	// of a null 32768-dim float vector would reserve ~1.22GiB for an empty
-	// payload. Use the schema-derived per-row reservation as a floor so the
-	// reserved bytes stay bounded by the message threshold either way.
-	vectorReserveFloor := denseVectorReserveBytes(insertMsg.GetFieldsData())
-
-	// rowCapacity estimates how many rows will fit into a single message before
-	// the size threshold forces a flush, so the destination buffers can be
-	// preallocated. Without it the FieldData slices start at zero capacity and
-	// Go's ~1.25x growth factor copies the payload roughly five times over.
-	rowCapacity := func(rowSize, remaining int) int {
-		if rowSize < vectorReserveFloor {
-			rowSize = vectorReserveFloor
-		}
-		if rowSize <= 0 || rowSize >= threshold {
-			return 1
-		}
-		n := threshold / rowSize
-		if n > remaining {
-			n = remaining
-		}
-		if n < 1 {
-			n = 1
-		}
-		return n
-	}
-
-	// create empty insert message
-	createInsertMsg := func(segmentID UniqueID, channelName string, capacity int) *msgstream.InsertMsg {
-		insertReq := &msgpb.InsertRequest{
+	ez *message.CipherConfig,
+	schemaVersion int32,
+) ([]message.MutableMessage, error) {
+	messages := make([]message.MutableMessage, 0, 1)
+	err := visitInsertRowsByMessageSize(insertMsg, rowOffsets, func(rows []int, firstFieldDataIndices []int64) error {
+		template := &msgpb.InsertRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_Insert),
-				commonpbutil.WithTimeStamp(insertMsg.BeginTimestamp), // entity's timestamp was set to equal it.BeginTimestamp in preExecute()
+				commonpbutil.WithTimeStamp(insertMsg.BeginTimestamp),
 				commonpbutil.WithSourceID(insertMsg.Base.SourceID),
 			),
 			CollectionID:   insertMsg.CollectionID,
@@ -115,39 +115,17 @@ func genInsertMsgsByPartition(ctx context.Context,
 			PartitionName:  partitionName,
 			SegmentID:      segmentID,
 			ShardName:      channelName,
+			NumRows:        uint64(len(rows)),
 			Version:        msgpb.InsertDataVersion_ColumnBased,
-			// PrepareResultFieldData preallocates each column for `capacity`
-			// rows. Field types it does not know about get a nil Field, which
-			// AppendFieldData already creates lazily, so behavior is unchanged
-			// for them.
-			FieldsData: typeutil.PrepareResultFieldData(insertMsg.GetFieldsData(), int64(capacity)),
-			RowIDs:     make([]int64, 0, capacity),
-			Timestamps: make([]uint64, 0, capacity),
 		}
-		msg := &msgstream.InsertMsg{
-			BaseMsg: msgstream.BaseMsg{
-				Ctx:        ctx,
-				HashValues: make([]uint32, 0, capacity),
-			},
-			InsertRequest: insertReq,
-		}
-
-		return msg
-	}
-
-	fieldsData := insertMsg.GetFieldsData()
-	idxComputer := typeutil.NewFieldDataIdxComputer(fieldsData)
-
-	repackedMsgs := make([]msgstream.TsMsg, 0)
-	requestSize := 0
-	// The message is created on the first row rather than up front, so that its
-	// capacity can be derived from that row's size.
-	var msg *msgstream.InsertMsg
-	for i, offset := range rowOffsets {
-		fieldIdxs := idxComputer.Compute(int64(offset))
-		curRowMessageSize, err := typeutil.EstimateEntitySize(fieldsData, offset, fieldIdxs...)
+		encoder, err := fastpb.NewInsertRequestViewEncoderWithFirstFieldIndices(
+			template,
+			insertMsg.InsertRequest,
+			rows,
+			firstFieldDataIndices,
+		)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if hasSingleRowLimit && curRowMessageSize >= singleRowLimit {
 			return nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
@@ -156,29 +134,33 @@ func genInsertMsgsByPartition(ctx context.Context,
 			))
 		}
 
-		// If the insert message size exceeds the threshold, flush the current
-		// message first. A single row can be larger than the threshold, so do
-		// not emit an empty message before adding that row.
-		if msg == nil {
-			msg = createInsertMsg(segmentID, channelName,
-				rowCapacity(curRowMessageSize, len(rowOffsets)-i))
-		} else if msg.NumRows > 0 && requestSize+curRowMessageSize >= threshold {
-			repackedMsgs = append(repackedMsgs, msg)
-			msg = createInsertMsg(segmentID, channelName,
-				rowCapacity(curRowMessageSize, len(rowOffsets)-i))
-			requestSize = 0
+		// BuildMutable consumes the borrowed encoder synchronously. Once it
+		// returns, the message owns only the final payload and the splitter may
+		// safely reuse firstFieldDataIndices for the next view.
+		newMsg, err := message.NewInsertMessageBuilderV1().
+			WithVChannel(channelName).
+			WithHeader(&message.InsertMessageHeader{
+				CollectionId: insertMsg.CollectionID,
+				Partitions: []*message.PartitionSegmentAssignment{
+					{
+						PartitionId: partitionID,
+						Rows:        uint64(len(rows)),
+						BinarySize:  0, // StreamingNode uses the encoded message size when absent.
+					},
+				},
+				SchemaVersion: &schemaVersion,
+			}).
+			WithBodyEncoder(encoder).
+			WithCipher(ez).
+			BuildMutable()
+		if err != nil {
+			return err
 		}
-
-		typeutil.AppendFieldData(msg.FieldsData, fieldsData, int64(offset), fieldIdxs...)
-		msg.HashValues = append(msg.HashValues, insertMsg.HashValues[offset])
-		msg.Timestamps = append(msg.Timestamps, insertMsg.Timestamps[offset])
-		msg.RowIDs = append(msg.RowIDs, insertMsg.RowIDs[offset])
-		msg.NumRows++
-		requestSize += curRowMessageSize
+		messages = append(messages, newMsg)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	if msg != nil && msg.NumRows > 0 {
-		repackedMsgs = append(repackedMsgs, msg)
-	}
-
-	return repackedMsgs, nil
+	return messages, nil
 }

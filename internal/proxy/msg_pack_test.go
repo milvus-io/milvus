@@ -18,11 +18,11 @@ package proxy
 
 import (
 	"context"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -38,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 )
 
-func TestGenInsertMsgsByPartitionRejectsSingleOversizedRow(t *testing.T) {
+func TestSplitInsertRowsByMessageSizeSingleOversizedRow(t *testing.T) {
 	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "64"))
 	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
 
@@ -153,6 +153,10 @@ func newVarCharInsertMsgForPackTest(rows ...string) *msgstream.InsertMsg {
 			Version:    msgpb.InsertDataVersion_ColumnBased,
 		},
 	}
+
+	selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0})
+	assert.NoError(t, err)
+	assert.Equal(t, [][]int{{0}}, selections)
 }
 
 func TestRepackInsertData(t *testing.T) {
@@ -305,53 +309,22 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 	}
 }
 
-// genInsertMsgsByPartition used to build each message's FieldData with zero
-// capacity and grow it one row at a time, which copies the payload roughly five
-// times over. These tests pin the observable behavior (message splitting and
-// row contents) and assert that the destination is preallocated.
-func TestGenInsertMsgsByPartitionPreallocates(t *testing.T) {
+func TestSplitInsertRowsByMessageSize(t *testing.T) {
 	paramtable.Init()
 
-	const dim = 8
-
-	// One int64 column plus one float-vector column, both preallocatable.
 	newInsertMsg := func(rows int) *msgstream.InsertMsg {
 		ids := make([]int64, rows)
-		vec := make([]float32, rows*dim)
-		ts := make([]uint64, rows)
-		rowIDs := make([]int64, rows)
-		hash := make([]uint32, rows)
 		for i := 0; i < rows; i++ {
 			ids[i] = int64(i)
-			ts[i] = uint64(i + 1)
-			rowIDs[i] = int64(i)
-			for d := 0; d < dim; d++ {
-				vec[i*dim+d] = float32(i*dim + d)
-			}
 		}
 		return &msgstream.InsertMsg{
-			BaseMsg: msgstream.BaseMsg{Ctx: context.Background(), HashValues: hash},
 			InsertRequest: &msgpb.InsertRequest{
-				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
-				DbName:         "default",
-				CollectionName: "c",
-				PartitionName:  "p",
-				NumRows:        uint64(rows),
-				Timestamps:     ts,
-				RowIDs:         rowIDs,
-				Version:        msgpb.InsertDataVersion_ColumnBased,
+				NumRows: uint64(rows),
 				FieldsData: []*schemapb.FieldData{
 					{
 						Type: schemapb.DataType_Int64, FieldId: 100, FieldName: "pk",
 						Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}},
-						}},
-					},
-					{
-						Type: schemapb.DataType_FloatVector, FieldId: 101, FieldName: "vec",
-						Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-							Dim:  dim,
-							Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vec}},
 						}},
 					},
 				},
@@ -367,34 +340,16 @@ func TestGenInsertMsgsByPartitionPreallocates(t *testing.T) {
 		return out
 	}
 
-	t.Run("all rows in one message, contents preserved", func(t *testing.T) {
-		const rows = 100
-		src := newInsertMsg(rows)
-		msgs, err := genInsertMsgsByPartition(context.Background(), 7, 1, "p", offsets(rows), "ch", src)
+	t.Run("all rows borrow one selection", func(t *testing.T) {
+		rows := offsets(100)
+		selections, err := splitInsertRowsByMessageSize(newInsertMsg(len(rows)), rows)
 		assert.NoError(t, err)
-		assert.Len(t, msgs, 1)
+		assert.Len(t, selections, 1)
+		assert.Equal(t, rows, selections[0])
 
-		got := msgs[0].(*msgstream.InsertMsg)
-		assert.Equal(t, uint64(rows), got.GetNumRows())
-		assert.Len(t, got.GetRowIDs(), rows)
-		assert.Len(t, got.GetTimestamps(), rows)
-
-		pk := got.GetFieldsData()[0].GetScalars().GetLongData().GetData()
-		assert.Len(t, pk, rows)
-		for i := 0; i < rows; i++ {
-			assert.Equal(t, int64(i), pk[i])
-		}
-		vec := got.GetFieldsData()[1].GetVectors().GetFloatVector().GetData()
-		assert.Len(t, vec, rows*dim)
-		assert.Equal(t, float32(rows*dim-1), vec[rows*dim-1])
-
-		// The point of the change: the buffers were sized up front rather than
-		// grown row by row. A grown slice would land on a power-of-two-ish
-		// capacity well above the exact length.
-		assert.Equal(t, rows, cap(pk), "pk column should be preallocated exactly")
-		assert.Equal(t, rows*dim, cap(vec), "vector column should be preallocated exactly")
-		assert.Equal(t, rows, cap(got.GetRowIDs()))
-		assert.Equal(t, rows, cap(got.GetTimestamps()))
+		// The selection is a view over the caller's offset array, not a copy.
+		rows[0] = 99
+		assert.Equal(t, 99, selections[0][0])
 	})
 
 	t.Run("splitting on the size threshold still works", func(t *testing.T) {
@@ -403,127 +358,112 @@ func TestGenInsertMsgsByPartitionPreallocates(t *testing.T) {
 		defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
 
 		const rows = 5
-		src := newInsertMsg(rows)
-		msgs, err := genInsertMsgsByPartition(context.Background(), 7, 1, "p", offsets(rows), "ch", src)
+		rowOffsets := offsets(rows)
+		selections, err := splitInsertRowsByMessageSize(newInsertMsg(rows), rowOffsets)
 		assert.NoError(t, err)
-		assert.Len(t, msgs, rows)
-
-		for i, m := range msgs {
-			im := m.(*msgstream.InsertMsg)
-			assert.Equal(t, uint64(1), im.GetNumRows())
-			pk := im.GetFieldsData()[0].GetScalars().GetLongData().GetData()
-			assert.Equal(t, []int64{int64(i)}, pk)
-		}
+		assert.Equal(t, [][]int{{0}, {1}, {2}, {3}, {4}}, selections)
 	})
 
-	// The message is now created lazily on the first row, so the no-rows case
-	// must not dereference a nil message.
 	t.Run("no rows produces no messages", func(t *testing.T) {
-		src := newInsertMsg(3)
-		msgs, err := genInsertMsgsByPartition(context.Background(), 7, 1, "p", nil, "ch", src)
+		selections, err := splitInsertRowsByMessageSize(newInsertMsg(3), nil)
 		assert.NoError(t, err)
-		assert.Empty(t, msgs)
+		assert.Empty(t, selections)
 	})
 }
 
-// A dense vector column's backing array is sized dim*capacity by
-// PrepareResultFieldData regardless of nullability, while EstimateEntitySize
-// skips null rows entirely. Deriving the capacity from a row whose vector is
-// null therefore used to reserve orders of magnitude too much: 10k rows of a
-// null 32768-dim float vector reserve ~1.22GiB for an empty payload.
-func TestGenInsertMsgsByPartitionBoundsNullVectorReservation(t *testing.T) {
+func TestGenInsertMessagesByPartitionEncodesSelectionView(t *testing.T) {
 	paramtable.Init()
-
-	const (
-		rows      = 10000
-		dim       = 32768
-		threshold = 2 * 1024 * 1024
-	)
-	Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(threshold))
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
 	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
 
-	// nullVectorMsg builds an insert whose vector column is nullable and null
-	// for `nullRows` leading rows.
-	newMsg := func(nullRows int) *msgstream.InsertMsg {
-		ids := make([]int64, rows)
-		valid := make([]bool, rows)
-		vec := make([]float32, 0, rows*dim)
-		for i := 0; i < rows; i++ {
-			ids[i] = int64(i)
-			valid[i] = i >= nullRows
-			if valid[i] {
-				vec = append(vec, make([]float32, dim)...)
-			}
-		}
-		return &msgstream.InsertMsg{
-			BaseMsg: msgstream.BaseMsg{Ctx: context.Background(), HashValues: make([]uint32, rows)},
-			InsertRequest: &msgpb.InsertRequest{
-				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
-				DbName:         "default",
-				CollectionName: "c",
-				PartitionName:  "p",
-				NumRows:        rows,
-				Timestamps:     make([]uint64, rows),
-				RowIDs:         ids,
-				Version:        msgpb.InsertDataVersion_ColumnBased,
-				FieldsData: []*schemapb.FieldData{
-					{
-						Type: schemapb.DataType_Int64, FieldId: 100, FieldName: "pk",
-						Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}},
+	const dim = 2
+	source := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{BeginTimestamp: 99},
+		InsertRequest: &msgpb.InsertRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert, SourceID: 42},
+			CollectionID:   100,
+			DbName:         "db",
+			CollectionName: "collection",
+			PartitionName:  "source-partition",
+			NumRows:        4,
+			RowIDs:         []int64{10, 11, 12, 13},
+			Timestamps:     []uint64{20, 21, 22, 23},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type: schemapb.DataType_Int64, FieldId: 100, FieldName: "pk",
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{
+							Data: []int64{100, 101, 102, 103},
 						}},
-					},
-					{
-						Type: schemapb.DataType_FloatVector, FieldId: 101, FieldName: "vec",
-						ValidData: valid,
-						Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-							Dim:  dim,
-							Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vec}},
+					}},
+				},
+				{
+					Type: schemapb.DataType_FloatVector, FieldId: 101, FieldName: "vec",
+					ValidData: []bool{true, false, true, true},
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim: dim,
+						Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
+							Data: []float32{0, 1, 4, 5, 6, 7},
 						}},
-					},
+					}},
 				},
 			},
-		}
+			Version: msgpb.InsertDataVersion_ColumnBased,
+		},
 	}
 
-	offsets := make([]int, rows)
-	for i := range offsets {
-		offsets[i] = i
+	selection := []int{1, 3}
+	msgs, err := genInsertMessagesByPartition(0, 200, "target-partition", selection, "vchannel", source, nil, 7)
+	assert.NoError(t, err)
+	assert.Len(t, msgs, 1)
+	builtPayload := append([]byte(nil), msgs[0].Payload()...)
+
+	insert := message.MustAsMutableInsertMessageV1(msgs[0])
+	header := insert.Header()
+	assert.Equal(t, int64(100), header.GetCollectionId())
+	assert.Equal(t, int32(7), header.GetSchemaVersion())
+	assert.Equal(t, uint64(2), header.GetPartitions()[0].GetRows())
+
+	body := insert.MustBody()
+	assert.Equal(t, uint64(2), body.GetNumRows())
+	assert.Equal(t, int64(200), body.GetPartitionID())
+	assert.Equal(t, "target-partition", body.GetPartitionName())
+	assert.Equal(t, "vchannel", body.GetShardName())
+	assert.Equal(t, uint64(99), body.GetBase().GetTimestamp())
+	assert.Equal(t, int64(42), body.GetBase().GetSourceID())
+	assert.Equal(t, []int64{11, 13}, body.GetRowIDs())
+	assert.Equal(t, []uint64{21, 23}, body.GetTimestamps())
+	assert.Equal(t, []int64{101, 103}, body.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	assert.Equal(t, []bool{false, true}, body.GetFieldsData()[1].GetValidData())
+	assert.Equal(t, []float32{6, 7}, body.GetFieldsData()[1].GetVectors().GetFloatVector().GetData())
+
+	// The view encoder must not mutate or compact the source request.
+	assert.Equal(t, []int64{10, 11, 12, 13}, source.GetRowIDs())
+	assert.Equal(t, []float32{0, 1, 4, 5, 6, 7}, source.GetFieldsData()[1].GetVectors().GetFloatVector().GetData())
+
+	// Force every logical row into a separate message. This pins the physical
+	// compact-vector index captured at each later selection boundary; rescanning
+	// or reusing the previous message's index would return the wrong vector row.
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1"))
+	msgs, err = genInsertMessagesByPartition(0, 200, "target-partition", []int{0, 1, 2, 3}, "vchannel", source, nil, 7)
+	assert.NoError(t, err)
+	require.Len(t, msgs, 4)
+	expectedVectors := [][]float32{{0, 1}, nil, {4, 5}, {6, 7}}
+	for i, msg := range msgs {
+		body := message.MustAsMutableInsertMessageV1(msg).MustBody()
+		assert.Equal(t, []int64{int64(10 + i)}, body.GetRowIDs())
+		assert.Equal(t, []bool{source.GetFieldsData()[1].GetValidData()[i]}, body.GetFieldsData()[1].GetValidData())
+		assert.Equal(t, expectedVectors[i], body.GetFieldsData()[1].GetVectors().GetFloatVector().GetData())
 	}
 
-	// A dense vector row costs dim*4 = 128KiB, so at a 2MiB threshold a message
-	// can hold ~16 rows. Anything far above that means the null rows were not
-	// accounted for. Allow generous slack; the bug reserved ~600x this.
-	const maxReserveBytes = 8 * 1024 * 1024
-
-	for _, tc := range []struct {
-		name     string
-		nullRows int
-	}{
-		{"all rows null", rows},
-		{"first row null", 1},
-		{"no rows null", 0},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			msgs, err := genInsertMsgsByPartition(context.Background(), 7, 1, "p", offsets, "ch", newMsg(tc.nullRows))
-			assert.NoError(t, err)
-			assert.NotEmpty(t, msgs)
-
-			for _, m := range msgs {
-				im := m.(*msgstream.InsertMsg)
-				for _, fd := range im.GetFieldsData() {
-					v := fd.GetVectors().GetFloatVector().GetData()
-					assert.LessOrEqual(t, cap(v)*4, maxReserveBytes,
-						"vector column reserved %d bytes for %d rows", cap(v)*4, im.GetNumRows())
-				}
-			}
-
-			// Row contents must still be complete.
-			total := uint64(0)
-			for _, m := range msgs {
-				total += m.(*msgstream.InsertMsg).GetNumRows()
-			}
-			assert.Equal(t, uint64(rows), total)
-		})
-	}
+	// BuildMutable consumes the view synchronously. Later changes to either the
+	// source request or the borrowed selection cannot affect the WAL payload.
+	selection[0] = 0
+	source.RowIDs[1] = 999
+	source.GetFieldsData()[1].GetVectors().GetFloatVector().Data[4] = 999
+	assert.Equal(t, builtPayload, insert.Payload())
+	var rebuilt msgpb.InsertRequest
+	require.NoError(t, proto.Unmarshal(insert.Payload(), &rebuilt))
+	assert.Equal(t, []int64{11, 13}, rebuilt.GetRowIDs())
+	assert.Equal(t, []float32{6, 7}, rebuilt.GetFieldsData()[1].GetVectors().GetFloatVector().GetData())
 }

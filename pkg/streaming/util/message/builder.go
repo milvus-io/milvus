@@ -124,10 +124,19 @@ func newMutableMessageBuilder[H proto.Message, B proto.Message]() *mutableMesasg
 	}
 }
 
+// BodyEncoder encodes a message body directly into a caller-provided buffer.
+// EncodedSize must return the exact number of bytes MarshalTo writes. Builders
+// consume the encoder synchronously and retain only the encoded payload.
+type BodyEncoder interface {
+	EncodedSize() (int, error)
+	MarshalTo([]byte) (int, error)
+}
+
 // mutableMesasgeBuilder is the builder for message.
 type mutableMesasgeBuilder[H proto.Message, B proto.Message] struct {
 	header       H
 	body         B
+	bodyEncoder  BodyEncoder
 	properties   propertiesImpl
 	cipherConfig *CipherConfig
 	allVChannel  bool
@@ -158,6 +167,13 @@ func (b *mutableMesasgeBuilder[H, B]) WithUnreplicable() *mutableMesasgeBuilder[
 // WithBody creates a new builder with message body.
 func (b *mutableMesasgeBuilder[H, B]) WithBody(body B) *mutableMesasgeBuilder[H, B] {
 	b.body = body
+	return b
+}
+
+// WithBodyEncoder creates a new builder with a body encoder that writes the
+// encoded body directly into the message payload during Build.
+func (b *mutableMesasgeBuilder[H, B]) WithBodyEncoder(bodyEncoder BodyEncoder) *mutableMesasgeBuilder[H, B] {
+	b.bodyEncoder = bodyEncoder
 	return b
 }
 
@@ -336,8 +352,13 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 	if reflect.ValueOf(b.header).IsNil() {
 		panic("message builder not ready for header field")
 	}
-	if reflect.ValueOf(b.body).IsNil() {
+	bodySet := !reflect.ValueOf(b.body).IsNil()
+	bodyEncoderSet := !isNilBodyEncoder(b.bodyEncoder)
+	if !bodySet && !bodyEncoderSet {
 		panic("message builder not ready for body field")
+	}
+	if bodySet && bodyEncoderSet {
+		panic("message builder must set exactly one of body or body encoder")
 	}
 
 	// setup header.
@@ -347,9 +368,17 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 	}
 	b.properties.Set(messageHeader, sp)
 
-	payload, err := proto.Marshal(b.body)
+	var payload []byte
+	if bodyEncoderSet {
+		payload, err = marshalBodyEncoder(b.bodyEncoder)
+	} else {
+		payload, err = proto.Marshal(b.body)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to marshal body")
+		}
+	}
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal body")
+		return nil, err
 	}
 	if b.cipherConfig != nil {
 		messageType := MustGetMessageTypeWithVersion[H, B]()
@@ -381,6 +410,40 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 		payload:    payload,
 		properties: b.properties,
 	}, nil
+}
+
+func isNilBodyEncoder(bodyEncoder BodyEncoder) bool {
+	if bodyEncoder == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(bodyEncoder)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func marshalBodyEncoder(bodyEncoder BodyEncoder) ([]byte, error) {
+	size, err := bodyEncoder.EncodedSize()
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to get encoded body size")
+	}
+	if size < 0 {
+		return nil, merr.WrapErrServiceInternalMsg("body encoder returned negative encoded size %d", size)
+	}
+
+	payload := make([]byte, size)
+	written, err := bodyEncoder.MarshalTo(payload)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to marshal body")
+	}
+	if written != size {
+		return nil, merr.WrapErrServiceInternalMsg("body encoder wrote %d bytes, expected %d", written, size)
+	}
+	return payload, nil
 }
 
 // NewImmutableTxnMessageBuilder creates a new txn builder.

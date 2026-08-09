@@ -109,33 +109,11 @@ func repackInsertDataForStreamingService(
 
 	for channel, rowOffsets := range channel2RowOffsets {
 		// segment id is assigned at streaming node.
-		msgs, err := genInsertMsgsByPartition(ctx, 0, partitionID, partitionName, rowOffsets, channel, insertMsg, walName)
+		msgs, err := genInsertMessagesByPartition(0, partitionID, partitionName, rowOffsets, channel, insertMsg, ez, schemaVersion)
 		if err != nil {
 			return nil, err
 		}
-		for _, msg := range msgs {
-			insertRequest := msg.(*msgstream.InsertMsg).InsertRequest
-			newMsg, err := message.NewInsertMessageBuilderV1().
-				WithVChannel(channel).
-				WithHeader(&message.InsertMessageHeader{
-					CollectionId: insertMsg.CollectionID,
-					Partitions: []*message.PartitionSegmentAssignment{
-						{
-							PartitionId: partitionID,
-							Rows:        insertRequest.GetNumRows(),
-							BinarySize:  0, // TODO: current not used, message estimate size is used.
-						},
-					},
-					SchemaVersion: &schemaVersion,
-				}).
-				WithBody(insertRequest).
-				WithCipher(ez).
-				BuildMutable()
-			if err != nil {
-				return nil, err
-			}
-			messages = append(messages, newMsg)
-		}
+		messages = append(messages, msgs...)
 	}
 	return messages, nil
 }
@@ -203,33 +181,11 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 		}
 
 		for partitionName, rowOffsets := range partition2RowOffsets {
-			msgs, err := genInsertMsgsByPartition(ctx, 0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg, walName)
+			msgs, err := genInsertMessagesByPartition(0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg, ez, schemaVersion)
 			if err != nil {
 				return nil, err
 			}
-			for _, msg := range msgs {
-				insertRequest := msg.(*msgstream.InsertMsg).InsertRequest
-				newMsg, err := message.NewInsertMessageBuilderV1().
-					WithVChannel(channel).
-					WithHeader(&message.InsertMessageHeader{
-						CollectionId: insertMsg.CollectionID,
-						Partitions: []*message.PartitionSegmentAssignment{
-							{
-								PartitionId: partitionIDs[partitionName],
-								Rows:        insertRequest.GetNumRows(),
-								BinarySize:  0, // TODO: current not used, message estimate size is used.
-							},
-						},
-						SchemaVersion: &schemaVersion,
-					}).
-					WithBody(insertRequest).
-					WithCipher(ez).
-					BuildMutable()
-				if err != nil {
-					return nil, err
-				}
-				messages = append(messages, newMsg)
-			}
+			messages = append(messages, msgs...)
 		}
 	}
 	return messages, nil

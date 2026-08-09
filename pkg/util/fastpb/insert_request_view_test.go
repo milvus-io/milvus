@@ -1,0 +1,512 @@
+package fastpb
+
+import (
+	"encoding/binary"
+	"math"
+	"math/rand"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
+
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	msgpb "github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+func TestInsertRequestViewEncoder_DifferentialAllRepackTypes(t *testing.T) {
+	template := insertViewTemplate()
+	// The encoder owns the row-bearing fields, even if a caller accidentally
+	// leaves stale values in the metadata template.
+	template.Timestamps = []uint64{999}
+	template.RowIDs = []int64{999}
+	template.FieldsData = []*schemapb.FieldData{{FieldId: 999}}
+	template.NumRows = 999
+	template.ProtoReflect().SetUnknown(protowire.AppendVarint(protowire.AppendTag(nil, 99, protowire.VarintType), 7))
+
+	source := insertViewAllRepackTypesSource()
+	for _, rows := range [][]int{
+		{0},
+		{0, 2, 4},
+		{1, 4}, // all-null selection for compact vector fields
+		{0, 1, 2, 3, 4},
+	} {
+		t.Run(rowsName(rows), func(t *testing.T) {
+			assertViewMatchesMaterialized(t, template, source, rows)
+		})
+	}
+}
+
+func TestInsertRequestViewEncoder_DifferentialRandomSelections(t *testing.T) {
+	r := rand.New(rand.NewSource(0x52269))
+	template := insertViewTemplate()
+	for iteration := 0; iteration < 500; iteration++ {
+		rowCount := 1 + r.Intn(32)
+		source := randomInsertViewSource(r, rowCount)
+		rows := make([]int, 0, rowCount)
+		for row := 0; row < rowCount; row++ {
+			if r.Intn(3) != 0 {
+				rows = append(rows, row)
+			}
+		}
+		if len(rows) == 0 {
+			rows = append(rows, r.Intn(rowCount))
+		}
+		assertViewMatchesMaterialized(t, template, source, rows)
+	}
+}
+
+func TestInsertRequestViewEncoder_DifferentialNilRepeatedMessages(t *testing.T) {
+	template := insertViewTemplate()
+	source := insertViewAllRepackTypesSource()
+	source.GetFieldsData()[6].GetScalars().GetArrayData().Data[2] = nil
+	source.GetFieldsData()[17].GetVectors().GetVectorArray().Data[2] = nil
+	assertViewMatchesMaterialized(t, template, source, []int{2})
+}
+
+func TestInsertRequestViewEncoder_ExtendedScalarOneofs(t *testing.T) {
+	// Bytes/Mol/MolSmiles/Date/Time are current ScalarField oneofs, but the old
+	// AppendFieldData repack helper does not handle them. Keep this explicit
+	// expected-object test separate from the old-path differential oracle above.
+	rows := []int{0, 2, 3}
+	source := &msgpb.InsertRequest{
+		NumRows:    4,
+		RowIDs:     []int64{1, 2, 3, 4},
+		Timestamps: []uint64{11, 12, 13, 14},
+		FieldsData: []*schemapb.FieldData{
+			scalarField(100, schemapb.DataType_None, &schemapb.ScalarField_BytesData{BytesData: &schemapb.BytesArray{Data: [][]byte{{1}, {}, {3, 3}, {4}}}}),
+			scalarField(101, schemapb.DataType_None, &schemapb.ScalarField_MolData{MolData: &schemapb.MolArray{Data: [][]byte{{10}, {20}, {30}, {40}}}}),
+			scalarField(102, schemapb.DataType_Text, &schemapb.ScalarField_MolSmilesData{MolSmilesData: &schemapb.MolSmilesArray{Data: []string{"C", "CC", "CCC", ""}}}),
+			scalarField(103, schemapb.DataType_Date, &schemapb.ScalarField_DateData{DateData: &schemapb.DateArray{Data: []int32{-1, 0, 1, math.MaxInt32}}}),
+			scalarField(104, schemapb.DataType_Time, &schemapb.ScalarField_TimeData{TimeData: &schemapb.TimeArray{Data: []int64{-1, 0, 1, math.MaxInt64}}}),
+		},
+	}
+
+	expected := materializeExtendedScalars(insertViewTemplate(), source, rows)
+	got := encodeAndDecodeInsertView(t, insertViewTemplate(), source, rows)
+	require.True(t, proto.Equal(expected, got), "extended scalar selection mismatch\nexpected: %v\nactual:   %v", expected, got)
+}
+
+func TestInsertRequestViewEncoder_WithCapturedFieldIndices(t *testing.T) {
+	template := insertViewTemplate()
+	source := insertViewAllRepackTypesSource()
+	rows := []int{2, 4}
+	idxComputer := typeutil.NewFieldDataIdxComputer(source.GetFieldsData())
+	firstIndices := append([]int64(nil), idxComputer.Compute(int64(rows[0]))...)
+
+	encoder, err := NewInsertRequestViewEncoderWithFirstFieldIndices(template, source, rows, firstIndices)
+	require.NoError(t, err)
+	size, err := encoder.EncodedSize()
+	require.NoError(t, err)
+	payload := make([]byte, size)
+	_, err = encoder.MarshalTo(payload)
+	require.NoError(t, err)
+	got := &msgpb.InsertRequest{}
+	require.NoError(t, proto.Unmarshal(payload, got))
+	expected := materializeWithAppendFieldData(template, source, rows)
+	require.True(t, proto.Equal(expected, got))
+
+	_, err = NewInsertRequestViewEncoderWithFirstFieldIndices(template, source, rows, firstIndices[:1])
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	badIndices := append([]int64(nil), firstIndices...)
+	badIndices[0] = -1
+	_, err = NewInsertRequestViewEncoderWithFirstFieldIndices(template, source, rows, badIndices)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestInsertRequestViewEncoder_AllNullHighDimVectorDoesNotMaterialize(t *testing.T) {
+	const (
+		rowCount = 10_000
+		dim      = 32_768
+	)
+	rows := make([]int, rowCount)
+	rowIDs := make([]int64, rowCount)
+	timestamps := make([]uint64, rowCount)
+	valid := make([]bool, rowCount)
+	for row := range rows {
+		rows[row] = row
+		rowIDs[row] = int64(row)
+	}
+	source := &msgpb.InsertRequest{
+		NumRows:    rowCount,
+		RowIDs:     rowIDs,
+		Timestamps: timestamps,
+		FieldsData: []*schemapb.FieldData{{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: "embedding",
+			FieldId:   100,
+			ValidData: valid,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: dim,
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{},
+				},
+			}},
+		}},
+	}
+
+	encoder, err := NewInsertRequestViewEncoder(insertViewTemplate(), source, rows)
+	require.NoError(t, err)
+	size, err := encoder.EncodedSize()
+	require.NoError(t, err)
+	assert.Less(t, size, 1<<20, "all-null vector payload must not scale with dim*rowCount")
+
+	decoded := encodeAndDecodeInsertView(t, insertViewTemplate(), source, rows)
+	require.Len(t, decoded.GetFieldsData()[0].GetValidData(), rowCount)
+	assert.Nil(t, decoded.GetFieldsData()[0].GetVectors().GetFloatVector())
+}
+
+func TestInsertRequestViewEncoder_InternalContractErrors(t *testing.T) {
+	validSource := &msgpb.InsertRequest{
+		NumRows:    2,
+		RowIDs:     []int64{1, 2},
+		Timestamps: []uint64{10, 20},
+		FieldsData: []*schemapb.FieldData{
+			scalarField(1, schemapb.DataType_Int64, &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}),
+		},
+	}
+
+	cases := []struct {
+		name     string
+		template *msgpb.InsertRequest
+		source   *msgpb.InsertRequest
+		rows     []int
+	}{
+		{name: "nil template", source: validSource, rows: []int{0}},
+		{name: "nil source", template: insertViewTemplate(), rows: []int{0}},
+		{name: "empty selection", template: insertViewTemplate(), source: validSource},
+		{name: "negative row", template: insertViewTemplate(), source: validSource, rows: []int{-1}},
+		{name: "duplicate row", template: insertViewTemplate(), source: validSource, rows: []int{0, 0}},
+		{name: "descending rows", template: insertViewTemplate(), source: validSource, rows: []int{1, 0}},
+		{name: "row ID out of range", template: insertViewTemplate(), source: validSource, rows: []int{2}},
+		{name: "row based source", template: insertViewTemplate(), source: &msgpb.InsertRequest{RowData: []*commonpb.Blob{{Value: []byte{1}}}}, rows: nil},
+		{name: "struct arrays", template: insertViewTemplate(), source: &msgpb.InsertRequest{
+			NumRows: 1, RowIDs: []int64{1}, Timestamps: []uint64{1},
+			FieldsData: []*schemapb.FieldData{{FieldId: 1, Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{}}}},
+		}, rows: []int{0}},
+		{name: "short scalar", template: insertViewTemplate(), source: &msgpb.InsertRequest{
+			NumRows: 2, RowIDs: []int64{1, 2}, Timestamps: []uint64{1, 2},
+			FieldsData: []*schemapb.FieldData{scalarField(1, schemapb.DataType_Int64, &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}})},
+		}, rows: []int{1}},
+		{name: "short compact vector", template: insertViewTemplate(), source: &msgpb.InsertRequest{
+			NumRows: 2, RowIDs: []int64{1, 2}, Timestamps: []uint64{1, 2},
+			FieldsData: []*schemapb.FieldData{{
+				Type: schemapb.DataType_FloatVector, FieldId: 1, ValidData: []bool{true, true},
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}}}},
+			}},
+		}, rows: []int{1}},
+		{name: "bad binary dim", template: insertViewTemplate(), source: &msgpb.InsertRequest{
+			NumRows: 1, RowIDs: []int64{1}, Timestamps: []uint64{1},
+			FieldsData: []*schemapb.FieldData{{
+				Type: schemapb.DataType_BinaryVector, FieldId: 1,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 7, Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1}}}},
+			}},
+		}, rows: []int{0}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewInsertRequestViewEncoder(tc.template, tc.source, tc.rows)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		})
+	}
+}
+
+func TestInsertRequestViewEncoder_MarshalContract(t *testing.T) {
+	source := insertViewAllRepackTypesSource()
+	encoder, err := NewInsertRequestViewEncoder(insertViewTemplate(), source, []int{0, 2})
+	require.NoError(t, err)
+	size, err := encoder.EncodedSize()
+	require.NoError(t, err)
+
+	_, err = encoder.MarshalTo(make([]byte, size-1))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+
+	// Borrowed inputs are immutable until MarshalTo. A size-changing mutation
+	// is detected and returned as a typed internal error instead of silently
+	// returning a payload outside the caller's buffer.
+	source.FieldsData[5].GetScalars().GetStringData().Data[0] = "a much longer value"
+	_, err = encoder.MarshalTo(make([]byte, size))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func assertViewMatchesMaterialized(t *testing.T, template, source *msgpb.InsertRequest, rows []int) {
+	t.Helper()
+	expected := materializeWithAppendFieldData(template, source, rows)
+	got := encodeAndDecodeInsertView(t, template, source, rows)
+	require.True(t, proto.Equal(expected, got), "view encoding mismatch\nrows:     %v\nexpected: %v\nactual:   %v", rows, expected, got)
+	assert.Equal(t, proto.Size(expected), proto.Size(got))
+}
+
+func encodeAndDecodeInsertView(t *testing.T, template, source *msgpb.InsertRequest, rows []int) *msgpb.InsertRequest {
+	t.Helper()
+	encoder, err := NewInsertRequestViewEncoder(template, source, rows)
+	require.NoError(t, err)
+	size, err := encoder.EncodedSize()
+	require.NoError(t, err)
+	dst := make([]byte, size+8)
+	for i := size; i < len(dst); i++ {
+		dst[i] = 0xA5
+	}
+	n, err := encoder.MarshalTo(dst)
+	require.NoError(t, err)
+	require.Equal(t, size, n)
+	for i := size; i < len(dst); i++ {
+		assert.Equal(t, byte(0xA5), dst[i], "MarshalTo wrote past EncodedSize")
+	}
+	got := &msgpb.InsertRequest{}
+	require.NoError(t, proto.Unmarshal(dst[:n], got))
+	return got
+}
+
+func materializeWithAppendFieldData(template, source *msgpb.InsertRequest, rows []int) *msgpb.InsertRequest {
+	expected := proto.Clone(template).(*msgpb.InsertRequest)
+	expected.Timestamps = make([]uint64, 0, len(rows))
+	expected.RowIDs = make([]int64, 0, len(rows))
+	expected.RowData = nil
+	expected.FieldsData = make([]*schemapb.FieldData, len(source.GetFieldsData()))
+	expected.NumRows = uint64(len(rows))
+
+	idxComputer := typeutil.NewFieldDataIdxComputer(source.GetFieldsData())
+	for _, row := range rows {
+		fieldIndices := idxComputer.Compute(int64(row))
+		typeutil.AppendFieldData(expected.FieldsData, source.GetFieldsData(), int64(row), fieldIndices...)
+		expected.Timestamps = append(expected.Timestamps, source.GetTimestamps()[row])
+		expected.RowIDs = append(expected.RowIDs, source.GetRowIDs()[row])
+	}
+	return expected
+}
+
+func materializeExtendedScalars(template, source *msgpb.InsertRequest, rows []int) *msgpb.InsertRequest {
+	expected := proto.Clone(template).(*msgpb.InsertRequest)
+	expected.Timestamps = make([]uint64, 0, len(rows))
+	expected.RowIDs = make([]int64, 0, len(rows))
+	expected.RowData = nil
+	expected.FieldsData = make([]*schemapb.FieldData, 0, len(source.GetFieldsData()))
+	expected.NumRows = uint64(len(rows))
+	for _, row := range rows {
+		expected.Timestamps = append(expected.Timestamps, source.GetTimestamps()[row])
+		expected.RowIDs = append(expected.RowIDs, source.GetRowIDs()[row])
+	}
+	for _, sourceField := range source.GetFieldsData() {
+		field := &schemapb.FieldData{
+			Type: sourceField.GetType(), FieldName: sourceField.GetFieldName(), FieldId: sourceField.GetFieldId(), IsDynamic: sourceField.GetIsDynamic(),
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{}},
+		}
+		for _, row := range rows {
+			if len(sourceField.GetValidData()) > 0 {
+				field.ValidData = append(field.ValidData, sourceField.GetValidData()[row])
+			}
+		}
+		switch value := sourceField.GetScalars().Data.(type) {
+		case *schemapb.ScalarField_BytesData:
+			selected := &schemapb.BytesArray{}
+			for _, row := range rows {
+				selected.Data = append(selected.Data, value.BytesData.GetData()[row])
+			}
+			field.GetScalars().Data = &schemapb.ScalarField_BytesData{BytesData: selected}
+		case *schemapb.ScalarField_MolData:
+			selected := &schemapb.MolArray{}
+			for _, row := range rows {
+				selected.Data = append(selected.Data, value.MolData.GetData()[row])
+			}
+			field.GetScalars().Data = &schemapb.ScalarField_MolData{MolData: selected}
+		case *schemapb.ScalarField_MolSmilesData:
+			selected := &schemapb.MolSmilesArray{}
+			for _, row := range rows {
+				selected.Data = append(selected.Data, value.MolSmilesData.GetData()[row])
+			}
+			field.GetScalars().Data = &schemapb.ScalarField_MolSmilesData{MolSmilesData: selected}
+		case *schemapb.ScalarField_DateData:
+			selected := &schemapb.DateArray{}
+			for _, row := range rows {
+				selected.Data = append(selected.Data, value.DateData.GetData()[row])
+			}
+			field.GetScalars().Data = &schemapb.ScalarField_DateData{DateData: selected}
+		case *schemapb.ScalarField_TimeData:
+			selected := &schemapb.TimeArray{}
+			for _, row := range rows {
+				selected.Data = append(selected.Data, value.TimeData.GetData()[row])
+			}
+			field.GetScalars().Data = &schemapb.ScalarField_TimeData{TimeData: selected}
+		default:
+			panic("unexpected extended scalar")
+		}
+		expected.FieldsData = append(expected.FieldsData, field)
+	}
+	return expected
+}
+
+func insertViewTemplate() *msgpb.InsertRequest {
+	namespace := "tenant-a"
+	return &msgpb.InsertRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_Insert,
+			MsgID:     100,
+			Timestamp: 200,
+			SourceID:  300,
+		},
+		ShardName:      "by-dev-rootcoord-dml_0_123v0",
+		DbName:         "db",
+		CollectionName: "collection",
+		PartitionName:  "partition",
+		DbID:           10,
+		CollectionID:   20,
+		PartitionID:    30,
+		SegmentID:      40,
+		Version:        msgpb.InsertDataVersion_ColumnBased,
+		Namespace:      &namespace,
+	}
+}
+
+func insertViewAllRepackTypesSource() *msgpb.InsertRequest {
+	const rows = 5
+	valid := []bool{true, false, true, true, false}
+	arrayRows := make([]*schemapb.ScalarField, rows)
+	vectorArrayRows := make([]*schemapb.VectorField, rows)
+	for row := 0; row < rows; row++ {
+		arrayRows[row] = &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{int64(row), int64(row + 10)}}}}
+		vectorData := []float32{float32(row), float32(row) + 0.5}
+		if !valid[row] {
+			vectorData = nil // ArrayOfVector keeps a placeholder for null rows.
+		}
+		vectorArrayRows[row] = &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vectorData}}}
+	}
+
+	return &msgpb.InsertRequest{
+		NumRows:    rows,
+		RowIDs:     []int64{-1, 0, 1, 2, math.MaxInt64},
+		Timestamps: []uint64{0, 1, 127, 128, math.MaxUint64},
+		FieldsData: []*schemapb.FieldData{
+			{Type: schemapb.DataType_Bool, FieldName: "bool", FieldId: 1, ValidData: valid, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{true, false, true, false, true}}}}}},
+			scalarField(2, schemapb.DataType_Int32, &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{-1, 0, 1, 128, math.MaxInt32}}}),
+			scalarField(3, schemapb.DataType_Int64, &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{-1, 0, 1, 128, math.MaxInt64}}}),
+			scalarField(4, schemapb.DataType_Float, &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{-1.5, 0, 1.5, float32(math.Inf(1)), float32(math.NaN())}}}),
+			scalarField(5, schemapb.DataType_Double, &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{-1.5, 0, 1.5, math.Inf(-1), math.NaN()}}}),
+			scalarField(6, schemapb.DataType_VarChar, &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"", "ascii", "向量", "x", "last"}}}),
+			scalarField(7, schemapb.DataType_Array, &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{Data: arrayRows, ElementType: schemapb.DataType_Int64}}),
+			scalarField(8, schemapb.DataType_JSON, &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(`{}`), []byte(`null`), []byte(`{"a":2}`), {}, []byte(`[]`)}}}),
+			scalarField(9, schemapb.DataType_Timestamptz, &schemapb.ScalarField_TimestamptzData{TimestamptzData: &schemapb.TimestamptzArray{Data: []int64{-1, 0, 1, 2, 3}}}),
+			scalarField(10, schemapb.DataType_Geometry, &schemapb.ScalarField_GeometryData{GeometryData: &schemapb.GeometryArray{Data: [][]byte{{1}, {2}, {3}, {}, {5}}}}),
+			scalarField(11, schemapb.DataType_VarChar, &schemapb.ScalarField_GeometryWktData{GeometryWktData: &schemapb.GeometryWktArray{Data: []string{"POINT(0 0)", "", "POINT(2 2)", "POINT(3 3)", "POINT(4 4)"}}}),
+			{Type: schemapb.DataType_BinaryVector, FieldName: "binary", FieldId: 12, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 16, Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}}}}},
+			{Type: schemapb.DataType_FloatVector, FieldName: "float-vector", FieldId: 13, ValidData: valid, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{10, 11, 20, 21, 30, 31}}}}}},
+			{Type: schemapb.DataType_Float16Vector, FieldName: "float16", FieldId: 14, ValidData: valid, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}}}}},
+			{Type: schemapb.DataType_BFloat16Vector, FieldName: "bfloat16", FieldId: 15, ValidData: valid, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1}}}}},
+			{Type: schemapb.DataType_SparseFloatVector, FieldName: "sparse", FieldId: 16, ValidData: valid, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 99, Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Dim: 100, Contents: [][]byte{sparseTestRow(1), sparseTestRow(9), sparseTestRow(4)}}}}}},
+			{Type: schemapb.DataType_Int8Vector, FieldName: "int8", FieldId: 17, ValidData: valid, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3, 4, 5, 6}}}}},
+			{Type: schemapb.DataType_ArrayOfVector, FieldName: "array-of-vector", FieldId: 18, ValidData: valid, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{Dim: 2, ElementType: schemapb.DataType_FloatVector, Data: vectorArrayRows}}}}},
+		},
+	}
+}
+
+func randomInsertViewSource(r *rand.Rand, rows int) *msgpb.InsertRequest {
+	valid := make([]bool, rows)
+	floatData := make([]float32, 0, rows*4)
+	binaryData := make([]byte, 0, rows*2)
+	sparseData := make([][]byte, 0, rows)
+	for row := 0; row < rows; row++ {
+		valid[row] = r.Intn(3) != 0
+		if valid[row] {
+			for i := 0; i < 4; i++ {
+				floatData = append(floatData, r.Float32())
+			}
+			binaryData = append(binaryData, byte(r.Uint32()), byte(r.Uint32()))
+			sparseData = append(sparseData, sparseTestRow(uint32(r.Intn(256))))
+		}
+	}
+	rowIDs := make([]int64, rows)
+	timestamps := make([]uint64, rows)
+	ints := make([]int64, rows)
+	strings := make([]string, rows)
+	vectorArrayRows := make([]*schemapb.VectorField, rows)
+	for row := 0; row < rows; row++ {
+		rowIDs[row] = int64(r.Uint64())
+		timestamps[row] = r.Uint64()
+		ints[row] = int64(r.Uint64())
+		strings[row] = rowsName([]int{row, r.Intn(1000)})
+		vectorArrayRows[row] = &schemapb.VectorField{Dim: 1, Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{byte(r.Uint32())}}}
+	}
+	return &msgpb.InsertRequest{
+		NumRows: uint64(rows), RowIDs: rowIDs, Timestamps: timestamps,
+		FieldsData: []*schemapb.FieldData{
+			scalarField(1, schemapb.DataType_Int64, &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ints}}),
+			scalarField(2, schemapb.DataType_VarChar, &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: strings}}),
+			{Type: schemapb.DataType_FloatVector, FieldId: 3, ValidData: valid, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 4, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: floatData}}}}},
+			{Type: schemapb.DataType_BinaryVector, FieldId: 4, ValidData: valid, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 16, Data: &schemapb.VectorField_BinaryVector{BinaryVector: binaryData}}}},
+			{Type: schemapb.DataType_SparseFloatVector, FieldId: 5, ValidData: valid, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Dim: 256, Contents: sparseData}}}}},
+			{Type: schemapb.DataType_ArrayOfVector, FieldId: 6, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 1, Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{Dim: 1, ElementType: schemapb.DataType_Int8Vector, Data: vectorArrayRows}}}}},
+		},
+	}
+}
+
+func scalarField(id int64, dataType schemapb.DataType, data any) *schemapb.FieldData {
+	scalar := &schemapb.ScalarField{}
+	switch value := data.(type) {
+	case *schemapb.ScalarField_BoolData:
+		scalar.Data = value
+	case *schemapb.ScalarField_IntData:
+		scalar.Data = value
+	case *schemapb.ScalarField_LongData:
+		scalar.Data = value
+	case *schemapb.ScalarField_FloatData:
+		scalar.Data = value
+	case *schemapb.ScalarField_DoubleData:
+		scalar.Data = value
+	case *schemapb.ScalarField_StringData:
+		scalar.Data = value
+	case *schemapb.ScalarField_BytesData:
+		scalar.Data = value
+	case *schemapb.ScalarField_ArrayData:
+		scalar.Data = value
+	case *schemapb.ScalarField_JsonData:
+		scalar.Data = value
+	case *schemapb.ScalarField_GeometryData:
+		scalar.Data = value
+	case *schemapb.ScalarField_TimestamptzData:
+		scalar.Data = value
+	case *schemapb.ScalarField_GeometryWktData:
+		scalar.Data = value
+	case *schemapb.ScalarField_MolData:
+		scalar.Data = value
+	case *schemapb.ScalarField_MolSmilesData:
+		scalar.Data = value
+	case *schemapb.ScalarField_DateData:
+		scalar.Data = value
+	case *schemapb.ScalarField_TimeData:
+		scalar.Data = value
+	default:
+		panic("unsupported scalar test data")
+	}
+	return &schemapb.FieldData{
+		Type: dataType, FieldName: rowsName([]int{int(id)}), FieldId: id,
+		Field: &schemapb.FieldData_Scalars{Scalars: scalar},
+	}
+}
+
+func sparseTestRow(index uint32) []byte {
+	row := make([]byte, 8)
+	binary.LittleEndian.PutUint32(row, index)
+	binary.LittleEndian.PutUint32(row[4:], math.Float32bits(float32(index)+0.5))
+	return row
+}
+
+func rowsName(rows []int) string {
+	if len(rows) == 0 {
+		return "empty"
+	}
+	result := "rows"
+	for _, row := range rows {
+		result += "_" + string(rune('a'+row%26))
+	}
+	return result
+}
