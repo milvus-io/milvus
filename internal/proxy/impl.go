@@ -157,9 +157,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			}
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), msgType == commonpb.MsgType_DropCollection)
-				for _, name := range aliasName {
-					deprecateShardCaches(name)
-				}
+				deprecateShardCaches(aliasName...)
 			}
 			// Invalidate alias cache for alias operations
 			if msgType == commonpb.MsgType_CreateAlias || msgType == commonpb.MsgType_AlterAlias || msgType == commonpb.MsgType_DropAlias {
@@ -172,9 +170,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			// All the request from query use collectionID
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
-				for _, name := range aliasName {
-					deprecateShardCaches(name)
-				}
+				deprecateShardCaches(aliasName...)
 			}
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_CreatePartition, commonpb.MsgType_DropPartition:
@@ -196,9 +192,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
-				for _, name := range aliasName {
-					deprecateShardCaches(name)
-				}
+				deprecateShardCaches(aliasName...)
 			}
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp())
@@ -208,9 +202,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			log.Warn("receive unexpected msgType of invalidate collection meta cache", zap.String("msgType", request.GetBase().GetMsgType().String()))
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
-				for _, name := range aliasName {
-					deprecateShardCaches(name)
-				}
+				deprecateShardCaches(aliasName...)
 			}
 
 			if collectionName != "" {
