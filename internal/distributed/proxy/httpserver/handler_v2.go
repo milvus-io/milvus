@@ -490,7 +490,7 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(merr.ErrNeedAuthenticate), nil, c.FullPath(), hookutil.ActionAuthorize)
 		return merr.ErrNeedAuthenticate
 	}
-	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	ctx, authErr := proxy.PrivilegeInterceptor(ctx, req)
 	if authErr != nil {
 		if !ignoreErr {
 			HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
@@ -498,6 +498,7 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(authErr), nil, c.FullPath(), hookutil.ActionAuthorize)
 		return authErr
 	}
+	c.Request = c.Request.WithContext(ctx)
 
 	return nil
 }
@@ -507,11 +508,28 @@ func checkAuthorizationHelper(ctx context.Context, c *gin.Context, req interface
 	if !ok || username.(string) == "" {
 		return merr.ErrNeedAuthenticate
 	}
-	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	ctx, authErr := proxy.PrivilegeInterceptor(ctx, req)
 	if authErr != nil {
 		return authErr
 	}
+	c.Request = c.Request.WithContext(ctx)
 	return nil
+}
+
+func prepareReadRequestSnapshot(ctx context.Context, c *gin.Context, req any, checkAuth bool) (context.Context, error) {
+	if checkAuth {
+		if err := checkAuthorizationV2(ctx, c, false, req); err != nil {
+			return ctx, err
+		}
+		ctx = c.Request.Context()
+	}
+
+	ctx, err, _ := proxy.EnsureReadRequestSnapshotForRequest(ctx, req)
+	if err != nil {
+		return ctx, err
+	}
+	c.Request = c.Request.WithContext(ctx)
+	return ctx, nil
 }
 
 func wrapperProxy(ctx context.Context, c *gin.Context, req any, checkAuth bool, ignoreErr bool, fullMethod string, handler func(reqCtx context.Context, req any) (any, error)) (interface{}, error) {
@@ -528,8 +546,13 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 		if err != nil {
 			return nil, err
 		}
+		ctx = ginCtx.Request.Context()
 	}
-	if checkLimit {
+	ctx, snapshotErr, isReadRequest := proxy.EnsureReadRequestSnapshotForRequest(ctx, req)
+	if isReadRequest {
+		ginCtx.Request = ginCtx.Request.WithContext(ctx)
+	}
+	if checkLimit && snapshotErr == nil {
 		_, err := CheckLimiter(ctx, req, pxy)
 		if err != nil {
 			log.Warn("high level restful api, fail to check limiter", zap.Error(err), zap.String("method", fullMethod))
@@ -1151,6 +1174,10 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		QueryParams:    []*commonpb.KeyValuePair{},
 	}
 	var err error
+	ctx, err = prepareReadRequestSnapshot(ctx, c, req, h.checkAuth)
+	if err != nil {
+		return nil, err
+	}
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
@@ -1172,7 +1199,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	if httpReq.Limit > 0 && !matchCountRule(httpReq.OutputFields) {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.LimitKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	}
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Query", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := wrapperProxyWithLimit(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/Query", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Query(reqCtx, req.(*milvuspb.QueryRequest))
 	})
 	if err == nil {
@@ -1210,6 +1237,16 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 
 func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionIDReq)
+	req := &milvuspb.QueryRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		OutputFields:   httpReq.OutputFields,
+		PartitionNames: httpReq.PartitionNames,
+	}
+	ctx, err := prepareReadRequestSnapshot(ctx, c, req, h.checkAuth)
+	if err != nil {
+		return nil, err
+	}
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
@@ -1223,13 +1260,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		})
 		return nil, err
 	}
-	req := &milvuspb.QueryRequest{
-		DbName:         dbName,
-		CollectionName: httpReq.CollectionName,
-		OutputFields:   httpReq.OutputFields,
-		PartitionNames: httpReq.PartitionNames,
-		Expr:           filter,
-	}
+	req.Expr = filter
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, query with consistency_level invalid", zap.Error(err))
@@ -1240,7 +1271,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		return nil, err
 	}
 	c.Set(ContextRequest, req)
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Query", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := wrapperProxyWithLimit(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/Query", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Query(reqCtx, req.(*milvuspb.QueryRequest))
 	})
 	if err == nil {
@@ -1603,6 +1634,10 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		})
 		return nil, err
 	}
+	ctx, err = prepareReadRequestSnapshot(ctx, c, req, h.checkAuth)
+	if err != nil {
+		return nil, err
+	}
 	c.Set(ContextRequest, req)
 
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
@@ -1708,7 +1743,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 
 	req.SearchParams = searchParams
 	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Search", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := wrapperProxyWithLimit(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/Search", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
 	})
 	if err == nil {
@@ -1792,6 +1827,10 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		})
 		return nil, err
 	}
+	ctx, err = prepareReadRequestSnapshot(ctx, c, req, h.checkAuth)
+	if err != nil {
+		return nil, err
+	}
 	c.Set(ContextRequest, req)
 
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
@@ -1861,7 +1900,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			return nil, err
 		}
 	}
-	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/HybridSearch", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := wrapperProxyWithLimit(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/HybridSearch", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.HybridSearch(reqCtx, req.(*milvuspb.HybridSearchRequest))
 	})
 	if err == nil {

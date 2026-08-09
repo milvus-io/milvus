@@ -397,15 +397,26 @@ func getNq(req *milvuspb.SearchRequest) (int64, error) {
 }
 
 func getPartitionIDs(ctx context.Context, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
+	partitionsMap, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
+	if err != nil {
+		return nil, err
+	}
+	return getPartitionIDsFromMap(partitionsMap, partitionNames)
+}
+
+func getPartitionIDsFromSnapshot(ctx context.Context, snapshot *readRequestSnapshot, partitionNames []string) ([]UniqueID, error) {
+	partitions, err := snapshot.Partitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return getPartitionIDsFromMap(partitions.name2ID, partitionNames)
+}
+
+func getPartitionIDsFromMap(partitionsMap map[string]UniqueID, partitionNames []string) ([]UniqueID, error) {
 	for _, tag := range partitionNames {
 		if err := validatePartitionTag(tag, false); err != nil {
 			return nil, err
 		}
-	}
-
-	partitionsMap, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
-	if err != nil {
-		return nil, err
 	}
 
 	useRegexp := Params.ProxyCfg.PartitionNameRegexp.GetAsBool()

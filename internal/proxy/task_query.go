@@ -58,6 +58,7 @@ type queryTask struct {
 	ctx            context.Context
 	result         *milvuspb.QueryResults
 	request        *milvuspb.QueryRequest
+	readSnapshot   *readRequestSnapshot
 	mixCoord       types.MixCoordClient
 	ids            *schemapb.IDs
 	collectionName string
@@ -350,6 +351,11 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 
 func (t *queryTask) CanSkipAllocTimestamp() bool {
 	var consistencyLevel commonpb.ConsistencyLevel
+	if t.readSnapshot != nil {
+		if _, _, _, pinned := t.readSnapshot.GetPinnedTimestamp(); pinned {
+			return true
+		}
+	}
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
 	if !useDefaultConsistency {
 		// legacy SDK & resultful behavior
@@ -358,6 +364,10 @@ func (t *queryTask) CanSkipAllocTimestamp() bool {
 		}
 		consistencyLevel = t.request.GetConsistencyLevel()
 	} else {
+		if t.readSnapshot != nil {
+			consistencyLevel = t.readSnapshot.Collection().Info().consistencyLevel
+			return consistencyLevel != commonpb.ConsistencyLevel_Strong
+		}
 		collID, err := globalMetaCache.GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
 		if err != nil { // err is not nil if collection not exists
 			log.Ctx(t.ctx).Warn("query task get collectionID failed, can't skip alloc timestamp",
@@ -380,43 +390,38 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_Retrieve
 	t.Base.SourceID = paramtable.GetNodeID()
 
-	collectionName := t.request.CollectionName
-	t.collectionName = collectionName
-
-	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName),
+	requestedCollectionName := t.request.CollectionName
+	var err error
+	log := log.Ctx(ctx).With(zap.String("collectionName", requestedCollectionName),
 		zap.Strings("partitionNames", t.request.GetPartitionNames()),
 		zap.String("requestType", t.getQueryLabel()))
 
-	if err := validateCollectionName(collectionName); err != nil {
+	if err := validateCollectionName(requestedCollectionName); err != nil {
 		log.Warn("Invalid collectionName.")
 		return err
 	}
 	log.Debug("Validate collectionName.")
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn("Failed to get collection id.", zap.String("collectionName", collectionName), zap.Error(err))
+	if t.readSnapshot == nil {
+		_, snapshot, err := ensureReadRequestSnapshot(ctx, t.request.GetDbName(), requestedCollectionName)
+		if err != nil {
+			return err
+		}
+		t.readSnapshot = snapshot
+	}
+	if err := t.readSnapshot.validateTarget(t.request.GetDbName(), requestedCollectionName); err != nil {
 		return err
 	}
-	t.CollectionID = collID
+	collectionSnapshot := t.readSnapshot.Collection()
+	collectionName := collectionSnapshot.CanonicalName()
+	t.collectionName = collectionName
+	t.CollectionID = collectionSnapshot.CollectionID()
+	colInfo := collectionSnapshot.Info()
+	schema := collectionSnapshot.Schema()
+	t.schema = schema
+	log.Debug("Use collection read snapshot", zap.Int64("collectionID", t.CollectionID))
 
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
-	if err != nil {
-		log.Warn("Failed to get collection info.", zap.String("collectionName", collectionName),
-			zap.Int64("collectionID", t.CollectionID), zap.Error(err))
-		// The name was already resolved above (GetCollectionID succeeded), so a
-		// not-found here means the collection was concurrently dropped between the
-		// two lookups — a TOCTOU race, not the caller's input error. Leave it as the
-		// default SystemError; do not stamp InputError.
-		return err
-	}
-	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))
-
-	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn("check partition key mode failed", zap.Int64("collectionID", t.CollectionID), zap.Error(err))
-		return err
-	}
+	t.partitionKeyMode = t.schema.IsPartitionKeyCollection()
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
 		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 	}
@@ -452,13 +457,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 	t.queryParams = queryParams
 	t.Limit = queryParams.limit + queryParams.offset
-
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
-	if err != nil {
-		log.Warn("get collection schema failed", zap.Error(err))
-		return err
-	}
-	t.schema = schema
 
 	if t.ids != nil {
 		pkField := ""
@@ -497,14 +495,14 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 			partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), t.request.CollectionName, partitionKeys)
+			hashedPartitionNames, err := assignPartitionKeysFromSnapshot(ctx, t.readSnapshot, partitionKeys)
 			if err != nil {
 				return err
 			}
 
 			partitionNames = append(partitionNames, hashedPartitionNames...)
 		}
-		t.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.request.CollectionName, partitionNames)
+		t.PartitionIDs, err = getPartitionIDsFromSnapshot(ctx, t.readSnapshot, partitionNames)
 		if err != nil {
 			return err
 		}
@@ -526,57 +524,57 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.Username = username
 	}
 
-	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
-	if err2 != nil {
-		log.Warn("Proxy::queryTask::PreExecute failed to GetCollectionInfo from cache",
-			zap.String("collectionName", collectionName), zap.Int64("collectionID", t.CollectionID),
-			zap.Error(err2))
-		return err2
-	}
-
-	guaranteeTs := t.request.GetGuaranteeTimestamp()
-	var consistencyLevel commonpb.ConsistencyLevel
-	useDefaultConsistency := t.request.GetUseDefaultConsistency()
-	t.ConsistencyLevel = t.request.GetConsistencyLevel()
-	if useDefaultConsistency {
-		consistencyLevel = collectionInfo.consistencyLevel
-		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
-	} else {
-		consistencyLevel = t.request.GetConsistencyLevel()
-		// Compatibility logic, parse guarantee timestamp
-		if consistencyLevel == 0 && guaranteeTs > 0 {
-			guaranteeTs = parseGuaranteeTs(guaranteeTs, t.BeginTs())
-		} else {
-			// parse from guarantee timestamp and user input consistency level
+	consistencyLevel, requestTS, guaranteeTs, timestampPinned := t.readSnapshot.GetPinnedTimestamp()
+	if !timestampPinned {
+		requestTS = t.BeginTs()
+		guaranteeTs = t.request.GetGuaranteeTimestamp()
+		useDefaultConsistency := t.request.GetUseDefaultConsistency()
+		if useDefaultConsistency {
+			consistencyLevel = colInfo.consistencyLevel
 			guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
+		} else {
+			consistencyLevel = t.request.GetConsistencyLevel()
+			// Compatibility logic, parse guarantee timestamp
+			if consistencyLevel == 0 && guaranteeTs > 0 {
+				guaranteeTs = parseGuaranteeTs(guaranteeTs, t.BeginTs())
+			} else {
+				// parse from guarantee timestamp and user input consistency level
+				guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
+			}
 		}
+
+		// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
+		// this make query view updated happens before new read request happens
+		// see also schema change design
+		if colInfo.updateTimestamp > guaranteeTs {
+			guaranteeTs = colInfo.updateTimestamp
+		}
+		if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
+			guaranteeTs = t.request.GetGuaranteeTimestamp()
+		}
+		t.readSnapshot.PinTimestamp(consistencyLevel, requestTS, guaranteeTs)
+		consistencyLevel, requestTS, guaranteeTs, _ = t.readSnapshot.GetPinnedTimestamp()
 	}
+	t.Base.Timestamp = requestTS
 
 	// update actual consistency level
 	accesslog.SetActualConsistencyLevel(ctx, consistencyLevel)
 
-	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
-	// this make query view updated happens before new read request happens
-	// see also schema change design
-	if collectionInfo.updateTimestamp > guaranteeTs {
-		guaranteeTs = collectionInfo.updateTimestamp
-	}
-
 	t.GuaranteeTimestamp = guaranteeTs
+	t.ConsistencyLevel = consistencyLevel
 	// need modify mvccTs and guaranteeTs for iterator specially
 	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
-		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
-		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
+		t.MvccTimestamp = guaranteeTs
 	}
 	t.IsIterator = queryParams.isIterator
 
-	if collectionInfo.collectionTTL != 0 {
+	if colInfo.collectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
-		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
+		expireTime := physicalTime.Add(-time.Duration(colInfo.collectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), colInfo.collectionTTL)
 		}
 	}
 	deadline, ok := t.TraceCtx().Deadline()
@@ -679,6 +677,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		log.Warn("failed to get primary field schema", zap.Error(err))
 		return err
 	}
+	t.result.CollectionName = t.request.GetCollectionName()
 	t.result.PrimaryFieldName = primaryFieldSchema.GetName()
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.getQueryLabel()).Observe(float64(tr.RecordSpan().Microseconds()) / 1000.0)
 

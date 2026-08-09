@@ -1979,10 +1979,11 @@ func versionalV2(category string, action string) string {
 	return "/v2/vectordb" + category + action
 }
 
-func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
-	h := NewHandlersV2(proxy)
+func initHTTPServerV2(proxyComponent types.ProxyComponent, needAuth bool) *gin.Engine {
+	h := NewHandlersV2(proxyComponent)
 	ginHandler := gin.Default()
 	appV2 := ginHandler.Group("/v2/vectordb", genAuthMiddleWare(needAuth))
+	proxy.InitGlobalCacheFromProxyForTest(proxyComponent)
 	h.RegisterRoutesToV2(appV2)
 
 	return ginHandler

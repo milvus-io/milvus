@@ -1106,7 +1106,10 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(info, nil).Maybe()
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
+	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+		collID: collectionID,
+		schema: info,
+	}, nil).Maybe()
 	globalMetaCache = cache
 
 	{
@@ -4164,7 +4167,10 @@ func TestSearchTask_Requery(t *testing.T) {
 	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil).Maybe()
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
+	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+		collID: collectionID,
+		schema: schema,
+	}, nil).Maybe()
 	cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
 	globalMetaCache = cache
 
@@ -4696,17 +4702,21 @@ func (s *MaterializedViewTestSuite) TearDownSuite() {
 
 func (s *MaterializedViewTestSuite) SetupTest() {
 	s.mockMetaCache = NewMockCache(s.T())
-	s.mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.colID, nil)
-	s.mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-		&collectionInfo{
-			collID:                s.colID,
-			partitionKeyIsolation: true,
-		}, nil)
 	globalMetaCache = s.mockMetaCache
 }
 
 func (s *MaterializedViewTestSuite) TearDownTest() {
 	globalMetaCache = nil
+}
+
+func (s *MaterializedViewTestSuite) expectCollectionSnapshot(schema *schemaInfo) {
+	s.mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(
+		&collectionInfo{
+			collID:                s.colID,
+			dbName:                s.dbName,
+			schema:                schema,
+			partitionKeyIsolation: true,
+		}, nil)
 }
 
 func (s *MaterializedViewTestSuite) getSearchTask() *searchTask {
@@ -4731,7 +4741,7 @@ func (s *MaterializedViewTestSuite) TestMvNotEnabledWithNoPartitionKey() {
 
 	schema := constructCollectionSchemaByDataType(s.colName, s.fieldName2Types, testInt64Field, false)
 	schemaInfo := newSchemaInfo(schema)
-	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+	s.expectCollectionSnapshot(schemaInfo)
 
 	err := task.PreExecute(s.ctx)
 	s.NoError(err)
@@ -4746,8 +4756,7 @@ func (s *MaterializedViewTestSuite) TestMvNotEnabledWithPartitionKey() {
 	task.request.Dsl = testInt64Field + " == 1"
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testInt64Field, false)
 	schemaInfo := newSchemaInfo(schema)
-	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
-	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
+	s.expectCollectionSnapshot(schemaInfo)
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
 
 	err := task.PreExecute(s.ctx)
@@ -4762,7 +4771,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledNoPartitionKey() {
 	task.enableMaterializedView = true
 	schema := constructCollectionSchemaByDataType(s.colName, s.fieldName2Types, testInt64Field, false)
 	schemaInfo := newSchemaInfo(schema)
-	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+	s.expectCollectionSnapshot(schemaInfo)
 
 	err := task.PreExecute(s.ctx)
 	s.NoError(err)
@@ -4777,8 +4786,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnInt64() {
 	task.request.Dsl = testInt64Field + " == 1"
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testInt64Field, false)
 	schemaInfo := newSchemaInfo(schema)
-	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
-	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
+	s.expectCollectionSnapshot(schemaInfo)
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
 
 	err := task.PreExecute(s.ctx)
@@ -4794,8 +4802,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
 	task.request.Dsl = testVarCharField + " == \"a\""
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 	schemaInfo := newSchemaInfo(schema)
-	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
-	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
+	s.expectCollectionSnapshot(schemaInfo)
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
 
 	err := task.PreExecute(s.ctx)
@@ -4814,8 +4821,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		task.IsAdvanced = isAdvanced
 		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 		schemaInfo := newSchemaInfo(schema)
-		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
-		s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
+		s.expectCollectionSnapshot(schemaInfo)
 		s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
 		err := task.PreExecute(s.ctx)
 		s.NoError(err)
@@ -4834,7 +4840,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		task.request.Dsl = testVarCharField + " in [\"a\", \"b\", \"c\"]"
 		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 		schemaInfo := newSchemaInfo(schema)
-		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+		s.expectCollectionSnapshot(schemaInfo)
 		s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support IN")
 	}
 }
@@ -4848,7 +4854,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		task.request.Dsl = testVarCharField + " == \"a\" || " + testVarCharField + "  == \"b\" || " + testVarCharField + " == \"c\""
 		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 		schemaInfo := newSchemaInfo(schema)
-		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+		s.expectCollectionSnapshot(schemaInfo)
 		s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support IN")
 	}
 }
