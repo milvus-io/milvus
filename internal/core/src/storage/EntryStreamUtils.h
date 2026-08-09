@@ -309,7 +309,7 @@ class TransientMemoryBudget {
     };
 
     struct PendingResolution {
-        std::vector<std::shared_ptr<PendingAdmission>> admitted;
+        PendingQueue admitted;
     };
 
     TransientMemoryBudget() = default;
@@ -370,11 +370,11 @@ class TransientMemoryBudget {
                 if (!CanAcquireCapacityLocked(pending->bytes)) {
                     break;
                 }
-                auto admitted = std::move(pending);
-                queue.pop_front();
+                auto admitted = pending;
+                resolution.admitted.splice(
+                    resolution.admitted.end(), queue, queue.begin());
                 admitted->queue = nullptr;
                 MarkAdmittedLocked(admitted);
-                resolution.admitted.push_back(std::move(admitted));
             }
         };
         admit_queue(high_pending_);

@@ -162,6 +162,23 @@ func TestRegisterStorageV2AsyncLoadReadWindowConfigCatchesUp(t *testing.T) {
 	assert.EqualValues(t, 1048576, GetStorageV2AsyncLoadReadWindowSizeBytes())
 }
 
+func TestRegisterStorageV2AsyncLoadReadWindowConfigHandlesDelete(t *testing.T) {
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
+	previous := GetStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		UpdateStorageV2AsyncLoadReadWindowSizeBytes(previous)
+	})
+
+	assert.NoError(t, pt.Save(item.Key, "0"))
+	registerStorageV2AsyncLoadReadWindowConfig(pt)
+	assert.EqualValues(t, 0, GetStorageV2AsyncLoadReadWindowSizeBytes())
+
+	assert.NoError(t, pt.Remove(item.Key))
+	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, GetStorageV2AsyncLoadReadWindowSizeBytes())
+}
+
 func TestRegisterStorageV2AsyncLoadEnabledWatcherCatchesUp(t *testing.T) {
 	pt := &paramtable.ComponentParam{}
 	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))

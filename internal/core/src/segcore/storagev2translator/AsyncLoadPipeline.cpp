@@ -219,6 +219,15 @@ LoadWindowAsync(int64_t segment_id,
 
     auto batches_result = co_await chunk_reader->get_chunks_async(
         window.chunk_indices, /*parallelism=*/1);
+    CheckCancellationToken(
+        cancellation_token, segment_id, "AsyncLoadPipeline::read");
+    if (!batches_result.ok()) {
+        throw milvus_storage::ToSegcoreError(batches_result.status());
+    }
+    if (batches_result.ValueOrDie().size() != window.chunk_indices.size()) {
+        throw milvus_storage::ToSegcoreError(arrow::Status::Invalid(
+            "async chunk reader returned an unexpected batch count"));
+    }
     auto finalization_executor = finalization_executor_provider
                                      ? finalization_executor_provider()
                                      : folly::Executor::KeepAlive<>{};
