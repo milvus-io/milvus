@@ -26,7 +26,75 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+// A group-by field name used to resolve to a field id with no look at the
+// type: grouping by a vector field was accepted here and silently degenerated
+// or failed deep in the query. The supported list mirrors the switch in
+// SearchGroupByOperator.cpp.
+func TestParseGroupByFieldChecksFieldType(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "coll",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			{FieldID: 102, Name: "bvec", DataType: schemapb.DataType_BinaryVector},
+			{FieldID: 103, Name: "price", DataType: schemapb.DataType_Double},
+			{FieldID: 104, Name: "ratio", DataType: schemapb.DataType_Float},
+			{FieldID: 105, Name: "tag", DataType: schemapb.DataType_VarChar},
+			{FieldID: 106, Name: "flag", DataType: schemapb.DataType_Bool},
+			{FieldID: 107, Name: "meta", DataType: schemapb.DataType_JSON},
+			{FieldID: 108, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+
+	for _, name := range []string{"pk", "tag", "flag", "meta", `meta["k"]`} {
+		_, _, err := parseGroupByField(name, schema)
+		assert.NoError(t, err, name)
+	}
+	_, jsonPath, err := parseGroupByField("free_key", schema)
+	assert.NoError(t, err)
+	assert.Equal(t, "free_key", jsonPath)
+
+	schema.Fields = append(schema.Fields,
+		&schemapb.FieldSchema{FieldID: 109, Name: "legacy_str", DataType: schemapb.DataType_String})
+
+	for _, name := range []string{"vec", "price", "ratio", `vec["x"]`, "legacy_str"} {
+		_, _, err := parseGroupByField(name, schema)
+		assert.Error(t, err, name)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid, name)
+		assert.Contains(t, err.Error(), "unsupported data type for group by", name)
+	}
+	_, _, err = parseGroupByField("bvec", schema)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not support search_group_by operation based on binary vector column")
+}
+
+// The plan carries a single json_path/json_type and the executor asserts at
+// most one JSON group-by field; two bare JSON fields used to pass the proxy
+// (neither produces a jsonPath) and fail only deep in execution.
+func TestParseGroupByInfoRejectsMultipleJSONFields(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "meta1", DataType: schemapb.DataType_JSON},
+			{FieldID: 102, Name: "meta2", DataType: schemapb.DataType_JSON},
+			{FieldID: 103, Name: "tag", DataType: schemapb.DataType_VarChar},
+		},
+	}
+
+	_, err := parseGroupByInfo([]*commonpb.KeyValuePair{
+		{Key: GroupByFieldsKey, Value: "meta1,meta2"},
+	}, schema)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "at most one JSON field")
+
+	info, err := parseGroupByInfo([]*commonpb.KeyValuePair{
+		{Key: GroupByFieldsKey, Value: "meta1,tag"},
+	}, schema)
+	assert.NoError(t, err)
+	assert.Equal(t, []int64{101, 103}, info.groupByFieldIds)
+}
 
 func TestRankParamsCarryJSONGroupAttributes(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
