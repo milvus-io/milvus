@@ -776,6 +776,48 @@ TEST_F(AsyncLoadPipelineTest, CancelsPendingWindowsAfterFirstReadFailure) {
     EXPECT_EQ(reader->AsyncCalls(), 1);
 }
 
+TEST_F(AsyncLoadPipelineTest, FailsReadBeforeRequestingFinalizationExecutor) {
+    budget_.SetCapacityBytes(1);
+    folly::ManualExecutor io_executor;
+    auto reader = std::make_shared<FakeChunkReader>(nullptr);
+    reader->SetStatus(arrow::Status::IOError("read failed"));
+    std::vector<CellSpec> cells{{.cid = 0,
+                                 .file_idx = 0,
+                                 .local_rg_offset = 0,
+                                 .rg_count = 1,
+                                 .memory_size = 1}};
+    int provider_calls = 0;
+    auto options = Options();
+    options.finalization_executor_provider = [&]() {
+        ++provider_calls;
+        return folly::getKeepAliveToken(&io_executor);
+    };
+
+    auto load = Start(LoadCellsAsync(
+        nullptr, std::move(cells), reader, Finalizer(), std::move(options)));
+    auto completed_before_io = load.isReady();
+    auto next_budget =
+        budget_.AcquireAsync(1, storage::TransientBudgetPriority::High);
+    auto released_budget_before_io = next_budget.isReady();
+
+    if (!completed_before_io) {
+        io_executor.drain();
+        executor_.drain();
+    }
+    EXPECT_EQ(provider_calls, 0);
+    EXPECT_TRUE(completed_before_io);
+    EXPECT_TRUE(released_budget_before_io);
+    try {
+        std::move(load).get();
+        FAIL() << "expected read failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::StorageError);
+    }
+    ASSERT_TRUE(next_budget.isReady());
+    auto next_lease = folly::coro::blockingWait(std::move(next_budget));
+    next_lease.Release();
+}
+
 TEST_F(AsyncLoadPipelineTest, CapturesExecutorKeepAliveBeforeTaskStarts) {
     KeepAliveRecordingExecutor executor;
     auto reader = std::make_shared<FakeChunkReader>(nullptr);

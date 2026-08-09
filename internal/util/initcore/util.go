@@ -301,7 +301,7 @@ func registerStorageV2AsyncLoadReadWindowConfig(pt *paramtable.ComponentParam) {
 	item := &pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
 	registerConfigWatcherWithCatchUp(func(syncConfig func()) {
 		pt.Watch(item.Key, config.NewHandler(item.Key+".core", func(evt *config.Event) {
-			if !evt.HasUpdated || evt.EventType != config.UpdateType {
+			if !evt.HasUpdated {
 				return
 			}
 			syncConfig()
