@@ -30,6 +30,77 @@ VALID_HEADER = """# MEP: Example
 
 ## Summary
 """
+PROW_APPROVERS_UNSET = object()
+TEST_APPROVAL_COMMAND = re.compile(
+    r"^/([^\s]+)[\t ]*([^\n\r]*)",
+    re.MULTILINE,
+)
+
+
+def prow_notification(*approvers, comment_id=700):
+    rendered = ", ".join(
+        f'*<a href="https://github.com/milvus-io/milvus/pull/1#" '
+        f'title="Approved">{login}</a>*'
+        for login in approvers
+    )
+    return {
+        "id": comment_id,
+        "user": {
+            "login": checker.PROW_BOT_LOGIN,
+            "id": checker.PROW_BOT_USER_ID,
+        },
+        "body": (
+            f"{checker.PROW_APPROVAL_NOTIFICATION_PREFIX} This PR is **APPROVED**\n\n"
+            f"This pull-request has been approved by: {rendered}\n\n"
+            "The full list of commands accepted by this bot follows."
+        ),
+        "created_at": "2026-08-08T00:00:00Z",
+        "updated_at": "2026-08-08T00:00:00Z",
+    }
+
+
+def approved_label_event(
+    actor_login,
+    *,
+    actor_id=123,
+    actor_type="User",
+    event_id=900,
+    event="labeled",
+):
+    return {
+        "id": event_id,
+        "event": event,
+        "label": {"name": checker.APPROVED_LABEL},
+        "actor": {
+            "login": actor_login,
+            "id": actor_id,
+            "type": actor_type,
+        },
+    }
+
+
+def infer_prow_approvers(comments):
+    states = {}
+    for comment in comments:
+        login = comment["user"]["login"]
+        for match in TEST_APPROVAL_COMMAND.finditer(comment.get("body") or ""):
+            command = match.group(1).casefold()
+            arguments = match.group(2).strip().casefold()
+            if command == "approve":
+                states[login.casefold()] = "cancel" not in arguments
+            elif command == "remove-approve":
+                states[login.casefold()] = False
+    return tuple(sorted(login for login, approved in states.items() if approved))
+
+
+def parsed_prow_approvers(comments, maintainers, author):
+    return checker.extract_prow_approvers(
+        comments,
+        maintainers,
+        author,
+        "milvus-io/milvus",
+        1,
+    )
 
 
 class GovernanceConfigTest(unittest.TestCase):
@@ -108,7 +179,7 @@ class GovernanceConfigTest(unittest.TestCase):
                 self.assertTrue(checker.is_design_doc_path(path))
                 self.assertIsNotNone(mergify_pattern.fullmatch(path))
 
-    def test_feature_policy_does_not_trust_automated_title_text(self):
+    def test_feature_policy_preserves_the_existing_automated_exception(self):
         mergify = (REPOSITORY_ROOT / ".github/mergify.yml").read_text(encoding="utf-8")
         protection = mergify.split("  - name: Docs / feature Design Doc policy", 1)[
             1
@@ -120,9 +191,9 @@ class GovernanceConfigTest(unittest.TestCase):
             "  - name: Dismiss block label if automated create PR", 1
         )[1].split("  - name: Blocking PR if feat PR missing design doc", 1)[0]
 
-        self.assertNotIn("automated", protection.casefold())
-        self.assertNotIn("automated", label_rule.casefold())
-        self.assertNotIn("do-not-merge/missing-design-doc", automated_rule)
+        self.assertIn(r"-title~=\[automated\]", protection)
+        self.assertIn(r"-title~=\[automated\]", label_rule)
+        self.assertIn("do-not-merge/missing-design-doc", automated_rule)
 
     def test_review_events_relay_to_the_trusted_policy_workflow(self):
         signal_workflow = (
@@ -156,6 +227,35 @@ class GovernanceConfigTest(unittest.TestCase):
             "pullResponse.data.head.ref !== workflowRun.head_branch", trusted_workflow
         )
         self.assertNotIn("workflowRun.head_repository", trusted_workflow)
+
+    def test_trusted_workflow_bounds_failures_and_uses_least_privilege(self):
+        trusted_workflow = (
+            REPOSITORY_ROOT / ".github/workflows/design-doc-policy.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("    timeout-minutes: 20\n", trusted_workflow)
+        self.assertGreaterEqual(trusted_workflow.count("        timeout-minutes:"), 5)
+        self.assertIn("      pull-requests: read\n", trusted_workflow)
+        self.assertNotIn("      pull-requests: write\n", trusted_workflow)
+        self.assertIn('core.setOutput("head_sha", headSha);', trusted_workflow)
+        self.assertIn('core.setOutput("external_id", externalId);', trusted_workflow)
+        self.assertIn(
+            "${{ always() && steps.validate-policy.outcome != 'success' &&\n"
+            "          steps.start-policy-check.outputs.head_sha != '' }}",
+            trusted_workflow,
+        )
+        self.assertNotIn(
+            "steps.start-policy-check.outcome == 'success'", trusted_workflow
+        )
+        self.assertIn(
+            "POLICY_HEAD_SHA: ${{ steps.start-policy-check.outputs.head_sha }}",
+            trusted_workflow,
+        )
+        self.assertIn(
+            "POLICY_EXTERNAL_ID: "
+            "${{ steps.start-policy-check.outputs.external_id }}",
+            trusted_workflow,
+        )
 
 
 class GovernanceValidationTest(unittest.TestCase):
@@ -229,6 +329,21 @@ class GovernanceValidationTest(unittest.TestCase):
         issues = checker.validate_approver_governance(self.owners_aliases, drifted)
         self.assertTrue(any("Prow approval labels" in issue for issue in issues))
 
+    def test_rejects_merge_protection_reporting_drift(self):
+        for original, replacement in (
+            ("  reporting_method: check-runs", "  reporting_method: deployments"),
+            ("  post_comment: false", "  post_comment: true"),
+            ("merge_protections_settings:", "disabled_merge_protections_settings:"),
+        ):
+            with self.subTest(original=original):
+                drifted = self.mergify.replace(original, replacement, 1)
+                issues = checker.validate_approver_governance(
+                    self.owners_aliases, drifted
+                )
+                self.assertTrue(
+                    any("required check-run configuration" in issue for issue in issues)
+                )
+
     def test_rejects_general_rule_drift(self):
         cases = (
             "      - base=master",
@@ -291,6 +406,52 @@ class GovernanceValidationTest(unittest.TestCase):
                 )
                 self.assertTrue(any(expected in issue for issue in issues))
 
+    def test_rejects_tested_knowhere_automation_drift(self):
+        for line in (
+            f"      - author={checker.AUTOMATED_KNOWHERE_AUTHOR}",
+            f"      - 'title={checker.AUTOMATED_KNOWHERE_TITLE}'",
+            f"      - modified-files={checker.AUTOMATED_KNOWHERE_FILE}",
+            "      - '#files=1'",
+            "      - label=ci-passed",
+            "          - lgtm",
+            "          - approved",
+        ):
+            with self.subTest(line=line):
+                drifted = self.comment_out_rule_line(
+                    checker.AUTOMATED_KNOWHERE_RULE_NAME,
+                    line,
+                )
+                issues = checker.validate_approver_governance(
+                    self.owners_aliases, drifted
+                )
+                self.assertTrue(
+                    any(
+                        "Knowhere-update approval automation" in issue
+                        for issue in issues
+                    )
+                )
+
+    def test_rejects_automated_feature_compatibility_drift(self):
+        cases = (
+            (
+                checker.AUTOMATED_FEATURE_CLEANUP_RULE_NAME,
+                "          - do-not-merge/missing-design-doc",
+                "automated-PR cleanup",
+            ),
+            (
+                checker.FEATURE_MISSING_DOC_RULE_NAME,
+                r"      - -title~=\[automated\]",
+                "automated-title exception",
+            ),
+        )
+        for rule_name, line, expected in cases:
+            with self.subTest(rule=rule_name):
+                drifted = self.comment_out_rule_line(rule_name, line)
+                issues = checker.validate_approver_governance(
+                    self.owners_aliases, drifted
+                )
+                self.assertTrue(any(expected in issue for issue in issues))
+
     def test_merge_protections_section_cannot_be_disabled(self):
         drifted = self.mergify.replace(
             "\nmerge_protections:\n",
@@ -328,7 +489,8 @@ class GovernanceValidationTest(unittest.TestCase):
                 "      - base=master\n"
                 "      - or:\n"
                 "          - 'title~=^feat:'\n"
-                "          - label=kind/feature",
+                "          - label=kind/feature\n"
+                "      - -title~=\\[automated\\]",
                 "Feature policy trigger",
             ),
         )
@@ -454,155 +616,7 @@ class GovernanceValidationTest(unittest.TestCase):
         )
 
 
-class ApprovalTimelineTest(unittest.TestCase):
-    def comment(self, login, body, created_at, comment_id=1):
-        return {
-            "id": comment_id,
-            "user": {"login": login},
-            "body": body,
-            "created_at": created_at,
-        }
-
-    def review(self, login, state, body, submitted_at, review_id=1):
-        return {
-            "id": review_id,
-            "user": {"login": login},
-            "state": state,
-            "body": body,
-            "submitted_at": submitted_at,
-        }
-
-    def test_replays_slash_commands_in_order_and_filters_actors(self):
-        comments = [
-            self.comment(
-                "Bob",
-                "/APPROVE no-issue\n/approve cancel\n/approve anything",
-                "2026-08-08T00:00:00Z",
-                1,
-            ),
-            self.comment(
-                "Carol",
-                "/approve\n/remove-approve",
-                "2026-08-08T00:00:01Z",
-                2,
-            ),
-            self.comment(
-                "Alice",
-                "/approve",
-                "2026-08-08T00:00:02Z",
-                3,
-            ),
-            self.comment(
-                "outsider",
-                "/approve",
-                "2026-08-08T00:00:03Z",
-                4,
-            ),
-            self.comment(
-                "Carol",
-                " /approve\n/lgtm",
-                "2026-08-08T00:00:04Z",
-                5,
-            ),
-        ]
-        self.assertEqual(
-            ("Bob",),
-            checker.reconstruct_active_approvers(
-                comments,
-                [],
-                [],
-                ["Alice", "Bob", "Carol"],
-                "alice",
-            ),
-        )
-
-    def test_repeated_approval_by_one_person_counts_once(self):
-        comments = [
-            self.comment("Bob", "/approve", "2026-08-08T00:00:00Z", 1),
-            self.comment("Bob", "/approve", "2026-08-08T00:00:01Z", 2),
-        ]
-        self.assertEqual(
-            ("Bob",),
-            checker.reconstruct_active_approvers(
-                comments,
-                [],
-                [],
-                ["Bob", "Carol"],
-                "author",
-            ),
-        )
-
-    def test_review_states_are_compatible_and_body_commands_override(self):
-        reviews = [
-            self.review("Bob", "APPROVED", "", "2026-08-08T00:00:00Z", 1),
-            self.review(
-                "Bob",
-                "CHANGES_REQUESTED",
-                "/approve",
-                "2026-08-08T00:00:01Z",
-                2,
-            ),
-            self.review(
-                "Carol",
-                "APPROVED",
-                "/approve cancel",
-                "2026-08-08T00:00:02Z",
-                3,
-            ),
-            self.review("Carol", "COMMENTED", "", "2026-08-08T00:00:03Z", 4),
-        ]
-        self.assertEqual(
-            ("Bob",),
-            checker.reconstruct_active_approvers(
-                [], [], reviews, ["Bob", "Carol"], "author"
-            ),
-        )
-
-    def test_same_timestamp_uses_review_comment_issue_comment_review_order(self):
-        timestamp = "2026-08-08T00:00:00Z"
-        review_comments = [self.comment("Bob", "/approve", timestamp)]
-        issue_comments = [self.comment("Bob", "/remove-approve", timestamp)]
-        reviews = [self.review("Bob", "APPROVED", "", timestamp)]
-        self.assertEqual(
-            ("Bob",),
-            checker.reconstruct_active_approvers(
-                issue_comments,
-                review_comments,
-                reviews,
-                ["Bob"],
-                "author",
-            ),
-        )
-
-    def test_rejects_malformed_timeline_entries(self):
-        with self.assertRaisesRegex(RuntimeError, "without a timestamp"):
-            checker.reconstruct_active_approvers(
-                [{"user": {"login": "Bob"}, "body": "/approve"}],
-                [],
-                [],
-                ["Bob"],
-                "author",
-            )
-
-    def test_ignores_unsubmitted_pending_reviews(self):
-        self.assertEqual(
-            (),
-            checker.reconstruct_active_approvers(
-                [],
-                [],
-                [
-                    {
-                        "user": {"login": "Bob"},
-                        "state": "PENDING",
-                        "body": "/approve",
-                        "submitted_at": None,
-                    }
-                ],
-                ["Bob"],
-                "author",
-            ),
-        )
-
+class ApprovalRequirementTest(unittest.TestCase):
     def test_formal_design_doc_change_includes_delete_and_rename_out(self):
         path = "docs/design-docs/design_docs/example.md"
         self.assertTrue(
@@ -645,11 +659,11 @@ class ApprovalTimelineTest(unittest.TestCase):
         )
         approval = checker.evaluate_approval_requirement(
             client,
+            "milvus-io/milvus",
+            1,
             state,
             [],
-            [self.comment("Bob", "/approve", "2026-08-08T00:00:00Z")],
-            [],
-            [],
+            [prow_notification("Bob")],
         )
         self.assertEqual(("Bob",), approval.approvers)
         self.assertEqual(1, approval.required)
@@ -658,9 +672,9 @@ class ApprovalTimelineTest(unittest.TestCase):
             client.requests,
         )
 
-    def test_governance_and_design_docs_require_two_approvers(self):
+    def test_only_design_docs_require_two_approvers(self):
         owners = "aliases:\n  maintainers:\n    - Bob\n    - Carol\n"
-        for files, formal, governance in (
+        for files, formal, required in (
             (
                 [
                     {
@@ -669,12 +683,12 @@ class ApprovalTimelineTest(unittest.TestCase):
                     }
                 ],
                 True,
-                False,
+                2,
             ),
             (
                 [{"filename": ".github/mergify.yml", "status": "modified"}],
                 False,
-                True,
+                1,
             ),
         ):
             with self.subTest(files=files):
@@ -690,11 +704,172 @@ class ApprovalTimelineTest(unittest.TestCase):
                     labels=(),
                 )
                 approval = checker.evaluate_approval_requirement(
-                    client, state, files, [], [], []
+                    client,
+                    "milvus-io/milvus",
+                    1,
+                    state,
+                    files,
+                    [prow_notification()],
                 )
-                self.assertEqual(2, approval.required)
+                self.assertEqual(required, approval.required)
                 self.assertEqual(formal, approval.formal_design_doc)
-                self.assertEqual(governance, approval.governance_enforcement)
+
+
+class ProwApprovalSnapshotTest(unittest.TestCase):
+    def test_reads_latest_prow_snapshot_and_filters_author_and_outsiders(self):
+        comments = [
+            prow_notification("Alice", "Bob", "outsider", comment_id=700),
+            prow_notification("Alice", "Carol", comment_id=701),
+        ]
+        self.assertEqual(
+            ("Carol",),
+            parsed_prow_approvers(
+                comments,
+                ["Alice", "Bob", "Carol"],
+                "alice",
+            ),
+        )
+
+    def test_missing_snapshot_means_no_explicit_prow_approval(self):
+        self.assertEqual(
+            (),
+            parsed_prow_approvers([], ["Bob"], "author"),
+        )
+
+    def test_human_cannot_forge_the_prow_snapshot(self):
+        forged = prow_notification("Bob")
+        forged["user"] = {"login": "contributor", "id": 123}
+        self.assertEqual(
+            (),
+            parsed_prow_approvers([forged], ["Bob"], "author"),
+        )
+
+    def test_rejects_partial_prow_bot_identity_matches(self):
+        notification = prow_notification("Bob")
+        notification["user"]["id"] = 123
+        with self.assertRaisesRegex(RuntimeError, "identity changed"):
+            parsed_prow_approvers([notification], ["Bob"], "author")
+
+    def test_accepts_the_current_prow_review_rendering(self):
+        review_snapshot = prow_notification("Bob")
+        review_snapshot["body"] = review_snapshot["body"].replace(
+            'title="Approved"', 'title="LGTM"'
+        )
+        self.assertEqual(
+            ("Bob",),
+            parsed_prow_approvers(
+                [review_snapshot],
+                ["Bob"],
+                "author",
+            ),
+        )
+
+    def test_raw_comment_edits_do_not_get_ahead_of_prow(self):
+        edited_into_approval = {
+            "id": 800,
+            "user": {"login": "Bob"},
+            "body": "/approve",
+            "created_at": "2026-08-08T00:00:00Z",
+            "updated_at": "2026-08-08T00:00:01Z",
+        }
+        self.assertEqual(
+            (),
+            parsed_prow_approvers(
+                [prow_notification(), edited_into_approval],
+                ["Bob"],
+                "author",
+            ),
+        )
+
+        edited_or_deleted_after_prow_approval = {
+            **edited_into_approval,
+            "body": "approval text removed",
+        }
+        self.assertEqual(
+            ("Bob",),
+            parsed_prow_approvers(
+                [
+                    prow_notification("Bob"),
+                    edited_or_deleted_after_prow_approval,
+                ],
+                ["Bob"],
+                "author",
+            ),
+        )
+
+    def test_rejects_unknown_prow_snapshot_format(self):
+        malformed = prow_notification("Bob")
+        malformed["body"] = malformed["body"].replace(
+            'title="Approved"', 'title="Unknown"'
+        )
+        with self.assertRaisesRegex(RuntimeError, "unknown format"):
+            parsed_prow_approvers([malformed], ["Bob"], "author")
+
+    def test_rejects_cross_pr_links_and_duplicate_approvers(self):
+        cross_pr = prow_notification("Bob")
+        cross_pr["body"] = cross_pr["body"].replace("/pull/1#", "/pull/2#")
+        with self.assertRaisesRegex(RuntimeError, "another pull request"):
+            parsed_prow_approvers([cross_pr], ["Bob"], "author")
+
+        duplicate = prow_notification("Bob", "Bob")
+        with self.assertRaisesRegex(RuntimeError, "repeats an approver"):
+            parsed_prow_approvers([duplicate], ["Bob"], "author")
+
+
+class ManualApprovalCompatibilityTest(unittest.TestCase):
+    def test_accepts_non_author_non_prow_label_actors(self):
+        for event in (
+            approved_label_event("reviewer"),
+            approved_label_event("mergify[bot]", actor_type="Bot"),
+            approved_label_event("migrated-reviewer", actor_type="Mannequin"),
+        ):
+            with self.subTest(event=event):
+                self.assertEqual(
+                    event["actor"]["login"],
+                    checker.extract_non_author_manual_approval_actor(
+                        [event],
+                        "author",
+                    ),
+                )
+
+    def test_rejects_the_author_and_prow_label_actor(self):
+        for event in (
+            approved_label_event("author"),
+            approved_label_event(
+                checker.PROW_BOT_LOGIN,
+                actor_id=checker.PROW_BOT_USER_ID,
+            ),
+        ):
+            with self.subTest(event=event):
+                self.assertIsNone(
+                    checker.extract_non_author_manual_approval_actor(
+                        [event],
+                        "author",
+                    )
+                )
+
+    def test_latest_approved_label_event_controls_the_actor(self):
+        events = [
+            approved_label_event("reviewer", event_id=900),
+            approved_label_event(
+                "reviewer",
+                event_id=901,
+                event="unlabeled",
+            ),
+            approved_label_event("author", event_id=902),
+        ]
+        self.assertIsNone(
+            checker.extract_non_author_manual_approval_actor(events, "author")
+        )
+
+    def test_rejects_missing_or_inconsistent_label_history(self):
+        with self.assertRaisesRegex(RuntimeError, "no corresponding issue event"):
+            checker.extract_non_author_manual_approval_actor([], "author")
+        with self.assertRaisesRegex(RuntimeError, "state conflicts"):
+            checker.extract_non_author_manual_approval_actor(
+                [approved_label_event("reviewer", event="unlabeled")],
+                "author",
+            )
 
 
 class ApprovalLabelTest(unittest.TestCase):
@@ -713,12 +888,12 @@ class ApprovalLabelTest(unittest.TestCase):
         def remove_pull_request_label(self, repository, pull_number, label):
             self.removed.append((repository, pull_number, label))
 
-    def approval(self, approvers, formal=True, required=2):
+    def approval(self, approvers, formal=True, required=2, automated=False):
         return checker.ApprovalRequirement(
             approvers=tuple(approvers),
             required=required,
             formal_design_doc=formal,
-            governance_enforcement=False,
+            automated_knowhere_update=automated,
         )
 
     def test_adds_dedicated_label_after_two_approvers(self):
@@ -876,42 +1051,34 @@ class GitHubClientApprovalApiTest(unittest.TestCase):
         self.assertEqual("contributor/milvus", state.head_repository)
         self.assertEqual(("approved",), state.labels)
 
-    def test_review_api_methods_paginate(self):
-        cases = (
-            (
-                "list_pull_request_review_comments",
-                "/repos/milvus-io/milvus/pulls/8/comments",
-            ),
-            (
-                "list_pull_request_reviews",
-                "/repos/milvus-io/milvus/pulls/8/reviews",
-            ),
-        )
-        for method_name, endpoint in cases:
-            with self.subTest(method=method_name):
-                client = checker.GitHubClient("token", "https://api.github.test")
-                paths = []
-
-                def request(method, path, payload=None, allow_not_found=False):
-                    paths.append(path)
-                    return [{}] * (100 if path.endswith("page=1") else 1)
-
-                client.request = request
-                items = getattr(client, method_name)("milvus-io/milvus", 8)
-                self.assertEqual(101, len(items))
-                self.assertEqual(
-                    [
-                        f"{endpoint}?per_page=100&page=1",
-                        f"{endpoint}?per_page=100&page=2",
-                    ],
-                    paths,
-                )
-
-    def test_review_api_rejects_invalid_page(self):
+    def test_issue_event_api_paginates(self):
         client = checker.GitHubClient("token", "https://api.github.test")
-        client.request = lambda *args, **kwargs: {"not": "a list"}
-        with self.assertRaisesRegex(RuntimeError, "invalid pull-request review list"):
-            client.list_pull_request_reviews("milvus-io/milvus", 8)
+        calls = []
+
+        def request(method, path, payload=None, allow_not_found=False):
+            calls.append((method, path))
+            if path.endswith("page=1"):
+                return [{"id": index} for index in range(100)]
+            if path.endswith("page=2"):
+                return [{"id": 100}]
+            raise AssertionError(f"Unexpected request: {method} {path}")
+
+        client.request = request
+        events = client.list_issue_events("milvus-io/milvus", 8)
+        self.assertEqual(101, len(events))
+        self.assertEqual(
+            [
+                (
+                    "GET",
+                    "/repos/milvus-io/milvus/issues/8/events?per_page=100&page=1",
+                ),
+                (
+                    "GET",
+                    "/repos/milvus-io/milvus/issues/8/events?per_page=100&page=2",
+                ),
+            ],
+            calls,
+        )
 
     def test_label_creation_tolerates_concurrent_creator(self):
         client = checker.GitHubClient("token", "https://api.github.test")
@@ -1404,7 +1571,7 @@ inline docs/design-docs/design_docs/20260728-inline.md reference
         )
         client.file_exists.assert_not_called()
 
-    def test_automated_title_text_does_not_bypass_feature_requirement(self):
+    def test_automated_title_text_preserves_feature_requirement_exception(self):
         client = mock.Mock()
         issue = checker.validate_feature_design_doc_requirement(
             client,
@@ -1417,7 +1584,7 @@ inline docs/design-docs/design_docs/20260728-inline.md reference
             "",
             [],
         )
-        self.assertIn("must add or update", issue)
+        self.assertIsNone(issue)
         client.file_exists.assert_not_called()
 
     def test_added_or_modified_formal_doc_satisfies_feature_requirement(self):
@@ -1845,6 +2012,7 @@ class RunTest(unittest.TestCase):
         title="docs: test",
         body="",
         labels=None,
+        author="contributor",
         event_title=None,
         event_body=None,
         event_labels=None,
@@ -1856,6 +2024,7 @@ class RunTest(unittest.TestCase):
             title=title,
             body=body,
             labels=live_labels,
+            author=author,
         )
         event = {
             "repository": {"full_name": "milvus-io/milvus"},
@@ -1917,6 +2086,281 @@ class RunTest(unittest.TestCase):
         self.assertEqual(0, self.run_with_client(client))
         self.assertEqual("success", client.completed_checks[-1][1])
         self.assertIn("@congqixia", client.completed_checks[-1][3])
+
+    def test_non_author_manual_label_preserves_the_existing_general_flow(self):
+        for actor, actor_type in (
+            ("jaime0815", "User"),
+            ("mergify[bot]", "Bot"),
+        ):
+            with self.subTest(actor=actor):
+                client = FakeRunClient(
+                    files=[],
+                    documents={},
+                    refs=("head", "base"),
+                    comments=[],
+                    approval_comments=[],
+                    prow_approvers=(),
+                    issue_events=[approved_label_event(actor, actor_type=actor_type)],
+                )
+                self.assertEqual(
+                    0,
+                    self.run_with_client(
+                        client,
+                        labels=[checker.APPROVED_LABEL],
+                    ),
+                )
+                self.assertEqual("success", client.completed_checks[-1][1])
+                self.assertIn(f"@{actor}", client.completed_checks[-1][3])
+                self.assertIn("manual", client.completed_checks[-1][3].casefold())
+
+    def test_author_or_prow_manual_label_cannot_satisfy_general_gate(self):
+        cases = (
+            (
+                "author",
+                approved_label_event("contributor"),
+            ),
+            (
+                "prow bot",
+                approved_label_event(
+                    checker.PROW_BOT_LOGIN,
+                    actor_id=checker.PROW_BOT_USER_ID,
+                ),
+            ),
+        )
+        for name, event in cases:
+            with self.subTest(name=name):
+                client = FakeRunClient(
+                    files=[],
+                    documents={},
+                    refs=("head", "base"),
+                    comments=[],
+                    approval_comments=[],
+                    prow_approvers=(),
+                    issue_events=[event],
+                )
+                self.assertEqual(
+                    1,
+                    self.run_with_client(client, labels=[checker.APPROVED_LABEL]),
+                )
+                self.assertEqual("failure", client.completed_checks[-1][1])
+                self.assertIn("(0/1)", client.completed_checks[-1][3])
+
+    def test_manual_label_never_counts_toward_the_design_doc_pair(self):
+        client = FakeRunClient(
+            files=[
+                {
+                    "filename": "docs/design-docs/design_docs/example.md",
+                    "status": "modified",
+                    "sha": "valid",
+                }
+            ],
+            documents={"valid": VALID_HEADER},
+            refs=("head", "base"),
+            comments=[],
+            approval_comments=[],
+            prow_approvers=("congqixia",),
+            issue_events=[approved_label_event("jaime0815")],
+        )
+        self.assertEqual(
+            1,
+            self.run_with_client(client, labels=[checker.APPROVED_LABEL]),
+        )
+        self.assertEqual("failure", client.completed_checks[-1][1])
+        self.assertIn("(1/2)", client.completed_checks[-1][3])
+        self.assertEqual([], client.added_labels)
+
+    def test_governance_change_keeps_the_general_one_approver_threshold(self):
+        mergify = (REPOSITORY_ROOT / checker.MERGIFY_CONFIG_PATH).read_text(
+            encoding="utf-8"
+        )
+        client = FakeRunClient(
+            files=[
+                {
+                    "filename": checker.MERGIFY_CONFIG_PATH,
+                    "status": "modified",
+                }
+            ],
+            documents={},
+            refs=("head", "base"),
+            comments=[],
+            approval_comments=[self.approval_comment("congqixia", "/approve", 1)],
+            repository_documents={checker.MERGIFY_CONFIG_PATH: mergify},
+        )
+        self.assertEqual(0, self.run_with_client(client))
+        self.assertEqual("success", client.completed_checks[-1][1])
+        self.assertIn("(1/1)", client.completed_checks[-1][3])
+
+    def test_tested_knowhere_automation_preserves_existing_non_doc_flow(self):
+        client = FakeRunClient(
+            files=[
+                {
+                    "filename": checker.AUTOMATED_KNOWHERE_FILE,
+                    "status": "modified",
+                }
+            ],
+            documents={},
+            refs=("head", "base"),
+            comments=[],
+            approval_comments=[],
+        )
+        self.assertEqual(
+            0,
+            self.run_with_client(
+                client,
+                title=checker.AUTOMATED_KNOWHERE_TITLE,
+                labels=["ci-passed"],
+                author=checker.AUTOMATED_KNOWHERE_AUTHOR,
+            ),
+        )
+        self.assertEqual("success", client.completed_checks[-1][1])
+        self.assertIn(
+            "existing tested Knowhere-update automation",
+            client.completed_checks[-1][3],
+        )
+
+    def test_knowhere_automation_does_not_broaden_other_approval_paths(self):
+        mergify = (REPOSITORY_ROOT / checker.MERGIFY_CONFIG_PATH).read_text(
+            encoding="utf-8"
+        )
+        scenarios = (
+            (
+                "missing ci-passed",
+                [
+                    {
+                        "filename": checker.AUTOMATED_KNOWHERE_FILE,
+                        "status": "modified",
+                    }
+                ],
+                {},
+                {},
+                ["approved"],
+                checker.AUTOMATED_KNOWHERE_AUTHOR,
+                checker.AUTOMATED_KNOWHERE_TITLE,
+                "(0/1)",
+            ),
+            (
+                "wrong author",
+                [
+                    {
+                        "filename": checker.AUTOMATED_KNOWHERE_FILE,
+                        "status": "modified",
+                    }
+                ],
+                {},
+                {},
+                ["approved", "ci-passed"],
+                "contributor",
+                checker.AUTOMATED_KNOWHERE_TITLE,
+                "(0/1)",
+            ),
+            (
+                "title near match",
+                [
+                    {
+                        "filename": checker.AUTOMATED_KNOWHERE_FILE,
+                        "status": "modified",
+                    }
+                ],
+                {},
+                {},
+                ["approved", "ci-passed"],
+                checker.AUTOMATED_KNOWHERE_AUTHOR,
+                f"{checker.AUTOMATED_KNOWHERE_TITLE} extra",
+                "(0/1)",
+            ),
+            (
+                "extra file",
+                [
+                    {
+                        "filename": checker.AUTOMATED_KNOWHERE_FILE,
+                        "status": "modified",
+                    },
+                    {"filename": "README.md", "status": "modified"},
+                ],
+                {},
+                {},
+                ["approved", "ci-passed"],
+                checker.AUTOMATED_KNOWHERE_AUTHOR,
+                checker.AUTOMATED_KNOWHERE_TITLE,
+                "(0/1)",
+            ),
+            (
+                "wrong file status",
+                [
+                    {
+                        "filename": checker.AUTOMATED_KNOWHERE_FILE,
+                        "status": "added",
+                    }
+                ],
+                {},
+                {},
+                ["approved", "ci-passed"],
+                checker.AUTOMATED_KNOWHERE_AUTHOR,
+                checker.AUTOMATED_KNOWHERE_TITLE,
+                "(0/1)",
+            ),
+            (
+                "governance change",
+                [
+                    {
+                        "filename": checker.MERGIFY_CONFIG_PATH,
+                        "status": "modified",
+                    }
+                ],
+                {},
+                {checker.MERGIFY_CONFIG_PATH: mergify},
+                ["approved", "ci-passed"],
+                checker.AUTOMATED_KNOWHERE_AUTHOR,
+                checker.AUTOMATED_KNOWHERE_TITLE,
+                "(0/1)",
+            ),
+            (
+                "formal design doc",
+                [
+                    {
+                        "filename": "docs/design-docs/design_docs/example.md",
+                        "status": "modified",
+                        "sha": "valid",
+                    }
+                ],
+                {"valid": VALID_HEADER},
+                {},
+                ["approved", "ci-passed"],
+                checker.AUTOMATED_KNOWHERE_AUTHOR,
+                checker.AUTOMATED_KNOWHERE_TITLE,
+                "(0/2)",
+            ),
+        )
+        for (
+            name,
+            files,
+            documents,
+            repository_documents,
+            labels,
+            author,
+            title,
+            expected,
+        ) in scenarios:
+            with self.subTest(name=name):
+                client = FakeRunClient(
+                    files=files,
+                    documents=documents,
+                    refs=("head", "base"),
+                    comments=[],
+                    approval_comments=[],
+                    repository_documents=repository_documents,
+                )
+                self.assertEqual(
+                    1,
+                    self.run_with_client(
+                        client,
+                        title=title,
+                        labels=labels,
+                        author=author,
+                    ),
+                )
+                self.assertEqual("failure", client.completed_checks[-1][1])
+                self.assertIn(expected, client.completed_checks[-1][3])
 
     def test_formal_design_doc_needs_two_and_removes_manual_label(self):
         client = FakeRunClient(
@@ -2065,11 +2509,7 @@ class RunTest(unittest.TestCase):
         )
 
     def test_approval_api_failures_complete_policy_check_as_failure(self):
-        for method_name in (
-            "list_issue_comments",
-            "list_pull_request_review_comments",
-            "list_pull_request_reviews",
-        ):
+        for method_name in ("list_issue_comments",):
             with self.subTest(method_name=method_name):
                 client = FakeRunClient(
                     files=[],
@@ -2089,6 +2529,21 @@ class RunTest(unittest.TestCase):
                     "Design Doc policy could not be evaluated",
                     client.completed_checks[-1][2],
                 )
+
+        client = FakeRunClient(
+            files=[],
+            documents={},
+            refs=("head", "base"),
+            comments=[],
+            approval_comments=[],
+            prow_approvers=(),
+        )
+        client.list_issue_events = mock.Mock(
+            side_effect=RuntimeError("approval API failed")
+        )
+        with self.assertRaisesRegex(RuntimeError, "approval API failed"):
+            self.run_with_client(client, labels=[checker.APPROVED_LABEL])
+        self.assertEqual("failure", client.completed_checks[-1][1])
 
     def test_missing_or_malformed_base_approvers_fail_closed(self):
         malformed = "aliases:\n  maintainers: not-a-list\n"
@@ -2173,7 +2628,7 @@ class RunTest(unittest.TestCase):
                 self.assertEqual(1, self.run_with_client(client))
                 self.assertIn("(0/1)", client.completed_checks[-1][3])
 
-    def test_timeline_change_removes_design_doc_label_fail_closed(self):
+    def test_prow_snapshot_change_removes_design_doc_label_fail_closed(self):
         design_doc = "docs/design-docs/design_docs/example.md"
         initial_comments = [
             self.approval_comment("congqixia", "/approve", 1),
@@ -2196,7 +2651,18 @@ class RunTest(unittest.TestCase):
             comments=[],
             approval_comments=initial_comments,
         )
-        snapshots = iter((initial_comments, changed_comments))
+        snapshots = iter(
+            (
+                [
+                    *initial_comments,
+                    prow_notification("congqixia", "czs007", comment_id=700),
+                ],
+                [
+                    *changed_comments,
+                    prow_notification("congqixia", comment_id=701),
+                ],
+            )
+        )
 
         def list_issue_comments(repository, pull_number):
             return [*client.comments, *next(snapshots)]
@@ -2212,6 +2678,29 @@ class RunTest(unittest.TestCase):
             [("milvus-io/milvus", 1, checker.DESIGN_DOC_APPROVAL_LABEL)],
             client.removed_labels,
         )
+
+    def test_manual_approval_actor_change_makes_the_run_stale(self):
+        client = FakeRunClient(
+            files=[],
+            documents={},
+            refs=("head", "base"),
+            comments=[],
+            approval_comments=[],
+            prow_approvers=(),
+        )
+        event_snapshots = iter(
+            (
+                [approved_label_event("reviewer", event_id=900)],
+                [approved_label_event("contributor", event_id=901)],
+            )
+        )
+        client.list_issue_events = lambda repository, pull_number: next(event_snapshots)
+
+        self.assertEqual(
+            0,
+            self.run_with_client(client, labels=[checker.APPROVED_LABEL]),
+        )
+        self.assertEqual("neutral", client.completed_checks[-1][1])
 
     def test_stale_run_does_not_mutate_comments(self):
         invalid_design_doc = "docs/design-docs/design_docs/20260728-invalid.md"
@@ -2514,8 +3003,8 @@ class FakeRunClient(FakeCommentClient):
         final_state=None,
         completion_state=None,
         approval_comments=None,
-        review_comments=None,
-        reviews=None,
+        prow_approvers=PROW_APPROVERS_UNSET,
+        issue_events=None,
         label_error=False,
     ):
         normalized_comments = [
@@ -2558,21 +3047,31 @@ class FakeRunClient(FakeCommentClient):
                     "user": {"login": "czs007"},
                 },
             ]
-        self.review_comments = review_comments or []
-        self.reviews = reviews or []
+        if prow_approvers is PROW_APPROVERS_UNSET:
+            self.prow_approvers = infer_prow_approvers(self.approval_comments)
+        else:
+            self.prow_approvers = tuple(prow_approvers)
+        self.issue_events = issue_events
+        if self.issue_events is None:
+            self.issue_events = [
+                approved_label_event(
+                    checker.PROW_BOT_LOGIN,
+                    actor_id=checker.PROW_BOT_USER_ID,
+                )
+            ]
         self.ensured_labels = []
         self.added_labels = []
         self.removed_labels = []
         self.label_error = label_error
 
-    def configure_default_states(self, head_sha, base_sha, title, body, labels):
+    def configure_default_states(self, head_sha, base_sha, title, body, labels, author):
         if self.initial_state is None:
             self.initial_state = checker.PullRequestState(
                 head_sha=head_sha,
                 base_sha=base_sha,
                 head_repository="contributor/milvus",
                 base_repository="milvus-io/milvus",
-                author="contributor",
+                author=author,
                 title=title,
                 body=body,
                 labels=tuple(sorted(labels)),
@@ -2604,13 +3103,14 @@ class FakeRunClient(FakeCommentClient):
         return self.files
 
     def list_issue_comments(self, repository, pull_number):
-        return [*self.comments, *self.approval_comments]
+        return [
+            *self.comments,
+            *self.approval_comments,
+            prow_notification(*self.prow_approvers),
+        ]
 
-    def list_pull_request_review_comments(self, repository, pull_number):
-        return self.review_comments
-
-    def list_pull_request_reviews(self, repository, pull_number):
-        return self.reviews
+    def list_issue_events(self, repository, pull_number):
+        return self.issue_events
 
     def get_blob(self, repository, sha):
         content = self.documents[sha].encode("utf-8")

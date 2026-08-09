@@ -26,6 +26,9 @@ COMMENT_MARKER = "<!-- milvus-design-doc-policy-check -->"
 COMMENT_PREFIX = f"{COMMENT_MARKER}\n## Design document policy check\n"
 POLICY_CHECK_NAME = "Design Doc Policy"
 BOT_LOGIN = "github-actions[bot]"
+PROW_BOT_LOGIN = "sre-ci-robot"
+PROW_BOT_USER_ID = 56469371
+PROW_APPROVAL_NOTIFICATION_PREFIX = "[APPROVALNOTIFIER]"
 OWNERS_ALIASES_PATH = "OWNERS_ALIASES"
 MERGIFY_CONFIG_PATH = ".github/mergify.yml"
 DESIGN_DOC_AREA_MATCHER = r"files~=^docs/design-docs/design_docs/.+\.md$"
@@ -53,12 +56,60 @@ POLICY_CHECK_SUCCESS_LINES = (
     POLICY_CHECK_SUCCESS_LINE,
     *POLICY_CHECK_STATE_GUARD_LINES,
 )
-APPROVED_LABEL_LINE = "      - label=approved"
+APPROVED_LABEL = "approved"
+APPROVED_LABEL_LINE = f"      - label={APPROVED_LABEL}"
 DESIGN_DOC_APPROVAL_LABEL = "approved/design-doc"
 DESIGN_DOC_APPROVAL_LABEL_LINE = f"      - label={DESIGN_DOC_APPROVAL_LABEL}"
 DESIGN_DOC_APPROVAL_LABEL_COLOR = "0ffa16"
 DESIGN_DOC_APPROVAL_LABEL_DESCRIPTION = (
     "Two distinct non-author Approvers approved a formal Design Doc change."
+)
+AUTOMATED_KNOWHERE_AUTHOR = "sre-ci-robot"
+AUTOMATED_KNOWHERE_TITLE = "[automated] Update Knowhere Commit"
+AUTOMATED_KNOWHERE_FILE = "internal/core/thirdparty/knowhere/CMakeLists.txt"
+AUTOMATED_KNOWHERE_REQUIRED_LABEL = "ci-passed"
+AUTOMATED_KNOWHERE_RULE_NAME = (
+    "Assign the 'lgtm' and 'approved' labels following the successful testing "
+    "of the 'Update Knowhere Commit'"
+)
+AUTOMATED_KNOWHERE_CONDITION_LINES = (
+    "      - or: *BRANCHES",
+    f"      - author={AUTOMATED_KNOWHERE_AUTHOR}",
+    f"      - 'title={AUTOMATED_KNOWHERE_TITLE}'",
+    f"      - modified-files={AUTOMATED_KNOWHERE_FILE}",
+    "      - '#files=1'",
+    "      - label=ci-passed",
+)
+AUTOMATED_KNOWHERE_ACTION_LINES = (
+    "      label:",
+    "        add:",
+    "          - lgtm",
+    "          - approved",
+)
+AUTOMATED_FEATURE_CLEANUP_RULE_NAME = "Dismiss block label if automated create PR"
+AUTOMATED_FEATURE_CLEANUP_CONDITION_LINES = (
+    "      - or: *BRANCHES",
+    r"      - title~=\[automated\]",
+)
+AUTOMATED_FEATURE_CLEANUP_ACTION_LINES = (
+    "      label:",
+    "        remove:",
+    "          - do-not-merge/missing-related-issue",
+    "          - do-not-merge/missing-related-pr",
+    "          - do-not-merge/missing-design-doc",
+)
+FEATURE_MISSING_DOC_RULE_NAME = "Blocking PR if feat PR missing design doc"
+FEATURE_MISSING_DOC_CONDITION_LINES = (
+    "      - or: *BRANCHES",
+    "      - or:",
+    "          - 'title~=^feat:'",
+    "          - label=kind/feature",
+    r"      - -title~=\[automated\]",
+    "      - *no_design_doc_body",
+    "      - not:",
+    "          or:",
+    "            - *added_design_doc",
+    "            - *modified_design_doc",
 )
 GENERAL_REVIEW_SUCCESS_LINES = (
     APPROVED_LABEL_LINE,
@@ -66,11 +117,16 @@ GENERAL_REVIEW_SUCCESS_LINES = (
 )
 DESIGN_DOC_REVIEW_SUCCESS_LINES = (DESIGN_DOC_APPROVAL_LABEL_LINE,)
 MASTER_ONLY_IF_LINES = ("      - base=master",)
+MERGE_PROTECTIONS_SETTINGS_LINES = (
+    "  reporting_method: check-runs",
+    "  post_comment: false",
+)
 FEATURE_POLICY_IF_LINES = (
     "      - base=master",
     "      - or:",
     "          - 'title~=^feat:'",
     "          - label=kind/feature",
+    r"      - -title~=\[automated\]",
 )
 FEATURE_POLICY_SUCCESS_LINES = (
     "      - or:",
@@ -126,16 +182,31 @@ class ApprovalRequirement:
     approvers: tuple[str, ...]
     required: int
     formal_design_doc: bool
-    governance_enforcement: bool
+    automated_knowhere_update: bool
+    manual_approval_actor: str | None = None
 
     @property
     def satisfied(self) -> bool:
-        return len(self.approvers) >= self.required
+        return (
+            self.automated_knowhere_update
+            or (not self.formal_design_doc and self.manual_approval_actor is not None)
+            or len(self.approvers) >= self.required
+        )
 
 
-SLASH_COMMAND_PATTERN = re.compile(r"^/([^\s]+)[\t ]*([^\n\r]*)", re.MULTILINE)
 REVIEW_SIGNAL_RUN_TITLE_PATTERN = re.compile(r"^([1-9][0-9]*)$")
 LOGIN_PATTERN = re.compile(r"^@[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
+PROW_APPROVAL_HEADER_PATTERN = re.compile(
+    r"\[APPROVALNOTIFIER\] This PR is \*\*(?:NOT )?APPROVED\*\*"
+)
+PROW_APPROVAL_LINE_PATTERN = re.compile(
+    r"(?m)^This pull-request has been approved by:(?P<approvals>[^\r\n]*)$"
+)
+PROW_APPROVAL_LINK_PATTERN = re.compile(
+    r'\*<a href="([^"\r\n]+)" '
+    r'title="(?:Approved|LGTM|Author self-approved)">'
+    r"([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})</a>\*"
+)
 LOGIN_PLACEHOLDERS = {
     "@github-handle",
     "@github-login",
@@ -302,47 +373,25 @@ class GitHubClient:
                 return comments
         raise RuntimeError("The pull request has too many comments to update safely")
 
-    def list_pull_request_review_comments(
+    def list_issue_events(
         self, repository: str, pull_number: int
     ) -> list[dict[str, Any]]:
         repository_path = urllib.parse.quote(repository, safe="/")
-        comments: list[dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
         for page in range(1, 101):
             page_items = self.request(
                 "GET",
-                f"/repos/{repository_path}/pulls/{pull_number}/comments"
+                f"/repos/{repository_path}/issues/{pull_number}/events"
                 f"?per_page=100&page={page}",
             )
             if not isinstance(page_items, list):
-                raise RuntimeError(
-                    "GitHub returned an invalid pull-request review-comment list"
-                )
-            comments.extend(page_items)
+                raise RuntimeError("GitHub returned an invalid issue-event list")
+            events.extend(page_items)
             if len(page_items) < 100:
-                return comments
+                return events
         raise RuntimeError(
-            "The pull request has too many review comments to evaluate safely"
+            "The pull request has too many issue events to evaluate safely"
         )
-
-    def list_pull_request_reviews(
-        self, repository: str, pull_number: int
-    ) -> list[dict[str, Any]]:
-        repository_path = urllib.parse.quote(repository, safe="/")
-        reviews: list[dict[str, Any]] = []
-        for page in range(1, 101):
-            page_items = self.request(
-                "GET",
-                f"/repos/{repository_path}/pulls/{pull_number}/reviews"
-                f"?per_page=100&page={page}",
-            )
-            if not isinstance(page_items, list):
-                raise RuntimeError(
-                    "GitHub returned an invalid pull-request review list"
-                )
-            reviews.extend(page_items)
-            if len(page_items) < 100:
-                return reviews
-        raise RuntimeError("The pull request has too many reviews to evaluate safely")
 
     def get_pull_request_state(
         self, repository: str, pull_number: int
@@ -605,94 +654,69 @@ def formal_design_doc_changed(files: list[dict[str, Any]]) -> bool:
     )
 
 
-def _timeline_timestamp(value: Any, source: str) -> datetime.datetime:
-    if not isinstance(value, str) or not value:
-        raise RuntimeError(f"GitHub returned a {source} without a timestamp")
-    try:
-        timestamp = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as error:
-        raise RuntimeError(
-            f"GitHub returned a {source} with an invalid timestamp"
-        ) from error
-    if timestamp.tzinfo is None:
-        raise RuntimeError(f"GitHub returned a {source} without a timezone")
-    return timestamp
-
-
-def _slash_approval_updates(body: str) -> list[bool]:
-    updates: list[bool] = []
-    for match in SLASH_COMMAND_PATTERN.finditer(body):
-        command = match.group(1).casefold()
-        arguments = match.group(2).strip().casefold()
-        if command == "approve":
-            updates.append("cancel" not in arguments)
-        elif command == "remove-approve":
-            updates.append(False)
-    return updates
-
-
-def reconstruct_active_approvers(
+def extract_prow_approvers(
     issue_comments: list[dict[str, Any]],
-    review_comments: list[dict[str, Any]],
-    reviews: list[dict[str, Any]],
     maintainers: list[str],
     author: str,
+    repository: str,
+    pull_number: int,
 ) -> tuple[str, ...]:
-    """Rebuild Prow-compatible sticky approval state from the full PR timeline."""
+    """Read the explicit approval set last computed by the Prow approve plugin."""
 
-    timeline: list[tuple[datetime.datetime, int, int, str, dict[str, Any]]] = []
-    sources = (
-        (review_comments, 0, "review comment", "created_at"),
-        (issue_comments, 1, "issue comment", "created_at"),
-        (reviews, 2, "review", "submitted_at"),
-    )
-    for items, source_priority, source, timestamp_field in sources:
-        for index, item in enumerate(items):
-            if not isinstance(item, dict):
-                raise RuntimeError(f"GitHub returned an invalid {source}")
-            if (
-                source == "review"
-                and item.get("submitted_at") is None
-                and str(item.get("state", "")).upper() == "PENDING"
-            ):
-                continue
-            timeline.append(
-                (
-                    _timeline_timestamp(item.get(timestamp_field), source),
-                    source_priority,
-                    index,
-                    source,
-                    item,
-                )
-            )
-    timeline.sort(key=lambda event: event[:3])
-
-    approval_state: dict[str, bool] = {}
-    for _, _, _, source, item in timeline:
-        user = item.get("user")
+    notifications: list[tuple[int, str]] = []
+    for comment in issue_comments:
+        if not isinstance(comment, dict):
+            raise RuntimeError("GitHub returned an invalid issue comment")
+        user = comment.get("user")
         login = user.get("login") if isinstance(user, dict) else None
-        if not isinstance(login, str) or not login:
-            raise RuntimeError(f"GitHub returned a {source} without an author")
-        normalized_login = login.casefold()
+        user_id = user.get("id") if isinstance(user, dict) else None
+        body = comment.get("body")
+        if isinstance(body, str) and body.startswith(PROW_APPROVAL_NOTIFICATION_PREFIX):
+            login_matches = (
+                isinstance(login, str) and login.casefold() == PROW_BOT_LOGIN.casefold()
+            )
+            id_matches = user_id == PROW_BOT_USER_ID
+            if not login_matches and not id_matches:
+                continue
+            if not login_matches or not id_matches:
+                raise RuntimeError("The Prow approval notifier identity changed")
+            comment_id = comment.get("id")
+            if not isinstance(comment_id, int) or comment_id <= 0:
+                raise RuntimeError(
+                    "GitHub returned a Prow approval notification without a valid ID"
+                )
+            notifications.append((comment_id, body))
 
-        if source == "review":
-            state = item.get("state")
-            if not isinstance(state, str):
-                raise RuntimeError("GitHub returned a review without a state")
-            normalized_state = state.upper()
-            if normalized_state == "APPROVED":
-                approval_state[normalized_login] = True
-            elif normalized_state == "CHANGES_REQUESTED":
-                approval_state[normalized_login] = False
+    if not notifications:
+        return ()
 
-        body = item.get("body")
-        if body is None:
-            body = ""
-        if not isinstance(body, str):
-            raise RuntimeError(f"GitHub returned a {source} with an invalid body")
-        for approved in _slash_approval_updates(body):
-            approval_state[normalized_login] = approved
+    _, notification = max(notifications, key=lambda item: item[0])
+    first_line = notification.splitlines()[0] if notification else ""
+    approval_lines = list(PROW_APPROVAL_LINE_PATTERN.finditer(notification))
+    if (
+        PROW_APPROVAL_HEADER_PATTERN.fullmatch(first_line) is None
+        or len(approval_lines) != 1
+    ):
+        raise RuntimeError("The Prow approval notification has an unknown format")
 
+    approval_line = approval_lines[0]
+    rendered_approvals = approval_line.group("approvals").strip()
+    approval_links = list(PROW_APPROVAL_LINK_PATTERN.finditer(rendered_approvals))
+    if rendered_approvals != ", ".join(match.group(0) for match in approval_links):
+        raise RuntimeError("The Prow approval notification has an unknown format")
+
+    expected_href_prefix = f"https://github.com/{repository}/pull/{pull_number}#"
+    if any(
+        not match.group(1).startswith(expected_href_prefix) for match in approval_links
+    ):
+        raise RuntimeError(
+            "The Prow approval notification links to another pull request"
+        )
+
+    normalized_notified_logins = [match.group(2).casefold() for match in approval_links]
+    if len(normalized_notified_logins) != len(set(normalized_notified_logins)):
+        raise RuntimeError("The Prow approval notification repeats an approver")
+    notified_logins = set(normalized_notified_logins)
     trusted_logins = {login.casefold(): login for login in maintainers}
     author_login = author.casefold()
     return tuple(
@@ -701,20 +725,77 @@ def reconstruct_active_approvers(
                 canonical_login
                 for normalized_login, canonical_login in trusted_logins.items()
                 if normalized_login != author_login
-                and approval_state.get(normalized_login, False)
+                and normalized_login in notified_logins
             ),
             key=str.casefold,
         )
     )
 
 
+def extract_non_author_manual_approval_actor(
+    issue_events: list[dict[str, Any]],
+    author: str,
+) -> str | None:
+    """Preserve Prow's approved-label bypass, except for the PR author."""
+
+    approved_label_events: list[tuple[int, dict[str, Any]]] = []
+    for event in issue_events:
+        if not isinstance(event, dict):
+            raise RuntimeError("GitHub returned an invalid issue event")
+        event_name = event.get("event")
+        label = event.get("label")
+        label_name = label.get("name") if isinstance(label, dict) else None
+        if event_name not in {"labeled", "unlabeled"} or label_name != APPROVED_LABEL:
+            continue
+        event_id = event.get("id")
+        if not isinstance(event_id, int) or event_id <= 0:
+            raise RuntimeError(
+                "GitHub returned an approved-label event without a valid ID"
+            )
+        approved_label_events.append((event_id, event))
+
+    if not approved_label_events:
+        raise RuntimeError(
+            "The current approved label has no corresponding issue event"
+        )
+
+    _, latest_event = max(approved_label_events, key=lambda item: item[0])
+    if latest_event.get("event") != "labeled":
+        raise RuntimeError(
+            "The approved label state conflicts with its latest issue event"
+        )
+
+    actor = latest_event.get("actor")
+    actor_login = actor.get("login") if isinstance(actor, dict) else None
+    actor_id = actor.get("id") if isinstance(actor, dict) else None
+    actor_type = actor.get("type") if isinstance(actor, dict) else None
+    if (
+        not isinstance(actor_login, str)
+        or not actor_login
+        or not isinstance(actor_id, int)
+        or actor_id <= 0
+        or not isinstance(actor_type, str)
+    ):
+        raise RuntimeError(
+            "GitHub returned an approved-label event without a valid actor"
+        )
+
+    if (
+        actor_id == PROW_BOT_USER_ID
+        or actor_login.casefold() == PROW_BOT_LOGIN.casefold()
+        or actor_login.casefold() == author.casefold()
+    ):
+        return None
+    return actor_login
+
+
 def evaluate_approval_requirement(
     client: GitHubClient,
+    repository: str,
+    pull_number: int,
     state: PullRequestState,
     files: list[dict[str, Any]],
     issue_comments: list[dict[str, Any]],
-    review_comments: list[dict[str, Any]],
-    reviews: list[dict[str, Any]],
 ) -> ApprovalRequirement:
     try:
         owners_aliases = client.get_repository_file(
@@ -728,19 +809,41 @@ def evaluate_approval_requirement(
         ) from error
 
     formal_design_doc = formal_design_doc_changed(files)
-    governance_enforcement = governance_enforcement_changed(files)
-    required = 2 if formal_design_doc or governance_enforcement else 1
-    return ApprovalRequirement(
-        approvers=reconstruct_active_approvers(
-            issue_comments,
-            review_comments,
-            reviews,
-            maintainers,
+    automated_knowhere_update = (
+        not formal_design_doc
+        and not governance_enforcement_changed(files)
+        and state.author.casefold() == AUTOMATED_KNOWHERE_AUTHOR.casefold()
+        and state.title == AUTOMATED_KNOWHERE_TITLE
+        and len(files) == 1
+        and files[0].get("filename") == AUTOMATED_KNOWHERE_FILE
+        and files[0].get("status") == "modified"
+        and AUTOMATED_KNOWHERE_REQUIRED_LABEL in state.labels
+    )
+    required = 2 if formal_design_doc else 1
+    approvers = extract_prow_approvers(
+        issue_comments,
+        maintainers,
+        state.author,
+        repository,
+        pull_number,
+    )
+    manual_approval_actor = None
+    if (
+        not formal_design_doc
+        and not automated_knowhere_update
+        and not approvers
+        and APPROVED_LABEL in state.labels
+    ):
+        manual_approval_actor = extract_non_author_manual_approval_actor(
+            client.list_issue_events(repository, pull_number),
             state.author,
-        ),
+        )
+    return ApprovalRequirement(
+        approvers=approvers,
         required=required,
         formal_design_doc=formal_design_doc,
-        governance_enforcement=governance_enforcement,
+        automated_knowhere_update=automated_knowhere_update,
+        manual_approval_actor=manual_approval_actor,
     )
 
 
@@ -795,7 +898,9 @@ def extract_design_doc_references(body: str) -> list[str]:
 
 
 def is_feature_pull_request(title: str, labels: list[str]) -> bool:
-    return title.startswith("feat:") or "kind/feature" in labels
+    return "[automated]" not in title and (
+        title.startswith("feat:") or "kind/feature" in labels
+    )
 
 
 def select_design_doc_files(
@@ -1138,6 +1243,22 @@ def rule_block_lines(rule: str, declaration: str) -> tuple[str, ...] | None:
     return tuple(conditions)
 
 
+def top_level_block_lines(document: str, declaration: str) -> tuple[str, ...] | None:
+    lines = document.splitlines()
+    markers = [index for index, line in enumerate(lines) if line == declaration]
+    if len(markers) != 1:
+        return None
+
+    values: list[str] = []
+    for line in lines[markers[0] + 1 :]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith(" "):
+            break
+        values.append(line)
+    return tuple(values)
+
+
 def if_condition_lines(rule: str) -> tuple[str, ...] | None:
     return rule_block_lines(rule, "    if:")
 
@@ -1177,6 +1298,15 @@ def validate_approver_governance(
         issues.append(
             "Mergify must use Prow approval labels instead of GitHub review Approver "
             "conditions"
+        )
+
+    if (
+        top_level_block_lines(mergify, "merge_protections_settings:")
+        != MERGE_PROTECTIONS_SETTINGS_LINES
+    ):
+        issues.append(
+            "Mergify merge protections must publish the exact required check-run "
+            "configuration"
         )
 
     try:
@@ -1299,6 +1429,62 @@ def validate_approver_governance(
             issues.append(
                 "Feature changes do not require the native Design Doc requirement "
                 "and exact Design Doc Policy success"
+            )
+    except ValueError as error:
+        issues.append(str(error))
+
+    try:
+        automated_knowhere_rule = configuration_rule(
+            mergify,
+            AUTOMATED_KNOWHERE_RULE_NAME,
+        )
+        if (
+            rule_block_lines(automated_knowhere_rule, "    conditions:")
+            != AUTOMATED_KNOWHERE_CONDITION_LINES
+            or rule_block_lines(automated_knowhere_rule, "    actions:")
+            != AUTOMATED_KNOWHERE_ACTION_LINES
+        ):
+            issues.append(
+                "The tested Knowhere-update approval automation must keep its "
+                "exact author, title, file, ci-passed, lgtm, and approved contract"
+            )
+    except ValueError as error:
+        issues.append(str(error))
+
+    try:
+        automated_feature_cleanup_rule = configuration_rule(
+            mergify,
+            AUTOMATED_FEATURE_CLEANUP_RULE_NAME,
+        )
+        if (
+            rule_block_lines(automated_feature_cleanup_rule, "    conditions:")
+            != AUTOMATED_FEATURE_CLEANUP_CONDITION_LINES
+            or rule_block_lines(automated_feature_cleanup_rule, "    actions:")
+            != AUTOMATED_FEATURE_CLEANUP_ACTION_LINES
+        ):
+            issues.append(
+                "The existing automated-PR cleanup must keep removing the "
+                "missing Design Doc label"
+            )
+    except ValueError as error:
+        issues.append(str(error))
+
+    try:
+        feature_missing_doc_rule = configuration_rule(
+            mergify,
+            FEATURE_MISSING_DOC_RULE_NAME,
+        )
+        if (
+            rule_block_lines(feature_missing_doc_rule, "    conditions:")
+            != FEATURE_MISSING_DOC_CONDITION_LINES
+            or feature_missing_doc_rule.count(
+                "          - do-not-merge/missing-design-doc"
+            )
+            != 1
+        ):
+            issues.append(
+                "The feature Design Doc label rule must preserve the existing "
+                "automated-title exception"
             )
     except ValueError as error:
         issues.append(str(error))
@@ -1463,19 +1649,39 @@ def build_check_summary(
     governance_issues = governance_issues or []
     lines = ["## Design Doc policy"]
     if approval is not None:
-        approval_result = "passed" if approval.satisfied else "failed"
-        approvers = (
-            ", ".join(f"@{login}" for login in approval.approvers)
-            if approval.approvers
-            else "none"
-        )
-        lines.extend(
-            [
-                f"- Non-author Approver requirement: {approval_result} "
-                f"({len(approval.approvers)}/{approval.required})",
-                f"  - Current valid Approvers: {approvers}",
-            ]
-        )
+        if approval.automated_knowhere_update:
+            lines.extend(
+                [
+                    "- Non-author Approver requirement: existing tested "
+                    "Knowhere-update automation applies",
+                    "  - Restricted to @sre-ci-robot, the exact automated "
+                    "title, and a single-file Knowhere update with `ci-passed`",
+                ]
+            )
+        elif approval.manual_approval_actor is not None:
+            lines.extend(
+                [
+                    "- Non-author Approver requirement: existing manual "
+                    "approved-label path applies",
+                    "  - The current `approved` label was last added by "
+                    "a non-author, non-Prow actor "
+                    f"@{approval.manual_approval_actor}",
+                ]
+            )
+        else:
+            approval_result = "passed" if approval.satisfied else "failed"
+            approvers = (
+                ", ".join(f"@{login}" for login in approval.approvers)
+                if approval.approvers
+                else "none"
+            )
+            lines.extend(
+                [
+                    f"- Non-author Approver requirement: {approval_result} "
+                    f"({len(approval.approvers)}/{approval.required})",
+                    f"  - Current valid Approvers: {approvers}",
+                ]
+            )
     if feature_requirement_issue is None:
         lines.append("- Feature Design Doc requirement: passed or not applicable")
     else:
@@ -1634,17 +1840,13 @@ def run(event_path: str) -> int:
         )
 
         existing_comments = client.list_issue_comments(repository, pull_number)
-        review_comments = client.list_pull_request_review_comments(
-            repository, pull_number
-        )
-        reviews = client.list_pull_request_reviews(repository, pull_number)
         approval = evaluate_approval_requirement(
             client,
+            repository,
+            pull_number,
             initial_state,
             files,
             existing_comments,
-            review_comments,
-            reviews,
         )
         current_state = client.get_pull_request_state(repository, pull_number)
         if stable_pull_request_state(current_state) != stable_pull_request_state(
@@ -1695,11 +1897,11 @@ def run(event_path: str) -> int:
 
         final_approval = evaluate_approval_requirement(
             client,
+            repository,
+            pull_number,
             final_state,
             files,
             client.list_issue_comments(repository, pull_number),
-            client.list_pull_request_review_comments(repository, pull_number),
-            client.list_pull_request_reviews(repository, pull_number),
         )
         if final_approval != approval:
             if approval.formal_design_doc or final_approval.formal_design_doc:
@@ -1711,8 +1913,8 @@ def run(event_path: str) -> int:
                 )
             complete_stale_policy_check(client, repository, check_run_id)
             print(
-                "The approval timeline changed while this evaluation was running; "
-                "a newer workflow run will evaluate it."
+                "The Prow approval snapshot changed while this evaluation was "
+                "running; a newer workflow run will evaluate it."
             )
             return 0
 
@@ -1757,7 +1959,14 @@ def run(event_path: str) -> int:
             print("Repository governance enforcement is inconsistent.")
         else:
             print("Repository governance enforcement is valid or does not apply.")
-        if approval.satisfied:
+        if approval.automated_knowhere_update:
+            print("The existing tested Knowhere-update automation applies.")
+        elif approval.manual_approval_actor is not None:
+            print(
+                "The existing non-author manual approved-label path applies "
+                f"(@{approval.manual_approval_actor})."
+            )
+        elif approval.satisfied:
             print(
                 f"The non-author Approver requirement is satisfied "
                 f"({len(approval.approvers)}/{approval.required})."

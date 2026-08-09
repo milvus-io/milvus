@@ -16,7 +16,7 @@ concurrency:
     design-doc-policy-${{ github.event.pull_request.number ||
     github.event.issue.number ||
     github.event.workflow_run.display_title || github.run_id }}
-  # A canceled run could leave its explicit head-SHA check in progress.
+  # Serialize events so a newer run cannot interrupt check finalization.
   cancel-in-progress: false
 
 jobs:
@@ -24,16 +24,17 @@ jobs:
     name: Publish Design Doc Policy check
     if: ${{ github.event_name != 'issue_comment' || github.event.issue.pull_request }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     permissions:
       contents: read
       checks: write
       issues: write
-      pull-requests: write
+      pull-requests: read
 
     steps:
       - name: Invalidate previous head-SHA policy result
         id: start-policy-check
+        timeout-minutes: 2
         uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
         with:
           github-token: ${{ github.token }}
@@ -75,6 +76,8 @@ jobs:
             }
             const headSha = pullResponse.data.head.sha;
             const externalId = `design-doc-policy-pr-${pullNumber}`;
+            core.setOutput("head_sha", headSha);
+            core.setOutput("external_id", externalId);
             const checkIds = [];
 
             for (let page = 1; page <= 10; page += 1) {
@@ -139,6 +142,7 @@ jobs:
             return uniqueCheckIds;
 
       - name: Checkout trusted workflow revision
+        timeout-minutes: 2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.workflow_sha }}
@@ -146,6 +150,7 @@ jobs:
           persist-credentials: false
 
       - name: Test validator
+        timeout-minutes: 2
         run: >-
           python3 -m unittest discover
           -s .github/scripts
@@ -153,6 +158,7 @@ jobs:
 
       - name: Validate Design Doc policy
         id: validate-policy
+        timeout-minutes: 5
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -160,25 +166,56 @@ jobs:
           --event "$GITHUB_EVENT_PATH"
 
       - name: Fail any unfinished head-SHA policy check
-        if: ${{ failure() && steps.start-policy-check.outcome == 'success' }}
+        if: >-
+          ${{ always() && steps.validate-policy.outcome != 'success' &&
+          steps.start-policy-check.outputs.head_sha != '' }}
+        timeout-minutes: 2
         uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
         env:
-          POLICY_CHECK_IDS: ${{ steps.start-policy-check.outputs.result }}
+          POLICY_HEAD_SHA: ${{ steps.start-policy-check.outputs.head_sha }}
+          POLICY_EXTERNAL_ID: ${{ steps.start-policy-check.outputs.external_id }}
         with:
           github-token: ${{ github.token }}
           script: |
             const { owner, repo } = context.repo;
-            const checkIds = JSON.parse(process.env.POLICY_CHECK_IDS || "[]");
-            const completedAt = new Date().toISOString();
-            for (const check_run_id of checkIds) {
-              const existing = await github.rest.checks.get({
+            const headSha = process.env.POLICY_HEAD_SHA;
+            const externalId = process.env.POLICY_EXTERNAL_ID;
+            if (!headSha || !externalId) {
+              throw new Error("Policy check cleanup target is missing");
+            }
+            const checkIds = [];
+            for (let page = 1; page <= 10; page += 1) {
+              const response = await github.rest.checks.listForRef({
                 owner,
                 repo,
-                check_run_id,
+                ref: headSha,
+                check_name: "Design Doc Policy",
+                filter: "all",
+                per_page: 100,
+                page,
               });
-              if (existing.data.status === "completed") {
-                continue;
+              for (const check of response.data.check_runs) {
+                if (
+                  check.external_id === externalId &&
+                  check.app?.slug === "github-actions" &&
+                  check.status !== "completed"
+                ) {
+                  checkIds.push(check.id);
+                }
               }
+              if (response.data.check_runs.length < 100) {
+                break;
+              }
+              if (page === 10) {
+                throw new Error(
+                  "Too many Design Doc Policy checks to clean up",
+                );
+              }
+            }
+            const completedAt = new Date().toISOString();
+            for (const check_run_id of [...new Set(checkIds)].sort(
+              (a, b) => a - b,
+            )) {
               await github.rest.checks.update({
                 owner,
                 repo,

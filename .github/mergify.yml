@@ -194,7 +194,7 @@ merge_protections:
       - label=approved/design-doc
 
   - name: Review / governance enforcement
-    description: Changes to repository governance enforcement need the trusted policy workflow to confirm two distinct non-author Milvus Approvers.
+    description: Changes to repository governance enforcement need the trusted policy workflow to preserve the normal non-author approval rule and enforcement gates.
     if:
       - base=master
       - *governance_area
@@ -245,6 +245,7 @@ merge_protections:
       - or:
           - 'title~=^feat:'
           - label=kind/feature
+      - -title~=\[automated\]
     success_conditions:
       - or:
           - *added_design_doc
@@ -746,6 +747,7 @@ pull_request_rules:
         remove:
           - do-not-merge/missing-related-issue
           - do-not-merge/missing-related-pr
+          - do-not-merge/missing-design-doc
 
   - name: Blocking PR if feat PR missing design doc
     conditions:
@@ -753,6 +755,7 @@ pull_request_rules:
       - or:
           - 'title~=^feat:'
           - label=kind/feature
+      - -title~=\[automated\]
       # PR body does not reference an in-repo design doc, and the PR does not add one
       - *no_design_doc_body
       - not:
@@ -978,7 +981,10 @@ pull_request_rules:
   - name: Assign the 'lgtm' and 'approved' labels following the successful testing of the 'Update Knowhere Commit'
     conditions:
       - or: *BRANCHES
-      - 'title~=Update Knowhere Commit'
+      - author=sre-ci-robot
+      - 'title=[automated] Update Knowhere Commit'
+      - modified-files=internal/core/thirdparty/knowhere/CMakeLists.txt
+      - '#files=1'
       - label=ci-passed
     actions:
       label:
