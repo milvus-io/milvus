@@ -1510,6 +1510,48 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteMissingTTLFieldDoe
 	// Source segment carries a dropped field (103) -> droppedFieldIDs>0 -> full rewrite.
 	s.prepareBumpSchemaVersionCompactionWithDroppedField()
 
+	// Attach a real V3 manifest deltalog so the full rewrite filters one row and
+	// exercises selection/newSelectedRecord against the packed source record.
+	sourceSegment := s.task.plan.GetSegmentBinlogs()[0]
+	const deltaLogID = int64(20000)
+	basePath, _, err := packed.UnmarshalManifestPath(sourceSegment.GetManifest())
+	s.Require().NoError(err)
+	deltaPath := metautil.BuildDeltaLogPathV3(basePath, deltaLogID)
+	deleteRecord, _, _, err := storage.BuildDeleteRecord(
+		[]storage.PrimaryKey{storage.NewInt64PrimaryKey(sourceSegment.GetSegmentID())},
+		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))},
+	)
+	s.Require().NoError(err)
+	defer deleteRecord.Release()
+	deltaWriter, err := storage.NewDeltalogWriter(
+		context.Background(),
+		sourceSegment.GetCollectionID(),
+		sourceSegment.GetPartitionID(),
+		sourceSegment.GetSegmentID(),
+		deltaLogID,
+		schemapb.DataType_Int64,
+		deltaPath,
+		storage.WithVersion(storage.StorageV2),
+		storage.WithStorageConfig(s.task.compactionParams.StorageConfig),
+	)
+	s.Require().NoError(err)
+	s.Require().NoError(deltaWriter.Write(deleteRecord))
+	s.Require().NoError(deltaWriter.Close())
+	sourceSegment.Manifest, err = packed.AddDeltaLogsToManifest(
+		sourceSegment.GetManifest(),
+		s.task.compactionParams.StorageConfig,
+		[]packed.DeltaLogEntry{{Path: deltaPath, NumEntries: 1}},
+	)
+	s.Require().NoError(err)
+	sourceSegment.Deltalogs = []*datapb.FieldBinlog{{
+		FieldID: 100,
+		Binlogs: []*datapb.Binlog{{
+			LogID:      deltaLogID,
+			LogPath:    deltaPath,
+			EntriesNum: 1,
+		}},
+	}}
+
 	result, err := s.task.Compact()
 	s.Require().NoError(err)
 	s.Require().NotNil(result)
@@ -1517,7 +1559,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteMissingTTLFieldDoe
 	s.Require().Len(result.GetSegments(), 1)
 
 	segment := result.GetSegments()[0]
-	s.EqualValues(3, segment.GetNumOfRows())
+	s.EqualValues(2, segment.GetNumOfRows())
 
 	reader, err := storage.NewManifestRecordReader(
 		context.Background(),
@@ -1534,5 +1576,5 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteMissingTTLFieldDoe
 	s.Require().NoError(err)
 	ttlColumn, ok := record.Column(newTTLFieldID).(*array.Int64)
 	s.Require().True(ok)
-	s.Equal(3, ttlColumn.NullN())
+	s.Equal(2, ttlColumn.NullN())
 }
