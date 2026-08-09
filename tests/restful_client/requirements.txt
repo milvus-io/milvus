@@ -10,6 +10,9 @@ pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.5.0
 pytest-html==3.1.1
+# pytest-html 3.1.1 imports py.xml; py used to arrive transitively via
+# pytest-forked until its 1.7.5 release (2026-08-08) dropped the dependency
+py==1.11.0
 pytest-sugar==0.9.5
 pytest-parallel
 pytest-random-order

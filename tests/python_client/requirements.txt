@@ -16,6 +16,9 @@ pytest-assume==2.4.3
 pytest-rerunfailures==14.0
 pytest_tagging==1.6.0
 pytest-html==3.1.1
+# pytest-html 3.1.1 imports py.xml; py used to arrive transitively via
+# pytest-forked until its 1.7.5 release (2026-08-08) dropped the dependency
+py==1.11.0
 delayed-assert==0.3.5
 kubernetes==17.17.0
 PyYAML==6.0.2
