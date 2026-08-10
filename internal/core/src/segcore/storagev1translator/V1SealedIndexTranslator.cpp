@@ -120,13 +120,15 @@ V1SealedIndexTranslator::LoadVecIndex() {
         index_info.index_engine_version = index_load_info_.index_engine_version;
 
         // get index type
-        AssertInfo(index_params.find("index_type") != index_params.end(),
-                   "index type is empty");
+        if (!(index_params.find("index_type") != index_params.end())) {
+            ThrowInfo(ErrorCode::DataFormatBroken, "index type is empty");
+        }
         index_info.index_type = index_params.at("index_type");
 
         // get metric type
-        AssertInfo(index_params.find("metric_type") != index_params.end(),
-                   "metric type is empty");
+        if (!(index_params.find("metric_type") != index_params.end())) {
+            ThrowInfo(ErrorCode::DataFormatBroken, "metric type is empty");
+        }
         index_info.metric_type = index_params.at("metric_type");
 
         // init file manager
@@ -176,8 +178,10 @@ V1SealedIndexTranslator::LoadScalarIndex() {
         auto& index_params = index_load_info_.index_params;
         bool find_index_type =
             index_params.count("index_type") > 0 ? true : false;
-        AssertInfo(find_index_type == true,
-                   "Can't find index type in index_params");
+        if (!(find_index_type == true)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "Can't find index type in index_params");
+        }
 
         milvus::index::CreateIndexInfo index_info;
         index_info.field_type = milvus::DataType(field_type);

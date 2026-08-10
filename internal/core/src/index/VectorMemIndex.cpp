@@ -176,10 +176,12 @@ VectorMemIndex<T>::VectorMemIndex(
       elem_type_(elem_type),
       use_knowhere_build_pool_(use_knowhere_build_pool) {
     CheckMetricTypeSupport<T>(metric_type);
-    AssertInfo(!is_unsupported(index_type, metric_type),
-               "{} doesn't support metric: {}",
-               index_type,
-               metric_type);
+    if (!(!is_unsupported(index_type, metric_type))) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "{} doesn't support metric: {}",
+                  index_type,
+                  metric_type);
+    }
     if (file_manager_context.Valid()) {
         file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
@@ -210,10 +212,12 @@ VectorMemIndex<T>::VectorMemIndex(DataType elem_type,
       elem_type_(elem_type),
       use_knowhere_build_pool_(use_knowhere_build_pool) {
     CheckMetricTypeSupport<T>(metric_type);
-    AssertInfo(!is_unsupported(index_type, metric_type),
-               "{} doesn't support metric: {}",
-               index_type,
-               metric_type);
+    if (!(!is_unsupported(index_type, metric_type))) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "{} doesn't support metric: {}",
+                  index_type,
+                  metric_type);
+    }
 
     auto view_data_pack = knowhere::Pack(view_data);
     auto get_index_obj = knowhere::IndexFactory::Instance().Create<T>(

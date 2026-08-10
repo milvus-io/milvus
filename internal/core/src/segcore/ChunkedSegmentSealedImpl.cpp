@@ -658,8 +658,10 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
     auto field_id = FieldId(info.field_id);
     auto snapshot = CapturePublishedState();
 
-    AssertInfo(info.index_params.count("metric_type"),
-               "Can't get metric_type in index_params");
+    if (!(info.index_params.count("metric_type"))) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Can't get metric_type in index_params");
+    }
     auto metric_type = info.index_params.at("metric_type");
 
     const auto& visible_state =
