@@ -1463,6 +1463,58 @@ TEST_F(BloomFilterExprEvalTest,
 }
 
 TEST_F(BloomFilterExprEvalTest,
+       UnaryRangeBitmapInputLeavesExcludedNullCandidatesUntouched) {
+    std::vector<size_t> null_rows;
+    std::vector<size_t> valid_rows;
+    for (size_t i = 0; i < N; ++i) {
+        (i64_valid_[i] ? valid_rows : null_rows).push_back(i);
+    }
+    ASSERT_GE(null_rows.size(), 2u);
+    ASSERT_GE(valid_rows.size(), 2u);
+
+    OffsetVector offsets{
+        static_cast<int32_t>(null_rows[0]),
+        static_cast<int32_t>(valid_rows[0]),
+        static_cast<int32_t>(null_rows[1]),
+        static_cast<int32_t>(valid_rows[1]),
+    };
+    TargetBitmap candidate_mask(offsets.size(), false);
+    candidate_mask.set(1);
+    candidate_mask.set(2);
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(i64_col_[valid_rows[0]]);
+    expr::TypedExprPtr logical = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(i64_fid_, DataType::INT64, {}, true),
+        proto::plan::OpType::Equal,
+        value);
+
+    auto growing = BuildGrowing();
+    auto sealed = BuildSealed();
+    for (const SegmentInternalInterface* segment :
+         {static_cast<const SegmentInternalInterface*>(growing.get()),
+          static_cast<const SegmentInternalInterface*>(sealed.get())}) {
+        auto result =
+            EvalPhysical(segment, logical, candidate_mask.clone(), &offsets);
+        ASSERT_NE(result, nullptr);
+        BitsetTypeView bits(result->GetRawData(), result->size());
+        BitsetTypeView valid(result->GetValidRawData(), result->size());
+        ASSERT_EQ(result->size(), offsets.size());
+
+        EXPECT_FALSE(bits[0]);
+        EXPECT_TRUE(valid[0])
+            << "an excluded NULL candidate must remain untouched";
+        EXPECT_TRUE(bits[1]);
+        EXPECT_TRUE(valid[1]);
+        EXPECT_FALSE(bits[2]);
+        EXPECT_FALSE(valid[2]) << "an active NULL candidate is invalid";
+        EXPECT_FALSE(bits[3]);
+        EXPECT_TRUE(valid[3])
+            << "an excluded valid candidate must remain untouched";
+    }
+}
+
+TEST_F(BloomFilterExprEvalTest,
        JsonBitmapInputLeavesExcludedNullCandidatesUntouched) {
     std::vector<std::string> rows(N, R"({"uid": 5})");
     FixedVector<bool> validity(N, true);

@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "common/VirtualPK.h"
+#include "mmap/ChunkedColumnFilter.h"
 #include "mmap/VirtualPKChunkedColumn.h"
 
 using namespace milvus;
@@ -128,6 +129,39 @@ class VirtualPKChunkedColumnTest : public ::testing::Test {
     }
 };
 
+class TrackingVirtualPKChunkedColumn : public VirtualPKChunkedColumn {
+ public:
+    using VirtualPKChunkedColumn::Take;
+
+    TrackingVirtualPKChunkedColumn(int64_t segment_id, int64_t num_rows)
+        : VirtualPKChunkedColumn(segment_id, num_rows) {
+    }
+
+    PinWrapper<Chunk*>
+    GetChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
+        ++get_chunk_calls;
+        return VirtualPKChunkedColumn::GetChunk(op_ctx, chunk_id);
+    }
+
+    TakeCellPin
+    MakeTakeCellPin(milvus::OpContext*) const override {
+        ++make_take_pin_calls;
+        return {};
+    }
+
+ protected:
+    std::unique_ptr<ColumnPlanner>
+    BuildPlanner() const override {
+        ++build_planner_calls;
+        return ChunkedColumnInterface::BuildPlanner();
+    }
+
+ public:
+    mutable int get_chunk_calls{0};
+    mutable int make_take_pin_calls{0};
+    mutable int build_planner_calls{0};
+};
+
 TEST_F(VirtualPKChunkedColumnTest, BasicProperties) {
     int64_t segment_id = 12345;
     int64_t num_rows = 1000;
@@ -173,6 +207,185 @@ TEST_F(VirtualPKChunkedColumnTest, BulkPrimitiveValueAt) {
         int64_t expected = GetVirtualPK(segment_id, offsets[i]);
         ASSERT_EQ(results[i], expected);
     }
+}
+
+TEST_F(VirtualPKChunkedColumnTest,
+       Int64VirtualPrimaryKeyUsesFixedWidthScanCursor) {
+    constexpr int64_t segment_id = 200;
+    constexpr int64_t num_rows = 5;
+    VirtualPKChunkedColumn column(segment_id, num_rows);
+
+    auto cursor =
+        column.Scan(nullptr,
+                    ChunkedColumnInterface::ScanOptions::ForData(
+                        1, ChunkedColumnInterface::TargetType::Int64));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(
+        cursor->Next(num_rows + 10,
+                     ChunkedColumnInterface::ScanReadMode::DataAndValidity,
+                     &batch));
+    EXPECT_EQ(batch.row_id_start, 1);
+    EXPECT_EQ(batch.size, num_rows - 1);
+    EXPECT_EQ(batch.values.target_type,
+              ChunkedColumnInterface::TargetType::Int64);
+    const auto* values = batch.values.data_as<int64_t>();
+    for (int64_t i = 0; i < batch.size; ++i) {
+        EXPECT_EQ(values[i], GetVirtualPK(segment_id, i + 1));
+    }
+    EXPECT_FALSE(cursor->Next(
+        1024, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+}
+
+TEST_F(VirtualPKChunkedColumnTest,
+       ScanAndTakeGenerateRequestedRowsWithoutChunkAccess) {
+    constexpr int64_t segment_id = 200;
+    constexpr int64_t num_rows = 20;
+    TrackingVirtualPKChunkedColumn column(segment_id, num_rows);
+
+    const int64_t* no_offsets = nullptr;
+    auto empty_take =
+        column.Take(nullptr,
+                    ChunkedColumnInterface::TakeOptions{
+                        ChunkedColumnInterface::OffsetView::From(no_offsets, 0),
+                        ChunkedColumnInterface::TargetType::Int64});
+    ASSERT_NE(empty_take, nullptr);
+    EXPECT_EQ(empty_take->Size(), 0);
+    EXPECT_TRUE(empty_take->IsOwned());
+    auto empty_owned = empty_take->GetOwn();
+    EXPECT_EQ(empty_owned.size, 0);
+    EXPECT_NE(empty_owned.owner, nullptr);
+
+    const std::vector<int64_t> offsets{7, 1, 7, 19};
+    auto take = column.Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::TargetType::Int64});
+    ASSERT_NE(take, nullptr);
+    ASSERT_EQ(take->Size(), static_cast<int64_t>(offsets.size()));
+    EXPECT_TRUE(take->IsOwned());
+    for (int64_t i = 0; i < take->Size(); ++i) {
+        EXPECT_TRUE(take->IsValid(i));
+        const auto item = take->Get<int64_t>(i);
+        ASSERT_TRUE(item.value.has_value());
+        EXPECT_EQ(*item.value, GetVirtualPK(segment_id, offsets[i]));
+    }
+    auto owned = take->GetOwn();
+    ASSERT_EQ(owned.size, static_cast<int64_t>(offsets.size()));
+    const auto* owned_values = owned.values.data_as<int64_t>();
+    for (int64_t i = 0; i < owned.size; ++i) {
+        EXPECT_EQ(owned_values[i], GetVirtualPK(segment_id, offsets[i]));
+    }
+
+    auto cursor =
+        column.Scan(nullptr,
+                    ChunkedColumnInterface::ScanOptions::ForData(
+                        3, ChunkedColumnInterface::TargetType::Int64));
+    ASSERT_NE(cursor, nullptr);
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        5, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    ASSERT_EQ(batch.row_id_start, 3);
+    ASSERT_EQ(batch.size, 5);
+    ASSERT_FALSE(batch.validity);
+    const auto* values = batch.values.data_as<int64_t>();
+    for (int64_t i = 0; i < batch.size; ++i) {
+        EXPECT_EQ(values[i], GetVirtualPK(segment_id, 3 + i));
+    }
+
+    EXPECT_THROW(
+        cursor->Next(
+            2, ChunkedColumnInterface::ScanReadMode::ValidityOnly, &batch),
+        std::exception);
+
+    EXPECT_EQ(column.get_chunk_calls, 0);
+    EXPECT_EQ(column.make_take_pin_calls, 0);
+    EXPECT_EQ(column.build_planner_calls, 0);
+}
+
+TEST_F(VirtualPKChunkedColumnTest,
+       ScanAndTakeApplyFilterWithoutExposingPhysicalCells) {
+    constexpr int64_t segment_id = 200;
+    constexpr int64_t num_rows = 20;
+    VirtualPKChunkedColumn column(segment_id, num_rows);
+    std::vector<int64_t> visited_cells;
+    auto filter = std::make_shared<const detail::ColumnFilter>(
+        detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+        [&](int64_t cell_id) {
+            visited_cells.emplace_back(cell_id);
+            return true;
+        });
+
+    auto scan_options = ChunkedColumnInterface::ScanOptions::ForData(
+        2, ChunkedColumnInterface::TargetType::Int64);
+    scan_options.filter = filter;
+    auto cursor = column.Scan(nullptr, scan_options);
+    ASSERT_NE(cursor, nullptr);
+    EXPECT_TRUE(visited_cells.empty());
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        3, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 2);
+    EXPECT_EQ(batch.size, 3);
+    EXPECT_TRUE(batch.data_skipped);
+    EXPECT_TRUE(batch.values.empty());
+
+    const int64_t* no_offsets = nullptr;
+    auto empty_take =
+        column.Take(nullptr,
+                    ChunkedColumnInterface::TakeOptions{
+                        ChunkedColumnInterface::OffsetView::From(no_offsets, 0),
+                        ChunkedColumnInterface::TargetType::Int64,
+                        filter});
+    ASSERT_NE(empty_take, nullptr);
+    EXPECT_EQ(empty_take->Size(), 0);
+    EXPECT_EQ(visited_cells, (std::vector<int64_t>{0}));
+
+    const std::vector<int64_t> offsets{7, 1, 7};
+    auto take = column.Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::TargetType::Int64,
+            filter});
+    ASSERT_NE(take, nullptr);
+    ASSERT_EQ(take->Size(), static_cast<int64_t>(offsets.size()));
+    for (int64_t i = 0; i < take->Size(); ++i) {
+        EXPECT_TRUE(take->IsValid(i));
+        const auto item = take->Get<int64_t>(i);
+        EXPECT_TRUE(item.data_skipped);
+        EXPECT_FALSE(item.value.has_value());
+    }
+    const auto owned = take->GetOwn();
+    EXPECT_TRUE(owned.values.empty());
+    ASSERT_TRUE(owned.data_skipped);
+    for (int64_t i = 0; i < owned.size; ++i) {
+        EXPECT_TRUE(owned.data_skipped[i]);
+    }
+    EXPECT_EQ(visited_cells, (std::vector<int64_t>{0, 0}));
+}
+
+TEST_F(VirtualPKChunkedColumnTest,
+       NoneTargetCanOpenUniformValidityCursorButCannotReadData) {
+    VirtualPKChunkedColumn column(/*segment_id=*/200, /*num_rows=*/5);
+    auto cursor = column.Scan(nullptr,
+                              ChunkedColumnInterface::ScanOptions::ForData(
+                                  0, ChunkedColumnInterface::TargetType::None));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    EXPECT_THROW(
+        cursor->Next(
+            1, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch),
+        std::exception);
+    EXPECT_THROW(
+        cursor->Next(
+            1, ChunkedColumnInterface::ScanReadMode::ValidityOnly, &batch),
+        std::exception);
 }
 
 TEST_F(VirtualPKChunkedColumnTest, BulkValueAt) {
@@ -307,15 +520,38 @@ TEST_F(VirtualPKChunkedColumnTest, SupportedOperations) {
 
     VirtualPKChunkedColumn column(segment_id, num_rows);
 
-    // DataOfChunk and Span are supported via EnsureMaterialized
+    // Chunk-backed access remains available for legacy Chunk consumers.
     EXPECT_NO_THROW(column.DataOfChunk(nullptr, 0));
     EXPECT_NO_THROW(column.Span(nullptr, 0));
+    EXPECT_NO_THROW(column.GetChunk(nullptr, 0));
+    EXPECT_NO_THROW(column.GetAllChunks(nullptr));
 
     // Verify DataOfChunk returns valid data
     auto data = column.DataOfChunk(nullptr, 0);
     auto pks = reinterpret_cast<const int64_t*>(data.get());
     ASSERT_NE(pks, nullptr);
     ASSERT_EQ(pks[0], GetVirtualPK(GetTruncatedSegmentID(segment_id), 0));
+
+    auto chunks = column.GetAllChunks(nullptr);
+    ASSERT_EQ(chunks.size(), 1);
+    ASSERT_EQ(chunks[0].get()->RowNums(), num_rows);
+}
+
+TEST_F(VirtualPKChunkedColumnTest, MaterializedChunkKeepsVirtualPkBufferAlive) {
+    constexpr int64_t segment_id = 100;
+    constexpr int64_t num_rows = 50;
+    auto pinned_chunk = [=]() {
+        auto column =
+            std::make_shared<VirtualPKChunkedColumn>(segment_id, num_rows);
+        return column->GetChunk(nullptr, 0);
+    }();
+
+    ASSERT_NE(pinned_chunk.get(), nullptr);
+    for (int64_t i = 0; i < num_rows; ++i) {
+        EXPECT_EQ(
+            *reinterpret_cast<const int64_t*>(pinned_chunk.get()->ValueAt(i)),
+            GetVirtualPK(segment_id, i));
+    }
 }
 
 TEST_F(VirtualPKChunkedColumnTest, UnsupportedOperations) {
@@ -324,9 +560,6 @@ TEST_F(VirtualPKChunkedColumnTest, UnsupportedOperations) {
 
     VirtualPKChunkedColumn column(segment_id, num_rows);
 
-    // These operations should throw
-    EXPECT_THROW(column.GetChunk(nullptr, 0), std::exception);
-    EXPECT_THROW(column.GetAllChunks(nullptr), std::exception);
     EXPECT_THROW(column.StringViews(nullptr, 0, std::nullopt), std::exception);
     EXPECT_THROW(column.ArrayViews(nullptr, 0, std::nullopt), std::exception);
 }

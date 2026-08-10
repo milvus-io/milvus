@@ -1152,6 +1152,30 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
             ExecuteQueryExpr(plan, seg.get(), json_strs.size(), MAX_TIMESTAMP);
 
         EXPECT_TRUE(result == expect_res);
+
+        // Offset execution uses Raw Take even when the dense path can use the
+        // JSON index. NULL rows must retain the evaluator's EXISTS/NOT EXISTS
+        // semantics instead of inheriting field validity from the Take
+        // adapter. Keep the offsets unordered and duplicated to exercise the
+        // positional Take contract as well.
+        auto full_result = milvus::test::gen_filter_res(
+            plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
+        exec::OffsetVector offsets = {8, 0, 15, 7, 8};
+        auto offset_result = milvus::test::gen_filter_res(
+            plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP, &offsets);
+        TargetBitmapView full_values(full_result->GetRawData(),
+                                     full_result->size());
+        TargetBitmapView full_validity(full_result->GetValidRawData(),
+                                       full_result->size());
+        TargetBitmapView offset_values(offset_result->GetRawData(),
+                                       offset_result->size());
+        TargetBitmapView offset_validity(offset_result->GetValidRawData(),
+                                         offset_result->size());
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            const auto row = offsets[i];
+            EXPECT_EQ(offset_values[i], full_values[row]) << "row " << row;
+            EXPECT_EQ(offset_validity[i], full_validity[row]) << "row " << row;
+        }
     }
 }
 

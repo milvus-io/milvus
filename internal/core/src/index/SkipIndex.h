@@ -185,11 +185,26 @@ class SkipIndex {
                            T>;
 
  public:
+    // Exactly one metrics source is registered for a field. LoadedPayload is
+    // a legacy Raw fallback, not an extra statistics layer on top of
+    // PreloadedStatistics.
+    enum class MetricsSource {
+        None,
+        // Built from file/footer statistics available at segment load, so the
+        // planner may consult it before pinning data Cells.
+        PreloadedStatistics,
+        // Used when legacy Raw data has no independently available
+        // statistics. Metrics are derived lazily from an already loaded Chunk
+        // and therefore can only skip post-pin predicate evaluation.
+        LoadedPayload,
+    };
+
     std::shared_ptr<SkipIndex>
     Clone() const {
         auto cloned = std::make_shared<SkipIndex>();
         std::shared_lock lck(mutex_);
         cloned->fieldChunkMetrics_ = fieldChunkMetrics_;
+        cloned->metricsSources_ = metricsSources_;
         return cloned;
     }
 
@@ -197,6 +212,14 @@ class SkipIndex {
     Erase(FieldId field_id) {
         std::unique_lock lck(mutex_);
         fieldChunkMetrics_.erase(field_id);
+        metricsSources_.erase(field_id);
+    }
+
+    MetricsSource
+    GetMetricsSource(FieldId field_id) const {
+        std::shared_lock lck(mutex_);
+        auto it = metricsSources_.find(field_id);
+        return it == metricsSources_.end() ? MetricsSource::None : it->second;
     }
 
     template <typename T>
@@ -469,6 +492,7 @@ class SkipIndex {
 
         std::unique_lock lck(mutex_);
         fieldChunkMetrics_[field_id] = std::move(cache_slot);
+        metricsSources_[field_id] = MetricsSource::LoadedPayload;
     }
 
     void
@@ -486,6 +510,7 @@ class SkipIndex {
 
         std::unique_lock lck(mutex_);
         fieldChunkMetrics_[field_id] = std::move(cache_slot);
+        metricsSources_[field_id] = MetricsSource::PreloadedStatistics;
     }
 
  private:
@@ -520,6 +545,7 @@ class SkipIndex {
         FieldId,
         std::shared_ptr<cachinglayer::CacheSlot<index::FieldChunkMetrics>>>
         fieldChunkMetrics_;
+    std::unordered_map<FieldId, MetricsSource> metricsSources_;
     mutable std::shared_mutex mutex_;
 };
 }  // namespace milvus

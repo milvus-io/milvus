@@ -3924,6 +3924,7 @@ type queryNodeConfig struct {
 	MultipleChunkedEnable              ParamItem `refreshable:"false"` // Deprecated
 	EnableGeometryCache                ParamItem `refreshable:"false"`
 	EnableGISSplitFusion               ParamItem `refreshable:"false"`
+	ScanCursorOwnsPin                  ParamItem `refreshable:"false"`
 
 	TieredWarmupScalarField         ParamItem `refreshable:"true"`
 	TieredWarmupScalarIndex         ParamItem `refreshable:"true"`
@@ -4684,6 +4685,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.EnableGISSplitFusion.Init(base.mgr)
+
+	p.ScanCursorOwnsPin = ParamItem{
+		Key:          "queryNode.segcore.scanCursorOwnsPin",
+		Version:      "2.6.6",
+		DefaultValue: "false",
+		Doc:          "Use cursor-owned rather than result-owned Cell pins for scalar Scan",
+		Export:       true,
+	}
+	p.ScanCursorOwnsPin.Init(base.mgr)
 
 	p.InterimIndexNProbe = ParamItem{
 		Key:     "queryNode.segcore.interimIndex.nprobe",

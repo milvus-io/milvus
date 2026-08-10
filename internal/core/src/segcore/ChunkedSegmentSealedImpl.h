@@ -614,6 +614,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                  int64_t count,
                                  TargetBitmapView valid_result) const override;
 
+    std::shared_ptr<ChunkedColumnInterface>
+    GetChunkedColumn(FieldId field_id) const override {
+        return get_column(field_id);
+    }
+
+    std::pair<std::shared_ptr<ChunkedColumnInterface>,
+              std::shared_ptr<const SkipIndex>>
+    GetDataScanResources(FieldId field_id) const override;
+
  protected:
     // blob and row_count
     PinWrapper<SpanBase>
@@ -2468,6 +2477,33 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<const PublishedSegmentState>& current,
         StateDelta& final_delta,
         Verifier&& verifier) {
+        TestStageLoadFieldDataThenPublish(field_id,
+                                          column,
+                                          num_rows,
+                                          data_type,
+                                          schema_snapshot,
+                                          std::move(runtime),
+                                          staged_state,
+                                          current,
+                                          final_delta,
+                                          /*is_proxy_column=*/false,
+                                          std::forward<Verifier>(verifier));
+    }
+
+    template <typename Verifier>
+    void
+    TestStageLoadFieldDataThenPublish(
+        FieldId field_id,
+        const std::shared_ptr<ChunkedColumnInterface>& column,
+        size_t num_rows,
+        DataType data_type,
+        const SchemaPtr& schema_snapshot,
+        std::shared_ptr<RuntimeResourceState> runtime,
+        PublishedSegmentState* staged_state,
+        const std::shared_ptr<const PublishedSegmentState>& current,
+        StateDelta& final_delta,
+        bool is_proxy_column,
+        Verifier&& verifier) {
         std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
         StagedStateCommitter committer(*this, runtime.get(), staged_state);
         load_field_data_common(field_id,
@@ -2475,7 +2511,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                num_rows,
                                data_type,
                                /*enable_mmap=*/false,
-                               /*is_proxy_column=*/false,
+                               is_proxy_column,
                                *current->load_info,
                                schema_snapshot,
                                runtime.get(),

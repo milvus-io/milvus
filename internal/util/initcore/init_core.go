@@ -902,6 +902,12 @@ func InitGISSplitFusion(params *paramtable.ComponentParam) error {
 	return nil
 }
 
+func InitScanPinPolicy(params *paramtable.ComponentParam) error {
+	cursorOwnsPin := C.bool(params.QueryNodeCfg.ScanCursorOwnsPin.GetAsBool())
+	C.SegcoreSetScanCursorOwnsPin(cursorOwnsPin)
+	return nil
+}
+
 func CleanRemoteChunkManager() {
 	C.CleanRemoteChunkManagerSingleton()
 }
