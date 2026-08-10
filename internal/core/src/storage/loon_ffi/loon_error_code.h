@@ -58,9 +58,18 @@ LoonErrCodeToErrorCode(int err_code) {
             break;
     }
 
-    // Outside the low band: an ExtendStatusCode. Let the producer classify it.
-    return milvus_storage::ToSegcoreErrorCode(
-        static_cast<milvus_storage::ExtendStatusCode>(err_code));
+    // Outside the hand-classified low band: if it is an ExtendStatusCode,
+    // the producer's table classifies it; otherwise fall back to the
+    // producer's own retryability probe rather than guessing -- an unknown
+    // transient code must stay retriable and an unknown permanent one must
+    // not masquerade as transient.
+    auto extend = milvus_storage::ExtendStatusCodeFromInt(err_code);
+    if (extend.has_value()) {
+        return milvus_storage::ToSegcoreErrorCode(extend.value());
+    }
+    return loon_ffi_is_retryable_errcode(err_code) != 0
+               ? ErrorCode::StorageTransientError
+               : ErrorCode::StorageError;
 }
 
 }  // namespace milvus::storage
