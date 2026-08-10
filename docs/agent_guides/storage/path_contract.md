@@ -34,6 +34,9 @@ Explore is a separate layout: local temporary manifests live under
   consuming boundary.
 - Cleanup uses the same layout as the producer. Preserve remote keys exactly:
   `.`, `..`, and repeated separators are literal object-key components.
+- Vortex local mmap files under `<mmap root>/vortex/` are ephemeral caches. The
+  sparse filesystem unlinks its pathname on release; retained readers and
+  buffers keep the open descriptor/mapping alive until their own release.
 
 ## Manifest index artifacts
 
