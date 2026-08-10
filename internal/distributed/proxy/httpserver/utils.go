@@ -2847,7 +2847,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	return queryResp, nil
 }
 
-func buildSearchResp(results *schemapb.SearchResultData, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) ([]map[string]interface{}, error) {
+func buildSearchResp(results *schemapb.SearchResultData, requestedOutputFields []string, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) ([]map[string]interface{}, error) {
 	if results == nil {
 		return nil, merr.WrapErrServiceInternalMsg("search result is nil")
 	}
@@ -2877,7 +2877,7 @@ func buildSearchResp(results *schemapb.SearchResultData, enableInt64 bool, colle
 		)
 	}
 
-	if containsString(results.GetOutputFields(), HTTPReturnElementOffset) {
+	if containsString(requestedOutputFields, HTTPReturnElementOffset) || containsString(results.GetOutputFields(), HTTPReturnElementOffset) {
 		return nil, merr.WrapErrParameterInvalidMsg(
 			"field %q conflicts with the reserved REST search element offset field",
 			HTTPReturnElementOffset,

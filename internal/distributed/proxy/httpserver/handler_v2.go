@@ -1841,6 +1841,13 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	})
 }
 
+func invalidSearchResultStatus(buildErr error) *commonpb.Status {
+	status := merr.Status(merr.ErrInvalidSearchResult)
+	status.Reason += ", error: " + buildErr.Error()
+	status.Detail = status.Reason
+	return status
+}
+
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*SearchReqV2)
 	req := &milvuspb.SearchRequest{
@@ -2059,13 +2066,14 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, buildErr := buildSearchResp(searchResp.Results, allowJS, collSchema)
+			outputData, buildErr := buildSearchResp(searchResp.Results, httpReq.OutputFields, allowJS, collSchema)
 			if buildErr != nil {
-				err = buildErr
+				searchResp.Status = invalidSearchResultStatus(buildErr)
+				err = merr.Error(searchResp.Status)
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(buildErr))
 				HTTPReturn(c, http.StatusOK, gin.H{
-					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + buildErr.Error(),
+					HTTPReturnCode:    searchResp.Status.GetCode(),
+					HTTPReturnMessage: searchResp.Status.GetReason(),
 				})
 			} else {
 				if len(searchResp.Results.Recalls) > 0 {
@@ -2232,13 +2240,14 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, buildErr := buildSearchResp(searchResp.Results, allowJS, collSchema)
+			outputData, buildErr := buildSearchResp(searchResp.Results, httpReq.OutputFields, allowJS, collSchema)
 			if buildErr != nil {
-				err = buildErr
+				searchResp.Status = invalidSearchResultStatus(buildErr)
+				err = merr.Error(searchResp.Status)
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(buildErr))
 				HTTPReturn(c, http.StatusOK, gin.H{
-					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + buildErr.Error(),
+					HTTPReturnCode:    searchResp.Status.GetCode(),
+					HTTPReturnMessage: searchResp.Status.GetReason(),
 				})
 			} else {
 				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {

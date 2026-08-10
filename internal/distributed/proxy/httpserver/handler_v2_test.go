@@ -1085,22 +1085,27 @@ func TestSearchV2RejectsElementOffsetFieldCollision(t *testing.T) {
 		requestBody string
 		method      string
 		hybrid      bool
+		mismatched  bool
+		expected    string
 	}{
 		{
 			name:        "search",
 			path:        versionalV2(EntityCategory, SearchAction),
 			requestBody: `{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":1}`,
 			method:      "Search",
+			expected:    `field "offset" conflicts with the reserved REST search element offset field`,
 		},
 		{
-			name: "hybrid search",
+			name: "hybrid search with mismatched element offsets",
 			path: versionalV2(EntityCategory, HybridSearchAction),
 			requestBody: `{"collectionName":"book","search":[` +
 				`{"data":[[0.1,0.2]],"annsField":"book_intro","metricType":"L2","limit":1},` +
 				`{"data":[[0.1,0.2]],"annsField":"book_intro","metricType":"L2","limit":1}],` +
 				`"rerank":{"strategy":"weighted","params":{"weights":[0.5,0.5]}},"limit":1}`,
-			method: "HybridSearch",
-			hybrid: true,
+			method:     "HybridSearch",
+			hybrid:     true,
+			mismatched: true,
+			expected:   "element_indices length (0) does not match row count (1)",
 		},
 	}
 
@@ -1109,7 +1114,9 @@ func TestSearchV2RejectsElementOffsetFieldCollision(t *testing.T) {
 			mp := mocks.NewMockProxy(t)
 			testEngine := initHTTPServerV2(mp, false)
 			schema := generateCollectionSchema(schemapb.DataType_Int64, false, false)
-			schema.Fields[0].Name = HTTPReturnElementOffset
+			if !testCase.mismatched {
+				schema.Fields[0].Name = HTTPReturnElementOffset
+			}
 			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
 				Schema:         schema,
@@ -1127,6 +1134,9 @@ func TestSearchV2RejectsElementOffsetFieldCollision(t *testing.T) {
 					ElementIndices: &schemapb.LongArray{Data: []int64{0}},
 				},
 			}
+			if testCase.mismatched {
+				searchResult.Results.ElementIndices = &schemapb.LongArray{}
+			}
 			if testCase.hybrid {
 				mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(searchResult, nil).Once()
 			} else {
@@ -1136,8 +1146,8 @@ func TestSearchV2RejectsElementOffsetFieldCollision(t *testing.T) {
 			failureCounter := metrics.ProxyFunctionCall.WithLabelValues(
 				paramtable.GetStringNodeID(),
 				testCase.method,
-				metrics.RejectedLabel,
-				metrics.CauseUser,
+				metrics.FailLabel,
+				metrics.CauseSystem,
 				DefaultDbName,
 				DefaultCollectionName,
 			)
@@ -1151,10 +1161,84 @@ func TestSearchV2RejectsElementOffsetFieldCollision(t *testing.T) {
 			var response ReturnErrMsg
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 			require.Equal(t, merr.Code(merr.ErrInvalidSearchResult), response.Code)
-			require.Contains(t, response.Message, `field "offset" conflicts with the reserved REST search element offset field`)
+			require.Contains(t, response.Message, testCase.expected)
+			require.Equal(t, response.Code, searchResult.GetStatus().GetCode())
+			require.Equal(t, response.Message, searchResult.GetStatus().GetReason())
 			require.Equal(t, beforeFailures+1, testutil.ToFloat64(failureCounter))
 		})
 	}
+}
+
+func TestSearchV2RejectsRequestedElementOffsetAfterReconstruction(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	schema := generateCollectionSchema(schemapb.DataType_Int64, false, true)
+	schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+		{
+			FieldID: common.StartOfUserFieldID + 3,
+			Name:    "chunks",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:     common.StartOfUserFieldID + 4,
+					Name:        "embeddings",
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+					},
+				},
+			},
+		},
+	}
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         schema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	searchResult := &milvuspb.SearchResults{
+		Status: commonSuccessStatus,
+		Results: &schemapb.SearchResultData{
+			NumQueries:   1,
+			TopK:         1,
+			Topks:        []int64{1},
+			OutputFields: []string{common.MetaFieldName},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_JSON,
+					FieldName: common.MetaFieldName,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(`{}`)}}},
+					}},
+					IsDynamic: true,
+				},
+			},
+			Ids:            generateIDs(schemapb.DataType_Int64, 1),
+			Scores:         DefaultScores[:1],
+			ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+		},
+	}
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(searchResult, nil).Once()
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		versionalV2(EntityCategory, SearchAction),
+		bytes.NewReader([]byte(`{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":1,"outputFields":["offset"]}`)),
+	)
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var response ReturnErrMsg
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Equal(t, merr.Code(merr.ErrInvalidSearchResult), response.Code)
+	require.Contains(t, response.Message, `field "offset" conflicts with the reserved REST search element offset field`)
+	require.Equal(t, response.Code, searchResult.GetStatus().GetCode())
+	require.Equal(t, response.Message, searchResult.GetStatus().GetReason())
 }
 
 func TestDocInDocOutSearch(t *testing.T) {
