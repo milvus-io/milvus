@@ -117,6 +117,9 @@ func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema)
 
 	placeholder := phg.Placeholders[0]
 	fieldType := fieldSchema.GetDataType()
+	if fieldType == schemapb.DataType_ArrayOfVector {
+		fieldType = fieldSchema.GetElementType()
+	}
 
 	// Check if types already match
 	if isVectorTypeMatch(placeholder.Type, fieldType) {
