@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <future>
 #include <memory>
 #include <thread>
 #include <type_traits>
@@ -87,10 +88,10 @@ TEST_F(TransientMemoryBudgetAsyncTest, LeaseDestructorReleasesBudget) {
     {
         auto acquired = budget_.AcquireAsync(1, TransientBudgetPriority::High);
         auto lease = folly::coro::blockingWait(std::move(acquired));
-        EXPECT_FALSE(budget_.TryAcquire(1));
+        EXPECT_FALSE(budget_.TryAcquire(1, TransientBudgetPriority::High));
     }
 
-    EXPECT_TRUE(budget_.TryAcquire(1));
+    EXPECT_TRUE(budget_.TryAcquire(1, TransientBudgetPriority::High));
     budget_.Release(1);
 }
 
@@ -141,7 +142,7 @@ TEST_F(TransientMemoryBudgetAsyncTest, RejectsPreCancelledAdmission) {
     ASSERT_TRUE(cancelled.isReady());
     EXPECT_THROW(folly::coro::blockingWait(std::move(cancelled)),
                  folly::OperationCancelled);
-    EXPECT_TRUE(budget_.TryAcquire(1));
+    EXPECT_TRUE(budget_.TryAcquire(1, TransientBudgetPriority::High));
     budget_.Release(1);
 }
 
@@ -234,7 +235,7 @@ TEST_F(TransientMemoryBudgetAsyncTest,
         }
         executor.drain();
 
-        ASSERT_TRUE(budget_.TryAcquire(1));
+        ASSERT_TRUE(budget_.TryAcquire(1, TransientBudgetPriority::High));
         budget_.Release(1);
     }
 }
@@ -262,7 +263,7 @@ TEST_F(TransientMemoryBudgetAsyncTest, ReleaseAndCancellationRaceResolvesOnce) {
         } catch (const folly::OperationCancelled&) {
         }
 
-        ASSERT_TRUE(budget_.TryAcquire(1));
+        ASSERT_TRUE(budget_.TryAcquire(1, TransientBudgetPriority::High));
         budget_.Release(1);
     }
 }
@@ -324,11 +325,146 @@ TEST_F(TransientMemoryBudgetAsyncTest,
     running_lease.Release();
 
     ASSERT_TRUE(waiting.isReady());
-    EXPECT_FALSE(budget_.TryAcquire(1));
+    EXPECT_FALSE(budget_.TryAcquire(1, TransientBudgetPriority::High));
     auto waiting_lease = folly::coro::blockingWait(std::move(waiting));
     waiting_lease.Release();
-    EXPECT_TRUE(budget_.TryAcquire(1));
+    EXPECT_TRUE(budget_.TryAcquire(1, TransientBudgetPriority::High));
     budget_.Release(1);
+}
+
+TEST_F(TransientMemoryBudgetAsyncTest,
+       HighPriorityLegacyAdmissionBypassesQueuedLowWaiter) {
+    budget_.SetCapacityBytes(2);
+
+    auto running = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto running_lease = folly::coro::blockingWait(std::move(running));
+    auto low_waiting = budget_.AcquireAsync(2, TransientBudgetPriority::Low);
+    ASSERT_FALSE(low_waiting.isReady());
+
+    folly::CancellationToken token;
+    EXPECT_TRUE(budget_.AcquireUntil(1, TransientBudgetPriority::High, token));
+    budget_.Release(1);
+    running_lease.Release();
+
+    ASSERT_TRUE(low_waiting.isReady());
+    auto low_lease = folly::coro::blockingWait(std::move(low_waiting));
+    low_lease.Release();
+}
+
+TEST_F(TransientMemoryBudgetAsyncTest,
+       LowPriorityLegacyAdmissionCannotBypassQueuedLowWaiter) {
+    budget_.SetCapacityBytes(2);
+
+    auto running = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto running_lease = folly::coro::blockingWait(std::move(running));
+    auto low_waiting = budget_.AcquireAsync(2, TransientBudgetPriority::Low);
+    ASSERT_FALSE(low_waiting.isReady());
+
+    EXPECT_FALSE(budget_.TryAcquire(1, TransientBudgetPriority::Low));
+    running_lease.Release();
+
+    ASSERT_TRUE(low_waiting.isReady());
+    auto low_lease = folly::coro::blockingWait(std::move(low_waiting));
+    low_lease.Release();
+}
+
+TEST_F(TransientMemoryBudgetAsyncTest,
+       QueuedHighLegacyAdmissionBlocksNewLowAsyncAdmission) {
+    budget_.SetCapacityBytes(2);
+
+    auto running = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto running_lease = folly::coro::blockingWait(std::move(running));
+    folly::CancellationSource cancellation_source;
+    auto high_legacy = std::async(
+        std::launch::async, [&, token = cancellation_source.getToken()]() {
+            return budget_.AcquireUntil(
+                2, TransientBudgetPriority::High, token);
+        });
+
+    bool high_registered = false;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (!budget_.TryAcquire(1, TransientBudgetPriority::Low)) {
+            high_registered = true;
+            break;
+        }
+        budget_.Release(1);
+        std::this_thread::yield();
+    }
+    if (!high_registered) {
+        cancellation_source.requestCancellation();
+        ASSERT_EQ(high_legacy.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        EXPECT_FALSE(high_legacy.get());
+        FAIL() << "high-priority legacy waiter was not tracked";
+    }
+
+    auto low_waiting = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    ASSERT_FALSE(low_waiting.isReady());
+    running_lease.Release();
+
+    auto high_status = high_legacy.wait_for(std::chrono::seconds(2));
+    bool high_won = high_status == std::future_status::ready;
+    if (!high_won && low_waiting.isReady()) {
+        auto low_lease = folly::coro::blockingWait(std::move(low_waiting));
+        low_lease.Release();
+        high_status = high_legacy.wait_for(std::chrono::seconds(2));
+    }
+
+    ASSERT_EQ(high_status, std::future_status::ready);
+    EXPECT_TRUE(high_legacy.get());
+    budget_.Release(2);
+    EXPECT_TRUE(high_won);
+
+    if (high_won) {
+        ASSERT_TRUE(low_waiting.isReady());
+        auto low_lease = folly::coro::blockingWait(std::move(low_waiting));
+        low_lease.Release();
+    }
+}
+
+TEST_F(TransientMemoryBudgetAsyncTest,
+       CancellingHighLegacyAdmissionUnblocksLowAsyncAdmission) {
+    budget_.SetCapacityBytes(2);
+
+    auto running = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto running_lease = folly::coro::blockingWait(std::move(running));
+    folly::CancellationSource cancellation_source;
+    auto high_legacy = std::async(
+        std::launch::async, [&, token = cancellation_source.getToken()]() {
+            return budget_.AcquireUntil(
+                2, TransientBudgetPriority::High, token);
+        });
+
+    bool high_registered = false;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (!budget_.TryAcquire(1, TransientBudgetPriority::Low)) {
+            high_registered = true;
+            break;
+        }
+        budget_.Release(1);
+        std::this_thread::yield();
+    }
+    if (!high_registered) {
+        cancellation_source.requestCancellation();
+        ASSERT_EQ(high_legacy.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        EXPECT_FALSE(high_legacy.get());
+        FAIL() << "high-priority legacy waiter was not tracked";
+    }
+
+    auto low_waiting = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    ASSERT_FALSE(low_waiting.isReady());
+    cancellation_source.requestCancellation();
+
+    ASSERT_EQ(high_legacy.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    EXPECT_FALSE(high_legacy.get());
+    ASSERT_TRUE(low_waiting.isReady());
+    auto low_lease = folly::coro::blockingWait(std::move(low_waiting));
+    low_lease.Release();
+    running_lease.Release();
 }
 
 TEST_F(TransientMemoryBudgetAsyncTest, PendingQueueOperationsScaleLinearly) {
