@@ -133,9 +133,6 @@ func (si *statsInspector) Stop() {
 
 func (si *statsInspector) reloadFromMeta() {
 	tasks := si.mt.statsTaskMeta.GetAllTasks()
-	// the collection cache is usually not filled yet at startup, and resolving
-	// it hits rootcoord, so memoize it across all recovered tasks
-	collections := newCollectionCache(si.handler)
 	for _, st := range tasks {
 		if st.GetState() != indexpb.JobState_JobStateInit &&
 			st.GetState() != indexpb.JobState_JobStateRetry &&
@@ -145,7 +142,11 @@ func (si *statsInspector) reloadFromMeta() {
 		taskSlot := int64(0)
 		segment := si.mt.GetHealthySegment(si.ctx, st.GetSegmentID())
 		if segment != nil {
-			coll := collections.get(si.ctx, segment.GetCollectionID())
+			// Only the local cache is consulted: recovery runs synchronously in
+			// Start(), so it must not load collections through rootcoord. On a
+			// cold cache the estimation falls back to the conservative segment
+			// size, which is the pre-optimization behavior.
+			coll := si.getCollection(segment.GetCollectionID())
 			taskSlot = calculateStatsTaskSlot(si.estimateStatsTaskSize(coll, segment, st.GetSubJobType()))
 		}
 		si.scheduler.Enqueue(newStatsTask(
@@ -494,7 +495,7 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 	if err != nil {
 		return err
 	}
-	coll := resolveCollection(si.ctx, si.handler, originSegment.GetCollectionID())
+	coll := si.getCollection(originSegment.GetCollectionID())
 	originSegmentSize := si.estimateStatsTaskSize(coll, originSegment, subJobType)
 
 	taskSlot := calculateStatsTaskSlot(originSegmentSize)
