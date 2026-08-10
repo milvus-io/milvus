@@ -6439,7 +6439,7 @@ class TestQueryCount(TestMilvusClientV2Base):
         # 3. create index and load
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(
-            field_name=ct.default_float_vec_field_name, index_type="IVF_SQ8", metric_type="L2", params={"nlist": 64}
+            field_name=ct.default_float_vec_field_name, index_type="FLAT", metric_type="L2", params={}
         )
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)

@@ -86,6 +86,36 @@ func prepareDataForGroupBySearch(t *testing.T, loopInsert int, insertNi int, idx
 	return mc, ctx, schema.CollectionName
 }
 
+func prepareDataForUnsupportedIndexGroupBySearch(t *testing.T, idx index.Index) (*base.MilvusClient, context.Context, string) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*5)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	collName := common.GenRandomString("TestSearchGroupByUnsupportedIndex", 6)
+	schema := entity.NewSchema().WithName(collName).
+		WithField(entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName(common.DefaultVarcharFieldName).WithDataType(entity.FieldTypeVarChar).WithMaxLength(common.TestMaxLen)).
+		WithField(entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim))
+
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		common.CheckErr(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collName)), true)
+	})
+
+	for i := 0; i < 3; i++ {
+		hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithNb(1000).TWithStart(i*1000))
+	}
+	hp.CollPrepare.FlushData(ctx, t, mc, collName)
+	hp.CollPrepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultFloatVecFieldName: idx}))
+
+	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, common.DefaultVarcharFieldName, index.NewAutoIndex(entity.L2)))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, idxTask.Await(ctx), true)
+	hp.CollPrepare.Load(ctx, t, mc, hp.NewLoadParams(collName))
+	return mc, ctx, collName
+}
+
 // create coll with all datatype -> build all supported index
 // -> search with WithGroupByField (int* + varchar + bool
 // -> verify every top passage is the top of whole group
@@ -454,7 +484,7 @@ func TestSearchGroupByUnsupportedIndex(t *testing.T) {
 	t.Parallel()
 	for _, idx := range genUnsupportedFloatGroupByIndex() {
 		t.Run(string(idx.IndexType()), func(t *testing.T) {
-			mc, ctx, collName := prepareDataForGroupBySearch(t, 3, 1000, idx, false)
+			mc, ctx, collName := prepareDataForUnsupportedIndexGroupBySearch(t, idx)
 			// groupBy search
 			queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 			_, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, queryVec).WithGroupByField(common.DefaultVarcharFieldName).WithANNSField(common.DefaultFloatVecFieldName))
