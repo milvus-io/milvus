@@ -41,7 +41,6 @@ impl From<tantivy_5::TantivyError> for TantivyBindingError {
     }
 }
 
-
 /// Stable discriminant carried over the FFI boundary so the C++ side can
 /// classify an error without parsing the Display text (whose wording is a
 /// human-facing detail, not a contract). Exported through cbindgen; values
@@ -67,12 +66,8 @@ pub enum TantivyBindingErrorCode {
 fn tantivy_error_code(e: &tantivy::TantivyError) -> TantivyBindingErrorCode {
     use tantivy::TantivyError::*;
     match e {
-        IoError(_) | OpenDirectoryError(_) | OpenReadError(_) => {
-            TantivyBindingErrorCode::Io
-        }
-        DataCorruption(_) | IncompatibleIndex(_) => {
-            TantivyBindingErrorCode::DataCorruption
-        }
+        IoError(_) | OpenDirectoryError(_) | OpenReadError(_) => TantivyBindingErrorCode::Io,
+        DataCorruption(_) | IncompatibleIndex(_) => TantivyBindingErrorCode::DataCorruption,
         InvalidArgument(_) => TantivyBindingErrorCode::InvalidArgument,
         _ => TantivyBindingErrorCode::Tantivy,
     }
@@ -81,12 +76,8 @@ fn tantivy_error_code(e: &tantivy::TantivyError) -> TantivyBindingErrorCode {
 fn tantivy_5_error_code(e: &tantivy_5::TantivyError) -> TantivyBindingErrorCode {
     use tantivy_5::TantivyError::*;
     match e {
-        IoError(_) | OpenDirectoryError(_) | OpenReadError(_) => {
-            TantivyBindingErrorCode::Io
-        }
-        DataCorruption(_) | IncompatibleIndex(_) => {
-            TantivyBindingErrorCode::DataCorruption
-        }
+        IoError(_) | OpenDirectoryError(_) | OpenReadError(_) => TantivyBindingErrorCode::Io,
+        DataCorruption(_) | IncompatibleIndex(_) => TantivyBindingErrorCode::DataCorruption,
         InvalidArgument(_) => TantivyBindingErrorCode::InvalidArgument,
         _ => TantivyBindingErrorCode::Tantivy,
     }
@@ -97,12 +88,8 @@ impl TantivyBindingError {
         match self {
             TantivyBindingError::JsonError(_) => TantivyBindingErrorCode::Json,
             TantivyBindingError::IOError(_) => TantivyBindingErrorCode::Io,
-            TantivyBindingError::InvalidArgument(_) => {
-                TantivyBindingErrorCode::InvalidArgument
-            }
-            TantivyBindingError::InternalError(_) => {
-                TantivyBindingErrorCode::Internal
-            }
+            TantivyBindingError::InvalidArgument(_) => TantivyBindingErrorCode::InvalidArgument,
+            TantivyBindingError::InternalError(_) => TantivyBindingErrorCode::Internal,
             TantivyBindingError::TantivyError(e) => tantivy_error_code(e),
             TantivyBindingError::TantivyErrorV5(e) => tantivy_5_error_code(e),
         }
