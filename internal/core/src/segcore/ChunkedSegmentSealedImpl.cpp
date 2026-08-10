@@ -1193,6 +1193,15 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
         return state_->runtime->row_count;
     }
 
+    std::pair<std::shared_ptr<ChunkedColumnInterface>,
+              std::shared_ptr<const SkipIndex>>
+    GetDataScanResources(FieldId field_id) const override {
+        auto it = state_->runtime->fields.find(field_id);
+        auto column =
+            it == state_->runtime->fields.end() ? nullptr : it->second;
+        return {std::move(column), state_->runtime->skip_index};
+    }
+
  private:
     bool
     FieldDataReady(FieldId field_id) const {
@@ -3780,6 +3789,16 @@ ChunkedSegmentSealedImpl::GetSkipIndexSnapshot() const {
         return std::make_shared<const SkipIndex>();
     }
     return runtime->skip_index;
+}
+
+std::pair<std::shared_ptr<ChunkedColumnInterface>,
+          std::shared_ptr<const SkipIndex>>
+ChunkedSegmentSealedImpl::GetDataScanResources(FieldId field_id) const {
+    auto runtime = CaptureRuntimeResourceState();
+    if (runtime == nullptr) {
+        return {nullptr, nullptr};
+    }
+    return {get_column(runtime, field_id), runtime->skip_index};
 }
 
 int64_t
@@ -7204,6 +7223,10 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             const std::shared_ptr<ChunkedColumnInterface>& old_column,
             const PublishedSegmentState& state_snapshot) {
             prepare_array_offsets(target_runtime);
+
+            if (is_replace && target_runtime.skip_index != nullptr) {
+                target_runtime.skip_index->Erase(field_id);
+            }
 
             if (IsVariableDataType(data_type)) {
                 if (enable_mmap) {
