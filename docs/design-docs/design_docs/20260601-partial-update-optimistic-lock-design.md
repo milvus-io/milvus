@@ -106,16 +106,23 @@ Ordinary non-partial AutoID upsert continues to allocate a new PK.
 
 ### Internal protocol
 
-The internal message proto adds transaction-scoped commit-admission metadata:
+The internal message proto adds attempt-scoped commit-admission proof:
 
 ```proto
 message PartialUpdateCAS {
     uint64 read_ts = 1;
     int64 observed_pchannel_term = 2;
-    int64 primary_key_field_id = 3;
-    int64 collection_id = 4;
+
+    reserved 3, 4;
+    reserved "primary_key_field_id", "collection_id";
 }
 ```
+
+`read_ts` and `observed_pchannel_term` cannot be derived by StreamingNode
+and therefore come from Proxy. Collection and PK identity are not duplicated
+in the proof: StreamingNode reads `collection_id` and `schema_version`
+from the Insert header, then resolves the authoritative PK descriptor from
+ShardManager.
 
 The internal streaming error enum adds:
 
@@ -160,7 +167,7 @@ No persistent PK index, schema migration, or restore-time gate is introduced.
 
 ### Correctness invariants
 
-The design depends on five invariants:
+The design depends on six invariants:
 
 1. **Attempt proof:** a term snapshot and `readTS` belong to the same attempt,
    and terms are resolved before `readTS` is allocated.
@@ -173,6 +180,9 @@ The design depends on five invariants:
    row data updates either exact PK versions or a conservative fence.
 5. **Fail closed:** missing history, malformed proof, or incomplete local CAS
    recovery never degrades to an unchecked ordinary commit.
+6. **Authoritative write identity:** a CAS Insert derives its collection and
+   schema version from the Insert header and its PK field from ShardManager;
+   attempt proof never supplies a competing collection or PK identity.
 
 ### Architecture and state ownership
 
@@ -294,9 +304,21 @@ and CAS all address the same row.
 
 ### CAS metadata and encryption
 
-Proxy derives the touched vchannels from the original request PKs. Metadata does
-not duplicate the PK list; it identifies the PK field, and StreamingNode
-extracts the PKs from each complete Insert chunk.
+Proxy derives the touched vchannels from the original request PKs. CAS metadata
+contains only the attempt `readTS` and observed PChannel term; it does not
+duplicate the collection ID, schema version, PK field ID, or PK list.
+
+For every CAS Insert, StreamingNode:
+
+1. reads `collection_id` and `schema_version` from the Insert header;
+2. requires `schema_version` to be explicitly present;
+3. resolves the immutable PK descriptor through ShardManager;
+4. extracts the descriptor's PK field from the complete Insert chunk; and
+5. verifies that all CAS chunks in the transaction use the same proof,
+   collection, and schema version.
+
+Ordinary legacy Insert keeps its existing rolling-upgrade behavior and may
+omit `schema_version`. Only CAS Insert requires an explicit version.
 
 The message builder writes metadata into the Insert body before encryption and
 before `BuildMutable()`. When cluster encryption is enabled, the proof is
@@ -421,10 +443,11 @@ transaction-body production, remain outside the exclusive section.
 The partial-update interceptor maintains `pendingTxn` in two phases for each
 body message:
 
-- before the inner append, it extracts, validates, and registers the CAS
-  metadata. If metadata already registered for the same transaction differs
-  from the current body, that body is rejected before it reaches the WAL
-  backend;
+- before the inner append, it extracts and validates the attempt proof, derives
+  collection and schema identity from the Insert header, resolves the PK
+  descriptor from ShardManager, and registers the proof and derived scope. If
+  any CAS chunk in the same transaction differs in proof, collection, or
+  schema version, that body is rejected before it reaches the WAL backend;
 - only after the inner append succeeds does it record whether the current
   interceptor lifecycle observed BeginTxn, the exact PK write set extracted
   from Insert and Delete, and an optional collection-wide fence.
@@ -436,10 +459,13 @@ commit validation snapshots the write set.
 Marker validation is fail closed:
 
 - runtime CAS metadata without a local commit marker is unrecoverable;
-- a marker with an observed BeginTxn but no valid metadata or PK write set is
-  unrecoverable;
+- a marker with an observed BeginTxn but no valid proof, derived collection and
+  schema scope, or PK write set is unrecoverable;
 - a recovered local CAS that lacks a complete runtime proof is retryable and
   never reaches the WAL backend.
+
+Commit admission uses the collection ID stored in `pendingTxn`, never a
+collection ID supplied by CAS metadata, for collection-fence validation.
 
 CAS validation runs before the inner CommitTxn append. A deterministic
 admission reject is marked separately from a WAL append error:
@@ -543,7 +569,7 @@ Promotion creates a new term and therefore a new empty per-term index.
 | Term mismatch, PK conflict, collection fence, incomplete-txn fence, TTL expiry, or budget-incomplete history | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Rebuild `REPLACE`; project relative update to non-retriable conflict |
 | Recovered local CAS without complete proof | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Same as above |
 | Local CAS transaction expires before commit | Producer converts to `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Same as above |
-| Malformed marker, metadata, PK write set, or internal invariant | `STREAMING_CODE_UNRECOVERABLE` | Fail without CAS retry |
+| Malformed marker, proof, Insert schema scope, PK write set, or internal invariant | `STREAMING_CODE_UNRECOVERABLE` | Fail without CAS retry |
 | Shard schema version mismatch | `STREAMING_CODE_SCHEMA_VERSION_MISMATCH` | `ErrCollectionSchemaMismatch` |
 | Timeout, disconnect, or unknown append result | Original transport or streaming error | Do not classify as deterministic CAS abort |
 
