@@ -5,6 +5,9 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -79,6 +82,55 @@ func TestEquiv_FieldData_ValidData(t *testing.T) {
 func TestEquiv_IDs(t *testing.T) {
 	roundTripSRD(t, &schemapb.SearchResultData{Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10, 20, 30}}}}})
 	roundTripSRD(t, &schemapb.SearchResultData{Ids: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"k1", "k2"}}}}})
+	roundTripSRD(t, &schemapb.SearchResultData{Ids: &schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: [][]byte{
+		{0x55, 0x0e, 0x84, 0x00, 0xe2, 0x9b, 0x41, 0xd4, 0xa7, 0x16, 0x44, 0x66, 0x55, 0x44, 0x00, 0x00},
+		{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff},
+	}}}}})
+	// Empty element and empty array: repeated bytes must round-trip both.
+	roundTripSRD(t, &schemapb.SearchResultData{Ids: &schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: [][]byte{{}}}}}})
+	roundTripSRD(t, &schemapb.SearchResultData{Ids: &schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{}}}})
+}
+
+// TestEquiv_IDs_OneofLastWins pins that every IDs oneof variant is decoded
+// in-pass. proto.Marshal only ever emits the variant that is set, so a
+// single-variant payload cannot distinguish an in-pass case from the deferred
+// protoMerge fallback -- both produce the same value. The divergence needs two
+// variants on one wire: anything left to the fallback is merged *after* the
+// loop, so it wins regardless of position and breaks oneof last-wins.
+func TestEquiv_IDs_OneofLastWins(t *testing.T) {
+	uuid, err := proto.Marshal(&schemapb.UUIDArray{Data: [][]byte{{0xaa, 0xbb}}})
+	require.NoError(t, err)
+	ints, err := proto.Marshal(&schemapb.LongArray{Data: []int64{7}})
+	require.NoError(t, err)
+	strs, err := proto.Marshal(&schemapb.StringArray{Data: []string{"s"}})
+	require.NoError(t, err)
+
+	// uuid_id (3) first, then the variant that must win by position.
+	for name, last := range map[string][]byte{"int_id": ints, "str_id": strs} {
+		t.Run(name, func(t *testing.T) {
+			lastNum := protowire.Number(1)
+			if name == "str_id" {
+				lastNum = 2
+			}
+			var idsWire []byte
+			idsWire = protowire.AppendTag(idsWire, 3, protowire.BytesType)
+			idsWire = protowire.AppendBytes(idsWire, uuid)
+			idsWire = protowire.AppendTag(idsWire, lastNum, protowire.BytesType)
+			idsWire = protowire.AppendBytes(idsWire, last)
+
+			var wire []byte
+			wire = protowire.AppendTag(wire, 5, protowire.BytesType) // SearchResultData.ids
+			wire = protowire.AppendBytes(wire, idsWire)
+
+			var want schemapb.SearchResultData
+			require.NoError(t, proto.Unmarshal(wire, &want))
+
+			var got schemapb.SearchResultData
+			require.NoError(t, UnmarshalSearchResultData(wire, &got))
+
+			assert.True(t, proto.Equal(&want, &got), "official = %v, fastpb = %v", &want, &got)
+		})
+	}
 }
 
 func TestEquiv_SearchResultData_Full(t *testing.T) {
