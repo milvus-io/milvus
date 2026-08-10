@@ -154,6 +154,22 @@ func TestSegcoreErrorClassification(t *testing.T) {
 		assert.Equal(t, []int32{2056}, got)
 	})
 
+	t.Run("named_sentinel_wire_transitions", func(t *testing.T) {
+		// The renumbering is a versioned wire-contract change, pinned here:
+		// ErrSegcoreUnsupported moved 2001 -> 2003 and ErrSegcorePretendFinished
+		// 2002 -> 2033 (their old numbers squatted on C++ UnexpectedError /
+		// NotImplemented). Clients matching the old wire values must migrate;
+		// see docs/dev/error_handling_casebook.md.
+		assert.Equal(t, int32(2003), ErrSegcoreUnsupported.code())
+		assert.Equal(t, int32(2033), ErrSegcorePretendFinished.code())
+		// The vacated numbers now mean the C++ codes themselves and must NOT
+		// resurrect the old sentinel identities.
+		assert.Equal(t, int32(2001), Status(SegcoreError(2001, "x")).GetCode())
+		assert.NotErrorIs(t, SegcoreError(2001, "x"), ErrSegcoreUnsupported)
+		assert.Equal(t, int32(2002), Status(SegcoreError(2002, "x")).GetCode())
+		assert.NotErrorIs(t, SegcoreError(2002, "x"), ErrSegcorePretendFinished)
+	})
+
 	t.Run("wire_code_projection", func(t *testing.T) {
 		// Pins the client-visible contract: the ORIGINAL C++ code passes
 		// through to the wire (2028 stays 2028) instead of collapsing onto

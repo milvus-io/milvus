@@ -106,8 +106,8 @@ SegcoreConfig::parse_from(const std::string& config_path) {
             }
         }
 #endif
-    } catch (const SegcoreError& e) {
-        throw e;
+    } catch (const SegcoreError&) {
+        throw;
     } catch (const std::exception& e) {
         std::string str =
             std::string("Invalid Yaml: ") + config_path + ", err: " + e.what();
