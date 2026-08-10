@@ -204,14 +204,16 @@ RemoteInputStream::Read(int fd, size_t size) {
                 rest_size,
                 file_size_);
         }
-        AssertInfo(bytes_read <= static_cast<int64_t>(read_size),
-                   "Remote input stream returned more bytes than requested, "
-                   "operation: read to file, offset: {}, bytes read: {}, "
-                   "size: {}, file size: {}",
-                   offset,
-                   bytes_read,
-                   read_size,
-                   file_size_);
+        if (!(bytes_read <= static_cast<int64_t>(read_size))) {
+            ThrowInfo(ErrorCode::FileReadFailed,
+                      "Remote input stream returned more bytes than requested, "
+                      "operation: read to file, offset: {}, bytes read: {}, "
+                      "size: {}, file size: {}",
+                      offset,
+                      bytes_read,
+                      read_size,
+                      file_size_);
+        }
         auto bytes_to_write = static_cast<size_t>(bytes_read);
         ssize_t ret = ::write(fd, data.data(), bytes_to_write);
         if (ret != static_cast<ssize_t>(bytes_to_write)) {

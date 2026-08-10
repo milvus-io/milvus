@@ -409,9 +409,11 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                                     element_type);
                         }
                     } else {
-                        AssertInfo(array.get_element_type() == element_type,
-                                   "Inconsistent element types in "
-                                   "VectorArray");
+                        if (!(array.get_element_type() == element_type)) {
+                            ThrowInfo(ErrorCode::DataFormatBroken,
+                                      "Inconsistent element types in "
+                                      "VectorArray");
+                        }
                     }
                     auto status = list_builder->Append();
                     if (!status.ok()) {
@@ -1625,15 +1627,20 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            milvus_storage::ArrowFileSystemPtr fs,
                            size_t max_rows /*=0*/,
                            size_t offset /*=0*/) {
-    AssertInfo(remote_files.size() > 0, "[StorageV2] remote files size is 0");
+    if (!(remote_files.size() > 0)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "[StorageV2] remote files size is 0");
+    }
     std::vector<FieldDataPtr> field_data_list;
 
     // remote files might not followed the sequence of column group id,
     // so we need to put into map<column_group_id, remote_chunk_files>
     std::unordered_map<int64_t, std::vector<std::string>> column_group_files;
     for (auto& remote_chunk_files : remote_files) {
-        AssertInfo(remote_chunk_files.size() > 0,
-                   "[StorageV2] remote files size is 0");
+        if (!(remote_chunk_files.size() > 0)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "[StorageV2] remote files size is 0");
+        }
         int64_t group_id = ExtractGroupIdFromPath(remote_chunk_files[0]);
         column_group_files[group_id] = remote_chunk_files;
     }
@@ -1672,8 +1679,10 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             field_id);
         return field_data_list;
     }
-    AssertInfo(remote_chunk_files.size() > 0,
-               "[StorageV2] remote files size is 0");
+    if (!(remote_chunk_files.size() > 0)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "[StorageV2] remote files size is 0");
+    }
 
     // find column offset
     if (col_offset == -1) {
@@ -2517,10 +2526,13 @@ GetTextFieldDatasFromManifest(
         }
 
         auto raw_column = batch->GetColumnByName(column_name);
-        AssertInfo(raw_column != nullptr,
-                   "TEXT field {} column {} not found in SegmentReader batch",
-                   field_meta.field_id,
-                   column_name);
+        if (!(raw_column != nullptr)) {
+            ThrowInfo(
+                ErrorCode::DataFormatBroken,
+                "TEXT field {} column {} not found in SegmentReader batch",
+                field_meta.field_id,
+                column_name);
+        }
         auto chunked_array = std::make_shared<arrow::ChunkedArray>(raw_column);
         auto field_data = CreateFieldData(DataType::TEXT,
                                           DataType::NONE,
@@ -2928,11 +2940,13 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             int expected_list_length =
                 ExpectedVectorListLength(data_type, dim, values->type());
             int elem_bit_width = values->type()->bit_width();
-            AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
-                       "vector list element{} must be fixed-width "
-                       "byte-aligned type, got bit_width={}",
-                       FieldErrorSuffix(field_meta),
-                       elem_bit_width);
+            if (!(elem_bit_width > 0 && elem_bit_width % 8 == 0)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "vector list element{} must be fixed-width "
+                          "byte-aligned type, got bit_width={}",
+                          FieldErrorSuffix(field_meta),
+                          elem_bit_width);
+            }
             int elem_byte_size = elem_bit_width / 8;
             auto raw = reinterpret_cast<const uint8_t*>(
                 values->data()->buffers[1]->data());
@@ -2971,11 +2985,13 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             int expected_list_length =
                 ExpectedVectorListLength(data_type, dim, values->type());
             int elem_bit_width = values->type()->bit_width();
-            AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
-                       "vector list element{} must be fixed-width "
-                       "byte-aligned type, got bit_width={}",
-                       FieldErrorSuffix(field_meta),
-                       elem_bit_width);
+            if (!(elem_bit_width > 0 && elem_bit_width % 8 == 0)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "vector list element{} must be fixed-width "
+                          "byte-aligned type, got bit_width={}",
+                          FieldErrorSuffix(field_meta),
+                          elem_bit_width);
+            }
             int elem_byte_size = elem_bit_width / 8;
             if (!(fsl_array->value_length() == expected_list_length)) {
                 ThrowInfo(
@@ -3178,8 +3194,9 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
                     }
                 } else {
                     auto v = src->GetView(i);
-                    AssertInfo(builder.Append(v.data(), v.size()).ok(),
-                               "append str");
+                    if (!(builder.Append(v.data(), v.size()).ok())) {
+                        ThrowInfo(ErrorCode::MemAllocateFailed, "append str");
+                    }
                 }
             }
         } else {
@@ -3192,8 +3209,9 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
                     }
                 } else {
                     auto v = src->GetView(i);
-                    AssertInfo(builder.Append(v.data(), v.size()).ok(),
-                               "append str");
+                    if (!(builder.Append(v.data(), v.size()).ok())) {
+                        ThrowInfo(ErrorCode::MemAllocateFailed, "append str");
+                    }
                 }
             }
         }
@@ -3223,12 +3241,13 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
                     }
                 } else {
                     auto v = src->GetView(i);
-                    AssertInfo(
-                        builder
-                            .Append(reinterpret_cast<const uint8_t*>(v.data()),
-                                    v.size())
-                            .ok(),
-                        "append bin");
+                    if (!(builder
+                              .Append(
+                                  reinterpret_cast<const uint8_t*>(v.data()),
+                                  v.size())
+                              .ok())) {
+                        ThrowInfo(ErrorCode::MemAllocateFailed, "append bin");
+                    }
                 }
             }
         } else {
@@ -3241,12 +3260,13 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
                     }
                 } else {
                     auto v = src->GetView(i);
-                    AssertInfo(
-                        builder
-                            .Append(reinterpret_cast<const uint8_t*>(v.data()),
-                                    v.size())
-                            .ok(),
-                        "append bin");
+                    if (!(builder
+                              .Append(
+                                  reinterpret_cast<const uint8_t*>(v.data()),
+                                  v.size())
+                              .ok())) {
+                        ThrowInfo(ErrorCode::MemAllocateFailed, "append bin");
+                    }
                 }
             }
         }
@@ -3311,8 +3331,11 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
             if (!array->IsNull(i)) {
                 auto [s, e] = ranges[i];
                 int64_t len = e - s;
-                AssertInfo(cur + len <= INT32_MAX,
-                           "CanonicalizeArrowVariants: int32 offset overflow");
+                if (!(cur + len <= INT32_MAX)) {
+                    ThrowInfo(
+                        ErrorCode::DataFormatBroken,
+                        "CanonicalizeArrowVariants: int32 offset overflow");
+                }
                 slices.push_back(canonical_values->Slice(s, len));
                 cur += static_cast<int32_t>(len);
             }
@@ -3544,12 +3567,14 @@ ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
         auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
         auto actual_element_type =
             ArrowListElementTypeToMilvus(list_arr->values(), field_meta);
-        AssertInfo(
-            IsCompatibleArrayElementType(actual_element_type, element_type),
-            "array element type mismatch{}, expected {}, actual {}",
-            FieldErrorSuffix(field_meta),
-            element_type,
-            actual_element_type);
+        if (!(IsCompatibleArrayElementType(actual_element_type,
+                                           element_type))) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "array element type mismatch{}, expected {}, actual {}",
+                      FieldErrorSuffix(field_meta),
+                      element_type,
+                      actual_element_type);
+        }
         arrow::BinaryBuilder builder;
         auto status = builder.Reserve(list_arr->length());
         if (!status.ok()) {
@@ -3639,8 +3664,10 @@ NormalizeVectorArrayInner(const arrow::ArrayVector& arrays,
             continue;
         }
         auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
-        AssertInfo(field_meta.is_nullable() || list_arr->null_count() == 0,
-                   "VECTOR_ARRAY does not support null rows");
+        if (!(field_meta.is_nullable() || list_arr->null_count() == 0)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "VECTOR_ARRAY does not support null rows");
+        }
         if (list_arr->values()->type_id() == arrow::Type::FIXED_SIZE_BINARY) {
             ValidateFixedSizeBinaryVectorWidth(list_arr->values(),
                                                element_type,

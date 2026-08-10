@@ -759,11 +759,13 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
 
     // Write offsets file for VECTOR_ARRAY
     if (is_vector_array) {
-        AssertInfo(
-            !offsets.empty() && offsets.front() == 0,
-            "invalid emb_list offsets: size {}, front {}",
-            offsets.size(),
-            offsets.empty() ? -1 : static_cast<int64_t>(offsets.front()));
+        if (!(!offsets.empty() && offsets.front() == 0)) {
+            ThrowInfo(
+                ErrorCode::DataFormatBroken,
+                "invalid emb_list offsets: size {}, front {}",
+                offsets.size(),
+                offsets.empty() ? -1 : static_cast<int64_t>(offsets.front()));
+        }
         if (offsets.size() == 1) {
             AssertInfo(nullable || total_num_rows == 0,
                        "non-nullable emb_list offsets must include rows");
@@ -847,8 +849,10 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
         // Handle VECTOR_ARRAY - need to flatten the array data
         auto vec_array_data =
             dynamic_cast<FieldData<VectorArray>*>(field_data.get());
-        AssertInfo(vec_array_data != nullptr,
-                   "failed to cast field data to vector array");
+        if (!(vec_array_data != nullptr)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "failed to cast field data to vector array");
+        }
 
         dim = field_data->get_dim();
         auto rows = vec_array_data->get_num_rows();
@@ -1161,11 +1165,13 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
         // offsets must contain at least the initial sentinel (0).  When all
         // rows are null or contain empty embedding lists the vector is {0}
         // which is valid — VectorDiskAnnIndex handles the empty-input case.
-        AssertInfo(
-            offsets.size() >= 1 && offsets.front() == 0,
-            "invalid emb_list offsets: size {}, front {}",
-            offsets.size(),
-            offsets.empty() ? -1 : static_cast<int64_t>(offsets.front()));
+        if (!(offsets.size() >= 1 && offsets.front() == 0)) {
+            ThrowInfo(
+                ErrorCode::DataFormatBroken,
+                "invalid emb_list offsets: size {}, front {}",
+                offsets.size(),
+                offsets.empty() ? -1 : static_cast<int64_t>(offsets.front()));
+        }
         // Get offsets path from config if provided, otherwise use default
         auto offsets_path = index::GetValueFromConfig<std::string>(
                                 config, index::EMB_LIST_OFFSETS_PATH)
