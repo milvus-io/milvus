@@ -2047,6 +2047,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const SchemaPtr& schema_snapshot,
         bool eager_load,
         const std::string& aggregated_warmup_policy,
+        bool use_mmap,
         milvus::OpContext* op_ctx,
         bool is_replace,
         RuntimeResourceState* runtime,
