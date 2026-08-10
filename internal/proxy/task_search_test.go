@@ -4161,7 +4161,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	node.mixCoord = mocks.NewMockMixCoordClient(t)
 
 	collectionName := "col"
-	collectionID := UniqueID(0)
+	collectionID := UniqueID(1000)
 	cache := NewMockCache(t)
 	collSchema := constructCollectionSchema(pkField, vecField, dim, collection)
 	schema := newSchemaInfo(collSchema)
@@ -4272,9 +4272,10 @@ func TestSearchTask_Requery(t *testing.T) {
 		}
 		qt.queryChannelsNode.Insert("mock_qn", 1)
 		op, err := newRequeryOperator(qt, nil)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		queryResult, storageCost, err := op.(*requeryOperator).requery(ctx, nil, qt.result.Results.Ids, outputFields)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		require.NotNil(t, queryResult)
 		assert.Equal(t, int64(0), storageCost.ScannedRemoteBytes)
 		assert.Equal(t, int64(0), storageCost.ScannedTotalBytes)
 		assert.Len(t, queryResult.FieldsData, 2)
