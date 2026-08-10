@@ -107,8 +107,10 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
         auto& index_params = load_index_info->index_params;
         bool find_index_type =
             index_params.count("index_type") > 0 ? true : false;
-        AssertInfo(find_index_type == true,
-                   "Can't find index type in index_params");
+        if (!(find_index_type == true)) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Can't find index type in index_params");
+        }
 
         // Segment Loader calls this API while deciding whether a segment may
         // start loading. Keep that admission path metadata-only: exact scalar
