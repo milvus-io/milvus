@@ -1794,6 +1794,35 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         return res;
     }
 
+    if (!has_offset_input_ && !expr_->column_.element_level_) {
+        if (auto* cursor = EnsureRowIdScanCursor([&] {
+                return ChunkedColumnInterface::ScanOptions::ForUnary(
+                    current_data_global_pos_,
+                    expr_->op_type_,
+                    expr_->val_,
+                    GetScanPinPolicy());
+            })) {
+            const auto window_start = current_data_global_pos_;
+            ChunkedColumnInterface::ScanBatch batch;
+            if (cursor->Position() != window_start) {
+                cursor->Seek(window_start);
+            }
+            const auto returned = cursor->Next(
+                real_batch_size,
+                ChunkedColumnInterface::ScanReadMode::DataAndValidity,
+                &batch);
+            AssertInfo(returned,
+                       "row id scan did not process range [{}, {})",
+                       window_start,
+                       window_start + real_batch_size);
+            auto bitmaps = RowIdScanBatchToBitmaps(
+                batch, window_start, real_batch_size, bitmap_input, true);
+            AdvanceDataCursor(real_batch_size);
+            return std::make_shared<ColumnVector>(std::move(bitmaps.result),
+                                                  std::move(bitmaps.validity));
+        }
+    }
+
     if (!arg_inited_) {
         value_arg_.SetValue<IndexInnerType>(expr_->val_);
         arg_inited_ = true;

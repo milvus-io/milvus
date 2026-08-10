@@ -267,6 +267,60 @@ ApplyValidMaskForCandidates(ValidityView validity,
     }
 }
 
+struct RowIdScanBitmaps {
+    TargetBitmap result;
+    TargetBitmap validity;
+};
+
+inline RowIdScanBitmaps
+RowIdScanBatchToBitmaps(const ChunkedColumnInterface::ScanBatch& batch,
+                        int64_t batch_start,
+                        int64_t batch_size,
+                        const TargetBitmap& bitmap_input,
+                        bool mask_validity_by_bitmap_input = true) {
+    AssertInfo(bitmap_input.empty() ||
+                   static_cast<int64_t>(bitmap_input.size()) >= batch_size,
+               "bitmap input size {} is smaller than row id scan batch {}",
+               bitmap_input.size(),
+               batch_size);
+    const int64_t batch_end = batch_start + batch_size;
+    RowIdScanBitmaps bitmaps{TargetBitmap(batch_size, false),
+                             TargetBitmap(batch_size, true)};
+    std::optional<int64_t> previous_row_id;
+    AssertInfo(batch.values.empty(),
+               "row id payload scan batch should not contain values");
+    AssertInfo(batch.size == static_cast<int64_t>(batch.row_ids.size()),
+               "row id payload scan size {} does not match row ids size {}",
+               batch.size,
+               batch.row_ids.size());
+    for (size_t i = 0; i < batch.row_ids.size(); ++i) {
+        const auto row_id = batch.row_ids[i];
+        if (previous_row_id.has_value()) {
+            AssertInfo(previous_row_id.value() <= row_id,
+                       "row id payload is not ordered: {} before {}",
+                       previous_row_id.value(),
+                       row_id);
+        }
+        previous_row_id = row_id;
+        AssertInfo(row_id >= batch_start && row_id < batch_end,
+                   "row id {} is outside scan range [{}, {})",
+                   row_id,
+                   batch_start,
+                   batch_end);
+        const auto local_index = static_cast<size_t>(row_id - batch_start);
+        const auto valid = !batch.validity || batch.validity[i];
+        if (!valid) {
+            if (!mask_validity_by_bitmap_input || bitmap_input.empty() ||
+                bitmap_input[local_index]) {
+                bitmaps.validity[local_index] = false;
+            }
+        } else if (bitmap_input.empty() || bitmap_input[local_index]) {
+            bitmaps.result[local_index] = true;
+        }
+    }
+    return bitmaps;
+}
+
 class Expr : public std::enable_shared_from_this<Expr> {
  public:
     Expr(DataType type,
@@ -592,6 +646,10 @@ class SegmentExpr : public Expr {
     MoveCursorForData() {
         const auto rows =
             std::min(batch_size_, active_count_ - current_data_global_pos_);
+        AssertInfo(
+            data_scan_cursor_ == nullptr || row_id_scan_cursor_ == nullptr,
+            "field {} has both data and row-id scan cursors",
+            field_id_.get());
         // A leaf short-circuited by its parent does not advance its scan
         // cursor. The next evaluated call compares the cursor position with
         // its window start and performs a forward Seek() when needed.
@@ -702,6 +760,40 @@ class SegmentExpr : public Expr {
             BindCellSkipPredicate(std::move(skip_func), std::move(skip_index)));
     }
 
+    ChunkedColumnInterface::ScanPinPolicy
+    GetScanPinPolicy() const {
+        return segcore::SegcoreConfig::default_config()
+                       .get_scan_cursor_owns_pin()
+                   ? ChunkedColumnInterface::ScanPinPolicy::CursorOwned
+                   : ChunkedColumnInterface::ScanPinPolicy::ResultOwned;
+    }
+
+    template <typename MakeOptions>
+    ChunkedColumnInterface::ScanCursor*
+    EnsureRowIdScanCursor(MakeOptions&& make_options) {
+        if (row_id_scan_initialized_) {
+            return row_id_scan_cursor_.get();
+        }
+        auto column = segment_->GetChunkedColumn(field_id_);
+        if (column == nullptr) {
+            row_id_scan_initialized_ = true;
+            return nullptr;
+        }
+        auto options = std::forward<MakeOptions>(make_options)();
+        if (!column->SupportsScanPushdown(options)) {
+            row_id_scan_initialized_ = true;
+            return nullptr;
+        }
+        auto cursor = column->Scan(op_ctx_, options);
+        AssertInfo(cursor != nullptr,
+                   "row id scan cursor is null for field {}",
+                   field_id_.get());
+        row_id_scan_column_ = std::move(column);
+        row_id_scan_cursor_ = std::move(cursor);
+        row_id_scan_initialized_ = true;
+        return row_id_scan_cursor_.get();
+    }
+
     template <typename T>
     ChunkedColumnInterface::ScanCursor*
     EnsureDataScanCursor(
@@ -748,12 +840,11 @@ class SegmentExpr : public Expr {
             target_type != ChunkedColumnInterface::TargetType::None &&
             !prefetched_;
 
-        const auto pin_policy =
-            segcore::SegcoreConfig::default_config().get_scan_cursor_owns_pin()
-                ? ChunkedColumnInterface::ScanPinPolicy::CursorOwned
-                : ChunkedColumnInterface::ScanPinPolicy::ResultOwned;
         auto options = ChunkedColumnInterface::ScanOptions::ForData(
-            current_data_global_pos_, target_type, pin_policy, cursor_prefetch);
+            current_data_global_pos_,
+            target_type,
+            GetScanPinPolicy(),
+            cursor_prefetch);
         options.filter = data_scan_filter_;
         data_scan_cursor_ = data_scan_column_->Scan(op_ctx_, options);
         if (data_scan_cursor_ == nullptr) {
@@ -3679,6 +3770,9 @@ class SegmentExpr : public Expr {
     std::shared_ptr<ChunkedColumnInterface> data_scan_column_{nullptr};
     std::unique_ptr<ChunkedColumnInterface::ScanCursor> data_scan_cursor_;
     detail::ColumnFilterPtr data_scan_filter_{nullptr};
+    bool row_id_scan_initialized_{false};
+    std::shared_ptr<ChunkedColumnInterface> row_id_scan_column_{nullptr};
+    std::unique_ptr<ChunkedColumnInterface::ScanCursor> row_id_scan_cursor_;
     ChunkedColumnInterface::TargetType data_scan_target_type_{
         ChunkedColumnInterface::TargetType::None};
     // Offset input is evaluated in multiple batches by the same expression.

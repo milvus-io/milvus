@@ -639,6 +639,51 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             processed_size = ProcessDataChunksForElementLevel<T>(
                 execute_sub_batch, skip_index_func, res, valid_res, val1, val2);
         } else {
+            auto make_scan_value = [](const HighPrecisionType& value) {
+                proto::plan::GenericValue scan_value;
+                if constexpr (std::is_same_v<HighPrecisionType, bool>) {
+                    scan_value.set_bool_val(value);
+                } else if constexpr (std::is_integral_v<HighPrecisionType>) {
+                    scan_value.set_int64_val(static_cast<int64_t>(value));
+                } else if constexpr (std::is_floating_point_v<
+                                         HighPrecisionType>) {
+                    scan_value.set_float_val(value);
+                } else if constexpr (std::is_same_v<HighPrecisionType,
+                                                    std::string>) {
+                    scan_value.set_string_val(value);
+                }
+                return scan_value;
+            };
+
+            if (auto* cursor = EnsureRowIdScanCursor([&] {
+                    return ChunkedColumnInterface::ScanOptions::ForBinaryRange(
+                        current_data_global_pos_,
+                        make_scan_value(val1),
+                        lower_inclusive,
+                        make_scan_value(val2),
+                        upper_inclusive,
+                        GetScanPinPolicy());
+                })) {
+                const auto window_start = current_data_global_pos_;
+                ChunkedColumnInterface::ScanBatch batch;
+                if (cursor->Position() != window_start) {
+                    cursor->Seek(window_start);
+                }
+                const auto returned = cursor->Next(
+                    real_batch_size,
+                    ChunkedColumnInterface::ScanReadMode::DataAndValidity,
+                    &batch);
+                AssertInfo(returned,
+                           "row id scan did not process range [{}, {})",
+                           window_start,
+                           window_start + real_batch_size);
+                auto bitmaps = RowIdScanBatchToBitmaps(
+                    batch, window_start, real_batch_size, bitmap_input, false);
+                AdvanceDataCursor(real_batch_size);
+                return std::make_shared<ColumnVector>(
+                    std::move(bitmaps.result), std::move(bitmaps.validity));
+            }
+
             processed_size = ProcessDataChunks<T>(
                 execute_sub_batch, skip_index_func, res, valid_res, val1, val2);
         }
