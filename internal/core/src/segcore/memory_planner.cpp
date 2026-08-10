@@ -400,7 +400,10 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             20,
         FieldDataReadWindowBytes() >> 20);
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
+    auto pool_priority = milvus::PriorityForLoad(priority);
+    auto& pool = ThreadPools::GetThreadPool(pool_priority);
+    auto budget_priority =
+        milvus::storage::TransientPriorityForThreadPool(pool_priority);
     auto shared_factory =
         std::make_shared<BatchReaderFactory>(std::move(reader_factory));
     auto shared_finalizer =
@@ -425,8 +428,8 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
         auto cancellation_token =
             op_ctx ? op_ctx->cancellation_token : folly::CancellationToken();
-        auto budget_admitted = budget.AcquireUntil(batch_loading_overhead_bytes,
-                                                   cancellation_token);
+        auto budget_admitted = budget.AcquireUntil(
+            batch_loading_overhead_bytes, budget_priority, cancellation_token);
         if (!budget_admitted) {
             // AcquireUntil waits for budget and returns false only when the
             // caller's lifecycle ends before admission.

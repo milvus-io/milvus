@@ -402,7 +402,8 @@ TEST(LoadCellBatchAsync, ReleasesBatchBudgetBeforeFutureCompletion) {
     folly::CancellationSource cancel_source;
     auto acquire_future = std::async(
         std::launch::async, [&budget, token = cancel_source.getToken()] {
-            return budget.AcquireUntil(2, token);
+            return budget.AcquireUntil(
+                2, milvus::storage::TransientBudgetPriority::High, token);
         });
     bool acquired = false;
     if (acquire_future.wait_for(std::chrono::seconds(2)) ==
@@ -488,7 +489,8 @@ TEST(LoadCellBatchAsync, KeepsBudgetWhileSharedBatchTablesRemain) {
         }));
     }
 
-    auto acquired = budget.TryAcquire(1);
+    auto acquired =
+        budget.TryAcquire(1, milvus::storage::TransientBudgetPriority::High);
     EXPECT_FALSE(acquired)
         << "batch budget was released while a shared Arrow buffer remained";
     if (acquired) {
@@ -607,7 +609,7 @@ TEST(LoadCellBatchAsync, CancellationWhileWaitingForBudgetSkipsRead) {
         milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
     budget.SetCapacityBytes(1);
-    budget.Acquire(1);
+    budget.Acquire(1, milvus::storage::TransientBudgetPriority::High);
     auto cleanup = folly::makeGuard([&budget, old_capacity]() {
         budget.Release(1);
         budget.SetCapacityBytes(old_capacity);
@@ -677,7 +679,7 @@ TEST(LoadCellBatchAsync, WaitingForBudgetDoesNotOccupyLoadPoolWorker) {
         milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
     budget.SetCapacityBytes(1);
-    budget.Acquire(1);
+    budget.Acquire(1, milvus::storage::TransientBudgetPriority::High);
     auto budget_cleanup = folly::makeGuard([&budget, old_capacity]() {
         budget.Release(1);
         budget.SetCapacityBytes(old_capacity);
