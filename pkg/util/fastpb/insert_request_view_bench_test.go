@@ -54,8 +54,8 @@ func BenchmarkInsertRequestViewEncoder10Kx768(b *testing.B) {
 	benchmarkInsertRequestViewEncoder(b, source, rows)
 }
 
-// BenchmarkInsertRequestViewEncoder10KVarChar1KiB covers the document-style
-// payload that exposes repeated UTF-8 validation in the view encoder.
+// BenchmarkInsertRequestViewEncoder10KVarChar1KiB covers a document-style
+// trusted string payload.
 func BenchmarkInsertRequestViewEncoder10KVarChar1KiB(b *testing.B) {
 	const rowCount = 10_000
 	rows, rowIDs, timestamps := benchmarkInsertRows(rowCount)
@@ -109,6 +109,106 @@ func BenchmarkInsertRequestViewEncoder10KArray64Int64(b *testing.B) {
 		},
 	}
 	benchmarkInsertRequestViewEncoder(b, source, rows)
+}
+
+func BenchmarkInsertRequestViewExactSplit10K(b *testing.B) {
+	const (
+		rowCount    = 10_000
+		elementsPer = 64
+		bodyBudget  = 64 << 10
+	)
+	template := insertViewTemplate()
+	rows, rowIDs, timestamps := benchmarkInsertRows(rowCount)
+	document := strings.Repeat("Milvus exact split document payload. ", 26)
+	texts := make([]string, rowCount)
+	arrayRows := make([]*schemapb.ScalarField, rowCount)
+	vectorRows := make([]*schemapb.VectorField, rowCount)
+	for row := 0; row < rowCount; row++ {
+		texts[row] = document + strconv.Itoa(row)
+		values := make([]int64, elementsPer)
+		for element := range values {
+			values[element] = int64(row*elementsPer + element)
+		}
+		arrayRows[row] = &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{
+			LongData: &schemapb.LongArray{Data: values},
+		}}
+		vectorRows[row] = &schemapb.VectorField{
+			Dim: 4,
+			Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
+				Data: []float32{float32(row), 1, 2, 3},
+			}},
+		}
+	}
+
+	cases := []struct {
+		name   string
+		source *msgpb.InsertRequest
+	}{
+		{name: "varchar_1kib", source: &msgpb.InsertRequest{
+			NumRows:    rowCount,
+			RowIDs:     rowIDs,
+			Timestamps: timestamps,
+			FieldsData: []*schemapb.FieldData{
+				scalarField(100, schemapb.DataType_VarChar, &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{Data: texts},
+				}),
+			},
+		}},
+		{name: "array_and_array_of_vector", source: &msgpb.InsertRequest{
+			NumRows:    rowCount,
+			RowIDs:     rowIDs,
+			Timestamps: timestamps,
+			FieldsData: []*schemapb.FieldData{
+				scalarField(100, schemapb.DataType_Array, &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{Data: arrayRows, ElementType: schemapb.DataType_Int64},
+				}),
+				{
+					Type: schemapb.DataType_ArrayOfVector, FieldId: 101, FieldName: "vectors",
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim: 4,
+						Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+							Dim: 4, ElementType: schemapb.DataType_FloatVector, Data: vectorRows,
+						}},
+					}},
+				},
+			},
+		}},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			var bytesPerIteration int64
+			for i := 0; i < b.N; i++ {
+				cursor, err := NewInsertRequestViewCursor(tc.source)
+				if err != nil {
+					b.Fatal(err)
+				}
+				var encodedBytes int64
+				for start := 0; start < len(rows); {
+					encoder, consumed, err := cursor.NextEncoder(template, rows[start:], bodyBudget)
+					if err != nil {
+						b.Fatal(err)
+					}
+					size, err := encoder.EncodedSize()
+					if err != nil {
+						b.Fatal(err)
+					}
+					payload := make([]byte, size)
+					if _, err := encoder.MarshalTo(payload); err != nil {
+						b.Fatal(err)
+					}
+					encodedBytes += int64(size)
+					insertRequestViewBenchmarkSink = payload
+					start += consumed
+				}
+				if i == 0 {
+					bytesPerIteration = encodedBytes
+				}
+			}
+			b.SetBytes(bytesPerIteration)
+		})
+	}
 }
 
 func benchmarkInsertRows(rowCount int) ([]int, []int64, []uint64) {

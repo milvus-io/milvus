@@ -23,60 +23,69 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // visitInsertRowsByMessageSize partitions a monotonically increasing row
-// selection and synchronously visits each per-message view. The rows slice
-// borrows the backing array of rowOffsets and is valid only until visit
+// selection by the exact plaintext InsertRequest protobuf size and
+// synchronously visits each per-message encoder. Both the rows slice and the
+// encoder borrow reusable cursor scratch and are valid only until visit
 // returns.
-//
-// Keep the existing entity-size split rule here. This change removes the
-// materialized repack buffers without also changing message boundaries.
 func visitInsertRowsByMessageSize(
+	template *msgpb.InsertRequest,
 	insertMsg *msgstream.InsertMsg,
 	rowOffsets []int,
-	visit func(rows []int) error,
+	visit func(rows []int, encoder *fastpb.InsertRequestViewEncoder) error,
 ) error {
 	if len(rowOffsets) == 0 {
 		return nil
 	}
 
 	threshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
-	fieldsData := insertMsg.GetFieldsData()
-	idxComputer := typeutil.NewFieldDataIdxComputer(fieldsData)
-
+	viewCursor, err := fastpb.NewInsertRequestViewCursor(insertMsg.InsertRequest)
+	if err != nil {
+		return err
+	}
 	start := 0
-	requestSize := 0
-	for i, offset := range rowOffsets {
-		fieldIdxs := idxComputer.Compute(int64(offset))
-		rowSize, err := typeutil.EstimateEntitySize(fieldsData, offset, fieldIdxs...)
+	for start < len(rowOffsets) {
+		encoder, consumed, err := viewCursor.NextEncoder(template, rowOffsets[start:], threshold)
 		if err != nil {
 			return err
 		}
-		// A single row may be larger than the threshold. Do not emit an empty
-		// selection before it; match the previous repack behavior exactly.
-		if i > start && requestSize+rowSize >= threshold {
-			if err := visit(rowOffsets[start:i]); err != nil {
-				return err
-			}
-			start = i
-			requestSize = 0
+		rows := rowOffsets[start : start+consumed]
+		if err := visit(rows, encoder); err != nil {
+			return err
 		}
-		requestSize += rowSize
+		start += consumed
 	}
-
-	return visit(rowOffsets[start:])
+	return nil
 }
 
 // splitInsertRowsByMessageSize exposes the borrowed row views for focused
 // message-boundary tests. Production encoding uses the synchronous visitor
 // above so it does not allocate an outer selection slice.
 func splitInsertRowsByMessageSize(insertMsg *msgstream.InsertMsg, rowOffsets []int) ([][]int, error) {
+	template := &msgpb.InsertRequest{
+		Base:           insertMsg.GetBase(),
+		ShardName:      insertMsg.GetShardName(),
+		DbName:         insertMsg.GetDbName(),
+		CollectionName: insertMsg.GetCollectionName(),
+		PartitionName:  insertMsg.GetPartitionName(),
+		DbID:           insertMsg.GetDbID(),
+		CollectionID:   insertMsg.GetCollectionID(),
+		PartitionID:    insertMsg.GetPartitionID(),
+		SegmentID:      insertMsg.GetSegmentID(),
+		Version:        insertMsg.GetVersion(),
+		Namespace:      insertMsg.Namespace,
+	}
 	var selections [][]int
-	err := visitInsertRowsByMessageSize(insertMsg, rowOffsets, func(rows []int) error {
+	err := visitInsertRowsByMessageSize(template, insertMsg, rowOffsets, func(rows []int, encoder *fastpb.InsertRequestViewEncoder) error {
 		selections = append(selections, rows)
-		return nil
+		size, err := encoder.EncodedSize()
+		if err != nil {
+			return err
+		}
+		_, err = encoder.MarshalTo(make([]byte, size))
+		return err
 	})
 	return selections, err
 }
@@ -94,39 +103,23 @@ func genInsertMessagesByPartition(
 	ez *message.CipherConfig,
 	schemaVersion int32,
 ) ([]message.MutableMessage, error) {
-	viewCursor, err := fastpb.NewInsertRequestViewCursor(insertMsg.InsertRequest)
-	if err != nil {
-		return nil, err
+	template := &msgpb.InsertRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_Insert),
+			commonpbutil.WithTimeStamp(insertMsg.BeginTimestamp),
+			commonpbutil.WithSourceID(insertMsg.Base.SourceID),
+		),
+		CollectionID:   insertMsg.CollectionID,
+		PartitionID:    partitionID,
+		DbName:         insertMsg.DbName,
+		CollectionName: insertMsg.CollectionName,
+		PartitionName:  partitionName,
+		SegmentID:      segmentID,
+		ShardName:      channelName,
+		Version:        msgpb.InsertDataVersion_ColumnBased,
 	}
 	messages := make([]message.MutableMessage, 0, 1)
-	err = visitInsertRowsByMessageSize(insertMsg, rowOffsets, func(rows []int) error {
-		template := &msgpb.InsertRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Insert),
-				commonpbutil.WithTimeStamp(insertMsg.BeginTimestamp),
-				commonpbutil.WithSourceID(insertMsg.Base.SourceID),
-			),
-			CollectionID:   insertMsg.CollectionID,
-			PartitionID:    partitionID,
-			DbName:         insertMsg.DbName,
-			CollectionName: insertMsg.CollectionName,
-			PartitionName:  partitionName,
-			SegmentID:      segmentID,
-			ShardName:      channelName,
-			NumRows:        uint64(len(rows)),
-			Version:        msgpb.InsertDataVersion_ColumnBased,
-		}
-		encoder, err := viewCursor.NewEncoder(template, rows)
-		if err != nil {
-			return err
-		}
-		if hasSingleRowLimit && curRowMessageSize >= singleRowLimit {
-			return nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
-				"single row at offset %d is too large to fit in one WAL message: estimated size=%d bytes, limit=%d bytes",
-				offset, curRowMessageSize, singleRowLimit,
-			))
-		}
-
+	err := visitInsertRowsByMessageSize(template, insertMsg, rowOffsets, func(rows []int, encoder *fastpb.InsertRequestViewEncoder) error {
 		// BuildMutable consumes the borrowed encoder synchronously. Once it
 		// returns, the message owns only the final payload and the splitter may
 		// safely reuse the cursor scratch for the next view.

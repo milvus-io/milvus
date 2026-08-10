@@ -1,9 +1,11 @@
 package fastpb
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
 	"math/rand"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -211,6 +213,184 @@ func TestInsertRequestViewCursor_SequentialViews(t *testing.T) {
 	})
 }
 
+func TestInsertRequestViewCursor_ExactPrefixSizing(t *testing.T) {
+	const rowCount = 129
+	rowIDs := make([]int64, rowCount)
+	timestamps := make([]uint64, rowCount)
+	longs := make([]int64, rowCount)
+	stringsData := make([]string, rowCount)
+	for row := 0; row < rowCount; row++ {
+		rowIDs[row] = int64(row)
+		timestamps[row] = uint64(row)
+		longs[row] = int64(row)
+	}
+	for row, value := range []uint64{0, 127, 128, 16_383, 16_384} {
+		rowIDs[row] = int64(value)
+		timestamps[row] = value
+		longs[row] = int64(value)
+	}
+	stringsData[1] = strings.Repeat("a", 127)
+	stringsData[2] = strings.Repeat("b", 128)
+	stringsData[3] = strings.Repeat("c", 16_383)
+	stringsData[4] = strings.Repeat("d", 16_384)
+	source := &msgpb.InsertRequest{
+		NumRows:    rowCount,
+		RowIDs:     rowIDs,
+		Timestamps: timestamps,
+		FieldsData: []*schemapb.FieldData{
+			scalarField(1, schemapb.DataType_Int64, &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: longs}}),
+			scalarField(2, schemapb.DataType_VarChar, &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: stringsData}}),
+		},
+	}
+	template := insertViewTemplate()
+	rows := make([]int, rowCount)
+	for row := range rows {
+		rows[row] = row
+	}
+
+	for _, prefix := range []int{1, 2, 3, 4, 5, 126, 127, 128, 129} {
+		cursor, err := NewInsertRequestViewCursor(source)
+		require.NoError(t, err)
+		encoder, consumed, err := cursor.NextEncoder(template, rows[:prefix], 0)
+		require.NoError(t, err)
+		assert.Equal(t, prefix, consumed)
+		expected := materializeWithAppendFieldData(template, source, rows[:prefix])
+		size, err := encoder.EncodedSize()
+		require.NoError(t, err)
+		assert.Equal(t, proto.Size(expected), size, "prefix=%d", prefix)
+		payload := make([]byte, size)
+		written, err := encoder.MarshalTo(payload)
+		require.NoError(t, err)
+		assert.Equal(t, size, written)
+	}
+}
+
+func TestInsertRequestViewCursor_ExactSplitPendingRow(t *testing.T) {
+	template := insertViewTemplate()
+	source := insertViewAllRepackTypesSource()
+	// Row 2 is the first rejected/pending row below. Keep nil repeated-message
+	// entries there so the cached pending delta also covers ARRAY and
+	// ArrayOfVector's zero-length nested-message representation.
+	source.GetFieldsData()[6].GetScalars().GetArrayData().Data[2] = nil
+	source.GetFieldsData()[17].GetVectors().GetVectorArray().Data[2] = nil
+	oracleSource := proto.Clone(source).(*msgpb.InsertRequest)
+	rows := []int{0, 1, 2, 3, 4}
+	limit := proto.Size(materializeWithAppendFieldData(template, oracleSource, rows[:3]))
+
+	cursor, err := NewInsertRequestViewCursor(source)
+	require.NoError(t, err)
+	start := 0
+	var selections [][]int
+	for start < len(rows) {
+		encoder, consumed, err := cursor.NextEncoder(template, rows[start:], limit)
+		require.NoError(t, err)
+		selection := rows[start : start+consumed]
+		selections = append(selections, append([]int(nil), selection...))
+
+		size, err := encoder.EncodedSize()
+		require.NoError(t, err)
+		payload := make([]byte, size)
+		_, err = encoder.MarshalTo(payload)
+		require.NoError(t, err)
+		got := &msgpb.InsertRequest{}
+		require.NoError(t, proto.Unmarshal(payload, got))
+		expected := materializeWithAppendFieldData(template, oracleSource, selection)
+		require.True(t, proto.Equal(expected, got), "selection=%v", selection)
+		start += consumed
+	}
+	assert.Equal(t, []int{0, 1}, selections[0], "candidate equal to the limit must roll over")
+	assert.Equal(t, rows, flattenRowSelections(selections))
+}
+
+func TestInsertRequestViewCursor_SingleOversizedPendingRow(t *testing.T) {
+	values := []string{"small", strings.Repeat("x", 4096), "small"}
+	source := &msgpb.InsertRequest{
+		NumRows:    3,
+		RowIDs:     []int64{1, 2, 3},
+		Timestamps: []uint64{1, 2, 3},
+		FieldsData: []*schemapb.FieldData{
+			scalarField(1, schemapb.DataType_VarChar, &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: values}}),
+		},
+	}
+	template := insertViewTemplate()
+	rows := []int{0, 1, 2}
+	smallSize := proto.Size(materializeWithAppendFieldData(template, source, rows[:1]))
+	hugeSize := proto.Size(materializeWithAppendFieldData(template, source, rows[1:2]))
+	limit := smallSize + 32
+	require.Less(t, limit, hugeSize)
+
+	cursor, err := NewInsertRequestViewCursor(source)
+	require.NoError(t, err)
+	start := 0
+	var selections [][]int
+	var sizes []int
+	for start < len(rows) {
+		encoder, consumed, err := cursor.NextEncoder(template, rows[start:], limit)
+		require.NoError(t, err)
+		selection := rows[start : start+consumed]
+		selections = append(selections, append([]int(nil), selection...))
+		size, err := encoder.EncodedSize()
+		require.NoError(t, err)
+		sizes = append(sizes, size)
+		_, err = encoder.MarshalTo(make([]byte, size))
+		require.NoError(t, err)
+		start += consumed
+	}
+	assert.Equal(t, [][]int{{0}, {1}, {2}}, selections)
+	assert.Less(t, sizes[0], limit)
+	assert.Greater(t, sizes[1], limit)
+	assert.Less(t, sizes[2], limit)
+}
+
+func TestInsertRequestViewCursor_DifferentialRandomExactSplits(t *testing.T) {
+	r := rand.New(rand.NewSource(0x52269_51))
+	template := insertViewTemplate()
+	for iteration := 0; iteration < 100; iteration++ {
+		rowCount := 2 + r.Intn(31)
+		source := randomInsertViewSource(r, rowCount)
+		rows := make([]int, 0, rowCount)
+		for row := 0; row < rowCount; row++ {
+			if r.Intn(4) != 0 {
+				rows = append(rows, row)
+			}
+		}
+		if len(rows) == 0 {
+			rows = append(rows, r.Intn(rowCount))
+		}
+		oracleSource := proto.Clone(source).(*msgpb.InsertRequest)
+		fullSize := proto.Size(materializeWithAppendFieldData(template, oracleSource, rows))
+		limit := 1 + r.Intn(fullSize)
+
+		cursor, err := NewInsertRequestViewCursor(source)
+		require.NoError(t, err)
+		start := 0
+		for start < len(rows) {
+			encoder, consumed, err := cursor.NextEncoder(template, rows[start:], limit)
+			require.NoError(t, err)
+			selection := rows[start : start+consumed]
+			size, err := encoder.EncodedSize()
+			require.NoError(t, err)
+			if consumed > 1 {
+				assert.Less(t, size, limit)
+			}
+			payload := make([]byte, size)
+			_, err = encoder.MarshalTo(payload)
+			require.NoError(t, err)
+			got := &msgpb.InsertRequest{}
+			require.NoError(t, proto.Unmarshal(payload, got))
+			expected := materializeWithAppendFieldData(template, oracleSource, selection)
+			require.True(t, proto.Equal(expected, got), "iteration=%d selection=%v limit=%d", iteration, selection, limit)
+			if next := start + consumed; next < len(rows) {
+				candidate := append(append([]int(nil), selection...), rows[next])
+				candidateSize := proto.Size(materializeWithAppendFieldData(template, oracleSource, candidate))
+				require.GreaterOrEqual(t, candidateSize, limit,
+					"iteration=%d selection=%v next=%d limit=%d", iteration, selection, rows[next], limit)
+			}
+			start += consumed
+		}
+	}
+}
+
 func TestInsertRequestViewEncoder_AllNullHighDimVectorDoesNotMaterialize(t *testing.T) {
 	const (
 		rowCount = 10_000
@@ -321,9 +501,11 @@ func TestInsertRequestViewEncoder_MarshalContract(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)
 
-	// Borrowed inputs are immutable until MarshalTo. A size-changing mutation
-	// is detected and returned as a typed internal error instead of silently
-	// returning a payload outside the caller's buffer.
+	// Borrowed inputs must remain immutable for the standalone encoder's entire
+	// lifetime. This particular size-changing contract violation is detected and
+	// returned as a typed internal error instead of silently returning a payload
+	// outside the caller's buffer; cached-size mutation behavior is otherwise
+	// intentionally undefined by protobuf.
 	source.FieldsData[5].GetScalars().GetStringData().Data[0] = "a much longer value"
 	_, err = encoder.MarshalTo(make([]byte, size))
 	require.Error(t, err)
@@ -341,13 +523,19 @@ func TestInsertRequestViewEncoder_InvalidUTF8(t *testing.T) {
 		}
 	}
 
-	t.Run("top-level varchar rejected during sizing", func(t *testing.T) {
+	t.Run("top-level varchar is treated as trusted", func(t *testing.T) {
 		source := baseSource(scalarField(1, schemapb.DataType_VarChar, &schemapb.ScalarField_StringData{
 			StringData: &schemapb.StringArray{Data: []string{invalid}},
 		}))
-		_, err := NewInsertRequestViewEncoder(insertViewTemplate(), source, []int{0})
-		require.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		encoder, err := NewInsertRequestViewEncoder(insertViewTemplate(), source, []int{0})
+		require.NoError(t, err)
+		size, err := encoder.EncodedSize()
+		require.NoError(t, err)
+		payload := make([]byte, size)
+		written, err := encoder.MarshalTo(payload)
+		require.NoError(t, err)
+		assert.Equal(t, size, written)
+		assert.True(t, bytes.Contains(payload, []byte{0xff}))
 	})
 
 	t.Run("nested array string rejected during marshal", func(t *testing.T) {
@@ -639,4 +827,12 @@ func rowsName(rows []int) string {
 		result += "_" + string(rune('a'+row%26))
 	}
 	return result
+}
+
+func flattenRowSelections(selections [][]int) []int {
+	var rows []int
+	for _, selection := range selections {
+		rows = append(rows, selection...)
+	}
+	return rows
 }

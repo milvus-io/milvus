@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -314,12 +315,16 @@ func TestSplitInsertRowsByMessageSize(t *testing.T) {
 
 	newInsertMsg := func(rows int) *msgstream.InsertMsg {
 		ids := make([]int64, rows)
+		timestamps := make([]uint64, rows)
 		for i := 0; i < rows; i++ {
 			ids[i] = int64(i)
+			timestamps[i] = uint64(i)
 		}
 		return &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
-				NumRows: uint64(rows),
+				NumRows:    uint64(rows),
+				RowIDs:     ids,
+				Timestamps: timestamps,
 				FieldsData: []*schemapb.FieldData{
 					{
 						Type: schemapb.DataType_Int64, FieldId: 100, FieldName: "pk",
@@ -369,6 +374,73 @@ func TestSplitInsertRowsByMessageSize(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Empty(t, selections)
 	})
+}
+
+func TestGenInsertMessagesByPartitionExactSplitIncludesFinalMetadata(t *testing.T) {
+	paramtable.Init()
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
+	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+
+	const rows = 3
+	value := strings.Repeat("v", 64)
+	source := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{BeginTimestamp: 99},
+		InsertRequest: &msgpb.InsertRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert, SourceID: 42},
+			CollectionID:   100,
+			DbName:         strings.Repeat("db", 32),
+			CollectionName: strings.Repeat("collection", 16),
+			NumRows:        rows,
+			RowIDs:         []int64{1, 1, 1},
+			Timestamps:     []uint64{1, 1, 1},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type: schemapb.DataType_VarChar, FieldId: 100, FieldName: strings.Repeat("field", 32),
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{value, value, value}}},
+					}},
+				},
+			},
+			Version: msgpb.InsertDataVersion_ColumnBased,
+		},
+	}
+	partitionName := strings.Repeat("partition", 16)
+	channelName := strings.Repeat("channel", 16)
+
+	twoRows, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1}, channelName, source, nil, 7)
+	require.NoError(t, err)
+	require.Len(t, twoRows, 1)
+	threshold := len(twoRows[0].Payload())
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(threshold)))
+
+	msgs, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1, 2}, channelName, source, nil, 7)
+	require.NoError(t, err)
+	require.Len(t, msgs, 3, "candidate body equal to the threshold must roll over")
+	for _, msg := range msgs {
+		assert.Less(t, len(msg.Payload()), threshold)
+		body := message.MustAsMutableInsertMessageV1(msg).MustBody()
+		assert.Equal(t, uint64(1), body.GetNumRows())
+		assert.Equal(t, commonpb.MsgType_Insert, body.GetBase().GetMsgType())
+		assert.Equal(t, uint64(99), body.GetBase().GetTimestamp())
+		assert.Equal(t, int64(42), body.GetBase().GetSourceID())
+		assert.Equal(t, int64(100), body.GetCollectionID())
+		assert.Equal(t, int64(300), body.GetPartitionID())
+		assert.Equal(t, int64(200), body.GetSegmentID())
+		assert.Equal(t, partitionName, body.GetPartitionName())
+		assert.Equal(t, channelName, body.GetShardName())
+		assert.Equal(t, source.GetDbName(), body.GetDbName())
+		assert.Equal(t, source.GetCollectionName(), body.GetCollectionName())
+		assert.Equal(t, msgpb.InsertDataVersion_ColumnBased, body.GetVersion())
+		assert.Equal(t, []int64{1}, body.GetRowIDs())
+		assert.Equal(t, []uint64{1}, body.GetTimestamps())
+		require.Len(t, body.GetFieldsData(), 1)
+		field := body.GetFieldsData()[0]
+		assert.Equal(t, schemapb.DataType_VarChar, field.GetType())
+		assert.Equal(t, int64(100), field.GetFieldId())
+		assert.Equal(t, source.GetFieldsData()[0].GetFieldName(), field.GetFieldName())
+		assert.Equal(t, []string{value}, field.GetScalars().GetStringData().GetData())
+		assert.Equal(t, proto.Size(body), len(msg.Payload()))
+	}
 }
 
 func TestGenInsertMessagesByPartitionEncodesSelectionView(t *testing.T) {
