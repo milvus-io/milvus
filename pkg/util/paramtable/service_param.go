@@ -34,10 +34,11 @@ import (
 )
 
 const (
-	defaultEtcdLogLevel       = "info"
-	defaultEtcdLogPath        = "stdout"
-	KafkaProducerConfigPrefix = "kafka.producer."
-	KafkaConsumerConfigPrefix = "kafka.consumer."
+	defaultEtcdLogLevel         = "info"
+	defaultEtcdLogPath          = "stdout"
+	defaultPulsarMaxMessageSize = "2097152"
+	KafkaProducerConfigPrefix   = "kafka.producer."
+	KafkaConsumerConfigPrefix   = "kafka.consumer."
 
 	defaultLocalStoragePath = "/var/lib/milvus/data"
 )
@@ -1228,11 +1229,22 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 	p.MaxMessageSize = ParamItem{
 		Key:          "pulsar.maxMessageSize",
 		Version:      "2.0.0",
-		DefaultValue: "2097152",
+		DefaultValue: defaultPulsarMaxMessageSize,
 		Doc: `The maximum size of each message in Pulsar. Unit: Byte.
-By default, Pulsar can transmit at most 2MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
-If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.`,
+By default, Pulsar can transmit at most 2 MiB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
+If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
+Invalid, out-of-int32-range, zero, or negative values fall back to the default 2 MiB limit.`,
 		Export: true,
+		Formatter: func(value string) string {
+			maxMessageSize, err := strconv.ParseInt(value, 10, 32)
+			if err != nil || maxMessageSize <= 0 {
+				mlog.Warn(context.TODO(), "pulsar.maxMessageSize must be a positive 32-bit integer, using default",
+					mlog.String("configured", value),
+					mlog.String("default", defaultPulsarMaxMessageSize))
+				return defaultPulsarMaxMessageSize
+			}
+			return value
+		},
 	}
 	p.MaxMessageSize.Init(base.mgr)
 

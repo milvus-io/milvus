@@ -100,7 +100,7 @@ func TestInsertRequestViewCursor_SequentialViews(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, rows := range [][]int{{0, 2}, {3, 4}} {
-		encoder, err := cursor.NewEncoder(template, rows)
+		encoder, err := cursor.newEncoder(template, rows)
 		require.NoError(t, err)
 		size, err := encoder.EncodedSize()
 		require.NoError(t, err)
@@ -113,7 +113,7 @@ func TestInsertRequestViewCursor_SequentialViews(t *testing.T) {
 		require.True(t, proto.Equal(expected, got))
 	}
 
-	_, err = cursor.NewEncoder(template, []int{4})
+	_, err = cursor.newEncoder(template, []int{4})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)
 
@@ -124,9 +124,9 @@ func TestInsertRequestViewCursor_SequentialViews(t *testing.T) {
 	t.Run("requires synchronous consumption", func(t *testing.T) {
 		cursor, err := NewInsertRequestViewCursor(source)
 		require.NoError(t, err)
-		encoder, err := cursor.NewEncoder(template, []int{0})
+		encoder, err := cursor.newEncoder(template, []int{0})
 		require.NoError(t, err)
-		_, err = cursor.NewEncoder(template, []int{2})
+		_, err = cursor.newEncoder(template, []int{2})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrServiceInternal)
 
@@ -134,7 +134,7 @@ func TestInsertRequestViewCursor_SequentialViews(t *testing.T) {
 		require.NoError(t, err)
 		_, err = encoder.MarshalTo(make([]byte, size))
 		require.NoError(t, err)
-		_, err = cursor.NewEncoder(template, []int{2})
+		_, err = cursor.newEncoder(template, []int{2})
 		require.NoError(t, err)
 	})
 
@@ -142,7 +142,7 @@ func TestInsertRequestViewCursor_SequentialViews(t *testing.T) {
 		cursor, err := NewInsertRequestViewCursor(source)
 		require.NoError(t, err)
 		for _, rows := range [][]int{{2}, {4}} {
-			encoder, err := cursor.NewEncoder(template, rows)
+			encoder, err := cursor.newEncoder(template, rows)
 			require.NoError(t, err)
 			size, err := encoder.EncodedSize()
 			require.NoError(t, err)
@@ -161,7 +161,7 @@ func TestInsertRequestViewCursor_SequentialViews(t *testing.T) {
 		cursor, err := NewInsertRequestViewCursor(source)
 		require.NoError(t, err)
 
-		first, err := cursor.NewEncoder(template, []int{0})
+		first, err := cursor.newEncoder(template, []int{0})
 		require.NoError(t, err)
 		firstSize, err := first.EncodedSize()
 		require.NoError(t, err)
@@ -169,13 +169,13 @@ func TestInsertRequestViewCursor_SequentialViews(t *testing.T) {
 		_, err = first.MarshalTo(make([]byte, firstSize))
 		require.NoError(t, err)
 
-		second, err := cursor.NewEncoder(template, []int{2})
+		second, err := cursor.newEncoder(template, []int{2})
 		require.NoError(t, err)
 		_, err = firstCopy.MarshalTo(make([]byte, firstSize))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrServiceInternal)
 
-		_, err = cursor.NewEncoder(template, []int{3})
+		_, err = cursor.newEncoder(template, []int{3})
 		require.Error(t, err, "the consumed encoder must not release the newer encoder's scratch")
 		assert.ErrorIs(t, err, merr.ErrServiceInternal)
 
@@ -183,7 +183,7 @@ func TestInsertRequestViewCursor_SequentialViews(t *testing.T) {
 		require.NoError(t, err)
 		_, err = second.MarshalTo(make([]byte, secondSize))
 		require.NoError(t, err)
-		_, err = cursor.NewEncoder(template, []int{3})
+		_, err = cursor.newEncoder(template, []int{3})
 		require.NoError(t, err)
 	})
 
@@ -191,13 +191,13 @@ func TestInsertRequestViewCursor_SequentialViews(t *testing.T) {
 		cursor, err := NewInsertRequestViewCursor(source)
 		require.NoError(t, err)
 
-		_, err = cursor.NewEncoder(nil, []int{2})
+		_, err = cursor.newEncoder(nil, []int{2})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrServiceInternal)
 
 		var encoder *InsertRequestViewEncoder
 		require.NotPanics(t, func() {
-			encoder, err = cursor.NewEncoder(template, []int{0})
+			encoder, err = cursor.newEncoder(template, []int{0})
 		})
 		require.NoError(t, err)
 		size, err := encoder.EncodedSize()

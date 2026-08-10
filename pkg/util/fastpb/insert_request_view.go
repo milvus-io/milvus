@@ -44,7 +44,7 @@ type InsertRequestViewEncoder struct {
 // InsertRequestViewCursor binds compact nullable-vector prefix state and
 // reusable encoding scratch to one source request. Source and every object
 // reachable from it must remain immutable from cursor creation until the cursor
-// is discarded. Successive calls to NewEncoder must use globally increasing
+// is discarded. Successive calls to NextEncoder must use globally increasing
 // row selections. The returned encoder borrows the cursor scratch until
 // MarshalTo returns, so callers must consume it synchronously before requesting
 // the next view.
@@ -86,9 +86,9 @@ func NewInsertRequestViewCursor(source *msgpb.InsertRequest) (*InsertRequestView
 	}, nil
 }
 
-// NewEncoder creates the next borrowed view from this cursor. The encoder must
-// be synchronously marshaled before NewEncoder is called again.
-func (c *InsertRequestViewCursor) NewEncoder(template *msgpb.InsertRequest, rows []int) (*InsertRequestViewEncoder, error) {
+// newEncoder creates an unbounded borrowed view for package tests. Production
+// splitters must pass an explicit size limit through NextEncoder.
+func (c *InsertRequestViewCursor) newEncoder(template *msgpb.InsertRequest, rows []int) (*InsertRequestViewEncoder, error) {
 	encoder, consumed, err := c.NextEncoder(template, rows, 0)
 	if err != nil {
 		return nil, err
@@ -347,10 +347,10 @@ func (e *InsertRequestViewEncoder) appendRequest(w *insertViewWriter) error {
 	w.proto3Varint(8, uint64(t.GetPartitionID()))
 	w.proto3Varint(9, uint64(t.GetSegmentID()))
 
-	if err := e.appendSelectedUint64(w, 10, e.source.GetTimestamps(), "timestamps"); err != nil {
+	if err := e.appendSelectedUint64(w, 10, e.source.GetTimestamps()); err != nil {
 		return err
 	}
-	if err := e.appendSelectedInt64(w, 11, e.source.GetRowIDs(), "row IDs"); err != nil {
+	if err := e.appendSelectedInt64(w, 11, e.source.GetRowIDs()); err != nil {
 		return err
 	}
 
@@ -386,7 +386,7 @@ func (e *InsertRequestViewEncoder) appendRequest(w *insertViewWriter) error {
 	return w.err
 }
 
-func (e *InsertRequestViewEncoder) appendSelectedUint64(w *insertViewWriter, fieldNumber protowire.Number, values []uint64, label string) error {
+func (e *InsertRequestViewEncoder) appendSelectedUint64(w *insertViewWriter, fieldNumber protowire.Number, values []uint64) error {
 	if len(e.rows) == 0 {
 		return nil
 	}
@@ -402,7 +402,7 @@ func (e *InsertRequestViewEncoder) appendSelectedUint64(w *insertViewWriter, fie
 	})
 }
 
-func (e *InsertRequestViewEncoder) appendSelectedInt64(w *insertViewWriter, fieldNumber protowire.Number, values []int64, label string) error {
+func (e *InsertRequestViewEncoder) appendSelectedInt64(w *insertViewWriter, fieldNumber protowire.Number, values []int64) error {
 	if len(e.rows) == 0 {
 		return nil
 	}

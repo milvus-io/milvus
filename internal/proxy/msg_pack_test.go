@@ -39,6 +39,57 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 )
 
+func TestInsertRequestBodyLimit(t *testing.T) {
+	tests := []struct {
+		name           string
+		maxMessageSize int
+		expected       int
+	}{
+		{name: "negative defense", maxMessageSize: -1, expected: 1},
+		{name: "non-positive defense", maxMessageSize: 0, expected: 1},
+		{name: "one byte limit", maxMessageSize: 1, expected: 1},
+		{name: "below proportional reserve", maxMessageSize: 31, expected: 31},
+		{name: "proportional reserve starts", maxMessageSize: 32, expected: 31},
+		{name: "tiny limit", maxMessageSize: 64, expected: 62},
+		{
+			name:           "64 KiB limit",
+			maxMessageSize: 64 * 1024,
+			expected:       62 * 1024,
+		},
+		{
+			name:           "128 KiB limit",
+			maxMessageSize: 128 * 1024,
+			expected:       124 * 1024,
+		},
+		{
+			name:           "below default reserve cap",
+			maxMessageSize: 2*1024*1024 - 1,
+			expected:       2*1024*1024 - insertMessageTransportReserve,
+		},
+		{
+			name:           "default pulsar limit",
+			maxMessageSize: 2 * 1024 * 1024,
+			expected:       2*1024*1024 - insertMessageTransportReserve,
+		},
+		{
+			name:           "above default keeps reserve cap",
+			maxMessageSize: 2*1024*1024 + 1,
+			expected:       2*1024*1024 + 1 - insertMessageTransportReserve,
+		},
+		{
+			name:           "max int32",
+			maxMessageSize: 2147483647,
+			expected:       2147483647 - insertMessageTransportReserve,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected, insertRequestBodyLimit(test.maxMessageSize))
+		})
+	}
+}
+
 func TestSplitInsertRowsByMessageSizeSingleOversizedRow(t *testing.T) {
 	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "64"))
 	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
@@ -359,7 +410,7 @@ func TestSplitInsertRowsByMessageSize(t *testing.T) {
 
 	t.Run("splitting on the size threshold still works", func(t *testing.T) {
 		// Force a tiny threshold so every row lands in its own message.
-		Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1")
+		require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1"))
 		defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
 
 		const rows = 5
@@ -376,13 +427,13 @@ func TestSplitInsertRowsByMessageSize(t *testing.T) {
 	})
 }
 
-func TestGenInsertMessagesByPartitionExactSplitIncludesFinalMetadata(t *testing.T) {
+func TestGenInsertMessagesByPartitionReservesStreamingEnvelopeOverhead(t *testing.T) {
 	paramtable.Init()
 	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
 	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
 
 	const rows = 3
-	value := strings.Repeat("v", 64)
+	value := strings.Repeat("v", 80*1024)
 	source := &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{BeginTimestamp: 99},
 		InsertRequest: &msgpb.InsertRequest{
@@ -410,14 +461,19 @@ func TestGenInsertMessagesByPartitionExactSplitIncludesFinalMetadata(t *testing.
 	twoRows, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1}, channelName, source, nil, 7)
 	require.NoError(t, err)
 	require.Len(t, twoRows, 1)
-	threshold := len(twoRows[0].Payload())
+	twoRowRecord := twoRows[0].IntoMessageProto()
+	threshold := proto.Size(twoRowRecord)
+	require.Less(t, len(twoRowRecord.GetPayload()), threshold,
+		"the plaintext body fits below the broker-facing limit before properties are counted")
+	require.Greater(t, len(twoRowRecord.GetPayload()), insertRequestBodyLimit(threshold),
+		"the transport reserve must keep this near-limit body out of one record")
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(threshold)))
 
 	msgs, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1, 2}, channelName, source, nil, 7)
 	require.NoError(t, err)
-	require.Len(t, msgs, 3, "candidate body equal to the threshold must roll over")
+	require.Len(t, msgs, 3, "transport overhead must not consume the broker-facing size limit")
 	for _, msg := range msgs {
-		assert.Less(t, len(msg.Payload()), threshold)
+		assert.Less(t, proto.Size(msg.IntoMessageProto()), threshold)
 		body := message.MustAsMutableInsertMessageV1(msg).MustBody()
 		assert.Equal(t, uint64(1), body.GetNumRows())
 		assert.Equal(t, commonpb.MsgType_Insert, body.GetBase().GetMsgType())
@@ -441,6 +497,76 @@ func TestGenInsertMessagesByPartitionExactSplitIncludesFinalMetadata(t *testing.
 		assert.Equal(t, []string{value}, field.GetScalars().GetStringData().GetData())
 		assert.Equal(t, proto.Size(body), len(msg.Payload()))
 	}
+}
+
+func TestGenInsertMessagesByPartitionSmallScalarsUseScaledTransportReserve(t *testing.T) {
+	paramtable.Init()
+	const maxMessageSize = 64 * 1024
+	require.Equal(t, 62*1024, insertRequestBodyLimit(maxMessageSize))
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(maxMessageSize)))
+	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+
+	const (
+		rows       = 1024
+		fieldCount = 128
+	)
+	rowIDs := make([]int64, rows)
+	timestamps := make([]uint64, rows)
+	selection := make([]int, rows)
+	for i := range rows {
+		rowIDs[i] = int64(i + 1)
+		timestamps[i] = uint64(i + 1)
+		selection[i] = i
+	}
+
+	fields := make([]*schemapb.FieldData, 0, fieldCount)
+	for fieldID := range fieldCount {
+		values := make([]int64, rows)
+		for row := range values {
+			values[row] = 1
+		}
+		fields = append(fields, &schemapb.FieldData{
+			Type:      schemapb.DataType_Int64,
+			FieldId:   int64(1000 + fieldID),
+			FieldName: "small_scalar_" + strconv.Itoa(fieldID),
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values}},
+			}},
+		})
+	}
+
+	source := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{BeginTimestamp: 99},
+		InsertRequest: &msgpb.InsertRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert, SourceID: 42},
+			CollectionID:   100,
+			DbName:         "db",
+			CollectionName: "collection",
+			NumRows:        rows,
+			RowIDs:         rowIDs,
+			Timestamps:     timestamps,
+			FieldsData:     fields,
+			Version:        msgpb.InsertDataVersion_ColumnBased,
+		},
+	}
+
+	msgs, err := genInsertMessagesByPartition(200, 300, "partition", selection, "vchannel", source, nil, 7)
+	require.NoError(t, err)
+	require.Greater(t, len(msgs), 1)
+	require.Less(t, len(msgs), rows/2, "scaled reserve must not degenerate into one WAL message per row")
+
+	totalRows := 0
+	for i, msg := range msgs {
+		raw := msg.IntoMessageProto()
+		assert.Less(t, len(raw.GetPayload()), insertRequestBodyLimit(maxMessageSize))
+		assert.Less(t, proto.Size(raw), maxMessageSize)
+		body := message.MustAsMutableInsertMessageV1(msg).MustBody()
+		if i < len(msgs)-1 {
+			assert.Greater(t, body.GetNumRows(), uint64(1), "non-final messages should use the scaled body budget")
+		}
+		totalRows += int(body.GetNumRows())
+	}
+	assert.Equal(t, rows, totalRows)
 }
 
 func TestGenInsertMessagesByPartitionEncodesSelectionView(t *testing.T) {

@@ -25,6 +25,41 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 )
 
+const (
+	// insertMessageTransportReserve caps the headroom left outside the plaintext
+	// InsertRequest body for the streaming message header, cipher
+	// metadata/expansion, properties added before WAL append, and Pulsar message
+	// metadata.
+	insertMessageTransportReserve = 64 * 1024
+
+	// insertMessageTransportReserveDivisor keeps the reserve proportional for
+	// small operator/test limits. At and below the default 2 MiB limit, at most
+	// 1/32 (3.125%) is reserved; larger limits keep the 64 KiB cap.
+	insertMessageTransportReserveDivisor = 32
+)
+
+// insertRequestBodyLimit converts the broker-facing message limit into the
+// plaintext InsertRequest budget controlled by Proxy. The final WAL record can
+// grow after this point through encryption, streaming properties, Pulsar
+// metadata, and write-before function materialization, so using the broker
+// limit directly as an exact body limit is unsafe.
+//
+// This is conservative headroom, not an exact final-record calculation:
+// write-before function outputs have no bounded expansion at Proxy. A single
+// oversized row is still emitted by InsertRequestViewCursor. Keep the body
+// limit positive even for invalid or deliberately tiny limits.
+func insertRequestBodyLimit(maxMessageSize int) int {
+	if maxMessageSize <= 0 {
+		return 1
+	}
+
+	reserve := maxMessageSize / insertMessageTransportReserveDivisor
+	if reserve > insertMessageTransportReserve {
+		reserve = insertMessageTransportReserve
+	}
+	return maxMessageSize - reserve
+}
+
 // visitInsertRowsByMessageSize partitions a monotonically increasing row
 // selection by the exact plaintext InsertRequest protobuf size and
 // synchronously visits each per-message encoder. Both the rows slice and the
@@ -40,14 +75,14 @@ func visitInsertRowsByMessageSize(
 		return nil
 	}
 
-	threshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+	bodyLimit := insertRequestBodyLimit(Params.PulsarCfg.MaxMessageSize.GetAsInt())
 	viewCursor, err := fastpb.NewInsertRequestViewCursor(insertMsg.InsertRequest)
 	if err != nil {
 		return err
 	}
 	start := 0
 	for start < len(rowOffsets) {
-		encoder, consumed, err := viewCursor.NextEncoder(template, rowOffsets[start:], threshold)
+		encoder, consumed, err := viewCursor.NextEncoder(template, rowOffsets[start:], bodyLimit)
 		if err != nil {
 			return err
 		}

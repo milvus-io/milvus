@@ -374,7 +374,7 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 	} else {
 		payload, err = proto.Marshal(b.body)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to marshal body")
+			err = errors.Wrap(err, "failed to marshal body")
 		}
 	}
 	if err != nil {
