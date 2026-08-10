@@ -1173,12 +1173,12 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	if err != nil {
 		log.Warn("QueryNode search return error", zap.Error(err))
 		// globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
-		t.shardClientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
+		t.shardClientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		log.Warn("QueryNode is not shardLeader")
-		t.shardClientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
+		t.shardClientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		return merr.Error(result.GetStatus())
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {

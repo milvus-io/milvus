@@ -744,12 +744,12 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	result, err := qn.Query(ctx, req)
 	if err != nil {
 		log.Warn("QueryNode query return error", zap.Error(err))
-		t.shardclientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
+		t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		log.Warn("QueryNode is not shardLeader")
-		t.shardclientMgr.DeprecateShardCache(t.request.GetDbName(), t.collectionName)
+		t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		return merr.Error(result.GetStatus())
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
