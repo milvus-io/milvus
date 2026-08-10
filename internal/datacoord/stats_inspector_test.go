@@ -581,9 +581,9 @@ func (s *statsInspectorSuite) TestReloadFromMeta() {
 }
 
 func (s *statsInspectorSuite) TestReloadFromMetaEstimatesPerSubJobType() {
-	// The collection cache is filled asynchronously, so recovered stats tasks
-	// must resolve the collection through the handler and be sized by the
-	// columns their sub job actually reads.
+	// Recovered stats tasks read the collection from the local meta cache and
+	// are sized by the columns their sub job actually reads; recovery must not
+	// resolve collections through the handler (rootcoord).
 	const (
 		collectionID = UniqueID(5)
 		segmentID    = UniqueID(50)
@@ -593,7 +593,7 @@ func (s *statsInspectorSuite) TestReloadFromMetaEstimatesPerSubJobType() {
 		groupSize    = int64(2 * 1024 * 1024 * 1024)
 	)
 
-	collInfo := &collectionInfo{
+	s.mt.collections.Insert(collectionID, &collectionInfo{
 		ID: collectionID,
 		Schema: &schemapb.CollectionSchema{
 			ExternalSource: "s3://external",
@@ -602,11 +602,9 @@ func (s *statsInspectorSuite) TestReloadFromMetaEstimatesPerSubJobType() {
 				{FieldID: jsonFieldID, Name: "json", DataType: schemapb.DataType_JSON, ExternalField: "json_col"},
 			},
 		},
-	}
-	handler := NewNMockHandler(s.T())
-	// resolved once for the two recovered tasks
-	handler.EXPECT().GetCollection(mock.Anything, collectionID).Return(collInfo, nil).Once()
-	s.inspector.handler = handler
+	})
+	// no GetCollection expectation: any handler resolution fails the test
+	s.inspector.handler = NewNMockHandler(s.T())
 
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
@@ -659,6 +657,36 @@ func (s *statsInspectorSuite) TestReloadFromMetaEstimatesPerSubJobType() {
 	s.Equal(calculateStatsTaskSlot(residual*numRows*2), slots[indexpb.StatsSubJob_JsonKeyIndexJob])
 	s.Equal(calculateStatsTaskSlot(segment.getSegmentSize()), slots[indexpb.StatsSubJob_Sort])
 	s.Less(slots[indexpb.StatsSubJob_JsonKeyIndexJob], calculateStatsTaskSlot(segment.getSegmentSize()*2))
+}
+
+func (s *statsInspectorSuite) TestReloadFromMetaSkipsCollectionResolutionWithoutProjection() {
+	// Recovery reads collections from the local meta cache only; it must never
+	// resolve one through the handler (rootcoord), whose cache-miss retries
+	// would block Start().
+	// no GetCollection expectation: any resolution attempt fails the test
+	handler := NewNMockHandler(s.T())
+	s.inspector.handler = handler
+
+	s.mt.statsTaskMeta.tasks.Insert(1005, &indexpb.StatsTask{
+		CollectionID: 1,
+		TaskID:       1005,
+		SegmentID:    10,
+		SubJobType:   indexpb.StatsSubJob_Sort,
+		State:        indexpb.JobState_JobStateInProgress,
+	})
+
+	slots := make([]int64, 0, 1)
+	scheduler := task.NewMockGlobalScheduler(s.T())
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(t task.Task) {
+		slots = append(slots, t.GetTaskSlot())
+	}).Return()
+	s.inspector.scheduler = scheduler
+
+	s.inspector.reloadFromMeta()
+
+	s.Require().Len(slots, 1)
+	segment := s.mt.GetHealthySegment(s.ctx, 10)
+	s.Equal(calculateStatsTaskSlot(s.inspector.estimateStatsTaskSize(nil, segment, indexpb.StatsSubJob_Sort)), slots[0])
 }
 
 func (s *statsInspectorSuite) TestReloadFromMetaExternalStatsTask() {
