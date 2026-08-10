@@ -5374,13 +5374,12 @@ user-task-polling:
 		DefaultValue: strconv.Itoa(DefaultStorageV2AsyncLoadReadWindowSizeBytes),
 		Doc: `Target estimated loaded-byte threshold for one storage v2 async read window. ` +
 			`Each window contains at least one cell, so an oversized cell may exceed the threshold. ` +
-			`Set to 0 to disable size-based splitting; file boundaries and non-contiguous row groups ` +
-			`still start new windows. Default 16 MiB.`,
+			`The value must be positive. Default 16 MiB.`,
 		Export: true,
 		Formatter: func(v string) string {
 			parsed, err := strconv.ParseInt(v, 10, 64)
-			if err != nil || parsed < 0 {
-				mlog.Warn(context.TODO(), "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes must be non-negative, using default 16 MiB",
+			if err != nil || parsed <= 0 {
+				mlog.Warn(context.TODO(), "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes must be positive, using default 16 MiB",
 					mlog.String("configured", v))
 				return strconv.Itoa(DefaultStorageV2AsyncLoadReadWindowSizeBytes)
 			}

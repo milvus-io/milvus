@@ -22,6 +22,7 @@
 #include <cstring>
 #include <filesystem>
 #include <future>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <string>
@@ -1297,23 +1298,24 @@ TEST_P(ManifestGroupTranslatorTest, AsyncReadWindowConfigControlsReadBatching) {
     auto use_mmap = GetParam();
 
     SetCellTargetSizeBytes(1);
-    SetStorageV2AsyncLoadReadWindowSizeBytes(0);
-    auto unlimited_reader =
+    SetStorageV2AsyncLoadReadWindowSizeBytes(
+        std::numeric_limits<int64_t>::max());
+    auto wide_window_reader =
         std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
-    auto unlimited_translator =
-        MakeTranslator(0, use_mmap, true, unlimited_reader);
-    auto num_cells = unlimited_translator->num_cells();
+    auto wide_window_translator =
+        MakeTranslator(0, use_mmap, true, wide_window_reader);
+    auto num_cells = wide_window_translator->num_cells();
     ASSERT_GT(num_cells, 1);
     std::vector<cachinglayer::cid_t> cids(num_cells);
     std::iota(cids.begin(), cids.end(), 0);
-    auto unlimited_cells = unlimited_translator->get_cells(nullptr, cids);
-    EXPECT_EQ(unlimited_cells.size(), num_cells);
-    EXPECT_EQ(unlimited_reader->AsyncCalls(), 1);
+    auto wide_window_cells = wide_window_translator->get_cells(nullptr, cids);
+    EXPECT_EQ(wide_window_cells.size(), num_cells);
+    EXPECT_EQ(wide_window_reader->AsyncCalls(), 1);
 
     SetStorageV2AsyncLoadReadWindowSizeBytes(1);
-    auto limited_cells = unlimited_translator->get_cells(nullptr, cids);
+    auto limited_cells = wide_window_translator->get_cells(nullptr, cids);
     EXPECT_EQ(limited_cells.size(), num_cells);
-    EXPECT_EQ(unlimited_reader->AsyncCalls(), 1 + num_cells);
+    EXPECT_EQ(wide_window_reader->AsyncCalls(), 1 + num_cells);
 }
 
 TEST_P(ManifestGroupTranslatorTest, RoutesAsyncFinalizationByMmapMode) {
