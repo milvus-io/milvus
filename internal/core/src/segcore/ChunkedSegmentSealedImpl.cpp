@@ -2724,7 +2724,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
             vec_binlog_config_[field_id] = std::move(field_binlog_config);
             set_bit(binlog_index_bitset_, field_id, true);
             auto index_version =
-                knowhere::Version::GetCurrentVersion().VersionNumber();
+                knowhere::Version::GetMaximumVersion().VersionNumber();
             if (is_sparse ||
                 field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
                 index_has_raw_data_[field_id] =
