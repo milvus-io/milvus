@@ -29,7 +29,7 @@ pub extern "C" fn tantivy_create_text_writer(
     let extra_info_str = cstr_to_str!(analyzer_extra_info);
     let tantivy_index_version = match TantivyIndexVersion::from_u32(tantivy_index_version) {
         Ok(v) => v,
-        Err(e) => return RustResult::from_error(e.to_string()),
+        Err(e) => return RustResult::from_binding_error(&e),
     };
 
     match IndexWriterWrapper::create_text_writer(
