@@ -39,10 +39,19 @@ PROW_APPROVAL_HEADER_PATTERN = re.compile(
 PROW_APPROVAL_LINE_PATTERN = re.compile(
     r"(?m)^This pull-request has been approved by:(?P<approvals>[^\r\n]*)$"
 )
+GITHUB_USER_LOGIN_FRAGMENT = r"[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}"
+# GitHub App actors append the five-character "[bot]" suffix; cap the stem at
+# 34 characters so the full login keeps GitHub's 39-character limit.
+GITHUB_APP_BOT_LOGIN_FRAGMENT = (
+    r"[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,33}\[bot\]"
+)
+GITHUB_ACTOR_LOGIN_FRAGMENT = (
+    rf"(?:{GITHUB_USER_LOGIN_FRAGMENT}|{GITHUB_APP_BOT_LOGIN_FRAGMENT})"
+)
 PROW_APPROVAL_LINK_PATTERN = re.compile(
     r'\*<a href="([^"\r\n]+)" '
     r'title="(?:Approved|LGTM|Author self-approved)">'
-    r"([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})</a>\*"
+    rf"({GITHUB_ACTOR_LOGIN_FRAGMENT})</a>\*"
 )
 
 

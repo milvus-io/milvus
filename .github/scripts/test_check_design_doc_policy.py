@@ -37,11 +37,14 @@ TEST_APPROVAL_COMMAND = re.compile(
 )
 
 
-def prow_notification(*approvers, comment_id=700):
+def prow_notification(*approvers, comment_id=700, titles=None):
+    titles = ("Approved",) * len(approvers) if titles is None else tuple(titles)
+    if len(titles) != len(approvers):
+        raise ValueError("Each rendered approver needs one title")
     rendered = ", ".join(
         f'*<a href="https://github.com/milvus-io/milvus/pull/1#" '
-        f'title="Approved">{login}</a>*'
-        for login in approvers
+        f'title="{title}">{login}</a>*'
+        for login, title in zip(approvers, titles)
     )
     return {
         "id": comment_id,
@@ -672,6 +675,41 @@ class ApprovalRequirementTest(unittest.TestCase):
             [prow_notification("Bob")],
         )
         self.assertFalse(approval.satisfied)
+
+    def test_bot_author_does_not_poison_two_design_doc_approvals(self):
+        owners = "aliases:\n  maintainers:\n    - Bob\n    - Carol\n"
+        client = FakeRepositoryFileClient({checker.OWNERS_ALIASES_PATH: owners})
+        state = checker.PullRequestState(
+            head_sha="head",
+            base_sha="base",
+            head_repository="fork/milvus",
+            base_repository="milvus-io/milvus",
+            author="mergify[bot]",
+            title="docs: test",
+            body="",
+            labels=(),
+        )
+        approval = checker.evaluate_design_doc_approval_requirement(
+            client,
+            "milvus-io/milvus",
+            1,
+            state,
+            [
+                prow_notification(
+                    "mergify[bot]",
+                    "Bob",
+                    "Carol",
+                    titles=(
+                        "Author self-approved",
+                        "Approved",
+                        "Approved",
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(("Bob", "Carol"), approval.approvers)
+        self.assertTrue(approval.satisfied)
 
 
 class ApprovalLabelTest(unittest.TestCase):

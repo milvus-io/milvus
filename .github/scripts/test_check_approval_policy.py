@@ -46,11 +46,19 @@ def pull_state(
     )
 
 
-def prow_notification(*approvers, comment_id=700, repository="milvus-io/milvus"):
+def prow_notification(
+    *approvers,
+    comment_id=700,
+    repository="milvus-io/milvus",
+    titles=None,
+):
+    titles = ("Approved",) * len(approvers) if titles is None else tuple(titles)
+    if len(titles) != len(approvers):
+        raise ValueError("Each rendered approver needs one title")
     rendered = ", ".join(
         f'*<a href="https://github.com/{repository}/pull/1#issuecomment-1" '
-        f'title="Approved">{login}</a>*'
-        for login in approvers
+        f'title="{title}">{login}</a>*'
+        for login, title in zip(approvers, titles)
     )
     return {
         "id": comment_id,
@@ -133,6 +141,68 @@ class ProwApprovalSnapshotTest(unittest.TestCase):
             prow_notification("Alice", "Carol", "outsider", comment_id=701),
         ]
         self.assertEqual(("Carol",), self.parse(comments))
+
+    def test_accepts_github_app_bot_logins_and_filters_the_bot_author(self):
+        for bot_author in ("mergify[bot]", "dependabot[bot]"):
+            with self.subTest(bot_author=bot_author):
+                notification = prow_notification(
+                    bot_author,
+                    "Bob",
+                    titles=("Author self-approved", "Approved"),
+                )
+                self.assertEqual(
+                    ("Bob",),
+                    self.parse(
+                        [notification],
+                        maintainers=("Bob",),
+                        author=bot_author,
+                    ),
+                )
+
+    def test_rejects_malformed_github_app_bot_logins(self):
+        for login in (
+            "mergify[bot]extra",
+            "mergify[Bot]",
+            "mergify[]",
+            "[bot]",
+            "mergify[bot][bot]",
+            "mergify[bot]</a><img>",
+        ):
+            with self.subTest(login=login):
+                with self.assertRaisesRegex(RuntimeError, "unknown format"):
+                    self.parse([prow_notification(login)])
+
+    def test_github_actor_logins_obey_the_github_login_length_limit(self):
+        longest_user_login = "a" * 39
+        self.assertEqual(
+            (longest_user_login,),
+            self.parse(
+                [prow_notification(longest_user_login)],
+                maintainers=(longest_user_login,),
+                author="author",
+            ),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "unknown format"):
+            self.parse([prow_notification("a" * 40)])
+
+        longest_bot_login = f"{'a' * 34}[bot]"
+        self.assertEqual(
+            (),
+            self.parse(
+                [
+                    prow_notification(
+                        longest_bot_login,
+                        titles=("Author self-approved",),
+                    )
+                ],
+                author=longest_bot_login,
+            ),
+        )
+
+        too_long_bot_login = f"{'a' * 35}[bot]"
+        with self.assertRaisesRegex(RuntimeError, "unknown format"):
+            self.parse([prow_notification(too_long_bot_login)])
 
     def test_missing_snapshot_means_no_prow_approval(self):
         self.assertEqual((), self.parse([]))
@@ -464,6 +534,24 @@ class RunTest(unittest.TestCase):
                 self.assertEqual("failure", client.completed[-1][2])
                 self.assertIn("(0/1)", client.completed[-1][4])
                 self.assertEqual(0, client.file_calls)
+
+    def test_github_app_bot_author_does_not_poison_a_valid_approval(self):
+        bot_author = "mergify[bot]"
+        state = pull_state(author=bot_author)
+        notification = prow_notification(
+            bot_author,
+            "Bob",
+            titles=("Author self-approved", "Approved"),
+        )
+        client = FakeClient(
+            states=[state],
+            comment_snapshots=[[notification]],
+        )
+
+        self.assertEqual(0, self.run_with_client(client))
+        self.assertEqual("success", client.completed[-1][2])
+        self.assertIn("@Bob", client.completed[-1][4])
+        self.assertEqual(0, client.event_calls)
 
     def test_manual_approved_label_compatibility_is_preserved(self):
         for actor_type in ("User", "Bot", "Mannequin", "Organization"):
