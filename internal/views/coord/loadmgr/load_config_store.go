@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 )
 
 // LoadConfigStore persists and serves the per-collection desired load state.
@@ -25,9 +26,12 @@ import (
 //
 // All methods are safe for concurrent use.
 type LoadConfigStore struct {
-	mu      sync.RWMutex
-	catalog metastore.QueryCoordCatalog
-	version uint64
+	// mu protects the shared in-memory state.
+	mu sync.RWMutex
+	// collectionLocks serializes persistence and in-memory commits per collection.
+	collectionLocks *lock.KeyLock[int64]
+	catalog         metastore.QueryCoordCatalog
+	version         uint64
 
 	// configs keeps the live in-memory snapshot per collection.
 	configs  map[int64]*LoadConfig
@@ -77,10 +81,11 @@ func RecoverLoadConfigStore(ctx context.Context, catalog metastore.QueryCoordCat
 	}
 
 	store := &LoadConfigStore{
-		catalog:  catalog,
-		version:  1,
-		configs:  configs,
-		versions: versions,
+		collectionLocks: lock.NewKeyLock[int64](),
+		catalog:         catalog,
+		version:         1,
+		configs:         configs,
+		versions:        versions,
 	}
 	return store, nil
 }
@@ -92,10 +97,13 @@ func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
 	if cfg == nil {
 		return nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	collectionID := cfg.CollectionID
+	s.collectionLocks.Lock(collectionID)
+	defer s.collectionLocks.Unlock(collectionID)
 
-	existing := s.configs[cfg.CollectionID]
+	s.mu.RLock()
+	existing := s.configs[collectionID]
+	s.mu.RUnlock()
 
 	// Delete orphans (items present in existing but absent from cfg) first,
 	// so stale ETCD keys do not linger after partition / replica removal.
@@ -113,7 +121,8 @@ func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
 	}
 
 	// Save the full collection (including all partitions) and all replicas.
-	if err := s.catalog.SaveCollection(ctx,
+	if err := s.catalog.SaveCollection(
+		ctx,
 		cfg.toCollectionLoadInfoProto(),
 		cfg.toPartitionLoadInfoProtos()...,
 	); err != nil {
@@ -129,9 +138,11 @@ func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
 		}
 	}
 
+	s.mu.Lock()
 	s.replaceInMemoryLocked(cfg)
 	s.version++
-	s.versions[cfg.CollectionID] = s.version
+	s.versions[collectionID] = s.version
+	s.mu.Unlock()
 	return nil
 }
 
@@ -139,10 +150,12 @@ func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
 // (CollectionLoadInfo + PartitionLoadInfo keys + all Replicas).
 // No-op if the collection is not present.
 func (s *LoadConfigStore) Remove(ctx context.Context, collectionID int64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.collectionLocks.Lock(collectionID)
+	defer s.collectionLocks.Unlock(collectionID)
 
+	s.mu.RLock()
 	existing := s.configs[collectionID]
+	s.mu.RUnlock()
 	if existing == nil {
 		return nil
 	}
@@ -155,9 +168,11 @@ func (s *LoadConfigStore) Remove(ctx context.Context, collectionID int64) error 
 		return err
 	}
 
+	s.mu.Lock()
 	delete(s.configs, collectionID)
 	s.version++
 	delete(s.versions, collectionID)
+	s.mu.Unlock()
 	return nil
 }
 
