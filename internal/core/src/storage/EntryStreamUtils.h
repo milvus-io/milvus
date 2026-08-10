@@ -169,12 +169,7 @@ class TransientMemoryBudget {
                     MarkAdmittedLocked(pending);
                     admitted = true;
                 } else {
-                    auto& queue = priority == TransientBudgetPriority::High
-                                      ? high_pending_
-                                      : low_pending_;
-                    auto position = queue.insert(queue.end(), pending);
-                    pending->queue = &queue;
-                    pending->queue_position = position;
+                    EnqueuePendingLocked(pending, priority);
                 }
             }
         }
@@ -189,19 +184,21 @@ class TransientMemoryBudget {
     /// thread has no inflight tasks (no risk of deadlock with channel pop).
     void
     Acquire(size_t bytes, TransientBudgetPriority priority) {
-        PendingResolution resolution;
-        {
-            std::unique_lock<std::mutex> lock(mu_);
-            RegisterLegacyWaiterLocked(priority);
-            cv_.wait(lock, [this, bytes, priority] {
-                return CanLegacyAcquireLocked(priority, bytes);
+        auto pending = std::make_shared<PendingAdmission>();
+        pending->bytes = bytes;
+        pending->legacy = true;
+
+        std::unique_lock<std::mutex> lock(mu_);
+        if (CanAdmitImmediatelyLocked(priority, bytes)) {
+            MarkAdmittedLocked(pending);
+        } else {
+            EnqueuePendingLocked(pending, priority);
+            cv_.wait(lock, [&pending] {
+                return pending->state != PendingAdmission::State::Pending;
             });
-            inflight_bytes_ += bytes;
-            UnregisterLegacyWaiterLocked(priority);
-            resolution = TakeAdmittedLocked();
         }
-        ResolvePending(std::move(resolution));
-        cv_.notify_all();
+        AssertInfo(pending->state == PendingAdmission::State::Admitted,
+                   "Blocking legacy budget admission was not admitted");
     }
 
     /// Block until enough budget is available, or cancellation is requested.
@@ -211,33 +208,38 @@ class TransientMemoryBudget {
     AcquireUntil(size_t bytes,
                  TransientBudgetPriority priority,
                  const folly::CancellationToken& cancellation_token) {
-        folly::CancellationCallback cancel_callback(
-            cancellation_token, [this]() noexcept {
-                // Pair with wait(lock, predicate) to avoid losing a cancel
-                // notification between predicate check and wait.
-                std::lock_guard<std::mutex> lock(mu_);
-                cv_.notify_all();
-            });
-
-        bool acquired = false;
-        PendingResolution resolution;
-        {
-            std::unique_lock<std::mutex> lock(mu_);
-            RegisterLegacyWaiterLocked(priority);
-            cv_.wait(lock, [this, bytes, priority, &cancellation_token] {
-                return cancellation_token.isCancellationRequested() ||
-                       CanLegacyAcquireLocked(priority, bytes);
-            });
-            if (!cancellation_token.isCancellationRequested()) {
-                inflight_bytes_ += bytes;
-                acquired = true;
-            }
-            UnregisterLegacyWaiterLocked(priority);
-            resolution = TakeAdmittedLocked();
+        auto pending = std::make_shared<PendingAdmission>();
+        pending->bytes = bytes;
+        pending->legacy = true;
+        if (cancellation_token.canBeCancelled()) {
+            std::weak_ptr<PendingAdmission> weak_pending = pending;
+            pending->cancellation_callback =
+                std::make_unique<folly::CancellationCallback>(
+                    cancellation_token, [this, weak_pending]() {
+                        if (auto admission = weak_pending.lock()) {
+                            CancelPending(std::move(admission));
+                        }
+                    });
         }
 
-        ResolvePending(std::move(resolution));
-        cv_.notify_all();
+        bool acquired = false;
+        {
+            std::unique_lock<std::mutex> lock(mu_);
+            if (pending->state != PendingAdmission::State::Cancelled) {
+                if (CanAdmitImmediatelyLocked(priority, bytes)) {
+                    MarkAdmittedLocked(pending);
+                } else {
+                    EnqueuePendingLocked(pending, priority);
+                    cv_.wait(lock, [&pending] {
+                        return pending->state !=
+                               PendingAdmission::State::Pending;
+                    });
+                }
+            }
+            acquired = pending->state == PendingAdmission::State::Admitted;
+        }
+
+        pending->cancellation_callback.reset();
         return acquired;
     }
 
@@ -246,7 +248,7 @@ class TransientMemoryBudget {
     bool
     TryAcquire(size_t bytes, TransientBudgetPriority priority) {
         std::lock_guard<std::mutex> lock(mu_);
-        if (CanLegacyAcquireLocked(priority, bytes)) {
+        if (CanAdmitImmediatelyLocked(priority, bytes)) {
             inflight_bytes_ += bytes;
             return true;
         }
@@ -328,6 +330,7 @@ class TransientMemoryBudget {
         folly::coro::Promise<TransientBudgetLease> promise;
         std::unique_ptr<folly::CancellationCallback> cancellation_callback;
         State state{State::Pending};
+        bool legacy{false};
         // Queue membership and this iterator are protected by mu_.
         PendingQueue* queue{nullptr};
         PendingQueue::iterator queue_position{};
@@ -362,18 +365,6 @@ class TransientMemoryBudget {
     }
 
     bool
-    CanLegacyAcquireLocked(TransientBudgetPriority priority,
-                           size_t bytes) const {
-        if (!CanAcquireCapacityLocked(bytes) || !high_pending_.empty()) {
-            return false;
-        }
-        if (priority == TransientBudgetPriority::High) {
-            return true;
-        }
-        return high_legacy_waiters_ == 0 && low_pending_.empty();
-    }
-
-    bool
     CanAdmitImmediatelyLocked(TransientBudgetPriority priority,
                               size_t bytes) const {
         if (!CanAcquireCapacityLocked(bytes)) {
@@ -382,24 +373,17 @@ class TransientMemoryBudget {
         if (priority == TransientBudgetPriority::High) {
             return high_pending_.empty();
         }
-        return high_pending_.empty() && high_legacy_waiters_ == 0 &&
-               low_pending_.empty();
+        return high_pending_.empty() && low_pending_.empty();
     }
 
     void
-    RegisterLegacyWaiterLocked(TransientBudgetPriority priority) {
-        if (priority == TransientBudgetPriority::High) {
-            ++high_legacy_waiters_;
-        }
-    }
-
-    void
-    UnregisterLegacyWaiterLocked(TransientBudgetPriority priority) {
-        if (priority == TransientBudgetPriority::High) {
-            AssertInfo(high_legacy_waiters_ > 0,
-                       "High-priority legacy waiter count underflow");
-            --high_legacy_waiters_;
-        }
+    EnqueuePendingLocked(const std::shared_ptr<PendingAdmission>& pending,
+                         TransientBudgetPriority priority) {
+        auto& queue = priority == TransientBudgetPriority::High ? high_pending_
+                                                                : low_pending_;
+        auto position = queue.insert(queue.end(), pending);
+        pending->queue = &queue;
+        pending->queue_position = position;
     }
 
     void
@@ -426,7 +410,7 @@ class TransientMemoryBudget {
             }
         };
         admit_queue(high_pending_);
-        if (high_pending_.empty() && high_legacy_waiters_ == 0) {
+        if (high_pending_.empty()) {
             admit_queue(low_pending_);
         }
         return resolution;
@@ -434,8 +418,11 @@ class TransientMemoryBudget {
 
     void
     FulfillAdmission(std::shared_ptr<PendingAdmission> pending) {
-        auto lease = TransientBudgetLease(this, pending->bytes);
         pending->cancellation_callback.reset();
+        if (pending->legacy) {
+            return;
+        }
+        auto lease = TransientBudgetLease(this, pending->bytes);
         pending->promise.trySetValue(std::move(lease));
     }
 
@@ -463,7 +450,9 @@ class TransientMemoryBudget {
             }
         }
         if (cancelled) {
-            pending->promise.trySetException(folly::OperationCancelled{});
+            if (!pending->legacy) {
+                pending->promise.trySetException(folly::OperationCancelled{});
+            }
             ResolvePending(std::move(resolution));
             cv_.notify_all();
         }
@@ -474,7 +463,6 @@ class TransientMemoryBudget {
     std::condition_variable cv_;
     size_t inflight_bytes_{0};
     size_t capacity_bytes_{0};
-    size_t high_legacy_waiters_{0};
     PendingQueue high_pending_;
     PendingQueue low_pending_;
 };
