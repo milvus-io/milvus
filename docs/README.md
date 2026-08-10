@@ -47,11 +47,12 @@ manuals, and experimental source code should live outside `design_docs/`.
 Keep executable experiments with the implementation, tests, or benchmark
 suite they validate.
 
-See [`design-docs/README.md`](design-docs/README.md) for the required header,
-review policy, and template.
+See [`design-docs/README.md`](design-docs/README.md) for the recommended review
+metadata, approval policy, and template.
 
 ## Validation
 
 Pull requests validate deterministic local documentation links. Design-document
-pull requests also receive automated classification, header reminders, and the
-additional approval policy described in the design-document guide.
+pull requests also receive automated classification, advisory metadata
+reminders, and the additional approval policy described in the design-document
+guide.

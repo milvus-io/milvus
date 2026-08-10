@@ -34,26 +34,28 @@ jobs:
           fail: true
 
   external-links:
-    name: Report external documentation links
+    name: Validate external documentation links
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: true
     steps:
       - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
 
-      - name: Check external links without blocking pull requests
-        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+      - name: Check documentation links
+        uses: gaurav-nelson/github-action-markdown-link-check@5c5dfc0ac2e225883c0e5f03a85311ec2830d368 # v1
         with:
-          args: >-
-            --accept '200..=299,429'
-            --exclude-path 'docs/archive/'
-            --max-concurrency 16
-            --no-progress
-            --timeout 20
-            './**/*.md'
-          fail: false
-          token: ${{ github.token }}
+          use-quiet-mode: 'yes'
+          use-verbose-mode: 'yes'
+          folder-path: 'docs/'
+
+      - name: Check repository-root Markdown links
+        uses: gaurav-nelson/github-action-markdown-link-check@5c5dfc0ac2e225883c0e5f03a85311ec2830d368 # v1
+        with:
+          use-quiet-mode: 'yes'
+          use-verbose-mode: 'yes'
+          # The action's `find` starts at depth 0 for `.`, so root files are
+          # depth 1. This keeps the historical root-only scope working.
+          max-depth: 1

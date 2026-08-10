@@ -33,11 +33,11 @@ suite they validate. Put other document classes in their owning directories.
 This organizational rule does not invalidate or exempt a legacy Markdown
 Design Doc from review policy.
 
-## Required review metadata
+## Recommended review metadata
 
-Within the first 50 lines of every new or substantively revised Design Doc,
-place these four exact, unbolded fields after the level-one title and before the
-first section heading:
+For easier ownership and review tracking, place these four exact, unbolded
+fields within the first 50 lines of a new or substantively revised Design Doc,
+after the level-one title and before the first section heading:
 
 ```markdown
 # MEP: <Title>
@@ -48,17 +48,19 @@ first section heading:
 - Design Review: YYYY-MM-DD
 ```
 
-Replace every placeholder. `Feature DRI`, `Primary Approver`, and
-`Independent Approver` must identify three distinct GitHub users. These four
-review fields are the machine-checked contract. The template also contains
-recommended lifecycle and discovery fields such as `Created`, `Status`,
-`Component`, related issues, and release information.
+Replace every placeholder when using this block. `Feature DRI`, `Primary
+Approver`, and `Independent Approver` should identify three distinct GitHub
+users. The exact format lets automation recognize the fields and clear its
+advisory reminder. Missing or invalid review metadata does not fail the policy
+check and does not block merging. The template also contains recommended
+lifecycle and discovery fields such as `Created`, `Status`, `Component`,
+related issues, and release information.
 
-When an older design document is substantively revised, add the four required
-review fields as part of that change. Pure path, link, or formatting maintenance
-may preserve historical metadata, but the policy check still inspects every
-changed formal Design Doc and posts a reviewer-visible reminder when fields are
-absent.
+When an older design document is substantively revised, add the four review
+fields when practical. Pure path, link, or formatting maintenance may preserve
+historical metadata. The policy check inspects every changed formal Design Doc
+and posts a reviewer-visible advisory reminder when fields are absent or
+invalid, while remaining merge-successful.
 
 Use [`TEMPLATE.md`](TEMPLATE.md) as the starting point for a new document.
 
@@ -72,10 +74,10 @@ Use [`TEMPLATE.md`](TEMPLATE.md) as the starting point for a new document.
 - Approvers can use the existing Prow flow by commenting `/approve`; a GitHub
   Review approval is not required. Automation adds `approved/design-doc` while
   two valid non-author approvals are active and removes it when they are not.
-- The trusted Design Doc Policy workflow comments on missing or invalid review
-  metadata. A nonexistent feature Design Doc reference fails the pull request
-  check. Files removed by a pull request still trigger the two-Approver policy,
-  but naturally have no header to validate.
+- The trusted Design Doc Policy workflow posts a non-blocking advisory comment
+  for missing or invalid review metadata. A nonexistent feature Design Doc
+  reference fails the pull request check. Files removed by a pull request still
+  trigger the two-Approver policy, but naturally have no metadata to inspect.
 - A release-branch pull request may reference a Design Doc that exists only on
   the base repository's default branch; it does not need a duplicate copy on
   the target release branch.

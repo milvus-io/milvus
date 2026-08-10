@@ -90,18 +90,25 @@ def print_header(msg: str):
 DESIGN_DOC_REF_PREFIX = "docs/design-docs/design_docs/"
 
 
-def is_valid_design_doc_ref(design_doc_ref: str) -> bool:
+def normalize_design_doc_ref(design_doc_ref: str) -> Optional[str]:
     normalized_ref = design_doc_ref.replace("\\", "/")
-    if not normalized_ref.startswith(DESIGN_DOC_REF_PREFIX) or not normalized_ref.endswith(
-        ".md"
-    ):
-        return False
+    if not normalized_ref.startswith(
+        DESIGN_DOC_REF_PREFIX
+    ) or not normalized_ref.endswith(".md"):
+        return None
 
     relative_path = normalized_ref[len(DESIGN_DOC_REF_PREFIX) :]
-    return bool(relative_path) and all(
+    if not relative_path or not all(
         part not in {"", ".", ".."} and not any(char in part for char in "\r\n\t")
         for part in relative_path.split("/")
-    )
+    ):
+        return None
+
+    return normalized_ref
+
+
+def is_valid_design_doc_ref(design_doc_ref: str) -> bool:
+    return normalize_design_doc_ref(design_doc_ref) is not None
 
 
 # ============================================================================
@@ -2877,7 +2884,8 @@ def workflow_pr():
                 print_error("Design doc path is required for feature PRs")
                 continue
 
-            if not is_valid_design_doc_ref(design_doc_url):
+            normalized_design_doc_ref = normalize_design_doc_ref(design_doc_url)
+            if normalized_design_doc_ref is None:
                 print_error(
                     "Design doc must be a Markdown file under "
                     "docs/design-docs/design_docs/"
@@ -2888,7 +2896,7 @@ def workflow_pr():
             if ai_service.has_api_key:
                 print_info("Validating design doc matches code changes...")
                 validation = ai_service.validate_design_doc(
-                    design_doc_url, diff, changed_files, stats
+                    normalized_design_doc_ref, diff, changed_files, stats
                 )
 
                 score = validation.get("score", -1)
@@ -2938,8 +2946,8 @@ def workflow_pr():
                 print_info("AI not available, skipping design doc validation")
 
             # Add design doc to PR body
-            pr_body = f"design doc: {design_doc_url}\n{pr_body}"
-            print_success(f"Design doc linked: {design_doc_url}")
+            pr_body = f"design doc: {normalized_design_doc_ref}\n{pr_body}"
+            print_success(f"Design doc linked: {normalized_design_doc_ref}")
             break
 
     print_info("Creating PR in milvus-io/milvus...")

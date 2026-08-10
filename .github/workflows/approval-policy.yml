@@ -1,7 +1,8 @@
-name: Design Doc Policy
+name: Approval Policy
 
 on:
   pull_request_target:
+    branches: [master]
     types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review]
   issue_comment:
     types: [created, edited, deleted]
@@ -13,7 +14,7 @@ permissions: {}
 
 concurrency:
   group: >-
-    design-doc-policy-${{ github.event.pull_request.number ||
+    approval-policy-${{ github.event.pull_request.number ||
     github.event.issue.number ||
     github.event.workflow_run.display_title || github.run_id }}
   # Serialize events so a newer run cannot interrupt check finalization.
@@ -21,18 +22,18 @@ concurrency:
 
 jobs:
   validate:
-    name: Publish Design Doc Policy check
+    name: Publish Approval Policy check
     if: ${{ github.event_name != 'issue_comment' || github.event.issue.pull_request }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
       checks: write
-      issues: write
+      issues: read
       pull-requests: read
 
     steps:
-      - name: Invalidate previous head-SHA policy result
+      - name: Invalidate previous head-SHA approval result
         id: start-policy-check
         timeout-minutes: 2
         uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
@@ -54,6 +55,7 @@ jobs:
             if (!pullNumber) {
               throw new Error("Could not determine the pull request number");
             }
+
             const pullResponse = await github.rest.pulls.get({
               owner,
               repo,
@@ -74,8 +76,17 @@ jobs:
                 );
               }
             }
+
+            const applicable = pullResponse.data.base.ref === "master";
+            core.setOutput("applicable", applicable ? "true" : "false");
+            if (!applicable) {
+              return [];
+            }
+
             const headSha = pullResponse.data.head.sha;
-            const externalId = `design-doc-policy-pr-${pullNumber}`;
+            const externalId = `approval-policy-pr-${pullNumber}`;
+            // Publish cleanup coordinates before any check-list mutation. If
+            // this step fails later, the final step can still fail closed.
             core.setOutput("head_sha", headSha);
             core.setOutput("external_id", externalId);
             const checkIds = [];
@@ -85,7 +96,7 @@ jobs:
                 owner,
                 repo,
                 ref: headSha,
-                check_name: "Design Doc Policy",
+                check_name: "Approval Policy",
                 filter: "all",
                 per_page: 100,
                 page,
@@ -102,15 +113,15 @@ jobs:
                 break;
               }
               if (page === 10) {
-                throw new Error("Too many Design Doc Policy checks on one commit");
+                throw new Error("Too many Approval Policy checks on one commit");
               }
             }
 
             const output = {
-              title: "Design Doc policy is being evaluated",
+              title: "Approval policy is being evaluated",
               summary:
-                "Validating feature documentation, repository governance, " +
-                "changed Design Doc metadata, and the two-Approver requirement.",
+                "Validating that a non-author Milvus Approver approved through " +
+                "the existing Prow-compatible flow.",
             };
             const startedAt = new Date().toISOString();
             const uniqueCheckIds = [...new Set(checkIds)].sort((a, b) => a - b);
@@ -119,7 +130,7 @@ jobs:
               const response = await github.rest.checks.create({
                 owner,
                 repo,
-                name: "Design Doc Policy",
+                name: "Approval Policy",
                 head_sha: headSha,
                 status: "in_progress",
                 external_id: externalId,
@@ -142,6 +153,7 @@ jobs:
             return uniqueCheckIds;
 
       - name: Checkout trusted workflow revision
+        if: ${{ steps.start-policy-check.outputs.applicable == 'true' }}
         timeout-minutes: 2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -149,25 +161,29 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Test validator
+      - name: Test approval validator
+        if: ${{ steps.start-policy-check.outputs.applicable == 'true' }}
         timeout-minutes: 2
         run: >-
           python3 -m unittest discover
           -s .github/scripts
-          -p 'test_check_design_doc_policy.py'
+          -p 'test_check_approval_policy.py'
 
-      - name: Validate Design Doc policy
+      - name: Validate approval policy
         id: validate-policy
+        if: ${{ steps.start-policy-check.outputs.applicable == 'true' }}
         timeout-minutes: 5
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
-          python3 .github/scripts/check_design_doc_policy.py
+          python3 .github/scripts/check_approval_policy.py
           --event "$GITHUB_EVENT_PATH"
 
-      - name: Fail any unfinished head-SHA policy check
+      - name: Fail any unfinished head-SHA approval check
         if: >-
-          ${{ always() && steps.validate-policy.outcome != 'success' &&
+          ${{ always() &&
+          steps.start-policy-check.outputs.applicable == 'true' &&
+          steps.validate-policy.outcome != 'success' &&
           steps.start-policy-check.outputs.head_sha != '' }}
         timeout-minutes: 2
         uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
@@ -181,15 +197,16 @@ jobs:
             const headSha = process.env.POLICY_HEAD_SHA;
             const externalId = process.env.POLICY_EXTERNAL_ID;
             if (!headSha || !externalId) {
-              throw new Error("Policy check cleanup target is missing");
+              throw new Error("Approval check cleanup target is missing");
             }
+
             const checkIds = [];
             for (let page = 1; page <= 10; page += 1) {
               const response = await github.rest.checks.listForRef({
                 owner,
                 repo,
                 ref: headSha,
-                check_name: "Design Doc Policy",
+                check_name: "Approval Policy",
                 filter: "all",
                 per_page: 100,
                 page,
@@ -208,10 +225,11 @@ jobs:
               }
               if (page === 10) {
                 throw new Error(
-                  "Too many Design Doc Policy checks to clean up",
+                  "Too many Approval Policy checks to clean up",
                 );
               }
             }
+
             const completedAt = new Date().toISOString();
             for (const check_run_id of [...new Set(checkIds)].sort(
               (a, b) => a - b,
@@ -224,11 +242,11 @@ jobs:
                 conclusion: "failure",
                 completed_at: completedAt,
                 output: {
-                  title: "Design Doc policy could not complete",
+                  title: "Approval policy could not complete",
                   summary:
                     "The trusted workflow failed before publishing a final " +
-                    "policy result. The check is failed closed; inspect this " +
-                    "workflow run.",
+                    "approval result. The check is failed closed; inspect " +
+                    "this workflow run.",
                 },
               });
             }

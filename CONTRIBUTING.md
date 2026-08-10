@@ -122,7 +122,7 @@ For new documents, use the recommended `YYYYMMDD-short-descriptive-name.md` file
 
 Any pull request that adds, modifies, renames, or deletes a formal Design Doc must be approved by at least two distinct Approvers, neither of whom may be the pull request author. Approvers can record approval through the existing Prow process by commenting `/approve`; clicking the GitHub Review `Approve` button is not required. When both valid approvals are present, automation adds the dedicated `approved/design-doc` label. Renaming or moving a Design Doc out of the formal directory still counts as a Design Doc change.
 
-Start each design document with a clear title and metadata block. Every new or substantively revised Design Doc must include the four review fields below in the exact unbolded, machine-readable format shown:
+For easier ownership and review tracking, new or substantively revised Design Docs should include the four review fields below in the exact unbolded, machine-readable format shown:
 
 ```markdown
 # MEP: <Title>
@@ -133,8 +133,7 @@ Start each design document with a clear title and metadata block. Every new or s
 - Design Review: YYYY-MM-DD
 ```
 
-The Feature DRI, Primary Approver, and Independent Approver must be three distinct GitHub users.
-The Design Doc template includes additional recommended lifecycle and discovery fields, but the four fields above are required for new or substantively revised Design Docs.
+When supplied, the Feature DRI, Primary Approver, and Independent Approver should identify three distinct GitHub users. These fields are recommended metadata, not a merge requirement: missing or invalid values produce an advisory pull-request comment but do not block merging. The Design Doc template includes additional recommended lifecycle and discovery fields.
 
 Every design document should explain the problem, the proposed design, and how the design will be verified. Use these sections:
 

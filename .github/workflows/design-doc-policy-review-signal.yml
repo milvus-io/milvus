@@ -8,8 +8,8 @@ on:
     types: [created, edited, deleted]
 
 # This workflow is intentionally unprivileged. Its completed workflow_run is
-# only a signal; the default-branch Design Doc Policy workflow refetches all PR
-# state and never consumes code or artifacts from this run.
+# only a signal; the default-branch policy workflows refetch all PR state and
+# never consume code or artifacts from this run.
 permissions: {}
 
 jobs:
