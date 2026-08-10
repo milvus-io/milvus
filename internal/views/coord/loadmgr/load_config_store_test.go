@@ -194,6 +194,24 @@ func TestRemove_NonExistent(t *testing.T) {
 	require.NoError(t, store.Remove(context.Background(), 999))
 }
 
+func TestContainsDoesNotRefreshSnapshot(t *testing.T) {
+	store, catalog := newTestStore(t)
+	resident := store.Snapshot()
+
+	expectFullSave(catalog, 1)
+	require.NoError(t, store.Put(context.Background(), sampleConfig()))
+	require.Same(t, resident, store.snapshot)
+	assert.True(t, store.Contains(100))
+	assert.False(t, store.Contains(999))
+	require.Same(t, resident, store.snapshot)
+
+	catalog.EXPECT().ReleaseReplicas(mock.Anything, int64(100)).Return(nil).Once()
+	catalog.EXPECT().ReleaseCollection(mock.Anything, int64(100)).Return(nil).Once()
+	require.NoError(t, store.Remove(context.Background(), 100))
+	assert.False(t, store.Contains(100))
+	require.Same(t, resident, store.snapshot)
+}
+
 func TestSnapshot_ReturnsAllConfigs(t *testing.T) {
 	store, catalog := newTestStore(t)
 	expectFullSave(catalog, 2)
