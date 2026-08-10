@@ -77,6 +77,7 @@ type searchTask struct {
 	schema                 *schemaInfo
 	needRequery            bool
 	partitionKeyMode       bool
+	partitionKeyIsolation  bool
 	largeTopKEnabled       bool
 	enableMaterializedView bool
 	mustUsePartitionKey    bool
@@ -185,6 +186,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.schema = collectionSnapshot.Schema()
 	collectionInfo := collectionSnapshot.Info()
 	t.largeTopKEnabled = collectionInfo.queryMode == common.QueryModeLargeTopK
+	t.partitionKeyIsolation = collectionInfo.partitionKeyIsolation
 
 	t.partitionKeyMode = t.schema.IsPartitionKeyCollection()
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
@@ -384,13 +386,7 @@ func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask, plan *pl
 			return err
 		}
 		if typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyFieldSchema) {
-			collInfo, colErr := globalMetaCache.GetCollectionInfo(t.ctx, t.request.GetDbName(), t.collectionName, t.CollectionID)
-			if colErr != nil {
-				log.Ctx(t.ctx).Warn("failed to get collection info", zap.Error(colErr))
-				return err
-			}
-
-			if collInfo.partitionKeyIsolation {
+			if t.partitionKeyIsolation {
 				expr, err := exprutil.ParseExprFromPlan(plan)
 				if err != nil {
 					log.Ctx(t.ctx).Warn("failed to parse expr from plan during MV", zap.Error(err))
