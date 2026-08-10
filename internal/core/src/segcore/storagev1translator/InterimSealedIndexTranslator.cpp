@@ -118,6 +118,10 @@ InterimSealedIndexTranslator::get_cells(
     CheckCancellation(
         ctx, segment_id_, "InterimSealedIndexTranslator::get_cells()");
 
+    // Sealed interim indexes are ephemeral and will never be serialized, so use the maximum
+    // version supported by this Knowhere build.
+    const auto index_version =
+        knowhere::Version::GetMaximumVersion().VersionNumber();
     std::unique_ptr<index::VectorIndex> vec_index = nullptr;
     auto num_chunk = vec_data_->num_chunks();
     if (vec_data_->IsNullable()) {
@@ -159,19 +163,19 @@ InterimSealedIndexTranslator::get_cells(
         };
 
         if (vec_data_type_ == DataType::VECTOR_FLOAT) {
-            vec_index = std::make_unique<index::VectorMemIndex<float>>(
-                DataType::NONE,
-                index_type_,
-                metric_type_,
-                knowhere::Version::GetCurrentVersion().VersionNumber(),
-                view_data,
-                false);
+            vec_index =
+                std::make_unique<index::VectorMemIndex<float>>(DataType::NONE,
+                                                               index_type_,
+                                                               metric_type_,
+                                                               index_version,
+                                                               view_data,
+                                                               false);
         } else if (vec_data_type_ == DataType::VECTOR_FLOAT16) {
             vec_index = std::make_unique<index::VectorMemIndex<knowhere::fp16>>(
                 DataType::NONE,
                 index_type_,
                 metric_type_,
-                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                index_version,
                 view_data,
                 false);
         } else if (vec_data_type_ == DataType::VECTOR_BFLOAT16) {
@@ -179,18 +183,14 @@ InterimSealedIndexTranslator::get_cells(
                 DataType::NONE,
                 index_type_,
                 metric_type_,
-                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                index_version,
                 view_data,
                 false);
         }
     } else {
         // sparse vector case
         vec_index = std::make_unique<index::VectorMemIndex<sparse_u32_f32>>(
-            DataType::NONE,
-            index_type_,
-            metric_type_,
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
-            false);
+            DataType::NONE, index_type_, metric_type_, index_version, false);
     }
 
     int64_t total_valid_count =

@@ -6872,7 +6872,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(
                 milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
                     std::move(translator));
             auto index_version =
-                knowhere::Version::GetCurrentVersion().VersionNumber();
+                knowhere::Version::GetMaximumVersion().VersionNumber();
             bool has_raw_data = false;
             if (is_sparse ||
                 field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
