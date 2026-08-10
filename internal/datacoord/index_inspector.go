@@ -159,10 +159,11 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 		if _, ok := indexIDToSegIndexes[index.IndexID]; ok {
 			continue
 		}
-		if !i.canCreateIndexForSegment(ctx, segment, index) {
+		collection, ok := i.canCreateIndexForSegment(ctx, segment, index)
+		if !ok {
 			continue
 		}
-		if err := i.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
+		if err := i.createIndexForSegment(ctx, collection, segment, index.IndexID); err != nil {
 			mlog.Warn(ctx, "create index for segment fail", mlog.FieldSegmentID(segment.ID),
 				mlog.FieldIndexID(index.IndexID))
 			return err
@@ -172,15 +173,17 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 }
 
 // canCreateIndexForSegment reports whether the segment is ready to build the
-// index. The schema is resolved through the handler (lazy-loading on cache miss,
-// e.g. right after a datacoord restart); the check fails closed, deferring to
-// the next inspection round on an unresolvable or inconsistent view.
-func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *SegmentInfo, index *model.Index) bool {
+// index, returning the resolved collection so the caller does not have to look
+// it up again. The schema is resolved through the handler (lazy-loading on
+// cache miss, e.g. right after a datacoord restart); the check fails closed,
+// deferring to the next inspection round on an unresolvable or inconsistent
+// view.
+func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *SegmentInfo, index *model.Index) (*collectionInfo, bool) {
 	collection, err := i.handler.GetCollection(ctx, segment.CollectionID)
 	if err != nil || collection == nil || collection.Schema == nil {
 		mlog.Warn(ctx, "cannot resolve collection schema, defer index build",
 			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID), mlog.Err(err))
-		return false
+		return nil, false
 	}
 	// Function outputs are materialized by schema-bump reconciliation, which
 	// advances the segment schema version. A segment behind the collection schema
@@ -190,17 +193,17 @@ func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *
 		mlog.Debug(ctx, "segment schema behind collection, function outputs may be unmaterialized, defer index build",
 			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID),
 			mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()), mlog.Int32("collectionSchemaVersion", collection.Schema.GetVersion()))
-		return false
+		return nil, false
 	}
 	if typeutil.GetFieldByID(collection.Schema, index.FieldID) == nil {
 		mlog.Warn(ctx, "indexed field not found in cached collection schema, defer index build",
 			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID))
-		return false
+		return nil, false
 	}
-	return true
+	return collection, true
 }
 
-func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *SegmentInfo, indexID UniqueID) error {
+func (i *indexInspector) createIndexForSegment(ctx context.Context, collection *collectionInfo, segment *SegmentInfo, indexID UniqueID) error {
 	mlog.Info(ctx, "create index for segment", mlog.FieldSegmentID(segment.ID), mlog.FieldIndexID(indexID))
 	buildID, err := i.allocator.AllocID(context.Background())
 	if err != nil {
@@ -211,10 +214,7 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	indexType := GetIndexType(indexParams)
 	isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 	fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, indexID)
-	fieldSize := segment.getFieldBinlogSize(fieldID)
-	if supportsFieldProjection(segment) {
-		fieldSize = i.estimateIndexFieldSize(ctx, resolveCollection(ctx, i.handler, segment.GetCollectionID()), segment, fieldID)
-	}
+	fieldSize := i.estimateIndexFieldSize(ctx, collection, segment, fieldID)
 	taskSlot := calculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
 
 	// rewrite the index type if needed, and this final index type will be persisted in the meta
@@ -272,15 +272,18 @@ func (i *indexInspector) isExternalCollection(collectionID int64) bool {
 //
 // A manifest-backed StorageV3 index build projects the indexed column, while
 // the binlog size covers the whole column group holding it. StorageV2 reads the
-// whole group and therefore keeps the binlog size. An unresolvable schema also
-// keeps that previous conservative behavior.
+// whole group and therefore keeps the binlog size. An unresolved collection
+// also keeps that previous conservative behavior.
 func (i *indexInspector) estimateIndexFieldSize(ctx context.Context, coll *collectionInfo, segment *SegmentInfo, fieldID int64) int64 {
 	binlogSize := segment.getFieldBinlogSize(fieldID)
 	if !supportsFieldProjection(segment) {
 		return binlogSize
 	}
 	if coll == nil {
-		mlog.Warn(ctx, "cannot resolve collection, fallback to binlog size for index task slot",
+		// The collection is not cached yet, e.g. task recovery right after a
+		// restart, before the async cache reload catches up. Keep the
+		// conservative binlog size instead of loading through rootcoord here.
+		mlog.Debug(ctx, "collection not cached, fallback to binlog size for index task slot",
 			mlog.FieldCollectionID(segment.GetCollectionID()),
 			mlog.FieldSegmentID(segment.GetID()),
 			mlog.Int64("binlogSize", binlogSize))
@@ -301,9 +304,6 @@ func (i *indexInspector) estimateIndexFieldSize(ctx context.Context, coll *colle
 
 func (i *indexInspector) reloadFromMeta() {
 	segments := i.meta.GetAllSegmentsUnsafe()
-	// the collection cache is usually not filled yet at startup, and resolving
-	// it hits rootcoord, so memoize it across all recovered tasks
-	collections := newCollectionCache(i.handler)
 	for _, segment := range segments {
 		for _, segIndex := range i.meta.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
 			if segIndex.IsDeleted || (segIndex.IndexState != commonpb.IndexState_Unissued &&
@@ -314,7 +314,11 @@ func (i *indexInspector) reloadFromMeta() {
 
 			indexParams := i.meta.indexMeta.GetIndexParams(segment.CollectionID, segIndex.IndexID)
 			fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
-			fieldSize := i.estimateIndexFieldSize(i.ctx, collections.get(i.ctx, segment.GetCollectionID()), segment, fieldID)
+			// Only the local cache is consulted: recovery runs synchronously in
+			// Start(), so it must not load collections through rootcoord. On a
+			// cold cache the estimation falls back to the conservative binlog
+			// size, which is the pre-optimization behavior.
+			fieldSize := i.estimateIndexFieldSize(i.ctx, i.meta.GetCollection(segment.GetCollectionID()), segment, fieldID)
 			taskSlot := calculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
 
 			i.scheduler.Enqueue(newIndexBuildTask(

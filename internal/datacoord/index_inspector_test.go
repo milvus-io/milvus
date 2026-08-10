@@ -159,10 +159,6 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 	}
 
 	inspector := newIndexInspector(ctx, notifyChan, meta, scheduler, alloc, handler, storage, versionManager)
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, collectionID int64) (*collectionInfo, error) {
-			return meta.GetCollection(collectionID), nil
-		}).Maybe()
 
 	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
 
@@ -264,14 +260,13 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 		assert.Equal(t, int64(4), scheduled.GetTaskSlot())
 	}).Return()
 
-	assert.NoError(t, inspector.createIndexForSegment(ctx, segment, 5))
+	assert.NoError(t, inspector.createIndexForSegment(ctx, meta.GetCollection(segment.CollectionID), segment, 5))
 }
 
-func TestIndexInspector_ReloadFromMetaResolvesCollectionThroughHandler(t *testing.T) {
-	// The datacoord collection cache is filled by an async goroutine, so it is
-	// usually still empty while reloadFromMeta recovers index tasks at startup.
-	// Recovered tasks must still get the per column estimate, and rootcoord must
-	// be hit once per collection, not once per task.
+func TestIndexInspector_ReloadFromMetaUsesCachedCollection(t *testing.T) {
+	// Recovery reads the collection from the local meta cache only: when the
+	// cache already holds the collection, recovered tasks get the per column
+	// estimate without going through the handler (rootcoord).
 	const (
 		collID    = UniqueID(2)
 		vecField  = UniqueID(101)
@@ -283,6 +278,7 @@ func TestIndexInspector_ReloadFromMetaResolvesCollectionThroughHandler(t *testin
 	notifyChan := make(chan int64, 1)
 	scheduler := task.NewMockGlobalScheduler(t)
 	alloc := allocator.NewMockAllocator(t)
+	// no GetCollection expectation: any handler resolution fails the test
 	handler := NewNMockHandler(t)
 	storageCli := mocks.NewChunkManager(t)
 	versionManager := newIndexEngineVersionManager()
@@ -312,8 +308,7 @@ func TestIndexInspector_ReloadFromMetaResolvesCollectionThroughHandler(t *testin
 	}
 	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
 
-	// the collection lives in rootcoord only, exactly as after a restart
-	collInfo := &collectionInfo{
+	m.collections.Insert(collID, &collectionInfo{
 		ID: collID,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -329,8 +324,7 @@ func TestIndexInspector_ReloadFromMetaResolvesCollectionThroughHandler(t *testin
 				},
 			},
 		},
-	}
-	handler.EXPECT().GetCollection(mock.Anything, collID).Return(collInfo, nil).Once()
+	})
 
 	for _, segmentID := range []UniqueID{1, 2} {
 		segment := &SegmentInfo{
@@ -378,6 +372,121 @@ func TestIndexInspector_ReloadFromMetaResolvesCollectionThroughHandler(t *testin
 	for _, slot := range slots {
 		assert.Equal(t, expected, slot)
 		assert.Less(t, slot, calculateIndexTaskSlot(groupSize, numRows, indexParams))
+	}
+}
+
+func TestIndexInspector_ReloadFromMetaNeverResolvesThroughHandler(t *testing.T) {
+	// Recovery runs synchronously in Start(), so it must never load a
+	// collection through the handler (rootcoord): a StorageV2 segment keeps the
+	// whole binlog size, and a projection-capable segment whose collection is
+	// not cached yet falls back to the conservative group size.
+	const (
+		collID    = UniqueID(2)
+		vecField  = UniqueID(101)
+		numRows   = int64(3000)
+		fieldSize = int64(600 * 1024 * 1024)
+	)
+
+	ctx := context.Background()
+	notifyChan := make(chan int64, 1)
+	scheduler := task.NewMockGlobalScheduler(t)
+	alloc := allocator.NewMockAllocator(t)
+	// no GetCollection expectation: any resolution attempt fails the test
+	handler := NewNMockHandler(t)
+	storageCli := mocks.NewChunkManager(t)
+	versionManager := newIndexEngineVersionManager()
+	catalog := mocks2.NewDataCoordCatalog(t)
+
+	m := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		indexMeta: &indexMeta{
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			catalog:          catalog,
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		},
+	}
+	m.indexMeta.indexes[collID] = map[UniqueID]*model.Index{
+		3: {
+			CollectionID: collID,
+			FieldID:      vecField,
+			IndexID:      3,
+			IndexName:    indexName,
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+			},
+		},
+	}
+	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+
+	// segment 1 is StorageV2, segment 2 is projection-capable but its
+	// collection is not cached: both must keep the conservative binlog size
+	// without any handler lookup.
+	segments := []*SegmentInfo{
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             1,
+				CollectionID:   collID,
+				NumOfRows:      numRows,
+				State:          commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV2,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID: vecField,
+						Binlogs: []*datapb.Binlog{
+							{EntriesNum: numRows, MemorySize: fieldSize},
+						},
+					},
+				},
+			},
+		},
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             2,
+				CollectionID:   collID,
+				NumOfRows:      numRows,
+				State:          commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   "manifest.json",
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID:     0,
+						ChildFields: []int64{100, vecField},
+						Binlogs: []*datapb.Binlog{
+							{EntriesNum: numRows, MemorySize: fieldSize},
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, segment := range segments {
+		m.segments.SetSegment(segment.GetID(), segment)
+		err := m.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+			CollectionID: collID,
+			SegmentID:    segment.GetID(),
+			IndexID:      3,
+			BuildID:      100 + segment.GetID(),
+			NumRows:      numRows,
+			IndexState:   commonpb.IndexState_Unissued,
+		})
+		assert.NoError(t, err)
+	}
+
+	slots := make([]int64, 0, 2)
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(t task.Task) {
+		slots = append(slots, t.GetTaskSlot())
+	}).Return()
+
+	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
+	inspector.reloadFromMeta()
+
+	assert.Len(t, slots, 2)
+	indexParams := m.indexMeta.indexes[collID][3].IndexParams
+	for _, slot := range slots {
+		assert.Equal(t, calculateIndexTaskSlot(fieldSize, numRows, indexParams), slot)
 	}
 }
 
@@ -594,16 +703,12 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 	}
 
 	inspector := newIndexInspector(ctx, notifyChan, meta, scheduler, alloc, handler, storage, versionManager)
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, collectionID int64) (*collectionInfo, error) {
-			return meta.GetCollection(collectionID), nil
-		}).Maybe()
 
 	alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil)
 	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
 	scheduler.EXPECT().Enqueue(mock.Anything).Return()
 
-	err := inspector.createIndexForSegment(ctx, segment, 5)
+	err := inspector.createIndexForSegment(ctx, meta.GetCollection(segment.CollectionID), segment, 5)
 	assert.NoError(t, err)
 
 	segIndexes := meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
@@ -1103,10 +1208,6 @@ func TestIndexInspector_CreateIndexForSegment_ExternalTaskSlot(t *testing.T) {
 	m.segments.SetSegment(segment.GetID(), segment)
 
 	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, collectionID int64) (*collectionInfo, error) {
-			return m.GetCollection(collectionID), nil
-		}).Maybe()
 
 	var enqueuedSlot int64
 	alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil)
@@ -1115,7 +1216,7 @@ func TestIndexInspector_CreateIndexForSegment_ExternalTaskSlot(t *testing.T) {
 		enqueuedSlot = t.GetTaskSlot()
 	}).Return()
 
-	err := inspector.createIndexForSegment(ctx, segment, indexID)
+	err := inspector.createIndexForSegment(ctx, m.GetCollection(collID), segment, indexID)
 	assert.NoError(t, err)
 
 	// 128 dim float vector over 3000 rows is ~1.5MB, the smallest slot bucket,

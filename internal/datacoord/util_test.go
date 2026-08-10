@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -424,34 +423,6 @@ func (suite *UtilSuite) TestEstimateFieldsReadSize() {
 		segment := newSegment(group(pkSize*numRows, pkField, vecField))
 		_, err := estimateFieldsReadSize(unknownSchema, segment, []int64{vecField})
 		suite.Error(err)
-	})
-}
-
-func (suite *UtilSuite) TestCollectionCache() {
-	const collectionID = int64(7)
-	coll := &collectionInfo{ID: collectionID}
-
-	suite.Run("resolves once and memoizes", func() {
-		handler := NewNMockHandler(suite.T())
-		handler.EXPECT().GetCollection(mock.Anything, collectionID).Return(coll, nil).Once()
-
-		cache := newCollectionCache(handler)
-		suite.Equal(coll, cache.get(context.Background(), collectionID))
-		suite.Equal(coll, cache.get(context.Background(), collectionID))
-	})
-
-	suite.Run("memoizes misses too", func() {
-		handler := NewNMockHandler(suite.T())
-		handler.EXPECT().GetCollection(mock.Anything, collectionID).
-			Return(nil, errors.New("mock rootcoord unreachable")).Once()
-
-		cache := newCollectionCache(handler)
-		suite.Nil(cache.get(context.Background(), collectionID))
-		suite.Nil(cache.get(context.Background(), collectionID))
-	})
-
-	suite.Run("no handler", func() {
-		suite.Nil(resolveCollection(context.Background(), nil, collectionID))
 	})
 }
 

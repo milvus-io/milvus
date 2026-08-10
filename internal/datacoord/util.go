@@ -803,44 +803,6 @@ func estimateGroupFieldsSize(schema *schemapb.CollectionSchema, group *columnGro
 	return total, nil
 }
 
-// collectionCache memoizes collection lookups over a loop that resolves the
-// same collections repeatedly. It goes through the handler, which loads from
-// rootcoord on a cache miss: the datacoord collection cache is filled by an
-// async goroutine (see Server.initMeta), so it is usually still empty while the
-// inspectors recover their tasks at startup. That load costs up to 5 retries
-// with a 10s timeout, hence the memoization - including of misses.
-type collectionCache struct {
-	handler Handler
-	cached  map[int64]*collectionInfo
-}
-
-func newCollectionCache(handler Handler) *collectionCache {
-	return &collectionCache{handler: handler, cached: make(map[int64]*collectionInfo)}
-}
-
-func (c *collectionCache) get(ctx context.Context, collectionID int64) *collectionInfo {
-	if coll, ok := c.cached[collectionID]; ok {
-		return coll
-	}
-	coll := resolveCollection(ctx, c.handler, collectionID)
-	c.cached[collectionID] = coll
-	return coll
-}
-
-// resolveCollection returns the collection info, loading it from rootcoord when
-// the datacoord cache does not hold it yet.
-func resolveCollection(ctx context.Context, handler Handler, collectionID int64) *collectionInfo {
-	if handler == nil {
-		return nil
-	}
-	coll, err := handler.GetCollection(ctx, collectionID)
-	if err != nil {
-		mlog.Warn(ctx, "failed to resolve collection", mlog.FieldCollectionID(collectionID), mlog.Err(err))
-		return nil
-	}
-	return coll
-}
-
 func calculateStatsTaskSlot(segmentSize int64) int64 {
 	defaultSlots := Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64()
 	if segmentSize > 512*1024*1024 {
