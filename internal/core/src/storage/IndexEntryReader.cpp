@@ -67,7 +67,7 @@ class LoadAdmissionGuard {
                 {slice_transient_bytes_, 1}, priority, cancellation_token);
         if (!acquired) {
             ThrowIfCancelled(cancellation_token, operation);
-            ThrowInfo(ErrorCode::UnexpectedError, "{} cancelled", operation);
+            ThrowInfo(ErrorCode::FollyCancel, "{} cancelled", operation);
         }
     }
 

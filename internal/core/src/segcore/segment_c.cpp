@@ -247,30 +247,35 @@ AsyncReopenSegment(CTraceContext c_trace,
         return static_cast<CFuture*>(static_cast<void*>(
             static_cast<milvus::futures::IFuture*>(future.release())));
     } catch (std::exception& e) {
+        // Keep the ORIGINAL error code (a typed SegcoreError, e.g. a
+        // retriable storage failure from preflight, must not collapse into
+        // UnexpectedError) while still prefixing the preflight context.
+        auto code = milvus::UnexpectedError;
+        if (auto* se = dynamic_cast<const milvus::SegcoreError*>(&e)) {
+            code = se->get_error_code();
+        }
         std::string error_msg = e.what();
         auto future = milvus::futures::Future<bool>::async(
             milvus::futures::getLoadCPUExecutor(),
             milvus::futures::ExecutePriority::NORMAL,
-            [error_msg = std::move(error_msg)](
+            [code, error_msg = std::move(error_msg)](
                 folly::CancellationToken cancel_token) -> bool* {
                 (void)cancel_token;
-                ThrowInfo(milvus::UnexpectedError,
-                          "AsyncReopenSegment preflight failed: {}",
-                          error_msg);
+                ThrowInfo(
+                    code, "AsyncReopenSegment preflight failed: {}", error_msg);
                 return nullptr;
             },
             milvus::futures::PoolType::kLoad);
         return static_cast<CFuture*>(static_cast<void*>(
             static_cast<milvus::futures::IFuture*>(future.release())));
     } catch (...) {
+        auto eptr = std::current_exception();
         auto future = milvus::futures::Future<bool>::async(
             milvus::futures::getLoadCPUExecutor(),
             milvus::futures::ExecutePriority::NORMAL,
-            [](folly::CancellationToken cancel_token) -> bool* {
+            [eptr](folly::CancellationToken cancel_token) -> bool* {
                 (void)cancel_token;
-                ThrowInfo(milvus::UnexpectedError,
-                          "AsyncReopenSegment preflight failed: {}",
-                          "unknown exception");
+                std::rethrow_exception(eptr);
                 return nullptr;
             },
             milvus::futures::PoolType::kLoad);

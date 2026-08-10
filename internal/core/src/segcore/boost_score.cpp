@@ -343,14 +343,21 @@ AsyncComputeScorerScoresOnOffsetChunks(CSegmentInterface c_segment,
         return static_cast<CFuture*>(static_cast<void*>(
             static_cast<milvus::futures::IFuture*>(future.release())));
     } catch (std::exception& e) {
+        // Keep the ORIGINAL error code (a typed SegcoreError from preflight
+        // must not collapse into UnexpectedError) while still prefixing the
+        // preflight context the caller-side diagnostics rely on.
+        auto code = milvus::UnexpectedError;
+        if (auto* se = dynamic_cast<const milvus::SegcoreError*>(&e)) {
+            code = se->get_error_code();
+        }
         std::string error_msg = e.what();
         auto future = milvus::futures::Future<bool>::async(
             milvus::futures::getSearchCPUExecutor(),
             milvus::futures::ExecutePriority::HIGH,
-            [error_msg = std::move(error_msg)](
+            [code, error_msg = std::move(error_msg)](
                 folly::CancellationToken cancel_token) -> bool* {
                 (void)cancel_token;
-                ThrowInfo(milvus::UnexpectedError,
+                ThrowInfo(code,
                           "AsyncComputeScorerScoresOnOffsetChunks preflight "
                           "failed: {}",
                           error_msg);

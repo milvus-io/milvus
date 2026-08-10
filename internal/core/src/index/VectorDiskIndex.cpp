@@ -533,7 +533,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
                     config.value("build_id", "unknown"));
                 return;
             }
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::DataFormatBroken,
                       fmt::format("Embedding list offsets file not found: {}",
                                   offsets_path));
         }

@@ -595,7 +595,7 @@ InjectExternalSpecProperties(
                 "(collection_id={}): {}",
                 collection_id,
                 e.what());
-            ThrowInfo(milvus::ErrorCode::UnexpectedError,
+            ThrowInfo(milvus::ErrorCode::ConfigInvalid,
                       "external_spec parse failed for collection {}: {}",
                       collection_id,
                       e.what());
