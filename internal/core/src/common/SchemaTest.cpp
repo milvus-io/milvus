@@ -560,6 +560,28 @@ TEST_F(SchemaTest, ExternalFunctionOutputUsesFieldIdColumnName) {
               columns->end());
 }
 
+TEST_F(SchemaTest, ExternalColumnResolvesAllLogicalAliases) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_external_source("s3://bucket/path");
+    schema_proto.set_external_spec(R"({"format":"parquet"})");
+
+    for (int64_t field_id : {101, 102}) {
+        auto* field = schema_proto.add_fields();
+        field->set_fieldid(field_id);
+        field->set_name("alias_" + std::to_string(field_id));
+        field->set_data_type(milvus::proto::schema::DataType::VarChar);
+        field->set_external_field("shared");
+        auto* max_length = field->add_type_params();
+        max_length->set_key("max_length");
+        max_length->set_value("1024");
+    }
+
+    auto schema = Schema::ParseFrom(schema_proto);
+    EXPECT_EQ(schema->ResolveColumnFieldIds("shared"),
+              (std::vector<FieldId>{FieldId(101), FieldId(102)}));
+    EXPECT_EQ(schema->ResolveColumnFieldId("shared"), FieldId(101));
+}
+
 TEST_F(SchemaTest, ConvertToLoonArrowSchemaNullableDenseVectorUsesBinary) {
     auto pk_id = schema_->AddDebugField("pk_field", DataType::INT64, false);
     schema_->set_primary_field_id(pk_id);
