@@ -16,6 +16,7 @@
 
 #include "mmap/VortexColumn.h"
 
+#include <array>
 #include <cstdint>
 #include <cmath>
 #include <exception>
@@ -35,8 +36,10 @@
 #include "gtest/gtest.h"
 #include "mmap/ChunkedColumnFilter.h"
 #include "milvus-storage/column_groups.h"
+#include "milvus-storage/format/vortex/vortex_types.h"
 #include "milvus-storage/format/vortex/vortex_writer.h"
 #include "milvus-storage/properties.h"
+#include "mmap/SparseVortexFileSystem.h"
 
 namespace milvus {
 namespace {
@@ -99,6 +102,54 @@ MakeProperties() {
     properties[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
     properties[PROPERTY_FS_ROOT_PATH] = std::string("/");
     return properties;
+}
+
+void
+CheckSparseVortexFileBacking(SparseVortexFileBacking backing) {
+    const auto dir =
+        std::filesystem::temp_directory_path() /
+        ("milvus_vortex_sparse_fs_test_" + std::to_string(::getpid()) + "_" +
+         std::to_string(static_cast<int>(backing)));
+    std::filesystem::create_directories(dir);
+    const auto file_path = dir / "sparse.vx";
+    const std::string logical_path = "sparse-test.vx";
+
+    SparseVortexFileSystemOptions options;
+    options.backing = backing;
+    options.file_path = file_path.string();
+    options.mmap_populate = true;
+    auto fs = MakeSparseVortexFileSystem(logical_path, std::move(options));
+    auto range_result =
+        milvus_storage::vortex::GetVortexRangeFile(fs, logical_path);
+    ASSERT_TRUE(range_result.ok()) << range_result.status().ToString();
+    auto range_file = std::move(range_result).ValueOrDie();
+
+    range_file->Resize(4096);
+    if (backing == SparseVortexFileBacking::Memory) {
+        ASSERT_FALSE(std::filesystem::exists(file_path));
+    } else {
+        ASSERT_TRUE(std::filesystem::exists(file_path));
+    }
+    auto status = range_file->WriteAt(128, arrow::Buffer::FromString("abc"));
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    std::array<char, 3> out{};
+    auto read_result = range_file->ReadAt(128, out.size(), out.data());
+    ASSERT_TRUE(read_result.ok()) << read_result.status().ToString();
+    ASSERT_EQ(read_result.ValueOrDie(), static_cast<int64_t>(out.size()));
+    ASSERT_EQ(std::string(out.data(), out.size()), "abc");
+
+    range_file->Punch(128, out.size());
+    out.fill('\1');
+    read_result = range_file->ReadAt(128, out.size(), out.data());
+    ASSERT_TRUE(read_result.ok()) << read_result.status().ToString();
+    ASSERT_EQ(read_result.ValueOrDie(), static_cast<int64_t>(out.size()));
+    ASSERT_EQ(std::string(out.data(), out.size()), std::string(out.size(), 0));
+
+    range_file.reset();
+    fs.reset();
+    ASSERT_FALSE(std::filesystem::exists(file_path));
+    std::filesystem::remove_all(dir);
 }
 
 VortexColumn::FileInfo
@@ -1044,6 +1095,12 @@ TEST(VortexColumnTest, RowIdScanPreservesExpressionValiditySemantics) {
     auto binary = evaluate(false);
     EXPECT_FALSE(binary.validity[1]);
     EXPECT_TRUE(binary.result[2]);
+}
+
+TEST(VortexColumnTest, SparseFileSystemBackingModes) {
+    CheckSparseVortexFileBacking(SparseVortexFileBacking::Memory);
+    CheckSparseVortexFileBacking(SparseVortexFileBacking::Mmap);
+    CheckSparseVortexFileBacking(SparseVortexFileBacking::Disk);
 }
 
 TEST(VortexColumnTest, ScanAndTake) {
