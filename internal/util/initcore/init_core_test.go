@@ -83,7 +83,7 @@ func TestSetupCoreConfigChangeCallback(t *testing.T) {
 		UpdateStorageV2AsyncLoadReadWindowSizeBytes(previousReadWindow)
 	})
 	assert.NoError(t, pt.Save(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key, "0"))
-	assert.EqualValues(t, 0, GetStorageV2AsyncLoadReadWindowSizeBytes())
+	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, GetStorageV2AsyncLoadReadWindowSizeBytes())
 	assert.NoError(t, pt.Save(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key, "1048576"))
 	assert.EqualValues(t, 1048576, GetStorageV2AsyncLoadReadWindowSizeBytes())
 }
@@ -156,7 +156,7 @@ func TestRegisterStorageV2AsyncLoadReadWindowConfigCatchesUp(t *testing.T) {
 	})
 
 	assert.NoError(t, pt.Save(item.Key, "1048576"))
-	UpdateStorageV2AsyncLoadReadWindowSizeBytes(0)
+	UpdateStorageV2AsyncLoadReadWindowSizeBytes(32 * 1024 * 1024)
 	registerStorageV2AsyncLoadReadWindowConfig(pt)
 
 	assert.EqualValues(t, 1048576, GetStorageV2AsyncLoadReadWindowSizeBytes())
@@ -171,9 +171,9 @@ func TestRegisterStorageV2AsyncLoadReadWindowConfigHandlesDelete(t *testing.T) {
 		UpdateStorageV2AsyncLoadReadWindowSizeBytes(previous)
 	})
 
-	assert.NoError(t, pt.Save(item.Key, "0"))
+	assert.NoError(t, pt.Save(item.Key, "1048576"))
 	registerStorageV2AsyncLoadReadWindowConfig(pt)
-	assert.EqualValues(t, 0, GetStorageV2AsyncLoadReadWindowSizeBytes())
+	assert.EqualValues(t, 1048576, GetStorageV2AsyncLoadReadWindowSizeBytes())
 
 	assert.NoError(t, pt.Remove(item.Key))
 	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, GetStorageV2AsyncLoadReadWindowSizeBytes())
@@ -450,7 +450,7 @@ func TestUpdateStorageV2AsyncLoadReadWindowSizeBytes(t *testing.T) {
 	})
 
 	UpdateStorageV2AsyncLoadReadWindowSizeBytes(0)
-	assert.EqualValues(t, 0, GetStorageV2AsyncLoadReadWindowSizeBytes())
+	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, GetStorageV2AsyncLoadReadWindowSizeBytes())
 	UpdateStorageV2AsyncLoadReadWindowSizeBytes(16 * 1024 * 1024)
 	assert.EqualValues(t, 16*1024*1024, GetStorageV2AsyncLoadReadWindowSizeBytes())
 }

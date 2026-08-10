@@ -128,7 +128,7 @@ void
 SetStorageV2AsyncLoadEnabled(bool enabled);
 
 // Target estimated-byte threshold for one storage v2 async read window.
-// Zero disables size-based splitting while preserving file/contiguity splits.
+// The value must be positive; non-positive values restore the process default.
 // A window always contains at least one cell, so an oversized cell may exceed
 // the configured threshold.
 void

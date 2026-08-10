@@ -400,8 +400,8 @@ GetAsyncLoadExecutor() {
 std::vector<AsyncReadWindow>
 BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
                       int64_t read_window_bytes) {
-    AssertInfo(read_window_bytes >= 0,
-               "[StorageV2] async read window must be non-negative, got {}",
+    AssertInfo(read_window_bytes > 0,
+               "[StorageV2] async read window must be positive, got {}",
                read_window_bytes);
     if (cells.empty()) {
         return {};

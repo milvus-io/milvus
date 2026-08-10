@@ -227,7 +227,7 @@ func TestComponentParam(t *testing.T) {
 		assert.EqualValues(t, 16*1024*1024, item.GetAsInt64())
 
 		params.Save(item.Key, "0")
-		assert.EqualValues(t, 0, item.GetAsInt64())
+		assert.EqualValues(t, 16*1024*1024, item.GetAsInt64())
 		params.Save(item.Key, "-1")
 		assert.EqualValues(t, 16*1024*1024, item.GetAsInt64())
 		params.Save(item.Key, "16MiB")

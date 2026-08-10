@@ -521,7 +521,7 @@ TEST_F(AsyncLoadPipelineTest, BuildsContiguousReadWindows) {
     EXPECT_EQ(windows[2].chunk_indices, (std::vector<int64_t>{8}));
 }
 
-TEST_F(AsyncLoadPipelineTest, ZeroReadWindowDisablesSizeBasedSplitting) {
+TEST_F(AsyncLoadPipelineTest, RejectsZeroReadWindow) {
     std::vector<CellSpec> cells{
         {.cid = 0,
          .file_idx = 0,
@@ -550,23 +550,17 @@ TEST_F(AsyncLoadPipelineTest, ZeroReadWindowDisablesSizeBasedSplitting) {
          .memory_size = 8},
     };
 
-    auto windows = BuildAsyncReadWindows(cells, 0);
-
-    ASSERT_EQ(windows.size(), 3);
-    EXPECT_EQ(windows[0].chunk_indices, (std::vector<int64_t>{0, 1, 2}));
-    EXPECT_EQ(windows[1].chunk_indices, (std::vector<int64_t>{4}));
-    EXPECT_EQ(windows[2].chunk_indices, (std::vector<int64_t>{0}));
-    ASSERT_EQ(windows[2].cells.size(), 1);
-    EXPECT_EQ(windows[2].cells.front().cid, 4);
+    EXPECT_THROW(BuildAsyncReadWindows(cells, 0), SegcoreError);
 }
 
-TEST_F(AsyncLoadPipelineTest, AsyncReadWindowConfigAllowsZero) {
+TEST_F(AsyncLoadPipelineTest, AsyncReadWindowConfigRejectsNonPositiveValues) {
     auto previous = StorageV2AsyncLoadReadWindowSizeBytes();
     auto restore = folly::makeGuard(
         [previous]() { SetStorageV2AsyncLoadReadWindowSizeBytes(previous); });
 
     SetStorageV2AsyncLoadReadWindowSizeBytes(0);
-    EXPECT_EQ(StorageV2AsyncLoadReadWindowSizeBytes(), 0);
+    EXPECT_EQ(StorageV2AsyncLoadReadWindowSizeBytes(),
+              kDefaultStorageV2AsyncLoadReadWindowSizeBytes);
 
     SetStorageV2AsyncLoadReadWindowSizeBytes(32 * 1024 * 1024);
     EXPECT_EQ(StorageV2AsyncLoadReadWindowSizeBytes(), 32 * 1024 * 1024);
@@ -613,7 +607,7 @@ TEST_F(AsyncLoadPipelineTest, DefaultOptionsUseConfiguredReadWindow) {
         return reader->AsyncCalls();
     };
 
-    EXPECT_EQ(run(0), 1);
+    EXPECT_EQ(run(kDefaultStorageV2AsyncLoadReadWindowSizeBytes), 1);
     EXPECT_EQ(run(1), cells.size());
 }
 

@@ -57,7 +57,7 @@ StorageV2AsyncLoadReadWindowSizeBytes() {
 
 inline void
 SetStorageV2AsyncLoadReadWindowSizeBytes(int64_t bytes) {
-    if (bytes < 0) {
+    if (bytes <= 0) {
         bytes = kDefaultStorageV2AsyncLoadReadWindowSizeBytes;
     }
     storage_v2_async_load_read_window_size_bytes_atomic().store(
