@@ -1241,6 +1241,29 @@ func TestSearchV2RejectsRequestedElementOffsetAfterReconstruction(t *testing.T) 
 	require.Equal(t, response.Message, searchResult.GetStatus().GetReason())
 }
 
+func TestSearchResultLogFieldsExcludePayload(t *testing.T) {
+	fields := searchResultLogFields(&schemapb.SearchResultData{
+		NumQueries: 2,
+		TopK:       3,
+		Scores:     []float32{0.9, 0.8},
+		FieldsData: []*schemapb.FieldData{{FieldName: "secret"}},
+		AggBuckets: []*schemapb.AggBucket{{Count: 1}},
+	})
+
+	keys := make([]string, 0, len(fields))
+	for _, field := range fields {
+		keys = append(keys, field.Key)
+	}
+	require.ElementsMatch(t, []string{
+		"nq",
+		"topK",
+		"rowCount",
+		"outputFieldCount",
+		"aggregationBucketCount",
+	}, keys)
+	require.NotContains(t, keys, "result")
+}
+
 func TestDocInDocOutSearch(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit

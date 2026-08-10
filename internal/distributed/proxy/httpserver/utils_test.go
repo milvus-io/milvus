@@ -1989,6 +1989,39 @@ func TestBuildSearchResp(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		require.ErrorContains(t, err, `field "offset" conflicts with the reserved REST search element offset field`)
 	})
+
+	t.Run("trimmed requested element offset", func(t *testing.T) {
+		_, err := buildSearchResp(&schemapb.SearchResultData{
+			Ids:            generateIDs(schemapb.DataType_Int64, 1),
+			Scores:         DefaultScores[:1],
+			ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+		}, []string{" offset "}, true, nil)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, `field "offset" conflicts with the reserved REST search element offset field`)
+	})
+
+	t.Run("explicit dynamic requested element offset", func(t *testing.T) {
+		schema := generateCollectionSchema(schemapb.DataType_Int64, false, true)
+		_, err := buildSearchResp(&schemapb.SearchResultData{
+			OutputFields: []string{common.MetaFieldName},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_JSON,
+					FieldName: common.MetaFieldName,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(`{}`)}}},
+					}},
+					IsDynamic: true,
+				},
+			},
+			Ids:            generateIDs(schemapb.DataType_Int64, 1),
+			Scores:         DefaultScores[:1],
+			ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+		}, []string{`$meta["offset"]`}, true, schema)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, `field "offset" conflicts with the reserved REST search element offset field`)
+	})
+
 }
 
 func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {

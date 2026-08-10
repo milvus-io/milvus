@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
+	internaltypeutil "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -2852,6 +2853,26 @@ func buildSearchResp(results *schemapb.SearchResultData, requestedOutputFields [
 		return nil, merr.WrapErrServiceInternalMsg("search result is nil")
 	}
 
+	elementIndices := results.GetElementIndices()
+	if elementIndices != nil && searchOutputFieldsContainElementOffset(requestedOutputFields, collectionSchema) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"field %q conflicts with the reserved REST search element offset field",
+			HTTPReturnElementOffset,
+		)
+	}
+	if elementIndices != nil && searchOutputFieldsContainElementOffset(results.GetOutputFields(), collectionSchema) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"field %q conflicts with the reserved REST search element offset field",
+			HTTPReturnElementOffset,
+		)
+	}
+	if elementIndices != nil && getRESTPrimaryFieldName(collectionSchema) == HTTPReturnElementOffset {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"field %q conflicts with the reserved REST search element offset field",
+			HTTPReturnElementOffset,
+		)
+	}
+
 	rows, err := buildQueryResp(
 		0,
 		results.GetOutputFields(),
@@ -2865,7 +2886,6 @@ func buildSearchResp(results *schemapb.SearchResultData, requestedOutputFields [
 		return nil, err
 	}
 
-	elementIndices := results.GetElementIndices()
 	if elementIndices == nil {
 		return rows, nil
 	}
@@ -2877,12 +2897,6 @@ func buildSearchResp(results *schemapb.SearchResultData, requestedOutputFields [
 		)
 	}
 
-	if containsString(requestedOutputFields, HTTPReturnElementOffset) || containsString(results.GetOutputFields(), HTTPReturnElementOffset) {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"field %q conflicts with the reserved REST search element offset field",
-			HTTPReturnElementOffset,
-		)
-	}
 	for _, row := range rows {
 		if _, ok := row[HTTPReturnElementOffset]; ok {
 			return nil, merr.WrapErrParameterInvalidMsg(
@@ -2895,6 +2909,37 @@ func buildSearchResp(results *schemapb.SearchResultData, requestedOutputFields [
 		rows[i][HTTPReturnElementOffset] = offset
 	}
 	return rows, nil
+}
+
+func searchOutputFieldsContainElementOffset(outputFields []string, collectionSchema *schemapb.CollectionSchema) bool {
+	var dynamicField *schemapb.FieldSchema
+	if collectionSchema != nil {
+		for _, field := range collectionSchema.GetFields() {
+			if field.GetIsDynamic() {
+				dynamicField = field
+				break
+			}
+		}
+	}
+
+	for _, outputField := range outputFields {
+		outputField = strings.TrimSpace(outputField)
+		if outputField == HTTPReturnElementOffset {
+			return true
+		}
+		if dynamicField == nil || !strings.Contains(outputField, "[") {
+			continue
+		}
+		nestedPath, err := internaltypeutil.ParseAndVerifyNestedPath(
+			outputField,
+			collectionSchema,
+			dynamicField.GetFieldID(),
+		)
+		if err == nil && nestedPath == "/"+HTTPReturnElementOffset {
+			return true
+		}
+	}
+	return false
 }
 
 func hasSearchAggregationResult(results *schemapb.SearchResultData) bool {

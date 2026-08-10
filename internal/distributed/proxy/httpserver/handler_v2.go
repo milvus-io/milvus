@@ -1848,6 +1848,24 @@ func invalidSearchResultStatus(buildErr error) *commonpb.Status {
 	return status
 }
 
+func searchResultLogFields(results *schemapb.SearchResultData) []mlog.Field {
+	if results == nil {
+		return []mlog.Field{mlog.Bool("resultNil", true)}
+	}
+	return []mlog.Field{
+		mlog.Int64("nq", results.GetNumQueries()),
+		mlog.Int64("topK", results.GetTopK()),
+		mlog.Int("rowCount", len(results.GetScores())),
+		mlog.Int("outputFieldCount", len(results.GetFieldsData())),
+		mlog.Int("aggregationBucketCount", len(results.GetAggBuckets())),
+	}
+}
+
+func logSearchResultBuildFailure(ctx context.Context, message string, results *schemapb.SearchResultData, buildErr error) {
+	fields := append(searchResultLogFields(results), mlog.Err(buildErr))
+	mlog.Warn(ctx, message, fields...)
+}
+
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*SearchReqV2)
 	req := &milvuspb.SearchRequest{
@@ -2040,7 +2058,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildSearchAggregationResp(searchResp.Results, allowJS, collSchema)
 			if err != nil {
-				mlog.Warn(ctx, "high level restful api, fail to deal with search aggregation result", mlog.Any("result", searchResp.Results), mlog.Err(err))
+				logSearchResultBuildFailure(ctx, "high level restful api, fail to deal with search aggregation result", searchResp.Results, err)
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
@@ -2070,7 +2088,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			if buildErr != nil {
 				searchResp.Status = invalidSearchResultStatus(buildErr)
 				err = merr.Error(searchResp.Status)
-				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(buildErr))
+				logSearchResultBuildFailure(ctx, "high level restful api, fail to deal with search result", searchResp.Results, buildErr)
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    searchResp.Status.GetCode(),
 					HTTPReturnMessage: searchResp.Status.GetReason(),
@@ -2244,7 +2262,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			if buildErr != nil {
 				searchResp.Status = invalidSearchResultStatus(buildErr)
 				err = merr.Error(searchResp.Status)
-				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(buildErr))
+				logSearchResultBuildFailure(ctx, "high level restful api, fail to deal with search result", searchResp.Results, buildErr)
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    searchResp.Status.GetCode(),
 					HTTPReturnMessage: searchResp.Status.GetReason(),
