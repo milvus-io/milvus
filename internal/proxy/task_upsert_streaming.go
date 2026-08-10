@@ -343,7 +343,7 @@ func (ut *upsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) 
 }
 
 // preparePartialUpdateCASGroups resolves all touched PChannel terms before it
-// allocates the attempt read timestamp used by both query and CAS metadata.
+// allocates the attempt read timestamp used by both query and CAS proof.
 func (ut *upsertTask) preparePartialUpdateCASGroups(ctx context.Context) error {
 	ut.partialUpdateCASGroups = nil
 	ut.partialUpdateReadTs = 0
@@ -413,17 +413,14 @@ func (ut *upsertTask) buildPartialUpdateCASGroups() (map[string]*messagespb.Part
 		vchannel := vchannels[channelIndex]
 		group := groups[vchannel]
 		if group == nil {
-			group = &messagespb.PartialUpdateCAS{
-				PrimaryKeyFieldId: primaryFieldSchema.GetFieldID(),
-				CollectionId:      ut.collectionID,
-			}
+			group = &messagespb.PartialUpdateCAS{}
 			groups[vchannel] = group
 		}
 	}
 	return groups, nil
 }
 
-// partialUpdateCASChannelIndexes mirrors normal upsert routing so CAS metadata
+// partialUpdateCASChannelIndexes mirrors normal upsert routing so CAS proof
 // and the corresponding DML transaction target the same vchannel.
 func (ut *upsertTask) partialUpdateCASChannelIndexes(ids *schemapb.IDs, vchannels []string) ([]uint32, error) {
 	channelID, ok, err := namespaceShardingChannelID(ut.schema.CollectionSchema, ut.req.Namespace, vchannels)

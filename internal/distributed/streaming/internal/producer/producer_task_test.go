@@ -504,8 +504,6 @@ func validProducerPartialUpdateCAS() *messagespb.PartialUpdateCAS {
 	return &messagespb.PartialUpdateCAS{
 		ReadTs:               100,
 		ObservedPchannelTerm: 2,
-		CollectionId:         10,
-		PrimaryKeyFieldId:    100,
 	}
 }
 

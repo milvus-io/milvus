@@ -117,10 +117,6 @@ func validatePartialUpdateCAS(meta *messagespb.PartialUpdateCAS) error {
 		return merr.WrapErrServiceInternalMsg("partial update CAS read_ts is empty")
 	case meta.GetObservedPchannelTerm() <= 0:
 		return merr.WrapErrServiceInternalMsg("partial update CAS observed_pchannel_term is empty")
-	case meta.GetCollectionId() == 0:
-		return merr.WrapErrServiceInternalMsg("partial update CAS collection_id is empty")
-	case meta.GetPrimaryKeyFieldId() <= 0:
-		return merr.WrapErrServiceInternalMsg("partial update CAS primary_key_field_id is empty")
 	default:
 	}
 	return nil

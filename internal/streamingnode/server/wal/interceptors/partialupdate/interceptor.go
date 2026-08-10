@@ -100,21 +100,22 @@ func (i *appendInterceptor) appendWrite(
 ) (message.MessageID, error) {
 	meta, err := message.ExtractPartialUpdateCAS(msg)
 	if err != nil {
-		return nil, status.NewUnrecoverableError("partial update CAS metadata is malformed: %v", err)
+		return nil, status.NewUnrecoverableError("partial update CAS proof is malformed: %v", err)
 	}
 	if meta != nil && msg.TxnContext() == nil {
 		return nil, status.NewUnrecoverableError("partial update CAS message must be transactional")
 	}
 
 	var pks []any
+	var casScope casInsertScope
 	var fenceCollectionID int64
 	var droppedCollectionID int64
 	if meta != nil {
-		pks, err = extractPKsFromInsert(msg, meta.GetPrimaryKeyFieldId())
+		pks, casScope, err = extractPKsFromCASInsert(msg, i.pkDescriptorGetter)
 		if err != nil {
 			return nil, err
 		}
-		if err := i.state.recordTxnMeta(msg.TxnContext().TxnID, meta); err != nil {
+		if err := i.state.recordTxnCAS(msg.TxnContext().TxnID, meta, casScope); err != nil {
 			return nil, err
 		}
 	} else {

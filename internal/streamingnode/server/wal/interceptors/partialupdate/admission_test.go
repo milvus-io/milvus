@@ -36,7 +36,7 @@ func TestValidateCommitRejectsPKConflict(t *testing.T) {
 	state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
 	state.pkVersions.UpdateAll("v1", []any{int64(10)}, 200)
 	state.recordTxnBegin(1)
-	require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
+	require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
 	state.recordTxnWrites(1, []any{int64(10)})
 
 	_, err := state.validateCommit(newCASCommitTxnMessage(t, "v1", 1, 300), 1)
@@ -46,7 +46,7 @@ func TestValidateCommitRejectsPKConflict(t *testing.T) {
 func TestValidateCommitPublishesAfterSuccessfulAppend(t *testing.T) {
 	state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
 	state.recordTxnBegin(1)
-	require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
+	require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
 	state.recordTxnWrites(1, []any{int64(10)})
 
 	commit := newCASCommitTxnMessage(t, "v1", 1, 300)
@@ -72,7 +72,7 @@ func TestValidateCommitMarkerConsistency(t *testing.T) {
 	t.Run("runtime CAS without marker", func(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
 		state.recordTxnBegin(1)
-		require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
+		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
 		state.recordTxnWrites(1, []any{int64(10)})
 
 		_, err := state.validateCommit(newCommitTxnMessage("v1", 1, 300), 1)
@@ -98,7 +98,7 @@ func TestValidateCommitMarkerConsistency(t *testing.T) {
 	t.Run("empty vchannel", func(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
 		state.recordTxnBegin(1)
-		require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
+		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
 		state.recordTxnWrites(1, []any{int64(10)})
 
 		_, err := state.validateCommit(newCASCommitTxnMessage(t, "", 1, 300), 1)
@@ -116,10 +116,22 @@ func TestPublishCommitAdvancesRetentionAndFence(t *testing.T) {
 }
 
 func TestValidateCommitRejectsInvalidProof(t *testing.T) {
+	t.Run("missing derived CAS scope", func(t *testing.T) {
+		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
+		state.txns[1] = &pendingTxn{
+			meta:          validCASMeta(100, 1),
+			pks:           []any{int64(10)},
+			observedBegin: true,
+		}
+
+		_, err := state.validateCommit(newCASCommitTxnMessage(t, "v1", 1, 300), 1)
+		requireUnrecoverable(t, err)
+	})
+
 	t.Run("missing primary keys", func(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
 		state.recordTxnBegin(1)
-		require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
+		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
 
 		_, err := state.validateCommit(newCASCommitTxnMessage(t, "v1", 1, 300), 1)
 		requireUnrecoverable(t, err)
@@ -128,7 +140,7 @@ func TestValidateCommitRejectsInvalidProof(t *testing.T) {
 	t.Run("mixed collection ids", func(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
 		state.recordTxnBegin(1)
-		require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
+		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
 		state.recordTxnWrites(1, []any{int64(10)})
 		state.recordTxnFence(1, 2)
 
@@ -141,7 +153,7 @@ func TestValidateCommitRejectsTermAndReadConflicts(t *testing.T) {
 	t.Run("term mismatch", func(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 2})
 		state.recordTxnBegin(1)
-		require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
+		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
 		state.recordTxnWrites(1, []any{int64(10)})
 
 		_, err := state.validateCommit(newCASCommitTxnMessage(t, "v1", 1, 120), 1)
@@ -152,7 +164,7 @@ func TestValidateCommitRejectsTermAndReadConflicts(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
 		state.pkVersions.channel("v1").retainedSinceTS = 200
 		state.recordTxnBegin(1)
-		require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
+		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
 		state.recordTxnWrites(1, []any{int64(10)})
 
 		_, err := state.validateCommit(newCASCommitTxnMessage(t, "v1", 1, 220), 1)
@@ -161,9 +173,10 @@ func TestValidateCommitRejectsTermAndReadConflicts(t *testing.T) {
 
 	t.Run("collection fence", func(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
-		state.fences.Update("v1", 1, 150)
+		scope := casInsertScope{collectionID: 2, schemaVersion: 1}
+		state.fences.Update("v1", scope.collectionID, 150)
 		state.recordTxnBegin(1)
-		require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
+		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), scope))
 		state.recordTxnWrites(1, []any{int64(10)})
 
 		_, err := state.validateCommit(newCASCommitTxnMessage(t, "v1", 1, 160), 1)
@@ -175,7 +188,7 @@ func TestValidateCommitRejectsIncompleteTransactionFence(t *testing.T) {
 	state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
 	state.incompleteTxnFences.Update("v1", 150)
 	state.recordTxnBegin(1)
-	require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
+	require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
 	state.recordTxnWrites(1, []any{int64(10)})
 
 	_, err := state.validateCommit(newCASCommitTxnMessage(t, "v1", 1, 160), 1)
@@ -185,7 +198,7 @@ func TestValidateCommitRejectsIncompleteTransactionFence(t *testing.T) {
 func TestValidateCommitReplicatedCASBypassesSourceProof(t *testing.T) {
 	state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 2})
 	state.recordTxnBegin(1)
-	require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
+	require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
 	state.recordTxnWrites(1, []any{int64(10)})
 
 	commit := newCASCommitTxnMessage(t, "v1", 1, 160)
@@ -239,7 +252,7 @@ func TestValidateCommitReplicatedCASRequiresCompleteWriteSet(t *testing.T) {
 	t.Run("missing primary keys", func(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 2})
 		state.recordTxnBegin(1)
-		require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
+		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
 
 		_, err := state.validateCommit(newReplicatedCommit(t), 1)
 		requireUnrecoverable(t, err)
@@ -248,7 +261,7 @@ func TestValidateCommitReplicatedCASRequiresCompleteWriteSet(t *testing.T) {
 	t.Run("mixed collection ids", func(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 2})
 		state.recordTxnBegin(1)
-		require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
+		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
 		state.recordTxnWrites(1, []any{int64(10)})
 		state.recordTxnFence(1, 2)
 
@@ -259,7 +272,7 @@ func TestValidateCommitReplicatedCASRequiresCompleteWriteSet(t *testing.T) {
 	t.Run("missing commit marker", func(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 2})
 		state.recordTxnBegin(1)
-		require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
+		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
 		state.recordTxnWrites(1, []any{int64(10)})
 		msgID := walimplstest.NewTestMessageID(1)
 		commit := newCommitTxnMessage("v1", 1, 160).WithReplicateHeader(&message.ReplicateHeader{
@@ -275,13 +288,36 @@ func TestValidateCommitReplicatedCASRequiresCompleteWriteSet(t *testing.T) {
 	})
 }
 
-func TestPartialUpdateStateStoresTxnMetadata(t *testing.T) {
+func TestPartialUpdateStateStoresTxnCASProofAndScope(t *testing.T) {
 	state := newPartialUpdateState(time.Second, versionIndexBudgetForEntries(100))
-	require.NoError(t, state.recordTxnMeta(1, nil))
-	require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
-	require.NoError(t, state.recordTxnMeta(1, validCASMeta(100, 1)))
-	require.Error(t, state.recordTxnMeta(1, validCASMeta(101, 1)))
-	require.EqualValues(t, 100, state.getTxn(1).meta.GetPrimaryKeyFieldId())
+	require.NoError(t, state.recordTxnCAS(1, nil, casInsertScope{}))
+	require.Error(t, state.recordTxnCAS(2, validCASMeta(100, 1), casInsertScope{}))
+
+	meta := validCASMeta(100, 1)
+	require.NoError(t, state.recordTxnCAS(1, meta, validCASScope()))
+	meta.ReadTs = 999
+	require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
+	require.Error(t, state.recordTxnCAS(1, validCASMeta(101, 1), validCASScope()))
+	require.Error(t, state.recordTxnCAS(1, validCASMeta(100, 1), casInsertScope{
+		collectionID:  2,
+		schemaVersion: 1,
+	}))
+	require.Error(t, state.recordTxnCAS(1, validCASMeta(100, 1), casInsertScope{
+		collectionID:  1,
+		schemaVersion: 2,
+	}))
+	require.NoError(t, state.recordTxnCAS(3, validCASMeta(100, 1), casInsertScope{
+		collectionID:  1,
+		schemaVersion: 0,
+	}))
+
+	txnState := state.getTxn(1)
+	require.EqualValues(t, 100, txnState.meta.GetReadTs())
+	require.EqualValues(t, 1, txnState.collectionID)
+	require.EqualValues(t, 1, txnState.schemaVersion)
+	require.True(t, txnState.casScopeSet)
+	txnState.meta.ReadTs = 999
+	require.EqualValues(t, 100, state.getTxn(1).meta.GetReadTs())
 }
 
 func newTestAdmissionState(channel types.PChannelInfo) *partialUpdateState {
@@ -311,7 +347,9 @@ func validCASMeta(readTS uint64, term int64) *messagespb.PartialUpdateCAS {
 	return &messagespb.PartialUpdateCAS{
 		ReadTs:               readTS,
 		ObservedPchannelTerm: term,
-		CollectionId:         1,
-		PrimaryKeyFieldId:    100,
 	}
+}
+
+func validCASScope() casInsertScope {
+	return casInsertScope{collectionID: 1, schemaVersion: 1}
 }

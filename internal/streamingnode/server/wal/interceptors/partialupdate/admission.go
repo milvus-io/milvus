@@ -76,18 +76,24 @@ func (s *partialUpdateState) validateCommit(msg message.MutableMessage, txnID me
 
 	if txnState.meta == nil {
 		if marker {
-			return nil, status.NewUnrecoverableError("partial update transaction %d has no CAS metadata", txnID)
+			return nil, status.NewUnrecoverableError("partial update transaction %d has no CAS proof", txnID)
 		}
 		return txnState, nil
+	}
+	if !txnState.casScopeSet {
+		return nil, status.NewUnrecoverableError(
+			"partial update transaction %d has no derived CAS scope",
+			txnID,
+		)
 	}
 	if len(txnState.pks) == 0 {
 		return nil, status.NewUnrecoverableError("partial update transaction %d has no primary key writes", txnID)
 	}
-	if txnState.fenceCollection != 0 && txnState.meta.GetCollectionId() != txnState.fenceCollection {
+	if txnState.fenceCollection != 0 && txnState.collectionID != txnState.fenceCollection {
 		return nil, status.NewUnrecoverableError(
 			"partial update transaction %d mixes collection ids %d and %d",
 			txnID,
-			txnState.meta.GetCollectionId(),
+			txnState.collectionID,
 			txnState.fenceCollection,
 		)
 	}
@@ -107,7 +113,7 @@ func (s *partialUpdateState) validateCommit(msg message.MutableMessage, txnID me
 	if err := s.pkVersions.Verify(msg.VChannel(), txnState.pks, txnState.meta.GetReadTs(), msg.TimeTick()); err != nil {
 		return nil, err
 	}
-	if err := s.fences.Verify(msg.VChannel(), txnState.meta.GetCollectionId(), txnState.meta.GetReadTs()); err != nil {
+	if err := s.fences.Verify(msg.VChannel(), txnState.collectionID, txnState.meta.GetReadTs()); err != nil {
 		return nil, err
 	}
 	return txnState, nil
@@ -129,12 +135,15 @@ func (s *partialUpdateState) publishCommit(msg message.MutableMessage, txnState 
 	}
 }
 
-// pendingTxn joins optional CAS metadata with writes observed in one runtime
+// pendingTxn joins optional CAS proof and derived scope with writes observed in one runtime
 // transaction. observedBegin distinguishes a complete runtime write set from
 // a recovered transaction for which only a body suffix or CommitTxn was seen.
 type pendingTxn struct {
 	pks               []any
 	meta              *messagespb.PartialUpdateCAS
+	collectionID      int64
+	schemaVersion     int32
+	casScopeSet       bool
 	fenceCollection   int64
 	observedBegin     bool
 	cleanupRegistered bool
@@ -165,19 +174,44 @@ func (s *partialUpdateState) recordTxnBegin(txnID message.TxnID) {
 	s.txnLocked(txnID).observedBegin = true
 }
 
-func (s *partialUpdateState) recordTxnMeta(txnID message.TxnID, meta *messagespb.PartialUpdateCAS) error {
+func (s *partialUpdateState) recordTxnCAS(
+	txnID message.TxnID,
+	meta *messagespb.PartialUpdateCAS,
+	scope casInsertScope,
+) error {
 	if meta == nil {
 		return nil
+	}
+	if scope.collectionID == 0 {
+		return status.NewUnrecoverableError(
+			"partial update txn %d carries an empty collection id",
+			txnID,
+		)
 	}
 	s.txnMu.Lock()
 	defer s.txnMu.Unlock()
 	txnState := s.txnLocked(txnID)
 	if txnState.meta == nil {
-		txnState.meta = meta
+		txnState.meta = proto.Clone(meta).(*messagespb.PartialUpdateCAS)
+		txnState.collectionID = scope.collectionID
+		txnState.schemaVersion = scope.schemaVersion
+		txnState.casScopeSet = true
 		return nil
 	}
 	if !proto.Equal(txnState.meta, meta) {
-		return status.NewUnrecoverableError("partial update txn %d carries different CAS metadata", txnID)
+		return status.NewUnrecoverableError("partial update txn %d carries different CAS proof", txnID)
+	}
+	if !txnState.casScopeSet ||
+		txnState.collectionID != scope.collectionID ||
+		txnState.schemaVersion != scope.schemaVersion {
+		return status.NewUnrecoverableError(
+			"partial update txn %d mixes CAS scope collection/schema %d/%d and %d/%d",
+			txnID,
+			txnState.collectionID,
+			txnState.schemaVersion,
+			scope.collectionID,
+			scope.schemaVersion,
+		)
 	}
 	return nil
 }
@@ -211,11 +245,21 @@ func (s *partialUpdateState) getTxn(txnID message.TxnID) *pendingTxn {
 	}
 	return &pendingTxn{
 		pks:               append([]any(nil), txnState.pks...),
-		meta:              txnState.meta,
+		meta:              cloneCASMeta(txnState.meta),
+		collectionID:      txnState.collectionID,
+		schemaVersion:     txnState.schemaVersion,
+		casScopeSet:       txnState.casScopeSet,
 		fenceCollection:   txnState.fenceCollection,
 		observedBegin:     txnState.observedBegin,
 		cleanupRegistered: txnState.cleanupRegistered,
 	}
+}
+
+func cloneCASMeta(meta *messagespb.PartialUpdateCAS) *messagespb.PartialUpdateCAS {
+	if meta == nil {
+		return nil
+	}
+	return proto.Clone(meta).(*messagespb.PartialUpdateCAS)
 }
 
 func (s *partialUpdateState) deleteTxn(txnID message.TxnID) {

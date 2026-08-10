@@ -702,7 +702,6 @@ func requireAppendedPartialUpdateCASGroups(
 	expected map[string]partialUpdateCASExpected,
 	readTS uint64,
 	term int64,
-	collectionID int64,
 ) {
 	t.Helper()
 
@@ -718,8 +717,6 @@ func requireAppendedPartialUpdateCASGroups(
 		require.Equal(t, streamingmessage.MessageTypeInsert, msg.MessageType())
 		require.Equal(t, readTS, meta.GetReadTs())
 		require.EqualValues(t, term, meta.GetObservedPchannelTerm())
-		require.Equal(t, collectionID, meta.GetCollectionId())
-		require.EqualValues(t, 100, meta.GetPrimaryKeyFieldId())
 		seen[msg.VChannel()] = struct{}{}
 	}
 	require.Len(t, seen, len(expected))
@@ -1078,8 +1075,6 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 			vchannel: {
 				ReadTs:               100,
 				ObservedPchannelTerm: 1,
-				CollectionId:         task.collectionID,
-				PrimaryKeyFieldId:    100,
 			},
 		}
 	}
@@ -1150,8 +1145,6 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedCASMessage(t *testing
 		vchannel: {
 			ReadTs:               100,
 			ObservedPchannelTerm: 1,
-			CollectionId:         task.collectionID,
-			PrimaryKeyFieldId:    100,
 		},
 	}
 
@@ -1208,8 +1201,6 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedSingleRow(t *testing
 		vchannel: {
 			ReadTs:               100,
 			ObservedPchannelTerm: 1,
-			CollectionId:         task.collectionID,
-			PrimaryKeyFieldId:    100,
 		},
 	}
 
@@ -1291,8 +1282,6 @@ func TestRepackInsertDataByPartitionForStreamingServicePreservesEntityPackingOrd
 	meta := &messagespb.PartialUpdateCAS{
 		ReadTs:               100,
 		ObservedPchannelTerm: 1,
-		CollectionId:         task.collectionID,
-		PrimaryKeyFieldId:    100,
 	}
 
 	baseline, err := repackInsertDataByPartitionForStreamingService(
@@ -1366,8 +1355,6 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 			vchannel: {
 				ReadTs:               100,
 				ObservedPchannelTerm: 1,
-				CollectionId:         task.collectionID,
-				PrimaryKeyFieldId:    100,
 			},
 		}
 	}
@@ -1451,8 +1438,6 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceSplitsOversizedCASMe
 		vchannel: {
 			ReadTs:               100,
 			ObservedPchannelTerm: 1,
-			CollectionId:         task.collectionID,
-			PrimaryKeyFieldId:    100,
 		},
 	}
 
@@ -1591,8 +1576,6 @@ func TestAttachPartialUpdateCASRejectsMissingMarker(t *testing.T) {
 		insertMsgs[0].VChannel(): {
 			ReadTs:               100,
 			ObservedPchannelTerm: 1,
-			CollectionId:         task.collectionID,
-			PrimaryKeyFieldId:    100,
 		},
 	}
 	err := task.attachPartialUpdateCAS(insertMsgs[:1])
@@ -1657,7 +1640,7 @@ func TestPartialUpdateAppendAcceptsBuilderCASMetadata(t *testing.T) {
 	require.Equal(t, len(expected), fakeWAL.resolveCalls)
 	require.Equal(t, 1, fakeWAL.appendCalls)
 	require.Len(t, fakeWAL.appended, len(insertMsgs)+len(deleteMsgs))
-	requireAppendedPartialUpdateCASGroups(t, fakeWAL.appended, expected, task.partialUpdateReadTs, 9, task.collectionID)
+	requireAppendedPartialUpdateCASGroups(t, fakeWAL.appended, expected, task.partialUpdateReadTs, 9)
 }
 
 func TestPartialUpdateAppendPacksMessagesAndAttachesCASMetadata(t *testing.T) {
@@ -1684,7 +1667,7 @@ func TestPartialUpdateAppendPacksMessagesAndAttachesCASMetadata(t *testing.T) {
 	require.Equal(t, 1, fakeWAL.resolveCalls)
 	require.Equal(t, 1, fakeWAL.appendCalls)
 	require.Len(t, fakeWAL.appended, 2)
-	requireAppendedPartialUpdateCASGroups(t, fakeWAL.appended, expected, task.partialUpdateReadTs, 9, task.collectionID)
+	requireAppendedPartialUpdateCASGroups(t, fakeWAL.appended, expected, task.partialUpdateReadTs, 9)
 }
 
 func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
@@ -2099,7 +2082,7 @@ func TestPartialUpdateAppendAcceptsBuilderCASMetadataForVarCharPK(t *testing.T) 
 	require.Equal(t, len(expected), fakeWAL.resolveCalls)
 	require.Equal(t, 1, fakeWAL.appendCalls)
 	require.Len(t, fakeWAL.appended, len(insertMsgs)+len(deleteMsgs))
-	requireAppendedPartialUpdateCASGroups(t, fakeWAL.appended, expected, task.partialUpdateReadTs, 9, task.collectionID)
+	requireAppendedPartialUpdateCASGroups(t, fakeWAL.appended, expected, task.partialUpdateReadTs, 9)
 }
 
 func TestPartialUpdateAutoIDBuildsCASGroupsFromOriginalPKs(t *testing.T) {
@@ -2220,12 +2203,10 @@ func TestAttachPartialUpdateCASValidatesPreparedGroups(t *testing.T) {
 }
 
 func TestAttachPartialUpdateCASRejectsVChannelMismatch(t *testing.T) {
-	newMeta := func(collectionID int64) *messagespb.PartialUpdateCAS {
+	newMeta := func() *messagespb.PartialUpdateCAS {
 		return &messagespb.PartialUpdateCAS{
 			ReadTs:               100,
 			ObservedPchannelTerm: 1,
-			CollectionId:         collectionID,
-			PrimaryKeyFieldId:    100,
 		}
 	}
 
@@ -2234,10 +2215,10 @@ func TestAttachPartialUpdateCASRejectsVChannelMismatch(t *testing.T) {
 		knownChannel := partialUpdateCASTestVChannels[0]
 		unknownChannel := partialUpdateCASTestVChannels[1]
 		task.partialUpdateCASGroups = map[string]*messagespb.PartialUpdateCAS{
-			knownChannel: newMeta(task.collectionID),
+			knownChannel: newMeta(),
 		}
 		messageGroups := map[string]*messagespb.PartialUpdateCAS{
-			unknownChannel: newMeta(task.collectionID),
+			unknownChannel: newMeta(),
 		}
 		insertMsgs, _ := buildPartialUpdateCASTestMessages(
 			t,
@@ -2258,8 +2239,8 @@ func TestAttachPartialUpdateCASRejectsVChannelMismatch(t *testing.T) {
 		presentChannel := partialUpdateCASTestVChannels[0]
 		missingChannel := partialUpdateCASTestVChannels[1]
 		task.partialUpdateCASGroups = map[string]*messagespb.PartialUpdateCAS{
-			presentChannel: newMeta(task.collectionID),
-			missingChannel: newMeta(task.collectionID),
+			presentChannel: newMeta(),
+			missingChannel: newMeta(),
 		}
 		insertMsgs, _ := buildPartialUpdateCASTestMessages(
 			t,
