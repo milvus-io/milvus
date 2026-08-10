@@ -335,7 +335,7 @@ IndexEntryEncryptedLocalWriter::UploadLocalFile() {
             if (errno == EINTR) {
                 continue;
             }
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::FileReadFailed,
                       fmt::format("Failed to read local file {}: {}",
                                   local_path_,
                                   strerror(errno)));

@@ -1055,7 +1055,7 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                             0);
         if (mapped == MAP_FAILED) {
             str_ids_file.Close();
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::MmapError,
                       "failed to mmap str_ids: {}",
                       strerror(errno));
         }
@@ -1187,7 +1187,7 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                                 0);
             if (mapped == MAP_FAILED) {
                 csr_file.Close();
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(ErrorCode::MmapError,
                           "failed to mmap CSR: {}",
                           strerror(errno));
             }

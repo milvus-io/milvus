@@ -355,15 +355,23 @@ CachedSearchIterator::GetNextValidResult(
     auto& iterator = iterators_[iterator_idx];
     while (true) {
         auto has_next = iterator->HasNext();
-        AssertInfo(has_next.has_value(),
-                   "knowhere iterator HasNext failed: {}",
-                   has_next.what());
+        if (!has_next.has_value()) {
+            // knowhere already classified this (OOM, disk read); route it
+            // through the mapper so a transient failure stays retriable
+            // instead of collapsing into UnexpectedError(2001).
+            ThrowInfo(KnowhereStatusToErrorCode(has_next.error()),
+                      "knowhere iterator HasNext failed: {}",
+                      has_next.what());
+        }
         if (!has_next.value()) {
             break;
         }
         auto next = iterator->Next();
-        AssertInfo(
-            next.has_value(), "knowhere iterator Next failed: {}", next.what());
+        if (!next.has_value()) {
+            ThrowInfo(KnowhereStatusToErrorCode(next.error()),
+                      "knowhere iterator Next failed: {}",
+                      next.what());
+        }
         auto result = ConvertIteratorResult(next.value());
         if (IsValid(result, last_bound, radius, range_filter)) {
             return result;
@@ -429,16 +437,20 @@ CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
         auto& iterator = iterators_[query_idx];
         while (rst.size() < batch_size_) {
             auto has_next = iterator->HasNext();
-            AssertInfo(has_next.has_value(),
-                       "knowhere iterator HasNext failed: {}",
-                       has_next.what());
+            if (!has_next.has_value()) {
+                ThrowInfo(KnowhereStatusToErrorCode(has_next.error()),
+                          "knowhere iterator HasNext failed: {}",
+                          has_next.what());
+            }
             if (!has_next.value()) {
                 break;
             }
             auto next = iterator->Next();
-            AssertInfo(next.has_value(),
-                       "knowhere iterator Next failed: {}",
-                       next.what());
+            if (!next.has_value()) {
+                ThrowInfo(KnowhereStatusToErrorCode(next.error()),
+                          "knowhere iterator Next failed: {}",
+                          next.what());
+            }
             auto result = ConvertIteratorResult(next.value());
             if (IsValid(result, last_bound, radius, range_filter)) {
                 rst.emplace_back(result);

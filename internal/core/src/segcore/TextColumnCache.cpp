@@ -111,7 +111,7 @@ TextColumnCache::ReadText(const std::string& lob_base_path,
     }
 
     if (ref_size != LOB_REFERENCE_SIZE) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::DataFormatBroken,
                   "Invalid LOB reference size: {}, expected: {}",
                   ref_size,
                   LOB_REFERENCE_SIZE);

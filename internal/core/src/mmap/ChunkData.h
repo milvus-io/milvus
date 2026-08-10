@@ -220,7 +220,10 @@ VariableLengthChunk<std::string>::set(
         total_size += src[i].size() + padding_size;
     }
     auto buf = (char*)mcm->Allocate(mmap_descriptor_, total_size);
-    AssertInfo(buf != nullptr, "failed to allocate memory from mmap_manager.");
+    if (buf == nullptr) {
+        ThrowInfo(ErrorCode::MmapError,
+                  "failed to allocate memory from mmap_manager.");
+    }
     for (auto i = 0, offset = 0; i < length; i++) {
         auto data_size = src[i].size() + padding_size;
         // string/varchar has default value, only take care of empty case
@@ -256,7 +259,10 @@ VariableLengthChunk<knowhere::sparse::SparseRow<SparseValueType>>::set(
         total_size += src[i].data_byte_size();
     }
     auto buf = (uint8_t*)mcm->Allocate(mmap_descriptor_, total_size);
-    AssertInfo(buf != nullptr, "failed to allocate memory from mmap_manager.");
+    if (buf == nullptr) {
+        ThrowInfo(ErrorCode::MmapError,
+                  "failed to allocate memory from mmap_manager.");
+    }
     for (auto i = 0, offset = 0; i < length; i++) {
         auto data_size = src[i].data_byte_size();
         uint8_t* data_ptr = buf + offset;
@@ -289,7 +295,10 @@ VariableLengthChunk<Json>::set(
         total_size += src[i].size() + padding_size;
     }
     auto buf = (char*)mcm->Allocate(mmap_descriptor_, total_size);
-    AssertInfo(buf != nullptr, "failed to allocate memory from mmap_manager.");
+    if (buf == nullptr) {
+        ThrowInfo(ErrorCode::MmapError,
+                  "failed to allocate memory from mmap_manager.");
+    }
     for (auto i = 0, offset = 0; i < length; i++) {
         auto data_size = src[i].size() + padding_size;
         if ((check_data_valid.has_value() &&
@@ -329,7 +338,10 @@ VariableLengthChunk<Array>::set(
     }
 
     auto buf = (char*)mcm->Allocate(mmap_descriptor_, total_size);
-    AssertInfo(buf != nullptr, "failed to allocate memory from mmap_manager.");
+    if (buf == nullptr) {
+        ThrowInfo(ErrorCode::MmapError,
+                  "failed to allocate memory from mmap_manager.");
+    }
     char* data_ptr = buf;
     for (auto i = 0; i < length; i++) {
         auto element_type = src[i].get_element_type();
