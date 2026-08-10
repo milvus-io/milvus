@@ -185,10 +185,12 @@ TimestampIndexTranslator::get_cells(
         auto* fixed_chunk = static_cast<FixedWidthChunk*>(all_chunks[0].get());
         auto span = fixed_chunk->Span();
         auto* ts_ptr = static_cast<const Timestamp*>(span.data());
-        AssertInfo(static_cast<int64_t>(span.row_count()) == num_rows_,
-                   "timestamp chunk row count {} != expected {}",
-                   span.row_count(),
-                   num_rows_);
+        if (!(static_cast<int64_t>(span.row_count()) == num_rows_)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "timestamp chunk row count {} != expected {}",
+                      span.row_count(),
+                      num_rows_);
+        }
         index = build_timestamp_index(ts_ptr, num_rows_);
     } else {
         std::vector<Timestamp> temp(num_rows_);
@@ -202,10 +204,12 @@ TimestampIndexTranslator::get_cells(
                 span.row_count() * sizeof(*temp.data()));
             offset += span.row_count();
         }
-        AssertInfo(static_cast<int64_t>(offset) == num_rows_,
-                   "timestamp total row count {} != expected {}",
-                   offset,
-                   num_rows_);
+        if (!(static_cast<int64_t>(offset) == num_rows_)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "timestamp total row count {} != expected {}",
+                      offset,
+                      num_rows_);
+        }
         index = build_timestamp_index(temp.data(), num_rows_);
     }
 

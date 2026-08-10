@@ -163,8 +163,10 @@ MemFileManagerImpl::LoadIndexToMemory(
         LoadBatchIndexFiles();
     }
 
-    AssertInfo(file_to_index_data.size() == remote_files.size(),
-               "inconsistent file num and index data num!");
+    if (!(file_to_index_data.size() == remote_files.size())) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "inconsistent file num and index data num!");
+    }
     return file_to_index_data;
 }
 
@@ -212,8 +214,10 @@ MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
         FetchRawData();
     }
 
-    AssertInfo(field_datas.size() == remote_files.size(),
-               "inconsistent file num and raw data num!");
+    if (!(field_datas.size() == remote_files.size())) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "inconsistent file num and raw data num!");
+    }
     return field_datas;
 }
 

@@ -482,9 +482,11 @@ PositionedFileWriter::WriteDirectAlignedAt(size_t file_offset,
 
     void* aligned_data_ptr =
         aligned_alloc(FileWriter::ALIGNMENT_BYTES, write_size);
-    AssertInfo(aligned_data_ptr != nullptr,
-               "Failed to allocate aligned write buffer of size {}",
-               write_size);
+    if (!(aligned_data_ptr != nullptr)) {
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "Failed to allocate aligned write buffer of size {}",
+                  write_size);
+    }
     auto free_aligned_data =
         folly::makeGuard([aligned_data_ptr]() { free(aligned_data_ptr); });
 

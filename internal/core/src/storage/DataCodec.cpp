@@ -64,8 +64,10 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
     auto edek = descriptor_event.GetEdekFromExtra();
     if (edek.length() > 0) {
         auto cipherPlugin = PluginLoader::GetInstance().getCipherPlugin();
-        AssertInfo(cipherPlugin != nullptr,
-                   "cipher plugin missing for an encrypted file");
+        if (!(cipherPlugin != nullptr)) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "cipher plugin missing for an encrypted file");
+        }
 
         int64_t ez_id = descriptor_event.GetEZFromExtra();
         if (!(ez_id != -1)) {
@@ -85,7 +87,9 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
             descriptor_event.event_header.next_position_,
             left_size);
 
-        AssertInfo(left_size > 0, "cipher text length is 0");
+        if (!(left_size > 0)) {
+            ThrowInfo(ErrorCode::DataFormatBroken, "cipher text length is 0");
+        }
         std::string cipher_str;
         cipher_str.resize(left_size);  // allocate enough space for size bytes
 
@@ -152,8 +156,10 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
                 }
                 auto field_data =
                     index_event_data.payload_reader->get_field_data();
-                AssertInfo(field_data->get_data_type() == DataType::STRING,
-                           "wrong index type in index binlog file");
+                if (!(field_data->get_data_type() == DataType::STRING)) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "wrong index type in index binlog file");
+                }
                 if (!(field_data->get_num_rows() == 1)) {
                     ThrowInfo(
                         ErrorCode::DataFormatBroken,

@@ -140,10 +140,12 @@ PayloadReader::init(const uint8_t* data,
                         if (metadata->Contains(DIM_KEY)) {
                             auto dim_str = metadata->Get(DIM_KEY).ValueOrDie();
                             dim_ = ParseMetadataInt(dim_str, "dim");
-                            AssertInfo(
-                                dim_ > 0,
-                                "nullable vector dim must be positive, got {}",
-                                dim_);
+                            if (!(dim_ > 0)) {
+                                ThrowInfo(ErrorCode::DataFormatBroken,
+                                          "nullable vector dim must be "
+                                          "positive, got {}",
+                                          dim_);
+                            }
                         } else {
                             ThrowInfo(DataTypeInvalid,
                                       "nullable vector field metadata missing "
@@ -185,7 +187,10 @@ PayloadReader::init(const uint8_t* data,
                 }
 
                 auto metadata = field->metadata();
-                AssertInfo(metadata != nullptr, "VectorArray metadata is null");
+                if (!(metadata != nullptr)) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "VectorArray metadata is null");
+                }
 
                 // Get element type
                 if (!(metadata->Contains(ELEMENT_TYPE_KEY_FOR_ARROW))) {
@@ -207,8 +212,11 @@ PayloadReader::init(const uint8_t* data,
                 }
                 auto dim_str = metadata->Get(DIM_KEY).ValueOrDie();
                 dim_ = ParseMetadataInt(dim_str, "dim");
-                AssertInfo(
-                    dim_ > 0, "VectorArray dim must be positive, got {}", dim_);
+                if (!(dim_ > 0)) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "VectorArray dim must be positive, got {}",
+                              dim_);
+                }
             }
 
             std::shared_ptr<::arrow::RecordBatchReader> rb_reader;

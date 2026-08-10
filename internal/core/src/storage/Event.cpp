@@ -311,8 +311,10 @@ BaseEventData::Serialize() {
         if (data_type == DataType::VECTOR_ARRAY) {
             auto vector_array_field =
                 std::dynamic_pointer_cast<FieldData<VectorArray>>(field_data);
-            AssertInfo(vector_array_field != nullptr,
-                       "Failed to cast to FieldData<VectorArray>");
+            if (!(vector_array_field != nullptr)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "Failed to cast to FieldData<VectorArray>");
+            }
             auto element_type = vector_array_field->get_element_type();
             payload_writer =
                 std::make_unique<PayloadWriter>(data_type,
