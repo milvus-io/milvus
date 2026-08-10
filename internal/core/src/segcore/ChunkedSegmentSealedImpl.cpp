@@ -9031,6 +9031,7 @@ ChunkedSegmentSealedImpl::TryLoadVortexColumnGroup(
     const SchemaPtr& schema_snapshot,
     bool eager_load,
     const std::string& aggregated_warmup_policy,
+    bool use_mmap,
     milvus::OpContext* op_ctx,
     bool is_replace,
     RuntimeResourceState* runtime,
@@ -9083,13 +9084,26 @@ ChunkedSegmentSealedImpl::TryLoadVortexColumnGroup(
                              /*is_vector=*/false,
                              /*is_index=*/false,
                              /*in_load_list=*/eager_load);
+    VortexColumnGroup::Options vortex_options;
+    if (use_mmap) {
+        auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+        vortex_options.sparse_file_backing = SparseVortexFileBacking::Mmap;
+        vortex_options.mmap_populate = mmap_config.GetMmapPopulate();
+        vortex_options.mmap_dir_path =
+            milvus::storage::LocalChunkManagerSingleton::GetInstance()
+                .GetChunkManager()
+                ->GetRootPath();
+        vortex_options.segment_id = get_segment_id();
+        vortex_options.column_group_index = index;
+    }
     auto vortex_column_group =
         std::make_shared<VortexColumnGroup>(vortex_files,
                                             properties,
                                             column_group->columns,
                                             milvus_field_ids.size(),
                                             group_cache_warmup_policy,
-                                            op_ctx);
+                                            op_ctx,
+                                            std::move(vortex_options));
 
     const auto expected_num_rows = segment_load_info.GetNumOfRows();
     if (vortex_column_group->num_rows() != expected_num_rows) {
@@ -9133,7 +9147,7 @@ ChunkedSegmentSealedImpl::TryLoadVortexColumnGroup(
                                column,
                                expected_num_rows,
                                field_meta.get_data_type(),
-                               false,
+                               use_mmap,
                                true,
                                segment_load_info,
                                schema_snapshot,
@@ -9200,6 +9214,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         mmap_enabled = mmap_enabled || field_mmap_enabled;
     }
 
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    const bool global_use_mmap = is_vector
+                                     ? mmap_config.GetVectorFieldEnableMmap()
+                                     : mmap_config.GetScalarFieldEnableMmap();
+    const bool use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
+
     if (TryLoadVortexColumnGroup(column_group,
                                  properties,
                                  index,
@@ -9209,6 +9229,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                                  schema_snapshot,
                                  eager_load,
                                  aggregated_warmup_policy,
+                                 use_mmap,
                                  op_ctx,
                                  is_replace,
                                  runtime,
@@ -9216,12 +9237,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         return;
     }
 
-    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
     auto writeback_mode = CreateMmapChunkWritebackMode(mmap_config);
-    bool global_use_mmap = is_vector ? mmap_config.GetVectorFieldEnableMmap()
-                                     : mmap_config.GetScalarFieldEnableMmap();
-    auto use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
-
     // Project each physical column once. Logical fields that share an external
     // column are expanded by the translator after reading it.
     auto needed_columns =
@@ -9371,6 +9387,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         mmap_enabled = mmap_enabled || field_mmap_enabled;
     }
 
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    const bool global_use_mmap = is_vector
+                                     ? mmap_config.GetVectorFieldEnableMmap()
+                                     : mmap_config.GetScalarFieldEnableMmap();
+    const bool use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
+
     if (TryLoadVortexColumnGroup(column_group,
                                  properties,
                                  index,
@@ -9380,6 +9402,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                                  schema_snapshot,
                                  eager_load,
                                  aggregated_warmup_policy,
+                                 use_mmap,
                                  op_ctx,
                                  is_replace,
                                  nullptr,
@@ -9387,14 +9410,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         return;
     }
 
-    const auto& mmap_config =
-        storage::MmapManager::GetInstance().GetMmapConfig();
     const auto writeback_mode = CreateMmapChunkWritebackMode(mmap_config);
-    const bool global_use_mmap = is_vector
-                                     ? mmap_config.GetVectorFieldEnableMmap()
-                                     : mmap_config.GetScalarFieldEnableMmap();
-    const bool use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
-
     const auto needed_columns =
         GetStorageColumnNames(schema_snapshot, milvus_field_ids);
     auto physical_column_field_ids =
