@@ -4759,7 +4759,7 @@ func (s *MaterializedViewTestSuite) TestMvNotEnabledWithPartitionKey() {
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testInt64Field, false)
 	schemaInfo := newSchemaInfo(schema)
 	s.expectCollectionSnapshot(schemaInfo)
-	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_0": 1, "partition_1": 2}, nil)
 
 	err := task.PreExecute(s.ctx)
 	s.NoError(err)
@@ -4789,7 +4789,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnInt64() {
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testInt64Field, false)
 	schemaInfo := newSchemaInfo(schema)
 	s.expectCollectionSnapshot(schemaInfo)
-	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_0": 1, "partition_1": 2}, nil)
 
 	err := task.PreExecute(s.ctx)
 	s.NoError(err)
@@ -4805,7 +4805,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 	schemaInfo := newSchemaInfo(schema)
 	s.expectCollectionSnapshot(schemaInfo)
-	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_0": 1, "partition_1": 2}, nil)
 
 	err := task.PreExecute(s.ctx)
 	s.NoError(err)
@@ -4824,7 +4824,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 		schemaInfo := newSchemaInfo(schema)
 		s.expectCollectionSnapshot(schemaInfo)
-		s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
+		s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_0": 1, "partition_1": 2}, nil)
 		err := task.PreExecute(s.ctx)
 		s.NoError(err)
 		s.NotZero(len(task.queryInfos))
