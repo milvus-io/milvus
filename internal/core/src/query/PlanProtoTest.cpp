@@ -146,6 +146,35 @@ FindFilterBitsNode(const std::shared_ptr<milvus::plan::PlanNode>& node) {
 
 }  // namespace
 
+// Internal-invariant producers must NOT carry ExprInvalid(2028): 2028 is an
+// InputError in merr, which blames the request and stops lb_policy's
+// cross-replica failover. ElementFilterExpr reaching ParseExprs is a plan
+// translator bug (it must be handled at PlanNode level), so it reports
+// UnexpectedError, and the unset-oneof default follows the same rule.
+TEST(PlanProto, InternalExprGuardsAreNotInputErrors) {
+    using namespace milvus;
+    using namespace milvus::query;
+    auto schema = BuildSchema();
+    ProtoParser parser(schema);
+
+    proto::plan::Expr elem_pb;
+    elem_pb.mutable_element_filter_expr();
+    try {
+        parser.ParseExprs(elem_pb);
+        FAIL() << "expected ElementFilterExpr in ParseExprs to throw";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::UnexpectedError);
+    }
+
+    proto::plan::Expr unset_pb;
+    try {
+        parser.ParseExprs(unset_pb);
+        FAIL() << "expected unset expr oneof to throw";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::UnexpectedError);
+    }
+}
+
 TEST(PlanProto, NotSetUnsupported) {
     using namespace milvus;
     using namespace milvus::query;
