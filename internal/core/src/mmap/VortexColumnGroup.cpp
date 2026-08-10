@@ -17,6 +17,8 @@
 #include "mmap/VortexColumnGroup.h"
 
 #include <algorithm>
+#include <atomic>
+#include <filesystem>
 #include <memory>
 #include <string_view>
 #include <utility>
@@ -38,6 +40,24 @@
 namespace milvus {
 
 namespace {
+
+std::atomic<uint64_t> g_vortex_sparse_path_generation{0};
+
+std::string
+MakeFileBackedSparsePath(const VortexColumnGroup::Options& options,
+                         size_t file_index) {
+    AssertInfo(!options.mmap_dir_path.empty(),
+               "vortex file-backed sparse file requires mmap dir path");
+    const auto generation =
+        g_vortex_sparse_path_generation.fetch_add(1, std::memory_order_relaxed);
+    return (std::filesystem::path(options.mmap_dir_path) / "vortex" /
+            fmt::format("seg_{}_cg_{}_file_{}_{}.vortex",
+                        options.segment_id,
+                        options.column_group_index,
+                        file_index,
+                        generation))
+        .string();
+}
 
 [[noreturn]] void
 ThrowVortexStatus(const arrow::Status& status,
@@ -67,6 +87,23 @@ VortexColumnGroup::VortexColumnGroup(
     size_t logical_field_count,
     CacheWarmupPolicy cache_warmup_policy,
     milvus::OpContext* op_ctx)
+    : VortexColumnGroup(files,
+                        std::move(properties),
+                        field_names,
+                        logical_field_count,
+                        cache_warmup_policy,
+                        op_ctx,
+                        Options{}) {
+}
+
+VortexColumnGroup::VortexColumnGroup(
+    const std::vector<VortexColumnFileInfo>& files,
+    std::shared_ptr<milvus_storage::api::Properties> properties,
+    const std::vector<std::string>& field_names,
+    size_t logical_field_count,
+    CacheWarmupPolicy cache_warmup_policy,
+    milvus::OpContext* op_ctx,
+    Options options)
     : num_fields_(logical_field_count) {
     AssertInfo(properties != nullptr, "vortex properties is null");
     AssertInfo(!files.empty(), "vortex column group has no files");
@@ -96,7 +133,8 @@ VortexColumnGroup::VortexColumnGroup(
     num_rows_until_chunk_.push_back(0);
     int64_t row_prefix = 0;
 
-    for (const auto& file : files) {
+    for (size_t file_index = 0; file_index < files.size(); ++file_index) {
+        const auto& file = files[file_index];
         auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
             *properties, file.path);
         if (!fs_result.ok()) {
@@ -122,10 +160,18 @@ VortexColumnGroup::VortexColumnGroup(
         auto source_fs = fs_result.ValueOrDie();
         state.sparse_path = MakeSparseVortexPath(resolved_path);
         // TODO(local-format): Each source file currently retains its sparse
-        // range-file descriptor for the ColumnGroup lifetime because footer
-        // planning and later Cell fills share it. Add pooling and resource
-        // accounting before targeting segments with very large file counts.
-        state.sparse_fs = MakeSparseVortexFileSystem(state.sparse_path);
+        // backing for the ColumnGroup lifetime because footer planning and
+        // later Cell fills share it. Add pooling and resource accounting before
+        // targeting segments with very large file counts.
+        SparseVortexFileSystemOptions sparse_options;
+        sparse_options.backing = options.sparse_file_backing;
+        sparse_options.mmap_populate = options.mmap_populate;
+        if (options.sparse_file_backing != SparseVortexFileBacking::Memory) {
+            sparse_options.file_path =
+                MakeFileBackedSparsePath(options, file_index);
+        }
+        state.sparse_fs = MakeSparseVortexFileSystem(state.sparse_path,
+                                                     std::move(sparse_options));
         state.footer_reader =
             std::make_shared<milvus_storage::vortex::VortexFooterReader>(
                 state.sparse_fs,
