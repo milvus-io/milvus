@@ -29,6 +29,7 @@ type httpConfig struct {
 	ReadHeaderTimeout     ParamItem `refreshable:"false"`
 	ReadTimeout           ParamItem `refreshable:"false"`
 	WriteTimeout          ParamItem `refreshable:"false"`
+	StreamIdleTimeout     ParamItem `refreshable:"true"`
 	IdleTimeout           ParamItem `refreshable:"false"`
 	MaxHeaderBytes        ParamItem `refreshable:"false"`
 	HSTSMaxAge            ParamItem `refreshable:"false"`
@@ -158,6 +159,15 @@ form and a warning is logged, so a caller always sees one shape or the other and
 		Export:       true,
 	}
 	p.WriteTimeout.Init(base.mgr)
+
+	p.StreamIdleTimeout = ParamItem{
+		Key:          "proxy.http.streamIdleTimeout",
+		DefaultValue: "0s",
+		Version:      "2.6.20",
+		Doc:          "Maximum duration without successful response write progress after REST v2 streaming begins. 0 disables this timeout",
+		Export:       true,
+	}
+	p.StreamIdleTimeout.Init(base.mgr)
 
 	p.IdleTimeout = ParamItem{
 		Key:          "proxy.http.idleTimeout",

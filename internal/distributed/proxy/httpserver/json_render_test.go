@@ -19,6 +19,7 @@ package httpserver
 import (
 	"bytes"
 	"context"
+	"io"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -93,6 +94,25 @@ type streamingCaptureWriter struct {
 	encodedRows           *int
 }
 
+type delayedChunkWriter struct {
+	chunkSize int
+	delay     time.Duration
+	writes    []int
+}
+
+func (w *delayedChunkWriter) Write(data []byte) (int, error) {
+	chunks := (len(data) + w.chunkSize - 1) / w.chunkSize
+	time.Sleep(time.Duration(chunks) * w.delay)
+	w.writes = append(w.writes, len(data))
+	return len(data), nil
+}
+
+type shortWriter struct{}
+
+func (shortWriter) Write(data []byte) (int, error) {
+	return len(data) / 2, nil
+}
+
 func newStreamingCaptureWriter(encodedRows *int) *streamingCaptureWriter {
 	return &streamingCaptureWriter{
 		header:                make(http.Header),
@@ -116,6 +136,36 @@ func (w *streamingCaptureWriter) Write(data []byte) (int, error) {
 	}
 	w.writeCount++
 	return w.body.Write(data)
+}
+
+func TestStreamIdleProgressWriterBoundsAndRecordsProgress(t *testing.T) {
+	ctx, controller := withStreamIdleTimeout(context.Background(), 300*time.Millisecond)
+	defer controller.stop()
+	controller.arm()
+
+	underlying := &delayedChunkWriter{
+		chunkSize: streamingJSONBufferSize,
+		delay:     120 * time.Millisecond,
+	}
+	writer := &streamIdleProgressWriter{writer: underlying, controller: controller}
+	data := make([]byte, streamingJSONBufferSize*2+1)
+	n, err := writer.Write(data)
+
+	require.NoError(t, err)
+	assert.Equal(t, len(data), n)
+	assert.Equal(t, []int{streamingJSONBufferSize, streamingJSONBufferSize, 1}, underlying.writes)
+	assert.NoError(t, context.Cause(ctx))
+}
+
+func TestStreamIdleProgressWriterReturnsShortWrite(t *testing.T) {
+	_, controller := withStreamIdleTimeout(context.Background(), time.Hour)
+	defer controller.stop()
+	writer := &streamIdleProgressWriter{writer: shortWriter{}, controller: controller}
+
+	n, err := writer.Write(make([]byte, 1024))
+
+	assert.Equal(t, 512, n)
+	require.ErrorIs(t, err, io.ErrShortWrite)
 }
 
 func TestJSONRenderStreamsRowsIncrementally(t *testing.T) {

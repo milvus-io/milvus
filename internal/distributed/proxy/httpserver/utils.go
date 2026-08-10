@@ -4183,7 +4183,11 @@ func (rows *queryResponseRows) validateDynamicJSON() error {
 				continue
 			}
 			raw := jsonRows[dataIndex]
-			if !validDynamicJSONObject(raw) {
+			validJSON, err := validDynamicJSONObject(rows.ctx, raw)
+			if err != nil {
+				return err
+			}
+			if !validJSON {
 				// Dynamic JSON in a query response is internal component output,
 				// not the original REST request payload.
 				return merr.WrapErrServiceInternalMsg(
@@ -4232,44 +4236,100 @@ func (rows *queryResponseRows) prepareNativeJSON() error {
 	return nil
 }
 
-// Sonic's encoder uses a 4096-entry stack. Dynamic JSON's top-level object is
-// flattened into the response row, so 4093 nested child containers is the last
-// depth that fits once the row map and encoder root state are included.
-const maxDynamicJSONValueNestingDepth = 4093
+// Sonic's encoder uses a 4096-entry stack, and nested map[string]interface{}
+// objects consume about two entries per level. Dynamic JSON's top-level object
+// is flattened into the response row, so 2046 is the last worst-case depth
+// encodable by Sonic v1.15.2 after accounting for the row map itself.
+const maxDynamicJSONValueNestingDepth = 2046
 
-func validDynamicJSONObject(raw []byte) bool {
-	if !gjson.ValidBytes(raw) {
-		return false
-	}
-	value := gjson.ParseBytes(raw)
-	// Preserve the previous json.Unmarshal behavior: a dynamic field may be
-	// null, in which case it contributes no keys to the REST row.
-	if value.Type == gjson.Null {
-		return true
-	}
-	return value.IsObject() && validDynamicJSONValue(value, 0)
+// Bound the amount of JSON the tokenizer can process between request-context
+// checks. Decoder.Token keeps a non-recursive parser stack and visits each byte
+// once, avoiding gjson.ForEach's repeated scans of nested raw subtrees.
+const dynamicJSONContextCheckBytes = 4 * 1024
+
+type dynamicJSONContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+	err    error
 }
 
-func validDynamicJSONValue(value gjson.Result, nestingDepth int) bool {
-	if value.Type == gjson.Number {
-		return !math.IsNaN(value.Num) && !math.IsInf(value.Num, 0)
+func (reader *dynamicJSONContextReader) Read(buffer []byte) (int, error) {
+	if err := reader.ctx.Err(); err != nil {
+		reader.err = err
+		return 0, err
 	}
-	if value.Type != gjson.JSON {
-		return true
+	if len(buffer) > dynamicJSONContextCheckBytes {
+		buffer = buffer[:dynamicJSONContextCheckBytes]
 	}
-	if nestingDepth > maxDynamicJSONValueNestingDepth {
-		return false
-	}
-	valid := true
-	value.ForEach(func(_, child gjson.Result) bool {
-		childDepth := nestingDepth
-		if child.Type == gjson.JSON {
-			childDepth++
+	return reader.reader.Read(buffer)
+}
+
+func validDynamicJSONObject(ctx context.Context, raw []byte) (bool, error) {
+	ctx = renderContext(ctx)
+	reader := &dynamicJSONContextReader{ctx: ctx, reader: bytes.NewReader(raw)}
+	decoder := gojson.NewDecoder(reader)
+	decoder.UseNumber()
+
+	first, err := decoder.Token()
+	if err != nil {
+		if reader.err != nil {
+			return false, reader.err
 		}
-		valid = validDynamicJSONValue(child, childDepth)
-		return valid
-	})
-	return valid
+		return false, nil
+	}
+	// Preserve the previous json.Unmarshal behavior: a dynamic field may be
+	// null, in which case it contributes no keys to the REST row.
+	if first == nil {
+		_, err = decoder.Token()
+		if reader.err != nil {
+			return false, reader.err
+		}
+		return err == io.EOF, nil
+	}
+
+	delim, ok := first.(gojson.Delim)
+	if !ok || delim != '{' {
+		return false, nil
+	}
+	containerDepth := 1
+	for containerDepth > 0 {
+		token, err := decoder.Token()
+		if err != nil {
+			if reader.err != nil {
+				return false, reader.err
+			}
+			return false, nil
+		}
+		switch value := token.(type) {
+		case gojson.Delim:
+			switch value {
+			case '{', '[':
+				containerDepth++
+				if containerDepth > maxDynamicJSONValueNestingDepth+1 {
+					return false, nil
+				}
+			case '}', ']':
+				containerDepth--
+			}
+		case gojson.Number:
+			number, err := value.Float64()
+			if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
+				return false, nil
+			}
+		}
+	}
+
+	_, err = decoder.Token()
+	if reader.err != nil {
+		return false, reader.err
+	}
+	if err != io.EOF {
+		return false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (rows *queryResponseRows) validateStructArrays() error {
@@ -4585,17 +4645,6 @@ func (rows *queryResponseRows) Row(i int64) (map[string]interface{}, error) {
 					if err := decoder.Decode(&dataMap); err != nil {
 						return nil, merr.WrapErrServiceInternalErr(err,
 							"query response dynamic field %s row %d could not be decoded",
-							fieldData.GetFieldName(), i)
-					}
-					var trailing interface{}
-					if err := decoder.Decode(&trailing); err != io.EOF {
-						if err == nil {
-							return nil, merr.WrapErrServiceInternalMsg(
-								"query response dynamic field %s row %d contains trailing JSON content",
-								fieldData.GetFieldName(), i)
-						}
-						return nil, merr.WrapErrServiceInternalErr(err,
-							"query response dynamic field %s row %d has invalid trailing JSON content",
 							fieldData.GetFieldName(), i)
 					}
 

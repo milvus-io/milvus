@@ -49,6 +49,42 @@ type jsonStreamSource interface {
 	WriteJSON(context.Context, io.Writer) error
 }
 
+type streamIdleProgressWriter struct {
+	writer         io.Writer
+	deadlineWriter *requestDeadlineWriter
+	controller     *streamIdleController
+}
+
+func (w *streamIdleProgressWriter) Write(data []byte) (int, error) {
+	written := 0
+	for len(data) > 0 {
+		chunk := data
+		if len(chunk) > streamingJSONBufferSize {
+			chunk = chunk[:streamingJSONBufferSize]
+		}
+
+		n, err := w.writer.Write(chunk)
+		if n < 0 || n > len(chunk) {
+			return written, &responseTransportError{cause: io.ErrShortWrite}
+		}
+		written += n
+		if err != nil {
+			return written, err
+		}
+		if n != len(chunk) {
+			return written, &responseTransportError{cause: io.ErrShortWrite}
+		}
+		deadline := w.controller.arm()
+		if w.deadlineWriter != nil {
+			if err := w.deadlineWriter.setStreamIdleDeadline(deadline); err != nil {
+				return written, err
+			}
+		}
+		data = data[n:]
+	}
+	return written, nil
+}
+
 type jsonRowStreamSource struct {
 	rows     jsonRowSource
 	rowCount int64
@@ -84,7 +120,7 @@ func (r jsonRender) Render(w http.ResponseWriter) error {
 			return err
 		}
 		if deferredWriter, ok := w.(deferredRenderWriter); ok {
-			if err := ctx.Err(); err != nil {
+			if err := responseContextError(ctx); err != nil {
 				return err
 			}
 			if err := deferredWriter.DeferRender(streamRender); err != nil {
@@ -92,12 +128,12 @@ func (r jsonRender) Render(w http.ResponseWriter) error {
 				// registration. Preserve the request cancellation in that race
 				// instead of misclassifying the late registration as an invalid
 				// search result.
-				if ctxErr := ctx.Err(); ctxErr != nil {
+				if ctxErr := responseContextError(ctx); ctxErr != nil {
 					return ctxErr
 				}
 				return err
 			}
-			return ctx.Err()
+			return responseContextError(ctx)
 		}
 		return streamRender.Render(w)
 	}
@@ -145,7 +181,7 @@ func newStreamingJSONRender(ctx context.Context, data gin.H, streamSource jsonSt
 		fields: make([]encodedJSONField, 0, len(keys)),
 	}
 	for _, key := range keys {
-		if err := ctx.Err(); err != nil {
+		if err := responseContextError(ctx); err != nil {
 			return nil, err
 		}
 		encodedKey, err := json.Marshal(key)
@@ -168,13 +204,23 @@ func newStreamingJSONRender(ctx context.Context, data gin.H, streamSource jsonSt
 
 func (r *streamingJSONRender) Render(w http.ResponseWriter) error {
 	r.WriteContentType(w)
-	if err := r.ctx.Err(); err != nil {
+	if err := responseContextError(r.ctx); err != nil {
 		return err
 	}
 
 	deadlineWriter := newRequestDeadlineWriter(r.ctx, w)
 	defer deadlineWriter.stopDeadlineInterrupt()
-	bufferedWriter := bufio.NewWriterSize(deadlineWriter, streamingJSONBufferSize)
+	outputWriter := io.Writer(deadlineWriter)
+	if controller := streamIdleControllerFromContext(r.ctx); controller != nil {
+		controller.arm()
+		defer controller.stop()
+		outputWriter = &streamIdleProgressWriter{
+			writer:         deadlineWriter,
+			deadlineWriter: deadlineWriter,
+			controller:     controller,
+		}
+	}
+	bufferedWriter := bufio.NewWriterSize(outputWriter, streamingJSONBufferSize)
 	if err := bufferedWriter.WriteByte('{'); err != nil {
 		return err
 	}
@@ -201,6 +247,9 @@ func (r *streamingJSONRender) Render(w http.ResponseWriter) error {
 		// Keep small responses uncommitted while encoding; large responses
 		// commit naturally when the bounded buffer fills.
 		if err := field.stream.WriteJSON(r.ctx, bufferedWriter); err != nil {
+			if ctxErr := responseContextError(r.ctx); ctxErr != nil {
+				return ctxErr
+			}
 			return err
 		}
 	}
@@ -219,7 +268,7 @@ func (source *jsonRowStreamSource) WriteJSON(ctx context.Context, w io.Writer) e
 	}
 	rowEncoder := json.NewEncoder(w)
 	for rowIndex := int64(0); rowIndex < source.rowCount; rowIndex++ {
-		if err := ctx.Err(); err != nil {
+		if err := responseContextError(ctx); err != nil {
 			return err
 		}
 		if rowIndex > 0 {
@@ -229,6 +278,9 @@ func (source *jsonRowStreamSource) WriteJSON(ctx context.Context, w io.Writer) e
 		}
 		row, err := source.rows.Row(rowIndex)
 		if err != nil {
+			if ctxErr := responseContextError(ctx); ctxErr != nil {
+				return ctxErr
+			}
 			return err
 		}
 		// Reuse one streaming encoder. Sonic still materializes one encoded row

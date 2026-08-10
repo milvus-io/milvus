@@ -20,18 +20,23 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -81,6 +86,159 @@ func TestBufferPoolDropsOversizedBuffers(t *testing.T) {
 	pool.Put(small)
 	assert.Zero(t, small.Len())
 	assert.False(t, isReusableResponseBuffer(nil))
+}
+
+func TestStreamIdleControllerLifecycle(t *testing.T) {
+	t.Run("disabled", func(t *testing.T) {
+		parent := context.Background()
+		ctx, controller := withStreamIdleTimeout(parent, 0)
+		assert.Equal(t, parent, ctx)
+		assert.Nil(t, controller)
+	})
+
+	t.Run("waits for stream start", func(t *testing.T) {
+		ctx, controller := withStreamIdleTimeout(context.Background(), time.Hour)
+		defer controller.stop()
+
+		controller.mu.Lock()
+		assert.Nil(t, controller.timer)
+		controller.mu.Unlock()
+		assert.NoError(t, ctx.Err())
+
+		controller.arm()
+		controller.mu.Lock()
+		assert.NotNil(t, controller.timer)
+		controller.mu.Unlock()
+	})
+
+	t.Run("rearms after progress", func(t *testing.T) {
+		_, controller := withStreamIdleTimeout(context.Background(), time.Hour)
+		defer controller.stop()
+
+		controller.arm()
+		controller.mu.Lock()
+		firstDeadline := controller.deadline
+		firstTimer := controller.timer
+		controller.mu.Unlock()
+
+		time.Sleep(time.Millisecond)
+		controller.arm()
+		controller.mu.Lock()
+		secondDeadline := controller.deadline
+		secondTimer := controller.timer
+		controller.mu.Unlock()
+
+		assert.Same(t, firstTimer, secondTimer)
+		assert.True(t, secondDeadline.After(firstDeadline))
+	})
+
+	t.Run("expires with timeout cause", func(t *testing.T) {
+		ctx, controller := withStreamIdleTimeout(context.Background(), 10*time.Millisecond)
+		defer controller.stop()
+		controller.arm()
+
+		select {
+		case <-ctx.Done():
+		case <-time.After(time.Second):
+			t.Fatal("stream idle timer did not expire")
+		}
+		require.ErrorIs(t, context.Cause(ctx), errStreamIdleTimeout)
+		require.ErrorIs(t, context.Cause(ctx), context.DeadlineExceeded)
+	})
+
+	t.Run("publishes cancellation before stopped state", func(t *testing.T) {
+		ctx, controller := withStreamIdleTimeout(context.Background(), time.Hour)
+		controller.deadline = time.Now().Add(-time.Second)
+
+		originalCancel := controller.cancel
+		cancelStarted := make(chan struct{})
+		releaseCancel := make(chan struct{})
+		released := false
+		defer func() {
+			if !released {
+				close(releaseCancel)
+			}
+		}()
+		controller.cancel = func(cause error) {
+			close(cancelStarted)
+			<-releaseCancel
+			originalCancel(cause)
+		}
+
+		expireDone := make(chan struct{})
+		go func() {
+			controller.expire()
+			close(expireDone)
+		}()
+		<-cancelStarted
+
+		armDone := make(chan time.Time, 1)
+		go func() { armDone <- controller.arm() }()
+		select {
+		case <-armDone:
+			t.Fatal("arm observed stopped state before timeout cancellation")
+		case <-time.After(20 * time.Millisecond):
+		}
+
+		close(releaseCancel)
+		released = true
+		<-expireDone
+		assert.True(t, (<-armDone).IsZero())
+		require.ErrorIs(t, context.Cause(ctx), errStreamIdleTimeout)
+	})
+
+	t.Run("stop prevents expiry", func(t *testing.T) {
+		ctx, controller := withStreamIdleTimeout(context.Background(), time.Hour)
+		controller.arm()
+		controller.stop()
+		controller.expire()
+
+		assert.NoError(t, ctx.Err())
+	})
+}
+
+func TestTimeoutMiddlewareSnapshotsStreamIdleTimeoutPerRequest(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.HTTPCfg.RequestTimeoutMs.Key, "1000"))
+	require.NoError(t, params.Save(params.HTTPCfg.StreamIdleTimeout.Key, "1h"))
+	t.Cleanup(func() {
+		params.Reset(params.HTTPCfg.RequestTimeoutMs.Key)
+		params.Reset(params.HTTPCfg.StreamIdleTimeout.Key)
+	})
+
+	observed := make(chan *streamIdleController, 2)
+	release := make(chan struct{})
+	router := gin.New()
+	router.GET("/snapshot", timeoutMiddleware(func(c *gin.Context) {
+		observed <- streamIdleControllerFromContext(c.Request.Context())
+		<-release
+		c.Status(http.StatusNoContent)
+	}))
+
+	firstResponse := httptest.NewRecorder()
+	firstDone := make(chan struct{})
+	go func() {
+		router.ServeHTTP(firstResponse, httptest.NewRequest(http.MethodGet, "/snapshot", nil))
+		close(firstDone)
+	}()
+	firstController := <-observed
+	require.NotNil(t, firstController)
+	assert.Equal(t, time.Hour, firstController.timeout)
+
+	require.NoError(t, params.Save(params.HTTPCfg.StreamIdleTimeout.Key, "0s"))
+	close(release)
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first request did not finish")
+	}
+	assert.Equal(t, http.StatusNoContent, firstResponse.Code)
+
+	secondResponse := httptest.NewRecorder()
+	router.ServeHTTP(secondResponse, httptest.NewRequest(http.MethodGet, "/snapshot", nil))
+	assert.Nil(t, <-observed)
+	assert.Equal(t, http.StatusNoContent, secondResponse.Code)
 }
 
 type blockingTestRender struct {
@@ -297,6 +455,14 @@ type blockingDeadlineWriter struct {
 	releaseOnce      sync.Once
 }
 
+type singleConnListener struct {
+	conn      net.Conn
+	mu        sync.Mutex
+	accepted  bool
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
 type manualDeadlineContext struct {
 	context.Context
 	deadline time.Time
@@ -335,6 +501,40 @@ type firstWriteSignalWriter struct {
 	once       sync.Once
 }
 
+type failingJSONRows struct {
+	err error
+}
+
+func (rows *failingJSONRows) Len() int64 {
+	return 1
+}
+
+func (rows *failingJSONRows) Row(int64) (map[string]interface{}, error) {
+	return nil, rows.err
+}
+
+type failingNetworkResponseWriter struct {
+	header    http.Header
+	status    int
+	writes    int
+	attempted bytes.Buffer
+	err       error
+}
+
+func (writer *failingNetworkResponseWriter) Header() http.Header {
+	return writer.header
+}
+
+func (writer *failingNetworkResponseWriter) WriteHeader(status int) {
+	writer.status = status
+}
+
+func (writer *failingNetworkResponseWriter) Write(data []byte) (int, error) {
+	writer.writes++
+	_, _ = writer.attempted.Write(data)
+	return 0, writer.err
+}
+
 func (w *firstWriteSignalWriter) Write(data []byte) (int, error) {
 	w.once.Do(func() {
 		close(w.firstWrite)
@@ -342,10 +542,177 @@ func (w *firstWriteSignalWriter) Write(data []byte) (int, error) {
 	return w.ResponseRecorder.Write(data)
 }
 
+func (listener *singleConnListener) Accept() (net.Conn, error) {
+	listener.mu.Lock()
+	if !listener.accepted {
+		listener.accepted = true
+		conn := listener.conn
+		listener.mu.Unlock()
+		return conn, nil
+	}
+	listener.mu.Unlock()
+	<-listener.closed
+	return nil, net.ErrClosed
+}
+
+func (listener *singleConnListener) Close() error {
+	listener.closeOnce.Do(func() {
+		close(listener.closed)
+	})
+	return nil
+}
+
+func (listener *singleConnListener) Addr() net.Addr {
+	return listener.conn.LocalAddr()
+}
+
+func TestTimeoutMiddlewareReturnsInvalidSearchResultForUnwrittenDeferredRenderError(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.HTTPCfg.RequestTimeoutMs.Key, "1000"))
+	require.NoError(t, params.Save(params.HTTPCfg.StreamIdleTimeout.Key, "0s"))
+	t.Cleanup(func() {
+		params.Reset(params.HTTPCfg.RequestTimeoutMs.Key)
+		params.Reset(params.HTTPCfg.StreamIdleTimeout.Key)
+	})
+
+	for _, test := range []struct {
+		name    string
+		newRows func(error) jsonRowSource
+		err     error
+	}{
+		{
+			name: "row materialization",
+			newRows: func(err error) jsonRowSource {
+				return &failingJSONRows{err: err}
+			},
+			err: errors.New("row materialization failed"),
+		},
+		{
+			name: "row encoding",
+			newRows: func(err error) jsonRowSource {
+				return &testJSONRows{rows: []map[string]interface{}{{
+					"invalid": failingJSONValue{err: err},
+				}}}
+			},
+			err: errors.New("row encoding failed"),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			router := gin.New()
+			router.POST("/render-error", timeoutMiddleware(func(c *gin.Context) {
+				if err := HTTPReturnStream(c, http.StatusOK, gin.H{
+					HTTPReturnCode: 0,
+					HTTPReturnData: test.newRows(test.err),
+				}); err != nil {
+					panic(err)
+				}
+			}))
+
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/render-error", nil))
+
+			assert.Equal(t, http.StatusOK, response.Code)
+			var body ReturnErrMsg
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body), response.Body.String())
+			assert.Equal(t, merr.Code(merr.ErrInvalidSearchResult), body.Code)
+			assert.Contains(t, body.Message, test.err.Error())
+			assert.NotContains(t, response.Body.String(), `"data"`)
+		})
+	}
+}
+
+func TestTimeoutMiddlewareDoesNotRelabelCommittedConnectionError(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.HTTPCfg.RequestTimeoutMs.Key, "1000"))
+	require.NoError(t, params.Save(params.HTTPCfg.StreamIdleTimeout.Key, "0s"))
+	t.Cleanup(func() {
+		params.Reset(params.HTTPCfg.RequestTimeoutMs.Key)
+		params.Reset(params.HTTPCfg.StreamIdleTimeout.Key)
+	})
+
+	networkErr := errors.New("connection closed")
+	writer := &failingNetworkResponseWriter{
+		header: make(http.Header),
+		err:    networkErr,
+	}
+	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+	failureCounter := metrics.RestfulStreamDeliveryFailure.WithLabelValues(
+		nodeID,
+		"/connection-error",
+		streamTerminationCauseTransportError,
+	)
+	failureCountBefore := testutil.ToFloat64(failureCounter)
+	t.Cleanup(func() {
+		metrics.RestfulStreamDeliveryFailure.DeleteLabelValues(
+			nodeID,
+			"/connection-error",
+			streamTerminationCauseTransportError,
+		)
+	})
+	var termination interface{}
+	var terminationCause interface{}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Next()
+		termination, _ = c.Get(ContextStreamTermination)
+		terminationCause, _ = c.Get(ContextStreamTerminationCause)
+	})
+	router.POST("/connection-error", timeoutMiddleware(func(c *gin.Context) {
+		if err := HTTPReturnStream(c, http.StatusOK, gin.H{
+			HTTPReturnCode: 0,
+			HTTPReturnData: &testJSONRows{rows: []map[string]interface{}{{"id": 1}}},
+		}); err != nil {
+			panic(err)
+		}
+	}))
+
+	router.ServeHTTP(writer, httptest.NewRequest(http.MethodPost, "/connection-error", nil))
+
+	assert.Equal(t, http.StatusOK, writer.status)
+	assert.Equal(t, 1, writer.writes)
+	assert.Contains(t, writer.attempted.String(), `"code":0`)
+	assert.NotContains(t, writer.attempted.String(), merr.ErrInvalidSearchResult.Error())
+	assert.Equal(t, streamTerminationFailed, termination)
+	assert.Equal(t, streamTerminationCauseTransportError, terminationCause)
+	assert.Equal(t, failureCountBefore+1, testutil.ToFloat64(failureCounter))
+}
+
+func TestStreamTerminationCause(t *testing.T) {
+	renderErr := errors.New("render failed")
+	transportErr := errors.New("transport failed")
+	tests := []struct {
+		name     string
+		err      error
+		expected string
+	}{
+		{name: "idle timeout", err: errStreamIdleTimeout, expected: streamTerminationCauseIdleTimeout},
+		{name: "request timeout", err: context.DeadlineExceeded, expected: streamTerminationCauseRequestTimeout},
+		{name: "client cancel", err: context.Canceled, expected: streamTerminationCauseClientCancel},
+		{name: "transport", err: &responseTransportError{cause: transportErr}, expected: streamTerminationCauseTransportError},
+		{name: "transport deadline", err: &responseTransportError{cause: context.DeadlineExceeded}, expected: streamTerminationCauseTransportError},
+		{name: "transport inside renderer", err: &deferredRenderError{cause: &responseTransportError{cause: transportErr}}, expected: streamTerminationCauseTransportError},
+		{name: "renderer", err: &deferredRenderError{cause: renderErr}, expected: streamTerminationCauseRenderError},
+		{name: "unknown post-commit", err: errors.New("unknown"), expected: streamTerminationCauseTransportError},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected, streamTerminationCause(test.err))
+		})
+	}
+}
+
 type requestTimeoutJSONRows struct {
 	ctx         context.Context
 	requestDone <-chan struct{}
 	rowCalls    int
+}
+
+type streamIdleJSONRows struct {
+	ctx      context.Context
+	rowCalls int
 }
 
 func (rows *requestTimeoutJSONRows) Len() int64 {
@@ -362,6 +729,193 @@ func (rows *requestTimeoutJSONRows) Row(index int64) (map[string]interface{}, er
 		return nil, err
 	}
 	return map[string]interface{}{"value": "after request timeout"}, nil
+}
+
+func (rows *streamIdleJSONRows) Len() int64 {
+	return 2
+}
+
+func (rows *streamIdleJSONRows) Row(index int64) (map[string]interface{}, error) {
+	rows.rowCalls++
+	if index == 0 {
+		return map[string]interface{}{"value": string(bytes.Repeat([]byte{'x'}, streamingJSONBufferSize*2))}, nil
+	}
+	<-rows.ctx.Done()
+	return nil, responseContextError(rows.ctx)
+}
+
+func TestStreamIdleTimeoutAfterCommitReturnsPartialJSON(t *testing.T) {
+	requestContext, controller := withStreamIdleTimeout(context.Background(), 50*time.Millisecond)
+	defer controller.stop()
+	rows := &streamIdleJSONRows{ctx: requestContext}
+	recorder := newTimeoutResponseRecorder(&bytes.Buffer{})
+	require.NoError(t, (jsonRender{Context: requestContext, Data: gin.H{
+		HTTPReturnCode: 0,
+		HTTPReturnData: rows,
+	}}).Render(recorder))
+
+	responseWriter := &firstWriteSignalWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		firstWrite:       make(chan struct{}),
+	}
+	gCtx, _ := gin.CreateTestContext(responseWriter)
+	commitDone := make(chan error, 1)
+	go func() {
+		commitDone <- recorder.CommitTo(requestContext, gCtx.Writer)
+	}()
+
+	select {
+	case <-responseWriter.firstWrite:
+	case <-time.After(time.Second):
+		t.Fatal("stream response was not committed")
+	}
+	select {
+	case err := <-commitDone:
+		require.ErrorIs(t, err, errStreamIdleTimeout)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(time.Second):
+		t.Fatal("stream idle timeout did not stop rendering")
+	}
+
+	assert.Equal(t, http.StatusOK, responseWriter.Code)
+	assert.Equal(t, 2, rows.rowCalls)
+	assert.Contains(t, responseWriter.Body.String(), `"data":[`)
+	var body map[string]interface{}
+	require.Error(t, json.Unmarshal(responseWriter.Body.Bytes(), &body))
+}
+
+func TestStreamIdleTimeoutInterruptsFirstBlockedOutput(t *testing.T) {
+	for _, serverWriteTimeout := range []time.Duration{0, 2 * time.Minute} {
+		serverWriteTimeout := serverWriteTimeout
+		t.Run(serverWriteTimeout.String(), func(t *testing.T) {
+			requestContext, controller := withStreamIdleTimeout(context.Background(), 50*time.Millisecond)
+			defer controller.stop()
+			writer := &blockingDeadlineWriter{
+				header:           make(http.Header),
+				operationStarted: make(chan struct{}),
+				deadlineSet:      make(chan time.Time, 1),
+				releaseOperation: make(chan struct{}),
+			}
+			t.Cleanup(func() {
+				writer.releaseOnce.Do(func() { close(writer.releaseOperation) })
+			})
+			renderDone := make(chan error, 1)
+			go func() {
+				renderDone <- (jsonRender{
+					Context: withServerWriteTimeout(requestContext, serverWriteTimeout),
+					Data: gin.H{
+						HTTPReturnCode: 0,
+						HTTPReturnData: &testJSONRows{rows: []map[string]interface{}{{"id": 1}}},
+					},
+				}).Render(writer)
+			}()
+			select {
+			case <-writer.operationStarted:
+			case <-time.After(time.Second):
+				t.Fatal("output operation did not start")
+			}
+			select {
+			case deadline := <-writer.deadlineSet:
+				assert.WithinDuration(t, time.Now(), deadline, 250*time.Millisecond)
+			case <-time.After(time.Second):
+				t.Fatal("stream idle timeout did not interrupt active output")
+			}
+			select {
+			case err := <-renderDone:
+				require.ErrorIs(t, err, errStreamIdleTimeout)
+			case <-time.After(time.Second):
+				t.Fatal("output remained blocked after stream idle timeout")
+			}
+		})
+	}
+}
+
+func TestSuccessfulStreamingRenderStopsStreamIdleTimer(t *testing.T) {
+	requestContext, controller := withStreamIdleTimeout(context.Background(), time.Hour)
+	response := httptest.NewRecorder()
+	require.NoError(t, (jsonRender{Context: requestContext, Data: gin.H{
+		HTTPReturnCode: 0,
+		HTTPReturnData: &testJSONRows{rows: []map[string]interface{}{{
+			"value": string(bytes.Repeat([]byte{'x'}, streamingJSONBufferSize*2)),
+		}}},
+	}}).Render(response))
+
+	controller.mu.Lock()
+	stopped := controller.stopped
+	timerStarted := controller.timer != nil
+	controller.mu.Unlock()
+	assert.True(t, timerStarted)
+	assert.True(t, stopped)
+	controller.expire()
+	assert.NoError(t, requestContext.Err())
+}
+
+func TestStreamIdleDeadlineBoundsHTTP1ResponseFinalization(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.HTTPCfg.RequestTimeoutMs.Key, "2000"))
+	require.NoError(t, params.Save(params.HTTPCfg.StreamIdleTimeout.Key, "100ms"))
+	t.Cleanup(func() {
+		params.Reset(params.HTTPCfg.RequestTimeoutMs.Key)
+		params.Reset(params.HTTPCfg.StreamIdleTimeout.Key)
+	})
+
+	serverConn, clientConn := net.Pipe()
+	listener := &singleConnListener{
+		conn:   serverConn,
+		closed: make(chan struct{}),
+	}
+	handlerReturned := make(chan struct{})
+	connectionClosed := make(chan struct{})
+	var connectionClosedOnce sync.Once
+	router := gin.New()
+	router.Use(serverWriteTimeoutMiddleware(0))
+	router.POST("/finalize", timeoutMiddleware(func(c *gin.Context) {
+		if err := HTTPReturnStream(c, http.StatusOK, gin.H{
+			HTTPReturnCode: 0,
+			HTTPReturnData: &testJSONRows{rows: []map[string]interface{}{{"id": 1}}},
+		}); err != nil {
+			panic(err)
+		}
+	}))
+	server := &http.Server{
+		ReadHeaderTimeout: 10 * time.Second,
+		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			router.ServeHTTP(writer, request)
+			close(handlerReturned)
+		}),
+		ConnState: func(_ net.Conn, state http.ConnState) {
+			if state == http.StateClosed {
+				connectionClosedOnce.Do(func() { close(connectionClosed) })
+			}
+		},
+	}
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- server.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		_ = clientConn.Close()
+		_ = server.Close()
+		_ = listener.Close()
+		select {
+		case <-serveDone:
+		case <-time.After(time.Second):
+		}
+	})
+
+	_, err := io.WriteString(clientConn, "POST /finalize HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\n\r\n")
+	require.NoError(t, err)
+	select {
+	case <-handlerReturned:
+	case <-time.After(time.Second):
+		t.Fatal("handler did not return before response finalization")
+	}
+	select {
+	case <-connectionClosed:
+	case <-time.After(time.Second):
+		t.Fatal("stream idle deadline did not bound HTTP/1 response finalization")
+	}
 }
 
 func TestTimeoutResponseRecorderKeepsRequestTimeoutAfterCommit(t *testing.T) {
@@ -604,6 +1158,48 @@ func TestRequestDeadlineWriterPreservesServerWriteTimeout(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Empty(t, writer.deadlines)
+	})
+
+	t.Run("stream idle deadline remains for response finalization", func(t *testing.T) {
+		requestCtx, cancel := context.WithTimeout(context.Background(), time.Hour)
+		defer cancel()
+		streamCtx, controller := withStreamIdleTimeout(requestCtx, 2*time.Second)
+		writer := &deadlineTrackingWriter{header: make(http.Header)}
+		start := time.Now()
+		render := jsonRender{Context: withServerWriteTimeout(streamCtx, 0), Data: gin.H{
+			HTTPReturnCode: 0,
+			HTTPReturnData: &testJSONRows{rows: []map[string]interface{}{{"id": 1}}},
+		}}
+		require.NoError(t, render.Render(writer))
+
+		require.NotEmpty(t, writer.deadlines)
+		lastDeadline := writer.deadlines[len(writer.deadlines)-1]
+		assert.WithinDuration(t, start.Add(2*time.Second), lastDeadline, 500*time.Millisecond)
+		requestDeadline, ok := requestCtx.Deadline()
+		require.True(t, ok)
+		assert.True(t, lastDeadline.Before(requestDeadline))
+		controller.mu.Lock()
+		stopped := controller.stopped
+		controller.mu.Unlock()
+		assert.True(t, stopped)
+	})
+
+	t.Run("native server timeout keeps deadline ownership", func(t *testing.T) {
+		requestCtx, cancel := context.WithTimeout(context.Background(), time.Hour)
+		defer cancel()
+		streamCtx, controller := withStreamIdleTimeout(requestCtx, 2*time.Second)
+		writer := &deadlineTrackingWriter{header: make(http.Header)}
+		render := jsonRender{Context: withServerWriteTimeout(streamCtx, time.Minute), Data: gin.H{
+			HTTPReturnCode: 0,
+			HTTPReturnData: &testJSONRows{rows: []map[string]interface{}{{"id": 1}}},
+		}}
+		require.NoError(t, render.Render(writer))
+
+		assert.Empty(t, writer.deadlines)
+		controller.mu.Lock()
+		stopped := controller.stopped
+		controller.mu.Unlock()
+		assert.True(t, stopped)
 	})
 
 	t.Run("startup snapshot ignores runtime config changes", func(t *testing.T) {

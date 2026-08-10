@@ -42,8 +42,10 @@ const (
 	// ContextErrorType carries the merr classification (input_error/system_error)
 	// set by the REST handler when it holds the error object; must match the key
 	// written in internal/distributed/proxy/httpserver.
-	ContextErrorType = "error_type"
-	ContextToken     = "token"
+	ContextErrorType              = "error_type"
+	ContextStreamTermination      = "stream_termination"
+	ContextStreamTerminationCause = "stream_termination_cause"
+	ContextToken                  = "token"
 )
 
 type RestfulInfo struct {
@@ -180,6 +182,18 @@ func (i *RestfulInfo) ErrorType() string {
 		}
 	}
 	return ""
+}
+
+func (i *RestfulInfo) StreamTermination() string {
+	termination, _ := i.ctx.Get(ContextStreamTermination)
+	value, _ := termination.(string)
+	return value
+}
+
+func (i *RestfulInfo) StreamTerminationCause() string {
+	cause, _ := i.ctx.Get(ContextStreamTerminationCause)
+	value, _ := cause.(string)
+	return value
 }
 
 func (i *RestfulInfo) SdkVersion() string {

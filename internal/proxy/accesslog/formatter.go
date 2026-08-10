@@ -18,6 +18,7 @@ package accesslog
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
@@ -103,10 +104,20 @@ func (f *Formatter) buildMetric(metric string, prefixs []string) ([]string, []st
 func (f *Formatter) build() {
 	prefixs := []string{f.base}
 	f.fields = []string{}
+	metrics := make([]string, 0, len(info.MetricFuncMap))
 	for metric := range info.MetricFuncMap {
 		if strings.Contains(f.base, metric) {
-			f.fields, prefixs = f.buildMetric(metric, prefixs)
+			metrics = append(metrics, metric)
 		}
+	}
+	sort.Slice(metrics, func(i, j int) bool {
+		if len(metrics[i]) == len(metrics[j]) {
+			return metrics[i] < metrics[j]
+		}
+		return len(metrics[i]) > len(metrics[j])
+	})
+	for _, metric := range metrics {
+		f.fields, prefixs = f.buildMetric(metric, prefixs)
 	}
 
 	f.fmt = ""

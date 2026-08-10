@@ -448,6 +448,16 @@ func TestQueryResponseRowsRejectsInvalidDynamicJSON(t *testing.T) {
 	assert.Empty(t, row)
 }
 
+func TestDynamicJSONPreflightObservesCancellationWithinDocument(t *testing.T) {
+	raw := []byte(`{"wide":"` + strings.Repeat("x", dynamicJSONContextCheckBytes*3) + `"}`)
+	ctx := newCancelAfterErrChecksContext(1)
+
+	valid, err := validDynamicJSONObject(ctx, raw)
+
+	require.False(t, valid)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 func TestQueryResponseRowsRejectsDynamicJSONBeyondStreamingEncoderDepth(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -460,7 +470,7 @@ func TestQueryResponseRowsRejectsDynamicJSONBeyondStreamingEncoderDepth(t *testi
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			raw := []byte(`{"deep":` + strings.Repeat("[", test.depth) + `0` + strings.Repeat("]", test.depth) + `}`)
+			raw := []byte(`{"deep":` + strings.Repeat(`{"nested":`, test.depth) + `0` + strings.Repeat("}", test.depth) + `}`)
 			field := &schemapb.FieldData{
 				Type:      schemapb.DataType_JSON,
 				FieldName: "$meta",
