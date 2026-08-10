@@ -39,6 +39,34 @@ using namespace milvus::segcore;
 
 namespace fs = std::filesystem;
 
+namespace {
+
+// ScopedSegcoreConfigRestore does not cover asyncGrowingBuild. Cases that
+// require the interim index to have taken over raw data by the time Insert
+// returns pin the synchronous build path with this guard.
+class ScopedSyncGrowingBuild {
+ public:
+    explicit ScopedSyncGrowingBuild(SegcoreConfig& config)
+        : config_(config),
+          previous_(config.get_enable_async_growing_index_build()) {
+        config_.set_enable_async_growing_index_build(false);
+    }
+
+    ~ScopedSyncGrowingBuild() {
+        config_.set_enable_async_growing_index_build(previous_);
+    }
+
+    ScopedSyncGrowingBuild(const ScopedSyncGrowingBuild&) = delete;
+    ScopedSyncGrowingBuild&
+    operator=(const ScopedSyncGrowingBuild&) = delete;
+
+ private:
+    SegcoreConfig& config_;
+    bool previous_;
+};
+
+}  // namespace
+
 class FlushGrowingSegmentTest : public ::testing::Test {
  protected:
     struct ParsedBM25Stats {
@@ -1728,6 +1756,9 @@ TEST_F(FlushGrowingSegmentTest, FlushFloatVectorFromIndexAfterChunksCleared) {
 
     auto& config = SegcoreConfig::default_config();
     ScopedSegcoreConfigRestore config_restore(config);
+    // This case asserts the index owns the raw data (chunks cleared) right
+    // after Insert returns, which only the synchronous build path guarantees.
+    ScopedSyncGrowingBuild sync_build(config);
     InterimIndexConfigForTest interim_config;
     interim_config.chunk_rows = 16;
     interim_config.nlist = 1;
@@ -1807,6 +1838,9 @@ TEST_F(FlushGrowingSegmentTest,
 
     auto& config = SegcoreConfig::default_config();
     ScopedSegcoreConfigRestore config_restore(config);
+    // This case asserts the index owns the raw data (chunks cleared) right
+    // after Insert returns, which only the synchronous build path guarantees.
+    ScopedSyncGrowingBuild sync_build(config);
     InterimIndexConfigForTest interim_config;
     interim_config.chunk_rows = 16;
     interim_config.nlist = 1;
@@ -1915,6 +1949,9 @@ TEST_F(FlushGrowingSegmentTest,
 
     auto& config = SegcoreConfig::default_config();
     ScopedSegcoreConfigRestore config_restore(config);
+    // This case asserts the index owns the raw data (chunks cleared) right
+    // after Insert returns, which only the synchronous build path guarantees.
+    ScopedSyncGrowingBuild sync_build(config);
     InterimIndexConfigForTest interim_config;
     interim_config.chunk_rows = 16;
     interim_config.nlist = 1;
