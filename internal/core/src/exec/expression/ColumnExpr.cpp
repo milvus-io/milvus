@@ -98,13 +98,13 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
 
-        if constexpr (std::is_same_v<T, std::string>) {
-            if (segment_chunk_reader_.segment_->type() == SegmentType::Sealed) {
-                auto accessor =
-                    segment_chunk_reader_.GetStringDataAccessorByOffsets(
-                        expr_->GetColumn().field_id_,
-                        OffsetView::From(input->data(), real_batch_size),
-                        PinnedIndexForRawLookup());
+        if (segment_chunk_reader_.segment_->type() == SegmentType::Sealed) {
+            auto accessor = segment_chunk_reader_.GetDataAccessorByOffsets(
+                expr_->GetColumn().data_type_,
+                expr_->GetColumn().field_id_,
+                OffsetView::From(input->data(), real_batch_size),
+                PinnedIndexForRawLookup());
+            if (accessor) {
                 for (int64_t i = 0; i < real_batch_size; ++i) {
                     auto value = accessor(i);
                     if (value.has_value()) {
@@ -184,7 +184,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             current_chunk_pos_,
             PinnedIndexForRawLookup(),
             real_batch_size,
-            &string_scan_state_);
+            &column_scan_state_);
         for (int i = 0; i < real_batch_size; ++i) {
             auto data = cda();
             if (!data.has_value()) {

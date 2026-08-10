@@ -822,6 +822,13 @@ class SegmentExpr : public Expr {
         return data_scan_cursor_.get();
     }
 
+    static bool
+    UsesLegacyChunkPrefetch(const ChunkedColumnInterface* column) {
+        return column == nullptr ||
+               column->GetLocalFormat() ==
+                   ChunkedColumnInterface::LocalFormat::Raw;
+    }
+
     static void
     ApplyScanValidity(const ChunkedColumnInterface::ScanBatch& batch,
                       int64_t batch_pos,
@@ -1636,8 +1643,31 @@ class SegmentExpr : public Expr {
             return -1;
         }
         const auto nullable = data_take_column_->IsNullable();
+        OffsetVector selected_offsets;
+        const OffsetVector* take_offsets = input;
+        if (has_candidate_mask) {
+            selected_offsets.reserve(input->size());
+            for (size_t i = 0; i < input->size(); ++i) {
+                if ((*candidate_mask)[i]) {
+                    selected_offsets.push_back((*input)[i]);
+                }
+            }
+            take_offsets = &selected_offsets;
+        }
+        if (take_offsets->empty()) {
+            for (size_t i = 0; i < input->size(); ++i) {
+                func.template operator()<FilterType::random>(nullptr,
+                                                             ValidityView{},
+                                                             nullptr,
+                                                             1,
+                                                             res + i,
+                                                             valid_res + i,
+                                                             values...);
+            }
+            return input->size();
+        }
         const auto input_view = ChunkedColumnInterface::OffsetView::From(
-            input->data(), static_cast<int64_t>(input->size()));
+            take_offsets->data(), static_cast<int64_t>(take_offsets->size()));
         auto take = data_take_column_->Take(
             op_ctx_,
             ChunkedColumnInterface::TakeOptions{
@@ -1651,7 +1681,8 @@ class SegmentExpr : public Expr {
                    input_view.size);
         const auto take_is_owned = take->IsOwned();
 
-        if (take_is_owned && data_take_filter_ == nullptr) {
+        if (take_is_owned && data_take_filter_ == nullptr &&
+            !has_candidate_mask) {
             auto owned = take->GetOwn();
             AssertInfo(owned.size == take->Size() && !owned.values.empty(),
                        "invalid owned take result");
@@ -1672,6 +1703,7 @@ class SegmentExpr : public Expr {
                    items.Size(),
                    input_view.size);
         const T invalid_value{};
+        int64_t take_pos = 0;
         for (int64_t logical_pos = 0;
              logical_pos < static_cast<int64_t>(input->size());
              ++logical_pos) {
@@ -1688,7 +1720,7 @@ class SegmentExpr : public Expr {
                     values...);
                 continue;
             }
-            auto item = items[logical_pos];
+            auto item = items[take_pos++];
             const auto valid = item.is_valid;
             if (item.data_skipped) {
                 const auto validity = nullable
@@ -1738,6 +1770,10 @@ class SegmentExpr : public Expr {
                 valid_res + logical_pos,
                 values...);
         }
+        AssertInfo(take_pos == items.Size(),
+                   "consumed {} Take rows, expected {}",
+                   take_pos,
+                   items.Size());
         return input->size();
     }
 
@@ -2175,7 +2211,10 @@ class SegmentExpr : public Expr {
         std::vector<ElementType> value_buffer;
         FixedVector<bool> valid_buffer;
 
-        EnsureRawDataPrefetched();
+        auto column = CaptureDataScanResources().first;
+        if (UsesLegacyChunkPrefetch(column.get())) {
+            EnsureRawDataPrefetched();
+        }
 
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
@@ -3593,6 +3632,13 @@ class SegmentExpr : public Expr {
             }
             self->EnsureExecPathDetermined();
             if (self->exec_path_ == ExprExecPath::RawData) {
+                auto column = self->CaptureDataScanResources().first;
+                if (!self->UsesLegacyChunkPrefetch(column.get())) {
+                    // Non-raw formats own their cell selection and pinning.
+                    // Legacy chunk prefetch would eagerly load the full
+                    // column and defeat their cache policy.
+                    return;
+                }
                 if (self->ShouldPrefetchRawDataEagerly()) {
                     self->PrefetchRawData();
                     self->prefetched_ = true;
