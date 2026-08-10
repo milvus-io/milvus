@@ -271,6 +271,28 @@ func (pw *packedRecordBatchWriter) Close() (packed.WriterOutput, error) {
 	return out, nil
 }
 
+// Abort releases the underlying FFI writer via Destroy instead of Close. Close
+// finalizes writer output and returns a column-groups payload; the caller
+// separately decides whether to publish it with packed.CommitManifestUpdates.
+// Error paths use Abort because they will not publish that output.
+// Without it a caller that returns on error simply drops the writer, whose C
+// handle and properties have no finalizer, and leaks it. Abort is NOT a clean
+// rollback: Destroy still runs the Arrow ParquetFileWriter destructor, which
+// can finalize the currently open row group. On object storage, the S3 sink has
+// no destructor, so an in-flight multipart upload is left neither completed nor
+// aborted. Bytes
+// already flushed during Write, plus any such trailing row group / dangling
+// multipart upload, remain and need storage-side reclamation (a bucket
+// lifecycle rule for incomplete multipart uploads) until milvus-storage
+// exposes a cascading abort down to the sink.
+func (pw *packedRecordBatchWriter) Abort() {
+	if pw.writer == nil {
+		return
+	}
+	pw.writer.Destroy()
+	pw.writer = nil
+}
+
 func (pw *packedRecordBatchWriter) AsNewColumnGroups() {
 	if pw.writer != nil {
 		pw.writer.AsNewColumnGroups()

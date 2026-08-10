@@ -106,6 +106,26 @@ func (w *fakeBinlogRecordWriter) FlushChunk() error                  { return ni
 func (w *fakeBinlogRecordWriter) GetBufferUncompressed() uint64      { return 0 }
 func (w *fakeBinlogRecordWriter) Schema() *schemapb.CollectionSchema { return w.schema }
 
+type fakeBumpSchemaVersionBatchWriter struct {
+	closeCalls int
+	abortCalls int
+	output     packed.WriterOutput
+	closeErr   error
+	writeErr   error
+}
+
+func (w *fakeBumpSchemaVersionBatchWriter) Abort() { w.abortCalls++ }
+
+func (w *fakeBumpSchemaVersionBatchWriter) Write(storage.Record) error { return w.writeErr }
+func (w *fakeBumpSchemaVersionBatchWriter) GetWrittenUncompressed() uint64 {
+	return 0
+}
+func (w *fakeBumpSchemaVersionBatchWriter) AsNewColumnGroups() {}
+func (w *fakeBumpSchemaVersionBatchWriter) Close() (packed.WriterOutput, error) {
+	w.closeCalls++
+	return w.output, w.closeErr
+}
+
 type BumpSchemaVersionCompactionTaskSuite struct {
 	suite.Suite
 
@@ -1476,4 +1496,86 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMissingFunctionInputSchemaByF
 	s.ErrorIs(err, merr.ErrDataIntegrity)
 	s.ErrorContains(err, "references by_field lang of type")
 	s.ErrorContains(err, "only VarChar is allowed")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialWriterLeaseCleanupAbortsOnceWithoutFlush() {
+	writer := &fakeBumpSchemaVersionBatchWriter{output: &packed.ColumnGroups{}}
+	lease := &bumpSchemaVersionWriterLease{writer: writer}
+	lease.Cleanup()
+	lease.Cleanup()
+
+	s.Equal(1, writer.abortCalls)
+	s.Zero(writer.closeCalls, "Cleanup must not finalize the writer: Close flushes pending column groups that will never be committed")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialWriterLeaseSuccessfulCloseSkipsAbort() {
+	output := &packed.ColumnGroups{}
+	writer := &fakeBumpSchemaVersionBatchWriter{output: output}
+	lease := &bumpSchemaVersionWriterLease{writer: writer}
+
+	gotOutput, err := lease.Close()
+	s.NoError(err)
+	s.Same(output, gotOutput)
+	lease.Cleanup()
+
+	s.Equal(1, writer.closeCalls)
+	s.Zero(writer.abortCalls)
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialWriterLeaseCloseErrorDoesNotDoubleClose() {
+	output := &packed.ColumnGroups{}
+	destroyCalls := 0
+	destroyPatch := mockey.Mock((*packed.ColumnGroups).Destroy).To(func(*packed.ColumnGroups) {
+		destroyCalls++
+	}).Build()
+	defer destroyPatch.UnPatch()
+
+	writer := &fakeBumpSchemaVersionBatchWriter{output: output, closeErr: assert.AnError}
+	lease := &bumpSchemaVersionWriterLease{writer: writer}
+	gotOutput, err := lease.Close()
+	s.ErrorIs(err, assert.AnError)
+	s.Same(output, gotOutput)
+	gotOutput.Destroy()
+	lease.Cleanup()
+
+	s.Equal(1, writer.closeCalls)
+	s.Equal(1, destroyCalls)
+	s.Zero(writer.abortCalls, "explicit Close consumed the writer; Cleanup must not abort it again")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialWriterLeaseSecondCloseFailsWithoutTouchingWriter() {
+	writer := &fakeBumpSchemaVersionBatchWriter{output: &packed.ColumnGroups{}, closeErr: assert.AnError}
+	lease := &bumpSchemaVersionWriterLease{writer: writer}
+
+	_, err := lease.Close()
+	s.ErrorIs(err, assert.AnError)
+
+	output, err := lease.Close()
+	s.Nil(output)
+	s.ErrorIs(err, merr.ErrServiceInternal)
+	s.Equal(1, writer.closeCalls, "second Close must not touch the consumed native writer")
+	s.Zero(writer.abortCalls)
+}
+
+// Non-vacuous integration guard for the deferred writer lease: it drives
+// runMissingFunctionMaterialization (via Compact) with an injected writer that
+// fails mid-stream, and asserts the error path releases the native writer via
+// Abort — not Close. Deleting `defer writerLease.Cleanup()` in
+// runMissingFunctionMaterialization makes abortCalls stay 0 and fails this test
+// (the isolated lease unit tests above stay green regardless, so they cannot
+// pin the wiring).
+func (s *BumpSchemaVersionCompactionTaskSuite) TestPartialMaterializationAbortsWriterOnMidStreamError() {
+	s.prepareBumpSchemaVersionCompaction()
+
+	fake := &fakeBumpSchemaVersionBatchWriter{writeErr: assert.AnError}
+	patch := mockey.Mock((*bumpSchemaVersionCompactionTask).setupWriter).To(
+		func(*bumpSchemaVersionCompactionTask, []*schemapb.FieldSchema, *datapb.CompactionSegmentBinlogs, int64) (*bumpSchemaVersionWriterResult, error) {
+			return &bumpSchemaVersionWriterResult{writer: fake}, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	_, err := s.task.Compact()
+	s.Error(err, "a mid-stream writer failure must fail the compaction")
+	s.Equal(1, fake.abortCalls, "the error path must release the writer via the deferred lease Cleanup (Abort)")
+	s.Zero(fake.closeCalls, "the error path must not Close the writer, which would commit/flush")
 }

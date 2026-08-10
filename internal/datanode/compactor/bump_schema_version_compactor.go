@@ -756,6 +756,41 @@ type bumpSchemaVersionBatchWriter interface {
 	GetWrittenUncompressed() uint64
 	AsNewColumnGroups()
 	Close() (packed.WriterOutput, error)
+	Abort()
+}
+
+type bumpSchemaVersionWriterLease struct {
+	writer    bumpSchemaVersionBatchWriter
+	exhausted bool
+}
+
+func (l *bumpSchemaVersionWriterLease) Close() (packed.WriterOutput, error) {
+	if l.exhausted {
+		// A second Close is always a caller bug: after an error the native
+		// writer must not be touched again (the underlying nil-guard only
+		// covers the success path), and after success there is nothing left
+		// to close. Fail loudly instead of touching the FFI writer.
+		return nil, merr.WrapErrServiceInternalMsg("bump schema version writer lease already consumed")
+	}
+	output, err := l.writer.Close()
+	// Close consumes the native writer even when it returns an error. Never call
+	// it again from deferred cleanup; only the returned output still needs release.
+	l.exhausted = true
+	return output, err
+}
+
+// Cleanup releases an unconsumed writer on error paths via Abort instead of
+// output-finalizing Close. Manifest publication is a separate caller action via
+// packed.CommitManifestUpdates, and this error path never reaches it.
+// It does not guarantee no bytes are written: see packedRecordBatchWriter.Abort
+// for the object-storage residue (a possibly finalized open row group and a
+// dangling multipart upload) that storage-side reclamation must handle.
+func (l *bumpSchemaVersionWriterLease) Cleanup() {
+	if l == nil || l.exhausted {
+		return
+	}
+	l.exhausted = true
+	l.writer.Abort()
 }
 
 type bumpSchemaVersionWriterResult struct {
@@ -988,6 +1023,8 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 	if err != nil {
 		return nil, err
 	}
+	writerLease := &bumpSchemaVersionWriterLease{writer: writerResult.writer}
+	defer writerLease.Cleanup()
 
 	log.Info(ctx, "schema bump writer setup",
 		mlog.Int64("effectiveStorageVersion", writerResult.storageVersion),
@@ -1100,12 +1137,12 @@ func (t *bumpSchemaVersionCompactionTask) runMissingFunctionMaterialization(ctx 
 		return nil, err
 	}
 
-	writerOutput, err := writerResult.writer.Close()
-	if err != nil {
-		return nil, err
-	}
+	writerOutput, err := writerLease.Close()
 	if writerOutput != nil {
 		defer writerOutput.Destroy()
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	manifestPath, err := packed.CommitManifestUpdates(
