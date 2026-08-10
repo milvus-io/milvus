@@ -906,7 +906,7 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 			},
 		}, nil
 
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return &schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,

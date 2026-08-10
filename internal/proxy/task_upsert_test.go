@@ -2843,6 +2843,7 @@ func TestUpsertTask_GenNullableFieldData(t *testing.T) {
 			{"Float", schemapb.DataType_Float},
 			{"Double", schemapb.DataType_Double},
 			{"VarChar", schemapb.DataType_VarChar},
+			{"Text", schemapb.DataType_Text},
 			{"JSON", schemapb.DataType_JSON},
 			{"Array", schemapb.DataType_Array},
 			{"Timestamptz", schemapb.DataType_Timestamptz},
@@ -2858,8 +2859,8 @@ func TestUpsertTask_GenNullableFieldData(t *testing.T) {
 					Nullable: true,
 				}
 				result, err := GenNullableFieldData(field, upsertIDSize)
-				assert.NoError(t, err)
-				assert.NotNil(t, result)
+				require.NoError(t, err)
+				require.NotNil(t, result)
 				assert.Equal(t, field.FieldID, result.FieldId)
 				assert.Equal(t, field.Name, result.FieldName)
 				assert.Equal(t, tc.dataType, result.Type)
@@ -2867,6 +2868,9 @@ func TestUpsertTask_GenNullableFieldData(t *testing.T) {
 				// All ValidData should be false (null)
 				for _, v := range result.ValidData {
 					assert.False(t, v)
+				}
+				if tc.dataType == schemapb.DataType_Text {
+					assert.Len(t, result.GetScalars().GetStringData().GetData(), upsertIDSize)
 				}
 			})
 		}
