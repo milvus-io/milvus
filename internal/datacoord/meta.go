@@ -1921,6 +1921,28 @@ func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
 func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
+	updatePack, err := m.prepareUpdateSegmentsInfoLocked(ctx, operators...)
+	if err != nil || updatePack == nil {
+		return err
+	}
+
+	segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })
+	increments := lo.Values(updatePack.increments)
+
+	if err := m.catalog.AlterSegments(ctx, segments, increments...); err != nil {
+		mlog.Error(ctx, "meta update: update flush segments info - failed to store flush segment info into Etcd",
+			mlog.Err(err))
+		return err
+	}
+	m.applyUpdateSegmentsInfoLocked(updatePack)
+	mlog.Info(ctx, "meta update: update flush segments info - update flush segments info successfully")
+	return nil
+}
+
+// prepareUpdateSegmentsInfoLocked applies operators to cloned segment state and
+// validates the resulting pack without persisting or changing the live cache.
+// Callers must hold segMu. A nil pack means all operators were benign no-ops.
+func (m *meta) prepareUpdateSegmentsInfoLocked(ctx context.Context, operators ...UpdateOperator) (*updateSegmentPack, error) {
 	updatePack := &updateSegmentPack{
 		meta:       m,
 		segments:   make(map[int64]*SegmentInfo),
@@ -1934,21 +1956,21 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	for _, operator := range operators {
 		operator(updatePack)
 		if updatePack.err != nil {
-			return updatePack.err
+			return nil, updatePack.err
 		}
 	}
 	if err := commitL0ManifestUpdates(updatePack.l0ManifestUpdates); err != nil {
-		return err
+		return nil, err
 	}
 	for _, update := range updatePack.l0ManifestUpdates {
 		if !update.apply(updatePack) {
-			return updatePack.err
+			return nil, updatePack.err
 		}
 	}
 
 	// skip if all segment not exist
 	if len(updatePack.segments) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Validate the update pack.
@@ -1959,28 +1981,23 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 		// inside this package on purpose; see errIgnoredSegmentMetaOperation.
 		if errors.Is(err, errIgnoredSegmentMetaOperation) {
 			mlog.Info(ctx, "meta update: ignored stale segment meta operation", mlog.Err(err))
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
 	updatePack.prepareSegmentMetricUpdates()
+	return updatePack, nil
+}
 
-	segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })
-	increments := lo.Values(updatePack.increments)
-
-	if err := m.catalog.AlterSegments(ctx, segments, increments...); err != nil {
-		mlog.Error(ctx, "meta update: update flush segments info - failed to store flush segment info into Etcd",
-			mlog.Err(err))
-		return err
-	}
+// applyUpdateSegmentsInfoLocked makes a successfully persisted update pack
+// visible in metrics and the in-memory segment cache. Callers must hold segMu.
+func (m *meta) applyUpdateSegmentsInfoLocked(updatePack *updateSegmentPack) {
 	// Apply metric mutation after a successful meta update.
 	updatePack.metricMutation.commit()
 	// update memory status
 	for id, s := range updatePack.segments {
 		m.segments.SetSegment(id, s)
 	}
-	mlog.Info(ctx, "meta update: update flush segments info - update flush segments info successfully")
-	return nil
 }
 
 // UpdateDropChannelSegmentInfo updates segment checkpoints and binlogs before drop

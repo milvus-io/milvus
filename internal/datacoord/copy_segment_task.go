@@ -138,6 +138,15 @@ func UpdateCopyTaskNodeID(nodeID int64) UpdateCopySegmentTaskAction {
 	}
 }
 
+// UpdateCopyTaskVersion creates an action that updates the dispatch epoch.
+//
+// Use case: fencing worker-side cleanup against a re-dispatch of the same task
+func UpdateCopyTaskVersion(version int64) UpdateCopySegmentTaskAction {
+	return func(t CopySegmentTask) {
+		t.(*copySegmentTask).task.Load().TaskVersion = version
+	}
+}
+
 // UpdateCopyTaskCompleteTs creates an action that updates the task completion timestamp.
 //
 // Use case: Recording when the task finished for metrics and debugging
@@ -348,6 +357,31 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	ctx := t.ctx
 	mlog.Info(ctx, "processing pending copy segment task...", WrapCopySegmentTaskLog(t)...)
 	job := t.copyMeta.GetJob(ctx, t.GetJobId())
+	// Do not start work for a job that is already over. The scheduler dispatches
+	// on its own tick and only looks at the task's state, so a task can still be
+	// Pending here seconds after a sibling failed the job — copying segments for
+	// it would burn worker slots and write objects for a restore already
+	// reported Failed, against a snapshot whose pin has been released. The check
+	// is deliberately before the RPC: once the worker has accepted the task,
+	// letting the InProgress write through is what gives DropTaskOnWorker a
+	// NodeID to clean up with.
+	if job == nil || !isActiveCopyJobState(job.GetState()) {
+		mlog.Info(ctx, "skip dispatching copy segment task: parent job is no longer active",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
+		return
+	}
+	// A worker task of an earlier dispatch is still being cleaned up. It writes
+	// the very object keys this dispatch would write — target paths are a
+	// deterministic transform of the source paths, identical across dispatches —
+	// so running both at once, or letting the pending abort land after this one
+	// publishes, would delete live data. The inspector retries that cleanup every
+	// round and the scheduler re-queues this task, so the dispatch resumes as
+	// soon as the previous one is provably gone.
+	if meta, ok := t.copyMeta.(*copySegmentMeta); ok && meta.hasPendingUntrackedDrop(t.GetTaskId()) {
+		mlog.Info(ctx, "skip dispatching copy segment task: cleanup of an earlier dispatch is still pending",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
+		return
+	}
 	req, err := AssembleCopySegmentRequest(t, job)
 	if err != nil {
 		mlog.Warn(ctx, "failed to assemble copy segment request",
@@ -357,6 +391,17 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		}
 		return
 	}
+	// Claim a fresh epoch before the worker can accept the task, so every
+	// worker-side task is bound to exactly one dispatch and a drop issued for an
+	// earlier one is recognizable as stale. Persisting first keeps the epoch
+	// monotonic across a DataCoord restart.
+	taskVersion, err := t.copyMeta.BumpTaskDispatchVersion(ctx, t.GetTaskId())
+	if err != nil {
+		mlog.Warn(ctx, "failed to bump copy segment task dispatch version",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+		return
+	}
+	req.TaskVersion = taskVersion
 	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId(), job.GetExternal())
 	if err != nil {
 		mlog.Warn(ctx, "failed to create copy segment task on datanode",
@@ -369,20 +414,77 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	}
 	mlog.Info(ctx, "create copy segment task on datanode done",
 		WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
-	err = t.copyMeta.UpdateTask(ctx, t.GetTaskId(),
-		UpdateCopyTaskNodeID(nodeID),
-		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskInProgress))
+	resolution, err := t.copyMeta.CommitTaskDispatch(ctx, t.GetTaskId(), nodeID,
+		fmt.Sprintf("copy segment task was accepted by node %d after parent job terminated", nodeID))
 	if err != nil {
-		mlog.Warn(ctx, "failed to update copy segment task state",
+		mlog.Warn(ctx, "failed to commit copy segment task dispatch, dropping untracked worker task",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+		t.dropUntrackedCopySegmentTask(cluster, nodeID, taskVersion)
 		return
 	}
+
+	switch resolution {
+	case taskDispatchAlreadyTracked:
+		mlog.Debug(ctx, "copy segment task dispatch already tracked",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
+		return
+	case taskDispatchCleanupTracked:
+		// The worker accepted the task, but the task/job became terminal while
+		// the RPC was in flight. CommitTaskDispatch preserved that terminal
+		// outcome and recorded this node solely as a retry handle for cleanup.
+		mlog.Info(ctx, "copy segment task became inactive during dispatch, dropping accepted worker task",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
+		t.DropTaskOnWorker(cluster)
+		return
+	case taskDispatchCleanupUntracked:
+		mlog.Info(ctx, "copy segment task dispatch no longer matches metadata, dropping accepted worker task",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
+		t.dropUntrackedCopySegmentTask(cluster, nodeID, taskVersion)
+		return
+	case taskDispatchApplied:
+		// Continue below and report the pending -> executing transition.
+	}
+
 	// Record pending duration
 	pendingDuration := t.GetTR().RecordSpan()
 	metrics.CopySegmentTaskLatency.WithLabelValues(metrics.Pending).Observe(float64(pendingDuration.Milliseconds()))
 	mlog.Info(ctx, "copy segment task start to execute",
 		WrapCopySegmentTaskLog(t, mlog.Int64("scheduledNodeID", nodeID),
 			mlog.Duration("taskTimeCost/pending", pendingDuration))...)
+}
+
+// dropUntrackedCopySegmentTask schedules removal of a worker task that was
+// accepted after metadata moved elsewhere and therefore cannot be retried
+// through the task's single NodeID field. The copy-segment inspector keeps the
+// exact (nodeID, taskID, taskVersion) triple until DropCopySegment succeeds or
+// the node is confirmed gone for the lifetime of the current DataCoord
+// ownership.
+//
+// taskVersion is the epoch of the dispatch being cleaned up, not the task's
+// current epoch: the worker executes the abort only while it still holds this
+// exact dispatch, so a re-dispatch that has already begun cannot have its
+// output deleted by this cleanup.
+func (t *copySegmentTask) dropUntrackedCopySegmentTask(cluster session.Cluster, nodeID, taskVersion int64) {
+	taskID := t.GetTaskId()
+	if meta, ok := t.copyMeta.(*copySegmentMeta); ok && meta.enqueueUntrackedDrop(nodeID, taskID, taskVersion) {
+		mlog.Info(context.TODO(), "queued untracked copy segment task for worker-side cleanup",
+			mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID), mlog.Int64("taskVersion", taskVersion))
+		return
+	}
+
+	// Production registers the retry handler before the scheduler starts. Keep a
+	// synchronous fallback for isolated task implementations and tests so an
+	// alternate CopySegmentMeta cannot silently skip cleanup altogether.
+	mlog.Warn(context.TODO(), "untracked copy segment drop retry handler unavailable, dropping synchronously",
+		mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID))
+	err := cluster.DropCopySegment(context.TODO(), nodeID, taskID, taskVersion, true)
+	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
+		mlog.Warn(context.TODO(), "failed to drop untracked copy segment task on datanode",
+			mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID), mlog.Err(err))
+		return
+	}
+	mlog.Info(context.TODO(), "dropped untracked copy segment task on datanode",
+		mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID))
 }
 
 // ===========================================================================================
@@ -404,7 +506,7 @@ func (t *copySegmentTask) markTaskAndJobFailed(reason string) {
 	// Sync job state immediately (fail-fast)
 	job := t.copyMeta.GetJob(context.TODO(), t.GetJobId())
 	if job != nil && job.GetState() != datapb.CopySegmentJobState_CopySegmentJobFailed {
-		updateErr = t.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), t.GetJobId(),
+		_, updateErr = t.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), t.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(reason))
 		if updateErr != nil {
@@ -489,21 +591,37 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 		// restarted/replaced, or its in-memory task manager lost the task).
 		// Leaving the task InProgress would make the scheduler poll a dead
 		// node until the job-level timeout, since only Pending tasks are
-		// re-dispatched. Reset to Pending with NullNodeID so the scheduler
-		// re-dispatches it to a live node.
-		// Re-dispatch is idempotent: target binlog paths are deterministic
-		// transforms of the source paths (same content on overwrite), and each
-		// dispatch allocates fresh buildIDs, so index files from a partial
-		// earlier attempt are never referenced by meta and are removed by GC.
-		if resetErr := t.copyMeta.UpdateTask(context.TODO(), t.GetTaskId(),
-			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
-			UpdateCopyTaskNodeID(NullNodeID)); resetErr != nil {
-			mlog.Warn(context.TODO(), "failed to reset copy segment task to pending after worker loss",
-				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(resetErr))...)
+		// re-dispatched. ResolveTaskOnWorkerLoss decides atomically (all checks
+		// and the update under one meta write lock):
+		//   - parent job still active: reset to Pending with NullNodeID so the
+		//     scheduler re-dispatches to a live node. Re-dispatch is idempotent:
+		//     target binlog paths are deterministic transforms of the source
+		//     paths (same content on overwrite), and each dispatch allocates
+		//     fresh buildIDs, so index files from a partial earlier attempt are
+		//     never referenced by meta and are removed by GC.
+		//   - parent job terminal (this response arrived after another task
+		//     already failed the job): converge to Failed with NullNodeID.
+		//     Reviving to Pending would earn the scheduler one extra dispatch
+		//     for a dead job, and leaving it InProgress on the dead node would
+		//     block checkGC forever (GC skips tasks with a node assignment).
+		resolution, resolveErr := t.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), t.GetTaskId(),
+			fmt.Sprintf("copy segment task lost on worker node %d after parent job terminated: %v", nodeID, err))
+		if resolveErr != nil {
+			mlog.Warn(context.TODO(), "failed to resolve copy segment task after worker loss",
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(resolveErr))...)
 			return
 		}
-		mlog.Info(context.TODO(), "reset copy segment task to pending due to worker loss, will re-dispatch",
-			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+		switch resolution {
+		case workerLossRedispatched:
+			mlog.Info(context.TODO(), "reset copy segment task to pending due to worker loss, will re-dispatch",
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+		case workerLossFailed:
+			mlog.Info(context.TODO(), "converged lost copy segment task to failed: parent job no longer active",
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+		case workerLossSkipped:
+			mlog.Info(context.TODO(), "skip resolving copy segment task after worker loss: task no longer in progress",
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+		}
 		return
 	}
 
@@ -514,6 +632,19 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 
 	if resp.GetState() != datapb.CopySegmentTaskState_CopySegmentTaskCompleted {
+		return
+	}
+
+	// A success response can arrive after a sibling task already failed the
+	// parent job and checkFailedJob converged this task to Failed — the
+	// scheduler polls once more before it inspects the task's state. Applying it
+	// then would flip the target segments to Flushed (queryable) and resurrect
+	// the task out of its terminal state, exposing part of a restore that never
+	// succeeded. Discard the stale result instead; the inspector drops the
+	// target segments of a failed job, and the scheduler drops the worker task.
+	if !t.copyMeta.TaskAcceptsWorkerResult(context.TODO(), t.GetTaskId()) {
+		mlog.Info(context.TODO(), "discard stale copy segment result: task no longer in progress or job no longer active",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
 		return
 	}
 
@@ -546,17 +677,40 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 // - During garbage collection of old tasks
 //
 // Error handling:
-// - Logs warning but does not retry (task will be GC'd eventually)
-// - Non-critical operation (task already finished)
+//   - On an ambiguous error the node assignment is deliberately kept, so this
+//     call does not itself converge. The inspector re-runs it every round for
+//     terminal tasks that still carry an assignment (processTerminal), which is
+//     what eventually lets checkGC reclaim the task and its job.
+//   - Non-critical operation (task already finished)
 func (t *copySegmentTask) DropTaskOnWorker(cluster session.Cluster) {
+	t.dropTaskOnWorker(context.TODO(), cluster)
+}
+
+func (t *copySegmentTask) dropTaskOnWorker(ctx context.Context, cluster session.Cluster) {
 	nodeID := t.GetNodeId()
-	err := cluster.DropCopySegment(nodeID, t.GetTaskId())
-	if err != nil {
-		mlog.Warn(context.TODO(), "failed to drop copy segment task on datanode",
+	if nodeID == NullNodeID {
+		return
+	}
+	// ErrNodeNotFound means the node (and the in-memory task with it) is already
+	// gone — the drop's goal is achieved, proceed to clear the assignment.
+	job := t.copyMeta.GetJob(ctx, t.GetJobId())
+	abort := t.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed ||
+		job == nil || job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed
+	if err := cluster.DropCopySegment(ctx, nodeID, t.GetTaskId(), t.GetTaskVersion(), abort); err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
+		mlog.Warn(ctx, "failed to drop copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 		return
 	}
-	mlog.Info(context.TODO(), "drop copy segment task on datanode done",
+	// The worker-side task is gone; clear the node assignment so checkGC can
+	// reclaim the task after retention — GC skips any task still assigned to a
+	// node, and nothing else clears the assignment of a terminal task. Mirrors
+	// DropImportTask in the import pipeline; state/reason are not touched.
+	if _, updateErr := t.copyMeta.ClearTaskNodeAssignment(ctx, t.GetTaskId(), nodeID); updateErr != nil {
+		mlog.Warn(ctx, "failed to clear copy segment task node assignment after drop",
+			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(updateErr))...)
+		return
+	}
+	mlog.Info(ctx, "drop copy segment task on datanode done",
 		WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
 }
 
@@ -882,16 +1036,25 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 	// Update task state based on response
 	switch resp.GetState() {
 	case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
-		// Update binlog information for all segments
+		// Update binlog information for all segments.
+		//
+		// Visibility is deliberately NOT published here. A restore is
+		// all-or-nothing, but tasks finish one at a time: flipping a task's
+		// target segments to Flushed/IsImporting=false on task completion puts
+		// them straight into the flushed view (handler.go's
+		// GetCurrentSegmentsView excludes only Importing), so a collection
+		// loaded while the restore is still running would serve a half-restored
+		// snapshot for the whole remaining runtime — and if a later task fails,
+		// those rows are dropped again, so results appear and then vanish.
+		// finishJob publishes every target segment in one batch once the job
+		// itself has completed; see Step 2 there.
+		// For StorageV3+ segments, also update manifest_path.
 		for _, result := range resp.GetSegmentResults() {
-			// Update binlog info and segment state to Flushed
-			// For StorageV3+ segments, also update manifest_path
 			var err error
-			op1 := UpdateBinlogsOperator(result.GetSegmentId(), result.GetBinlogs(),
-				result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
-			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
-			op3 := UpdateIsImporting(result.GetSegmentId(), false)
-			operators := []UpdateOperator{op1, op2, op3}
+			operators := []UpdateOperator{
+				UpdateBinlogsOperator(result.GetSegmentId(), result.GetBinlogs(),
+					result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs()),
+			}
 			if manifestPath := result.GetManifestPath(); manifestPath != "" {
 				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
 			}
@@ -906,7 +1069,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 						mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
 				}
 
-				updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
+				_, updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
 					UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 					UpdateCopyJobReason(err.Error()))
 				if updateErr != nil {
@@ -941,21 +1104,34 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 					mlog.Bool("hasManifestPath", result.GetManifestPath() != ""))...)
 		}
 
-		// Mark task as completed and record copying duration
+		// Mark task as completed. Guarded: the job can go terminal while the
+		// result is being applied, and a task must never be resurrected out of a
+		// terminal state.
 		completeTs := uint64(time.Now().UnixNano())
 		copyingDuration := task.GetTR().RecordSpan()
+		totalDuration := task.GetTR().ElapseSpan()
+
+		applied, err := copyMeta.CompleteTaskIfActive(ctx, task.GetTaskId(), completeTs)
+		if err != nil {
+			return err
+		}
+		if !applied {
+			// The task did NOT complete — it keeps the terminal state the winning
+			// path gave it, or stays InProgress for checkFailedJob to converge.
+			// Reporting Done latency here would count it as a success.
+			mlog.Info(context.TODO(), "copy segment task went terminal while its result was applied, skip marking it completed",
+				WrapCopySegmentTaskLog(task)...)
+			return nil
+		}
+
 		metrics.CopySegmentTaskLatency.WithLabelValues(metrics.Executing).Observe(float64(copyingDuration.Milliseconds()))
 		// Record total latency (from task creation to completion)
-		totalDuration := task.GetTR().ElapseSpan()
 		metrics.CopySegmentTaskLatency.WithLabelValues(metrics.Done).Observe(float64(totalDuration.Milliseconds()))
 		mlog.Info(context.TODO(), "copy segment task completed",
 			WrapCopySegmentTaskLog(task,
 				mlog.Duration("taskTimeCost/copying", copyingDuration),
 				mlog.Duration("taskTimeCost/total", totalDuration))...)
-
-		return copyMeta.UpdateTask(ctx, task.GetTaskId(),
-			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskCompleted),
-			UpdateCopyTaskCompleteTs(completeTs))
+		return nil
 
 	case datapb.CopySegmentTaskState_CopySegmentTaskFailed:
 		return copyMeta.UpdateTask(ctx, task.GetTaskId(),
@@ -1086,7 +1262,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 					mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
 			}
 
-			updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
+			_, updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
 				UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 				UpdateCopyJobReason(err.Error()))
 			if updateErr != nil {
@@ -1157,7 +1333,7 @@ func syncTextIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 				mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
 		}
 
-		updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
+		_, updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(err.Error()))
 		if updateErr != nil {
@@ -1223,7 +1399,7 @@ func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 				mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
 		}
 
-		updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
+		_, updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(err.Error()))
 		if updateErr != nil {

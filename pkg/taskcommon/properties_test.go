@@ -103,6 +103,16 @@ func TestProperties_CollectionID(t *testing.T) {
 	})
 }
 
+func TestProperties_TaskAbort(t *testing.T) {
+	props := NewProperties(nil)
+	assert.False(t, props.GetTaskAbort())
+	props.AppendTaskAbort(true)
+	assert.Equal(t, "true", props[TaskAbortKey])
+	assert.True(t, props.GetTaskAbort())
+	props[TaskAbortKey] = "invalid"
+	assert.False(t, props.GetTaskAbort())
+}
+
 func TestProperties_CostFields(t *testing.T) {
 	t.Run("append and get", func(t *testing.T) {
 		props := NewProperties(nil)
