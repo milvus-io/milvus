@@ -526,6 +526,10 @@ func prepareReadRequestSnapshot(ctx context.Context, c *gin.Context, req any, ch
 
 	ctx, err, _ := proxy.EnsureReadRequestSnapshotForRequest(ctx, req)
 	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
 		return ctx, err
 	}
 	c.Request = c.Request.WithContext(ctx)

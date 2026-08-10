@@ -549,9 +549,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		if colInfo.updateTimestamp > guaranteeTs {
 			guaranteeTs = colInfo.updateTimestamp
 		}
-		if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
-			guaranteeTs = t.request.GetGuaranteeTimestamp()
-		}
 		t.readSnapshot.PinTimestamp(consistencyLevel, requestTS, guaranteeTs)
 		consistencyLevel, requestTS, guaranteeTs, _ = t.readSnapshot.GetPinnedTimestamp()
 	}
@@ -564,7 +561,8 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	t.ConsistencyLevel = consistencyLevel
 	// need modify mvccTs and guaranteeTs for iterator specially
 	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
-		t.MvccTimestamp = guaranteeTs
+		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
+		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
 	}
 	t.IsIterator = queryParams.isIterator
 

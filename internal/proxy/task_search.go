@@ -273,9 +273,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		if collectionInfo.updateTimestamp > guaranteeTs {
 			guaranteeTs = collectionInfo.updateTimestamp
 		}
-		if t.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
-			guaranteeTs = t.request.GetGuaranteeTimestamp()
-		}
 		t.readSnapshot.PinTimestamp(consistencyLevel, requestTS, guaranteeTs)
 		consistencyLevel, requestTS, guaranteeTs, _ = t.readSnapshot.GetPinnedTimestamp()
 	}
@@ -287,7 +284,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.GuaranteeTimestamp = guaranteeTs
 	t.ConsistencyLevel = consistencyLevel
 	if t.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
-		t.MvccTimestamp = guaranteeTs
+		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
+		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
 	}
 	t.IsIterator = t.isIterator
 

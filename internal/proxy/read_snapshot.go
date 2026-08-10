@@ -95,9 +95,8 @@ type readRequestSnapshot struct {
 	requestTS        Timestamp
 	guaranteeTS      Timestamp
 
-	partitionOnce sync.Once
-	partitions    *partitionInfos
-	partitionErr  error
+	partitionMu sync.Mutex
+	partitions  *partitionInfos
 }
 
 func newReadRequestSnapshot(collection *collectionReadSnapshot) *readRequestSnapshot {
@@ -146,39 +145,50 @@ func (s *readRequestSnapshot) Partitions(ctx context.Context) (*partitionInfos, 
 	if s == nil || s.collection == nil {
 		return nil, merr.WrapErrServiceInternalMsg("read request snapshot has no collection binding")
 	}
-	s.partitionOnce.Do(func() {
-		if globalMetaCache == nil {
-			s.partitionErr = merr.WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), "initialization")
-			return
-		}
-		if cache, ok := globalMetaCache.(partitionInfosByIDCache); ok {
-			s.partitions, s.partitionErr = cache.GetPartitionInfosByID(
-				ctx,
-				s.collection.DatabaseName(),
-				s.collection.CollectionID(),
-			)
-			return
-		}
+	s.partitionMu.Lock()
+	defer s.partitionMu.Unlock()
+	if s.partitions != nil {
+		return s.partitions, nil
+	}
+	if globalMetaCache == nil {
+		return nil, merr.WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), "initialization")
+	}
 
+	var partitions *partitionInfos
+	var err error
+	if cache, ok := globalMetaCache.(partitionInfosByIDCache); ok {
+		partitions, err = cache.GetPartitionInfosByID(
+			ctx,
+			s.collection.DatabaseName(),
+			s.collection.CollectionID(),
+		)
+	} else {
 		// Generated test mocks implement Cache only. Keep their fallback bound
 		// to the canonical collection name; production MetaCache always uses the
 		// id-only path above.
-		partitions, err := globalMetaCache.GetPartitions(ctx, s.collection.DatabaseName(), s.collection.CanonicalName())
-		if err != nil {
-			s.partitionErr = err
-			return
+		partitionMap, fetchErr := globalMetaCache.GetPartitions(
+			ctx,
+			s.collection.DatabaseName(),
+			s.collection.CanonicalName(),
+		)
+		if fetchErr != nil {
+			return nil, fetchErr
 		}
-		infos := make([]*partitionInfo, 0, len(partitions))
-		for name, id := range partitions {
+		infos := make([]*partitionInfo, 0, len(partitionMap))
+		for name, id := range partitionMap {
 			infos = append(infos, &partitionInfo{name: name, partitionID: id})
 		}
-		s.partitions = parsePartitionsInfo(infos, s.collection.Schema().IsPartitionKeyCollection())
-	})
-	if s.partitions == nil && s.partitionErr == nil {
+		partitions = parsePartitionsInfo(infos, s.collection.Schema().IsPartitionKeyCollection())
+	}
+	if err != nil {
+		return nil, err
+	}
+	if partitions == nil {
 		return nil, merr.WrapErrServiceInternalMsg(
 			"partition metadata snapshot is incomplete for collection %d", s.collection.CollectionID())
 	}
-	return s.partitions, s.partitionErr
+	s.partitions = partitions
+	return s.partitions, nil
 }
 
 func (s *readRequestSnapshot) PartitionInfo(ctx context.Context, partitionName string) (*partitionInfo, error) {

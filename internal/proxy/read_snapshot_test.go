@@ -36,6 +36,7 @@ type readSnapshotTestCache struct {
 	current        *collectionInfo
 	infoCalls      int
 	partitions     map[UniqueID]*partitionInfos
+	partitionErrs  []error
 	partitionCalls []UniqueID
 }
 
@@ -55,6 +56,13 @@ func (c *readSnapshotTestCache) GetPartitionInfosByID(
 	collectionID int64,
 ) (*partitionInfos, error) {
 	c.partitionCalls = append(c.partitionCalls, collectionID)
+	if len(c.partitionErrs) > 0 {
+		err := c.partitionErrs[0]
+		c.partitionErrs = c.partitionErrs[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
 	return c.partitions[collectionID], nil
 }
 
@@ -208,4 +216,35 @@ func TestReadRequestSnapshotRejectsIncompleteMetadata(t *testing.T) {
 			require.Equal(t, 1, cache.infoCalls)
 		})
 	}
+}
+
+func TestReadRequestSnapshotRetriesPartitionFetchAfterTransientFailure(t *testing.T) {
+	collection := newAliasSnapshotCollectionInfo(10, 101, "collection", commonpb.ConsistencyLevel_Strong)
+	cache := &readSnapshotTestCache{
+		current: collection,
+		partitions: map[UniqueID]*partitionInfos{
+			101: parsePartitionsInfo([]*partitionInfo{{name: "p1", partitionID: 1001}}, false),
+		},
+		partitionErrs: []error{merr.WrapErrServiceUnavailable("proxy", "transient partition fetch failure")},
+	}
+	oldCache := globalMetaCache
+	globalMetaCache = cache
+	t.Cleanup(func() {
+		globalMetaCache = oldCache
+	})
+
+	ctx, snapshot, err := ensureReadRequestSnapshot(context.Background(), "db", "alias")
+	require.NoError(t, err)
+
+	_, err = snapshot.Partitions(ctx)
+	require.ErrorContains(t, err, "transient partition fetch failure")
+
+	partitions, err := snapshot.Partitions(ctx)
+	require.NoError(t, err)
+	require.Equal(t, UniqueID(1001), partitions.name2ID["p1"])
+	require.Equal(t, []UniqueID{101, 101}, cache.partitionCalls)
+
+	_, err = snapshot.Partitions(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []UniqueID{101, 101}, cache.partitionCalls)
 }

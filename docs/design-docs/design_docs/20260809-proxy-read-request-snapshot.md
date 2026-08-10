@@ -84,9 +84,8 @@ The request-level object additionally owns lazily initialized partition metadata
 type ReadRequestSnapshot struct {
     Collection *CollectionReadSnapshot
 
-    partitionOnce sync.Once
-    partitions    *partitionInfos
-    partitionErr  error
+    partitionMu sync.Mutex
+    partitions  *partitionInfos
 
     timestampMu     sync.RWMutex
     timestampPinned bool
@@ -150,9 +149,9 @@ Partition lookup must not re-resolve the alias. Add collection-id-based helpers:
 GetPartitionInfosByID(ctx, database, collectionID)
 ```
 
-Refactor `getPartitionIDs`, `assignPartitionKeys`, namespace partition routing, and rate-limit partition accounting to accept `ReadRequestSnapshot` rather than database/collection name strings.
+Refactor `getPartitionIDs`, `assignPartitionKeys`, and rate-limit partition accounting to accept `ReadRequestSnapshot` rather than database/collection name strings.
 
-The first partition consumer loads the immutable partition list by the pinned collection id. Later consumers reuse the same pointer.
+The first successful partition consumer loads the immutable partition list by the pinned collection id. Later consumers reuse the same pointer. A transient fetch failure is returned to that consumer but is not cached, so a rate-limit lookup that fails open cannot poison task execution; the next consumer retries against the same pinned collection id.
 
 For the AlterAlias problem, resolving partitions by collection id is sufficient to prevent cross-collection mixing. A future strict RootCoord-wide snapshot covering concurrent schema and partition DDL would require a combined/versioned RootCoord read API and is outside this change.
 
@@ -160,7 +159,7 @@ For the AlterAlias problem, resolving partitions by collection id is sufficient 
 
 The collection metadata binding and data MVCC timestamp are separate but belong to the same external request.
 
-The first task computes consistency, its allocated request timestamp, and guarantee timestamp from the pinned collection info, including the collection schema update timestamp barrier. The result is stored once in `ReadRequestSnapshot`.
+The first task computes consistency, its allocated request timestamp, and the base guarantee timestamp from the pinned collection info, including the collection schema update timestamp barrier. The result is stored once in `ReadRequestSnapshot`.
 
 All internal attempts reuse it:
 
@@ -172,6 +171,8 @@ All internal attempts reuse it:
 - Query internal retry.
 
 Subsequent attempts may allocate a new task id, but `PreExecute` restores the pinned request timestamp and must not select a new collection or a new guarantee timestamp. Existing Search requery additionally reuses the per-channel MVCC timestamps returned by the first Search.
+
+Iterator continuation requests keep two timestamp roles separate. The request timestamp and base guarantee timestamp are computed for the current external request, so collection TTL expiry uses the current request clock. Proxy then overrides only the wire guarantee/MVCC timestamp with the client-carried iterator session timestamp. This preserves a stable iterator MVCC view without freezing TTL expiry at the first page's clock.
 
 This change pins the Proxy-visible read contract. For normal non-iterator Eventually/Bounded reads, QueryNode may still choose its actual per-channel MVCC from the channel tSafe when the request carries `mvcc_timestamp=0`; a strict, externally visible, identical per-channel MVCC across every replica failover would require a separate QueryNode response/protocol extension. The implementation does not claim that stronger guarantee.
 

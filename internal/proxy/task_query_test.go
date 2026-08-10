@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -351,18 +352,22 @@ func TestQueryTask_all(t *testing.T) {
 						Value: "True",
 					},
 				},
-				GuaranteeTimestamp: enqueTs,
+				GuaranteeTimestamp:    enqueTs,
+				UseDefaultConsistency: true,
 			},
 			mixCoord:       qc,
 			lb:             lb,
 			shardclientMgr: mgr,
 			resultBuf:      &typeutil.ConcurrentSet[*internalpb.RetrieveResults]{},
 		}
+		secondPageTs := tsoutil.ComposeTSByTime(time.Now(), 0)
+		qt.SetTs(secondPageTs)
 		qtErr = qt.PreExecute(context.TODO())
 		assert.Nil(t, qtErr)
 		assert.True(t, qt.queryParams.isIterator)
 		// from the second page, the mvccTs is set to the sessionTs init in the first page
 		assert.Equal(t, enqueTs, qt.GetMvccTimestamp())
+		assert.Equal(t, secondPageTs, qt.GetBase().GetTimestamp())
 	})
 }
 

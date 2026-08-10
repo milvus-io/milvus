@@ -820,6 +820,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 			Value: "True",
 		})
 		st.request.GuaranteeTimestamp = 1000
+		st.request.UseDefaultConsistency = true
 		st.request.DslType = commonpb.DslType_BoolExprV1
 
 		ctxTimeout, cancel := context.WithTimeout(ctx, time.Second)
