@@ -174,11 +174,18 @@ after that step fail only that check closed. The checks use different names,
 external IDs, concurrency groups, tests, and cleanup paths. Per-step timeouts
 leave budget for an always-run cleanup that re-enumerates the same head and
 policy identity, so a partially failed start or validator step does not leave a
-required check permanently pending. A missing or nonexistent feature Design
-Doc, insufficient formal-document approvals, label synchronization failure, or
-governance drift fails `Design Doc Policy`. Metadata findings remain
-reviewer-visible advisory reminders and do not fail it. Publishing explicit
-head-SHA checks is required because each workflow job's own
+required check permanently pending. The authoritative pull-request file list,
+feature Design Doc existence lookup, Approver source and approval snapshots,
+label synchronization, governance validation, race checks, and final check-run
+publication fail closed. Metadata findings remain reviewer-visible advisory
+reminders and do not fail `Design Doc Policy`. Metadata blob retrieval,
+decoding, header parsing, and reminder-comment create, update, or cleanup are
+best effort; their failures appear as warnings without changing the hard policy
+conclusion, and an incomplete inspection leaves existing reminders unchanged.
+The advisory reader also uses a short per-blob timeout and a bounded file count
+so slow or unusually large metadata inspections cannot exhaust the validator's
+workflow timeout.
+Publishing explicit head-SHA checks is required because each workflow job's own
 `pull_request_target` status belongs to the base branch SHA.
 
 A referenced Design Doc path is accepted when it exists at the pull-request
@@ -247,7 +254,8 @@ is added later.
    two approvals.
 7. Modifying a legacy Markdown Design Doc whose name does not follow the
    current recommendation still triggers an advisory metadata inspection and
-   two approvals; missing metadata does not block the pull request.
+   two approvals; missing metadata, blob inspection failure, or reminder-comment
+   mutation failure does not change the hard policy result.
 8. A release-branch feature pull request can reference a Design Doc that exists
    only on the repository default branch, while a path absent from the
    pull-request head, target base, and default branch fails the Design Doc Policy

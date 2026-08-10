@@ -165,7 +165,14 @@ GOVERNANCE_ENFORCEMENT_PATHS = frozenset(
 )
 MAX_HEADER_LINES = 50
 MAX_BLOB_BYTES = 1024 * 1024
+MAX_METADATA_INSPECTION_FILES = 20
+METADATA_BLOB_TIMEOUT_SECONDS = 5
 MAX_COMMENT_CHARS = 60_000
+MAX_CHECK_SUMMARY_CHARS = 60_000
+CHECK_SUMMARY_TRUNCATION_NOTICE = (
+    "\n\n_Additional policy details were omitted because the check summary "
+    "reached its size limit._"
+)
 API_VERSION = "2022-11-28"
 
 FIELD_SPECS = (
@@ -204,6 +211,16 @@ class ApprovalRequirement:
         return len(self.approvers) >= DESIGN_DOC_REQUIRED_APPROVALS
 
 
+@dataclass(frozen=True)
+class MetadataInspection:
+    issues: dict[str, list[str]]
+    warnings: tuple[str, ...]
+
+    @property
+    def complete(self) -> bool:
+        return not self.warnings
+
+
 REVIEW_SIGNAL_RUN_TITLE_PATTERN = re.compile(r"^([1-9][0-9]*)$")
 LOGIN_PATTERN = re.compile(r"^@[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
 LOGIN_PLACEHOLDERS = {
@@ -228,6 +245,13 @@ INLINE_HIDDEN_HTML_START = re.compile(
 )
 
 
+def truncate_check_summary(summary: str) -> str:
+    if len(summary) <= MAX_CHECK_SUMMARY_CHARS:
+        return summary
+    prefix_length = MAX_CHECK_SUMMARY_CHARS - len(CHECK_SUMMARY_TRUNCATION_NOTICE)
+    return summary[:prefix_length].rstrip() + CHECK_SUMMARY_TRUNCATION_NOTICE
+
+
 class GitHubClient:
     def __init__(self, token: str, api_url: str) -> None:
         self.token = token
@@ -240,6 +264,7 @@ class GitHubClient:
         path: str,
         payload: dict[str, Any] | None = None,
         allow_not_found: bool = False,
+        timeout: float = 30,
     ) -> Any:
         body = None
         if payload is not None:
@@ -259,7 +284,7 @@ class GitHubClient:
         )
 
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 response_body = response.read()
         except urllib.error.HTTPError as error:
             if allow_not_found and error.code == 404:
@@ -306,12 +331,16 @@ class GitHubClient:
                 return files
         raise RuntimeError(
             "The pull request has at least 3000 files, so GitHub cannot expose "
-            "a complete file list for Design Doc metadata reminders"
+            "the complete file list required to classify Design Doc changes"
         )
 
     def get_blob(self, repository: str, sha: str) -> dict[str, Any]:
         repository_path = urllib.parse.quote(repository, safe="/")
-        blob = self.request("GET", f"/repos/{repository_path}/git/blobs/{sha}")
+        blob = self.request(
+            "GET",
+            f"/repos/{repository_path}/git/blobs/{sha}",
+            timeout=METADATA_BLOB_TIMEOUT_SECONDS,
+        )
         if not isinstance(blob, dict):
             raise RuntimeError("GitHub returned an invalid blob response")
         return blob
@@ -592,7 +621,10 @@ class GitHubClient:
                     "status": "completed",
                     "conclusion": conclusion,
                     "completed_at": completed_at,
-                    "output": {"title": title, "summary": summary},
+                    "output": {
+                        "title": title,
+                        "summary": truncate_check_summary(summary),
+                    },
                 },
             )
 
@@ -1308,25 +1340,44 @@ def validate_changed_design_docs(
     client: GitHubClient,
     repository: str,
     files: list[dict[str, Any]],
-) -> dict[str, list[str]]:
+) -> MetadataInspection:
     issues: dict[str, list[str]] = {}
-    for file_info in select_design_doc_files(files):
+    warnings: list[str] = []
+    selected_files = select_design_doc_files(files)
+    if len(selected_files) > MAX_METADATA_INSPECTION_FILES:
+        omitted = len(selected_files) - MAX_METADATA_INSPECTION_FILES
+        warnings.append(
+            "Metadata inspection was limited to the first "
+            f"{MAX_METADATA_INSPECTION_FILES} changed Design Docs; "
+            f"{omitted} additional file(s) were not inspected"
+        )
+        selected_files = selected_files[:MAX_METADATA_INSPECTION_FILES]
+
+    for file_info in selected_files:
         filename = file_info["filename"]
         blob_sha = file_info.get("sha")
         if not isinstance(blob_sha, str) or not blob_sha:
-            issues[filename] = ["The changed file content could not be located."]
+            warnings.append(
+                f"Could not inspect recommended metadata in {filename}: "
+                "the changed file content could not be located"
+            )
             continue
 
         try:
             document = decode_blob(client.get_blob(repository, blob_sha))
-        except ValueError as error:
-            issues[filename] = [str(error)]
+            file_issues = validate_header(document)
+        except Exception as error:
+            # Recommended metadata is advisory. Keep blob and parser failures
+            # outside the merge-enforcement exception boundary.
+            detail = " ".join(str(error).split()) or type(error).__name__
+            warnings.append(
+                f"Could not inspect recommended metadata in {filename}: {detail}"
+            )
             continue
 
-        file_issues = validate_header(document)
         if file_issues:
             issues[filename] = file_issues
-    return issues
+    return MetadataInspection(issues=issues, warnings=tuple(warnings))
 
 
 def build_comment(
@@ -1447,13 +1498,33 @@ def approval_summary_lines(approval: ApprovalRequirement) -> list[str]:
     ]
 
 
+def summarized_advisory_warnings(warnings: list[str]) -> list[str]:
+    summarized = []
+    for warning in warnings[:50]:
+        normalized = " ".join(warning.split())
+        if len(normalized) > 500:
+            normalized = normalized[:497] + "..."
+        summarized.append(html.escape(normalized))
+    if len(warnings) > 50:
+        summarized.append(f"... and {len(warnings) - 50} more")
+    return summarized
+
+
+def report_advisory_warning(warning: str) -> None:
+    print(f"Advisory warning: {warning}", file=sys.stderr)
+
+
 def build_check_summary(
     issues: dict[str, list[str]],
     feature_requirement_issue: str | None,
     governance_issues: list[str] | None = None,
     approval: ApprovalRequirement | None = None,
+    metadata_complete: bool = True,
+    comment_synchronized: bool = True,
+    advisory_warnings: list[str] | None = None,
 ) -> str:
     governance_issues = governance_issues or []
+    advisory_warnings = advisory_warnings or []
     lines = ["## Design Doc policy"]
     if approval is not None:
         lines.extend(approval_summary_lines(approval))
@@ -1474,18 +1545,36 @@ def build_check_summary(
     else:
         lines.append("- Repository governance enforcement: passed or not applicable")
 
-    if not issues:
-        lines.append("- Changed Design Doc metadata: no reminders")
-    else:
+    if not metadata_complete:
         lines.append(
-            f"- Changed Design Doc metadata: advisory reminders posted for "
+            "- Changed Design Doc metadata: advisory inspection incomplete; "
+            "existing reminders were left unchanged"
+        )
+    elif not issues:
+        lines.append("- Changed Design Doc metadata: no advisory findings")
+    elif comment_synchronized:
+        lines.append(
+            f"- Changed Design Doc metadata: advisory reminders synchronized for "
             f"{len(issues)} file(s)"
         )
+    else:
+        lines.append(
+            f"- Changed Design Doc metadata: advisory findings detected for "
+            f"{len(issues)} file(s)"
+        )
+    if issues:
         for filename in sorted(issues)[:50]:
             safe_filename = filename.replace("`", "\\`")
             lines.append(f"  - `{safe_filename}`")
         if len(issues) > 50:
             lines.append(f"  - ... and {len(issues) - 50} more")
+
+    if advisory_warnings:
+        lines.append("- Advisory warnings (do not block merging):")
+        lines.extend(
+            f"  - {warning}"
+            for warning in summarized_advisory_warnings(advisory_warnings)
+        )
 
     return "\n".join(lines)
 
@@ -1568,14 +1657,24 @@ def complete_stale_policy_check(
     client: GitHubClient,
     repository: str,
     check_run_id: int,
+    advisory_warnings: list[str] | None = None,
 ) -> None:
+    summary = (
+        "The pull request changed while this evaluation was running. "
+        "A newer workflow run will evaluate the current head."
+    )
+    if advisory_warnings:
+        warning_lines = "\n".join(
+            f"- {warning}"
+            for warning in summarized_advisory_warnings(advisory_warnings)
+        )
+        summary += f"\n\n## Advisory warnings\n{warning_lines}"
     client.complete_policy_check(
         repository,
         check_run_id,
         "neutral",
         "Design Doc policy evaluation became stale",
-        "The pull request changed while this evaluation was running. "
-        "A newer workflow run will evaluate the current head.",
+        summary,
     )
 
 
@@ -1597,10 +1696,15 @@ def run(event_path: str) -> int:
     check_run_id = client.create_policy_check(
         repository, initial_state.head_sha, pull_number
     )
+    advisory_warnings: list[str] = []
 
     try:
         files = client.list_pull_request_files(repository, pull_number)
-        issues = validate_changed_design_docs(client, repository, files)
+        metadata_inspection = validate_changed_design_docs(client, repository, files)
+        issues = metadata_inspection.issues
+        advisory_warnings.extend(metadata_inspection.warnings)
+        for warning in metadata_inspection.warnings:
+            report_advisory_warning(warning)
         governance_issues = validate_changed_governance(
             client,
             initial_state.head_repository,
@@ -1635,7 +1739,12 @@ def run(event_path: str) -> int:
         if stable_pull_request_state(current_state) != stable_pull_request_state(
             initial_state
         ):
-            complete_stale_policy_check(client, repository, check_run_id)
+            complete_stale_policy_check(
+                client,
+                repository,
+                check_run_id,
+                advisory_warnings,
+            )
             print(
                 "The pull request changed while this evaluation was running; "
                 "skipping stale comment update."
@@ -1655,28 +1764,58 @@ def run(event_path: str) -> int:
                 repository, pull_number, DESIGN_DOC_APPROVAL_LABEL
             )
 
-        body = (
-            build_comment(
-                issues,
-                feature_requirement_issue,
-                governance_issues,
+        comment_synchronized = False
+        if metadata_inspection.complete:
+            try:
+                # The comment is only a delivery mechanism for reminders. Hard
+                # policy decisions and the final race checks continue on error.
+                body = (
+                    build_comment(
+                        issues,
+                        feature_requirement_issue,
+                        governance_issues,
+                    )
+                    if (
+                        issues
+                        or feature_requirement_issue is not None
+                        or governance_issues
+                    )
+                    else None
+                )
+                sync_comment(
+                    client,
+                    repository,
+                    pull_number,
+                    body,
+                    existing_comments=existing_comments,
+                )
+                comment_synchronized = True
+            except Exception as error:
+                detail = " ".join(str(error).split()) or type(error).__name__
+                warning = (
+                    "The advisory policy comment could not be synchronized: "
+                    f"{detail}"
+                )
+                advisory_warnings.append(warning)
+                report_advisory_warning(warning)
+        else:
+            warning = (
+                "The advisory policy comment was left unchanged because metadata "
+                "inspection was incomplete."
             )
-            if (issues or feature_requirement_issue is not None or governance_issues)
-            else None
-        )
-        sync_comment(
-            client,
-            repository,
-            pull_number,
-            body,
-            existing_comments=existing_comments,
-        )
+            advisory_warnings.append(warning)
+            report_advisory_warning(warning)
 
         final_state = client.get_pull_request_state(repository, pull_number)
         if stable_pull_request_state(final_state) != stable_pull_request_state(
             initial_state
         ):
-            complete_stale_policy_check(client, repository, check_run_id)
+            complete_stale_policy_check(
+                client,
+                repository,
+                check_run_id,
+                advisory_warnings,
+            )
             print(
                 "The pull request changed while the policy comment was being "
                 "updated; skipping stale check completion."
@@ -1702,7 +1841,12 @@ def run(event_path: str) -> int:
                 client.remove_pull_request_label(
                     repository, pull_number, DESIGN_DOC_APPROVAL_LABEL
                 )
-            complete_stale_policy_check(client, repository, check_run_id)
+            complete_stale_policy_check(
+                client,
+                repository,
+                check_run_id,
+                advisory_warnings,
+            )
             print(
                 "The Prow approval snapshot changed while this evaluation was "
                 "running; a newer workflow run will evaluate it."
@@ -1718,6 +1862,8 @@ def run(event_path: str) -> int:
             check_title = "Two non-author Design Doc approvals are required"
         elif failed:
             check_title = "Design Doc policy failed"
+        elif advisory_warnings:
+            check_title = "Design Doc policy passed with advisory warnings"
         elif issues:
             check_title = "Design Doc policy passed with metadata reminders"
         else:
@@ -1732,13 +1878,26 @@ def run(event_path: str) -> int:
                 feature_requirement_issue,
                 governance_issues,
                 approval,
+                metadata_complete=metadata_inspection.complete,
+                comment_synchronized=comment_synchronized,
+                advisory_warnings=advisory_warnings,
             ),
         )
 
-        if issues:
-            print(f"Posted metadata reminders for {len(issues)} design document(s).")
-        else:
+        if issues and comment_synchronized:
+            print(
+                f"Synchronized metadata reminders for {len(issues)} "
+                "design document(s)."
+            )
+        elif issues:
+            print(
+                f"Found metadata reminders for {len(issues)} design document(s), "
+                "but the advisory comment was not synchronized."
+            )
+        elif metadata_inspection.complete:
             print("No changed Design Doc metadata reminders were needed.")
+        else:
+            print("Changed Design Doc metadata inspection was incomplete.")
         if feature_requirement_issue is not None:
             print("The feature design document requirement is not satisfied.")
         else:
@@ -1765,13 +1924,22 @@ def run(event_path: str) -> int:
             print("The two-Approver Design Doc requirement does not apply.")
         return 1 if failed else 0
     except Exception as error:
+        failure_summary = (
+            f"The trusted policy workflow failed: `{html.escape(str(error))}`"
+        )
+        if advisory_warnings:
+            warning_lines = "\n".join(
+                f"- {warning}"
+                for warning in summarized_advisory_warnings(advisory_warnings)
+            )
+            failure_summary += f"\n\n## Advisory warnings\n{warning_lines}"
         try:
             client.complete_policy_check(
                 repository,
                 check_run_id,
                 "failure",
                 "Design Doc policy could not be evaluated",
-                f"The trusted policy workflow failed: `{html.escape(str(error))}`",
+                failure_summary,
             )
         except Exception as completion_error:
             print(

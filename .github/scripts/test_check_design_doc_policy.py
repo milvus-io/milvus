@@ -904,6 +904,18 @@ class GitHubClientApprovalApiTest(unittest.TestCase):
         )
         self.assertEqual(["GET", "POST", "GET"], [call[0] for call in calls])
 
+    def test_blob_read_uses_the_bounded_advisory_timeout(self):
+        client = checker.GitHubClient("token", "https://api.github.test")
+        client.request = mock.Mock(return_value={})
+
+        client.get_blob("milvus-io/milvus", "blob-sha")
+
+        client.request.assert_called_once_with(
+            "GET",
+            "/repos/milvus-io/milvus/git/blobs/blob-sha",
+            timeout=checker.METADATA_BLOB_TIMEOUT_SECONDS,
+        )
+
 
 class HeaderValidationTest(unittest.TestCase):
     def test_accepts_canonical_header(self):
@@ -1326,13 +1338,67 @@ class FileSelectionTest(unittest.TestCase):
                 "sha": "bad-date",
             },
         ]
-        issues = checker.validate_changed_design_docs(client, "milvus-io/milvus", files)
+        inspection = checker.validate_changed_design_docs(
+            client, "milvus-io/milvus", files
+        )
         self.assertEqual(
             [
                 "docs/design-docs/design_docs/20260728-bad-date.md",
                 "docs/design-docs/design_docs/20260728-missing.md",
             ],
-            sorted(issues),
+            sorted(inspection.issues),
+        )
+        self.assertTrue(inspection.complete)
+        self.assertEqual((), inspection.warnings)
+
+    def test_missing_changed_blob_is_an_incomplete_advisory_inspection(self):
+        inspection = checker.validate_changed_design_docs(
+            FakeBlobClient({}),
+            "milvus-io/milvus",
+            [
+                {
+                    "filename": "docs/design-docs/design_docs/example.md",
+                    "status": "modified",
+                }
+            ],
+        )
+
+        self.assertEqual({}, inspection.issues)
+        self.assertFalse(inspection.complete)
+        self.assertIn("could not be located", inspection.warnings[0])
+
+    def test_metadata_inspection_has_a_bounded_file_budget(self):
+        content = VALID_HEADER.encode("utf-8")
+        client = mock.Mock()
+        client.get_blob.return_value = {
+            "size": len(content),
+            "encoding": "base64",
+            "content": base64.b64encode(content).decode("ascii"),
+        }
+        changed_count = checker.MAX_METADATA_INSPECTION_FILES + 3
+        files = [
+            {
+                "filename": (
+                    "docs/design-docs/design_docs/" f"{index:04d}-bounded-inspection.md"
+                ),
+                "status": "modified",
+                "sha": f"blob-{index}",
+            }
+            for index in range(changed_count)
+        ]
+
+        inspection = checker.validate_changed_design_docs(
+            client, "milvus-io/milvus", files
+        )
+
+        self.assertEqual(
+            checker.MAX_METADATA_INSPECTION_FILES,
+            client.get_blob.call_count,
+        )
+        self.assertFalse(inspection.complete)
+        self.assertIn(
+            f"{changed_count - checker.MAX_METADATA_INSPECTION_FILES} additional",
+            inspection.warnings[-1],
         )
 
 
@@ -1736,6 +1802,34 @@ class CommentTest(unittest.TestCase):
 
 
 class GitHubClientCheckRunTest(unittest.TestCase):
+    def test_truncates_oversized_summary_before_publishing_check(self):
+        client = checker.GitHubClient("token", "https://api.github.test")
+        payloads = []
+
+        def request(method, path, payload=None, allow_not_found=False):
+            self.assertEqual("PATCH", method)
+            payloads.append(payload)
+            return None
+
+        client.request = request
+        hard_result = "Hard policy result must be preserved.\n"
+        oversized_summary = hard_result + "&" * (checker.MAX_CHECK_SUMMARY_CHARS * 2)
+
+        client.complete_policy_check(
+            "milvus-io/milvus",
+            99,
+            "success",
+            "passed with advisory warnings",
+            oversized_summary,
+        )
+
+        published_summary = payloads[0]["output"]["summary"]
+        self.assertLessEqual(len(published_summary), checker.MAX_CHECK_SUMMARY_CHARS)
+        self.assertTrue(published_summary.startswith(hard_result))
+        self.assertTrue(
+            published_summary.endswith(checker.CHECK_SUMMARY_TRUNCATION_NOTICE)
+        )
+
     def test_reuses_and_completes_every_matching_check_on_same_head(self):
         client = checker.GitHubClient("token", "https://api.github.test")
         calls = []
@@ -2020,6 +2114,375 @@ class RunTest(unittest.TestCase):
             ],
             client.added_labels,
         )
+
+    def test_metadata_blob_failure_warns_without_changing_hard_pass(self):
+        client = FakeRunClient(
+            files=[
+                {
+                    "filename": "docs/design-docs/design_docs/example.md",
+                    "status": "modified",
+                    "sha": "valid",
+                }
+            ],
+            documents={"valid": VALID_HEADER},
+            refs=("head", "base"),
+            comments=[],
+        )
+        client.get_blob = mock.Mock(
+            side_effect=RuntimeError("metadata blob read failed")
+        )
+
+        self.assertEqual(0, self.run_with_client(client))
+        self.assertEqual("success", client.completed_checks[-1][1])
+        self.assertIn("metadata blob read failed", client.completed_checks[-1][3])
+        self.assertEqual(
+            [("milvus-io/milvus", 1, checker.DESIGN_DOC_APPROVAL_LABEL)],
+            client.added_labels,
+        )
+
+    def test_metadata_blob_failure_does_not_hide_hard_approval_failure(self):
+        client = FakeRunClient(
+            files=[
+                {
+                    "filename": "docs/design-docs/design_docs/example.md",
+                    "status": "modified",
+                    "sha": "valid",
+                }
+            ],
+            documents={"valid": VALID_HEADER},
+            refs=("head", "base"),
+            comments=[],
+            approval_comments=[self.approval_comment("congqixia", "/approve", 1)],
+        )
+        client.get_blob = mock.Mock(
+            side_effect=RuntimeError("metadata blob read failed")
+        )
+
+        self.assertEqual(1, self.run_with_client(client))
+        self.assertEqual("failure", client.completed_checks[-1][1])
+        self.assertIn("(1/2)", client.completed_checks[-1][3])
+        self.assertIn("metadata blob read failed", client.completed_checks[-1][3])
+        self.assertEqual([], client.added_labels)
+
+    def test_metadata_parser_failure_is_advisory_and_preserves_reminder(self):
+        client = FakeRunClient(
+            files=[
+                {
+                    "filename": "docs/design-docs/design_docs/example.md",
+                    "status": "modified",
+                    "sha": "valid",
+                }
+            ],
+            documents={"valid": VALID_HEADER},
+            refs=("head", "base"),
+            comments=[
+                {
+                    "id": 10,
+                    "body": checker.COMMENT_PREFIX + "old",
+                    "user": {"login": checker.BOT_LOGIN},
+                }
+            ],
+        )
+        client.delete_comment = mock.Mock()
+
+        with mock.patch.object(
+            checker,
+            "validate_header",
+            side_effect=RuntimeError("metadata parser failed"),
+        ):
+            self.assertEqual(0, self.run_with_client(client))
+
+        self.assertEqual("success", client.completed_checks[-1][1])
+        self.assertIn("metadata parser failed", client.completed_checks[-1][3])
+        client.delete_comment.assert_not_called()
+
+    def test_metadata_decode_failure_is_advisory_and_preserves_reminder(self):
+        client = FakeRunClient(
+            files=[
+                {
+                    "filename": "docs/design-docs/design_docs/example.md",
+                    "status": "modified",
+                    "sha": "invalid",
+                }
+            ],
+            documents={},
+            refs=("head", "base"),
+            comments=[
+                {
+                    "id": 10,
+                    "body": checker.COMMENT_PREFIX + "old",
+                    "user": {"login": checker.BOT_LOGIN},
+                }
+            ],
+        )
+        client.get_blob = mock.Mock(
+            return_value={"size": 3, "encoding": "base64", "content": "%%%"}
+        )
+        client.update_comment = mock.Mock()
+
+        self.assertEqual(0, self.run_with_client(client))
+        self.assertEqual("success", client.completed_checks[-1][1])
+        self.assertIn("not valid base64", client.completed_checks[-1][3])
+        self.assertIn("inspection incomplete", client.completed_checks[-1][3])
+        client.update_comment.assert_not_called()
+
+    def test_comment_mutation_failures_are_advisory(self):
+        owned_comment = {
+            "id": 10,
+            "body": checker.COMMENT_PREFIX + "old",
+            "user": {"login": checker.BOT_LOGIN},
+        }
+        scenarios = (
+            ("create", "# MEP: Missing metadata\n", [], "create_comment"),
+            (
+                "update",
+                "# MEP: Missing metadata\n",
+                [owned_comment],
+                "update_comment",
+            ),
+            ("delete", VALID_HEADER, [owned_comment], "delete_comment"),
+        )
+        for operation, document, comments, method_name in scenarios:
+            with self.subTest(operation=operation):
+                client = FakeRunClient(
+                    files=[
+                        {
+                            "filename": "docs/design-docs/design_docs/example.md",
+                            "status": "modified",
+                            "sha": "document",
+                        }
+                    ],
+                    documents={"document": document},
+                    refs=("head", "base"),
+                    comments=comments,
+                )
+                error = f"comment {operation} failed"
+                setattr(
+                    client,
+                    method_name,
+                    mock.Mock(side_effect=RuntimeError(error)),
+                )
+
+                self.assertEqual(0, self.run_with_client(client))
+                self.assertEqual("success", client.completed_checks[-1][1])
+                self.assertIn(error, client.completed_checks[-1][3])
+
+    def test_comment_failure_does_not_hide_hard_policy_failure(self):
+        client = FakeRunClient(
+            files=[
+                {
+                    "filename": "docs/design-docs/design_docs/example.md",
+                    "status": "modified",
+                    "sha": "invalid",
+                }
+            ],
+            documents={"invalid": "# MEP: Missing metadata\n"},
+            refs=("head", "base"),
+            comments=[],
+            approval_comments=[self.approval_comment("congqixia", "/approve", 1)],
+        )
+        client.create_comment = mock.Mock(
+            side_effect=RuntimeError("comment create failed")
+        )
+
+        self.assertEqual(1, self.run_with_client(client))
+        self.assertEqual("failure", client.completed_checks[-1][1])
+        self.assertIn("(1/2)", client.completed_checks[-1][3])
+        self.assertIn("comment create failed", client.completed_checks[-1][3])
+
+    def test_incomplete_metadata_inspection_preserves_existing_reminder(self):
+        client = FakeRunClient(
+            files=[
+                {
+                    "filename": "docs/design-docs/design_docs/example.md",
+                    "status": "modified",
+                    "sha": "valid",
+                }
+            ],
+            documents={"valid": VALID_HEADER},
+            refs=("head", "base"),
+            comments=[
+                {
+                    "id": 10,
+                    "body": checker.COMMENT_PREFIX + "old",
+                    "user": {"login": checker.BOT_LOGIN},
+                }
+            ],
+        )
+        client.get_blob = mock.Mock(
+            side_effect=RuntimeError("metadata blob read failed")
+        )
+        client.delete_comment = mock.Mock()
+
+        self.assertEqual(0, self.run_with_client(client))
+        client.delete_comment.assert_not_called()
+        self.assertIn("left unchanged", client.completed_checks[-1][3])
+
+    def test_comment_failure_does_not_skip_final_state_race_check(self):
+        initial_state = checker.PullRequestState(
+            head_sha="head",
+            base_sha="base",
+            head_repository="contributor/milvus",
+            base_repository="milvus-io/milvus",
+            author="contributor",
+            title="docs: test",
+            body="",
+            labels=(),
+        )
+        completion_state = checker.PullRequestState(
+            head_sha="head",
+            base_sha="base",
+            head_repository="contributor/milvus",
+            base_repository="milvus-io/milvus",
+            author="contributor",
+            title="feat: changed after comment failure",
+            body="design doc: docs/design-docs/design_docs/example.md",
+            labels=("kind/feature",),
+        )
+        client = FakeRunClient(
+            files=[
+                {
+                    "filename": "docs/design-docs/design_docs/example.md",
+                    "status": "modified",
+                    "sha": "invalid",
+                }
+            ],
+            documents={"invalid": "# MEP: Missing metadata\n"},
+            refs=("head", "base"),
+            comments=[],
+            initial_state=initial_state,
+            final_state=initial_state,
+            completion_state=completion_state,
+        )
+        client.create_comment = mock.Mock(
+            side_effect=RuntimeError("comment create failed")
+        )
+
+        with mock.patch.object(checker, "report_advisory_warning") as report_warning:
+            self.assertEqual(0, self.run_with_client(client))
+
+        report_warning.assert_called_once()
+        self.assertEqual("neutral", client.completed_checks[-1][1])
+        self.assertIn("comment create failed", client.completed_checks[-1][3])
+
+    def test_comment_failure_does_not_skip_final_approval_race_check(self):
+        initial_comments = [
+            self.approval_comment("congqixia", "/approve", 1),
+            self.approval_comment("czs007", "/approve", 2),
+        ]
+        changed_comments = [
+            *initial_comments,
+            self.approval_comment("czs007", "/approve cancel", 3),
+        ]
+        client = FakeRunClient(
+            files=[
+                {
+                    "filename": "docs/design-docs/design_docs/example.md",
+                    "status": "modified",
+                    "sha": "invalid",
+                }
+            ],
+            documents={"invalid": "# MEP: Missing metadata\n"},
+            refs=("head", "base"),
+            comments=[],
+            approval_comments=initial_comments,
+        )
+        snapshots = iter(
+            (
+                [
+                    *initial_comments,
+                    prow_notification("congqixia", "czs007", comment_id=700),
+                ],
+                [
+                    *changed_comments,
+                    prow_notification("congqixia", comment_id=701),
+                ],
+            )
+        )
+        client.list_issue_comments = lambda repository, pull_number: next(snapshots)
+        client.create_comment = mock.Mock(
+            side_effect=RuntimeError("comment create failed")
+        )
+
+        self.assertEqual(0, self.run_with_client(client))
+        self.assertEqual("neutral", client.completed_checks[-1][1])
+        self.assertIn("comment create failed", client.completed_checks[-1][3])
+        self.assertEqual(
+            [("milvus-io/milvus", 1, checker.DESIGN_DOC_APPROVAL_LABEL)],
+            client.added_labels,
+        )
+        self.assertEqual(
+            [("milvus-io/milvus", 1, checker.DESIGN_DOC_APPROVAL_LABEL)],
+            client.removed_labels,
+        )
+
+    def test_final_approval_comment_read_failure_remains_fail_closed(self):
+        initial_comments = [
+            self.approval_comment("congqixia", "/approve", 1),
+            self.approval_comment("czs007", "/approve", 2),
+        ]
+        client = FakeRunClient(
+            files=[
+                {
+                    "filename": "docs/design-docs/design_docs/example.md",
+                    "status": "modified",
+                    "sha": "valid",
+                }
+            ],
+            documents={"valid": VALID_HEADER},
+            refs=("head", "base"),
+            comments=[],
+            approval_comments=initial_comments,
+        )
+        snapshots = iter(
+            (
+                [
+                    *initial_comments,
+                    prow_notification("congqixia", "czs007", comment_id=700),
+                ],
+                RuntimeError("final approval comment read failed"),
+            )
+        )
+
+        def list_issue_comments(repository, pull_number):
+            snapshot = next(snapshots)
+            if isinstance(snapshot, Exception):
+                raise snapshot
+            return snapshot
+
+        client.list_issue_comments = list_issue_comments
+
+        with self.assertRaisesRegex(RuntimeError, "final approval comment read failed"):
+            self.run_with_client(client)
+        self.assertEqual("failure", client.completed_checks[-1][1])
+        self.assertEqual(
+            "Design Doc policy could not be evaluated",
+            client.completed_checks[-1][2],
+        )
+
+    def test_hard_failure_summary_retains_prior_advisory_warning(self):
+        client = FakeRunClient(
+            files=[
+                {
+                    "filename": "docs/design-docs/design_docs/example.md",
+                    "status": "modified",
+                    "sha": "valid",
+                }
+            ],
+            documents={"valid": VALID_HEADER},
+            refs=("head", "base"),
+            comments=[],
+            label_error=True,
+        )
+        client.get_blob = mock.Mock(
+            side_effect=RuntimeError("metadata blob read failed")
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "label write failed"):
+            self.run_with_client(client)
+        self.assertEqual("failure", client.completed_checks[-1][1])
+        self.assertIn("label write failed", client.completed_checks[-1][3])
+        self.assertIn("metadata blob read failed", client.completed_checks[-1][3])
 
     def test_label_write_failure_completes_policy_check_as_failure(self):
         client = FakeRunClient(

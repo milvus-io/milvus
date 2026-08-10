@@ -58,9 +58,12 @@ related issues, and release information.
 
 When an older design document is substantively revised, add the four review
 fields when practical. Pure path, link, or formatting maintenance may preserve
-historical metadata. The policy check inspects every changed formal Design Doc
-and posts a reviewer-visible advisory reminder when fields are absent or
-invalid, while remaining merge-successful.
+historical metadata. The policy check makes a bounded, best-effort inspection of
+changed formal Design Docs and synchronizes a reviewer-visible advisory reminder
+when fields are absent or invalid. Blob retrieval, decoding, header parsing,
+inspection-budget exhaustion, and reminder-comment create, update, or cleanup
+failures are reported as warnings without changing the hard policy result. If
+inspection is incomplete, existing reminders are left unchanged.
 
 Use [`TEMPLATE.md`](TEMPLATE.md) as the starting point for a new document.
 
@@ -74,10 +77,13 @@ Use [`TEMPLATE.md`](TEMPLATE.md) as the starting point for a new document.
 - Approvers can use the existing Prow flow by commenting `/approve`; a GitHub
   Review approval is not required. Automation adds `approved/design-doc` while
   two valid non-author approvals are active and removes it when they are not.
-- The trusted Design Doc Policy workflow posts a non-blocking advisory comment
-  for missing or invalid review metadata. A nonexistent feature Design Doc
-  reference fails the pull request check. Files removed by a pull request still
-  trigger the two-Approver policy, but naturally have no metadata to inspect.
+- The trusted Design Doc Policy workflow makes a best-effort attempt to post a
+  non-blocking advisory comment for missing or invalid review metadata. Blob,
+  metadata-parser, or reminder-comment failures produce warnings but do not
+  change the approval or Design Doc existence result. A nonexistent feature
+  Design Doc reference fails the pull request check. Files removed by a pull
+  request still trigger the two-Approver policy, but naturally have no metadata
+  to inspect.
 - A release-branch pull request may reference a Design Doc that exists only on
   the base repository's default branch; it does not need a duplicate copy on
   the target release branch.

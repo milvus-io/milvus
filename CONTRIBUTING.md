@@ -133,7 +133,7 @@ For easier ownership and review tracking, new or substantively revised Design Do
 - Design Review: YYYY-MM-DD
 ```
 
-When supplied, the Feature DRI, Primary Approver, and Independent Approver should identify three distinct GitHub users. These fields are recommended metadata, not a merge requirement: missing or invalid values produce an advisory pull-request comment but do not block merging. The Design Doc template includes additional recommended lifecycle and discovery fields.
+When supplied, the Feature DRI, Primary Approver, and Independent Approver should identify three distinct GitHub users. These fields are recommended metadata, not a merge requirement: missing or invalid values produce a best-effort advisory pull-request comment but do not block merging. Metadata inspection and reminder-comment updates can report warnings in the policy check or workflow log, but those warnings do not change the approval or Design Doc existence result. The Design Doc template includes additional recommended lifecycle and discovery fields.
 
 Every design document should explain the problem, the proposed design, and how the design will be verified. Use these sections:
 
