@@ -78,6 +78,13 @@ enum class TransientBudgetPriority {
     Low,
 };
 
+inline TransientBudgetPriority
+TransientPriorityForThreadPool(milvus::ThreadPoolPriority priority) {
+    return priority == milvus::ThreadPoolPriority::LOW
+               ? TransientBudgetPriority::Low
+               : TransientBudgetPriority::High;
+}
+
 class TransientMemoryBudget;
 
 class TransientBudgetLease {
@@ -110,10 +117,11 @@ class TransientBudgetLease {
 ///
 /// Usage:
 ///   - Call AcquireAsync(bytes, priority, token) for a cancellable RAII lease.
-///   - Call Acquire(bytes) to block until budget is available.
-///   - Call AcquireUntil(bytes, cancellation_token) to block until budget is
-///     available or cancellation is requested.
-///   - Call TryAcquire(bytes) for non-blocking replenish in refill loops.
+///   - Call Acquire(bytes, priority) to block until budget is available.
+///   - Call AcquireUntil(bytes, priority, cancellation_token) to block until
+///     budget is available or cancellation is requested.
+///   - Call TryAcquire(bytes, priority) for non-blocking replenish in refill
+///     loops.
 ///   - Call Release(bytes) after the transient data has been consumed.
 ///   - Oversized requests are allowed to run exclusively to guarantee progress.
 /// Async waiters are admitted high-priority first without reserved capacity.
@@ -180,10 +188,20 @@ class TransientMemoryBudget {
     /// Block until enough budget is available. Safe to call when the calling
     /// thread has no inflight tasks (no risk of deadlock with channel pop).
     void
-    Acquire(size_t bytes) {
-        std::unique_lock<std::mutex> lock(mu_);
-        cv_.wait(lock, [this, bytes] { return CanLegacyAcquireLocked(bytes); });
-        inflight_bytes_ += bytes;
+    Acquire(size_t bytes, TransientBudgetPriority priority) {
+        PendingResolution resolution;
+        {
+            std::unique_lock<std::mutex> lock(mu_);
+            RegisterLegacyWaiterLocked(priority);
+            cv_.wait(lock, [this, bytes, priority] {
+                return CanLegacyAcquireLocked(priority, bytes);
+            });
+            inflight_bytes_ += bytes;
+            UnregisterLegacyWaiterLocked(priority);
+            resolution = TakeAdmittedLocked();
+        }
+        ResolvePending(std::move(resolution));
+        cv_.notify_all();
     }
 
     /// Block until enough budget is available, or cancellation is requested.
@@ -191,6 +209,7 @@ class TransientMemoryBudget {
     /// its work.
     bool
     AcquireUntil(size_t bytes,
+                 TransientBudgetPriority priority,
                  const folly::CancellationToken& cancellation_token) {
         folly::CancellationCallback cancel_callback(
             cancellation_token, [this]() noexcept {
@@ -201,27 +220,33 @@ class TransientMemoryBudget {
             });
 
         bool acquired = false;
+        PendingResolution resolution;
         {
             std::unique_lock<std::mutex> lock(mu_);
-            cv_.wait(lock, [this, bytes, &cancellation_token] {
+            RegisterLegacyWaiterLocked(priority);
+            cv_.wait(lock, [this, bytes, priority, &cancellation_token] {
                 return cancellation_token.isCancellationRequested() ||
-                       CanLegacyAcquireLocked(bytes);
+                       CanLegacyAcquireLocked(priority, bytes);
             });
             if (!cancellation_token.isCancellationRequested()) {
                 inflight_bytes_ += bytes;
                 acquired = true;
             }
+            UnregisterLegacyWaiterLocked(priority);
+            resolution = TakeAdmittedLocked();
         }
 
+        ResolvePending(std::move(resolution));
+        cv_.notify_all();
         return acquired;
     }
 
     /// Try to claim budget. Returns true if under budget.
     /// Used in the refill loop where blocking could cause deadlock.
     bool
-    TryAcquire(size_t bytes) {
+    TryAcquire(size_t bytes, TransientBudgetPriority priority) {
         std::lock_guard<std::mutex> lock(mu_);
-        if (CanLegacyAcquireLocked(bytes)) {
+        if (CanLegacyAcquireLocked(priority, bytes)) {
             inflight_bytes_ += bytes;
             return true;
         }
@@ -337,9 +362,15 @@ class TransientMemoryBudget {
     }
 
     bool
-    CanLegacyAcquireLocked(size_t bytes) const {
-        return high_pending_.empty() && low_pending_.empty() &&
-               CanAcquireCapacityLocked(bytes);
+    CanLegacyAcquireLocked(TransientBudgetPriority priority,
+                           size_t bytes) const {
+        if (!CanAcquireCapacityLocked(bytes) || !high_pending_.empty()) {
+            return false;
+        }
+        if (priority == TransientBudgetPriority::High) {
+            return true;
+        }
+        return high_legacy_waiters_ == 0 && low_pending_.empty();
     }
 
     bool
@@ -351,7 +382,24 @@ class TransientMemoryBudget {
         if (priority == TransientBudgetPriority::High) {
             return high_pending_.empty();
         }
-        return high_pending_.empty() && low_pending_.empty();
+        return high_pending_.empty() && high_legacy_waiters_ == 0 &&
+               low_pending_.empty();
+    }
+
+    void
+    RegisterLegacyWaiterLocked(TransientBudgetPriority priority) {
+        if (priority == TransientBudgetPriority::High) {
+            ++high_legacy_waiters_;
+        }
+    }
+
+    void
+    UnregisterLegacyWaiterLocked(TransientBudgetPriority priority) {
+        if (priority == TransientBudgetPriority::High) {
+            AssertInfo(high_legacy_waiters_ > 0,
+                       "High-priority legacy waiter count underflow");
+            --high_legacy_waiters_;
+        }
     }
 
     void
@@ -378,7 +426,7 @@ class TransientMemoryBudget {
             }
         };
         admit_queue(high_pending_);
-        if (high_pending_.empty()) {
+        if (high_pending_.empty() && high_legacy_waiters_ == 0) {
             admit_queue(low_pending_);
         }
         return resolution;
@@ -426,6 +474,7 @@ class TransientMemoryBudget {
     std::condition_variable cv_;
     size_t inflight_bytes_{0};
     size_t capacity_bytes_{0};
+    size_t high_legacy_waiters_{0};
     PendingQueue high_pending_;
     PendingQueue low_pending_;
 };

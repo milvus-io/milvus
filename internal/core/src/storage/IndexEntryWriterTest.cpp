@@ -1840,7 +1840,7 @@ TEST_F(IndexEntryWriterV3Test,
     auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
     budget.SetCapacityBytes(2 * entry_size);
-    budget.Acquire(entry_size);
+    budget.Acquire(entry_size, TransientBudgetPriority::High);
     bool budget_held = true;
     auto budget_cleanup = folly::makeGuard([&]() {
         if (budget_held) {
@@ -1992,7 +1992,7 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryStreamCancellationWhileWaitingBudget) {
     auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
     auto old_capacity = budget.CapacityBytes();
     budget.SetCapacityBytes(slice_size);
-    budget.Acquire(slice_size);
+    budget.Acquire(slice_size, TransientBudgetPriority::High);
     auto cleanup = folly::makeGuard([&budget, old_capacity, slice_size]() {
         budget.Release(slice_size);
         budget.SetCapacityBytes(old_capacity);
