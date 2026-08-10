@@ -173,22 +173,26 @@ func TestPartialUpdateCASPropertyValidation(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "zero_primary_key_field_id",
+			name: "zero_read_ts",
 			meta: func() *messagespb.PartialUpdateCAS {
 				meta := validPartialUpdateCAS()
-				meta.PrimaryKeyFieldId = 0
+				meta.ReadTs = 0
 				return meta
 			},
 			wantErr: true,
 		},
 		{
-			name: "negative_primary_key_field_id",
+			name: "zero_observed_term",
 			meta: func() *messagespb.PartialUpdateCAS {
 				meta := validPartialUpdateCAS()
-				meta.PrimaryKeyFieldId = -1
+				meta.ObservedPchannelTerm = 0
 				return meta
 			},
 			wantErr: true,
+		},
+		{
+			name: "valid_attempt_proof",
+			meta: validPartialUpdateCAS,
 		},
 	}
 
@@ -264,8 +268,6 @@ func validPartialUpdateCAS() *messagespb.PartialUpdateCAS {
 	return &messagespb.PartialUpdateCAS{
 		ReadTs:               100,
 		ObservedPchannelTerm: 2,
-		CollectionId:         10,
-		PrimaryKeyFieldId:    100,
 	}
 }
 

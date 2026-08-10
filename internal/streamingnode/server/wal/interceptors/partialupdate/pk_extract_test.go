@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -188,6 +189,183 @@ func TestExtractPKsFromInsert(t *testing.T) {
 	})
 }
 
+func TestExtractPKsFromCASInsert(t *testing.T) {
+	t.Run("int64", func(t *testing.T) {
+		getter := &staticPrimaryKeyDescriptorGetter{
+			descriptor: shards.PrimaryKeyDescriptor{
+				FieldID:  100,
+				DataType: schemapb.DataType_Int64,
+			},
+		}
+
+		pks, scope, err := extractPKsFromCASInsert(newInsertMessage([]*schemapb.FieldData{
+			int64PKFieldData(10, 20),
+		}), getter)
+
+		require.NoError(t, err)
+		require.Equal(t, []any{int64(10), int64(20)}, pks)
+		require.Equal(t, casInsertScope{collectionID: 10, schemaVersion: 1}, scope)
+		require.EqualValues(t, 10, getter.collectionID)
+		require.EqualValues(t, 1, getter.schemaVersion)
+	})
+
+	t.Run("varchar", func(t *testing.T) {
+		getter := &staticPrimaryKeyDescriptorGetter{
+			descriptor: shards.PrimaryKeyDescriptor{
+				FieldID:  100,
+				DataType: schemapb.DataType_VarChar,
+			},
+		}
+
+		pks, scope, err := extractPKsFromCASInsert(newInsertMessage([]*schemapb.FieldData{
+			varcharPKFieldData("pk-1", "pk-2"),
+		}), getter)
+
+		require.NoError(t, err)
+		require.Equal(t, []any{"pk-1", "pk-2"}, pks)
+		require.Equal(t, casInsertScope{collectionID: 10, schemaVersion: 1}, scope)
+	})
+
+	t.Run("explicit zero schema version", func(t *testing.T) {
+		getter := &staticPrimaryKeyDescriptorGetter{
+			descriptor: shards.PrimaryKeyDescriptor{
+				FieldID:  100,
+				DataType: schemapb.DataType_Int64,
+			},
+		}
+		msg := newInsertMessage([]*schemapb.FieldData{int64PKFieldData(10)})
+		insertMsg := message.MustAsMutableInsertMessageV1(msg)
+		header := insertMsg.Header()
+		zero := int32(0)
+		header.SchemaVersion = &zero
+		insertMsg.OverwriteHeader(header)
+
+		pks, scope, err := extractPKsFromCASInsert(msg, getter)
+
+		require.NoError(t, err)
+		require.Equal(t, []any{int64(10)}, pks)
+		require.Equal(t, casInsertScope{collectionID: 10, schemaVersion: 0}, scope)
+		require.EqualValues(t, 0, getter.schemaVersion)
+	})
+}
+
+func TestExtractPKsFromCASInsertErrors(t *testing.T) {
+	validGetter := func() *staticPrimaryKeyDescriptorGetter {
+		return &staticPrimaryKeyDescriptorGetter{
+			descriptor: shards.PrimaryKeyDescriptor{
+				FieldID:  100,
+				DataType: schemapb.DataType_Int64,
+			},
+		}
+	}
+
+	t.Run("missing descriptor getter", func(t *testing.T) {
+		_, _, err := extractPKsFromCASInsert(newInsertMessage(nil), nil)
+		requireUnrecoverable(t, err)
+	})
+
+	t.Run("decode insert", func(t *testing.T) {
+		_, _, err := extractPKsFromCASInsert(newDeleteMessage(&schemapb.IDs{}), validGetter())
+		requireUnrecoverable(t, err)
+	})
+
+	t.Run("empty collection", func(t *testing.T) {
+		msg := newInsertMessage(nil)
+		insertMsg := message.MustAsMutableInsertMessageV1(msg)
+		header := insertMsg.Header()
+		header.CollectionId = 0
+		insertMsg.OverwriteHeader(header)
+
+		_, _, err := extractPKsFromCASInsert(msg, validGetter())
+		requireUnrecoverable(t, err)
+	})
+
+	t.Run("missing schema version", func(t *testing.T) {
+		msg := newInsertMessage(nil)
+		insertMsg := message.MustAsMutableInsertMessageV1(msg)
+		header := insertMsg.Header()
+		header.SchemaVersion = nil
+		insertMsg.OverwriteHeader(header)
+
+		_, _, err := extractPKsFromCASInsert(msg, validGetter())
+		requireUnrecoverable(t, err)
+	})
+
+	t.Run("schema version mismatch", func(t *testing.T) {
+		_, _, err := extractPKsFromCASInsert(newInsertMessage(nil), &staticPrimaryKeyDescriptorGetter{
+			err: shards.ErrCollectionSchemaVersionNotMatch,
+		})
+		require.Error(t, err)
+		require.True(t, status.AsStreamingError(err).IsSchemaVersionMismatch())
+	})
+
+	t.Run("descriptor lookup", func(t *testing.T) {
+		_, _, err := extractPKsFromCASInsert(newInsertMessage(nil), &staticPrimaryKeyDescriptorGetter{
+			err: errors.New("schema lookup failed"),
+		})
+		requireUnrecoverable(t, err)
+	})
+
+	for _, test := range []struct {
+		name       string
+		descriptor shards.PrimaryKeyDescriptor
+	}{
+		{
+			name: "missing descriptor field",
+			descriptor: shards.PrimaryKeyDescriptor{
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+		{
+			name: "unsupported descriptor type",
+			descriptor: shards.PrimaryKeyDescriptor{
+				FieldID:  100,
+				DataType: schemapb.DataType_Float,
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, err := extractPKsFromCASInsert(newInsertMessage(nil), &staticPrimaryKeyDescriptorGetter{
+				descriptor: test.descriptor,
+			})
+			requireUnrecoverable(t, err)
+		})
+	}
+
+	t.Run("decode insert body", func(t *testing.T) {
+		_, _, err := extractPKsFromCASInsert(
+			corruptMessageBody(newInsertMessage(nil)),
+			validGetter(),
+		)
+		requireUnrecoverable(t, err)
+	})
+
+	t.Run("missing primary key field", func(t *testing.T) {
+		_, _, err := extractPKsFromCASInsert(newInsertMessage(nil), validGetter())
+		requireUnrecoverable(t, err)
+	})
+
+	t.Run("primary key field type mismatch", func(t *testing.T) {
+		_, _, err := extractPKsFromCASInsert(newInsertMessage([]*schemapb.FieldData{
+			varcharPKFieldData("pk-1"),
+		}), validGetter())
+		requireUnrecoverable(t, err)
+	})
+
+	t.Run("primary key scalar payload mismatch", func(t *testing.T) {
+		field := int64PKFieldData(10)
+		field.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{Data: []string{"pk-1"}},
+				},
+			},
+		}
+		_, _, err := extractPKsFromCASInsert(newInsertMessage([]*schemapb.FieldData{field}), validGetter())
+		requireUnrecoverable(t, err)
+	})
+}
+
 func TestExtractPKsFromOrdinaryInsertErrors(t *testing.T) {
 	t.Run("missing schema getter", func(t *testing.T) {
 		_, _, err := extractPKsFromOrdinaryInsert(newInsertMessage(nil), nil)
@@ -355,8 +533,10 @@ func TestPKsFromIDsRejectsNilArraysAndPK(t *testing.T) {
 }
 
 type staticPrimaryKeyDescriptorGetter struct {
-	descriptor shards.PrimaryKeyDescriptor
-	err        error
+	descriptor    shards.PrimaryKeyDescriptor
+	err           error
+	collectionID  int64
+	schemaVersion int32
 }
 
 func corruptMessageBody(msg message.MutableMessage) message.MutableMessage {
@@ -367,7 +547,9 @@ func corruptMessageBody(msg message.MutableMessage) message.MutableMessage {
 	return message.NewMutableMessageBeforeAppend([]byte{0xff}, properties)
 }
 
-func (g *staticPrimaryKeyDescriptorGetter) GetPrimaryKeyDescriptor(int64, int32) (shards.PrimaryKeyDescriptor, error) {
+func (g *staticPrimaryKeyDescriptorGetter) GetPrimaryKeyDescriptor(collectionID int64, schemaVersion int32) (shards.PrimaryKeyDescriptor, error) {
+	g.collectionID = collectionID
+	g.schemaVersion = schemaVersion
 	return g.descriptor, g.err
 }
 

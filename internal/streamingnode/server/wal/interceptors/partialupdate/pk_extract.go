@@ -14,6 +14,11 @@ import (
 // when an insert header does not carry an explicit version.
 const latestCollectionSchemaVersion int32 = -1
 
+type casInsertScope struct {
+	collectionID  int64
+	schemaVersion int32
+}
+
 // extractPKs extracts row-content primary keys from WAL delete messages.
 // ok=false means callers must handle inserts and collection-wide writes separately.
 func extractPKs(msg message.MutableMessage) ([]any, bool, error) {
@@ -53,6 +58,78 @@ func extractPKsFromInsert(msg message.MutableMessage, fieldID int64) ([]any, err
 		return nil, status.NewUnrecoverableError("decode partial update insert body failed: %v", err)
 	}
 	return extractPKsFromFieldData(body.GetFieldsData(), fieldID)
+}
+
+// extractPKsFromCASInsert derives collection and PK identity from the Insert
+// header and ShardManager instead of trusting attempt-scoped CAS proof.
+func extractPKsFromCASInsert(
+	msg message.MutableMessage,
+	descriptorGetter primaryKeyDescriptorGetter,
+) ([]any, casInsertScope, error) {
+	if descriptorGetter == nil {
+		return nil, casInsertScope{}, status.NewUnrecoverableError(
+			"partial update primary key descriptor getter is unavailable",
+		)
+	}
+	insertMsg, err := message.AsMutableInsertMessageV1(msg)
+	if err != nil {
+		return nil, casInsertScope{}, status.NewUnrecoverableError(
+			"decode partial update insert message failed: %v",
+			err,
+		)
+	}
+	header := insertMsg.Header()
+	if header.GetCollectionId() == 0 {
+		return nil, casInsertScope{}, status.NewUnrecoverableError(
+			"partial update CAS insert collection id is empty",
+		)
+	}
+	if header.SchemaVersion == nil {
+		return nil, casInsertScope{}, status.NewUnrecoverableError(
+			"partial update CAS insert schema version is missing",
+		)
+	}
+
+	scope := casInsertScope{
+		collectionID:  header.GetCollectionId(),
+		schemaVersion: header.GetSchemaVersion(),
+	}
+	descriptor, err := descriptorGetter.GetPrimaryKeyDescriptor(
+		scope.collectionID,
+		scope.schemaVersion,
+	)
+	if err != nil {
+		if errors.Is(err, shards.ErrCollectionSchemaVersionNotMatch) {
+			return nil, casInsertScope{}, status.NewSchemaVersionMismatch(
+				"schema version mismatch while validating partial update CAS, collection: %d, schema version: %d",
+				scope.collectionID,
+				scope.schemaVersion,
+			)
+		}
+		return nil, casInsertScope{}, status.NewUnrecoverableError(
+			"get primary key descriptor for partial update CAS failed: %v",
+			err,
+		)
+	}
+	if descriptor.FieldID <= 0 || !typeutil.IsPrimaryFieldType(descriptor.DataType) {
+		return nil, casInsertScope{}, status.NewUnrecoverableError(
+			"partial update primary key descriptor is invalid, field: %d, type: %s",
+			descriptor.FieldID,
+			descriptor.DataType.String(),
+		)
+	}
+	body, err := insertMsg.Body()
+	if err != nil {
+		return nil, casInsertScope{}, status.NewUnrecoverableError(
+			"decode partial update insert body failed: %v",
+			err,
+		)
+	}
+	pks, err := extractPKsFromDescriptor(body.GetFieldsData(), descriptor)
+	if err != nil {
+		return nil, casInsertScope{}, err
+	}
+	return pks, scope, nil
 }
 
 // extractPKsFromOrdinaryInsert returns exact PKs when schema is available, or
@@ -118,6 +195,62 @@ func extractPKsFromFieldData(fields []*schemapb.FieldData, fieldID int64) ([]any
 		}
 	}
 	return nil, status.NewUnrecoverableError("partial update insert primary key field %d is missing", fieldID)
+}
+
+func extractPKsFromDescriptor(
+	fields []*schemapb.FieldData,
+	descriptor shards.PrimaryKeyDescriptor,
+) ([]any, error) {
+	for _, field := range fields {
+		if field.GetFieldId() != descriptor.FieldID {
+			continue
+		}
+		if field.GetType() != descriptor.DataType {
+			return nil, status.NewUnrecoverableError(
+				"partial update insert primary key field %d has type %s, expected %s",
+				descriptor.FieldID,
+				field.GetType().String(),
+				descriptor.DataType.String(),
+			)
+		}
+		scalars := field.GetScalars()
+		switch descriptor.DataType {
+		case schemapb.DataType_Int64:
+			values, ok := scalars.GetData().(*schemapb.ScalarField_LongData)
+			if !ok {
+				return nil, status.NewUnrecoverableError(
+					"partial update insert primary key field %d does not match schema type %s",
+					descriptor.FieldID,
+					descriptor.DataType.String(),
+				)
+			}
+			return pksFromIDs(&schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{IntId: values.LongData},
+			})
+		case schemapb.DataType_VarChar:
+			values, ok := scalars.GetData().(*schemapb.ScalarField_StringData)
+			if !ok {
+				return nil, status.NewUnrecoverableError(
+					"partial update insert primary key field %d does not match schema type %s",
+					descriptor.FieldID,
+					descriptor.DataType.String(),
+				)
+			}
+			return pksFromIDs(&schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{StrId: values.StringData},
+			})
+		default:
+			return nil, status.NewUnrecoverableError(
+				"partial update primary key field %d has unsupported data type %s",
+				descriptor.FieldID,
+				descriptor.DataType.String(),
+			)
+		}
+	}
+	return nil, status.NewUnrecoverableError(
+		"partial update insert primary key field %d is missing",
+		descriptor.FieldID,
+	)
 }
 
 // extractCollectionFenceID extracts collections affected by wide data mutations.

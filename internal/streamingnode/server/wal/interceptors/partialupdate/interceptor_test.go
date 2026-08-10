@@ -259,6 +259,9 @@ func TestPartialUpdateInterceptorRecordsTxnWriteAndMetaAfterAppend(t *testing.T)
 	txnState := interceptor.state.getTxn(1)
 	require.Equal(t, []any{int64(10)}, txnState.pks)
 	require.True(t, proto.Equal(meta, txnState.meta))
+	require.EqualValues(t, 10, txnState.collectionID)
+	require.EqualValues(t, 1, txnState.schemaVersion)
+	require.True(t, txnState.casScopeSet)
 }
 
 func TestPartialUpdateInterceptorCollectsPKsAcrossInsertChunks(t *testing.T) {
@@ -518,11 +521,23 @@ func TestPartialUpdateInterceptorRejectsNonTransactionalCAS(t *testing.T) {
 
 func TestPartialUpdateInterceptorRejectsCASWithMissingPKField(t *testing.T) {
 	interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 1})
-	meta := validCASMeta(100, 1)
-	meta.PrimaryKeyFieldId = 999
-	msg := newCASInsertMessage(t, []*schemapb.FieldData{int64PKFieldData(10)}, meta).
+	msg := newCASInsertMessage(t, nil, validCASMeta(100, 1)).
 		WithTxnContext(message.TxnContext{TxnID: 1, Keepalive: time.Second}).
 		WithTimeTick(120)
+
+	_, err := interceptor.DoAppend(context.Background(), msg, appendOK)
+	requireUnrecoverable(t, err)
+}
+
+func TestPartialUpdateInterceptorRejectsCASWithoutExplicitSchemaVersion(t *testing.T) {
+	interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 1})
+	msg := newCASInsertMessage(t, []*schemapb.FieldData{int64PKFieldData(10)}, validCASMeta(100, 1)).
+		WithTxnContext(message.TxnContext{TxnID: 1, Keepalive: time.Second}).
+		WithTimeTick(120)
+	insertMsg := message.MustAsMutableInsertMessageV1(msg)
+	header := insertMsg.Header()
+	header.SchemaVersion = nil
+	insertMsg.OverwriteHeader(header)
 
 	_, err := interceptor.DoAppend(context.Background(), msg, appendOK)
 	requireUnrecoverable(t, err)
@@ -689,7 +704,10 @@ func TestPartialUpdateInterceptorPreservesSchemaVersionMismatch(t *testing.T) {
 
 func TestPartialUpdateInterceptorRejectsTxnCASAttemptMismatchBeforeAppend(t *testing.T) {
 	interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 1})
-	require.NoError(t, interceptor.state.recordTxnMeta(1, validCASMeta(100, 1)))
+	require.NoError(t, interceptor.state.recordTxnCAS(1, validCASMeta(100, 1), casInsertScope{
+		collectionID:  10,
+		schemaVersion: 1,
+	}))
 	msg := newCASInsertMessage(t, []*schemapb.FieldData{int64PKFieldData(20)}, validCASMeta(101, 1)).
 		WithTxnContext(message.TxnContext{TxnID: 1, Keepalive: time.Second}).
 		WithTimeTick(120)
@@ -820,9 +838,7 @@ func (e *partialUpdateChainTestEnv) prepareCASTxn(t *testing.T, readTS uint64, p
 	require.NoError(t, err)
 	require.NotNil(t, result.TxnCtx)
 
-	meta := validCASMeta(readTS, 1)
-	meta.CollectionId = 10
-	body := newCASInsertMessage(t, []*schemapb.FieldData{int64PKFieldData(pk)}, meta).
+	body := newCASInsertMessage(t, []*schemapb.FieldData{int64PKFieldData(pk)}, validCASMeta(readTS, 1)).
 		WithTxnContext(*result.TxnCtx)
 	_, err = e.append(body, nil)
 	require.NoError(t, err)
@@ -884,7 +900,15 @@ func appendCASTxnBody(
 func newTestAppendInterceptor(channel types.PChannelInfo) *appendInterceptor {
 	state := newPartialUpdateState(30*time.Second, versionIndexBudgetForEntries(100))
 	state.channel = channel
-	return &appendInterceptor{state: state}
+	return &appendInterceptor{
+		state: state,
+		pkDescriptorGetter: &staticPrimaryKeyDescriptorGetter{
+			descriptor: shards.PrimaryKeyDescriptor{
+				FieldID:  100,
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
 }
 
 func appendOK(context.Context, message.MutableMessage) (message.MessageID, error) {
