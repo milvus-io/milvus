@@ -410,66 +410,53 @@ class ColumnarArrayChunk final : public Chunk {
 
     template <typename T>
     static T
-    GetData(const proto::schema::TypeSchema& type,
-            const Chunk& child,
-            size_t index) {
-        AssertInfo(GetElementType(type) != DataType::ARRAY,
-                   "get_data<T> requires a scalar child chunk");
-
-        const auto element_type = GetElementType(type);
+    ReadScalarElement(const proto::schema::TypeSchema& type,
+                      const Chunk& child,
+                      size_t index) {
         using ValueType = std::decay_t<T>;
 
         if constexpr (std::is_same_v<ValueType, bool>) {
-            AssertInfo(element_type == DataType::BOOL,
-                       "requested bool from array element type {}",
-                       element_type);
             const auto& chunk = static_cast<const FixedWidthChunk&>(child);
             return *reinterpret_cast<const uint8_t*>(
                        chunk.ValueAt(static_cast<int64_t>(index))) != 0;
         } else if constexpr (std::is_same_v<ValueType, int> ||
+                             std::is_same_v<ValueType, int64_t> ||
                              std::is_same_v<ValueType, int8_t> ||
                              std::is_same_v<ValueType, int16_t> ||
-                             std::is_same_v<ValueType, int32_t>) {
-            AssertInfo(element_type == DataType::INT8 ||
-                           element_type == DataType::INT16 ||
-                           element_type == DataType::INT32,
-                       "requested int from array element type {}",
-                       element_type);
+                             std::is_same_v<ValueType, int32_t> ||
+                             std::is_same_v<ValueType, float> ||
+                             std::is_same_v<ValueType, double>) {
+            const auto element_type = GetElementType(type);
             const auto& chunk = static_cast<const FixedWidthChunk&>(child);
-            return static_cast<T>(*reinterpret_cast<const int32_t*>(
-                chunk.ValueAt(static_cast<int64_t>(index))));
-        } else if constexpr (std::is_same_v<ValueType, int64_t>) {
-            AssertInfo(element_type == DataType::INT64,
-                       "requested int64 from array element type {}",
-                       element_type);
-            const auto& chunk = static_cast<const FixedWidthChunk&>(child);
-            return *reinterpret_cast<const int64_t*>(
-                chunk.ValueAt(static_cast<int64_t>(index)));
-        } else if constexpr (std::is_same_v<ValueType, float>) {
-            AssertInfo(element_type == DataType::FLOAT,
-                       "requested float from array element type {}",
-                       element_type);
-            const auto& chunk = static_cast<const FixedWidthChunk&>(child);
-            return *reinterpret_cast<const float*>(
-                chunk.ValueAt(static_cast<int64_t>(index)));
-        } else if constexpr (std::is_same_v<ValueType, double>) {
-            AssertInfo(element_type == DataType::DOUBLE,
-                       "requested double from array element type {}",
-                       element_type);
-            const auto& chunk = static_cast<const FixedWidthChunk&>(child);
-            return *reinterpret_cast<const double*>(
-                chunk.ValueAt(static_cast<int64_t>(index)));
+            const auto* value = chunk.ValueAt(static_cast<int64_t>(index));
+            switch (element_type) {
+                case DataType::INT8:
+                case DataType::INT16:
+                case DataType::INT32:
+                    return static_cast<T>(
+                        *reinterpret_cast<const int32_t*>(value));
+                case DataType::INT64:
+                    return static_cast<T>(
+                        *reinterpret_cast<const int64_t*>(value));
+                case DataType::FLOAT:
+                    return static_cast<T>(
+                        *reinterpret_cast<const float*>(value));
+                case DataType::DOUBLE:
+                    return static_cast<T>(
+                        *reinterpret_cast<const double*>(value));
+                default:
+                    ThrowInfo(Unsupported,
+                              "unsupported array element type {}",
+                              element_type);
+            }
         } else if constexpr (std::is_same_v<ValueType, std::string_view> ||
                              std::is_same_v<ValueType, std::string>) {
-            AssertInfo(IsStringDataType(element_type),
-                       "requested string from array element type {}",
-                       element_type);
             const auto& chunk = static_cast<const StringChunk&>(child);
             const auto value = chunk[static_cast<int>(index)];
             return T(value.data(), value.size());
         } else {
             static_assert(AlwaysFalse<T>,
-                          "unsupported ArrayValueView value type");
+                          "unsupported scalar element value type");
         }
     }
 
@@ -481,7 +468,8 @@ class ColumnarArrayChunk final : public Chunk {
                 ScalarFieldProto& output) {
         output.Clear();
 
-        if (GetElementType(type) == DataType::ARRAY) {
+        const auto element_type = GetElementType(type);
+        if (element_type == DataType::ARRAY) {
             const auto& child_type = type.array_element();
             const auto& nested = static_cast<const ColumnarArrayChunk&>(child);
             auto* data = output.mutable_array_data();
@@ -504,64 +492,72 @@ class ColumnarArrayChunk final : public Chunk {
             return;
         }
 
-        switch (GetElementType(type)) {
+        const auto begin_index = static_cast<size_t>(begin);
+        const auto end_index = static_cast<size_t>(end);
+        const auto element_count = end_index - begin_index;
+        switch (element_type) {
             case DataType::BOOL: {
                 auto* data = output.mutable_bool_data()->mutable_data();
-                data->Reserve(ProtoReserveSize(end - begin));
-                for (auto i = begin; i < end; ++i) {
-                    data->Add(GetData<bool>(type, child, i));
-                }
+                data->Reserve(ProtoReserveSize(element_count));
+                const auto& chunk = static_cast<const FixedWidthChunk&>(child);
+                const auto* values =
+                    reinterpret_cast<const uint8_t*>(chunk.Data());
+                data->Add(values + begin_index, values + end_index);
                 return;
             }
             case DataType::INT8:
             case DataType::INT16:
             case DataType::INT32: {
                 auto* data = output.mutable_int_data()->mutable_data();
-                data->Reserve(ProtoReserveSize(end - begin));
-                for (auto i = begin; i < end; ++i) {
-                    data->Add(GetData<int32_t>(type, child, i));
-                }
+                data->Reserve(ProtoReserveSize(element_count));
+                const auto& chunk = static_cast<const FixedWidthChunk&>(child);
+                const auto* values =
+                    reinterpret_cast<const int32_t*>(chunk.Data());
+                data->Add(values + begin_index, values + end_index);
                 return;
             }
             case DataType::INT64: {
                 auto* data = output.mutable_long_data()->mutable_data();
-                data->Reserve(ProtoReserveSize(end - begin));
-                for (auto i = begin; i < end; ++i) {
-                    data->Add(GetData<int64_t>(type, child, i));
-                }
+                data->Reserve(ProtoReserveSize(element_count));
+                const auto& chunk = static_cast<const FixedWidthChunk&>(child);
+                const auto* values =
+                    reinterpret_cast<const int64_t*>(chunk.Data());
+                data->Add(values + begin_index, values + end_index);
                 return;
             }
             case DataType::FLOAT: {
                 auto* data = output.mutable_float_data()->mutable_data();
-                data->Reserve(ProtoReserveSize(end - begin));
-                for (auto i = begin; i < end; ++i) {
-                    data->Add(GetData<float>(type, child, i));
-                }
+                data->Reserve(ProtoReserveSize(element_count));
+                const auto& chunk = static_cast<const FixedWidthChunk&>(child);
+                const auto* values =
+                    reinterpret_cast<const float*>(chunk.Data());
+                data->Add(values + begin_index, values + end_index);
                 return;
             }
             case DataType::DOUBLE: {
                 auto* data = output.mutable_double_data()->mutable_data();
-                data->Reserve(ProtoReserveSize(end - begin));
-                for (auto i = begin; i < end; ++i) {
-                    data->Add(GetData<double>(type, child, i));
-                }
+                data->Reserve(ProtoReserveSize(element_count));
+                const auto& chunk = static_cast<const FixedWidthChunk&>(child);
+                const auto* values =
+                    reinterpret_cast<const double*>(chunk.Data());
+                data->Add(values + begin_index, values + end_index);
                 return;
             }
             case DataType::STRING:
             case DataType::VARCHAR: {
                 auto* data = output.mutable_string_data()->mutable_data();
-                data->Reserve(ProtoReserveSize(end - begin));
+                data->Reserve(ProtoReserveSize(element_count));
+                const auto& chunk = static_cast<const StringChunk&>(child);
                 for (auto i = begin; i < end; ++i) {
-                    const auto value =
-                        GetData<std::string_view>(type, child, i);
-                    data->Add(std::string(value));
+                    const auto value = chunk[static_cast<int>(i)];
+                    data->Add()->assign(value.data(), value.size());
                 }
                 return;
             }
             default:
                 ThrowInfo(Unsupported,
                           "unsupported ArrayValue leaf type {}",
-                          GetElementType(type));
+                          element_type);
         }
     }
 

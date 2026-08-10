@@ -209,14 +209,12 @@ class ArrayValueView {
     template <typename T>
     T
     get_data(size_t index) const {
-        AssertInitialized();
-        AssertNotNull();
         const auto length = static_cast<size_t>(end_ - begin_);
         AssertInfo(index < length,
                    "array view index {} out of range {}",
                    index,
                    length);
-        return ColumnarArrayChunk::GetData<T>(
+        return ColumnarArrayChunk::ReadScalarElement<T>(
             *type_, *child_, static_cast<size_t>(begin_ + index));
     }
 
