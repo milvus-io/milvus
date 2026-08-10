@@ -80,6 +80,13 @@ SegcoreSetEnableGISSplitFusion(const bool value) {
 }
 
 extern "C" void
+SegcoreSetScanPinUntilCellExhausted(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_scan_pin_until_cell_exhausted(value);
+}
+
+extern "C" void
 SegcoreSetVisibilityFilterEnabled(const bool value) {
     // Deprecated compatibility shim: row visibility filtering is always
     // enforced and this value is ignored. The symbol survives so callers
