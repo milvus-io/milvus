@@ -13,6 +13,26 @@ enum class JsonExistValueType : uint8_t {
   Bool,
 };
 
+/// Stable discriminant carried over the FFI boundary so the C++ side can
+/// classify an error without parsing the Display text (whose wording is a
+/// human-facing detail, not a contract). Exported through cbindgen; values
+/// are part of the C ABI -- append, never renumber.
+enum class TantivyBindingErrorCode : int32_t {
+  Ok = 0,
+  /// Malformed caller input (analyzer params, query arguments).
+  InvalidArgument = 1,
+  /// I/O failure underneath the index (read/open); typically transient.
+  Io = 2,
+  /// Persisted index data failed validation / deserialization.
+  DataCorruption = 3,
+  /// JSON (de)serialization failure.
+  Json = 4,
+  /// Any other tantivy engine error.
+  Tantivy = 5,
+  /// Binding-internal error (ad-hoc failures, poisoned locks, ...).
+  Internal = 6,
+};
+
 enum class TantivyDataType : uint8_t {
   Text,
   Keyword,
@@ -96,6 +116,9 @@ struct RustResult {
   bool success;
   Value value;
   const char *error;
+  /// 0 (Ok) on success. Carried explicitly so the C++ side classifies by
+  /// discriminant instead of parsing the error text.
+  TantivyBindingErrorCode error_code;
 };
 
 using SetBitsetFn = void(*)(void*, const uint32_t*, uintptr_t);
