@@ -15,20 +15,49 @@
 // limitations under the License.
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <functional>
+#include <memory>
 #include <mutex>
+#include <optional>
+#include <vector>
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
+#include "common/EasyAssert.h"
 #include "common/OffsetMapping.h"
 #include "common/SealedOffsetMapping.h"
 #include "common/bson_view.h"
+#include "mmap/ChunkedColumnScanCommon.h"
 namespace milvus {
 
 using namespace milvus::cachinglayer;
 
 class ChunkedColumnInterface {
  public:
+    using ScanValueKind = milvus::ScanValueKind;
+    using ValueView = milvus::ValueView;
+    using ScanBatch = milvus::ScanBatch;
+    using ScanReadMode = milvus::ScanReadMode;
+    using ScanCursor = milvus::ScanCursor;
+    using ScanPinPolicy = milvus::ScanPinPolicy;
+    using ScanOptions = milvus::ScanOptions;
+    using ScanResult = milvus::ScanResult;
+    using OffsetView = milvus::OffsetView;
+    using TakeLocation = milvus::TakeLocation;
+    using TakePlan = milvus::TakePlan;
+    using CellSkipPredicate = milvus::CellSkipPredicate;
+    using CellLocation = milvus::CellLocation;
+    using PlannedCellRange = milvus::PlannedCellRange;
+    using ScanPlan = milvus::ScanPlan;
+    using ColumnPlanner = milvus::ColumnPlanner;
+    using OwnedTakeData = milvus::OwnedTakeData;
+    using TakeOptions = milvus::TakeOptions;
+    using TakeResult = milvus::TakeResult;
+    using TakeResultPtr = milvus::TakeResultPtr;
+    using TakeCellPin = std::function<PinWrapper<Chunk*>(int64_t)>;
+
     virtual ~ChunkedColumnInterface() = default;
 
     // Check if this column is part of a multi-field column group.
@@ -164,6 +193,39 @@ class ChunkedColumnInterface {
                    size,
                    chunk->RowNums());
         chunk->ApplyValidityMask(offset, size, valid_result);
+    }
+
+    virtual ScanResult
+    Scan(milvus::OpContext* op_ctx, const ScanOptions& options) const;
+
+    // Return the one immutable Cell planner owned by this Column generation.
+    // All logical row/offset to Cell conversion must route through it.
+    const ColumnPlanner&
+    Planner() const;
+
+    // Convenience positional access. The default Raw implementation plans
+    // Cell-local locations before executing Take; other backends may consume
+    // the segment offsets directly. Results preserve input order and
+    // duplicates.
+    virtual TakeResultPtr
+    Take(milvus::OpContext* op_ctx, const TakeOptions& options) const;
+
+    // Execute a prepared Cell-local positional plan. This overload serves the
+    // default Raw implementation and generated columns; reader-backed
+    // backends with different coordinates override Take(TakeOptions).
+    virtual TakeResultPtr
+    Take(milvus::OpContext* op_ctx,
+         TakePlan plan,
+         ScanValueKind value_kind) const;
+
+    // Return a generation-stable accessor used by the default Raw Take
+    // implementation to pin one Cell at a time after Take() returns. The
+    // accessor must own the cache resources it needs; it must not capture a
+    // bare column pointer. The caller keeps op_ctx alive until borrowed access
+    // and any GetOwn() materialization are complete.
+    virtual TakeCellPin
+    MakeTakeCellPin(milvus::OpContext* op_ctx) const {
+        return {};
     }
 
     // Get number of rows before a specific chunk
@@ -361,6 +423,14 @@ class ChunkedColumnInterface {
     }
 
  protected:
+    virtual std::unique_ptr<ColumnPlanner>
+    BuildPlanner() const;
+
+    virtual std::optional<DataType>
+    GetDefaultScanDataType() const {
+        return std::nullopt;
+    }
+
     FixedVector<bool> valid_data_;
     std::vector<int64_t> valid_count_per_chunk_;
     std::vector<int64_t> num_valid_rows_until_chunk_;
@@ -399,6 +469,10 @@ class ChunkedColumnInterface {
         }
         return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
     }
+
+ private:
+    mutable std::once_flag planner_once_;
+    mutable std::unique_ptr<ColumnPlanner> planner_;
 };
 
 }  // namespace milvus

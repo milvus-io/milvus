@@ -829,6 +829,12 @@ func InitGISSplitFusion(params *paramtable.ComponentParam) error {
 	return nil
 }
 
+func InitScanPinPolicy(params *paramtable.ComponentParam) error {
+	enableStickyPin := C.bool(params.QueryNodeCfg.ScanPinUntilCellExhausted.GetAsBool())
+	C.SegcoreSetScanPinUntilCellExhausted(enableStickyPin)
+	return nil
+}
+
 func CleanRemoteChunkManager() {
 	C.CleanRemoteChunkManagerSingleton()
 }

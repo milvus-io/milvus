@@ -246,6 +246,16 @@ class SegcoreConfig {
         return enable_gis_split_fusion_;
     }
 
+    void
+    set_scan_pin_until_cell_exhausted(bool value) {
+        scan_pin_until_cell_exhausted_ = value;
+    }
+
+    bool
+    get_scan_pin_until_cell_exhausted() const {
+        return scan_pin_until_cell_exhausted_;
+    }
+
  private:
     inline static const std::unordered_set<std::string>
         valid_dense_vector_index_type = {
@@ -270,6 +280,7 @@ class SegcoreConfig {
     inline static bool refine_with_quant_flag_ = false;
     inline static bool enable_geometry_cache_ = false;
     inline static bool enable_gis_split_fusion_ = false;
+    inline static bool scan_pin_until_cell_exhausted_ = false;
     inline static bool prefer_field_data_when_index_has_raw_data_ = false;
     inline static bool reject_remote_vector_output_ = false;
     inline static float interim_index_mem_expansion_rate_ = 1.15f;

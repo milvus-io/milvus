@@ -43,6 +43,41 @@ using namespace milvus::segcore;
 
 namespace {
 
+class InspectableSegmentExpr : public SegmentExpr {
+ public:
+    using SegmentExpr::SegmentExpr;
+
+    bool
+    DataScanInitialized() const {
+        return data_access_mode_ != DataAccessMode::Uninitialized;
+    }
+
+    bool
+    HasRetainedDataScanColumn() const {
+        return data_scan_column_ != nullptr;
+    }
+
+    int64_t
+    CurrentDataChunkID() const {
+        return current_data_chunk_;
+    }
+
+    int64_t
+    CurrentDataChunkPosition() const {
+        return current_data_chunk_pos_;
+    }
+
+    int64_t
+    CurrentExecutionPosition() const {
+        return current_data_global_pos_;
+    }
+
+    int64_t
+    NextBatchSize() {
+        return GetNextBatchSize();
+    }
+};
+
 std::unique_ptr<SegmentSealed>
 CreateTwoChunkSealed(const SchemaPtr& schema,
                      const GeneratedData& first,
@@ -602,20 +637,377 @@ TEST_F(OffsetsEvalCorrectnessTest,
     }
 }
 
-// Sealed raw data is chunked by binlog. Cover the fixed-width branch with
-// candidates from a skipped first binlog followed by a probed second binlog.
-TEST_F(OffsetsEvalCorrectnessTest,
-       SealedScalarSkipBranchKeepsBitmapCursorAligned) {
+TEST_F(OffsetsEvalCorrectnessTest, SealedOffsetTakeDoesNotApplySkipIndex) {
     auto query_context = std::make_shared<QueryContext>(
         DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
     auto seg_expr = MakeDirectSegmentExpr(
         sealed_.get(), i64_fid_, DataType::INT64, *query_context);
-    OffsetVector offsets;
-    for (auto offset : std::vector<int32_t>{0, 1, 2, 3, 16, 17, 18, 19}) {
-        offsets.emplace_back(offset);
+    OffsetVector offsets{0, 16, 1, 17};
+
+    int skip_checks = 0;
+    auto reject_every_cell =
+        [&](const milvus::SkipIndex&, FieldId, int) {
+            ++skip_checks;
+            return true;
+        };
+
+    int64_t rows_seen = 0;
+    auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
+        const int64_t* data,
+        const bool*,
+        const int32_t*,
+        int size,
+        TargetBitmapView result,
+        TargetBitmapView) {
+        ASSERT_NE(data, nullptr);
+        rows_seen += size;
+        for (int i = 0; i < size; ++i) {
+            result[i] = true;
+        }
+    };
+
+    TargetBitmap result(offsets.size(), false);
+    TargetBitmap valid(offsets.size(), true);
+    EXPECT_EQ(seg_expr->ProcessDataByOffsets<int64_t>(evaluate_batch,
+                                                      reject_every_cell,
+                                                      &offsets,
+                                                      TargetBitmapView(result),
+                                                      TargetBitmapView(valid)),
+              static_cast<int64_t>(offsets.size()));
+    EXPECT_EQ(skip_checks, 0);
+    EXPECT_EQ(rows_seen, static_cast<int64_t>(offsets.size()));
+    EXPECT_EQ(result.count(), offsets.size());
+}
+
+TEST_F(OffsetsEvalCorrectnessTest,
+       SequentialScanAdvancesGlobalAndChunkPositions) {
+    auto query_context = std::make_shared<QueryContext>(
+        DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
+    InspectableSegmentExpr seg_expr(std::vector<ExprPtr>{},
+                                    "scan cursor probe",
+                                    query_context->get_op_context(),
+                                    sealed_.get(),
+                                    i64_fid_,
+                                    std::vector<std::string>{},
+                                    DataType::INT64,
+                                    N,
+                                    /*batch_size=*/4,
+                                    query_context->get_consistency_level());
+    auto evaluate_batch =
+        []<FilterType filter_type = FilterType::sequential>(const int64_t*,
+                                                            const bool*,
+                                                            const int32_t*,
+                                                            int,
+                                                            TargetBitmapView,
+                                                            TargetBitmapView){};
+    std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+
+    TargetBitmap first_res(4, false);
+    TargetBitmap first_valid(4, true);
+    EXPECT_EQ(
+        seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
+                                            no_skip,
+                                            TargetBitmapView(first_res),
+                                            TargetBitmapView(first_valid)),
+        4);
+    ASSERT_TRUE(seg_expr.DataScanInitialized());
+    EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 4);
+    EXPECT_EQ(seg_expr.CurrentDataChunkID(), 0);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 4);
+
+    TargetBitmap second_res(4, false);
+    TargetBitmap second_valid(4, true);
+    EXPECT_EQ(
+        seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
+                                            no_skip,
+                                            TargetBitmapView(second_res),
+                                            TargetBitmapView(second_valid)),
+        4);
+    EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 8);
+    EXPECT_EQ(seg_expr.CurrentDataChunkID(), 0);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 8);
+}
+
+TEST_F(OffsetsEvalCorrectnessTest,
+       SequentialScanExecutionBatchCrossesColumnChunks) {
+    auto query_context = std::make_shared<QueryContext>(
+        DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
+    InspectableSegmentExpr seg_expr(std::vector<ExprPtr>{},
+                                    "cross-chunk scan cursor probe",
+                                    query_context->get_op_context(),
+                                    sealed_.get(),
+                                    i64_fid_,
+                                    std::vector<std::string>{},
+                                    DataType::INT64,
+                                    N,
+                                    /*batch_size=*/20,
+                                    query_context->get_consistency_level());
+    std::vector<int64_t> callback_sizes;
+    auto evaluate_batch =
+        [&callback_sizes]<FilterType filter_type = FilterType::sequential>(
+            const int64_t* data,
+            const bool*,
+            const int32_t*,
+            int size,
+            TargetBitmapView,
+            TargetBitmapView) {
+        ASSERT_NE(data, nullptr);
+        callback_sizes.push_back(size);
+    };
+    std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+
+    TargetBitmap res(20, false);
+    TargetBitmap valid(20, true);
+    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
+                                                  no_skip,
+                                                  TargetBitmapView(res),
+                                                  TargetBitmapView(valid)),
+              20);
+    EXPECT_EQ(callback_sizes, (std::vector<int64_t>{16, 4}));
+    EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 20);
+    EXPECT_EQ(seg_expr.CurrentDataChunkID(), 1);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 4);
+}
+
+TEST_F(OffsetsEvalCorrectnessTest,
+       SequentialScanAppliesLoadedPayloadSkipAfterReadingTheCell) {
+    ASSERT_EQ(sealed_->GetSkipIndex()->GetMetricsSource(i64_fid_),
+              SkipIndex::MetricsSource::LoadedPayload);
+    auto query_context = std::make_shared<QueryContext>(
+        DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
+    InspectableSegmentExpr seg_expr(std::vector<ExprPtr>{},
+                                    "loaded skip scan probe",
+                                    query_context->get_op_context(),
+                                    sealed_.get(),
+                                    i64_fid_,
+                                    std::vector<std::string>{},
+                                    DataType::INT64,
+                                    N,
+                                    /*batch_size=*/20,
+                                    query_context->get_consistency_level());
+
+    std::vector<std::pair<bool, int64_t>> callbacks;
+    auto evaluate_batch =
+        [&callbacks]<FilterType filter_type = FilterType::sequential>(
+            const int64_t* data,
+            const bool*,
+            const int32_t*,
+            int size,
+            TargetBitmapView,
+            TargetBitmapView) {
+        callbacks.emplace_back(data == nullptr, size);
+    };
+    auto skip_first_cell = [](const milvus::SkipIndex&, FieldId, int chunk_id) {
+        return chunk_id == 0;
+    };
+
+    TargetBitmap res(20, false);
+    TargetBitmap valid(20, true);
+    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
+                                                  skip_first_cell,
+                                                  TargetBitmapView(res),
+                                                  TargetBitmapView(valid)),
+              20);
+    EXPECT_EQ(callbacks,
+              (std::vector<std::pair<bool, int64_t>>{{true, 16}, {false, 4}}));
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 20);
+}
+
+TEST_F(OffsetsEvalCorrectnessTest,
+       SequentialScanUsesGlobalPositionBeforeBackendSelection) {
+    auto query_context = std::make_shared<QueryContext>(
+        DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
+    InspectableSegmentExpr seg_expr(std::vector<ExprPtr>{},
+                                    "pre-bind scan position probe",
+                                    query_context->get_op_context(),
+                                    sealed_.get(),
+                                    i64_fid_,
+                                    std::vector<std::string>{},
+                                    DataType::INT64,
+                                    N,
+                                    /*batch_size=*/20,
+                                    query_context->get_consistency_level());
+
+    // Skip the first execution batch before Scan has selected or retained a
+    // column generation. The old generation has chunk sizes [16, 16], so its
+    // cached chunk coordinate for row 20 would be (1, 4).
+    ASSERT_FALSE(seg_expr.DataScanInitialized());
+    seg_expr.MoveCursor();
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 20);
+    ASSERT_FALSE(seg_expr.DataScanInitialized());
+
+    // Publish the same logical rows with different chunk geometry. Reusing the
+    // old (1, 4) coordinate against [24, 8] would incorrectly report row 28 as
+    // the execution position. Batch sizing and the first Scan must instead use
+    // the segment-global row 20.
+    std::vector<FieldDataPtr> chunks;
+    int64_t next_value = 1000;
+    for (const int64_t rows : {24, 8}) {
+        auto field_data =
+            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+        std::vector<int64_t> values(rows);
+        std::iota(values.begin(), values.end(), next_value);
+        next_value += rows;
+        field_data->FillFieldData(values.data(), rows);
+        chunks.push_back(std::move(field_data));
+    }
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                    kPartitionID,
+                                                    kSegmentID,
+                                                    i64_fid_.get(),
+                                                    std::move(chunks),
+                                                    cm);
+    sealed_->DropFieldData(i64_fid_);
+    const auto status = LoadFieldData(sealed_.get(), &load_info);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(sealed_->chunk_size(i64_fid_, 0), 24);
+    ASSERT_EQ(sealed_->chunk_size(i64_fid_, 1), 8);
+
+    ASSERT_EQ(seg_expr.NextBatchSize(), 12);
+    std::vector<int64_t> values_seen;
+    auto evaluate_batch =
+        [&values_seen]<FilterType filter_type = FilterType::sequential>(
+            const int64_t* data,
+            const bool*,
+            const int32_t*,
+            int size,
+            TargetBitmapView,
+            TargetBitmapView) {
+        ASSERT_NE(data, nullptr);
+        values_seen.insert(values_seen.end(), data, data + size);
+    };
+    std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+    TargetBitmap res(12, false);
+    TargetBitmap valid(12, true);
+    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
+                                                  no_skip,
+                                                  TargetBitmapView(res),
+                                                  TargetBitmapView(valid)),
+              12);
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), N);
+    EXPECT_EQ(seg_expr.CurrentDataChunkID(), 1);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 8);
+    std::vector<int64_t> expected(12);
+    std::iota(expected.begin(), expected.end(), 1020);
+    EXPECT_EQ(values_seen, expected);
+}
+
+TEST_F(OffsetsEvalCorrectnessTest,
+       GrowingChunkCacheRebasesFromGlobalPositionAfterShortCircuit) {
+    auto query_context = std::make_shared<QueryContext>(
+        DEAFULT_QUERY_ID, growing_.get(), N, MAX_TIMESTAMP);
+    InspectableSegmentExpr seg_expr(std::vector<ExprPtr>{},
+                                    "growing chunk position probe",
+                                    query_context->get_op_context(),
+                                    growing_.get(),
+                                    i64_fid_,
+                                    std::vector<std::string>{},
+                                    DataType::INT64,
+                                    N,
+                                    /*batch_size=*/4,
+                                    query_context->get_consistency_level());
+    auto evaluate_batch =
+        []<FilterType filter_type = FilterType::sequential>(const int64_t*,
+                                                            const bool*,
+                                                            const int32_t*,
+                                                            int,
+                                                            TargetBitmapView,
+                                                            TargetBitmapView){};
+    std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+
+    auto process_batch = [&]() {
+        TargetBitmap res(4, false);
+        TargetBitmap valid(4, true);
+        EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
+                                                      no_skip,
+                                                      TargetBitmapView(res),
+                                                      TargetBitmapView(valid)),
+                  4);
+    };
+
+    process_batch();
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 4);
+    seg_expr.MoveCursor();
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 8);
+    process_batch();
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 12);
+}
+
+TEST_F(OffsetsEvalCorrectnessTest,
+       SequentialScanKeepsColumnAliveAcrossFieldDrop) {
+    auto query_context = std::make_shared<QueryContext>(
+        DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
+    std::weak_ptr<ChunkedColumnInterface> weak_column;
+
+    {
+        auto column = sealed_->GetChunkedColumn(i64_fid_);
+        ASSERT_NE(column, nullptr);
+        weak_column = column;
+        column.reset();
+
+        InspectableSegmentExpr seg_expr(std::vector<ExprPtr>{},
+                                        "scan column lifetime probe",
+                                        query_context->get_op_context(),
+                                        sealed_.get(),
+                                        i64_fid_,
+                                        std::vector<std::string>{},
+                                        DataType::INT64,
+                                        N,
+                                        /*batch_size=*/4,
+                                        query_context->get_consistency_level());
+        int64_t rows_seen = 0;
+        auto evaluate_batch =
+            [&rows_seen]<FilterType filter_type = FilterType::sequential>(
+                const int64_t* data,
+                const bool*,
+                const int32_t*,
+                int size,
+                TargetBitmapView,
+                TargetBitmapView) {
+            ASSERT_NE(data, nullptr);
+            rows_seen += size;
+        };
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+
+        TargetBitmap first_res(4, false);
+        TargetBitmap first_valid(4, true);
+        EXPECT_EQ(
+            seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
+                                                no_skip,
+                                                TargetBitmapView(first_res),
+                                                TargetBitmapView(first_valid)),
+            4);
+        EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
+
+        sealed_->DropFieldData(i64_fid_);
+        ASSERT_FALSE(sealed_->HasFieldData(i64_fid_));
+        ASSERT_FALSE(weak_column.expired())
+            << "the expression must retain its selected source column";
+
+        // Skip one execution batch after the live segment drops the field.
+        // The next window must prepare from the retained column generation
+        // instead of asking the segment for its now-missing field again.
+        seg_expr.MoveCursor();
+        EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
+        EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 8);
+
+        TargetBitmap second_res(4, false);
+        TargetBitmap second_valid(4, true);
+        EXPECT_EQ(
+            seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
+                                                no_skip,
+                                                TargetBitmapView(second_res),
+                                                TargetBitmapView(second_valid)),
+            4);
+        EXPECT_EQ(rows_seen, 8);
     }
 
-    VerifySkipCursorContract<int64_t>(*seg_expr, &offsets, 0);
+    EXPECT_TRUE(weak_column.expired());
 }
 
 // Exercise the production expression stack used by iterative filtering:
@@ -726,20 +1118,47 @@ TEST(OffsetsEvalProductionRegressionTest,
     }
 }
 
-// VARCHAR/JSON/ARRAY use get_views_by_offsets rather than chunk_data. Pin the
-// view branch separately because its validity storage and ownership differ.
-TEST_F(OffsetsEvalCorrectnessTest,
-       SealedViewSkipBranchKeepsBitmapCursorAligned) {
+TEST_F(OffsetsEvalCorrectnessTest, SealedViewTakeDoesNotApplySkipIndex) {
     auto query_context = std::make_shared<QueryContext>(
         DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
     auto seg_expr = MakeDirectSegmentExpr(
         sealed_.get(), varchar_fid_, DataType::VARCHAR, *query_context);
-    OffsetVector offsets;
-    for (auto offset : std::vector<int32_t>{0, 1, 2, 3, 16, 17, 18, 19}) {
-        offsets.emplace_back(offset);
-    }
+    OffsetVector offsets{0, 16, 1, 17};
 
-    VerifySkipCursorContract<std::string_view>(*seg_expr, &offsets, 0);
+    int skip_checks = 0;
+    auto reject_every_cell =
+        [&](const milvus::SkipIndex&, FieldId, int) {
+            ++skip_checks;
+            return true;
+        };
+
+    int64_t rows_seen = 0;
+    auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
+        const std::string_view* data,
+        const bool*,
+        const int32_t*,
+        int size,
+        TargetBitmapView result,
+        TargetBitmapView) {
+        ASSERT_NE(data, nullptr);
+        rows_seen += size;
+        for (int i = 0; i < size; ++i) {
+            result[i] = true;
+        }
+    };
+
+    TargetBitmap result(offsets.size(), false);
+    TargetBitmap valid(offsets.size(), true);
+    EXPECT_EQ(seg_expr->ProcessDataByOffsets<std::string_view>(
+                  evaluate_batch,
+                  reject_every_cell,
+                  &offsets,
+                  TargetBitmapView(result),
+                  TargetBitmapView(valid)),
+              static_cast<int64_t>(offsets.size()));
+    EXPECT_EQ(skip_checks, 0);
+    EXPECT_EQ(rows_seen, static_cast<int64_t>(offsets.size()));
+    EXPECT_EQ(result.count(), offsets.size());
 }
 
 // VECTOR_ARRAY has its own chunk_view branch. There is no production
@@ -760,6 +1179,70 @@ TEST_F(OffsetsEvalCorrectnessTest,
     }
 
     VerifySkipCursorContract<VectorArrayView>(*seg_expr, &offsets, 0);
+}
+
+TEST_F(OffsetsEvalCorrectnessTest,
+       SequentialVectorArrayScanKeepsCursorAlignedAcrossSkippedBatch) {
+    auto query_context = std::make_shared<QueryContext>(
+        DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
+    InspectableSegmentExpr seg_expr(std::vector<ExprPtr>{},
+                                    "vector array scan cursor probe",
+                                    query_context->get_op_context(),
+                                    sealed_.get(),
+                                    vector_array_fid_,
+                                    std::vector<std::string>{},
+                                    DataType::VECTOR_ARRAY,
+                                    N,
+                                    /*batch_size=*/4,
+                                    query_context->get_consistency_level());
+    auto evaluate_batch = []<FilterType filter_type = FilterType::sequential>(
+        const VectorArrayView*,
+        const bool*,
+        const int32_t*,
+        int,
+        TargetBitmapView,
+        TargetBitmapView){};
+    std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+
+    auto process_batch = [&]() {
+        TargetBitmap res(4, false);
+        TargetBitmap valid(4, true);
+        EXPECT_EQ(seg_expr.ProcessDataChunks<VectorArrayView>(
+                      evaluate_batch,
+                      no_skip,
+                      TargetBitmapView(res),
+                      TargetBitmapView(valid)),
+                  4);
+    };
+
+    process_batch();
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 4);
+    EXPECT_EQ(seg_expr.CurrentDataChunkID(), 0);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 4);
+    EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
+
+    // Simulate a conjunction short-circuit: skip the second expression batch
+    // without preparing scan resources for that window.
+    seg_expr.MoveCursor();
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 8);
+    EXPECT_EQ(seg_expr.CurrentDataChunkID(), 0);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 8);
+    EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
+
+    // A second consecutive short-circuit advances both logical coordinates
+    // without asking the retained cursor to read or pin data.
+    seg_expr.MoveCursor();
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 12);
+    EXPECT_EQ(seg_expr.CurrentDataChunkID(), 0);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 12);
+    EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
+
+    // Resume the VECTOR_ARRAY scan at the post-skip global position.
+    process_batch();
+    EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 16);
+    EXPECT_EQ(seg_expr.CurrentDataChunkID(), 0);
+    EXPECT_EQ(seg_expr.CurrentDataChunkPosition(), 16);
+    EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
 }
 
 TEST_F(OffsetsEvalCorrectnessTest,
@@ -1109,4 +1592,71 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
     EXPECT_FALSE(valid[1]);
     EXPECT_TRUE(valid[2]);
     EXPECT_TRUE(valid[3]);
+}
+
+// F02 regression: a validity-only scan passes the same TargetBitmapView as both
+// destinations, so each NULL must be masked exactly once. ApplyValidMask must
+// still clear every NULL row when result and validity alias the same bitmap.
+TEST(ScanValidityMaskTest, AliasedDestinationClearsNullsExactlyOnce) {
+    const bool valid_data[] = {
+        true, false, true, false, true, true, false, true, false, false, true};
+    const int size = static_cast<int>(std::size(valid_data));
+
+    // Distinct result/validity destinations: every NULL clears both bitmaps.
+    TargetBitmap distinct_res(size, true);
+    TargetBitmap distinct_valid(size, true);
+    ApplyValidMask(ValidityView::FromExpanded(valid_data),
+                   TargetBitmapView(distinct_res),
+                   TargetBitmapView(distinct_valid),
+                   size);
+    for (int i = 0; i < size; ++i) {
+        EXPECT_EQ(bool(distinct_res[i]), valid_data[i]);
+        EXPECT_EQ(bool(distinct_valid[i]), valid_data[i]);
+    }
+
+    // Aliased destination (the ProcessDataChunksForValid shape): the same
+    // bitmap is passed for result and validity, and NULLs are cleared once.
+    TargetBitmap aliased(size, true);
+    ApplyValidMask(ValidityView::FromExpanded(valid_data),
+                   TargetBitmapView(aliased),
+                   TargetBitmapView(aliased),
+                   size);
+    for (int i = 0; i < size; ++i) {
+        EXPECT_EQ(bool(aliased[i]), valid_data[i]);
+    }
+}
+
+// F02 regression for the packed-validity overload used by Raw and Vortex scans.
+TEST(ScanValidityMaskTest, AliasedPackedDestinationClearsNullsOnce) {
+    std::vector<uint8_t> packed((11 + 7) / 8, 0xff);
+    // Rows 1, 3, 8, 9 are NULL.
+    for (int i : {1, 3, 8, 9}) {
+        packed[i >> 3] &= static_cast<uint8_t>(~(uint8_t{1} << (i & 0x07)));
+    }
+    auto validity = ValidityView::FromPacked(packed.data());
+
+    TargetBitmap distinct_res(11, true);
+    TargetBitmap distinct_valid(11, true);
+    ApplyValidMask(validity,
+                   TargetBitmapView(distinct_res),
+                   TargetBitmapView(distinct_valid),
+                   11);
+    for (int i : {1, 3, 8, 9}) {
+        EXPECT_FALSE(distinct_res[i]);
+        EXPECT_FALSE(distinct_valid[i]);
+    }
+    for (int i : {0, 2, 4, 5, 6, 7, 10}) {
+        EXPECT_TRUE(distinct_res[i]);
+        EXPECT_TRUE(distinct_valid[i]);
+    }
+
+    TargetBitmap aliased(11, true);
+    ApplyValidMask(
+        validity, TargetBitmapView(aliased), TargetBitmapView(aliased), 11);
+    for (int i : {1, 3, 8, 9}) {
+        EXPECT_FALSE(aliased[i]);
+    }
+    for (int i : {0, 2, 4, 5, 6, 7, 10}) {
+        EXPECT_TRUE(aliased[i]);
+    }
 }
