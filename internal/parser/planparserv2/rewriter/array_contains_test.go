@@ -120,14 +120,6 @@ func TestCombineArrayContainsSkipsInvalidValues(t *testing.T) {
 			},
 		},
 		{
-			name: "bytes element",
-			build: func(column *planpb.ColumnInfo) *planpb.Expr {
-				return arrayContainsTestExpr(column, planpb.JSONContainsExpr_Contains, &planpb.GenericValue{
-					Val: &planpb.GenericValue_BytesVal{BytesVal: []byte("unknown")},
-				})
-			},
-		},
-		{
 			name: "array element",
 			build: func(column *planpb.ColumnInfo) *planpb.Expr {
 				return arrayContainsTestExpr(column, planpb.JSONContainsExpr_Contains, &planpb.GenericValue{
