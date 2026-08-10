@@ -295,9 +295,11 @@ The interface covers two operation groups:
 - scan operations for expression evaluation;
 - positional take/output operations for retrieve, requery, and bulk_subscript.
 
-`Scan` returns a persistent cursor of `ScanBatch` values for one expression
-leaf. The cursor receives each requested absolute row range through `Next` and
-pins only the resources needed to produce the returned batch.
+`Scan(ScanOptions)` creates one forward-only cursor for a physical expression
+leaf. Cursor construction records only the scan contract and starting segment
+offset; it does not plan a window, pin Cells, create a reader, or decode data.
+The physical expression tree and its cursors belong to one Segment and are not
+shared across Segments.
 
 Scan outputs:
 
@@ -354,14 +356,55 @@ Raw Cell or backend batch boundary. Validity-only mode is accepted only by
 nullable data scans, omits values, and may avoid data parsing when the backend
 can provide validity directly.
 
-With `ScanPinPolicy::PerCall`, the cursor retains no Cell between calls; each
-returned `ScanBatch::owner` keeps its own Cell pin, batch-local values, and
-normalized validity alive until that batch is released. With
-`ScanPinPolicy::UntilCellExhausted`, the cursor may additionally retain the
-current file/Cell plan across calls. An identical next plan reuses that pin;
-when the plan changes, the cursor releases the old plan before pinning the new
-one. The expression layer does not separately pin Cells or reopen the cursor
-between windows.
+Within that Column-owned planner flow, pruning decisions remain in Cell-ID form
+until execution creates the scan requests:
+
+1. A pre-pin planner uses only footer/statistics metadata loaded with the
+   segment and produces skipped Cell IDs.
+2. Non-nullable scans omit those Cells from the pin request. Nullable scans pin
+   every Cell in the window because data and validity share the same Cell.
+3. After pinning, Raw may run its payload-backed legacy SkipIndex on the
+   planner-retained Cells and add more skipped Cell IDs. Vortex has no
+   payload-backed post-pin skip phase.
+4. The Column-owned planner converts Cell decisions to ordered segment ranges.
+   Expression execution consumes that plan: it skips a non-nullable NoMatch
+   range without calling the cursor, or calls `Next(..., ValidityOnly)` for a
+   nullable NoMatch range. Vortex keeps physical planner plans and Cell IDs
+   scoped by source file; sparse row-id output represents matching rows, while
+   the validity side reader supplies nullable Unknown rows.
+
+Validity and data are currently stored in the same Cell. A nullable scan that
+needs field validity therefore pins every Cell intersecting the current window,
+including planner-NoMatch ranges. A non-nullable scan may omit planner-skipped
+Cells. Validity-only scans use the same Cell pin semantics and omit values from
+the public `ScanBatch`; a backend may still need to decode the combined physical
+representation to recover validity. Calling `ValidityOnly` for a non-nullable
+column is invalid; the execution planner advances such NoMatch ranges without a
+cursor call.
+
+`Next(position, length, mode, ScanBatch*)` returns at most one batch beginning
+at the exact absolute segment position. `length` is an upper bound, not a
+required batch size. Dense data batches may return early at a Raw Chunk, Vortex
+file, reader, or ownership boundary and never exceed
+`[position, position + length)`. The expression layer repeats `Next` until its
+own execution window is complete and advances by the returned `ScanBatch::size`.
+Raw returns at Chunk boundaries instead of copying or concatenating data.
+
+`DataAndValidity` returns values plus aligned validity when needed.
+`ValidityOnly` omits value construction and returns aligned validity for a
+nullable column. `ScanBatch::owner` retains the pin, Arrow data, normalized
+views, and validity mask required by that one batch.
+
+Short-circuiting has no cursor method. The execution layer advances its own
+position, and the next evaluated call passes the later absolute `position`.
+The forward-only cursor seeks without reading the intervening rows. The default
+`PerCall` pin policy releases a Cell with the batch owner; the experimental
+`UntilCellExhausted` policy may retain the current file/Cell plan across
+adjacent calls. An identical next plan reuses that pin; a forward seek or a
+different plan releases the old pin before the next plan is pinned. Neither
+policy permits a Vortex reader or decoded Arrow batch to be cached in the
+public cursor. The expression layer does not separately pin Cells or reopen
+the cursor between windows.
 
 Row-id scan supports:
 
@@ -408,8 +451,9 @@ Responsibilities:
   planner or row-prefix table.
 - Validate every file's Arrow field type against the Milvus `FieldMeta` before
   publishing the column. Direct scans use checked Arrow casts; physical
-  representations that require the existing normalization path fall back to
-  materialized raw-compatible scans instead of being reinterpreted in place.
+  representations that require Milvus normalization are converted per reader
+  batch, and `ScanBatch::owner` keeps the normalized Arrow data and derived
+  views alive without materializing a whole Raw Chunk.
 - Reject actual NULL rows returned for a non-nullable Milvus field across scan
   and take paths as `DataFormatBroken`.
 - Implement `Scan`.
@@ -427,11 +471,11 @@ Example:
 ```text
 UnaryExpr / BinaryRangeExpr
   -> ChunkedColumnInterface::Scan(ScanOutput::RowIds)
-  -> VortexColumn::Scan
-  -> VortexRowIdScanCursor
-  -> VortexPlanner::PlanForRowRange(predicate)
-  -> pin planned cells
-  -> VortexFormatReader::read_row_ids_with_plan
+  -> persistent Vortex ScanCursor
+  -> Next(window_start, window_length, DataAndValidity)
+     -> VortexPlanner::PlanForRowRange(predicate)
+     -> pin planned cells
+     -> VortexFormatReader::read_row_ids_with_plan
   -> bitmap assembly in expression execution
 ```
 
@@ -449,10 +493,11 @@ Example:
 ```text
 Expr data path
   -> ChunkedColumnInterface::Scan(ScanOutput::Data)
-  -> VortexDataScanCursor
-  -> VortexPlanner::PlanForRowRange(no predicate)
-  -> pin planned cells
-  -> VortexFormatReader::read_with_plan
+  -> persistent Vortex ScanCursor
+  -> Next(position, remaining_length, DataAndValidity)
+     -> VortexPlanner::PlanForRowRange(no predicate)
+     -> pin planned cells
+     -> VortexFormatReader::read_with_plan
   -> expression layer evaluates predicate
 ```
 
@@ -460,13 +505,23 @@ This is the current path for examples such as `LIKE`, `IN`, JSON path
 expressions, and array predicates when they cannot be represented as a Vortex
 predicate.
 
-Each expression leaf creates one persistent cursor with `Scan(ScanOptions)`.
-For every expression window it calls
-`ScanCursor::Next(position, length, mode, out)` with an absolute segment
-position. `length` is an upper bound: a Raw Cell or reader boundary may produce
-a shorter dense batch, and the expression layer continues from the returned
-batch end. A greater `position` advances the same cursor without reading the
-intervening rows.
+`VortexColumn::Scan` creates the persistent leaf cursor without opening any
+resources. Each `Next` plans only the requested absolute range, pins the planned
+Cells, opens a range reader, and returns its first physical batch. A later call
+replans from its supplied absolute position; the cursor does not retain a
+reader or decoded data between calls. Nullable row-id scans build both the
+predicate plan and the full validity plan, union their Cell IDs, and share one
+pin between the two readers; this intentionally pins predicate-pruned Cells
+because their validity is still needed. Non-nullable row-id scans can omit
+predicate-pruned Cells. Vortex does not run the legacy payload-dependent Raw
+SkipIndex path.
+
+Pin selection and reader execution consume the same per-call planner result.
+Predicate-pruned Vortex Cells remain file-scoped while plans are built and pins
+are selected; they are not exposed as a mutable public skip plan. The
+persistent cursor retains only configuration, its forward-only position, and
+an optional current-Cell pin under `UntilCellExhausted`. The scan path does not
+concatenate dense data through `IntoArray`.
 
 The expression layer keeps both its segment-global execution position and the
 existing chunk id/in-chunk offset cursor synchronized. Scan uses the global
@@ -474,10 +529,10 @@ position to describe its logical row window, while legacy Raw and Growing reads
 continue from the chunk cursor. For Vortex, that cursor describes only the
 logical file range and local row offset; maintaining it does not create a Raw
 Chunk, pin a Cell, or open a reader. Normal evaluation and conjunction
-short-circuit advance both representations. `Next` pins the Cell required by
-the requested position. The returned batch and the configured scan pin policy
-define how long that Cell stays pinned; the expression layer does not manage
-Cell pins separately or reopen the cursor between windows.
+short-circuit advance both representations. A short-circuited leaf does not
+call the scan cursor; the next evaluated call supplies the later segment
+offset. Separate leaves retain separate cursors even when they reference the
+same field, preserving the previous execution semantics.
 
 ### Offset Input Execution
 
