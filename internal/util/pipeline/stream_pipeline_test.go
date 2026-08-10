@@ -227,6 +227,12 @@ func TestDMLMsgPackBatcherTreatsInsertPacksAsBarriers(t *testing.T) {
 			wantPending: true,
 		},
 		{
+			name:        "delete batch stops before mixed insert delete pack",
+			first:       newDMLMsgPack(230, 240, newDeleteTsMsg(231)),
+			next:        newDMLMsgPack(241, 250, newInsertTsMsg(245), newDeleteTsMsg(246)),
+			wantPending: true,
+		},
+		{
 			name:  "mixed first pack does not drain next pack",
 			first: newDMLMsgPack(300, 310, newInsertTsMsg(301), newDeleteTsMsg(302)),
 			next:  newDMLMsgPack(311, 320, newDeleteTsMsg(315)),
