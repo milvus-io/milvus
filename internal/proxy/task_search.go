@@ -195,6 +195,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			"because the mustUsePartitionKey config is true"))
 	}
 
+	var err error
 	if !t.partitionKeyMode && len(t.request.GetPartitionNames()) > 0 {
 		// translate partition name to partition ids. Use regex-pattern to match partition name.
 		t.PartitionIDs, err = getPartitionIDsFromSnapshot(ctx, t.readSnapshot, t.request.GetPartitionNames())

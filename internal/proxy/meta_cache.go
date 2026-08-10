@@ -864,7 +864,8 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
 
-		collInfo, err := m.UpdateByName(ctx, database, collectionName)
+		var err error
+		collInfo, err = m.UpdateByName(ctx, database, collectionName)
 		if err != nil {
 			return nil, err
 		}
