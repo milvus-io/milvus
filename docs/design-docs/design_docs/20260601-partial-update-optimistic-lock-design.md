@@ -112,9 +112,6 @@ The internal message proto adds attempt-scoped commit-admission proof:
 message PartialUpdateCAS {
     uint64 read_ts = 1;
     int64 observed_pchannel_term = 2;
-
-    reserved 3, 4;
-    reserved "primary_key_field_id", "collection_id";
 }
 ```
 
