@@ -98,19 +98,29 @@ func NewSyncTask(ctx context.Context,
 		syncPack.WithBM25Stats(bm25Stats)
 	}
 
-	writeRetryAttempts := paramtable.Get().DataNodeCfg.ImportMaxWriteRetryAttempts.GetAsUint()
-	retryOpts := []retry.Option{
-		retry.Attempts(writeRetryAttempts), // default retry always
-		retry.MaxSleepTime(10 * time.Second),
-	}
 	task := syncmgr.NewSyncTask().
 		WithAllocator(allocator).
 		WithMetaCache(metaCache).
 		WithSchema(metaCache.GetSchema(0)). // TODO specify import schema if needed
 		WithSyncPack(syncPack).
 		WithStorageConfig(storageConfig).
-		WithWriteRetryOptions(retryOpts...)
+		WithWriteRetryOptions(newWriteRetryOptions()...)
 	return task, nil
+}
+
+// newWriteRetryOptions builds the retry options for import writes. The options are
+// order-sensitive: retry.Sleep raises maxSleepTime to 2*initial, so MaxSleepTime must
+// be applied last. The paramtable formatters guarantee both intervals are positive,
+// which keeps retry.Do from degenerating into a zero-delay loop under attempts=0.
+func newWriteRetryOptions() []retry.Option {
+	params := &paramtable.Get().DataNodeCfg
+	initialInterval := time.Duration(params.ImportWriteRetryInitialInterval.GetAsInt()) * time.Second
+	maxInterval := time.Duration(params.ImportWriteRetryMaxInterval.GetAsInt()) * time.Second
+	return []retry.Option{
+		retry.Attempts(params.ImportMaxWriteRetryAttempts.GetAsUint()), // 0 = unlimited, preserved on purpose
+		retry.Sleep(initialInterval),
+		retry.MaxSleepTime(maxInterval),
+	}
 }
 
 func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache.MetaCache) (*datapb.ImportSegmentInfo, error) {
