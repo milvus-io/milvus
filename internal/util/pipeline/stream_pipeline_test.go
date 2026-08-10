@@ -144,6 +144,7 @@ func (suite *StreamPipelineSuite) TestDMLMsgPackBatcherKeepsBufferedInsertPacksS
 		0,
 		false,
 		suite.channel,
+		nil,
 		staticMVCCGetter{},
 		WithMsgPackBatcher(NewDMLMsgPackBatcher(func() int { return 8 })),
 	)
