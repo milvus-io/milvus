@@ -19,7 +19,7 @@ set( GIT_REPOSITORY  "https://github.com/milvus-io/milvus-storage.git")
 message(STATUS "milvus-storage repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-storage version: ${milvus-storage_VERSION}")
 
-message(STATUS "Building milvus-storage-${milvus-storage_SOURCE_VER} from source")
+message(STATUS "Building milvus-storage-${milvus-storage_VERSION} from source")
 message(STATUS ${CMAKE_BUILD_TYPE})
 
 if ( ENABLE_AZURE_FS STREQUAL "ON" )
@@ -30,6 +30,19 @@ endif ()
 
 # Disable benchmark for milvus-storage (we don't need it and it may have missing deps)
 set(WITH_BENCHMARK OFF CACHE BOOL "" FORCE)
+
+set(WITH_VORTEX ON CACHE BOOL "" FORCE )
+
+# milvus-storage's Rust bridge now depends on crates that require Rust 1.92.
+# The top-level CMake cache may have been initialized by other Rust components
+# that intentionally build with 1.89, so reset Corrosion's cached Rust toolchain
+# before adding milvus-storage. Use rustup's channel name so Corrosion can
+# append the current host triple on Linux and macOS.
+set(Rust_TOOLCHAIN "1.92" CACHE STRING "" FORCE)
+unset(Rust_COMPILER_CACHED CACHE)
+unset(Rust_CARGO_CACHED CACHE)
+unset(_CORROSION_RUSTC CACHE)
+unset(_CORROSION_CARGO CACHE)
 
 # Conan 2.x: CMAKE_PREFIX_PATH is set by conan_toolchain.cmake.
 # find_package(Protobuf) sets Protobuf_PROTOC_EXECUTABLE automatically.

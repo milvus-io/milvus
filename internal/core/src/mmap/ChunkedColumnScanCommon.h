@@ -20,6 +20,7 @@
 #include <optional>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "common/Array.h"
@@ -28,6 +29,7 @@
 #include "common/Json.h"
 #include "common/Types.h"
 #include "common/ValidityView.h"
+#include "pb/plan.pb.h"
 
 namespace milvus {
 
@@ -257,12 +259,15 @@ struct ValueView {
 
 struct ScanBatch {
     // Every batch represents the dense row range
-    // [row_id_start, row_id_start + size). Values are optional based on the
-    // requested projection, while validity remains aligned with this range.
+    // [row_id_start, row_id_start + size) for data scans. Filter pushdown
+    // batches instead carry sparse row_ids.
     ValueView values;
     // Empty means every row in this batch is valid. The view may reference
     // expanded bools or an LSB-first packed bitmap owned by `owner`.
     ValidityView validity;
+    // Filter pushdown batches may carry sparse row ids instead of a dense
+    // segment range; data scans leave this empty.
+    std::vector<int64_t> row_ids;
     std::shared_ptr<void> owner;
     int64_t row_id_start = 0;
     int64_t size = 0;
@@ -485,12 +490,18 @@ class ScanCursor {
     virtual void
     Seek(int64_t position) = 0;
 
-    // Return at most one dense batch beginning exactly at Position(). The
-    // returned size may be smaller than length at a Cell, file, reader, or
-    // ownership boundary, but must never exceed length. A zero-length request
-    // returns false. Under CursorOwned, consume the borrowed batch before the
-    // next Next()/Seek(); under ResultOwned, its views remain valid while the
+    // Data scans return at most one dense batch beginning exactly at
+    // Position(). The returned size may be smaller than length at a Cell,
+    // file, reader, or ownership boundary, but must never exceed length.
+    // Under CursorOwned, consume the borrowed data batch before the next
+    // Next()/Seek(); under ResultOwned, its views remain valid while the
     // returned batch owner remains alive.
+    //
+    // Row-id scans consume the complete requested source range in one call and
+    // return one sparse payload. They return true even when no row matches;
+    // ScanBatch::size is then the row_ids count rather than consumed rows.
+    //
+    // A zero-length request returns false.
     virtual bool
     Next(int64_t length, ScanReadMode read_mode, ScanBatch* out) = 0;
 };
@@ -502,6 +513,17 @@ enum class ScanPinPolicy {
     // The cursor owns the physical Cell pin. A returned batch is borrowed and
     // must be consumed before the next Next()/Seek() call.
     CursorOwned,
+};
+
+enum class ScanOutput {
+    RowIds,
+    Data,
+};
+
+enum class ScanPredicate {
+    None,
+    Unary,
+    BinaryRange,
 };
 
 struct ScanOptions {
@@ -525,6 +547,38 @@ struct ScanOptions {
         return ScanOptions(start_offset, target_type, pin_policy, prefetch);
     }
 
+    static ScanOptions
+    ForUnary(int64_t start_offset,
+             proto::plan::OpType op_type,
+             const proto::plan::GenericValue& value,
+             ScanPinPolicy pin_policy = ScanPinPolicy::ResultOwned) {
+        ScanOptions options(start_offset, TargetType::None, pin_policy);
+        options.output = ScanOutput::RowIds;
+        options.predicate = ScanPredicate::Unary;
+        options.op_type = op_type;
+        options.value = value;
+        return options;
+    }
+
+    static ScanOptions
+    ForBinaryRange(int64_t start_offset,
+                   const proto::plan::GenericValue& lower_value,
+                   bool lower_inclusive,
+                   const proto::plan::GenericValue& upper_value,
+                   bool upper_inclusive,
+                   ScanPinPolicy pin_policy = ScanPinPolicy::ResultOwned) {
+        ScanOptions options(start_offset, TargetType::None, pin_policy);
+        options.output = ScanOutput::RowIds;
+        options.predicate = ScanPredicate::BinaryRange;
+        options.lower_value = lower_value;
+        options.upper_value = upper_value;
+        options.lower_inclusive = lower_inclusive;
+        options.upper_inclusive = upper_inclusive;
+        return options;
+    }
+
+    ScanOutput output = ScanOutput::Data;
+    ScanPredicate predicate = ScanPredicate::None;
     int64_t start_offset = 0;
     TargetType target_type = TargetType::None;
     ScanPinPolicy pin_policy = ScanPinPolicy::ResultOwned;
@@ -534,6 +588,12 @@ struct ScanOptions {
     // together so tiered-storage I/O stays parallel.
     bool prefetch = false;
     detail::ColumnFilterPtr filter;
+    proto::plan::OpType op_type = proto::plan::OpType::Invalid;
+    proto::plan::GenericValue value;
+    proto::plan::GenericValue lower_value;
+    proto::plan::GenericValue upper_value;
+    bool lower_inclusive = false;
+    bool upper_inclusive = false;
 };
 
 using ScanResult = std::unique_ptr<ScanCursor>;

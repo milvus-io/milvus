@@ -3188,6 +3188,72 @@ IsCompatibleArrayElementType(DataType actual_type, DataType expected_type) {
     return actual_type == DataType::STRING && IsStringDataType(expected_type);
 }
 
+DataType
+TypeSchemaArrayElementType(const proto::schema::TypeSchema& type) {
+    AssertInfo(type.has_array_element(),
+               "nested ARRAY type schema is missing an array element");
+    const auto& element = type.array_element();
+    if (element.has_array_element()) {
+        return DataType::ARRAY;
+    }
+    AssertInfo(element.has_leaf_type(),
+               "nested ARRAY type schema is missing a leaf type");
+    return DataType(element.leaf_type());
+}
+
+proto::schema::ScalarField
+ArrowNestedListToScalarFieldProto(
+    const std::shared_ptr<arrow::ListArray>& list_array,
+    int64_t row_index,
+    const proto::schema::TypeSchema& type,
+    const FieldMeta& field_meta) {
+    const auto expected_element_type = TypeSchemaArrayElementType(type);
+    const auto values = list_array->values();
+    if (expected_element_type != DataType::ARRAY) {
+        const auto actual_element_type =
+            ArrowListElementTypeToMilvus(values, field_meta);
+        AssertInfo(IsCompatibleArrayElementType(actual_element_type,
+                                                expected_element_type),
+                   "array element type mismatch{}, expected {}, actual {}",
+                   FieldErrorSuffix(field_meta),
+                   expected_element_type,
+                   actual_element_type);
+        const auto start = list_array->value_offset(row_index);
+        const auto end = list_array->value_offset(row_index + 1);
+        ValidateNoNullValuesInRange(values, start, end, "array list");
+        return ArrowListToScalarFieldProto(list_array, row_index);
+    }
+
+    AssertInfo(values->type_id() == arrow::Type::LIST,
+               "nested array element type mismatch{}, expected Arrow list, "
+               "actual {}",
+               FieldErrorSuffix(field_meta),
+               values->type()->ToString());
+    const auto nested = std::static_pointer_cast<arrow::ListArray>(values);
+    const auto& child_type = type.array_element();
+
+    proto::schema::ScalarField result;
+    auto* data = result.mutable_array_data();
+    data->set_element_type(static_cast<proto::schema::DataType>(
+        TypeSchemaArrayElementType(child_type)));
+    const auto start = list_array->value_offset(row_index);
+    const auto end = list_array->value_offset(row_index + 1);
+    data->mutable_data()->Reserve(static_cast<int>(end - start));
+    for (auto index = start; index < end; ++index) {
+        auto* child = data->add_data();
+        if (nested->IsNull(index)) {
+            AssertInfo(child_type.nullable(),
+                       "non-nullable nested array{} contains null row {}",
+                       FieldErrorSuffix(field_meta),
+                       index);
+            continue;
+        }
+        *child = ArrowNestedListToScalarFieldProto(
+            nested, index, child_type, field_meta);
+    }
+    return result;
+}
+
 arrow::ArrayVector
 ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
                             DataType element_type,
@@ -3200,14 +3266,22 @@ ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
             continue;
         }
         auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
-        auto actual_element_type =
-            ArrowListElementTypeToMilvus(list_arr->values(), field_meta);
-        AssertInfo(
-            IsCompatibleArrayElementType(actual_element_type, element_type),
-            "array element type mismatch{}, expected {}, actual {}",
-            FieldErrorSuffix(field_meta),
-            element_type,
-            actual_element_type);
+        const auto nested = field_meta.is_nested_array();
+        if (nested) {
+            AssertInfo(element_type == DataType::ARRAY,
+                       "nested ARRAY{} must have ARRAY element type, got {}",
+                       FieldErrorSuffix(field_meta),
+                       element_type);
+        } else {
+            const auto actual_element_type =
+                ArrowListElementTypeToMilvus(list_arr->values(), field_meta);
+            AssertInfo(
+                IsCompatibleArrayElementType(actual_element_type, element_type),
+                "array element type mismatch{}, expected {}, actual {}",
+                FieldErrorSuffix(field_meta),
+                element_type,
+                actual_element_type);
+        }
         arrow::BinaryBuilder builder;
         auto status = builder.Reserve(list_arr->length());
         AssertInfo(status.ok(), "BinaryBuilder reserve failed");
@@ -3215,11 +3289,20 @@ ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
             if (list_arr->IsNull(i)) {
                 status = builder.AppendNull();
             } else {
-                auto start = list_arr->value_offset(i);
-                auto end = list_arr->value_offset(i + 1);
-                ValidateNoNullValuesInRange(
-                    list_arr->values(), start, end, "array list");
-                auto proto = ArrowListToScalarFieldProto(list_arr, i);
+                proto::schema::ScalarField proto;
+                if (nested) {
+                    proto = ArrowNestedListToScalarFieldProto(
+                        list_arr,
+                        i,
+                        field_meta.get_array_type_schema(),
+                        field_meta);
+                } else {
+                    const auto start = list_arr->value_offset(i);
+                    const auto end = list_arr->value_offset(i + 1);
+                    ValidateNoNullValuesInRange(
+                        list_arr->values(), start, end, "array list");
+                    proto = ArrowListToScalarFieldProto(list_arr, i);
+                }
                 std::string serialized;
                 proto.SerializeToString(&serialized);
                 status = builder.Append(serialized);

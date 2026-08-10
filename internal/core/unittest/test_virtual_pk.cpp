@@ -388,6 +388,14 @@ TEST_F(VirtualPKChunkedColumnTest,
         std::exception);
 }
 
+TEST_F(VirtualPKChunkedColumnTest, UnsupportedRowIdScanReturnsNoCursor) {
+    VirtualPKChunkedColumn column(/*segment_id=*/200, /*num_rows=*/5);
+    ChunkedColumnInterface::ScanOptions options;
+    options.output = ChunkedColumnInterface::ScanOutput::RowIds;
+    options.predicate = ChunkedColumnInterface::ScanPredicate::Unary;
+    EXPECT_EQ(column.Scan(nullptr, options), nullptr);
+}
+
 TEST_F(VirtualPKChunkedColumnTest, BulkValueAt) {
     int64_t segment_id = 300;
     int64_t num_rows = 50;
