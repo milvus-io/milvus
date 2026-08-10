@@ -370,15 +370,25 @@ TEST_P(GroupByJsonGetterTest, ChunkReadFailureKeepsItsCode) {
     EXPECT_EQ(stats_->pinned_chunks, (std::vector<int64_t>{1}));
 }
 
-TEST_P(GroupByJsonGetterTest, MissingColumnDoesNotPoisonCache) {
-    auto getter = MakeGetter<std::string>(DataType::VARCHAR);
+TEST_P(GroupByJsonGetterTest, MissingColumnFailsGetterConstruction) {
     segment_->hide_column = true;
     try {
-        getter->Get(37);
+        MakeGetter<std::string>(DataType::VARCHAR);
         FAIL() << "expected missing JSON column failure";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
     }
+    EXPECT_TRUE(stats_->pinned_chunks.empty());
+    segment_->hide_column = false;
+    auto getter = MakeGetter<std::string>(DataType::VARCHAR);
+    EXPECT_EQ(getter->Get(37), expected_[37]);
+    EXPECT_EQ(stats_->pinned_chunks, (std::vector<int64_t>{1}));
+}
+
+TEST_P(GroupByJsonGetterTest, CapturedColumnSurvivesHiddenLiveLookup) {
+    auto getter = MakeGetter<std::string>(DataType::VARCHAR);
+    segment_->hide_column = true;
+    EXPECT_EQ(getter->Get(37), expected_[37]);
     segment_->hide_column = false;
     EXPECT_EQ(getter->Get(37), expected_[37]);
     EXPECT_EQ(stats_->pinned_chunks, (std::vector<int64_t>{1}));

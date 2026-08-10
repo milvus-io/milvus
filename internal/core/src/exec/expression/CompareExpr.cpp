@@ -223,23 +223,16 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
         int64_t cached_right_chunk_id = -1;
         segcore::ChunkDataAccessor left;
         segcore::ChunkDataAccessor right;
-        // Finite offset input uses one Take per sealed string column,
-        // preserving order, duplicates and nulls, instead of one Cell pin
-        // and view per row.
+        // Finite offset input uses one Take per supported sealed column,
+        // preserving order, duplicates and nulls.
         segcore::ChunkDataAccessor left_by_offsets;
         segcore::ChunkDataAccessor right_by_offsets;
         if (segment_chunk_reader_.segment_->type() == SegmentType::Sealed) {
             auto offsets = OffsetView::From(input->data(), real_batch_size);
-            if (expr_->left_data_type_ == DataType::VARCHAR) {
-                left_by_offsets =
-                    segment_chunk_reader_.GetStringDataAccessorByOffsets(
-                        left_field_, offsets);
-            }
-            if (expr_->right_data_type_ == DataType::VARCHAR) {
-                right_by_offsets =
-                    segment_chunk_reader_.GetStringDataAccessorByOffsets(
-                        right_field_, offsets);
-            }
+            left_by_offsets = segment_chunk_reader_.GetDataAccessorByOffsets(
+                expr_->left_data_type_, left_field_, offsets);
+            right_by_offsets = segment_chunk_reader_.GetDataAccessorByOffsets(
+                expr_->right_data_type_, right_field_, offsets);
         }
         for (auto i = 0; i < real_batch_size; ++i) {
             auto offset = (*input)[i];
@@ -306,14 +299,14 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             left_current_chunk_id_,
             left_current_chunk_pos_,
             real_batch_size,
-            &left_string_scan_state_);
+            &left_column_scan_state_);
         auto right = segment_chunk_reader_.GetMultipleChunkDataAccessor(
             expr_->right_data_type_,
             expr_->right_field_id_,
             right_current_chunk_id_,
             right_current_chunk_pos_,
             real_batch_size,
-            &right_string_scan_state_);
+            &right_column_scan_state_);
         for (int i = 0; i < real_batch_size; ++i) {
             auto left_value = left(), right_value = right();
             if (!left_value.has_value() || !right_value.has_value()) {
@@ -415,6 +408,28 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op, EvalCtx& context) {
                                              real_batch_size,
                                              right_values);
 
+    const auto vortex_raw_by_offsets =
+        [&](bool gathered, FieldId field_id, DataType data_type) {
+            if (gathered ||
+                segment_chunk_reader_.segment_->type() != SegmentType::Sealed) {
+                return segcore::ChunkDataAccessor{};
+            }
+            auto column = CaptureDataColumn(field_id);
+            if (column == nullptr ||
+                column->GetLocalFormat() !=
+                    ChunkedColumnInterface::LocalFormat::Vortex) {
+                return segcore::ChunkDataAccessor{};
+            }
+            return segment_chunk_reader_.GetDataAccessorByOffsets(
+                data_type,
+                field_id,
+                OffsetView::From(offsets.data(), real_batch_size));
+        };
+    auto left_by_offsets = vortex_raw_by_offsets(
+        left_gathered, left_field_, expr_->left_data_type_);
+    auto right_by_offsets = vortex_raw_by_offsets(
+        right_gathered, right_field_, expr_->right_data_type_);
+
     const auto left_raw_chunk_count =
         segment_chunk_reader_.NumChunkData(left_field_);
     const auto right_raw_chunk_count =
@@ -464,23 +479,25 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op, EvalCtx& context) {
         if (left_gathered) {
             left = &left_values[static_cast<size_t>(i)];
         } else {
-            left_raw = read_raw(left_field_,
-                                expr_->left_data_type_,
-                                left_raw_chunk_count,
-                                offset,
-                                cached_left_chunk_id,
-                                left_accessor);
+            left_raw = left_by_offsets ? left_by_offsets(i)
+                                       : read_raw(left_field_,
+                                                  expr_->left_data_type_,
+                                                  left_raw_chunk_count,
+                                                  offset,
+                                                  cached_left_chunk_id,
+                                                  left_accessor);
             left = &left_raw;
         }
         if (right_gathered) {
             right = &right_values[static_cast<size_t>(i)];
         } else {
-            right_raw = read_raw(right_field_,
-                                 expr_->right_data_type_,
-                                 right_raw_chunk_count,
-                                 offset,
-                                 cached_right_chunk_id,
-                                 right_accessor);
+            right_raw = right_by_offsets ? right_by_offsets(i)
+                                         : read_raw(right_field_,
+                                                    expr_->right_data_type_,
+                                                    right_raw_chunk_count,
+                                                    offset,
+                                                    cached_right_chunk_id,
+                                                    right_accessor);
             right = &right_raw;
         }
         if (!left->has_value() || !right->has_value()) {
