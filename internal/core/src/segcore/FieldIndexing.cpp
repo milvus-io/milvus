@@ -178,12 +178,16 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
 void
 VectorFieldIndexing::recreate_index(DataType data_type,
                                     const VectorBase* field_raw_data) {
+    // Growing indexes are ephemeral and will never be serialized, so use the latest version
+    // supported by this Knowhere build.
+    const auto index_version =
+        knowhere::Version::GetMaximumVersion().VersionNumber();
     if (IsSparseFloatVectorDataType(data_type)) {
         index_ = std::make_unique<index::VectorMemIndex<sparse_u32_f32>>(
             DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
-            knowhere::Version::GetCurrentVersion().VersionNumber());
+            index_version);
     } else if (data_type == DataType::VECTOR_FLOAT) {
         auto concurrent_fp32_vec =
             reinterpret_cast<const ConcurrentVector<FloatVector>*>(
@@ -199,7 +203,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            index_version,
             view_data);
     } else if (data_type == DataType::VECTOR_FLOAT16) {
         auto concurrent_fp16_vec =
@@ -216,7 +220,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            index_version,
             view_data);
     } else if (data_type == DataType::VECTOR_BFLOAT16) {
         auto concurrent_bf16_vec =
@@ -233,7 +237,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             DataType::NONE,
             config_->GetIndexType(),
             config_->GetMetricType(),
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            index_version,
             view_data);
     }
 }
