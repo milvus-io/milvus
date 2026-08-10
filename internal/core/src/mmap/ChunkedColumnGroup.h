@@ -295,6 +295,9 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             }
             return;
         }
+        if (count == 0) {
+            return;
+        }
         ForEachResolvedRow(
             op_ctx,
             offsets,
