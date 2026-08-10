@@ -2,7 +2,9 @@ package loadmgr
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -169,6 +171,132 @@ func TestPut_EmptyReplicasSkipsSaveReplica(t *testing.T) {
 		Return(nil).Once()
 	// No SaveReplica expected when Replicas is empty.
 	require.NoError(t, store.Put(context.Background(), cfg))
+}
+
+func TestPut_DifferentCollectionsPersistConcurrently(t *testing.T) {
+	store, catalog := newTestStore(t)
+	cfg1 := sampleConfig()
+	cfg1.Replicas = nil
+	cfg2 := sampleConfig()
+	cfg2.CollectionID = 101
+	cfg2.Replicas = nil
+
+	entered := make(chan int64, 2)
+	release := make(chan struct{})
+	catalog.EXPECT().
+		SaveCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Run(func(_ context.Context, collection *querypb.CollectionLoadInfo, _ ...*querypb.PartitionLoadInfo) {
+			entered <- collection.GetCollectionID()
+			<-release
+		}).
+		Return(nil).
+		Times(2)
+	errs := make(chan error, 2)
+	go func() { errs <- store.Put(context.Background(), cfg1) }()
+	go func() { errs <- store.Put(context.Background(), cfg2) }()
+
+	seen := make(map[int64]struct{}, 2)
+	timer := time.NewTimer(time.Second)
+	for len(seen) < 2 {
+		select {
+		case collectionID := <-entered:
+			seen[collectionID] = struct{}{}
+		case <-timer.C:
+			close(release)
+			require.FailNow(t, "different collections did not persist concurrently")
+		}
+	}
+	if !timer.Stop() {
+		<-timer.C
+	}
+	close(release)
+
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+	assert.Contains(t, store.Snapshot().ConfigsMap(), cfg1.CollectionID)
+	assert.Contains(t, store.Snapshot().ConfigsMap(), cfg2.CollectionID)
+}
+
+func TestPut_SameCollectionPersistsSerially(t *testing.T) {
+	store, catalog := newTestStore(t)
+	cfg := sampleConfig()
+	cfg.Replicas = nil
+	firstEntered := make(chan struct{})
+	secondEntered := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	catalog.EXPECT().
+		SaveCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Run(func(context.Context, *querypb.CollectionLoadInfo, ...*querypb.PartitionLoadInfo) {
+			switch calls.Add(1) {
+			case 1:
+				close(firstEntered)
+				<-releaseFirst
+			case 2:
+				close(secondEntered)
+			}
+		}).
+		Return(nil).
+		Times(2)
+	errs := make(chan error, 2)
+	go func() { errs <- store.Put(context.Background(), cfg) }()
+	<-firstEntered
+
+	secondStarted := make(chan struct{})
+	go func() {
+		close(secondStarted)
+		errs <- store.Put(context.Background(), cfg.Clone())
+	}()
+	<-secondStarted
+
+	select {
+	case <-secondEntered:
+		close(releaseFirst)
+		require.FailNow(t, "same collection persisted concurrently")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFirst)
+
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+	select {
+	case <-secondEntered:
+	case <-time.After(time.Second):
+		require.FailNow(t, "second put did not continue after the first completed")
+	}
+}
+
+func TestSnapshot_DoesNotWaitForCollectionPersistence(t *testing.T) {
+	store, catalog := newTestStore(t)
+	cfg := sampleConfig()
+	cfg.Replicas = nil
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	catalog.EXPECT().
+		SaveCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Run(func(context.Context, *querypb.CollectionLoadInfo, ...*querypb.PartitionLoadInfo) {
+			close(entered)
+			<-release
+		}).
+		Return(nil).
+		Once()
+	putDone := make(chan error, 1)
+	go func() { putDone <- store.Put(context.Background(), cfg) }()
+	<-entered
+
+	snapshotDone := make(chan *LoadConfigSnapshot, 1)
+	go func() { snapshotDone <- store.Snapshot() }()
+	select {
+	case snapshot := <-snapshotDone:
+		assert.NotContains(t, snapshot.ConfigsMap(), int64(100))
+	case <-time.After(time.Second):
+		close(release)
+		require.FailNow(t, "snapshot waited for collection persistence")
+	}
+
+	close(release)
+	require.NoError(t, <-putDone)
+	assert.Contains(t, store.Snapshot().ConfigsMap(), int64(100))
 }
 
 func TestRemove(t *testing.T) {
