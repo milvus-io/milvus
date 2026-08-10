@@ -786,6 +786,14 @@ func newPartialUpdateChainTestEnvWithBuilders(
 		LastConfirmedMessageID: lastConfirmed,
 		MVCCManager:            mvcc.NewMVCCManager(lastTimeTick.TimeTick()),
 		TxnManager:             txnManager,
+		ShardManager: &partialUpdateSchemaManagerTarget{
+			primaryKeyDescriptorGetter: &staticPrimaryKeyDescriptorGetter{
+				descriptor: shards.PrimaryKeyDescriptor{
+					FieldID:  100,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		},
 	}
 	partial := NewInterceptorBuilder().Build(param).(*appendInterceptor)
 	chain := interceptors.NewChainedInterceptor(
