@@ -44,6 +44,7 @@
 #include "expr/ITypeExpr.h"
 #include "index/ScalarIndex.h"
 #include "index/json_stats/bson_inverted.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "pb/plan.pb.h"
 #include "segcore/SegmentInterface.h"
 #include "simdjson/error.h"
