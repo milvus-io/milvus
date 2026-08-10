@@ -2021,7 +2021,6 @@ func TestBuildSearchResp(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		require.ErrorContains(t, err, `field "offset" conflicts with the reserved REST search element offset field`)
 	})
-
 }
 
 func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
