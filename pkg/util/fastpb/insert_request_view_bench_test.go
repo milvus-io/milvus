@@ -1,6 +1,8 @@
 package fastpb
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -49,13 +51,85 @@ func BenchmarkInsertRequestViewEncoder10Kx768(b *testing.B) {
 			}},
 		}},
 	}
+	benchmarkInsertRequestViewEncoder(b, source, rows)
+}
+
+// BenchmarkInsertRequestViewEncoder10KVarChar1KiB covers the document-style
+// payload that exposes repeated UTF-8 validation in the view encoder.
+func BenchmarkInsertRequestViewEncoder10KVarChar1KiB(b *testing.B) {
+	const rowCount = 10_000
+	rows, rowIDs, timestamps := benchmarkInsertRows(rowCount)
+	document := strings.Repeat("Milvus 向量数据库 document payload. ", 26)
+	texts := make([]string, rowCount)
+	for row := range texts {
+		texts[row] = document + strconv.Itoa(row)
+	}
+	source := &msgpb.InsertRequest{
+		NumRows:    rowCount,
+		RowIDs:     rowIDs,
+		Timestamps: timestamps,
+		FieldsData: []*schemapb.FieldData{
+			scalarField(100, schemapb.DataType_VarChar, &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{Data: texts},
+			}),
+		},
+	}
+	benchmarkInsertRequestViewEncoder(b, source, rows)
+}
+
+// BenchmarkInsertRequestViewEncoder10KArray64Int64 covers nested protobuf rows,
+// whose sizes must be measured once and reused while writing the final payload.
+func BenchmarkInsertRequestViewEncoder10KArray64Int64(b *testing.B) {
+	const (
+		rowCount    = 10_000
+		elementsPer = 64
+	)
+	rows, rowIDs, timestamps := benchmarkInsertRows(rowCount)
+	arrayRows := make([]*schemapb.ScalarField, rowCount)
+	for row := range arrayRows {
+		values := make([]int64, elementsPer)
+		for element := range values {
+			values[element] = int64(row*elementsPer + element)
+		}
+		arrayRows[row] = &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{
+			LongData: &schemapb.LongArray{Data: values},
+		}}
+	}
+	source := &msgpb.InsertRequest{
+		NumRows:    rowCount,
+		RowIDs:     rowIDs,
+		Timestamps: timestamps,
+		FieldsData: []*schemapb.FieldData{
+			scalarField(100, schemapb.DataType_Array, &schemapb.ScalarField_ArrayData{
+				ArrayData: &schemapb.ArrayArray{
+					Data:        arrayRows,
+					ElementType: schemapb.DataType_Int64,
+				},
+			}),
+		},
+	}
+	benchmarkInsertRequestViewEncoder(b, source, rows)
+}
+
+func benchmarkInsertRows(rowCount int) ([]int, []int64, []uint64) {
+	rows := make([]int, rowCount)
+	rowIDs := make([]int64, rowCount)
+	timestamps := make([]uint64, rowCount)
+	for row := range rows {
+		rows[row] = row
+		rowIDs[row] = int64(row)
+		timestamps[row] = uint64(row)
+	}
+	return rows, rowIDs, timestamps
+}
+
+func benchmarkInsertRequestViewEncoder(b *testing.B, source *msgpb.InsertRequest, rows []int) {
+	b.Helper()
 	template := insertViewTemplate()
 	encoder, err := NewInsertRequestViewEncoder(template, source, rows)
 	if err != nil {
 		b.Fatal(err)
 	}
-	idxComputer := typeutil.NewFieldDataIdxComputer(source.GetFieldsData())
-	firstFieldIndices := append([]int64(nil), idxComputer.Compute(int64(rows[0]))...)
 	payloadSize, err := encoder.EncodedSize()
 	if err != nil {
 		b.Fatal(err)
@@ -94,7 +168,7 @@ func BenchmarkInsertRequestViewEncoder10Kx768(b *testing.B) {
 		b.SetBytes(int64(payloadSize))
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			view, err := NewInsertRequestViewEncoderWithFirstFieldIndices(template, source, rows, firstFieldIndices)
+			view, err := NewInsertRequestViewEncoder(template, source, rows)
 			if err != nil {
 				b.Fatal(err)
 			}

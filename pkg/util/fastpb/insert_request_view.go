@@ -8,10 +8,12 @@ import (
 
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/runtime/protoiface"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // InsertRequestViewEncoder serializes a row selection from Source directly into
@@ -31,7 +33,107 @@ type InsertRequestViewEncoder struct {
 	source                *msgpb.InsertRequest
 	rows                  []int
 	firstFieldDataIndices []int64
+	sizePlan              []int
 	size                  int
+	owner                 *InsertRequestViewCursor
+	consumed              bool
+}
+
+// InsertRequestViewCursor binds compact nullable-vector prefix state and
+// reusable encoding scratch to one source request. Successive calls to
+// NewEncoder must use globally increasing row selections. The returned encoder
+// borrows the cursor scratch until MarshalTo returns, so callers must consume it
+// synchronously before requesting the next view.
+type InsertRequestViewCursor struct {
+	source                *msgpb.InsertRequest
+	scanRow               int
+	lastSelectedRow       int
+	firstFieldDataIndices []int64
+	nextFieldDataIndices  []int64
+	sizePlan              []int
+	activeEncoder         *InsertRequestViewEncoder
+}
+
+// NewInsertRequestViewCursor creates a source-bound cursor for a sequential
+// message splitter.
+func NewInsertRequestViewCursor(source *msgpb.InsertRequest) (*InsertRequestViewCursor, error) {
+	if source == nil {
+		return nil, insertViewInternal("nil source request")
+	}
+	if len(source.GetRowData()) != 0 {
+		return nil, insertViewInternal("row-based InsertRequest is not supported")
+	}
+	return &InsertRequestViewCursor{
+		source:                source,
+		lastSelectedRow:       -1,
+		firstFieldDataIndices: make([]int64, len(source.GetFieldsData())),
+		nextFieldDataIndices:  make([]int64, len(source.GetFieldsData())),
+	}, nil
+}
+
+// NewEncoder creates the next borrowed view from this cursor. The encoder must
+// be synchronously marshaled before NewEncoder is called again.
+func (c *InsertRequestViewCursor) NewEncoder(template *msgpb.InsertRequest, rows []int) (*InsertRequestViewEncoder, error) {
+	if c == nil || c.source == nil {
+		return nil, insertViewInternal("nil insert request view cursor")
+	}
+	if c.activeEncoder != nil {
+		return nil, insertViewInternal("previous cursor encoder has not been marshaled")
+	}
+	if len(rows) == 0 {
+		return nil, insertViewInternal("row selection is empty")
+	}
+	previous := c.lastSelectedRow
+	for i, row := range rows {
+		if row < 0 {
+			return nil, insertViewInternal("row offset at selection index %d is negative: %d", i, row)
+		}
+		if row <= previous {
+			return nil, insertViewInternal("cursor row offsets must be globally increasing: rows[%d]=%d after %d", i, row, previous)
+		}
+		previous = row
+	}
+	if len(c.firstFieldDataIndices) != len(c.source.GetFieldsData()) || len(c.nextFieldDataIndices) != len(c.source.GetFieldsData()) {
+		return nil, insertViewInternal("source FieldsData count changed while cursor was in use")
+	}
+	firstRow := rows[0]
+	for fieldIndex, field := range c.source.GetFieldsData() {
+		if field == nil {
+			return nil, insertViewInternal("source FieldsData[%d] is nil", fieldIndex)
+		}
+		if !typeutil.IsSupportedNullableVectorType(field.GetType()) || len(field.GetValidData()) == 0 {
+			c.nextFieldDataIndices[fieldIndex] = int64(firstRow)
+			continue
+		}
+		valid := field.GetValidData()
+		if firstRow > len(valid) {
+			return nil, insertViewInternal("first row offset %d exceeds ValidData length %d for field %q (%d)", firstRow, len(valid), field.GetFieldName(), field.GetFieldId())
+		}
+		dataIndex := c.firstFieldDataIndices[fieldIndex]
+		// Compact indices store the number of valid physical rows before
+		// firstRow. Preserve the prior prefix and advance it exactly once.
+		for _, isValid := range valid[c.scanRow:firstRow] {
+			if isValid {
+				dataIndex++
+			}
+		}
+		c.nextFieldDataIndices[fieldIndex] = dataIndex
+	}
+
+	encoder, err := newInsertRequestViewEncoder(template, c.source, rows, c.nextFieldDataIndices, c.sizePlan[:0])
+	if err != nil {
+		return nil, err
+	}
+	// Commit prefix state only after the encoder has fully validated and sized
+	// the borrowed view. The two persistent buffers keep failure transactional
+	// without adding a per-message allocation.
+	c.firstFieldDataIndices, c.nextFieldDataIndices = c.nextFieldDataIndices, c.firstFieldDataIndices
+	c.scanRow = firstRow
+	c.lastSelectedRow = rows[len(rows)-1]
+	c.sizePlan = encoder.sizePlan
+	encoder.owner = c
+	c.activeEncoder = encoder
+	return encoder, nil
 }
 
 // NewInsertRequestViewEncoder creates a borrowed row-selection view over source.
@@ -39,24 +141,10 @@ type InsertRequestViewEncoder struct {
 // contract violations, so they intentionally use ErrServiceInternal rather
 // than an input-error code.
 func NewInsertRequestViewEncoder(template, source *msgpb.InsertRequest, rows []int) (*InsertRequestViewEncoder, error) {
-	return newInsertRequestViewEncoder(template, source, rows, nil)
+	return newInsertRequestViewEncoder(template, source, rows, nil, nil)
 }
 
-// NewInsertRequestViewEncoderWithFirstFieldIndices is the O(1)-prefix variant
-// used by a sequential message splitter. firstFieldDataIndices must be the
-// result of FieldDataIdxComputer.Compute(rows[0]) captured at the first row of
-// this view. Like rows, the slice is borrowed and must remain immutable until
-// MarshalTo returns; a splitter may reuse one scratch slice after the builder
-// synchronously consumes the encoder. Supplying it avoids rescanning nullable-
-// vector validity prefixes for every split message.
-func NewInsertRequestViewEncoderWithFirstFieldIndices(template, source *msgpb.InsertRequest, rows []int, firstFieldDataIndices []int64) (*InsertRequestViewEncoder, error) {
-	if len(rows) > 0 && len(firstFieldDataIndices) != len(source.GetFieldsData()) {
-		return nil, insertViewInternal("first field-index count %d does not match FieldsData count %d", len(firstFieldDataIndices), len(source.GetFieldsData()))
-	}
-	return newInsertRequestViewEncoder(template, source, rows, firstFieldDataIndices)
-}
-
-func newInsertRequestViewEncoder(template, source *msgpb.InsertRequest, rows []int, firstFieldDataIndices []int64) (*InsertRequestViewEncoder, error) {
+func newInsertRequestViewEncoder(template, source *msgpb.InsertRequest, rows []int, firstFieldDataIndices []int64, sizePlan []int) (*InsertRequestViewEncoder, error) {
 	if template == nil {
 		return nil, insertViewInternal("nil output template")
 	}
@@ -107,6 +195,7 @@ func newInsertRequestViewEncoder(template, source *msgpb.InsertRequest, rows []i
 		source:                source,
 		rows:                  rows,
 		firstFieldDataIndices: firstFieldDataIndices,
+		sizePlan:              prepareSizePlan(sizePlan, len(source.GetFieldsData())),
 	}
 	size, err := encoder.calculateSize()
 	if err != nil {
@@ -120,7 +209,7 @@ func calculateFirstFieldDataIndices(fields []*schemapb.FieldData, firstRow int) 
 	indices := make([]int64, len(fields))
 	for fieldIndex, field := range fields {
 		indices[fieldIndex] = int64(firstRow)
-		if field == nil || !isCompactVectorType(field.GetType()) || len(field.GetValidData()) == 0 {
+		if field == nil || !typeutil.IsSupportedNullableVectorType(field.GetType()) || len(field.GetValidData()) == 0 {
 			continue
 		}
 		valid := field.GetValidData()
@@ -138,24 +227,13 @@ func calculateFirstFieldDataIndices(fields []*schemapb.FieldData, firstRow int) 
 	return indices, nil
 }
 
-func isCompactVectorType(dataType schemapb.DataType) bool {
-	switch dataType {
-	case schemapb.DataType_BinaryVector,
-		schemapb.DataType_FloatVector,
-		schemapb.DataType_Float16Vector,
-		schemapb.DataType_BFloat16Vector,
-		schemapb.DataType_SparseFloatVector,
-		schemapb.DataType_Int8Vector:
-		return true
-	default:
-		return false
-	}
-}
-
 // EncodedSize returns the exact number of bytes MarshalTo writes.
 func (e *InsertRequestViewEncoder) EncodedSize() (int, error) {
 	if e == nil {
 		return 0, insertViewInternal("nil encoder")
+	}
+	if err := e.checkCursorOwnership(); err != nil {
+		return 0, err
 	}
 	return e.size, nil
 }
@@ -166,16 +244,22 @@ func (e *InsertRequestViewEncoder) MarshalTo(dst []byte) (int, error) {
 	if e == nil {
 		return 0, insertViewInternal("nil encoder")
 	}
+	if err := e.checkCursorOwnership(); err != nil {
+		return 0, err
+	}
 	if len(dst) < e.size {
 		return 0, insertViewInternal("destination buffer has %d bytes, need %d", len(dst), e.size)
 	}
 
-	w := newInsertViewMarshalWriter(dst[:0:e.size])
+	w := newInsertViewMarshalWriter(dst[:0:e.size], &e.sizePlan)
 	if err := e.appendRequest(w); err != nil {
 		return 0, err
 	}
 	if w.err != nil {
 		return 0, w.err
+	}
+	if w.planIndex != len(e.sizePlan) {
+		return 0, insertViewInternal("encoded size plan changed while borrowed data was in use: consumed %d entries, expected %d", w.planIndex, len(e.sizePlan))
 	}
 	if w.n != e.size || len(w.out) != e.size {
 		return 0, insertViewInternal("encoded size changed while borrowed data was in use: expected %d, wrote %d", e.size, w.n)
@@ -183,11 +267,31 @@ func (e *InsertRequestViewEncoder) MarshalTo(dst []byte) (int, error) {
 	if e.size > 0 && &w.out[0] != &dst[0] {
 		return 0, insertViewInternal("encoder exceeded the caller-provided destination buffer")
 	}
+	if e.owner != nil {
+		e.consumed = true
+		e.owner.activeEncoder = nil
+	}
 	return e.size, nil
 }
 
+func (e *InsertRequestViewEncoder) checkCursorOwnership() error {
+	if e.owner == nil {
+		return nil
+	}
+	if e.consumed {
+		return insertViewInternal("encoder has already been marshaled")
+	}
+	// Pointer identity also rejects value-copied encoders. Without it, a stale
+	// copy could release scratch that a newer encoder currently borrows.
+	if e.owner.activeEncoder != e {
+		return insertViewInternal("encoder is no longer active for its cursor")
+	}
+	return nil
+}
+
 func (e *InsertRequestViewEncoder) calculateSize() (int, error) {
-	w := newInsertViewSizeWriter()
+	e.sizePlan = e.sizePlan[:0]
+	w := newInsertViewSizeWriter(&e.sizePlan)
 	if err := e.appendRequest(w); err != nil {
 		return 0, err
 	}
@@ -235,12 +339,14 @@ func (e *InsertRequestViewEncoder) appendRequest(w *insertViewWriter) error {
 		if field.GetStructArrays() != nil {
 			return insertViewInternal("source field %q (%d) still contains StructArrays; proxy must flatten struct fields before repacking", field.GetFieldName(), field.GetFieldId())
 		}
-		fieldSize, err := e.sizeFieldData(field)
+		fieldSize, err := w.cachedInt(func() (int, error) {
+			return e.sizeFieldData(i, field)
+		})
 		if err != nil {
 			return err
 		}
 		if err := w.message(13, fieldSize, func() error {
-			return e.appendFieldData(w, field)
+			return e.appendFieldData(w, i, field)
 		}); err != nil {
 			return err
 		}
@@ -264,12 +370,18 @@ func (e *InsertRequestViewEncoder) appendSelectedUint64(w *insertViewWriter, fie
 	if len(e.rows) == 0 {
 		return nil
 	}
-	payloadSize := 0
-	for _, row := range e.rows {
-		if row >= len(values) {
-			return insertViewInternal("row offset %d exceeds %s length %d", row, label, len(values))
+	payloadSize, err := w.cachedInt(func() (int, error) {
+		size := 0
+		for _, row := range e.rows {
+			if row >= len(values) {
+				return 0, insertViewInternal("row offset %d exceeds %s length %d", row, label, len(values))
+			}
+			size += protowire.SizeVarint(values[row])
 		}
-		payloadSize += protowire.SizeVarint(values[row])
+		return size, nil
+	})
+	if err != nil {
+		return err
 	}
 	return w.message(fieldNumber, payloadSize, func() error {
 		for _, row := range e.rows {
@@ -283,12 +395,18 @@ func (e *InsertRequestViewEncoder) appendSelectedInt64(w *insertViewWriter, fiel
 	if len(e.rows) == 0 {
 		return nil
 	}
-	payloadSize := 0
-	for _, row := range e.rows {
-		if row >= len(values) {
-			return insertViewInternal("row offset %d exceeds %s length %d", row, label, len(values))
+	payloadSize, err := w.cachedInt(func() (int, error) {
+		size := 0
+		for _, row := range e.rows {
+			if row >= len(values) {
+				return 0, insertViewInternal("row offset %d exceeds %s length %d", row, label, len(values))
+			}
+			size += protowire.SizeVarint(uint64(values[row]))
 		}
-		payloadSize += protowire.SizeVarint(uint64(values[row]))
+		return size, nil
+	})
+	if err != nil {
+		return err
 	}
 	return w.message(fieldNumber, payloadSize, func() error {
 		for _, row := range e.rows {
@@ -298,9 +416,9 @@ func (e *InsertRequestViewEncoder) appendSelectedInt64(w *insertViewWriter, fiel
 	})
 }
 
-func (e *InsertRequestViewEncoder) sizeFieldData(field *schemapb.FieldData) (int, error) {
-	w := newInsertViewSizeWriter()
-	if err := e.appendFieldData(w, field); err != nil {
+func (e *InsertRequestViewEncoder) sizeFieldData(fieldIndex int, field *schemapb.FieldData) (int, error) {
+	w := newInsertViewSizeWriter(&e.sizePlan)
+	if err := e.appendFieldData(w, fieldIndex, field); err != nil {
 		return 0, err
 	}
 	if w.err != nil {
@@ -309,7 +427,7 @@ func (e *InsertRequestViewEncoder) sizeFieldData(field *schemapb.FieldData) (int
 	return w.n, nil
 }
 
-func (e *InsertRequestViewEncoder) appendFieldData(w *insertViewWriter, field *schemapb.FieldData) error {
+func (e *InsertRequestViewEncoder) appendFieldData(w *insertViewWriter, fieldIndex int, field *schemapb.FieldData) error {
 	w.proto3Varint(1, uint64(field.GetType()))
 	if err := w.proto3String(2, field.GetFieldName(), "field name"); err != nil {
 		return err
@@ -323,7 +441,9 @@ func (e *InsertRequestViewEncoder) appendFieldData(w *insertViewWriter, field *s
 		if value.Scalars == nil {
 			return insertViewInternal("scalar field %q (%d) has a nil ScalarField", field.GetFieldName(), field.GetFieldId())
 		}
-		scalarSize, err := e.sizeScalarField(value.Scalars)
+		scalarSize, err := w.cachedInt(func() (int, error) {
+			return e.sizeScalarField(value.Scalars)
+		})
 		if err != nil {
 			return err
 		}
@@ -336,12 +456,14 @@ func (e *InsertRequestViewEncoder) appendFieldData(w *insertViewWriter, field *s
 		if value.Vectors == nil {
 			return insertViewInternal("vector field %q (%d) has a nil VectorField", field.GetFieldName(), field.GetFieldId())
 		}
-		vectorSize, err := e.sizeVectorField(field, value.Vectors)
+		vectorSize, err := w.cachedInt(func() (int, error) {
+			return e.sizeVectorField(fieldIndex, field, value.Vectors)
+		})
 		if err != nil {
 			return err
 		}
 		if err := w.message(4, vectorSize, func() error {
-			return e.appendVectorField(w, field, value.Vectors)
+			return e.appendVectorField(w, fieldIndex, field, value.Vectors)
 		}); err != nil {
 			return err
 		}
@@ -357,12 +479,18 @@ func (e *InsertRequestViewEncoder) appendFieldData(w *insertViewWriter, field *s
 	}
 	if len(field.GetValidData()) > 0 && len(e.rows) > 0 {
 		valid := field.GetValidData()
-		for _, row := range e.rows {
-			if row >= len(valid) {
-				return insertViewInternal("row offset %d exceeds ValidData length %d for field %q (%d)", row, len(valid), field.GetFieldName(), field.GetFieldId())
+		validSize, err := w.cachedInt(func() (int, error) {
+			for _, row := range e.rows {
+				if row >= len(valid) {
+					return 0, insertViewInternal("row offset %d exceeds ValidData length %d for field %q (%d)", row, len(valid), field.GetFieldName(), field.GetFieldId())
+				}
 			}
+			return len(e.rows), nil
+		})
+		if err != nil {
+			return err
 		}
-		if err := w.message(7, len(e.rows), func() error {
+		if err := w.message(7, validSize, func() error {
 			for _, row := range e.rows {
 				if valid[row] {
 					w.varint(1)
@@ -379,7 +507,7 @@ func (e *InsertRequestViewEncoder) appendFieldData(w *insertViewWriter, field *s
 }
 
 func (e *InsertRequestViewEncoder) sizeScalarField(field *schemapb.ScalarField) (int, error) {
-	w := newInsertViewSizeWriter()
+	w := newInsertViewSizeWriter(&e.sizePlan)
 	if err := e.appendScalarField(w, field); err != nil {
 		return 0, err
 	}
@@ -438,20 +566,26 @@ func (e *InsertRequestViewEncoder) appendBoolArray(w *insertViewWriter, fieldNum
 	if values == nil {
 		return insertViewInternal("nil bool scalar array")
 	}
-	for _, row := range e.rows {
-		if row >= len(values.GetData()) {
-			return insertViewInternal("row offset %d exceeds bool scalar length %d", row, len(values.GetData()))
+	payloadSize, err := w.cachedInt(func() (int, error) {
+		for _, row := range e.rows {
+			if row >= len(values.GetData()) {
+				return 0, insertViewInternal("row offset %d exceeds bool scalar length %d", row, len(values.GetData()))
+			}
 		}
+		return len(e.rows), nil
+	})
+	if err != nil {
+		return err
 	}
 	arraySize := 0
-	if len(e.rows) > 0 {
-		arraySize = protowire.SizeTag(1) + protowire.SizeBytes(len(e.rows))
+	if payloadSize > 0 {
+		arraySize = protowire.SizeTag(1) + protowire.SizeBytes(payloadSize)
 	}
 	return w.message(fieldNumber, arraySize, func() error {
-		if len(e.rows) == 0 {
+		if payloadSize == 0 {
 			return nil
 		}
-		return w.message(1, len(e.rows), func() error {
+		return w.message(1, payloadSize, func() error {
 			for _, row := range e.rows {
 				if values.GetData()[row] {
 					w.varint(1)
@@ -482,12 +616,18 @@ func (e *InsertRequestViewEncoder) appendInt32Values(w *insertViewWriter, fieldN
 	if nilArray {
 		return insertViewInternal("nil %s array", label)
 	}
-	payloadSize := 0
-	for _, row := range e.rows {
-		if row >= len(values) {
-			return insertViewInternal("row offset %d exceeds %s length %d", row, label, len(values))
+	payloadSize, err := w.cachedInt(func() (int, error) {
+		size := 0
+		for _, row := range e.rows {
+			if row >= len(values) {
+				return 0, insertViewInternal("row offset %d exceeds %s length %d", row, label, len(values))
+			}
+			size += protowire.SizeVarint(uint64(values[row]))
 		}
-		payloadSize += protowire.SizeVarint(uint64(values[row]))
+		return size, nil
+	})
+	if err != nil {
+		return err
 	}
 	arraySize := 0
 	if len(e.rows) > 0 {
@@ -510,12 +650,18 @@ func (e *InsertRequestViewEncoder) appendInt64Values(w *insertViewWriter, fieldN
 	if nilArray {
 		return insertViewInternal("nil %s array", label)
 	}
-	payloadSize := 0
-	for _, row := range e.rows {
-		if row >= len(values) {
-			return insertViewInternal("row offset %d exceeds %s length %d", row, label, len(values))
+	payloadSize, err := w.cachedInt(func() (int, error) {
+		size := 0
+		for _, row := range e.rows {
+			if row >= len(values) {
+				return 0, insertViewInternal("row offset %d exceeds %s length %d", row, label, len(values))
+			}
+			size += protowire.SizeVarint(uint64(values[row]))
 		}
-		payloadSize += protowire.SizeVarint(uint64(values[row]))
+		return size, nil
+	})
+	if err != nil {
+		return err
 	}
 	arraySize := 0
 	if len(e.rows) > 0 {
@@ -538,12 +684,14 @@ func (e *InsertRequestViewEncoder) appendFloat32Array(w *insertViewWriter, field
 	if values == nil {
 		return insertViewInternal("nil float scalar array")
 	}
-	for _, row := range e.rows {
-		if row >= len(values.GetData()) {
-			return insertViewInternal("row offset %d exceeds float scalar length %d", row, len(values.GetData()))
+	payloadSize, err := w.cachedInt(func() (int, error) {
+		for _, row := range e.rows {
+			if row >= len(values.GetData()) {
+				return 0, insertViewInternal("row offset %d exceeds float scalar length %d", row, len(values.GetData()))
+			}
 		}
-	}
-	payloadSize, err := checkedProduct(len(e.rows), 4, "float scalar payload")
+		return checkedProduct(len(e.rows), 4, "float scalar payload")
+	})
 	if err != nil {
 		return err
 	}
@@ -568,12 +716,14 @@ func (e *InsertRequestViewEncoder) appendFloat64Array(w *insertViewWriter, field
 	if values == nil {
 		return insertViewInternal("nil double scalar array")
 	}
-	for _, row := range e.rows {
-		if row >= len(values.GetData()) {
-			return insertViewInternal("row offset %d exceeds double scalar length %d", row, len(values.GetData()))
+	payloadSize, err := w.cachedInt(func() (int, error) {
+		for _, row := range e.rows {
+			if row >= len(values.GetData()) {
+				return 0, insertViewInternal("row offset %d exceeds double scalar length %d", row, len(values.GetData()))
+			}
 		}
-	}
-	payloadSize, err := checkedProduct(len(e.rows), 8, "double scalar payload")
+		return checkedProduct(len(e.rows), 8, "double scalar payload")
+	})
 	if err != nil {
 		return err
 	}
@@ -605,16 +755,22 @@ func (e *InsertRequestViewEncoder) appendStringValues(w *insertViewWriter, field
 	if nilArray {
 		return insertViewInternal("nil %s array", label)
 	}
-	arraySize := 0
-	for _, row := range e.rows {
-		if row >= len(values) {
-			return insertViewInternal("row offset %d exceeds %s length %d", row, label, len(values))
+	arraySize, err := w.cachedInt(func() (int, error) {
+		size := 0
+		for _, row := range e.rows {
+			if row >= len(values) {
+				return 0, insertViewInternal("row offset %d exceeds %s length %d", row, label, len(values))
+			}
+			value := values[row]
+			if !utf8.ValidString(value) {
+				return 0, insertViewInternal("%s row %d contains invalid UTF-8", label, row)
+			}
+			size += protowire.SizeTag(1) + protowire.SizeBytes(len(value))
 		}
-		value := values[row]
-		if !utf8.ValidString(value) {
-			return insertViewInternal("%s row %d contains invalid UTF-8", label, row)
-		}
-		arraySize += protowire.SizeTag(1) + protowire.SizeBytes(len(value))
+		return size, nil
+	})
+	if err != nil {
+		return err
 	}
 	return w.message(fieldNumber, arraySize, func() error {
 		for _, row := range e.rows {
@@ -635,12 +791,18 @@ func (e *InsertRequestViewEncoder) appendRawBytesRows(w *insertViewWriter, field
 	if nilArray {
 		return insertViewInternal("nil %s array", label)
 	}
-	arraySize := 0
-	for _, row := range e.rows {
-		if row >= len(values) {
-			return insertViewInternal("row offset %d exceeds %s length %d", row, label, len(values))
+	arraySize, err := w.cachedInt(func() (int, error) {
+		size := 0
+		for _, row := range e.rows {
+			if row >= len(values) {
+				return 0, insertViewInternal("row offset %d exceeds %s length %d", row, label, len(values))
+			}
+			size += protowire.SizeTag(1) + protowire.SizeBytes(len(values[row]))
 		}
-		arraySize += protowire.SizeTag(1) + protowire.SizeBytes(len(values[row]))
+		return size, nil
+	})
+	if err != nil {
+		return err
 	}
 	return w.message(fieldNumber, arraySize, func() error {
 		for _, row := range e.rows {
@@ -654,16 +816,22 @@ func (e *InsertRequestViewEncoder) appendArrayArray(w *insertViewWriter, fieldNu
 	if values == nil {
 		return insertViewInternal("nil array scalar payload")
 	}
-	arraySize := 0
-	for _, row := range e.rows {
-		if row >= len(values.GetData()) {
-			return insertViewInternal("row offset %d exceeds array scalar length %d", row, len(values.GetData()))
+	arraySize, err := w.cachedInt(func() (int, error) {
+		size := 0
+		for _, row := range e.rows {
+			if row >= len(values.GetData()) {
+				return 0, insertViewInternal("row offset %d exceeds array scalar length %d", row, len(values.GetData()))
+			}
+			itemSize := nullableProtoSize(values.GetData()[row], false)
+			size += protowire.SizeTag(1) + protowire.SizeBytes(itemSize)
 		}
-		itemSize := nullableProtoSize(values.GetData()[row])
-		arraySize += protowire.SizeTag(1) + protowire.SizeBytes(itemSize)
-	}
-	if values.GetElementType() != schemapb.DataType_None {
-		arraySize += protowire.SizeTag(2) + protowire.SizeVarint(uint64(values.GetElementType()))
+		if values.GetElementType() != schemapb.DataType_None {
+			size += protowire.SizeTag(2) + protowire.SizeVarint(uint64(values.GetElementType()))
+		}
+		return size, nil
+	})
+	if err != nil {
+		return err
 	}
 	return w.message(fieldNumber, arraySize, func() error {
 		for _, row := range e.rows {
@@ -676,9 +844,9 @@ func (e *InsertRequestViewEncoder) appendArrayArray(w *insertViewWriter, fieldNu
 	})
 }
 
-func (e *InsertRequestViewEncoder) sizeVectorField(field *schemapb.FieldData, vector *schemapb.VectorField) (int, error) {
-	w := newInsertViewSizeWriter()
-	if err := e.appendVectorField(w, field, vector); err != nil {
+func (e *InsertRequestViewEncoder) sizeVectorField(fieldIndex int, field *schemapb.FieldData, vector *schemapb.VectorField) (int, error) {
+	w := newInsertViewSizeWriter(&e.sizePlan)
+	if err := e.appendVectorField(w, fieldIndex, field, vector); err != nil {
 		return 0, err
 	}
 	if w.err != nil {
@@ -687,23 +855,23 @@ func (e *InsertRequestViewEncoder) sizeVectorField(field *schemapb.FieldData, ve
 	return w.n, nil
 }
 
-func (e *InsertRequestViewEncoder) appendVectorField(w *insertViewWriter, field *schemapb.FieldData, vector *schemapb.VectorField) error {
+func (e *InsertRequestViewEncoder) appendVectorField(w *insertViewWriter, fieldIndex int, field *schemapb.FieldData, vector *schemapb.VectorField) error {
 	switch value := vector.Data.(type) {
 	case nil:
 		w.proto3Varint(1, uint64(vector.GetDim()))
 		return w.err
 	case *schemapb.VectorField_BinaryVector:
-		return e.appendDenseBytesVector(w, field, vector.GetDim(), 3, value.BinaryVector, 8, "binary vector")
+		return e.appendDenseBytesVector(w, fieldIndex, field, vector.GetDim(), 3, value.BinaryVector, 8, "binary vector")
 	case *schemapb.VectorField_FloatVector:
-		return e.appendFloatVector(w, field, vector.GetDim(), value.FloatVector)
+		return e.appendFloatVector(w, fieldIndex, field, vector.GetDim(), value.FloatVector)
 	case *schemapb.VectorField_Float16Vector:
-		return e.appendDenseBytesVector(w, field, vector.GetDim(), 4, value.Float16Vector, 2, "float16 vector")
+		return e.appendDenseBytesVector(w, fieldIndex, field, vector.GetDim(), 4, value.Float16Vector, 2, "float16 vector")
 	case *schemapb.VectorField_Bfloat16Vector:
-		return e.appendDenseBytesVector(w, field, vector.GetDim(), 5, value.Bfloat16Vector, 2, "bfloat16 vector")
+		return e.appendDenseBytesVector(w, fieldIndex, field, vector.GetDim(), 5, value.Bfloat16Vector, 2, "bfloat16 vector")
 	case *schemapb.VectorField_SparseFloatVector:
-		return e.appendSparseVector(w, field, vector, value.SparseFloatVector)
+		return e.appendSparseVector(w, fieldIndex, field, vector, value.SparseFloatVector)
 	case *schemapb.VectorField_Int8Vector:
-		return e.appendDenseBytesVector(w, field, vector.GetDim(), 7, value.Int8Vector, 1, "int8 vector")
+		return e.appendDenseBytesVector(w, fieldIndex, field, vector.GetDim(), 7, value.Int8Vector, 1, "int8 vector")
 	case *schemapb.VectorField_VectorArray:
 		return e.appendVectorArray(w, vector, value.VectorArray)
 	default:
@@ -713,14 +881,16 @@ func (e *InsertRequestViewEncoder) appendVectorField(w *insertViewWriter, field 
 
 // appendDenseBytesVector handles byte-backed dense vectors. unit denotes bytes
 // per dimension, except binary vectors where unit=8 means dimensions per byte.
-func (e *InsertRequestViewEncoder) appendDenseBytesVector(w *insertViewWriter, field *schemapb.FieldData, dim int64, fieldNumber protowire.Number, data []byte, unit int, label string) error {
+func (e *InsertRequestViewEncoder) appendDenseBytesVector(w *insertViewWriter, fieldIndex int, field *schemapb.FieldData, dim int64, fieldNumber protowire.Number, data []byte, unit int, label string) error {
 	stride, err := denseVectorStride(dim, unit, label)
 	if err != nil {
 		return err
 	}
-	selected, err := e.countSelectedVectorRows(field, func(dataIndex int) error {
-		_, _, err := vectorBounds(dataIndex, stride, len(data), field, label)
-		return err
+	selected, err := w.cachedInt(func() (int, error) {
+		return e.countSelectedVectorRows(fieldIndex, field, func(dataIndex int) error {
+			_, _, err := vectorBounds(dataIndex, stride, len(data), field, label)
+			return err
+		})
 	})
 	if err != nil {
 		return err
@@ -734,7 +904,7 @@ func (e *InsertRequestViewEncoder) appendDenseBytesVector(w *insertViewWriter, f
 		return err
 	}
 	return w.message(fieldNumber, payloadSize, func() error {
-		_, err := e.countSelectedVectorRows(field, func(dataIndex int) error {
+		_, err := e.countSelectedVectorRows(fieldIndex, field, func(dataIndex int) error {
 			start, end, err := vectorBounds(dataIndex, stride, len(data), field, label)
 			if err != nil {
 				return err
@@ -746,7 +916,7 @@ func (e *InsertRequestViewEncoder) appendDenseBytesVector(w *insertViewWriter, f
 	})
 }
 
-func (e *InsertRequestViewEncoder) appendFloatVector(w *insertViewWriter, field *schemapb.FieldData, dim int64, values *schemapb.FloatArray) error {
+func (e *InsertRequestViewEncoder) appendFloatVector(w *insertViewWriter, fieldIndex int, field *schemapb.FieldData, dim int64, values *schemapb.FloatArray) error {
 	if values == nil {
 		return insertViewInternal("field %q (%d) has a nil float vector payload", field.GetFieldName(), field.GetFieldId())
 	}
@@ -754,9 +924,11 @@ func (e *InsertRequestViewEncoder) appendFloatVector(w *insertViewWriter, field 
 	if err != nil {
 		return err
 	}
-	selected, err := e.countSelectedVectorRows(field, func(dataIndex int) error {
-		_, _, err := vectorBounds(dataIndex, stride, len(values.GetData()), field, "float vector")
-		return err
+	selected, err := w.cachedInt(func() (int, error) {
+		return e.countSelectedVectorRows(fieldIndex, field, func(dataIndex int) error {
+			_, _, err := vectorBounds(dataIndex, stride, len(values.GetData()), field, "float vector")
+			return err
+		})
 	})
 	if err != nil {
 		return err
@@ -782,7 +954,7 @@ func (e *InsertRequestViewEncoder) appendFloatVector(w *insertViewWriter, field 
 			return nil
 		}
 		return w.message(1, payloadSize, func() error {
-			_, err := e.countSelectedVectorRows(field, func(dataIndex int) error {
+			_, err := e.countSelectedVectorRows(fieldIndex, field, func(dataIndex int) error {
 				start, end, err := vectorBounds(dataIndex, stride, len(values.GetData()), field, "float vector")
 				if err != nil {
 					return err
@@ -795,32 +967,51 @@ func (e *InsertRequestViewEncoder) appendFloatVector(w *insertViewWriter, field 
 	})
 }
 
-func (e *InsertRequestViewEncoder) appendSparseVector(w *insertViewWriter, field *schemapb.FieldData, vector *schemapb.VectorField, values *schemapb.SparseFloatArray) error {
+func (e *InsertRequestViewEncoder) appendSparseVector(w *insertViewWriter, fieldIndex int, field *schemapb.FieldData, vector *schemapb.VectorField, values *schemapb.SparseFloatArray) error {
 	if values == nil {
 		return insertViewInternal("field %q (%d) has a nil sparse vector payload", field.GetFieldName(), field.GetFieldId())
 	}
-	selected := 0
 	sparseSize := 0
 	selectedDim := int64(0)
-	_, err := e.countSelectedVectorRows(field, func(dataIndex int) error {
-		if dataIndex < 0 || dataIndex >= len(values.GetContents()) {
-			return insertViewInternal("compact sparse vector index %d exceeds payload rows %d for field %q (%d)", dataIndex, len(values.GetContents()), field.GetFieldName(), field.GetFieldId())
-		}
-		row := values.GetContents()[dataIndex]
-		rowDim, err := sparseRowDim(row)
-		if err != nil {
-			return merr.Wrapf(err, "field %q (%d) has malformed sparse row %d", field.GetFieldName(), field.GetFieldId(), dataIndex)
-		}
-		if rowDim > selectedDim {
-			selectedDim = rowDim
-		}
-		selected++
-		sparseSize += protowire.SizeTag(1) + protowire.SizeBytes(len(row))
-		return nil
+	selected, err := w.cachedInt(func() (int, error) {
+		count := 0
+		_, err := e.countSelectedVectorRows(fieldIndex, field, func(dataIndex int) error {
+			if dataIndex < 0 || dataIndex >= len(values.GetContents()) {
+				return insertViewInternal("compact sparse vector index %d exceeds payload rows %d for field %q (%d)", dataIndex, len(values.GetContents()), field.GetFieldName(), field.GetFieldId())
+			}
+			row := values.GetContents()[dataIndex]
+			rowDim, err := sparseRowDim(row)
+			if err != nil {
+				return merr.Wrapf(err, "field %q (%d) has malformed sparse row %d", field.GetFieldName(), field.GetFieldId(), dataIndex)
+			}
+			if rowDim > selectedDim {
+				selectedDim = rowDim
+			}
+			count++
+			sparseSize += protowire.SizeTag(1) + protowire.SizeBytes(len(row))
+			return nil
+		})
+		return count, err
 	})
 	if err != nil {
 		return err
 	}
+	sparseSize, err = w.cachedInt(func() (int, error) {
+		return sparseSize, nil
+	})
+	if err != nil {
+		return err
+	}
+	selectedDimSize, err := w.cachedInt(func() (int, error) {
+		if uint64(selectedDim) > uint64(math.MaxInt) {
+			return 0, insertViewInternal("selected sparse vector dimension %d exceeds addressable memory", selectedDim)
+		}
+		return int(selectedDim), nil
+	})
+	if err != nil {
+		return err
+	}
+	selectedDim = int64(selectedDimSize)
 
 	outerDim := vector.GetDim()
 	if selected > 0 {
@@ -836,7 +1027,7 @@ func (e *InsertRequestViewEncoder) appendSparseVector(w *insertViewWriter, field
 		sparseSize += protowire.SizeTag(2) + protowire.SizeVarint(uint64(selectedDim))
 	}
 	return w.message(6, sparseSize, func() error {
-		_, err := e.countSelectedVectorRows(field, func(dataIndex int) error {
+		_, err := e.countSelectedVectorRows(fieldIndex, field, func(dataIndex int) error {
 			w.bytes(1, values.GetContents()[dataIndex])
 			return w.err
 		})
@@ -853,19 +1044,25 @@ func (e *InsertRequestViewEncoder) appendVectorArray(w *insertViewWriter, vector
 		return insertViewInternal("nil ArrayOfVector payload")
 	}
 	w.proto3Varint(1, uint64(vector.GetDim()))
-	arraySize := 0
-	for _, row := range e.rows {
-		if row >= len(values.GetData()) {
-			return insertViewInternal("row offset %d exceeds ArrayOfVector length %d", row, len(values.GetData()))
+	arraySize, err := w.cachedInt(func() (int, error) {
+		size := 0
+		for _, row := range e.rows {
+			if row >= len(values.GetData()) {
+				return 0, insertViewInternal("row offset %d exceeds ArrayOfVector length %d", row, len(values.GetData()))
+			}
+			itemSize := nullableProtoSize(values.GetData()[row], false)
+			size += protowire.SizeTag(2) + protowire.SizeBytes(itemSize)
 		}
-		itemSize := nullableProtoSize(values.GetData()[row])
-		arraySize += protowire.SizeTag(2) + protowire.SizeBytes(itemSize)
-	}
-	if values.GetDim() != 0 {
-		arraySize += protowire.SizeTag(1) + protowire.SizeVarint(uint64(values.GetDim()))
-	}
-	if values.GetElementType() != schemapb.DataType_None {
-		arraySize += protowire.SizeTag(3) + protowire.SizeVarint(uint64(values.GetElementType()))
+		if values.GetDim() != 0 {
+			size += protowire.SizeTag(1) + protowire.SizeVarint(uint64(values.GetDim()))
+		}
+		if values.GetElementType() != schemapb.DataType_None {
+			size += protowire.SizeTag(3) + protowire.SizeVarint(uint64(values.GetElementType()))
+		}
+		return size, nil
+	})
+	if err != nil {
+		return err
 	}
 	return w.message(8, arraySize, func() error {
 		w.proto3Varint(1, uint64(values.GetDim()))
@@ -883,7 +1080,7 @@ func (e *InsertRequestViewEncoder) appendVectorArray(w *insertViewWriter, vector
 // vector indices. Nullable scalar columns and ArrayOfVector remain dense; this
 // helper is used only for the regular vector oneofs whose null payload is
 // compacted according to ValidData.
-func (e *InsertRequestViewEncoder) countSelectedVectorRows(field *schemapb.FieldData, visit func(dataIndex int) error) (int, error) {
+func (e *InsertRequestViewEncoder) countSelectedVectorRows(fieldIndex int, field *schemapb.FieldData, visit func(dataIndex int) error) (int, error) {
 	valid := field.GetValidData()
 	if len(valid) == 0 {
 		for _, row := range e.rows {
@@ -897,9 +1094,8 @@ func (e *InsertRequestViewEncoder) countSelectedVectorRows(field *schemapb.Field
 	dataIndex := 0
 	scanRow := 0
 	if len(e.rows) > 0 && len(e.firstFieldDataIndices) == len(e.source.GetFieldsData()) {
-		fieldIndex := e.sourceFieldIndex(field)
-		if fieldIndex < 0 {
-			return 0, insertViewInternal("field %q (%d) is not part of the borrowed source request", field.GetFieldName(), field.GetFieldId())
+		if fieldIndex < 0 || fieldIndex >= len(e.firstFieldDataIndices) {
+			return 0, insertViewInternal("field index %d is outside the borrowed source request", fieldIndex)
 		}
 		dataIndex = int(e.firstFieldDataIndices[fieldIndex])
 		scanRow = e.rows[0]
@@ -925,15 +1121,6 @@ func (e *InsertRequestViewEncoder) countSelectedVectorRows(field *schemapb.Field
 		scanRow = row + 1
 	}
 	return selected, nil
-}
-
-func (e *InsertRequestViewEncoder) sourceFieldIndex(field *schemapb.FieldData) int {
-	for fieldIndex, candidate := range e.source.GetFieldsData() {
-		if candidate == field {
-			return fieldIndex
-		}
-	}
-	return -1
 }
 
 func denseVectorStride(dim int64, unit int, label string) (int, error) {
@@ -992,16 +1179,34 @@ func checkedProduct(a, b int, label string) (int, error) {
 	return a * b, nil
 }
 
-func nullableProtoSize(message proto.Message) int {
+func prepareSizePlan(plan []int, fieldCount int) []int {
+	capacity, err := checkedProduct(fieldCount, 6, "encoded size plan capacity")
+	if err != nil || capacity > math.MaxInt-8 {
+		return plan[:0]
+	}
+	capacity += 8
+	if cap(plan) < capacity {
+		return make([]int, 0, capacity)
+	}
+	return plan[:0]
+}
+
+func nullableProtoSize(message proto.Message, useCachedSize bool) int {
 	if isNilProto(message) {
 		return 0
 	}
-	return proto.Size(message)
+	return (proto.MarshalOptions{UseCachedSize: useCachedSize}).Size(message)
 }
 
 func isNilProto(message proto.Message) bool {
 	if message == nil {
 		return true
+	}
+	switch message := message.(type) {
+	case *schemapb.ScalarField:
+		return message == nil
+	case *schemapb.VectorField:
+		return message == nil
 	}
 	value := reflect.ValueOf(message)
 	return value.Kind() == reflect.Ptr && value.IsNil()
@@ -1012,18 +1217,53 @@ func insertViewInternal(format string, args ...any) error {
 }
 
 type insertViewWriter struct {
-	out     []byte
-	n       int
-	marshal bool
-	err     error
+	out       []byte
+	n         int
+	marshal   bool
+	err       error
+	sizePlan  *[]int
+	planIndex int
 }
 
-func newInsertViewSizeWriter() *insertViewWriter {
-	return &insertViewWriter{}
+func newInsertViewSizeWriter(sizePlan *[]int) *insertViewWriter {
+	return &insertViewWriter{sizePlan: sizePlan}
 }
 
-func newInsertViewMarshalWriter(dst []byte) *insertViewWriter {
-	return &insertViewWriter{out: dst, marshal: true}
+func newInsertViewMarshalWriter(dst []byte, sizePlan *[]int) *insertViewWriter {
+	return &insertViewWriter{out: dst, marshal: true, sizePlan: sizePlan}
+}
+
+// cachedInt records expensive size calculations and related non-negative
+// metadata during the initial size pass, then replays them in the same
+// pre-order during MarshalTo. Callers must keep the borrowed source immutable
+// between the two passes.
+func (w *insertViewWriter) cachedInt(compute func() (int, error)) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	if w.sizePlan == nil {
+		return 0, insertViewInternal("missing encoded size plan")
+	}
+	if w.marshal {
+		if w.planIndex >= len(*w.sizePlan) {
+			return 0, insertViewInternal("encoded size plan exhausted at entry %d", w.planIndex)
+		}
+		size := (*w.sizePlan)[w.planIndex]
+		w.planIndex++
+		return size, nil
+	}
+
+	slot := len(*w.sizePlan)
+	*w.sizePlan = append(*w.sizePlan, 0)
+	size, err := compute()
+	if err != nil {
+		return 0, err
+	}
+	if size < 0 {
+		return 0, insertViewInternal("negative cached protobuf size %d", size)
+	}
+	(*w.sizePlan)[slot] = size
+	return size, nil
 }
 
 func (w *insertViewWriter) add(n int) {
@@ -1106,7 +1346,7 @@ func (w *insertViewWriter) string(number protowire.Number, value string, force b
 	if !force && value == "" {
 		return nil
 	}
-	if !utf8.ValidString(value) {
+	if !w.marshal && !utf8.ValidString(value) {
 		return insertViewInternal("%s contains invalid UTF-8", label)
 	}
 	w.stringBytes(number, value)
@@ -1158,13 +1398,41 @@ func (w *insertViewWriter) message(number protowire.Number, size int, appendBody
 }
 
 func (w *insertViewWriter) protoMessage(number protowire.Number, message proto.Message, label string) error {
-	size := nullableProtoSize(message)
+	if isNilProto(message) {
+		return w.message(number, 0, func() error { return nil })
+	}
+	reflected := message.ProtoReflect()
+	methods := reflected.ProtoMethods()
+	// The size pass seeds protobuf's per-message size cache. Reuse that cache
+	// through ProtoMethods during MarshalTo so MarshalAppend does not recursively
+	// size every ARRAY/ArrayOfVector row again.
+	flags := protoiface.MarshalInputFlags(0)
+	if w.marshal {
+		flags |= protoiface.MarshalUseCachedSize
+	}
+	var size int
+	if methods != nil && methods.Size != nil {
+		size = methods.Size(protoiface.SizeInput{Message: reflected, Flags: flags}).Size
+	} else {
+		size = (proto.MarshalOptions{UseCachedSize: w.marshal}).Size(message)
+	}
 	return w.message(number, size, func() error {
-		if size == 0 || isNilProto(message) {
+		if size == 0 {
 			return nil
 		}
 		startLen := len(w.out)
-		out, err := (proto.MarshalOptions{}).MarshalAppend(w.out, message)
+		out := w.out
+		var err error
+		if methods != nil && methods.Marshal != nil {
+			marshalOutput, marshalErr := methods.Marshal(protoiface.MarshalInput{
+				Message: reflected,
+				Buf:     w.out,
+				Flags:   protoiface.MarshalUseCachedSize,
+			})
+			out, err = marshalOutput.Buf, marshalErr
+		} else {
+			out, err = (proto.MarshalOptions{UseCachedSize: true}).MarshalAppend(w.out, message)
+		}
 		if err != nil {
 			return merr.WrapErrServiceInternalErr(err, "failed to marshal %s", label)
 		}

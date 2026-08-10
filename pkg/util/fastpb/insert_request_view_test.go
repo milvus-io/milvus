@@ -91,33 +91,124 @@ func TestInsertRequestViewEncoder_ExtendedScalarOneofs(t *testing.T) {
 	require.True(t, proto.Equal(expected, got), "extended scalar selection mismatch\nexpected: %v\nactual:   %v", expected, got)
 }
 
-func TestInsertRequestViewEncoder_WithCapturedFieldIndices(t *testing.T) {
+func TestInsertRequestViewCursor_SequentialViews(t *testing.T) {
 	template := insertViewTemplate()
 	source := insertViewAllRepackTypesSource()
-	rows := []int{2, 4}
-	idxComputer := typeutil.NewFieldDataIdxComputer(source.GetFieldsData())
-	firstIndices := append([]int64(nil), idxComputer.Compute(int64(rows[0]))...)
+	cursor, err := NewInsertRequestViewCursor(source)
+	require.NoError(t, err)
 
-	encoder, err := NewInsertRequestViewEncoderWithFirstFieldIndices(template, source, rows, firstIndices)
-	require.NoError(t, err)
-	size, err := encoder.EncodedSize()
-	require.NoError(t, err)
-	payload := make([]byte, size)
-	_, err = encoder.MarshalTo(payload)
-	require.NoError(t, err)
-	got := &msgpb.InsertRequest{}
-	require.NoError(t, proto.Unmarshal(payload, got))
-	expected := materializeWithAppendFieldData(template, source, rows)
-	require.True(t, proto.Equal(expected, got))
+	for _, rows := range [][]int{{0, 2}, {3, 4}} {
+		encoder, err := cursor.NewEncoder(template, rows)
+		require.NoError(t, err)
+		size, err := encoder.EncodedSize()
+		require.NoError(t, err)
+		payload := make([]byte, size)
+		_, err = encoder.MarshalTo(payload)
+		require.NoError(t, err)
+		got := &msgpb.InsertRequest{}
+		require.NoError(t, proto.Unmarshal(payload, got))
+		expected := materializeWithAppendFieldData(template, source, rows)
+		require.True(t, proto.Equal(expected, got))
+	}
 
-	_, err = NewInsertRequestViewEncoderWithFirstFieldIndices(template, source, rows, firstIndices[:1])
+	_, err = cursor.NewEncoder(template, []int{4})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)
-	badIndices := append([]int64(nil), firstIndices...)
-	badIndices[0] = -1
-	_, err = NewInsertRequestViewEncoderWithFirstFieldIndices(template, source, rows, badIndices)
+
+	_, err = NewInsertRequestViewCursor(nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+
+	t.Run("requires synchronous consumption", func(t *testing.T) {
+		cursor, err := NewInsertRequestViewCursor(source)
+		require.NoError(t, err)
+		encoder, err := cursor.NewEncoder(template, []int{0})
+		require.NoError(t, err)
+		_, err = cursor.NewEncoder(template, []int{2})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+
+		size, err := encoder.EncodedSize()
+		require.NoError(t, err)
+		_, err = encoder.MarshalTo(make([]byte, size))
+		require.NoError(t, err)
+		_, err = cursor.NewEncoder(template, []int{2})
+		require.NoError(t, err)
+	})
+
+	t.Run("first view starts after row zero", func(t *testing.T) {
+		cursor, err := NewInsertRequestViewCursor(source)
+		require.NoError(t, err)
+		for _, rows := range [][]int{{2}, {4}} {
+			encoder, err := cursor.NewEncoder(template, rows)
+			require.NoError(t, err)
+			size, err := encoder.EncodedSize()
+			require.NoError(t, err)
+			payload := make([]byte, size)
+			_, err = encoder.MarshalTo(payload)
+			require.NoError(t, err)
+
+			got := &msgpb.InsertRequest{}
+			require.NoError(t, proto.Unmarshal(payload, got))
+			expected := materializeWithAppendFieldData(template, source, rows)
+			require.True(t, proto.Equal(expected, got))
+		}
+	})
+
+	t.Run("consumed encoder cannot release a newer encoder", func(t *testing.T) {
+		cursor, err := NewInsertRequestViewCursor(source)
+		require.NoError(t, err)
+
+		first, err := cursor.NewEncoder(template, []int{0})
+		require.NoError(t, err)
+		firstSize, err := first.EncodedSize()
+		require.NoError(t, err)
+		firstCopy := *first
+		_, err = first.MarshalTo(make([]byte, firstSize))
+		require.NoError(t, err)
+
+		second, err := cursor.NewEncoder(template, []int{2})
+		require.NoError(t, err)
+		_, err = firstCopy.MarshalTo(make([]byte, firstSize))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+
+		_, err = cursor.NewEncoder(template, []int{3})
+		require.Error(t, err, "the consumed encoder must not release the newer encoder's scratch")
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+
+		secondSize, err := second.EncodedSize()
+		require.NoError(t, err)
+		_, err = second.MarshalTo(make([]byte, secondSize))
+		require.NoError(t, err)
+		_, err = cursor.NewEncoder(template, []int{3})
+		require.NoError(t, err)
+	})
+
+	t.Run("failed encoder creation does not advance compact prefix", func(t *testing.T) {
+		cursor, err := NewInsertRequestViewCursor(source)
+		require.NoError(t, err)
+
+		_, err = cursor.NewEncoder(nil, []int{2})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+
+		var encoder *InsertRequestViewEncoder
+		require.NotPanics(t, func() {
+			encoder, err = cursor.NewEncoder(template, []int{0})
+		})
+		require.NoError(t, err)
+		size, err := encoder.EncodedSize()
+		require.NoError(t, err)
+		payload := make([]byte, size)
+		_, err = encoder.MarshalTo(payload)
+		require.NoError(t, err)
+
+		got := &msgpb.InsertRequest{}
+		require.NoError(t, proto.Unmarshal(payload, got))
+		expected := materializeWithAppendFieldData(template, source, []int{0})
+		require.True(t, proto.Equal(expected, got))
+	})
 }
 
 func TestInsertRequestViewEncoder_AllNullHighDimVectorDoesNotMaterialize(t *testing.T) {
@@ -237,6 +328,45 @@ func TestInsertRequestViewEncoder_MarshalContract(t *testing.T) {
 	_, err = encoder.MarshalTo(make([]byte, size))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestInsertRequestViewEncoder_InvalidUTF8(t *testing.T) {
+	invalid := string([]byte{0xff})
+	baseSource := func(field *schemapb.FieldData) *msgpb.InsertRequest {
+		return &msgpb.InsertRequest{
+			NumRows:    1,
+			RowIDs:     []int64{1},
+			Timestamps: []uint64{10},
+			FieldsData: []*schemapb.FieldData{field},
+		}
+	}
+
+	t.Run("top-level varchar rejected during sizing", func(t *testing.T) {
+		source := baseSource(scalarField(1, schemapb.DataType_VarChar, &schemapb.ScalarField_StringData{
+			StringData: &schemapb.StringArray{Data: []string{invalid}},
+		}))
+		_, err := NewInsertRequestViewEncoder(insertViewTemplate(), source, []int{0})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+
+	t.Run("nested array string rejected during marshal", func(t *testing.T) {
+		source := baseSource(scalarField(1, schemapb.DataType_Array, &schemapb.ScalarField_ArrayData{
+			ArrayData: &schemapb.ArrayArray{
+				Data: []*schemapb.ScalarField{{Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{Data: []string{invalid}},
+				}}},
+				ElementType: schemapb.DataType_VarChar,
+			},
+		}))
+		encoder, err := NewInsertRequestViewEncoder(insertViewTemplate(), source, []int{0})
+		require.NoError(t, err)
+		size, err := encoder.EncodedSize()
+		require.NoError(t, err)
+		_, err = encoder.MarshalTo(make([]byte, size))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
 }
 
 func assertViewMatchesMaterialized(t *testing.T, template, source *msgpb.InsertRequest, rows []int) {

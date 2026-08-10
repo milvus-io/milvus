@@ -28,15 +28,15 @@ import (
 
 // visitInsertRowsByMessageSize partitions a monotonically increasing row
 // selection and synchronously visits each per-message view. The rows slice
-// borrows the backing array of rowOffsets. firstFieldDataIndices is reusable
-// scratch and is valid only until visit returns.
+// borrows the backing array of rowOffsets and is valid only until visit
+// returns.
 //
 // Keep the existing entity-size split rule here. This change removes the
 // materialized repack buffers without also changing message boundaries.
 func visitInsertRowsByMessageSize(
 	insertMsg *msgstream.InsertMsg,
 	rowOffsets []int,
-	visit func(rows []int, firstFieldDataIndices []int64) error,
+	visit func(rows []int) error,
 ) error {
 	if len(rowOffsets) == 0 {
 		return nil
@@ -45,7 +45,6 @@ func visitInsertRowsByMessageSize(
 	threshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
 	fieldsData := insertMsg.GetFieldsData()
 	idxComputer := typeutil.NewFieldDataIdxComputer(fieldsData)
-	firstFieldDataIndices := make([]int64, len(fieldsData))
 
 	start := 0
 	requestSize := 0
@@ -55,24 +54,19 @@ func visitInsertRowsByMessageSize(
 		if err != nil {
 			return err
 		}
-		if i == start {
-			copy(firstFieldDataIndices, fieldIdxs)
-		}
-
 		// A single row may be larger than the threshold. Do not emit an empty
 		// selection before it; match the previous repack behavior exactly.
 		if i > start && requestSize+rowSize >= threshold {
-			if err := visit(rowOffsets[start:i], firstFieldDataIndices); err != nil {
+			if err := visit(rowOffsets[start:i]); err != nil {
 				return err
 			}
 			start = i
 			requestSize = 0
-			copy(firstFieldDataIndices, fieldIdxs)
 		}
 		requestSize += rowSize
 	}
 
-	return visit(rowOffsets[start:], firstFieldDataIndices)
+	return visit(rowOffsets[start:])
 }
 
 // splitInsertRowsByMessageSize exposes the borrowed row views for focused
@@ -80,7 +74,7 @@ func visitInsertRowsByMessageSize(
 // above so it does not allocate an outer selection slice.
 func splitInsertRowsByMessageSize(insertMsg *msgstream.InsertMsg, rowOffsets []int) ([][]int, error) {
 	var selections [][]int
-	err := visitInsertRowsByMessageSize(insertMsg, rowOffsets, func(rows []int, _ []int64) error {
+	err := visitInsertRowsByMessageSize(insertMsg, rowOffsets, func(rows []int) error {
 		selections = append(selections, rows)
 		return nil
 	})
@@ -100,8 +94,12 @@ func genInsertMessagesByPartition(
 	ez *message.CipherConfig,
 	schemaVersion int32,
 ) ([]message.MutableMessage, error) {
+	viewCursor, err := fastpb.NewInsertRequestViewCursor(insertMsg.InsertRequest)
+	if err != nil {
+		return nil, err
+	}
 	messages := make([]message.MutableMessage, 0, 1)
-	err := visitInsertRowsByMessageSize(insertMsg, rowOffsets, func(rows []int, firstFieldDataIndices []int64) error {
+	err = visitInsertRowsByMessageSize(insertMsg, rowOffsets, func(rows []int) error {
 		template := &msgpb.InsertRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_Insert),
@@ -118,12 +116,7 @@ func genInsertMessagesByPartition(
 			NumRows:        uint64(len(rows)),
 			Version:        msgpb.InsertDataVersion_ColumnBased,
 		}
-		encoder, err := fastpb.NewInsertRequestViewEncoderWithFirstFieldIndices(
-			template,
-			insertMsg.InsertRequest,
-			rows,
-			firstFieldDataIndices,
-		)
+		encoder, err := viewCursor.NewEncoder(template, rows)
 		if err != nil {
 			return err
 		}
@@ -136,7 +129,7 @@ func genInsertMessagesByPartition(
 
 		// BuildMutable consumes the borrowed encoder synchronously. Once it
 		// returns, the message owns only the final payload and the splitter may
-		// safely reuse firstFieldDataIndices for the next view.
+		// safely reuse the cursor scratch for the next view.
 		newMsg, err := message.NewInsertMessageBuilderV1().
 			WithVChannel(channelName).
 			WithHeader(&message.InsertMessageHeader{

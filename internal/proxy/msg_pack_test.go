@@ -441,9 +441,9 @@ func TestGenInsertMessagesByPartitionEncodesSelectionView(t *testing.T) {
 	assert.Equal(t, []int64{10, 11, 12, 13}, source.GetRowIDs())
 	assert.Equal(t, []float32{0, 1, 4, 5, 6, 7}, source.GetFieldsData()[1].GetVectors().GetFloatVector().GetData())
 
-	// Force every logical row into a separate message. This pins the physical
-	// compact-vector index captured at each later selection boundary; rescanning
-	// or reusing the previous message's index would return the wrong vector row.
+	// Force every logical row into a separate message. This pins the cursor's
+	// compact-vector prefix state at each later selection boundary; advancing it
+	// incorrectly would return the wrong physical vector row.
 	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1"))
 	msgs, err = genInsertMessagesByPartition(0, 200, "target-partition", []int{0, 1, 2, 3}, "vchannel", source, nil, 7)
 	assert.NoError(t, err)
