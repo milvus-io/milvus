@@ -30,6 +30,51 @@ func (_m *MockSegment) EXPECT() *MockSegment_Expecter {
 	return &MockSegment_Expecter{mock: &_m.Mock}
 }
 
+// AckedRowCount provides a mock function with no fields
+func (_m *MockSegment) AckedRowCount() int64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for AckedRowCount")
+	}
+
+	var r0 int64
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	return r0
+}
+
+// MockSegment_AckedRowCount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AckedRowCount'
+type MockSegment_AckedRowCount_Call struct {
+	*mock.Call
+}
+
+// AckedRowCount is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) AckedRowCount() *MockSegment_AckedRowCount_Call {
+	return &MockSegment_AckedRowCount_Call{Call: _e.mock.On("AckedRowCount")}
+}
+
+func (_c *MockSegment_AckedRowCount_Call) Run(run func()) *MockSegment_AckedRowCount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_AckedRowCount_Call) Return(_a0 int64) *MockSegment_AckedRowCount_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_AckedRowCount_Call) RunAndReturn(run func() int64) *MockSegment_AckedRowCount_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // BatchPkExist provides a mock function with given fields: lc
 func (_m *MockSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
 	ret := _m.Called(lc)

@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -126,6 +127,62 @@ func (s *InsertBufferSuite) TestBasic() {
 		s.True(insertBuffer.IsFull())
 		s.False(insertBuffer.IsEmpty())
 	})
+}
+
+func (s *InsertBufferSuite) TestBM25StatsCountTowardBufferSize() {
+	schema := &schemapb.CollectionSchema{
+		Name:      s.collSchema.Name,
+		Fields:    s.collSchema.Fields,
+		Functions: []*schemapb.FunctionSchema{{Name: "bm25"}},
+	}
+	insertBuffer, err := NewInsertBuffer(schema)
+	s.Require().NoError(err)
+
+	stats := storage.NewBM25Stats()
+	stats.Append(map[uint32]float32{1: 1, 2: 1})
+	insertBuffer.sizeLimit = stats.MemSize()
+	insertData := &InsertData{
+		data:      []*storage.InsertData{{}},
+		tsField:   []*storage.Int64FieldData{{Data: []int64{100}}},
+		bm25Stats: map[int64]*storage.BM25Stats{101: stats},
+	}
+	buffered := insertBuffer.Buffer(insertData,
+		&msgpb.MsgPosition{Timestamp: 100},
+		&msgpb.MsgPosition{Timestamp: 200})
+
+	s.Equal(stats.MemSize(), buffered)
+	s.Equal(stats.MemSize(), insertBuffer.size)
+	s.Equal(stats.MemSize(), insertBuffer.statsBuffer.MemorySize())
+	s.True(insertBuffer.IsFull())
+
+	moreStats := storage.NewBM25Stats()
+	moreStats.Append(map[uint32]float32{2: 1, 3: 1})
+	before := insertBuffer.statsBuffer.MemorySize()
+	insertData.bm25Stats = map[int64]*storage.BM25Stats{101: moreStats}
+	buffered = insertBuffer.Buffer(insertData,
+		&msgpb.MsgPosition{Timestamp: 201},
+		&msgpb.MsgPosition{Timestamp: 300})
+
+	s.Equal(insertBuffer.statsBuffer.MemorySize()-before, buffered)
+	s.Equal(insertBuffer.statsBuffer.MemorySize(), insertBuffer.size)
+
+	before = insertBuffer.size
+	insertData.bm25Stats = map[int64]*storage.BM25Stats{101: nil}
+	buffered = insertBuffer.Buffer(insertData,
+		&msgpb.MsgPosition{Timestamp: 301},
+		&msgpb.MsgPosition{Timestamp: 400})
+	s.Zero(buffered)
+	s.Equal(before, insertBuffer.size)
+
+	replacement := storage.NewBM25Stats()
+	replacement.Append(map[uint32]float32{4: 1})
+	insertBuffer.statsBuffer.bm25Stats[102] = nil
+	insertData.bm25Stats = map[int64]*storage.BM25Stats{102: replacement}
+	buffered = insertBuffer.Buffer(insertData,
+		&msgpb.MsgPosition{Timestamp: 401},
+		&msgpb.MsgPosition{Timestamp: 500})
+	s.Equal(replacement.MemSize(), buffered)
+	s.Equal(insertBuffer.statsBuffer.MemorySize(), insertBuffer.size)
 }
 
 func (s *InsertBufferSuite) TestBuffer() {

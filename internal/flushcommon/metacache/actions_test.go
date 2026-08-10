@@ -34,7 +34,7 @@ func (s *SegmentFilterSuite) TestFilters() {
 	info := &SegmentInfo{}
 
 	partitionID := int64(1001)
-	filter := WithPartitionID(partitionID)
+	filter := WithPartitionIDs([]int64{partitionID})
 	info.partitionID = partitionID + 1
 	s.False(filter.Filter(info))
 	info.partitionID = partitionID
@@ -96,7 +96,7 @@ func (s *SegmentActionSuite) TestActions() {
 	s.Equal(numOfRows, info.NumOfRows())
 
 	info = &SegmentInfo{}
-	actions := SegmentActions(UpdateState(state), UpdateCheckpoint(cp), UpdateNumOfRows(numOfRows),
+	actions := MergeSegmentAction(UpdateState(state), UpdateCheckpoint(cp), UpdateNumOfRows(numOfRows),
 		UpdateBinlogs([]*datapb.FieldBinlog{
 			{
 				FieldID: 1,
@@ -130,6 +130,18 @@ func (s *SegmentActionSuite) TestActions() {
 	s.Equal(1, len(info.Statslogs()))
 	s.Equal(1, len(info.Deltalogs()))
 	s.Equal(1, len(info.Bm25logs()))
+}
+
+func (s *SegmentActionSuite) TestDiscardSyncingDoesNotRestoreMissingPayload() {
+	info := &SegmentInfo{}
+	UpdateBufferedRows(10)(info)
+	StartSyncing(10)(info)
+
+	DiscardSyncing(10)(info)
+
+	s.Zero(info.BufferRows())
+	s.Zero(info.SyncingRows())
+	s.True(WithNoSyncingTask().Filter(info))
 }
 
 func (s *SegmentActionSuite) TestMergeActions() {

@@ -606,6 +606,20 @@ func (s *LocalSegment) RowNum() int64 {
 	return rowNum
 }
 
+func (s *LocalSegment) AckedRowCount() int64 {
+	if !s.ptrLock.PinIf(state.IsDataLoaded) {
+		return 0
+	}
+	defer s.ptrLock.Unpin()
+
+	var rowCount int64
+	GetDynamicPool().Submit(func() (any, error) {
+		rowCount = s.csegment.AckedRowCount()
+		return nil, nil
+	}).Await()
+	return rowCount
+}
+
 func (s *LocalSegment) MemSize() int64 {
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return 0
