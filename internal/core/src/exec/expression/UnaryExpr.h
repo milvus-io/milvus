@@ -39,6 +39,7 @@
 #include "index/json_stats/bson_inverted.h"
 #include "cachinglayer/CacheSlot.h"
 #include "index/NgramInvertedIndex.h"
+#include "mmap/ChunkedColumnInterface.h"
 
 namespace milvus {
 namespace exec {
