@@ -2755,7 +2755,7 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 			}
 			data.Data = newData
 		}
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
 		if data := field.GetScalars().GetStringData(); data != nil && len(data.Data) > 0 {
 			newData := make([]string, n)
 			for newIdx, oldIdx := range indices {

@@ -6461,6 +6461,46 @@ func (s *SearchPipelineSuite) TestOrderByOperatorVarCharField() {
 	s.Equal(expectedNames, sortedResult.Results.FieldsData[0].GetScalars().GetStringData().Data)
 }
 
+func (s *SearchPipelineSuite) TestOrderByOperatorReordersTextOutputField() {
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids:    testSearchResultIDs(1, 2, 3),
+			Scores: []float32{0.9, 0.8, 0.7},
+			Topks:  []int64{3},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Float,
+					FieldName: "price",
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{3, 1, 2}}},
+					}},
+				},
+				{
+					Type:      schemapb.DataType_Text,
+					FieldName: "content",
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"third", "first", "second"}}},
+					}},
+				},
+			},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+	}
+
+	outputs, err := op.run(context.Background(), s.span, result)
+	s.NoError(err)
+	sortedResult := outputs[0].(*milvuspb.SearchResults)
+	s.Equal([]int64{2, 3, 1}, sortedResult.Results.Ids.GetIntId().Data)
+	s.Equal(
+		[]string{"first", "second", "third"},
+		sortedResult.Results.FieldsData[1].GetScalars().GetStringData().Data,
+	)
+}
+
 // Test compareNulls helper function
 func (s *SearchPipelineSuite) TestCompareNulls() {
 	// Empty ValidData - should return (0, false)
