@@ -262,6 +262,18 @@ supported, provided the generated target metadata, segment manifest, and data
 object keys do not overwrite any object used by the source snapshot. Milvus
 rejects such overlap before the first copy.
 
+`targetS3Path` is a destination base root. Each accepted export receives a
+persisted random namespace and writes the bundle under
+`<targetS3Path>/exports/<export-id>`. This prevents different clusters that use
+the same collection and snapshot IDs from overwriting each other's bundles.
+Use the complete `snapshotMetadataURI` returned by a completed job instead of
+constructing the metadata path from `targetS3Path`.
+
+`ExportSnapshot` does not currently support external collections. Their
+StorageV3 manifests may reference lake fragments that are not part of the
+snapshot file set, so Milvus rejects the export before enumerating or copying
+objects instead of publishing an incomplete self-contained bundle.
+
 **Go SDK Example:**
 ```go
 jobID, err := client.ExportSnapshot(context.Background(),
@@ -330,12 +342,14 @@ The URI is empty for `Pending`, `Executing`, and `Failed` jobs.
 
 Progress is checkpoint based: `0` means queued, `5` means planning completed,
 values from `5` through `95` reflect durably checkpointed object copies, `99`
-means DataCoord has durably entered metadata publication, and `100` means the
-bundle is published and completion is durable. The internal publication state
-is reported through the public API as `Executing`; no additional public state
-is exposed. A restart may replay an uncheckpointed copy batch or the
-deterministic manifest/metadata publication, but reported progress does not
-move backward.
+means DataCoord has written final segment manifests, verified private staging
+metadata, and durably entered metadata publication. `100` means the final
+metadata object is published and completion is durable. The internal
+publication state is reported through the public API as `Executing`; no
+additional public state is exposed. A restart may replay an uncheckpointed copy
+batch. Once progress reaches `99`, recovery reads only the target staging object
+and never rebuilds the source snapshot or copy plan, so reported progress does
+not move backward.
 
 `dataCoord.snapshot.exportCopyConcurrency` controls the maximum number of
 provider-side object copy requests executed concurrently by each job. The
@@ -343,18 +357,27 @@ default is `16`. `dataCoord.snapshot.exportMaxConcurrentJobs` limits concurrent
 jobs and defaults to `1`. `dataCoord.snapshot.exportJobTimeout` covers queue and
 data-copy execution time and defaults to 12 hours. Once publication progress
 reaches `99`, the original deadline no longer turns the job into `Failed`;
-DataCoord finishes or replays publication and then durably records completion.
+DataCoord compares `<bundle-root>/_staging/metadata.json` with the final
+metadata object, finishes or replays publication, and then durably records
+completion. If the final write returns an error after actually committing,
+read-back comparison recognizes the matching bytes as success. Source snapshot
+deletion after the source pin expires does not affect a durable `Publishing`
+job. The staging object is removed best-effort after completion.
 Completed and failed jobs remain queryable for
 `dataCoord.snapshot.exportJobRetention`, which defaults to 3 hours. These
 settings are refreshable.
 
 Request validation, source snapshot lookup, pin creation, and job persistence
 can fail synchronously before a job ID is returned. Storage permission errors,
-missing source objects, provider copy failures, plan changes, publication
-errors, and timeout after acceptance are reported as a `Failed` job. DataCoord
-keeps the source snapshot pinned until the job is terminal and recovers accepted
-jobs after restart. A failed job does not automatically delete objects already
-copied to the target root.
+missing source objects, provider copy failures, plan changes, staging integrity
+errors, and timeout before publication are reported as a `Failed` job. After
+`Publishing` is durable, temporarily unreadable target objects and ambiguous
+final writes remain at progress `99` for reconciliation retry. A missing or
+corrupt staging object, a permanent target-access error, or a final object whose
+bytes differ from staging fails the job.
+DataCoord keeps the source snapshot pinned until the job is terminal or the pin
+expires and recovers accepted jobs after restart. A failed job does not
+automatically delete objects already copied to the target root.
 
 Raw credentials in export `externalSpec` are persisted only while the job is
 active so that DataCoord can recover it after restart. The terminal update
@@ -410,7 +433,7 @@ POST /v2/vectordb/jobs/snapshot/restore_external
 ```json
 {
   "targetCollectionName": "restored_collection",
-  "snapshotMetadataURI": "https://s3.us-west-2.amazonaws.com/bucket/snapshot-exports/backup_20240101/snapshots/100/metadata/1.json",
+  "snapshotMetadataURI": "https://s3.us-west-2.amazonaws.com/bucket/snapshot-exports/backup_20240101/exports/<export-id>/snapshots/100/metadata/1.json",
   "externalSpec": "{\"extfs\":{\"cloud_provider\":\"aws\",\"region\":\"us-west-2\",\"use_iam\":\"true\"}}"
 }
 ```
@@ -432,6 +455,11 @@ service-account JSON in `credential_json`; these modes are mutually exclusive.
 Avoid raw access keys or `credential_json` in restore `externalSpec` unless
 operationally required, because restore job state must propagate the spec
 through persistent metadata before DataNode can execute the copy.
+
+External restore requires at least one DataNode running Milvus `3.0.1` or
+later. During a rolling upgrade, the restore job remains pending until a
+compatible DataNode is available; unrelated tasks can continue to run on older
+DataNodes.
 
 ### Drop Snapshot
 
@@ -881,6 +909,9 @@ Use consistent and descriptive naming:
 7. **Field/Index ID preservation**:
    - Restore process uses `PreserveFieldId=true` and `PreserveIndexId=true`
    - These flags ensure compatibility between snapshot data files and restored collection
+8. **External collection export**: `ExportSnapshot` rejects external
+   collections because their lake fragments cannot yet be included in a
+   self-contained bundle
 
 ### Planning Considerations
 

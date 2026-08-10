@@ -37,6 +37,10 @@ The feature has explicit non-goals:
   them again just to cross buckets.
 - No cross-provider copy, cross-endpoint copy, or provider-specific source-auth
   extension.
+- No external collection export. Its StorageV3 manifests may reference lake
+  fragments outside the snapshot file set. Full support requires copying those
+  fragments, rewriting the manifest references, and clearing
+  `external_source` and `external_spec` from the exported schema.
 - No arbitrary metadata layout. The restore metadata URI must still expose
   `<root>/snapshots/{collectionID}/metadata/{snapshotID}.json`.
 
@@ -63,8 +67,10 @@ Referenced snapshot restore:
 
 Manual bundle relocation:
 
-1. Export writes:
-   `export-root/snapshots/100/metadata/1.json` and `export-root/files/...`.
+1. The caller supplies `export-root` and Export writes the bundle under its
+   persisted namespace:
+   `export-root/exports/<export-id>/snapshots/100/metadata/1.json` and
+   `export-root/exports/<export-id>/files/...`.
 2. An operator copies the entire bundle to:
    `restored/x/snapshots/100/metadata/1.json` and `restored/x/files/...`.
 3. Restore receives the new metadata URI. Milvus derives `oldRoot` from the
@@ -75,14 +81,18 @@ Export to the source or a foreign bucket:
 
 1. The caller invokes `ExportSnapshot` with a `target_s3_path` in the configured
    source bucket or a foreign bucket.
-2. DataCoord validates the request, pins the source snapshot, persists a
-   `Pending` export job, and immediately returns its `job_id`.
+2. DataCoord validates the request, generates a random export namespace, pins
+   the source snapshot, persists the effective
+   `<target_s3_path>/exports/<export-id>` root in a `Pending` export job, and
+   immediately returns its `job_id`.
 3. A background worker resolves the target storage config from the instance
    credential or request `external_spec`.
 4. For a same-bucket export, Milvus rejects the job before copying if any
    generated target metadata, segment manifest, or data object key would
    overwrite an object used by the source snapshot.
-5. The provider performs object copy without streaming through Milvus. The
+5. Milvus rejects external collections before enumerating or copying snapshot
+   objects because their lake fragments are not yet included in the bundle.
+6. The provider performs object copy without streaming through Milvus. The
    caller polls `GetExportSnapshotState` until the job completes or fails.
 
 Restore from a foreign bucket:
@@ -131,7 +141,8 @@ caller uses it with `GetRestoreSnapshotState`.
 - `db_name`: database routing and namespace context.
 - `collection_name`: local source collection.
 - `snapshot_name`: local snapshot to export.
-- `target_s3_path`: destination root for the self-contained bundle.
+- `target_s3_path`: destination base root. Each accepted job writes its
+  self-contained bundle under `<target_s3_path>/exports/<export-id>`.
 - `external_spec`: optional JSON storage spec for the foreign target.
 
 `ExportSnapshotResponse.job_id` identifies the accepted asynchronous export
@@ -142,14 +153,16 @@ compatibility field and is empty on submission.
 `GetExportSnapshotStateResponse.info` contains the job identity, state,
 checkpoint-based progress, copied and total file counts, timing, sanitized
 failure reason, total bundle bytes, and the completed bundle metadata URI.
-`total_bytes` is populated for Completed jobs and sums the unique copied data
-objects plus generated segment manifests and metadata. The metadata URI is
-empty unless the state is `Completed`.
+`total_bytes` is exposed for Completed jobs and sums the unique copied data
+objects plus generated segment manifests and final metadata. DataCoord computes
+and persists it before entering `Publishing`, but both it and the metadata URI
+remain hidden until the state is `Completed`.
 
-DataCoord also persists an internal `Publishing` state after all data objects
-are copied and before manifests and metadata are written. The public API maps
-this state to `Executing` with progress `99`; it does not add another public
-enum value or expose the metadata URI before `Completed`.
+DataCoord persists an internal `Publishing` state only after all data objects
+are copied, final segment manifests are written, and a private
+`_staging/metadata.json` object has been written and read back successfully.
+The public API maps this state to `Executing` with progress `99`; it does not add
+another public enum value or expose the metadata URI before `Completed`.
 
 For remote object storage, `DescribeSnapshot.s3_location` and the completed
 export metadata location are credential-free, complete URIs. Standard
@@ -223,7 +236,7 @@ jobID, err := client.RestoreExternalSnapshot(
     ctx,
     milvusclient.NewRestoreExternalSnapshotOption(
         "restored_collection",
-        "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json",
+        "s3://foreign-bucket/export-root/exports/<export-id>/snapshots/100/metadata/1.json",
     ).WithExternalSpec(`{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`),
 )
 ```
@@ -261,7 +274,7 @@ curl -X POST "$MILVUS_ADDR/v2/vectordb/jobs/snapshot/restore_external" \
   -d '{
     "dbName": "default",
     "targetCollectionName": "restored_collection",
-    "snapshotMetadataURI": "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json",
+    "snapshotMetadataURI": "s3://foreign-bucket/export-root/exports/<export-id>/snapshots/100/metadata/1.json",
     "externalSpec": "{\"extfs\":{\"cloud_provider\":\"aws\",\"region\":\"us-west-2\",\"use_iam\":\"true\"}}"
   }'
 ```
@@ -389,8 +402,8 @@ paths from `oldRoot` to `newRoot`. The copied data source root is
 
 ```text
 old:
-export-root/snapshots/100/metadata/1.json
-export-root/files/...
+export-root/exports/<export-id>/snapshots/100/metadata/1.json
+export-root/exports/<export-id>/files/...
 
 new:
 restored/x/snapshots/100/metadata/1.json
@@ -446,11 +459,14 @@ worker attempts without changing an active attempt. Invalid or non-positive
 values fall back to `16`. `dataCoord.snapshot.exportMaxConcurrentJobs` defaults
 to `1`, `dataCoord.snapshot.exportJobTimeout` defaults to 12 hours including
 queue wait, and `dataCoord.snapshot.exportJobRetention` keeps terminal state for
-3 hours after pin cleanup. Snapshot metadata is written only after every object
-copy succeeds. Exports to the same normalized bucket and target root are
-serialized within one DataCoord process. A failed attempt may leave
-unreferenced objects; Milvus does not remove them because their paths may be
-shared by an older published bundle.
+3 hours after pin cleanup. Public snapshot metadata is written only after every
+object copy and final segment manifest write succeeds. Each accepted export
+receives a random namespace that is stored
+in the durable job before object-store work begins. Therefore two clusters can
+use the same requested target root without sharing metadata, manifest, or data
+object keys, and correctness does not depend on an `Exist` preflight or a
+single-DataCoord lock. A failed attempt may leave isolated, unreferenced
+objects; Milvus does not remove them automatically.
 
 Same-bucket export is supported, but source protection is an object-level
 invariant. Before copy starts, DataCoord builds the complete source object set:
@@ -493,19 +509,27 @@ DataCoord:
 - Persists enough external storage information for restore jobs and DataNode
   copy tasks.
 - For export, resolves the target in the background, prevents same-bucket
-  source-object overwrite, and copies data before manifests and metadata.
-  After all copy checkpoints are durable, DataCoord persists `Publishing`, the
-  deterministic metadata URI, and progress `99`. Metadata is the publication
-  marker and is written last. Publication can be replayed idempotently after a
-  restart or catalog persistence failure. A separate durable update records
-  `Completed`, total bundle bytes, and end time. `external_spec` is retained
-  only while a job is non-terminal, and the first terminal update clears it
-  atomically.
-- Publication replay does not persist a second metadata checksum. It relies on
-  the durable plan fingerprint, deterministic destination paths, and the source
-  snapshot pin. If a prolonged catalog outage outlives that pin and the source
-  snapshot is then dropped, replay can no longer rebuild the publication plan
-  and the job fails.
+  source-object overwrite, copies data, writes final segment manifests, and
+  serializes final metadata to `<bundle-root>/_staging/metadata.json`. It reads
+  the staging object back before persisting `Publishing`, the deterministic
+  final metadata URI, prepared total bytes, and progress `99`.
+- A recovered `Publishing` job resolves only the target storage and reads the
+  staging object. It never reads the source snapshot or rebuilds the export
+  plan, so source pin expiration or source snapshot deletion cannot invalidate
+  publication after this state is durable.
+- Final metadata publication is idempotent. If the final object already equals
+  staging, publication is complete. Otherwise DataCoord writes it and reads it
+  back. A write error is accepted when read-back proves the final bytes equal
+  staging; a different final object fails with a data-integrity error. Transient
+  or ambiguous storage results remain in `Publishing` for reconciliation retry.
+  A missing or corrupt staging object and permanent target-access errors fail
+  the job because publication can no longer make progress.
+  A separate durable update records `Completed` and end time, then staging is
+  removed best-effort. `external_spec` is retained only while a job is
+  non-terminal, and the first terminal update clears it atomically.
+- Publication replay does not persist a second metadata checksum. It compares
+  staging and final metadata bytes directly; the staging path is derived from
+  the durable target root, so no additional proto field is required.
 - Computes a deterministic fingerprint of external snapshot metadata and loaded
   segment manifests after preflight. The fingerprint is carried through WAL and
   copy-job state so ACK and task assembly reject metadata that changed between
@@ -514,6 +538,9 @@ DataCoord:
 DataNode:
 
 - Executes copy segment tasks.
+- Reports its Milvus build version in the slot query response. External
+  snapshot copy tasks require DataNode `3.0.1` or later; workers that omit the
+  version field are treated as pre-feature nodes.
 - Rebuilds source storage config for external restore tasks.
 - Copies StorageV1 PB paths, treats a StorageV2 manifest as a concrete object,
   and enumerates StorageV3 manifest objects and LOB files before copying them
@@ -545,8 +572,8 @@ Data flow:
 ```text
 ExportSnapshot:
 Proxy -> DataCoord durable Pending job -> background plan/checkpoint loop ->
-provider-side copies -> durable Publishing state -> manifests -> metadata
-publication -> Completed job
+provider-side copies -> final manifests -> verified staging metadata -> durable
+Publishing state -> final metadata byte comparison/publication -> Completed job
 
 GetExportSnapshotState:
 Proxy -> DataCoord in-memory cache backed by persisted export job metadata
@@ -581,14 +608,14 @@ Access probing:
 - Export does not issue a separate target write probe. The first provider-side
   copy request is the end-to-end check for source read, target write, copy API,
   and KMS permissions.
-- A permission failure after acceptance transitions the export job to `Failed`
-  before metadata is written.
-- The configured export deadline applies to queueing, planning, and data-copy
-  work. Once `Publishing` is durable, the job is not downgraded to `Failed`
-  solely because that original deadline elapsed. If metadata publication
-  succeeds but the `Completed` catalog update fails, reconciliation rebuilds
-  the persisted plan and republishes the same deterministic objects before
-  retrying completion.
+- A permission failure before `Publishing` transitions the export job to
+  `Failed` before public metadata is written.
+- The configured export deadline applies to queueing, planning, data-copy,
+  manifest, and staging preparation work. Once `Publishing` is durable, the job
+  is not downgraded to `Failed` solely because that original deadline elapsed.
+  If metadata publication succeeds but the `Completed` catalog update fails,
+  reconciliation compares final metadata with staging and retries only the
+  completion commit; it does not read the source snapshot.
 - A failed attempt may leave unreferenced data or manifest objects. Export does
   not delete them because object paths may already be shared by an older
   published bundle; deleting them could corrupt that bundle. A later retry can
@@ -652,6 +679,9 @@ Restore tests:
   state with `external_spec`.
 - DataNode copy tasks rebuild source storage config and copy into local target
   paths.
+- During a rolling upgrade, external restore tasks remain pending until a
+  compatible DataNode is available. Version filtering does not block ordinary
+  restore, import, index, or compaction tasks from using older workers.
 - DataNode invokes each provider copy once within one bounded object-copy
   deadline; provider SDKs retain their request-level retries.
 - Azure retries transient copy-status polling without replaying
@@ -674,7 +704,10 @@ Export tests:
   credential clearing, pin cleanup retry, and retention are covered.
 - Internal `Publishing` remains schedulable after the original deadline, maps
   to public `Executing` at `99`, and survives a failed `Completed` catalog write
-  without exposing the metadata URI early.
+  without exposing the metadata URI or total bytes early.
+- Publishing recovery succeeds after source data is unavailable, treats an
+  already matching final object as committed, and verifies an ambiguous final
+  metadata write by reading the object back.
 - Export to the same bucket succeeds when destination objects do not overlap the
   source snapshot and fails before copy when metadata, manifest, or data objects
   would overlap.

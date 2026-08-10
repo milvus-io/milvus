@@ -114,6 +114,13 @@ func TestFirstExternalSourceURI(t *testing.T) {
 	}
 }
 
+func TestCurrentMilvusVersion(t *testing.T) {
+	t.Setenv(metricsinfo.GitBuildTagsEnvKey, "3.0.1")
+	if version := currentMilvusVersion(); version != "3.0.1" {
+		t.Fatalf("currentMilvusVersion() = %q, want 3.0.1", version)
+	}
+}
+
 func (s *DataNodeServicesSuite) SetupSuite() {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	etcdCli, err := etcd.GetEtcdClient(
@@ -511,6 +518,7 @@ func (s *DataNodeServicesSuite) TestQuerySlot() {
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
 		s.NoError(merr.Error(resp.GetStatus()))
+		s.NotEmpty(resp.GetVersion())
 	})
 }
 

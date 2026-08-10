@@ -28,6 +28,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -3322,6 +3323,46 @@ func TestSnapshotExportManager_LockTargetSerializesEquivalentRoots(t *testing.T)
 	<-secondDone
 }
 
+func TestNamespacedSnapshotExportTarget(t *testing.T) {
+	const namespace = "550e8400-e29b-41d4-a716-446655440000"
+	tests := []struct {
+		name       string
+		targetPath string
+		expected   string
+	}{
+		{
+			name:       "object key",
+			targetPath: "backup/root/",
+			expected:   "backup/root/exports/" + namespace,
+		},
+		{
+			name:       "S3 URI",
+			targetPath: "s3://bucket/backup/root",
+			expected:   "s3://bucket/backup/root/exports/" + namespace,
+		},
+		{
+			name:       "endpoint URI",
+			targetPath: "https://minio.example.com/bucket/backup/root/",
+			expected:   "https://minio.example.com/bucket/backup/root/exports/" + namespace,
+		},
+		{
+			name:       "GCS URI",
+			targetPath: "gs://bucket/backup/root",
+			expected:   "gs://bucket/backup/root/exports/" + namespace,
+		},
+		{
+			name:       "Azure URI",
+			targetPath: "azure://account.blob.core.windows.net/container/backup/root",
+			expected:   "azure://account.blob.core.windows.net/container/backup/root/exports/" + namespace,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected, namespacedSnapshotExportTarget(test.targetPath, namespace))
+		})
+	}
+}
+
 func TestSnapshotExportManager_SubmitDurableJob(t *testing.T) {
 	t.Run("accepted job outlives submission context", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -3384,6 +3425,16 @@ func TestSnapshotExportManager_SubmitDurableJob(t *testing.T) {
 		assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobPending, job.GetState())
 		assert.Equal(t, int64(7001), job.GetPinId())
 		assert.NotEmpty(t, job.GetExternalSpec())
+		const targetPrefix = "s3://target-bucket/export-root/exports/"
+		require.True(t, strings.HasPrefix(job.GetTargetS3Path(), targetPrefix))
+		_, parseErr := uuid.Parse(strings.TrimPrefix(job.GetTargetS3Path(), targetPrefix))
+		require.NoError(t, parseErr)
+
+		reloadedMeta, err := newSnapshotExportMeta(context.Background(), catalog)
+		require.NoError(t, err)
+		reloadedJob, ok := reloadedMeta.GetJob(jobID)
+		require.True(t, ok)
+		assert.Equal(t, job.GetTargetS3Path(), reloadedJob.GetTargetS3Path())
 	})
 
 	t.Run("persistence failure releases pin with live context", func(t *testing.T) {
@@ -3432,6 +3483,46 @@ func TestSnapshotExportManager_SubmitDurableJob(t *testing.T) {
 	})
 }
 
+func TestSnapshotExportManager_SubmitSeparatesMatchingClusterLocalIDs(t *testing.T) {
+	mockValidate := mockey.Mock(snapshotstorage.ValidateForeignStorageRequest).Return(nil).Build()
+	defer mockValidate.UnPatch()
+	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).Return(
+		&datapb.SnapshotInfo{Id: 1, CollectionId: 100, Name: "snapshot-1"}, nil).Build()
+	defer mockGetSnapshot.UnPatch()
+	mockPin := mockey.Mock((*snapshotMeta).PinSnapshot).Return(int64(7001), 1, nil).Build()
+	defer mockPin.UnPatch()
+	mockAlloc := mockey.Mock((*restoreAllocatorTarget).AllocID).Return(typeutil.UniqueID(9001), nil).Build()
+	defer mockAlloc.UnPatch()
+
+	newManager := func() (*snapshotExportManager, *snapshotExportMeta) {
+		meta, err := newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake())
+		require.NoError(t, err)
+		manager := newSnapshotExportManager(context.Background(), meta, &snapshotManager{
+			snapshotMeta: &snapshotMeta{},
+			allocator:    &restoreAllocatorTarget{},
+		})
+		return manager, meta
+	}
+	managerA, metaA := newManager()
+	managerB, metaB := newManager()
+
+	jobIDA, err := managerA.Submit(
+		context.Background(), 100, "snapshot-1", "default", "collection-1", "s3://bucket/export-root", "")
+	require.NoError(t, err)
+	jobIDB, err := managerB.Submit(
+		context.Background(), 100, "snapshot-1", "default", "collection-1", "s3://bucket/export-root", "")
+	require.NoError(t, err)
+	assert.Equal(t, jobIDA, jobIDB)
+
+	jobA, ok := metaA.GetJob(jobIDA)
+	require.True(t, ok)
+	jobB, ok := metaB.GetJob(jobIDB)
+	require.True(t, ok)
+	assert.NotEqual(t, jobA.GetTargetS3Path(), jobB.GetTargetS3Path())
+	assert.True(t, strings.HasPrefix(jobA.GetTargetS3Path(), "s3://bucket/export-root/exports/"))
+	assert.True(t, strings.HasPrefix(jobB.GetTargetS3Path(), "s3://bucket/export-root/exports/"))
+}
+
 func waitForSnapshotExportJobState(
 	t *testing.T,
 	meta *snapshotExportMeta,
@@ -3450,6 +3541,46 @@ func waitForSnapshotExportJobState(
 	job, _ := meta.GetJob(jobID)
 	require.Equal(t, state, job.GetState())
 	return job
+}
+
+func preparePublishingSnapshotExportJob(
+	t *testing.T,
+	targetCM storage.ChunkManager,
+	targetRoot string,
+	jobID int64,
+) *datapb.ExportSnapshotJob {
+	t.Helper()
+	snapshot := createTestSnapshotDataForMeta()
+	snapshot.Segments = nil
+	snapshot.SegmentIDs = nil
+	snapshot.Indexes = nil
+	snapshot.BuildIDs = nil
+	_, metadataPath := snapshotstorage.GetSnapshotPaths(
+		targetRoot,
+		snapshot.SnapshotInfo.GetCollectionId(),
+		snapshot.SnapshotInfo.GetId(),
+	)
+	plan := &snapshotExportPlan{
+		targetRoot:  targetRoot,
+		metadataURI: metadataPath,
+		mappings:    map[string]string{},
+	}
+	totalBytes, err := prepareSnapshotExportPlanWithSize(context.Background(), targetCM, snapshot, plan)
+	require.NoError(t, err)
+	return &datapb.ExportSnapshotJob{
+		JobId:               jobID,
+		SnapshotName:        snapshot.SnapshotInfo.GetName(),
+		CollectionId:        snapshot.SnapshotInfo.GetCollectionId(),
+		DbName:              "default",
+		CollectionName:      snapshot.Collection.GetSchema().GetName(),
+		TargetS3Path:        targetRoot,
+		State:               datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing,
+		Progress:            99,
+		StartTime:           uint64(time.Now().Add(-time.Second).UnixMilli()),
+		DeadlineTime:        uint64(time.Now().Add(-time.Millisecond).UnixMilli()),
+		SnapshotMetadataUri: metadataPath,
+		TotalBytes:          totalBytes,
+	}
 }
 
 func TestSnapshotExportManager_ExecutesAndPublishesDurableResult(t *testing.T) {
@@ -3707,6 +3838,7 @@ func TestSnapshotExportManager_GetJobInfoHidesUnpublishedMetadata(t *testing.T) 
 		State:               datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing,
 		Progress:            99,
 		SnapshotMetadataUri: "s3://bucket/root/snapshots/100/metadata/1.json",
+		TotalBytes:          128,
 		StartTime:           uint64(time.Now().Add(-time.Second).UnixMilli()),
 	}
 	meta, err := newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake(job))
@@ -3717,6 +3849,7 @@ func TestSnapshotExportManager_GetJobInfoHidesUnpublishedMetadata(t *testing.T) 
 	require.NoError(t, err)
 	assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing, info.GetState())
 	assert.Empty(t, info.GetSnapshotMetadataUri())
+	assert.Zero(t, info.GetTotalBytes())
 	assert.GreaterOrEqual(t, info.GetTimeCost(), uint64(1000))
 }
 
@@ -3755,18 +3888,9 @@ func TestSnapshotExportManager_DoesNotPublishAfterDeadline(t *testing.T) {
 	meta, err := newSnapshotExportMeta(context.Background(), catalog)
 	require.NoError(t, err)
 
-	publishCalls := 0
-	mockPublish := mockey.Mock(publishSnapshotExportPlanWithSize).To(
-		func(context.Context, storage.ChunkManager, *snapshotstorage.SnapshotData, *snapshotExportPlan) (string, int64, error) {
-			publishCalls++
-			return "metadata", 0, nil
-		}).Build()
-	defer mockPublish.UnPatch()
-
 	manager := newSnapshotExportManager(context.Background(), meta, nil)
 	err = manager.executeJob(context.Background(), job.GetJobId())
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.Zero(t, publishCalls)
 	assert.True(t, manager.failJob(job.GetJobId(), "snapshot export job timed out"))
 
 	failed, ok := meta.GetJob(job.GetJobId())
@@ -3775,52 +3899,23 @@ func TestSnapshotExportManager_DoesNotPublishAfterDeadline(t *testing.T) {
 }
 
 func TestSnapshotExportManager_CompletesPublishingAfterOriginalDeadline(t *testing.T) {
-	deadline := time.Now().Add(100 * time.Millisecond)
-	job := &datapb.ExportSnapshotJob{
-		JobId:          9001,
-		SnapshotName:   "snapshot-1",
-		CollectionId:   100,
-		DbName:         "default",
-		CollectionName: "collection-1",
-		TargetS3Path:   "s3://target-bucket/export-root",
-		State:          datapb.ExportSnapshotJobState_ExportSnapshotJobPending,
-		StartTime:      uint64(time.Now().UnixMilli()),
-		DeadlineTime:   uint64(deadline.UnixMilli()),
-	}
+	targetRoot := path.Join(t.TempDir(), "export-root")
+	targetCM := storage.NewLocalChunkManager(objectstorage.RootPath(path.Dir(targetRoot)))
+	job := preparePublishingSnapshotExportJob(t, targetCM, targetRoot, 9001)
 	meta, err := newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake(job))
 	require.NoError(t, err)
-	manager := newSnapshotExportManager(
-		context.Background(),
-		meta,
-		&snapshotManager{snapshotMeta: &snapshotMeta{}},
-	)
-
-	snapshot := &snapshotstorage.SnapshotData{
-		SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100, Name: "snapshot-1"},
-	}
-	plan := &snapshotExportPlan{
-		version:             snapshotExportPlanVersion,
-		fingerprint:         "plan-fingerprint",
-		snapshotFingerprint: "snapshot-fingerprint",
-		targetRoot:          "export-root",
-		metadataURI:         "s3://target-bucket/export-root/snapshots/100/metadata/1.json",
-	}
 	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
 		ForeignBucket: "target-bucket",
+		ForeignCM:     targetCM,
 	}, nil).Build()
 	defer mockResolve.UnPatch()
-	mockRead := mockey.Mock((*snapshotManager).ReadSnapshotData).Return(snapshot, nil).Build()
-	defer mockRead.UnPatch()
-	mockBuild := mockey.Mock(buildSnapshotExportPlan).Return(plan, nil).Build()
-	defer mockBuild.UnPatch()
-	mockPublish := mockey.Mock(publishSnapshotExportPlanWithSize).To(
-		func(ctx context.Context, _ storage.ChunkManager, _ *snapshotstorage.SnapshotData, _ *snapshotExportPlan) (string, int64, error) {
-			_, hasDeadline := ctx.Deadline()
-			assert.False(t, hasDeadline)
-			time.Sleep(time.Until(deadline) + 50*time.Millisecond)
-			return plan.metadataURI, 128, nil
+	mockRead := mockey.Mock((*snapshotManager).ReadSnapshotData).To(
+		func(*snapshotManager, context.Context, int64, string) (*snapshotstorage.SnapshotData, error) {
+			require.FailNow(t, "Publishing must not read the source snapshot")
+			return nil, nil
 		}).Build()
-	defer mockPublish.UnPatch()
+	defer mockRead.UnPatch()
+	manager := newSnapshotExportManager(context.Background(), meta, nil)
 
 	manager.wg.Add(1)
 	manager.runJob(context.Background(), job.GetJobId())
@@ -3829,66 +3924,31 @@ func TestSnapshotExportManager_CompletesPublishingAfterOriginalDeadline(t *testi
 	require.True(t, ok)
 	assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted, completed.GetState())
 	assert.Equal(t, int32(100), completed.GetProgress())
-	assert.Equal(t, int64(128), completed.GetTotalBytes())
-	assert.Equal(t, plan.metadataURI, completed.GetSnapshotMetadataUri())
+	assert.Equal(t, job.GetTotalBytes(), completed.GetTotalBytes())
+	assert.Equal(t, job.GetSnapshotMetadataUri(), completed.GetSnapshotMetadataUri())
 }
 
 func TestSnapshotExportManager_ReplaysPublishingAfterCompletionPersistenceFailure(t *testing.T) {
-	deadline := time.Now().Add(100 * time.Millisecond)
-	job := &datapb.ExportSnapshotJob{
-		JobId:          9001,
-		SnapshotName:   "snapshot-1",
-		CollectionId:   100,
-		DbName:         "default",
-		CollectionName: "collection-1",
-		TargetS3Path:   "s3://target-bucket/export-root",
-		ExternalSpec:   `{"extfs":{"access_key_id":"AK","access_key_value":"SK"}}`,
-		State:          datapb.ExportSnapshotJobState_ExportSnapshotJobPending,
-		StartTime:      uint64(time.Now().UnixMilli()),
-		DeadlineTime:   uint64(deadline.UnixMilli()),
-	}
+	targetRoot := path.Join(t.TempDir(), "export-root")
+	targetCM := storage.NewLocalChunkManager(objectstorage.RootPath(path.Dir(targetRoot)))
+	job := preparePublishingSnapshotExportJob(t, targetCM, targetRoot, 9001)
+	job.ExternalSpec = `{"extfs":{"access_key_id":"AK","access_key_value":"SK"}}`
 	catalog := newSnapshotExportCatalogFake(job)
 	meta, err := newSnapshotExportMeta(context.Background(), catalog)
 	require.NoError(t, err)
-	manager := newSnapshotExportManager(
-		context.Background(),
-		meta,
-		&snapshotManager{snapshotMeta: &snapshotMeta{}},
-	)
-
-	snapshot := &snapshotstorage.SnapshotData{
-		SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100, Name: "snapshot-1"},
-	}
-	plan := &snapshotExportPlan{
-		version:             snapshotExportPlanVersion,
-		fingerprint:         "plan-fingerprint",
-		snapshotFingerprint: "snapshot-fingerprint",
-		targetRoot:          "export-root",
-		metadataURI:         "s3://target-bucket/export-root/snapshots/100/metadata/1.json",
-	}
+	manager := newSnapshotExportManager(context.Background(), meta, nil)
 	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
 		ForeignBucket: "target-bucket",
+		ForeignCM:     targetCM,
 	}, nil).Build()
 	defer mockResolve.UnPatch()
-	mockRead := mockey.Mock((*snapshotManager).ReadSnapshotData).Return(snapshot, nil).Build()
-	defer mockRead.UnPatch()
-	mockBuild := mockey.Mock(buildSnapshotExportPlan).Return(plan, nil).Build()
-	defer mockBuild.UnPatch()
-	var publishCalls atomic.Int32
-	mockPublish := mockey.Mock(publishSnapshotExportPlanWithSize).To(
-		func(context.Context, storage.ChunkManager, *snapshotstorage.SnapshotData, *snapshotExportPlan) (string, int64, error) {
-			publishCalls.Add(1)
-			return plan.metadataURI, 256, nil
+	mockRead := mockey.Mock((*snapshotManager).ReadSnapshotData).To(
+		func(*snapshotManager, context.Context, int64, string) (*snapshotstorage.SnapshotData, error) {
+			require.FailNow(t, "Publishing recovery must not read the source snapshot")
+			return nil, nil
 		}).Build()
-	defer mockPublish.UnPatch()
-
-	catalog.beforeSave = func(saved *datapb.ExportSnapshotJob) {
-		if saved.GetState() == datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing {
-			catalog.mu.Lock()
-			catalog.saveErr = errors.New("catalog unavailable")
-			catalog.mu.Unlock()
-		}
-	}
+	defer mockRead.UnPatch()
+	catalog.saveErr = errors.New("catalog unavailable")
 	manager.wg.Add(1)
 	manager.runJob(context.Background(), job.GetJobId())
 
@@ -3896,14 +3956,12 @@ func TestSnapshotExportManager_ReplaysPublishingAfterCompletionPersistenceFailur
 	require.True(t, ok)
 	assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing, publishing.GetState())
 	assert.Equal(t, int32(99), publishing.GetProgress())
-	assert.Equal(t, plan.metadataURI, publishing.GetSnapshotMetadataUri())
-	assert.Zero(t, publishing.GetTotalBytes())
+	assert.Equal(t, job.GetSnapshotMetadataUri(), publishing.GetSnapshotMetadataUri())
+	assert.Equal(t, job.GetTotalBytes(), publishing.GetTotalBytes())
 	assert.NotEmpty(t, publishing.GetExternalSpec())
-	assert.Equal(t, int32(1), publishCalls.Load())
-
-	if remaining := time.Until(deadline); remaining > 0 {
-		time.Sleep(remaining)
-	}
+	finalData, err := targetCM.Read(context.Background(), job.GetSnapshotMetadataUri())
+	require.NoError(t, err)
+	assert.NotEmpty(t, finalData)
 	catalog.mu.Lock()
 	catalog.saveErr = nil
 	catalog.mu.Unlock()
@@ -3914,9 +3972,95 @@ func TestSnapshotExportManager_ReplaysPublishingAfterCompletionPersistenceFailur
 	require.True(t, ok)
 	assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted, completed.GetState())
 	assert.Equal(t, int32(100), completed.GetProgress())
-	assert.Equal(t, int64(256), completed.GetTotalBytes())
+	assert.Equal(t, job.GetTotalBytes(), completed.GetTotalBytes())
 	assert.Empty(t, completed.GetExternalSpec())
-	assert.Equal(t, int32(2), publishCalls.Load())
+}
+
+func TestSnapshotExportManager_PublishingStagingFailures(t *testing.T) {
+	t.Run("missing staging fails the job", func(t *testing.T) {
+		targetRoot := path.Join(t.TempDir(), "export-root")
+		targetCM := storage.NewLocalChunkManager(objectstorage.RootPath(path.Dir(targetRoot)))
+		job := preparePublishingSnapshotExportJob(t, targetCM, targetRoot, 9001)
+		require.NoError(t, targetCM.Remove(
+			context.Background(),
+			snapshotstorage.GetSnapshotStagingMetadataPath(targetRoot),
+		))
+		meta, err := newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake(job))
+		require.NoError(t, err)
+		manager := newSnapshotExportManager(context.Background(), meta, nil)
+		mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
+			ForeignBucket: "target-bucket",
+			ForeignCM:     targetCM,
+		}, nil).Build()
+		defer mockResolve.UnPatch()
+
+		manager.wg.Add(1)
+		manager.runJob(context.Background(), job.GetJobId())
+
+		failed, ok := meta.GetJob(job.GetJobId())
+		require.True(t, ok)
+		assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobFailed, failed.GetState())
+		assert.Contains(t, failed.GetReason(), "staged snapshot metadata object is missing")
+	})
+
+	t.Run("transient staging read remains publishing", func(t *testing.T) {
+		targetRoot := path.Join(t.TempDir(), "export-root")
+		targetCM := storage.NewLocalChunkManager(objectstorage.RootPath(path.Dir(targetRoot)))
+		job := preparePublishingSnapshotExportJob(t, targetCM, targetRoot, 9002)
+		stagingPath := snapshotstorage.GetSnapshotStagingMetadataPath(targetRoot)
+		var origin func(*storage.LocalChunkManager, context.Context, string) ([]byte, error)
+		mockRead := mockey.Mock((*storage.LocalChunkManager).Read).To(
+			func(manager *storage.LocalChunkManager, readCtx context.Context, objectPath string) ([]byte, error) {
+				if objectPath == stagingPath {
+					return nil, merr.WrapErrIoTooManyRequests(objectPath, errors.New("object store throttled"))
+				}
+				return origin(manager, readCtx, objectPath)
+			}).Origin(&origin).Build()
+		defer mockRead.UnPatch()
+		meta, err := newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake(job))
+		require.NoError(t, err)
+		manager := newSnapshotExportManager(context.Background(), meta, nil)
+		mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
+			ForeignBucket: "target-bucket",
+			ForeignCM:     targetCM,
+		}, nil).Build()
+		defer mockResolve.UnPatch()
+
+		manager.wg.Add(1)
+		manager.runJob(context.Background(), job.GetJobId())
+
+		current, ok := meta.GetJob(job.GetJobId())
+		require.True(t, ok)
+		assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing, current.GetState())
+		assert.Empty(t, current.GetReason())
+	})
+
+	t.Run("corrupt staging fails the job", func(t *testing.T) {
+		targetRoot := path.Join(t.TempDir(), "export-root")
+		targetCM := storage.NewLocalChunkManager(objectstorage.RootPath(path.Dir(targetRoot)))
+		job := preparePublishingSnapshotExportJob(t, targetCM, targetRoot, 9003)
+		require.NoError(t, targetCM.Write(
+			context.Background(),
+			snapshotstorage.GetSnapshotStagingMetadataPath(targetRoot),
+			[]byte("{"),
+		))
+		meta, err := newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake(job))
+		require.NoError(t, err)
+		manager := newSnapshotExportManager(context.Background(), meta, nil)
+		mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
+			ForeignBucket: "target-bucket",
+			ForeignCM:     targetCM,
+		}, nil).Build()
+		defer mockResolve.UnPatch()
+
+		manager.wg.Add(1)
+		manager.runJob(context.Background(), job.GetJobId())
+
+		failed, ok := meta.GetJob(job.GetJobId())
+		require.True(t, ok)
+		assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobFailed, failed.GetState())
+		assert.Contains(t, failed.GetReason(), "invalid staged snapshot metadata")
+	})
 }
 
 func TestSnapshotExportManager_TimeoutStopsLateCopyCheckpoint(t *testing.T) {
@@ -4809,6 +4953,8 @@ func TestSnapshotExportManager_ExecuteJobErrorBranches(t *testing.T) {
 		defer mockRead.UnPatch()
 		mockBuild := mockey.Mock(buildSnapshotExportPlan).Return(newPlan(), nil).Build()
 		defer mockBuild.UnPatch()
+		mockPrepare := mockey.Mock(prepareSnapshotExportPlanWithSize).Return(int64(128), nil).Build()
+		defer mockPrepare.UnPatch()
 		job := newJob()
 		manager, _, catalog := newManager(t, job)
 		expected := errors.New("catalog unavailable")
@@ -4835,15 +4981,17 @@ func TestSnapshotExportManager_ExecuteJobErrorBranches(t *testing.T) {
 		defer mockBuild.UnPatch()
 		job := newJob()
 		manager, meta, _ := newManager(t, job)
-		mockPublish := mockey.Mock(publishSnapshotExportPlanWithSize).To(
-			func(context.Context, storage.ChunkManager, *snapshotstorage.SnapshotData, *snapshotExportPlan) (string, int64, error) {
+		mockPrepare := mockey.Mock(prepareSnapshotExportPlanWithSize).Return(int64(128), nil).Build()
+		defer mockPrepare.UnPatch()
+		mockCommit := mockey.Mock(commitSnapshotExportMetadata).To(
+			func(context.Context, storage.ChunkManager, string, string) error {
 				_, _, err := meta.UpdateJob(context.Background(), job.GetJobId(), func(latest *datapb.ExportSnapshotJob) (bool, error) {
 					latest.SnapshotMetadataUri = "other-metadata"
 					return false, nil
 				})
-				return plan.metadataURI, 0, err
+				return err
 			}).Build()
-		defer mockPublish.UnPatch()
+		defer mockCommit.UnPatch()
 
 		err := manager.executeJob(context.Background(), job.GetJobId())
 		require.Error(t, err)
@@ -4875,16 +5023,16 @@ func TestSnapshotExportManager_ExecuteJobErrorBranches(t *testing.T) {
 				return newPlan(), err
 			}).Build()
 		defer mockBuild.UnPatch()
-		publishCalls := 0
-		mockPublish := mockey.Mock(publishSnapshotExportPlanWithSize).To(
-			func(context.Context, storage.ChunkManager, *snapshotstorage.SnapshotData, *snapshotExportPlan) (string, int64, error) {
-				publishCalls++
-				return "", 0, nil
+		prepareCalls := 0
+		mockPrepare := mockey.Mock(prepareSnapshotExportPlanWithSize).To(
+			func(context.Context, storage.ChunkManager, *snapshotstorage.SnapshotData, *snapshotExportPlan) (int64, error) {
+				prepareCalls++
+				return 0, nil
 			}).Build()
-		defer mockPublish.UnPatch()
+		defer mockPrepare.UnPatch()
 
 		require.ErrorIs(t, manager.executeJob(context.Background(), job.GetJobId()), errSnapshotExportJobStopped)
-		assert.Zero(t, publishCalls)
+		assert.Zero(t, prepareCalls)
 	})
 }
 
@@ -4920,56 +5068,35 @@ func TestSnapshotExportManager_PersistenceAndCleanupBranches(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "checkpoint is invalid")
 
-		publishingBase := &datapb.ExportSnapshotJob{
+		publishing := &datapb.ExportSnapshotJob{
 			JobId:               9003,
 			State:               datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing,
-			PlanVersion:         plan.version,
-			PlanFingerprint:     plan.fingerprint,
-			SnapshotFingerprint: plan.snapshotFingerprint,
+			TargetS3Path:        "target",
 			TotalFiles:          1,
 			CopyCursor:          1,
 			CopiedFiles:         1,
-			SnapshotMetadataUri: "metadata",
+			SnapshotMetadataUri: "target/snapshots/100/metadata/1.json",
+			TotalBytes:          128,
 		}
-		publishingPlan := *plan
-		publishingPlan.metadataURI = "metadata"
-		meta, err = newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake(publishingBase))
+		meta, err = newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake(publishing))
 		require.NoError(t, err)
 		manager = newSnapshotExportManager(context.Background(), meta, nil)
-		validated, err := manager.persistOrValidatePlan(context.Background(), publishingBase.GetJobId(), &publishingPlan)
-		require.NoError(t, err)
-		assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing, validated.GetState())
+		_, err = manager.persistOrValidatePlan(context.Background(), publishing.GetJobId(), plan)
+		require.ErrorIs(t, err, errSnapshotExportJobStopped)
+		require.NoError(t, validateSnapshotExportPublishingJob(context.Background(), publishing))
 
-		missingPlan := proto.Clone(publishingBase).(*datapb.ExportSnapshotJob)
-		missingPlan.JobId = 9004
-		missingPlan.PlanFingerprint = ""
-		meta, err = newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake(missingPlan))
-		require.NoError(t, err)
-		manager = newSnapshotExportManager(context.Background(), meta, nil)
-		_, err = manager.persistOrValidatePlan(context.Background(), missingPlan.GetJobId(), &publishingPlan)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no durable plan")
-
-		incomplete := proto.Clone(publishingBase).(*datapb.ExportSnapshotJob)
-		incomplete.JobId = 9005
+		incomplete := proto.Clone(publishing).(*datapb.ExportSnapshotJob)
 		incomplete.CopyCursor = 0
 		incomplete.CopiedFiles = 0
-		meta, err = newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake(incomplete))
-		require.NoError(t, err)
-		manager = newSnapshotExportManager(context.Background(), meta, nil)
-		_, err = manager.persistOrValidatePlan(context.Background(), incomplete.GetJobId(), &publishingPlan)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "incomplete copy plan")
+		require.ErrorContains(t, validateSnapshotExportPublishingJob(context.Background(), incomplete), "incomplete copy plan")
 
-		wrongURI := proto.Clone(publishingBase).(*datapb.ExportSnapshotJob)
-		wrongURI.JobId = 9006
-		wrongURI.SnapshotMetadataUri = "other-metadata"
-		meta, err = newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake(wrongURI))
-		require.NoError(t, err)
-		manager = newSnapshotExportManager(context.Background(), meta, nil)
-		_, err = manager.persistOrValidatePlan(context.Background(), wrongURI.GetJobId(), &publishingPlan)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "metadata URI changed")
+		missingPaths := proto.Clone(publishing).(*datapb.ExportSnapshotJob)
+		missingPaths.SnapshotMetadataUri = ""
+		require.ErrorContains(t, validateSnapshotExportPublishingJob(context.Background(), missingPaths), "missing its target paths")
+
+		missingSize := proto.Clone(publishing).(*datapb.ExportSnapshotJob)
+		missingSize.TotalBytes = 0
+		require.ErrorContains(t, validateSnapshotExportPublishingJob(context.Background(), missingSize), "no prepared bundle size")
 	})
 
 	t.Run("failure update handles terminal lock and persistence cases", func(t *testing.T) {

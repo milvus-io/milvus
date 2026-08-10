@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -95,8 +96,14 @@ func exportSnapshot(
 	); err != nil {
 		return "", err
 	}
-	metadataURI, _, err := publishSnapshotExportPlanWithSize(ctx, targetCM, snapshot, plan)
-	return metadataURI, err
+	_, err = prepareSnapshotExportPlanWithSize(ctx, targetCM, snapshot, plan)
+	if err != nil {
+		return "", err
+	}
+	if err := commitSnapshotExportMetadata(ctx, targetCM, plan.targetRoot, plan.metadataURI); err != nil {
+		return "", err
+	}
+	return plan.metadataURI, nil
 }
 
 func TestSnapshotExporter_ExportCopiesFilesAndWritesSelfContainedMetadata(t *testing.T) {
@@ -166,6 +173,48 @@ func TestSnapshotExporter_ExportCopiesFilesAndWritesSelfContainedMetadata(t *tes
 	assert.Equal(t, metadataURI, readSnapshot.SnapshotInfo.GetS3Location())
 	assert.Equal(t, copiedBinlog, readSnapshot.Segments[0].GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
 	assert.Equal(t, copiedIndex, readSnapshot.Segments[0].GetIndexFiles()[0].GetIndexFilePaths()[0])
+}
+
+func TestSnapshotExporter_RejectsExternalCollectionBeforeCopy(t *testing.T) {
+	ctx := context.Background()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	snapshotData := createTestSnapshotDataForMeta()
+	snapshotData.Collection.Schema.Fields = []*schemapb.FieldSchema{{
+		FieldID:       1,
+		Name:          "id",
+		DataType:      schemapb.DataType_Int64,
+		ExternalField: "source_id",
+	}}
+
+	sourcePath := path.Join(cm.RootPath(), "files/insert_log/100/1/1001/1")
+	require.NoError(t, cm.Write(ctx, sourcePath, []byte("binlog")))
+	segment := snapshotData.Segments[0]
+	clearSegmentNonInsertFiles(segment)
+	segment.Binlogs = []*datapb.FieldBinlog{{
+		FieldID: 1,
+		Binlogs: []*datapb.Binlog{{
+			LogID:   1,
+			LogPath: sourcePath,
+		}},
+	}}
+
+	copyCalled := false
+	copier := newSnapshotExporterCopierMock(t, func(context.Context, string, string, string, string) error {
+		copyCalled = true
+		return nil
+	})
+	_, err := exportSnapshot(
+		ctx,
+		cm,
+		cm,
+		copier,
+		"",
+		"",
+		snapshotData,
+		path.Join(cm.RootPath(), "exported"),
+	)
+	require.ErrorContains(t, err, "exporting external collections is not supported")
+	assert.False(t, copyCalled)
 }
 
 func TestSnapshotExporter_PopulatePlanSizes(t *testing.T) {
@@ -879,9 +928,9 @@ func TestSnapshotExporter_ValidationAndPublicationErrors(t *testing.T) {
 	})
 
 	t.Run("publication validation and write failure", func(t *testing.T) {
-		_, _, err := publishSnapshotExportPlanWithSize(ctx, cm, snapshot, nil)
+		_, err := prepareSnapshotExportPlanWithSize(ctx, cm, snapshot, nil)
 		require.Error(t, err)
-		_, _, err = publishSnapshotExportPlanWithSize(ctx, cm, nil, &snapshotExportPlan{targetRoot: "target"})
+		_, err = prepareSnapshotExportPlanWithSize(ctx, cm, nil, &snapshotExportPlan{targetRoot: "target"})
 		require.Error(t, err)
 
 		emptySnapshot := createTestSnapshotDataForMeta()
@@ -890,11 +939,11 @@ func TestSnapshotExporter_ValidationAndPublicationErrors(t *testing.T) {
 		emptySnapshot.Indexes = nil
 		emptySnapshot.BuildIDs = nil
 		expected := errors.New("write failed")
-		mockSave := mockey.Mock((*snapshotstorage.SnapshotWriter).SaveToRootWithSize).
+		mockSave := mockey.Mock((*snapshotstorage.SnapshotWriter).PrepareToRootWithStaging).
 			Return("", int64(0), expected).
 			Build()
 		defer mockSave.UnPatch()
-		_, _, err = publishSnapshotExportPlanWithSize(ctx, cm, emptySnapshot, &snapshotExportPlan{
+		_, err = prepareSnapshotExportPlanWithSize(ctx, cm, emptySnapshot, &snapshotExportPlan{
 			targetRoot:  "target",
 			metadataURI: "target/snapshots/100/metadata/1.json",
 			mappings:    map[string]string{},

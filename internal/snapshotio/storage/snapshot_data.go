@@ -16,12 +16,14 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"path"
 	"strconv"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	snapshotio "github.com/milvus-io/milvus/internal/snapshotio"
@@ -36,6 +38,7 @@ const (
 	SnapshotRootPath         = "snapshots"
 	SnapshotMetadataSubPath  = "metadata"
 	SnapshotManifestsSubPath = "manifests"
+	SnapshotStagingSubPath   = "_staging"
 	SnapshotFormatVersion    = snapshotio.SnapshotFormatVersion
 )
 
@@ -79,6 +82,12 @@ func GetSegmentManifestPath(manifestDir string, segmentID int64) string {
 	return path.Join(manifestDir, fmt.Sprintf("%d.avro", segmentID))
 }
 
+// GetSnapshotStagingMetadataPath returns the private metadata object used to
+// make snapshot publication recoverable without rebuilding the source snapshot.
+func GetSnapshotStagingMetadataPath(rootPath string) string {
+	return path.Join(rootPath, SnapshotStagingSubPath, "metadata.json")
+}
+
 // Save stores a referenced snapshot under the writer root.
 func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (string, error) {
 	metadataPath, _, err := w.SaveToRootWithSize(ctx, snapshot, w.chunkManager.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
@@ -92,23 +101,152 @@ func (w *SnapshotWriter) SaveToRootWithSize(
 	rootPath string,
 	layout datapb.SnapshotLayout,
 ) (string, int64, error) {
+	metadataPath, metadataData, manifestBytes, err := w.writeManifestsAndMarshalMetadata(
+		ctx,
+		snapshot,
+		rootPath,
+		layout,
+	)
+	if err != nil {
+		return "", 0, err
+	}
+
+	// Metadata is the publication marker for a complete snapshot. Recheck the
+	// caller context after manifest writes so a canceled operation does not
+	// publish a partially prepared snapshot.
+	if err := ctx.Err(); err != nil {
+		return "", 0, err
+	}
+	if err := w.chunkManager.Write(ctx, metadataPath, metadataData); err != nil {
+		return "", 0, merr.Wrap(err, "failed to write snapshot metadata object")
+	}
+
+	mlog.Info(ctx, "Successfully wrote metadata file",
+		mlog.String("metadataPath", metadataPath))
+
+	return metadataPath, manifestBytes + int64(len(metadataData)), nil
+}
+
+// PrepareToRootWithStaging writes final segment manifests and a private,
+// verified metadata object. The returned byte count describes the final bundle
+// and does not include the temporary staging object as an additional file.
+func (w *SnapshotWriter) PrepareToRootWithStaging(
+	ctx context.Context,
+	snapshot *SnapshotData,
+	rootPath string,
+	layout datapb.SnapshotLayout,
+	stagingMetadataPath string,
+) (string, int64, error) {
+	if strings.TrimSpace(stagingMetadataPath) == "" {
+		return "", 0, merr.WrapErrServiceInternalMsg("staging metadata path cannot be empty")
+	}
+	metadataPath, metadataData, manifestBytes, err := w.writeManifestsAndMarshalMetadata(
+		ctx,
+		snapshot,
+		rootPath,
+		layout,
+	)
+	if err != nil {
+		return "", 0, err
+	}
+	stagingMetadataPath = NormalizeSnapshotObjectPath(stagingMetadataPath)
+	if stagingMetadataPath == metadataPath {
+		return "", 0, merr.WrapErrServiceInternalMsg("staging metadata path must differ from final metadata path")
+	}
+	if err := ctx.Err(); err != nil {
+		return "", 0, err
+	}
+	if err := w.chunkManager.Write(ctx, stagingMetadataPath, metadataData); err != nil {
+		return "", 0, merr.Wrap(err, "failed to write staged snapshot metadata object")
+	}
+	stagedData, err := w.chunkManager.Read(ctx, stagingMetadataPath)
+	if err != nil {
+		return "", 0, merr.Wrap(err, "failed to verify staged snapshot metadata object")
+	}
+	if !bytes.Equal(stagedData, metadataData) {
+		return "", 0, merr.WrapErrDataIntegrityMsg("staged snapshot metadata differs from prepared metadata")
+	}
+
+	return metadataPath, manifestBytes + int64(len(metadataData)), nil
+}
+
+// CommitStagedMetadata publishes the prepared metadata idempotently. A write
+// error is treated as successful when a read-back proves that the expected
+// bytes reached the final object.
+func (w *SnapshotWriter) CommitStagedMetadata(
+	ctx context.Context,
+	stagingMetadataPath string,
+	metadataPath string,
+	metadataURI string,
+) (int64, error) {
+	stagingMetadataPath = NormalizeSnapshotObjectPath(stagingMetadataPath)
+	metadataPath = NormalizeSnapshotObjectPath(metadataPath)
+	if stagingMetadataPath == "" || metadataPath == "" || strings.TrimSpace(metadataURI) == "" {
+		return 0, merr.WrapErrServiceInternalMsg("staging path, metadata path, and metadata URI are required")
+	}
+	if stagingMetadataPath == metadataPath {
+		return 0, merr.WrapErrServiceInternalMsg("staging metadata path must differ from final metadata path")
+	}
+
+	stagedData, err := w.chunkManager.Read(ctx, stagingMetadataPath)
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return 0, merr.WrapErrDataIntegrityMsg("staged snapshot metadata object is missing")
+		}
+		return 0, merr.Wrap(err, "failed to read staged snapshot metadata object")
+	}
+	if err := validateStagedSnapshotMetadata(stagedData, metadataURI); err != nil {
+		return 0, err
+	}
+
+	finalData, err := w.chunkManager.Read(ctx, metadataPath)
+	if err == nil {
+		if !bytes.Equal(finalData, stagedData) {
+			return 0, merr.WrapErrDataIntegrityMsg("published snapshot metadata differs from staged metadata")
+		}
+		return int64(len(stagedData)), nil
+	}
+	if !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return 0, merr.Wrap(err, "failed to inspect published snapshot metadata object")
+	}
+
+	writeErr := w.chunkManager.Write(ctx, metadataPath, stagedData)
+	finalData, readErr := w.chunkManager.Read(ctx, metadataPath)
+	if readErr == nil {
+		if !bytes.Equal(finalData, stagedData) {
+			return 0, merr.WrapErrDataIntegrityMsg("published snapshot metadata differs from staged metadata")
+		}
+		return int64(len(stagedData)), nil
+	}
+	if writeErr != nil {
+		return 0, merr.Wrap(writeErr, "snapshot metadata write result could not be verified")
+	}
+	return 0, merr.Wrap(readErr, "failed to verify published snapshot metadata object")
+}
+
+func (w *SnapshotWriter) writeManifestsAndMarshalMetadata(
+	ctx context.Context,
+	snapshot *SnapshotData,
+	rootPath string,
+	layout datapb.SnapshotLayout,
+) (string, []byte, int64, error) {
 	if snapshot == nil {
-		return "", 0, merr.WrapErrServiceInternalMsg("snapshot cannot be nil")
+		return "", nil, 0, merr.WrapErrServiceInternalMsg("snapshot cannot be nil")
 	}
 	if snapshot.SnapshotInfo == nil {
-		return "", 0, merr.WrapErrServiceInternalMsg("snapshot info cannot be nil")
+		return "", nil, 0, merr.WrapErrServiceInternalMsg("snapshot info cannot be nil")
 	}
 	collectionID := snapshot.SnapshotInfo.GetCollectionId()
 	if collectionID <= 0 {
-		return "", 0, merr.WrapErrServiceInternalMsg("invalid collection ID: %d", collectionID)
+		return "", nil, 0, merr.WrapErrServiceInternalMsg("invalid collection ID: %d", collectionID)
 	}
 	if snapshot.Collection == nil {
-		return "", 0, merr.WrapErrServiceInternalMsg("collection description cannot be nil")
+		return "", nil, 0, merr.WrapErrServiceInternalMsg("collection description cannot be nil")
 	}
 
 	snapshotID := snapshot.SnapshotInfo.GetId()
 	if snapshotID <= 0 {
-		return "", 0, merr.WrapErrServiceInternalMsg("invalid snapshot ID: %d", snapshotID)
+		return "", nil, 0, merr.WrapErrServiceInternalMsg("invalid snapshot ID: %d", snapshotID)
 	}
 	if layout == datapb.SnapshotLayout_SnapshotLayoutUnknown {
 		layout = datapb.SnapshotLayout_SnapshotLayoutReferenced
@@ -122,7 +260,7 @@ func (w *SnapshotWriter) SaveToRootWithSize(
 		manifestPath := GetSegmentManifestPath(manifestDir, segment.GetSegmentId())
 		manifestBytes, err := w.writeSegmentManifest(ctx, manifestPath, segment)
 		if err != nil {
-			return "", 0, merr.Wrapf(err, "failed to write manifest for segment %d", segment.GetSegmentId())
+			return "", nil, 0, merr.Wrapf(err, "failed to write manifest for segment %d", segment.GetSegmentId())
 		}
 		totalBytes += manifestBytes
 		manifestPaths = append(manifestPaths, manifestPath)
@@ -142,22 +280,11 @@ func (w *SnapshotWriter) SaveToRootWithSize(
 		}
 	}
 
-	// Metadata is the publication marker for a complete snapshot. Recheck the
-	// caller context after manifest writes so a canceled export does not publish
-	// a bundle that its durable job has already stopped advancing.
-	if err := ctx.Err(); err != nil {
-		return "", 0, err
-	}
-	metadataBytes, err := w.writeMetadataFile(ctx, metadataPath, snapshot, manifestPaths, storagev2Manifests)
+	metadataData, err := marshalSnapshotMetadata(snapshot, manifestPaths, storagev2Manifests)
 	if err != nil {
-		return "", 0, merr.Wrap(err, "failed to write metadata file")
+		return "", nil, 0, err
 	}
-	totalBytes += metadataBytes
-
-	mlog.Info(ctx, "Successfully wrote metadata file",
-		mlog.String("metadataPath", metadataPath))
-
-	return metadataPath, totalBytes, nil
+	return metadataPath, metadataData, totalBytes, nil
 }
 
 func (w *SnapshotWriter) writeSegmentManifest(ctx context.Context, manifestPath string, segment *datapb.SegmentDescription) (int64, error) {
@@ -171,7 +298,7 @@ func (w *SnapshotWriter) writeSegmentManifest(ctx context.Context, manifestPath 
 	return int64(len(binaryData)), nil
 }
 
-func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath string, snapshot *SnapshotData, manifestPaths []string, storagev2Manifests []*datapb.StorageV2SegmentManifest) (int64, error) {
+func marshalSnapshotMetadata(snapshot *SnapshotData, manifestPaths []string, storagev2Manifests []*datapb.StorageV2SegmentManifest) ([]byte, error) {
 	metadata := &datapb.SnapshotMetadata{
 		FormatVersion:         int32(SnapshotFormatVersion),
 		SnapshotInfo:          snapshot.SnapshotInfo,
@@ -192,13 +319,32 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath str
 	}
 	jsonData, err := opts.Marshal(metadata)
 	if err != nil {
-		return 0, merr.WrapErrServiceInternalErr(err, "failed to marshal metadata to JSON")
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to marshal metadata to JSON")
 	}
+	return jsonData, nil
+}
 
-	if err := w.chunkManager.Write(ctx, metadataPath, jsonData); err != nil {
-		return 0, merr.Wrap(err, "failed to write snapshot metadata object")
+func validateStagedSnapshotMetadata(data []byte, metadataURI string) error {
+	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(data)
+	if err != nil {
+		return merr.WrapErrDataIntegrity(err, "invalid staged snapshot metadata")
 	}
-	return int64(len(jsonData)), nil
+	if metadata.GetSnapshotInfo() == nil {
+		return merr.WrapErrDataIntegrityMsg("invalid staged snapshot metadata: snapshot info cannot be nil")
+	}
+	if metadata.GetCollection() == nil {
+		return merr.WrapErrDataIntegrityMsg("invalid staged snapshot metadata: collection cannot be nil")
+	}
+	if metadata.GetLayout() != datapb.SnapshotLayout_SnapshotLayoutSelfContained {
+		return merr.WrapErrDataIntegrityMsg("invalid staged snapshot metadata: layout must be self-contained")
+	}
+	if metadata.GetSnapshotInfo().GetS3Location() != metadataURI {
+		return merr.WrapErrDataIntegrityMsg("staged snapshot metadata location does not match the export job")
+	}
+	if err := ValidateSelfContainedSnapshotMetadata(metadataURI, metadata, nil); err != nil {
+		return merr.Wrap(err, "invalid staged self-contained snapshot metadata")
+	}
+	return nil
 }
 
 // Drop removes snapshot metadata and manifest files.

@@ -378,6 +378,98 @@ func TestSnapshotWriter_SaveToRootWithSize(t *testing.T) {
 	assert.Equal(t, manifestBytes+metadataBytes, totalBytes)
 }
 
+func TestSnapshotWriter_StagedMetadataPublication(t *testing.T) {
+	prepare := func(t *testing.T) (*storage.LocalChunkManager, *snapshotstorage.SnapshotWriter, string, string, int64) {
+		t.Helper()
+		ctx := context.Background()
+		cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+		writer := snapshotstorage.NewSnapshotWriter(cm)
+		snapshotData := createTestSnapshotData()
+		targetRoot := path.Join(cm.RootPath(), "export-root")
+		_, metadataPath := snapshotstorage.GetSnapshotPaths(
+			targetRoot,
+			snapshotData.SnapshotInfo.GetCollectionId(),
+			snapshotData.SnapshotInfo.GetId(),
+		)
+		snapshotData.SnapshotInfo.S3Location = metadataPath
+		stagingPath := snapshotstorage.GetSnapshotStagingMetadataPath(targetRoot)
+		preparedPath, totalBytes, err := writer.PrepareToRootWithStaging(
+			ctx,
+			snapshotData,
+			targetRoot,
+			datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+			stagingPath,
+		)
+		require.NoError(t, err)
+		require.Equal(t, metadataPath, preparedPath)
+		return cm, writer, stagingPath, metadataPath, totalBytes
+	}
+
+	t.Run("normal and already published", func(t *testing.T) {
+		ctx := context.Background()
+		cm, writer, stagingPath, metadataPath, totalBytes := prepare(t)
+		exists, err := cm.Exist(ctx, metadataPath)
+		require.NoError(t, err)
+		assert.False(t, exists)
+
+		metadataBytes, err := writer.CommitStagedMetadata(ctx, stagingPath, metadataPath, metadataPath)
+		require.NoError(t, err)
+		assert.Greater(t, metadataBytes, int64(0))
+		assert.Greater(t, totalBytes, metadataBytes)
+
+		secondBytes, err := writer.CommitStagedMetadata(ctx, stagingPath, metadataPath, metadataPath)
+		require.NoError(t, err)
+		assert.Equal(t, metadataBytes, secondBytes)
+	})
+
+	t.Run("write error after commit is verified", func(t *testing.T) {
+		ctx := context.Background()
+		cm, writer, stagingPath, metadataPath, _ := prepare(t)
+		expected := merr.WrapErrIoTooManyRequests(metadataPath, errors.New("write response timed out"))
+		var origin func(*storage.LocalChunkManager, context.Context, string, []byte) error
+		mockWrite := mockey.Mock((*storage.LocalChunkManager).Write).To(
+			func(manager *storage.LocalChunkManager, writeCtx context.Context, filePath string, content []byte) error {
+				if filePath != metadataPath {
+					return origin(manager, writeCtx, filePath, content)
+				}
+				require.NoError(t, origin(manager, writeCtx, filePath, content))
+				return expected
+			}).Origin(&origin).Build()
+		defer mockWrite.UnPatch()
+
+		_, err := writer.CommitStagedMetadata(ctx, stagingPath, metadataPath, metadataPath)
+		require.NoError(t, err)
+		published, err := cm.Read(ctx, metadataPath)
+		require.NoError(t, err)
+		staged, err := cm.Read(ctx, stagingPath)
+		require.NoError(t, err)
+		assert.Equal(t, staged, published)
+	})
+
+	t.Run("different final metadata is rejected", func(t *testing.T) {
+		ctx := context.Background()
+		cm, writer, stagingPath, metadataPath, _ := prepare(t)
+		require.NoError(t, cm.Write(ctx, metadataPath, []byte("different")))
+
+		_, err := writer.CommitStagedMetadata(ctx, stagingPath, metadataPath, metadataPath)
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
+
+	t.Run("missing and corrupt staging metadata", func(t *testing.T) {
+		ctx := context.Background()
+		cm, writer, stagingPath, metadataPath, _ := prepare(t)
+		require.NoError(t, cm.Remove(ctx, stagingPath))
+
+		_, err := writer.CommitStagedMetadata(ctx, stagingPath, metadataPath, metadataPath)
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+		require.ErrorContains(t, err, "staged snapshot metadata object is missing")
+
+		require.NoError(t, cm.Write(ctx, stagingPath, []byte("{")))
+		_, err = writer.CommitStagedMetadata(ctx, stagingPath, metadataPath, metadataPath)
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
+}
+
 func TestSnapshotWriter_Save_DoesNotPublishMetadataAfterCancellation(t *testing.T) {
 	tempDir := t.TempDir()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))

@@ -30,10 +30,10 @@ import (
 
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const snapshotExportPlanVersion int32 = 1
@@ -74,6 +74,11 @@ func buildSnapshotExportPlan(
 	}
 	if targetCM == nil {
 		return nil, merr.WrapErrServiceInternalMsg("target chunk manager cannot be nil")
+	}
+	// External collection manifests can reference lake fragments outside the
+	// snapshot file set, so they cannot yet form a self-contained export bundle.
+	if typeutil.IsExternalCollection(snapshot.Collection.GetSchema()) {
+		return nil, merr.WrapErrParameterInvalidMsg("exporting external collections is not supported")
 	}
 	if err := snapshotstorage.ValidateSnapshotObjectPathForBucket(targetCM, "target_s3_path", targetPath, targetBucket); err != nil {
 		return nil, err
@@ -220,37 +225,67 @@ func copySnapshotExportPlan(
 	return copyGroup.Wait()
 }
 
-func publishSnapshotExportPlanWithSize(
+func prepareSnapshotExportPlanWithSize(
 	ctx context.Context,
 	targetCM storage.ChunkManager,
 	snapshot *snapshotstorage.SnapshotData,
 	plan *snapshotExportPlan,
-) (string, int64, error) {
+) (int64, error) {
 	if plan == nil {
-		return "", 0, merr.WrapErrServiceInternalMsg("snapshot export plan cannot be nil")
+		return 0, merr.WrapErrServiceInternalMsg("snapshot export plan cannot be nil")
 	}
 	// Keep metadata under targetRoot/snapshots/... so RestoreExternalSnapshot can
 	// derive the bundle root without adding another API parameter.
 	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(snapshot, plan.mappings, plan.targetRoot, plan.metadataURI)
 	if err != nil {
-		return "", 0, err
+		return 0, err
 	}
-	// Data objects can be shared by multiple exported snapshots under one root.
-	// Metadata is written last, so a failed attempt leaves only unreachable or
-	// retryable objects; deleting them could corrupt an older published bundle.
-	_, metadataBytes, err := snapshotstorage.NewSnapshotWriter(targetCM).SaveToRootWithSize(
+	metadataPath, metadataBytes, err := snapshotstorage.NewSnapshotWriter(targetCM).PrepareToRootWithStaging(
 		ctx,
 		rewritten,
 		plan.targetRoot,
 		datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+		snapshotstorage.GetSnapshotStagingMetadataPath(plan.targetRoot),
 	)
 	if err != nil {
-		return "", 0, err
+		return 0, err
 	}
-	mlog.Info(ctx, "export snapshot completed",
-		mlog.String("snapshotName", snapshot.SnapshotInfo.GetName()),
-		mlog.String("snapshotMetadataURI", snapshotstorage.RedactSnapshotObjectPath(plan.metadataURI)))
-	return plan.metadataURI, plan.dataBytes + metadataBytes, nil
+	if metadataPath != snapshotstorage.NormalizeSnapshotObjectPath(plan.metadataURI) {
+		return 0, merr.WrapErrDataIntegrityMsg("prepared snapshot metadata path does not match the export plan")
+	}
+	return plan.dataBytes + metadataBytes, nil
+}
+
+func commitSnapshotExportMetadata(
+	ctx context.Context,
+	targetCM storage.ChunkManager,
+	targetRoot string,
+	metadataURI string,
+) error {
+	if targetCM == nil {
+		return merr.WrapErrServiceInternalMsg("target chunk manager cannot be nil")
+	}
+	if strings.TrimSpace(targetRoot) == "" || strings.TrimSpace(metadataURI) == "" {
+		return merr.WrapErrServiceInternalMsg("target root and metadata URI are required")
+	}
+	_, err := snapshotstorage.NewSnapshotWriter(targetCM).CommitStagedMetadata(
+		ctx,
+		snapshotstorage.GetSnapshotStagingMetadataPath(targetRoot),
+		snapshotstorage.NormalizeSnapshotObjectPath(metadataURI),
+		metadataURI,
+	)
+	return err
+}
+
+func cleanupSnapshotExportStagingMetadata(
+	ctx context.Context,
+	targetCM storage.ChunkManager,
+	targetRoot string,
+) error {
+	if targetCM == nil || strings.TrimSpace(targetRoot) == "" {
+		return nil
+	}
+	return targetCM.Remove(ctx, snapshotstorage.GetSnapshotStagingMetadataPath(targetRoot))
 }
 
 func normalizeSnapshotExportTargetIdentity(targetPath, targetBucket, targetRoot string) string {

@@ -2904,7 +2904,7 @@ func TestServer_ExportSnapshot_ForwardsForeignStorageFields(t *testing.T) {
 // --- Test rollbackRestoreSnapshot ---
 // Note: The actual DropCollection RPC is tested in internal/datacoord/broker/coordinator_broker_test.go
 
-	func TestServer_RollbackRestoreSnapshot(t *testing.T) {
+func TestServer_RollbackRestoreSnapshot(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 

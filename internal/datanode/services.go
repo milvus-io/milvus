@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
 	"golang.org/x/time/rate"
@@ -761,7 +762,15 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	return &datapb.QuerySlotResponse{
 		Status:         merr.Success(),
 		AvailableSlots: availableSlots,
+		Version:        currentMilvusVersion(),
 	}, nil
+}
+
+func currentMilvusVersion() string {
+	if version := strings.TrimSpace(os.Getenv(metricsinfo.GitBuildTagsEnvKey)); version != "" && version != "unknown" {
+		return version
+	}
+	return common.Version.String()
 }
 
 // Not in used now

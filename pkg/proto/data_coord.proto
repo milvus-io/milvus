@@ -1471,6 +1471,7 @@ message QuerySlotRequest {}
 message QuerySlotResponse {
   common.Status status = 1;
   int64 available_slots = 2;
+  string version = 3; // Milvus build version reported by the worker
 }
 
 enum CompactionTaskState {
