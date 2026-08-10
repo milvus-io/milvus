@@ -161,6 +161,14 @@ func (s *LoadConfigStore) Remove(ctx context.Context, collectionID int64) error 
 	return nil
 }
 
+// Contains reports whether a collection has a live load config without
+// materializing the full balancer snapshot.
+func (s *LoadConfigStore) Contains(collectionID int64) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.configs[collectionID] != nil
+}
+
 // Snapshot returns the current immutable load-config view. It refreshes the
 // resident snapshot lazily when the live version has advanced. The returned
 // maps point at the store's copy-on-write snapshots and must be treated as

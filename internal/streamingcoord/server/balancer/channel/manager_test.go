@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,6 +25,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
+
+func TestReplicateRoleDoesNotWaitForChannelManagerLock(t *testing.T) {
+	m := &ChannelManager{
+		cond: syncutil.NewContextCond(&sync.Mutex{}),
+	}
+
+	m.cond.L.Lock()
+	defer m.cond.L.Unlock()
+
+	roleCh := make(chan replicateutil.Role, 1)
+	go func() {
+		roleCh <- m.ReplicateRole()
+	}()
+
+	select {
+	case role := <-roleCh:
+		assert.Equal(t, replicateutil.RolePrimary, role)
+	case <-time.After(time.Second):
+		t.Fatal("ReplicateRole blocked on the channel manager lock")
+	}
+}
 
 func TestChannelManager(t *testing.T) {
 	ResetStaticPChannelStatsManager()
@@ -905,7 +927,7 @@ func TestAddPChannels_UnavailableInReplication(t *testing.T) {
 			{ClusterId: "by-dev2", Pchannels: []string{"ch3", "ch4"}},
 		},
 		CrossClusterTopology: []*commonpb.CrossClusterTopology{
-			{SourceClusterId: "by-dev", TargetClusterId: "by-dev2"},
+			{SourceClusterId: "by-dev2", TargetClusterId: "by-dev"},
 		},
 	}
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(
@@ -914,6 +936,7 @@ func TestAddPChannels_UnavailableInReplication(t *testing.T) {
 
 	m, err := RecoverChannelManager(ctx, "ch1", "ch2")
 	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RoleSecondary, m.ReplicateRole())
 
 	// ch1 and ch2 should be available (in replicateConfig)
 	assert.True(t, m.channels[ChannelID{Name: "ch1"}].AvailableInReplication())

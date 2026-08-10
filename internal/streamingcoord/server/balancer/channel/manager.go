@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -90,6 +91,11 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 		streamingVersion: streamingVersion,
 		replicateConfig:  replicateConfig,
 	}
+	replicateRole := replicateutil.RolePrimary
+	if replicateConfig != nil {
+		replicateRole = replicateConfig.GetCurrentCluster().Role()
+	}
+	cm.replicateRole.Store(int32(replicateRole))
 
 	// Register the channel manager singleton after recovery.
 	register(cm)
@@ -225,6 +231,7 @@ type ChannelManager struct {
 	// 1 if streaming service has been run once.
 	streamingEnableNotifiers []*syncutil.AsyncTaskNotifier[struct{}]
 	replicateConfig          *replicateutil.ConfigHelper
+	replicateRole            atomic.Int32 // lock-free snapshot published after replicateConfig is persisted
 	shardAssignmentProvider  ShardAssignmentProvider
 }
 
@@ -271,13 +278,7 @@ func (cm *ChannelManager) IsStreamingVersionAtLeast(version int64) bool {
 
 // ReplicateRole returns the replicate role of the channel manager.
 func (cm *ChannelManager) ReplicateRole() replicateutil.Role {
-	cm.cond.L.Lock()
-	defer cm.cond.L.Unlock()
-
-	if cm.replicateConfig == nil {
-		return replicateutil.RolePrimary
-	}
-	return cm.replicateConfig.GetCurrentCluster().Role()
+	return replicateutil.Role(cm.replicateRole.Load())
 }
 
 // AddPChannels adds new PChannels dynamically. Channels that already exist are skipped.
@@ -668,6 +669,7 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 	cm.cond.UnsafeBroadcast()
 	cm.version.Local++
 	cm.metrics.UpdateAssignmentVersion(cm.version.Local)
+	cm.replicateRole.Store(int32(config.GetCurrentCluster().Role()))
 	return nil
 }
 

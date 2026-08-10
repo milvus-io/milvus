@@ -42,7 +42,8 @@ func (s *Server) broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx con
 		return err
 	}
 
-	if s.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap()[req.GetCollectionID()] == nil {
+	isLoaded := s.qviewsRuntime.loadConfigStore.Contains(req.GetCollectionID())
+	if !isLoaded {
 		return errReleaseCollectionNotLoaded
 	}
 	msg := message.NewDropLoadConfigMessageBuilderV2().
