@@ -21,7 +21,12 @@ package merr
 // `make generate-segcore-codes` (which resolves the pinned header), or directly:
 //go:generate sh -c "go run ./internal/segcoregen/main.go -header \"$MILVUS_COMMON_HEADER\" -out segcore_codes_gen.go"
 
-import "github.com/cockroachdb/errors"
+import (
+	"strconv"
+	"strings"
+
+	"github.com/cockroachdb/errors"
+)
 
 // onUnmappedSegcoreCode, if set, is invoked once per occurrence whenever a C++
 // segcore code arrives that is not classified by classForCode (classification
@@ -37,6 +42,58 @@ var onUnmappedSegcoreCode func(code int32)
 // from a package that may import metrics/logging.
 func RegisterUnmappedSegcoreCodeObserver(fn func(code int32)) {
 	onUnmappedSegcoreCode = fn
+}
+
+// onUnexpectedSegcoreOrigin is the same injection pattern for UnexpectedError
+// (2001), the bucket that means "unclassified internal failure". Every other
+// segcore code names what went wrong; 2001 only says something did, so the
+// actionable signal is WHERE. AssertInfo/ThrowInfo append " at <file>:<line>"
+// to the message on the C++ side, which is the only place that survives the
+// cgo boundary, so the origin is recovered from the message text.
+//
+// This exists to close the audit loop: the 1500-odd remaining 2001 sites in
+// internal/core were each read and judged to be genuine invariants, but a
+// judgement is a hypothesis. A site that fires in production falsifies it and
+// names itself here, which beats re-reading the code looking for stragglers.
+var onUnexpectedSegcoreOrigin func(origin string)
+
+// RegisterUnexpectedSegcoreOriginObserver installs the callback invoked with
+// the source location of every UnexpectedError(2001) crossing the boundary.
+// Call it once at init from a package that may import metrics/logging.
+func RegisterUnexpectedSegcoreOriginObserver(fn func(origin string)) {
+	onUnexpectedSegcoreOrigin = fn
+}
+
+// segcoreOrigin extracts the "<file>:<line>" that EasyAssertInfo appends to a
+// segcore message as " at <file>:<line>", trimmed to a repo-relative path so
+// the label does not carry the builder's absolute directory (which differs
+// between CI images and would split one site across several metric series).
+//
+// Returns "" when the message carries no location: the caller then reports the
+// site as unknown rather than inventing one. The scan runs from the end
+// because a message body may itself contain " at " or a colon.
+func segcoreOrigin(msg string) string {
+	const marker = " at "
+	idx := strings.LastIndex(msg, marker)
+	if idx < 0 {
+		return ""
+	}
+	loc := msg[idx+len(marker):]
+	// A location is exactly "<path>:<line>"; anything else is prose that
+	// happened to contain " at ".
+	colon := strings.LastIndexByte(loc, ':')
+	if colon <= 0 || colon == len(loc)-1 {
+		return ""
+	}
+	if _, err := strconv.Atoi(loc[colon+1:]); err != nil {
+		return ""
+	}
+	// Absolute build paths (/home/runner/work/milvus/milvus/internal/core/...)
+	// become repo-relative so the same site is one series everywhere.
+	if i := strings.Index(loc, "internal/core/"); i >= 0 {
+		loc = loc[i:]
+	}
+	return loc
 }
 
 // segcore error codes are produced by the C++ core (milvus::ErrorCode, defined
@@ -217,6 +274,13 @@ func classifySegcoreError(code int32, msg string) error {
 		if onUnmappedSegcoreCode != nil {
 			onUnmappedSegcoreCode(code)
 		}
+	}
+
+	// 2001 is the "unclassified internal failure" bucket: report where it was
+	// raised so a site that fires in production can be reclassified from
+	// evidence instead of from re-reading the code.
+	if code == int32(CodeUnexpectedError) && onUnexpectedSegcoreOrigin != nil {
+		onUnexpectedSegcoreOrigin(segcoreOrigin(msg))
 	}
 
 	// Stamp the original C++ code into the segcoreCode field on the sentinel,

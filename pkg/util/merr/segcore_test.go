@@ -247,3 +247,59 @@ func TestSegcoreCodeTableCoverage(t *testing.T) {
 	assert.Empty(t, unclassified, "generated SegcoreCode constants not classified in classForCode "+
 		"(pkg/util/merr/segcore.go): %v", unclassified)
 }
+
+// TestSegcoreOrigin pins the parser that turns a C++ message into the metric
+// label. EasyAssertInfo appends " at <file>:<line>"; everything else must be
+// reported as unknown rather than guessed at, and absolute build paths must
+// collapse to one repo-relative series so the same site does not split across
+// CI images.
+func TestSegcoreOrigin(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  string
+		want string
+	}{
+		{
+			"absolute build path is trimmed to repo-relative",
+			"assert failed at /home/runner/work/milvus/milvus/internal/core/src/index/FMIndex.h:75",
+			"internal/core/src/index/FMIndex.h:75",
+		},
+		{
+			"already relative path is kept",
+			"boom at internal/core/src/exec/Driver.cpp:150",
+			"internal/core/src/exec/Driver.cpp:150",
+		},
+		{
+			// The body itself contains " at " and a colon; the scan runs from
+			// the end so the real location still wins.
+			"prose containing the marker does not confuse the scan",
+			"failed at offset 3: bad at /src/internal/core/src/storage/Util.cpp:42",
+			"internal/core/src/storage/Util.cpp:42",
+		},
+		{"no location at all", "plain failure with no location", ""},
+		{"marker without a line number", "failed at the wrong time", ""},
+		{"trailing colon is not a line number", "failed at /a/b.cpp:", ""},
+		{"empty message", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, segcoreOrigin(tc.msg))
+		})
+	}
+}
+
+// The origin observer must fire for 2001 and only for 2001: every other code
+// already names its failure, so labeling them by source location would add
+// metric series with no decision attached.
+func TestUnexpectedSegcoreOriginObserver(t *testing.T) {
+	var got []string
+	RegisterUnexpectedSegcoreOriginObserver(func(origin string) { got = append(got, origin) })
+	defer RegisterUnexpectedSegcoreOriginObserver(nil)
+
+	_ = SegcoreError(2001, "boom at internal/core/src/exec/Task.cpp:248")
+	_ = SegcoreError(2001, "no location here")
+	_ = SegcoreError(2024, "corrupt at internal/core/src/storage/Util.cpp:1")
+	_ = SegcoreError(2034, "oom at internal/core/src/storage/Util.cpp:2")
+
+	assert.Equal(t, []string{"internal/core/src/exec/Task.cpp:248", ""}, got)
+}
