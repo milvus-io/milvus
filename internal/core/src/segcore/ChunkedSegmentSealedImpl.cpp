@@ -8161,13 +8161,15 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
 
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<void>> load_group_futures;
-    for (const auto& [cg_index, field_ids] : cg_field_ids) {
+    for (const auto& cg_field_id : cg_field_ids) {
+        const auto cg_index = cg_field_id.first;
+        const auto& field_ids_ref = cg_field_id.second;
         auto size_estimate = size_estimates.at(cg_index);
         auto future = pool.Submit([this,
                                    column_groups,
                                    properties,
                                    cg_index,
-                                   field_ids,
+                                   field_ids = field_ids_ref,
                                    size_estimate = std::move(size_estimate),
                                    &segment_load_info,
                                    schema_snapshot,
