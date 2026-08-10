@@ -2430,6 +2430,18 @@ TEST(Sealed, QueryAllNullableFields) {
     EXPECT_EQ(float_array_result->scalars().array_data().data_size(),
               dataset_size);
 
+    for (int64_t i = 0; i < dataset_size; ++i) {
+        const auto offset = ids_ds->GetIds()[i];
+        if (int8_valid_values[offset]) {
+            EXPECT_EQ(int8_result->scalars().int_data().data(i),
+                      static_cast<int32_t>(int8_values[offset]));
+        }
+        if (int16_valid_values[offset]) {
+            EXPECT_EQ(int16_result->scalars().int_data().data(i),
+                      static_cast<int32_t>(int16_values[offset]));
+        }
+    }
+
     EXPECT_EQ(GetFieldDataRowValidData(*bool_result).size(), dataset_size);
     EXPECT_EQ(GetFieldDataRowValidData(*int8_result).size(), dataset_size);
     EXPECT_EQ(GetFieldDataRowValidData(*int16_result).size(), dataset_size);
@@ -4698,6 +4710,68 @@ TEST(SealedSegmentCowState,
     EXPECT_NE(chunk_rows_thread, caller_thread);
     EXPECT_TRUE(chunk_rows_thread_name.starts_with("MIDD_SEGC_POOL"))
         << chunk_rows_thread_name;
+}
+
+TEST(SealedSegmentCowState, ResolvesVortexColumnGroupLocalFormatFallback) {
+    const FieldId pk(100);
+    const FieldId raw(101);
+    const FieldId vortex(102);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldMeta(FieldName("pk"),
+                               pk,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "",
+                               LOCAL_FORMAT_RAW));
+    schema->AddField(FieldMeta(FieldName("raw"),
+                               raw,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "",
+                               LOCAL_FORMAT_RAW));
+    schema->AddField(FieldMeta(FieldName("vortex"),
+                               vortex,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "",
+                               LOCAL_FORMAT_VORTEX));
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto column_group = std::make_shared<milvus_storage::api::ColumnGroup>();
+    column_group->format = STORAGE_FORMAT_VORTEX;
+
+    column_group->columns = {schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Vortex);
+    column_group->columns = {schema->get_storage_column_name(raw),
+                             schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Default);
+    column_group->columns = {schema->get_storage_column_name(pk),
+                             schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Raw);
+
+    column_group->format = "parquet";
+    column_group->columns = {schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Default);
+    column_group->columns = {schema->get_storage_column_name(pk)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Raw);
 }
 
 TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {

@@ -519,7 +519,7 @@ TEST_P(SegmentChunkReaderStringTest, SmallWindowsDoNotRebuildWholeChunkViews) {
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     int64_t chunk = 0, pos = 0;
     constexpr int64_t batch = 17;
-    StringScanState scan_state;
+    ColumnScanState scan_state;
     for (int64_t start = 0; start < expected_.size(); start += batch) {
         const auto count = std::min<int64_t>(batch, expected_.size() - start);
         auto accessor = reader.GetMultipleChunkDataAccessor(
@@ -545,7 +545,7 @@ TEST_P(SegmentChunkReaderStringTest, StringAccessorsUseBoundSnapshot) {
     segment_->forbid_live_column_read = true;
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     reader.SetSnapshot(&snapshot);
-    StringScanState scan_state;
+    ColumnScanState scan_state;
     int64_t chunk = 1, pos = 0;
     for (int64_t row = 8192; row < 8196; row += 2) {
         auto scan = reader.GetMultipleChunkDataAccessor(
@@ -730,7 +730,7 @@ TEST_P(SegmentChunkReaderStringTest,
 TEST_P(SegmentChunkReaderStringTest,
        PersistentScanUsesConfiguredPinLifetimeAcrossWindows) {
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
-    StringScanState scan_state;
+    ColumnScanState scan_state;
     int64_t chunk = 1, pos = 0;
     {
         auto accessor = reader.GetMultipleChunkDataAccessor(

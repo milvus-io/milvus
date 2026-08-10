@@ -519,6 +519,12 @@ class Schema {
     FieldId
     ResolveColumnFieldId(const std::string& column_name) const;
 
+    // Resolve every logical field backed by one physical manifest column.
+    // External schemas may intentionally map multiple fields to the same
+    // external_field.
+    std::vector<FieldId>
+    ResolveColumnFieldIds(const std::string& column_name) const;
+
     proto::schema::CollectionSchema
     ToProto() const;
 
