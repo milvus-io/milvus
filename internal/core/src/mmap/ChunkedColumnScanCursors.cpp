@@ -179,6 +179,7 @@ class RawScanCursor final : public ChunkedColumnInterface::ScanCursor {
     ResetOutput(ChunkedColumnInterface::ScanBatch* out) {
         out->values = ChunkedColumnInterface::ValueView{};
         out->validity = {};
+        out->row_ids.clear();
         out->owner.reset();
         out->row_id_start = 0;
         out->size = 0;
@@ -433,6 +434,10 @@ OpenDataScan(const ChunkedColumnInterface* column,
 ChunkedColumnInterface::ScanResult
 ChunkedColumnInterface::Scan(milvus::OpContext* op_ctx,
                              const ScanOptions& options) const {
+    if (options.output != ScanOutput::Data ||
+        options.predicate != ScanPredicate::None) {
+        return nullptr;
+    }
     auto data_type = GetDefaultScanDataType();
     if (!data_type.has_value()) {
         return nullptr;
