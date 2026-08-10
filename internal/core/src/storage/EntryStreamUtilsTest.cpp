@@ -424,6 +424,64 @@ TEST_F(TransientMemoryBudgetAsyncTest,
 }
 
 TEST_F(TransientMemoryBudgetAsyncTest,
+       QueuedHighLegacyAdmissionBlocksLaterHighAdmissions) {
+    budget_.SetCapacityBytes(2);
+
+    auto running = budget_.AcquireAsync(1, TransientBudgetPriority::Low);
+    auto running_lease = folly::coro::blockingWait(std::move(running));
+    folly::CancellationSource cancellation_source;
+    auto high_legacy = std::async(
+        std::launch::async, [&, token = cancellation_source.getToken()]() {
+            return budget_.AcquireUntil(
+                2, TransientBudgetPriority::High, token);
+        });
+
+    bool high_registered = false;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (!budget_.TryAcquire(1, TransientBudgetPriority::Low)) {
+            high_registered = true;
+            break;
+        }
+        budget_.Release(1);
+        std::this_thread::yield();
+    }
+    if (!high_registered) {
+        cancellation_source.requestCancellation();
+        ASSERT_EQ(high_legacy.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        EXPECT_FALSE(high_legacy.get());
+        FAIL() << "high-priority legacy waiter was not tracked";
+    }
+
+    bool try_acquire_overtook =
+        budget_.TryAcquire(1, TransientBudgetPriority::High);
+    if (try_acquire_overtook) {
+        budget_.Release(1);
+    }
+    auto high_async = budget_.AcquireAsync(1, TransientBudgetPriority::High);
+    bool async_overtook = high_async.isReady();
+    if (async_overtook) {
+        auto async_lease = folly::coro::blockingWait(std::move(high_async));
+        async_lease.Release();
+    }
+
+    running_lease.Release();
+    ASSERT_EQ(high_legacy.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    EXPECT_TRUE(high_legacy.get());
+    budget_.Release(2);
+
+    EXPECT_FALSE(try_acquire_overtook);
+    EXPECT_FALSE(async_overtook);
+    if (!async_overtook) {
+        ASSERT_TRUE(high_async.isReady());
+        auto async_lease = folly::coro::blockingWait(std::move(high_async));
+        async_lease.Release();
+    }
+}
+
+TEST_F(TransientMemoryBudgetAsyncTest,
        CancellingHighLegacyAdmissionUnblocksLowAsyncAdmission) {
     budget_.SetCapacityBytes(2);
 
