@@ -1617,6 +1617,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 }
                 break;
             }
+            case DataType::STRING:
             case DataType::VARCHAR: {
                 auto begin = data->scalars().string_data().data().begin();
                 auto end = data->scalars().string_data().data().end();
@@ -1625,10 +1626,11 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                     auto raw_valid_data = row_valid_data.data();
                     createNullableFieldData(data_raw.data(),
                                             raw_valid_data,
-                                            DataType::VARCHAR,
+                                            field_meta.get_data_type(),
                                             dim);
                 } else {
-                    createFieldData(data_raw.data(), DataType::VARCHAR, dim);
+                    createFieldData(
+                        data_raw.data(), field_meta.get_data_type(), dim);
                 }
                 break;
             }
