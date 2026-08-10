@@ -17,6 +17,9 @@
 package streamrpc
 
 import (
+	"context"
+	"math"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,18 +29,48 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
-func intResult(start, n int64) *internalpb.RetrieveResults {
-	data := make([]int64, n)
-	for i := range data {
-		data[i] = start + int64(i)
+// Auto-id primary keys and TSO timestamps are both large enough that their
+// varints occupy the full 8-9 bytes. Using small values instead would make the
+// Ids column compress far below the FieldsData columns and overstate the effect
+// these tests are about.
+const (
+	firstAutoID    = 458000000000000000
+	firstTimestamp = 460000000000000000
+)
+
+// deleteStyleResult mirrors what querynode actually streams for
+// delete-by-expression: the ID list plus a FieldsData carrying the PK column and
+// common.TimeStampField, because the delete plan asks for both
+// (proxy/task_delete.go) and the stream path never enables ignoreNonPk.
+//
+// merge keeps only the Ids, so a fixture without FieldsData cannot observe how
+// much of an incoming result is charged but discarded.
+func deleteStyleResult(start, n int64) *internalpb.RetrieveResults {
+	pks := make([]int64, n)
+	tss := make([]int64, n)
+	for i := range pks {
+		pks[i] = firstAutoID + start + int64(i)
+		tss[i] = firstTimestamp + start + int64(i)
+	}
+	longCol := func(name string, fieldID int64, data []int64) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			Type:      schemapb.DataType_Int64,
+			FieldName: name,
+			FieldId:   fieldID,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: data}},
+			}},
+		}
 	}
 	return &internalpb.RetrieveResults{
 		Ids: &schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: data}},
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: pks}},
 		},
+		FieldsData:         []*schemapb.FieldData{longCol("pk", 100, pks), longCol("Timestamp", 1, tss)},
 		AllRetrieveCount:   n,
 		ScannedTotalBytes:  n * 8,
 		ScannedRemoteBytes: n * 4,
+		CostAggregation:    &internalpb.CostAggregation{ResponseTime: 1, ServiceTime: 1, TotalNQ: 1},
 	}
 }
 
@@ -50,7 +83,7 @@ func TestRetrieveResultCacheSizeNeverUnderestimates(t *testing.T) {
 
 	cache := &RetrieveResultCache{cap: 1 << 30} // never flushes
 	for i := 0; i < results; i++ {
-		cache.Put(intResult(int64(i*perResult), perResult))
+		cache.Put(deleteStyleResult(int64(i*perResult), perResult))
 		assert.GreaterOrEqual(t, cache.size, proto.Size(cache.result),
 			"reported size must not be below the real encoded size after %d merges", i+1)
 	}
@@ -59,17 +92,20 @@ func TestRetrieveResultCacheSizeNeverUnderestimates(t *testing.T) {
 	got := cache.result.GetIds().GetIntId().GetData()
 	assert.Len(t, got, results*perResult)
 	for i := range got {
-		assert.Equal(t, int64(i), got[i])
+		assert.Equal(t, int64(firstAutoID+i), got[i])
 	}
 	assert.Equal(t, int64(results*perResult), cache.result.GetAllRetrieveCount())
 	assert.Equal(t, int64(results*perResult*8), cache.result.GetScannedTotalBytes())
 	assert.Equal(t, int64(results*perResult*4), cache.result.GetScannedRemoteBytes())
 
-	// The over-estimate stays proportional to the per-result envelope rather
-	// than growing with the payload.
+	// Charging the whole incoming envelope rather than the part merge retains
+	// costs a steady ~3x here, which would flush at a third of cap. The slack
+	// must stay a per-merge constant (the Ids tag and length prefix) plus the
+	// one-off headroom, not a fraction of the payload.
 	real := proto.Size(cache.result)
-	assert.Less(t, cache.size-real, real/10,
-		"over-estimate should stay well under 10%% of the real size")
+	assert.Less(t, cache.size-real, real/100,
+		"over-estimate should stay under 1%% of the real size, got %d of %d",
+		cache.size-real, real)
 }
 
 func TestRetrieveResultCacheSizeStringIDs(t *testing.T) {
@@ -85,27 +121,66 @@ func TestRetrieveResultCacheSizeStringIDs(t *testing.T) {
 	assert.Len(t, cache.result.GetIds().GetStrId().GetData(), 150)
 }
 
+type recordingStreamServer struct {
+	ctx  context.Context
+	sent []*internalpb.RetrieveResults
+}
+
+func (s *recordingStreamServer) Send(result *internalpb.RetrieveResults) error {
+	s.sent = append(s.sent, result)
+	return nil
+}
+
+func (s *recordingStreamServer) Context() context.Context { return s.ctx }
+
+// The size estimate decides when a batch is full, so an estimate that runs high
+// does not just "flush slightly early" — it shrinks every message the stream
+// emits. Proxy turns each received message into one deleteTask
+// (proxy/task_delete.go), so the batch size here is the delete write batch size.
+func TestResultCacheServerFillsBatchesToCapacity(t *testing.T) {
+	const (
+		batchCap   = 4 << 20 // queryNode.queryStreamBatchSize default
+		maxMsgSize = 128 << 20
+		perResult  = 1000
+		results    = 600
+	)
+
+	srv := &recordingStreamServer{ctx: context.Background()}
+	cacheSrv := NewResultCacheServer(srv, batchCap, maxMsgSize)
+	for i := 0; i < results; i++ {
+		assert.NoError(t, cacheSrv.Send(deleteStyleResult(int64(i*perResult), perResult)))
+	}
+	assert.NoError(t, cacheSrv.Flush())
+	assert.NotEmpty(t, srv.sent)
+
+	// Safety first: this is what the estimate exists to guarantee.
+	for i, msg := range srv.sent {
+		assert.LessOrEqual(t, proto.Size(msg), maxMsgSize, "message %d exceeds maxMsgSize", i)
+	}
+
+	// Utilization: every message except the trailing flush should be close to
+	// cap. Charging the full envelope instead of the retained IDs puts these at
+	// roughly cap/3.
+	total := 0
+	for _, msg := range srv.sent[:len(srv.sent)-1] {
+		size := proto.Size(msg)
+		total += size
+		assert.Greater(t, size, batchCap*7/10,
+			"batches should fill cap, got %d of %d", size, batchCap)
+	}
+	assert.Positive(t, total)
+}
+
 // The old implementation was quadratic in the number of merged results.
 func BenchmarkRetrieveResultCacheMerge(b *testing.B) {
 	for _, n := range []int{50, 100, 200} {
-		b.Run(strconvItoa(n), func(b *testing.B) {
+		b.Run(strconv.Itoa(n)+"results", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				cache := &RetrieveResultCache{cap: 1 << 30}
+				cache := &RetrieveResultCache{cap: math.MaxInt}
 				for j := 0; j < n; j++ {
-					cache.Put(intResult(int64(j*5000), 5000))
+					cache.Put(deleteStyleResult(int64(j*5000), 5000))
 				}
 			}
 		})
-	}
-}
-
-func strconvItoa(n int) string {
-	switch n {
-	case 50:
-		return "50results"
-	case 100:
-		return "100results"
-	default:
-		return "200results"
 	}
 }
