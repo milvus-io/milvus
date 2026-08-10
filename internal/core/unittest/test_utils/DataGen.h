@@ -242,6 +242,7 @@ struct GeneratedData {
                             std::copy_n(src_data, raw_->num_rows(), ret.data());
                             break;
                         }
+                        case DataType::STRING:
                         case DataType::VARCHAR: {
                             auto ret_data =
                                 reinterpret_cast<std::string*>(ret.data());
