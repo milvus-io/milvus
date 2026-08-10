@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -56,6 +58,24 @@ type CopySegmentTask struct {
 
 	// Target objects created by this task, managed through TaskManager updates.
 	copiedFiles []string
+
+	runtime *copySegmentRuntime // Shared by every TaskManager clone
+}
+
+// copySegmentRuntime contains execution ownership that must survive metadata
+// clones. Abort uses the same object as all submitted copy closures, so it can
+// prevent new work, wait for every accepted closure, and then clean the final
+// complete set of outputs.
+type copySegmentRuntime struct {
+	mu      sync.Mutex
+	wg      sync.WaitGroup
+	aborted bool
+
+	// dispatchVersion is the epoch of the newest DataCoord dispatch this
+	// worker-side task serves. It lives on the runtime rather than the task so
+	// that TaskManager clones — and a re-dispatch that TaskManager folds into the
+	// existing entry — observe the same value.
+	dispatchVersion atomic.Int64
 }
 
 func NewCopySegmentTask(
@@ -105,6 +125,8 @@ func NewCopySegmentTask(
 	}
 
 	// Step 3: Create task with all components
+	runtime := &copySegmentRuntime{}
+	runtime.dispatchVersion.Store(req.GetTaskVersion())
 	task := &CopySegmentTask{
 		ctx:            ctx,
 		cancel:         cancel,
@@ -125,6 +147,7 @@ func NewCopySegmentTask(
 		copier:              copier,
 		sourceBucket:        sourceBucket,
 		targetBucket:        targetBucket,
+		runtime:             runtime,
 	}
 	return task
 }
@@ -185,6 +208,43 @@ func (t *CopySegmentTask) Cancel() {
 	t.cancel()
 }
 
+// AdoptDispatchVersion binds this worker-side task to a newer DataCoord
+// dispatch.
+//
+// TaskManager keeps the first entry when the same taskID is created again, so a
+// re-dispatch is served by the task already running here. Raising the epoch
+// hands ownership to the newest dispatch, which is what makes a drop queued for
+// an earlier one recognizably stale — without it, that drop would match and
+// abort the copy the new dispatch is relying on. Never lowers the epoch, so
+// out-of-order dispatch RPCs cannot resurrect an older owner.
+func (t *CopySegmentTask) AdoptDispatchVersion(version int64) {
+	for {
+		current := t.runtime.dispatchVersion.Load()
+		if version <= current {
+			return
+		}
+		if t.runtime.dispatchVersion.CompareAndSwap(current, version) {
+			return
+		}
+	}
+}
+
+// AcceptsDrop reports whether a drop issued for the given dispatch epoch still
+// applies to this task.
+//
+// Target object keys are a deterministic transform of the source keys and carry
+// no dispatch identity, so every dispatch of a task writes the same objects. A
+// drop from a superseded dispatch must therefore be ignored: honoring it would
+// delete the output the current dispatch produced, which may already be
+// published and referenced by live segment metadata.
+//
+// A zero epoch on either side means the peer predates the fence (rolling
+// upgrade) and the drop is honored, preserving the previous behavior.
+func (t *CopySegmentTask) AcceptsDrop(version int64) bool {
+	current := t.runtime.dispatchVersion.Load()
+	return version == 0 || current == 0 || version == current
+}
+
 // Clone creates a copy of the task with deep-copied segmentResults.
 // Note: This shares references to manager, cm, and other components.
 // The segmentResults map is deep-copied to avoid concurrent map access.
@@ -217,6 +277,7 @@ func (t *CopySegmentTask) Clone() Task {
 		sourceBucket:        t.sourceBucket,
 		targetBucket:        t.targetBucket,
 		copiedFiles:         copiedFiles,
+		runtime:             t.runtime,
 	}
 }
 
@@ -279,17 +340,55 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 		return nil
 	}
 
-	// Step 3: Submit all segment pairs to the execution pool. Workers publish
-	// copied files before returning; only the finalizer publishes failure.
+	// Step 3: Claim the whole batch against a concurrent Abort, then release the
+	// lock before submitting anything.
+	//
+	// The aborted check and the wg.Add must be atomic: once Abort observes
+	// aborted == false it is guaranteed to see the full counter in wg.Wait(),
+	// and once it sets aborted == true no further batch is accepted.
+	//
+	// The lock must NOT span the submit loop. GetExecPool().Submit blocks when
+	// the pool has no idle worker, so holding the mutex across the loop would
+	// stall every other holder — including a concurrent Abort — behind a pool
+	// that only frees up once the accepted closures finish.
+	t.runtime.mu.Lock()
+	if t.runtime.aborted {
+		t.runtime.mu.Unlock()
+		return nil
+	}
+	t.runtime.wg.Add(len(sources))
+	t.runtime.mu.Unlock()
+
+	// Workers publish copied files before returning; only the finalizer
+	// publishes failure.
 	workerFutures := make([]*conc.Future[any], 0, len(sources))
 	var (
 		firstErr     error
 		firstErrOnce sync.Once
 	)
 	for i := range sources {
+		// Stop admitting work once Abort has fenced the task. Every source
+		// counted into wg above must still be released, or Abort would wait on
+		// copies that will never run — so hand back the whole remaining tail in
+		// one atomic decrement.
+		if t.runtimeAborted() {
+			t.runtime.wg.Add(i - len(sources))
+			break
+		}
+
 		source := sources[i]
 		target := targets[i]
+		// Each source owns a release latch so its wg slot is given back exactly
+		// once, whether the closure runs to completion or the pool rejects it
+		// outright (in which case the closure never runs and cannot release it).
+		released := atomic.NewBool(false)
+		release := func() {
+			if released.CompareAndSwap(false, true) {
+				t.runtime.wg.Done()
+			}
+		}
 		future := GetExecPool().Submit(func() (any, error) {
+			defer release()
 			result, err := t.copySingleSegment(source, target)
 			if err != nil {
 				firstErrOnce.Do(func() {
@@ -299,6 +398,9 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 			}
 			return result, err
 		})
+		if isPoolRejection(future) {
+			release()
+		}
 		workerFutures = append(workerFutures, future)
 	}
 
@@ -317,6 +419,28 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 	})
 
 	return []*conc.Future[any]{finalizer}
+}
+
+// runtimeAborted reports whether Abort has fenced this task.
+func (t *CopySegmentTask) runtimeAborted() bool {
+	t.runtime.mu.Lock()
+	defer t.runtime.mu.Unlock()
+	return t.runtime.aborted
+}
+
+// isPoolRejection reports whether the pool declined the closure instead of
+// scheduling it. A rejected submission completes its future immediately with an
+// error without ever entering the closure, so the caller owns the cleanup that
+// the closure would otherwise have performed. A closure that ran and failed also
+// completes with an error, which is why the release latch — not this check — is
+// what keeps the accounting exactly-once.
+func isPoolRejection(future *conc.Future[any]) bool {
+	select {
+	case <-future.Inner():
+		return future.Err() != nil
+	default:
+		return false
+	}
 }
 
 // copySingleSegment copies all files for a single source-target segment pair.
@@ -416,7 +540,7 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 // orphan data in storage that cannot be cleaned by garbage collection.
 //
 // Process flow:
-//  1. Copy the immutable task snapshot's file list
+//  1. Read the freshest published file list from TaskManager
 //  2. Early return if no files to cleanup
 //  3. Use ChunkManager.MultiRemove for batch deletion with timeout
 //  4. Log success/failure (failure is logged but doesn't block task removal)
@@ -427,21 +551,45 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 //   - Without cleanup, storage leaks accumulate over time
 //
 // Error handling:
-//   - Cleanup failure is logged but doesn't prevent task removal
-//   - Best-effort cleanup: some files may remain if deletion fails
-//   - 30-second timeout prevents cleanup from blocking indefinitely
+//   - Abort uses cleanupCopiedFiles and propagates deletion failure, so the
+//     task remains registered and a later Drop RPC can retry.
+//   - This compatibility wrapper logs the error for older direct callers.
 //
 // Idempotency:
 //   - Safe to call multiple times (operation is idempotent)
 //   - Subsequent calls will attempt to delete same files again
 func (t *CopySegmentTask) CleanupCopiedFiles() {
-	// Step 1: Copy the manager-owned task snapshot before performing I/O.
-	files := append([]string(nil), t.copiedFiles...)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.ctx), 30*time.Second)
+	defer cancel()
+	if err := t.cleanupCopiedFiles(ctx); err != nil {
+		mlog.Error(t.ctx, "failed to cleanup copied files", mlog.Int64("taskID", t.taskID), mlog.Err(err))
+	}
+}
+
+// currentCopiedFiles returns the freshest published set of target objects.
+//
+// Workers publish their output through TaskManager, which applies every update
+// to a fresh task snapshot. The receiver here is whichever snapshot the caller
+// happened to hold — for Abort, the one taken before the in-flight closures were
+// joined — so it can be missing files that were published in the meantime.
+// Deleting only that stale subset would leave the rest orphaned forever.
+func (t *CopySegmentTask) currentCopiedFiles() []string {
+	if t.manager != nil {
+		if latest, ok := t.manager.Get(t.taskID).(*CopySegmentTask); ok {
+			return append([]string(nil), latest.copiedFiles...)
+		}
+	}
+	return append([]string(nil), t.copiedFiles...)
+}
+
+func (t *CopySegmentTask) cleanupCopiedFiles(ctx context.Context) error {
+	// Step 1: Read the freshest published snapshot of the copied files.
+	files := t.currentCopiedFiles()
 
 	// Step 2: Early return if no files to cleanup
 	if len(files) == 0 {
 		mlog.Info(t.ctx, "no files to cleanup", mlog.Int64("taskID", t.taskID))
-		return
+		return nil
 	}
 
 	mlog.Info(t.ctx, "cleaning up copied files for failed task",
@@ -449,21 +597,53 @@ func (t *CopySegmentTask) CleanupCopiedFiles() {
 		mlog.Int64("jobID", t.jobID),
 		mlog.Int("fileCount", len(files)))
 
-	// Step 3: Delete all copied files with timeout
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.ctx), 30*time.Second)
-	defer cancel()
-
+	// Step 3: Delete all copied files.
 	if err := t.targetCM.MultiRemove(ctx, files); err != nil {
-		// Cleanup failure is logged but doesn't block task removal
 		mlog.Error(t.ctx, "failed to cleanup copied files",
 			mlog.Int64("taskID", t.taskID),
 			mlog.Int64("jobID", t.jobID),
 			mlog.Int("fileCount", len(files)),
 			mlog.Err(err))
+		return err
 	} else {
 		mlog.Info(t.ctx, "successfully cleaned up copied files",
 			mlog.Int64("taskID", t.taskID),
 			mlog.Int64("jobID", t.jobID),
 			mlog.Int("fileCount", len(files)))
 	}
+	return nil
+}
+
+// Abort prevents submission of new copy operations, cancels in-flight I/O,
+// joins every accepted copy closure, and only then removes all recorded output.
+// The task must remain in TaskManager when this returns an error so a later RPC
+// can retry cleanup with the same shared runtime state.
+func (t *CopySegmentTask) Abort(ctx context.Context) error {
+	t.runtime.mu.Lock()
+	t.runtime.aborted = true
+	t.cancel()
+	t.runtime.mu.Unlock()
+
+	// Joining every accepted closure before cleanup is the whole point of the
+	// shared runtime: removing output while a copy is still writing would leave
+	// the objects it writes afterwards behind forever. But the join must not
+	// outlive the caller's deadline — Abort runs synchronously inside the
+	// DropCopySegment RPC handler, and Execute's submit loop can be parked in the
+	// shared exec pool behind *other* tasks' work, which cancel() cannot release.
+	//
+	// On timeout, report the failure without touching storage. The task stays
+	// registered, so DataCoord's drop retry converges the cleanup later with the
+	// same runtime state, rather than this handler deleting files out from under
+	// copies that are still running.
+	joined := make(chan struct{})
+	go func() {
+		defer close(joined)
+		t.runtime.wg.Wait()
+	}()
+	select {
+	case <-joined:
+	case <-ctx.Done():
+		return merr.Wrap(ctx.Err(), "timed out joining in-flight copy segment closures before cleanup")
+	}
+	return t.cleanupCopiedFiles(ctx)
 }

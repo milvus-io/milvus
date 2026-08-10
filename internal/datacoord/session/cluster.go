@@ -94,8 +94,10 @@ type Cluster interface {
 	CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64) error
 	// QueryCopySegment queries the status of a copy segment task
 	QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error)
-	// DropCopySegment drops a copy segment task
-	DropCopySegment(nodeID int64, taskID int64) error
+	// DropCopySegment drops a copy segment task. taskVersion identifies the
+	// dispatch being dropped; the worker ignores the request once it no longer
+	// matches the dispatch it holds.
+	DropCopySegment(ctx context.Context, nodeID int64, taskID int64, taskVersion int64, abort bool) error
 }
 
 var _ Cluster = (*cluster)(nil)
@@ -156,8 +158,12 @@ func (c *cluster) queryTask(nodeID int64, properties taskcommon.Properties) (*wo
 }
 
 func (c *cluster) dropTask(nodeID int64, properties taskcommon.Properties) error {
+	return c.dropTaskWithContext(context.Background(), nodeID, properties)
+}
+
+func (c *cluster) dropTaskWithContext(parent context.Context, nodeID int64, properties taskcommon.Properties) error {
 	timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cli, err := c.nm.GetClient(nodeID)
 	if err != nil {
@@ -705,6 +711,7 @@ func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest,
 	properties.AppendType(taskcommon.CopySegment)
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendCollectionID(collectionID)
+	properties.AppendTaskVersion(in.GetTaskVersion())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -758,10 +765,12 @@ func (c *cluster) QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequ
 	}
 }
 
-func (c *cluster) DropCopySegment(nodeID int64, taskID int64) error {
+func (c *cluster) DropCopySegment(ctx context.Context, nodeID int64, taskID int64, taskVersion int64, abort bool) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(taskID)
 	properties.AppendType(taskcommon.CopySegment)
-	return c.dropTask(nodeID, properties)
+	properties.AppendTaskAbort(abort)
+	properties.AppendTaskVersion(taskVersion)
+	return c.dropTaskWithContext(ctx, nodeID, properties)
 }

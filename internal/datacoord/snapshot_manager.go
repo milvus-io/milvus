@@ -36,6 +36,8 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -48,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -1666,6 +1669,20 @@ func (sm *snapshotManager) createRestoreJob(
 			dmlPos.ChannelName = targetChannelName
 		}
 
+		targetManifestPath, err := deriveCopySegmentTargetManifestPath(
+			segDesc,
+			targetCollection,
+			targetPartitionID,
+			targetSegmentID,
+		)
+		if err != nil {
+			mlog.Error(context.TODO(), "failed to derive target manifest path",
+				mlog.Int64("sourceSegmentID", sourceSegmentID),
+				mlog.Int64("targetSegmentID", targetSegmentID),
+				mlog.Err(err))
+			return err
+		}
+
 		// Pre-register target segment in meta. NewSegmentInfo eagerly
 		// populates Stats so concurrent RLock readers don't race on a
 		// lazy init.
@@ -1683,6 +1700,7 @@ func (sm *snapshotManager) createRestoreJob(
 			StartPosition:       startPos,
 			DmlPosition:         dmlPos,
 			StorageVersion:      segDesc.GetStorageVersion(),
+			ManifestPath:        targetManifestPath,
 			IsSorted:            segDesc.GetIsSorted(),
 			CommitTimestamp:     segDesc.GetCommitTimestamp(),
 			IsImporting:         true,
@@ -1761,6 +1779,40 @@ func (sm *snapshotManager) createRestoreJob(
 		mlog.Int("totalSegments", len(idMappings)))
 
 	return nil
+}
+
+// deriveCopySegmentTargetManifestPath persists the V3 target base path before
+// the DataNode task starts. This lets dropped-segment GC remove partially
+// copied data even if the DataNode restarts before reporting its result.
+func deriveCopySegmentTargetManifestPath(
+	segment *datapb.SegmentDescription,
+	targetCollectionID, targetPartitionID, targetSegmentID int64,
+) (string, error) {
+	if segment.GetStorageVersion() < storage.StorageV3 {
+		return "", nil
+	}
+	if segment.GetManifestPath() == "" {
+		return "", merr.WrapErrServiceInternalMsg(
+			"storage_version=%d requires manifest_path for copy segment target derivation (segmentID=%d)",
+			segment.GetStorageVersion(), segment.GetSegmentId())
+	}
+
+	basePath, version, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
+	if err != nil {
+		return "", merr.WrapErrServiceInternalErr(err,
+			"failed to unmarshal manifest path for copy segment source %d", segment.GetSegmentId())
+	}
+	targetBasePath, err := metautil.ReplaceSegmentIDsInPath(
+		basePath,
+		targetCollectionID,
+		targetPartitionID,
+		targetSegmentID,
+	)
+	if err != nil {
+		return "", merr.WrapErrServiceInternalErr(err,
+			"failed to derive manifest base path for copy segment source %d", segment.GetSegmentId())
+	}
+	return packed.MarshalManifestPath(targetBasePath, version), nil
 }
 
 // ============================================================================
@@ -1914,7 +1966,8 @@ func (sm *snapshotManager) convertJobState(jobState datapb.CopySegmentJobState) 
 	switch jobState {
 	case datapb.CopySegmentJobState_CopySegmentJobPending:
 		return datapb.RestoreSnapshotState_RestoreSnapshotPending
-	case datapb.CopySegmentJobState_CopySegmentJobExecuting:
+	case datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		datapb.CopySegmentJobState_CopySegmentJobPublishing:
 		return datapb.RestoreSnapshotState_RestoreSnapshotExecuting
 	case datapb.CopySegmentJobState_CopySegmentJobCompleted:
 		return datapb.RestoreSnapshotState_RestoreSnapshotCompleted

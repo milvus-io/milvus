@@ -648,6 +648,15 @@ func (node *DataNode) CopySegment(ctx context.Context, req *datapb.CopySegmentRe
 	)
 	node.importTaskMgr.Add(task)
 
+	// Add keeps the first entry for a duplicate taskID, so a re-dispatch is
+	// served by the task already registered here. Bind whichever task is tracked
+	// to this dispatch's epoch: a drop still queued for an earlier dispatch must
+	// no longer match, or its abort would delete the output this dispatch is
+	// producing at the very same object keys.
+	if tracked, ok := node.importTaskMgr.Get(req.GetTaskID()).(*importv2.CopySegmentTask); ok {
+		tracked.AdoptDispatchVersion(req.GetTaskVersion())
+	}
+
 	mlog.Info(context.TODO(), "datanode added copy segment task")
 	return merr.Success(), nil
 }
@@ -701,24 +710,41 @@ func (node *DataNode) DropCopySegment(ctx context.Context, req *datapb.DropCopyS
 		return merr.Status(err), nil
 	}
 
-	// Check task state before removal
 	task := node.importTaskMgr.Get(req.GetTaskID())
-	if task != nil {
-		// If the task is a failed CopySegmentTask, cleanup copied files
-		if copyTask, ok := task.(*importv2.CopySegmentTask); ok {
-			taskState := copyTask.GetState()
-			if taskState == datapb.ImportTaskStateV2_Failed {
-				mlog.Info(context.TODO(), "task failed, triggering cleanup of copied files",
-					mlog.String("state", taskState.String()),
-					mlog.String("reason", copyTask.GetReason()))
-
-				// Call task's cleanup method
-				copyTask.CleanupCopiedFiles()
-			}
-		}
+	if task == nil {
+		return merr.Success(), nil
+	}
+	copyTask, ok := task.(*importv2.CopySegmentTask)
+	if !ok {
+		return merr.Status(merr.WrapErrServiceInternalMsg("task %d is not a copy segment task", req.GetTaskID())), nil
 	}
 
-	// Remove task from manager
+	// A drop issued for a dispatch this task no longer serves must not touch it.
+	// Every dispatch of a task writes the same deterministic target object keys,
+	// so aborting on behalf of a superseded dispatch would delete output the
+	// current one produced — possibly already published and referenced by live
+	// segment metadata. Report success: the stale cleanup has nothing left to do,
+	// and DataCoord retries the request until it is acknowledged.
+	if !copyTask.AcceptsDrop(req.GetTaskVersion()) {
+		mlog.Info(ctx, "ignore stale copy segment drop from a superseded dispatch",
+			mlog.Int64("taskID", req.GetTaskID()), mlog.Int64("taskVersion", req.GetTaskVersion()))
+		return merr.Success(), nil
+	}
+
+	// Failed-state inference preserves compatibility with coordinators that do
+	// not yet send the explicit abort bit during a rolling upgrade.
+	abort := req.GetAbort() || copyTask.GetState() == datapb.ImportTaskStateV2_Failed
+	if abort {
+		if err := copyTask.Abort(ctx); err != nil {
+			return merr.Status(merr.WrapErrServiceInternalMsg("abort copy segment task %d: %v", req.GetTaskID(), err)), nil
+		}
+	} else if copyTask.GetState() != datapb.ImportTaskStateV2_Completed {
+		return merr.Status(merr.WrapErrServiceInternalMsg(
+			"cannot release copy segment task %d in state %s", req.GetTaskID(), copyTask.GetState().String())), nil
+	}
+
+	// Remove only after abort cleanup succeeded, or after a terminal successful
+	// release that deliberately preserves copied output.
 	node.importTaskMgr.Remove(req.GetTaskID())
 
 	mlog.Info(context.TODO(), "datanode drop copy segment done")
@@ -1060,7 +1086,11 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 	case taskcommon.PreImport, taskcommon.Import:
 		return node.DropImport(ctx, &datapb.DropImportRequest{TaskID: taskID})
 	case taskcommon.CopySegment:
-		return node.DropCopySegment(ctx, &datapb.DropCopySegmentRequest{TaskID: taskID})
+		return node.DropCopySegment(ctx, &datapb.DropCopySegmentRequest{
+			TaskID:      taskID,
+			Abort:       properties.GetTaskAbort(),
+			TaskVersion: properties.GetTaskVersion(),
+		})
 	case taskcommon.Compaction:
 		return node.DropCompactionPlan(ctx, &datapb.DropCompactionPlanRequest{PlanID: taskID})
 	case taskcommon.Index, taskcommon.Stats, taskcommon.Analyze:

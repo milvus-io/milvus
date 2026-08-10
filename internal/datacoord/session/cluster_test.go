@@ -1224,7 +1224,7 @@ func TestCluster_CopySegment(t *testing.T) {
 		mockClient.EXPECT().DropTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		// Test
-		err := cluster.DropCopySegment(1, 123)
+		err := cluster.DropCopySegment(context.Background(), 1, 123, 5, true)
 		assert.NoError(t, err)
 	})
 
@@ -1236,7 +1236,7 @@ func TestCluster_CopySegment(t *testing.T) {
 		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(nil, errors.New("failed to get client"))
 
 		// Test
-		err := cluster.DropCopySegment(1, 123)
+		err := cluster.DropCopySegment(context.Background(), 1, 123, 5, true)
 		assert.Error(t, err)
 	})
 }
