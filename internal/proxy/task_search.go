@@ -1067,6 +1067,9 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	annsField := typeutil.GetField(t.schema.CollectionSchema, t.FieldId)
 	if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
 		isEmbList := isEmbeddingListPlaceholderType(placeholderType)
+		if err := validateSearchAggregationTopHitsElementOffsets(t.aggCtx, annsField, placeholderType); err != nil {
+			return err
+		}
 
 		if isEmbList {
 			if gjson.Get(queryInfo.GetSearchParams(), radiusKey).Exists() {
@@ -1325,6 +1328,24 @@ func isEmbeddingListPlaceholderType(pt commonpb.PlaceholderType) bool {
 	default:
 		return false
 	}
+}
+
+func validateSearchAggregationTopHitsElementOffsets(
+	aggCtx *search_agg.SearchAggregationContext,
+	annsField *schemapb.FieldSchema,
+	placeholderType commonpb.PlaceholderType,
+) error {
+	if aggCtx == nil || annsField == nil || annsField.GetDataType() != schemapb.DataType_ArrayOfVector || isEmbeddingListPlaceholderType(placeholderType) {
+		return nil
+	}
+	for _, level := range aggCtx.Levels {
+		if level.TopHits != nil {
+			return merr.WrapErrParameterInvalidMsg(
+				"search_aggregation top_hits is not supported for element-level search on ArrayOfVector fields because element offsets cannot be represented",
+			)
+		}
+	}
+	return nil
 }
 
 func validateElementFilterVectorSearch(plan *planpb.PlanNode, schema *schemapb.CollectionSchema, fieldID int64, placeholderType commonpb.PlaceholderType) error {

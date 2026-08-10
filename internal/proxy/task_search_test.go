@@ -6563,6 +6563,72 @@ func TestIsEmbeddingListPlaceholderType(t *testing.T) {
 	}
 }
 
+func TestValidateSearchAggregationTopHitsElementOffsets(t *testing.T) {
+	arrayOfVectorField := &schemapb.FieldSchema{DataType: schemapb.DataType_ArrayOfVector}
+	regularVectorField := &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}
+	withTopHits := &search_agg.SearchAggregationContext{
+		Levels: []search_agg.LevelContext{{}, {TopHits: &search_agg.TopHitsConfig{Size: 1}}},
+	}
+	withoutTopHits := &search_agg.SearchAggregationContext{
+		Levels: []search_agg.LevelContext{{}},
+	}
+
+	testCases := []struct {
+		name            string
+		aggCtx          *search_agg.SearchAggregationContext
+		annsField       *schemapb.FieldSchema
+		placeholderType commonpb.PlaceholderType
+		wantErr         bool
+	}{
+		{
+			name:            "element-level top hits",
+			aggCtx:          withTopHits,
+			annsField:       arrayOfVectorField,
+			placeholderType: commonpb.PlaceholderType_FloatVector,
+			wantErr:         true,
+		},
+		{
+			name:            "element-level aggregation without top hits",
+			aggCtx:          withoutTopHits,
+			annsField:       arrayOfVectorField,
+			placeholderType: commonpb.PlaceholderType_FloatVector,
+		},
+		{
+			name:            "embedding-list top hits",
+			aggCtx:          withTopHits,
+			annsField:       arrayOfVectorField,
+			placeholderType: commonpb.PlaceholderType_EmbListFloatVector,
+		},
+		{
+			name:            "regular vector top hits",
+			aggCtx:          withTopHits,
+			annsField:       regularVectorField,
+			placeholderType: commonpb.PlaceholderType_FloatVector,
+		},
+		{
+			name:            "no aggregation",
+			annsField:       arrayOfVectorField,
+			placeholderType: commonpb.PlaceholderType_FloatVector,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := validateSearchAggregationTopHitsElementOffsets(
+				testCase.aggCtx,
+				testCase.annsField,
+				testCase.placeholderType,
+			)
+			if testCase.wantErr {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.ErrorContains(t, err, "element offsets cannot be represented")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestSearchTask_ArrayOfVectorGroupBy(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
@@ -6681,6 +6747,25 @@ func TestSearchTask_ArrayOfVectorGroupBy(t *testing.T) {
 		task := makeTask("emb_vec", "", commonpb.PlaceholderType_FloatVector)
 		err := task.initSearchRequest(ctx)
 		assert.NoError(t, err)
+	})
+
+	t.Run("element-level search aggregation top hits should fail", func(t *testing.T) {
+		task := makeTask("emb_vec", "", commonpb.PlaceholderType_FloatVector)
+		aggCtx, err := search_agg.NewContext(1, []search_agg.LevelContext{
+			{
+				OwnFieldIDs: []int64{100},
+				Size:        1,
+				SearchSize:  1,
+				TopHits:     &search_agg.TopHitsConfig{Size: 1},
+			},
+		}, nil, nil)
+		require.NoError(t, err)
+		task.aggCtx = aggCtx
+		task.GroupByFieldIds = []int64{100}
+
+		err = task.initSearchRequest(ctx)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "element offsets cannot be represented")
 	})
 
 	t.Run("regular vector with group by non-PK should succeed", func(t *testing.T) {
