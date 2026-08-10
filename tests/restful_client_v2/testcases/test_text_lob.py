@@ -36,9 +36,10 @@ EXPLICIT_DEFAULT_TEXT = "explicit default text lob marker atlas"
 TEXT_FIELDS = [CONTENT_FIELD, CONTENT_ZH_FIELD, CONTENT_ALT_FIELD, CONTENT_DEFAULT_FIELD]
 
 INDEXED_SEALED_ROWS = 3000
-UNINDEXED_SEALED_ROWS = 500
+UNINDEXED_SEALED_ROWS = 1000
 GROWING_ROWS = 500
 TOTAL_ROWS = INDEXED_SEALED_ROWS + UNINDEXED_SEALED_ROWS + GROWING_ROWS
+TEXT_LOB_SETUP_TIMEOUT = 300
 INDEXED_SEALED_RANGE = range(0, INDEXED_SEALED_ROWS)
 UNINDEXED_SEALED_RANGE = range(INDEXED_SEALED_ROWS, INDEXED_SEALED_ROWS + UNINDEXED_SEALED_ROWS)
 GROWING_RANGE = range(INDEXED_SEALED_ROWS + UNINDEXED_SEALED_ROWS, TOTAL_ROWS)
@@ -204,11 +205,11 @@ def expected_payloads(rows):
     }
 
 
-def text_field(field_name, analyzer_params):
+def text_field(field_name, analyzer_params, nullable=True):
     return {
         "fieldName": field_name,
         "dataType": "Text",
-        "nullable": True,
+        "nullable": nullable,
         "elementTypeParams": {
             "enable_analyzer": True,
             "enable_match": True,
@@ -323,7 +324,7 @@ def build_text_index_payload(collection_name):
 
 
 def wait_for_sealed_layout(collection_name, connection_alias, timeout=120):
-    """Wait until public segment metadata exposes the 3,000 + 500 sealed layout."""
+    """Wait until public segment metadata exposes the 3,000 + 1,000 sealed layout."""
     deadline = time.monotonic() + timeout
     last_infos = []
     while time.monotonic() < deadline:
@@ -351,6 +352,13 @@ def flush_collection(collection_client, collection_name, timeout=30):
         time.sleep(1)
 
 
+def remaining_setup_timeout(deadline, phase, cap):
+    """Return a phase timeout bounded by the shared fixture setup deadline."""
+    remaining = int(deadline - time.monotonic())
+    assert remaining > 0, f"TEXT LOB fixture setup budget exhausted before {phase}"
+    return min(cap, remaining)
+
+
 def assert_rows_payload(rows_by_id, expected, fields):
     assert set(rows_by_id) == set(expected), f"row ids mismatch: actual={set(rows_by_id)}, expected={set(expected)}"
     for pk, row in rows_by_id.items():
@@ -370,6 +378,7 @@ class TestTextLOB(TestBase):
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_text_lob_collection(self, request, init_class_config):
+        setup_deadline = time.monotonic() + TEXT_LOB_SETUP_TIMEOUT
         collection_client, vector_client = self._class_scope_clients()
         index_client = IndexClient(self.endpoint, self.api_key)
         connection_alias = self.collection_name
@@ -392,22 +401,30 @@ class TestTextLOB(TestBase):
         rsp = vector_client.vector_insert({"collectionName": self.collection_name, "data": indexed_rows})
         assert rsp["code"] == 0, rsp
         assert rsp["data"]["insertCount"] == INDEXED_SEALED_ROWS
-        flush_collection(collection_client, self.collection_name)
+        flush_collection(
+            collection_client,
+            self.collection_name,
+            timeout=remaining_setup_timeout(setup_deadline, "indexed sealed flush", 30),
+        )
 
         unindexed_rows = self.shared_rows[INDEXED_SEALED_ROWS : INDEXED_SEALED_ROWS + UNINDEXED_SEALED_ROWS]
         rsp = vector_client.vector_insert({"collectionName": self.collection_name, "data": unindexed_rows})
         assert rsp["code"] == 0, rsp
         assert rsp["data"]["insertCount"] == UNINDEXED_SEALED_ROWS
-        flush_collection(collection_client, self.collection_name)
+        flush_collection(
+            collection_client,
+            self.collection_name,
+            timeout=remaining_setup_timeout(setup_deadline, "unindexed sealed flush", 30),
+        )
 
         rsp = index_client.index_create(build_dense_index_payload(self.collection_name))
         assert rsp["code"] == 0, rsp
         assert utility.wait_for_index_building_complete(
             self.collection_name,
             index_name=VECTOR_FIELD,
-            timeout=300,
+            timeout=remaining_setup_timeout(setup_deadline, "dense index build", 300),
             using=connection_alias,
-        )
+        ), "dense index did not complete within the shared fixture setup budget"
 
         rsp = index_client.index_create(build_text_index_payload(self.collection_name))
         assert rsp["code"] == 0, rsp
@@ -420,14 +437,21 @@ class TestTextLOB(TestBase):
             assert utility.wait_for_index_building_complete(
                 self.collection_name,
                 index_name=index_name,
-                timeout=300,
+                timeout=remaining_setup_timeout(setup_deadline, f"{index_name} index build", 300),
                 using=connection_alias,
-            )
+            ), f"{index_name} index did not complete within the shared fixture setup budget"
 
         rsp = collection_client.collection_load(collection_name=self.collection_name)
         assert rsp["code"] == 0, rsp
-        collection_client.wait_load_completed(self.collection_name, timeout=120)
-        sealed_infos = wait_for_sealed_layout(self.collection_name, connection_alias)
+        collection_client.wait_load_completed(
+            self.collection_name,
+            timeout=remaining_setup_timeout(setup_deadline, "collection load", 120),
+        )
+        sealed_infos = wait_for_sealed_layout(
+            self.collection_name,
+            connection_alias,
+            timeout=remaining_setup_timeout(setup_deadline, "sealed segment layout", 120),
+        )
         self.__class__.shared_sealed_segment_ids = [info.segmentID for info in sealed_infos]
 
         growing_rows = self.shared_rows[INDEXED_SEALED_ROWS + UNINDEXED_SEALED_ROWS :]
@@ -473,7 +497,7 @@ class TestTextLOB(TestBase):
     def test_text_lob_shared_schema_and_payloads(self):
         """
         target: verify TEXT LOB schema, BM25 indexes, and exact payload retrieval
-        method: describe the shared collection and query 4,000 rows across indexed sealed,
+        method: describe the shared collection and query 4,500 rows across indexed sealed,
             unindexed sealed, and growing paths
         expected: every path participates and every TEXT payload checksum matches inserted data
         """
@@ -532,14 +556,101 @@ class TestTextLOB(TestBase):
                 "limit": 3,
                 "searchParams": {"metricType": "COSINE", "params": {"ef": 64}},
                 "outputFields": [ID_FIELD, CONTENT_FIELD, CONTENT_ALT_FIELD],
+                "orderByFields": [f"{ID_FIELD}:asc"],
             },
             timeout=30,
         )
         assert rsp["code"] == 0, rsp
         assert len(rsp["data"]) == len(LOB_MARKER_IDS)
         ids = [int(hit[ID_FIELD]) for hit in rsp["data"]]
-        assert set(ids) == set(LOB_MARKER_IDS.values())
+        assert ids == sorted(LOB_MARKER_IDS.values())
         for hit in rsp["data"]:
             pk = int(hit[ID_FIELD])
             assert_text_payload(hit.get(CONTENT_FIELD), self.shared_expected[pk][CONTENT_FIELD])
             assert_text_payload(hit.get(CONTENT_ALT_FIELD), self.shared_expected[pk][CONTENT_ALT_FIELD])
+
+
+class TestTextMutation(TestBase):
+    def create_collection(self, nullable):
+        self.name = gen_collection_name(prefix="rest_text_mutation")
+        rsp = self.collection_client.collection_create(
+            {
+                "collectionName": self.name,
+                "schema": {
+                    "autoId": False,
+                    "enableDynamicField": False,
+                    "fields": [
+                        {"fieldName": ID_FIELD, "dataType": "Int64", "isPrimary": True},
+                        {
+                            "fieldName": VECTOR_FIELD,
+                            "dataType": "FloatVector",
+                            "elementTypeParams": {"dim": str(DIM)},
+                        },
+                        text_field(CONTENT_FIELD, STANDARD_ANALYZER, nullable=nullable),
+                    ],
+                },
+                "indexParams": [
+                    {
+                        "fieldName": VECTOR_FIELD,
+                        "indexName": VECTOR_FIELD,
+                        "metricType": "COSINE",
+                    }
+                ],
+            }
+        )
+        assert rsp["code"] == 0, rsp
+        self.collection_client.wait_load_completed(self.name, timeout=120)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_text_partial_upsert_omitted_nullable_field(self):
+        """
+        target: verify partial upsert inserts a new row without a nullable TEXT value
+        method: partially upsert an unknown primary key while omitting its nullable TEXT field
+        expected: the row is inserted and querying the TEXT field returns null
+        """
+        self.create_collection(nullable=True)
+        rsp = self.vector_client.vector_upsert(
+            {
+                "collectionName": self.name,
+                "partialUpdate": True,
+                "data": [{ID_FIELD: 100, VECTOR_FIELD: vector_for_pk(100)}],
+            }
+        )
+        assert rsp["code"] == 0, rsp
+        assert rsp["data"]["upsertCount"] == 1
+
+        rsp = self.vector_client.vector_query(
+            {
+                "collectionName": self.name,
+                "filter": f"{ID_FIELD} == 100",
+                "outputFields": [ID_FIELD, CONTENT_FIELD],
+            },
+            timeout=30,
+        )
+        assert rsp["code"] == 0, rsp
+        assert len(rsp["data"]) == 1
+        assert int(rsp["data"][0][ID_FIELD]) == 100
+        assert rsp["data"][0].get(CONTENT_FIELD) is None
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize(
+        ("row", "expected_message"),
+        [
+            ({ID_FIELD: 1, VECTOR_FIELD: vector_for_pk(1)}, f"field {CONTENT_FIELD} is required"),
+            (
+                {ID_FIELD: 2, VECTOR_FIELD: vector_for_pk(2), CONTENT_FIELD: None},
+                f"field {CONTENT_FIELD} is not nullable",
+            ),
+        ],
+        ids=["missing", "null"],
+    )
+    def test_text_non_nullable_insert_rejected(self, row, expected_message):
+        """
+        target: verify REST insert rejects absent and null non-nullable TEXT values
+        method: insert one row that omits TEXT or explicitly sends null
+        expected: both requests return the invalid-insert code and a field-specific message
+        """
+        self.create_collection(nullable=False)
+        rsp = self.vector_client.vector_insert({"collectionName": self.name, "data": [row]})
+        assert rsp["code"] == 1804, rsp
+        assert expected_message in rsp["message"]
