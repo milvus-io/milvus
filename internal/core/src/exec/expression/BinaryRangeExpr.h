@@ -42,9 +42,10 @@
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
-#include "segcore/json_stats/bson_inverted.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "pb/plan.pb.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/json_stats/bson_inverted.h"
 #include "simdjson/error.h"
 
 namespace milvus {

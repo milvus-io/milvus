@@ -37,6 +37,7 @@
 #include "common/bson_view.h"
 #include "segcore/json_stats/bson_inverted.h"
 #include "cachinglayer/CacheSlot.h"
+#include "mmap/ChunkedColumnInterface.h"
 
 namespace milvus {
 namespace exec {
