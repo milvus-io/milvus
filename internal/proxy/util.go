@@ -2340,23 +2340,43 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 	return nil
 }
 
-// The trusted insert encoder does not revalidate protobuf strings. Validate
-// VarChar, legacy String, and analyzer-enabled Text before the request enters
-// the message queue.
-func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) error {
-	checkeFields := lo.FilterMap(allFields, func(field *schemapb.FieldSchema, _ int) (int64, bool) {
-		if field.DataType == schemapb.DataType_VarChar || field.DataType == schemapb.DataType_String {
-			return field.GetFieldID(), true
+// carriesProto3Strings reports whether a field can hand proto3 strings to the
+// insert encoder: VarChar and legacy String columns, analyzer-enabled Text, and
+// Array cells with a string element type. The last one is how a struct array's
+// string sub-field arrives here, since checkAndFlattenStructFieldData has
+// already turned every sub-field into a top-level Array FieldData.
+func carriesProto3Strings(field *schemapb.FieldSchema) bool {
+	switch field.GetDataType() {
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		return true
+	case schemapb.DataType_Array:
+		switch field.GetElementType() {
+		case schemapb.DataType_VarChar, schemapb.DataType_String:
+			return true
 		}
-
-		if field.DataType != schemapb.DataType_Text {
-			return 0, false
-		}
-
+	case schemapb.DataType_Text:
 		for _, kv := range field.GetTypeParams() {
 			if kv.Key == common.EnableAnalyzerKey {
-				return field.GetFieldID(), true
+				return true
 			}
+		}
+	}
+	return false
+}
+
+// The trusted insert encoder does not revalidate protobuf strings, so invalid
+// UTF-8 that proto.Marshal used to reject would now reach the WAL and only fail
+// on the consumer side, where a message that cannot be unmarshaled is dropped
+// with a warning while its checkpoint still advances. Reject it here, at the
+// single ingress both Insert and Upsert share.
+//
+// gRPC input is already validated by the request decoder; the reachable source
+// is REST, which parses string cells out of the raw body with gjson and keeps
+// whatever bytes the caller sent.
+func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) error {
+	checkeFields := lo.FilterMap(allFields, func(field *schemapb.FieldSchema, _ int) (int64, bool) {
+		if carriesProto3Strings(field) {
+			return field.GetFieldID(), true
 		}
 		return 0, false
 	})
@@ -2365,17 +2385,40 @@ func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msg
 		return nil
 	}
 
+	// The offending bytes are never echoed back: they are invalid text by
+	// definition, and the field name plus position is what locates the row.
+	invalid := func(fieldData *schemapb.FieldData, row int, element int) error {
+		mlog.Warn(context.TODO(), "string field data not utf-8 format",
+			mlog.String("fieldName", fieldData.GetFieldName()),
+			mlog.Int64("fieldID", fieldData.GetFieldId()),
+			mlog.Int("row", row),
+			mlog.Int("element", element))
+		if element < 0 {
+			return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+				"string input should be utf-8 format, but field %s row %d is not utf-8",
+				fieldData.GetFieldName(), row))
+		}
+		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(
+			"string input should be utf-8 format, but field %s row %d element %d is not utf-8",
+			fieldData.GetFieldName(), row, element))
+	}
+
 	for _, fieldData := range insertMsg.FieldsData {
 		if !lo.Contains(checkeFields, fieldData.GetFieldId()) {
 			continue
 		}
 
-		strData := fieldData.GetScalars().GetStringData()
-		for row, data := range strData.GetData() {
-			ok := utf8.ValidString(data)
-			if !ok {
-				mlog.Warn(context.TODO(), "string field data not utf-8 format", mlog.String("messageVersion", strData.ProtoReflect().Descriptor().Syntax().GoString()))
-				return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("string input should be utf-8 format, but row: %d is not utf-8. data: %s", row, data))
+		scalars := fieldData.GetScalars()
+		for row, data := range scalars.GetStringData().GetData() {
+			if !utf8.ValidString(data) {
+				return invalid(fieldData, row, -1)
+			}
+		}
+		for row, cell := range scalars.GetArrayData().GetData() {
+			for element, data := range cell.GetStringData().GetData() {
+				if !utf8.ValidString(data) {
+					return invalid(fieldData, row, element)
+				}
 			}
 		}
 	}

@@ -3963,6 +3963,60 @@ func TestCheckVarcharFormat(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
+
+	// A struct array's string sub-field reaches this check flattened into a
+	// top-level Array FieldData, which is the shape the REST handler builds and
+	// the one the encoder writes without rescanning UTF-8.
+	newArrayMessage := func(elementType schemapb.DataType, rows ...[]string) *msgstream.InsertMsg {
+		cells := make([]*schemapb.ScalarField, 0, len(rows))
+		for _, row := range rows {
+			cells = append(cells, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: row}},
+			})
+		}
+		return &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				FieldsData: []*schemapb.FieldData{{
+					FieldId:   100,
+					FieldName: "tokens",
+					Type:      schemapb.DataType_Array,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+							ElementType: elementType,
+							Data:        cells,
+						}},
+					}},
+				}},
+			},
+		}
+	}
+	for _, elementType := range []schemapb.DataType{schemapb.DataType_VarChar, schemapb.DataType_String} {
+		t.Run("array of "+elementType.String(), func(t *testing.T) {
+			fields := []*schemapb.FieldSchema{{
+				FieldID: 100, Name: "tokens",
+				DataType: schemapb.DataType_Array, ElementType: elementType,
+			}}
+			require.NoError(t, checkInputUtf8Compatiable(fields, newArrayMessage(elementType,
+				[]string{"合法字符串", "ok"}, []string{"still ok"})))
+
+			err := checkInputUtf8Compatiable(fields, newArrayMessage(elementType,
+				[]string{"ok"}, []string{"ok", invalidUTF8}))
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			// The position is reported, the bytes are not.
+			assert.Contains(t, err.Error(), "row 1 element 1")
+			assert.NotContains(t, err.Error(), invalidUTF8)
+		})
+	}
+
+	t.Run("array of int is not scanned", func(t *testing.T) {
+		fields := []*schemapb.FieldSchema{{
+			FieldID: 100, Name: "tokens",
+			DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		}}
+		require.NoError(t, checkInputUtf8Compatiable(fields, newArrayMessage(schemapb.DataType_Int64,
+			[]string{invalidUTF8})))
+	})
 }
 
 func BenchmarkCheckVarcharFormat(b *testing.B) {

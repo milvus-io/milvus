@@ -153,6 +153,78 @@ func TestInsertRequestViewCursor_AggregatesSparseVectorExactly(t *testing.T) {
 	assertCursorExactSplits(t, insertViewTemplate(), source, rows, limit)
 }
 
+// boundedVariableSimplePrefix sizes one 64-row block at a time and replays only
+// the block that crosses the limit, so the seam between two blocks is where a
+// checkpoint/rollback mistake would show up: a prefix that ends exactly on the
+// block edge, the first row of the following block, and a split that happens
+// several blocks in. A budget equal to the size of prefix+1 rows must roll that
+// row over (the limit is exclusive); one more byte of budget must take it.
+func assertBoundedPrefixBlockSeams(t *testing.T, source *msgpb.InsertRequest, rows []int, prefixes []int) {
+	t.Helper()
+	template := insertViewTemplate()
+	sizeAt := func(prefix int) int {
+		return proto.Size(materializeWithAppendFieldData(template, source, rows[:prefix]))
+	}
+	consumedWithLimit := func(limit int) int {
+		cursor, err := NewInsertRequestViewCursor(source)
+		require.NoError(t, err)
+		_, consumed, err := cursor.NextEncoder(template, rows, limit)
+		require.NoError(t, err)
+		return consumed
+	}
+	for _, prefix := range prefixes {
+		require.Less(t, prefix+1, len(rows))
+		t.Run("prefix"+strconv.Itoa(prefix), func(t *testing.T) {
+			limit := sizeAt(prefix + 1)
+			assert.Equal(t, prefix, consumedWithLimit(limit), "equal-size prefix must roll over")
+			assertCursorExactSplits(t, template, source, rows, limit)
+
+			assert.Equal(t, prefix+1, consumedWithLimit(limit+1), "one more byte must take one more row")
+			assertCursorExactSplits(t, template, source, rows, limit+1)
+		})
+	}
+}
+
+func TestInsertRequestViewCursor_RepeatedScalarPrefixBlockSeams(t *testing.T) {
+	const rowCount = 200
+	rows, rowIDs, timestamps := benchmarkInsertRows(rowCount)
+	stringsData := make([]string, rowCount)
+	jsonData := make([][]byte, rowCount)
+	for row := 0; row < rowCount; row++ {
+		stringsData[row] = strings.Repeat("s", row%131)
+		jsonData[row] = []byte(`{"row":` + strconv.Itoa(row) + `,"payload":"` + strings.Repeat("j", row%257) + `"}`)
+	}
+	source := &msgpb.InsertRequest{
+		NumRows: rowCount, RowIDs: rowIDs, Timestamps: timestamps,
+		FieldsData: []*schemapb.FieldData{
+			scalarField(1, schemapb.DataType_VarChar,
+				&schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: stringsData}}),
+			scalarField(2, schemapb.DataType_JSON,
+				&schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: jsonData}}),
+		},
+	}
+	assertBoundedPrefixBlockSeams(t, source, rows, []int{1, 62, 63, 64, 65, 66, 127, 128, 129, 130})
+}
+
+func TestInsertRequestViewCursor_SparsePrefixBlockSeams(t *testing.T) {
+	const rowCount = 200
+	rows, rowIDs, timestamps := benchmarkInsertRows(rowCount)
+	contents := make([][]byte, rowCount)
+	for row := range contents {
+		// The sparse index grows with the row, so the selection's max dimension
+		// keeps moving and has to be rolled back with the rest of the block.
+		contents[row] = sparseTestRow(uint32(row + 1))
+	}
+	source := &msgpb.InsertRequest{
+		NumRows: rowCount, RowIDs: rowIDs, Timestamps: timestamps,
+		FieldsData: []*schemapb.FieldData{vectorField(1, schemapb.DataType_SparseFloatVector, int64(rowCount+1),
+			&schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
+				Dim: int64(rowCount + 1), Contents: contents,
+			}}, nil)},
+	}
+	assertBoundedPrefixBlockSeams(t, source, rows, []int{1, 63, 64, 65, 126, 127, 128, 129})
+}
+
 func TestInsertRequestViewCursor_AggregatesRepeatedScalarsExactly(t *testing.T) {
 	const rowCount = 64
 	rows, rowIDs, timestamps := benchmarkInsertRows(rowCount)
