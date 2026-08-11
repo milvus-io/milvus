@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"math"
 	"math/rand"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -147,6 +148,32 @@ func TestInsertRequestViewCursor_AggregatesSparseVectorExactly(t *testing.T) {
 		NumRows: rowCount, RowIDs: rowIDs, Timestamps: timestamps,
 		FieldsData: []*schemapb.FieldData{vectorField(1, schemapb.DataType_SparseFloatVector, 1024,
 			&schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Dim: 1024, Contents: contents}}, nil)},
+	}
+	limit := proto.Size(materializeWithAppendFieldData(insertViewTemplate(), source, rows[:17]))
+	assertCursorExactSplits(t, insertViewTemplate(), source, rows, limit)
+}
+
+func TestInsertRequestViewCursor_AggregatesRepeatedScalarsExactly(t *testing.T) {
+	const rowCount = 64
+	rows, rowIDs, timestamps := benchmarkInsertRows(rowCount)
+	stringsData := make([]string, rowCount)
+	jsonData := make([][]byte, rowCount)
+	valid := make([]bool, rowCount)
+	for row := 0; row < rowCount; row++ {
+		stringsData[row] = strings.Repeat("s", row%131)
+		jsonData[row] = []byte(`{"row":` + strconv.Itoa(row) + `,"payload":"` + strings.Repeat("j", row%257) + `"}`)
+		valid[row] = row%3 != 0
+	}
+	jsonField := scalarField(2, schemapb.DataType_JSON,
+		&schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: jsonData}})
+	jsonField.ValidData = valid
+	source := &msgpb.InsertRequest{
+		NumRows: rowCount, RowIDs: rowIDs, Timestamps: timestamps,
+		FieldsData: []*schemapb.FieldData{
+			scalarField(1, schemapb.DataType_VarChar,
+				&schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: stringsData}}),
+			jsonField,
+		},
 	}
 	limit := proto.Size(materializeWithAppendFieldData(insertViewTemplate(), source, rows[:17]))
 	assertCursorExactSplits(t, insertViewTemplate(), source, rows, limit)
@@ -663,6 +690,10 @@ func TestInsertRequestViewEncoder_InternalContractErrors(t *testing.T) {
 		{name: "short scalar", template: insertViewTemplate(), source: &msgpb.InsertRequest{
 			NumRows: 2, RowIDs: []int64{1, 2}, Timestamps: []uint64{1, 2},
 			FieldsData: []*schemapb.FieldData{scalarField(1, schemapb.DataType_Int64, &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}})},
+		}, rows: []int{1}},
+		{name: "short repeated scalar", template: insertViewTemplate(), source: &msgpb.InsertRequest{
+			NumRows: 2, RowIDs: []int64{1, 2}, Timestamps: []uint64{1, 2},
+			FieldsData: []*schemapb.FieldData{scalarField(1, schemapb.DataType_JSON, &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(`{}`)}}})},
 		}, rows: []int{1}},
 		{name: "short compact vector", template: insertViewTemplate(), source: &msgpb.InsertRequest{
 			NumRows: 2, RowIDs: []int64{1, 2}, Timestamps: []uint64{1, 2},

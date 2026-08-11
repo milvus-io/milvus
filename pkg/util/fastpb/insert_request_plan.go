@@ -243,7 +243,8 @@ func (s *insertRequestSizeState) aggregateSimpleRows(rows []int, previous, sizeL
 			continue
 		}
 		if field.class == insertFieldPlanScalar &&
-			(field.valuePlan == insertFieldValueScalarEmpty || field.valuePlan == insertFieldValueScalarPacked) {
+			(field.valuePlan == insertFieldValueScalarEmpty || field.valuePlan == insertFieldValueScalarPacked ||
+				field.valuePlan == insertFieldValueScalarRepeated) {
 			continue
 		}
 		if field.class == insertFieldPlanVector && !field.compactVector &&
@@ -406,6 +407,13 @@ func (s *insertRequestSizeState) simpleRowsUpperBound(rowCount int) (int, error)
 func (s *insertRequestSizeState) prepareSimpleUpperBounds(rows []int) error {
 	for i := range s.fields {
 		field := &s.fields[i]
+		if field.valuePlan == insertFieldValueScalarRepeated {
+			maxWireSize, err := field.repeatedScalarMaxWireSize(rows)
+			if err != nil {
+				return err
+			}
+			field.payloadStride = maxWireSize
+		}
 		if field.valuePlan != insertFieldValueVectorSparse {
 			continue
 		}
@@ -893,8 +901,14 @@ func (s *insertFieldSizeState) simplePayloadUpperBound(rowCount int) (int, int, 
 	case insertFieldPlanNone:
 		return 0, 0, 0, nil
 	case insertFieldPlanScalar:
-		payloadSize, err := s.packedScalarPayloadUpperBound(rowCount)
-		return payloadSize, 0, 0, err
+		switch s.valuePlan {
+		case insertFieldValueScalarEmpty, insertFieldValueScalarPacked:
+			payloadSize, err := s.packedScalarPayloadUpperBound(rowCount)
+			return payloadSize, 0, 0, err
+		case insertFieldValueScalarRepeated:
+			payloadSize, err := checkedProduct(rowCount, s.payloadStride, "repeated scalar payload upper bound")
+			return payloadSize, 0, 0, err
+		}
 	case insertFieldPlanVector:
 		switch s.valuePlan {
 		case insertFieldValueVectorEmpty:
@@ -915,8 +929,14 @@ func (s *insertFieldSizeState) aggregateSimplePayload(rows []int) (int, int, int
 	case insertFieldPlanNone:
 		return 0, 0, 0, nil
 	case insertFieldPlanScalar:
-		payloadSize, err := s.aggregatePackedScalarPayload(rows)
-		return payloadSize, 0, 0, err
+		switch s.valuePlan {
+		case insertFieldValueScalarEmpty, insertFieldValueScalarPacked:
+			payloadSize, err := s.aggregatePackedScalarPayload(rows)
+			return payloadSize, 0, 0, err
+		case insertFieldValueScalarRepeated:
+			payloadSize, err := s.aggregateRepeatedScalarPayload(rows)
+			return payloadSize, 0, 0, err
+		}
 	case insertFieldPlanVector:
 		switch s.valuePlan {
 		case insertFieldValueVectorEmpty:
@@ -982,6 +1002,88 @@ func (s *insertFieldSizeState) validateDenseVectorRows(rows []int) error {
 	default:
 		return insertViewInternal("field %q (%d) has unexpected simple vector payload %T", s.field.GetFieldName(), s.field.GetFieldId(), value)
 	}
+}
+
+func (s *insertFieldSizeState) repeatedScalarMaxWireSize(rows []int) (int, error) {
+	_, maxWireSize, err := s.repeatedScalarWireStats(rows)
+	return maxWireSize, err
+}
+
+func (s *insertFieldSizeState) aggregateRepeatedScalarPayload(rows []int) (int, error) {
+	payloadSize, _, err := s.repeatedScalarWireStats(rows)
+	return payloadSize, err
+}
+
+func (s *insertFieldSizeState) repeatedScalarWireStats(rows []int) (int, int, error) {
+	valid := s.field.GetValidData()
+	for _, row := range rows {
+		if len(valid) > 0 && (row < 0 || row >= len(valid)) {
+			return 0, 0, insertViewInternal("row offset %d exceeds ValidData length %d for field %q (%d)", row, len(valid), s.field.GetFieldName(), s.field.GetFieldId())
+		}
+	}
+	scalar := s.field.GetScalars()
+	switch value := scalar.Data.(type) {
+	case *schemapb.ScalarField_StringData:
+		return repeatedStringWireStats(value.StringData.GetData(), rows, "string scalar")
+	case *schemapb.ScalarField_BytesData:
+		return repeatedBytesWireStats(value.BytesData.GetData(), rows, "bytes scalar")
+	case *schemapb.ScalarField_JsonData:
+		return repeatedBytesWireStats(value.JsonData.GetData(), rows, "JSON scalar")
+	case *schemapb.ScalarField_GeometryData:
+		return repeatedBytesWireStats(value.GeometryData.GetData(), rows, "geometry scalar")
+	case *schemapb.ScalarField_GeometryWktData:
+		return repeatedStringWireStats(value.GeometryWktData.GetData(), rows, "geometry WKT scalar")
+	case *schemapb.ScalarField_MolData:
+		return repeatedBytesWireStats(value.MolData.GetData(), rows, "molecular scalar")
+	case *schemapb.ScalarField_MolSmilesData:
+		return repeatedStringWireStats(value.MolSmilesData.GetData(), rows, "molecular SMILES scalar")
+	default:
+		return 0, 0, insertViewInternal("unexpected repeated ScalarField oneof %T", value)
+	}
+}
+
+func repeatedStringWireStats(values []string, rows []int, label string) (int, int, error) {
+	payloadSize := uint64(0)
+	maxWireSize := uint64(0)
+	for _, row := range rows {
+		if row < 0 || row >= len(values) {
+			return 0, 0, insertViewInternal("row offset %d exceeds %s length %d", row, label, len(values))
+		}
+		wireSize := directBytesFieldSize(1, uint64(len(values[row])))
+		if payloadSize > math.MaxUint64-wireSize {
+			return 0, 0, insertViewInternal("%s payload exceeds addressable memory", label)
+		}
+		payloadSize += wireSize
+		if wireSize > maxWireSize {
+			maxWireSize = wireSize
+		}
+	}
+	if payloadSize > uint64(math.MaxInt) || maxWireSize > uint64(math.MaxInt) {
+		return 0, 0, insertViewInternal("%s payload exceeds addressable memory", label)
+	}
+	return int(payloadSize), int(maxWireSize), nil
+}
+
+func repeatedBytesWireStats(values [][]byte, rows []int, label string) (int, int, error) {
+	payloadSize := uint64(0)
+	maxWireSize := uint64(0)
+	for _, row := range rows {
+		if row < 0 || row >= len(values) {
+			return 0, 0, insertViewInternal("row offset %d exceeds %s length %d", row, label, len(values))
+		}
+		wireSize := directBytesFieldSize(1, uint64(len(values[row])))
+		if payloadSize > math.MaxUint64-wireSize {
+			return 0, 0, insertViewInternal("%s payload exceeds addressable memory", label)
+		}
+		payloadSize += wireSize
+		if wireSize > maxWireSize {
+			maxWireSize = wireSize
+		}
+	}
+	if payloadSize > uint64(math.MaxInt) || maxWireSize > uint64(math.MaxInt) {
+		return 0, 0, insertViewInternal("%s payload exceeds addressable memory", label)
+	}
+	return int(payloadSize), int(maxWireSize), nil
 }
 
 func (s *insertFieldSizeState) aggregatePackedScalarPayload(rows []int) (int, error) {
@@ -1275,16 +1377,19 @@ func (s *insertFieldSizeState) directWireSize(delta *insertFieldRowDelta, rowCou
 	switch s.class {
 	case insertFieldPlanNone:
 	case insertFieldPlanScalar:
-		if s.valuePlan != insertFieldValueScalarEmpty && s.valuePlan != insertFieldValueScalarPacked {
-			return 0, false, nil
-		}
 		scalarSize := uint64(0)
-		if s.valuePlan == insertFieldValueScalarPacked {
+		switch s.valuePlan {
+		case insertFieldValueScalarEmpty:
+		case insertFieldValueScalarPacked:
 			arraySize := uint64(0)
 			if rowCount > 0 {
 				arraySize = directBytesFieldSize(1, payloadSize)
 			}
 			scalarSize = directBytesFieldSize(s.valueFieldNumber, arraySize)
+		case insertFieldValueScalarRepeated:
+			scalarSize = directBytesFieldSize(s.valueFieldNumber, payloadSize)
+		default:
+			return 0, false, nil
 		}
 		fieldSize += directBytesFieldSize(3, scalarSize)
 	case insertFieldPlanVector:
