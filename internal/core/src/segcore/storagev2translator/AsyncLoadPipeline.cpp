@@ -17,6 +17,7 @@
 #include "segcore/storagev2translator/AsyncLoadPipeline.h"
 
 #include <algorithm>
+#include <chrono>
 #include <exception>
 #include <limits>
 #include <mutex>
@@ -31,6 +32,7 @@
 #include "folly/executors/CPUThreadPoolExecutor.h"
 #include "folly/executors/ExecutorWithPriority.h"
 #include "folly/executors/thread_factory/NamedThreadFactory.h"
+#include "log/Log.h"
 #include "milvus-storage/common/extend_status.h"
 #include "segcore/Utils.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
@@ -334,23 +336,60 @@ LoadCellsAsyncImpl(
         read_window_bytes = StorageV2AsyncLoadReadWindowSizeBytes();
     }
     auto windows = BuildAsyncReadWindows(cells, read_window_bytes);
+    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    const auto* priority_name =
+        budget_priority == storage::TransientBudgetPriority::High ? "high"
+                                                                  : "low";
+    LOG_INFO(
+        "[StorageV3] async load pipeline: segment {} loads {} cells in {} "
+        "windows (read_window={}MB, budget_capacity={}MB, priority={})",
+        segment_id,
+        cells.size(),
+        windows.size(),
+        read_window_bytes >> 20,
+        budget.CapacityBytes() >> 20,
+        priority_name);
     auto shared_finalizer =
         std::make_shared<CellFinalizeFunc>(std::move(finalize_cell));
     auto work_executor =
         WithExecutorPriority(std::move(executor_keep_alive), executor_priority);
-    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
     auto window_failure_state = std::make_shared<WindowFailureState>();
     auto window_cancellation_token = folly::cancellation_token_merge(
         cancellation_token, window_failure_state->GetToken());
     auto request_count = cells.size();
     std::vector<std::optional<WindowLoadResult>> window_results(windows.size());
     folly::coro::AsyncScope scope;
+    const bool debug_logging_enabled = VLOG_IS_ON(GLOG_DEBUG);
     try {
         for (size_t i = 0; i < windows.size(); ++i) {
+            std::chrono::steady_clock::time_point admission_start;
+            if (debug_logging_enabled) {
+                admission_start = std::chrono::steady_clock::now();
+                LOG_DEBUG(
+                    "[StorageV3] async load segment {} waits for window {} "
+                    "budget (budget_bytes={}, priority={})",
+                    segment_id,
+                    i,
+                    windows[i].budget_bytes,
+                    priority_name);
+            }
             auto lease =
                 co_await budget.AcquireAsync(windows[i].budget_bytes,
                                              budget_priority,
                                              window_cancellation_token);
+            if (debug_logging_enabled) {
+                auto admission_wait_us =
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - admission_start)
+                        .count();
+                LOG_DEBUG(
+                    "[StorageV3] async load segment {} admits window {} "
+                    "(budget_bytes={}, wait_us={})",
+                    segment_id,
+                    i,
+                    windows[i].budget_bytes,
+                    admission_wait_us);
+            }
             CheckCancellationToken(window_cancellation_token,
                                    segment_id,
                                    "AsyncLoadPipeline::admission");
