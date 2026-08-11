@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
@@ -40,6 +41,7 @@ func TestBuildStatsFromFieldBinlogs_Empty(t *testing.T) {
 	assert.Zero(t, s.GetDeltaTimestampTo())
 	assert.Nil(t, s.GetTimestampQuantiles())
 	assert.Nil(t, s.GetNullCounts())
+	assert.Nil(t, s.GetLoadResource())
 }
 
 // fieldBinlog is a small constructor helper to keep table rows readable.
@@ -74,6 +76,10 @@ func TestBuildStatsFromFieldBinlogs_InsertAggregates(t *testing.T) {
 	assert.EqualValues(t, 10, s.GetTimestampFrom())
 	assert.EqualValues(t, 40, s.GetTimestampTo())
 	assert.Equal(t, map[int64]int64{100: 4, 101: 2}, s.GetNullCounts())
+	assert.Equal(t, []*datapb.ColumnGroupStatistics{
+		{GroupId: 100, FieldIds: []int64{100}, MemorySize: 300},
+		{GroupId: 101, FieldIds: []int64{101}, MemorySize: 125},
+	}, s.GetLoadResource().GetColumnGroups())
 }
 
 func TestBuildStatsFromFieldBinlogs_TimestampFromIgnoresZero(t *testing.T) {
@@ -270,14 +276,105 @@ func TestStatisticsCollector_DigestAndPublish_Cumulative(t *testing.T) {
 	assert.Equal(t, uint64(20), s.GetTimestampTo())
 	// quantiles: 5 marks over cumulative rows by tsTo; both syncs present.
 	assert.Len(t, s.GetTimestampQuantiles(), 5)
+	assert.Equal(t, []*datapb.ColumnGroupStatistics{
+		{GroupId: 0, FieldIds: []int64{100, 101}, MemorySize: 2000},
+	}, s.GetLoadResource().GetColumnGroups())
 }
 
 func TestStatisticsCollector_Publish_EmptyIsNil(t *testing.T) {
 	assert.Nil(t, NewStatisticsCollector().Publish())
 }
 
+func TestBuildLoadResourceStatistics_Deterministic(t *testing.T) {
+	loadResource := BuildLoadResourceStatistics([]*datapb.FieldBinlog{
+		{FieldID: 20, ChildFields: []int64{102, 101, 101}, Binlogs: []*datapb.Binlog{{MemorySize: 30}}},
+		{FieldID: 10, Binlogs: []*datapb.Binlog{{MemorySize: 10}, {MemorySize: 20}}},
+		{FieldID: 20, ChildFields: []int64{103}, Binlogs: []*datapb.Binlog{{MemorySize: 40}}},
+	})
+	require.Equal(t, []*datapb.ColumnGroupStatistics{
+		{GroupId: 10, FieldIds: []int64{10}, MemorySize: 30},
+		{GroupId: 20, FieldIds: []int64{101, 102, 103}, MemorySize: 70},
+	}, loadResource.GetColumnGroups())
+}
+
+func TestStatisticsLoadResourceProtoRoundTrip(t *testing.T) {
+	original := &datapb.Statistics{
+		LoadResource: &datapb.LoadResourceStatistics{
+			ColumnGroups: []*datapb.ColumnGroupStatistics{{GroupId: 0, FieldIds: []int64{100}, MemorySize: 0}},
+		},
+	}
+
+	data, err := proto.Marshal(original)
+	require.NoError(t, err)
+	var restored datapb.Statistics
+	require.NoError(t, proto.Unmarshal(data, &restored))
+	require.True(t, proto.Equal(original, &restored))
+	require.NotNil(t, restored.GetLoadResource())
+
+	data, err = proto.Marshal(&datapb.Statistics{})
+	require.NoError(t, err)
+	restored.Reset()
+	require.NoError(t, proto.Unmarshal(data, &restored))
+	require.Nil(t, restored.GetLoadResource())
+}
+
+func TestStatisticsCollector_LoadResourceAccumulatesAndRestores(t *testing.T) {
+	c := NewStatisticsCollector()
+	c.Digest(insertFieldBinlog(20, []int64{102, 101}, 30, 10, 1, 10, nil), nil, 0, 10, 1, 10)
+	c.Digest(insertFieldBinlog(10, nil, 20, 10, 11, 20, nil), nil, 0, 10, 11, 20)
+
+	persisted := c.Publish()
+	require.Equal(t, []*datapb.ColumnGroupStatistics{
+		{GroupId: 10, FieldIds: []int64{10}, MemorySize: 20},
+		{GroupId: 20, FieldIds: []int64{101, 102}, MemorySize: 30},
+	}, persisted.GetLoadResource().GetColumnGroups())
+
+	restored := NewStatisticsCollectorFromStats(persisted, 20)
+	restored.Digest(insertFieldBinlog(20, []int64{101, 102, 103}, 40, 10, 21, 30, nil), nil, 0, 10, 21, 30)
+	got := restored.Publish()
+	require.Equal(t, []*datapb.ColumnGroupStatistics{
+		{GroupId: 10, FieldIds: []int64{10}, MemorySize: 20},
+		{GroupId: 20, FieldIds: []int64{101, 102, 103}, MemorySize: 70},
+	}, got.GetLoadResource().GetColumnGroups())
+	require.EqualValues(t, 90, got.GetInsertBinlogSize())
+}
+
+func TestStatisticsCollector_LoadResourceNilAndEmptyRoundTrip(t *testing.T) {
+	require.Nil(t, NewStatisticsCollectorFromStats(&datapb.Statistics{}, 0).Publish())
+
+	c := NewStatisticsCollectorFromStats(&datapb.Statistics{
+		LoadResource: &datapb.LoadResourceStatistics{},
+	}, 0)
+	got := c.Publish()
+	require.NotNil(t, got)
+	require.NotNil(t, got.GetLoadResource())
+	require.Empty(t, got.GetLoadResource().GetColumnGroups())
+	require.NotNil(t, c.Clone().Publish().GetLoadResource())
+}
+
+func TestStatisticsCollector_LoadResourceZeroValuesAreAvailable(t *testing.T) {
+	c := NewStatisticsCollector()
+	inserts := insertFieldBinlog(0, []int64{100}, 0, 1, 1, 1, nil)
+	c.Digest(inserts, nil, 0, 1, 1, 1)
+
+	loadResource := c.Publish().GetLoadResource()
+	require.NotNil(t, loadResource)
+	require.Equal(t, []*datapb.ColumnGroupStatistics{{GroupId: 0, FieldIds: []int64{100}}}, loadResource.GetColumnGroups())
+}
+
+func TestStatisticsCollector_CloneLoadResourceIsIndependent(t *testing.T) {
+	c := NewStatisticsCollector()
+	c.Digest(insertFieldBinlog(0, []int64{100}, 10, 1, 1, 1, nil), nil, 0, 1, 1, 1)
+
+	clone := c.Clone()
+	clone.Digest(insertFieldBinlog(0, []int64{100}, 20, 1, 2, 2, nil), nil, 0, 1, 2, 2)
+
+	require.EqualValues(t, 10, c.Publish().GetLoadResource().GetColumnGroups()[0].GetMemorySize())
+	require.EqualValues(t, 30, clone.Publish().GetLoadResource().GetColumnGroups()[0].GetMemorySize())
+}
+
 // TestStatisticsCollector_StatsBlobSizeAccumulates pins the caller contract for
-// the V3 sync path: each Digest receives THIS SYNC's newly-written stats-blob
+// the sync path: each Digest receives THIS SYNC's newly-written stats-blob
 // bytes (a per-sync delta), and Digest accumulates them. Two syncs each passing
 // statsBlobSize=100 must sum to 200 — NOT 300. If a caller mistakenly passed the
 // cumulative footprint per sync, this would over-count.

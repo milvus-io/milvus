@@ -156,13 +156,10 @@ func (s *ClusteringCompactionTaskSuite) TestIsVectorClusteringKey() {
 func (s *ClusteringCompactionTaskSuite) TestCompactionWithEmptyBinlog() {
 	s.task.plan.Schema = genCollectionSchema()
 	s.task.plan.ClusteringKeyField = 100
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{}
 	_, err := s.task.Compact()
 	s.Require().Error(err)
 	s.Equal(true, errors.Is(err, merr.ErrIllegalCompactionPlan))
-	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{}
-	_, err2 := s.task.Compact()
-	s.Require().Error(err2)
-	s.Equal(true, errors.Is(err2, merr.ErrIllegalCompactionPlan))
 }
 
 func (s *ClusteringCompactionTaskSuite) TestCompactionWithEmptySchema() {

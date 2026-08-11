@@ -57,14 +57,14 @@ func TestProtoContract_FieldSetsPinned(t *testing.T) {
 	}{
 		// top-level fast-pathed types (TryUnmarshal dispatch)
 		{"internalpb.RetrieveResults", &internalpb.RetrieveResults{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 13, 14, 15, 16, 17, 18, 19}},
-		{"milvuspb.InsertRequest", &milvuspb.InsertRequest{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9}},
-		{"milvuspb.UpsertRequest", &milvuspb.UpsertRequest{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}},
+		{"milvuspb.InsertRequest", &milvuspb.InsertRequest{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}},
+		{"milvuspb.UpsertRequest", &milvuspb.UpsertRequest{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}},
 		{"schemapb.SearchResultData", &schemapb.SearchResultData{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19}},
 		// nested hand-decoded types (oneof-bearing — highest divergence risk)
 		{"schemapb.FieldData", &schemapb.FieldData{}, []int{1, 2, 3, 4, 5, 6, 7, 8}},
 		{"schemapb.ScalarField", &schemapb.ScalarField{}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
 		{"schemapb.VectorField", &schemapb.VectorField{}, []int{1, 2, 3, 4, 5, 6, 7, 8}},
-		{"schemapb.IDs", &schemapb.IDs{}, []int{1, 2}},
+		{"schemapb.IDs", &schemapb.IDs{}, []int{1, 2, 3}},
 		// leaf arrays with their own hand-written field switches (no unknown-field
 		// fallback in some — a new field here would mis-parse)
 		{"schemapb.SparseFloatArray", &schemapb.SparseFloatArray{}, []int{1, 2}},
@@ -75,6 +75,7 @@ func TestProtoContract_FieldSetsPinned(t *testing.T) {
 		{"schemapb.DoubleArray", &schemapb.DoubleArray{}, []int{1}},
 		{"schemapb.BytesArray", &schemapb.BytesArray{}, []int{1}},
 		{"schemapb.JSONArray", &schemapb.JSONArray{}, []int{1}},
+		{"schemapb.UUIDArray", &schemapb.UUIDArray{}, []int{1}},
 		{"schemapb.StringArray", &schemapb.StringArray{}, []int{1}},
 	}
 	for _, c := range cases {
