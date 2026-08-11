@@ -386,7 +386,7 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
 
     SpanBase
     get_span(const ChunkSnapshot& snap, int64_t chunk_id) const override {
-        if constexpr (IsMmap && std::is_same_v<std::string, Type>) {
+        if constexpr (IsMmap && IsVariableTypeSupportInChunk<Type>) {
             return SpanBase(get_chunk_data(snap, chunk_id),
                             get_chunk_size(snap, chunk_id),
                             sizeof(ChunkViewType<Type>));
@@ -400,7 +400,7 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     int64_t
     get_element_size() override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        if constexpr (IsMmap && std::is_same_v<std::string, Type>) {
+        if constexpr (IsMmap && IsVariableTypeSupportInChunk<Type>) {
             return sizeof(ChunkViewType<Type>);
         }
         return sizeof(Type);
@@ -433,7 +433,7 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     SpanBase
     get_span(int64_t chunk_id) override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        if constexpr (IsMmap && std::is_same_v<std::string, Type>) {
+        if constexpr (IsMmap && IsVariableTypeSupportInChunk<Type>) {
             return SpanBase(get_chunk_data(chunk_id),
                             get_chunk_size(chunk_id),
                             sizeof(ChunkViewType<Type>));
@@ -482,14 +482,22 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
                              src.length(),
                              src.byte_size(),
                              src.get_element_type(),
-                             src.get_offsets_data());
+                             src.get_offsets_data(),
+                             src.is_element_nullable()
+                                 ? src.get_element_valid_data().view()
+                                 : TargetBitmapView(),
+                             src.is_element_nullable());
         } else if constexpr (std::is_same_v<VectorArray, Type>) {
             auto& src = chunk[chunk_offset];
             return VectorArrayView(const_cast<char*>(src.data()),
                                    src.dim(),
                                    src.length(),
                                    src.byte_size(),
-                                   src.get_element_type());
+                                   src.get_element_type(),
+                                   src.is_element_nullable()
+                                       ? src.get_element_valid_data().view()
+                                       : TargetBitmapView(),
+                                   src.is_element_nullable());
         } else if constexpr (std::is_same_v<Json, Type>) {
             return Json(chunk[chunk_offset].c_str(),
                         chunk[chunk_offset].size());

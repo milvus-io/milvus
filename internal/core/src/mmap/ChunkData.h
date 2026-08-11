@@ -220,6 +220,9 @@ VariableLengthChunk<Array>::set(
         size_);
     size_t total_size = 0;
     for (auto i = 0; i < length; i++) {
+        if (src[i].is_element_nullable()) {
+            total_size += src[i].get_element_valid_data_byte_size();
+        }
         total_size += src[i].byte_size();
         if (IsVariableDataType(src[i].get_element_type())) {
             total_size += (src[i].length() * sizeof(uint32_t));
@@ -238,6 +241,19 @@ VariableLengthChunk<Array>::set(
         } else {
             int length = src[i].length();
             uint32_t* src_offsets_ptr = src[i].get_offsets_data();
+            TargetBitmapView element_valid_data;
+            if (src[i].is_element_nullable()) {
+                auto element_valid_bytes =
+                    src[i].get_element_valid_data_byte_size();
+                if (element_valid_bytes > 0) {
+                    milvus::fastmem::FastMemcpy(
+                        data_ptr,
+                        src[i].get_element_valid_data().data(),
+                        element_valid_bytes);
+                }
+                element_valid_data = TargetBitmapView(data_ptr, length);
+                data_ptr += element_valid_bytes;
+            }
             // need copy offsets for variable types
             uint32_t* target_offsets_ptr = nullptr;
             if (IsVariableDataType(element_type)) {
@@ -249,8 +265,13 @@ VariableLengthChunk<Array>::set(
             }
             auto data_size = src[i].byte_size();
             milvus::fastmem::FastMemcpy(data_ptr, src[i].data(), data_size);
-            data_[i + begin] = ArrayView(
-                data_ptr, length, data_size, element_type, target_offsets_ptr);
+            data_[i + begin] = ArrayView(data_ptr,
+                                         length,
+                                         data_size,
+                                         element_type,
+                                         target_offsets_ptr,
+                                         element_valid_data,
+                                         src[i].is_element_nullable());
             data_ptr += data_size;
         }
     }

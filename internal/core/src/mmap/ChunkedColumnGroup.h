@@ -760,7 +760,13 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             op_ctx,
             offsets,
             count,
-            [&fn](Chunk* chunk, int64_t offset_in_chunk, int64_t i) {
+            [this, &fn](Chunk* chunk,
+                        int64_t offset_in_chunk,
+                        int64_t i) {
+                if (field_meta_.is_nullable()) {
+                    offset_in_chunk =
+                        chunk->PhysicalOffsetOf(offset_in_chunk);
+                }
                 auto array = static_cast<VectorArrayChunk*>(chunk)
                                  ->View(offset_in_chunk)
                                  .output_data();

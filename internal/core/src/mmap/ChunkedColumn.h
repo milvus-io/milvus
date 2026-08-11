@@ -726,6 +726,9 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
             auto chunk =
                 static_cast<VectorArrayChunk*>(ca->get_cell_of(cids[i]));
             auto offset = offsets_in_chunk[i];
+            if (nullable_) {
+                offset = chunk->PhysicalOffsetOf(offset);
+            }
             auto array = chunk->View(offset).output_data();
             fn(std::move(array), i);
         }

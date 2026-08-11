@@ -579,7 +579,9 @@ TEST(test_chunk_segment,
     auto field_meta = schema->operator[](vec_id);
 
     const auto bitmap_bytes = (row_count + 7) / 8;
-    const auto header_bytes = sizeof(uint32_t) * (row_count * 2 + 1);
+    constexpr int64_t valid_row_count = 5;
+    const auto header_bytes =
+        sizeof(uint32_t) * (valid_row_count * 2 + 1);
     const auto payload_offset =
         static_cast<uint32_t>(bitmap_bytes + header_bytes);
     const auto vector_bytes = static_cast<uint32_t>(dim * sizeof(float));
@@ -592,9 +594,7 @@ TEST(test_chunk_segment,
 
     // Logical rows: [NULL, [], [A], [B], [], [C]].
     buffer[0] = 0b00111110;
-    const std::array<uint32_t, row_count * 2 + 1> header{
-        payload_offset,
-        0,
+    const std::array<uint32_t, valid_row_count * 2 + 1> header{
         payload_offset,
         0,
         payload_offset,
@@ -622,7 +622,8 @@ TEST(test_chunk_segment,
                                            buffer.size(),
                                            DataType::VECTOR_FLOAT,
                                            chunk_mmap_guard,
-                                           true));
+                                           true,
+                                           false));
     auto translator = std::make_unique<TestChunkTranslator>(
         std::vector<int64_t>{row_count}, "", std::move(chunks));
     auto slot =
