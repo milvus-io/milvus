@@ -120,6 +120,53 @@ ApplyValidMask(const bool* valid_data,
     }
 }
 
+inline void
+ApplyValidMask(ValidityView validity,
+               TargetBitmapView res,
+               TargetBitmapView valid_res,
+               const int size) {
+    if (!validity) {
+        return;
+    }
+
+    if (const auto* expanded = validity.expanded_data(); expanded != nullptr) {
+        ApplyValidMask(expanded, res, valid_res, size);
+        return;
+    }
+
+    const auto* packed = validity.packed_data();
+    AssertInfo(packed != nullptr, "Packed validity data is missing");
+
+    const auto read_word = [packed](int64_t bit_offset, int bit_count) {
+        const auto byte_offset = bit_offset >> 3;
+        const auto shift = static_cast<int>(bit_offset & 0x07);
+        const auto bytes = (shift + bit_count + 7) >> 3;
+        uint64_t word = 0;
+        const auto low_bytes = std::min(bytes, 8);
+        for (int i = 0; i < low_bytes; ++i) {
+            word |= uint64_t(packed[byte_offset + i]) << (i * 8);
+        }
+        word >>= shift;
+        if (bytes > 8) {
+            word |= uint64_t(packed[byte_offset + 8]) << (64 - shift);
+        }
+        if (bit_count < 64) {
+            word &= (uint64_t{1} << bit_count) - 1;
+        }
+        return word;
+    };
+
+    for (int i = 0; i < size; i += 64) {
+        const auto bit_count = std::min(size - i, 64);
+        auto word = read_word(validity.bit_offset() + i, bit_count);
+        TargetBitmapView validity_word(&word, bit_count);
+        auto res_block = res.view(i);
+        auto valid_res_block = valid_res.view(i);
+        res_block.inplace_and(validity_word, bit_count);
+        valid_res_block.inplace_and(validity_word, bit_count);
+    }
+}
+
 class Expr : public std::enable_shared_from_this<Expr> {
  public:
     Expr(DataType type,
@@ -425,11 +472,11 @@ class SegmentExpr : public Expr {
     }
 
     void
-    ApplyValidData(const bool* valid_data,
+    ApplyValidData(ValidityView validity,
                    TargetBitmapView res,
                    TargetBitmapView valid_res,
                    const int size) {
-        ApplyValidMask(valid_data, res, valid_res, size);
+        ApplyValidMask(validity, res, valid_res, size);
     }
 
     // Try to load the full bitset from ExprResCache.
@@ -654,7 +701,7 @@ class SegmentExpr : public Expr {
                 res[i] = valid_res[i] = false;
                 evaluate_batch.template operator()<FilterType::random>(
                     nullptr,
-                    nullptr,
+                    ValidityView{},
                     nullptr,
                     1,
                     res + i,
@@ -666,7 +713,7 @@ class SegmentExpr : public Expr {
             bool valid_data = all_valid || valid_result[offset];
             evaluate_batch.template operator()<FilterType::random>(
                 &raw_data,
-                &valid_data,
+                ValidityView::FromExpanded(&valid_data),
                 nullptr,
                 1,
                 res + i,
@@ -718,7 +765,7 @@ class SegmentExpr : public Expr {
                     !skip_func(*skip_index, field_id_, chunk_id)) {
                     evaluate_batch.template operator()<FilterType::random>(
                         data_vec.data(),
-                        valid_data.data(),
+                        valid_data,
                         nullptr,
                         1,
                         res + processed_size,
@@ -729,13 +776,13 @@ class SegmentExpr : public Expr {
                     // callback on a null batch so cursor-tracking callbacks (which index
                     // bitmap_input by batch position via their processed_cursor) stay
                     // aligned — mirrors the ProcessDataChunksForMultipleChunk skip branch.
-                    ApplyValidData(valid_data.data(),
+                    ApplyValidData(valid_data,
                                    res + processed_size,
                                    valid_res + processed_size,
                                    1);
                     evaluate_batch.template operator()<FilterType::random>(
                         nullptr,
-                        nullptr,
+                        ValidityView{},
                         nullptr,
                         1,
                         res + processed_size,
@@ -804,7 +851,9 @@ class SegmentExpr : public Expr {
                             evaluate_batch
                                 .template operator()<FilterType::random>(
                                     data_vec.data() + j,
-                                    valid_ptr,
+                                    valid_ptr == nullptr
+                                        ? ValidityView{}
+                                        : ValidityView::FromExpanded(valid_ptr),
                                     nullptr,
                                     1,
                                     res + processed_size,
@@ -824,7 +873,7 @@ class SegmentExpr : public Expr {
                             evaluate_batch
                                 .template operator()<FilterType::random>(
                                     nullptr,
-                                    nullptr,
+                                    ValidityView{},
                                     nullptr,
                                     1,
                                     res + processed_size,
@@ -843,7 +892,7 @@ class SegmentExpr : public Expr {
             int64_t cached_chunk_id = -1;
             std::optional<PinWrapper<Span<T>>> pw;
             const T* chunk_base = nullptr;
-            const bool* chunk_valid_base = nullptr;
+            ValidityView chunk_validity;
             bool cached_skip = false;
             for (size_t i = 0; i < input->size(); ++i) {
                 int64_t offset = (*input)[i];
@@ -854,7 +903,7 @@ class SegmentExpr : public Expr {
                         segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id));
                     auto chunk = pw->get();
                     chunk_base = chunk.data();
-                    chunk_valid_base = chunk.valid_data();
+                    chunk_validity = chunk.validity();
                     // SkipIndex is keyed by chunk alone; evaluate it once per
                     // chunk instead of once per row.
                     cached_skip = skip_func &&
@@ -862,13 +911,11 @@ class SegmentExpr : public Expr {
                     cached_chunk_id = chunk_id;
                 }
                 const T* data = chunk_base + chunk_offset;
-                const bool* valid_data = chunk_valid_base != nullptr
-                                             ? chunk_valid_base + chunk_offset
-                                             : nullptr;
+                const auto validity = chunk_validity.Subview(chunk_offset);
                 if (!cached_skip) {
                     evaluate_batch.template operator()<FilterType::random>(
                         data,
-                        valid_data,
+                        validity,
                         nullptr,
                         1,
                         res + processed_size,
@@ -879,13 +926,13 @@ class SegmentExpr : public Expr {
                     // callback on a null batch so cursor-tracking callbacks (which index
                     // bitmap_input by batch position via their processed_cursor) stay
                     // aligned — mirrors the ProcessDataChunksForMultipleChunk skip branch.
-                    ApplyValidData(valid_data,
+                    ApplyValidData(validity,
                                    res + processed_size,
                                    valid_res + processed_size,
                                    1);
                     evaluate_batch.template operator()<FilterType::random>(
                         nullptr,
-                        nullptr,
+                        ValidityView{},
                         nullptr,
                         1,
                         res + processed_size,
@@ -903,7 +950,7 @@ class SegmentExpr : public Expr {
             int64_t cached_chunk_id = -1;
             std::optional<PinWrapper<Span<T>>> pw;
             const T* chunk_base = nullptr;
-            const bool* chunk_valid_base = nullptr;
+            ValidityView chunk_validity;
             bool cached_skip = false;
             for (size_t i = 0; i < input->size(); ++i) {
                 int64_t offset = (*input)[i];
@@ -914,7 +961,7 @@ class SegmentExpr : public Expr {
                         segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id));
                     auto chunk = pw->get();
                     chunk_base = chunk.data();
-                    chunk_valid_base = chunk.valid_data();
+                    chunk_validity = chunk.validity();
                     // SkipIndex is keyed by chunk alone; evaluate it once per
                     // chunk instead of once per row.
                     cached_skip = skip_func &&
@@ -922,13 +969,11 @@ class SegmentExpr : public Expr {
                     cached_chunk_id = chunk_id;
                 }
                 const T* data = chunk_base + chunk_offset;
-                const bool* valid_data = chunk_valid_base != nullptr
-                                             ? chunk_valid_base + chunk_offset
-                                             : nullptr;
+                const auto validity = chunk_validity.Subview(chunk_offset);
                 if (!cached_skip) {
                     evaluate_batch.template operator()<FilterType::random>(
                         data,
-                        valid_data,
+                        validity,
                         nullptr,
                         1,
                         res + processed_size,
@@ -939,13 +984,13 @@ class SegmentExpr : public Expr {
                     // callback on a null batch so cursor-tracking callbacks (which index
                     // bitmap_input by batch position via their processed_cursor) stay
                     // aligned — mirrors the ProcessDataChunksForMultipleChunk skip branch.
-                    ApplyValidData(valid_data,
+                    ApplyValidData(validity,
                                    res + processed_size,
                                    valid_res + processed_size,
                                    1);
                     evaluate_batch.template operator()<FilterType::random>(
                         nullptr,
-                        nullptr,
+                        ValidityView{},
                         nullptr,
                         1,
                         res + processed_size,
@@ -1080,7 +1125,7 @@ class SegmentExpr : public Expr {
                             evaluate_batch
                                 .template operator()<FilterType::random>(
                                     &value,
-                                    &is_valid,
+                                    ValidityView::FromExpanded(&is_valid),
                                     nullptr,
                                     1,
                                     res + result_idx,
@@ -1095,7 +1140,7 @@ class SegmentExpr : public Expr {
                             evaluate_batch
                                 .template operator()<FilterType::random>(
                                     nullptr,
-                                    nullptr,
+                                    ValidityView{},
                                     nullptr,
                                     1,
                                     res + result_idx,
@@ -1148,10 +1193,7 @@ class SegmentExpr : public Expr {
                     segment_->chunk_data<Array>(op_ctx_, field_id_, chunk_id);
                 auto chunk = pw.get();
                 const Array* array_ptr = chunk.data() + chunk_offset;
-                const bool* valid_data = chunk.valid_data();
-                if (valid_data != nullptr) {
-                    valid_data += chunk_offset;
-                }
+                const auto validity = chunk.validity().Subview(chunk_offset);
 
                 const bool chunk_active =
                     !skip_func || !skip_func(*skip_index, field_id_, chunk_id);
@@ -1161,11 +1203,11 @@ class SegmentExpr : public Expr {
                         // Extract element from Array
                         auto value = array_ptr->get_data<ElementType>(
                             row.element_index + t);
-                        bool is_valid = !valid_data || valid_data[0];
+                        bool is_valid = !validity || validity[0];
 
                         evaluate_batch.template operator()<FilterType::random>(
                             &value,
-                            &is_valid,
+                            ValidityView::FromExpanded(&is_valid),
                             nullptr,
                             1,
                             res + processed_size,
@@ -1174,13 +1216,13 @@ class SegmentExpr : public Expr {
                     } else {
                         // Keep cursor-tracking evaluators aligned with offset
                         // input.
-                        if (valid_data && !valid_data[0]) {
+                        if (validity && !validity[0]) {
                             res[processed_size] = valid_res[processed_size] =
                                 false;
                         }
                         evaluate_batch.template operator()<FilterType::random>(
                             nullptr,
-                            nullptr,
+                            ValidityView{},
                             nullptr,
                             1,
                             res + processed_size,
@@ -1260,8 +1302,7 @@ class SegmentExpr : public Expr {
                     auto [data_vec, valid_data] = pw.get();
 
                     for (size_t j = 0; j < static_cast<size_t>(size); j++) {
-                        const bool is_row_valid =
-                            !valid_data.data() || valid_data[j];
+                        const bool is_row_valid = !valid_data || valid_data[j];
                         // ArrayOffsets defines a NULL array row as having zero
                         // logical elements even when its physical payload is
                         // non-empty. Keep the flattened result aligned with
@@ -1284,7 +1325,7 @@ class SegmentExpr : public Expr {
                                     ElementType str_val(str_view);
                                     evaluate_batch(
                                         &str_val,
-                                        nullptr,
+                                        ValidityView{},
                                         nullptr,
                                         1,
                                         res + processed_elems + k,
@@ -1308,7 +1349,7 @@ class SegmentExpr : public Expr {
                                                              ElementType>) {
                                     // Types match, batch process
                                     evaluate_batch(raw_data,
-                                                   nullptr,
+                                                   ValidityView{},
                                                    nullptr,
                                                    elem_count,
                                                    res + processed_elems,
@@ -1322,7 +1363,7 @@ class SegmentExpr : public Expr {
                                                 raw_data[k]);
                                         evaluate_batch(
                                             &val,
-                                            nullptr,
+                                            ValidityView{},
                                             nullptr,
                                             1,
                                             res + processed_elems + k,
@@ -1340,13 +1381,10 @@ class SegmentExpr : public Expr {
                         segment_->chunk_data<Array>(op_ctx_, field_id_, i);
                     auto chunk = pw.get();
                     const Array* data = chunk.data() + data_pos;
-                    const bool* valid_data = chunk.valid_data();
-                    if (valid_data != nullptr) {
-                        valid_data += data_pos;
-                    }
+                    const auto validity = chunk.validity().Subview(data_pos);
 
                     for (size_t j = 0; j < static_cast<size_t>(size); j++) {
-                        const bool is_row_valid = !valid_data || valid_data[j];
+                        const bool is_row_valid = !validity || validity[j];
                         // ArrayOffsets defines a NULL array row as having zero
                         // logical elements even when its physical payload is
                         // non-empty. Keep the flattened result aligned with
@@ -1369,7 +1407,7 @@ class SegmentExpr : public Expr {
                                     ElementType str_val(str_view);
                                     evaluate_batch(
                                         &str_val,
-                                        nullptr,
+                                        ValidityView{},
                                         nullptr,
                                         1,
                                         res + processed_elems + k,
@@ -1393,7 +1431,7 @@ class SegmentExpr : public Expr {
                                                              ElementType>) {
                                     // Types match, batch process
                                     evaluate_batch(raw_data,
-                                                   nullptr,
+                                                   ValidityView{},
                                                    nullptr,
                                                    elem_count,
                                                    res + processed_elems,
@@ -1407,7 +1445,7 @@ class SegmentExpr : public Expr {
                                                 raw_data[k]);
                                         evaluate_batch(
                                             &val,
-                                            nullptr,
+                                            ValidityView{},
                                             nullptr,
                                             1,
                                             res + processed_elems + k,
@@ -1438,7 +1476,7 @@ class SegmentExpr : public Expr {
                     int64_t{end_range.first - start_range.first};
                 if (skipped_elems > 0) {
                     evaluate_batch(nullptr,
-                                   nullptr,
+                                   ValidityView{},
                                    nullptr,
                                    skipped_elems,
                                    res + processed_elems,
@@ -1486,7 +1524,7 @@ class SegmentExpr : public Expr {
                 continue;  //do not go empty-loop at the bound of the chunk
 
             auto skip_index = segment_->GetSkipIndex();
-            auto process_chunk = [&](const T* data, const bool* valid_data) {
+            auto process_chunk = [&](const T* data, ValidityView valid_data) {
                 auto skipped =
                     skip_func && skip_func(*skip_index, field_id_, i);
                 if (!skipped) {
@@ -1533,7 +1571,7 @@ class SegmentExpr : public Expr {
                             size_per_chunk_ * i + data_pos + j);
                     }
                     func(nullptr,
-                         nullptr,
+                         ValidityView{},
                          nullptr,
                          segment_offsets_array.data(),
                          size,
@@ -1542,7 +1580,7 @@ class SegmentExpr : public Expr {
                          values...);
                 } else {
                     func(nullptr,
-                         nullptr,
+                         ValidityView{},
                          nullptr,
                          size,
                          res + processed_size,
@@ -1558,15 +1596,12 @@ class SegmentExpr : public Expr {
                 auto pw = segment_->chunk_view<VectorArrayView>(
                     op_ctx_, field_id_, i, std::make_pair(data_pos, size));
                 const auto& [data_vec, valid_data] = pw.get();
-                process_chunk(data_vec.data(), valid_data.data());
+                process_chunk(data_vec.data(), valid_data);
             } else {
                 auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
                 auto chunk = pw.get();
-                const bool* valid_data = chunk.valid_data();
-                if (valid_data != nullptr) {
-                    valid_data += data_pos;
-                }
-                process_chunk(chunk.data() + data_pos, valid_data);
+                const auto validity = chunk.validity().Subview(data_pos);
+                process_chunk(chunk.data() + data_pos, validity);
             }
 
             processed_size += size;
@@ -1637,7 +1672,7 @@ class SegmentExpr : public Expr {
 
                         if constexpr (NeedSegmentOffsets) {
                             func(data_vec.data(),
-                                 valid_data.data(),
+                                 valid_data,
                                  nullptr,
                                  segment_offsets_array.data(),
                                  size,
@@ -1646,7 +1681,7 @@ class SegmentExpr : public Expr {
                                  values...);
                         } else {
                             func(data_vec.data(),
-                                 valid_data.data(),
+                                 valid_data,
                                  nullptr,
                                  size,
                                  res + processed_size,
@@ -1667,15 +1702,13 @@ class SegmentExpr : public Expr {
                             segment_->chunk_data<T>(op_ctx_, field_id_, i);
                         auto chunk = pw.get();
                         const T* data = chunk.data() + data_pos;
-                        const bool* valid_data = chunk.valid_data();
-                        if (valid_data != nullptr) {
-                            valid_data += data_pos;
-                        }
+                        const auto validity =
+                            chunk.validity().Subview(data_pos);
 
                         if constexpr (NeedSegmentOffsets) {
                             // For GIS functions: construct segment offsets array
                             func(data,
-                                 valid_data,
+                                 validity,
                                  nullptr,
                                  segment_offsets_array.data(),
                                  size,
@@ -1684,7 +1717,7 @@ class SegmentExpr : public Expr {
                                  values...);
                         } else {
                             func(data,
-                                 valid_data,
+                                 validity,
                                  nullptr,
                                  size,
                                  res + processed_size,
@@ -1699,26 +1732,20 @@ class SegmentExpr : public Expr {
                 // 1. Apply valid_data to handle nullable fields
                 // 2. Call func with nullptr to update internal cursors
                 //    (e.g., processed_cursor for bitmap_input indexing)
-                const bool* valid_data;
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json> ||
                               std::is_same_v<T, ArrayView> ||
                               std::is_same_v<T, VectorArrayView>) {
                     auto pw = segment_->get_batch_views<T>(
                         op_ctx_, field_id_, i, data_pos, size);
-                    valid_data = pw.get().second.data();
-                    ApplyValidData(valid_data,
+                    ApplyValidData(pw.get().second,
                                    res + processed_size,
                                    valid_res + processed_size,
                                    size);
                 } else {
                     auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
                     auto chunk = pw.get();
-                    valid_data = chunk.valid_data();
-                    if (valid_data != nullptr) {
-                        valid_data += data_pos;
-                    }
-                    ApplyValidData(valid_data,
+                    ApplyValidData(chunk.validity().Subview(data_pos),
                                    res + processed_size,
                                    valid_res + processed_size,
                                    size);
@@ -1726,7 +1753,7 @@ class SegmentExpr : public Expr {
                 // Call func with nullptr to update internal cursors
                 if constexpr (NeedSegmentOffsets) {
                     func(nullptr,
-                         nullptr,
+                         ValidityView{},
                          nullptr,
                          segment_offsets_array.data(),
                          size,
@@ -1735,7 +1762,7 @@ class SegmentExpr : public Expr {
                          values...);
                 } else {
                     func(nullptr,
-                         nullptr,
+                         ValidityView{},
                          nullptr,
                          size,
                          res + processed_size,

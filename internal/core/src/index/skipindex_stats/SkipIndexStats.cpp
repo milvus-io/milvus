@@ -163,48 +163,45 @@ SkipIndexStatsBuilder::Build(DataType data_type, const Chunk* chunk) const {
     auto span = fixed_chunk->Span();
 
     const void* chunk_data = span.data();
-    const bool* valid_data = span.valid_data();
+    const auto validity = span.validity();
     int64_t count = span.row_count();
     switch (data_type) {
         case DataType::BOOL: {
             const bool* typedData = static_cast<const bool*>(chunk_data);
-            auto info = ProcessFieldMetrics<bool>(typedData, valid_data, count);
+            auto info = ProcessFieldMetrics<bool>(typedData, validity, count);
             return LoadMetrics<bool>(info);
         }
         case DataType::INT8: {
             const int8_t* typedData = static_cast<const int8_t*>(chunk_data);
-            auto info =
-                ProcessFieldMetrics<int8_t>(typedData, valid_data, count);
+            auto info = ProcessFieldMetrics<int8_t>(typedData, validity, count);
             return LoadMetrics<int8_t>(info);
         }
         case DataType::INT16: {
             const int16_t* typedData = static_cast<const int16_t*>(chunk_data);
             auto info =
-                ProcessFieldMetrics<int16_t>(typedData, valid_data, count);
+                ProcessFieldMetrics<int16_t>(typedData, validity, count);
             return LoadMetrics<int16_t>(info);
         }
         case DataType::INT32: {
             const int32_t* typedData = static_cast<const int32_t*>(chunk_data);
             auto info =
-                ProcessFieldMetrics<int32_t>(typedData, valid_data, count);
+                ProcessFieldMetrics<int32_t>(typedData, validity, count);
             return LoadMetrics<int32_t>(info);
         }
         case DataType::INT64: {
             const int64_t* typedData = static_cast<const int64_t*>(chunk_data);
             auto info =
-                ProcessFieldMetrics<int64_t>(typedData, valid_data, count);
+                ProcessFieldMetrics<int64_t>(typedData, validity, count);
             return LoadMetrics<int64_t>(info);
         }
         case DataType::FLOAT: {
             const float* typedData = static_cast<const float*>(chunk_data);
-            auto info =
-                ProcessFieldMetrics<float>(typedData, valid_data, count);
+            auto info = ProcessFieldMetrics<float>(typedData, validity, count);
             return LoadMetrics<float>(info);
         }
         case DataType::DOUBLE: {
             const double* typedData = static_cast<const double*>(chunk_data);
-            auto info =
-                ProcessFieldMetrics<double>(typedData, valid_data, count);
+            auto info = ProcessFieldMetrics<double>(typedData, validity, count);
             return LoadMetrics<double>(info);
         }
         default:
