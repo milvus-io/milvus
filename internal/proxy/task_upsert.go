@@ -1220,8 +1220,8 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 
 	seenSubFieldIDs := make(map[int64]struct{}, len(structArrays.GetFields()))
 	for _, subField := range structArrays.GetFields() {
-		if typeutil.HasFieldDataValidDataConflict(subField) {
-			return merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s' cannot set both legacy and field-specific valid_data",
+		if !typeutil.ValidateAndNormalizeFieldDataValidData(subField) {
+			return merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s' has different legacy and field-specific valid_data",
 				subField.GetFieldName(), fieldData.GetFieldName())
 		}
 		subFieldSchema, err := schemaHelper.GetFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
@@ -1550,6 +1550,9 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 			IdField: nil,
 		},
 		Timestamp: it.EndTs(),
+	}
+	if err := validateAndNormalizeFieldDataValidData(it.req.GetFieldsData()); err != nil {
+		return err
 	}
 
 	// check collection exists

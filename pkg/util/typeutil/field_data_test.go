@@ -65,6 +65,61 @@ func TestFieldDataValidData(t *testing.T) {
 		assert.True(t, HasFieldDataValidDataConflict(field))
 	})
 
+	t.Run("matching dual sources", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			ValidData: scalarValid,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{ValidData: scalarValid},
+			},
+		}
+		assert.False(t, HasFieldDataValidDataConflict(field))
+		assert.True(t, ValidateAndNormalizeFieldDataValidData(field))
+		assert.Nil(t, field.GetValidData())
+		assert.Equal(t, scalarValid, field.GetScalars().GetValidData())
+	})
+
+	t.Run("normalize legacy source", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			ValidData: legacy,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{},
+			},
+		}
+		assert.True(t, ValidateAndNormalizeFieldDataValidData(field))
+		assert.Nil(t, field.GetValidData())
+		assert.Equal(t, legacy, field.GetScalars().GetValidData())
+	})
+
+	t.Run("reject mismatched dual sources", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			ValidData: legacy,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{ValidData: scalarValid},
+			},
+		}
+		assert.False(t, ValidateAndNormalizeFieldDataValidData(field))
+		assert.Equal(t, legacy, field.GetValidData())
+		assert.Equal(t, scalarValid, field.GetScalars().GetValidData())
+	})
+
+	t.Run("project current source for legacy readers", func(t *testing.T) {
+		subField := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{ValidData: vectorValid},
+			},
+		}
+		field := &schemapb.FieldData{
+			Field: &schemapb.FieldData_StructArrays{
+				StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{subField}},
+			},
+		}
+
+		ProjectFieldDataValidDataForLegacy(field)
+		assert.Equal(t, vectorValid, subField.GetValidData())
+		assert.Equal(t, vectorValid, subField.GetVectors().GetValidData())
+		assert.False(t, HasFieldDataValidDataConflict(field))
+	})
+
 	t.Run("set scalar validity", func(t *testing.T) {
 		field := &schemapb.FieldData{
 			ValidData: legacy,

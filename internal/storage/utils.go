@@ -586,9 +586,9 @@ func validateColumnBasedNullableVectorFieldData(field *schemapb.FieldSchema, src
 func validateColumnBasedInsertMsgNullableVectors(schema *schemapb.CollectionSchema, msg *msgstream.InsertMsg) error {
 	srcFields := make(map[int64]*schemapb.FieldData, len(msg.GetFieldsData()))
 	for _, fieldData := range msg.GetFieldsData() {
-		if typeutil.HasFieldDataValidDataConflict(fieldData) {
+		if !typeutil.ValidateAndNormalizeFieldDataValidData(fieldData) {
 			return merr.WrapErrParameterInvalidMsg(
-				"field %s cannot set both legacy and field-specific valid_data",
+				"field %s has different legacy and field-specific valid_data",
 				fieldData.GetFieldName(),
 			)
 		}
@@ -614,9 +614,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			// unreachable
 			panic("struct is not flattened")
 		}
-		if typeutil.HasFieldDataValidDataConflict(field) {
+		if !typeutil.ValidateAndNormalizeFieldDataValidData(field) {
 			return nil, merr.WrapErrParameterInvalidMsg(
-				"field %s cannot set both legacy and field-specific valid_data",
+				"field %s has different legacy and field-specific valid_data",
 				field.GetFieldName(),
 			)
 		}

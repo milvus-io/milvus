@@ -110,8 +110,8 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 		return merr.WrapErrServiceInternal("nil schema helper provided for Validation")
 	}
 	for _, field := range data {
-		if typeutil.HasFieldDataValidDataConflict(field) {
-			return merr.WrapErrParameterInvalidMsg("field %s cannot set both legacy and field-specific valid_data", field.GetFieldName())
+		if !typeutil.ValidateAndNormalizeFieldDataValidData(field) {
+			return merr.WrapErrParameterInvalidMsg("field %s has different legacy and field-specific valid_data", field.GetFieldName())
 		}
 		fieldSchema, err := helper.GetFieldFromName(field.GetFieldName())
 		if err != nil {
@@ -487,8 +487,8 @@ func (v *validateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeuti
 }
 
 func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema, numRows int) error {
-	if typeutil.HasFieldDataValidDataConflict(field) {
-		return merr.WrapErrParameterInvalidMsg("field %s cannot set both legacy and field-specific valid_data", field.GetFieldName())
+	if !typeutil.ValidateAndNormalizeFieldDataValidData(field) {
+		return merr.WrapErrParameterInvalidMsg("field %s has different legacy and field-specific valid_data", field.GetFieldName())
 	}
 	validData := typeutil.GetFieldDataValidData(field)
 	err := nullutil.CheckValidData(validData, fieldSchema, numRows)
@@ -620,8 +620,8 @@ func fillVectorArrayNullValueImpl(array []*schemapb.VectorField, validData []boo
 }
 
 func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema, numRows int) error {
-	if typeutil.HasFieldDataValidDataConflict(field) {
-		return merr.WrapErrParameterInvalidMsg("field %s cannot set both legacy and field-specific valid_data", field.GetFieldName())
+	if !typeutil.ValidateAndNormalizeFieldDataValidData(field) {
+		return merr.WrapErrParameterInvalidMsg("field %s has different legacy and field-specific valid_data", field.GetFieldName())
 	}
 	var err error
 	validData := typeutil.GetFieldDataValidData(field)

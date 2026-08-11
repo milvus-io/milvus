@@ -125,10 +125,12 @@ func TestFieldDataColumnValidDataSources(t *testing.T) {
 	}{
 		{name: "legacy fallback", legacy: validData},
 		{name: "field-specific", current: validData},
-		{name: "dual source", legacy: validData, current: validData, wantErr: true},
+		{name: "matching dual sources", legacy: validData, current: validData},
+		{name: "mismatched dual sources", legacy: validData, current: []bool{false, true}, wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			col, err := FieldDataColumn(makeField(test.legacy, test.current), 0, -1)
+			field := makeField(test.legacy, test.current)
+			col, err := FieldDataColumn(field, 0, -1)
 			if test.wantErr {
 				assert.Error(t, err)
 				assert.Nil(t, col)
@@ -136,6 +138,8 @@ func TestFieldDataColumnValidDataSources(t *testing.T) {
 			}
 			assert.NoError(t, err)
 			assert.NotNil(t, col)
+			assert.Nil(t, field.GetValidData())
+			assert.Equal(t, validData, field.GetScalars().GetValidData())
 		})
 	}
 }

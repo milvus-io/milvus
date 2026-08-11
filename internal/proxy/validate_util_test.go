@@ -2376,7 +2376,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("rejects dual valid data sources", func(t *testing.T) {
+	t.Run("accepts matching dual valid data sources", func(t *testing.T) {
 		h, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
@@ -2405,8 +2405,42 @@ func Test_validateUtil_Validate(t *testing.T) {
 		}
 
 		err = newValidateUtil().Validate([]*schemapb.FieldData{field}, h, 2)
+		require.NoError(t, err)
+		assert.Nil(t, field.GetValidData())
+		assert.Equal(t, []bool{true, false}, field.GetScalars().GetValidData())
+	})
+
+	t.Run("rejects mismatched dual valid data sources", func(t *testing.T) {
+		h, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					Name:     "value",
+					DataType: schemapb.DataType_Int64,
+					Nullable: true,
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		field := &schemapb.FieldData{
+			FieldId:   100,
+			FieldName: "value",
+			Type:      schemapb.DataType_Int64,
+			ValidData: []bool{true, false},
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					ValidData: []bool{false, true},
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{10, 0}},
+					},
+				},
+			},
+		}
+
+		err = newValidateUtil().Validate([]*schemapb.FieldData{field}, h, 2)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "both legacy and field-specific valid_data")
+		assert.Contains(t, err.Error(), "different legacy and field-specific valid_data")
 	})
 
 	t.Run("nullable vector fills missing valid data", func(t *testing.T) {

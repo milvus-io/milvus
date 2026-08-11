@@ -1216,6 +1216,21 @@ func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo)
 	return nil
 }
 
+// validateAndNormalizeFieldDataValidData validates compatibility fields once
+// when a user payload enters the proxy, then keeps only the current
+// field-specific representation for internal processing.
+func validateAndNormalizeFieldDataValidData(fields []*schemapb.FieldData) error {
+	for _, field := range fields {
+		if !typeutil.ValidateAndNormalizeFieldDataValidData(field) {
+			return merr.WrapErrParameterInvalidMsg(
+				"field %s has different legacy and field-specific valid_data",
+				field.GetFieldName(),
+			)
+		}
+	}
+	return nil
+}
+
 // fillFieldPropertiesOnly fills field properties (FieldId, Type, ElementType) from schema.
 // It assumes that columns have been validated and does not perform validation.
 // Use validateFieldDataColumns before calling this function if validation is needed.
@@ -1962,8 +1977,8 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 		// either have data or all be empty. Partial presence is invalid.
 		hasDataCount := 0
 		for _, subField := range structArrays.StructArrays.Fields {
-			if typeutil.HasFieldDataValidDataConflict(subField) {
-				return merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s' cannot set both legacy and field-specific valid_data",
+			if !typeutil.ValidateAndNormalizeFieldDataValidData(subField) {
+				return merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s' has different legacy and field-specific valid_data",
 					subField.GetFieldName(), structName)
 			}
 			if subFieldHasData(subField) {

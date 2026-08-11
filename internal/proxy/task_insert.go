@@ -110,6 +110,9 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		},
 		Timestamp: it.EndTs(),
 	}
+	if err := validateAndNormalizeFieldDataValidData(it.insertMsg.GetFieldsData()); err != nil {
+		return err
+	}
 
 	collectionName := it.insertMsg.CollectionName
 	log := mlog.With(mlog.String("collectionName", collectionName))
