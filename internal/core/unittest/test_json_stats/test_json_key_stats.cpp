@@ -308,7 +308,7 @@ TEST_P(JsonKeyStatsTest, TestExecutorForShreddingData) {
     TargetBitmapView valid_res_view(valid_res);
 
     auto func = [](const int64_t* data,
-                   const bool* valid_data,
+                   ValidityView valid_data,
                    const int size,
                    TargetBitmapView res,
                    TargetBitmapView valid_res) {

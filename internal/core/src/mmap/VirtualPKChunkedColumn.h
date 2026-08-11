@@ -124,7 +124,7 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
         return true;
     }
 
-    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     StringViews(milvus::OpContext* op_ctx,
                 int64_t chunk_id,
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -133,7 +133,7 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
                   "StringViews not supported for VirtualPKChunkedColumn");
     }
 
-    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     ArrayViews(
         milvus::OpContext* op_ctx,
         int64_t chunk_id,
@@ -142,7 +142,7 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
                   "ArrayViews not supported for VirtualPKChunkedColumn");
     }
 
-    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     VectorArrayViews(
         milvus::OpContext* op_ctx,
         int64_t chunk_id,

@@ -250,19 +250,16 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
         for (size_t i = 0; i < num_data_chunk; i++) {
             auto chunk_size = column->chunk_row_nums(i);
-            const bool* valid_data;
             if (GetShreddingJsonType(path) == JSONType::STRING ||
                 GetShreddingJsonType(path) == JSONType::ARRAY) {
                 auto pw = column->StringViews(op_ctx, i);
-                valid_data = pw.get().second.data();
                 ApplyOnlyValidData(
-                    valid_data, valid_res + processed_size, chunk_size);
+                    pw.get().second, valid_res + processed_size, chunk_size);
             } else {
                 auto pw = column->Span(op_ctx, i);
                 auto chunk = pw.get();
-                valid_data = chunk.valid_data();
                 ApplyOnlyValidData(
-                    valid_data, valid_res + processed_size, chunk_size);
+                    chunk.validity(), valid_res + processed_size, chunk_size);
             }
             processed_size += chunk_size;
         }
@@ -305,7 +302,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                     auto [data_vec, valid_data] = pw.get();
 
                     func(data_vec.data(),
-                         valid_data.data(),
+                         valid_data,
                          chunk_size,
                          res + processed_size,
                          valid_res + processed_size,
@@ -314,28 +311,25 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                     auto pw = column->Span(op_ctx, i);
                     auto chunk = pw.get();
                     const T* data = static_cast<const T*>(chunk.data());
-                    const bool* valid_data = chunk.valid_data();
+                    const auto validity = chunk.validity();
                     func(data,
-                         valid_data,
+                         validity,
                          chunk_size,
                          res + processed_size,
                          valid_res + processed_size,
                          values...);
                 }
             } else {
-                const bool* valid_data;
                 if constexpr (std::is_same_v<T, std::string_view>) {
                     auto pw = column->StringViews(op_ctx, i);
-                    valid_data = pw.get().second.data();
-                    ApplyValidData(valid_data,
+                    ApplyValidData(pw.get().second,
                                    res + processed_size,
                                    valid_res + processed_size,
                                    chunk_size);
                 } else {
                     auto pw = column->Span(op_ctx, i);
                     auto chunk = pw.get();
-                    valid_data = chunk.valid_data();
-                    ApplyValidData(valid_data,
+                    ApplyValidData(chunk.validity(),
                                    res + processed_size,
                                    valid_res + processed_size,
                                    chunk_size);
@@ -628,13 +622,13 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                       const std::string& warmup_policy = "");
 
     void
-    ApplyValidData(const bool* valid_data,
+    ApplyValidData(ValidityView validity,
                    TargetBitmapView res,
                    TargetBitmapView valid_res,
                    const int size) {
-        if (valid_data != nullptr) {
+        if (validity) {
             for (int i = 0; i < size; i++) {
-                if (!valid_data[i]) {
+                if (!validity[i]) {
                     res[i] = valid_res[i] = false;
                 }
             }
@@ -642,12 +636,12 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     }
 
     void
-    ApplyOnlyValidData(const bool* valid_data,
+    ApplyOnlyValidData(ValidityView validity,
                        TargetBitmapView valid_res,
                        const int size) {
-        if (valid_data != nullptr) {
+        if (validity) {
             for (int i = 0; i < size; i++) {
-                if (!valid_data[i]) {
+                if (!validity[i]) {
                     valid_res[i] = false;
                 }
             }
