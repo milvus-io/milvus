@@ -42,19 +42,14 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	if err != nil {
 		return nil, err
 	}
-	adminClient, err := b.getPulsarAdminClient()
-	if err != nil {
-		c.Close()
-		return nil, err
-	}
 	return &openerImpl{
-		tenant: tenant,
-		c:      c,
-		topics: adminClient.Topics(),
+		tenant:        tenant,
+		c:             c,
+		newTopicAdmin: b.getPulsarTopicAdmin,
 	}, nil
 }
 
-func (b *builderImpl) getPulsarAdminClient() (admin.Client, error) {
+func (b *builderImpl) getPulsarTopicAdmin() (pulsarTopicAdmin, error) {
 	cfg := &paramtable.Get().PulsarCfg
 	adminClient, err := admin.New(&pulsaradminconfig.Config{
 		WebServiceURL: cfg.WebAddress.GetValue(),
@@ -64,7 +59,7 @@ func (b *builderImpl) getPulsarAdminClient() (admin.Client, error) {
 	if err != nil {
 		return nil, merr.WrapErrMqInternal(err, "build pulsar admin client")
 	}
-	return adminClient, nil
+	return adminClient.Topics(), nil
 }
 
 // getPulsarClientOptions gets the pulsar client options from the config.

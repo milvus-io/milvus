@@ -66,16 +66,8 @@ func TestReadOnlyMissingTopicDoesNotAutoCreate(t *testing.T) {
 		Name:          "missing-historical-reader",
 		DeliverPolicy: options.DeliverPolicyAll(),
 	})
-	require.NoError(t, err)
-	defer scanner.Close()
-
-	select {
-	case _, ok := <-scanner.Chan():
-		require.False(t, ok)
-		require.ErrorIs(t, scanner.Error(), merr.ErrMqTopicNotFound)
-	case <-time.After(15 * time.Second):
-		t.Fatal("read-only kafka scanner did not reject the missing topic")
-	}
+	require.Nil(t, scanner)
+	require.ErrorIs(t, err, merr.ErrMqTopicNotFound)
 }
 
 func TestGetBasicConfig(t *testing.T) {
