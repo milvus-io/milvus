@@ -375,6 +375,18 @@ func createKafkaClient(t *testing.T) *kafkaClient {
 	return kc
 }
 
+func TestNewProducerConfigUsesConfiguredMessageMaxBytes(t *testing.T) {
+	config := &paramtable.Get().KafkaCfg
+	oldValue := config.ProducerMessageMaxBytes.SwapTempValue("4096")
+	defer config.ProducerMessageMaxBytes.SwapTempValue(oldValue)
+
+	kc := NewKafkaClientInstance(getKafkaBrokerList())
+	producerConfig := kc.newProducerConfig()
+	value, err := producerConfig.Get("message.max.bytes", nil)
+	assert.NoError(t, err)
+	assert.Equal(t, 4096, value)
+}
+
 func createConsumer(t *testing.T,
 	kc *kafkaClient,
 	topic string,
