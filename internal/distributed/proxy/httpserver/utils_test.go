@@ -1191,7 +1191,6 @@ func TestCheckAndSetData(t *testing.T) {
 			})
 		}
 	})
-
 	t.Run("invalid field name with dynamic field", func(t *testing.T) {
 		body := []byte("{\"data\": {\"id\": 0,\"$meta\": 2,\"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
 		coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)

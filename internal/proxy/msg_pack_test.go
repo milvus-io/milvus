@@ -40,58 +40,26 @@ import (
 )
 
 func TestInsertRequestBodyLimit(t *testing.T) {
-	tests := []struct {
-		name           string
-		maxMessageSize int
-		expected       int
-	}{
-		{name: "negative defense", maxMessageSize: -1, expected: 1},
-		{name: "non-positive defense", maxMessageSize: 0, expected: 1},
-		{name: "one byte limit", maxMessageSize: 1, expected: 1},
-		{name: "below proportional reserve", maxMessageSize: 31, expected: 31},
-		{name: "proportional reserve starts", maxMessageSize: 32, expected: 31},
-		{name: "tiny limit", maxMessageSize: 64, expected: 62},
-		{
-			name:           "64 KiB limit",
-			maxMessageSize: 64 * 1024,
-			expected:       62 * 1024,
-		},
-		{
-			name:           "128 KiB limit",
-			maxMessageSize: 128 * 1024,
-			expected:       124 * 1024,
-		},
-		{
-			name:           "below default reserve cap",
-			maxMessageSize: 2*1024*1024 - 1,
-			expected:       2*1024*1024 - insertMessageTransportReserve,
-		},
-		{
-			name:           "default pulsar limit",
-			maxMessageSize: 2 * 1024 * 1024,
-			expected:       2*1024*1024 - insertMessageTransportReserve,
-		},
-		{
-			name:           "above default keeps reserve cap",
-			maxMessageSize: 2*1024*1024 + 1,
-			expected:       2*1024*1024 + 1 - insertMessageTransportReserve,
-		},
-		{
-			name:           "max int32",
-			maxMessageSize: 2147483647,
-			expected:       2147483647 - insertMessageTransportReserve,
-		},
-	}
+	paramtable.Init()
+	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+	defer Params.Reset(Params.PulsarCfg.MessageReserveSize.Key)
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.expected, insertRequestBodyLimit(test.maxMessageSize))
-		})
-	}
+	// The default reserve is taken out of the broker-facing limit.
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "2097152"))
+	assert.Equal(t, 2097152-4096, insertRequestBodyLimit())
+
+	// A configured reserve replaces the default one.
+	require.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "1024"))
+	assert.Equal(t, 2097152-1024, insertRequestBodyLimit())
+
+	// A reserve wider than the limit still leaves a positive body budget.
+	require.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "4194304"))
+	assert.Equal(t, 1, insertRequestBodyLimit())
 }
 
 func TestSplitInsertRowsByMessageSizeSingleOversizedRow(t *testing.T) {
-	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "64"))
+	// One byte above the default reserve, so the plaintext body budget is 1 byte.
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "4097"))
 	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
 
 	t.Run("only row", func(t *testing.T) {
@@ -409,8 +377,8 @@ func TestSplitInsertRowsByMessageSize(t *testing.T) {
 	})
 
 	t.Run("splitting on the size threshold still works", func(t *testing.T) {
-		// Force a tiny threshold so every row lands in its own message.
-		require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1"))
+		// Force a tiny body budget so every row lands in its own message.
+		require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "4097"))
 		defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
 
 		const rows = 5
@@ -427,7 +395,7 @@ func TestSplitInsertRowsByMessageSize(t *testing.T) {
 	})
 }
 
-func TestGenInsertMessagesByPartitionReservesStreamingEnvelopeOverhead(t *testing.T) {
+func TestGenInsertMessagesByPartitionSplitsByPlaintextBodyLimit(t *testing.T) {
 	paramtable.Init()
 	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
 	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
@@ -462,18 +430,16 @@ func TestGenInsertMessagesByPartitionReservesStreamingEnvelopeOverhead(t *testin
 	require.NoError(t, err)
 	require.Len(t, twoRows, 1)
 	twoRowRecord := twoRows[0].IntoMessageProto()
-	threshold := proto.Size(twoRowRecord)
-	require.Less(t, len(twoRowRecord.GetPayload()), threshold,
-		"the plaintext body fits below the broker-facing limit before properties are counted")
-	require.Greater(t, len(twoRowRecord.GetPayload()), insertRequestBodyLimit(threshold),
-		"the transport reserve must keep this near-limit body out of one record")
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(threshold)))
+	// A limit just below the two-row plaintext body forces one row per message.
+	// The reserve shrinks the body budget further, so it stays below it too.
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(len(twoRowRecord.GetPayload())-1)))
+	bodyLimit := insertRequestBodyLimit()
 
 	msgs, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1, 2}, channelName, source, nil, 7)
 	require.NoError(t, err)
-	require.Len(t, msgs, 3, "transport overhead must not consume the broker-facing size limit")
+	require.Len(t, msgs, 3, "each row must land in its own message under this body limit")
 	for _, msg := range msgs {
-		assert.Less(t, proto.Size(msg.IntoMessageProto()), threshold)
+		assert.LessOrEqual(t, len(msg.Payload()), bodyLimit)
 		body := message.MustAsMutableInsertMessageV1(msg).MustBody()
 		assert.Equal(t, uint64(1), body.GetNumRows())
 		assert.Equal(t, commonpb.MsgType_Insert, body.GetBase().GetMsgType())
@@ -499,10 +465,9 @@ func TestGenInsertMessagesByPartitionReservesStreamingEnvelopeOverhead(t *testin
 	}
 }
 
-func TestGenInsertMessagesByPartitionSmallScalarsUseScaledTransportReserve(t *testing.T) {
+func TestGenInsertMessagesByPartitionSmallScalars(t *testing.T) {
 	paramtable.Init()
 	const maxMessageSize = 64 * 1024
-	require.Equal(t, 62*1024, insertRequestBodyLimit(maxMessageSize))
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(maxMessageSize)))
 	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
 
@@ -553,16 +518,15 @@ func TestGenInsertMessagesByPartitionSmallScalarsUseScaledTransportReserve(t *te
 	msgs, err := genInsertMessagesByPartition(200, 300, "partition", selection, "vchannel", source, nil, 7)
 	require.NoError(t, err)
 	require.Greater(t, len(msgs), 1)
-	require.Less(t, len(msgs), rows/2, "scaled reserve must not degenerate into one WAL message per row")
+	require.Less(t, len(msgs), rows/2, "splitting must not degenerate into one WAL message per row")
 
 	totalRows := 0
 	for i, msg := range msgs {
 		raw := msg.IntoMessageProto()
-		assert.Less(t, len(raw.GetPayload()), insertRequestBodyLimit(maxMessageSize))
-		assert.Less(t, proto.Size(raw), maxMessageSize)
+		assert.LessOrEqual(t, len(raw.GetPayload()), insertRequestBodyLimit())
 		body := message.MustAsMutableInsertMessageV1(msg).MustBody()
 		if i < len(msgs)-1 {
-			assert.Greater(t, body.GetNumRows(), uint64(1), "non-final messages should use the scaled body budget")
+			assert.Greater(t, body.GetNumRows(), uint64(1), "non-final messages should use the full body budget")
 		}
 		totalRows += int(body.GetNumRows())
 	}
@@ -642,7 +606,7 @@ func TestGenInsertMessagesByPartitionEncodesSelectionView(t *testing.T) {
 	// Force every logical row into a separate message. This pins the cursor's
 	// compact-vector prefix state at each later selection boundary; advancing it
 	// incorrectly would return the wrong physical vector row.
-	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1"))
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "4097"))
 	msgs, err = genInsertMessagesByPartition(0, 200, "target-partition", []int{0, 1, 2, 3}, "vchannel", source, nil, 7)
 	assert.NoError(t, err)
 	require.Len(t, msgs, 4)

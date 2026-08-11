@@ -287,25 +287,65 @@ func TestServiceParam(t *testing.T) {
 		tests := []struct {
 			name     string
 			value    string
+			reserve  string
 			expected int
 		}{
 			{name: "valid", value: "3145728", expected: 3145728},
 			{name: "max int32", value: "2147483647", expected: 2147483647},
+			{name: "just above reserve", value: "4097", expected: 4097},
+			{name: "equal to reserve", value: "4096", expected: 2097152},
+			{name: "below reserve", value: "4095", expected: 2097152},
 			{name: "above int32", value: "2147483648", expected: 2097152},
 			{name: "invalid", value: "not-a-number", expected: 2097152},
 			{name: "zero", value: "0", expected: 2097152},
 			{name: "negative", value: "-1", expected: 2097152},
 			{name: "overflow", value: "9223372036854775808", expected: 2097152},
+			{name: "custom reserve accepts smaller limit", value: "1025", reserve: "1024", expected: 1025},
+			{name: "custom reserve rejects equal limit", value: "1024", reserve: "1024", expected: 2097152},
+			{name: "zero reserve accepts tiny limit", value: "1", reserve: "0", expected: 1},
 		}
 
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
 				base := NewBaseTable(SkipRemote(true))
 				assert.NoError(t, base.Save("pulsar.maxMessageSize", test.value))
+				if test.reserve != "" {
+					assert.NoError(t, base.Save("pulsar.messageReserveSize", test.reserve))
+				}
 
 				var pulsarConfig PulsarConfig
 				pulsarConfig.Init(base)
 				assert.Equal(t, test.expected, pulsarConfig.MaxMessageSize.GetAsInt())
+			})
+		}
+	})
+
+	t.Run("test pulsar message reserve size formatter", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			value    string
+			expected int
+		}{
+			{name: "default", value: "", expected: 4096},
+			{name: "valid", value: "8192", expected: 8192},
+			{name: "zero", value: "0", expected: 0},
+			{name: "max int32", value: "2147483647", expected: 2147483647},
+			{name: "above int32", value: "2147483648", expected: 4096},
+			{name: "invalid", value: "not-a-number", expected: 4096},
+			{name: "negative", value: "-1", expected: 4096},
+			{name: "overflow", value: "9223372036854775808", expected: 4096},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				base := NewBaseTable(SkipRemote(true))
+				if test.value != "" {
+					assert.NoError(t, base.Save("pulsar.messageReserveSize", test.value))
+				}
+
+				var pulsarConfig PulsarConfig
+				pulsarConfig.Init(base)
+				assert.Equal(t, test.expected, pulsarConfig.MessageReserveSize.GetAsInt())
 			})
 		}
 	})

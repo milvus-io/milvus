@@ -34,11 +34,17 @@ import (
 )
 
 const (
-	defaultEtcdLogLevel         = "info"
-	defaultEtcdLogPath          = "stdout"
+	defaultEtcdLogLevel = "info"
+	defaultEtcdLogPath  = "stdout"
+
 	defaultPulsarMaxMessageSize = "2097152"
-	KafkaProducerConfigPrefix   = "kafka.producer."
-	KafkaConsumerConfigPrefix   = "kafka.consumer."
+	// defaultPulsarMessageReserveSize is the headroom kept outside the plaintext
+	// message body for the streaming message header, cipher metadata/expansion,
+	// properties added before WAL append, and Pulsar message metadata.
+	defaultPulsarMessageReserveSize = "4096"
+
+	KafkaProducerConfigPrefix = "kafka.producer."
+	KafkaConsumerConfigPrefix = "kafka.consumer."
 
 	defaultLocalStoragePath = "/var/lib/milvus/data"
 )
@@ -1145,11 +1151,12 @@ Valid values: [auto, enable, disable]`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- pulsar ---
 type PulsarConfig struct {
-	Address        ParamItem `refreshable:"false"`
-	Port           ParamItem `refreshable:"false"`
-	WebAddress     ParamItem `refreshable:"false"`
-	WebPort        ParamItem `refreshable:"false"`
-	MaxMessageSize ParamItem `refreshable:"true"`
+	Address            ParamItem `refreshable:"false"`
+	Port               ParamItem `refreshable:"false"`
+	WebAddress         ParamItem `refreshable:"false"`
+	WebPort            ParamItem `refreshable:"false"`
+	MaxMessageSize     ParamItem `refreshable:"true"`
+	MessageReserveSize ParamItem `refreshable:"true"`
 
 	// support auth
 	AuthPlugin ParamItem `refreshable:"false"`
@@ -1226,6 +1233,27 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 	}
 	p.WebAddress.Init(base.mgr)
 
+	p.MessageReserveSize = ParamItem{
+		Key:          "pulsar.messageReserveSize",
+		Version:      "3.0.0",
+		DefaultValue: defaultPulsarMessageReserveSize,
+		Doc: `The headroom reserved out of pulsar.maxMessageSize for message overhead outside the plaintext body. Unit: Byte.
+A produced record carries a streaming message header, properties added before WAL append, cipher metadata/expansion, and Pulsar message metadata on top of the body, so the producer budgets only pulsar.maxMessageSize minus this value for the body itself.
+Must be a non-negative 32-bit integer; invalid or out-of-range values fall back to the default 4 KiB. pulsar.maxMessageSize must stay greater than this value.`,
+		Export: true,
+		Formatter: func(value string) string {
+			reserveSize, err := strconv.ParseInt(value, 10, 32)
+			if err != nil || reserveSize < 0 {
+				mlog.Warn(context.TODO(), "pulsar.messageReserveSize must be a non-negative 32-bit integer, using default",
+					mlog.String("configured", value),
+					mlog.String("default", defaultPulsarMessageReserveSize))
+				return defaultPulsarMessageReserveSize
+			}
+			return value
+		},
+	}
+	p.MessageReserveSize.Init(base.mgr)
+
 	p.MaxMessageSize = ParamItem{
 		Key:          "pulsar.maxMessageSize",
 		Version:      "2.0.0",
@@ -1233,13 +1261,15 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Doc: `The maximum size of each message in Pulsar. Unit: Byte.
 By default, Pulsar can transmit at most 2 MiB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
 If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
-Invalid, out-of-int32-range, zero, or negative values fall back to the default 2 MiB limit.`,
+Must be a 32-bit integer greater than pulsar.messageReserveSize so a positive plaintext body budget remains; invalid, out-of-range, or too small values fall back to the default 2 MiB limit.`,
 		Export: true,
 		Formatter: func(value string) string {
 			maxMessageSize, err := strconv.ParseInt(value, 10, 32)
-			if err != nil || maxMessageSize <= 0 {
-				mlog.Warn(context.TODO(), "pulsar.maxMessageSize must be a positive 32-bit integer, using default",
+			reserveSize := int64(p.MessageReserveSize.GetAsInt())
+			if err != nil || maxMessageSize <= reserveSize {
+				mlog.Warn(context.TODO(), "pulsar.maxMessageSize must be a 32-bit integer greater than pulsar.messageReserveSize, using default",
 					mlog.String("configured", value),
+					mlog.Int64("messageReserveSize", reserveSize),
 					mlog.String("default", defaultPulsarMaxMessageSize))
 				return defaultPulsarMaxMessageSize
 			}
