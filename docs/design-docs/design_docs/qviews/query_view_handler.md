@@ -29,6 +29,9 @@
 - **Report path unity**: All reports (immediate and asynchronous) flow through the same `OnReport → pendingReports → send loop → stream.Send` path.
 - **Callback replacement**: When a stream reconnects and Coord re-pushes, `ApplyViews` replaces old `OnReport` callbacks with new ones. Old callbacks write to a stopped `pendingReports` — silently ignored, no panic.
 - **Shard-granularity locking**: Outer mutex protects the shard map; per-shard mutex serializes SM operations. Views on different shards can be applied concurrently.
+- **Reachable shard ownership**: An empty shard marks itself detached before
+  invoking its callback. The handler deletes only the identical map instance,
+  and retries a batch rejected by a detached shard on the current replacement.
 
 ## 2. ViewSyncServer
 
@@ -121,6 +124,14 @@ Duplicate QueryViewKey handling is owned by the handler/SM pair, not by
 
 **Persist-before-report invariant**: Persistence is always executed before report. If SN crashes after reporting but before persisting, Coord would believe the state advanced while SN lost it.
 
+The StreamingNode catalog wraps its metadata KV with
+`ReliableWriteMetaKv`, so transient retry and undetermined-write handling are
+centralized in the metastore layer. The handler passes the WAL lifecycle
+context to catalog writes so shutdown cancels an in-progress reliable write.
+A canceled write does not advance the corresponding report or Release. Other
+write failures are terminal at this layer; the handler does not implement a
+second persistence retry mechanism above `ReliableWriteMetaKv`.
+
 **Full-view persistence invariant**: The SN-persisted Up view is the complete
 `QueryViewOfShard` pushed by Coord, not just `QueryViewOfStreamingNode`. The
 StreamingNode-local resource manager only consumes the SN portion. Retaining
@@ -141,8 +152,10 @@ SN persists only the Up state. On crash recovery:
 
 1. Load persisted full Up shard views from `Catalog`.
 2. Create SMs in UpRecovering state (Coord-visible as Up).
-3. Call the injected `resMgr.Acquire(OnReady, OnUnrecoverable)` for each view.
-4. `OnReady` drives UpRecovering → Up → report Up. `OnUnrecoverable` drives
+3. Construct each recovered shard, install its identity-checked empty callback,
+   and publish it in the handler map.
+4. Call the injected `resMgr.Acquire(OnReady, OnUnrecoverable)` for each view.
+5. `OnReady` drives UpRecovering → Up → report Up. `OnUnrecoverable` drives
    UpRecovering → Unrecoverable locally without reporting to Coord and retains
    persisted recovery metadata until Coord later pushes Dropped.
 
@@ -162,6 +175,15 @@ When Coord pushes Dropped, the SM enters Dropping. The persist behavior depends 
 If future resource wiring drives UpRecovering to Unrecoverable, the state
 machine retains persisted Up metadata until Coord's Dropped push; deletion is
 deferred to that Dropping transition.
+
+### 4.5 SN: Handoff Release Ownership
+
+Normal Dropping and `CloseForHandoff` share one release record per view entry.
+The first path starts `ResourceManager.Release` and owns a completion channel;
+subsequent paths only reuse and wait on that channel. Handoff detaches and
+clears the shard under its mutex, then waits without the mutex for every
+existing release callback. This guarantees one Release invocation per view and
+still waits for cleanup already in flight.
 
 ## 5. Liveness Contracts
 

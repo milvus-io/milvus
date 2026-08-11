@@ -2,8 +2,10 @@ package streamingnode
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -17,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -61,7 +64,9 @@ func TestCatalogConsumeCheckpoint(t *testing.T) {
 
 	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Unset()
 	kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("err"))
-	err = catalog.SaveConsumeCheckpoint(ctx, "p1", &streamingpb.WALCheckpoint{})
+	canceledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	err = catalog.SaveConsumeCheckpoint(canceledCtx, "p1", &streamingpb.WALCheckpoint{})
 	assert.Error(t, err)
 }
 
@@ -109,6 +114,36 @@ func TestCatalogQueryViews(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, views, 1)
 	assert.Equal(t, int64(31), views[0].GetMeta().GetVersion().GetQueryVersion())
+}
+
+func TestCatalogQueryViewWritesUseReliableMetaKV(t *testing.T) {
+	metaKV := &etcdkv.EmbedEtcdKV{}
+	var attempts atomic.Int32
+	mockWrite := mockey.Mock((*etcdkv.EmbedEtcdKV).MultiSaveAndRemove).
+		To(func(_ *etcdkv.EmbedEtcdKV, _ context.Context, _ map[string]string, _ []string, _ ...predicates.Predicate) error {
+			if attempts.Add(1) == 1 {
+				return merr.WrapErrServiceUnavailableMsg("injected metastore failure")
+			}
+			return nil
+		}).Build()
+	t.Cleanup(func() { mockWrite.UnPatch() })
+
+	view := &viewpb.QueryViewOfShard{
+		Meta: &viewpb.QueryViewMeta{
+			CollectionId: 1,
+			ReplicaId:    10,
+			Vchannel:     "p1_1v0",
+			Version: &viewpb.QueryViewVersion{
+				DataVersion:  &viewpb.DataVersion{StreamingVersion: 20},
+				QueryVersion: 30,
+			},
+			State: viewpb.QueryViewState_QueryViewStateUp,
+		},
+		StreamingNode: &viewpb.QueryViewOfStreamingNode{},
+	}
+
+	require.NoError(t, NewCataLog(metaKV).SaveQueryViews(context.Background(), "p1", []*viewpb.QueryViewOfShard{view}))
+	assert.Equal(t, int32(2), attempts.Load())
 }
 
 func TestBuildQueryViewKeyRejectsMismatchedIdentity(t *testing.T) {

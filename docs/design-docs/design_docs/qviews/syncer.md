@@ -76,7 +76,7 @@ Each `resumableSyncer` owns a `pendingSyncQueryViews` instance that tracks views
 pendingSyncQueryViews
 ├── mu sync.Mutex
 ├── entries map[QueryViewKey]SyncView   // pending entries awaiting response
-├── unsent  []*QueryViewOfShard         // protos accumulated by Upsert, drained by sendLoop
+├── unsent  map[QueryViewKey]*QueryViewOfShard // latest incremental proto per key
 └── notify  chan struct{} (cap 1)       // signaled by Upsert
 ```
 
@@ -84,7 +84,7 @@ pendingSyncQueryViews
 
 | Method | Description |
 |---|---|
-| `Upsert(sv)` | Insert/replace entry, append proto to `unsent`, signal `notify`. |
+| `Upsert(sv)` | Insert/replace the entry and its latest `unsent` proto, then signal `notify`. |
 | `Ready()` | Returns the `notify` channel for `sendLoop` to select on. |
 | `DrainUnsent()` | Atomically drain and return `unsent` protos. |
 | `MatchResponse(pb)` | Match response to entry. Invokes `OnSyncResponse` outside the pending mutex. If it returns true, delete the entry only when the stored revision still matches. |
@@ -97,6 +97,9 @@ pendingSyncQueryViews
 - `MatchResponse` is called from `recvLoop` (per-node goroutine).
 - `MatchResponse` does not hold the pending mutex while calling `OnSyncResponse`; callbacks can enqueue follow-up syncs without self-deadlock.
 - Each pending entry carries a revision. If a callback enqueues a replacement while it runs, a true return from the old callback only deletes the entry when the revision still matches.
+- `unsent` is latest-wins by QueryViewKey, so repeated updates while a node is
+  disconnected consume memory proportional to pending keys rather than update
+  count. Reconnection still re-pushes the authoritative `entries` snapshot.
 
 ## 4. resumableSyncer
 
@@ -107,15 +110,24 @@ Per-node component that maintains a gRPC bidirectional stream.
 ```
 loop() goroutine:
     for ctx not cancelled:
-        stream = OpenSyncStream()       // backoff on failure
+        attemptCtx = WithCancel(ctx)
+        stream = OpenSyncStream(attemptCtx)
         rePush(stream)                  // DrainUnsent + CollectProtos → sendBatched
-        if rePush fails → continue      // skip to reconnect
+        if rePush fails → cancel + CloseSend + backoff
 
-        start sendLoop goroutine        // Ready() → DrainUnsent → sendBatched
-        recvLoop (current goroutine)    // Recv → MatchResponse
+        start sendLoop(attemptCtx)       // Ready() → DrainUnsent → sendBatched
+        start recvLoop(attemptCtx)       // Recv → MatchResponse
 
-        stream broke → cancel sendLoop → wait → backoff → retry
+        either loop exits
+        → cancel attemptCtx → CloseSend → wait for both loops
+        → backoff → retry
 ```
+
+Open failures, re-push failures, send failures, receive failures, and immediate
+close responses all enter the same reconnect backoff. The exponential backoff
+is reset only after a valid QueryView response is received or the stream stays
+healthy for the stable interval. Canceling the parent context interrupts both
+the active attempt and its reconnect delay.
 
 ### Batched Sending
 
@@ -171,8 +183,13 @@ Key design decisions:
 
 ### Concurrency
 
-- `getOrCreateSyncer` holds `s.mu` while calling `IsNodeAlive` (local cache lookup). This ensures mutual exclusion with `drainRemovedNodes`, preventing a race where a syncer is created for a node that was just removed.
-- `rs.Sync(views)` is called after releasing the lock. If `drainRemovedNodes` closes the syncer concurrently, views added after drain are lost. This is acceptable because the upper-layer state machine will retry.
+- `syncViewsToNode` holds `s.mu` across syncer lookup, `IsNodeAlive` (a local
+  cache lookup), lazy creation, and `rs.Sync(views)`. This is mutually exclusive
+  with `drainRemovedNodes`, so a node-change drain cannot miss views already
+  accepted by `SyncViews`.
+- If the node is already absent, `syncViewsToNode` returns the affected views
+  and `SyncViews` invokes `OnQueryNodeLost` after releasing `s.mu`, avoiding
+  callback re-entry while the syncer map lock is held.
 
 ### Close
 
@@ -269,12 +286,13 @@ resumableSyncer
 ├── pending *pendingSyncQueryViews                  // per-node pending tracker
 ├── ctx / cancel
 └── loop goroutine:
-        create stream → rePush → sendLoop + recvLoop → on break, backoff → retry
+        attempt context → create stream → rePush → sendLoop + recvLoop
+        → cancel + CloseSend + join → backoff → retry
 
 pendingSyncQueryViews
 ├── mu sync.Mutex
 ├── entries map[QueryViewKey]SyncView
-├── unsent []*QueryViewOfShard
+├── unsent map[QueryViewKey]*QueryViewOfShard
 └── notify chan struct{} (cap 1)
 ```
 

@@ -49,7 +49,7 @@ import (
 //	        └── 456398247938
 func NewCataLog(metaKV kv.MetaKv) metastore.StreamingNodeCataLog {
 	return &catalog{
-		metaKV: metaKV,
+		metaKV: kv.NewReliableWriteMetaKv(metaKV),
 	}
 }
 

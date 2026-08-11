@@ -22,6 +22,8 @@ import (
 type snShardView struct {
 	mu              sync.Mutex
 	closed          bool
+	detached        bool
+	ctx             context.Context
 	pchannel        string
 	shardID         qviews.ShardID
 	collectionID    int64
@@ -29,19 +31,21 @@ type snShardView struct {
 	views           map[qviews.QueryViewVersion]*snViewEntry
 	catalog         metastore.StreamingNodeCataLog
 	resMgr          StreamingNodeResourceManager
-	onEmpty         func() // called (under mu) when the last view entry is removed
+	onEmpty         func(*snShardView) // called (under mu) when the last view entry is removed
 }
 
 // snViewEntry pairs an ApplyView (carrying the OnReport callback) with its state machine.
 type snViewEntry struct {
 	handler.ApplyView
-	sm *snQueryViewStateMachine
+	sm             *snQueryViewStateMachine
+	releaseStarted bool
+	releaseDone    chan struct{}
 }
 
-// recoverSnShardView constructs an snShardView from pre-built recovered state machines
-// and starts recovery for each view via ResourceManager (under shard lock).
-// Called during handler construction.
+// recoverSnShardView constructs an snShardView from pre-built recovered state machines.
+// Recovery starts only after the handler publishes the shard.
 func recoverSnShardView(
+	ctx context.Context,
 	pchannel string,
 	shardID qviews.ShardID,
 	views map[qviews.QueryViewVersion]*snQueryViewStateMachine,
@@ -63,6 +67,7 @@ func recoverSnShardView(
 		}
 	}
 	s := &snShardView{
+		ctx:      ctx,
 		pchannel: pchannel,
 		shardID:  shardID,
 		views:    entries,
@@ -74,22 +79,29 @@ func recoverSnShardView(
 		break
 	}
 
-	// Start recovery for each view via ResourceManager under shard lock.
-	versions := make([]qviews.QueryViewVersion, 0, len(views))
-	for version := range views {
+	return s
+}
+
+// startRecovery starts resource acquisition for recovered views after the
+// handler has published the shard and installed its empty callback.
+func (s *snShardView) startRecovery() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	versions := make([]qviews.QueryViewVersion, 0, len(s.views))
+	for version := range s.views {
 		versions = append(versions, version)
 	}
 	sort.Slice(versions, func(i, j int) bool {
 		return versions[j].GT(versions[i])
 	})
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, version := range versions {
-		key := qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version}
+		key := qviews.QueryViewKey{ShardID: s.shardID, QueryViewVersion: version}
+		entry := s.views[version]
 		v := version // capture loop variable
-		resMgr.Acquire(AcquireResource{
+		s.resMgr.Acquire(AcquireResource{
 			Key:  key,
-			Meta: views[version].Meta(),
+			Meta: entry.sm.Meta(),
 			OnReady: func() {
 				s.notifyRecoveringDone(v)
 			},
@@ -98,16 +110,14 @@ func recoverSnShardView(
 			},
 		})
 	}
-
-	return s
 }
 
 // ApplyViews applies a batch of coord-pushed views atomically.
-func (s *snShardView) ApplyViews(views []handler.ApplyView) {
+func (s *snShardView) ApplyViews(views []handler.ApplyView) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
-		return
+	if s.closed || s.detached {
+		return false
 	}
 
 	for i := range views {
@@ -122,37 +132,26 @@ func (s *snShardView) ApplyViews(views []handler.ApplyView) {
 			s.applyOneLocked(&views[i])
 		}
 	}
+	return true
 }
 
 func (s *snShardView) CloseForHandoff() {
 	s.mu.Lock()
 	s.closed = true
-	releases := make([]qviews.QueryViewKey, 0, len(s.views))
+	s.detached = true
+	releases := make([]<-chan struct{}, 0, len(s.views))
 	for version, entry := range s.views {
-		key := entry.View.QueryViewKey()
-		if key.QueryViewVersion == (qviews.QueryViewVersion{}) {
-			key = qviews.QueryViewKey{ShardID: s.shardID, QueryViewVersion: version}
-		}
-		releases = append(releases, key)
+		releases = append(releases, s.startReleaseLocked(version, entry))
 	}
 	s.views = make(map[qviews.QueryViewVersion]*snViewEntry)
 	if s.onEmpty != nil {
-		s.onEmpty()
+		s.onEmpty(s)
 	}
 	s.mu.Unlock()
 
-	var wg sync.WaitGroup
-	wg.Add(len(releases))
-	for _, key := range releases {
-		k := key
-		s.resMgr.Release(ReleaseResource{
-			Key: k,
-			OnDropped: func() {
-				wg.Done()
-			},
-		})
+	for _, releaseDone := range releases {
+		<-releaseDone
 	}
-	wg.Wait()
 }
 
 // applyOneLocked applies a single view. Caller must hold s.mu.
@@ -296,7 +295,9 @@ func (s *snShardView) notifyDropped(version qviews.QueryViewVersion) {
 // persisting, Coord would believe the state advanced while SN lost it.
 // Caller must hold s.mu.
 func (s *snShardView) consumeReportPersistAndCleanup(version qviews.QueryViewVersion, entry *snViewEntry) {
-	s.consumeAndPersist(entry)
+	if !s.consumeAndPersist(entry) {
+		return
+	}
 	s.consumeReport(entry)
 	s.consumeAndRelease(version, entry)
 	s.cleanupIfDropped(version, entry)
@@ -311,21 +312,26 @@ func (s *snShardView) cleanupIfDropped(version qviews.QueryViewVersion, entry *s
 	}
 	delete(s.views, version)
 	if len(s.views) == 0 && s.onEmpty != nil {
-		s.onEmpty()
+		s.detached = true
+		s.onEmpty(s)
 	}
 }
 
 // consumeAndPersist drains pending persist and writes to catalog.
 // The catalog handles save vs delete based on the view's state.
 // Caller must hold s.mu.
-func (s *snShardView) consumeAndPersist(entry *snViewEntry) {
+func (s *snShardView) consumeAndPersist(entry *snViewEntry) bool {
 	persist := entry.sm.ConsumePersist()
 	if persist == nil {
-		return
+		return true
 	}
-	if err := s.catalog.SaveQueryViews(context.Background(), s.pchannel, []*viewpb.QueryViewOfShard{persist}); err != nil {
+	if err := s.catalog.SaveQueryViews(s.ctx, s.pchannel, []*viewpb.QueryViewOfShard{persist}); err != nil {
+		if s.ctx.Err() != nil {
+			return false
+		}
 		panic(merr.Wrapf(err, "persist query view %s failed", persist.GetMeta().GetVchannel()))
 	}
+	return true
 }
 
 // consumeAndRelease drains pending release and calls ResourceManager.Release.
@@ -334,11 +340,28 @@ func (s *snShardView) consumeAndRelease(version qviews.QueryViewVersion, entry *
 	if !entry.sm.ConsumeRelease() {
 		return
 	}
+	s.startReleaseLocked(version, entry)
+}
+
+// startReleaseLocked starts exactly one resource release for an entry and
+// returns the completion channel shared by normal dropping and handoff.
+// Caller must hold s.mu.
+func (s *snShardView) startReleaseLocked(version qviews.QueryViewVersion, entry *snViewEntry) <-chan struct{} {
+	if entry.releaseStarted {
+		return entry.releaseDone
+	}
+	entry.releaseStarted = true
+	entry.releaseDone = make(chan struct{})
 	key := entry.View.QueryViewKey()
+	if key.QueryViewVersion == (qviews.QueryViewVersion{}) {
+		key = qviews.QueryViewKey{ShardID: s.shardID, QueryViewVersion: version}
+	}
 	s.resMgr.Release(ReleaseResource{
 		Key: key,
 		OnDropped: func() {
+			defer close(entry.releaseDone)
 			s.notifyDropped(version)
 		},
 	})
+	return entry.releaseDone
 }

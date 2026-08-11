@@ -306,60 +306,51 @@ func (m *ShardViewManager) RequestRelease(_ context.Context) error {
 //
 // Must be called under m.mu.
 func (m *ShardViewManager) processStateMachine(sm *CoordQueryViewStateMachine) {
-	for {
-		// 1. ConsumeFlush persist effect → collect into pending batch.
-		flush := sm.ConsumeFlush()
-		if flush.Persist != nil {
-			m.pendingPersists = append(m.pendingPersists, flush.Persist)
+	// 1. ConsumeFlush persist effect → collect into pending batch.
+	flush := sm.ConsumeFlush()
+	if flush.Persist != nil {
+		m.pendingPersists = append(m.pendingPersists, flush.Persist)
+	}
+
+	// 2. ConsumeFlush sync effects → collect into pending batch.
+	if len(flush.Sync) > 0 {
+		m.pendingSyncs = append(m.pendingSyncs, syncEntry{sm: sm, views: flush.Sync})
+	}
+
+	// 3. Handle cascading effects based on current state.
+	switch sm.State() {
+	case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady:
+		m.preparingView = sm
+
+	case qviews.QueryViewStateUp:
+		if m.preparingView == sm {
+			m.preparingView = nil
+		}
+		m.downOlderUpView(sm)
+		m.upView = sm
+
+	case qviews.QueryViewStateDown:
+		if m.upView == sm {
+			m.upView = nil
 		}
 
-		// 2. ConsumeFlush sync effects → collect into pending batch.
-		if len(flush.Sync) > 0 {
-			m.pendingSyncs = append(m.pendingSyncs, syncEntry{sm: sm, views: flush.Sync})
+	case qviews.QueryViewStateUnrecoverable:
+		if m.preparingView == sm {
+			m.preparingView = nil
 		}
-
-		// 3. Handle cascading effects based on current state.
-		switch sm.State() {
-		case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady:
-			m.preparingView = sm
-			return
-
-		case qviews.QueryViewStateUp:
-			if m.preparingView == sm {
-				m.preparingView = nil
-			}
-			m.downOlderUpView(sm)
-			m.upView = sm
-			return
-
-		case qviews.QueryViewStateDown:
-			if m.upView == sm {
-				m.upView = nil
-			}
-			return
-
-		case qviews.QueryViewStateUnrecoverable:
-			if m.preparingView == sm {
-				m.preparingView = nil
-			}
-			if m.upView == sm {
-				m.upView = nil
-			}
-			// Stay Unrecoverable; wait for AddPreparing or RequestRelease
-			// to advance to Dropping so that Dropped sync and new Preparing
-			// sync can be batched together.
-			return
-
-		case qviews.QueryViewStateDropping:
-			return
-
-		case qviews.QueryViewStateDropped:
-			m.removeView(sm)
-			return
-
-		default:
-			return
+		if m.upView == sm {
+			m.upView = nil
 		}
+		// Stay Unrecoverable; wait for AddPreparing or RequestRelease
+		// to advance to Dropping so that Dropped sync and new Preparing
+		// sync can be batched together.
+
+	case qviews.QueryViewStateDropping:
+
+	case qviews.QueryViewStateDropped:
+		m.removeView(sm)
+
+	default:
 	}
 }
 
@@ -483,13 +474,6 @@ func (m *ShardViewManager) makeOnQueryNodeLost(version qviews.QueryViewVersion) 
 func (m *ShardViewManager) submitDirtyEvent(event dirtyViewEvent) {
 	if !event.empty() {
 		m.eventSubmitter.Submit(event)
-	}
-}
-
-func (m *ShardViewManager) keyForStateMachine(sm *CoordQueryViewStateMachine) qviews.QueryViewKey {
-	return qviews.QueryViewKey{
-		ShardID:          m.shardID,
-		QueryViewVersion: sm.Version(),
 	}
 }
 

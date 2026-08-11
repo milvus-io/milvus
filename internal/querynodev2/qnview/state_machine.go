@@ -134,17 +134,13 @@ func (sm *QNQueryViewStateMachine) OnSegmentsReady(readySegmentIDs map[int64][]i
 	}
 
 	if sm.state == qviews.QueryViewStateReady {
-		if changed {
-			sm.pendingReport = sm.buildReport()
+		if !changed {
+			return
 		}
-		return
-	}
-	if sm.readyCount >= sm.totalSegments {
+	} else if sm.readyCount >= sm.totalSegments {
 		sm.state = qviews.QueryViewStateReady
-		sm.pendingReport = sm.buildReport()
-	} else {
-		sm.pendingReport = sm.buildReport()
 	}
+	sm.pendingReport = sm.buildReport()
 }
 
 func buildAssignedSegmentSet(qnView *viewpb.QueryViewOfQueryNode) (map[int64]map[int64]struct{}, int) {

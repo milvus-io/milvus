@@ -13,10 +13,11 @@ import (
 // qnShardView manages all query view state machines for a single shard on a QueryNode.
 // All public methods are concurrent-safe via the internal mutex.
 type qnShardView struct {
-	mu      sync.Mutex
-	views   map[qviews.QueryViewVersion]*qnViewEntry
-	segMgr  SegmentManager
-	onEmpty func() // called (under mu) when the last view entry is removed
+	mu       sync.Mutex
+	views    map[qviews.QueryViewVersion]*qnViewEntry
+	segMgr   SegmentManager
+	detached bool
+	onEmpty  func(*qnShardView) // called (under mu) when the last view entry is removed
 }
 
 // qnViewEntry pairs an ApplyView (carrying the OnReport callback) with its state machine.
@@ -28,9 +29,12 @@ type qnViewEntry struct {
 // ApplyViews applies a batch of coord-pushed views atomically.
 // Preparing and Up views are processed first so new serving candidates are
 // installed before older views are released.
-func (s *qnShardView) ApplyViews(views []handler.ApplyView) {
+func (s *qnShardView) ApplyViews(views []handler.ApplyView) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.detached {
+		return false
+	}
 
 	for i := range views {
 		state := views[i].View.State()
@@ -44,6 +48,7 @@ func (s *qnShardView) ApplyViews(views []handler.ApplyView) {
 			s.applyOneLocked(&views[i])
 		}
 	}
+	return true
 }
 
 // applyOneLocked applies a single view. Caller must hold s.mu.
@@ -165,7 +170,8 @@ func (s *qnShardView) consumeReportAndCleanup(key qviews.QueryViewKey, entry *qn
 	if entry.sm.State() == qviews.QueryViewStateDropped {
 		delete(s.views, key.QueryViewVersion)
 		if len(s.views) == 0 && s.onEmpty != nil {
-			s.onEmpty()
+			s.detached = true
+			s.onEmpty(s)
 		}
 	}
 }

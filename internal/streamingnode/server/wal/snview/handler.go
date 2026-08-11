@@ -1,6 +1,7 @@
 package snview
 
 import (
+	"context"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -57,6 +58,7 @@ var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
 type SNQueryViewHandler struct {
 	mu       sync.Mutex
 	closed   bool
+	ctx      context.Context
 	pchannel string
 	shards   map[qviews.ShardID]*snShardView
 	catalog  metastore.StreamingNodeCataLog
@@ -66,12 +68,14 @@ type SNQueryViewHandler struct {
 // recoverSNQueryViewHandler reconstructs the handler from persisted views
 // during SN startup. Pass nil or empty views for a fresh handler.
 func recoverSNQueryViewHandler(
+	ctx context.Context,
 	pchannel string,
 	catalog metastore.StreamingNodeCataLog,
 	resMgr StreamingNodeResourceManager,
 	views []*viewpb.QueryViewOfShard,
 ) *SNQueryViewHandler {
 	h := &SNQueryViewHandler{
+		ctx:      ctx,
 		pchannel: pchannel,
 		shards:   make(map[qviews.ShardID]*snShardView),
 		catalog:  catalog,
@@ -95,21 +99,25 @@ func recoverSNQueryViewHandler(
 	}
 
 	for shardID, shardViews := range grouped {
-		shard := recoverSnShardView(pchannel, shardID, shardViews, catalog, resMgr)
+		shard := recoverSnShardView(ctx, pchannel, shardID, shardViews, catalog, resMgr)
 		shard.onEmpty = h.makeOnEmpty(shardID)
 		h.shards[shardID] = shard
+	}
+	for _, shard := range h.shards {
+		shard.startRecovery()
 	}
 
 	return h
 }
 
 func RecoverPChannelSNQueryViewHandler(
+	ctx context.Context,
 	pchannel string,
 	catalog metastore.StreamingNodeCataLog,
 	resMgr StreamingNodeResourceManager,
 	views []*viewpb.QueryViewOfShard,
 ) *SNQueryViewHandler {
-	return recoverSNQueryViewHandler(pchannel, catalog, resMgr, views)
+	return recoverSNQueryViewHandler(ctx, pchannel, catalog, resMgr, views)
 }
 
 func OldestUpDataVersions(views []*viewpb.QueryViewOfShard) map[string]qviews.DataVersion {
@@ -141,11 +149,12 @@ func (h *SNQueryViewHandler) ApplyViews(views []handler.ApplyView) {
 
 	// Apply each group atomically under the shard lock.
 	for shardID, shardViews := range grouped {
-		shard := h.getOrCreateShard(shardID)
-		if shard == nil {
-			continue
+		for {
+			shard := h.getOrCreateShard(shardID)
+			if shard == nil || shard.ApplyViews(shardViews) {
+				break
+			}
 		}
-		shard.ApplyViews(shardViews)
 	}
 }
 
@@ -173,6 +182,7 @@ func (h *SNQueryViewHandler) getOrCreateShard(shardID qviews.ShardID) *snShardVi
 	shard, ok := h.shards[shardID]
 	if !ok {
 		shard = &snShardView{
+			ctx:      h.ctx,
 			pchannel: h.pchannel,
 			shardID:  shardID,
 			views:    make(map[qviews.QueryViewVersion]*snViewEntry),
@@ -185,10 +195,12 @@ func (h *SNQueryViewHandler) getOrCreateShard(shardID qviews.ShardID) *snShardVi
 	return shard
 }
 
-func (h *SNQueryViewHandler) makeOnEmpty(shardID qviews.ShardID) func() {
-	return func() {
+func (h *SNQueryViewHandler) makeOnEmpty(shardID qviews.ShardID) func(*snShardView) {
+	return func(emptyShard *snShardView) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		delete(h.shards, shardID)
+		if h.shards[shardID] == emptyShard {
+			delete(h.shards, shardID)
+		}
 	}
 }

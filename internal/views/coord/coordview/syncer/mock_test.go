@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc/metadata"
@@ -22,6 +23,7 @@ type mockStream struct {
 	recvCh  chan *viewpb.SyncResponse // test injects responses
 	sendMu  sync.Mutex
 	sendErr error // if non-nil, Send returns this immediately
+	closed  atomic.Int32
 }
 
 func newMockStream(ctx context.Context) *mockStream {
@@ -62,16 +64,23 @@ func (s *mockStream) Recv() (*viewpb.SyncResponse, error) {
 
 func (s *mockStream) Header() (metadata.MD, error) { return nil, nil }
 func (s *mockStream) Trailer() metadata.MD         { return nil }
-func (s *mockStream) CloseSend() error             { return nil }
-func (s *mockStream) Context() context.Context     { return s.ctx }
-func (s *mockStream) SendMsg(m interface{}) error  { return nil }
-func (s *mockStream) RecvMsg(m interface{}) error  { return nil }
+func (s *mockStream) CloseSend() error {
+	s.closed.Add(1)
+	return nil
+}
+func (s *mockStream) Context() context.Context    { return s.ctx }
+func (s *mockStream) SendMsg(m interface{}) error { return nil }
+func (s *mockStream) RecvMsg(m interface{}) error { return nil }
 
 // setSendErr sets the error returned by future Send calls.
 func (s *mockStream) setSendErr(err error) {
 	s.sendMu.Lock()
 	s.sendErr = err
 	s.sendMu.Unlock()
+}
+
+func (s *mockStream) closeCount() int32 {
+	return s.closed.Load()
 }
 
 // collectSent drains all currently buffered SyncRequests from sendCh.
