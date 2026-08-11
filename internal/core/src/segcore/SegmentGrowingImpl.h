@@ -370,13 +370,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
             ctx_ = nullptr;
         }
 
-        // Original mmap cleanup logic
-        if (mmap_descriptor_ != nullptr) {
-            auto mcm =
-                storage::MmapManager::GetInstance().GetMmapChunkManager();
-            mcm->UnRegister(mmap_descriptor_);
-        }
-
         // Refund any tracked resources before destruction
         // No lock needed - destructor implies exclusive access
         if (tracked_resource_.AnyGTZero()) {
@@ -685,6 +678,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
         int64_t row_limit);
 
  private:
+    // Keep this first so it is destroyed last. Its custom deleter unregisters
+    // the segment's mmap blocks only after indexing_record_ has joined any
+    // async build and insert_record_ has released all chunk objects.
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     SegcoreConfig segcore_config_;
     SchemaPtr schema_;
