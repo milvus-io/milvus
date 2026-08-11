@@ -656,6 +656,13 @@ ManifestGroupTranslator::get_cells_legacy(
 std::vector<ManifestGroupTranslator::CellResult>
 ManifestGroupTranslator::get_cells_via_async_pipeline(
     milvus::OpContext* ctx, std::vector<milvus::segcore::CellSpec> cell_specs) {
+    LOG_INFO(
+        "[StorageV3] translator {} uses async load pipeline for {} cells in "
+        "manifest column group {} of segment {}",
+        key_,
+        cell_specs.size(),
+        column_group_index_,
+        segment_id_);
     AsyncLoadPipelineOptions options{
         .segment_id = segment_id_,
         .load_priority = load_priority_,
