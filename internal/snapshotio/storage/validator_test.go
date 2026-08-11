@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 )
 
 func validateSnapshotForeignStorageForTest(
@@ -426,6 +427,7 @@ func TestBuildInstanceSnapshotURIRoundTrip(t *testing.T) {
 		wantURI      string
 		wantProvider string
 		wantRegion   string
+		externalSpec string
 	}{
 		{
 			name: "AWS",
@@ -486,11 +488,13 @@ func TestBuildInstanceSnapshotURIRoundTrip(t *testing.T) {
 			wantProvider: objectstorage.CloudProviderAzure,
 		},
 		{
-			name: "MinIO",
+			name: "custom S3-compatible endpoint",
 			cfg: &objectstorage.Config{
-				Address: "localhost:9000", BucketName: "snapshot-bucket", CloudProvider: "minio",
+				Address: "localhost:9000", BucketName: "snapshot-bucket",
+				CloudProvider: objectstorage.CloudProviderAWS,
 			},
-			wantURI: "http://localhost:9000/snapshot-bucket/" + objectKey,
+			wantURI:      "minio://localhost:9000/snapshot-bucket/" + objectKey,
+			externalSpec: `{"format":"milvus-table","extfs":{"cloud_provider":"minio","access_key_id":"ak","access_key_value":"sk"}}`,
 		},
 	}
 
@@ -499,6 +503,9 @@ func TestBuildInstanceSnapshotURIRoundTrip(t *testing.T) {
 			uri, err := BuildInstanceSnapshotURI(tt.cfg, objectKey)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantURI, uri)
+			if tt.externalSpec != "" {
+				require.NoError(t, externalspec.ValidateSourceAndSpec(uri, tt.externalSpec))
+			}
 
 			bucket, parsedKey, endpoint, err := ParseForeignURI(uri)
 			require.NoError(t, err)

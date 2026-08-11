@@ -71,6 +71,7 @@ func (t *versionAwareSchedulerTask) GetTaskVersion() int64                      
 func (t *versionAwareSchedulerTask) MinimumWorkerVersion() semver.Version {
 	return t.minimumVersion
 }
+
 func (t *versionAwareSchedulerTask) CreateTaskOnWorker(nodeID int64, _ session.Cluster) {
 	t.nodeID.Store(nodeID)
 	t.state.Store(int32(taskcommon.InProgress))

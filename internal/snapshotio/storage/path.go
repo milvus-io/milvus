@@ -136,7 +136,12 @@ func buildSnapshotObjectURI(cfg *objectstorage.Config, bucket, objectPath string
 		if endpoint == "" {
 			return "", merr.WrapErrServiceInternalMsg("snapshot storage endpoint is empty")
 		}
-		if cfg.UseSSL {
+		if strings.EqualFold(strings.TrimSpace(cfg.CloudProvider), externalspec.CloudProviderMinIO) ||
+			inferStorageEndpointIdentity(endpoint).cloudProvider == "" {
+			// Custom S3-compatible endpoints use the endpoint-style MinIO URI
+			// accepted by both snapshot restore and external collections.
+			uri.Scheme = "minio"
+		} else if cfg.UseSSL {
 			uri.Scheme = "https"
 		} else {
 			uri.Scheme = "http"

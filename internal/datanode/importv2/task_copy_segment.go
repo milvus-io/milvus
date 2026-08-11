@@ -386,7 +386,6 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 		target,
 		logFields,
 	)
-
 	if err != nil {
 		copyErr := merr.Wrap(err, "failed to copy segment files")
 		mlog.Error(t.ctx,
