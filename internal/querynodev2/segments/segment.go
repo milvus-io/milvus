@@ -839,7 +839,15 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 	// been applied to this segment, and skipping them causes silent data loss.
 
 	var err error
-	GetDynamicPool().Submit(func() (any, error) {
+	// issue #49435: run the streaming delete-apply on the dedicated deletePool
+	// instead of the shared dynamicPool. dynamicPool is also used by the bulk
+	// deltalog load (C.LoadDeletedRecord in LoadDeltaData), which can take tens
+	// of seconds per call under a segment-load storm. Sharing one pool makes the
+	// tiny (~ms) tsafe-critical forward delete queue behind those giant loads,
+	// starving the delegator's ProcessDelete -> UpdateTSafe and freezing the
+	// channel tsafe (505 channel tsafe stalled). A separate pool keeps the
+	// delete-apply off that queue.
+	GetDeletePool().Submit(func() (struct{}, error) {
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
@@ -852,7 +860,7 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 			PrimaryKeys: primaryKeys,
 			Timestamps:  timestamps,
 		})
-		return nil, nil
+		return struct{}{}, nil
 	}).Await()
 
 	if err != nil {
