@@ -278,6 +278,25 @@ func TestHandleAlterConfig(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "immutable configuration cannot be modified")
 	})
 
+	t.Run("kafka producer message max bytes should be immutable", func(t *testing.T) {
+		key := paramtable.Get().KafkaCfg.ProducerMessageMaxBytes.Key
+		require.True(t, mgr.IsImmutable(key))
+
+		reqBody := map[string]interface{}{
+			"configs": []map[string]interface{}{
+				{"key": key, "value": "20971520"},
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config/alter", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+
+		coord.HandleAlterConfig(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "immutable configuration cannot be modified")
+	})
+
 	t.Run("wrong HTTP method should fail", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/config/alter", nil)
 		w := httptest.NewRecorder()
