@@ -34,7 +34,7 @@ logical offsets and null bitset, and points to a child column:
 ```text
 ArrayColumn
 ├── offsets        // parent row -> range of logical child rows
-├── null_bitset    // when nullable, one bit per parent row; 1 means null
+├── null_bitset    // when nullable, one bit per parent row; 0 means null
 └── child          // another ArrayColumn or a leaf column
 ```
 

@@ -297,8 +297,7 @@ func TestValidateSchemaEvolutionNestedArrayTypeSchema(t *testing.T) {
 
 	t.Run("reject nesting change", func(t *testing.T) {
 		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
-		evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().Kind =
-			&schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64}
+		evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().Kind = &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64}
 
 		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot change the type schema")
 	})
