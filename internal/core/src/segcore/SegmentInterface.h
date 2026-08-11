@@ -440,8 +440,10 @@ class SegmentInternalInterface : public SegmentInterface {
                     int64_t start_offset,
                     int64_t length) const {
         if (this->type() == SegmentType::Growing) {
-            ThrowInfo(ErrorCode::Unsupported,
-                      "get chunk views not supported for growing segment");
+            if constexpr (!std::is_same_v<ViewType, ArrayView>) {
+                ThrowInfo(ErrorCode::Unsupported,
+                          "get chunk views not supported for growing segment");
+            }
         }
         return chunk_view<ViewType>(
             op_ctx, field_id, chunk_id, std::make_pair(start_offset, length));
@@ -454,8 +456,11 @@ class SegmentInternalInterface : public SegmentInterface {
                          int64_t chunk_id,
                          const FixedVector<int32_t>& offsets) const {
         if (this->type() == SegmentType::Growing) {
-            ThrowInfo(ErrorCode::Unsupported,
-                      "get chunk views not supported for growing segment");
+            if constexpr (!std::is_same_v<ViewType, ArrayView>) {
+                ThrowInfo(
+                    ErrorCode::Unsupported,
+                    "get chunk views not supported for growing segment");
+            }
         }
         if constexpr (std::is_same_v<ViewType, std::string_view>) {
             return chunk_string_views_by_offsets(

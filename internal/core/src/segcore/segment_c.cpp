@@ -879,6 +879,7 @@ struct FieldInfo {
     milvus::DataType data_type;
     milvus::DataType element_type;
     bool nullable;
+    bool element_nullable;
     int64_t dim;  // for vector types
     const milvus::segcore::VectorBase* vec_base;
     milvus::segcore::ThreadSafeValidDataPtr valid_data;
@@ -1437,11 +1438,29 @@ BuildVectorArrayForChunk(const FieldInfo& field_info,
         if (vector_array.dim() != field_info.dim) {
             return arrow::Status::Invalid("VECTOR_ARRAY dim mismatch");
         }
+        if (vector_array.is_element_nullable() !=
+            field_info.element_nullable) {
+            return arrow::Status::Invalid(
+                "VECTOR_ARRAY element nullable mismatch");
+        }
 
         ARROW_RETURN_NOT_OK(builder.Append());
-        ARROW_RETURN_NOT_OK(value_builder->AppendValues(
-            reinterpret_cast<const uint8_t*>(vector_array.data()),
-            vector_array.length()));
+        if (field_info.element_nullable) {
+            for (int j = 0; j < vector_array.length(); ++j) {
+                auto data = reinterpret_cast<const uint8_t*>(
+                                vector_array.data()) +
+                            j * byte_width;
+                if (vector_array.is_element_valid(j)) {
+                    ARROW_RETURN_NOT_OK(value_builder->Append(data));
+                } else {
+                    ARROW_RETURN_NOT_OK(value_builder->AppendNull());
+                }
+            }
+        } else {
+            ARROW_RETURN_NOT_OK(value_builder->AppendValues(
+                reinterpret_cast<const uint8_t*>(vector_array.data()),
+                vector_array.length()));
+        }
     }
 
     return builder.Finish();
@@ -2118,6 +2137,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             info.data_type = data_type;
             info.element_type = field_meta.get_element_type();
             info.nullable = field_meta.is_nullable();
+            info.element_nullable = field_meta.is_element_nullable();
             info.dim = dim;
             info.vec_base = vec_base;
             info.valid_data = nullptr;

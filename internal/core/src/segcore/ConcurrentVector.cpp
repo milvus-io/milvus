@@ -68,7 +68,9 @@ VectorBase::set_data_raw(ssize_t element_offset,
                 if (vector_array.size() == element_count) {
                     for (ssize_t i = 0; i < element_count; ++i) {
                         if (valid_data[i]) {
-                            data_raw.emplace_back(VectorArray(vector_array[i]));
+                            data_raw.emplace_back(
+                                vector_array[i],
+                                field_meta.is_element_nullable());
                         }
                     }
                 } else {
@@ -79,7 +81,8 @@ VectorBase::set_data_raw(ssize_t element_offset,
                         vector_array.size(),
                         valid_count);
                     for (auto& e : vector_array) {
-                        data_raw.emplace_back(VectorArray(e));
+                        data_raw.emplace_back(e,
+                                              field_meta.is_element_nullable());
                     }
                 }
             } else {
@@ -90,7 +93,7 @@ VectorBase::set_data_raw(ssize_t element_offset,
                            element_count);
                 data_raw.reserve(vector_array.size());
                 for (auto& e : vector_array) {
-                    data_raw.emplace_back(VectorArray(e));
+                    data_raw.emplace_back(e, field_meta.is_element_nullable());
                 }
             }
             return set_data_raw(element_offset, data_raw.data(), element_count);
@@ -169,10 +172,44 @@ VectorBase::set_data_raw(ssize_t element_offset,
         }
         case DataType::ARRAY: {
             auto& array_data = FIELD_DATA(data, array);
-            std::vector<Array> data_raw{};
-            data_raw.reserve(array_data.size());
-            for (auto& array_bytes : array_data) {
-                data_raw.emplace_back(Array(array_bytes));
+            const auto& valid_data = GetFieldDataRowValidData(*data);
+            std::vector<Array> data_raw(element_count);
+            if (field_meta.is_nullable() &&
+                valid_data.size() == element_count) {
+                ssize_t valid_count =
+                    std::count(valid_data.begin(), valid_data.end(), true);
+                auto dense_aligned = array_data.size() == element_count;
+                auto compact_nullable = array_data.size() == valid_count;
+                AssertInfo(
+                    dense_aligned || compact_nullable,
+                    "nullable ARRAY data size {} must match element count {} "
+                    "or valid row count {}",
+                    array_data.size(),
+                    element_count,
+                    valid_count);
+                compact_nullable = compact_nullable && !dense_aligned;
+
+                ssize_t physical_row = 0;
+                for (ssize_t logical_row = 0; logical_row < element_count;
+                     ++logical_row) {
+                    if (!valid_data[logical_row]) {
+                        continue;
+                    }
+                    auto source_index =
+                        compact_nullable ? physical_row++ : logical_row;
+                    data_raw[logical_row] =
+                        Array(array_data.Get(source_index),
+                              field_meta.is_element_nullable());
+                }
+            } else {
+                AssertInfo(array_data.size() == element_count,
+                           "ARRAY data size {} must match element count {}",
+                           array_data.size(),
+                           element_count);
+                for (ssize_t i = 0; i < element_count; ++i) {
+                    data_raw[i] = Array(array_data.Get(i),
+                                        field_meta.is_element_nullable());
+                }
             }
 
             return set_data_raw(element_offset, data_raw.data(), element_count);

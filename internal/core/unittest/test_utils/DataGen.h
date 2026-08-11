@@ -1437,35 +1437,42 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
     FieldDataPtr field_data = nullptr;
 
     auto element_type = field_meta.get_element_type();
+    auto element_nullable = field_meta.is_element_nullable();
     const auto& row_valid_data = GetFieldDataRowValidData(*data);
     auto createFieldData =
-        [&field_data, &raw_count, &element_type](
+        [&field_data, &raw_count, &element_type, element_nullable](
             const void* raw_data, DataType data_type, int64_t dim) {
-            field_data =
-                storage::CreateFieldData(data_type, element_type, false, dim);
+            field_data = storage::CreateFieldData(data_type,
+                                                  element_type,
+                                                  false,
+                                                  element_nullable,
+                                                  dim,
+                                                  0);
             field_data->FillFieldData(raw_data, raw_count);
         };
-    auto createNullableFieldData = [&field_data, &raw_count, &element_type](
-                                       const void* raw_data,
-                                       const bool* raw_valid_data,
-                                       DataType data_type,
-                                       int64_t dim) {
-        field_data =
-            storage::CreateFieldData(data_type, element_type, true, dim);
-        int byteSize = (raw_count + 7) / 8;
-        std::vector<uint8_t> valid_data(byteSize);
-        for (int i = 0; i < raw_count; i++) {
-            bool value = raw_valid_data[i];
-            int byteIndex = i / 8;
-            int bitIndex = i % 8;
-            if (value) {
-                valid_data[byteIndex] |= (1 << bitIndex);
-            } else {
-                valid_data[byteIndex] &= ~(1 << bitIndex);
+    auto createNullableFieldData =
+        [&field_data, &raw_count, &element_type, element_nullable](
+            const void* raw_data,
+            const bool* raw_valid_data,
+            DataType data_type,
+            int64_t dim) {
+            field_data = storage::CreateFieldData(
+                data_type, element_type, true, element_nullable, dim, 0);
+            int byteSize = (raw_count + 7) / 8;
+            std::vector<uint8_t> valid_data(byteSize);
+            for (int i = 0; i < raw_count; i++) {
+                bool value = raw_valid_data[i];
+                int byteIndex = i / 8;
+                int bitIndex = i % 8;
+                if (value) {
+                    valid_data[byteIndex] |= (1 << bitIndex);
+                } else {
+                    valid_data[byteIndex] &= ~(1 << bitIndex);
+                }
             }
-        }
-        field_data->FillFieldData(raw_data, valid_data.data(), raw_count, 0);
-    };
+            field_data->FillFieldData(
+                raw_data, valid_data.data(), raw_count, 0);
+        };
 
     if (field_meta.is_vector()) {
         switch (field_meta.get_data_type()) {
@@ -1511,7 +1518,8 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 auto dim = field_meta.get_dim();
                 std::vector<VectorArray> data_raw(src_data.size());
                 for (int i = 0; i < src_data.size(); i++) {
-                    data_raw[i] = VectorArray(src_data.at(i));
+                    data_raw[i] =
+                        VectorArray(src_data.at(i), element_nullable);
                 }
                 createFieldData(data_raw.data(), DataType::VECTOR_ARRAY, dim);
                 break;
@@ -1668,7 +1676,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 auto src_data = data->scalars().array_data().data();
                 std::vector<Array> data_raw(src_data.size());
                 for (int i = 0; i < src_data.size(); i++) {
-                    data_raw[i] = Array(src_data.at(i));
+                    data_raw[i] = Array(src_data.at(i), element_nullable);
                 }
                 if (field_meta.is_nullable()) {
                     auto raw_valid_data = row_valid_data.data();
