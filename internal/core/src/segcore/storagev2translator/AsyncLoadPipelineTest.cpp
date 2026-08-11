@@ -770,6 +770,110 @@ TEST_F(AsyncLoadPipelineTest, CancelsPendingWindowsAfterFirstReadFailure) {
     EXPECT_EQ(reader->AsyncCalls(), 1);
 }
 
+TEST_F(AsyncLoadPipelineTest, PublishesReadFailureBeforeReleasingWindowBudget) {
+    budget_.SetCapacityBytes(1);
+    InlineRecordingExecutor load_executor;
+    InlineRecordingExecutor caller_executor;
+    auto reader = std::make_shared<FakeChunkReader>(nullptr);
+    reader->DeferNextRead();
+    std::vector<CellSpec> cells{
+        {.cid = 0,
+         .file_idx = 0,
+         .local_rg_offset = 0,
+         .rg_count = 1,
+         .memory_size = 1},
+        {.cid = 1,
+         .file_idx = 0,
+         .local_rg_offset = 1,
+         .rg_count = 1,
+         .memory_size = 1},
+    };
+    auto options = Options();
+    options.read_window_bytes = 1;
+    // Force the admitted window to run before Release() returns so the test
+    // observes whether cancellation was published before the next admission.
+    options.executor = &load_executor;
+    auto load = std::move(LoadCellsAsync(
+                              nullptr,
+                              std::move(cells),
+                              reader,
+                              [](const auto&, int64_t) {
+                                  return std::make_unique<GroupChunk>();
+                              },
+                              std::move(options)))
+                    .semi()
+                    .via(folly::getKeepAliveToken(&caller_executor));
+
+    ASSERT_FALSE(load.isReady());
+    ASSERT_EQ(reader->AsyncCalls(), 1);
+
+    reader->FailDeferredRead();
+
+    EXPECT_EQ(reader->AsyncCalls(), 1);
+    try {
+        std::move(load).get();
+        FAIL() << "expected read failure";
+    } catch (const std::runtime_error& error) {
+        EXPECT_STREQ(error.what(), "read failed");
+    }
+}
+
+TEST_F(AsyncLoadPipelineTest,
+       PublishesFinalizationFailureBeforeReleasingWindowBudget) {
+    budget_.SetCapacityBytes(1);
+    InlineRecordingExecutor load_executor;
+    RecordingManualExecutor finalization_executor;
+    InlineRecordingExecutor caller_executor;
+    auto reader = std::make_shared<FakeChunkReader>(nullptr);
+    reader->DeferNextRead();
+    std::vector<CellSpec> cells{
+        {.cid = 0,
+         .file_idx = 0,
+         .local_rg_offset = 0,
+         .rg_count = 1,
+         .memory_size = 1},
+        {.cid = 1,
+         .file_idx = 0,
+         .local_rg_offset = 1,
+         .rg_count = 1,
+         .memory_size = 1},
+    };
+    auto options = Options();
+    options.read_window_bytes = 1;
+    // Keep load admission reentrant while finalization runs on a separate
+    // executor, matching the lease handoff in the production path.
+    options.executor = &load_executor;
+    options.finalization_executor_provider = [&finalization_executor]() {
+        return folly::getKeepAliveToken(&finalization_executor);
+    };
+    auto load =
+        std::move(LoadCellsAsync(
+                      nullptr,
+                      std::move(cells),
+                      reader,
+                      [](const auto&, int64_t) -> std::unique_ptr<GroupChunk> {
+                          throw std::runtime_error("finalization failed");
+                      },
+                      std::move(options)))
+            .semi()
+            .via(folly::getKeepAliveToken(&caller_executor));
+
+    ASSERT_FALSE(load.isReady());
+    ASSERT_EQ(reader->AsyncCalls(), 1);
+
+    reader->CompleteDeferredRead();
+    ASSERT_EQ(finalization_executor.step(), 1);
+    finalization_executor.drain();
+
+    EXPECT_EQ(reader->AsyncCalls(), 1);
+    try {
+        std::move(load).get();
+        FAIL() << "expected finalization failure";
+    } catch (const std::runtime_error& error) {
+        EXPECT_STREQ(error.what(), "finalization failed");
+    }
+}
+
 TEST_F(AsyncLoadPipelineTest, FailsReadBeforeRequestingFinalizationExecutor) {
     budget_.SetCapacityBytes(1);
     folly::ManualExecutor io_executor;
