@@ -144,10 +144,13 @@ func TestRepeatedMessageOneofMerge(t *testing.T) {
 		assert.True(t, proto.Equal(got, want), "got=%v want=%v", got, want)
 	})
 
+	// uuid_id(3) only started taking this branch in the change that hand-decoded it:
+	// before, a repeated field 3 fell through default -> rest -> protoMerge, an
+	// entirely different path from the duplicate guard it hits now.
 	t.Run("IDs.UuidId", func(t *testing.T) {
 		wire := concat(t,
-			&schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: [][]byte{{1}}}}},
-			&schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: [][]byte{{2}}}}},
+			&schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: [][]byte{{0xaa}}}}},
+			&schemapb.IDs{IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: [][]byte{{0xbb}}}}},
 		)
 		want := &schemapb.IDs{}
 		require.NoError(t, proto.Unmarshal(wire, want))

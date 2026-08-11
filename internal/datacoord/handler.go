@@ -874,6 +874,8 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			Schema:              schema,
 			NumShards:           int64(resp.GetShardsNum()),
 			NumPartitions:       resp.GetNumPartitions(),
+			ConsistencyLevel:    resp.GetConsistencyLevel(),
+			Properties:          common.CloneKeyValuePairs(resp.GetProperties()),
 			Partitions:          partitionMapping,
 			VirtualChannelNames: resp.GetVirtualChannelNames(),
 		},

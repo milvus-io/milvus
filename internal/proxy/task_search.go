@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -263,6 +262,11 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	// searches with small result size could no longer need requery.
 	traceVal, _ := funcutil.GetAttrByKeyFromRepeatedKV(PipelineTraceKey, t.request.GetSearchParams())
 	t.traceEnabled = strings.EqualFold(traceVal, "true")
+	timezone, err := resolveTimezone(ctx, t.request.GetSearchParams(), collectionInfo)
+	if err != nil {
+		return err
+	}
+	t.resolvedTimezoneStr = timezone
 	// initSearchAggregation must run before init{,Advanced}SearchRequest so
 	// that t.SearchRequest.GroupByFieldIds and t.aggCtx are populated before
 	// queryInfo is built and captured — otherwise queryInfo.GroupByFieldIds
@@ -339,19 +343,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
 		}
 	}
-
-	timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.request.SearchParams)
-	if exist {
-		if !timestamptz.IsTimezoneValid(timezone) {
-			log.Info(ctx, "get invalid timezone from request", mlog.String("timezone", timezone))
-			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", timezone)
-		}
-		log.Debug(ctx, "determine timezone from request", mlog.String("user defined timezone", timezone))
-	} else {
-		timezone = getColTimezone(collectionInfo)
-		log.Debug(ctx, "determine timezone from collection", mlog.Any("collection timezone", timezone))
-	}
-	t.resolvedTimezoneStr = timezone
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 

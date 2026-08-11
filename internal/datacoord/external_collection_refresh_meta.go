@@ -21,6 +21,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -33,6 +34,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// errExternalRefreshTaskPlanNotPublishable is an in-process control-flow
+// signal for task plans rejected before any catalog write is attempted.
+// createTasksForJob uses it to distinguish a definitive rejection from an
+// ambiguous catalog error, where deleting the Explore manifest could break a
+// plan that was committed despite the client observing an error.
+var errExternalRefreshTaskPlanNotPublishable = errors.New("external refresh task plan is not publishable")
+
 // externalCollectionRefreshMeta manages both Job and Task metadata for external collection refresh.
 // Job represents user-initiated refresh operations (API level), while Task represents
 // execution units dispatched to workers (scheduler level).
@@ -43,8 +51,9 @@ import (
 // - tasks: taskID -> Task (for scheduler)
 // - jobTasks: jobID -> {taskID -> Task} (for job-task association)
 type externalCollectionRefreshMeta struct {
-	ctx     context.Context
-	catalog metastore.DataCoordCatalog
+	ctx         context.Context
+	catalog     metastore.DataCoordCatalog
+	resultStore *externalCollectionRefreshResultStore
 
 	// Job lock (by collectionID)
 	jobLock *lock.KeyLock[UniqueID]
@@ -64,7 +73,21 @@ type externalCollectionRefreshMeta struct {
 	jobTasks *typeutil.ConcurrentMap[int64, *typeutil.ConcurrentMap[int64, *datapb.ExternalCollectionRefreshTask]]
 }
 
-func newExternalCollectionRefreshMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*externalCollectionRefreshMeta, error) {
+type externalCollectionRefreshMetaOption func(*externalCollectionRefreshMeta)
+
+func withExternalCollectionRefreshResultStore(
+	resultStore *externalCollectionRefreshResultStore,
+) externalCollectionRefreshMetaOption {
+	return func(meta *externalCollectionRefreshMeta) {
+		meta.resultStore = resultStore
+	}
+}
+
+func newExternalCollectionRefreshMeta(
+	ctx context.Context,
+	catalog metastore.DataCoordCatalog,
+	options ...externalCollectionRefreshMetaOption,
+) (*externalCollectionRefreshMeta, error) {
 	m := &externalCollectionRefreshMeta{
 		ctx:            ctx,
 		catalog:        catalog,
@@ -74,6 +97,9 @@ func newExternalCollectionRefreshMeta(ctx context.Context, catalog metastore.Dat
 		collectionJobs: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[int64, *datapb.ExternalCollectionRefreshJob]](),
 		tasks:          typeutil.NewConcurrentMap[int64, *datapb.ExternalCollectionRefreshTask](),
 		jobTasks:       typeutil.NewConcurrentMap[int64, *typeutil.ConcurrentMap[int64, *datapb.ExternalCollectionRefreshTask]](),
+	}
+	for _, option := range options {
+		option(m)
 	}
 	if err := m.reloadFromKV(); err != nil {
 		return nil, err
@@ -327,16 +353,12 @@ func (m *externalCollectionRefreshMeta) mutateJob(
 //     because the job already reached Finished/Failed. Callers that perform
 //     follow-up actions conditional on the transition (fire onJobFailed, mark
 //     tasks as failed, etc.) MUST check applied and short-circuit when false.
-//     This is the critical signal that prevents tryTimeoutJob from racing an
-//     eager Finished transition and poisoning the manager's notifiedJobs map.
 //   - applied=false, err!=nil means a persistence / lookup failure.
 func (m *externalCollectionRefreshMeta) UpdateJobState(jobID int64, state indexpb.JobState, failReason string) (bool, error) {
 	applied, err := m.mutateJob(jobID, "update job state", func(job *datapb.ExternalCollectionRefreshJob) (bool, error) {
 		// Terminal-state guard: once a job has reached Finished or Failed it must
 		// not be transitioned again. Without this guard a stale-snapshot caller
-		// (e.g. tryTimeoutJob using a job pointer captured before aggregateJobState
-		// transitioned the job to Finished in the same processJob cycle) could
-		// silently overwrite a successful Finished as Failed("timeout").
+		// could silently overwrite a transition persisted by another checker path.
 		if job.GetState() == indexpb.JobState_JobStateFinished ||
 			job.GetState() == indexpb.JobState_JobStateFailed {
 			mlog.Info(m.ctx, "skip update job state, already in terminal state",
@@ -452,15 +474,6 @@ func (m *externalCollectionRefreshMeta) UpdateJobProgress(jobID int64, progress 
 	return err
 }
 
-// AddTaskIDToJob adds a taskID to job's task_ids list
-func (m *externalCollectionRefreshMeta) AddTaskIDToJob(jobID int64, taskID int64) error {
-	_, err := m.mutateJob(jobID, "add taskID to job", func(job *datapb.ExternalCollectionRefreshJob) (bool, error) {
-		job.TaskIds = append(job.TaskIds, taskID)
-		return false, nil
-	})
-	return err
-}
-
 // AddTasksToJob persists a batch of newly-created tasks together with the
 // job's updated TaskIds list as a single composite catalog write, then applies
 // the in-memory bookkeeping of both. It replaces the per-task pair of writes
@@ -491,6 +504,24 @@ func (m *externalCollectionRefreshMeta) AddTasksToJob(jobID int64, tasks []*data
 	job, ok = m.jobs.Get(jobID)
 	if !ok {
 		return merr.WrapErrServiceInternalMsg("job %d not found", jobID)
+	}
+	// This is the production publication boundary. The checks must happen after
+	// re-fetching under jobLock so timeout/failure and publication are ordered:
+	// whichever acquires the lock first wins, and a late Explore result cannot
+	// append tasks to a terminal or already-published job.
+	if job.GetState() != indexpb.JobState_JobStateInit {
+		return merr.Wrapf(
+			errExternalRefreshTaskPlanNotPublishable,
+			"cannot publish external refresh task plan for job %d in state %s",
+			jobID,
+			job.GetState().String(),
+		)
+	}
+	if len(tasks) == 0 {
+		return merr.Wrapf(errExternalRefreshTaskPlanNotPublishable, "cannot publish empty task plan for job %d", jobID)
+	}
+	if len(job.GetTaskIds()) > 0 {
+		return merr.Wrapf(errExternalRefreshTaskPlanNotPublishable, "job %d already has a published task plan", jobID)
 	}
 
 	// Mirror AddTaskIDToJob: mutate a clone (append every new task ID) and
@@ -573,6 +604,14 @@ func (m *externalCollectionRefreshMeta) DropJob(ctx context.Context, jobID int64
 
 	m.jobs.Remove(jobID)
 	m.removeFromCollectionJobs(job.GetCollectionId(), jobID)
+	if m.resultStore != nil {
+		if err := m.resultStore.RemoveJob(ctx, job.GetCollectionId(), jobID); err != nil {
+			mlog.Warn(ctx, "failed to remove external refresh job results",
+				mlog.FieldJobID(jobID),
+				mlog.FieldCollectionID(job.GetCollectionId()),
+				mlog.Err(err))
+		}
+	}
 
 	mlog.Info(ctx, "drop job success",
 		mlog.Int64("jobID", jobID),
@@ -638,6 +677,102 @@ func (m *externalCollectionRefreshMeta) GetTasksByJobID(jobID int64) []*datapb.E
 	return tasks
 }
 
+// GetCommittedTasksByJobID resolves tasks through the parent job's ordered
+// task_ids list. Task records absent from that list are unpublished and must
+// not be scheduled, aggregated, applied, or have their results cleared.
+func (m *externalCollectionRefreshMeta) GetCommittedTasksByJobID(jobID int64) ([]*datapb.ExternalCollectionRefreshTask, error) {
+	job := m.GetJob(jobID)
+	if job == nil {
+		return nil, merr.WrapErrServiceInternalMsg("job %d not found", jobID)
+	}
+	if len(job.GetTaskIds()) == 0 {
+		return nil, nil
+	}
+
+	m.taskLock.Lock(jobID)
+	defer m.taskLock.Unlock(jobID)
+	return m.getCommittedTasksLocked(job)
+}
+
+// GetCommittedTaskResultsByJobID resolves the committed task headers first,
+// then loads external result payloads without holding the job-scoped task lock.
+// Callers that only inspect task state should use GetCommittedTasksByJobID to
+// avoid object-storage I/O.
+func (m *externalCollectionRefreshMeta) GetCommittedTaskResultsByJobID(jobID int64) ([]*datapb.ExternalCollectionRefreshTask, error) {
+	tasks, err := m.GetCommittedTasksByJobID(jobID)
+	if err != nil {
+		return nil, err
+	}
+	for _, task := range tasks {
+		switch task.GetResultStorageVersion() {
+		case 0:
+			if task.GetResultPath() != "" || len(task.GetResultChecksum()) != 0 {
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"external refresh task %d has a result reference without a storage version",
+					task.GetTaskId(),
+				)
+			}
+			if task.GetOwnershipPlanVersion() == externalRefreshOwnershipPlanVersion && task.GetResultReady() {
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"external refresh task %d has an inline result under ownership plan version %d",
+					task.GetTaskId(),
+					task.GetOwnershipPlanVersion(),
+				)
+			}
+		case externalRefreshTaskResultStorageVersion:
+			if !task.GetResultReady() {
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"external refresh task %d has an unpublished external result",
+					task.GetTaskId(),
+				)
+			}
+			if m.resultStore == nil {
+				return nil, merr.WrapErrServiceInternalMsg(
+					"external refresh task %d requires an unconfigured result store",
+					task.GetTaskId(),
+				)
+			}
+			result, err := m.resultStore.Load(m.ctx, task)
+			if err != nil {
+				return nil, err
+			}
+			task.KeptSegments = append([]int64(nil), result.GetKeptSegments()...)
+			task.UpdatedSegments = cloneProtoSegments(result.GetUpdatedSegments())
+		default:
+			return nil, merr.WrapErrServiceInternalMsg(
+				"external refresh task %d has unsupported result storage version %d",
+				task.GetTaskId(),
+				task.GetResultStorageVersion(),
+			)
+		}
+	}
+	return tasks, nil
+}
+
+// getCommittedTasksLocked resolves a job's published task list while the
+// caller holds taskLock for that job.
+func (m *externalCollectionRefreshMeta) getCommittedTasksLocked(job *datapb.ExternalCollectionRefreshJob) ([]*datapb.ExternalCollectionRefreshTask, error) {
+	jobID := job.GetJobId()
+	tasks := make([]*datapb.ExternalCollectionRefreshTask, 0, len(job.GetTaskIds()))
+	seen := make(map[int64]struct{}, len(job.GetTaskIds()))
+	for _, taskID := range job.GetTaskIds() {
+		if _, ok := seen[taskID]; ok {
+			return nil, merr.WrapErrServiceInternalMsg("job %d references duplicate task %d", jobID, taskID)
+		}
+		seen[taskID] = struct{}{}
+
+		task, ok := m.tasks.Get(taskID)
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg("job %d references missing task %d", jobID, taskID)
+		}
+		if task.GetJobId() != jobID {
+			return nil, merr.WrapErrServiceInternalMsg("job %d references task %d owned by job %d", jobID, taskID, task.GetJobId())
+		}
+		tasks = append(tasks, proto.Clone(task).(*datapb.ExternalCollectionRefreshTask))
+	}
+	return tasks, nil
+}
+
 // GetAllTasks returns all tasks (for inspector)
 func (m *externalCollectionRefreshMeta) GetAllTasks() map[int64]*datapb.ExternalCollectionRefreshTask {
 	result := make(map[int64]*datapb.ExternalCollectionRefreshTask)
@@ -691,7 +826,9 @@ func (m *externalCollectionRefreshMeta) mutateTask(
 	if err := m.catalog.SaveExternalCollectionRefreshTask(m.ctx, cloneTask); err != nil {
 		mlog.Warn(m.ctx,
 			opName+" failed",
-			mlog.Int64("taskID", taskID),
+			mlog.FieldJobID(cloneTask.GetJobId()),
+			mlog.FieldTaskID(taskID),
+			mlog.Int("taskMetaBytes", proto.Size(cloneTask)),
 			mlog.Err(err))
 		return false, nil, err
 	}
@@ -736,11 +873,65 @@ func (m *externalCollectionRefreshMeta) UpdateTaskResult(
 	keptSegments []int64,
 	updatedSegments []*datapb.SegmentInfo,
 ) error {
+	currentTask := m.GetTask(taskID)
+	if currentTask == nil {
+		return merr.WrapErrServiceInternalMsg("task %d not found", taskID)
+	}
+
+	storeExternally := false
+	switch currentTask.GetOwnershipPlanVersion() {
+	case 0:
+		// Version zero is retained for legacy test fixtures. Runtime tasks with
+		// no ownership plan are rejected before worker dispatch.
+	case externalRefreshOwnershipPlanVersion:
+		storeExternally = true
+	default:
+		return merr.WrapErrServiceInternalMsg(
+			"external refresh task %d has unsupported ownership plan version %d",
+			taskID,
+			currentTask.GetOwnershipPlanVersion(),
+		)
+	}
+
+	var resultRef externalCollectionRefreshResultRef
+	if storeExternally {
+		if m.resultStore == nil {
+			return merr.WrapErrServiceInternalMsg(
+				"external refresh task %d requires an unconfigured result store",
+				taskID,
+			)
+		}
+		var err error
+		resultRef, err = m.resultStore.Save(m.ctx, currentTask, keptSegments, updatedSegments)
+		if err != nil {
+			return err
+		}
+	}
+
 	applied, cloned, err := m.mutateTask(taskID, "update task result", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
+		if storeExternally &&
+			(task.GetVersion() != currentTask.GetVersion() ||
+				task.GetOwnershipPlanVersion() != currentTask.GetOwnershipPlanVersion()) {
+			return false, merr.WrapErrServiceInternalMsg(
+				"external refresh task %d changed while persisting result",
+				taskID,
+			)
+		}
 		task.State = state
 		task.FailReason = failReason
-		task.KeptSegments = append([]int64(nil), keptSegments...)
-		task.UpdatedSegments = cloneProtoSegments(updatedSegments)
+		if storeExternally {
+			task.KeptSegments = nil
+			task.UpdatedSegments = nil
+			task.ResultStorageVersion = externalRefreshTaskResultStorageVersion
+			task.ResultPath = resultRef.path
+			task.ResultChecksum = append([]byte(nil), resultRef.checksum...)
+		} else {
+			task.KeptSegments = append([]int64(nil), keptSegments...)
+			task.UpdatedSegments = cloneProtoSegments(updatedSegments)
+			task.ResultStorageVersion = 0
+			task.ResultPath = ""
+			task.ResultChecksum = nil
+		}
 		task.ResultReady = true
 		if state == indexpb.JobState_JobStateFinished {
 			task.Progress = 100
@@ -749,10 +940,15 @@ func (m *externalCollectionRefreshMeta) UpdateTaskResult(
 	})
 	if applied {
 		mlog.Info(m.ctx, "update task result success",
-			mlog.Int64("taskID", taskID),
+			mlog.FieldJobID(cloned.GetJobId()),
+			mlog.FieldTaskID(taskID),
 			mlog.String("state", state.String()),
-			mlog.Int("keptSegments", len(cloned.GetKeptSegments())),
-			mlog.Int("updatedSegments", len(cloned.GetUpdatedSegments())))
+			mlog.Int("ownedSegments", len(cloned.GetOwnedSegmentIds())),
+			mlog.Int("keptSegments", len(keptSegments)),
+			mlog.Int("updatedSegments", len(updatedSegments)),
+			mlog.Int32("resultStorageVersion", cloned.GetResultStorageVersion()),
+			mlog.Int("resultBytes", resultRef.size),
+			mlog.Int("taskMetaBytes", proto.Size(cloned)))
 	}
 	return err
 }
@@ -761,24 +957,50 @@ func (m *externalCollectionRefreshMeta) UpdateTaskResult(
 // persisted Finished. The task state/progress remain intact for progress and
 // history queries until the job retention GC drops the task.
 func (m *externalCollectionRefreshMeta) ClearTaskResult(taskID int64) error {
+	var resultPath string
 	applied, cloned, err := m.mutateTask(taskID, "clear task result", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
-		if len(task.GetKeptSegments()) == 0 && len(task.GetUpdatedSegments()) == 0 {
+		if len(task.GetKeptSegments()) == 0 &&
+			len(task.GetUpdatedSegments()) == 0 &&
+			task.GetResultStorageVersion() == 0 &&
+			task.GetResultPath() == "" &&
+			len(task.GetResultChecksum()) == 0 {
 			return true, nil
 		}
+		resultPath = task.GetResultPath()
 		task.KeptSegments = nil
 		task.UpdatedSegments = nil
+		task.ResultStorageVersion = 0
+		task.ResultPath = ""
+		task.ResultChecksum = nil
 		return false, nil
 	})
 	if applied {
 		mlog.Info(m.ctx, "clear task result success",
 			mlog.Int64("taskID", taskID),
 			mlog.String("state", cloned.GetState().String()))
+		// The durable reference is cleared first. A failed object deletion is
+		// safe to leave for the job-prefix cleanup performed by DropJob.
+		if resultPath != "" {
+			if m.resultStore == nil {
+				mlog.Warn(m.ctx, "cannot remove external refresh task result without result store",
+					mlog.FieldTaskID(taskID),
+					mlog.String("resultPath", resultPath))
+			} else if err := m.resultStore.Remove(m.ctx, resultPath); err != nil {
+				mlog.Warn(m.ctx, "failed to remove external refresh task result",
+					mlog.FieldTaskID(taskID),
+					mlog.String("resultPath", resultPath),
+					mlog.Err(err))
+			}
+		}
 	}
 	return err
 }
 
 func (m *externalCollectionRefreshMeta) ClearTaskResultsByJobID(jobID int64) error {
-	tasks := m.GetTasksByJobID(jobID)
+	tasks, err := m.GetCommittedTasksByJobID(jobID)
+	if err != nil {
+		return err
+	}
 	for _, task := range tasks {
 		if err := m.ClearTaskResult(task.GetTaskId()); err != nil {
 			return err
@@ -805,11 +1027,15 @@ func (m *externalCollectionRefreshMeta) UpdateTaskVersion(taskID, nodeID int64) 
 
 // ==================== Aggregation Operations ====================
 
-// AggregateJobStateFromTasks calculates job state and progress from its tasks
-func (m *externalCollectionRefreshMeta) AggregateJobStateFromTasks(jobID int64) (state indexpb.JobState, progress int64) {
-	tasks := m.GetTasksByJobID(jobID)
+// AggregateJobStateFromTasks calculates job state and progress from the
+// committed task plan.
+func (m *externalCollectionRefreshMeta) AggregateJobStateFromTasks(jobID int64) (state indexpb.JobState, progress int64, err error) {
+	tasks, err := m.GetCommittedTasksByJobID(jobID)
+	if err != nil {
+		return indexpb.JobState_JobStateNone, 0, err
+	}
 	if len(tasks) == 0 {
-		return indexpb.JobState_JobStateNone, 0
+		return indexpb.JobState_JobStateNone, 0, nil
 	}
 
 	var hasInit, hasRetry, hasInProgress, hasFailed bool
@@ -849,5 +1075,5 @@ func (m *externalCollectionRefreshMeta) AggregateJobStateFromTasks(jobID int64) 
 	}
 
 	progress = totalProgress / int64(len(tasks))
-	return state, progress
+	return state, progress, nil
 }
