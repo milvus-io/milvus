@@ -2003,6 +2003,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadColumnGroups(const SegmentLoadInfo& segment_load_info,
                      const SchemaPtr& schema_snapshot,
                      milvus::OpContext* op_ctx,
+                     bool is_replace,
                      StagedStateCommitter& committer);
 
     void
