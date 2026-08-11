@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
@@ -15,6 +16,8 @@ import (
 )
 
 var _ walimpls.WALImpls = (*walImpl)(nil)
+
+const kafkaTopicMetadataTimeout = time.Second
 
 type walImpl struct {
 	*helper.WALHelper
@@ -70,8 +73,19 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create kafka consumer")
 	}
+	consumerOwnedByScanner := false
+	defer func() {
+		if !consumerOwnedByScanner {
+			c.Close()
+		}
+	}()
 
 	topic := w.Channel().Name
+	if w.Channel().AccessMode == types.AccessModeRO {
+		if err := validateKafkaTopicExists(ctx, c, topic); err != nil {
+			return nil, err
+		}
+	}
 	seekPosition := kafka.TopicPartition{
 		Topic:     &topic,
 		Partition: 0,
@@ -102,7 +116,50 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 	if err := c.Assign([]kafka.TopicPartition{seekPosition}); err != nil {
 		return nil, errors.Wrap(convertKafkaReadError(err, topic), "failed to assign kafka consumer")
 	}
+	consumerOwnedByScanner = true
 	return newScanner(opt.Name, topic, exclude, c), nil
+}
+
+func validateKafkaTopicExists(ctx context.Context, consumer *kafka.Consumer, topic string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	timeout := kafkaTopicMetadataTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return ctx.Err()
+		}
+		if remaining < timeout {
+			timeout = remaining
+		}
+	}
+	timeoutMillis := max(int(timeout.Milliseconds()), 1)
+	// Request a complete metadata snapshot without naming the missing topic.
+	// This avoids triggering topic creation and keeps transient runtime
+	// UNKNOWN_TOPIC_OR_PARTITION errors separate from an absent topic.
+	metadata, err := consumer.GetMetadata(nil, true, timeoutMillis)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return errors.Wrap(err, "failed to get kafka topic metadata")
+	}
+	return validateKafkaTopicMetadata(metadata, topic)
+}
+
+func validateKafkaTopicMetadata(metadata *kafka.Metadata, topic string) error {
+	if metadata == nil {
+		return merr.WrapErrMqInternalMsg("kafka returned nil topic metadata")
+	}
+	topicMetadata, ok := metadata.Topics[topic]
+	if !ok {
+		return merr.WrapErrMqTopicNotFound(topic)
+	}
+	if topicMetadata.Error.Code() != kafka.ErrNoError {
+		return convertKafkaReadError(topicMetadata.Error, topic)
+	}
+	return nil
 }
 
 func (w *walImpl) consumerConfigForRead() kafka.ConfigMap {
@@ -117,7 +174,7 @@ func (w *walImpl) consumerConfigForRead() kafka.ConfigMap {
 
 func convertKafkaReadError(err error, topic string) error {
 	var kafkaErr kafka.Error
-	if errors.As(err, &kafkaErr) {
+	if errors.As(err, &kafkaErr) && kafkaErr.IsFatal() {
 		switch kafkaErr.Code() {
 		case kafka.ErrUnknownTopic, kafka.ErrUnknownTopicOrPart:
 			return merr.WrapErrMqTopicNotFound(topic, kafkaErr.Error())

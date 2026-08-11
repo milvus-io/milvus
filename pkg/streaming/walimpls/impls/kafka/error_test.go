@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"context"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -14,9 +15,19 @@ import (
 )
 
 func TestConvertKafkaReadError(t *testing.T) {
-	t.Run("topic not found", func(t *testing.T) {
+	t.Run("non-fatal topic error remains recoverable", func(t *testing.T) {
+		expected := kafka.NewError(kafka.ErrUnknownTopicOrPart, "unknown topic", false)
 		err := convertKafkaReadError(
-			kafka.NewError(kafka.ErrUnknownTopicOrPart, "unknown topic", false),
+			expected,
+			"missing-topic",
+		)
+		require.Equal(t, expected, err)
+		require.NotErrorIs(t, err, merr.ErrMqTopicNotFound)
+	})
+
+	t.Run("fatal topic error is unavailable", func(t *testing.T) {
+		err := convertKafkaReadError(
+			kafka.NewError(kafka.ErrUnknownTopicOrPart, "unknown topic", true),
 			"missing-topic",
 		)
 		require.ErrorIs(t, err, merr.ErrMqTopicNotFound)
@@ -26,6 +37,49 @@ func TestConvertKafkaReadError(t *testing.T) {
 		expected := errors.New("unrelated error")
 		require.Same(t, expected, convertKafkaReadError(expected, "topic"))
 	})
+}
+
+func TestValidateKafkaTopicMetadata(t *testing.T) {
+	t.Run("topic exists", func(t *testing.T) {
+		err := validateKafkaTopicMetadata(&kafka.Metadata{
+			Topics: map[string]kafka.TopicMetadata{
+				"existing-topic": {Topic: "existing-topic"},
+			},
+		}, "existing-topic")
+		require.NoError(t, err)
+	})
+
+	t.Run("topic is absent from metadata snapshot", func(t *testing.T) {
+		err := validateKafkaTopicMetadata(&kafka.Metadata{
+			Topics: map[string]kafka.TopicMetadata{},
+		}, "missing-topic")
+		require.ErrorIs(t, err, merr.ErrMqTopicNotFound)
+	})
+
+	t.Run("transient topic metadata error remains recoverable", func(t *testing.T) {
+		expected := kafka.NewError(kafka.ErrUnknownTopicOrPart, "metadata is propagating", false)
+		err := validateKafkaTopicMetadata(&kafka.Metadata{
+			Topics: map[string]kafka.TopicMetadata{
+				"existing-topic": {
+					Topic: "existing-topic",
+					Error: expected,
+				},
+			},
+		}, "existing-topic")
+		require.Equal(t, expected, err)
+		require.NotErrorIs(t, err, merr.ErrMqTopicNotFound)
+	})
+
+	t.Run("nil metadata is an internal error", func(t *testing.T) {
+		err := validateKafkaTopicMetadata(nil, "topic")
+		require.ErrorIs(t, err, merr.ErrMqInternal)
+	})
+}
+
+func TestValidateKafkaTopicExistsPreservesCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, validateKafkaTopicExists(ctx, nil, "topic"), context.Canceled)
 }
 
 func TestConsumerConfigForRead(t *testing.T) {

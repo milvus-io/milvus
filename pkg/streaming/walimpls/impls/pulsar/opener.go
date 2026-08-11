@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/rest"
 	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/utils"
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
@@ -21,6 +25,7 @@ import (
 const (
 	truncateCursorSubscriptionName = "truncate-cursor"
 	defaultBacklogSize             = 100 * 1024 * 1024 // default 100MB
+	pulsarTopicCheckTimeout        = time.Second
 )
 
 var _ walimpls.OpenerImpls = (*openerImpl)(nil)
@@ -48,7 +53,10 @@ func (t tenant) MustGetFullTopicName(topic string) string {
 type openerImpl struct {
 	tenant tenant
 	c      pulsar.Client
-	topics pulsarTopicAdmin
+
+	topicAdminMu  sync.Mutex
+	topicAdmin    pulsarTopicAdmin
+	newTopicAdmin func() (pulsarTopicAdmin, error)
 }
 
 // Open opens a wal instance.
@@ -57,6 +65,9 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 		return nil, err
 	}
 	if opt.Channel.AccessMode == types.AccessModeRO {
+		// A WAL name identifies the backend, not the migration epoch. Even if
+		// the requested name matches the current backend, an A->B->A migration
+		// can still make this a historical read, so every RO open is checked.
 		topic := o.tenant.MustGetFullTopicName(opt.Channel.Name)
 		if err := o.checkTopicExists(ctx, topic); err != nil {
 			return nil, err
@@ -86,21 +97,73 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 }
 
 func (o *openerImpl) checkTopicExists(ctx context.Context, topic string) error {
-	if o.topics == nil {
-		return merr.WrapErrMqInternalMsg("pulsar topic admin is unavailable")
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	topicName, err := utils.GetTopicName(topic)
 	if err != nil {
 		return merr.WrapErrMqInternal(err, "parse pulsar topic name")
 	}
-	if _, err := o.topics.GetStatsWithContext(ctx, *topicName); err != nil {
-		var adminErr rest.Error
-		if errors.As(err, &adminErr) && adminErr.Code == http.StatusNotFound {
-			return merr.WrapErrMqTopicNotFound(topic, adminErr.Reason)
+	topicAdmin, err := o.getTopicAdmin()
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		return merr.WrapErrMqInternal(err, "check pulsar topic existence")
+		mlog.Warn(ctx, "skip pulsar topic existence check because admin client is unavailable",
+			mlog.String("topic", topic),
+			mlog.Err(err))
+		return nil
+	}
+	if topicAdmin == nil {
+		mlog.Warn(ctx, "skip pulsar topic existence check because admin client returned no topic service",
+			mlog.String("topic", topic))
+		return nil
+	}
+
+	checkCtx, cancel := context.WithTimeout(ctx, pulsarTopicCheckTimeout)
+	defer cancel()
+	if _, err := topicAdmin.GetStatsWithContext(checkCtx, *topicName); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if isExplicitPulsarTopicNotFound(err) {
+			return merr.WrapErrMqTopicNotFound(topic, err.Error())
+		}
+		mlog.Warn(ctx, "skip inconclusive pulsar topic existence check",
+			mlog.String("topic", topic),
+			mlog.Err(err))
 	}
 	return nil
+}
+
+func (o *openerImpl) getTopicAdmin() (pulsarTopicAdmin, error) {
+	o.topicAdminMu.Lock()
+	defer o.topicAdminMu.Unlock()
+	if o.topicAdmin != nil {
+		return o.topicAdmin, nil
+	}
+	if o.newTopicAdmin == nil {
+		return nil, merr.WrapErrMqInternalMsg("pulsar topic admin is unavailable")
+	}
+	topicAdmin, err := o.newTopicAdmin()
+	if err != nil {
+		return nil, err
+	}
+	if topicAdmin == nil {
+		return nil, merr.WrapErrMqInternalMsg("pulsar topic admin returned no topic service")
+	}
+	o.topicAdmin = topicAdmin
+	return o.topicAdmin, nil
+}
+
+func isExplicitPulsarTopicNotFound(err error) bool {
+	var adminErr rest.Error
+	if !errors.As(err, &adminErr) || adminErr.Code != http.StatusNotFound {
+		return false
+	}
+	reason := strings.ToLower(strings.TrimSpace(adminErr.Reason))
+	return strings.Contains(reason, "topic") &&
+		(strings.Contains(reason, "not found") || strings.Contains(reason, "does not exist"))
 }
 
 // Close closes the opener resources.
