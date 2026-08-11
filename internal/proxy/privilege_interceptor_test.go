@@ -486,6 +486,7 @@ func TestPrivilegeInterceptorRestoreSnapshot(t *testing.T) {
 			PolicyInfos: []string{
 				funcutil.PolicyForPrivilege("role_collection", commonpb.ObjectType_Collection.String(), "orders", commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(), "tenant_a"),
 				funcutil.PolicyForPrivilege("role_cluster", commonpb.ObjectType_Collection.String(), "orders", commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(), util.AnyWord),
+				funcutil.PolicyForPrivilege("role_cluster", commonpb.ObjectType_Collection.String(), "payroll", commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(), util.AnyWord),
 			},
 			UserRoles: []string{
 				funcutil.EncodeUserRoleCache("collection_admin", "role_collection"),
@@ -494,6 +495,10 @@ func TestPrivilegeInterceptorRestoreSnapshot(t *testing.T) {
 		}, nil
 	}
 	require.NoError(t, InitMetaCache(context.Background(), client))
+	cache := globalMetaCache.(*MetaCache)
+	payroll := seedCollection(cache, "tenant_a", "payroll", 100)
+	payroll.aliases = []string{"orders_alias"}
+	cache.setAliasLocked("tenant_a", "orders_alias", "payroll")
 
 	t.Run("same database restore uses collection grant", func(t *testing.T) {
 		_, err := PrivilegeInterceptor(GetContext(context.Background(), "collection_admin:pwd"), &milvuspb.RestoreSnapshotRequest{
@@ -504,12 +509,20 @@ func TestPrivilegeInterceptorRestoreSnapshot(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("omitted target database is treated as source database", func(t *testing.T) {
-		_, err := PrivilegeInterceptor(GetContext(context.Background(), "collection_admin:pwd"), &milvuspb.RestoreSnapshotRequest{
+	t.Run("omitted target database uses active database", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContextWithDB(context.Background(), "collection_admin:pwd", "tenant_a"), &milvuspb.RestoreSnapshotRequest{
 			DbName:         "tenant_a",
 			CollectionName: "orders",
 		})
 		assert.NoError(t, err)
+	})
+
+	t.Run("omitted target database detects cross database restore", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContextWithDB(context.Background(), "collection_admin:pwd", "tenant_b"), &milvuspb.RestoreSnapshotRequest{
+			DbName:         "tenant_a",
+			CollectionName: "orders",
+		})
+		assert.Error(t, err)
 	})
 
 	t.Run("cross database restore rejects collection grant", func(t *testing.T) {
@@ -525,6 +538,15 @@ func TestPrivilegeInterceptorRestoreSnapshot(t *testing.T) {
 		_, err := PrivilegeInterceptor(GetContext(context.Background(), "cluster_admin:pwd"), &milvuspb.RestoreSnapshotRequest{
 			DbName:         "tenant_a",
 			CollectionName: "orders",
+			TargetDbName:   "tenant_b",
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("cross database restore resolves alias in source database", func(t *testing.T) {
+		_, err := PrivilegeInterceptor(GetContext(context.Background(), "cluster_admin:pwd"), &milvuspb.RestoreSnapshotRequest{
+			DbName:         "tenant_a",
+			CollectionName: "orders_alias",
 			TargetDbName:   "tenant_b",
 		})
 		assert.NoError(t, err)
