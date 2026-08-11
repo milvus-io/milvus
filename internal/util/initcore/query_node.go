@@ -88,6 +88,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 
 	SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
 	SyncEnableGrowingSourceFlush(ctx, paramtable.Get())
+	SyncTakeForOutputTopKLimit(paramtable.Get())
 
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
@@ -259,4 +260,11 @@ func SyncEnableGrowingSourceFlush(ctx context.Context, params *paramtable.Compon
 	if v {
 		mlog.Info(ctx, "enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")
 	}
+}
+
+// SyncTakeForOutputTopKLimit pushes the maximum search topK allowed to use
+// take() for output fields into segcore. A value of 0 disables the limit.
+func SyncTakeForOutputTopKLimit(params *paramtable.ComponentParam) {
+	limit := params.QueryNodeCfg.TakeForOutputTopKLimit.GetAsInt64()
+	C.SegcoreSetTakeForOutputTopKLimit(C.int64_t(limit))
 }
