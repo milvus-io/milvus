@@ -66,6 +66,25 @@ WriteUint32(std::vector<char>& data, size_t offset, uint32_t value) {
     memcpy(data.data() + offset, &value, sizeof(value));
 }
 
+class CountingVectorArrayChunk : public VectorArrayChunk {
+ public:
+    using VectorArrayChunk::VectorArrayChunk;
+
+    bool
+    isValid(int offset) const override {
+        ++validity_checks_;
+        return Chunk::isValid(offset);
+    }
+
+    int64_t
+    validity_checks() const {
+        return validity_checks_;
+    }
+
+ private:
+    mutable int64_t validity_checks_{0};
+};
+
 std::shared_ptr<arrow::BinaryArray>
 BuildBinaryArray(const std::vector<std::optional<std::string>>& values) {
     arrow::BinaryBuilder builder;
@@ -249,22 +268,28 @@ TEST(chunk, nullable_vector_array_views_reference_packed_validity) {
         }
     }
 
-    VectorArrayChunk chunk(4,
-                           row_count,
-                           data.data(),
-                           data.size(),
-                           DataType::VECTOR_FLOAT,
-                           nullptr,
-                           true);
+    CountingVectorArrayChunk chunk(4,
+                                   row_count,
+                                   data.data(),
+                                   data.size(),
+                                   DataType::VECTOR_FLOAT,
+                                   nullptr,
+                                   true);
 
     auto [views, validity] = chunk.Views(std::make_pair(1, 3));
     ASSERT_EQ(views.size(), 3);
+    EXPECT_EQ(chunk.validity_checks(), 0);
     EXPECT_EQ(validity.packed_data(),
               reinterpret_cast<const uint8_t*>(data.data()));
     EXPECT_EQ(validity.bit_offset(), 1);
     EXPECT_FALSE(validity[0]);
     EXPECT_TRUE(validity[1]);
     EXPECT_FALSE(validity[2]);
+
+    EXPECT_EQ(chunk.View(2).length(), 0);
+    EXPECT_EQ(chunk.validity_checks(), 1);
+    EXPECT_ANY_THROW(chunk.View(1));
+    EXPECT_EQ(chunk.validity_checks(), 2);
 }
 
 TEST(chunk, test_int64_field) {

@@ -891,7 +891,7 @@ class ShreddingExecutor {
                       "shredding data");
         } else {
             ExecuteOperation(src, size, res);
-            HandleValidData(valid, size, res, valid_res);
+            ApplyValidMask(valid, res, valid_res, size);
         }
     }
 
@@ -899,20 +899,6 @@ class ShreddingExecutor {
     void
     ExecuteOperation(const GetType* src, size_t size, TargetBitmapView res) {
         BatchUnaryCompare<GetType, InnerType>(src, size, val_, op_type_, res);
-    }
-
-    void
-    HandleValidData(ValidityView valid,
-                    size_t size,
-                    TargetBitmapView res,
-                    TargetBitmapView valid_res) {
-        if (valid) {
-            for (int i = 0; i < size; ++i) {
-                if (!valid[i]) {
-                    res[i] = valid_res[i] = false;
-                }
-            }
-        }
     }
 
     proto::plan::OpType op_type_;

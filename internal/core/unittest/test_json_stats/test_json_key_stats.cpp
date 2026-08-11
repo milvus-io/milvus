@@ -332,6 +332,20 @@ TEST_P(JsonKeyStatsTest, TestExecutorForShreddingData) {
     } else {
         EXPECT_EQ(res.count(), 800);
     }
+
+    TargetBitmap skipped_res(size_, true);
+    TargetBitmap skipped_valid_res(size_, true);
+    processed_size = index_->ExecutorForShreddingData<int64_t>(
+        nullptr,
+        field_name,
+        func,
+        [](const SkipIndex&, std::string, int) { return true; },
+        TargetBitmapView(skipped_res),
+        TargetBitmapView(skipped_valid_res));
+    EXPECT_EQ(processed_size, size_);
+    const auto expected_valid_count = nullable_ ? 400 : 800;
+    EXPECT_EQ(skipped_res.count(), expected_valid_count);
+    EXPECT_EQ(skipped_valid_res.count(), expected_valid_count);
 }
 
 TEST_P(JsonKeyStatsTest, TestGetShreddingFields) {

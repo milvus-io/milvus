@@ -593,13 +593,7 @@ class VectorArrayChunk : public Chunk {
         AssertInfo(!nullable_ || isValid(idx),
                    "VectorArrayChunk::View offset {} is null",
                    idx);
-        int idx_off = 2 * idx;
-        auto offset = offsets_lens_[idx_off];
-        auto len = offsets_lens_[idx_off + 1];
-        auto next_offset = offsets_lens_[idx_off + 2];
-        auto data_ptr = data_ + offset;
-        return VectorArrayView(
-            data_ptr, dim_, len, next_offset - offset, element_type_);
+        return ViewUnchecked(idx);
     }
 
     std::pair<std::vector<VectorArrayView>, ValidityView>
@@ -635,14 +629,10 @@ class VectorArrayChunk : public Chunk {
         auto end_offset = start_offset + len;
         const auto validity = Validity(start_offset);
         for (int64_t i = start_offset; i < end_offset; i++) {
-            if (nullable_) {
-                if (validity[i - start_offset]) {
-                    views.emplace_back(View(i));
-                } else {
-                    views.emplace_back();
-                }
+            if (nullable_ && !validity[i - start_offset]) {
+                views.emplace_back();
             } else {
-                views.emplace_back(View(i));
+                views.emplace_back(ViewUnchecked(i));
             }
         }
         return {std::move(views), validity};
@@ -665,6 +655,16 @@ class VectorArrayChunk : public Chunk {
     }
 
  private:
+    VectorArrayView
+    ViewUnchecked(int64_t idx) const {
+        int idx_off = 2 * idx;
+        auto offset = offsets_lens_[idx_off];
+        auto len = offsets_lens_[idx_off + 1];
+        auto next_offset = offsets_lens_[idx_off + 2];
+        auto data_ptr = data_ + offset;
+        return VectorArrayView(
+            data_ptr, dim_, len, next_offset - offset, element_type_);
+    }
     int64_t dim_;
     uint32_t* offsets_lens_;
     milvus::DataType element_type_;

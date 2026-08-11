@@ -250,17 +250,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
         for (size_t i = 0; i < num_data_chunk; i++) {
             auto chunk_size = column->chunk_row_nums(i);
-            if (GetShreddingJsonType(path) == JSONType::STRING ||
-                GetShreddingJsonType(path) == JSONType::ARRAY) {
-                auto pw = column->StringViews(op_ctx, i);
-                ApplyOnlyValidData(
-                    pw.get().second, valid_res + processed_size, chunk_size);
-            } else {
-                auto pw = column->Span(op_ctx, i);
-                auto chunk = pw.get();
-                ApplyOnlyValidData(
-                    chunk.validity(), valid_res + processed_size, chunk_size);
-            }
+            column->ApplyValidDataInChunk(
+                op_ctx, i, 0, chunk_size, valid_res + processed_size);
             processed_size += chunk_size;
         }
         AssertInfo(processed_size == valid_res.size(),
@@ -320,19 +311,13 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                          values...);
                 }
             } else {
-                if constexpr (std::is_same_v<T, std::string_view>) {
-                    auto pw = column->StringViews(op_ctx, i);
-                    ApplyValidData(pw.get().second,
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   chunk_size);
-                } else {
-                    auto pw = column->Span(op_ctx, i);
+                if (column->IsNullable()) {
+                    auto pw = column->GetChunk(op_ctx, i);
                     auto chunk = pw.get();
-                    ApplyValidData(chunk.validity(),
-                                   res + processed_size,
-                                   valid_res + processed_size,
-                                   chunk_size);
+                    chunk->ApplyValidityMask(
+                        0, chunk_size, res + processed_size);
+                    chunk->ApplyValidityMask(
+                        0, chunk_size, valid_res + processed_size);
                 }
             }
 
@@ -620,33 +605,6 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     void
     LoadShreddingData(const std::vector<std::string>& index_files,
                       const std::string& warmup_policy = "");
-
-    void
-    ApplyValidData(ValidityView validity,
-                   TargetBitmapView res,
-                   TargetBitmapView valid_res,
-                   const int size) {
-        if (validity) {
-            for (int i = 0; i < size; i++) {
-                if (!validity[i]) {
-                    res[i] = valid_res[i] = false;
-                }
-            }
-        }
-    }
-
-    void
-    ApplyOnlyValidData(ValidityView validity,
-                       TargetBitmapView valid_res,
-                       const int size) {
-        if (validity) {
-            for (int i = 0; i < size; i++) {
-                if (!validity[i]) {
-                    valid_res[i] = false;
-                }
-            }
-        }
-    }
 
     void
     GetColumnSchemaFromParquet(int64_t column_group_id,
