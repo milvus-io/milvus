@@ -50,13 +50,11 @@ func getDeliverPolicyWALName(deliverPolicy options.DeliverPolicy) (message.WALNa
 //
 // This adaptor only joins persisted WAL streams. It does not manage the
 // catchup/tailing transition or access the write-ahead buffer.
-// sharedWAL, when provided, is caller-owned and is never closed by the adaptor.
 type underlyingWALScannerAdaptor struct {
 	*helper.ScannerHelper
 
 	logger                     *mlog.Logger
 	channel                    types.PChannelInfo
-	sharedWAL                  walimpls.ROWALImpls
 	underlyingROWALImplsOpener underlyingROWALImplsOpener
 	onUnderlyingScannerChanged func(message.WALName)
 
@@ -70,7 +68,6 @@ type underlyingWALScannerAdaptor struct {
 func newUnderlyingWALScannerAdaptor(
 	logger *mlog.Logger,
 	channel types.PChannelInfo,
-	sharedWAL walimpls.ROWALImpls,
 	readOption walimpls.ReadOption,
 	underlyingROWALImplsOpener underlyingROWALImplsOpener,
 	onUnderlyingScannerChanged func(message.WALName),
@@ -95,7 +92,6 @@ func newUnderlyingWALScannerAdaptor(
 		ScannerHelper:              helper.NewScannerHelper(readOption.Name),
 		logger:                     logger,
 		channel:                    channel,
-		sharedWAL:                  sharedWAL,
 		underlyingROWALImplsOpener: underlyingROWALImplsOpener,
 		onUnderlyingScannerChanged: onUnderlyingScannerChanged,
 		underlyingWALName:          walName,
@@ -134,7 +130,7 @@ func (a *underlyingWALScannerAdaptor) consume() error {
 			return a.Context().Err()
 		}
 
-		underlyingWAL, owned, err := a.openUnderlyingWAL(a.Context())
+		underlyingWAL, err := a.openUnderlyingWAL(a.Context())
 		if err != nil {
 			if isReadWALUnavailable(err) {
 				return newUnderlyingWALUnavailableError(a.underlyingWALName, err)
@@ -143,9 +139,7 @@ func (a *underlyingWALScannerAdaptor) consume() error {
 		}
 
 		err = a.consumeUnderlying(a.Context(), underlyingWAL)
-		if owned {
-			underlyingWAL.Close()
-		}
+		underlyingWAL.Close()
 		if err == nil {
 			continue
 		}
@@ -241,20 +235,17 @@ func (a *underlyingWALScannerAdaptor) consumeUnderlying(
 
 func (a *underlyingWALScannerAdaptor) openUnderlyingWAL(
 	ctx context.Context,
-) (walimpls.ROWALImpls, bool, error) {
-	if a.sharedWAL != nil && a.sharedWAL.WALName() == a.underlyingWALName {
-		return a.sharedWAL, false, nil
-	}
+) (walimpls.ROWALImpls, error) {
 	underlyingWAL, err := a.underlyingROWALImplsOpener(ctx, a.underlyingWALName, a.channel)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if underlyingWAL.WALName() != a.underlyingWALName {
 		actualWALName := underlyingWAL.WALName()
 		underlyingWAL.Close()
-		return nil, false, status.NewWALNameMismatchError(actualWALName.String(), a.underlyingWALName.String())
+		return nil, status.NewWALNameMismatchError(actualWALName.String(), a.underlyingWALName.String())
 	}
-	return underlyingWAL, true, nil
+	return underlyingWAL, nil
 }
 
 func (a *underlyingWALScannerAdaptor) createUnderlyingScannerWithBackoff(

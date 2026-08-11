@@ -164,17 +164,9 @@ func (s *catchupScanner) openCatchupScannerImpls(ctx context.Context) (walimpls.
 		}
 		return scanner, err
 	}
-	var sharedWAL walimpls.ROWALImpls
-	if s.writeAheadBuffer != nil {
-		// The caller owns the active RW WAL. Reuse it while the logical stream
-		// points at that backend, but never use the name match as a stream boundary.
-		sharedWAL = s.innerWAL
-	}
-
 	return newUnderlyingWALScannerAdaptor(
 		s.logger,
 		s.innerWAL.Channel(),
-		sharedWAL,
 		walimpls.ReadOption{
 			Name:                s.scannerName,
 			DeliverPolicy:       s.deliverPolicy,
