@@ -116,7 +116,10 @@ func (h *HandlersV2) restoreSnapshot(ctx context.Context, c *gin.Context, anyReq
 	httpReq := anyReq.(*RestoreSnapshotReq)
 	targetDBName := httpReq.TargetDbName
 	if targetDBName == "" {
-		targetDBName = dbName
+		targetDBName = c.Request.Header.Get(HTTPHeaderDBName)
+		if targetDBName == "" {
+			targetDBName = DefaultDbName
+		}
 	}
 	req := &milvuspb.RestoreSnapshotRequest{
 		Name:                 httpReq.SnapshotName,

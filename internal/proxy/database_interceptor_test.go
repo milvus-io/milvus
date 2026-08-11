@@ -63,7 +63,7 @@ func TestDatabaseInterceptor(t *testing.T) {
 		assert.Equal(t, "db-from-header", req.GetDbName())
 	})
 
-	t.Run("restore snapshot defaults target database to source database", func(t *testing.T) {
+	t.Run("restore snapshot defaults databases independently from active database", func(t *testing.T) {
 		testCases := []struct {
 			name           string
 			dbName         string
@@ -76,7 +76,14 @@ func TestDatabaseInterceptor(t *testing.T) {
 				name:           "explicit source database",
 				dbName:         "source_db",
 				expectedDBName: "source_db",
-				expectedTarget: "source_db",
+				expectedTarget: util.DefaultDBName,
+			},
+			{
+				name:           "explicit source database with different active database",
+				dbName:         "archive",
+				metadataDBName: "tenant_a",
+				expectedDBName: "archive",
+				expectedTarget: "tenant_a",
 			},
 			{
 				name:           "source database from metadata",

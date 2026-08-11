@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -434,6 +435,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 
 		testCases := []struct {
 			name            string
+			ctx             context.Context
 			request         proto.Message
 			expectedDBID    int64
 			expectedCollNum int
@@ -467,7 +469,10 @@ func TestRateLimitInterceptor(t *testing.T) {
 				expectedDBID: 100,
 			},
 			{
-				name: "restore snapshot to source database",
+				name: "restore snapshot to active database",
+				ctx: metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+					util.HeaderDBName, "active_db",
+				)),
 				request: &milvuspb.RestoreSnapshotRequest{
 					DbName:               "source_db",
 					CollectionName:       "source",
@@ -502,7 +507,11 @@ func TestRateLimitInterceptor(t *testing.T) {
 
 		for _, testCase := range testCases {
 			t.Run(testCase.name, func(t *testing.T) {
-				response, err := interceptor(context.Background(), testCase.request, serverInfo, handler)
+				testCtx := testCase.ctx
+				if testCtx == nil {
+					testCtx = context.Background()
+				}
+				response, err := interceptor(testCtx, testCase.request, serverInfo, handler)
 				require.NoError(t, err)
 				status, ok := requestutil.GetStatusFromResponse(response)
 				require.True(t, ok)
@@ -520,7 +529,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 				n:               1,
 			}, limiter.checks[i])
 		}
-		assert.Equal(t, []string{"db1", "db1", "target_db", "source_db", "db1"}, databaseNames)
+		assert.Equal(t, []string{"db1", "db1", "target_db", "active_db", "db1"}, databaseNames)
 	})
 
 	t.Run("test RateLimitInterceptor", func(t *testing.T) {
