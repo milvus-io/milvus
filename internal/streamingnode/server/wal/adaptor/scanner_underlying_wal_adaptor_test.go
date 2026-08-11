@@ -222,6 +222,45 @@ func TestUnderlyingWALScannerAdaptorPassesThroughRawV0Message(t *testing.T) {
 	require.NoError(t, scanner.Close())
 }
 
+func TestUnderlyingWALScannerAdaptorSkipsRawV0MessageAfterAlterWAL(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	marker := newTestAlterWALMessage(commonpb.WALName_Test, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
+	oldWAL := newTestReadWAL(t, message.WALNameRocksmq, channel, marker)
+	staleLegacyMessage := message.NewImmutableMesasge(
+		walimplstest.NewTestMessageID(0),
+		[]byte("stale-legacy-message"),
+		map[string]string{},
+	)
+	currentMessage := newTestTimeTickMessage(101, walimplstest.NewTestMessageID(1), walimplstest.NewTestMessageID(1))
+	currentWAL := newTestReadWAL(t, message.WALNameTest, channel, staleLegacyMessage, currentMessage)
+
+	scanner, err := newUnderlyingWALScannerAdaptor(
+		mlog.With(),
+		channel,
+		walimpls.ReadOption{
+			Name:          "legacy-reader-after-switch",
+			DeliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
+		},
+		func(_ context.Context, walName message.WALName, _ types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			switch walName {
+			case message.WALNameRocksmq:
+				return oldWAL, nil
+			case message.WALNameTest:
+				return currentWAL, nil
+			default:
+				t.Fatalf("unexpected WAL name %s", walName)
+				return nil, nil
+			}
+		},
+		nil,
+	)
+	require.NoError(t, err)
+
+	require.Equal(t, marker, <-scanner.Chan())
+	require.Equal(t, currentMessage, <-scanner.Chan())
+	require.NoError(t, scanner.Close())
+}
+
 func TestUnderlyingWALScannerAdaptorDoesNotTreatMatchingWALNameAsCurrentEpoch(t *testing.T) {
 	channel := types.PChannelInfo{Name: "test-channel"}
 	innerWAL := mock_walimpls.NewMockWALImpls(t)

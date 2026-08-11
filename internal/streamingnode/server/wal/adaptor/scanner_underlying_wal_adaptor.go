@@ -198,6 +198,12 @@ func (a *underlyingWALScannerAdaptor) consumeUnderlying(
 			// reach catchupScanner, which converts them to V1 before inspecting
 			// TimeTick or MessageType. AlterWAL is never encoded as a V0 message.
 			if msg.Version() == message.VersionOld {
+				// V0 messages can only belong to the history before the first WAL
+				// switch. Once cutTs is set, a V0 message from the next WAL is stale
+				// residue from reusing a backend and must not regress the TimeTick.
+				if a.cutTs > 0 {
+					continue
+				}
 				if a.excludedMessageID == nil || !msg.MessageID().EQ(a.excludedMessageID) {
 					select {
 					case <-ctx.Done():
