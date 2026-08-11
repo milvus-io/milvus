@@ -3930,65 +3930,39 @@ func TestComputeRecall(t *testing.T) {
 }
 
 func TestCheckVarcharFormat(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				DataType: schemapb.DataType_VarChar,
-				FieldID:  100,
-				TypeParams: []*commonpb.KeyValuePair{{
-					Key:   common.EnableAnalyzerKey,
-					Value: "true",
+	newMessage := func(dataType schemapb.DataType, value string) *msgstream.InsertMsg {
+		return &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{
+				FieldsData: []*schemapb.FieldData{{
+					FieldId: 100,
+					Type:    dataType,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{value}}},
+					}},
 				}},
 			},
-			// skip field
-			{
-				DataType: schemapb.DataType_Int64,
-			},
-		},
+		}
+	}
+	invalidUTF8 := string([]byte{0xC0, 0xAF})
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_VarChar, schemapb.DataType_String} {
+		t.Run(dataType.String(), func(t *testing.T) {
+			fields := []*schemapb.FieldSchema{{FieldID: 100, DataType: dataType}}
+			require.NoError(t, checkInputUtf8Compatiable(fields, newMessage(dataType, "合法字符串")))
+			err := checkInputUtf8Compatiable(fields, newMessage(dataType, invalidUTF8))
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		})
 	}
 
-	data := &msgstream.InsertMsg{
-		InsertRequest: &msgpb.InsertRequest{
-			FieldsData: []*schemapb.FieldData{{
-				FieldId: 100,
-				Type:    schemapb.DataType_VarChar,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_StringData{
-							StringData: &schemapb.StringArray{
-								Data: []string{"valid string"},
-							},
-						},
-					},
-				},
-			}},
-		},
-	}
-
-	err := checkInputUtf8Compatiable(schema.Fields, data)
-	assert.NoError(t, err)
-
-	// invalid data
-	invalidUTF8 := []byte{0xC0, 0xAF}
-	data = &msgstream.InsertMsg{
-		InsertRequest: &msgpb.InsertRequest{
-			FieldsData: []*schemapb.FieldData{{
-				FieldId: 100,
-				Type:    schemapb.DataType_VarChar,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_StringData{
-							StringData: &schemapb.StringArray{
-								Data: []string{string(invalidUTF8)},
-							},
-						},
-					},
-				},
-			}},
-		},
-	}
-	err = checkInputUtf8Compatiable(schema.Fields, data)
-	assert.Error(t, err)
+	t.Run("text analyzer compatibility", func(t *testing.T) {
+		textField := &schemapb.FieldSchema{
+			FieldID: 100, DataType: schemapb.DataType_Text,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.EnableAnalyzerKey, Value: "true"}},
+		}
+		err := checkInputUtf8Compatiable([]*schemapb.FieldSchema{textField}, newMessage(schemapb.DataType_Text, invalidUTF8))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
 }
 
 func BenchmarkCheckVarcharFormat(b *testing.B) {

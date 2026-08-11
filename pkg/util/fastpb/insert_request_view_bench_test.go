@@ -429,10 +429,17 @@ func BenchmarkInsertRequestViewExactSplit10K(b *testing.B) {
 	rows, rowIDs, timestamps := benchmarkInsertRows(rowCount)
 	document := strings.Repeat("Milvus exact split document payload. ", 26)
 	texts := make([]string, rowCount)
+	sparseRows := make([][]byte, rowCount)
 	arrayRows := make([]*schemapb.ScalarField, rowCount)
 	vectorRows := make([]*schemapb.VectorField, rowCount)
 	for row := 0; row < rowCount; row++ {
 		texts[row] = document + strconv.Itoa(row)
+		sparseRows[row] = make([]byte, 128*8)
+		for element := 0; element < 128; element++ {
+			offset := element * 8
+			binary.LittleEndian.PutUint32(sparseRows[row][offset:], uint32(element*2+row%2))
+			binary.LittleEndian.PutUint32(sparseRows[row][offset+4:], 0x3f800000)
+		}
 		values := make([]int64, elementsPer)
 		for element := range values {
 			values[element] = int64(row*elementsPer + element)
@@ -461,6 +468,17 @@ func BenchmarkInsertRequestViewExactSplit10K(b *testing.B) {
 					StringData: &schemapb.StringArray{Data: texts},
 				}),
 			},
+		}},
+		{name: "sparse_1kib", source: &msgpb.InsertRequest{
+			NumRows:    rowCount,
+			RowIDs:     rowIDs,
+			Timestamps: timestamps,
+			FieldsData: []*schemapb.FieldData{{
+				Type: schemapb.DataType_SparseFloatVector, FieldId: 100, FieldName: "sparse",
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Contents: sparseRows}},
+				}},
+			}},
 		}},
 		{name: "array_and_array_of_vector", source: &msgpb.InsertRequest{
 			NumRows:    rowCount,

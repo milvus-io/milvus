@@ -2340,12 +2340,12 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 	return nil
 }
 
-// for some varchar with analzyer
-// we need check char format before insert it to message queue
-// now only support utf-8
+// The trusted insert encoder does not revalidate protobuf strings. Validate
+// VarChar, legacy String, and analyzer-enabled Text before the request enters
+// the message queue.
 func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) error {
 	checkeFields := lo.FilterMap(allFields, func(field *schemapb.FieldSchema, _ int) (int64, bool) {
-		if field.DataType == schemapb.DataType_VarChar {
+		if field.DataType == schemapb.DataType_VarChar || field.DataType == schemapb.DataType_String {
 			return field.GetFieldID(), true
 		}
 
@@ -2375,7 +2375,7 @@ func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msg
 			ok := utf8.ValidString(data)
 			if !ok {
 				mlog.Warn(context.TODO(), "string field data not utf-8 format", mlog.String("messageVersion", strData.ProtoReflect().Descriptor().Syntax().GoString()))
-				return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("input with analyzer should be utf-8 format, but row: %d not utf-8 format. data: %s", row, data))
+				return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("string input should be utf-8 format, but row: %d is not utf-8. data: %s", row, data))
 			}
 		}
 	}

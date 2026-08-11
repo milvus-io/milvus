@@ -414,6 +414,44 @@ func TestInsertRequestViewCursor_SequentialViews(t *testing.T) {
 	})
 }
 
+func TestInsertRequestViewCursor_AggregateRejectsShortValidData(t *testing.T) {
+	rows := []int{0, 1}
+	for _, tc := range []struct {
+		name  string
+		field *schemapb.FieldData
+	}{
+		{
+			name: "payload-less field",
+			field: &schemapb.FieldData{
+				Type: schemapb.DataType_Bool, FieldName: "empty", FieldId: 100,
+				ValidData: []bool{true},
+			},
+		},
+		{
+			name: "empty vector",
+			field: &schemapb.FieldData{
+				Type: schemapb.DataType_FloatVector, FieldName: "empty-vector", FieldId: 101,
+				ValidData: []bool{true},
+				Field:     &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 4}},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := &msgpb.InsertRequest{
+				NumRows: 2, RowIDs: []int64{1, 2}, Timestamps: []uint64{10, 20},
+				FieldsData: []*schemapb.FieldData{tc.field},
+			}
+			cursor, err := NewInsertRequestViewCursor(source)
+			require.NoError(t, err)
+			require.NotPanics(t, func() {
+				_, _, err = cursor.NextEncoder(insertViewTemplate(), rows, 1<<20)
+			})
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		})
+	}
+}
+
 func TestInsertRequestViewCursor_ExactPrefixSizing(t *testing.T) {
 	const rowCount = 129
 	rowIDs := make([]int64, rowCount)
