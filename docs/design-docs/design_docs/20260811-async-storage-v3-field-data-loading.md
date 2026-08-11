@@ -1,4 +1,4 @@
-# Async Storage V2 Field-Data Loading
+# Async Storage V3 Field-Data Loading
 
 - **Created:** 2026-08-11
 - **Status:** Draft; implementation is under review
@@ -9,7 +9,7 @@
 ## Summary
 
 This design adds an opt-in asynchronous load path for field data backed by the
-Storage V2 manifest and column-group reader. The existing caching-layer
+Storage V3 manifest and column-group reader. The existing caching-layer
 `Translator` interface remains synchronous, but the work behind
 `ManifestGroupTranslator::get_cells()` is decomposed into coroutine-based read
 windows that can overlap remote reads without dedicating one load worker to
@@ -33,7 +33,7 @@ The path is guarded by the temporary
 `queryNode.segcore.storageV2.enableAsyncLoad` switch, which defaults to
 `false`. The legacy `LoadCellBatchAsync` path remains available during rollout.
 
-This PR covers Storage V2 field data and JSON key-stat column groups. It does
+This PR covers Storage V3 field data and JSON key-stat column groups. It does
 not make scalar-index loading asynchronous.
 
 ## Terminology
@@ -49,10 +49,11 @@ This document follows the names used by the current Segcore implementation:
 | transient bytes | The estimated peak temporary memory held from admission through finalization. This is what the global budget charges. |
 | finalization | Converting Arrow record batches into Milvus `GroupChunk` data, including local mmap-file materialization when enabled. |
 
-The code and configuration use the name `storageV2`. Some surrounding Storage
-V3 documents use "manifest storage" for the same generation of sealed-segment
-column-group loading. This document uses `Storage V2` to match the implementation
-being changed.
+This feature is part of the Storage V3 load path. Some existing implementation
+identifiers still use the historical `storageV2` name, including the
+`storagev2translator` namespace and the
+`queryNode.segcore.storageV2.*` configuration keys. Those identifiers are kept
+for compatibility and do not define the feature's public terminology.
 
 ## Motivation
 
@@ -84,7 +85,7 @@ semantics, and error categories across coroutine and executor boundaries.
 
 ## Goals
 
-- Use the native `ChunkReader::get_chunks_async()` path for Storage V2
+- Use the native `ChunkReader::get_chunks_async()` path for Storage V3
   field-data reads.
 - Overlap independent read windows without blocking a worker for each remote
   I/O wait.
@@ -152,7 +153,7 @@ one blocking storage operation per load task.
 
 The switch is passed into translators created for:
 
-- eager and lazy Storage V2 sealed-segment column groups; and
+- eager and lazy Storage V3 sealed-segment column groups; and
 - eager and lazy JSON key-stat column groups.
 
 ### End-to-end flow
