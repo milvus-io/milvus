@@ -140,7 +140,26 @@ func (c *InsertRequestViewCursor) NextEncoder(template *msgpb.InsertRequest, row
 	planScanRow := c.scanRow
 	previous := c.lastSelectedRow
 	consumed := 0
+	aggregated, err := c.sizeState.aggregatePackedScalarRows(rows, previous, sizeLimit)
+	if err != nil {
+		return nil, 0, err
+	}
+	if aggregated {
+		firstRow := rows[0]
+		lastRow := rows[len(rows)-1]
+		for fieldIndex := range c.sizeState.fields {
+			c.encoderFirstFieldDataIndices[fieldIndex] = int64(firstRow)
+			c.nextFieldDataIndices[fieldIndex] = int64(lastRow + 1)
+		}
+		c.pendingRow = -1
+		planScanRow = lastRow + 1
+		previous = lastRow
+		consumed = len(rows)
+	}
 	for i, row := range rows {
+		if aggregated {
+			break
+		}
 		if row < 0 {
 			return nil, 0, insertViewInternal("row offset at selection index %d is negative: %d", i, row)
 		}

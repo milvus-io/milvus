@@ -26,6 +26,7 @@ func BenchmarkInsertRequestViewDataTypes10K(b *testing.B) {
 	rows, rowIDs, timestamps := benchmarkInsertRows(rowCount)
 
 	bools := make([]bool, rowCount)
+	int32s := make([]int32, rowCount)
 	int64s := make([]int64, rowCount)
 	doubles := make([]float64, rowCount)
 	varchars := make([]string, rowCount)
@@ -45,6 +46,7 @@ func BenchmarkInsertRequestViewDataTypes10K(b *testing.B) {
 
 	for row := 0; row < rowCount; row++ {
 		bools[row] = row%2 == 0
+		int32s[row] = int32(row * 17)
 		int64s[row] = int64(row * 17)
 		doubles[row] = float64(row) + 0.25
 		varchars[row] = document + strconv.Itoa(row)
@@ -96,7 +98,9 @@ func BenchmarkInsertRequestViewDataTypes10K(b *testing.B) {
 		name   string
 		source *msgpb.InsertRequest
 	}{
+		{"rowid_timestamp_only", &msgpb.InsertRequest{NumRows: rowCount, RowIDs: rowIDs, Timestamps: timestamps}},
 		{"bool", request(scalarField(100, schemapb.DataType_Bool, &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: bools}}))},
+		{"int32", request(scalarField(100, schemapb.DataType_Int32, &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: int32s}}))},
 		{"int64", request(scalarField(100, schemapb.DataType_Int64, &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: int64s}}))},
 		{"double", request(scalarField(100, schemapb.DataType_Double, &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: doubles}}))},
 		{"varchar_1kib", request(scalarField(100, schemapb.DataType_VarChar, &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: varchars}}))},

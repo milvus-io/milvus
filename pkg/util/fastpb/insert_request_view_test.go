@@ -62,6 +62,43 @@ func TestInsertRequestViewEncoder_DifferentialRandomSelections(t *testing.T) {
 	}
 }
 
+func TestInsertRequestViewCursor_AggregatesPackedScalarsExactly(t *testing.T) {
+	allTypes := insertViewAllRepackTypesSource()
+	source := &msgpb.InsertRequest{
+		NumRows:    allTypes.GetNumRows(),
+		RowIDs:     allTypes.GetRowIDs(),
+		Timestamps: allTypes.GetTimestamps(),
+		FieldsData: []*schemapb.FieldData{
+			allTypes.GetFieldsData()[0], // bool, including ValidData
+			allTypes.GetFieldsData()[1], // int32 varints
+			allTypes.GetFieldsData()[2], // int64 varints
+			allTypes.GetFieldsData()[3], // fixed32
+			allTypes.GetFieldsData()[4], // fixed64
+			allTypes.GetFieldsData()[8], // timestamptz varints
+		},
+	}
+	rows := []int{0, 1, 2, 3, 4}
+	template := insertViewTemplate()
+	expected := materializeWithAppendFieldData(template, source, rows)
+
+	cursor, err := NewInsertRequestViewCursor(source)
+	require.NoError(t, err)
+	encoder, consumed, err := cursor.NextEncoder(template, rows, 1<<20)
+	require.NoError(t, err)
+	require.Equal(t, len(rows), consumed)
+
+	size, err := encoder.EncodedSize()
+	require.NoError(t, err)
+	actualBytes := make([]byte, size)
+	_, err = encoder.MarshalTo(actualBytes)
+	require.NoError(t, err)
+	require.Equal(t, proto.Size(expected), size)
+
+	actual := &msgpb.InsertRequest{}
+	require.NoError(t, proto.Unmarshal(actualBytes, actual))
+	assert.True(t, proto.Equal(expected, actual))
+}
+
 func TestInsertRequestViewEncoder_DifferentialNilRepeatedMessages(t *testing.T) {
 	template := insertViewTemplate()
 	source := insertViewAllRepackTypesSource()
@@ -147,6 +184,16 @@ func TestInsertRequestViewEncoder_ExtendedScalarOneofs(t *testing.T) {
 	expected := materializeExtendedScalars(insertViewTemplate(), source, rows)
 	got := encodeAndDecodeInsertView(t, insertViewTemplate(), source, rows)
 	require.True(t, proto.Equal(expected, got), "extended scalar selection mismatch\nexpected: %v\nactual:   %v", expected, got)
+
+	packedSource := &msgpb.InsertRequest{
+		NumRows:    source.GetNumRows(),
+		RowIDs:     source.GetRowIDs(),
+		Timestamps: source.GetTimestamps(),
+		FieldsData: source.GetFieldsData()[3:],
+	}
+	packedExpected := materializeExtendedScalars(insertViewTemplate(), packedSource, rows)
+	packedGot := encodeAndDecodeInsertView(t, insertViewTemplate(), packedSource, rows)
+	require.True(t, proto.Equal(packedExpected, packedGot), "packed date/time selection mismatch\nexpected: %v\nactual:   %v", packedExpected, packedGot)
 }
 
 func TestInsertRequestViewCursor_SequentialViews(t *testing.T) {

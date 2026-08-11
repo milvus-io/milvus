@@ -59,6 +59,8 @@ type insertFieldSizeState struct {
 	valueFieldNumber protowire.Number
 	metadataSize     int
 	payloadSize      int
+	wireSize         int
+	previewWireSize  int
 	selectedRows     int
 	sparseDim        int64
 	stride           int
@@ -82,17 +84,23 @@ type insertFieldComputedSize struct {
 }
 
 type insertRequestSizeState struct {
-	template          *msgpb.InsertRequest
-	source            *msgpb.InsertRequest
-	fixedSize         int
-	rowCount          int
-	timestampPayload  int
-	rowIDPayload      int
-	encodedSize       int
-	fields            []insertFieldSizeState
-	rowDeltas         []insertFieldRowDelta
-	arrayCellPayloads []int
-	arrayFieldCount   int
+	template                 *msgpb.InsertRequest
+	source                   *msgpb.InsertRequest
+	fixedSize                int
+	rowCount                 int
+	timestampPayload         int
+	timestampWireSize        int
+	previewTimestampWireSize int
+	rowIDPayload             int
+	rowIDWireSize            int
+	previewRowIDWireSize     int
+	numRowsWireSize          int
+	previewNumRowsWireSize   int
+	encodedSize              int
+	fields                   []insertFieldSizeState
+	rowDeltas                []insertFieldRowDelta
+	arrayCellPayloads        []int
+	arrayFieldCount          int
 }
 
 func (s *insertRequestSizeState) reset(template, source *msgpb.InsertRequest) error {
@@ -139,8 +147,14 @@ func (s *insertRequestSizeState) reset(template, source *msgpb.InsertRequest) er
 	s.fixedSize = fixedSize
 	s.rowCount = 0
 	s.timestampPayload = 0
+	s.timestampWireSize = 0
+	s.previewTimestampWireSize = 0
 	s.rowIDPayload = 0
-	s.encodedSize = 0
+	s.rowIDWireSize = 0
+	s.previewRowIDWireSize = 0
+	s.numRowsWireSize = 0
+	s.previewNumRowsWireSize = 0
+	s.encodedSize = fixedSize
 	s.arrayCellPayloads = arrayCellPayloads
 	return nil
 }
@@ -193,6 +207,153 @@ func (s *insertRequestSizeState) validateRow(row int) error {
 	return nil
 }
 
+// aggregatePackedScalarRows sizes a selection field-major when its shape is
+// simple enough to calculate directly. This avoids rebuilding every enclosing
+// protobuf wrapper once per row for the common small-scalar case.
+func (s *insertRequestSizeState) aggregatePackedScalarRows(rows []int, previous, sizeLimit int) (bool, error) {
+	for i := range s.fields {
+		field := &s.fields[i]
+		if field.class == insertFieldPlanNone {
+			continue
+		}
+		if field.class != insertFieldPlanScalar ||
+			(field.valuePlan != insertFieldValueScalarEmpty && field.valuePlan != insertFieldValueScalarPacked) {
+			return false, nil
+		}
+	}
+
+	if sizeLimit > 0 {
+		upperBound, err := s.packedScalarUpperBound(len(rows))
+		if err != nil {
+			return false, err
+		}
+		if upperBound >= sizeLimit {
+			return false, nil
+		}
+	}
+
+	for i, row := range rows {
+		if row < 0 {
+			return false, insertViewInternal("row offset at selection index %d is negative: %d", i, row)
+		}
+		if row <= previous {
+			return false, insertViewInternal("cursor row offsets must be globally increasing: rows[%d]=%d after %d", i, row, previous)
+		}
+		if err := s.validateRow(row); err != nil {
+			return false, err
+		}
+		previous = row
+	}
+
+	rowCount := len(rows)
+	if _, err := checkedProduct(rowCount, 10, "timestamp payload upper bound"); err != nil {
+		return false, err
+	}
+	timestampPayload := 0
+	rowIDPayload := 0
+	for _, row := range rows {
+		timestampPayload += protowire.SizeVarint(s.source.GetTimestamps()[row])
+		rowIDPayload += protowire.SizeVarint(uint64(s.source.GetRowIDs()[row]))
+	}
+
+	total := s.fixedSize
+	timestampWireSize, err := insertBytesFieldSize(10, timestampPayload)
+	if err != nil {
+		return false, err
+	}
+	total, err = checkedAddSize(total, timestampWireSize, "insert request size")
+	if err != nil {
+		return false, err
+	}
+	rowIDWireSize, err := insertBytesFieldSize(11, rowIDPayload)
+	if err != nil {
+		return false, err
+	}
+	total, err = checkedAddSize(total, rowIDWireSize, "insert request size")
+	if err != nil {
+		return false, err
+	}
+
+	for i := range s.fields {
+		field := &s.fields[i]
+		payloadSize, err := field.aggregatePackedScalarPayload(rows)
+		if err != nil {
+			return false, err
+		}
+		field.payloadSize = payloadSize
+		computed, err := field.computedSize(nil, rowCount)
+		if err != nil {
+			return false, err
+		}
+		fieldWireSize, err := insertBytesFieldSize(13, computed.fieldSize)
+		if err != nil {
+			return false, err
+		}
+		field.wireSize = fieldWireSize
+		field.previewWireSize = fieldWireSize
+		total, err = checkedAddSize(total, fieldWireSize, "insert request size")
+		if err != nil {
+			return false, err
+		}
+	}
+
+	numRowsWireSize := insertProto3VarintFieldSize(14, uint64(rowCount))
+	total, err = checkedAddSize(total, numRowsWireSize, "insert request size")
+	if err != nil {
+		return false, err
+	}
+
+	s.rowCount = rowCount
+	s.timestampPayload = timestampPayload
+	s.timestampWireSize = timestampWireSize
+	s.previewTimestampWireSize = timestampWireSize
+	s.rowIDPayload = rowIDPayload
+	s.rowIDWireSize = rowIDWireSize
+	s.previewRowIDWireSize = rowIDWireSize
+	s.numRowsWireSize = numRowsWireSize
+	s.previewNumRowsWireSize = numRowsWireSize
+	s.encodedSize = total
+	return true, nil
+}
+
+func (s *insertRequestSizeState) packedScalarUpperBound(rowCount int) (int, error) {
+	packedPayload, err := checkedProduct(rowCount, 10, "packed request column upper bound")
+	if err != nil {
+		return 0, err
+	}
+	total := s.fixedSize
+	for _, number := range []protowire.Number{10, 11} {
+		wireSize, err := insertBytesFieldSize(number, packedPayload)
+		if err != nil {
+			return 0, err
+		}
+		total, err = checkedAddSize(total, wireSize, "insert request size upper bound")
+		if err != nil {
+			return 0, err
+		}
+	}
+	for i := range s.fields {
+		field := &s.fields[i]
+		maxPayload, err := field.packedScalarPayloadUpperBound(rowCount)
+		if err != nil {
+			return 0, err
+		}
+		computed, err := field.computedSize(&insertFieldRowDelta{payloadSize: maxPayload}, rowCount)
+		if err != nil {
+			return 0, err
+		}
+		wireSize, err := insertBytesFieldSize(13, computed.fieldSize)
+		if err != nil {
+			return 0, err
+		}
+		total, err = checkedAddSize(total, wireSize, "insert request size upper bound")
+		if err != nil {
+			return 0, err
+		}
+	}
+	return checkedAddSize(total, insertProto3VarintFieldSize(14, uint64(rowCount)), "insert request size upper bound")
+}
+
 func (s *insertRequestSizeState) previewSize(row int, deltas []insertFieldRowDelta) (int, error) {
 	newRowCount := s.rowCount + 1
 	timestampPayload, err := checkedAddSize(s.timestampPayload, protowire.SizeVarint(s.source.GetTimestamps()[row]), "timestamp payload")
@@ -204,23 +365,22 @@ func (s *insertRequestSizeState) previewSize(row int, deltas []insertFieldRowDel
 		return 0, err
 	}
 
-	total := s.fixedSize
-	timestampSize, err := insertBytesFieldSize(10, timestampPayload)
+	timestampWireSize, err := insertBytesFieldSize(10, timestampPayload)
 	if err != nil {
 		return 0, err
 	}
-	total, err = checkedAddSize(total, timestampSize, "insert request size")
+	if timestampWireSize < s.timestampWireSize {
+		return 0, insertViewInternal("timestamp wire size shrank from %d to %d", s.timestampWireSize, timestampWireSize)
+	}
+	wireDelta := uint64(timestampWireSize - s.timestampWireSize)
+	rowIDWireSize, err := insertBytesFieldSize(11, rowIDPayload)
 	if err != nil {
 		return 0, err
 	}
-	rowIDSize, err := insertBytesFieldSize(11, rowIDPayload)
-	if err != nil {
-		return 0, err
+	if rowIDWireSize < s.rowIDWireSize {
+		return 0, insertViewInternal("row ID wire size shrank from %d to %d", s.rowIDWireSize, rowIDWireSize)
 	}
-	total, err = checkedAddSize(total, rowIDSize, "insert request size")
-	if err != nil {
-		return 0, err
-	}
+	wireDelta += uint64(rowIDWireSize - s.rowIDWireSize)
 
 	for i := range s.fields {
 		computed, err := s.fields[i].computedSize(&deltas[i], newRowCount)
@@ -231,25 +391,41 @@ func (s *insertRequestSizeState) previewSize(row int, deltas []insertFieldRowDel
 		if err != nil {
 			return 0, err
 		}
-		total, err = checkedAddSize(total, fieldWireSize, "insert request size")
-		if err != nil {
-			return 0, err
+		s.fields[i].previewWireSize = fieldWireSize
+		if fieldWireSize < s.fields[i].wireSize {
+			return 0, insertViewInternal("field %d wire size shrank from %d to %d", i, s.fields[i].wireSize, fieldWireSize)
 		}
+		fieldDelta := uint64(fieldWireSize - s.fields[i].wireSize)
+		if wireDelta > math.MaxUint64-fieldDelta {
+			return 0, insertViewInternal("insert request wire-size delta exceeds addressable memory")
+		}
+		wireDelta += fieldDelta
 	}
 
-	total, err = checkedAddSize(total, insertProto3VarintFieldSize(14, uint64(newRowCount)), "insert request size")
-	if err != nil {
-		return 0, err
+	numRowsWireSize := insertProto3VarintFieldSize(14, uint64(newRowCount))
+	if numRowsWireSize < s.numRowsWireSize {
+		return 0, insertViewInternal("NumRows wire size shrank from %d to %d", s.numRowsWireSize, numRowsWireSize)
 	}
+	numRowsDelta := uint64(numRowsWireSize - s.numRowsWireSize)
+	if wireDelta > math.MaxUint64-numRowsDelta || wireDelta+numRowsDelta > uint64(math.MaxInt-s.encodedSize) {
+		return 0, insertViewInternal("insert request size exceeds addressable memory")
+	}
+	total := s.encodedSize + int(wireDelta+numRowsDelta)
+	s.previewTimestampWireSize = timestampWireSize
+	s.previewRowIDWireSize = rowIDWireSize
+	s.previewNumRowsWireSize = numRowsWireSize
 	return total, nil
 }
 
 func (s *insertRequestSizeState) commitRow(row, encodedSize int) {
 	s.rowCount++
 	s.timestampPayload += protowire.SizeVarint(s.source.GetTimestamps()[row])
+	s.timestampWireSize = s.previewTimestampWireSize
 	s.rowIDPayload += protowire.SizeVarint(uint64(s.source.GetRowIDs()[row]))
+	s.rowIDWireSize = s.previewRowIDWireSize
+	s.numRowsWireSize = s.previewNumRowsWireSize
 	for i := range s.fields {
-		s.fields[i].commit(s.rowDeltas[i])
+		s.fields[i].commit(s.rowDeltas[i], s.fields[i].previewWireSize)
 		if s.fields[i].arrayOrdinal >= 0 {
 			s.arrayCellPayloads = append(s.arrayCellPayloads, s.rowDeltas[i].arrayCellPayload)
 		}
@@ -596,6 +772,104 @@ func (s *insertFieldSizeState) previewScalarRow(scalar *schemapb.ScalarField, ro
 	return nil
 }
 
+func (s *insertFieldSizeState) packedScalarPayloadUpperBound(rowCount int) (int, error) {
+	width := 0
+	switch s.valuePlan {
+	case insertFieldValueNone, insertFieldValueScalarEmpty:
+	case insertFieldValueScalarPacked:
+		switch s.valueFieldNumber {
+		case 1:
+			width = 1
+		case 4:
+			width = 4
+		case 5:
+			width = 8
+		case 2, 3, 11, 15, 16:
+			width = 10
+		default:
+			return 0, insertViewInternal("unexpected packed scalar field number %d", s.valueFieldNumber)
+		}
+	default:
+		return 0, insertViewInternal("unexpected packed scalar size plan %d", s.valuePlan)
+	}
+	return checkedProduct(rowCount, width, "packed scalar payload upper bound")
+}
+
+func (s *insertFieldSizeState) aggregatePackedScalarPayload(rows []int) (int, error) {
+	if _, err := s.packedScalarPayloadUpperBound(len(rows)); err != nil {
+		return 0, err
+	}
+	valid := s.field.GetValidData()
+	if len(valid) > 0 && len(rows) > 0 && rows[len(rows)-1] >= len(valid) {
+		for _, row := range rows {
+			if row >= len(valid) {
+				return 0, insertViewInternal("row offset %d exceeds ValidData length %d for field %q (%d)", row, len(valid), s.field.GetFieldName(), s.field.GetFieldId())
+			}
+		}
+	}
+
+	if s.class == insertFieldPlanNone || s.valuePlan == insertFieldValueScalarEmpty {
+		return 0, nil
+	}
+	scalar := s.field.GetScalars()
+	switch value := scalar.Data.(type) {
+	case *schemapb.ScalarField_BoolData:
+		values := value.BoolData.GetData()
+		if err := validateSelectedRows(rows, len(values), "bool scalar"); err != nil {
+			return 0, err
+		}
+		return len(rows), nil
+	case *schemapb.ScalarField_IntData:
+		values := value.IntData.GetData()
+		if err := validateSelectedRows(rows, len(values), "int scalar"); err != nil {
+			return 0, err
+		}
+		size := 0
+		for _, row := range rows {
+			size += protowire.SizeVarint(uint64(values[row]))
+		}
+		return size, nil
+	case *schemapb.ScalarField_LongData:
+		values := value.LongData.GetData()
+		if err := validateSelectedRows(rows, len(values), "long scalar"); err != nil {
+			return 0, err
+		}
+		size := 0
+		for _, row := range rows {
+			size += protowire.SizeVarint(uint64(values[row]))
+		}
+		return size, nil
+	case *schemapb.ScalarField_FloatData:
+		values := value.FloatData.GetData()
+		if err := validateSelectedRows(rows, len(values), "float scalar"); err != nil {
+			return 0, err
+		}
+		return checkedProduct(len(rows), 4, "float scalar payload")
+	case *schemapb.ScalarField_DoubleData:
+		values := value.DoubleData.GetData()
+		if err := validateSelectedRows(rows, len(values), "double scalar"); err != nil {
+			return 0, err
+		}
+		return checkedProduct(len(rows), 8, "double scalar payload")
+	case *schemapb.ScalarField_TimestamptzData:
+		return aggregateSelectedInt64(value.TimestamptzData.GetData(), rows, "timestamptz scalar")
+	case *schemapb.ScalarField_DateData:
+		values := value.DateData.GetData()
+		if err := validateSelectedRows(rows, len(values), "date scalar"); err != nil {
+			return 0, err
+		}
+		size := 0
+		for _, row := range rows {
+			size += protowire.SizeVarint(uint64(values[row]))
+		}
+		return size, nil
+	case *schemapb.ScalarField_TimeData:
+		return aggregateSelectedInt64(value.TimeData.GetData(), rows, "time scalar")
+	default:
+		return 0, insertViewInternal("unexpected packed ScalarField oneof %T", value)
+	}
+}
+
 func (s *insertFieldSizeState) previewVectorRow(vector *schemapb.VectorField, row, dataIndex int, delta *insertFieldRowDelta) error {
 	switch value := vector.Data.(type) {
 	case nil:
@@ -841,8 +1115,9 @@ func (s *insertFieldSizeState) appendPlan(plan []int, computed insertFieldComput
 	return plan
 }
 
-func (s *insertFieldSizeState) commit(delta insertFieldRowDelta) {
+func (s *insertFieldSizeState) commit(delta insertFieldRowDelta, wireSize int) {
 	s.payloadSize += delta.payloadSize
+	s.wireSize = wireSize
 	s.selectedRows += delta.selectedRows
 	if delta.sparseDim > s.sparseDim {
 		s.sparseDim = delta.sparseDim
@@ -960,6 +1235,29 @@ func previewInt64Row(values []int64, row int, label string, delta *insertFieldRo
 	}
 	delta.payloadSize = protowire.SizeVarint(uint64(values[row]))
 	return nil
+}
+
+func validateSelectedRows(rows []int, valueCount int, label string) error {
+	if len(rows) == 0 || rows[len(rows)-1] < valueCount {
+		return nil
+	}
+	for _, row := range rows {
+		if row >= valueCount {
+			return insertViewInternal("row offset %d exceeds %s length %d", row, label, valueCount)
+		}
+	}
+	return nil
+}
+
+func aggregateSelectedInt64(values []int64, rows []int, label string) (int, error) {
+	if err := validateSelectedRows(rows, len(values), label); err != nil {
+		return 0, err
+	}
+	size := 0
+	for _, row := range rows {
+		size += protowire.SizeVarint(uint64(values[row]))
+	}
+	return size, nil
 }
 
 func insertProto3VarintFieldSize(number protowire.Number, value uint64) int {
