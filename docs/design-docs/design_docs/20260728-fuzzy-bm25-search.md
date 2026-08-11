@@ -140,10 +140,10 @@ This behavior is important for the term dictionary design:
 ### 5.1 FST fragment
 
 An immutable FST containing the sorted, deduplicated analyzer output terms
-newly covered by one sync for one segment, field, and analyzer identity. An FST
-is losslessly enumerable in lexical order, so it serves both as the durable
-vocabulary and as the query artifact. Compaction, migration, and Global FST
-generation iterate input FSTs directly; no parallel term-enum file is stored.
+newly covered by one sync for one segment and field. An FST is losslessly
+enumerable in lexical order, so it serves both as the durable vocabulary and
+as the query artifact. Compaction, migration, and Global FST generation iterate
+input FSTs directly; no parallel term-enum file is stored.
 
 ### 5.2 Segment term dictionary
 
@@ -177,13 +177,16 @@ features.
 A dictionary is identified by at least:
 
 ```text
-(collection, vchannel, segment, field, analyzer identity, dictionary generation)
+(collection, vchannel, segment, field, dictionary generation)
 ```
 
-The analyzer identity is a stable digest of analyzer configuration, referenced
-resources, multi-analyzer selection, and the tokenizer implementation version.
-A segment ID alone is not sufficient because compaction, schema change, or
-index rebuild can publish a new dictionary for the same logical data frontier.
+The dictionary is field-scoped because all analyzer output for a BM25 field is
+hashed into the same sparse-vector and posting space. A multi-analyzer selects
+one analyzer per row; it does not create separate logical fields or posting
+spaces. Therefore terms emitted by every selected analyzer are unioned into
+the same field vocabulary. A segment ID alone is not sufficient because
+compaction, schema change, or index rebuild can publish a new dictionary for
+the same logical data frontier.
 
 ### 5.5 Lexical snapshot
 
@@ -251,9 +254,10 @@ Validation rules:
 4. The property defaults to `false`.
 5. The first release treats the property as creation-time immutable. Enabling
    it on existing data requires an explicit backfill/rebuild design.
-6. For a multi-analyzer BM25 field, message term batches and dictionaries are
-   separated by analyzer identity. A term analyzed with analyzer A must never
-   be inserted into or queried through analyzer B's dictionary.
+6. For a multi-analyzer BM25 field, every row contributes the terms emitted by
+   its selected analyzer to one field-level message batch and dictionary. Query
+   analysis selects the requested analyzer only to produce source terms; fuzzy
+   expansion searches the complete field vocabulary.
 
 `enable_fuzzy_bm25` is not intended to become the permanent owner of text
 index construction. It exists so fuzzy BM25 can be delivered before the
@@ -340,7 +344,6 @@ WAL header or message properties. Its logical shape is:
 ```text
 TextTermBatch {
     input_field_id
-    analyzer_identity
     repeated bytes sorted_unique_terms
 }
 ```
@@ -349,7 +352,7 @@ The actual wire change can either extend `msgpb.InsertRequest` or introduce a
 new versioned Insert body. It must follow the streaming message code-generation
 and rolling-upgrade rules.
 
-Terms are deduplicated within one message for each `(field, analyzer identity)`.
+Terms are deduplicated within one message for each field.
 The current Insert message is assigned to one partition/segment. If batch
 inserts later span multiple segment assignments, the sidecar must become
 assignment-scoped; applying the union of the whole message to every assigned
@@ -361,7 +364,7 @@ normalization, lowercasing, or stemming is performed after the analyzer.
 ### 8.3 Growing segment dictionary
 
 The QueryNode Worker maintains one `MutableTrieDictionary` per enabled growing
-segment, field, and analyzer identity.
+segment and field.
 
 When an Insert message becomes visible to the growing segment, its message term
 batch is inserted into the Trie. Trie insertion is idempotent, which makes
@@ -379,7 +382,7 @@ They must advance under the same message/checkpoint boundary as the row data.
 ### 8.4 Sync writes FST fragments
 
 Every sync sorts and deduplicates the terms newly covered by that sync and
-writes one immutable FST fragment for each enabled `(field, analyzer identity)`.
+writes one immutable FST fragment for each enabled field.
 The in-memory term set is cleared only after the sync manifest is committed.
 
 A separate term-enum file is unnecessary. FST construction from an already
@@ -397,7 +400,7 @@ A sync atomically publishes:
 
 - insert data files;
 - BM25 statistics;
-- zero or one FST fragment per enabled `(field, analyzer identity)`;
+- zero or one FST fragment per enabled field;
 - the data checkpoint and FST coverage checkpoint;
 - the manifest or V2 metadata that references the complete set.
 
@@ -413,7 +416,7 @@ does not create a physical FST file. Otherwise recovery cannot distinguish
 
 Each FST fragment, together with its manifest entry, records at least:
 
-- field ID and analyzer identity;
+- field ID;
 - covered WAL/checkpoint range;
 - term count;
 - encoding version;
@@ -493,7 +496,6 @@ single compacted FST. The Worker segment exposes one logical interface:
 ```text
 ExpandTerms(
     field,
-    analyzer_identity,
     source_terms,
     fuzzy_options,
     expected_dictionary_generation
@@ -525,7 +527,6 @@ ExpandTermsRequest {
     vchannel
     lexical_snapshot_version
     field_id
-    analyzer_identity
     fuzzy_options
     repeated source_terms_by_query
     repeated SegmentDictionaryRef segments
@@ -549,7 +550,8 @@ analyzes the raw query with `with_hash=false`. It retains:
 - the source term bytes;
 - per-query source term frequency;
 - source-token ordering when needed by the fuzzy rewrite policy;
-- analyzer identity.
+- the query analyzer selection used to produce the source terms, when the
+  field uses multi-analyzer row dispatch.
 
 The Delegator merges and deduplicates Worker responses by query and source
 token. The same candidate returned by many segments appears only once in the
@@ -631,7 +633,6 @@ Exact mode is fail-closed:
 - a required Worker expansion failure fails the query or restarts the complete
   expansion on a newly pinned lexical snapshot;
 - a missing dictionary generation is not treated as an empty vocabulary;
-- analyzer identity mismatch fails the query;
 - a distribution change after pinning does not alter the in-flight query;
 - partial expansion results must not be combined with full-target IDF stats.
 
@@ -673,7 +674,7 @@ Indexes.
 A background global-dictionary compaction job opens iterators over consolidated
 segment FSTs and performs a streaming k-way union. It publishes:
 
-- one Global FST per `(collection/vchannel, field, analyzer identity)`;
+- one Global FST per `(collection/vchannel, field)`;
 - a generation ID and format version;
 - a coverage manifest;
 - checksum, term count, and build timestamp.
@@ -693,7 +694,6 @@ The coverage manifest must bind at least:
 ```text
 vchannel
 field_id
-analyzer_identity
 global_dictionary_generation
 WAL/checkpoint frontier
 covered segment dictionary generations
@@ -796,7 +796,7 @@ The implementation is expected to require changes in the following areas.
 
 ### WAL message
 
-- Add a versioned, field/analyzer-scoped term sidecar to Insert messages.
+- Add a versioned, field-scoped term sidecar to Insert messages.
 - Generate/update specialized message bindings through the existing codegen
   path.
 - Preserve the sidecar through transaction assembly and replication.
@@ -805,7 +805,7 @@ The implementation is expected to require changes in the following areas.
 
 - FST fragment entries with checkpoint coverage.
 - Consolidated FST entries with dictionary generation.
-- Analyzer identity and encoding version.
+- Field-level FST encoding version.
 - Global FST coverage manifest and generation.
 
 ### QueryNode RPC
@@ -834,7 +834,7 @@ The implementation is expected to require changes in the following areas.
 ## 12. Correctness invariants
 
 1. **WAL materialization invariant**: BM25 sparse output and the message term
-   batch come from the same analyzer execution and analyzer identity.
+   batch come from the same per-row analyzer execution.
 2. **Sync coverage invariant**: data and FST coverage checkpoints advance
    together, including empty-term syncs.
 3. **Readable segment invariant**: an exact-fuzzy-readable segment has a
@@ -848,8 +848,9 @@ The implementation is expected to require changes in the following areas.
 7. **Exact-mode invariant**: every target segment's vocabulary is represented
    by either the pinned Global FST or a successful Worker expansion response.
 8. **Rewrite invariant**: DF-zero terms are removed before `max_expansions`.
-9. **Analyzer invariant**: dictionaries built by different analyzer identities
-   are never unioned or queried together.
+9. **Field vocabulary invariant**: all terms that contribute to one BM25 input
+   field, including terms from different multi-analyzer row selections, are
+   unioned into one field-level dictionary.
 
 ---
 
@@ -931,8 +932,11 @@ Delegator path.
 ### Write and recovery
 
 - Message-level deduplication, including empty terms and repeated terms.
-- BM25 output and the message term batch use exactly the same analyzer identity.
-- Multi-analyzer dictionaries remain isolated.
+- BM25 output and the message term batch come from the same per-row analyzer
+  execution.
+- Rows selecting different multi-analyzer branches contribute to one shared
+  field vocabulary, and a query analyzed through one branch can expand to a
+  live term emitted by another branch.
 - Sync publishes matching data/FST-coverage checkpoints.
 - Crash before and after manifest commit leaves either the old complete state
   or the new complete state.
