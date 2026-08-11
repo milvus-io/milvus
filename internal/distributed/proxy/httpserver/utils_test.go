@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
@@ -4090,6 +4091,92 @@ func TestBuildStructArrayFieldDataRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, extracted1, 1)
 	assert.EqualValues(t, int32(3), extracted1[0]["sub_int"])
+}
+
+// A struct array's string sub-field is parsed out of the raw request body with
+// gjson, which hands back whatever bytes the caller sent. proto.Marshal used to
+// reject invalid UTF-8 when the message was built; the borrowed-row-view encoder
+// no longer rescans it, so the bytes would reach the WAL and be dropped on the
+// consumer side with only a warning. This pins the half of the chain that runs
+// here -- the invalid byte survives into an Array sub-field whose element type
+// is VarChar -- which is exactly the shape checkAndFlattenStructFieldData lifts
+// to the top level and checkInputUtf8Compatiable rejects (TestCheckVarcharFormat
+// in internal/proxy covers that half).
+func TestAnyToColumnsStructArrayKeepsRawInvalidUTF8(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	structSchema := schema.GetStructArrayFields()[0]
+	structSchema.Nullable = true
+	subStr := &schemapb.FieldSchema{
+		FieldID:     105,
+		Name:        "sub_str",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxCapacityKey, Value: "10"},
+			{Key: common.MaxLengthKey, Value: "64"},
+		},
+	}
+	structSchema.Fields = append(structSchema.Fields, subStr)
+
+	// A raw 0xff, not an escape: this is a byte a client can put on the wire.
+	invalidUTF8 := "bad\xffbyte"
+	body := []byte(`{
+		"data": [
+			{
+				"id": 1,
+				"vec": [0.1, 0.2, 0.3, 0.4],
+				"my_struct": [
+					{"sub_int": 10, "sub_vec": [1.1, 1.2, 1.3, 1.4], "sub_str": "ok"},
+					{"sub_int": 11, "sub_vec": [2.1, 2.2, 2.3, 2.4], "sub_str": "` + invalidUTF8 + `"}
+				]
+			},
+			{
+				"id": 2,
+				"vec": [0.5, 0.6, 0.7, 0.8],
+				"my_struct": null
+			},
+			{
+				"id": 3,
+				"vec": [0.9, 1.0, 1.1, 1.2],
+				"my_struct": [{"sub_int": 30, "sub_vec": [3.1, 3.2, 3.3, 3.4], "sub_str": "fine"}]
+			}
+		]
+	}`)
+
+	rows, validData, err := checkAndSetData(body, schema, false)
+	require.NoError(t, err)
+	require.Equal(t, []bool{true, false, true}, validData["my_struct"])
+
+	fds, err := anyToColumns(rows, validData, schema, true, false)
+	require.NoError(t, err)
+	var structFD *schemapb.FieldData
+	for _, fd := range fds {
+		if fd.GetType() == schemapb.DataType_ArrayOfStruct {
+			structFD = fd
+			break
+		}
+	}
+	require.NotNil(t, structFD)
+
+	var strSub *schemapb.FieldData
+	for _, sub := range structFD.GetStructArrays().GetFields() {
+		if sub.GetFieldName() == "sub_str" {
+			strSub = sub
+			break
+		}
+	}
+	require.NotNil(t, strSub)
+	// The field ID has to survive too: it is what the ingress check matches on.
+	assert.Equal(t, subStr.GetFieldID(), strSub.GetFieldId())
+	assert.Equal(t, schemapb.DataType_Array, strSub.GetType())
+	assert.Equal(t, schemapb.DataType_VarChar, strSub.GetScalars().GetArrayData().GetElementType())
+
+	cells := strSub.GetScalars().GetArrayData().GetData()
+	require.Len(t, cells, 2, "the null row carries no payload cell")
+	require.Equal(t, []string{"ok", invalidUTF8}, cells[0].GetStringData().GetData())
+	assert.False(t, utf8.ValidString(cells[0].GetStringData().GetData()[1]),
+		"REST must be assumed to pass raw bytes through; the Proxy ingress is what rejects them")
+	assert.Equal(t, []string{"fine"}, cells[1].GetStringData().GetData())
 }
 
 func TestAnyToColumnsStructArray(t *testing.T) {

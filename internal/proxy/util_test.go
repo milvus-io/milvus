@@ -4017,6 +4017,54 @@ func TestCheckVarcharFormat(t *testing.T) {
 		require.NoError(t, checkInputUtf8Compatiable(fields, newArrayMessage(schemapb.DataType_Int64,
 			[]string{invalidUTF8})))
 	})
+
+	// The reachable source of invalid UTF-8 is a REST struct array: its string
+	// sub-field is parsed with gjson, which keeps the caller's bytes, and it
+	// arrives here nested in StructArrays. Drive the flatten step the insert task
+	// runs first, so the check is exercised on the shape REST actually produces
+	// (TestAnyToColumnsStructArrayKeepsRawInvalidUTF8 in the httpserver package
+	// pins the other half: that the raw byte survives the HTTP body parse).
+	t.Run("struct array string sub-field after flatten", func(t *testing.T) {
+		subField := &schemapb.FieldSchema{
+			FieldID: 103, Name: "sub_str",
+			DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+		}
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+				FieldID: 102, Name: "my_struct", Fields: []*schemapb.FieldSchema{subField},
+			}},
+		}
+		cell := func(values ...string) *schemapb.ScalarField {
+			return &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: values}},
+			}
+		}
+		structData := &schemapb.FieldData{
+			Type: schemapb.DataType_ArrayOfStruct, FieldName: "my_struct", FieldId: 102,
+			Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{
+				Fields: []*schemapb.FieldData{{
+					Type: schemapb.DataType_Array, FieldName: "sub_str", FieldId: 103,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+							ElementType: schemapb.DataType_VarChar,
+							Data:        []*schemapb.ScalarField{cell("ok"), cell("ok", invalidUTF8)},
+						}},
+					}},
+				}},
+			}},
+		}
+		insertMsg := &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{
+			FieldsData: []*schemapb.FieldData{structData},
+		}}
+		require.NoError(t, checkAndFlattenStructFieldData(schema, insertMsg))
+
+		err := checkInputUtf8Compatiable(typeutil.GetAllFieldSchemas(schema), insertMsg)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "row 1 element 1")
+		assert.NotContains(t, err.Error(), invalidUTF8)
+	})
 }
 
 func BenchmarkCheckVarcharFormat(b *testing.B) {
