@@ -17,6 +17,8 @@
 package httpserver
 
 import (
+	"unicode/utf8"
+
 	"github.com/tidwall/gjson"
 	"google.golang.org/protobuf/proto"
 
@@ -193,6 +195,13 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			},
 		}
 	case schemapb.DataType_VarChar:
+		// sonic substitutes U+FFFD for an invalid byte, so the raw column is
+		// what carries the evidence; see checkedUTF8String in utils.go for why
+		// a string cell has to be valid UTF-8 before it becomes a proto3 string.
+		if !paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool() && !utf8.Valid(raw) {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"field %s expects utf-8 text, but an element is not utf-8", f.FieldName)
+		}
 		data := []string{}
 		err := json.Unmarshal(raw, &data)
 		if err != nil {

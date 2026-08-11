@@ -24,7 +24,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
@@ -4093,16 +4092,124 @@ func TestBuildStructArrayFieldDataRoundTrip(t *testing.T) {
 	assert.EqualValues(t, int32(3), extracted1[0]["sub_int"])
 }
 
-// A struct array's string sub-field is parsed out of the raw request body with
-// gjson, which hands back whatever bytes the caller sent. proto.Marshal used to
-// reject invalid UTF-8 when the message was built; the borrowed-row-view encoder
-// no longer rescans it, so the bytes would reach the WAL and be dropped on the
-// consumer side with only a warning. This pins the half of the chain that runs
-// here -- the invalid byte survives into an Array sub-field whose element type
-// is VarChar -- which is exactly the shape checkAndFlattenStructFieldData lifts
-// to the top level and checkInputUtf8Compatiable rejects (TestCheckVarcharFormat
-// in internal/proxy covers that half).
-func TestAnyToColumnsStructArrayKeepsRawInvalidUTF8(t *testing.T) {
+// Every REST path that turns request bytes into a proto3 string has to refuse
+// invalid UTF-8, because the insert encoder writes those bytes into the message
+// body without rescanning them.
+func TestCheckAndSetDataRejectsInvalidUTF8(t *testing.T) {
+	// A raw 0xff, not an escape: this is a byte a client can put on the wire.
+	const invalidUTF8 = "bad\xffbyte"
+
+	varcharSchema := &schemapb.CollectionSchema{
+		Name: "c_utf8",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}},
+			},
+		},
+	}
+	arraySchema := &schemapb.CollectionSchema{
+		Name: "c_utf8_array",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID: 101, Name: "tokens",
+				DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxCapacityKey, Value: "10"},
+					{Key: common.MaxLengthKey, Value: "64"},
+				},
+			},
+		},
+	}
+
+	t.Run("varchar scalar", func(t *testing.T) {
+		body := []byte(`{"data": [{"id": 1, "text": "` + invalidUTF8 + `"}]}`)
+		_, _, err := checkAndSetData(body, varcharSchema, false)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "text")
+		assert.NotContains(t, err.Error(), invalidUTF8)
+
+		ok := []byte(`{"data": [{"id": 1, "text": "fine"}]}`)
+		_, _, err = checkAndSetData(ok, varcharSchema, false)
+		require.NoError(t, err)
+	})
+
+	// sonic replaces the invalid byte with U+FFFD before the elements exist, so
+	// the raw token is what carries the evidence.
+	t.Run("array of varchar", func(t *testing.T) {
+		body := []byte(`{"data": [{"id": 1, "tokens": ["ok", "` + invalidUTF8 + `"]}]}`)
+		_, _, err := checkAndSetData(body, arraySchema, false)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "tokens")
+
+		ok := []byte(`{"data": [{"id": 1, "tokens": ["ok", "fine"]}]}`)
+		_, _, err = checkAndSetData(ok, arraySchema, false)
+		require.NoError(t, err)
+	})
+
+	t.Run("struct array string sub-field", func(t *testing.T) {
+		schema := buildStructArrayTestSchema()
+		structSchema := schema.GetStructArrayFields()[0]
+		structSchema.Fields = append(structSchema.Fields, &schemapb.FieldSchema{
+			FieldID: 105, Name: "sub_str",
+			DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "10"},
+				{Key: common.MaxLengthKey, Value: "64"},
+			},
+		})
+		body := []byte(`{
+			"data": [{
+				"id": 1,
+				"vec": [0.1, 0.2, 0.3, 0.4],
+				"my_struct": [
+					{"sub_int": 10, "sub_vec": [1.1, 1.2, 1.3, 1.4], "sub_str": "ok"},
+					{"sub_int": 11, "sub_vec": [2.1, 2.2, 2.3, 2.4], "sub_str": "` + invalidUTF8 + `"}
+				]
+			}]
+		}`)
+		_, _, err := checkAndSetData(body, schema, false)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "sub_str")
+		assert.Contains(t, err.Error(), "element 1")
+		assert.NotContains(t, err.Error(), invalidUTF8)
+	})
+
+	// The low-level /api/v1 column form decodes with sonic as well.
+	t.Run("v1 varchar column", func(t *testing.T) {
+		field := &FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: "text",
+			Field:     []byte(`["ok", "` + invalidUTF8 + `"]`),
+		}
+		_, err := field.AsSchemapb()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "text")
+
+		good := &FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: "text",
+			Field:     []byte(`["ok", "fine"]`),
+		}
+		_, err = good.AsSchemapb()
+		require.NoError(t, err)
+	})
+}
+
+// A struct array's string sub-field becomes an Array FieldData with a string
+// element type -- the shape checkAndFlattenStructFieldData lifts to the top
+// level and checkInputUtf8Compatiable then scans. This pins that shape, field ID
+// included, on the well-formed input that has to keep working, alongside a null
+// row: TestCheckAndSetDataRejectsInvalidUTF8 covers the bytes that get refused,
+// and TestCheckVarcharFormat in internal/proxy covers the ingress that repeats
+// the check for everything that does not come in over HTTP.
+func TestAnyToColumnsStructArrayStringSubField(t *testing.T) {
 	schema := buildStructArrayTestSchema()
 	structSchema := schema.GetStructArrayFields()[0]
 	structSchema.Nullable = true
@@ -4118,8 +4225,6 @@ func TestAnyToColumnsStructArrayKeepsRawInvalidUTF8(t *testing.T) {
 	}
 	structSchema.Fields = append(structSchema.Fields, subStr)
 
-	// A raw 0xff, not an escape: this is a byte a client can put on the wire.
-	invalidUTF8 := "bad\xffbyte"
 	body := []byte(`{
 		"data": [
 			{
@@ -4127,7 +4232,7 @@ func TestAnyToColumnsStructArrayKeepsRawInvalidUTF8(t *testing.T) {
 				"vec": [0.1, 0.2, 0.3, 0.4],
 				"my_struct": [
 					{"sub_int": 10, "sub_vec": [1.1, 1.2, 1.3, 1.4], "sub_str": "ok"},
-					{"sub_int": 11, "sub_vec": [2.1, 2.2, 2.3, 2.4], "sub_str": "` + invalidUTF8 + `"}
+					{"sub_int": 11, "sub_vec": [2.1, 2.2, 2.3, 2.4], "sub_str": "還可以"}
 				]
 			},
 			{
@@ -4173,9 +4278,7 @@ func TestAnyToColumnsStructArrayKeepsRawInvalidUTF8(t *testing.T) {
 
 	cells := strSub.GetScalars().GetArrayData().GetData()
 	require.Len(t, cells, 2, "the null row carries no payload cell")
-	require.Equal(t, []string{"ok", invalidUTF8}, cells[0].GetStringData().GetData())
-	assert.False(t, utf8.ValidString(cells[0].GetStringData().GetData()[1]),
-		"REST must be assumed to pass raw bytes through; the Proxy ingress is what rejects them")
+	assert.Equal(t, []string{"ok", "還可以"}, cells[0].GetStringData().GetData())
 	assert.Equal(t, []string{"fine"}, cells[1].GetStringData().GetData())
 }
 

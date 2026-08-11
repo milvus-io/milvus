@@ -790,7 +790,7 @@ func jsonNumberLiteral(field string, raw string) (json.Number, error) {
 // every kind, including the object case.
 func stringFieldValue(field string, value gjson.Result, compatibilityMode bool) (string, error) {
 	if compatibilityMode {
-		return value.String(), nil
+		return checkedUTF8String(field, -1, value.String())
 	}
 	switch value.Type {
 	case gjson.Number, gjson.True, gjson.False:
@@ -804,8 +804,32 @@ func stringFieldValue(field string, value gjson.Result, compatibilityMode bool) 
 			"field %s expects a string, got a JSON %s", field, kind)
 	default:
 		// String, plus Null which the nullable handling above already resolved.
-		return value.String(), nil
+		return checkedUTF8String(field, -1, value.String())
 	}
+}
+
+// A string cell has to be valid UTF-8 before it becomes a proto3 string: the
+// insert encoder writes these bytes into the message body without rescanning
+// them, and a message the consumer cannot unmarshal is dropped with a warning
+// while its checkpoint still advances. gjson reads string values straight out
+// of the request body and keeps whatever bytes the caller sent, so this is the
+// first place that can say no. The Proxy ingress repeats the check for gRPC and
+// for anything that reaches it another way; a caller who sends bad bytes should
+// hear about it from the HTTP layer, naming the field they wrote.
+//
+// The offending bytes are never echoed back -- they are invalid text by
+// definition, and the field name plus position is what locates the value.
+// element is the index inside an array cell, or -1 for a scalar field.
+func checkedUTF8String(field string, element int, value string) (string, error) {
+	if utf8.ValidString(value) {
+		return value, nil
+	}
+	if element < 0 {
+		return "", merr.WrapErrParameterInvalidMsg(
+			"field %s expects utf-8 text, but the value is not utf-8", field)
+	}
+	return "", merr.WrapErrParameterInvalidMsg(
+		"field %s expects utf-8 text, but element %d is not utf-8", field, element)
 }
 
 // checkVectorSpelling refuses a vector handed over as the text of its own JSON
@@ -1307,6 +1331,18 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 							},
 						}
 					case schemapb.DataType_VarChar:
+						// Unlike every other string path here, this one is decoded
+						// by sonic, which replaces an invalid byte with U+FFFD
+						// instead of keeping it. That silently rewrites the
+						// caller's text, and by the time the elements exist the
+						// evidence is gone -- so the raw token is what gets
+						// checked. Gated by compatibilityMode: the substitution
+						// used to be accepted, unlike the gjson paths, where the
+						// bytes survived and the insert failed later anyway.
+						if !compatibilityMode && !utf8.ValidString(dataString) {
+							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalidMsg(
+								"field %s expects utf-8 text, but an element is not utf-8", fieldName)
+						}
 						arr := make([]string, 0)
 						err := json.Unmarshal([]byte(dataString), &arr)
 						if err != nil {
@@ -1895,11 +1931,16 @@ func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result, c
 		}, nil
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		arr := make([]string, 0, len(vals))
-		for _, v := range vals {
+		for element, v := range vals {
 			if v.Type != gjson.String {
 				return nil, wrapStructSubParseError(sub, v, "expect string")
 			}
-			arr = append(arr, v.String())
+			// gjson keeps the caller's bytes; see checkedUTF8String.
+			value, err := checkedUTF8String(sub.GetName(), element, v.String())
+			if err != nil {
+				return nil, err
+			}
+			arr = append(arr, value)
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: arr}},
