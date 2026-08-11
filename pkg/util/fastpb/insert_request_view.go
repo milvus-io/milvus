@@ -144,9 +144,13 @@ func (c *InsertRequestViewCursor) NextEncoder(template *msgpb.InsertRequest, row
 	if err != nil {
 		return nil, 0, err
 	}
+	if aggregatedRows < 0 || aggregatedRows > len(rows) {
+		return nil, 0, insertViewInternal("aggregated row count %d is out of range for %d selected rows", aggregatedRows, len(rows))
+	}
 	if aggregatedRows > 0 {
-		firstRow := rows[0]
-		lastRow := rows[aggregatedRows-1]
+		aggregated := rows[:aggregatedRows]
+		firstRow := aggregated[0]
+		lastRow := aggregated[len(aggregated)-1]
 		for fieldIndex := range c.sizeState.fields {
 			c.encoderFirstFieldDataIndices[fieldIndex] = int64(firstRow)
 			c.nextFieldDataIndices[fieldIndex] = int64(lastRow + 1)

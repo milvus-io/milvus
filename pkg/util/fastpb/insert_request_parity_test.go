@@ -37,7 +37,7 @@ import (
 // encoder is byte-for-byte identical to the protobuf one it replaced.
 //
 // The corpus deliberately avoids invalid UTF-8, which is the one intentional
-// behaviour change and would make the old encoder error out instead of
+// behavior change and would make the old encoder error out instead of
 // producing bytes to compare.
 func TestInsertRequestViewParity(t *testing.T) {
 	template := insertViewTemplate()
@@ -166,7 +166,7 @@ func parityCorpus() []parityCase {
 	sparse := make([][]byte, rowCount)
 	valid := make([]bool, rowCount)
 	for row := range longs {
-		longs[row] = int64(rng.Int63()) * int64(1-2*(row%2))
+		longs[row] = rng.Int63() * int64(1-2*(row%2))
 		texts[row] = "row-" + strconv.Itoa(row)
 		blobs[row] = []byte{byte(row), byte(row >> 8)}
 		floats = append(floats, float32(row), 1.5, -2.25, 0)

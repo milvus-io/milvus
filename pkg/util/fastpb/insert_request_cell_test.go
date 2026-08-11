@@ -307,7 +307,7 @@ func TestScalarCell_ValidUTF8Boundaries(t *testing.T) {
 			"",
 			"\x00",
 			"\x7f",
-			"",
+			"\u0080",
 			"߿",
 			"ࠀ",
 			"￿",
@@ -344,7 +344,7 @@ func TestScalarCell_RandomizedAgainstProto(t *testing.T) {
 		return b
 	}
 	// proto.Marshal rejects invalid UTF-8 in a string field, so the differential
-	// comparison has to feed it valid text. The arithmetic path's behaviour on
+	// comparison has to feed it valid text. The arithmetic path's behavior on
 	// invalid UTF-8 is pinned separately in TestScalarCell_InvalidUTF8.
 	randString := func() string {
 		runes := make([]rune, rng.Intn(20))
