@@ -17,6 +17,7 @@
 package rootcoord
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -718,6 +719,39 @@ func TestCheckStructArrayFieldSchema_MaxCapacityValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "my_struct")
 		assert.Contains(t, err.Error(), "sub_b")
 	})
+
+	t.Run("nested array is rejected", func(t *testing.T) {
+		schemas := []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "my_struct",
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:        "nested",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Array,
+						TypeSchema: &schemapb.TypeSchema{
+							TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+							Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+								TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "10"}},
+								Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+									Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
+								}},
+							}},
+						},
+					},
+					{
+						Name:        "legacy",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+					},
+				},
+			},
+		}
+
+		err := checkStructArrayFieldSchema(schemas)
+		require.ErrorContains(t, err, "nested array is not supported")
+	})
 }
 
 func Test_updateMaxFieldIDProperty(t *testing.T) {
@@ -763,30 +797,50 @@ func Test_updateMaxFieldIDProperty(t *testing.T) {
 }
 
 func TestCheckFieldSchemaNestedArrayTypeRepresentation(t *testing.T) {
-	typeSchema := &schemapb.TypeSchema{
-		Kind: &schemapb.TypeSchema_ArrayElement{
-			ArrayElement: &schemapb.TypeSchema{
+	nestedField := func(rootCapacity, elementCapacity string) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name:        "nested_array",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: rootCapacity}},
 				Kind: &schemapb.TypeSchema_ArrayElement{
 					ArrayElement: &schemapb.TypeSchema{
-						Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: elementCapacity}},
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+							},
+						},
 					},
 				},
 			},
-		},
+		}
 	}
 
-	require.NoError(t, checkFieldSchema([]*schemapb.FieldSchema{{
-		Name:        "nested_array",
-		DataType:    schemapb.DataType_Array,
-		ElementType: schemapb.DataType_Array,
-		TypeSchema:  typeSchema,
-	}}))
+	require.NoError(t, checkFieldSchema([]*schemapb.FieldSchema{nestedField("32", "16")}))
 
-	err := checkFieldSchema([]*schemapb.FieldSchema{{
-		Name:       "nested_array",
-		TypeSchema: typeSchema,
-	}})
+	matchingMirror := nestedField("32", "16")
+	matchingMirror.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}
+	require.NoError(t, checkFieldSchema([]*schemapb.FieldSchema{matchingMirror}))
+
+	conflictingMirror := nestedField("32", "16")
+	conflictingMirror.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "64"}}
+	err := checkFieldSchema([]*schemapb.FieldSchema{conflictingMirror})
+	require.ErrorContains(t, err, "must match type_schema root capacity")
+
+	invalidRepresentation := nestedField("32", "16")
+	invalidRepresentation.DataType = schemapb.DataType_None
+	invalidRepresentation.ElementType = schemapb.DataType_None
+	err = checkFieldSchema([]*schemapb.FieldSchema{invalidRepresentation})
 	require.ErrorContains(t, err, "must specify data_type Array and element_type Array")
+
+	tooLarge := strconv.FormatInt(Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()+1, 10)
+	err = checkFieldSchema([]*schemapb.FieldSchema{nestedField(tooLarge, "16")})
+	require.ErrorContains(t, err, "maximum capacity")
+
+	err = checkFieldSchema([]*schemapb.FieldSchema{nestedField("32", tooLarge)})
+	require.ErrorContains(t, err, "maximum capacity")
 }
 
 func TestValidateLocalFormat(t *testing.T) {

@@ -899,6 +899,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 							Name:       "array_of_vector",
 							TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
 							TypeSchema: &schemapb.TypeSchema{
+								TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
 								Kind: &schemapb.TypeSchema_ArrayElement{
 									ArrayElement: &schemapb.TypeSchema{
 										Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_ArrayOfVector},

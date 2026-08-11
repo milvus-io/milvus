@@ -571,35 +571,39 @@ func validateElementType(dataType schemapb.DataType) error {
 	return merr.WrapErrParameterInvalidMsg("element type %s is not supported", dataType.String())
 }
 
-func validateTypeSchema(collectionName string, fieldName string, typeSchema *schemapb.TypeSchema) error {
+func validateNestedArrayTypeSchema(collectionName string, fieldName string, typeSchema *schemapb.TypeSchema) (int64, error) {
 	if typeSchema == nil {
-		return merr.WrapErrParameterMissingMsg("type_schema should be specified for nested array field %s", fieldName)
+		return 0, merr.WrapErrParameterMissingMsg("type_schema should be specified for nested array field %s", fieldName)
 	}
 	if typeSchema.GetNullable() {
-		return merr.WrapErrParameterInvalidMsg("nullable nested array elements are not supported for field %s", fieldName)
+		return 0, merr.WrapErrParameterInvalidMsg("nullable nested array elements are not supported for field %s", fieldName)
 	}
 
 	switch kind := typeSchema.GetKind().(type) {
 	case *schemapb.TypeSchema_ArrayElement:
 		if kind.ArrayElement == nil {
-			return merr.WrapErrParameterMissingMsg("array element should be specified for nested array field %s", fieldName)
+			return 0, merr.WrapErrParameterMissingMsg("array element should be specified for nested array field %s", fieldName)
 		}
-		if _, err := getMaxCapacityPerRow(collectionName, fieldName, typeSchema.GetTypeParams()); err != nil {
-			return err
+		maxCapacity, err := getMaxCapacityPerRow(collectionName, fieldName, typeSchema.GetTypeParams())
+		if err != nil {
+			return 0, err
 		}
-		return validateTypeSchema(collectionName, fieldName, kind.ArrayElement)
+		if _, err := validateNestedArrayTypeSchema(collectionName, fieldName, kind.ArrayElement); err != nil {
+			return 0, err
+		}
+		return maxCapacity, nil
 	case *schemapb.TypeSchema_LeafType:
 		if err := validateElementType(kind.LeafType); err != nil {
-			return err
+			return 0, err
 		}
 		if kind.LeafType == schemapb.DataType_VarChar {
 			if err := validateMaxLengthPerRow(collectionName, fieldName, kind.LeafType, typeSchema.GetTypeParams()); err != nil {
-				return err
+				return 0, err
 			}
 		}
-		return nil
+		return 0, nil
 	default:
-		return merr.WrapErrParameterMissingMsg("type should be specified for nested array field %s", fieldName)
+		return 0, merr.WrapErrParameterMissingMsg("type should be specified for nested array field %s", fieldName)
 	}
 }
 
@@ -622,10 +626,29 @@ func validateArrayOfVectorFieldSchema(collectionName string, field *schemapb.Fie
 
 func validateArrayFieldSchema(collectionName string, field *schemapb.FieldSchema) error {
 	if field.GetTypeSchema() != nil {
-		if err := validateMaxCapacityPerRow(collectionName, field); err != nil {
+		rootCapacity, err := validateNestedArrayTypeSchema(
+			collectionName, field.GetName(), field.GetTypeSchema())
+		if err != nil {
 			return err
 		}
-		return validateTypeSchema(collectionName, field.GetName(), field.GetTypeSchema().GetArrayElement())
+
+		for _, param := range field.GetTypeParams() {
+			if param.GetKey() != common.MaxCapacityKey {
+				continue
+			}
+			mirrorCapacity, err := getMaxCapacityPerRow(
+				collectionName, field.GetName(), field.GetTypeParams())
+			if err != nil {
+				return err
+			}
+			if mirrorCapacity != rootCapacity {
+				return merr.WrapErrParameterInvalidMsg(
+					"type param %s of nested array field %s must match type_schema root capacity %d",
+					common.MaxCapacityKey, field.GetName(), rootCapacity)
+			}
+			break
+		}
+		return nil
 	}
 
 	if field.GetElementType() == schemapb.DataType_Array {
@@ -769,6 +792,9 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	if field.DataType != schemapb.DataType_Array && field.DataType != schemapb.DataType_ArrayOfVector {
 		return merr.WrapErrParameterInvalidMsg("fields in StructArrayField can only be array or array of struct, but field %s is %s", field.Name, field.DataType.String())
 	}
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		return merr.WrapErrParameterInvalidMsg("nested array is not supported for field %s", field.GetName())
+	}
 
 	switch field.GetElementType() {
 	case schemapb.DataType_ArrayOfVector:
@@ -800,7 +826,11 @@ func validateStructArrayFieldMaxCapacity(structArrayField *schemapb.StructArrayF
 	var expectedMaxCapacity int64
 	hasExpectedMaxCapacity := false
 	for _, subField := range structArrayField.Fields {
-		maxCapacity, err := getMaxCapacityPerRow(collectionName, subField.GetName(), subField.GetTypeParams())
+		typeParams := subField.GetTypeParams()
+		if typeutil.IsNestedArrayTypeSchema(subField.GetTypeSchema()) {
+			typeParams = subField.GetTypeSchema().GetTypeParams()
+		}
+		maxCapacity, err := getMaxCapacityPerRow(collectionName, subField.GetName(), typeParams)
 		if err != nil {
 			return err
 		}

@@ -5382,8 +5382,10 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 			ElementType:   schemapb.DataType_Array,
 			ExternalField: "nested_array_col",
 			TypeSchema: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
 				Kind: &schemapb.TypeSchema_ArrayElement{
 					ArrayElement: &schemapb.TypeSchema{
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
 						Kind: &schemapb.TypeSchema_ArrayElement{
 							ArrayElement: &schemapb.TypeSchema{
 								Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},

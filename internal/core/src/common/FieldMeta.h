@@ -264,15 +264,10 @@ class FieldMeta {
         return element_type_;
     }
 
-    milvus::proto::schema::TypeSchema
+    const milvus::proto::schema::TypeSchema&
     get_array_type_schema() const {
-        if (type_schema_.has_value()) {
-            return *type_schema_;
-        }
-        milvus::proto::schema::TypeSchema type_schema;
-        auto* element = type_schema.mutable_array_element();
-        element->set_leaf_type(ToProtoDataType(element_type_));
-        return type_schema;
+        Assert(is_nested_array());
+        return *type_schema_;
     }
 
     bool

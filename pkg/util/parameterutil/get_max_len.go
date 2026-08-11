@@ -31,11 +31,15 @@ func GetMaxLength(field *schemapb.FieldSchema) (int64, error) {
 	return int64(maxLength), nil
 }
 
-// GetMaxCapacity get max capacity of array field. Maybe also helpful outside.
+// GetMaxCapacity gets the root capacity of an Array field. Nested Arrays use
+// the TypeSchema root; legacy Arrays use FieldSchema parameters.
 func GetMaxCapacity(field *schemapb.FieldSchema) (int64, error) {
 	if !typeutil.IsArrayType(field.GetDataType()) && !typeutil.IsVectorArrayType(field.GetDataType()) {
 		msg := fmt.Sprintf("%s is not of array/vector array type", field.GetDataType())
 		return 0, merr.WrapErrParameterInvalid(schemapb.DataType_Array, field.GetDataType(), msg)
+	}
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		return GetMaxCapacityFromTypeSchema(field.GetTypeSchema())
 	}
 	return getMaxCapacityFromParams(append(field.GetIndexParams(), field.GetTypeParams()...))
 }

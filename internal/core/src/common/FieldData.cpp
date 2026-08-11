@@ -99,11 +99,8 @@ FieldData<ArrayValue>::FillFieldData(
     }
 
     ScalarFieldProto null_row;
-    std::vector<ArrayValue> values;
-    values.reserve(element_count);
-    for (ssize_t i = 0; i < element_count; ++i) {
-        values.emplace_back(ArrayValue::FromProto(null_row, array_type_));
-    }
+    const auto null_value = ArrayValue::FromProto(null_row, array_type_);
+    std::vector<ArrayValue> values(element_count, null_value);
     std::vector<uint8_t> valid_data((element_count + 7) / 8, 0);
     this->null_count_ += element_count;
     Base::FillFieldData(values.data(), valid_data.data(), element_count, 0);

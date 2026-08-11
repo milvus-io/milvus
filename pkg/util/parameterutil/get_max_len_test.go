@@ -106,6 +106,25 @@ func TestGetMaxCapacity(t *testing.T) {
 		assert.Equal(t, int64(100), maxCap)
 	})
 
+	t.Run("nested array uses type schema root", func(t *testing.T) {
+		f := &schemapb.FieldSchema{
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "10"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "5"}},
+					Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+					}},
+				}},
+			},
+		}
+		maxCap, err := GetMaxCapacity(f)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(10), maxCap)
+	})
+
 	t.Run("type schema", func(t *testing.T) {
 		typeSchema := &schemapb.TypeSchema{
 			Kind: &schemapb.TypeSchema_ArrayElement{

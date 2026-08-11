@@ -337,9 +337,48 @@ func CheckTimeTickLagExceeded(ctx context.Context, mixcoord types.MixCoord, maxD
 	return nil
 }
 
+func checkNestedArrayTypeSchemaCapacity(fieldSchema *schemapb.FieldSchema) error {
+	if !typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
+		return nil
+	}
+	maxArrayCapacity := Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()
+	var rootCapacity int64
+	for typeSchema := fieldSchema.GetTypeSchema(); typeSchema.GetArrayElement() != nil; typeSchema = typeSchema.GetArrayElement() {
+		maxCapacity, err := parameterutil.GetMaxCapacityFromTypeSchema(typeSchema)
+		if err != nil {
+			return err
+		}
+		if maxCapacity <= 0 || maxCapacity > maxArrayCapacity {
+			return merr.WrapErrParameterInvalidMsg(
+				"the maximum capacity specified for a Array should be in (0, %d]",
+				maxArrayCapacity)
+		}
+		if rootCapacity == 0 {
+			rootCapacity = maxCapacity
+		}
+	}
+
+	mirrorCapacity, err, hasMirror := common.GetInt64Value(
+		fieldSchema.GetTypeParams(), common.MaxCapacityKey)
+	if err != nil {
+		return merr.WrapErrParameterInvalidMsg(
+			"the value for %s of field %s must be an integer",
+			common.MaxCapacityKey, fieldSchema.GetName())
+	}
+	if hasMirror && mirrorCapacity != rootCapacity {
+		return merr.WrapErrParameterInvalidMsg(
+			"type param %s of nested array field %s must match type_schema root capacity %d",
+			common.MaxCapacityKey, fieldSchema.GetName(), rootCapacity)
+	}
+	return nil
+}
+
 func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 	for _, fieldSchema := range fieldSchemas {
 		if err := typeutil.ValidateFieldTypeSchema(fieldSchema); err != nil {
+			return err
+		}
+		if err := checkNestedArrayTypeSchemaCapacity(fieldSchema); err != nil {
 			return err
 		}
 		if fieldSchema.GetDataType() == schemapb.DataType_ArrayOfStruct {
@@ -470,6 +509,12 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 			if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
 				return err
 			}
+			if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+				return merr.WrapErrParameterInvalidMsg("nested array is not supported for field %s", field.GetName())
+			}
+			if err := checkNestedArrayTypeSchemaCapacity(field); err != nil {
+				return err
+			}
 			if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
 				msg := fmt.Sprintf("fields in StructArrayField can only be array or array of vector, but field %s is %s", field.Name, field.DataType.String())
 				return merr.WrapErrParameterInvalidMsg(msg)
@@ -515,7 +560,13 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 }
 
 func getStructSubFieldMaxCapacity(structName string, field *schemapb.FieldSchema) (int64, error) {
-	for _, param := range field.GetTypeParams() {
+	typeParams := field.GetTypeParams()
+	maxArrayCapacity := int64(defaultMaxArrayCapacity)
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		typeParams = field.GetTypeSchema().GetTypeParams()
+		maxArrayCapacity = Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()
+	}
+	for _, param := range typeParams {
 		if param.GetKey() != common.MaxCapacityKey {
 			continue
 		}
@@ -524,8 +575,8 @@ func getStructSubFieldMaxCapacity(structName string, field *schemapb.FieldSchema
 			return 0, merr.WrapErrParameterInvalidMsg("the value for %s of field %s in struct array field %s must be an integer",
 				common.MaxCapacityKey, field.GetName(), structName)
 		}
-		if maxCapacity > defaultMaxArrayCapacity || maxCapacity <= 0 {
-			return 0, merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", defaultMaxArrayCapacity)
+		if maxCapacity > maxArrayCapacity || maxCapacity <= 0 {
+			return 0, merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", maxArrayCapacity)
 		}
 		return maxCapacity, nil
 	}

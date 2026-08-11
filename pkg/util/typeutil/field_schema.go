@@ -90,8 +90,8 @@ func CreateFieldSchemaHelper(schema *schemapb.FieldSchema) *FieldSchemaHelper {
 	}
 }
 
-// validateTypeSchemaNode validates the recursive encoding of a TypeSchema node.
-// Array nodes must use array_element; all other types must use leaf_type.
+// validateTypeSchemaNode validates the recursive encoding of a TypeSchema
+// node. Parameter validation is handled by callers' Array schema validators.
 func validateTypeSchemaNode(fieldName string, typeSchema *schemapb.TypeSchema) error {
 	if typeSchema == nil {
 		return merr.WrapErrParameterInvalidMsg(

@@ -1406,7 +1406,8 @@ PinWrapper<SpanBase>
 SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                                     FieldId field_id,
                                     int64_t chunk_id) const {
-    const auto& field_meta = (*schema_)[field_id];
+    auto schema = get_schema_snapshot();
+    const auto& field_meta = (*schema)[field_id];
     if (field_meta.is_nested_array()) {
         ThrowInfo(ErrorCode::Unsupported,
                   "Span API does not support nested ARRAY field {}",

@@ -461,6 +461,34 @@ TEST(ArrayValue, ScalarLeavesRoundTrip) {
     }
 }
 
+TEST(ArrayValue, NestedArrayRawDataSizeIncludesLeafAndOffsets) {
+    auto type = NestedArrayType(
+        NestedArrayType(LeafArrayType(proto::schema::DataType::Int32)));
+    auto field_meta = NestedArrayFieldMeta(FieldId(100), type);
+
+    ScalarFieldProto leaf;
+    for (int i = 0; i < 100; ++i) {
+        leaf.mutable_int_data()->add_data(0);
+    }
+    auto row = NestedArrayRow(
+        proto::schema::DataType::Array,
+        {NestedArrayRow(proto::schema::DataType::Int32, {std::move(leaf)})});
+
+    proto::schema::FieldData data;
+    data.set_type(proto::schema::DataType::Array);
+    auto* array_data = data.mutable_scalars()->mutable_array_data();
+    array_data->set_element_type(proto::schema::DataType::Array);
+    *array_data->add_data() = row;
+
+    const auto leaf_size = static_cast<int64_t>(100 * sizeof(int));
+    // Three Array levels, each containing one row plus its terminal offset.
+    const auto expected_size =
+        leaf_size + 3 * 2 * static_cast<int64_t>(sizeof(ArrayOffset));
+    ASSERT_LT(static_cast<int64_t>(row.ByteSizeLong()), leaf_size);
+    ASSERT_EQ(segcore::GetRawDataSizeOfDataArray(&data, field_meta, 1),
+              expected_size);
+}
+
 TEST(ArrayValue, NestedStringArrayUsesRecursiveNodes) {
     auto type = NestedArrayType(LeafArrayType(proto::schema::DataType::String));
     auto row = NestedArrayRow(proto::schema::DataType::String,
@@ -684,6 +712,25 @@ TEST(ArrayValue, RecursiveSchemaSelectsStorageFieldData) {
     AssertProtoEqual(row0, values[0].output_data());
     ASSERT_TRUE(values[1].is_null());
     AssertProtoEqual(row2, values[2].output_data());
+}
+
+TEST(ArrayValue, NullableBackfillSharesNullStorage) {
+    auto type = NestedArrayType(LeafArrayType(proto::schema::DataType::Int32));
+    auto field_data = storage::CreateFieldData(
+        DataType::ARRAY, DataType::NONE, true, 1, 0, type);
+
+    field_data->FillFieldData(std::nullopt, 3);
+
+    ASSERT_EQ(field_data->get_num_rows(), 3);
+    ASSERT_EQ(field_data->get_null_count(), 3);
+    const auto* values = static_cast<const ArrayValue*>(field_data->Data());
+    ASSERT_TRUE(values[0].is_null());
+    ASSERT_TRUE(values[1].is_null());
+    ASSERT_TRUE(values[2].is_null());
+    ASSERT_EQ(values[0].data(), values[1].data());
+    ASSERT_EQ(values[0].data(), values[2].data());
+    ASSERT_EQ(&values[0].child(), &values[1].child());
+    ASSERT_EQ(&values[0].child(), &values[2].child());
 }
 
 TEST(ArrayValue, GrowingSchemaUsesArrayValueAndDenseNullableRows) {

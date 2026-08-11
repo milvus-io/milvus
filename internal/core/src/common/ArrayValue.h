@@ -37,6 +37,7 @@ struct ArrayValueStorage {
     std::shared_ptr<const proto::schema::TypeSchema> type;
     ArrayOffset length{0};
     bool is_null{false};
+
     std::vector<char> buffer;
     std::shared_ptr<const Chunk> child;
 };

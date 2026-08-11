@@ -211,8 +211,14 @@ func TestValidateSchemaEvolutionRejectsKeptFieldReinterpretation(t *testing.T) {
 	}
 }
 
-func TestValidateSchemaEvolutionRejectsNestedArrayTypeSchemaChange(t *testing.T) {
+func TestValidateSchemaEvolutionNestedArrayTypeSchema(t *testing.T) {
 	nestedArray := func(leafType schemapb.DataType) *schemapb.FieldSchema {
+		leafSchema := &schemapb.TypeSchema{
+			Kind: &schemapb.TypeSchema_LeafType{LeafType: leafType},
+		}
+		if leafType == schemapb.DataType_VarChar {
+			leafSchema.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "32"}}
+		}
 		return &schemapb.FieldSchema{
 			FieldID:     106,
 			Name:        "nested_array",
@@ -221,13 +227,12 @@ func TestValidateSchemaEvolutionRejectsNestedArrayTypeSchemaChange(t *testing.T)
 			Nullable:    true,
 			TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
 			TypeSchema: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
 				Kind: &schemapb.TypeSchema_ArrayElement{
 					ArrayElement: &schemapb.TypeSchema{
 						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
 						Kind: &schemapb.TypeSchema_ArrayElement{
-							ArrayElement: &schemapb.TypeSchema{
-								Kind: &schemapb.TypeSchema_LeafType{LeafType: leafType},
-							},
+							ArrayElement: leafSchema,
 						},
 					},
 				},
@@ -235,13 +240,82 @@ func TestValidateSchemaEvolutionRejectsNestedArrayTypeSchemaChange(t *testing.T)
 		}
 	}
 
-	oldSchema := evolutionBaseSchema()
-	oldSchema.Fields = append(oldSchema.Fields, nestedArray(schemapb.DataType_Int64))
-	setMaxFieldID(oldSchema, 106)
-	newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
-	evolutionFieldByID(newSchema, 106).TypeSchema = nestedArray(schemapb.DataType_VarChar).GetTypeSchema()
+	newNestedArraySchema := func(leafType schemapb.DataType) (*schemapb.CollectionSchema, *schemapb.CollectionSchema) {
+		oldSchema := evolutionBaseSchema()
+		oldSchema.Fields = append(oldSchema.Fields, nestedArray(leafType))
+		setMaxFieldID(oldSchema, 106)
+		return oldSchema, proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+	}
 
-	require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot change the type schema")
+	t.Run("allow root capacity change", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		field := evolutionFieldByID(newSchema, 106)
+		field.TypeParams[0].Value = "64"
+		field.TypeSchema.TypeParams[0].Value = "64"
+
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("allow root capacity change without field mirror", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(oldSchema, 106).TypeParams = nil
+		field := evolutionFieldByID(newSchema, 106)
+		field.TypeParams = nil
+		field.TypeSchema.TypeParams[0].Value = "64"
+
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("reject unsynchronized root capacity mirror", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(newSchema, 106).TypeParams[0].Value = "64"
+
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "must match type_schema root capacity")
+	})
+
+	t.Run("allow leaf max length change", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_VarChar)
+		leafSchema := evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().GetArrayElement()
+		leafSchema.TypeParams[0].Value = "64"
+
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("allow nested capacity change", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().TypeParams[0].Value = "24"
+
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("reject leaf type change", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(newSchema, 106).TypeSchema = nestedArray(schemapb.DataType_VarChar).GetTypeSchema()
+
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot change the type schema")
+	})
+
+	t.Run("reject nesting change", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().Kind =
+			&schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64}
+
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot change the type schema")
+	})
+
+	t.Run("reject element nullability change", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().Nullable = true
+
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot change the type schema")
+	})
+
+	t.Run("reject removing nested capacity", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().TypeParams = nil
+
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot remove or invalidate max_capacity")
+	})
 }
 
 func TestValidateSchemaEvolutionRejectsNonMonotonicBounds(t *testing.T) {

@@ -758,6 +758,8 @@ ColumnarArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
         rows.push_back(&row);
     }
     impl_->root = BuildColumnarArrayNode(rows, type_);
+    impl_->rows.clear();
+    impl_->rows.shrink_to_fit();
     impl_->serialized_size = ColumnarArraySerializedSize(
         static_cast<int64_t>(row_nums_), nullable_, *impl_->root);
     return {impl_->serialized_size, row_nums_};
@@ -784,8 +786,6 @@ ColumnarArrayChunkWriter::write_to_target(
     target->write(padding, MMAP_ARRAY_PADDING);
 
     impl_->root.reset();
-    impl_->rows.clear();
-    impl_->rows.shrink_to_fit();
 }
 
 std::shared_ptr<const ArrayValueStorage>
