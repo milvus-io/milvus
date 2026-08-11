@@ -1683,7 +1683,7 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 	// maybe it shall be lower in case of heavy CPU usage may impacting search/query
 	pool := segments.GetDeletePool()
 	futures := make([]*conc.Future[struct{}], 0, len(segs))
-	errSet := typeutil.NewConcurrentSet[int64]()
+	errMap := typeutil.NewConcurrentMap[int64, error]()
 
 	for _, segment := range segs {
 		segment := segment
@@ -1692,7 +1692,7 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 			// current implementation still copys pks into protobuf(or arrow) struct
 			err := segment.Delete(ctx, pks, req.GetTimestamps())
 			if err != nil {
-				errSet.Insert(segment.ID())
+				errMap.Insert(segment.ID(), err)
 				log.Warn(ctx, "segment delete failed",
 					mlog.Int64("segmentID", segment.ID()),
 					mlog.Err(err))
@@ -1702,13 +1702,24 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 		}))
 	}
 
-	// ignore error returned, since error segment is recorded into error set
+	// ignore error returned, since error segment is recorded into error map
 	_ = conc.AwaitAll(futures...)
 
-	// return merr.Success(), nil
+	// Carry the typed per-segment failure (index-aligned with failed_ids) so
+	// the delegator can distinguish a retryable failure (OOM, transient IO --
+	// retry) from a permanent one (offline the segment) instead of offlining
+	// on every failure.
+	failedIds := make([]int64, 0, errMap.Len())
+	failedStatuses := make([]*commonpb.Status, 0, errMap.Len())
+	errMap.Range(func(segmentID int64, segErr error) bool {
+		failedIds = append(failedIds, segmentID)
+		failedStatuses = append(failedStatuses, merr.Status(segErr))
+		return true
+	})
 	return &querypb.DeleteBatchResponse{
-		Status:    merr.Success(),
-		FailedIds: errSet.Collect(),
+		Status:         merr.Success(),
+		FailedIds:      failedIds,
+		FailedStatuses: failedStatuses,
 	}, nil
 }
 

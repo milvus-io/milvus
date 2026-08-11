@@ -1413,6 +1413,10 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 			retry.Attempts(updateSchemaWorkerRetryCount+1),
 			retry.Sleep(updateSchemaWorkerRetryInitialBackoff),
 			retry.MaxSleepTime(updateSchemaWorkerRetryMaxBackoff),
+			// Only transient failures may consume the retry budget: a permanent
+			// typed schema/segcore error resent to the same worker just adds
+			// fixed propagation latency and redundant RPC/log load.
+			retry.RetryErr(merr.IsRetryableErr),
 		)
 		return (*StatusWrapper)(status), err
 	}, "UpdateSchema", log)
