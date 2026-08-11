@@ -645,6 +645,12 @@ DiskFileManagerImpl::CacheRawDataToDisk(const Config& config) {
     auto storage_version =
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
             .value_or(0);
+    if (field_meta_.field_schema.element_nullable() &&
+        storage_version < STORAGE_V2) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "Storage V1 does not support element-nullable field {}",
+                  field_meta_.field_id);
+    }
     if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
         return cache_raw_data_to_disk_storage_v2<DataType>(config);
     }
@@ -852,10 +858,23 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
         dim = field_data->get_dim();
         auto rows = vec_array_data->get_num_rows();
 
-        // Calculate total data size needed
+        auto bytes_per_vector =
+            vector_bytes_per_element(vec_array_data->get_element_type(), dim);
+
+        // Calculate compact data size, excluding null elements.
         int64_t total_size = 0;
         for (auto i = 0; i < vec_array_data->get_valid_rows(); ++i) {
-            total_size += vec_array_data->DataSize(i);
+            const auto* vec_array = vec_array_data->value_at(i);
+            if (!vec_array->has_invalid_element()) {
+                total_size += vec_array->byte_size();
+                continue;
+            }
+            for (int64_t elem_idx = 0; elem_idx < vec_array->length();
+                 ++elem_idx) {
+                if (vec_array->is_element_valid(elem_idx)) {
+                    total_size += bytes_per_vector;
+                }
+            }
         }
 
         // Allocate buffer and copy data
@@ -869,22 +888,44 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
             }
 
             auto vec_array = vec_array_data->value_at(physical_row);
-            auto size = vec_array_data->DataSize(physical_row);
+            int64_t valid_vectors = 0;
+
+            if (!vec_array->has_invalid_element()) {
+                auto size = vec_array->byte_size();
+                if (size > 0) {
+                    milvus::fastmem::FastMemcpy(
+                        buf.get() + buf_offset, vec_array->data(), size);
+                }
+                buf_offset += size;
+                valid_vectors = vec_array->length();
+            } else {
+                for (int64_t elem_idx = 0; elem_idx < vec_array->length();
+                     ++elem_idx) {
+                    if (!vec_array->is_element_valid(elem_idx)) {
+                        continue;
+                    }
+                    milvus::fastmem::FastMemcpy(
+                        buf.get() + buf_offset,
+                        vec_array->data() + elem_idx * bytes_per_vector,
+                        bytes_per_vector);
+                    buf_offset += bytes_per_vector;
+                    ++valid_vectors;
+                }
+            }
 
             // Collect offsets information if needed (cumulative offsets)
             if (offsets != nullptr) {
                 // Add cumulative offset (number of vectors processed so far)
                 size_t last_offset = offsets->back();
-                offsets->push_back(last_offset + vec_array->length());
+                offsets->push_back(last_offset + valid_vectors);
             }
-
-            if (size > 0) {
-                milvus::fastmem::FastMemcpy(
-                    buf.get() + buf_offset, vec_array->data(), size);
-            }
-            buf_offset += size;
             physical_row++;
         }
+
+        AssertInfo(buf_offset == total_size,
+                   "VECTOR_ARRAY compact size mismatch, expected {}, got {}",
+                   total_size,
+                   buf_offset);
 
         // Write flattened data to disk
         local_chunk_manager->Write(
@@ -1032,6 +1073,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                        GetFieldDataMeta().field_id,
                                        data_type.value(),
                                        element_type.value(),
+                                       field_meta_.field_schema
+                                           .element_nullable(),
                                        dim,
                                        fs_);
         for (auto& field_data : field_datas) {
@@ -1366,6 +1409,7 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v2(const Config& config) {
                                                       field_id,
                                                       field_type,
                                                       element_type,
+                                                      false,
                                                       1,
                                                       fs_);
 

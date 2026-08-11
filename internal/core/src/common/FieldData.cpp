@@ -331,29 +331,8 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                       "FieldData");
         }
         case DataType::ARRAY: {
-            auto array_array =
-                std::dynamic_pointer_cast<arrow::BinaryArray>(array);
-            std::vector<Array> values(element_count);
-            int null_number = 0;
-            for (size_t index = 0; index < element_count; ++index) {
-                auto str = array_array->GetString(index);
-                if (str.empty()) {
-                    null_number++;
-                    continue;
-                }
-                ScalarFieldProto field_data;
-                auto success = field_data.ParseFromString(str);
-                AssertInfo(success, "parse from string failed");
-                values[index] = Array(field_data);
-            }
-            if (nullable_) {
-                return FillFieldData(values.data(),
-                                     array->null_bitmap_data(),
-                                     element_count,
-                                     array->offset());
-            }
-            AssertInfo(null_number == 0, "get empty string when not nullable");
-            return FillFieldData(values.data(), element_count);
+            ThrowInfo(NotImplemented,
+                      "ARRAY arrow data must be filled by FieldDataArrayImpl");
         }
         case DataType::VECTOR_FLOAT:
         case DataType::VECTOR_FLOAT16:
@@ -417,6 +396,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                        "Failed to cast to FieldData<VectorArray>");
             int64_t dim = vector_array_field->get_dim();
             DataType element_type = vector_array_field->get_element_type();
+            bool element_nullable = vector_array_field->is_element_nullable();
 
             AssertInfo(dim > 0, "Invalid dimension {} in VECTOR_ARRAY", dim);
             AssertInfo(element_type != DataType::NONE,
@@ -459,20 +439,38 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                             data_size > 0
                                 ? std::make_unique<uint8_t[]>(data_size)
                                 : nullptr;
+                        TargetBitmap element_valid_data(num_vectors, true);
 
                         for (int64_t i = 0; i < num_vectors; i++) {
+                            auto child_index = start_offset + i;
+                            AssertInfo(element_nullable ||
+                                           !binary_array->IsNull(child_index),
+                                       "VECTOR_ARRAY child value is null but "
+                                       "field is not element nullable");
+                            if (element_nullable &&
+                                binary_array->IsNull(child_index)) {
+                                element_valid_data.reset(i);
+                                std::memset(data_ptr.get() + i * bytes_per_vec,
+                                            0,
+                                            bytes_per_vec);
+                                continue;
+                            }
                             const uint8_t* binary_data =
-                                binary_array->GetValue(start_offset + i);
+                                binary_array->GetValue(child_index);
                             uint8_t* dest = data_ptr.get() + i * bytes_per_vec;
                             milvus::fastmem::FastMemcpy(
                                 dest, binary_data, bytes_per_vec);
                         }
 
-                        values.emplace_back(
-                            static_cast<const void*>(data_ptr.get()),
-                            num_vectors,
-                            dim,
-                            element_type);
+                        values.emplace_back(static_cast<const void*>(
+                                                data_ptr.get()),
+                                            num_vectors,
+                                            dim,
+                                            element_type,
+                                            element_nullable
+                                                ? element_valid_data.view()
+                                                : TargetBitmapView(),
+                                            element_nullable);
                     }
                     break;
                 }
@@ -496,6 +494,44 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                       GetDataTypeName(data_type_));
         }
     }
+}
+
+void
+FieldDataArrayImpl::FillFieldData(const std::shared_ptr<arrow::Array> array) {
+    AssertInfo(array != nullptr, "null arrow array");
+    auto element_count = array->length();
+    if (element_count == 0) {
+        return;
+    }
+    this->null_count_ += array->null_count();
+
+    auto array_array = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+    AssertInfo(array_array != nullptr,
+               "ARRAY field data expects arrow::BinaryArray, got {}",
+               array->type()->ToString());
+
+    std::vector<Array> values(element_count);
+    int null_number = 0;
+    for (size_t index = 0; index < element_count; ++index) {
+        if (array_array->IsNull(index)) {
+            ++null_number;
+            continue;
+        }
+
+        auto str = array_array->GetView(index);
+        ScalarFieldProto field_data;
+        auto success = field_data.ParseFromArray(str.data(), str.size());
+        AssertInfo(success, "parse array from string failed");
+        values[index] = Array(field_data, element_nullable_);
+    }
+    if (this->nullable_) {
+        return Base::FillFieldData(values.data(),
+                                   array->null_bitmap_data(),
+                                   element_count,
+                                   array->offset());
+    }
+    AssertInfo(null_number == 0, "get null array when not nullable");
+    return Base::FillFieldData(values.data(), element_count);
 }
 
 // used for generate added field which has no related binlogs

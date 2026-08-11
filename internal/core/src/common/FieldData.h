@@ -102,8 +102,10 @@ class FieldData<Array> : public FieldDataArrayImpl {
     static_assert(IsScalar<Array> || std::is_same_v<std::string, PkType>);
     explicit FieldData(DataType data_type,
                        bool nullable,
+                       bool element_nullable,
                        int64_t buffered_num_rows = 0)
-        : FieldDataArrayImpl(data_type, nullable, buffered_num_rows) {
+        : FieldDataArrayImpl(
+              data_type, nullable, element_nullable, buffered_num_rows) {
     }
 };
 
@@ -112,12 +114,17 @@ class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
  public:
     explicit FieldData(int64_t dim,
                        DataType element_type,
-                       bool nullable = false,
+                       bool nullable,
+                       bool element_nullable,
                        int64_t buffered_num_rows = 0)
         : FieldDataVectorArrayImpl(
-              DataType::VECTOR_ARRAY, nullable, buffered_num_rows),
+              DataType::VECTOR_ARRAY,
+              nullable,
+              element_nullable,
+              buffered_num_rows),
           dim_(dim),
-          element_type_(element_type) {
+          element_type_(element_type),
+          element_nullable_(element_nullable) {
         AssertInfo(element_type != DataType::NONE,
                    "element_type must be specified for VECTOR_ARRAY");
     }
@@ -137,6 +144,11 @@ class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
         element_type_ = element_type;
     }
 
+    bool
+    is_element_nullable() const {
+        return element_nullable_;
+    }
+
     const VectorArray*
     value_at(ssize_t offset) const {
         AssertInfo(offset < get_valid_rows(),
@@ -147,6 +159,7 @@ class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
  private:
     int64_t dim_;
     DataType element_type_;
+    bool element_nullable_;
 };
 
 template <typename Type, bool is_type_entire_row = false>

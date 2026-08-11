@@ -86,6 +86,13 @@ struct BaseEventData {
                            bool nullable,
                            bool is_field_data = true);
 
+    explicit BaseEventData(BinlogReaderPtr reader,
+                           int event_length,
+                           DataType data_type,
+                           bool nullable,
+                           bool element_nullable,
+                           bool is_field_data);
+
     std::vector<uint8_t>
     Serialize();
 };

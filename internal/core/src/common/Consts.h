@@ -44,6 +44,7 @@ const milvus::FieldId ElementIndexFieldID = milvus::FieldId(-101);
 const char ORIGIN_SIZE_KEY[] = "original_size";
 const char INDEX_BUILD_ID_KEY[] = "indexBuildID";
 const char NULLABLE[] = "nullable";
+const char ELEMENT_NULLABLE[] = "element_nullable";
 const char EDEK[] = "edek";
 const char EZID[] = "encryption_zone";
 
