@@ -418,10 +418,11 @@ class TransientMemoryBudget {
 
     void
     FulfillAdmission(std::shared_ptr<PendingAdmission> pending) {
-        pending->cancellation_callback.reset();
         if (pending->legacy) {
+            // AcquireUntil owns and clears the cancellation callback after waking.
             return;
         }
+        pending->cancellation_callback.reset();
         auto lease = TransientBudgetLease(this, pending->bytes);
         pending->promise.trySetValue(std::move(lease));
     }
