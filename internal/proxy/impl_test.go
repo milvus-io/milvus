@@ -83,6 +83,68 @@ func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 }
 
+func TestProxy_InvalidateCollectionMetaCache_ShardCacheEvictionByID(t *testing.T) {
+	paramtable.Init()
+	cached := globalMetaCache
+	defer func() { globalMetaCache = cached }()
+
+	const (
+		dbName    = "default"
+		aliasName = "alias_of_coll"
+	)
+	collectionID := int64(100)
+
+	newRequest := func(collID int64) *proxypb.InvalidateCollMetaCacheRequest {
+		return &proxypb.InvalidateCollMetaCacheRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
+			DbName:         dbName,
+			CollectionName: aliasName,
+			CollectionID:   collID,
+		}
+	}
+
+	t.Run("evicts by collection id, a constant number of times", func(t *testing.T) {
+		cache := NewMockCache(t)
+		cache.EXPECT().RemoveCollection(mock.Anything, dbName, aliasName, mock.Anything).Return()
+		// Five aliases resolve to the same collection id.
+		cache.EXPECT().RemoveCollectionsByID(mock.Anything, collectionID, mock.Anything, false).
+			Return([]string{"a1", "a2", "a3", "a4", "a5"})
+		cache.EXPECT().RemoveAlias(mock.Anything, dbName, aliasName).Return()
+		globalMetaCache = cache
+
+		shardMgr := shardclient.NewMockShardClientManager(t)
+		// The shard cache is keyed by collection id, so one delete covers every alias that
+		// resolves to it. The eviction count must stay constant (once for the collection name,
+		// once for the alias batch) instead of growing with the number of aliases.
+		shardMgr.EXPECT().InvalidateShardLeaderCache([]int64{collectionID}).Return().Times(2)
+
+		node := &Proxy{shardMgr: shardMgr}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		status, err := node.InvalidateCollectionMetaCache(context.Background(), newRequest(collectionID))
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	})
+
+	t.Run("no collection id, no eviction", func(t *testing.T) {
+		cache := NewMockCache(t)
+		cache.EXPECT().RemoveCollection(mock.Anything, dbName, aliasName, mock.Anything).Return()
+		cache.EXPECT().RemoveAlias(mock.Anything, dbName, aliasName).Return()
+		globalMetaCache = cache
+
+		// Alias DDL broadcasts carry no collection id, so there is nothing to evict by id.
+		// Any call on this mock is unexpected and fails the test.
+		shardMgr := shardclient.NewMockShardClientManager(t)
+
+		node := &Proxy{shardMgr: shardMgr}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		status, err := node.InvalidateCollectionMetaCache(context.Background(), newRequest(0))
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	})
+}
+
 func TestProxy_CheckHealth(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}

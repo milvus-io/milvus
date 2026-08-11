@@ -20,14 +20,18 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
@@ -231,6 +235,44 @@ func (suite *AnalyzeTaskSuite) TestAnalyze() {
 
 	err = t.PreExecute(context.Background())
 	suite.NoError(err)
+}
+
+func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var capturedMaxConnections uint32
+	patch := mockey.Mock(analyzecgowrapper.Analyze).To(
+		func(_ context.Context, info *clusteringpb.AnalyzeInfo, _ *indexcgopb.StoragePluginContext) (analyzecgowrapper.CodecAnalyze, error) {
+			capturedMaxConnections = info.GetStorageConfig().GetMaxConnections()
+			return nil, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	req := &workerpb.AnalyzeRequest{
+		TaskID:       suite.taskID,
+		CollectionID: suite.collectionID,
+		PartitionID:  suite.partitionID,
+		FieldID:      suite.fieldID,
+		FieldName:    "vec",
+		FieldType:    schemapb.DataType_FloatVector,
+		Dim:          128,
+		StorageConfig: &indexpb.StorageConfig{
+			StorageType:    "minio",
+			RootPath:       "files",
+			MaxConnections: 237,
+		},
+	}
+	task := &analyzeTask{
+		ctx:    ctx,
+		cancel: cancel,
+		req:    req,
+		tr:     timerecord.NewTimeRecorder("test-analyze-max-connections"),
+	}
+
+	err := task.Execute(ctx)
+	suite.NoError(err)
+	suite.Equal(uint32(237), capturedMaxConnections)
 }
 
 func TestAnalyzeTaskSuite(t *testing.T) {

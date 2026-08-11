@@ -100,14 +100,12 @@ func TestPurgeClient(t *testing.T) {
 		purgeInterval:   1 * time.Second,
 		expiredDuration: 3 * time.Second,
 
-		collLeader: map[string]map[string]*shardLeaders{
-			"default": {
-				"test": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 1,
-					shardLeaders: map[string][]NodeInfo{
-						"0": {node},
-					},
+		collLeader: map[int64]*shardLeaders{
+			1: {
+				idx:          atomic.NewInt64(0),
+				collectionID: 1,
+				shardLeaders: map[string][]NodeInfo{
+					"0": {node},
 				},
 			},
 		},
@@ -138,7 +136,7 @@ func TestPurgeClient(t *testing.T) {
 	assert.Equal(t, s.clients.Len(), 1)
 	assert.True(t, time.Now().UnixNano()-qnClient.lastActiveTs.Load() > 3*time.Second.Nanoseconds())
 
-	s.DeprecateShardCache("default", "test")
+	s.InvalidateShardLeaderCache([]int64{1})
 	returnEmptyResult.Store(true)
 	time.Sleep(2 * time.Second)
 	// remove client from shard location, expected client should be purged
@@ -147,109 +145,46 @@ func TestPurgeClient(t *testing.T) {
 	}, 10*time.Second, 1*time.Second)
 }
 
-func TestDeprecateShardCache(t *testing.T) {
-	node := NodeInfo{
-		NodeID: 1,
+// seedShardLeaders inserts a single-channel shard leaders entry into the id-keyed cache,
+// mirroring what updateShardLocationCache writes. The database argument only documents which
+// database the collection was filled under; the cache does not key on it.
+func seedShardLeaders(mgr *shardClientMgrImpl, database string, collectionID int64, channel string, node NodeInfo) {
+	mgr.leaderMut.Lock()
+	defer mgr.leaderMut.Unlock()
+	mgr.collLeader[collectionID] = &shardLeaders{
+		idx:          atomic.NewInt64(0),
+		collectionID: collectionID,
+		shardLeaders: map[string][]NodeInfo{channel: {node}},
 	}
+}
 
-	qn := mocks.NewMockQueryNodeClient(t)
-	qn.EXPECT().Close().Return(nil).Maybe()
-	creator := func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error) {
-		return qn, nil
-	}
+func TestRemoveDatabase(t *testing.T) {
+	node := NodeInfo{NodeID: 1}
 
 	mixcoord := mocks.NewMockMixCoordClient(t)
 	mgr := NewShardClientMgr(mixcoord)
-	mgr.SetClientCreatorFunc(creator)
+	defer mgr.Close()
 
-	t.Run("Clear with no collection info", func(t *testing.T) {
-		mgr.DeprecateShardCache("default", "collection_not_exist")
-		// Should not panic or error
+	// RemoveDatabase must not be the authority that evicts cache entries. A collection can move
+	// databases via cross-db RenameCollection while keeping its id, and DropDatabase requires an
+	// empty database (its collections are already evicted by id). The shard cache is keyed by the
+	// cluster-unique collection id, so eviction is by id only -- never by the mutable database
+	// attribution, which could drop a collection that has moved to (or is live under) another db.
+	t.Run("does not evict live entries; eviction is by id", func(t *testing.T) {
+		seedShardLeaders(mgr, "db1", 100, "channel-1", node)
+
+		mgr.RemoveDatabase("db1")
+		assert.NotNil(t, mgr.getCachedShardLeaders(100, "test"),
+			"RemoveDatabase must not evict a collection by its (mutable) database attribution")
+
+		mgr.InvalidateShardLeaderCache([]int64{100})
+		assert.Nil(t, mgr.getCachedShardLeaders(100, "test"))
 	})
 
-	t.Run("Clear valid collection empty cache", func(t *testing.T) {
-		// Add a collection to cache first
-		mgr.leaderMut.Lock()
-		mgr.collLeader = map[string]map[string]*shardLeaders{
-			"default": {
-				"test_collection": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 100,
-					shardLeaders: map[string][]NodeInfo{
-						"channel-1": {node},
-					},
-				},
-			},
-		}
-		mgr.leaderMut.Unlock()
-
-		mgr.DeprecateShardCache("default", "test_collection")
-
-		// Verify cache is cleared
-		mgr.leaderMut.RLock()
-		defer mgr.leaderMut.RUnlock()
-		_, exists := mgr.collLeader["default"]["test_collection"]
-		assert.False(t, exists)
+	t.Run("non-existent database is a safe no-op", func(t *testing.T) {
+		mgr.RemoveDatabase("no_such_db")
+		// Should not panic
 	})
-
-	t.Run("Clear one collection, keep others", func(t *testing.T) {
-		mgr.leaderMut.Lock()
-		mgr.collLeader = map[string]map[string]*shardLeaders{
-			"default": {
-				"collection1": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 100,
-					shardLeaders: map[string][]NodeInfo{
-						"channel-1": {node},
-					},
-				},
-				"collection2": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 101,
-					shardLeaders: map[string][]NodeInfo{
-						"channel-2": {node},
-					},
-				},
-			},
-		}
-		mgr.leaderMut.Unlock()
-
-		mgr.DeprecateShardCache("default", "collection1")
-
-		// Verify collection1 is cleared but collection2 remains
-		mgr.leaderMut.RLock()
-		defer mgr.leaderMut.RUnlock()
-		_, exists := mgr.collLeader["default"]["collection1"]
-		assert.False(t, exists)
-		_, exists = mgr.collLeader["default"]["collection2"]
-		assert.True(t, exists)
-	})
-
-	t.Run("Clear last collection in database removes database", func(t *testing.T) {
-		mgr.leaderMut.Lock()
-		mgr.collLeader = map[string]map[string]*shardLeaders{
-			"test_db": {
-				"last_collection": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 200,
-					shardLeaders: map[string][]NodeInfo{
-						"channel-1": {node},
-					},
-				},
-			},
-		}
-		mgr.leaderMut.Unlock()
-
-		mgr.DeprecateShardCache("test_db", "last_collection")
-
-		// Verify database is also removed
-		mgr.leaderMut.RLock()
-		defer mgr.leaderMut.RUnlock()
-		_, exists := mgr.collLeader["test_db"]
-		assert.False(t, exists)
-	})
-
-	mgr.Close()
 }
 
 func TestInvalidateShardLeaderCache(t *testing.T) {
@@ -268,168 +203,78 @@ func TestInvalidateShardLeaderCache(t *testing.T) {
 	mgr.SetClientCreatorFunc(creator)
 
 	t.Run("Invalidate single collection", func(t *testing.T) {
-		mgr.leaderMut.Lock()
-		mgr.collLeader = map[string]map[string]*shardLeaders{
-			"default": {
-				"collection1": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 100,
-					shardLeaders: map[string][]NodeInfo{
-						"channel-1": {node},
-					},
-				},
-				"collection2": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 101,
-					shardLeaders: map[string][]NodeInfo{
-						"channel-2": {node},
-					},
-				},
-			},
-		}
-		mgr.leaderMut.Unlock()
+		seedShardLeaders(mgr, "default", 100, "channel-1", node)
+		seedShardLeaders(mgr, "default", 101, "channel-2", node)
 
 		mgr.InvalidateShardLeaderCache([]int64{100})
 
 		// Verify collection with ID 100 is removed, but 101 remains
 		mgr.leaderMut.RLock()
 		defer mgr.leaderMut.RUnlock()
-		_, exists := mgr.collLeader["default"]["collection1"]
+		_, exists := mgr.collLeader[100]
 		assert.False(t, exists)
-		_, exists = mgr.collLeader["default"]["collection2"]
+		_, exists = mgr.collLeader[101]
 		assert.True(t, exists)
 	})
 
 	t.Run("Invalidate multiple collections", func(t *testing.T) {
-		mgr.leaderMut.Lock()
-		mgr.collLeader = map[string]map[string]*shardLeaders{
-			"default": {
-				"collection1": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 100,
-					shardLeaders: map[string][]NodeInfo{
-						"channel-1": {node},
-					},
-				},
-				"collection2": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 101,
-					shardLeaders: map[string][]NodeInfo{
-						"channel-2": {node},
-					},
-				},
-				"collection3": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 102,
-					shardLeaders: map[string][]NodeInfo{
-						"channel-3": {node},
-					},
-				},
-			},
-		}
-		mgr.leaderMut.Unlock()
+		seedShardLeaders(mgr, "default", 100, "channel-1", node)
+		seedShardLeaders(mgr, "default", 101, "channel-2", node)
+		seedShardLeaders(mgr, "default", 102, "channel-3", node)
 
 		mgr.InvalidateShardLeaderCache([]int64{100, 102})
 
 		// Verify collections 100 and 102 are removed, but 101 remains
 		mgr.leaderMut.RLock()
 		defer mgr.leaderMut.RUnlock()
-		_, exists := mgr.collLeader["default"]["collection1"]
+		_, exists := mgr.collLeader[100]
 		assert.False(t, exists)
-		_, exists = mgr.collLeader["default"]["collection2"]
+		_, exists = mgr.collLeader[101]
 		assert.True(t, exists)
-		_, exists = mgr.collLeader["default"]["collection3"]
+		_, exists = mgr.collLeader[102]
 		assert.False(t, exists)
 	})
 
 	t.Run("Invalidate non-existent collection", func(t *testing.T) {
-		mgr.leaderMut.Lock()
-		mgr.collLeader = map[string]map[string]*shardLeaders{
-			"default": {
-				"collection1": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 100,
-					shardLeaders: map[string][]NodeInfo{
-						"channel-1": {node},
-					},
-				},
-			},
-		}
-		mgr.leaderMut.Unlock()
+		seedShardLeaders(mgr, "default", 100, "channel-1", node)
 
 		mgr.InvalidateShardLeaderCache([]int64{999})
 
-		// Verify collection1 still exists
+		// Verify collection 100 still exists
 		mgr.leaderMut.RLock()
 		defer mgr.leaderMut.RUnlock()
-		_, exists := mgr.collLeader["default"]["collection1"]
+		_, exists := mgr.collLeader[100]
 		assert.True(t, exists)
 	})
 
-	t.Run("Invalidate all collections in database removes database", func(t *testing.T) {
-		mgr.leaderMut.Lock()
-		mgr.collLeader = map[string]map[string]*shardLeaders{
-			"test_db": {
-				"collection1": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 200,
-					shardLeaders: map[string][]NodeInfo{
-						"channel-1": {node},
-					},
-				},
-				"collection2": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 201,
-					shardLeaders: map[string][]NodeInfo{
-						"channel-2": {node},
-					},
-				},
-			},
-		}
-		mgr.leaderMut.Unlock()
+	t.Run("Invalidate all collections in a database", func(t *testing.T) {
+		seedShardLeaders(mgr, "test_db", 200, "channel-1", node)
+		seedShardLeaders(mgr, "test_db", 201, "channel-2", node)
 
 		mgr.InvalidateShardLeaderCache([]int64{200, 201})
 
-		// Verify database is removed
 		mgr.leaderMut.RLock()
 		defer mgr.leaderMut.RUnlock()
-		_, exists := mgr.collLeader["test_db"]
+		_, exists := mgr.collLeader[200]
+		assert.False(t, exists)
+		_, exists = mgr.collLeader[201]
 		assert.False(t, exists)
 	})
 
 	t.Run("Invalidate across multiple databases", func(t *testing.T) {
-		mgr.leaderMut.Lock()
-		mgr.collLeader = map[string]map[string]*shardLeaders{
-			"db1": {
-				"collection1": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 100,
-					shardLeaders: map[string][]NodeInfo{
-						"channel-1": {node},
-					},
-				},
-			},
-			"db2": {
-				"collection2": {
-					idx:          atomic.NewInt64(0),
-					collectionID: 100, // Same collection ID in different database
-					shardLeaders: map[string][]NodeInfo{
-						"channel-2": {node},
-					},
-				},
-			},
-		}
-		mgr.leaderMut.Unlock()
+		// collection ids are cluster-unique, so distinct collections carry distinct ids
+		// even across databases.
+		seedShardLeaders(mgr, "db1", 300, "channel-1", node)
+		seedShardLeaders(mgr, "db2", 400, "channel-2", node)
 
-		mgr.InvalidateShardLeaderCache([]int64{100})
+		mgr.InvalidateShardLeaderCache([]int64{300, 400})
 
-		// Verify collection is removed from both databases
 		mgr.leaderMut.RLock()
 		defer mgr.leaderMut.RUnlock()
-		_, exists := mgr.collLeader["db1"]
-		assert.False(t, exists) // db1 should be removed
-		_, exists = mgr.collLeader["db2"]
-		assert.False(t, exists) // db2 should be removed
+		_, exists := mgr.collLeader[300]
+		assert.False(t, exists)
+		_, exists = mgr.collLeader[400]
+		assert.False(t, exists)
 	})
 
 	mgr.Close()

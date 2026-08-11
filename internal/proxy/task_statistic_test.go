@@ -90,7 +90,7 @@ func (s *StatisticTaskSuite) SetupTest() {
 	mgr.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]shardclient.NodeInfo{
 		{NodeID: 1, Address: "mock_qn", Serviceable: true},
 	}, nil).Maybe()
-	mgr.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
+	mgr.EXPECT().InvalidateShardLeaderCache(mock.Anything).Return().Maybe()
 	s.mgr = mgr
 	s.lb = shardclient.NewLBPolicyImpl(mgr)
 
