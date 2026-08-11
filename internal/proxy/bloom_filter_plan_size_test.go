@@ -250,11 +250,8 @@ func TestQueryTaskBloomFilterPlanSizeLimit(t *testing.T) {
 	ctx := context.Background()
 	schema, templateValues := bloomPlanSizeIntegrationFixture(t)
 	cache := NewMockCache(t)
-	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
 	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return(&collectionInfo{}, nil).Maybe()
-	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
-		Return(schema, nil).Maybe()
+		Return(&collectionInfo{collID: 1, schema: schema}, nil)
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{}, nil)
 

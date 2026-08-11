@@ -42,6 +42,10 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 		if !ok {
 			return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
 		}
+		ctx, _, snapshotErr, isReadRequest := ensureReadRequestSnapshotForRequest(ctx, req)
+		if isReadRequest && snapshotErr != nil {
+			return handler(ctx, req)
+		}
 		dbID, collectionIDToPartIDs, rt, n, err := GetRequestInfo(ctx, request)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to get request info", mlog.Err(err))
@@ -155,6 +159,15 @@ func getCollectionAndPartitionID(ctx context.Context, r reqPartName) (int64, map
 }
 
 func getCollectionAndPartitionIDs(ctx context.Context, r reqPartNames) (int64, map[int64][]int64, error) {
+	if snapshot, snapshotErr, ok := readRequestSnapshotFromContext(ctx); ok {
+		if snapshotErr != nil {
+			return 0, nil, snapshotErr
+		}
+		if err := snapshot.validateTarget(r.GetDbName(), r.GetCollectionName()); err != nil {
+			return 0, nil, err
+		}
+		return getCollectionAndPartitionIDsFromSnapshot(ctx, snapshot, r)
+	}
 	db, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
 	if err != nil {
 		return 0, nil, err
@@ -185,6 +198,29 @@ func getCollectionAndPartitionIDs(ctx context.Context, r reqPartNames) (int64, m
 	}
 
 	return db.dbID, map[int64][]int64{collectionID: parts}, nil
+}
+
+func getCollectionAndPartitionIDsFromSnapshot(ctx context.Context, snapshot *readRequestSnapshot, r reqPartNames) (int64, map[int64][]int64, error) {
+	collection := snapshot.Collection()
+	partitionNames := r.GetPartitionNames()
+	if namespace := getRequestNamespace(r); namespace != nil {
+		resolvedNames, _, err := resolveNamespacePartitionNames(collection.Schema().CollectionSchema, namespace, partitionNames)
+		if err != nil {
+			return 0, nil, err
+		}
+		partitionNames = resolvedNames
+	}
+
+	parts := make([]int64, len(partitionNames))
+	for i, name := range partitionNames {
+		part, err := snapshot.PartitionInfo(ctx, name)
+		if err != nil {
+			return 0, nil, err
+		}
+		parts[i] = part.partitionID
+	}
+
+	return collection.DatabaseID(), map[int64][]int64{collection.CollectionID(): parts}, nil
 }
 
 func getCollectionID(r reqCollName) (int64, map[int64][]int64) {

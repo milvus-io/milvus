@@ -55,24 +55,25 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 	mockey.PatchConvey("TestQueryTask_PlanNamespace_AfterPreExecute", t, func() {
 		// Setup global meta cache and common mocks
 		globalMetaCache = &MetaCache{}
-		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345, consistencyLevel: commonpb.ConsistencyLevel_Strong}, nil).Build()
-		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
 		mockey.Mock(validatePartitionTag).Return(nil).Build()
 		mockey.Mock(isIgnoreGrowing).Return(false, nil).Build()
 
 		// Schema with namespace enabled
-		mockey.Mock((*MetaCache).GetCollectionSchema).To(func(_ *MetaCache, _ context.Context, _ string, _ string) (*schemaInfo, error) {
-			schema := &schemapb.CollectionSchema{
-				Name: "test_collection",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
-					{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
-				},
-				EnableNamespace: true,
-			}
-			return mustNewSchemaInfo(schema), nil
-		}).Build()
+		schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+			},
+			EnableNamespace: true,
+		})
+		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+			collID:           1001,
+			dbName:           defaultDB,
+			schema:           schema,
+			updateTimestamp:  12345,
+			consistencyLevel: commonpb.ConsistencyLevel_Strong,
+		}, nil).Build()
 
 		// Capture plan to verify namespace by mocking plan creation inside createPlan
 		var capturedPlan *planpb.PlanNode
@@ -125,11 +126,19 @@ func TestQueryTask_NamespaceSetsPartitionIDs(t *testing.T) {
 			&schemapb.FieldSchema{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
 		)
 
-		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345, consistencyLevel: commonpb.ConsistencyLevel_Strong}, nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(mustNewSchemaInfo(schema), nil).Build()
-		mockey.Mock((*MetaCache).GetPartitionsIndex).Return(partitionNames, nil).Build()
-		mockey.Mock((*MetaCache).GetPartitions).Return(partitionIDs, nil).Build()
+		schemaInfo := mustNewSchemaInfo(schema)
+		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+			collID:           1001,
+			dbName:           defaultDB,
+			schema:           schemaInfo,
+			updateTimestamp:  12345,
+			consistencyLevel: commonpb.ConsistencyLevel_Strong,
+		}, nil).Build()
+		mockey.Mock((*MetaCache).GetPartitionInfosByID).Return(
+			parsePartitionsInfo([]*partitionInfo{
+				{name: partitionNames[0], partitionID: partitionIDs[partitionNames[0]]},
+				{name: partitionNames[1], partitionID: partitionIDs[partitionNames[1]]},
+			}, true), nil).Build()
 		mockey.Mock(validatePartitionTag).Return(nil).Build()
 		mockey.Mock(isIgnoreGrowing).Return(false, nil).Build()
 

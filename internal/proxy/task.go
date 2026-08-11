@@ -1759,7 +1759,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	if !merr.Ok(result.GetStatus()) {
-		t.result.Status = describeCollectionErrorStatus(
+		t.result.Status = CollectionLookupErrorStatus(
 			merr.Error(result.GetStatus()), t.GetDbName(), t.GetCollectionName())
 		return nil
 	}

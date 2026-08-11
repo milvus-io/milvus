@@ -2813,11 +2813,36 @@ func GetCollectionRateSubLabel(req any) string {
 	return ratelimitutil.GetCollectionSubLabel(dbName.(string), collectionName.(string))
 }
 
+func setReadRequestStats(ctx context.Context, inboundLabel, databaseName, collectionName string) {
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(inboundLabel).
+		SetDatabaseName(databaseName).
+		SetCollectionName(collectionName)
+}
+
 // Search searches the most similar records of requests.
 func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
+	}
+	setReadRequestStats(ctx, metrics.SearchLabel, request.GetDbName(), request.GetCollectionName())
+	metrics.ProxyReceivedNQ.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		metrics.SearchLabel,
+		request.GetDbName(),
+		request.GetCollectionName(),
+	).Add(float64(request.GetNq()))
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		rsp.Status = merr.Status(err)
+		return rsp, nil
+	}
+	ctx, _, err = ensureReadRequestSnapshot(ctx, request.GetDbName(), request.GetCollectionName())
+	if err != nil {
+		rsp.Status = merr.Status(err)
+		return rsp, nil
 	}
 
 	optimizedSearch := true
@@ -2881,20 +2906,13 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 }
 
 func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
-	metrics.GetStats(ctx).
-		SetNodeID(paramtable.GetNodeID()).
-		SetInboundLabel(metrics.SearchLabel).
-		SetDatabaseName(request.GetDbName()).
-		SetCollectionName(request.GetCollectionName())
-
-	metrics.ProxyReceivedNQ.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.SearchLabel,
-		request.GetDbName(),
-		request.GetCollectionName(),
-	).Add(float64(request.GetNq()))
-
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.SearchResults{
+			Status: merr.Status(err),
+		}, false, false, false, nil
+	}
+	ctx, readSnapshot, err := ensureReadRequestSnapshot(ctx, request.GetDbName(), request.GetCollectionName())
+	if err != nil {
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
 		}, false, false, false, nil
@@ -2942,6 +2960,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			IsRecallEvaluation: isRecallEvaluation,
 		},
 		request:                request,
+		readSnapshot:           readSnapshot,
 		tr:                     timerecord.NewTimeRecorder("search"),
 		mixCoord:               node.mixCoord,
 		node:                   node,
@@ -3089,6 +3108,17 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
 	}
+	setReadRequestStats(ctx, metrics.HybridSearchLabel, request.GetDbName(), request.GetCollectionName())
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		rsp.Status = merr.Status(err)
+		return rsp, nil
+	}
+	ctx, _, err = ensureReadRequestSnapshot(ctx, request.GetDbName(), request.GetCollectionName())
+	if err != nil {
+		rsp.Status = merr.Status(err)
+		return rsp, nil
+	}
 	optimizedSearch := true
 	resultSizeInsufficient := false
 	isTopkReduce := false
@@ -3141,13 +3171,13 @@ func (l *hybridSearchRequestExprLogger) String() string {
 }
 
 func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
-	metrics.GetStats(ctx).
-		SetNodeID(paramtable.GetNodeID()).
-		SetInboundLabel(metrics.HybridSearchLabel).
-		SetDatabaseName(request.GetDbName()).
-		SetCollectionName(request.GetCollectionName())
-
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.SearchResults{
+			Status: merr.Status(err),
+		}, false, false, nil
+	}
+	ctx, readSnapshot, err := ensureReadRequestSnapshot(ctx, request.GetDbName(), request.GetCollectionName())
+	if err != nil {
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
 		}, false, false, nil
@@ -3171,6 +3201,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			IsTopkReduce: optimizedSearch,
 		},
 		request:             newSearchReq,
+		readSnapshot:        readSnapshot,
 		tr:                  timerecord.NewTimeRecorder(method),
 		mixCoord:            node.mixCoord,
 		node:                node,
@@ -3376,11 +3407,11 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	}
 
 	// Get collection schema for validation and plan building
-	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx,
-		request.GetDbName(), request.GetCollectionName(), 0)
+	ctx, readSnapshot, err := ensureReadRequestSnapshot(ctx, request.GetDbName(), request.GetCollectionName())
 	if err != nil {
 		return nil, err
 	}
+	collectionInfo := readSnapshot.Collection().Info()
 
 	// Get anns_field from search params, or infer from schema if only one vector field exists
 	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, request.SearchParams)
@@ -3470,6 +3501,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			QueryLabel:       metrics.QueryLabel,
 		},
 		request:             queryReq,
+		readSnapshot:        readSnapshot,
 		plan:                plan,
 		mixCoord:            node.mixCoord,
 		lb:                  node.lbPolicy,
@@ -3777,6 +3809,16 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			Status: merr.Status(err),
 		}, nil
 	}
+
+	ctx, readSnapshot, err := ensureReadRequestSnapshot(ctx, request.GetDbName(), request.GetCollectionName())
+	if err != nil {
+		return &milvuspb.QueryResults{
+			Status: merr.Status(err),
+		}, nil
+	}
+	qt.ctx = ctx
+	qt.Condition = NewTaskCondition(ctx)
+	qt.readSnapshot = readSnapshot
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Query")
 	defer sp.End()

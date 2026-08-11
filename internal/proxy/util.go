@@ -2677,6 +2677,31 @@ func assignPartitionKeys(ctx context.Context, dbName string, collName string, ke
 	return hashedPartitionNames, err
 }
 
+func assignPartitionKeysFromSnapshot(ctx context.Context, snapshot *readRequestSnapshot, keys []*planpb.GenericValue) ([]string, error) {
+	partitions, err := snapshot.Partitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if partitions.indexedPartitionNames == nil {
+		return nil, merr.WrapErrServiceInternal("partitions not in partition key naming pattern")
+	}
+	partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(snapshot.Collection().Schema().CollectionSchema)
+	if err != nil {
+		return nil, err
+	}
+	return typeutil2.HashKey2Partitions(partitionKeyFieldSchema, keys, partitions.indexedPartitionNames)
+}
+
+func assignNamespacePartitionKeyFromSnapshot(ctx context.Context, snapshot *readRequestSnapshot, namespace *string) ([]string, error) {
+	if namespace == nil {
+		return nil, nil
+	}
+
+	return assignPartitionKeysFromSnapshot(ctx, snapshot, []*planpb.GenericValue{
+		{Val: &planpb.GenericValue_StringVal{StringVal: *namespace}},
+	})
+}
+
 func assignNamespacePartitionKey(ctx context.Context, dbName string, collName string, namespace *string) ([]string, error) {
 	if namespace == nil {
 		return nil, nil
@@ -2937,6 +2962,15 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 }
 
 func GetCachedCollectionSchema(ctx context.Context, dbName string, colName string) (*schemaInfo, error) {
+	if snapshot, snapshotErr, ok := readRequestSnapshotFromContext(ctx); ok {
+		if snapshotErr != nil {
+			return nil, snapshotErr
+		}
+		if err := snapshot.validateTarget(dbName, colName); err != nil {
+			return nil, err
+		}
+		return snapshot.Collection().Schema(), nil
+	}
 	if globalMetaCache != nil {
 		return globalMetaCache.GetCollectionSchema(ctx, dbName, colName)
 	}

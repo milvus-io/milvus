@@ -1069,13 +1069,26 @@ func (m *MetaCache) GetPartitionsIndex(ctx context.Context, database, collection
 }
 
 func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionName string) (*partitionInfos, error) {
-	method := "GetPartitionInfo"
 	// See resolvePartitionCollection: entries are keyed by the collection id, so
 	// they have exactly one location and invalidation stales exact id-keys.
 	collectionID, rpcDB, rpcName, err := m.resolvePartitionCollection(ctx, database, collectionName)
 	if err != nil {
 		return nil, err
 	}
+	return m.getPartitionInfosByID(ctx, rpcDB, collectionID, rpcName)
+}
+
+func (m *MetaCache) GetPartitionInfosByID(ctx context.Context, database string, collectionID int64) (*partitionInfos, error) {
+	return m.getPartitionInfosByID(ctx, normalizeDBName(database), collectionID, "")
+}
+
+func (m *MetaCache) getPartitionInfosByID(
+	ctx context.Context,
+	rpcDB string,
+	collectionID int64,
+	collectionName string,
+) (*partitionInfos, error) {
+	method := "GetPartitionInfo"
 	key := buildPartitionCacheKey(collectionID)
 	m.mu.RLock()
 	cached, ok := m.partitionCache[key]
@@ -1104,7 +1117,11 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 		}
 		if collection.GetCollectionID() != collectionID {
 			// defense: the id and the returned collection must be the same one
-			return nil, merr.WrapErrCollectionNotFound(rpcName)
+			identifier := collectionName
+			if identifier == "" {
+				identifier = fmt.Sprintf("id=%d", collectionID)
+			}
+			return nil, merr.WrapErrCollectionNotFound(identifier)
 		}
 		schemaInfo, err := newSchemaInfo(collection.Schema)
 		if err != nil {
