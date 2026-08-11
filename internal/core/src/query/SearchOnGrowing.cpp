@@ -93,6 +93,49 @@ RunAfterChunkSnapshotHookForTest() {
     }
 }
 
+TargetBitmap
+BuildGrowingVectorArrayInvalidElementFilter(
+    const segcore::VectorBase* vec_data,
+    const ChunkSnapshot& chunks,
+    const milvus::IArrayOffsets& array_offsets,
+    int64_t logical_row_count,
+    int64_t physical_row_count) {
+    const auto total_elements =
+        GetElementCountForRows(array_offsets, logical_row_count);
+    TargetBitmap invalid_elements(total_elements, false);
+
+    const auto size_per_chunk = vec_data->get_size_per_chunk();
+    const auto num_chunks = std::min<int64_t>(
+        chunks.count, upper_div(physical_row_count, size_per_chunk));
+    int64_t element_offset = 0;
+    for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
+        auto chunk_data = vec_data->get_chunk_data(chunks, chunk_id);
+        auto vector_arrays = reinterpret_cast<const VectorArray*>(chunk_data);
+        const auto row_begin = chunk_id * size_per_chunk;
+        const auto chunk_rows =
+            std::min({size_per_chunk,
+                      physical_row_count - row_begin,
+                      vec_data->get_chunk_size(chunks, chunk_id)});
+        for (int64_t row_idx = 0; row_idx < chunk_rows; ++row_idx) {
+            const auto& vector_array = vector_arrays[row_idx];
+            for (int64_t elem_idx = 0; elem_idx < vector_array.length();
+                 ++elem_idx) {
+                if (vector_array.is_element_nullable() &&
+                    !vector_array.is_element_valid(elem_idx)) {
+                    invalid_elements.set(element_offset + elem_idx);
+                }
+            }
+            element_offset += vector_array.length();
+        }
+    }
+
+    AssertInfo(element_offset == total_elements,
+               "VECTOR_ARRAY element count mismatch, expected {}, got {}",
+               total_elements,
+               element_offset);
+    return invalid_elements;
+}
+
 }  // namespace
 
 void
@@ -345,6 +388,17 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             search_bitset =
                 search_result.PinBitset(std::move(transformed_bitset));
         }
+        if (is_element_level_search && field.is_element_nullable()) {
+            search_bitset = MergeSearchFilterBitset(
+                search_result,
+                search_bitset,
+                BuildGrowingVectorArrayInvalidElementFilter(
+                    vec_ptr,
+                    chunks,
+                    *info.array_offsets_,
+                    logical_bound,
+                    active_count));
+        }
 
         // Element-level search (embedding-search-embedding): knowhere sees
         // a scalar vector type and the per-chunk size must be measured in
@@ -414,9 +468,22 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 // data to a contiguous memory buffer. This is inefficient and
                 // will be optimized in the future.
                 auto vec_ptr = reinterpret_cast<const VectorArray*>(chunk_data);
+                const auto bytes_per_vector =
+                    vector_bytes_per_element(element_type, dim);
                 auto size = 0;
                 for (int i = 0; i < size_per_chunk; ++i) {
-                    size += vec_ptr[i].byte_size();
+                    if (is_element_level_search ||
+                        !vec_ptr[i].has_invalid_element()) {
+                        size += vec_ptr[i].byte_size();
+                        continue;
+                    }
+                    for (int64_t elem_idx = 0;
+                         elem_idx < vec_ptr[i].length();
+                         ++elem_idx) {
+                        if (vec_ptr[i].is_element_valid(elem_idx)) {
+                            size += bytes_per_vector;
+                        }
+                    }
                 }
 
                 buf = std::make_unique<uint8_t[]>(size);
@@ -441,11 +508,32 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                     auto offset = 0;
                     auto ptr = buf.get();
                     for (int i = 0; i < size_per_chunk; ++i) {
-                        milvus::fastmem::FastMemcpy(
-                            ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
-                        ptr += vec_ptr[i].byte_size();
+                        int64_t valid_vectors = 0;
+                        if (!vec_ptr[i].has_invalid_element()) {
+                            milvus::fastmem::FastMemcpy(
+                                ptr,
+                                vec_ptr[i].data(),
+                                vec_ptr[i].byte_size());
+                            ptr += vec_ptr[i].byte_size();
+                            valid_vectors = vec_ptr[i].length();
+                        } else {
+                            for (int64_t elem_idx = 0;
+                                 elem_idx < vec_ptr[i].length();
+                                 ++elem_idx) {
+                                if (!vec_ptr[i].is_element_valid(elem_idx)) {
+                                    continue;
+                                }
+                                milvus::fastmem::FastMemcpy(
+                                    ptr,
+                                    vec_ptr[i].data() +
+                                        elem_idx * bytes_per_vector,
+                                    bytes_per_vector);
+                                ptr += bytes_per_vector;
+                                ++valid_vectors;
+                            }
+                        }
 
-                        offset += vec_ptr[i].length();
+                        offset += valid_vectors;
                         offsets.push_back(offset);
                     }
                     sub_data = query::dataset::RawDataset{row_begin,
@@ -454,6 +542,12 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                                           buf.get(),
                                                           offsets.data()};
                 }
+            }
+
+            if (data_type == DataType::VECTOR_ARRAY &&
+                !is_element_level_search &&
+                sub_data.raw_data_offsets[size_per_chunk] == 0) {
+                continue;
             }
 
             if (use_vector_iterator) {

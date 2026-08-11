@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <ctime>
 #include <exception>
 #include <future>
@@ -3662,7 +3663,13 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
     AssertInfo(field_meta.is_vector(),
                "The meta type of vector field is not vector type");
 
-    if (get_bit(snapshot->binlog_index_bitset, field_id)) {
+    const bool requires_raw_element_search =
+        field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
+        field_meta.is_element_nullable() &&
+        search_info.array_offsets_ != nullptr;
+
+    if (!requires_raw_element_search &&
+        get_bit(snapshot->binlog_index_bitset, field_id)) {
         auto config_it = runtime->vec_binlog_config.find(field_id);
         AssertInfo(config_it != runtime->vec_binlog_config.end(),
                    "The binlog params is not generate.");
@@ -3683,7 +3690,8 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    output);
         milvus::tracer::AddEvent(
             "finish_searching_vector_temperate_binlog_index");
-    } else if (get_bit(snapshot->index_ready_bitset, field_id)) {
+    } else if (!requires_raw_element_search &&
+               get_bit(snapshot->index_ready_bitset, field_id)) {
         if (search_info.global_refine_enable_ &&
             IsIndexRefineEnabledLocked(op_context, field_id, runtime)) {
             search_info.topk_ = GetEffectiveSearchTopk(search_info);
@@ -3879,6 +3887,23 @@ ChunkedSegmentSealedImpl::get_emb_list(milvus::OpContext* op_ctx,
                "get_emb_list called on vector index without raw data");
 
     auto metric_type = vec_index->GetMetricType();
+
+    if (field_meta.is_element_nullable()) {
+        auto column = get_column(snapshot->runtime, field_id);
+        if (column != nullptr) {
+            CheckVectorOutputCellsLoaded(id_,
+                                         field_id,
+                                         field_meta,
+                                         column.get(),
+                                         seg_offsets,
+                                         count);
+            return get_raw_data(
+                op_ctx, field_id, field_meta, seg_offsets, count);
+        }
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "element-nullable VECTOR_ARRAY requires raw field data to "
+                  "preserve element validity");
+    }
 
     ValidResult filter_result;
     int64_t valid_count = count;
@@ -8740,6 +8765,14 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
             AssertInfo(field_exists_in_schema(schema_snapshot, field_id),
                        "field {} not found in schema when loading field data",
                        field_id.get());
+            const auto& field_meta = schema_snapshot->operator[](field_id);
+            if (field_meta.is_element_nullable() &&
+                segment_load_info.GetStorageVersion() < STORAGE_V2) {
+                ThrowInfo(
+                    ErrorCode::Unsupported,
+                    "Storage V1 does not support element-nullable field {}",
+                    field_id.get());
+            }
         }
 
         auto snapshot = CapturePublishedState();
@@ -9376,21 +9409,70 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
                     outer_list->values());
             int dim = field_meta.get_dim();
             auto element_type = field_meta.get_element_type();
-            auto* va = data_array->mutable_vectors()
-                           ->mutable_vector_array()
-                           ->mutable_data();
+            auto* vector_array =
+                data_array->mutable_vectors()->mutable_vector_array();
+            vector_array->set_dim(dim);
+            vector_array->set_element_type(
+                static_cast<proto::schema::DataType>(element_type));
             data_array->mutable_vectors()->set_dim(dim);
+            auto bytes_per_vector =
+                milvus::vector_bytes_per_element(element_type, dim);
             for (int64_t i = 0; i < size; i++) {
                 auto idx = result_mapping[i];
+                if (outer_list->IsNull(idx)) {
+                    VectorArray empty(nullptr,
+                                      0,
+                                      dim,
+                                      element_type,
+                                      TargetBitmapView(),
+                                      field_meta.is_element_nullable());
+                    *vector_array->mutable_data()->Add() = empty.output_data();
+                    continue;
+                }
                 int64_t start = outer_list->value_offset(idx);
                 int64_t end = outer_list->value_offset(idx + 1);
                 int64_t num_vectors = end - start;
-                VectorArray vec_arr(inner_values->GetValue(start),
-                                    num_vectors,
-                                    dim,
-                                    element_type);
-                auto* vf = va->Add();
-                *vf = vec_arr.output_data();
+                if (field_meta.is_element_nullable()) {
+                    std::vector<uint8_t> row_data(num_vectors *
+                                                  bytes_per_vector);
+                    TargetBitmap element_valid_data(num_vectors, true);
+                    for (int64_t j = 0; j < num_vectors; ++j) {
+                        auto child_idx = start + j;
+                        auto* dst = row_data.data() + j * bytes_per_vector;
+                        if (inner_values->IsNull(child_idx)) {
+                            element_valid_data.reset(j);
+                            std::memset(dst, 0, bytes_per_vector);
+                            continue;
+                        }
+                        milvus::fastmem::FastMemcpy(
+                            dst,
+                            inner_values->GetValue(child_idx),
+                            bytes_per_vector);
+                    }
+                    VectorArray vec_arr(row_data.data(),
+                                        num_vectors,
+                                        dim,
+                                        element_type,
+                                        element_valid_data.view(),
+                                        true);
+                    *vector_array->mutable_data()->Add() =
+                        vec_arr.output_data();
+                } else {
+                    for (int64_t j = 0; j < num_vectors; ++j) {
+                        AssertInfo(
+                            !inner_values->IsNull(start + j),
+                            "VECTOR_ARRAY child value is null but field is "
+                            "not element nullable");
+                    }
+                    VectorArray vec_arr(num_vectors > 0
+                                            ? inner_values->GetValue(start)
+                                            : nullptr,
+                                        num_vectors,
+                                        dim,
+                                        element_type);
+                    *vector_array->mutable_data()->Add() =
+                        vec_arr.output_data();
+                }
             }
             break;
         }

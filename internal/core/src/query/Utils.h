@@ -93,6 +93,36 @@ FinalizeVectorSearchOffsets(SearchResult& result,
     }
 }
 
+inline int64_t
+GetElementCountForRows(const milvus::IArrayOffsets& array_offsets,
+                       int64_t row_count) {
+    if (row_count <= 0) {
+        return 0;
+    }
+    return array_offsets.ElementIDRangeOfRow(row_count).first;
+}
+
+inline BitsetView
+MergeSearchFilterBitset(SearchResult& result,
+                        const BitsetView& bitset,
+                        TargetBitmap&& extra_filter) {
+    if (extra_filter.none()) {
+        return bitset;
+    }
+    if (!bitset.empty()) {
+        AssertInfo(bitset.size() == extra_filter.size(),
+                   "search bitset size {} does not match extra filter size {}",
+                   bitset.size(),
+                   extra_filter.size());
+        for (size_t i = 0; i < bitset.size(); ++i) {
+            if (bitset.test(i)) {
+                extra_filter.set(i);
+            }
+        }
+    }
+    return result.PinBitset(std::move(extra_filter));
+}
+
 template <typename T, typename U>
 inline bool
 Match(const T& x, const U& y, OpType op) {

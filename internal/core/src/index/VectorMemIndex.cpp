@@ -575,7 +575,7 @@ VectorMemIndex<T>::Build(const Config& config) {
             BuildValidData(valid_data.get(), total_num_rows);
             return;
         }
-        auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
+        std::shared_ptr<uint8_t[]> buf;
 
         size_t lim_offset = 0;
         std::vector<size_t> offsets;
@@ -583,6 +583,7 @@ VectorMemIndex<T>::Build(const Config& config) {
         int64_t offset = 0;
         // For embedding list index, elem_type_ is not NONE
         if (elem_type_ == DataType::NONE) {
+            buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
             // TODO: avoid copying
             for (auto& data : field_datas) {
                 auto valid_size = data->DataSize();
@@ -595,6 +596,31 @@ VectorMemIndex<T>::Build(const Config& config) {
             offsets.reserve((nullable ? total_valid_rows : total_num_rows) + 1);
             offsets.push_back(lim_offset);
             auto bytes_per_vec = vector_bytes_per_element(elem_type_, dim);
+            total_size = 0;
+            for (const auto& data : field_datas) {
+                auto vec_array_data =
+                    dynamic_cast<FieldData<VectorArray>*>(data.get());
+                AssertInfo(vec_array_data != nullptr,
+                           "failed to cast field data to vector array");
+                for (int64_t physical_row = 0;
+                     physical_row < vec_array_data->get_valid_rows();
+                     ++physical_row) {
+                    const auto* vec_array =
+                        vec_array_data->value_at(physical_row);
+                    if (!vec_array->has_invalid_element()) {
+                        total_size += vec_array->byte_size();
+                        continue;
+                    }
+                    for (int64_t elem_idx = 0;
+                         elem_idx < vec_array->length();
+                         ++elem_idx) {
+                        if (vec_array->is_element_valid(elem_idx)) {
+                            total_size += bytes_per_vec;
+                        }
+                    }
+                }
+            }
+            buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
             for (auto& data : field_datas) {
                 auto vec_array_data =
                     dynamic_cast<FieldData<VectorArray>*>(data.get());
@@ -602,32 +628,44 @@ VectorMemIndex<T>::Build(const Config& config) {
                            "failed to cast field data to vector array");
 
                 auto rows = vec_array_data->get_num_rows();
-                auto data_offset_before = offset;
                 int64_t physical_row = 0;
                 for (auto i = 0; i < rows; ++i) {
                     if (vec_array_data->IsNullable() &&
                         !vec_array_data->is_valid(i)) {
                         continue;
                     }
-                    auto size = vec_array_data->DataSize(physical_row);
-                    assert(size % bytes_per_vec == 0);
                     assert(bytes_per_vec != 0);
 
                     auto vec_array = vec_array_data->value_at(physical_row);
-
-                    if (size > 0) {
-                        milvus::fastmem::FastMemcpy(
-                            buf.get() + offset, vec_array->data(), size);
+                    int64_t valid_vectors = 0;
+                    if (!vec_array->has_invalid_element()) {
+                        auto size = vec_array->byte_size();
+                        if (size > 0) {
+                            milvus::fastmem::FastMemcpy(
+                                buf.get() + offset, vec_array->data(), size);
+                        }
+                        offset += size;
+                        valid_vectors = vec_array->length();
+                    } else {
+                        for (int64_t elem_idx = 0;
+                             elem_idx < vec_array->length();
+                             ++elem_idx) {
+                            if (!vec_array->is_element_valid(elem_idx)) {
+                                continue;
+                            }
+                            milvus::fastmem::FastMemcpy(
+                                buf.get() + offset,
+                                vec_array->data() + elem_idx * bytes_per_vec,
+                                bytes_per_vec);
+                            offset += bytes_per_vec;
+                            ++valid_vectors;
+                        }
                     }
-                    offset += size;
 
-                    lim_offset += size / bytes_per_vec;
+                    lim_offset += valid_vectors;
                     offsets.push_back(lim_offset);
                     physical_row++;
                 }
-
-                AssertInfo(data->DataSize() == offset - data_offset_before,
-                           "inconsistent vector array data size");
 
                 data.reset();
             }

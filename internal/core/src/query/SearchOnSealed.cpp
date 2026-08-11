@@ -47,6 +47,51 @@
 #include "segcore/SealedIndexingRecord.h"
 
 namespace milvus::query {
+namespace {
+
+TargetBitmap
+BuildVectorArrayInvalidElementFilter(ChunkedColumnInterface* column,
+                                     milvus::OpContext* op_context,
+                                     const milvus::IArrayOffsets& array_offsets,
+                                     int64_t row_count) {
+    const auto total_elements = GetElementCountForRows(array_offsets, row_count);
+    TargetBitmap invalid_elements(total_elements, false);
+
+    int64_t element_offset = 0;
+    int64_t remaining_rows = row_count;
+    const auto num_chunks = column->num_chunks();
+    for (int64_t chunk_id = 0; chunk_id < num_chunks && remaining_rows > 0;
+         ++chunk_id) {
+        auto views_pw =
+            column->VectorArrayViews(op_context, chunk_id, std::nullopt);
+        const auto& views = views_pw.get().first;
+        const auto& valid_data = views_pw.get().second;
+        const auto rows_to_scan =
+            std::min<int64_t>(remaining_rows, views.size());
+        for (int64_t row_idx = 0; row_idx < rows_to_scan; ++row_idx) {
+            if (!valid_data.empty() && !valid_data[row_idx]) {
+                continue;
+            }
+            const auto& view = views[row_idx];
+            for (int64_t elem_idx = 0; elem_idx < view.length(); ++elem_idx) {
+                if (view.is_element_nullable() &&
+                    !view.is_element_valid(elem_idx)) {
+                    invalid_elements.set(element_offset + elem_idx);
+                }
+            }
+            element_offset += view.length();
+        }
+        remaining_rows -= rows_to_scan;
+    }
+
+    AssertInfo(element_offset == total_elements,
+               "VECTOR_ARRAY element count mismatch, expected {}, got {}",
+               total_elements,
+               element_offset);
+    return invalid_elements;
+}
+
+}  // namespace
 
 void
 SearchOnSealedIndex(const Schema& schema,
@@ -222,6 +267,14 @@ SearchOnSealedColumn(const Schema& schema,
         }
     }
 
+    if (is_element_level_search && field.is_element_nullable()) {
+        search_bitview = MergeSearchFilterBitset(
+            result,
+            search_bitview,
+            BuildVectorArrayInvalidElementFilter(
+                column, op_context, *search_info.array_offsets_, row_count));
+    }
+
     // For element-level search (embedding-search-embedding), the underlying
     // knowhere search is keyed by the scalar element type rather than
     // VECTOR_ARRAY, and per-chunk sizes must be counted in elements.
@@ -280,13 +333,71 @@ SearchOnSealedColumn(const Schema& schema,
             query::dataset::RawDataset{offset, dim, chunk_size, vec_data};
 
         PinWrapper<const size_t*> offsets_pw;
+        std::unique_ptr<uint8_t[]> compact_vector_array_data;
+        std::vector<size_t> compact_vector_array_offsets;
         if (data_type == DataType::VECTOR_ARRAY) {
             AssertInfo(
                 query_offsets != nullptr,
                 "query_offsets is nullptr, but data_type is vector array");
 
-            offsets_pw = column->VectorArrayOffsets(op_context, i);
-            raw_dataset.raw_data_offsets = offsets_pw.get();
+            if (field.is_element_nullable()) {
+                auto views_pw =
+                    column->VectorArrayViews(op_context, i, std::nullopt);
+                const auto& views = views_pw.get().first;
+                const auto& valid_data = views_pw.get().second;
+                const auto bytes_per_vector =
+                    vector_bytes_per_element(element_type, dim);
+                size_t compact_size = 0;
+                for (int64_t row_idx = 0; row_idx < views.size(); ++row_idx) {
+                    if (!valid_data.empty() && !valid_data[row_idx]) {
+                        continue;
+                    }
+                    const auto& view = views[row_idx];
+                    for (int64_t elem_idx = 0; elem_idx < view.length();
+                         ++elem_idx) {
+                        if (view.is_element_valid(elem_idx)) {
+                            compact_size += bytes_per_vector;
+                        }
+                    }
+                }
+
+                compact_vector_array_data =
+                    std::make_unique<uint8_t[]>(compact_size);
+                compact_vector_array_offsets.reserve(chunk_size + 1);
+                compact_vector_array_offsets.push_back(0);
+                auto* dst = compact_vector_array_data.get();
+                size_t valid_vector_count = 0;
+                for (int64_t row_idx = 0; row_idx < views.size(); ++row_idx) {
+                    if (valid_data.empty() || valid_data[row_idx]) {
+                        const auto& view = views[row_idx];
+                        for (int64_t elem_idx = 0; elem_idx < view.length();
+                             ++elem_idx) {
+                            if (!view.is_element_valid(elem_idx)) {
+                                continue;
+                            }
+                            milvus::fastmem::FastMemcpy(
+                                dst,
+                                static_cast<const char*>(view.data()) +
+                                    elem_idx * bytes_per_vector,
+                                bytes_per_vector);
+                            dst += bytes_per_vector;
+                            ++valid_vector_count;
+                        }
+                    }
+                    compact_vector_array_offsets.push_back(valid_vector_count);
+                }
+                AssertInfo(views.size() == chunk_size,
+                           "VECTOR_ARRAY logical row count mismatch, expected "
+                           "{}, got {}",
+                           chunk_size,
+                           views.size());
+                raw_dataset.raw_data = compact_vector_array_data.get();
+                raw_dataset.raw_data_offsets =
+                    compact_vector_array_offsets.data();
+            } else {
+                offsets_pw = column->VectorArrayOffsets(op_context, i);
+                raw_dataset.raw_data_offsets = offsets_pw.get();
+            }
             if (raw_dataset.raw_data_offsets[chunk_size] == 0) {
                 offset += chunk_size;
                 continue;
