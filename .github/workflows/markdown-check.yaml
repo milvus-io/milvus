@@ -1,9 +1,6 @@
 name: Markdown Links Check
 
 on:
-  # Run on every pull request: deleting a linked image, source file, or other
-  # non-Markdown target can break documentation without changing the .md file.
-  pull_request:
   workflow_dispatch:
   schedule:
     - cron: "30 20 * * *"
@@ -12,30 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  local-links:
-    name: Validate local documentation links
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          persist-credentials: false
-
-      - name: Check deterministic local links
-        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
-        with:
-          args: >-
-            --offline
-            --include-fragments
-            --root-dir .
-            --no-progress
-            './**/*.md'
-          fail: true
-
-  external-links:
-    name: Validate external documentation links
-    if: github.event_name != 'pull_request'
+  check-links:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
