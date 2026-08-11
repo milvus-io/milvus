@@ -6058,6 +6058,7 @@ func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
 		seg := server.meta.GetSegment(ctx, segID)
 		require.NotNil(t, seg)
 		assert.EqualValues(t, 500, seg.GetCommitTimestamp())
+		assert.EqualValues(t, 500, seg.GetDeleteApplyStartAfterTimetick())
 		assert.False(t, seg.GetIsImporting())
 	}
 }

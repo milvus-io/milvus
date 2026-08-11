@@ -945,6 +945,17 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			if err = syncJSONKeyIndexes(ctx, result, task, meta, copyMeta); err != nil {
 				return err
 			}
+			if meta.dataViewManager != nil {
+				if _, err := meta.dataViewManager.OnCopySegmentComplete(ctx, CopySegmentCompleteDataViewEvent{
+					CollectionID: task.GetCollectionId(),
+					SegmentIDs:   []int64{result.GetSegmentId()},
+				}); err != nil {
+					mlog.Warn(ctx, "failed to publish DataView after copy segment completion",
+						WrapCopySegmentTaskLog(task,
+							mlog.Int64("segmentID", result.GetSegmentId()),
+							mlog.Err(err))...)
+				}
+			}
 
 			mlog.Info(context.TODO(), "update copy segment info done",
 				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", result.GetSegmentId()),

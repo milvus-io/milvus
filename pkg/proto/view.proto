@@ -18,6 +18,35 @@ message DataVersion {
     int64 compact_version = 2;
 }
 
+// DataViewOfCollection is the complete loadable sealed-segment membership
+// snapshot for one collection at a DataVersion.
+message DataViewOfCollection {
+    int64 collection_id = 1;
+    repeated DataViewOfShard shards = 2;
+    DataVersion data_version = 3;
+}
+
+// DataViewOfShard groups loadable segments by partition for one vchannel.
+message DataViewOfShard {
+    string vchannel = 1;
+    repeated DataViewOfPartition partitions = 2;
+    // TransformLog entries with timetick greater than this value must still be
+    // retained and applied when loading segments from this shard.
+    uint64 transform_start_after_timetick = 3;
+}
+
+message DataViewOfPartition {
+    int64 partition_id = 1;
+    repeated int64 segment_ids = 2;
+}
+
+// DataViewShardTimeTick is the lightweight delete-retention projection of a
+// visible DataView shard.
+message DataViewShardTimeTick {
+    string vchannel = 1;
+    uint64 transform_start_after_timetick = 2;
+}
+
 // QueryViewState represents the distributed lifecycle of a QueryView.
 enum QueryViewState {
     QueryViewStateUnknown = 0;

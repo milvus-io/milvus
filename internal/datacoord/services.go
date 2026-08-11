@@ -701,6 +701,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	operators = append(operators,
 		UpdateManifest(req.GetSegmentID(), req.GetManifestPath()),
 		UpdateStartPosition(req.GetStartPositions()),
+		UpdateDeleteApplyStartAfterTimetick(req.GetSegmentID(), req.GetDeleteApplyStartAfterTimetick()),
 		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 		// The request ships the complete cumulative Statistics published
 		// from the growing-segment collector; the receiver stores it
@@ -716,6 +717,15 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
 		mlog.Error(context.TODO(), "save binlog and checkpoints failed", mlog.Err(err))
 		return merr.Status(err), nil
+	}
+	if s.dataViewManager != nil && req.GetFlushed() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
+		if _, err := s.dataViewManager.OnFlush(ctx, FlushDataViewEvent{
+			CollectionID:         req.GetCollectionID(),
+			SegmentIDs:           []int64{req.GetSegmentID()},
+			TemporaryUnavailable: enableSortCompaction(),
+		}); err != nil {
+			mlog.Warn(ctx, "failed to publish DataView after flush", mlog.Err(err))
+		}
 	}
 
 	s.meta.SetLastWrittenTime(req.GetSegmentID())
@@ -2158,6 +2168,16 @@ func (s *Server) NotifyDropPartition(ctx context.Context, channel string, partit
 	mlog.Info(ctx, "receive NotifyDropPartition request",
 		mlog.String("channelname", channel),
 		mlog.Any("partitionID", partitionIDs))
+	if s.dataViewManager != nil {
+		for _, collectionID := range s.meta.GetCollectionIDsByPartition(ctx, partitionIDs) {
+			if _, err := s.dataViewManager.OnDropPartition(ctx, DropPartitionDataViewEvent{
+				CollectionID: collectionID,
+				PartitionIDs: partitionIDs,
+			}); err != nil {
+				return err
+			}
+		}
+	}
 	s.segmentManager.DropSegmentsOfPartition(ctx, channel, partitionIDs)
 	// release all segments of the partition.
 	return s.meta.DropSegmentsOfPartition(ctx, partitionIDs)
@@ -2178,6 +2198,16 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 		if err != nil {
 			mlog.Warn(ctx, "WatchChannelCheckpoint failed", mlog.Err(err))
 			return err
+		}
+		if s.dataViewManager != nil {
+			if _, err = s.dataViewManager.OnTruncate(ctx, TruncateDataViewEvent{
+				CollectionID: collectionID,
+				VChannel:     channelName,
+				FlushTs:      flushTs,
+			}); err != nil {
+				mlog.Warn(ctx, "OnTruncate DataView failed", mlog.Err(err))
+				return err
+			}
 		}
 		// drop segments that were updated before the flush timestamp
 		err = s.meta.TruncateChannelByTime(ctx, channelName, flushTs)
@@ -3194,6 +3224,12 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	// The callback must not access importMeta because HandleCommitVchannel holds m.mu (write lock);
 	// calling GetTaskBy inside the callback would attempt to re-acquire m.mu (read lock) → deadlock.
 	segIDs := s.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
+	collectionID := int64(0)
+	if len(segIDs) > 0 {
+		if segment := s.meta.GetSegment(ctx, segIDs[0]); segment != nil {
+			collectionID = segment.GetCollectionID()
+		}
+	}
 
 	commitTs := req.GetCommitTimestamp()
 	err := s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
@@ -3209,7 +3245,21 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 		if len(ops) == 0 {
 			return nil
 		}
-		return s.meta.UpdateSegmentsInfo(ctx, ops...)
+		if err := s.meta.UpdateSegmentsInfo(ctx, ops...); err != nil {
+			return err
+		}
+		if s.dataViewManager != nil && collectionID != 0 {
+			if _, err := s.dataViewManager.OnImport(ctx, ImportDataViewEvent{
+				CollectionID: collectionID,
+				SegmentIDs:   segIDs,
+			}); err != nil {
+				mlog.Warn(ctx, "failed to publish DataView after import commit",
+					mlog.FieldJobID(jobID),
+					mlog.String("vchannel", vchannel),
+					mlog.Err(err))
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return merr.Status(err), nil

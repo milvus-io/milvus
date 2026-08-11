@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -480,6 +481,21 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	if err := mt.UpdateSegmentsInfo(ctx, operators...); err != nil {
 		mlog.Warn(ctx, "failed to update segments atomically", mlog.Err(err))
 		return err
+	}
+	if mt.dataViewManager != nil {
+		addSegmentIDs := lo.Map(normalizedUpdatedSegments, func(segment *datapb.SegmentInfo, _ int) int64 {
+			return segment.GetID()
+		})
+		if _, err := mt.dataViewManager.OnExternalRefresh(ctx, ExternalRefreshDataViewEvent{
+			CollectionID: collectionID,
+			AddSegments:  addSegmentIDs,
+			DropSegments: segmentsToDrop,
+		}); err != nil {
+			mlog.Warn(ctx, "failed to publish DataView after external collection refresh",
+				mlog.Int64s("addSegments", addSegmentIDs),
+				mlog.Int64s("dropSegments", segmentsToDrop),
+				mlog.Err(err))
+		}
 	}
 
 	mlog.Info(ctx, "external collection segments updated successfully",

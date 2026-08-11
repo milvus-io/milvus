@@ -487,7 +487,28 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 		mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
 	)
 
-	return t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
+	ctx := context.TODO()
+	if err := t.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+		return err
+	}
+	t.publishDataViewAfterL0Compact(ctx)
+	return nil
+}
+
+func (t *l0CompactionTask) publishDataViewAfterL0Compact(ctx context.Context) {
+	meta, ok := t.meta.(*meta)
+	if !ok || meta.dataViewManager == nil {
+		return
+	}
+	task := t.GetTaskProto()
+	if _, err := meta.dataViewManager.OnL0Compact(ctx, L0CompactDataViewEvent{
+		CollectionID: task.GetCollectionID(),
+	}); err != nil {
+		mlog.Warn(ctx, "failed to refresh DataView delete timetick after L0 compaction",
+			mlog.Int64("planID", task.GetPlanID()),
+			mlog.FieldCollectionID(task.GetCollectionID()),
+			mlog.Err(err))
+	}
 }
 
 func (t *l0CompactionTask) GetSlotUsage() int64 {

@@ -1,6 +1,7 @@
 package qviews
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -97,6 +98,14 @@ func (s StateTransition) IsStateTransition() bool {
 type DataVersion struct {
 	StreamingVersion int64
 	CompactVersion   int64
+}
+
+// DataViewReferenceManager protects DataViews referenced by persisted
+// QueryViews until those QueryViews are durably removed.
+type DataViewReferenceManager interface {
+	PinDataView(ctx context.Context, collectionID int64, version DataVersion) error
+	RecoverDataViewReference(ctx context.Context, collectionID int64, version DataVersion) (bool, error)
+	UnpinDataView(collectionID int64, version DataVersion)
 }
 
 // String returns the string representation of the data version.

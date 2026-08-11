@@ -95,8 +95,9 @@ type meta struct {
 
 	collections *typeutil.ConcurrentMap[UniqueID, *collectionInfo] // collection id to collection info
 
-	segMu    lock.RWMutex
-	segments *SegmentsInfo // segment id to segment info
+	segMu           lock.RWMutex
+	segments        *SegmentsInfo // segment id to segment info
+	dataViewManager DataViewManager
 
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
@@ -1613,6 +1614,32 @@ func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOp
 	}
 }
 
+func UpdateDeleteApplyStartAfterTimetick(segmentID int64, timetick uint64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			mlog.Warn(context.TODO(), "meta update: update delete apply start after timetick failed - segment not found",
+				mlog.FieldSegmentID(segmentID))
+			return false
+		}
+		if timetick == 0 && segment.GetDeleteApplyStartAfterTimetick() != 0 {
+			return false
+		}
+		if timetick == 0 {
+			if ts := segment.GetCommitTimestamp(); ts != 0 {
+				timetick = ts
+			} else if segment.GetStartPosition() != nil {
+				timetick = segment.GetStartPosition().GetTimestamp()
+			}
+		}
+		if timetick == 0 || segment.GetDeleteApplyStartAfterTimetick() == timetick {
+			return false
+		}
+		segment.DeleteApplyStartAfterTimetick = timetick
+		return true
+	}
+}
+
 func UpdateDmlPosition(segmentID int64, dmlPosition *msgpb.MsgPosition) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		if len(dmlPosition.GetMsgID()) == 0 {
@@ -1865,6 +1892,9 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 			}
 		}
 		segment.CommitTimestamp = ts
+		if ts != 0 {
+			segment.DeleteApplyStartAfterTimetick = ts
+		}
 		return true
 	}
 }
@@ -2090,6 +2120,9 @@ func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) (*SegmentInfo, *segMetric
 	if seg2Drop.GetDmlPosition() != nil {
 		clonedSegment.DmlPosition = seg2Drop.GetDmlPosition()
 	}
+	if seg2Drop.GetDeleteApplyStartAfterTimetick() != 0 {
+		clonedSegment.DeleteApplyStartAfterTimetick = seg2Drop.GetDeleteApplyStartAfterTimetick()
+	}
 	clonedSegment.NumOfRows = seg2Drop.GetNumOfRows()
 	return clonedSegment, metricMutation
 }
@@ -2218,6 +2251,31 @@ func (m *meta) SelectSegments(ctx context.Context, filters ...SegmentFilter) []*
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()
 	return m.segments.GetSegmentsBySelector(filters...)
+}
+
+func (m *meta) GetCollectionIDsByPartition(ctx context.Context, partitionIDs []int64) []int64 {
+	partitions := make(map[int64]struct{}, len(partitionIDs))
+	for _, partitionID := range partitionIDs {
+		partitions[partitionID] = struct{}{}
+	}
+	collections := make(map[int64]struct{})
+	for _, collection := range m.GetCollections() {
+		for _, partitionID := range collection.Partitions {
+			if _, ok := partitions[partitionID]; ok {
+				collections[collection.ID] = struct{}{}
+				break
+			}
+		}
+	}
+	for _, segment := range m.SelectSegments(ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		_, ok := partitions[segment.GetPartitionID()]
+		return ok && segment.GetCollectionID() != 0
+	})) {
+		collections[segment.GetCollectionID()] = struct{}{}
+	}
+	collectionIDs := lo.Keys(collections)
+	sort.Slice(collectionIDs, func(i, j int) bool { return collectionIDs[i] < collectionIDs[j] })
+	return collectionIDs
 }
 
 func (m *meta) GetRealSegmentsForChannel(channel string) []*SegmentInfo {
@@ -2744,19 +2802,50 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 }
 
 func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
+	var (
+		newSegments    []*SegmentInfo
+		metricMutation *segMetricMutation
+		err            error
+	)
 	m.segMu.Lock()
-	defer m.segMu.Unlock()
 	switch t.GetType() {
 	case datapb.CompactionType_MixCompaction:
-		return m.completeMixCompactionMutation(t, result)
+		newSegments, metricMutation, err = m.completeMixCompactionMutation(t, result)
 	case datapb.CompactionType_ClusteringCompaction:
-		return m.completeClusterCompactionMutation(t, result)
+		newSegments, metricMutation, err = m.completeClusterCompactionMutation(t, result)
 	case datapb.CompactionType_SortCompaction:
-		return m.completeSortCompactionMutation(t, result)
+		newSegments, metricMutation, err = m.completeSortCompactionMutation(t, result)
 	case datapb.CompactionType_BumpSchemaVersionCompaction:
-		return m.completeBumpSchemaVersionCompactionMutation(t, result)
+		newSegments, metricMutation, err = m.completeBumpSchemaVersionCompactionMutation(t, result)
+	default:
+		err = merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 	}
-	return nil, nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
+	m.segMu.Unlock()
+	if err != nil {
+		return nil, nil, err
+	}
+	m.publishDataViewAfterCompaction(ctx, t, lo.Map(newSegments, func(segment *SegmentInfo, _ int) int64 {
+		return segment.GetID()
+	}))
+	return newSegments, metricMutation, nil
+}
+
+func (m *meta) publishDataViewAfterCompaction(ctx context.Context, task *datapb.CompactionTask, compactTo []int64) {
+	if m.dataViewManager == nil {
+		return
+	}
+	if _, err := m.dataViewManager.OnCompact(ctx, CompactDataViewEvent{
+		CollectionID: task.GetCollectionID(),
+		CompactFrom:  task.GetInputSegments(),
+		CompactTo:    compactTo,
+	}); err != nil {
+		mlog.Warn(ctx, "failed to publish DataView after compaction",
+			mlog.Int64("planID", task.GetPlanID()),
+			mlog.FieldCollectionID(task.GetCollectionID()),
+			mlog.Int64s("compactFrom", task.GetInputSegments()),
+			mlog.Int64s("compactTo", compactTo),
+			mlog.Err(err))
+	}
 }
 
 // buildSegment utility function for compose datapb.SegmentInfo struct with provided info
