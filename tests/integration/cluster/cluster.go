@@ -6,7 +6,6 @@ import (
 	"math"
 	"os"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +21,6 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
@@ -30,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration/cluster/process"
@@ -683,9 +680,6 @@ func (c *MiniClusterV3) getOptions() []process.Option {
 	for k, v := range c.extraEnv {
 		env[k] = v
 	}
-	// Every subprocess owns an HTTP management server. Assign a distinct port
-	// so the process that exposes a role-specific route is deterministic.
-	env[management.ListenPortEnvKey] = strconv.Itoa(funcutil.GetAvailablePort())
 	return []process.Option{
 		process.WithWorkDir(c.workDir),
 		process.WithServerID(c.nodeID),
