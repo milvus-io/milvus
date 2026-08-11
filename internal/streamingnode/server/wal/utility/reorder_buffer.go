@@ -36,12 +36,13 @@ func (r *ReOrderByTimeTickBuffer) Push(msg message.ImmutableMessage) error {
 	if msg.TimeTick() < r.lastPopTimeTick {
 		return errors.Wrapf(ErrTimeTickVoilation, "message time tick is less than last pop time tick: %d", r.lastPopTimeTick)
 	}
-	msgID := msg.MessageID().Marshal()
-	if r.messageIDs.Contain(msgID) {
-		return status.NewInner("message is duplicated: %s", msgID)
+	msgID := msg.MessageID()
+	msgIDKey := message.MessageIDKeyWithWALName(msgID)
+	if r.messageIDs.Contain(msgIDKey) {
+		return status.NewInner("message is duplicated: wal=%s, id=%s", msgID.WALName(), msgID.Marshal())
 	}
 	r.messageHeap.Push(msg)
-	r.messageIDs.Insert(msgID)
+	r.messageIDs.Insert(msgIDKey)
 	r.bytes += msg.EstimateSize()
 	return nil
 }
@@ -52,7 +53,7 @@ func (r *ReOrderByTimeTickBuffer) PopUtilTimeTick(timetick uint64) []message.Imm
 	var res []message.ImmutableMessage
 	for r.messageHeap.Len() > 0 && r.messageHeap.Peek().TimeTick() <= timetick {
 		r.bytes -= r.messageHeap.Peek().EstimateSize()
-		r.messageIDs.Remove(r.messageHeap.Peek().MessageID().Marshal())
+		r.messageIDs.Remove(message.MessageIDKeyWithWALName(r.messageHeap.Peek().MessageID()))
 		res = append(res, r.messageHeap.Pop())
 	}
 	r.lastPopTimeTick = timetick
