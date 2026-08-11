@@ -47,6 +47,7 @@
 #include "knowhere/operands.h"
 #include "knowhere/sparse_utils.h"
 #include "knowhere/version.h"
+#include "monitor/Monitor.h"
 #include "pb/common.pb.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
@@ -1775,6 +1776,11 @@ TEST(GrowingIndexAsyncBuildTest, CatchupDeadlineFallsBackToRawSearch) {
     auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
 
+    const auto build_failures_before =
+        milvus::monitor::internal_core_growing_index_build_failures.Value();
+    const auto deadline_failures_before =
+        milvus::monitor::internal_core_growing_index_deadline_failures.Value();
+
     auto trigger_data =
         InsertAsyncBatch(segment.get(), fixture.schema, trigger_batch, 5);
     ASSERT_TRUE(WaitState(segment_impl,
@@ -1784,6 +1790,14 @@ TEST(GrowingIndexAsyncBuildTest, CatchupDeadlineFallsBackToRawSearch) {
     EXPECT_FALSE(
         segment_impl->get_indexing_record().SyncDataWithIndex(fixture.vec));
     EXPECT_EQ(IndexedRowCount(segment_impl, fixture.vec), 0);
+    EXPECT_DOUBLE_EQ(
+        milvus::monitor::internal_core_growing_index_build_failures.Value(),
+        build_failures_before)
+        << "a configured catch-up deadline is not a build defect";
+    EXPECT_DOUBLE_EQ(
+        milvus::monitor::internal_core_growing_index_deadline_failures.Value(),
+        deadline_failures_before + 1)
+        << "deadline fallback must remain independently observable";
 
     auto plan = milvus::query::CreateSearchPlanByExpr(
         fixture.schema, fixture.plan_str.data(), fixture.plan_str.size());
@@ -1795,6 +1809,63 @@ TEST(GrowingIndexAsyncBuildTest, CatchupDeadlineFallsBackToRawSearch) {
     ASSERT_FALSE(probe_sr->seg_offsets_.empty());
     EXPECT_EQ(probe_sr->seg_offsets_[0], probe_row);
     EXPECT_NEAR(probe_sr->distances_[0], 0.0f, 1e-5);
+}
+
+// A catch-up round must be bounded by one staging slice so the outer loop can
+// re-check the absolute deadline between slices. Parking Phase 1 lets the raw
+// watermark grow to a deterministic multi-slice backlog before catch-up
+// starts; finalize_budget=0 keeps the task in the unlocked catch-up loop until
+// that backlog is fully absorbed.
+TEST(GrowingIndexAsyncBuildTest, CatchupRechecksPolicyBetweenStagingSlices) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ScopedAsyncGrowingCatchupPolicy catchup_policy(
+        config, /*finalize_budget_ms=*/0, /*catchup_deadline_ms=*/30000);
+    ApplyAsyncBuildConfig(config);
+
+    std::atomic<bool> build_parked{false};
+    std::atomic<bool> release_build{false};
+    std::atomic<int> catchup_rounds{0};
+    ScopedBuildHook hook([&](VectorFieldIndexing::GrowingBuildPhase phase) {
+        if (phase == VectorFieldIndexing::GrowingBuildPhase::kBeforeBuild) {
+            build_parked.store(true);
+            while (!release_build.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        } else if (phase ==
+                   VectorFieldIndexing::GrowingBuildPhase::kAfterCatchupRound) {
+            catchup_rounds.fetch_add(1);
+        }
+    });
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    ScopedFlagOnExit release_on_exit(release_build);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    constexpr int64_t per_batch = 10000;
+    // kAsyncDim=16 makes one dense staging slice 131072 rows. Keep the
+    // post-threshold backlog above that boundary so at least two unlocked
+    // catch-up rounds are required.
+    constexpr int64_t n_batch = 20;
+    for (int64_t i = 0; i < n_batch; ++i) {
+        InsertAsyncBatch(segment.get(), fixture.schema, per_batch, 200 + i);
+        if (i == 2) {
+            ASSERT_TRUE(WaitFlag(build_parked, /*timeout_ms=*/60000));
+        }
+    }
+    release_build.store(true);
+
+    ASSERT_TRUE(WaitSynced(segment_impl, fixture.vec, /*timeout_ms=*/120000));
+    EXPECT_GE(catchup_rounds.load(), 2)
+        << "a multi-slice backlog must return to the policy loop between "
+           "staging slices";
 }
 
 TEST(GrowingIndexAsyncBuildTest, SparseVectorBuildsAsynchronously) {
@@ -2007,6 +2078,13 @@ TEST(GrowingIndexAsyncBuildTest, NullableVectorBuildsAsynchronously) {
     ASSERT_TRUE(WaitSynced(segment_impl, fixture.vec, /*timeout_ms=*/60000));
     auto* raw = segment_impl->get_insert_record().get_data_base(fixture.vec);
     ASSERT_TRUE(raw->is_mapping_storage());
+    std::array<bool, 7> validity_window{};
+    raw->copy_valid_data(/*start=*/7997,
+                         /*count=*/validity_window.size(),
+                         validity_window.data());
+    EXPECT_EQ(
+        validity_window,
+        (std::array<bool, 7>{true, true, true, false, false, false, false}));
     // DataGen marks exactly every other row null ((i % 100) >= 50).
     constexpr int64_t valid_per_batch = per_batch / 2;
     // Physical rows: only the valid ones reach the index, and every valid row

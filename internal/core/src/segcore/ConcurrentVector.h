@@ -335,6 +335,18 @@ class VectorBase {
         return FixedVector<bool>{};
     }
 
+    // Copy a bounded logical validity range without materializing the whole
+    // segment bitmap. Non-mapping storage has no null rows, so its default is
+    // an all-valid range.
+    virtual void
+    copy_valid_data(int64_t start, int64_t count, bool* out) const {
+        AssertInfo(start >= 0 && count >= 0,
+                   "invalid validity range: start={}, count={}",
+                   start,
+                   count);
+        std::fill_n(out, count, true);
+    }
+
     // Non-nullable fields have no mapping at all; hand back the shared no-op
     // so callers never have to branch on a null pointer.
     virtual const OffsetMapping&
@@ -682,6 +694,19 @@ class ConcurrentVectorImpl : public VectorBase {
             return valid_data_ptr_->get_data();
         }
         return FixedVector<bool>{};
+    }
+
+    void
+    copy_valid_data(int64_t start, int64_t count, bool* out) const override {
+        AssertInfo(start >= 0 && count >= 0,
+                   "invalid validity range: start={}, count={}",
+                   start,
+                   count);
+        if (valid_data_ptr_ != nullptr) {
+            valid_data_ptr_->bulk_is_valid_range(start, count, out);
+            return;
+        }
+        std::fill_n(out, count, true);
     }
 
  private:
