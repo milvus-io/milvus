@@ -291,6 +291,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	mlog.Debug(context.TODO(), "Get proxy rate limiter done")
 
 	var unaryServerOption grpc.ServerOption
+	var streamServerOption grpc.ServerOption
 	if enableCustomInterceptor {
 		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
@@ -306,8 +307,18 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 			proxy.TraceLogInterceptor,
 			connection.KeepActiveInterceptor,
 		))
+		// Streaming RPCs (e.g. CreateReplicateStream) bypass the unary chain, so they must
+		// be authenticated and authorized through a dedicated stream interceptor chain.
+		// Without this the external server would accept unauthenticated/unauthorized
+		// streaming calls on the client port. The order mirrors the unary chain: first
+		// authenticate (resolve the user into ctx), then enforce RBAC on that user.
+		streamServerOption = grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+			proxy.GrpcAuthStreamInterceptor(proxy.AuthenticationInterceptor),
+			proxy.PrivilegeStreamInterceptor(proxy.StreamPrivilegeInterceptor),
+		))
 	} else {
 		unaryServerOption = grpc.EmptyServerOption{}
+		streamServerOption = grpc.EmptyServerOption{}
 	}
 
 	grpcOpts := []grpc.ServerOption{
@@ -316,6 +327,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		unaryServerOption,
+		streamServerOption,
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 		grpc.StatsHandler(metrics.NewGRPCSizeStatsHandler().
 			// both inbound and outbound

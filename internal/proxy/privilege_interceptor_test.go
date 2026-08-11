@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -851,5 +852,147 @@ func TestBuiltinPrivilegeGroup(t *testing.T) {
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{})
 		assert.Error(t, err)
+	})
+}
+
+// grantReplicateToRole builds a mock policy client that grants the given role the
+// cluster-level replicate privilege (PrivilegeUpdateReplicateConfiguration), which is
+// what StreamPrivilegeInterceptor requires for CreateReplicateStream.
+func grantReplicateToRole(user, role string) *MockMixCoordClientInterface {
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege(role, commonpb.ObjectType_Global.String(), "*",
+					commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String(), "default"),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache(user, role),
+			},
+		}, nil
+	}
+	return client
+}
+
+// TestPrivilegeStreamInterceptor verifies the high-order wrapper mirrors
+// UnaryServerInterceptor: it wraps a StreamPrivilegeFunc, blocks the handler on auth
+// failure, and propagates the authorized context to the handler on success.
+func TestPrivilegeStreamInterceptor(t *testing.T) {
+	interceptor := PrivilegeStreamInterceptor(StreamPrivilegeInterceptor)
+	assert.NotNil(t, interceptor)
+
+	info := &grpc.StreamServerInfo{FullMethod: milvuspb.MilvusService_CreateReplicateStream_FullMethodName}
+
+	t.Run("deny blocks handler", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		InitEmptyGlobalCache()
+
+		called := false
+		handler := func(srv interface{}, ss grpc.ServerStream) error {
+			called = true
+			return nil
+		}
+		ss := &mockServerStream{ctx: GetContext(context.Background(), "foo:123456")}
+		err := interceptor(nil, ss, info, handler)
+		assert.Error(t, err)
+		assert.False(t, called, "handler must not run when authorization fails")
+	})
+
+	t.Run("permit propagates authorized context", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		privilege.InitPrivilegeGroups()
+		InitMetaCache(context.Background(), grantReplicateToRole("alice", "role1"))
+		defer privilege.CleanPrivilegeCache()
+
+		called := false
+		var handlerCtx context.Context
+		handler := func(srv interface{}, ss grpc.ServerStream) error {
+			called = true
+			handlerCtx = ss.Context()
+			return nil
+		}
+		ss := &mockServerStream{ctx: GetContext(context.Background(), "alice:123456")}
+		err := interceptor(nil, ss, info, handler)
+		assert.NoError(t, err)
+		assert.True(t, called, "handler must run for an authorized stream")
+		assert.NotNil(t, handlerCtx, "authorized context must be propagated to the handler")
+	})
+}
+
+// TestStreamPrivilegeInterceptor exercises the authorization core: authorization
+// disabled, unregistered method (fail-closed), missing privilege, granted privilege,
+// and the root bypass.
+func TestStreamPrivilegeInterceptor(t *testing.T) {
+	createStream := milvuspb.MilvusService_CreateReplicateStream_FullMethodName
+
+	t.Run("authorization disabled passes", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
+		defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+		_, err := StreamPrivilegeInterceptor(context.Background(), createStream)
+		assert.NoError(t, err)
+	})
+
+	t.Run("unregistered method denied (fail-closed)", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		InitEmptyGlobalCache()
+
+		ctx := GetContext(context.Background(), "root:123456")
+		_, err := StreamPrivilegeInterceptor(ctx, "/milvus.proto.milvus.MilvusService/SomeUnknownStream")
+		assert.Error(t, err)
+	})
+
+	t.Run("missing privilege denied", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		privilege.InitPrivilegeGroups()
+		// grant replicate to role1/alice only; bob has no such privilege
+		InitMetaCache(context.Background(), grantReplicateToRole("alice", "role1"))
+		defer privilege.CleanPrivilegeCache()
+
+		_, err := StreamPrivilegeInterceptor(GetContext(context.Background(), "bob:123456"), createStream)
+		assert.Error(t, err)
+	})
+
+	t.Run("granted privilege permitted", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		privilege.InitPrivilegeGroups()
+		InitMetaCache(context.Background(), grantReplicateToRole("alice", "role1"))
+		defer privilege.CleanPrivilegeCache()
+
+		_, err := StreamPrivilegeInterceptor(GetContext(context.Background(), "alice:123456"), createStream)
+		assert.NoError(t, err)
+	})
+
+	t.Run("dump messages shares the replicate privilege", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		privilege.InitPrivilegeGroups()
+		InitMetaCache(context.Background(), grantReplicateToRole("alice", "role1"))
+		defer privilege.CleanPrivilegeCache()
+
+		dumpStream := milvuspb.MilvusService_DumpMessages_FullMethodName
+		// the same replicate privilege authorizes DumpMessages ...
+		_, err := StreamPrivilegeInterceptor(GetContext(context.Background(), "alice:123456"), dumpStream)
+		assert.NoError(t, err)
+		// ... while a user without it is denied.
+		_, err = StreamPrivilegeInterceptor(GetContext(context.Background(), "bob:123456"), dumpStream)
+		assert.Error(t, err)
+	})
+
+	t.Run("root bypass", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, "false")
+		defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
+		InitEmptyGlobalCache()
+
+		_, err := StreamPrivilegeInterceptor(GetContext(context.Background(), "root:123456"), createStream)
+		assert.NoError(t, err)
 	})
 }
