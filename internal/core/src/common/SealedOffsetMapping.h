@@ -81,6 +81,12 @@ class SealedOffsetMapping final : public OffsetMapping {
         bool* valid_data,
         std::vector<int64_t>& physical_offsets) const override;
 
+    void
+    ApplyValidDataByLogicalOffsets(
+        const int64_t* logical_offsets,
+        int64_t count,
+        TargetBitmapView valid_result) const override;
+
     bool
     IsUsingMap() const {
         return IsI2OUsingMap() || IsO2IUsingMap();

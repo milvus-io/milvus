@@ -1398,6 +1398,12 @@ func TestExpr_IsNull(t *testing.T) {
 		`VarCharField IS NULL`,
 		`ArrayField is null`,
 		`StringArrayField IS NULL`,
+		`FloatVectorField is null`,
+		`BinaryVectorField is null`,
+		`Float16VectorField is null`,
+		`BFloat16VectorField is null`,
+		`SparseFloatVectorField is null`,
+		`Int8VectorField is null`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1405,12 +1411,6 @@ func TestExpr_IsNull(t *testing.T) {
 
 	unsupported := []string{
 		`not_exist is null`,
-		`FloatVectorField is null`,
-		`BinaryVectorField is null`,
-		`Float16VectorField is null`,
-		`BFloat16VectorField is null`,
-		`SparseFloatVectorField is null`,
-		`Int8VectorField is null`,
 		// issue #48904: array element access with IS NULL should be
 		// rejected at parse time rather than raising an internal error
 		// at execution time.
@@ -1500,6 +1500,12 @@ func TestExpr_IsNotNull(t *testing.T) {
 		`VarCharField IS NOT NULL`,
 		`ArrayField is not null`,
 		`StringArrayField IS NOT NULL`,
+		`FloatVectorField is not null`,
+		`BinaryVectorField is not null`,
+		`Float16VectorField is not null`,
+		`BFloat16VectorField is not null`,
+		`SparseFloatVectorField is not null`,
+		`Int8VectorField is not null`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1507,12 +1513,6 @@ func TestExpr_IsNotNull(t *testing.T) {
 
 	unsupported := []string{
 		`not_exist is not null`,
-		`FloatVectorField is not null`,
-		`BinaryVectorField is not null`,
-		`Float16VectorField is not null`,
-		`BFloat16VectorField is not null`,
-		`SparseFloatVectorField is not null`,
-		`Int8VectorField is not null`,
 		// issue #48904: array element access with IS NOT NULL should be
 		// rejected at parse time rather than raising an internal error
 		// at execution time.

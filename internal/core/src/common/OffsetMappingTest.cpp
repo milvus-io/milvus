@@ -173,6 +173,27 @@ ExpectTransformOperations(const SealedOffsetMapping& mapping) {
     EXPECT_EQ(filtered_offsets, (std::vector<int64_t>{0, 1}));
 }
 
+void
+ExpectApplyValidDataByLogicalOffsets(
+    const OffsetMapping& mapping,
+    const std::vector<int64_t>& logical_offsets,
+    const std::vector<bool>& expected_valid_data) {
+    ASSERT_EQ(logical_offsets.size(), expected_valid_data.size());
+    TargetBitmap valid_result(logical_offsets.size(), true);
+    constexpr size_t precleared_index = 0;
+    if (precleared_index < valid_result.size()) {
+        valid_result[precleared_index] = false;
+    }
+    mapping.ApplyValidDataByLogicalOffsets(logical_offsets.data(),
+                                           logical_offsets.size(),
+                                           TargetBitmapView(valid_result));
+    for (size_t i = 0; i < expected_valid_data.size(); ++i) {
+        const bool expected =
+            i == precleared_index ? false : expected_valid_data[i];
+        EXPECT_EQ(valid_result[i], expected) << "offset index " << i;
+    }
+}
+
 class TestVectorIndex : public index::VectorIndex {
  public:
     TestVectorIndex() : index::VectorIndex("TEST", knowhere::metric::L2) {
@@ -267,6 +288,12 @@ TEST(OffsetMapping, DefaultIsDisabledAndPassThrough) {
     EXPECT_EQ(mapping.GetLogicalOffset(42), 42);
 }
 
+TEST(OffsetMapping, NoOpApplyValidDataByLogicalOffsetsMasksNegativeOnly) {
+    NoOpOffsetMapping mapping;
+    ExpectApplyValidDataByLogicalOffsets(
+        mapping, {-1, 0, 7, 7}, {false, true, true, true});
+}
+
 // ---------- Build (eager) ----------
 
 TEST(OffsetMapping, BuildBasicVecMode) {
@@ -293,6 +320,54 @@ TEST(OffsetMapping, BuildBasicVecMode) {
         ExpectMmapBlockFiles(mmap_root,
                              {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
     }
+}
+
+TEST(OffsetMapping, SealedApplyValidDataByLogicalOffsetsCoversStorageModes) {
+    auto dense_valid = ToBoolBytes(MakeValid({1, 0, 1, 1, 0}));
+    const std::vector<int64_t> dense_offsets{0, 1, 2, 3, 4, -1, 9, 3, 1};
+    const std::vector<bool> dense_expected{
+        true, false, true, true, false, false, false, true, false};
+
+    {
+        SealedOffsetMapping mapping;
+        mapping.Build(reinterpret_cast<const bool*>(dense_valid.data()), 5);
+        ExpectStorageMode(mapping, false, false, false, false);
+        ExpectApplyValidDataByLogicalOffsets(
+            mapping, dense_offsets, dense_expected);
+    }
+
+    {
+        const auto mmap_root = MakeMmapRoot("apply_valid_mmap");
+        auto mmap_dir = mmap_root;
+        SealedOffsetMapping mapping;
+        mapping.Build(reinterpret_cast<const bool*>(dense_valid.data()),
+                      5,
+                      MmapOptions(mmap_dir));
+        ExpectStorageMode(mapping, true, true, false, false);
+        ExpectApplyValidDataByLogicalOffsets(
+            mapping, dense_offsets, dense_expected);
+    }
+
+    std::vector<bool> sparse_bits(32, false);
+    sparse_bits[3] = true;
+    sparse_bits[19] = true;
+    auto sparse_valid = ToBoolBytes(sparse_bits);
+    SealedOffsetMapping mapping;
+    OffsetMappingBuildOptions map_options;
+    mapping.Build(reinterpret_cast<const bool*>(sparse_valid.data()),
+                  sparse_valid.size(),
+                  map_options);
+    ExpectStorageMode(mapping, false, false, true, true);
+    ExpectApplyValidDataByLogicalOffsets(
+        mapping,
+        {-1, 0, 3, 19, 31, 32, 3},
+        {false, false, true, true, false, false, true});
+
+    auto all_valid = ToBoolBytes(MakeValid({1, 1, 1, 1}));
+    SealedOffsetMapping all_valid_mapping;
+    all_valid_mapping.Build(reinterpret_cast<const bool*>(all_valid.data()), 4);
+    ExpectApplyValidDataByLogicalOffsets(
+        all_valid_mapping, {-1, 0, 3, 4}, {false, true, true, false});
 }
 
 TEST(OffsetMapping, BuildBasicVecModeMapsDirectionsIndependently) {
@@ -710,6 +785,38 @@ TEST(OffsetMapping, AppendNoopOnNullOrZero) {
     std::vector<uint8_t> v(1, 1);
     mapping.Append(reinterpret_cast<const bool*>(v.data()), 0, 0, 0);
     EXPECT_FALSE(mapping.IsEnabled());
+}
+
+TEST(OffsetMapping, GrowingApplyValidDataByLogicalOffsetsHandlesBatchShapes) {
+    GrowingOffsetMapping mapping;
+    auto b1 = ToBoolBytes(MakeValid({1, 0, 1, 1}));
+    mapping.Append(reinterpret_cast<const bool*>(b1.data()), 4, 0, 0);
+    auto b2 = ToBoolBytes(MakeValid({0, 1, 0, 1}));
+    mapping.Append(reinterpret_cast<const bool*>(b2.data()),
+                   4,
+                   mapping.GetTotalCount(),
+                   mapping.GetValidCount());
+
+    ExpectApplyValidDataByLogicalOffsets(mapping,
+                                         {-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 7, 2},
+                                         {false,
+                                          true,
+                                          false,
+                                          true,
+                                          true,
+                                          false,
+                                          true,
+                                          false,
+                                          true,
+                                          false,
+                                          true,
+                                          true});
+
+    GrowingOffsetMapping all_valid;
+    auto valid = ToBoolBytes(MakeValid({1, 1, 1}));
+    all_valid.Append(reinterpret_cast<const bool*>(valid.data()), 3, 0, 0);
+    ExpectApplyValidDataByLogicalOffsets(
+        all_valid, {-1, 0, 1, 2, 3}, {false, true, true, true, false});
 }
 
 // ---------- IsValid ----------

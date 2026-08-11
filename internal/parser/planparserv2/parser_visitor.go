@@ -1444,10 +1444,6 @@ func (v *ParserVisitor) getNullExprColumnInfo(identifier, child antlr.TerminalNo
 	return v.getChildColumnInfo(identifier, child, nil, nil)
 }
 
-func isUnsupportedNullExprVectorType(dataType schemapb.DataType) bool {
-	return typeutil.IsVectorType(dataType) && !typeutil.IsVectorArrayType(dataType)
-}
-
 // VisitCall parses the expr to call plan.
 func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 	functionName := strings.ToLower(ctx.Identifier().GetText())
@@ -2375,10 +2371,6 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 		return err
 	}
 
-	if isUnsupportedNullExprVectorType(column.DataType) {
-		return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on vector fields")
-	}
-
 	if len(column.NestedPath) != 0 {
 		if typeutil.IsArrayType(column.GetDataType()) {
 			return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on array element access, got: %s", ctx.GetText())
@@ -2420,10 +2412,6 @@ func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
 	column, err := v.getNullExprColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
 	if err != nil {
 		return err
-	}
-
-	if isUnsupportedNullExprVectorType(column.DataType) {
-		return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on vector fields")
 	}
 
 	if len(column.NestedPath) != 0 {

@@ -120,6 +120,11 @@ class OffsetMapping {
                               bool* valid_data,
                               std::vector<int64_t>& physical_offsets) const = 0;
 
+    virtual void
+    ApplyValidDataByLogicalOffsets(const int64_t* logical_offsets,
+                                   int64_t count,
+                                   TargetBitmapView valid_result) const = 0;
+
     // Check if a logical offset is valid (not null). Defined in terms of
     // GetPhysicalOffset, so implementations get it for free and cannot let the
     // two answers disagree.
@@ -228,6 +233,12 @@ class NoOpOffsetMapping final : public OffsetMapping {
         int64_t count,
         bool* valid_data,
         std::vector<int64_t>& physical_offsets) const override;
+
+    void
+    ApplyValidDataByLogicalOffsets(
+        const int64_t* logical_offsets,
+        int64_t count,
+        TargetBitmapView valid_result) const override;
 };
 
 }  // namespace milvus

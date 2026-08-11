@@ -394,4 +394,47 @@ GrowingOffsetMapping::FilterValidLogicalOffsets(
     }
 }
 
+void
+GrowingOffsetMapping::ApplyValidDataByLogicalOffsets(
+    const int64_t* logical_offsets,
+    int64_t count,
+    TargetBitmapView valid_result) const {
+    const auto counts = LoadCounts();
+    if (counts.total == 0) {
+        for (int64_t i = 0; i < count; ++i) {
+            valid_result[i] = false;
+        }
+        return;
+    }
+
+    if (counts.valid == counts.total) {
+        for (int64_t i = 0; i < count; ++i) {
+            const auto offset = logical_offsets[i];
+            if (offset < 0 || offset >= counts.total) {
+                valid_result[i] = false;
+            }
+        }
+        return;
+    }
+
+    int64_t hint = 0;
+    int64_t prev = std::numeric_limits<int64_t>::min();
+    for (int64_t i = 0; i < count; ++i) {
+        const auto offset = logical_offsets[i];
+        if (offset < 0 || offset >= counts.total) {
+            valid_result[i] = false;
+            continue;
+        }
+        const int64_t pos = offset >= prev
+                                ? GallopLowerBound(offset, hint, counts.valid)
+                                : LowerBound(offset, counts.valid);
+        hint = pos;
+        prev = offset;
+        if (pos >= counts.valid ||
+            static_cast<int64_t>(p2l_.Get(pos)) != offset) {
+            valid_result[i] = false;
+        }
+    }
+}
+
 }  // namespace milvus

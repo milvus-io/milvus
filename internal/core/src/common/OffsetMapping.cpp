@@ -235,4 +235,16 @@ NoOpOffsetMapping::FilterValidLogicalOffsets(
     }
 }
 
+void
+NoOpOffsetMapping::ApplyValidDataByLogicalOffsets(
+    const int64_t* logical_offsets,
+    int64_t count,
+    TargetBitmapView valid_result) const {
+    for (int64_t i = 0; i < count; ++i) {
+        if (logical_offsets[i] < 0) {
+            valid_result[i] = false;
+        }
+    }
+}
+
 }  // namespace milvus
