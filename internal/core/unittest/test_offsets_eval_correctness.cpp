@@ -878,6 +878,60 @@ TEST(OffsetsEvalNullableElementTest,
 }
 
 TEST(OffsetsEvalNullableElementTest,
+     GrowingPartialFinalChunkUsesItsLogicalElementCount) {
+    constexpr int64_t kRowCount = 5;
+    constexpr int64_t kChunkRows = 2;
+    constexpr int64_t kArrayLength = 2;
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto array_fid = schema->AddDebugArrayField(
+        "structA[nullable_values]", DataType::INT64, true, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto dataset = DataGen(schema, kRowCount, 625, 0, 1, kArrayLength);
+    for (auto& field_data : *dataset.raw_->mutable_fields_data()) {
+        if (field_data.field_id() != array_fid.get()) {
+            continue;
+        }
+        for (auto& row : *field_data.mutable_scalars()
+                              ->mutable_array_data()
+                              ->mutable_data()) {
+            row.mutable_valid_data()->Resize(row.long_data().data_size(), true);
+        }
+        break;
+    }
+
+    ScopedSegcoreConfigRestore config_restore;
+    SegcoreConfig config = SegcoreConfig::default_config();
+    config.set_chunk_rows(kChunkRows);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta, 1, config);
+    segment->PreInsert(kRowCount);
+    segment->Insert(0,
+                    kRowCount,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    ASSERT_EQ(segment->num_chunk_data(array_fid), 3);
+    auto final_chunk = segment->chunk_view<ArrayView>(
+        nullptr, array_fid, 2, std::nullopt);
+    const auto& [final_views, final_valid] = final_chunk.get();
+    ASSERT_EQ(final_views.size(), 1);
+    ASSERT_EQ(final_valid.size(), 1);
+    EXPECT_TRUE(final_valid[0]);
+    EXPECT_EQ(final_views[0].length(), kArrayLength);
+
+    // Rows 0, 2, and 4 are valid. Element-nullable predicates deliberately do
+    // not use SkipIndex, so the complete scan must consume all six elements,
+    // including the two from the one-row final chunk.
+    VerifyNullableElementFullScanLogicalCount(
+        segment.get(), array_fid, kRowCount, -1, 0, 6);
+}
+
+TEST(OffsetsEvalNullableElementTest,
      GrowingLoadFieldDataUsesLogicalCountForNullPayloadRows) {
     constexpr int64_t kRowCount = 4;
     constexpr int64_t kChunkRows = 2;
@@ -919,6 +973,12 @@ TEST(OffsetsEvalNullableElementTest,
         break;
     }
     ASSERT_TRUE(loaded);
+    // load_field_data_internal publishes the reserved range only after every
+    // field has been loaded.  This test invokes the per-field helper directly,
+    // so mirror that final publication step before evaluating the segment.
+    auto& insert_record = const_cast<InsertRecord<false>&>(
+        growing->get_insert_record());
+    insert_record.ack_responder_.AddSegment(0, kRowCount);
 
     VerifyNullableElementFullScanLogicalCount(
         segment.get(), array_fid, kRowCount, 0, 2, 2);

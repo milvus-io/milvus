@@ -760,26 +760,30 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             "division or modulus by zero in Array field arithmetic expression");
     }
 
-#define BinaryArithRangeArrayCompare(cmp)                       \
-    do {                                                        \
-        for (size_t i = 0; i < size; ++i) {                     \
-            auto offset = i;                                    \
-            if constexpr (filter_type == FilterType::random) {  \
-                offset = (offsets) ? offsets[i] : i;            \
-            }                                                   \
-            if (valid_data != nullptr && !valid_data[offset]) { \
-                res[i] = false;                                 \
-                valid_res[i] = false;                           \
-                continue;                                       \
-            }                                                   \
-            if (index >= data[offset].length()) {               \
-                res[i] = false;                                 \
-                valid_res[i] = false;                           \
-                continue;                                       \
-            }                                                   \
-            auto value = data[offset].get_data<GetType>(index); \
-            res[i] = (cmp);                                     \
-        }                                                       \
+#define BinaryArithRangeArrayCompare(cmp)                                 \
+    do {                                                                  \
+        for (size_t i = 0; i < size; ++i) {                               \
+            auto offset = i;                                              \
+            if constexpr (filter_type == FilterType::random) {            \
+                offset = offsets ? offsets[i] : i;                        \
+            }                                                             \
+            if (valid_data != nullptr && !valid_data[offset]) {           \
+                res[i] = valid_res[i] = false;                            \
+                continue;                                                 \
+            }                                                             \
+            if (index >= data[offset].length()) {                         \
+                res[i] = valid_res[i] = false;                            \
+                continue;                                                 \
+            }                                                             \
+            if constexpr (ElementNullable) {                              \
+                if (!data[offset].is_element_valid(index)) {              \
+                    res[i] = valid_res[i] = false;                        \
+                    continue;                                             \
+                }                                                         \
+            }                                                             \
+            auto value = data[offset].get_data_unchecked<GetType>(index); \
+            res[i] = (cmp);                                               \
+        }                                                                 \
     } while (false)
 
 #define BinaryArithRangeArrayLengthCompate(cmp)                 \
@@ -808,7 +812,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             TargetBitmapView valid_res,
             ValueType val,
             ValueType right_operand,
-            int index) {
+            int index,
+            bool element_nullable) {
         if (arith_type != proto::plan::ArithOpType::ArrayLength) {
             AssertInfo(index >= 0,
                        "array arithmetic predicate requires nested path");
@@ -818,7 +823,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
         if (data == nullptr) {
             return;
         }
-        switch (op_type) {
+        auto run = [&]<bool ElementNullable>() {
+            switch (op_type) {
             case proto::plan::OpType::Equal: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
@@ -1221,6 +1227,12 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                           "unsupported operator type for binary "
                           "arithmetic eval expr: {}",
                           op_type);
+            }
+        };
+        if (element_nullable) {
+            run.template operator()<true>();
+        } else {
+            run.template operator()<false>();
         }
     };
 
@@ -1234,7 +1246,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                                                     valid_res,
                                                     value,
                                                     right_operand,
-                                                    index);
+                                                    index,
+                                                    element_nullable_);
     } else {
         processed_size = ProcessDataChunks<milvus::ArrayView>(execute_sub_batch,
                                                               std::nullptr_t{},
@@ -1242,7 +1255,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                                                               valid_res,
                                                               value,
                                                               right_operand,
-                                                              index);
+                                                              index,
+                                                              element_nullable_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -2248,7 +2262,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
     };
     if (has_offset_input_) {
         auto res = ProcessIndexChunksByOffsets<T>(
-            execute_sub_batch, input, value, right_operand);
+            execute_sub_batch,
+            input,
+            expr_->column_.element_level_,
+            value,
+            right_operand);
 
         AssertInfo(res->size() == real_batch_size,
                    "internal error: expr processed rows {} not equal "

@@ -12,6 +12,7 @@
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
 #include <stddef.h>
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -35,12 +36,14 @@
 #include "common/VectorTrait.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
+#include "index/BitmapIndex.h"
 #include "index/Index.h"
 #include "index/Meta.h"
 #include "index/ScalarIndexSort.h"
 #include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/operands.h"
+#include "parquet/statistics.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "query/Plan.h"
@@ -53,6 +56,7 @@
 #include "segcore/Types.h"
 #include "storage/FileManager.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 #include "common/Common.h"
@@ -2541,6 +2545,378 @@ TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
     EXPECT_EQ(retrieve_results->offset(1), 2);
     ASSERT_EQ(retrieve_results->element_indices(1).indices_size(), 1);
     EXPECT_EQ(retrieve_results->element_indices(1).indices(0), 0);
+}
+
+TEST(ElementFilter, NullExprOnNonElementNullableArrayUsesElementCount) {
+    auto schema = std::make_shared<Schema>();
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    constexpr int64_t kRows = 3;
+    const std::vector<std::vector<int32_t>> values = {
+        {10, 11}, {20}, {30, 31, 32}};
+    auto raw_data = DataGen(schema, kRows, 42, 0, 1, 0);
+    std::vector<Array> arrays;
+    arrays.reserve(kRows);
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); ++i) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != int_array_fid.get()) {
+            continue;
+        }
+        auto* array_data = field_data->mutable_scalars()->mutable_array_data();
+        array_data->set_element_type(proto::schema::DataType::Int32);
+        array_data->mutable_data()->Clear();
+        for (const auto& row_values : values) {
+            auto* row = array_data->add_data();
+            row->mutable_int_data()->mutable_data()->Add(row_values.begin(),
+                                                         row_values.end());
+            arrays.emplace_back(*row);
+        }
+        break;
+    }
+    ASSERT_EQ(arrays.size(), kRows);
+
+    auto run = [&](SegmentInterface* segment) {
+        proto::plan::PlanNode plan_node;
+        auto* query = plan_node.mutable_query();
+        query->set_is_count(false);
+        query->set_limit(16);
+
+        auto* element_filter =
+            query->mutable_predicates()->mutable_element_filter_expr();
+        element_filter->set_struct_name("structA");
+        auto* null_expr =
+            element_filter->mutable_element_expr()->mutable_null_expr();
+        auto* column = null_expr->mutable_column_info();
+        column->set_field_id(int_array_fid.get());
+        column->set_data_type(proto::schema::DataType::Int32);
+        column->set_element_type(proto::schema::DataType::Int32);
+        column->set_is_element_level(true);
+        null_expr->set_op(proto::plan::NullExpr_NullOp_IsNotNull);
+
+        plan_node.add_output_field_ids(int64_fid.get());
+        plan_node.add_output_field_ids(int_array_fid.get());
+        auto plan = ProtoParser(schema).CreateRetrievePlan(plan_node);
+        auto result = segment->Retrieve(nullptr,
+                                        plan.get(),
+                                        1L << 63,
+                                        INT64_MAX,
+                                        false,
+                                        folly::CancellationToken(),
+                                        0,
+                                        0);
+
+        ASSERT_NE(result, nullptr);
+        ASSERT_TRUE(result->element_level());
+        ASSERT_EQ(result->offset_size(), kRows);
+        for (int row = 0; row < kRows; ++row) {
+            EXPECT_EQ(result->offset(row), row);
+            ASSERT_EQ(result->element_indices(row).indices_size(),
+                      values[row].size());
+            for (int elem = 0; elem < values[row].size(); ++elem) {
+                EXPECT_EQ(result->element_indices(row).indices(elem), elem);
+            }
+        }
+    };
+
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    growing->PreInsert(kRows);
+    growing->Insert(0,
+                    kRows,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    run(growing.get());
+
+    auto sealed = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    auto index_field_data = storage::CreateFieldData(
+        DataType::ARRAY, DataType::INT32, false, false, 1, kRows);
+    index_field_data->FillFieldData(arrays.data(), arrays.size());
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("structA[price_array]");
+    field_schema.set_fieldid(int_array_fid.get());
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Int32);
+    storage::FileManagerContext ctx;
+    ctx.fieldDataMeta = storage::FieldDataMeta{
+        kCollectionID,
+        kPartitionID,
+        kSegmentID,
+        int_array_fid.get(),
+        field_schema,
+    };
+    ctx.indexMeta =
+        storage::IndexMeta{kSegmentID, int_array_fid.get(), 5000, 5000};
+    auto bitmap_index =
+        std::make_unique<index::BitmapIndex<int32_t>>(ctx, false);
+    bitmap_index->BuildWithFieldData({index_field_data});
+    ASSERT_FALSE(bitmap_index->IsNestedIndex());
+
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = int_array_fid.get();
+    load_index_info.field_type = DataType::ARRAY;
+    load_index_info.element_type = DataType::INT32;
+    load_index_info.index_params = GenIndexParams(bitmap_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("array_bitmap", std::move(bitmap_index));
+    sealed->LoadIndex(load_index_info);
+    run(sealed.get());
+}
+
+TEST(ElementFilter, ElementNullableLogicalSemanticsAcrossExecutionPaths) {
+    constexpr int64_t kRows = 6;
+    auto schema = std::make_shared<Schema>();
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, true, true);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    auto raw_data = DataGen(schema, kRows, 42, 0, 1, 0);
+    const std::vector<bool> row_valid = {true, true, true, true, false, true};
+    std::vector<Array> arrays;
+    arrays.reserve(kRows);
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); ++i) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != int_array_fid.get()) {
+            continue;
+        }
+
+        field_data->clear_valid_data();
+        auto* scalars = field_data->mutable_scalars();
+        scalars->mutable_valid_data()->Clear();
+        for (auto valid : row_valid) {
+            scalars->add_valid_data(valid);
+        }
+
+        auto* array_data = scalars->mutable_array_data();
+        array_data->set_element_type(proto::schema::DataType::Int32);
+        array_data->mutable_data()->Clear();
+        auto append_row = [&](std::initializer_list<int32_t> values,
+                              std::initializer_list<bool> valid_data) {
+            auto* row = array_data->add_data();
+            row->mutable_int_data()->mutable_data()->Add(values.begin(),
+                                                         values.end());
+            row->mutable_valid_data()->Add(valid_data.begin(),
+                                           valid_data.end());
+            arrays.emplace_back(*row, true);
+        };
+        append_row({0, 2, 3}, {false, true, true});
+        append_row({2, 0, 4}, {true, false, true});
+        append_row({0, 0}, {false, false});
+        append_row({}, {});
+        append_row({}, {});
+        append_row({1, 2}, {true, true});
+        break;
+    }
+    ASSERT_EQ(arrays.size(), kRows);
+
+    auto growing_record = *raw_data.raw_;
+    for (auto& field_data : *growing_record.mutable_fields_data()) {
+        if (field_data.field_id() != int_array_fid.get()) {
+            continue;
+        }
+        auto* rows =
+            field_data.mutable_scalars()->mutable_array_data()->mutable_data();
+        google::protobuf::RepeatedPtrField<ScalarFieldProto> compact_rows;
+        for (int64_t row = 0; row < kRows; ++row) {
+            if (row_valid[row]) {
+                *compact_rows.Add() = rows->Get(row);
+            }
+        }
+        rows->Swap(&compact_rows);
+        break;
+    }
+
+    auto set_element_column = [&](proto::plan::ColumnInfo* column) {
+        column->set_field_id(int_array_fid.get());
+        column->set_data_type(proto::schema::DataType::Int32);
+        column->set_element_type(proto::schema::DataType::Int32);
+        column->set_is_element_level(true);
+    };
+    auto make_range = [&](proto::plan::OpType op, int64_t value) {
+        auto result = std::make_unique<proto::plan::Expr>();
+        auto* range = result->mutable_unary_range_expr();
+        set_element_column(range->mutable_column_info());
+        range->set_op(op);
+        range->mutable_value()->set_int64_val(value);
+        return result;
+    };
+    auto make_null = [&](proto::plan::NullExpr_NullOp op) {
+        auto result = std::make_unique<proto::plan::Expr>();
+        auto* null_expr = result->mutable_null_expr();
+        set_element_column(null_expr->mutable_column_info());
+        null_expr->set_op(op);
+        return result;
+    };
+    auto make_not = [](std::unique_ptr<proto::plan::Expr> child) {
+        auto result = std::make_unique<proto::plan::Expr>();
+        auto* unary = result->mutable_unary_expr();
+        unary->set_op(proto::plan::UnaryExpr_UnaryOp_Not);
+        unary->set_allocated_child(child.release());
+        return result;
+    };
+    auto make_binary = [](proto::plan::BinaryExpr_BinaryOp op,
+                          std::unique_ptr<proto::plan::Expr> left,
+                          std::unique_ptr<proto::plan::Expr> right) {
+        auto result = std::make_unique<proto::plan::Expr>();
+        auto* binary = result->mutable_binary_expr();
+        binary->set_op(op);
+        binary->set_allocated_left(left.release());
+        binary->set_allocated_right(right.release());
+        return result;
+    };
+
+    using Hit = std::pair<int64_t, int32_t>;
+    struct TestCase {
+        std::string name;
+        std::unique_ptr<proto::plan::Expr> expression;
+        std::set<Hit> expected;
+    };
+    std::vector<TestCase> cases;
+    cases.push_back({"equal",
+                     make_range(proto::plan::OpType::Equal, 2),
+                     {{0, 1}, {1, 0}, {5, 1}}});
+    cases.push_back({"not_equal_via_logical_not",
+                     make_not(make_range(proto::plan::OpType::Equal, 2)),
+                     {{0, 2}, {1, 2}, {5, 0}}});
+    cases.push_back(
+        {"logical_not_preserves_null_validity_when_skip_index_skips",
+         make_not(make_range(proto::plan::OpType::Equal, 999)),
+         {{0, 1}, {0, 2}, {1, 0}, {1, 2}, {5, 0}, {5, 1}}});
+    cases.push_back({"is_null",
+                     make_null(proto::plan::NullExpr_NullOp_IsNull),
+                     {{0, 0}, {1, 1}, {2, 0}, {2, 1}}});
+    cases.push_back({"is_not_null",
+                     make_null(proto::plan::NullExpr_NullOp_IsNotNull),
+                     {{0, 1}, {0, 2}, {1, 0}, {1, 2}, {5, 0}, {5, 1}}});
+    cases.push_back(
+        {"and_preserves_unknown",
+         make_binary(proto::plan::BinaryExpr_BinaryOp_LogicalAnd,
+                     make_not(make_range(proto::plan::OpType::Equal, 2)),
+                     make_range(proto::plan::OpType::LessThan, 4)),
+         {{0, 2}, {5, 0}}});
+    cases.push_back({"or_combines_null_and_value",
+                     make_binary(proto::plan::BinaryExpr_BinaryOp_LogicalOr,
+                                 make_null(proto::plan::NullExpr_NullOp_IsNull),
+                                 make_range(proto::plan::OpType::Equal, 2)),
+                     {{0, 0}, {0, 1}, {1, 0}, {1, 1}, {2, 0}, {2, 1}, {5, 1}}});
+
+    auto run = [&](SegmentInterface* segment, const std::string& path) {
+        for (const auto& test_case : cases) {
+            SCOPED_TRACE(path);
+            SCOPED_TRACE(test_case.name);
+
+            proto::plan::PlanNode plan_node;
+            auto* query = plan_node.mutable_query();
+            query->set_is_count(false);
+            query->set_limit(100);
+            auto* element_filter =
+                query->mutable_predicates()->mutable_element_filter_expr();
+            element_filter->set_struct_name("structA");
+            element_filter->mutable_element_expr()->CopyFrom(
+                *test_case.expression);
+            plan_node.add_output_field_ids(int64_fid.get());
+
+            auto plan = ProtoParser(schema).CreateRetrievePlan(plan_node);
+            auto result = segment->Retrieve(nullptr,
+                                            plan.get(),
+                                            1L << 63,
+                                            INT64_MAX,
+                                            false,
+                                            folly::CancellationToken(),
+                                            0,
+                                            0);
+            ASSERT_NE(result, nullptr);
+            ASSERT_TRUE(result->element_level());
+
+            std::set<Hit> actual;
+            for (int row = 0; row < result->offset_size(); ++row) {
+                for (auto element_index :
+                     result->element_indices(row).indices()) {
+                    actual.emplace(result->offset(row), element_index);
+                }
+            }
+            EXPECT_EQ(actual, test_case.expected);
+        }
+    };
+
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    growing->PreInsert(kRows);
+    growing->Insert(0,
+                    kRows,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    &growing_record);
+    auto stats_node = parquet::schema::PrimitiveNode::Make(
+        "array_element", parquet::Repetition::OPTIONAL, parquet::Type::INT32);
+    parquet::ColumnDescriptor stats_descriptor(stats_node, 1, 0);
+    auto array_element_stats =
+        parquet::MakeStatistics<parquet::Int32Type>(&stats_descriptor);
+    const int32_t valid_elements[] = {1, 2, 3, 4, 2, 2};
+    array_element_stats->Update(valid_elements, 6, 4);
+    growing->LoadSkipIndexFromStatistics(
+        int_array_fid,
+        DataType::INT32,
+        {std::static_pointer_cast<parquet::Statistics>(array_element_stats)});
+    ASSERT_TRUE(growing->GetSkipIndex()->CanSkipUnaryRange<int32_t>(
+        int_array_fid, 0, proto::plan::OpType::Equal, 999));
+    run(growing.get(), "growing_raw");
+
+    auto sealed_raw = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    run(sealed_raw.get(), "sealed_raw");
+
+    auto sealed_indexed = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    auto index_field_data = storage::CreateFieldData(
+        DataType::ARRAY, DataType::INT32, true, true, 1, kRows);
+    std::vector<uint8_t> valid_bitmap((kRows + 7) / 8, 0);
+    for (int64_t row = 0; row < kRows; ++row) {
+        if (row_valid[row]) {
+            valid_bitmap[row >> 3] |= uint8_t{1} << (row & 0x07);
+        }
+    }
+    index_field_data->FillFieldData(
+        arrays.data(), valid_bitmap.data(), kRows, 0);
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("structA[price_array]");
+    field_schema.set_fieldid(int_array_fid.get());
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Int32);
+    field_schema.set_nullable(true);
+    field_schema.set_element_nullable(true);
+    storage::FileManagerContext ctx;
+    ctx.fieldDataMeta = storage::FieldDataMeta{kCollectionID,
+                                               kPartitionID,
+                                               kSegmentID,
+                                               int_array_fid.get(),
+                                               field_schema};
+    ctx.indexMeta =
+        storage::IndexMeta{kSegmentID, int_array_fid.get(), 5001, 5001};
+    auto bitmap_index =
+        std::make_unique<index::BitmapIndex<int32_t>>(ctx, true);
+    bitmap_index->BuildWithFieldData({index_field_data});
+    ASSERT_TRUE(bitmap_index->IsNestedIndex());
+    int32_t target = 2;
+    auto direct_equal = bitmap_index->In(1, &target);
+    ASSERT_EQ(direct_equal.size(), 10);
+    for (int element = 0; element < 10; ++element) {
+        EXPECT_EQ(direct_equal[element],
+                  element == 1 || element == 3 || element == 9)
+            << "nested bitmap element " << element;
+    }
+
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = int_array_fid.get();
+    load_index_info.field_type = DataType::ARRAY;
+    load_index_info.element_type = DataType::INT32;
+    load_index_info.index_params = GenIndexParams(bitmap_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("nullable_nested_bitmap", std::move(bitmap_index));
+    sealed_indexed->LoadIndex(load_index_info);
+    run(sealed_indexed.get(), "sealed_nested_bitmap");
 }
 
 TEST_P(ElementFilterEmptyDocHit, ElementLevelSearchWithZeroElements) {

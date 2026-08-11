@@ -77,6 +77,9 @@ class PhyNullExpr : public SegmentExpr {
     ColumnVectorPtr
     PreCheckNullable(OffsetVector* input);
 
+    VectorPtr
+    ExecArrayElementNull(OffsetVector* input);
+
     template <typename T>
     VectorPtr
     ExecVisitorImpl(OffsetVector* input);

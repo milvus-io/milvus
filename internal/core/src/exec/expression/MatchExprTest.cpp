@@ -886,6 +886,89 @@ TEST(MatchExprNullableStruct, GrowingPropagatesStructRowValidity) {
     CheckNullableStructExpressions(segment.get(), schema);
 }
 
+TEST(MatchExprElementNullable, GrowingAndSealedPreserveElementNullSemantics) {
+    constexpr int64_t row_count = 6;
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+    auto sub_int_fid = schema->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, true, true);
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(row_count);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto id_array = CreateDataArrayFrom(
+        ids.data(), nullptr, row_count, schema->operator[](int64_fid));
+    insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+    auto* sub_field = insert_data->add_fields_data();
+    sub_field->set_field_id(sub_int_fid.get());
+    sub_field->set_field_name("struct_array[sub_int]");
+    sub_field->set_type(proto::schema::DataType::Array);
+    auto* scalars = sub_field->mutable_scalars();
+    for (auto valid : {true, true, true, true, false, true}) {
+        scalars->add_valid_data(valid);
+    }
+    auto* array_data = scalars->mutable_array_data();
+    array_data->set_element_type(proto::schema::DataType::Int32);
+    auto append_row = [array_data](std::initializer_list<int32_t> values,
+                                   std::initializer_list<bool> valid_data) {
+        auto* row = array_data->add_data();
+        row->mutable_int_data()->mutable_data()->Add(values.begin(),
+                                                     values.end());
+        for (auto valid : valid_data) {
+            row->add_valid_data(valid);
+        }
+    };
+    append_row({0, 2}, {false, true});
+    append_row({2, 0}, {true, false});
+    append_row({0, 0}, {false, false});
+    append_row({}, {});
+    append_row({}, {});
+    append_row({1, 2}, {true, true});
+    insert_data->set_num_rows(row_count);
+
+    std::vector<idx_t> row_ids(row_count);
+    std::vector<Timestamp> timestamps(row_count);
+    std::iota(row_ids.begin(), row_ids.end(), 0);
+    std::iota(timestamps.begin(), timestamps.end(), 0);
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    growing->PreInsert(row_count);
+    growing->Insert(0,
+                    row_count,
+                    row_ids.data(),
+                    timestamps.data(),
+                    insert_data.get());
+
+    GeneratedData generated_data;
+    generated_data.schema_ = schema;
+    generated_data.raw_ = insert_data.release();
+    generated_data.row_ids_ = row_ids;
+    generated_data.timestamps_ = timestamps;
+    auto sealed = CreateSealedWithFieldDataLoaded(schema, generated_data);
+
+    const std::vector<std::pair<std::string, std::set<int64_t>>> cases = {
+        {"match_any(struct_array, $[sub_int] >= 2)", {0, 1, 5}},
+        {"match_all(struct_array, $[sub_int] >= 2)", {0, 1, 2, 3}},
+        {"match_exact(struct_array, $[sub_int] >= 2, threshold=1)",
+         {0, 1, 5}},
+        {"match_most(struct_array, $[sub_int] >= 2, threshold=0)",
+         {2, 3}},
+        {"not match_any(struct_array, $[sub_int] >= 2)", {2, 3}},
+        {"match_any(struct_array, not ($[sub_int] >= 2))", {5}},
+    };
+
+    const std::vector<SegmentInternalInterface*> segments = {growing.get(),
+                                                              sealed.get()};
+    for (auto* segment : segments) {
+        for (const auto& [expression, expected] : cases) {
+            SCOPED_TRACE(segment->type());
+            SCOPED_TRACE(expression);
+            EXPECT_EQ(RetrieveOffsets(segment, schema, expression), expected);
+        }
+    }
+}
+
 TEST(MatchExprNullableStruct, NestedIndexUsesPhysicalRowValidity) {
     FieldId int64_fid;
     FieldId sub_int_fid;

@@ -477,19 +477,26 @@ struct UnaryElementFunc {
     }
 };
 
-#define UnaryArrayCompare(cmp)                                               \
-    do {                                                                     \
-        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {         \
-            res[i] = false;                                                  \
-        } else {                                                             \
-            if (index >= src[offset].length()) {                             \
-                res[i] = false;                                              \
-                valid_res[i] = false;                                        \
-                continue;                                                    \
-            }                                                                \
-            auto array_data = src[offset].template get_data<GetType>(index); \
-            res[i] = (cmp);                                                  \
-        }                                                                    \
+#define UnaryArrayCompare(cmp)                                           \
+    do {                                                                  \
+        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {      \
+            res[i] = false;                                               \
+        } else {                                                          \
+            if (index >= src[offset].length()) {                          \
+                res[i] = false;                                           \
+                valid_res[i] = false;                                     \
+                continue;                                                 \
+            }                                                             \
+            if constexpr (ElementNullable) {                              \
+                if (!src[offset].is_element_valid(index)) {               \
+                    res[i] = valid_res[i] = false;                        \
+                    continue;                                             \
+                }                                                         \
+            }                                                             \
+            auto array_data =                                             \
+                src[offset].template get_data_unchecked<GetType>(index);  \
+            res[i] = (cmp);                                               \
+        }                                                                 \
     } while (false)
 
 template <typename ValueType, proto::plan::OpType op, FilterType filter_type>
@@ -497,6 +504,7 @@ struct UnaryElementFuncForArray {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
+    template <bool ElementNullable>
     void
     operator()(const ArrayView* src,
                const bool* valid_data,
@@ -541,6 +549,12 @@ struct UnaryElementFuncForArray {
             }
             if constexpr (op == proto::plan::OpType::Equal) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                    if constexpr (ElementNullable) {
+                        if (src[offset].has_invalid_element()) {
+                            res[i] = valid_res[i] = false;
+                            continue;
+                        }
+                    }
                     res[i] = src[offset].is_same_array(val);
                 } else {
                     if (index >= src[offset].length()) {
@@ -548,12 +562,25 @@ struct UnaryElementFuncForArray {
                         valid_res[i] = false;
                         continue;
                     }
-                    auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                    if constexpr (ElementNullable) {
+                        if (!src[offset].is_element_valid(index)) {
+                            res[i] = valid_res[i] = false;
+                            continue;
+                        }
+                    }
+                    auto array_data = src[offset]
+                                          .template get_data_unchecked<GetType>(
+                                              index);
                     res[i] = array_data == val;
                 }
             } else if constexpr (op == proto::plan::OpType::NotEqual) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                    if constexpr (ElementNullable) {
+                        if (src[offset].has_invalid_element()) {
+                            res[i] = valid_res[i] = false;
+                            continue;
+                        }
+                    }
                     res[i] = !src[offset].is_same_array(val);
                 } else {
                     if (index >= src[offset].length()) {
@@ -561,8 +588,15 @@ struct UnaryElementFuncForArray {
                         valid_res[i] = false;
                         continue;
                     }
-                    auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                    if constexpr (ElementNullable) {
+                        if (!src[offset].is_element_valid(index)) {
+                            res[i] = valid_res[i] = false;
+                            continue;
+                        }
+                    }
+                    auto array_data = src[offset]
+                                          .template get_data_unchecked<GetType>(
+                                              index);
                     res[i] = array_data != val;
                 }
             } else if constexpr (op == proto::plan::OpType::GreaterThan) {
@@ -590,8 +624,15 @@ struct UnaryElementFuncForArray {
                         valid_res[i] = false;
                         continue;
                     }
-                    auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                    if constexpr (ElementNullable) {
+                        if (!src[offset].is_element_valid(index)) {
+                            res[i] = valid_res[i] = false;
+                            continue;
+                        }
+                    }
+                    auto array_data = src[offset]
+                                          .template get_data_unchecked<GetType>(
+                                              index);
                     res[i] = (*matcher)(array_data);
                 } else {
                     ThrowInfo(OpTypeInvalid,
@@ -610,8 +651,15 @@ struct UnaryElementFuncForArray {
                         valid_res[i] = false;
                         continue;
                     }
-                    auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                    if constexpr (ElementNullable) {
+                        if (!src[offset].is_element_valid(index)) {
+                            res[i] = valid_res[i] = false;
+                            continue;
+                        }
+                    }
+                    auto array_data = src[offset]
+                                          .template get_data_unchecked<GetType>(
+                                              index);
                     res[i] = (*regex_matcher)(array_data);
                 } else {
                     ThrowInfo(OpTypeInvalid,
