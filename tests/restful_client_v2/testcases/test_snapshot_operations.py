@@ -93,6 +93,7 @@ class TestSnapshotOperations(TestBase):
         assert rsp["code"] == 0, rsp
         job_id = rsp["data"]["jobId"]
         assert isinstance(job_id, (int, str)) and int(job_id) > 0, rsp
+        job_id = str(job_id)
 
         deadline = time.time() + 180
         while time.time() < deadline:
@@ -106,13 +107,13 @@ class TestSnapshotOperations(TestBase):
         else:
             pytest.fail(f"snapshot restore did not complete: {rsp}")
 
-        assert rsp["data"]["jobId"] == job_id, rsp
+        assert str(rsp["data"]["jobId"]) == job_id, rsp
         assert rsp["data"]["snapshotName"] == snapshot_name, rsp
         assert rsp["data"]["collectionName"] == target_collection, rsp
 
         rsp = self.snapshot_client.list_restore_snapshot_jobs({"collectionName": target_collection})
         assert rsp["code"] == 0, rsp
-        matching_jobs = [record for record in rsp["data"]["records"] if record["jobId"] == job_id]
+        matching_jobs = [record for record in rsp["data"]["records"] if str(record["jobId"]) == job_id]
         assert len(matching_jobs) == 1, rsp
         assert matching_jobs[0]["snapshotName"] == snapshot_name, rsp
         assert matching_jobs[0]["collectionName"] == target_collection, rsp
