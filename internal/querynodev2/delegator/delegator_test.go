@@ -445,7 +445,6 @@ func (s *DelegatorSuite) TestGetSegmentInfo() {
 		Version:     2001,
 	})
 
-	s.delegator.(*shardDelegator).distribution.Flush()
 	sealed, growing = s.delegator.GetSegmentInfo(false)
 	s.EqualValues([]SnapshotItem{
 		{
@@ -777,7 +776,6 @@ func (s *DelegatorSuite) TestSearch() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
@@ -966,7 +964,6 @@ func (s *DelegatorSuite) TestQuery() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
@@ -1250,7 +1247,6 @@ func (s *DelegatorSuite) TestQueryStream() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		client := streamrpc.NewLocalQueryClient(ctx)
 		server := client.CreateServer()
@@ -1428,7 +1424,6 @@ func (s *DelegatorSuite) TestGetStats() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		_, err := s.delegator.GetStatistics(ctx, &querypb.GetStatisticsRequest{
 			Req:         &internalpb.GetStatisticsRequest{Base: commonpbutil.NewMsgBase()},
@@ -1564,7 +1559,6 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
 		sd.distribution.MarkOfflineSegments(1001)
-		sd.distribution.Flush()
 
 		err := s.delegator.UpdateSchema(ctx, newFunctionRuntimeTestSchemaWithVersion(s.nextSchemaVersion()), 100)
 		s.Error(err)
@@ -3087,6 +3081,30 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 
 		// Should now be caught up
 		assert.False(t, sd.CatchingUpStreamingData())
+	})
+
+	t.Run("notifies when state changes to caught up", func(t *testing.T) {
+		mockParam := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsDurationByParse")).Return(5 * time.Second).Build()
+		defer mockParam.UnPatch()
+
+		var notifiedChannels []string
+		sd := &shardDelegator{
+			vchannelName:               "test-channel",
+			latestTsafe:                atomic.NewUint64(0),
+			catchingUpStreamingData:    atomic.NewBool(true),
+			tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
+			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+			leaderViewUpdatedCallback: func(channel string) {
+				notifiedChannels = append(notifiedChannels, channel)
+			},
+		}
+
+		recentTs := tsoutil.ComposeTSByTime(time.Now())
+		sd.UpdateTSafe(recentTs)
+		sd.UpdateTSafe(recentTs + 1)
+
+		assert.False(t, sd.CatchingUpStreamingData())
+		assert.Equal(t, []string{"test-channel"}, notifiedChannels)
 	})
 
 	t.Run("state remains catching up when lag is large", func(t *testing.T) {

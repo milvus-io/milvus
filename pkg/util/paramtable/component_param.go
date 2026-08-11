@@ -2830,8 +2830,9 @@ type queryCoordConfig struct {
 	HeartbeatAvailableInterval ParamItem `refreshable:"true"`
 	LoadTimeoutSeconds         ParamItem `refreshable:"true"`
 
-	DistributionRequestTimeout ParamItem `refreshable:"true"`
-	HeartBeatWarningLag        ParamItem `refreshable:"true"`
+	DistributionRequestTimeout  ParamItem `refreshable:"true"`
+	HeartBeatWarningLag         ParamItem `refreshable:"true"`
+	EnableDataDistributionDelta ParamItem `refreshable:"true"`
 
 	// Deprecated: Since 2.2.2, QueryCoord do not use HandOff logic anymore
 	CheckHandoffInterval ParamItem `refreshable:"true"`
@@ -3398,6 +3399,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	}
 	p.HeartBeatWarningLag.Init(base.mgr)
 
+	p.EnableDataDistributionDelta = ParamItem{
+		Key:          "queryCoord.enableDataDistributionDelta",
+		Version:      "2.6.19",
+		DefaultValue: "true",
+		Doc:          "whether querycoord requests delta data distribution reports from querynodes",
+		Export:       true,
+	}
+	p.EnableDataDistributionDelta.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "queryCoord.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -3686,15 +3696,16 @@ type queryNodeConfig struct {
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
-	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
-	MaxReadConcurrency    ParamItem `refreshable:"true"`
-	MaxGpuReadConcurrency ParamItem `refreshable:"false"`
-	MaxGroupNQ            ParamItem `refreshable:"true"`
-	NQMergeRatio          ParamItem `refreshable:"true"`
-	MaxDeadlineMergeGap   ParamItem `refreshable:"true"`
-	TopKMergeRatio        ParamItem `refreshable:"true"`
-	CPURatio              ParamItem `refreshable:"true"`
-	GracefulStopTimeout   ParamItem `refreshable:"false"`
+	MaxUnsolvedQueueSize         ParamItem `refreshable:"true"`
+	MaxReadConcurrency           ParamItem `refreshable:"true"`
+	MaxGpuReadConcurrency        ParamItem `refreshable:"false"`
+	MaxGroupNQ                   ParamItem `refreshable:"true"`
+	NQMergeRatio                 ParamItem `refreshable:"true"`
+	MaxDeadlineMergeGap          ParamItem `refreshable:"true"`
+	TopKMergeRatio               ParamItem `refreshable:"true"`
+	CPURatio                     ParamItem `refreshable:"true"`
+	GracefulStopTimeout          ParamItem `refreshable:"false"`
+	StandaloneMigrateDataTimeout ParamItem `refreshable:"false"`
 
 	EnableResultZeroCopy ParamItem `refreshable:"true"`
 
@@ -4786,6 +4797,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		FallbackKeys: []string{"common.gracefulStopTimeout"},
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.StandaloneMigrateDataTimeout = ParamItem{
+		Key:          "queryNode.standaloneMigrateDataTimeout",
+		Version:      "2.6.16",
+		DefaultValue: "10s",
+		Doc:          "Duration string (e.g. 10s, 3m). In standalone mode, after this duration, the node stops waiting for data migration if no other active query node is available.",
+		Export:       true,
+	}
+	p.StandaloneMigrateDataTimeout.Init(base.mgr)
 
 	p.MaxSegmentDeleteBuffer = ParamItem{
 		Key:          "queryNode.maxSegmentDeleteBuffer",
@@ -6772,9 +6792,10 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.ExternalCollectionPreAllocSegments.Init(base.mgr)
 
 	p.ExternalCollectionFilesPerTask = ParamItem{
-		Key:          "dataCoord.externalCollectionFilesPerTask",
-		Version:      "3.0.0",
-		Doc:          "Minimum number of external files per refresh task. Controls task splitting granularity.",
+		Key:     "dataCoord.externalCollectionFilesPerTask",
+		Version: "3.0.0",
+		Doc: "Target number of external files per base refresh task. " +
+			"Ownership closure may merge base ranges, so final tasks can contain more files.",
 		DefaultValue: "10000",
 		PanicIfEmpty: false,
 	}

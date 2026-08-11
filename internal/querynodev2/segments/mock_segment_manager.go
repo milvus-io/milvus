@@ -122,6 +122,65 @@ func (_c *MockSegmentManager_Clear_Call) RunAndReturn(run func(context.Context))
 	return _c
 }
 
+// CountBy provides a mock function with given fields: filters
+func (_m *MockSegmentManager) CountBy(filters ...SegmentFilter) int {
+	_va := make([]interface{}, len(filters))
+	for _i := range filters {
+		_va[_i] = filters[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountBy")
+	}
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func(...SegmentFilter) int); ok {
+		r0 = rf(filters...)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// MockSegmentManager_CountBy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountBy'
+type MockSegmentManager_CountBy_Call struct {
+	*mock.Call
+}
+
+// CountBy is a helper method to define mock.On call
+//   - filters ...SegmentFilter
+func (_e *MockSegmentManager_Expecter) CountBy(filters ...interface{}) *MockSegmentManager_CountBy_Call {
+	return &MockSegmentManager_CountBy_Call{Call: _e.mock.On("CountBy",
+		append([]interface{}{}, filters...)...)}
+}
+
+func (_c *MockSegmentManager_CountBy_Call) Run(run func(filters ...SegmentFilter)) *MockSegmentManager_CountBy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]SegmentFilter, len(args)-0)
+		for i, a := range args[0:] {
+			if a != nil {
+				variadicArgs[i] = a.(SegmentFilter)
+			}
+		}
+		run(variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockSegmentManager_CountBy_Call) Return(_a0 int) *MockSegmentManager_CountBy_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegmentManager_CountBy_Call) RunAndReturn(run func(...SegmentFilter) int) *MockSegmentManager_CountBy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Empty provides a mock function with no fields
 func (_m *MockSegmentManager) Empty() bool {
 	ret := _m.Called()
@@ -747,6 +806,54 @@ func (_c *MockSegmentManager_Put_Call) Return() *MockSegmentManager_Put_Call {
 }
 
 func (_c *MockSegmentManager_Put_Call) RunAndReturn(run func(context.Context, commonpb.SegmentState, ...Segment)) *MockSegmentManager_Put_Call {
+	_c.Run(run)
+	return _c
+}
+
+// RangeBy provides a mock function with given fields: visitor, filters
+func (_m *MockSegmentManager) RangeBy(visitor SegmentVisitor, filters ...SegmentFilter) {
+	_va := make([]interface{}, len(filters))
+	for _i := range filters {
+		_va[_i] = filters[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, visitor)
+	_ca = append(_ca, _va...)
+	_m.Called(_ca...)
+}
+
+// MockSegmentManager_RangeBy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RangeBy'
+type MockSegmentManager_RangeBy_Call struct {
+	*mock.Call
+}
+
+// RangeBy is a helper method to define mock.On call
+//   - visitor SegmentVisitor
+//   - filters ...SegmentFilter
+func (_e *MockSegmentManager_Expecter) RangeBy(visitor interface{}, filters ...interface{}) *MockSegmentManager_RangeBy_Call {
+	return &MockSegmentManager_RangeBy_Call{Call: _e.mock.On("RangeBy",
+		append([]interface{}{visitor}, filters...)...)}
+}
+
+func (_c *MockSegmentManager_RangeBy_Call) Run(run func(visitor SegmentVisitor, filters ...SegmentFilter)) *MockSegmentManager_RangeBy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]SegmentFilter, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(SegmentFilter)
+			}
+		}
+		run(args[0].(SegmentVisitor), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockSegmentManager_RangeBy_Call) Return() *MockSegmentManager_RangeBy_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegmentManager_RangeBy_Call) RunAndReturn(run func(SegmentVisitor, ...SegmentFilter)) *MockSegmentManager_RangeBy_Call {
 	_c.Run(run)
 	return _c
 }

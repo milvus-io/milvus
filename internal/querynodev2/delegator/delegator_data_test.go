@@ -308,50 +308,75 @@ func (s *DelegatorDataSuite) allocFunctionRunnersForTest() {
 }
 
 func (s *DelegatorDataSuite) TestProcessInsert() {
+	validInsertData := func() *InsertData {
+		return &InsertData{
+			RowIDs:        []int64{0, 1},
+			PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
+			Timestamps:    []uint64{10, 10},
+			PartitionID:   500,
+			StartPosition: &msgpb.MsgPosition{},
+			InsertRecord: &segcorepb.InsertRecord{
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "id",
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{
+										Data: []int64{1, 2},
+									},
+								},
+							},
+						},
+						FieldId: 100,
+					},
+					{
+						Type:      schemapb.DataType_FloatVector,
+						FieldName: "vector",
+						Field: &schemapb.FieldData_Vectors{
+							Vectors: &schemapb.VectorField{
+								Dim: 128,
+								Data: &schemapb.VectorField_FloatVector{
+									FloatVector: &schemapb.FloatArray{Data: make([]float32, 128*2)},
+								},
+							},
+						},
+						FieldId: 101,
+					},
+				},
+				NumRows: 2,
+			},
+		}
+	}
+
 	s.Run("normal_insert", func() {
 		s.delegator.ProcessInsert(map[int64]*InsertData{
-			100: {
-				RowIDs:        []int64{0, 1},
-				PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
-				Timestamps:    []uint64{10, 10},
-				PartitionID:   500,
-				StartPosition: &msgpb.MsgPosition{},
-				InsertRecord: &segcorepb.InsertRecord{
-					FieldsData: []*schemapb.FieldData{
-						{
-							Type:      schemapb.DataType_Int64,
-							FieldName: "id",
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_LongData{
-										LongData: &schemapb.LongArray{
-											Data: []int64{1, 2},
-										},
-									},
-								},
-							},
-							FieldId: 100,
-						},
-						{
-							Type:      schemapb.DataType_FloatVector,
-							FieldName: "vector",
-							Field: &schemapb.FieldData_Vectors{
-								Vectors: &schemapb.VectorField{
-									Dim: 128,
-									Data: &schemapb.VectorField_FloatVector{
-										FloatVector: &schemapb.FloatArray{Data: make([]float32, 128*2)},
-									},
-								},
-							},
-							FieldId: 101,
-						},
-					},
-					NumRows: 2,
-				},
-			},
+			100: validInsertData(),
 		})
 
 		s.NotNil(s.manager.Segment.GetGrowing(100))
+	})
+
+	s.Run("notify_new_growing_segment_once", func() {
+		var notifiedChannels []string
+		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil,
+			WithLeaderViewUpdatedCallback(func(channel string) {
+				notifiedChannels = append(notifiedChannels, channel)
+			}))
+		s.Require().NoError(err)
+		sd := delegator.(*shardDelegator)
+
+		insert := func() {
+			sd.ProcessInsert(map[int64]*InsertData{
+				101: validInsertData(),
+			})
+		}
+
+		insert()
+		insert()
+
+		s.Equal([]string{s.vchannelName}, notifiedChannels)
 	})
 
 	s.Run("insert_bad_data", func() {
@@ -550,7 +575,6 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		},
 	}, 10)
 
-	s.delegator.distribution.Flush()
 	s.False(s.delegator.distribution.Serviceable())
 
 	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
@@ -573,7 +597,6 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		Version: time.Now().UnixNano(),
 	})
 	s.Require().NoError(err)
-	s.delegator.distribution.Flush()
 	s.True(s.delegator.distribution.Serviceable())
 	// Test normal errors with retry and fail
 	worker1.ExpectedCalls = nil
@@ -586,7 +609,6 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			RowCount:    1,
 		},
 	}, 10)
-	s.delegator.distribution.Flush()
 	s.False(s.delegator.distribution.Serviceable(), "should retry and failed")
 
 	// refresh
@@ -610,7 +632,6 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		Version: time.Now().UnixNano(),
 	})
 	s.Require().NoError(err)
-	s.delegator.distribution.Flush()
 	s.True(s.delegator.distribution.Serviceable())
 
 	s.delegator.Close()
@@ -739,7 +760,6 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 		})
 
 		s.NoError(err)
-		s.delegator.distribution.Flush()
 		sealed, _ := s.delegator.GetSegmentInfo(false)
 		s.Require().Equal(1, len(sealed))
 		s.Equal(int64(1), sealed[0].NodeID)
@@ -1067,7 +1087,6 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		})
 
 		s.NoError(err)
-		s.delegator.distribution.Flush()
 		sealed, _ := s.delegator.GetSegmentInfo(false)
 		s.Require().Equal(1, len(sealed))
 		s.Equal(int64(1), sealed[0].NodeID)
@@ -1404,7 +1423,6 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 	})
 
 	s.Require().NoError(err)
-	s.delegator.distribution.Flush()
 	sealed, _ := s.delegator.GetSegmentInfo(false)
 	s.Require().Equal(1, len(sealed))
 	s.Require().Equal(1, len(sealed[0].Segments))
@@ -1794,7 +1812,6 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	})
 	s.Require().NoError(err)
 
-	s.delegator.distribution.Flush()
 	sealed, growing := s.delegator.GetSegmentInfo(false)
 	s.Require().Equal(1, len(sealed))
 	s.Equal(int64(1), sealed[0].NodeID)
