@@ -21,12 +21,17 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -399,6 +404,234 @@ func TestAzureObjectStorage(t *testing.T) {
 			err = testCM.RemoveObject(ctx, config.BucketName, dstKey)
 			assert.NoError(t, err)
 		})
+	})
+}
+
+func newAzureCopyTestStorage(t *testing.T, handler http.Handler) *AzureObjectStorage {
+	t.Helper()
+
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	client, err := service.NewClientWithNoCredential(server.URL, nil)
+	require.NoError(t, err)
+	return &AzureObjectStorage{Client: client}
+}
+
+func writeAzureCopyHeaders(w http.ResponseWriter, status blob.CopyStatusType, description string) {
+	w.Header().Set("ETag", `"etag"`)
+	w.Header().Set("Last-Modified", time.Now().UTC().Format(http.TimeFormat))
+	w.Header().Set("x-ms-copy-id", "copy-id")
+	w.Header().Set("x-ms-copy-status", string(status))
+	if description != "" {
+		w.Header().Set("x-ms-copy-status-description", description)
+	}
+}
+
+func TestAzureObjectStorageCopyStatus(t *testing.T) {
+	const (
+		bucketName = "bucket"
+		srcKey     = "src"
+		dstKey     = "dst"
+	)
+
+	t.Run("initial success", func(t *testing.T) {
+		var propertiesCalls atomic.Int32
+		storage := newAzureCopyTestStorage(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodPut:
+				writeAzureCopyHeaders(w, blob.CopyStatusTypeSuccess, "")
+				w.WriteHeader(http.StatusAccepted)
+			case http.MethodHead:
+				propertiesCalls.Add(1)
+				w.WriteHeader(http.StatusInternalServerError)
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+			}
+		}))
+
+		err := storage.CopyObject(context.Background(), bucketName, srcKey, dstKey)
+		require.NoError(t, err)
+		assert.Zero(t, propertiesCalls.Load())
+	})
+
+	t.Run("start copy failed", func(t *testing.T) {
+		storage := newAzureCopyTestStorage(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+		}))
+
+		err := storage.CopyObject(context.Background(), bucketName, srcKey, dstKey)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+	})
+
+	t.Run("context canceled before start", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		storage := newAzureCopyTestStorage(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+
+		err := storage.CopyObject(ctx, bucketName, srcKey, dstKey)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("missing initial status", func(t *testing.T) {
+		storage := newAzureCopyTestStorage(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("ETag", `"etag"`)
+			w.Header().Set("Last-Modified", time.Now().UTC().Format(http.TimeFormat))
+			w.Header().Set("x-ms-copy-id", "copy-id")
+			w.WriteHeader(http.StatusAccepted)
+		}))
+
+		err := storage.CopyObject(context.Background(), bucketName, srcKey, dstKey)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.ErrorContains(t, err, "status=unknown")
+	})
+
+	t.Run("pending then success", func(t *testing.T) {
+		var propertiesCalls atomic.Int32
+		storage := newAzureCopyTestStorage(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodPut:
+				writeAzureCopyHeaders(w, blob.CopyStatusTypePending, "")
+				w.WriteHeader(http.StatusAccepted)
+			case http.MethodHead:
+				propertiesCalls.Add(1)
+				writeAzureCopyHeaders(w, blob.CopyStatusTypeSuccess, "")
+				w.WriteHeader(http.StatusOK)
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+			}
+		}))
+
+		err := storage.CopyObject(context.Background(), bucketName, srcKey, dstKey)
+		require.NoError(t, err)
+		assert.Equal(t, int32(1), propertiesCalls.Load())
+	})
+
+	t.Run("pending twice then success", func(t *testing.T) {
+		var propertiesCalls atomic.Int32
+		storage := newAzureCopyTestStorage(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodPut:
+				writeAzureCopyHeaders(w, blob.CopyStatusTypePending, "")
+				w.WriteHeader(http.StatusAccepted)
+			case http.MethodHead:
+				if propertiesCalls.Add(1) == 1 {
+					writeAzureCopyHeaders(w, blob.CopyStatusTypePending, "")
+				} else {
+					writeAzureCopyHeaders(w, blob.CopyStatusTypeSuccess, "")
+				}
+				w.WriteHeader(http.StatusOK)
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+			}
+		}))
+
+		err := storage.CopyObject(context.Background(), bucketName, srcKey, dstKey)
+		require.NoError(t, err)
+		assert.Equal(t, int32(2), propertiesCalls.Load())
+	})
+
+	t.Run("get properties failed", func(t *testing.T) {
+		storage := newAzureCopyTestStorage(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodPut:
+				writeAzureCopyHeaders(w, blob.CopyStatusTypePending, "")
+				w.WriteHeader(http.StatusAccepted)
+			case http.MethodHead:
+				w.WriteHeader(http.StatusBadRequest)
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+			}
+		}))
+
+		err := storage.CopyObject(context.Background(), bucketName, srcKey, dstKey)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+	})
+
+	t.Run("pending then failed", func(t *testing.T) {
+		storage := newAzureCopyTestStorage(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodPut:
+				writeAzureCopyHeaders(w, blob.CopyStatusTypePending, "")
+				w.WriteHeader(http.StatusAccepted)
+			case http.MethodHead:
+				writeAzureCopyHeaders(w, blob.CopyStatusTypeFailed, "copy failed by service")
+				w.WriteHeader(http.StatusOK)
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+			}
+		}))
+
+		err := storage.CopyObject(context.Background(), bucketName, srcKey, dstKey)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.ErrorContains(t, err, "status=failed")
+		assert.ErrorContains(t, err, "copy failed by service")
+	})
+
+	t.Run("context canceled while pending", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		propertiesStarted := make(chan struct{})
+		storage := newAzureCopyTestStorage(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodPut:
+				writeAzureCopyHeaders(w, blob.CopyStatusTypePending, "")
+				w.WriteHeader(http.StatusAccepted)
+			case http.MethodHead:
+				close(propertiesStarted)
+				<-r.Context().Done()
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+			}
+		}))
+
+		go func() {
+			<-propertiesStarted
+			cancel()
+		}()
+
+		err := storage.CopyObject(ctx, bucketName, srcKey, dstKey)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("context canceled while waiting", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		propertiesReturned := make(chan struct{})
+		storage := newAzureCopyTestStorage(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodPut:
+				writeAzureCopyHeaders(w, blob.CopyStatusTypePending, "")
+				w.WriteHeader(http.StatusAccepted)
+			case http.MethodHead:
+				writeAzureCopyHeaders(w, blob.CopyStatusTypePending, "")
+				w.WriteHeader(http.StatusOK)
+				if flusher, ok := w.(http.Flusher); ok {
+					flusher.Flush()
+				}
+				close(propertiesReturned)
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+			}
+		}))
+
+		go func() {
+			<-propertiesReturned
+			time.Sleep(20 * time.Millisecond)
+			cancel()
+		}()
+
+		err := storage.CopyObject(ctx, bucketName, srcKey, dstKey)
+		require.ErrorIs(t, err, context.Canceled)
 	})
 }
 

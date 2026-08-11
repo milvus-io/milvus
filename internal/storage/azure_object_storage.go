@@ -204,6 +204,71 @@ func (AzureObjectStorage *AzureObjectStorage) CopyObject(ctx context.Context, bu
 	srcURL := srcBlobClient.URL()
 
 	// Start copy operation
-	_, err := dstBlobClient.StartCopyFromURL(ctx, srcURL, &blob.StartCopyFromURLOptions{})
-	return mapObjectStorageError(dstObjectName, err)
+	resp, err := dstBlobClient.StartCopyFromURL(ctx, srcURL, &blob.StartCopyFromURLOptions{})
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return mapObjectStorageError(dstObjectName, err)
+	}
+
+	copyID := ""
+	if resp.CopyID != nil {
+		copyID = *resp.CopyID
+	}
+
+	copyStatus := blob.CopyStatusType("")
+	if resp.CopyStatus != nil {
+		copyStatus = *resp.CopyStatus
+	}
+	copyStatusDescription := ""
+
+	if copyStatus == blob.CopyStatusTypePending {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+
+		for copyStatus == blob.CopyStatusTypePending {
+			props, err := dstBlobClient.GetProperties(ctx, &blob.GetPropertiesOptions{})
+			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
+				return mapObjectStorageError(dstObjectName, err)
+			}
+
+			copyStatus = blob.CopyStatusType("")
+			if props.CopyStatus != nil {
+				copyStatus = *props.CopyStatus
+			}
+			if props.CopyStatusDescription != nil {
+				copyStatusDescription = *props.CopyStatusDescription
+			}
+
+			if copyStatus != blob.CopyStatusTypePending {
+				break
+			}
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+			}
+		}
+	}
+
+	if copyStatus == blob.CopyStatusTypeSuccess {
+		return nil
+	}
+
+	status := string(copyStatus)
+	if status == "" {
+		status = "unknown"
+	}
+	return merr.WrapErrIoFailedMsg(
+		"Azure copy failed for %s: copyID=%s, status=%s, description=%s",
+		dstObjectName,
+		copyID,
+		status,
+		copyStatusDescription,
+	)
 }
