@@ -40,6 +40,7 @@
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
+#include "milvus-storage/common/extend_status.h"
 #include "segcore/async_load/AsyncLoadExecutor.h"
 #include "test_utils/Constants.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -417,8 +418,11 @@ class TrackingDelayedInputStream : public milvus::InputStream {
 
 class AsyncTrackingRandomAccessFile : public arrow::io::RandomAccessFile {
  public:
-    explicit AsyncTrackingRandomAccessFile(std::vector<uint8_t> content)
-        : content_(std::move(content)) {
+    explicit AsyncTrackingRandomAccessFile(
+        std::vector<uint8_t> content,
+        arrow::Status async_read_status = arrow::Status::OK())
+        : content_(std::move(content)),
+          async_read_status_(std::move(async_read_status)) {
     }
 
     arrow::Status
@@ -471,6 +475,11 @@ class AsyncTrackingRandomAccessFile : public arrow::io::RandomAccessFile {
               int64_t position,
               int64_t nbytes) override {
         async_read_calls_.fetch_add(1);
+        if (!async_read_status_.ok()) {
+            return arrow::Future<std::shared_ptr<arrow::Buffer>>::MakeFinished(
+                arrow::Result<std::shared_ptr<arrow::Buffer>>(
+                    async_read_status_));
+        }
         return arrow::Future<std::shared_ptr<arrow::Buffer>>::MakeFinished(
             MakeBuffer(position, nbytes));
     }
@@ -518,6 +527,7 @@ class AsyncTrackingRandomAccessFile : public arrow::io::RandomAccessFile {
     }
 
     std::vector<uint8_t> content_;
+    arrow::Status async_read_status_;
     int64_t position_{0};
     std::atomic<size_t> read_at_calls_{0};
     std::atomic<size_t> async_read_calls_{0};
@@ -1804,6 +1814,43 @@ TEST_F(IndexEntryWriterV3Test,
     EXPECT_EQ(remote_file_ptr->ReadAtCalls(), 0);
 }
 
+TEST_F(IndexEntryWriterV3Test,
+       ReadEntryStreamAsyncPreservesStorageErrorClassification) {
+    IndexEntryStreamConfigGuard guard;
+    const std::string file_path = kV3FilePath + "_stream_async_error_status";
+    auto data = GeneratePattern(kMinStreamSliceSize);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto remote_file = std::make_shared<AsyncTrackingRandomAccessFile>(
+        ReadLocalFileBytes(GetRootPath() + "/" + file_path),
+        milvus_storage::MakeExtendError(
+            milvus_storage::ExtendStatusCode::StorageTransientThrottling,
+            "storage throttled",
+            "retry later"));
+    std::shared_ptr<arrow::io::RandomAccessFile> arrow_file = remote_file;
+    auto input = std::make_shared<RemoteInputStream>(std::move(arrow_file));
+    auto reader = IndexEntryReader::Open(input, GetFileSize(file_path));
+
+    EntryStreamAsyncOptions options;
+    options.priority = milvus::proto::common::LoadPriority::HIGH;
+    options.slice_size = kMinStreamSliceSize;
+
+    try {
+        reader->ReadEntryStreamAsync(
+            "data", [](const uint8_t*, size_t) {}, options);
+        FAIL() << "expected storage error";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::StorageTransientError);
+    }
+    EXPECT_GT(remote_file->AsyncReadCalls(), 0);
+}
+
 TEST_F(IndexEntryWriterV3Test, ReadEntryToMemoryAsyncMatchesReadEntry) {
     IndexEntryStreamConfigGuard guard;
     const std::string file_path = kV3FilePath + "_stream_async_memory";
@@ -1860,6 +1907,65 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryToFileAsyncWritesEntry) {
 
     EXPECT_EQ(ReadLocalFileBytes(local_file), data);
     ::unlink(local_file.c_str());
+}
+
+TEST_F(IndexEntryWriterV3Test,
+       ReadEntryStreamAsyncCancellationWhileWaitingBudget) {
+    IndexEntryStreamConfigGuard guard;
+    const std::string file_path =
+        kV3FilePath + "_stream_async_cancel_budget_wait";
+    const size_t slice_size = kMinStreamSliceSize;
+    auto data = GeneratePattern(slice_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto& budget = TransientMemoryBudget::GetLoadTransientBudget();
+    budget.SetCapacityBytes(slice_size);
+    budget.Acquire(slice_size, TransientBudgetPriority::High);
+    auto cleanup = folly::makeGuard(
+        [&budget, slice_size]() { budget.Release(slice_size); });
+
+    folly::CancellationSource source;
+    auto input = CreateInputStream(file_path);
+    auto reader = IndexEntryReader::Open(
+        input, GetFileSize(file_path), 0, milvus::HIGH, source.getToken());
+
+    EntryStreamAsyncOptions options;
+    options.priority = milvus::proto::common::LoadPriority::HIGH;
+    options.slice_size = slice_size;
+
+    std::atomic<size_t> slice_count{0};
+    auto future = std::async(std::launch::async, [&]() {
+        reader->ReadEntryStreamAsync(
+            "data",
+            [&slice_count](const uint8_t*, size_t) {
+                slice_count.fetch_add(1);
+            },
+            options);
+    });
+
+    EXPECT_EQ(future.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    EXPECT_EQ(slice_count.load(), 0);
+
+    source.requestCancellation();
+
+    ASSERT_EQ(future.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    try {
+        future.get();
+        FAIL() << "expected cancellation";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::FollyCancel);
+    } catch (const std::exception& e) {
+        FAIL() << "unexpected cancellation exception: " << e.what();
+    }
+    EXPECT_EQ(slice_count.load(), 0);
 }
 
 TEST_F(IndexEntryWriterV3Test, ReadEntryStreamToFileWritesEntry) {

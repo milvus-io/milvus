@@ -64,14 +64,14 @@ class MilvusThreadPoolArrowExecutor final : public arrow::internal::Executor {
                  stop_callback_ptr]() mutable {
                     if (stop_token.IsStopRequested()) {
                         if (*stop_callback_ptr) {
-                            std::move(*stop_callback_ptr)(stop_token.Poll());
+                            std::move (*stop_callback_ptr)(stop_token.Poll());
                         }
                         return;
                     }
                     auto* previous_executor = current_executor_;
                     current_executor_ = this;
                     try {
-                        std::move(*task_ptr)();
+                        std::move (*task_ptr)();
                     } catch (...) {
                         current_executor_ = previous_executor;
                         throw;
@@ -131,14 +131,14 @@ class AsyncLoadDiskArrowExecutor final : public arrow::internal::Executor {
                            stop_callback_ptr]() mutable {
                 if (stop_token.IsStopRequested()) {
                     if (*stop_callback_ptr) {
-                        std::move(*stop_callback_ptr)(stop_token.Poll());
+                        std::move (*stop_callback_ptr)(stop_token.Poll());
                     }
                     return;
                 }
                 auto* previous_executor = current_executor_;
                 current_executor_ = this;
                 try {
-                    std::move(*task_ptr)();
+                    std::move (*task_ptr)();
                 } catch (...) {
                     current_executor_ = previous_executor;
                     throw;

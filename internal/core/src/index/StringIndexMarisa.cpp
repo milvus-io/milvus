@@ -57,6 +57,7 @@
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
 #include "segcore/async_load/AsyncLoadExecutor.h"
+#include "milvus-storage/common/extend_status.h"
 #include "storage/FileWriter.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/IndexEntryReader.h"
@@ -86,10 +87,9 @@ WriteMarisaSliceAsync(arrow::internal::Executor* executor,
                 return arrow::Status::OK();
             });
     auto status = std::move(write_future).get();
-    AssertInfo(status.ok(),
-               "Failed to write async marisa {} slice: {}",
-               entry_name,
-               status.ToString());
+    if (!status.ok()) {
+        throw milvus_storage::ToSegcoreError(status);
+    }
 }
 
 }  // namespace
@@ -919,7 +919,6 @@ StringIndexMarisa::LoadEntriesWithAsyncRead(
 
     storage::EntryStreamAsyncOptions read_options;
     read_options.priority = load_priority;
-    read_options.scheduler = &async_ctx.scheduler;
     read_options.localize_disk_executor =
         milvus::segcore::async_load::AsyncLoadDiskExecutor();
     read_options.trace_label = async_ctx.trace_label;

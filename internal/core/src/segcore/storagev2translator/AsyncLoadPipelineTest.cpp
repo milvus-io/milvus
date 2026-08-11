@@ -48,6 +48,7 @@
 #include "gtest/gtest.h"
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/reader.h"
+#include "segcore/async_load/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/FileWriter.h"
@@ -483,6 +484,32 @@ class AsyncLoadPipelineTest : public ::testing::Test {
         storage::TransientMemoryBudget::GetLoadTransientBudget();
     RecordingManualExecutor executor_;
 };
+
+TEST(AsyncLoadExecutorTest, DiskAndMaterializeExecutorsAreDistinct) {
+    auto* disk_executor = milvus::segcore::async_load::AsyncLoadDiskExecutor();
+    auto* materialize_executor =
+        milvus::segcore::async_load::AsyncLoadMaterializeExecutor();
+
+    ASSERT_NE(disk_executor, nullptr);
+    ASSERT_NE(materialize_executor, nullptr);
+    EXPECT_NE(disk_executor, materialize_executor);
+
+    auto disk_future =
+        milvus::segcore::async_load::SubmitAsyncLoadExecutorTask<bool>(
+            disk_executor, [disk_executor, materialize_executor] {
+                return disk_executor->OwnsThisThread() &&
+                       !materialize_executor->OwnsThisThread();
+            });
+    auto materialize_future =
+        milvus::segcore::async_load::SubmitAsyncLoadExecutorTask<bool>(
+            materialize_executor, [disk_executor, materialize_executor] {
+                return materialize_executor->OwnsThisThread() &&
+                       !disk_executor->OwnsThisThread();
+            });
+
+    EXPECT_TRUE(std::move(disk_future).get());
+    EXPECT_TRUE(std::move(materialize_future).get());
+}
 
 TEST_F(AsyncLoadPipelineTest, BuildsContiguousReadWindows) {
     std::vector<CellSpec> cells{

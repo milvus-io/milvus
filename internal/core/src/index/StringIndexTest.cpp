@@ -36,7 +36,6 @@
 #include "knowhere/dataset.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
-#include "segcore/async_load/AsyncLoadScheduler.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -120,6 +119,7 @@ struct MarisaAsyncLoadFixture {
 }  // namespace
 
 TEST(StringIndexMarisaV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
     MarisaAsyncLoadFixture fixture("marisa_async_memory");
     std::vector<std::string> data{"delta", "alpha", "charlie", "bravo"};
 
@@ -136,12 +136,9 @@ TEST(StringIndexMarisaV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
     ExposedStringIndexMarisa load_index(fixture.ctx);
     Config config;
     config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
-    milvus::segcore::async_load::LoadAdmissionScheduler scheduler(
-        {/*total_bytes=*/0, /*high_reserved_bytes=*/0});
     milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
         nullptr,
         milvus::proto::common::LoadPriority::HIGH,
-        scheduler,
         "marisa_async_memory"};
 
     load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);
@@ -164,6 +161,7 @@ TEST(StringIndexMarisaV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
 }
 
 TEST(StringIndexMarisaV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
     MarisaAsyncLoadFixture fixture("marisa_async_mmap");
     std::vector<std::string> data{"zero", "one", "two", "three", "four"};
 
@@ -181,12 +179,9 @@ TEST(StringIndexMarisaV3AsyncLoadTest, MmapPathUsesAsyncEntryReads) {
     Config config;
     config[milvus::index::MMAP_FILE_PATH] = fixture.root_path + "/mmap/marisa";
     config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
-    milvus::segcore::async_load::LoadAdmissionScheduler scheduler(
-        {/*total_bytes=*/0, /*high_reserved_bytes=*/0});
     milvus::index::ScalarIndexV3AsyncLoadContext async_ctx{
         nullptr,
         milvus::proto::common::LoadPriority::HIGH,
-        scheduler,
         "marisa_async_mmap"};
 
     load_index.LoadEntriesWithAsyncReadForTest(*reader, config, async_ctx);

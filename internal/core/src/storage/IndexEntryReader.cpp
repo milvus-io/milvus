@@ -36,6 +36,7 @@
 #include "arrow/result.h"
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
+#include "folly/coro/BlockingWait.h"
 #include "folly/futures/Future.h"
 #include "folly/futures/Promise.h"
 #include "milvus-storage/common/extend_status.h"
@@ -70,12 +71,11 @@ struct PendingAsyncAdmission {
     size_t seq{0};
     size_t budget_bytes{0};
     size_t read_bytes{0};
-    folly::SemiFuture<TransientBudgetLease> future;
+    folly::coro::Future<TransientBudgetLease> future;
 };
 
 TransientBudgetPriority
-TransientPriorityForLoad(
-    milvus::proto::common::LoadPriority load_priority) {
+TransientPriorityForLoad(milvus::proto::common::LoadPriority load_priority) {
     return load_priority == milvus::proto::common::LoadPriority::LOW
                ? TransientBudgetPriority::Low
                : TransientBudgetPriority::High;
@@ -483,11 +483,10 @@ ReadOrderedEntryStreamAsync(
             seq,
             budget_bytes,
             slice_read_bytes(seq),
-            TransientMemoryBudget::GetLoadTransientBudget()
-                .AcquireAsync(budget_bytes,
-                              TransientPriorityForLoad(priority),
-                              cancellation_token)
-                .semi()};
+            TransientMemoryBudget::GetLoadTransientBudget().AcquireAsync(
+                budget_bytes,
+                TransientPriorityForLoad(priority),
+                cancellation_token)};
     };
 
     auto startPendingAdmission = [&](bool block_for_budget) -> bool {
@@ -504,9 +503,11 @@ ReadOrderedEntryStreamAsync(
 
         TransientBudgetLease lease;
         try {
-            lease = std::move(pending.future).get();
+            lease = folly::coro::blockingWait(std::move(pending.future));
         } catch (...) {
-            rememberError(std::current_exception());
+            if (!rememberCancellation()) {
+                rememberError(std::current_exception());
+            }
             return false;
         }
 
