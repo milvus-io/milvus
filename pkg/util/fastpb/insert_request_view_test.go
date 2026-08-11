@@ -99,6 +99,77 @@ func TestInsertRequestViewCursor_AggregatesPackedScalarsExactly(t *testing.T) {
 	assert.True(t, proto.Equal(expected, actual))
 }
 
+func TestInsertRequestViewCursor_AggregatesSimpleVectorsExactly(t *testing.T) {
+	const (
+		rowCount = 64
+		dim      = 16
+	)
+	rows, rowIDs, timestamps := benchmarkInsertRows(rowCount)
+	floatValues := make([]float32, rowCount*dim)
+	byteValues := make([]byte, rowCount*dim)
+	binaryValues := make([]byte, rowCount*dim/8)
+	for i := range floatValues {
+		floatValues[i] = float32(i)
+	}
+	for i := range byteValues {
+		byteValues[i] = byte(i)
+	}
+	for i := range binaryValues {
+		binaryValues[i] = byte(i)
+	}
+
+	wideBytes := make([]byte, rowCount*dim*2)
+	fields := map[string]*schemapb.FieldData{
+		"binary":   vectorField(1, schemapb.DataType_BinaryVector, dim, &schemapb.VectorField_BinaryVector{BinaryVector: binaryValues}, nil),
+		"float":    vectorField(1, schemapb.DataType_FloatVector, dim, &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: floatValues}}, nil),
+		"float16":  vectorField(1, schemapb.DataType_Float16Vector, dim, &schemapb.VectorField_Float16Vector{Float16Vector: wideBytes}, nil),
+		"bfloat16": vectorField(1, schemapb.DataType_BFloat16Vector, dim, &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: wideBytes}, nil),
+		"int8":     vectorField(1, schemapb.DataType_Int8Vector, dim, &schemapb.VectorField_Int8Vector{Int8Vector: byteValues}, nil),
+	}
+
+	for name, field := range fields {
+		t.Run(name, func(t *testing.T) {
+			source := &msgpb.InsertRequest{NumRows: rowCount, RowIDs: rowIDs, Timestamps: timestamps, FieldsData: []*schemapb.FieldData{field}}
+			limit := proto.Size(materializeWithAppendFieldData(insertViewTemplate(), source, rows[:17]))
+			assertCursorExactSplits(t, insertViewTemplate(), source, rows, limit)
+		})
+	}
+}
+
+func TestInsertRequestViewCursor_AggregatesSparseVectorExactly(t *testing.T) {
+	const rowCount = 64
+	rows, rowIDs, timestamps := benchmarkInsertRows(rowCount)
+	contents := make([][]byte, rowCount)
+	for row := range contents {
+		contents[row] = sparseTestRow(uint32(row + 1))
+	}
+	source := &msgpb.InsertRequest{
+		NumRows: rowCount, RowIDs: rowIDs, Timestamps: timestamps,
+		FieldsData: []*schemapb.FieldData{vectorField(1, schemapb.DataType_SparseFloatVector, 1024,
+			&schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Dim: 1024, Contents: contents}}, nil)},
+	}
+	limit := proto.Size(materializeWithAppendFieldData(insertViewTemplate(), source, rows[:17]))
+	assertCursorExactSplits(t, insertViewTemplate(), source, rows, limit)
+}
+
+func TestInsertRequestViewEncoder_VectorArrayCellPlans(t *testing.T) {
+	unknown := protowire.AppendVarint(protowire.AppendTag(nil, 99, protowire.VarintType), 7)
+	fallback := &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{3, 4}}}}
+	fallback.ProtoReflect().SetUnknown(unknown)
+	cells := []*schemapb.VectorField{
+		{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}}},
+		fallback,
+		nil,
+		{Dim: 2},
+	}
+	source := &msgpb.InsertRequest{
+		NumRows: 4, RowIDs: []int64{1, 2, 3, 4}, Timestamps: []uint64{10, 20, 30, 40},
+		FieldsData: []*schemapb.FieldData{vectorField(1, schemapb.DataType_ArrayOfVector, 2,
+			&schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{Dim: 2, ElementType: schemapb.DataType_FloatVector, Data: cells}}, nil)},
+	}
+	assertViewMatchesMaterialized(t, insertViewTemplate(), source, []int{0, 1, 2, 3})
+}
+
 func TestInsertRequestViewEncoder_DifferentialNilRepeatedMessages(t *testing.T) {
 	template := insertViewTemplate()
 	source := insertViewAllRepackTypesSource()
@@ -715,6 +786,36 @@ func assertViewMatchesMaterialized(t *testing.T, template, source *msgpb.InsertR
 	got := encodeAndDecodeInsertView(t, template, source, rows)
 	require.True(t, proto.Equal(expected, got), "view encoding mismatch\nrows:     %v\nexpected: %v\nactual:   %v", rows, expected, got)
 	assert.Equal(t, proto.Size(expected), proto.Size(got))
+}
+
+func assertCursorExactSplits(t *testing.T, template, source *msgpb.InsertRequest, rows []int, limit int) {
+	t.Helper()
+	oracleSource := proto.Clone(source).(*msgpb.InsertRequest)
+	cursor, err := NewInsertRequestViewCursor(source)
+	require.NoError(t, err)
+	for start := 0; start < len(rows); {
+		encoder, consumed, err := cursor.NextEncoder(template, rows[start:], limit)
+		require.NoError(t, err)
+		selection := rows[start : start+consumed]
+		size, err := encoder.EncodedSize()
+		require.NoError(t, err)
+		if consumed > 1 {
+			require.Less(t, size, limit)
+		}
+		payload := make([]byte, size)
+		_, err = encoder.MarshalTo(payload)
+		require.NoError(t, err)
+		actual := &msgpb.InsertRequest{}
+		require.NoError(t, proto.Unmarshal(payload, actual))
+		expected := materializeWithAppendFieldData(template, oracleSource, selection)
+		require.True(t, proto.Equal(expected, actual), "selection=%v", selection)
+		if next := start + consumed; next < len(rows) {
+			candidate := append(append([]int(nil), selection...), rows[next])
+			candidateSize := proto.Size(materializeWithAppendFieldData(template, oracleSource, candidate))
+			require.GreaterOrEqual(t, candidateSize, limit, "selection=%v next=%d", selection, rows[next])
+		}
+		start += consumed
+	}
 }
 
 func encodeAndDecodeInsertView(t *testing.T, template, source *msgpb.InsertRequest, rows []int) *msgpb.InsertRequest {

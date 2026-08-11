@@ -49,9 +49,9 @@ const (
 )
 
 // insertFieldSizeState keeps aggregate protobuf payload sizes and the ordinal
-// of an ARRAY field in the request-level row-major token arena. It never owns
-// row data. Aggregate sizes are flattened into the replay plan; ARRAY tokens
-// remain cursor scratch that InsertRequestViewEncoder borrows during MarshalTo.
+// of an ARRAY/ArrayOfVector field in the request-level row-major token arena.
+// It never owns row data. Aggregate sizes are flattened into the replay plan;
+// nested-cell tokens remain cursor scratch borrowed during MarshalTo.
 type insertFieldSizeState struct {
 	field            *schemapb.FieldData
 	class            insertFieldPlanClass
@@ -64,6 +64,8 @@ type insertFieldSizeState struct {
 	selectedRows     int
 	sparseDim        int64
 	stride           int
+	payloadStride    int
+	upperSparseDim   int64
 	compactVector    bool
 	arrayOrdinal     int
 }
@@ -81,6 +83,21 @@ type insertFieldComputedSize struct {
 	payloadSize  int
 	selectedRows int
 	sparseDim    int
+}
+
+type vectorArrayCellPlanKind uint8
+
+const (
+	vectorArrayCellPlanEmpty vectorArrayCellPlanKind = iota
+	vectorArrayCellPlanFloat
+	vectorArrayCellProtoFallback = -1
+)
+
+type vectorArrayCellPlan struct {
+	kind           vectorArrayCellPlanKind
+	payloadSize    int
+	floatArraySize int
+	cellSize       int
 }
 
 type insertRequestSizeState struct {
@@ -103,7 +120,7 @@ type insertRequestSizeState struct {
 	arrayFieldCount          int
 }
 
-func (s *insertRequestSizeState) reset(template, source *msgpb.InsertRequest) error {
+func (s *insertRequestSizeState) reset(template, source *msgpb.InsertRequest, selectedRowCapacity int) error {
 	if template == nil {
 		return insertViewInternal("nil output template")
 	}
@@ -136,9 +153,19 @@ func (s *insertRequestSizeState) reset(template, source *msgpb.InsertRequest) er
 		if err := s.fields[i].reset(field); err != nil {
 			return err
 		}
-		if s.fields[i].valuePlan == insertFieldValueScalarArray {
+		if s.fields[i].valuePlan == insertFieldValueScalarArray || s.fields[i].valuePlan == insertFieldValueVectorArray {
 			s.fields[i].arrayOrdinal = s.arrayFieldCount
 			s.arrayFieldCount++
+		}
+	}
+	if s.arrayFieldCount > 0 {
+		expectedPayloads, err := checkedProduct(selectedRowCapacity, s.arrayFieldCount, "nested cell payload scratch")
+		if err != nil {
+			return err
+		}
+		const maxPreallocatedCellPayloads = 1 << 20
+		if expectedPayloads <= maxPreallocatedCellPayloads && cap(arrayCellPayloads) < expectedPayloads {
+			arrayCellPayloads = make([]int, 0, expectedPayloads)
 		}
 	}
 
@@ -207,51 +234,71 @@ func (s *insertRequestSizeState) validateRow(row int) error {
 	return nil
 }
 
-// aggregatePackedScalarRows sizes a selection field-major when its shape is
-// simple enough to calculate directly. This avoids rebuilding every enclosing
-// protobuf wrapper once per row for the common small-scalar case.
-func (s *insertRequestSizeState) aggregatePackedScalarRows(rows []int, previous, sizeLimit int) (bool, error) {
+// aggregateSimpleRows commits a prefix whose conservative wire-size upper
+// bound fits. The remaining boundary rows still use exact incremental sizing.
+func (s *insertRequestSizeState) aggregateSimpleRows(rows []int, previous, sizeLimit int) (int, error) {
 	for i := range s.fields {
 		field := &s.fields[i]
 		if field.class == insertFieldPlanNone {
 			continue
 		}
-		if field.class != insertFieldPlanScalar ||
-			(field.valuePlan != insertFieldValueScalarEmpty && field.valuePlan != insertFieldValueScalarPacked) {
-			return false, nil
+		if field.class == insertFieldPlanScalar &&
+			(field.valuePlan == insertFieldValueScalarEmpty || field.valuePlan == insertFieldValueScalarPacked) {
+			continue
 		}
+		if field.class == insertFieldPlanVector && !field.compactVector &&
+			(field.valuePlan == insertFieldValueVectorEmpty || field.valuePlan == insertFieldValueVectorDenseBytes ||
+				field.valuePlan == insertFieldValueVectorFloat || field.valuePlan == insertFieldValueVectorSparse) {
+			continue
+		}
+		return 0, nil
 	}
 
+	prefixCount := len(rows)
 	if sizeLimit > 0 {
-		upperBound, err := s.packedScalarUpperBound(len(rows))
-		if err != nil {
-			return false, err
+		if err := s.prepareSimpleUpperBounds(rows); err != nil {
+			return 0, err
 		}
-		if upperBound >= sizeLimit {
-			return false, nil
+		low, high := 0, len(rows)
+		for low < high {
+			middle := low + (high-low+1)/2
+			upperBound, err := s.simpleRowsUpperBound(middle)
+			if err != nil {
+				return 0, err
+			}
+			if upperBound < sizeLimit {
+				low = middle
+			} else {
+				high = middle - 1
+			}
 		}
+		prefixCount = low
 	}
+	if prefixCount == 0 {
+		return 0, nil
+	}
+	selected := rows[:prefixCount]
 
-	for i, row := range rows {
+	for i, row := range selected {
 		if row < 0 {
-			return false, insertViewInternal("row offset at selection index %d is negative: %d", i, row)
+			return 0, insertViewInternal("row offset at selection index %d is negative: %d", i, row)
 		}
 		if row <= previous {
-			return false, insertViewInternal("cursor row offsets must be globally increasing: rows[%d]=%d after %d", i, row, previous)
+			return 0, insertViewInternal("cursor row offsets must be globally increasing: rows[%d]=%d after %d", i, row, previous)
 		}
 		if err := s.validateRow(row); err != nil {
-			return false, err
+			return 0, err
 		}
 		previous = row
 	}
 
-	rowCount := len(rows)
+	rowCount := len(selected)
 	if _, err := checkedProduct(rowCount, 10, "timestamp payload upper bound"); err != nil {
-		return false, err
+		return 0, err
 	}
 	timestampPayload := 0
 	rowIDPayload := 0
-	for _, row := range rows {
+	for _, row := range selected {
 		timestampPayload += protowire.SizeVarint(s.source.GetTimestamps()[row])
 		rowIDPayload += protowire.SizeVarint(uint64(s.source.GetRowIDs()[row]))
 	}
@@ -259,48 +306,50 @@ func (s *insertRequestSizeState) aggregatePackedScalarRows(rows []int, previous,
 	total := s.fixedSize
 	timestampWireSize, err := insertBytesFieldSize(10, timestampPayload)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	total, err = checkedAddSize(total, timestampWireSize, "insert request size")
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	rowIDWireSize, err := insertBytesFieldSize(11, rowIDPayload)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	total, err = checkedAddSize(total, rowIDWireSize, "insert request size")
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 
 	for i := range s.fields {
 		field := &s.fields[i]
-		payloadSize, err := field.aggregatePackedScalarPayload(rows)
+		payloadSize, selectedRows, sparseDim, err := field.aggregateSimplePayload(selected)
 		if err != nil {
-			return false, err
+			return 0, err
 		}
 		field.payloadSize = payloadSize
+		field.selectedRows = selectedRows
+		field.sparseDim = sparseDim
 		computed, err := field.computedSize(nil, rowCount)
 		if err != nil {
-			return false, err
+			return 0, err
 		}
 		fieldWireSize, err := insertBytesFieldSize(13, computed.fieldSize)
 		if err != nil {
-			return false, err
+			return 0, err
 		}
 		field.wireSize = fieldWireSize
 		field.previewWireSize = fieldWireSize
 		total, err = checkedAddSize(total, fieldWireSize, "insert request size")
 		if err != nil {
-			return false, err
+			return 0, err
 		}
 	}
 
 	numRowsWireSize := insertProto3VarintFieldSize(14, uint64(rowCount))
 	total, err = checkedAddSize(total, numRowsWireSize, "insert request size")
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 
 	s.rowCount = rowCount
@@ -313,10 +362,10 @@ func (s *insertRequestSizeState) aggregatePackedScalarRows(rows []int, previous,
 	s.numRowsWireSize = numRowsWireSize
 	s.previewNumRowsWireSize = numRowsWireSize
 	s.encodedSize = total
-	return true, nil
+	return prefixCount, nil
 }
 
-func (s *insertRequestSizeState) packedScalarUpperBound(rowCount int) (int, error) {
+func (s *insertRequestSizeState) simpleRowsUpperBound(rowCount int) (int, error) {
 	packedPayload, err := checkedProduct(rowCount, 10, "packed request column upper bound")
 	if err != nil {
 		return 0, err
@@ -334,11 +383,11 @@ func (s *insertRequestSizeState) packedScalarUpperBound(rowCount int) (int, erro
 	}
 	for i := range s.fields {
 		field := &s.fields[i]
-		maxPayload, err := field.packedScalarPayloadUpperBound(rowCount)
+		maxPayload, selectedRows, sparseDim, err := field.simplePayloadUpperBound(rowCount)
 		if err != nil {
 			return 0, err
 		}
-		computed, err := field.computedSize(&insertFieldRowDelta{payloadSize: maxPayload}, rowCount)
+		computed, err := field.computedSize(&insertFieldRowDelta{payloadSize: maxPayload, selectedRows: selectedRows, sparseDim: sparseDim}, rowCount)
 		if err != nil {
 			return 0, err
 		}
@@ -352,6 +401,40 @@ func (s *insertRequestSizeState) packedScalarUpperBound(rowCount int) (int, erro
 		}
 	}
 	return checkedAddSize(total, insertProto3VarintFieldSize(14, uint64(rowCount)), "insert request size upper bound")
+}
+
+func (s *insertRequestSizeState) prepareSimpleUpperBounds(rows []int) error {
+	for i := range s.fields {
+		field := &s.fields[i]
+		if field.valuePlan != insertFieldValueVectorSparse {
+			continue
+		}
+		values := field.field.GetVectors().GetSparseFloatVector().GetContents()
+		maxWireSize := 0
+		maxDim := int64(0)
+		for _, row := range rows {
+			if row < 0 || row >= len(values) {
+				return insertViewInternal("sparse vector row %d exceeds payload rows %d for field %q (%d)", row, len(values), field.field.GetFieldName(), field.field.GetFieldId())
+			}
+			rowDim, err := sparseRowDim(values[row])
+			if err != nil {
+				return err
+			}
+			wireSize := directBytesFieldSize(1, uint64(len(values[row])))
+			if wireSize > uint64(math.MaxInt) {
+				return insertViewInternal("sparse vector row payload exceeds addressable memory")
+			}
+			if int(wireSize) > maxWireSize {
+				maxWireSize = int(wireSize)
+			}
+			if rowDim > maxDim {
+				maxDim = rowDim
+			}
+		}
+		field.payloadStride = maxWireSize
+		field.upperSparseDim = maxDim
+	}
+	return nil
 }
 
 func (s *insertRequestSizeState) previewSize(row int, deltas []insertFieldRowDelta) (int, error) {
@@ -383,13 +466,19 @@ func (s *insertRequestSizeState) previewSize(row int, deltas []insertFieldRowDel
 	wireDelta += uint64(rowIDWireSize - s.rowIDWireSize)
 
 	for i := range s.fields {
-		computed, err := s.fields[i].computedSize(&deltas[i], newRowCount)
+		fieldWireSize, direct, err := s.fields[i].directWireSize(&deltas[i], newRowCount)
 		if err != nil {
 			return 0, err
 		}
-		fieldWireSize, err := insertBytesFieldSize(13, computed.fieldSize)
-		if err != nil {
-			return 0, err
+		if !direct {
+			computed, err := s.fields[i].computedSize(&deltas[i], newRowCount)
+			if err != nil {
+				return 0, err
+			}
+			fieldWireSize, err = insertBytesFieldSize(13, computed.fieldSize)
+			if err != nil {
+				return 0, err
+			}
 		}
 		s.fields[i].previewWireSize = fieldWireSize
 		if fieldWireSize < s.fields[i].wireSize {
@@ -635,7 +724,7 @@ func (s *insertFieldSizeState) resetVector(vector *schemapb.VectorField) error {
 		if err != nil {
 			return err
 		}
-		s.valuePlan, s.valueFieldNumber, s.stride = insertFieldValueVectorDenseBytes, 3, stride
+		s.valuePlan, s.valueFieldNumber, s.stride, s.payloadStride = insertFieldValueVectorDenseBytes, 3, stride, stride
 	case *schemapb.VectorField_FloatVector:
 		if value.FloatVector == nil {
 			return insertViewInternal("field %q (%d) has a nil float vector payload", s.field.GetFieldName(), s.field.GetFieldId())
@@ -644,19 +733,23 @@ func (s *insertFieldSizeState) resetVector(vector *schemapb.VectorField) error {
 		if err != nil {
 			return err
 		}
-		s.valuePlan, s.valueFieldNumber, s.stride = insertFieldValueVectorFloat, 2, stride
+		payloadStride, err := checkedProduct(stride, 4, "float vector row payload")
+		if err != nil {
+			return err
+		}
+		s.valuePlan, s.valueFieldNumber, s.stride, s.payloadStride = insertFieldValueVectorFloat, 2, stride, payloadStride
 	case *schemapb.VectorField_Float16Vector:
 		stride, err := denseVectorStride(vector.GetDim(), 2, "float16 vector")
 		if err != nil {
 			return err
 		}
-		s.valuePlan, s.valueFieldNumber, s.stride = insertFieldValueVectorDenseBytes, 4, stride
+		s.valuePlan, s.valueFieldNumber, s.stride, s.payloadStride = insertFieldValueVectorDenseBytes, 4, stride, stride
 	case *schemapb.VectorField_Bfloat16Vector:
 		stride, err := denseVectorStride(vector.GetDim(), 2, "bfloat16 vector")
 		if err != nil {
 			return err
 		}
-		s.valuePlan, s.valueFieldNumber, s.stride = insertFieldValueVectorDenseBytes, 5, stride
+		s.valuePlan, s.valueFieldNumber, s.stride, s.payloadStride = insertFieldValueVectorDenseBytes, 5, stride, stride
 	case *schemapb.VectorField_SparseFloatVector:
 		if value.SparseFloatVector == nil {
 			return insertViewInternal("field %q (%d) has a nil sparse vector payload", s.field.GetFieldName(), s.field.GetFieldId())
@@ -667,7 +760,7 @@ func (s *insertFieldSizeState) resetVector(vector *schemapb.VectorField) error {
 		if err != nil {
 			return err
 		}
-		s.valuePlan, s.valueFieldNumber, s.stride = insertFieldValueVectorDenseBytes, 7, stride
+		s.valuePlan, s.valueFieldNumber, s.stride, s.payloadStride = insertFieldValueVectorDenseBytes, 7, stride, stride
 	case *schemapb.VectorField_VectorArray:
 		if value.VectorArray == nil {
 			return insertViewInternal("nil ArrayOfVector payload")
@@ -795,6 +888,102 @@ func (s *insertFieldSizeState) packedScalarPayloadUpperBound(rowCount int) (int,
 	return checkedProduct(rowCount, width, "packed scalar payload upper bound")
 }
 
+func (s *insertFieldSizeState) simplePayloadUpperBound(rowCount int) (int, int, int64, error) {
+	switch s.class {
+	case insertFieldPlanNone:
+		return 0, 0, 0, nil
+	case insertFieldPlanScalar:
+		payloadSize, err := s.packedScalarPayloadUpperBound(rowCount)
+		return payloadSize, 0, 0, err
+	case insertFieldPlanVector:
+		switch s.valuePlan {
+		case insertFieldValueVectorEmpty:
+			return 0, 0, 0, nil
+		case insertFieldValueVectorDenseBytes, insertFieldValueVectorFloat:
+			payloadSize, err := checkedProduct(rowCount, s.payloadStride, "dense vector payload upper bound")
+			return payloadSize, rowCount, 0, err
+		case insertFieldValueVectorSparse:
+			payloadSize, err := checkedProduct(rowCount, s.payloadStride, "sparse vector payload upper bound")
+			return payloadSize, rowCount, s.upperSparseDim, err
+		}
+	}
+	return 0, 0, 0, insertViewInternal("field %q (%d) is not eligible for simple aggregate sizing", s.field.GetFieldName(), s.field.GetFieldId())
+}
+
+func (s *insertFieldSizeState) aggregateSimplePayload(rows []int) (int, int, int64, error) {
+	switch s.class {
+	case insertFieldPlanNone:
+		return 0, 0, 0, nil
+	case insertFieldPlanScalar:
+		payloadSize, err := s.aggregatePackedScalarPayload(rows)
+		return payloadSize, 0, 0, err
+	case insertFieldPlanVector:
+		switch s.valuePlan {
+		case insertFieldValueVectorEmpty:
+			return 0, 0, 0, nil
+		case insertFieldValueVectorDenseBytes, insertFieldValueVectorFloat:
+			if err := s.validateDenseVectorRows(rows); err != nil {
+				return 0, 0, 0, err
+			}
+			payloadSize, err := checkedProduct(len(rows), s.payloadStride, "dense vector selected payload")
+			return payloadSize, len(rows), 0, err
+		case insertFieldValueVectorSparse:
+			values := s.field.GetVectors().GetSparseFloatVector().GetContents()
+			payloadSize := uint64(0)
+			maxDim := int64(0)
+			for _, row := range rows {
+				if row < 0 || row >= len(values) {
+					return 0, 0, 0, insertViewInternal("sparse vector row %d exceeds payload rows %d for field %q (%d)", row, len(values), s.field.GetFieldName(), s.field.GetFieldId())
+				}
+				rowDim, err := sparseRowDim(values[row])
+				if err != nil {
+					return 0, 0, 0, err
+				}
+				wireSize := directBytesFieldSize(1, uint64(len(values[row])))
+				if payloadSize > math.MaxUint64-wireSize {
+					return 0, 0, 0, insertViewInternal("sparse vector selected payload exceeds addressable memory")
+				}
+				payloadSize += wireSize
+				if rowDim > maxDim {
+					maxDim = rowDim
+				}
+			}
+			if payloadSize > uint64(math.MaxInt) {
+				return 0, 0, 0, insertViewInternal("sparse vector selected payload exceeds addressable memory")
+			}
+			return int(payloadSize), len(rows), maxDim, nil
+		}
+	}
+	return 0, 0, 0, insertViewInternal("field %q (%d) is not eligible for simple aggregate sizing", s.field.GetFieldName(), s.field.GetFieldId())
+}
+
+func (s *insertFieldSizeState) validateDenseVectorRows(rows []int) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	lastRow := rows[len(rows)-1]
+	vector := s.field.GetVectors()
+	switch value := vector.Data.(type) {
+	case *schemapb.VectorField_BinaryVector:
+		_, _, err := vectorBounds(lastRow, s.stride, len(value.BinaryVector), s.field, "binary vector")
+		return err
+	case *schemapb.VectorField_FloatVector:
+		_, _, err := vectorBounds(lastRow, s.stride, len(value.FloatVector.GetData()), s.field, "float vector")
+		return err
+	case *schemapb.VectorField_Float16Vector:
+		_, _, err := vectorBounds(lastRow, s.stride, len(value.Float16Vector), s.field, "float16 vector")
+		return err
+	case *schemapb.VectorField_Bfloat16Vector:
+		_, _, err := vectorBounds(lastRow, s.stride, len(value.Bfloat16Vector), s.field, "bfloat16 vector")
+		return err
+	case *schemapb.VectorField_Int8Vector:
+		_, _, err := vectorBounds(lastRow, s.stride, len(value.Int8Vector), s.field, "int8 vector")
+		return err
+	default:
+		return insertViewInternal("field %q (%d) has unexpected simple vector payload %T", s.field.GetFieldName(), s.field.GetFieldId(), value)
+	}
+}
+
 func (s *insertFieldSizeState) aggregatePackedScalarPayload(rows []int) (int, error) {
 	if _, err := s.packedScalarPayloadUpperBound(len(rows)); err != nil {
 		return 0, err
@@ -883,11 +1072,7 @@ func (s *insertFieldSizeState) previewVectorRow(vector *schemapb.VectorField, ro
 		if _, _, err := vectorBounds(dataIndex, s.stride, len(value.FloatVector.GetData()), s.field, "float vector"); err != nil {
 			return err
 		}
-		payloadSize, err := checkedProduct(s.stride, 4, "float vector row payload")
-		if err != nil {
-			return err
-		}
-		delta.payloadSize, delta.selectedRows = payloadSize, 1
+		delta.payloadSize, delta.selectedRows = s.payloadStride, 1
 	case *schemapb.VectorField_Float16Vector:
 		if _, _, err := vectorBounds(dataIndex, s.stride, len(value.Float16Vector), s.field, "float16 vector"); err != nil {
 			return err
@@ -921,16 +1106,78 @@ func (s *insertFieldSizeState) previewVectorRow(vector *schemapb.VectorField, ro
 		if row >= len(value.VectorArray.GetData()) {
 			return insertViewInternal("row offset %d exceeds ArrayOfVector length %d", row, len(value.VectorArray.GetData()))
 		}
-		itemSize := nullableProtoSize(value.VectorArray.GetData()[row], false)
+		itemSize, cellPayload, err := vectorArrayCellWirePlan(value.VectorArray.GetData()[row])
+		if err != nil {
+			return err
+		}
 		wireSize, err := insertBytesFieldSize(2, itemSize)
 		if err != nil {
 			return err
 		}
 		delta.payloadSize = wireSize
+		delta.arrayCellPayload = cellPayload
 	default:
 		return insertViewInternal("field %q (%d) has unsupported VectorField oneof %T", s.field.GetFieldName(), s.field.GetFieldId(), value)
 	}
 	return nil
+}
+
+func vectorArrayCellWirePlan(cell *schemapb.VectorField) (int, int, error) {
+	plan, ok, err := classifyVectorArrayCell(cell)
+	if err != nil {
+		return 0, 0, err
+	}
+	if ok {
+		return plan.cellSize, plan.payloadSize, nil
+	}
+	return nullableProtoSize(cell, false), vectorArrayCellProtoFallback, nil
+}
+
+func classifyVectorArrayCell(cell *schemapb.VectorField) (vectorArrayCellPlan, bool, error) {
+	if isNilProto(cell) {
+		return vectorArrayCellPlan{}, true, nil
+	}
+	if len(cell.ProtoReflect().GetUnknown()) != 0 {
+		return vectorArrayCellPlan{}, false, nil
+	}
+	plan := vectorArrayCellPlan{
+		kind:     vectorArrayCellPlanEmpty,
+		cellSize: insertProto3VarintFieldSize(1, uint64(cell.GetDim())),
+	}
+	switch value := cell.Data.(type) {
+	case nil:
+		return plan, true, nil
+	case *schemapb.VectorField_FloatVector:
+		if value.FloatVector == nil || len(value.FloatVector.ProtoReflect().GetUnknown()) != 0 {
+			return vectorArrayCellPlan{}, false, nil
+		}
+		payloadSize, err := checkedProduct(len(value.FloatVector.GetData()), 4, "ArrayOfVector float cell payload")
+		if err != nil {
+			return vectorArrayCellPlan{}, false, err
+		}
+		floatArraySize := 0
+		if payloadSize > 0 {
+			floatArraySize, err = insertBytesFieldSize(1, payloadSize)
+			if err != nil {
+				return vectorArrayCellPlan{}, false, err
+			}
+		}
+		floatWireSize, err := insertBytesFieldSize(2, floatArraySize)
+		if err != nil {
+			return vectorArrayCellPlan{}, false, err
+		}
+		cellSize, err := checkedAddSize(plan.cellSize, floatWireSize, "ArrayOfVector cell size")
+		if err != nil {
+			return vectorArrayCellPlan{}, false, err
+		}
+		plan.kind = vectorArrayCellPlanFloat
+		plan.payloadSize = payloadSize
+		plan.floatArraySize = floatArraySize
+		plan.cellSize = cellSize
+		return plan, true, nil
+	default:
+		return vectorArrayCellPlan{}, false, nil
+	}
 }
 
 func (s *insertFieldSizeState) computedSize(delta *insertFieldRowDelta, rowCount int) (insertFieldComputedSize, error) {
@@ -1005,6 +1252,98 @@ func (s *insertFieldSizeState) computedSize(delta *insertFieldRowDelta, rowCount
 	}
 	computed.fieldSize = fieldSize
 	return computed, nil
+}
+
+// directWireSize mirrors computedSize for the arithmetic-only field plans, but
+// keeps the hot split loop in uint64 and validates overflow once at the edge.
+func (s *insertFieldSizeState) directWireSize(delta *insertFieldRowDelta, rowCount int) (int, bool, error) {
+	payloadSize := uint64(s.payloadSize)
+	selectedRows := uint64(s.selectedRows)
+	sparseDim := s.sparseDim
+	if delta != nil {
+		payloadSize += uint64(delta.payloadSize)
+		selectedRows += uint64(delta.selectedRows)
+		if delta.sparseDim > sparseDim {
+			sparseDim = delta.sparseDim
+		}
+	}
+	if payloadSize > uint64(math.MaxInt) || selectedRows > uint64(math.MaxInt) {
+		return 0, true, insertViewInternal("direct field size exceeds addressable memory")
+	}
+
+	fieldSize := uint64(s.metadataSize)
+	switch s.class {
+	case insertFieldPlanNone:
+	case insertFieldPlanScalar:
+		if s.valuePlan != insertFieldValueScalarEmpty && s.valuePlan != insertFieldValueScalarPacked {
+			return 0, false, nil
+		}
+		scalarSize := uint64(0)
+		if s.valuePlan == insertFieldValueScalarPacked {
+			arraySize := uint64(0)
+			if rowCount > 0 {
+				arraySize = directBytesFieldSize(1, payloadSize)
+			}
+			scalarSize = directBytesFieldSize(s.valueFieldNumber, arraySize)
+		}
+		fieldSize += directBytesFieldSize(3, scalarSize)
+	case insertFieldPlanVector:
+		vector := s.field.GetVectors()
+		outerDim := vector.GetDim()
+		if s.valuePlan == insertFieldValueVectorSparse && selectedRows > 0 {
+			outerDim = vector.GetSparseFloatVector().GetDim()
+		}
+		vectorSize := directProto3VarintFieldSize(1, uint64(outerDim))
+		switch s.valuePlan {
+		case insertFieldValueVectorEmpty:
+		case insertFieldValueVectorDenseBytes:
+			if selectedRows > 0 {
+				vectorSize += directBytesFieldSize(s.valueFieldNumber, payloadSize)
+			}
+		case insertFieldValueVectorFloat:
+			if selectedRows > 0 {
+				floatArraySize := uint64(0)
+				if payloadSize > 0 {
+					floatArraySize = directBytesFieldSize(1, payloadSize)
+				}
+				vectorSize += directBytesFieldSize(2, floatArraySize)
+			}
+		case insertFieldValueVectorSparse:
+			if selectedRows > 0 {
+				if sparseDim < 0 {
+					return 0, true, insertViewInternal("selected sparse vector dimension %d is negative", sparseDim)
+				}
+				sparseSize := payloadSize + directProto3VarintFieldSize(2, uint64(sparseDim))
+				vectorSize += directBytesFieldSize(6, sparseSize)
+			}
+		case insertFieldValueVectorArray:
+			vectorSize += directBytesFieldSize(8, payloadSize)
+		default:
+			return 0, false, nil
+		}
+		fieldSize += directBytesFieldSize(4, vectorSize)
+	default:
+		return 0, false, nil
+	}
+	if len(s.field.GetValidData()) > 0 && rowCount > 0 {
+		fieldSize += directBytesFieldSize(7, uint64(rowCount))
+	}
+	fieldWireSize := directBytesFieldSize(13, fieldSize)
+	if fieldWireSize > uint64(math.MaxInt) {
+		return 0, true, insertViewInternal("direct FieldData wire size exceeds addressable memory")
+	}
+	return int(fieldWireSize), true, nil
+}
+
+func directProto3VarintFieldSize(number protowire.Number, value uint64) uint64 {
+	if value == 0 {
+		return 0
+	}
+	return uint64(protowire.SizeTag(number) + protowire.SizeVarint(value))
+}
+
+func directBytesFieldSize(number protowire.Number, payloadSize uint64) uint64 {
+	return uint64(protowire.SizeTag(number)+protowire.SizeVarint(payloadSize)) + payloadSize
 }
 
 func (s *insertFieldSizeState) scalarSize(payloadSize, rowCount int) (int, error) {

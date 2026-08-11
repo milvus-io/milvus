@@ -132,7 +132,7 @@ func (c *InsertRequestViewCursor) NextEncoder(template *msgpb.InsertRequest, row
 		len(c.pendingFieldDataIndices) != fieldCount || len(c.pendingFieldDeltas) != fieldCount {
 		return nil, 0, insertViewInternal("source FieldsData count changed while cursor was in use")
 	}
-	if err := c.sizeState.reset(template, c.source); err != nil {
+	if err := c.sizeState.reset(template, c.source, len(rows)); err != nil {
 		return nil, 0, err
 	}
 
@@ -140,13 +140,13 @@ func (c *InsertRequestViewCursor) NextEncoder(template *msgpb.InsertRequest, row
 	planScanRow := c.scanRow
 	previous := c.lastSelectedRow
 	consumed := 0
-	aggregated, err := c.sizeState.aggregatePackedScalarRows(rows, previous, sizeLimit)
+	aggregatedRows, err := c.sizeState.aggregateSimpleRows(rows, previous, sizeLimit)
 	if err != nil {
 		return nil, 0, err
 	}
-	if aggregated {
+	if aggregatedRows > 0 {
 		firstRow := rows[0]
-		lastRow := rows[len(rows)-1]
+		lastRow := rows[aggregatedRows-1]
 		for fieldIndex := range c.sizeState.fields {
 			c.encoderFirstFieldDataIndices[fieldIndex] = int64(firstRow)
 			c.nextFieldDataIndices[fieldIndex] = int64(lastRow + 1)
@@ -154,12 +154,10 @@ func (c *InsertRequestViewCursor) NextEncoder(template *msgpb.InsertRequest, row
 		c.pendingRow = -1
 		planScanRow = lastRow + 1
 		previous = lastRow
-		consumed = len(rows)
+		consumed = aggregatedRows
 	}
-	for i, row := range rows {
-		if aggregated {
-			break
-		}
+	for i := aggregatedRows; i < len(rows); i++ {
+		row := rows[i]
 		if row < 0 {
 			return nil, 0, insertViewInternal("row offset at selection index %d is negative: %d", i, row)
 		}
@@ -829,7 +827,7 @@ func (e *InsertRequestViewEncoder) appendVectorField(w *insertViewWriter, fieldI
 	case *schemapb.VectorField_Int8Vector:
 		return e.appendDenseBytesVector(w, fieldIndex, field, vector.GetDim(), 7, value.Int8Vector, 1, "int8 vector")
 	case *schemapb.VectorField_VectorArray:
-		return e.appendVectorArray(w, vector, value.VectorArray)
+		return e.appendVectorArray(w, fieldIndex, vector, value.VectorArray)
 	default:
 		return insertViewInternal("field %q (%d) has unsupported VectorField oneof %T", field.GetFieldName(), field.GetFieldId(), value)
 	}
@@ -957,9 +955,23 @@ func (e *InsertRequestViewEncoder) appendSparseVector(w *insertViewWriter, field
 	})
 }
 
-func (e *InsertRequestViewEncoder) appendVectorArray(w *insertViewWriter, vector *schemapb.VectorField, values *schemapb.VectorArray) error {
+func (e *InsertRequestViewEncoder) appendVectorArray(w *insertViewWriter, fieldIndex int, vector *schemapb.VectorField, values *schemapb.VectorArray) error {
 	if values == nil {
 		return insertViewInternal("nil ArrayOfVector payload")
+	}
+	if fieldIndex < 0 || fieldIndex >= len(e.fieldSizeStates) {
+		return insertViewInternal("ArrayOfVector cell payload field index %d is out of range", fieldIndex)
+	}
+	arrayOrdinal := e.fieldSizeStates[fieldIndex].arrayOrdinal
+	if arrayOrdinal < 0 || arrayOrdinal >= e.arrayFieldCount {
+		return insertViewInternal("ArrayOfVector field %d has invalid payload ordinal %d of %d", fieldIndex, arrayOrdinal, e.arrayFieldCount)
+	}
+	expectedPayloads, err := checkedProduct(len(e.rows), e.arrayFieldCount, "nested cell payload plan")
+	if err != nil {
+		return err
+	}
+	if len(e.arrayCellPayloads) != expectedPayloads {
+		return insertViewInternal("nested cell payload plan has %d entries, expected %d", len(e.arrayCellPayloads), expectedPayloads)
 	}
 	w.proto3Varint(1, uint64(vector.GetDim()))
 	arraySize, err := w.plannedInt()
@@ -968,13 +980,55 @@ func (e *InsertRequestViewEncoder) appendVectorArray(w *insertViewWriter, vector
 	}
 	return w.message(8, arraySize, func() error {
 		w.proto3Varint(1, uint64(values.GetDim()))
-		for _, row := range e.rows {
-			if err := w.protoMessage(2, values.GetData()[row], "ArrayOfVector row"); err != nil {
+		for i, row := range e.rows {
+			payload := e.arrayCellPayloads[i*e.arrayFieldCount+arrayOrdinal]
+			if err := appendVectorArrayCell(w, values.GetData()[row], payload); err != nil {
 				return err
 			}
 		}
 		w.proto3Varint(3, uint64(values.GetElementType()))
 		return w.err
+	})
+}
+
+func appendVectorArrayCell(w *insertViewWriter, cell *schemapb.VectorField, payload int) error {
+	plan, ok, err := classifyVectorArrayCell(cell)
+	if err != nil {
+		return err
+	}
+	if payload == vectorArrayCellProtoFallback {
+		if ok {
+			return insertViewInternal("ArrayOfVector cell classification changed after planning: expected protobuf fallback")
+		}
+		return w.protoMessage(2, cell, "ArrayOfVector row")
+	}
+	if payload < 0 {
+		return insertViewInternal("ArrayOfVector cell plan contains invalid payload size %d", payload)
+	}
+	if !ok {
+		return insertViewInternal("ArrayOfVector cell classification changed after planning: expected arithmetic path")
+	}
+	if payload != plan.payloadSize {
+		return insertViewInternal("ArrayOfVector cell payload changed after planning: expected %d, got %d", payload, plan.payloadSize)
+	}
+	return w.message(2, plan.cellSize, func() error {
+		if isNilProto(cell) {
+			return nil
+		}
+		w.proto3Varint(1, uint64(cell.GetDim()))
+		if plan.kind != vectorArrayCellPlanFloat {
+			return w.err
+		}
+		values := cell.GetFloatVector().GetData()
+		return w.message(2, plan.floatArraySize, func() error {
+			if payload == 0 {
+				return nil
+			}
+			return w.message(1, payload, func() error {
+				w.raw(f32ReadOnlyBytes(values))
+				return w.err
+			})
+		})
 	})
 }
 
