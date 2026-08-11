@@ -879,6 +879,23 @@ var (
 			cgoTypeLabelName,
 		})
 
+	// QueryNodeCGOQueueLatency measures how long a cgo call waited for a
+	// thread-pool slot before it started executing. issue #49435 instrumentation
+	// (temporary): a large wait on the tsafe-critical Insert/Delete applies means
+	// they were queued behind bulk loads (LoadDeletedRecord) sharing the pool.
+	QueryNodeCGOQueueLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "cgo_queue_latency",
+			Help:      "issue #49435: time a cgo call waited for a thread-pool slot before executing",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			cgoNameLabelName,
+			"pool",
+		})
+
 	QueryNodePartialResultCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -982,6 +999,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeDeleteBufferSize)
 	registry.MustRegister(QueryNodeDeleteBufferRowNum)
 	registry.MustRegister(QueryNodeCGOCallLatency)
+	registry.MustRegister(QueryNodeCGOQueueLatency)
 	registry.MustRegister(QueryNodePartialResultCount)
 	// Pool metrics collector (pull model - collectFn set later via SetPoolCollectFn)
 	registry.MustRegister(&poolMetricsCollector{})

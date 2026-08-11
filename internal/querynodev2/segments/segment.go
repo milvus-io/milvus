@@ -784,7 +784,17 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 
 	var result *segcore.InsertResult
 	var err error
-	GetDynamicPool().Submit(func() (any, error) {
+	submitTime := time.Now()
+	// issue #49435: run the tsafe-critical growing-segment insert on the
+	// dedicated deletePool (the streaming-pipeline apply pool, shared with the
+	// delete-apply) rather than the shared dynamicPool that the bulk deltalog
+	// load (C.LoadDeletedRecord) can hold for tens of seconds. insertNode is
+	// upstream of deleteNode on the tsafe pipeline, so a queued insert freezes
+	// tsafe just like a queued delete does.
+	GetDeletePool().Submit(func() (struct{}, error) {
+		metrics.QueryNodeCGOQueueLatency.WithLabelValues(
+			fmt.Sprint(paramtable.GetNodeID()), "Insert", "deletePool",
+		).Observe(float64(time.Since(submitTime).Milliseconds()))
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
@@ -799,7 +809,7 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 			Timestamps: timestamps,
 			Record:     record,
 		})
-		return nil, nil
+		return struct{}{}, nil
 	}).Await()
 
 	if err != nil {
@@ -847,7 +857,11 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 	// starving the delegator's ProcessDelete -> UpdateTSafe and freezing the
 	// channel tsafe (505 channel tsafe stalled). A separate pool keeps the
 	// delete-apply off that queue.
+	submitTime := time.Now()
 	GetDeletePool().Submit(func() (struct{}, error) {
+		metrics.QueryNodeCGOQueueLatency.WithLabelValues(
+			fmt.Sprint(paramtable.GetNodeID()), "Delete", "deletePool",
+		).Observe(float64(time.Since(submitTime).Milliseconds()))
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
