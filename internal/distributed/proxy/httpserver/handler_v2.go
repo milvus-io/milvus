@@ -3894,10 +3894,9 @@ func (h *HandlersV2) restoreExternalSnapshot(ctx context.Context, c *gin.Context
 		return h.proxy.RestoreExternalSnapshot(reqCtx, req.(*milvuspb.RestoreExternalSnapshotRequest))
 	})
 	if err == nil {
-		allowInt64, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		HTTPReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode: merr.Code(nil),
-			HTTPReturnData: gin.H{"jobId": formatRESTInt64(resp.(*milvuspb.RestoreExternalSnapshotResponse).GetJobId(), allowInt64)},
+			HTTPReturnData: gin.H{"jobId": resp.(*milvuspb.RestoreExternalSnapshotResponse).GetJobId()},
 		})
 	}
 	return resp, err
@@ -3972,12 +3971,12 @@ func (h *HandlersV2) getExportSnapshotState(ctx context.Context, c *gin.Context,
 	return resp, err
 }
 
-func restoreSnapshotJobToREST(info *milvuspb.RestoreSnapshotInfo, allowInt64 bool) gin.H {
+func restoreSnapshotJobToREST(info *milvuspb.RestoreSnapshotInfo) gin.H {
 	if info == nil {
 		return gin.H{}
 	}
 	return gin.H{
-		"jobId":          formatRESTInt64(info.GetJobId(), allowInt64),
+		"jobId":          info.GetJobId(),
 		"snapshotName":   info.GetSnapshotName(),
 		"dbName":         info.GetDbName(),
 		"collectionName": info.GetCollectionName(),
@@ -4006,10 +4005,9 @@ func (h *HandlersV2) getRestoreSnapshotState(ctx context.Context, c *gin.Context
 		return h.proxy.GetRestoreSnapshotState(reqCtx, req.(*milvuspb.GetRestoreSnapshotStateRequest))
 	})
 	if err == nil {
-		allowInt64, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		HTTPReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode: merr.Code(nil),
-			HTTPReturnData: restoreSnapshotJobToREST(resp.(*milvuspb.GetRestoreSnapshotStateResponse).GetInfo(), allowInt64),
+			HTTPReturnData: restoreSnapshotJobToREST(resp.(*milvuspb.GetRestoreSnapshotStateResponse).GetInfo()),
 		})
 	}
 	return resp, err
@@ -4028,10 +4026,9 @@ func (h *HandlersV2) listRestoreSnapshotJobs(ctx context.Context, c *gin.Context
 	})
 	if err == nil {
 		jobs := resp.(*milvuspb.ListRestoreSnapshotJobsResponse).GetJobs()
-		allowInt64, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		records := make([]gin.H, 0, len(jobs))
 		for _, info := range jobs {
-			records = append(records, restoreSnapshotJobToREST(info, allowInt64))
+			records = append(records, restoreSnapshotJobToREST(info))
 		}
 		HTTPReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode: merr.Code(nil),

@@ -3180,11 +3180,12 @@ func TestSnapshotRESTV2FormatsInt64Values(t *testing.T) {
 
 	const largeInt64 int64 = 9007199254740993
 	testCases := []struct {
-		name         string
-		path         string
-		body         string
-		responsePath string
-		setup        func(*mocks.MockProxy)
+		name                   string
+		path                   string
+		body                   string
+		responsePath           string
+		preserveReleasedNumber bool
+		setup                  func(*mocks.MockProxy)
 	}{
 		{
 			name:         "describe snapshot create timestamp",
@@ -3223,10 +3224,11 @@ func TestSnapshotRESTV2FormatsInt64Values(t *testing.T) {
 			},
 		},
 		{
-			name:         "restore external snapshot job ID",
-			path:         versionalV2(SnapshotJobCategory, RestoreExternalAction),
-			body:         `{"targetCollectionName":"restored_books","snapshotMetadataURI":"s3://bucket/snapshot.json"}`,
-			responsePath: "data.jobId",
+			name:                   "restore external snapshot job ID",
+			path:                   versionalV2(SnapshotJobCategory, RestoreExternalAction),
+			body:                   `{"targetCollectionName":"restored_books","snapshotMetadataURI":"s3://bucket/snapshot.json"}`,
+			responsePath:           "data.jobId",
+			preserveReleasedNumber: true,
 			setup: func(proxy *mocks.MockProxy) {
 				proxy.EXPECT().RestoreExternalSnapshot(mock.Anything, mock.Anything).Return(&milvuspb.RestoreExternalSnapshotResponse{
 					Status: merr.Success(),
@@ -3235,10 +3237,11 @@ func TestSnapshotRESTV2FormatsInt64Values(t *testing.T) {
 			},
 		},
 		{
-			name:         "describe restore job ID",
-			path:         versionalV2(SnapshotJobCategory, DescribeAction),
-			body:         `{"jobId":"9007199254740993"}`,
-			responsePath: "data.jobId",
+			name:                   "describe restore job ID",
+			path:                   versionalV2(SnapshotJobCategory, DescribeAction),
+			body:                   `{"jobId":"9007199254740993"}`,
+			responsePath:           "data.jobId",
+			preserveReleasedNumber: true,
 			setup: func(proxy *mocks.MockProxy) {
 				proxy.EXPECT().GetRestoreSnapshotState(mock.Anything, mock.Anything).Return(&milvuspb.GetRestoreSnapshotStateResponse{
 					Status: merr.Success(),
@@ -3247,10 +3250,11 @@ func TestSnapshotRESTV2FormatsInt64Values(t *testing.T) {
 			},
 		},
 		{
-			name:         "list restore job ID",
-			path:         versionalV2(SnapshotJobCategory, ListAction),
-			body:         `{}`,
-			responsePath: "data.records.0.jobId",
+			name:                   "list restore job ID",
+			path:                   versionalV2(SnapshotJobCategory, ListAction),
+			body:                   `{}`,
+			responsePath:           "data.records.0.jobId",
+			preserveReleasedNumber: true,
 			setup: func(proxy *mocks.MockProxy) {
 				proxy.EXPECT().ListRestoreSnapshotJobs(mock.Anything, mock.Anything).Return(&milvuspb.ListRestoreSnapshotJobsResponse{
 					Status: merr.Success(),
@@ -3275,7 +3279,7 @@ func TestSnapshotRESTV2FormatsInt64Values(t *testing.T) {
 
 				require.Equal(t, http.StatusOK, recorder.Code)
 				expectedRaw := `"9007199254740993"`
-				if allowInt64 {
+				if testCase.preserveReleasedNumber || allowInt64 {
 					expectedRaw = "9007199254740993"
 				}
 				assert.Equal(t, expectedRaw, gjson.Get(recorder.Body.String(), testCase.responsePath).Raw)
@@ -3457,7 +3461,7 @@ func TestRestoreExternalSnapshotRESTV2(t *testing.T) {
 	assert.Equal(t, "restored_books", proxy.restoreReq.GetTargetCollectionName())
 	assert.Equal(t, "s3://bucket/files/snapshots/meta.json", proxy.restoreReq.GetSnapshotMetadataUri())
 	assert.Equal(t, `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`, proxy.restoreReq.GetExternalSpec())
-	assert.Contains(t, w.Body.String(), `"jobId":"2001"`)
+	assert.Contains(t, w.Body.String(), `"jobId":2001`)
 }
 
 func TestExportSnapshotRESTV2(t *testing.T) {
@@ -3520,7 +3524,7 @@ func TestRestoreSnapshotJobRESTV2(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, int64(2001), proxy.getRestoreSnapshotStateReq.GetJobId())
-	assert.Contains(t, w.Body.String(), `"jobId":"2001"`)
+	assert.Contains(t, w.Body.String(), `"jobId":2001`)
 	assert.Contains(t, w.Body.String(), `"collectionName":"restored_collection"`)
 	assert.Contains(t, w.Body.String(), `"state":"RestoreSnapshotCompleted"`)
 
@@ -3535,7 +3539,7 @@ func TestRestoreSnapshotJobRESTV2(t *testing.T) {
 	assert.Equal(t, "default", proxy.listRestoreSnapshotJobsReq.GetDbName())
 	assert.Equal(t, "restored_collection", proxy.listRestoreSnapshotJobsReq.GetCollectionName())
 	assert.Contains(t, w.Body.String(), `"records":[`)
-	assert.Contains(t, w.Body.String(), `"jobId":"2001"`)
+	assert.Contains(t, w.Body.String(), `"jobId":2001`)
 	assert.Contains(t, w.Body.String(), `"state":"RestoreSnapshotPending"`)
 }
 
