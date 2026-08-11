@@ -314,6 +314,7 @@ func (sm *CoordQueryViewStateMachine) handleDropping(report qviews.QueryViewAtWo
 func (sm *CoordQueryViewStateMachine) transitionToUnrecoverable() {
 	sm.state = qviews.QueryViewStateUnrecoverable
 	sm.pending.Persist = sm.viewWithState(qviews.QueryViewStateUnrecoverable)
+	sm.pending.Sync = nil
 }
 
 // --- Helpers ---

@@ -380,6 +380,38 @@ func TestPreparing_QNUnrecoverable(t *testing.T) {
 	assertNoPendingSync(t, sm)
 }
 
+func TestUnrecoverableClearsPendingPreparingSync(t *testing.T) {
+	view := buildTestView(1)
+	sm := NewCoordQueryViewStateMachine(view)
+
+	// The initial Preparing flush has not been consumed when the target QN is
+	// lost, so the Unrecoverable transition must cancel that stale sync.
+	sm.OnQueryNodeLost(qviews.NewQueryNode(1))
+
+	flush := sm.ConsumeFlush()
+	require.NotNil(t, flush.Persist)
+	assert.Equal(t, viewpb.QueryViewState_QueryViewStateUnrecoverable, flush.Persist.GetMeta().GetState())
+	assert.Empty(t, flush.Sync)
+}
+
+func TestUnrecoverableClearsPendingUpSync(t *testing.T) {
+	view := buildTestView(1)
+	sm := NewCoordQueryViewStateMachine(view)
+	drainPending(sm)
+
+	// Reaching Ready queues an Up sync. A later Unrecoverable report must
+	// replace the pending outcome instead of sending that stale Up afterward.
+	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateReady))
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateReady))
+	require.Equal(t, qviews.QueryViewStateReady, sm.State())
+	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateUnrecoverable))
+
+	flush := sm.ConsumeFlush()
+	require.NotNil(t, flush.Persist)
+	assert.Equal(t, viewpb.QueryViewState_QueryViewStateUnrecoverable, flush.Persist.GetMeta().GetState())
+	assert.Empty(t, flush.Sync)
+}
+
 // TestReady_SNUnrecoverable: Ready → Unrecoverable via SN.
 func TestReady_SNUnrecoverable(t *testing.T) {
 	view := buildTestView(1)
