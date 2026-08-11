@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <functional>
 #include <future>
+#include <limits>
 #include <memory>
 #include "common/FastMem.h"
 
@@ -1501,10 +1502,20 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
         } else {
             all_row_groups.clear();
-            size_t total_rows = 0;
-            size_t start_row_group = (size_t)std::ceil(
-                (double)offset /
-                (double)row_group_meta_data_vector.Get(0).row_num());
+            // Find the starting row group by walking through cumulative row
+            // counts. Row groups can have different sizes, so we cannot assume
+            // uniform size based on the first row group.
+            size_t cumulative_rows = 0;
+            size_t start_row_group = 0;
+            for (size_t i = 0; i < row_group_num; i++) {
+                size_t rg_rows = row_group_meta_data_vector.Get(i).row_num();
+                if (cumulative_rows + rg_rows > offset) {
+                    start_row_group = i;
+                    break;
+                }
+                cumulative_rows += rg_rows;
+                start_row_group = i + 1;
+            }
             if (start_row_group >= row_group_num) {
                 LOG_DEBUG(
                     "[StorageV2] start_row_group {} is beyond group num {}",
@@ -1513,7 +1524,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                 return field_data_list;
             }
             LOG_DEBUG("[StorageV2] starting in row group: {}", start_row_group);
-            for (int i = start_row_group; i < row_group_num; i++) {
+            size_t total_rows = 0;
+            for (size_t i = start_row_group; i < row_group_num; i++) {
                 size_t num_rows = row_group_meta_data_vector.Get(i).row_num();
                 total_rows += num_rows;
                 all_row_groups.push_back(i);
@@ -1611,7 +1623,9 @@ IterateFieldDataFromManifest(
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
     const std::function<void(FieldDataPtr)>& consumer,
-    int64_t max_inflight_bytes) {
+    int64_t max_inflight_bytes,
+    size_t max_rows,
+    size_t offset) {
     AssertInfo(max_inflight_bytes > 0,
                "max_inflight_bytes must be positive, got {}",
                max_inflight_bytes);
@@ -1623,6 +1637,7 @@ IterateFieldDataFromManifest(
     // storage column mapping through FileManagerContext. The fallback keeps
     // direct test callers and older internal paths on the existing behavior.
     std::string column_name;
+    size_t column_group_index;
     const auto& ext_field = field_meta.field_schema.external_field();
     bool is_external = false;
     if (storage_column_mapping.has_value()) {
@@ -1643,6 +1658,7 @@ IterateFieldDataFromManifest(
         for (size_t i = 0; i < column_groups->size(); i++) {
             for (const auto& column : column_groups->at(i)->columns) {
                 if (column == name) {
+                    column_group_index = i;
                     return true;
                 }
             }
@@ -1701,16 +1717,7 @@ IterateFieldDataFromManifest(
         column_groups, reader_schema, needed_cols_ptr, *loon_ffi_properties);
 
     AssertInfo(reader != nullptr, "Failed to create reader");
-
-    auto reader_result = reader->get_record_batch_reader("");
-    if (!reader_result.ok()) {
-        auto error = milvus_storage::ToSegcoreError(reader_result.status());
-        ThrowInfo(error.get_error_code(),
-                  "Failed to get record batch reader: {}",
-                  error.what());
-    }
-
-    auto record_batch_reader = reader_result.ValueOrDie();
+    std::shared_ptr<arrow::RecordBatch> batch;
 
     // Decode batches on a background thread pool while this thread keeps
     // draining the record batch reader. ReadNext must stay single-threaded
@@ -1827,45 +1834,164 @@ IterateFieldDataFromManifest(
 
     auto data_type_v = data_type.value();
     auto element_type_v = element_type.value();
-    while (true) {
-        std::shared_ptr<arrow::RecordBatch> batch;
-        auto fetch_start = now_ns();
-        auto status = record_batch_reader->ReadNext(&batch);
-        auto fetch_elapsed = now_ns() - fetch_start;
-        fetch_ns += fetch_elapsed;
-        fetch_max_ns = std::max(fetch_max_ns, fetch_elapsed);
-        if (!status.ok()) {
-            // pending_drain_guard waits for the outstanding decode tasks
-            // while this throw unwinds.
-            auto error = milvus_storage::ToSegcoreError(status);
+    if (max_rows == 0) {  //read all with record batches
+        auto reader_result = reader->get_record_batch_reader("");
+        if (!reader_result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(reader_result.status());
             ThrowInfo(error.get_error_code(),
-                      "Failed to read record batch: {}",
+                      "Failed to get record batch reader: {}",
                       error.what());
         }
-        if (batch == nullptr) {
-            break;
+        auto record_batch_reader = reader_result.ValueOrDie();
+        while (true) {
+            std::shared_ptr<arrow::RecordBatch> batch;
+            auto fetch_start = now_ns();
+            auto status = record_batch_reader->ReadNext(&batch);
+            auto fetch_elapsed = now_ns() - fetch_start;
+            fetch_ns += fetch_elapsed;
+            fetch_max_ns = std::max(fetch_max_ns, fetch_elapsed);
+            if (!status.ok()) {
+                // pending_drain_guard waits for the outstanding decode tasks
+                // while this throw unwinds.
+                auto error = milvus_storage::ToSegcoreError(status);
+                ThrowInfo(error.get_error_code(),
+                          "Failed to read record batch: {}",
+                          error.what());
+            }
+            if (batch == nullptr) {
+                break;
+            }
+
+            auto num_rows = batch->num_rows();
+            if (num_rows == 0) {
+                continue;
+            }
+
+            // Charge this slice's arrow input bytes against the byte budget (see
+            // the note on the budget above for why input, not decoded, bytes).
+            // A record batch may share a large row-group backing buffer with
+            // adjacent slices, so count only the ranges this slice references.
+            auto batch_bytes = EstimateRecordBatchBytes(*batch);
+
+            auto decode_future = pool.Submit([batch,
+                                              column_name,
+                                              is_external,
+                                              data_type_v,
+                                              element_type_v,
+                                              dim,
+                                              nullable,
+                                              normalize_field_meta,
+                                              num_rows]() -> FieldDataPtr {
+                auto raw_column = batch->GetColumnByName(column_name);
+                if (is_external) {
+                    raw_column =
+                        NormalizeExternalArrowByType(raw_column,
+                                                     data_type_v,
+                                                     dim,
+                                                     nullable,
+                                                     element_type_v,
+                                                     *normalize_field_meta);
+                }
+                auto chunked_array =
+                    std::make_shared<arrow::ChunkedArray>(raw_column);
+                auto field_data = CreateFieldData(
+                    data_type_v, element_type_v, nullable, dim, num_rows);
+                field_data->FillFieldData(chunked_array);
+                return field_data;
+            });
+            pending.emplace_back(std::move(decode_future), batch_bytes);
+            pending_bytes += batch_bytes;
+            total_batch_bytes += batch_bytes;
+            ++batch_count;
+
+            // Backpressure: block on the oldest batch once the window is full
+            // by bytes or by count. Always keep at least one in flight so a
+            // single oversized batch cannot deadlock the loop.
+            while (pending.size() > 1 &&
+                   (pending_bytes > max_inflight_bytes ||
+                    pending.size() >= max_inflight_batches)) {
+                deliver_front();
+            }
+            // Opportunistically deliver whatever is already done, keeping
+            // consumer-side work (e.g. disk writes) interleaved with fetching.
+            while (!pending.empty() &&
+                   pending.front().first.wait_for(std::chrono::seconds(0)) ==
+                       std::future_status::ready) {
+                deliver_front();
+            }
         }
+    } else {  // read specific rows with chunk_reader
+        auto reader_result = reader->get_chunk_reader(column_group_index);
+        AssertInfo(
+            reader_result.ok(),
+            "Failed to get chunk reader: " + reader_result.status().ToString());
+        auto chunk_reader = std::move(reader_result).ValueOrDie();
+        auto chunk_rows_result = chunk_reader->get_chunk_rows();
+        AssertInfo(chunk_rows_result.ok(),
+                   "Failed to get chunk rows: " +
+                       chunk_rows_result.status().ToString());
+        auto chunk_rows = chunk_rows_result.ValueOrDie();
+        int64_t segment_total_rows =
+            std::accumulate(chunk_rows.begin(), chunk_rows.end(), int64_t{0});
+        LOG_DEBUG(
+            "[StorageV3] segment number of rows is: {} first chunk rows "
+            "is {}",
+            segment_total_rows,
+            chunk_rows.empty() ? 0 : chunk_rows[0]);
 
-        auto num_rows = batch->num_rows();
-        if (num_rows == 0) {
-            continue;
+        // Determine the row range [offset, offset + effective_rows).
+        int64_t signed_offset = static_cast<int64_t>(offset);
+        if (signed_offset >= segment_total_rows) {
+            LOG_DEBUG("[StorageV3] offset: {} is beyond total_rows: {}",
+                      offset,
+                      segment_total_rows);
+            return;
         }
+        int64_t effective_rows = std::min(static_cast<int64_t>(max_rows),
+                                          segment_total_rows - signed_offset);
 
-        // Charge this slice's arrow input bytes against the byte budget (see
-        // the note on the budget above for why input, not decoded, bytes).
-        // A record batch may share a large row-group backing buffer with
-        // adjacent slices, so count only the ranges this slice references.
-        auto batch_bytes = EstimateRecordBatchBytes(*batch);
+        std::vector<int64_t> row_indices;
+        row_indices.reserve(effective_rows);
+        for (int64_t i = signed_offset; i < signed_offset + effective_rows;
+             i++) {
+            row_indices.push_back(i);
+        }
+        AssertInfo(!row_indices.empty(),
+                   "row_indices unexpectedly empty after range check");
 
-        auto decode_future = pool.Submit([batch,
-                                          column_name,
-                                          is_external,
-                                          data_type_v,
-                                          element_type_v,
-                                          dim,
-                                          nullable,
-                                          normalize_field_meta,
-                                          num_rows]() -> FieldDataPtr {
+        auto chunk_indices_result =
+            chunk_reader->get_chunk_indices(row_indices);
+        if (!chunk_indices_result.ok()) {
+            LOG_DEBUG(
+                "[StorageV3] Could not fetch indices status: {} assume "
+                "offset: {} out of range",
+                chunk_indices_result.status().ToString(),
+                offset);
+            return;
+        }
+        auto chunk_indices = chunk_indices_result.ValueOrDie();
+        auto parallel_degree = static_cast<uint64_t>(
+            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+        LOG_DEBUG(
+            "[StorageV3] Fetching {} chunks, first chunk is: {} "
+            "parallel_degree is: {}",
+            chunk_indices.size(),
+            chunk_indices[0],
+            parallel_degree);
+
+        auto chunks_result =
+            chunk_reader->get_chunks(chunk_indices, parallel_degree);
+        AssertInfo(
+            chunks_result.ok(),
+            "Failed to read chunks: " + chunks_result.status().ToString());
+        auto batches = chunks_result.ValueOrDie();
+        int64_t consumed_rows = 0;
+        for (size_t i = 0; i < batches.size(); i++) {
+            batch = batches[i];
+            auto num_rows = batch->num_rows();
+            if (num_rows == 0) {
+                continue;
+            }
             auto raw_column = batch->GetColumnByName(column_name);
             if (is_external) {
                 raw_column =
@@ -1878,29 +2004,22 @@ IterateFieldDataFromManifest(
             }
             auto chunked_array =
                 std::make_shared<arrow::ChunkedArray>(raw_column);
-            auto field_data = CreateFieldData(
-                data_type_v, element_type_v, nullable, dim, num_rows);
+            auto field_data =
+                CreateFieldData(data_type_v,
+                                element_type_v,
+                                batch->schema()->field(0)->nullable(),
+                                dim,
+                                num_rows);
             field_data->FillFieldData(chunked_array);
-            return field_data;
-        });
-        pending.emplace_back(std::move(decode_future), batch_bytes);
-        pending_bytes += batch_bytes;
-        total_batch_bytes += batch_bytes;
-        ++batch_count;
-
-        // Backpressure: block on the oldest batch once the window is full
-        // by bytes or by count. Always keep at least one in flight so a
-        // single oversized batch cannot deadlock the loop.
-        while (pending.size() > 1 && (pending_bytes > max_inflight_bytes ||
-                                      pending.size() >= max_inflight_batches)) {
-            deliver_front();
-        }
-        // Opportunistically deliver whatever is already done, keeping
-        // consumer-side work (e.g. disk writes) interleaved with fetching.
-        while (!pending.empty() &&
-               pending.front().first.wait_for(std::chrono::seconds(0)) ==
-                   std::future_status::ready) {
-            deliver_front();
+            consumer(std::move(field_data));
+            consumed_rows += num_rows;
+            ++batch_count;
+            if (consumed_rows >= effective_rows) {
+                LOG_DEBUG("[StorageV3] max_rows: {} reached, consumed rows: {}",
+                          max_rows,
+                          consumed_rows);
+                break;
+            }
         }
     }
 
@@ -1936,6 +2055,8 @@ GetFieldDatasFromManifest(
     std::optional<DataType> data_type,
     int64_t dim,
     std::optional<DataType> element_type,
+    size_t max_rows,
+    size_t offset,
     std::optional<StorageColumnMapping> storage_column_mapping) {
     std::vector<FieldDataPtr> field_datas;
     IterateFieldDataFromManifest(
@@ -1953,7 +2074,9 @@ GetFieldDatasFromManifest(
         // would only pin extra source arrow batches on top of the full
         // column. Keep it small; overlap still happens, the peak does not
         // grow by half a gigabyte per concurrent build.
-        kAccumulatingInflightBytes);
+        kAccumulatingInflightBytes,
+        max_rows,
+        offset);
     return field_datas;
 }
 
