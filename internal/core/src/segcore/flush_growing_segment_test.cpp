@@ -73,12 +73,14 @@ class FlushGrowingSegmentTest : public ::testing::Test {
                          DataType data_type,
                          bool nullable,
                          int64_t dim,
-                         DataType element_type = DataType::NONE) {
+                         DataType element_type = DataType::NONE,
+                         bool element_nullable = false) {
         auto properties =
             storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
         EXPECT_NE(properties, nullptr);
         auto field_meta = gen_field_meta(
             1, 2, 3, field_id.get(), data_type, element_type, nullable);
+        field_meta.field_schema.set_element_nullable(element_nullable);
         std::string manifest_json =
             "{\"base_path\":\"" + segment_path +
             "\",\"ver\":" + std::to_string(result.committed_version) + "}";
@@ -2985,6 +2987,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableEmbListMixedRows) {
     // chunk_rows=1: the two physically stored rows land in separate physical
     // chunks, so the flush walk crosses a chunk boundary in compact storage
     // while the logical walk still sees three rows.
+    ScopedSegcoreConfigRestore config_restore;
     SegcoreConfig segcore_config;
     segcore_config.set_chunk_rows(1);
     auto segment =
@@ -3046,6 +3049,142 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableEmbListMixedRows) {
     ASSERT_EQ(target_out.float_vector().data_size(), dim);
     for (int d = 0; d < dim; ++d) {
         EXPECT_FLOAT_EQ(target_out.float_vector().data(d), 1.0f + d);
+    }
+
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushElementNullableEmbListMixedRows) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    constexpr int dim = 4;
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    "L2",
+                                                    true,
+                                                    true);
+    schema->set_primary_field_id(pk_fid);
+
+    constexpr int64_t N = 4;
+    VectorFieldProto empty_row;
+    empty_row.set_dim(dim);
+    empty_row.mutable_float_vector();
+
+    VectorFieldProto mixed_row;
+    mixed_row.set_dim(dim);
+    for (int d = 0; d < dim; ++d) {
+        mixed_row.mutable_float_vector()->add_data(20.0F + d);
+    }
+    mixed_row.add_valid_data(false);
+    mixed_row.add_valid_data(true);
+    mixed_row.add_valid_data(false);
+
+    VectorFieldProto valid_row;
+    valid_row.set_dim(dim);
+    for (int vector_idx = 0; vector_idx < 2; ++vector_idx) {
+        for (int d = 0; d < dim; ++d) {
+            valid_row.mutable_float_vector()->add_data(
+                30.0F + vector_idx * dim + d);
+        }
+        valid_row.add_valid_data(true);
+    }
+
+    auto dataset = DataGen(schema, N, 42, 0, 1, 1);
+    for (int i = 0; i < dataset.raw_->fields_data_size(); ++i) {
+        auto* field_data = dataset.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != vec_fid.get()) {
+            continue;
+        }
+        auto* rows = field_data->mutable_vectors()
+                         ->mutable_vector_array()
+                         ->mutable_data();
+        rows->Clear();
+        *rows->Add() = empty_row;  // row 0: null row placeholder
+        *rows->Add() = empty_row;  // row 1: valid empty row
+        *rows->Add() = mixed_row;  // row 2: [null, vector, null]
+        *rows->Add() = valid_row;  // row 3: [vector, vector]
+
+        field_data->clear_valid_data();
+        auto* row_valid_data =
+            field_data->mutable_vectors()->mutable_valid_data();
+        row_valid_data->Clear();
+        row_valid_data->Add(false);
+        row_valid_data->Add(true);
+        row_valid_data->Add(true);
+        row_valid_data->Add(true);
+        break;
+    }
+
+    ScopedSegcoreConfigRestore config_restore;
+    SegcoreConfig segcore_config;
+    segcore_config.set_chunk_rows(1);
+    auto segment =
+        CreateGrowingSegment(schema, empty_index_meta, 1, segcore_config);
+    ASSERT_NE(segment, nullptr);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
+    std::string segment_path = test_dir_ + "/segment_element_nullable_emblist";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = nullptr;
+    config.text_lob_paths = nullptr;
+    config.num_text_columns = 0;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+
+    auto field_datas = ReadFlushedFieldData(segment_path,
+                                            result,
+                                            vec_fid,
+                                            DataType::VECTOR_ARRAY,
+                                            true,
+                                            dim,
+                                            DataType::VECTOR_FLOAT,
+                                            true);
+    ASSERT_EQ(field_datas.size(), 1);
+    auto vector_array_data =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::VectorArray>>(
+            field_datas[0]);
+    ASSERT_NE(vector_array_data, nullptr);
+    ASSERT_EQ(vector_array_data->get_num_rows(), N);
+    ASSERT_EQ(vector_array_data->get_valid_rows(), 3);
+    EXPECT_FALSE(vector_array_data->is_valid(0));
+    EXPECT_TRUE(vector_array_data->is_valid(1));
+    EXPECT_TRUE(vector_array_data->is_valid(2));
+    EXPECT_TRUE(vector_array_data->is_valid(3));
+
+    const auto* restored_empty = vector_array_data->value_at(0);
+    ASSERT_TRUE(restored_empty->is_element_nullable());
+    EXPECT_EQ(restored_empty->length(), 0);
+
+    const auto* restored_mixed = vector_array_data->value_at(1);
+    ASSERT_EQ(restored_mixed->length(), 3);
+    EXPECT_FALSE(restored_mixed->is_element_valid(0));
+    EXPECT_TRUE(restored_mixed->is_element_valid(1));
+    EXPECT_FALSE(restored_mixed->is_element_valid(2));
+    for (int d = 0; d < dim; ++d) {
+        EXPECT_FLOAT_EQ(restored_mixed->get_data<float>(1)[d], 20.0F + d);
+    }
+
+    const auto* restored_valid = vector_array_data->value_at(2);
+    ASSERT_EQ(restored_valid->length(), 2);
+    for (int vector_idx = 0; vector_idx < 2; ++vector_idx) {
+        EXPECT_TRUE(restored_valid->is_element_valid(vector_idx));
+        for (int d = 0; d < dim; ++d) {
+            EXPECT_FLOAT_EQ(restored_valid->get_data<float>(vector_idx)[d],
+                            30.0F + vector_idx * dim + d);
+        }
     }
 
     FreeFlushResult(&result);

@@ -98,6 +98,36 @@ using namespace milvus::cachinglayer;
 
 namespace {
 
+int32_t
+GetScalarArrayLength(const proto::schema::ScalarField& array_value,
+                     DataType element_type) {
+    switch (element_type) {
+        case DataType::BOOL:
+            return array_value.bool_data().data_size();
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+            return array_value.int_data().data_size();
+        case DataType::INT64:
+            return array_value.long_data().data_size();
+        case DataType::FLOAT:
+            return array_value.float_data().data_size();
+        case DataType::DOUBLE:
+            return array_value.double_data().data_size();
+        case DataType::TIMESTAMPTZ:
+            return array_value.timestamptz_data().data_size();
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+            return array_value.string_data().data_size();
+        default:
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "Unexpected array type: {}",
+                      element_type);
+    }
+    return 0;
+}
+
 int64_t
 GetLoadedFieldRows(
     const std::vector<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>&
@@ -283,45 +313,83 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
             AssertInfo(source_index < vector_array.data_size(),
                        "VECTOR_ARRAY row {} is missing from field data",
                        source_index);
-            array_lengths[i] = GetVectorArrayLength(
-                vector_array.data(source_index), element_type, dim);
+            const auto& row = vector_array.data(source_index);
+            auto physical_length = GetVectorArrayLength(row, element_type, dim);
+            if (field_meta.is_element_nullable()) {
+                auto valid_count = std::count(
+                    row.valid_data().begin(), row.valid_data().end(), true);
+                AssertInfo(
+                    valid_count == physical_length,
+                    "VECTOR_ARRAY row {} valid element count {} does not match "
+                    "physical vector count {}",
+                    source_index,
+                    valid_count,
+                    physical_length);
+                array_lengths[i] = row.valid_data_size();
+            } else {
+                AssertInfo(row.valid_data_size() == 0,
+                           "non-element-nullable VECTOR_ARRAY row {} cannot "
+                           "carry element valid_data",
+                           source_index);
+                array_lengths[i] = physical_length;
+            }
         }
     } else {
-        // ARRAY: extract from scalars().array_data().data(i)
         const auto& array_data = field_data.scalars().array_data();
         auto element_type = field_meta.get_element_type();
+        bool compact_nullable = false;
+        if (field_meta.is_nullable()) {
+            int64_t valid_count = 0;
+            if (valid_data.size() == num_rows) {
+                valid_count =
+                    std::count(valid_data.begin(), valid_data.end(), true);
+            }
+            auto dense_aligned = array_data.data_size() == num_rows;
+            compact_nullable = valid_data.size() == num_rows &&
+                               array_data.data_size() == valid_count;
+            AssertInfo(
+                dense_aligned || compact_nullable,
+                "nullable ARRAY supports only dense-aligned data "
+                "(data_size == num_rows) or compact data "
+                "(valid_data_size == num_rows and data_size == valid_count), "
+                "got data_size {}, valid_data_size {}, num_rows {}, "
+                "valid_count {}",
+                array_data.data_size(),
+                valid_data.size(),
+                num_rows,
+                valid_count);
+            compact_nullable = compact_nullable && !dense_aligned;
+        } else {
+            AssertInfo(
+                array_data.data_size() == num_rows,
+                "non-nullable ARRAY data size {} must match row count {}",
+                array_data.data_size(),
+                num_rows);
+        }
+
+        int64_t physical_row = 0;
+        auto has_valid_data = valid_data.size() == num_rows;
 
         for (int i = 0; i < num_rows; ++i) {
-            int32_t array_len = 0;
-
-            switch (element_type) {
-                case DataType::BOOL:
-                    array_len = array_data.data(i).bool_data().data_size();
-                    break;
-                case DataType::INT8:
-                case DataType::INT16:
-                case DataType::INT32:
-                    array_len = array_data.data(i).int_data().data_size();
-                    break;
-                case DataType::INT64:
-                    array_len = array_data.data(i).long_data().data_size();
-                    break;
-                case DataType::FLOAT:
-                    array_len = array_data.data(i).float_data().data_size();
-                    break;
-                case DataType::DOUBLE:
-                    array_len = array_data.data(i).double_data().data_size();
-                    break;
-                case DataType::STRING:
-                case DataType::VARCHAR:
-                    array_len = array_data.data(i).string_data().data_size();
-                    break;
-                default:
-                    ThrowInfo(ErrorCode::UnexpectedError,
-                              "Unexpected array type: {}",
-                              element_type);
+            if (field_meta.is_nullable() && has_valid_data && !valid_data[i]) {
+                array_lengths[i] = 0;
+                continue;
             }
 
+            auto source_index = compact_nullable ? physical_row++ : i;
+            AssertInfo(source_index < array_data.data_size(),
+                       "ARRAY row {} is missing from field data",
+                       source_index);
+            const auto& row = array_data.data(source_index);
+            auto array_len = GetScalarArrayLength(row, element_type);
+            AssertInfo(field_meta.is_element_nullable()
+                           ? row.valid_data_size() == array_len
+                           : row.valid_data_size() == 0,
+                       "ARRAY row {} element valid_data size {} does not match "
+                       "schema and logical element count {}",
+                       source_index,
+                       row.valid_data_size(),
+                       array_len);
             array_lengths[i] = array_len;
         }
     }
@@ -960,6 +1028,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                 storage::CreateFieldData(field_meta.get_data_type(),
                                          field_meta.get_element_type(),
                                          true,
+                                         field_meta.is_element_nullable(),
                                          1,
                                          lack_num);
             field_data->FillFieldData(field_meta.default_value(), lack_num);
@@ -1242,6 +1311,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                             data_type,
                             field.second.get_element_type(),
                             field.second.is_nullable(),
+                            field.second.is_element_nullable(),
                             IsVectorDataType(data_type) &&
                                     !IsSparseFloatVectorDataType(data_type)
                                 ? field.second.get_dim()
@@ -1423,8 +1493,82 @@ SegmentGrowingImpl::chunk_array_view_impl(
     FieldId field_id,
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len) const {
-    ThrowInfo(ErrorCode::NotImplemented,
-              "chunk array view impl not implement for growing segment");
+    (void)op_ctx;
+
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](field_id);
+    AssertInfo(field_meta.get_data_type() == DataType::ARRAY,
+               "chunk_array_view_impl only supports ARRAY field");
+
+    auto array_data = insert_record_.get_data<Array>(field_id);
+    auto size_per_chunk = array_data->get_size_per_chunk();
+    auto active_count = insert_record_.ack_responder_.GetAck();
+    auto start_offset = int64_t{0};
+    auto len = size_per_chunk;
+    if (offset_len.has_value()) {
+        start_offset = offset_len->first;
+        len = offset_len->second;
+    }
+
+    AssertInfo(
+        start_offset >= 0 && start_offset < size_per_chunk,
+        "Retrieve array views with out-of-bound offset:{}, len:{}, wrong",
+        start_offset,
+        len);
+    AssertInfo(
+        len >= 0 && len <= size_per_chunk,
+        "Retrieve array views with out-of-bound offset:{}, len:{}, wrong",
+        start_offset,
+        len);
+    AssertInfo(
+        start_offset + len <= size_per_chunk,
+        "Retrieve array views with out-of-bound offset:{}, len:{}, wrong",
+        start_offset,
+        len);
+
+    auto logical_start = chunk_id * size_per_chunk + start_offset;
+    AssertInfo(
+        logical_start >= 0 && logical_start <= active_count,
+        "Retrieve array views with out-of-bound offset:{}, len:{}, wrong",
+        start_offset,
+        len);
+    if (offset_len.has_value()) {
+        AssertInfo(
+            logical_start + len <= active_count,
+            "Retrieve array views with out-of-bound offset:{}, len:{}, wrong",
+            start_offset,
+            len);
+    } else {
+        len = std::min(len, active_count - logical_start);
+    }
+
+    std::vector<ArrayView> views;
+    views.reserve(len);
+    FixedVector<bool> valid_data;
+    std::unique_ptr<bool[]> row_valid;
+    if (field_meta.is_nullable()) {
+        valid_data.reserve(len);
+        row_valid = std::make_unique<bool[]>(len);
+        insert_record_.get_valid_data(field_id)->bulk_is_valid_range(
+            logical_start, len, row_valid.get());
+    }
+
+    for (int64_t i = 0; i < len; ++i) {
+        const bool valid = !row_valid || row_valid[i];
+        if (field_meta.is_nullable()) {
+            valid_data.push_back(valid);
+        }
+        if (valid) {
+            views.emplace_back(array_data->view_element(logical_start + i));
+        } else {
+            views.emplace_back();
+        }
+    }
+
+    std::pair<std::vector<ArrayView>, FixedVector<bool>> content{
+        std::move(views), std::move(valid_data)};
+    return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
+        std::move(content));
 }
 
 PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
@@ -1524,7 +1668,11 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
                            vector_array->dim(),
                            vector_array->length(),
                            vector_array->byte_size(),
-                           vector_array->get_element_type());
+                           vector_array->get_element_type(),
+                           vector_array->is_element_nullable()
+                               ? vector_array->get_element_valid_data().view()
+                               : TargetBitmapView(),
+                           vector_array->is_element_nullable());
     }
 
     std::pair<std::vector<VectorArrayView>, FixedVector<bool>> content{
@@ -1550,9 +1698,54 @@ SegmentGrowingImpl::chunk_array_views_by_offsets(
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
-    ThrowInfo(
-        ErrorCode::NotImplemented,
-        "chunk array views by offsets not implemented for growing segment");
+    (void)op_ctx;
+
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](field_id);
+    AssertInfo(field_meta.get_data_type() == DataType::ARRAY,
+               "chunk_array_views_by_offsets only supports ARRAY field");
+
+    auto array_data = insert_record_.get_data<Array>(field_id);
+    auto size_per_chunk = array_data->get_size_per_chunk();
+    auto active_count = insert_record_.ack_responder_.GetAck();
+    std::vector<int64_t> logical_offsets(offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        AssertInfo(offsets[i] >= 0 && offsets[i] < size_per_chunk,
+                   "Retrieve array view with out-of-bound chunk offset:{}",
+                   offsets[i]);
+        logical_offsets[i] = chunk_id * size_per_chunk + offsets[i];
+        AssertInfo(logical_offsets[i] < active_count,
+                   "Retrieve array view with out-of-bound segment offset:{}",
+                   logical_offsets[i]);
+    }
+
+    std::vector<ArrayView> views;
+    views.reserve(offsets.size());
+    FixedVector<bool> valid_data;
+    std::unique_ptr<bool[]> row_valid;
+    if (field_meta.is_nullable()) {
+        valid_data.reserve(offsets.size());
+        row_valid = std::make_unique<bool[]>(offsets.size());
+        insert_record_.get_valid_data(field_id)->bulk_is_valid(
+            logical_offsets.data(), logical_offsets.size(), row_valid.get());
+    }
+
+    for (size_t i = 0; i < logical_offsets.size(); ++i) {
+        const bool valid = !row_valid || row_valid[i];
+        if (field_meta.is_nullable()) {
+            valid_data.push_back(valid);
+        }
+        if (valid) {
+            views.emplace_back(array_data->view_element(logical_offsets[i]));
+        } else {
+            views.emplace_back();
+        }
+    }
+
+    std::pair<std::vector<ArrayView>, FixedVector<bool>> content{
+        std::move(views), std::move(valid_data)};
+    return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
+        std::move(content));
 }
 
 int64_t
@@ -2118,7 +2311,7 @@ SegmentGrowingImpl::bulk_subscript_array_impl(
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (offset != INVALID_SEG_OFFSET) {
-            dst->at(i) = vec[offset].output_data();
+            dst->at(i) = vec.view_element(offset).output_data();
         }
     }
 }
@@ -2306,7 +2499,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             for (int64_t i = 0; i < count; ++i) {
                 auto offset = seg_offsets[i];
                 if (offset != INVALID_SEG_OFFSET) {
-                    dst[i] = src[offset];
+                    src.view_element(offset).output_data(dst[i]);
                 } else {
                     dst[i] =
                         Array();  // Default-construct empty Array for invalid offsets
@@ -3071,6 +3264,7 @@ SegmentGrowingImpl::LoadColumnGroup(
                     data_type,
                     field.get_element_type(),
                     field.is_nullable(),
+                    field.is_element_nullable(),
                     IsVectorDataType(data_type) &&
                             !IsSparseFloatVectorDataType(data_type)
                         ? field.get_dim()
