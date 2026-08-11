@@ -70,11 +70,11 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 		return nil, merr.WrapErrMqInternal(err, "failed to configure kafka reader group")
 	}
 	if w.Channel().AccessMode == types.AccessModeRO {
-		// A read-only historical reader must never create a missing topic.
+		// A read-only reader must never create a missing topic.
 		if err := consumerConfig.SetKey("allow.auto.create.topics", false); err != nil {
 			return nil, merr.WrapErrMqInternal(err, "failed to disable kafka topic auto creation")
 		}
-		// A historical read must fail instead of silently resetting to earliest
+		// A read-only scan must fail instead of silently resetting to earliest
 		// when its requested offset has been removed by retention.
 		if err := consumerConfig.SetKey("auto.offset.reset", "error"); err != nil {
 			return nil, merr.WrapErrMqInternal(err, "failed to disable kafka offset auto reset")

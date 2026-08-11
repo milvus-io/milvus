@@ -3,6 +3,7 @@ package rmq
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -13,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const defaultReadAheadBufferSize = 1024
@@ -89,7 +91,7 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 			return nil, err
 		}
 		// Do a inslusive seek.
-		if err = consumer.Seek(int64(id)); err != nil {
+		if err = w.seek(ctx, consumer, int64(id)); err != nil {
 			return nil, err
 		}
 	case *streamingpb.DeliverPolicy_StartAfter:
@@ -98,11 +100,30 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 			return nil, err
 		}
 		exclude = &id
-		if err = consumer.Seek(int64(id)); err != nil {
+		if err = w.seek(ctx, consumer, int64(id)); err != nil {
 			return nil, err
 		}
 	}
 	return newScanner(scannerName, exclude, consumer), nil
+}
+
+func (w *walImpl) seek(ctx context.Context, consumer client.Consumer, id int64) error {
+	err := consumer.Seek(id)
+	if err == nil || w.Channel().AccessMode == types.AccessModeRO || !errors.Is(err, merr.ErrMqTopicNotFound) {
+		return err
+	}
+
+	// A read-write RocksMQ reader keeps the pre-existing recovery behavior when
+	// retention has removed its checkpoint. Read-only readers must
+	// return the typed error because resetting them could skip the AlterWAL
+	// boundary needed to continue the logical stream.
+	w.Log().Warn(ctx, "RocksMQ position is unavailable on read-write WAL, reset reader to earliest",
+		mlog.Int64("messageID", id),
+		mlog.Err(err))
+	if resetErr := consumer.Seek(client.EarliestMessageID()); resetErr != nil {
+		return merr.Wrap(resetErr, "reset RocksMQ reader to earliest")
+	}
+	return nil
 }
 
 func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {

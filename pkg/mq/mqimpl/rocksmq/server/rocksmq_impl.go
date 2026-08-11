@@ -346,8 +346,7 @@ func NewRocksMQ(name string) (*rocksmq, error) {
 		for {
 			time.Sleep(10 * time.Minute)
 
-			mlog.Info(
-				ctx, "Rocksmq stats",
+			mlog.Info(ctx, "Rocksmq stats",
 				mlog.String("cache", kv.DB.GetProperty("rocksdb.block-cache-usage")),
 				mlog.String("rockskv memtable ", kv.DB.GetProperty("rocksdb.size-all-mem-tables")),
 				mlog.String("rockskv table readers", kv.DB.GetProperty("rocksdb.estimate-table-readers-mem")),
@@ -466,8 +465,7 @@ func (rmq *rocksmq) Info() bool {
 			return false
 		}
 
-		mlog.Info(
-			context.TODO(), "Rocksmq Info",
+		mlog.Info(context.TODO(), "Rocksmq Info",
 			mlog.String("topic", topic),
 			mlog.Int("consumer num", consumerList.Len()),
 			mlog.String("min position group names", minConsumerGroupName),
@@ -766,8 +764,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	// TODO add this to monitor metrics
 	getProduceTime := time.Since(start).Milliseconds()
 	if getProduceTime > 200 {
-		mlog.Warn(
-			rmq.ctx, "rocksmq produce too slowly", mlog.String("topic", topicName),
+		mlog.Warn(rmq.ctx, "rocksmq produce too slowly", mlog.String("topic", topicName),
 			mlog.Int64("get lock elapse", getLockTime),
 			mlog.Int64("alloc elapse", allocTime-getLockTime),
 			mlog.Int64("write elapse", writeTime-allocTime),
