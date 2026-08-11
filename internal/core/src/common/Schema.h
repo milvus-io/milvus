@@ -255,7 +255,7 @@ class Schema {
              DataType data_type,
              DataType element_type,
              bool nullable,
-             bool element_nullable = false) {
+             bool element_nullable) {
         auto field_meta = FieldMeta(name,
                                     id,
                                     data_type,
