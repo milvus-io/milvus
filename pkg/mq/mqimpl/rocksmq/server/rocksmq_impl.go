@@ -947,11 +947,6 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 	if !ok {
 		return merr.WrapErrMqInternalMsg("ConsumerGroup %s, channel %s not exists", groupName, topicName)
 	}
-	if msgID == DefaultMessageID {
-		// The earliest sentinel does not correspond to a persisted message.
-		// A newly created consumer group is already positioned there.
-		return nil
-	}
 
 	storeKey := path.Join(topicName, strconv.FormatInt(msgID, 10))
 	opts := gorocksdb.NewDefaultReadOptions()
@@ -962,9 +957,11 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 	}
 	defer val.Free()
 	if !val.Exists() {
-		mlog.Warn(rmq.ctx, "RocksMQ: trying to seek to non-existent position",
+		mlog.Warn(rmq.ctx, "RocksMQ: trying to seek to no exist position, reset current id",
 			mlog.String("topic", topicName), mlog.String("group", groupName), mlog.Int64("msgId", msgID))
-		return merr.WrapErrMqTopicNotFound(topicName, "requested message position "+strconv.FormatInt(msgID, 10)+" does not exist")
+		err := rmq.moveConsumePos(topicName, groupName, DefaultMessageID)
+		// skip seek if key is not found, this is the behavior as pulsar
+		return err
 	}
 	/* Step II: update current_id */
 	err = rmq.moveConsumePos(topicName, groupName, msgID)

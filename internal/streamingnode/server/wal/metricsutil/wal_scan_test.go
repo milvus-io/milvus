@@ -8,33 +8,29 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestScannerMetricsSwitchReaderInfo(t *testing.T) {
+func TestScannerMetricsSetReaderWALName(t *testing.T) {
 	paramtable.Init()
 	scanMetrics := NewScanMetrics(types.PChannelInfo{Name: "reader-metrics-test"})
 	defer scanMetrics.Close()
 
-	scannerMetrics := scanMetrics.NewScannerMetrics()
-	scannerMetrics.SetReaderInfo(message.WALNamePulsar, metrics.WALReaderRoleHistorical)
+	scannerMetrics := scanMetrics.NewConsumerScannerMetrics("v1", "reader-1")
+	scannerMetrics.SetReaderWALName(message.WALNamePulsar)
 	assert.Equal(t, float64(1), testutil.ToFloat64(
-		scannerMetrics.activeReaders.WithLabelValues(message.WALNamePulsar.String(), metrics.WALReaderRoleHistorical),
+		scannerMetrics.consumerReaderInfo.WithLabelValues("v1", "reader-1", message.WALNamePulsar.String()),
 	))
+	assert.Equal(t, 1, testutil.CollectAndCount(scannerMetrics.consumerReaderInfo))
 
-	scannerMetrics.SwitchReaderInfo(message.WALNameWoodpecker, metrics.WALReaderRoleCurrent)
-	assert.Equal(t, float64(0), testutil.ToFloat64(
-		scannerMetrics.activeReaders.WithLabelValues(message.WALNamePulsar.String(), metrics.WALReaderRoleHistorical),
-	))
+	scannerMetrics.SetReaderWALName(message.WALNameWoodpecker)
 	assert.Equal(t, float64(1), testutil.ToFloat64(
-		scannerMetrics.activeReaders.WithLabelValues(message.WALNameWoodpecker.String(), metrics.WALReaderRoleCurrent),
+		scannerMetrics.consumerReaderInfo.WithLabelValues("v1", "reader-1", message.WALNameWoodpecker.String()),
 	))
+	assert.Equal(t, 1, testutil.CollectAndCount(scannerMetrics.consumerReaderInfo))
 
 	scannerMetrics.Close()
-	assert.Equal(t, float64(0), testutil.ToFloat64(
-		scannerMetrics.activeReaders.WithLabelValues(message.WALNameWoodpecker.String(), metrics.WALReaderRoleCurrent),
-	))
+	assert.Equal(t, 0, testutil.CollectAndCount(scannerMetrics.consumerReaderInfo))
 }

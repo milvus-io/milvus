@@ -39,12 +39,8 @@ func TestMain(m *testing.M) {
 
 func TestClient(t *testing.T) {
 	client, err := NewClient(Options{})
-	assert.Nil(t, client)
-	assert.Error(t, err)
-
-	client, err = NewClient(Options{Server: server2.Rmq})
-	assert.Nil(t, client)
-	assert.Error(t, err)
+	assert.NotNil(t, client)
+	assert.NoError(t, err)
 }
 
 func TestClient_CreateProducer(t *testing.T) {
@@ -57,8 +53,13 @@ func TestClient_CreateProducer(t *testing.T) {
 	client, err := NewClient(Options{
 		Server: newMockRocksMQ(),
 	})
+	assert.NoError(t, err)
+
+	producer, err := client.CreateProducer(ProducerOptions{
+		Topic: newTopicName(),
+	})
 	assert.Error(t, err)
-	assert.Nil(t, client)
+	assert.Nil(t, producer)
 
 	/////////////////////////////////////////////////
 	os.MkdirAll(rmqPath, os.ModePerm)
@@ -91,8 +92,15 @@ func TestClient_Subscribe(t *testing.T) {
 	client, err := NewClient(Options{
 		Server: newMockRocksMQ(),
 	})
+	assert.NoError(t, err)
+
+	consumer, err := client.Subscribe(ConsumerOptions{
+		Topic:                       newTopicName(),
+		SubscriptionName:            newConsumerName(),
+		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
+	})
 	assert.Error(t, err)
-	assert.Nil(t, client)
+	assert.Nil(t, consumer)
 
 	/////////////////////////////////////////////////
 	os.MkdirAll(rmqPath, os.ModePerm)

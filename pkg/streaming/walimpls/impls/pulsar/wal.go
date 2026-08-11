@@ -2,14 +2,9 @@ package pulsar
 
 import (
 	"context"
-	"net/http"
-	"strings"
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/admin"
-	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/rest"
-	adminutils "github.com/apache/pulsar-client-go/pulsaradmin/pkg/utils"
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 	"golang.org/x/time/rate"
@@ -20,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -33,7 +27,6 @@ type walImpl struct {
 	notifier           *syncutil.AsyncTaskNotifier[struct{}]
 	backlogClearHelper *backlogClearHelper
 	tenant             tenant
-	adminClient        admin.Client
 }
 
 // initProducerAtBackground initializes the producer at background.
@@ -109,11 +102,6 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 
 func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls.ScannerImpls, err error) {
 	topic := w.tenant.MustGetFullTopicName(w.Channel().Name)
-	if w.Channel().AccessMode == types.AccessModeRO {
-		if err := w.checkTopicExists(ctx, topic); err != nil {
-			return nil, err
-		}
-	}
 	ch := make(chan pulsar.ReaderMessage, 1)
 	readerOpt := pulsar.ReaderOptions{
 		Topic:             topic,
@@ -144,41 +132,9 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 	}
 	reader, err := w.c.CreateReader(readerOpt)
 	if err != nil {
-		return nil, mapPulsarReadError(topic, err)
+		return nil, err
 	}
 	return newScanner(opt.Name, reader), nil
-}
-
-func mapPulsarReadError(topic string, err error) error {
-	var pulsarErr *pulsar.Error
-	if (errors.As(err, &pulsarErr) && pulsarErr.Result() == pulsar.TopicNotFound) ||
-		strings.Contains(err.Error(), "TopicNotFound") {
-		return merr.WrapErrMqTopicNotFound(topic, err.Error())
-	}
-	return err
-}
-
-func (w *walImpl) checkTopicExists(ctx context.Context, topic string) error {
-	if w.adminClient == nil {
-		return merr.WrapErrServiceUnavailable("pulsar admin client is unavailable")
-	}
-	topicName, err := adminutils.GetTopicName(topic)
-	if err != nil {
-		return merr.WrapErrMqInternal(err, "failed to parse pulsar topic name")
-	}
-	_, err = w.adminClient.Topics().GetStatsWithContext(ctx, *topicName)
-	return mapPulsarAdminReadError(topic, err)
-}
-
-func mapPulsarAdminReadError(topic string, err error) error {
-	if err == nil {
-		return nil
-	}
-	var adminErr rest.Error
-	if errors.As(err, &adminErr) && adminErr.Code == http.StatusNotFound {
-		return merr.WrapErrMqTopicNotFound(topic, adminErr.Error())
-	}
-	return err
 }
 
 func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {

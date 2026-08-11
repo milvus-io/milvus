@@ -32,7 +32,7 @@ func newSwitchableScanner(
 	deliverPolicy options.DeliverPolicy,
 	msgChan chan<- message.ImmutableMessage,
 	underlyingROWALImplsOpener underlyingROWALImplsOpener,
-	onReaderChanged func(message.WALName, string),
+	onReaderChanged func(message.WALName),
 ) switchableScanner {
 	impl := switchableScannerImpl{
 		scannerName:                scannerName,
@@ -61,7 +61,7 @@ type switchableScannerImpl struct {
 	msgChan                    chan<- message.ImmutableMessage
 	writeAheadBuffer           wab.ROWriteAheadBuffer
 	underlyingROWALImplsOpener underlyingROWALImplsOpener
-	onReaderChanged            func(message.WALName, string)
+	onReaderChanged            func(message.WALName)
 }
 
 func (s *switchableScannerImpl) HandleMessage(ctx context.Context, msg message.ImmutableMessage) error {
@@ -158,13 +158,11 @@ func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
 func (s *catchupScanner) openCatchupScannerImpls(ctx context.Context) (walimpls.ScannerImpls, error) {
 	_, hasWALSpecificPosition := getDeliverPolicyWALName(s.deliverPolicy)
 	if !hasWALSpecificPosition || s.underlyingROWALImplsOpener == nil {
-		return s.createInnerWALScannerWithBackoff(ctx, s.deliverPolicy)
-	}
-	var onUnderlyingScannerChanged func(message.WALName)
-	if s.onReaderChanged != nil {
-		onUnderlyingScannerChanged = func(walName message.WALName) {
-			s.onReaderChanged(walName, metrics.WALReaderRoleHistorical)
+		scanner, err := s.createInnerWALScannerWithBackoff(ctx, s.deliverPolicy)
+		if err == nil && s.onReaderChanged != nil {
+			s.onReaderChanged(s.innerWAL.WALName())
 		}
+		return scanner, err
 	}
 	var sharedWAL walimpls.ROWALImpls
 	if s.writeAheadBuffer != nil {
@@ -183,7 +181,7 @@ func (s *catchupScanner) openCatchupScannerImpls(ctx context.Context) (walimpls.
 			ReadAheadBufferSize: getWALReadAheadBufferSize(),
 		},
 		s.underlyingROWALImplsOpener,
-		onUnderlyingScannerChanged,
+		s.onReaderChanged,
 	)
 }
 
@@ -248,9 +246,6 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 					mlog.Stringer("messageID", msg.MessageID()),
 					mlog.Stringer("lastConfirmedMessageID", msg.LastConfirmedMessageID()),
 				)
-				if s.onReaderChanged != nil {
-					s.onReaderChanged(s.innerWAL.WALName(), metrics.WALReaderRoleCurrent)
-				}
 				return &tailingScanner{
 					switchableScannerImpl: s.switchableScannerImpl,
 					reader:                reader,

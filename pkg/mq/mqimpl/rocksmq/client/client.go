@@ -11,34 +11,17 @@
 
 package client
 
-import (
-	"reflect"
-
-	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
-)
+import "github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
 
 // RocksMQ is the type server.RocksMQ
 type RocksMQ = server.RocksMQ
 
 // NewClient returns a rocksmq client
 func NewClient(options Options) (Client, error) {
-	if isNilRocksMQ(options.Server) {
+	if options.Server == nil {
 		options.Server = server.Rmq
 	}
 	return newClient(options)
-}
-
-func isNilRocksMQ(rmq RocksMQ) bool {
-	if rmq == nil {
-		return true
-	}
-	value := reflect.ValueOf(rmq)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
-	}
 }
 
 // ClientOptions is the options of a client
