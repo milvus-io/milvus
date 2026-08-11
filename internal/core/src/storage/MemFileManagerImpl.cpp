@@ -265,6 +265,8 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
                                          data_type,
                                          dim,
                                          element_type,
+                                         max_rows,
+                                         offset,
                                          storage_column_mapping);
     }
 
@@ -477,6 +479,8 @@ MemFileManagerImpl::cache_opt_field_memory_v3(const Config& config) {
                                       field_type,
                                       1,  // scalar field
                                       element_type,
+                                      0,
+                                      0,
                                       GetStorageColumnMapping(field_id));
 
         res[field_id] = GetOptFieldIvfData(field_type, field_datas);
