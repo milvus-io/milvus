@@ -1097,6 +1097,7 @@ func TestCalculateTargetSizeCount_QueryNodeParallelism(t *testing.T) {
 		assert.Equal(t, int64(1), targetCount, "targetCount should not be adjusted when totalSize/desiredCount < configMaxSize")
 	})
 }
+
 func TestCalculateTargetSizeCount_UserTargetAndMemoryClamp(t *testing.T) {
 	Params.Save(Params.DataCoordCfg.CompactionForceMergeQueryNodeMemoryFactor.Key, "4")
 	Params.Save(Params.DataCoordCfg.CompactionForceMergeDataNodeMemoryFactor.Key, "4")
