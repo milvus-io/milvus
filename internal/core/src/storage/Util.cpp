@@ -385,12 +385,29 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
 
                     int num_vectors = array.length();
                     if (num_vectors > 0) {
-                        auto ast = value_builder->AppendValues(
-                            reinterpret_cast<const uint8_t*>(array.data()),
-                            num_vectors);
-                        AssertInfo(ast.ok(),
-                                   "Failed to batch append vectors: {}",
-                                   ast.ToString());
+                        auto bytes_per_vector = milvus::vector_bytes_per_element(
+                            array.get_element_type(), array.dim());
+                        if (array.is_element_nullable()) {
+                            for (int j = 0; j < num_vectors; ++j) {
+                                auto data = reinterpret_cast<const uint8_t*>(
+                                                array.data()) +
+                                            j * bytes_per_vector;
+                                auto ast = array.is_element_valid(j)
+                                               ? value_builder->Append(data)
+                                               : value_builder->AppendNull();
+                                AssertInfo(ast.ok(),
+                                           "Failed to append vector array "
+                                           "element: {}",
+                                           ast.ToString());
+                            }
+                        } else {
+                            auto ast = value_builder->AppendValues(
+                                reinterpret_cast<const uint8_t*>(array.data()),
+                                num_vectors);
+                            AssertInfo(ast.ok(),
+                                       "Failed to batch append vectors: {}",
+                                       ast.ToString());
+                        }
                     }
                 };
 
@@ -1230,6 +1247,20 @@ CreateFieldData(const DataType& type,
                 bool nullable,
                 int64_t dim,
                 int64_t total_num_rows) {
+    return CreateFieldData(
+        type, element_type, nullable, false, dim, total_num_rows);
+}
+
+FieldDataPtr
+CreateFieldData(const DataType& type,
+                const DataType& element_type,
+                bool nullable,
+                bool element_nullable,
+                int64_t dim,
+                int64_t total_num_rows) {
+    AssertInfo(!element_nullable || type == DataType::ARRAY ||
+                   type == DataType::VECTOR_ARRAY,
+               "element nullable is only valid for ARRAY or VECTOR_ARRAY");
     switch (type) {
         case DataType::BOOL:
             return std::make_shared<FieldData<bool>>(
@@ -1268,7 +1299,7 @@ CreateFieldData(const DataType& type,
                 type, nullable, total_num_rows);
         case DataType::ARRAY:
             return std::make_shared<FieldData<Array>>(
-                type, nullable, total_num_rows);
+                type, nullable, element_nullable, total_num_rows);
         case DataType::VECTOR_FLOAT:
             return std::make_shared<FieldData<FloatVector>>(
                 dim, type, nullable, total_num_rows);
@@ -1289,7 +1320,11 @@ CreateFieldData(const DataType& type,
                 dim, type, nullable, total_num_rows);
         case DataType::VECTOR_ARRAY:
             return std::make_shared<FieldData<VectorArray>>(
-                dim, element_type, nullable, total_num_rows);
+                dim,
+                element_type,
+                nullable,
+                element_nullable,
+                total_num_rows);
         default:
             ThrowInfo(DataTypeInvalid,
                       "CreateFieldData not support data type " +
@@ -1333,15 +1368,24 @@ MergeFieldData(std::vector<FieldDataPtr>& data_array) {
     }
 
     auto element_type = DataType::NONE;
+    auto element_nullable = false;
+    auto array_data = dynamic_cast<FieldData<Array>*>(data_array[0].get());
+    if (array_data) {
+        element_nullable = array_data->is_element_nullable();
+    }
     auto vector_array_data =
         dynamic_cast<FieldData<VectorArray>*>(data_array[0].get());
     if (vector_array_data) {
         element_type = vector_array_data->get_element_type();
+        element_nullable = vector_array_data->is_element_nullable();
     }
 
     auto merged_data = storage::CreateFieldData(data_array[0]->get_data_type(),
                                                 element_type,
-                                                data_array[0]->IsNullable());
+                                                data_array[0]->IsNullable(),
+                                                element_nullable,
+                                                1,
+                                                0);
     merged_data->Reserve(total_length);
     for (const auto& data : data_array) {
         if (merged_data->IsNullable()) {
@@ -1386,6 +1430,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
                            DataType element_type,
+                           bool element_nullable,
                            int64_t dim,
                            milvus_storage::ArrowFileSystemPtr fs) {
     AssertInfo(remote_files.size() > 0, "[StorageV2] remote files size is 0");
@@ -1529,6 +1574,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                     storage::CreateFieldData(data_type,
                                              element_type,
                                              field_schema->nullable(),
+                                             element_nullable,
                                              dim,
                                              num_rows);
                 for (const auto& chunked_array : chunked_arrays) {
@@ -1611,6 +1657,7 @@ IterateFieldDataFromManifest(
     std::vector<std::string> needed_columns = {column_name};
 
     bool nullable = field_meta.field_schema.nullable();
+    bool element_nullable = field_meta.field_schema.element_nullable();
     std::shared_ptr<const FieldMeta> normalize_field_meta;
     if (is_external) {
         auto schema = field_meta.field_schema;
@@ -1818,6 +1865,7 @@ IterateFieldDataFromManifest(
                                           element_type_v,
                                           dim,
                                           nullable,
+                                          element_nullable,
                                           normalize_field_meta,
                                           num_rows]() -> FieldDataPtr {
             auto raw_column = batch->GetColumnByName(column_name);
@@ -1832,8 +1880,12 @@ IterateFieldDataFromManifest(
             }
             auto chunked_array =
                 std::make_shared<arrow::ChunkedArray>(raw_column);
-            auto field_data = CreateFieldData(
-                data_type_v, element_type_v, nullable, dim, num_rows);
+            auto field_data = CreateFieldData(data_type_v,
+                                              element_type_v,
+                                              nullable,
+                                              element_nullable,
+                                              dim,
+                                              num_rows);
             field_data->FillFieldData(chunked_array);
             return field_data;
         });
@@ -2116,6 +2168,7 @@ CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
             static_cast<DataType>(field_schema.data_type()),
             static_cast<DataType>(field_schema.element_type()),
             true,
+            field_schema.element_nullable(),
             1,
             lack_binlog_rows);
         field_data->FillFieldData(default_value, lack_binlog_rows);
@@ -3127,9 +3180,17 @@ ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
             } else {
                 auto start = list_arr->value_offset(i);
                 auto end = list_arr->value_offset(i + 1);
-                ValidateNoNullValuesInRange(
-                    list_arr->values(), start, end, "array list");
+                if (!field_meta.is_element_nullable()) {
+                    ValidateNoNullValuesInRange(
+                        list_arr->values(), start, end, "array list");
+                }
                 auto proto = ArrowListToScalarFieldProto(list_arr, i);
+                if (field_meta.is_element_nullable()) {
+                    proto.mutable_valid_data()->Reserve(end - start);
+                    for (int64_t j = start; j < end; ++j) {
+                        proto.add_valid_data(list_arr->values()->IsValid(j));
+                    }
+                }
                 std::string serialized;
                 proto.SerializeToString(&serialized);
                 status = builder.Append(serialized);
@@ -3425,60 +3486,76 @@ ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
         case arrow::Type::BOOL: {
             auto typed = std::static_pointer_cast<arrow::BooleanArray>(values);
             auto* d = sf.mutable_bool_data();
-            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) {
+                d->add_data(values->IsValid(j) ? typed->Value(j) : false);
+            }
             break;
         }
         case arrow::Type::INT8: {
             auto typed = std::static_pointer_cast<arrow::Int8Array>(values);
             auto* d = sf.mutable_int_data();
             for (int64_t j = start; j < end; j++)
-                d->add_data(static_cast<int32_t>(typed->Value(j)));
+                d->add_data(values->IsValid(j)
+                                ? static_cast<int32_t>(typed->Value(j))
+                                : 0);
             break;
         }
         case arrow::Type::INT16: {
             auto typed = std::static_pointer_cast<arrow::Int16Array>(values);
             auto* d = sf.mutable_int_data();
             for (int64_t j = start; j < end; j++)
-                d->add_data(static_cast<int32_t>(typed->Value(j)));
+                d->add_data(values->IsValid(j)
+                                ? static_cast<int32_t>(typed->Value(j))
+                                : 0);
             break;
         }
         case arrow::Type::INT32: {
             auto typed = std::static_pointer_cast<arrow::Int32Array>(values);
             auto* d = sf.mutable_int_data();
-            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) {
+                d->add_data(values->IsValid(j) ? typed->Value(j) : 0);
+            }
             break;
         }
         case arrow::Type::INT64: {
             auto typed = std::static_pointer_cast<arrow::Int64Array>(values);
             auto* d = sf.mutable_long_data();
-            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) {
+                d->add_data(values->IsValid(j) ? typed->Value(j) : 0);
+            }
             break;
         }
         case arrow::Type::FLOAT: {
             auto typed = std::static_pointer_cast<arrow::FloatArray>(values);
             auto* d = sf.mutable_float_data();
-            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) {
+                d->add_data(values->IsValid(j) ? typed->Value(j) : 0.0F);
+            }
             break;
         }
         case arrow::Type::DOUBLE: {
             auto typed = std::static_pointer_cast<arrow::DoubleArray>(values);
             auto* d = sf.mutable_double_data();
-            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) {
+                d->add_data(values->IsValid(j) ? typed->Value(j) : 0.0);
+            }
             break;
         }
         case arrow::Type::STRING: {
             auto typed = std::static_pointer_cast<arrow::StringArray>(values);
             auto* d = sf.mutable_string_data();
-            for (int64_t j = start; j < end; j++)
-                d->add_data(typed->GetString(j));
+            for (int64_t j = start; j < end; j++) {
+                d->add_data(values->IsValid(j) ? typed->GetString(j) : "");
+            }
             break;
         }
         case arrow::Type::LARGE_STRING: {
             auto typed =
                 std::static_pointer_cast<arrow::LargeStringArray>(values);
             auto* d = sf.mutable_string_data();
-            for (int64_t j = start; j < end; j++)
-                d->add_data(typed->GetString(j));
+            for (int64_t j = start; j < end; j++) {
+                d->add_data(values->IsValid(j) ? typed->GetString(j) : "");
+            }
             break;
         }
         case arrow::Type::STRING_VIEW: {
@@ -3486,6 +3563,10 @@ ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
                 std::static_pointer_cast<arrow::StringViewArray>(values);
             auto* d = sf.mutable_string_data();
             for (int64_t j = start; j < end; j++) {
+                if (values->IsNull(j)) {
+                    d->add_data("");
+                    continue;
+                }
                 auto sv = typed->GetView(j);
                 d->add_data(std::string(sv.data(), sv.size()));
             }

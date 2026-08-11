@@ -35,6 +35,14 @@ namespace milvus::storage {
 PayloadReader::PayloadReader(const milvus::FieldDataPtr& fieldData)
     : column_type_(fieldData->get_data_type()),
       nullable_(fieldData->IsNullable()) {
+    if (auto array_field =
+            std::dynamic_pointer_cast<FieldData<Array>>(fieldData)) {
+        element_nullable_ = array_field->is_element_nullable();
+    } else if (auto vector_array_field =
+                   std::dynamic_pointer_cast<FieldData<VectorArray>>(
+                       fieldData)) {
+        element_nullable_ = vector_array_field->is_element_nullable();
+    }
     field_data_ = fieldData;
 }
 
@@ -43,7 +51,18 @@ PayloadReader::PayloadReader(const uint8_t* data,
                              DataType data_type,
                              bool nullable,
                              bool is_field_data)
-    : column_type_(data_type), nullable_(nullable) {
+    : PayloadReader(data, length, data_type, nullable, false, is_field_data) {
+}
+
+PayloadReader::PayloadReader(const uint8_t* data,
+                             int length,
+                             DataType data_type,
+                             bool nullable,
+                             bool element_nullable,
+                             bool is_field_data)
+    : column_type_(data_type),
+      nullable_(nullable),
+      element_nullable_(element_nullable) {
     init(data, length, is_field_data);
 }
 
@@ -160,8 +179,12 @@ PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
             auto total_num_rows = file_meta->num_rows();
 
             // Create FieldData, passing element_type for VectorArray
-            field_data_ = CreateFieldData(
-                column_type_, element_type, nullable_, dim_, total_num_rows);
+            field_data_ = CreateFieldData(column_type_,
+                                          element_type,
+                                          nullable_,
+                                          element_nullable_,
+                                          dim_,
+                                          total_num_rows);
 
             for (arrow::Result<std::shared_ptr<arrow::RecordBatch>>
                      maybe_batch : *rb_reader) {

@@ -200,6 +200,10 @@ DescriptorEventData::DescriptorEventData(BinlogReaderPtr reader) {
     if (json.contains(NULLABLE)) {
         extras[NULLABLE] = static_cast<bool>(json[NULLABLE]);
     }
+    if (json.contains(ELEMENT_NULLABLE)) {
+        extras[ELEMENT_NULLABLE] =
+            static_cast<bool>(json[ELEMENT_NULLABLE]);
+    }
 
     if (json.contains(EDEK)) {
         extras[EDEK] = static_cast<std::string>(json[EDEK]);
@@ -215,7 +219,7 @@ DescriptorEventData::Serialize() {
     auto fix_part_data = fix_part.Serialize();
     nlohmann::json extras_json;
     for (const auto& v : extras) {
-        if (v.first == NULLABLE) {
+        if (v.first == NULLABLE || v.first == ELEMENT_NULLABLE) {
             extras_json.emplace(v.first, std::any_cast<bool>(v.second));
         } else if (v.first == EZID) {
             extras_json.emplace(v.first, std::any_cast<int64_t>(v.second));
@@ -251,6 +255,16 @@ BaseEventData::BaseEventData(BinlogReaderPtr reader,
                              int event_length,
                              DataType data_type,
                              bool nullable,
+                             bool is_field_data)
+    : BaseEventData(
+          reader, event_length, data_type, nullable, false, is_field_data) {
+}
+
+BaseEventData::BaseEventData(BinlogReaderPtr reader,
+                             int event_length,
+                             DataType data_type,
+                             bool nullable,
+                             bool element_nullable,
                              bool is_field_data) {
     auto ast = reader->ReadSingleValue<Timestamp>(start_timestamp);
     AssertInfo(ast.ok(), "read start timestamp failed");
@@ -261,8 +275,12 @@ BaseEventData::BaseEventData(BinlogReaderPtr reader,
         event_length - sizeof(start_timestamp) - sizeof(end_timestamp);
     auto res = reader->Read(payload_length);
     AssertInfo(res.first.ok(), "read payload failed");
-    payload_reader = std::make_shared<PayloadReader>(
-        res.second.get(), payload_length, data_type, nullable, is_field_data);
+    payload_reader = std::make_shared<PayloadReader>(res.second.get(),
+                                                     payload_length,
+                                                     data_type,
+                                                     nullable,
+                                                     element_nullable,
+                                                     is_field_data);
 }
 
 std::vector<uint8_t>
