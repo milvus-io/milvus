@@ -17,8 +17,8 @@
 package delegator
 
 import (
-	"fmt"
 	"context"
+	"fmt"
 	"runtime"
 	"time"
 
