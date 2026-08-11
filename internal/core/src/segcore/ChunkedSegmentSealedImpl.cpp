@@ -9765,6 +9765,20 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     if (size == 0 || !snapshot->use_take_for_output) {
         return false;
     }
+    if (plan->plan_node_ != nullptr) {
+        auto topk = plan->plan_node_->search_info_.topk_;
+        auto topk_limit =
+            SegcoreConfig::default_config().get_take_for_output_topk_limit();
+        if (topk_limit > 0 && topk > topk_limit) {
+            LOG_DEBUG(
+                "[TakeAPI] search skipped take() for segment {} because "
+                "topk {} exceeds limit {}",
+                id_,
+                topk,
+                topk_limit);
+            return false;
+        }
+    }
     const bool is_external_collection =
         schema_snapshot->is_external_collection();
 

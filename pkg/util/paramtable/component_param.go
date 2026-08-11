@@ -3946,6 +3946,7 @@ type queryNodeConfig struct {
 	// output fields take
 	InternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
 	ExternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
+	TakeForOutputTopKLimit             ParamItem `refreshable:"true"`
 	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
 	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
 	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
@@ -5394,6 +5395,24 @@ user-task-polling:
 		Export:       false,
 	}
 	p.ExternalCollectionUseTakeForOutput.Init(base.mgr)
+
+	p.TakeForOutputTopKLimit = ParamItem{
+		Key:          "queryNode.takeForOutput.topKLimit",
+		Version:      "3.0.0",
+		DefaultValue: "10000",
+		Doc:          `Maximum search topK that can use take() for output fields. Set to 0 to disable the limit`,
+		Export:       false,
+		Formatter: func(v string) string {
+			limit, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || limit < 0 {
+				mlog.Warn(context.TODO(), "queryNode.takeForOutput.topKLimit must be non-negative, using default 10000",
+					mlog.String("configured", v))
+				return "10000"
+			}
+			return v
+		},
+	}
+	p.TakeForOutputTopKLimit.Init(base.mgr)
 
 	p.ExternalCollectionSamplePerSegment = ParamItem{
 		Key:          "queryNode.externalCollection.samplePerSegment",

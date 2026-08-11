@@ -70,6 +70,23 @@ class ScopedRejectRemoteVectorOutput {
     bool old_value_;
 };
 
+class ScopedTakeForOutputTopKLimit {
+ public:
+    explicit ScopedTakeForOutputTopKLimit(int64_t limit)
+        : old_value_(SegcoreConfig::default_config()
+                         .get_take_for_output_topk_limit()) {
+        SegcoreConfig::default_config().set_take_for_output_topk_limit(limit);
+    }
+
+    ~ScopedTakeForOutputTopKLimit() {
+        SegcoreConfig::default_config().set_take_for_output_topk_limit(
+            old_value_);
+    }
+
+ private:
+    int64_t old_value_;
+};
+
 std::string
 BuildDenseVectorBytes(int row, int byte_width, int seed) {
     std::string bytes(byte_width, '\0');
@@ -139,6 +156,11 @@ class MockTakeReader : public milvus_storage::api::Reader {
         : table_(std::move(table)) {
     }
 
+    size_t
+    take_call_count() const {
+        return take_call_count_;
+    }
+
     std::shared_ptr<milvus_storage::api::ColumnGroups>
     get_column_groups() const override {
         return nullptr;
@@ -160,6 +182,7 @@ class MockTakeReader : public milvus_storage::api::Reader {
          size_t,
          const std::shared_ptr<std::vector<std::string>>& needed_columns)
         override {
+        ++take_call_count_;
         if (!table_) {
             return arrow::Status::Invalid("no table");
         }
@@ -188,6 +211,8 @@ class MockTakeReader : public milvus_storage::api::Reader {
     }
 
  private:
+    size_t take_call_count_{0};
+
     // Select rows from table at given indices using arrow::compute::Take.
     static arrow::Result<std::shared_ptr<arrow::Table>>
     SelectRows(const std::shared_ptr<arrow::Table>& table,
@@ -2531,6 +2556,102 @@ TEST(ExternalTakeAccessMode, SearchEnabledUsesTake) {
     EXPECT_EQ(int64_arr->scalars().long_data().data(0), 0);
     EXPECT_EQ(int64_arr->scalars().long_data().data(1), 20000);
     EXPECT_EQ(int64_arr->scalars().long_data().data(2), 40000);
+}
+
+TEST(ExternalTakeAccessMode, SearchUsesTakeAtTopKLimit) {
+    auto [schema,
+          bool_id,
+          int8_id,
+          int16_id,
+          int32_id,
+          int64_id,
+          float_id,
+          double_id,
+          varchar_id,
+          vec_id] = BuildExternalSchema();
+    auto table = BuildTestArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    auto reader = std::make_unique<MockTakeReader>(table);
+    auto* reader_ptr = reader.get();
+    segment->SetReaderForTesting(std::move(reader));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::Plan>(schema);
+    plan->plan_node_ = std::make_unique<query::VectorPlanNode>();
+    plan->plan_node_->search_info_.topk_ = 2;
+    plan->target_entries_ = {int64_id};
+
+    ScopedTakeForOutputTopKLimit scoped_limit(2);
+    SearchResult results;
+    int64_t offset = 0;
+    bool ok = segment->TestTryTakeForSearch(plan.get(), &offset, 1, results);
+    EXPECT_TRUE(ok);
+    EXPECT_EQ(reader_ptr->take_call_count(), 1);
+}
+
+TEST(ExternalTakeAccessMode, SearchSkipsTakeAboveTopKLimit) {
+    auto [schema,
+          bool_id,
+          int8_id,
+          int16_id,
+          int32_id,
+          int64_id,
+          float_id,
+          double_id,
+          varchar_id,
+          vec_id] = BuildExternalSchema();
+    auto table = BuildTestArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    auto reader = std::make_unique<MockTakeReader>(table);
+    auto* reader_ptr = reader.get();
+    segment->SetReaderForTesting(std::move(reader));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::Plan>(schema);
+    plan->plan_node_ = std::make_unique<query::VectorPlanNode>();
+    plan->plan_node_->search_info_.topk_ = 3;
+    plan->target_entries_ = {int64_id};
+
+    ScopedTakeForOutputTopKLimit scoped_limit(2);
+    SearchResult results;
+    int64_t offset = 0;
+    bool ok = segment->TestTryTakeForSearch(plan.get(), &offset, 1, results);
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(reader_ptr->take_call_count(), 0);
+}
+
+TEST(ExternalTakeAccessMode, SearchUsesTakeWhenTopKLimitDisabled) {
+    auto [schema,
+          bool_id,
+          int8_id,
+          int16_id,
+          int32_id,
+          int64_id,
+          float_id,
+          double_id,
+          varchar_id,
+          vec_id] = BuildExternalSchema();
+    auto table = BuildTestArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    auto reader = std::make_unique<MockTakeReader>(table);
+    auto* reader_ptr = reader.get();
+    segment->SetReaderForTesting(std::move(reader));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::Plan>(schema);
+    plan->plan_node_ = std::make_unique<query::VectorPlanNode>();
+    plan->plan_node_->search_info_.topk_ = 10001;
+    plan->target_entries_ = {int64_id};
+
+    ScopedTakeForOutputTopKLimit scoped_limit(0);
+    SearchResult results;
+    int64_t offset = 0;
+    bool ok = segment->TestTryTakeForSearch(plan.get(), &offset, 1, results);
+    EXPECT_TRUE(ok);
+    EXPECT_EQ(reader_ptr->take_call_count(), 1);
 }
 
 TEST(ExternalTakeAccessMode, SearchRejectRemoteVectorOutputReturnsFalse) {

@@ -702,6 +702,16 @@ func TestComponentParam(t *testing.T) {
 		assert.True(t, Params.ExternalCollectionUseTakeForOutput.GetAsBool())
 		params.Save(Params.ExternalCollectionUseTakeForOutput.Key, "false")
 		assert.False(t, Params.ExternalCollectionUseTakeForOutput.GetAsBool())
+		defer params.Reset(Params.TakeForOutputTopKLimit.Key)
+		assert.Equal(t, int64(10000), Params.TakeForOutputTopKLimit.GetAsInt64())
+		params.Save(Params.TakeForOutputTopKLimit.Key, "0")
+		assert.Equal(t, int64(0), Params.TakeForOutputTopKLimit.GetAsInt64())
+		params.Save(Params.TakeForOutputTopKLimit.Key, "2048")
+		assert.Equal(t, int64(2048), Params.TakeForOutputTopKLimit.GetAsInt64())
+		params.Save(Params.TakeForOutputTopKLimit.Key, "-1")
+		assert.Equal(t, int64(10000), Params.TakeForOutputTopKLimit.GetAsInt64())
+		params.Save(Params.TakeForOutputTopKLimit.Key, "invalid")
+		assert.Equal(t, int64(10000), Params.TakeForOutputTopKLimit.GetAsInt64())
 
 		// test CatchUpStreamingDataTsLag parameter
 		assert.Equal(t, 1*time.Second, Params.CatchUpStreamingDataTsLag.GetAsDurationByParse())

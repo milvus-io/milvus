@@ -69,6 +69,10 @@ func TestSetupCoreConfigChangeCallback(t *testing.T) {
 
 	assert.NoError(t, pt.Save(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key, "32"))
 	assert.Equal(t, "32", pt.CommonCfg.ThreadPoolMaxThreadsSize.GetValue())
+
+	defer pt.Reset(pt.QueryNodeCfg.TakeForOutputTopKLimit.Key)
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.TakeForOutputTopKLimit.Key, "2048"))
+	assert.Equal(t, int64(2048), pt.QueryNodeCfg.TakeForOutputTopKLimit.GetAsInt64())
 }
 
 // TestRegisterArrowIOThreadPoolWatchers verifies the lifted helper registers

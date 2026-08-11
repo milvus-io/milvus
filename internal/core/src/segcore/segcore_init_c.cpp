@@ -96,6 +96,13 @@ SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value) {
 }
 
 extern "C" void
+SegcoreSetTakeForOutputTopKLimit(const int64_t value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_take_for_output_topk_limit(value);
+}
+
+extern "C" void
 SegcoreSetNlist(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
