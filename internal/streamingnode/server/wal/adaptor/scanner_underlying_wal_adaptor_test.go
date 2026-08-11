@@ -186,6 +186,42 @@ func TestUnderlyingWALScannerAdaptorFollowsAlterWAL(t *testing.T) {
 	require.Equal(t, currentMessage, messages[1])
 }
 
+func TestUnderlyingWALScannerAdaptorPassesThroughRawV0Message(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	legacyMessage := message.NewImmutableMesasge(rmq.NewRmqID(1), []byte("legacy-message"), map[string]string{})
+	marker := newTestAlterWALMessage(commonpb.WALName_Test, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
+	oldWAL := newTestReadWAL(t, message.WALNameRocksmq, channel, legacyMessage, marker)
+	currentMessage := newTestTimeTickMessage(101, walimplstest.NewTestMessageID(1), walimplstest.NewTestMessageID(1))
+	currentWAL := newTestReadWAL(t, message.WALNameTest, channel, currentMessage)
+
+	scanner, err := newUnderlyingWALScannerAdaptor(
+		mlog.With(),
+		channel,
+		walimpls.ReadOption{
+			Name:          "legacy-reader",
+			DeliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
+		},
+		func(_ context.Context, walName message.WALName, _ types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			switch walName {
+			case message.WALNameRocksmq:
+				return oldWAL, nil
+			case message.WALNameTest:
+				return currentWAL, nil
+			default:
+				t.Fatalf("unexpected WAL name %s", walName)
+				return nil, nil
+			}
+		},
+		nil,
+	)
+	require.NoError(t, err)
+
+	require.Equal(t, message.VersionOld, (<-scanner.Chan()).Version())
+	require.Equal(t, marker, <-scanner.Chan())
+	require.Equal(t, currentMessage, <-scanner.Chan())
+	require.NoError(t, scanner.Close())
+}
+
 func TestUnderlyingWALScannerAdaptorDoesNotTreatMatchingWALNameAsCurrentEpoch(t *testing.T) {
 	channel := types.PChannelInfo{Name: "test-channel"}
 	innerWAL := mock_walimpls.NewMockWALImpls(t)
@@ -363,6 +399,37 @@ func TestUnderlyingWALScannerAdaptorFailsWhenWALIsUnavailable(t *testing.T) {
 	require.Nil(t, next)
 	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
 	require.Contains(t, err.Error(), merr.ErrMqTopicNotFound.Error())
+}
+
+func TestUnderlyingWALScannerAdaptorStopsWhenScannerCreationIsUnrecoverable(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	underlyingWAL := mock_walimpls.NewMockWALImpls(t)
+	underlyingWAL.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
+	underlyingWAL.EXPECT().Read(mock.Anything, mock.Anything).
+		Return(nil, status.NewUnrecoverableError("reader cannot be created")).Once()
+	underlyingWAL.EXPECT().Close().Return().Once()
+
+	scanner, err := newUnderlyingWALScannerAdaptor(
+		mlog.With(),
+		channel,
+		walimpls.ReadOption{
+			Name:          "unrecoverable-reader",
+			DeliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
+		},
+		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			return underlyingWAL, nil
+		},
+		nil,
+	)
+	require.NoError(t, err)
+
+	select {
+	case _, ok := <-scanner.Chan():
+		require.False(t, ok)
+		require.True(t, status.AsStreamingError(scanner.Error()).IsUnrecoverable())
+	case <-time.After(time.Second):
+		t.Fatal("scanner retried an unrecoverable creation error")
+	}
 }
 
 func TestUnderlyingWALScannerAdaptorRejectsInvalidStartPosition(t *testing.T) {

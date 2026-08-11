@@ -195,6 +195,9 @@ func (o *openerAdaptorImpl) openUnderlyingROWALImpls(
 	walName message.WALName,
 	channel types.PChannelInfo,
 ) (walimpls.ROWALImpls, error) {
+	if walName == message.WALNameRocksmq && !paramtable.IsStandalone() {
+		return nil, status.NewUnrecoverableError("RocksMQ WAL is unavailable outside standalone mode")
+	}
 	openerImpl, err := o.getOrCreateOpenerImpl(ctx, walName)
 	if err != nil {
 		return nil, err

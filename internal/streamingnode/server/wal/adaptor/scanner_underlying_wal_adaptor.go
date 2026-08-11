@@ -125,6 +125,7 @@ func (a *underlyingWALScannerAdaptor) execute() {
 }
 
 func (a *underlyingWALScannerAdaptor) consume() error {
+	backoffTimer := newScannerReadBackoffTimer()
 	for {
 		if a.Context().Err() != nil {
 			return a.Context().Err()
@@ -141,6 +142,7 @@ func (a *underlyingWALScannerAdaptor) consume() error {
 		err = a.consumeUnderlying(a.Context(), underlyingWAL)
 		underlyingWAL.Close()
 		if err == nil {
+			backoffTimer = newScannerReadBackoffTimer()
 			continue
 		}
 		if isReadWALUnavailable(err) {
@@ -152,9 +154,16 @@ func (a *underlyingWALScannerAdaptor) consume() error {
 		if a.Context().Err() != nil {
 			return a.Context().Err()
 		}
-		a.logger.Warn(a.Context(), "underlying WAL scanner was interrupted, retrying",
+		waker, nextInterval := backoffTimer.NextTimer()
+		a.logger.Warn(a.Context(), "underlying WAL scanner was interrupted, start a backoff",
 			mlog.Stringer("walName", a.underlyingWALName),
+			mlog.Duration("nextInterval", nextInterval),
 			mlog.Err(err))
+		select {
+		case <-a.Context().Done():
+			return a.Context().Err()
+		case <-waker:
+		}
 	}
 }
 
@@ -183,6 +192,20 @@ func (a *underlyingWALScannerAdaptor) consumeUnderlying(
 				return status.NewUnrecoverableError(
 					"underlying WAL %s reached end of stream before an AlterWAL boundary", a.underlyingWALName,
 				)
+			}
+
+			// Raw V0 messages do not carry the streaming `_tt` property. They must
+			// reach catchupScanner, which converts them to V1 before inspecting
+			// TimeTick or MessageType. AlterWAL is never encoded as a V0 message.
+			if msg.Version() == message.VersionOld {
+				if a.excludedMessageID == nil || !msg.MessageID().EQ(a.excludedMessageID) {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case a.messageCh <- msg:
+					}
+				}
+				continue
 			}
 
 			if msg.TimeTick() <= a.cutTs {
@@ -262,6 +285,9 @@ func (a *underlyingWALScannerAdaptor) createUnderlyingScannerWithBackoff(
 			return nil, ctx.Err()
 		}
 		if isReadWALUnavailable(err) {
+			return nil, err
+		}
+		if status.AsStreamingError(err).IsUnrecoverable() {
 			return nil, err
 		}
 

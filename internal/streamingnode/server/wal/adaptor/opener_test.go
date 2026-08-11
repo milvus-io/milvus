@@ -74,6 +74,20 @@ func TestGetOrCreateOpenerImplReturnsErrorForUnregisteredWAL(t *testing.T) {
 	assert.True(t, status.AsStreamingError(err).IsWALNameMismatch())
 }
 
+func TestOpenUnderlyingRocksMQRejectsClusterMode(t *testing.T) {
+	oldRole := paramtable.GetRole()
+	paramtable.SetRole(typeutil.StreamingNodeRole)
+	defer paramtable.SetRole(oldRole)
+
+	_, err := (&openerAdaptorImpl{}).openUnderlyingROWALImpls(
+		context.Background(),
+		message.WALNameRocksmq,
+		types.PChannelInfo{Name: "test-channel"},
+	)
+	require.Error(t, err)
+	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
+}
+
 func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testing.T) {
 	channel := types.PChannelInfo{
 		Name:       "replicate-recovery-failure-cleanup",

@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -132,9 +133,17 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 	}
 	reader, err := w.c.CreateReader(readerOpt)
 	if err != nil {
-		return nil, err
+		return nil, convertPulsarReadError(err, topic)
 	}
-	return newScanner(opt.Name, reader), nil
+	return newScanner(opt.Name, topic, reader), nil
+}
+
+func convertPulsarReadError(err error, topic string) error {
+	var pulsarErr *pulsar.Error
+	if errors.As(err, &pulsarErr) && pulsarErr.Result() == pulsar.TopicNotFound {
+		return merr.WrapErrMqTopicNotFound(topic, pulsarErr.Error())
+	}
+	return err
 }
 
 func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {

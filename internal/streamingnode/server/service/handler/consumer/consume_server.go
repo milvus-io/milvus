@@ -144,7 +144,10 @@ func (c *ConsumeServer) sendLoop() (err error) {
 		select {
 		case msg, ok := <-c.scanner.Chan():
 			if !ok {
-				return status.NewInner("scanner error: %s", c.scanner.Error())
+				if err := c.scanner.Error(); err != nil {
+					return err
+				}
+				return status.NewInner("scanner closed without an error")
 			}
 			// If the message is a transaction message, we should send the sub messages one by one,
 			// Otherwise we can send the full message directly.

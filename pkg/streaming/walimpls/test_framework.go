@@ -111,22 +111,25 @@ func (f *testOneWALImplsFramework) Run() {
 		assert.Equal(f.t, pChannel.Term, w.Channel().Term)
 
 		f.testReadAndWrite(ctx, w)
-		// close the wal
-		w.Close()
 
-		// test ro path
+		// Test the read-only path while the WAL still exists. Some backends remove
+		// the topic when the read-write WAL is closed, and a read-only open must not
+		// recreate a missing historical topic.
 		pChannel.AccessMode = types.AccessModeRO
-		w, err = f.opener.Open(ctx, &OpenOption{
+		roWAL, err := f.opener.Open(ctx, &OpenOption{
 			Channel: pChannel,
 		})
 		assert.NoError(f.t, err)
-		assert.NotNil(f.t, w)
+		assert.NotNil(f.t, roWAL)
 		assert.Panics(f.t, func() {
-			w.Append(ctx, nil)
+			roWAL.Append(ctx, nil)
 		})
 		assert.Panics(f.t, func() {
-			w.Truncate(ctx, nil)
+			roWAL.Truncate(ctx, nil)
 		})
+		roWAL.Close()
+
+		// close the read-write wal
 		w.Close()
 	}
 

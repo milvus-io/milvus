@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -181,11 +182,15 @@ func (rc *resumableConsumerImpl) waitUntilUnavailable(consumer handler.Consumer)
 	case <-rc.ctx.Done():
 		return rc.ctx.Err()
 	case <-consumer.Done():
+		consumerErr := consumer.Error()
 		rc.logger.Warn(rc.ctx, "consumer is done or encounter error, try to resume...",
-			mlog.Err(consumer.Error()),
+			mlog.Err(consumerErr),
 			mlog.Any("lastConfirmedMessageID", rc.mh.lastConfirmedMessageID),
 			mlog.Uint64("lastTimeTick", rc.mh.lastTimeTick),
 		)
+		if consumerErr != nil && status.AsStreamingError(consumerErr).IsUnrecoverable() {
+			return consumerErr
+		}
 		return nil
 	}
 }

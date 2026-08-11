@@ -132,6 +132,7 @@ type catchupScanner struct {
 }
 
 func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
+	backoffTimer := newScannerReadBackoffTimer()
 	for {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -148,7 +149,15 @@ func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
 			if status.AsStreamingError(err).IsUnrecoverable() {
 				return nil, err
 			}
-			s.logger.Warn(ctx, "scanner consuming was interrpurted with error, start a backoff", mlog.Err(err))
+			waker, nextInterval := backoffTimer.NextTimer()
+			s.logger.Warn(ctx, "scanner consuming was interrupted with error, start a backoff",
+				mlog.Duration("nextInterval", nextInterval),
+				mlog.Err(err))
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-waker:
+			}
 			continue
 		}
 		return switchedScanner, nil
