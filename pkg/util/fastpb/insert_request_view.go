@@ -730,12 +730,31 @@ func (e *InsertRequestViewEncoder) appendArrayArray(w *insertViewWriter, fieldNu
 	}
 	return w.message(fieldNumber, arraySize, func() error {
 		for _, row := range e.rows {
-			if err := w.protoMessage(1, values.GetData()[row], "array scalar row"); err != nil {
+			if err := appendArrayCell(w, values.GetData()[row]); err != nil {
 				return err
 			}
 		}
 		w.proto3Varint(2, uint64(values.GetElementType()))
 		return w.err
+	})
+}
+
+// appendArrayCell writes one ArrayArray element. Cells the arithmetic encoder
+// covers skip the protobuf reflection encoder entirely; the rest fall back to
+// it, reusing the size cache scalarCellWireSize seeded for that same cell.
+//
+// The payload is measured again here rather than carried over from the sizing
+// pass. Threading a per-row entry through the size plan avoids the second pass
+// but couples the two far more tightly -- a misaligned plan writes a wrong
+// length prefix -- and measured only ~6% on an array-heavy encode.
+func appendArrayCell(w *insertViewWriter, cell *schemapb.ScalarField) error {
+	plan, ok := classifyScalarCell(cell)
+	if !ok {
+		return w.protoMessage(1, cell, "array scalar row")
+	}
+	plan.payload = scalarCellPayload(cell, plan)
+	return w.message(1, plan.scalarCellSize(), func() error {
+		return appendScalarCell(w, cell, plan)
 	})
 }
 
@@ -1073,6 +1092,26 @@ func (w *insertViewWriter) plannedInt() (int, error) {
 	size := (*w.sizePlan)[w.planIndex]
 	w.planIndex++
 	return size, nil
+}
+
+// appendBulk writes a run of values whose combined size is already known,
+// charging the writer once instead of per value. The per-value helpers below
+// each recompute the value's size to advance w.n; for a packed array that size
+// was already computed during sizing, so replaying it here would double the
+// varint work on the hot path. appendValues must append exactly size bytes --
+// verified rather than trusted, since a mismatch would silently desynchronize
+// the length prefix from the payload.
+func (w *insertViewWriter) appendBulk(size int, appendValues func([]byte) []byte) {
+	if w.err != nil {
+		return
+	}
+	start := len(w.out)
+	w.out = appendValues(w.out)
+	if actual := len(w.out) - start; actual != size {
+		w.err = insertViewInternal("bulk append wrote %d bytes, expected %d", actual, size)
+		return
+	}
+	w.add(size)
 }
 
 func (w *insertViewWriter) add(n int) {

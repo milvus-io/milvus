@@ -302,3 +302,89 @@ func materializePreallocatedForBenchmark(template, source *msgpb.InsertRequest, 
 	}
 	return request
 }
+
+// BenchmarkInsertRequestViewWideTable stresses the sizing loop rather than
+// payload volume. previewSize walks every field for every row, so its
+// O(rows x fields) cost is invisible in the single-field benchmarks above --
+// there, row-major and field-major traversal touch memory in the same order.
+// A wide table separates the two: 128 narrow columns mean each row's sizing
+// pass jumps across 128 slices.
+//
+// The array columns are the only ones whose per-row size is not O(1), so this
+// is also where an estimated (rather than measured) array size would have to
+// pay off if it pays off anywhere.
+func BenchmarkInsertRequestViewWideTable(b *testing.B) {
+	const (
+		rowCount    = 2_000
+		scalarCount = 96
+		arrayCount  = 32
+		elementsPer = 8
+		bodyBudget  = 256 << 10
+	)
+	template := insertViewTemplate()
+	rows, rowIDs, timestamps := benchmarkInsertRows(rowCount)
+
+	fields := make([]*schemapb.FieldData, 0, scalarCount+arrayCount)
+	for field := 0; field < scalarCount; field++ {
+		values := make([]int64, rowCount)
+		for row := range values {
+			values[row] = int64(row + field)
+		}
+		fields = append(fields, scalarField(int64(100+field), schemapb.DataType_Int64,
+			&schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values}}))
+	}
+	for field := 0; field < arrayCount; field++ {
+		cells := make([]*schemapb.ScalarField, rowCount)
+		for row := range cells {
+			values := make([]int64, elementsPer)
+			for element := range values {
+				values[element] = int64(row*elementsPer + element)
+			}
+			cells[row] = &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{
+				LongData: &schemapb.LongArray{Data: values},
+			}}
+		}
+		fields = append(fields, scalarField(int64(1000+field), schemapb.DataType_Array,
+			&schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+				Data: cells, ElementType: schemapb.DataType_Int64,
+			}}))
+	}
+
+	source := &msgpb.InsertRequest{
+		NumRows:    rowCount,
+		RowIDs:     rowIDs,
+		Timestamps: timestamps,
+		FieldsData: fields,
+	}
+
+	b.ReportAllocs()
+	var bytesPerIteration int64
+	for i := 0; i < b.N; i++ {
+		cursor, err := NewInsertRequestViewCursor(source)
+		if err != nil {
+			b.Fatal(err)
+		}
+		var encodedBytes int64
+		for start := 0; start < len(rows); {
+			encoder, consumed, err := cursor.NextEncoder(template, rows[start:], bodyBudget)
+			if err != nil {
+				b.Fatal(err)
+			}
+			size, err := encoder.EncodedSize()
+			if err != nil {
+				b.Fatal(err)
+			}
+			payload := make([]byte, size)
+			if _, err := encoder.MarshalTo(payload); err != nil {
+				b.Fatal(err)
+			}
+			encodedBytes += int64(size)
+			insertRequestViewBenchmarkSink = payload
+			start += consumed
+		}
+		if i == 0 {
+			bytesPerIteration = encodedBytes
+		}
+	}
+	b.SetBytes(bytesPerIteration)
+}

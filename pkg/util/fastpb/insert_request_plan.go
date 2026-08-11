@@ -538,7 +538,7 @@ func (s *insertFieldSizeState) previewScalarRow(scalar *schemapb.ScalarField, ro
 		if row >= len(value.ArrayData.GetData()) {
 			return insertViewInternal("row offset %d exceeds array scalar length %d", row, len(value.ArrayData.GetData()))
 		}
-		itemSize := nullableProtoSize(value.ArrayData.GetData()[row], false)
+		itemSize := scalarCellWireSize(value.ArrayData.GetData()[row])
 		wireSize, err := insertBytesFieldSize(1, itemSize)
 		if err != nil {
 			return err
@@ -960,6 +960,13 @@ func insertBytesFieldSize(number protowire.Number, payloadSize int) (int, error)
 	return checkedAddSize(prefixSize, payloadSize, "protobuf bytes field")
 }
 
+// checkedAddSize is the single largest flat cost on the O(rows x fields) sizing
+// path (~12% of a wide-table encode). It does not inline: splitting the error
+// construction into a //go:noinline helper brings it to cost 81 against a
+// budget of 80, and rewriting the overflow test to use wraparound makes it
+// worse (84). Getting under the budget needs the label parameter gone, which
+// costs the diagnostics on every call site, so it is left alone until the
+// sizing loop itself is restructured.
 func checkedAddSize(a, b int, label string) (int, error) {
 	if a < 0 || b < 0 || a > math.MaxInt-b {
 		return 0, insertViewInternal("%s exceeds addressable memory", label)

@@ -538,7 +538,11 @@ func TestInsertRequestViewEncoder_InvalidUTF8(t *testing.T) {
 		assert.True(t, bytes.Contains(payload, []byte{0xff}))
 	})
 
-	t.Run("nested array string rejected during marshal", func(t *testing.T) {
+	// An array cell used to be written by proto.Marshal, which validates UTF-8
+	// and fails. The arithmetic encoder that replaced it treats proto3 strings
+	// as trusted internal input, so nested strings now behave like the
+	// top-level varchar above: passed through untouched.
+	t.Run("nested array string is treated as trusted", func(t *testing.T) {
 		source := baseSource(scalarField(1, schemapb.DataType_Array, &schemapb.ScalarField_ArrayData{
 			ArrayData: &schemapb.ArrayArray{
 				Data: []*schemapb.ScalarField{{Data: &schemapb.ScalarField_StringData{
@@ -551,9 +555,11 @@ func TestInsertRequestViewEncoder_InvalidUTF8(t *testing.T) {
 		require.NoError(t, err)
 		size, err := encoder.EncodedSize()
 		require.NoError(t, err)
-		_, err = encoder.MarshalTo(make([]byte, size))
-		require.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		payload := make([]byte, size)
+		written, err := encoder.MarshalTo(payload)
+		require.NoError(t, err)
+		assert.Equal(t, size, written)
+		assert.True(t, bytes.Contains(payload, []byte{0xff}))
 	})
 }
 
