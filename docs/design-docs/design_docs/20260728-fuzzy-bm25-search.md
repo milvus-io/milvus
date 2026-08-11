@@ -132,6 +132,9 @@ This behavior is important for the term dictionary design:
 - Making approximate expansion the default behavior.
 - Supporting an online transition from `enable_fuzzy_bm25=false` to `true`
   without an explicit backfill procedure in the first release.
+- Supporting fuzzy BM25 on External Collections in the first release. External
+  schemas must reject `enable_fuzzy_bm25=true` until manifest-backed external
+  segments define an explicit FST completeness and coverage contract.
 
 ---
 
