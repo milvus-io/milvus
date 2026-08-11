@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -36,6 +37,66 @@
 namespace milvus {
 namespace exec {
 
+namespace {
+
+bool
+IsArrayElementNullExpr(const milvus::expr::ColumnInfo& column) {
+    return column.data_type_ == DataType::ARRAY &&
+           !column.nested_path_.empty();
+}
+
+template <bool ElementNullable>
+struct ArrayElementNullExecutor {
+    int index_;
+    bool is_null_;
+
+    template <FilterType filter_type = FilterType::sequential,
+              typename ArrayType>
+    void
+    operator()(const ArrayType* data,
+               const bool* valid_data,
+               const int32_t* offsets,
+               const int size,
+               TargetBitmapView res,
+               TargetBitmapView valid_res) const {
+        if (data == nullptr) {
+            return;
+        }
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = offsets ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (index_ < 0 || index_ >= data[offset].length()) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if constexpr (ElementNullable) {
+                const bool element_valid =
+                    data[offset].is_element_valid(index_);
+                res[i] = is_null_ ? !element_valid : element_valid;
+            } else {
+                res[i] = !is_null_;
+            }
+        }
+    }
+
+    void
+    operator()(std::nullptr_t,
+               std::nullptr_t,
+               std::nullptr_t,
+               int64_t,
+               TargetBitmapView,
+               TargetBitmapView) const {
+    }
+};
+
+}  // namespace
+
 void
 PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
     WaitPrefetch();
@@ -44,6 +105,10 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                  static_cast<int>(expr_->column_.data_type_));
 
     auto input = context.get_offset_input();
+    if (IsArrayElementNullExpr(expr_->column_)) {
+        result = ExecArrayElementNull(input);
+        return;
+    }
     auto data_type = expr_->column_.data_type_;
     if (expr_->column_.element_level_) {
         data_type = expr_->column_.element_type_;
@@ -124,17 +189,60 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
 void
 PhyNullExpr::DetermineExecPath() {
+    if (IsArrayElementNullExpr(expr_->column_)) {
+        exec_path_ = ExprExecPath::RawData;
+        return;
+    }
     if (expr_->column_.data_type_ == DataType::VECTOR_ARRAY) {
         exec_path_ = ExprExecPath::RawData;
         return;
     }
 
     SegmentExpr::DetermineExecPath();
-    if (PinnedIndexIsNested()) {
+    if (expr_->column_.element_level_ && !PinnedIndexIsNested()) {
         exec_path_ = ExprExecPath::RawData;
-        pinned_index_.clear();
-        num_index_chunk_ = 0;
     }
+}
+
+VectorPtr
+PhyNullExpr::ExecArrayElementNull(OffsetVector* input) {
+    auto real_batch_size = GetNextRealBatchSize(input, false);
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    const auto index = std::stoi(expr_->column_.nested_path_[0]);
+    const bool is_null =
+        expr_->op_ == proto::plan::NullExpr_NullOp_IsNull;
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+
+    auto run = [&]<bool ElementNullable>() {
+        auto execute_sub_batch =
+            ArrayElementNullExecutor<ElementNullable>{index, is_null};
+        if (input != nullptr) {
+            return ProcessDataByOffsets<ArrayView>(execute_sub_batch,
+                                                   std::nullptr_t{},
+                                                   input,
+                                                   res,
+                                                   valid_res);
+        }
+        return ProcessDataChunks<ArrayView>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res);
+    };
+
+    const auto processed_size = element_nullable_
+                                    ? run.template operator()<true>()
+                                    : run.template operator()<false>();
+    AssertInfo(processed_size == real_batch_size,
+               "internal error: expr processed rows {} not equal expect "
+               "batch size {}",
+               processed_size,
+               real_batch_size);
+    return res_vec;
 }
 
 template <typename T>
@@ -145,8 +253,10 @@ PhyNullExpr::ExecVisitorImpl(OffsetVector* input) {
     }
     auto valid_res =
         (input != nullptr)
-            ? ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input)
-            : ProcessChunksForValid<T>(UseIndexCursor());
+            ? ProcessChunksForValidByOffsets<T>(
+                  UseIndexCursor(), *input, expr_->column_.element_level_)
+            : ProcessChunksForValid<T>(UseIndexCursor(),
+                                       expr_->column_.element_level_);
     TargetBitmap res = valid_res.clone();
     if (expr_->op_ == proto::plan::NullExpr_NullOp_IsNull) {
         res.flip();
@@ -160,13 +270,20 @@ PhyNullExpr::ExecVisitorImpl(OffsetVector* input) {
 // res is all false when is null, and is all true when is not null
 ColumnVectorPtr
 PhyNullExpr::PreCheckNullable(OffsetVector* input) {
-    if (expr_->column_.nullable_) {
+    const bool nullable = expr_->column_.element_level_
+                              ? element_nullable_
+                              : expr_->column_.nullable_;
+    if (nullable) {
         return nullptr;
     }
 
     int64_t batch_size;
     if (input != nullptr) {
         batch_size = input->size();
+    } else if (expr_->column_.element_level_) {
+        auto [_, elem_count] = GetNextBatchSizeForElementLevel();
+        batch_size = elem_count;
+        MoveCursor();
     } else {
         batch_size = precheck_pos_ + batch_size_ >= active_count_
                          ? active_count_ - precheck_pos_

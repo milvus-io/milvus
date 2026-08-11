@@ -365,24 +365,12 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
     val2 = upper_arg_.GetValue<HighPrecisionType>();
     auto get_next_overflow_batch =
         [this](OffsetVector* input) -> ColumnVectorPtr {
-        TargetBitmap valid_res;
-        if (expr_->column_.element_level_) {
-            // Element batches are derived from the row cursor so
-            // MoveCursor()-based short-circuiting stays aligned.
-            // Individual elements cannot be null; their containing row's
-            // validity is applied by the element consumer.
-            auto batch_size =
-                GetNextRealBatchSize(input, /*element_level=*/true);
-            valid_res = TargetBitmap(batch_size, true);
-            if (input == nullptr) {
-                MoveCursor();
-            }
-        } else if (input != nullptr) {
-            valid_res =
-                ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input);
-        } else {
-            valid_res = ProcessChunksForValid<T>(UseIndexCursor());
-        }
+        auto valid_res =
+            input != nullptr
+                ? ProcessChunksForValidByOffsets<T>(
+                      UseIndexCursor(), *input, expr_->column_.element_level_)
+                : ProcessChunksForValid<T>(UseIndexCursor(),
+                                           expr_->column_.element_level_);
 
         auto batch_size = valid_res.size();
         auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
@@ -456,12 +444,23 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
             cached_result_ = std::make_shared<TargetBitmap>(
                 execute_sub_batch(index_ptr, val1, val2));
             cached_valid_result_ = std::make_shared<TargetBitmap>(
-                GetCachedIndexValidBitmap(index_ptr).clone());
-            AssertInfo(
-                cached_result_->size() == static_cast<size_t>(active_count_),
-                "index range result size {} does not match row count {}",
-                cached_result_->size(),
-                active_count_);
+                GetCachedIndexValidBitmap(
+                    index_ptr, expr_->column_.element_level_)
+                    .clone());
+            AssertInfo(cached_result_->size() ==
+                           cached_valid_result_->size(),
+                       "index range result and validity sizes differ: {} vs "
+                       "{}",
+                       cached_result_->size(),
+                       cached_valid_result_->size());
+            if (!expr_->column_.element_level_) {
+                AssertInfo(
+                    cached_result_->size() ==
+                        static_cast<size_t>(active_count_),
+                    "index range result size {} does not match row count {}",
+                    cached_result_->size(),
+                    active_count_);
+            }
         }
         return GatherCachedResultByOffsets(
             *cached_result_, *cached_valid_result_, *input);
@@ -1049,7 +1048,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
             TargetBitmapView valid_res,
             ValueType val1,
             ValueType val2,
-            int index) {
+            int index,
+            bool element_nullable) {
         AssertInfo(index >= 0,
                    "array element range predicate requires nested path");
         // If data is nullptr, this chunk was skipped by SkipIndex.
@@ -1058,64 +1058,51 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
             processed_cursor += size;
             return;
         }
+        auto run_func = [&]<typename Func>(Func& func) {
+            if (element_nullable) {
+                func.template operator()<true>(val1,
+                                               val2,
+                                               index,
+                                               data,
+                                               valid_data,
+                                               size,
+                                               res,
+                                               valid_res,
+                                               bitmap_input,
+                                               processed_cursor,
+                                               offsets);
+            } else {
+                func.template operator()<false>(val1,
+                                                val2,
+                                                index,
+                                                data,
+                                                valid_data,
+                                                size,
+                                                res,
+                                                valid_res,
+                                                bitmap_input,
+                                                processed_cursor,
+                                                offsets);
+            }
+        };
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForArray<ValueType, true, true, filter_type>
                 func;
-            func(val1,
-                 val2,
-                 index,
-                 data,
-                 valid_data,
-                 size,
-                 res,
-                 valid_res,
-                 bitmap_input,
-                 processed_cursor,
-                 offsets);
+            run_func(func);
         } else if (lower_inclusive && !upper_inclusive) {
             BinaryRangeElementFuncForArray<ValueType, true, false, filter_type>
                 func;
-            func(val1,
-                 val2,
-                 index,
-                 data,
-                 valid_data,
-                 size,
-                 res,
-                 valid_res,
-                 bitmap_input,
-                 processed_cursor,
-                 offsets);
+            run_func(func);
 
         } else if (!lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForArray<ValueType, false, true, filter_type>
                 func;
-            func(val1,
-                 val2,
-                 index,
-                 data,
-                 valid_data,
-                 size,
-                 res,
-                 valid_res,
-                 bitmap_input,
-                 processed_cursor,
-                 offsets);
+            run_func(func);
 
         } else {
             BinaryRangeElementFuncForArray<ValueType, false, false, filter_type>
                 func;
-            func(val1,
-                 val2,
-                 index,
-                 data,
-                 valid_data,
-                 size,
-                 res,
-                 valid_res,
-                 bitmap_input,
-                 processed_cursor,
-                 offsets);
+            run_func(func);
         }
         processed_cursor += size;
     };
@@ -1130,7 +1117,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
                                                     valid_res,
                                                     val1,
                                                     val2,
-                                                    index);
+                                                    index,
+                                                    element_nullable_);
     } else {
         processed_size = ProcessDataChunks<milvus::ArrayView>(execute_sub_batch,
                                                               std::nullptr_t{},
@@ -1138,7 +1126,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
                                                               valid_res,
                                                               val1,
                                                               val2,
-                                                              index);
+                                                              index,
+                                                              element_nullable_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -1233,6 +1222,10 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
 
     SegmentExpr::DetermineExecPath();
     if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
+    }
+    if (expr_->column_.element_level_ && !PinnedIndexIsNested()) {
+        exec_path_ = ExprExecPath::RawData;
         return;
     }
 

@@ -247,7 +247,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForIndex(
     VectorPtr result;
     if (input != nullptr) {
         result = ProcessIndexChunksByOffsets<T>(
-            exec_index, input, eval_size, compare_value, interval);
+            exec_index, input, false, eval_size, compare_value, interval);
     } else {
         result = ProcessIndexChunks<T>(
             exec_index, eval_size, compare_value, interval);

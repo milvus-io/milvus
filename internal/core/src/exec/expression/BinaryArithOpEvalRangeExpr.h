@@ -742,6 +742,10 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         if (exec_path_ != ExprExecPath::ScalarIndex) {
             return;
         }
+        if (expr_->column_.element_level_ && !PinnedIndexIsNested()) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
 
         auto data_type = expr_->column_.data_type_;
         if (expr_->column_.element_level_) {

@@ -476,27 +476,44 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             ValueType val,
-            int index) {
+            int index,
+            bool element_nullable) {
         if (data == nullptr) {
             processed_cursor += size;
             return;
         }
+        auto run_func = [&]<typename Func>(Func& func) {
+            if (element_nullable) {
+                func.template operator()<true>(data,
+                                               valid_data,
+                                               size,
+                                               val,
+                                               index,
+                                               res,
+                                               valid_res,
+                                               bitmap_input,
+                                               processed_cursor,
+                                               offsets);
+            } else {
+                func.template operator()<false>(data,
+                                                valid_data,
+                                                size,
+                                                val,
+                                                index,
+                                                res,
+                                                valid_res,
+                                                bitmap_input,
+                                                processed_cursor,
+                                                offsets);
+            }
+        };
         switch (op_type) {
             case proto::plan::GreaterThan: {
                 UnaryElementFuncForArray<ValueType,
                                          proto::plan::GreaterThan,
                                          filter_type>
                     func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
+                run_func(func);
                 break;
             }
             case proto::plan::GreaterEqual: {
@@ -504,16 +521,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                                          proto::plan::GreaterEqual,
                                          filter_type>
                     func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
+                run_func(func);
                 break;
             }
             case proto::plan::LessThan: {
@@ -521,16 +529,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                                          proto::plan::LessThan,
                                          filter_type>
                     func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
+                run_func(func);
                 break;
             }
             case proto::plan::LessEqual: {
@@ -538,16 +537,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                                          proto::plan::LessEqual,
                                          filter_type>
                     func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
+                run_func(func);
                 break;
             }
             case proto::plan::Equal: {
@@ -555,16 +545,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                                          proto::plan::Equal,
                                          filter_type>
                     func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
+                run_func(func);
                 break;
             }
             case proto::plan::NotEqual: {
@@ -572,16 +553,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                                          proto::plan::NotEqual,
                                          filter_type>
                     func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
+                run_func(func);
                 break;
             }
             case proto::plan::PrefixMatch: {
@@ -589,16 +561,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                                          proto::plan::PrefixMatch,
                                          filter_type>
                     func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
+                run_func(func);
                 break;
             }
             case proto::plan::Match: {
@@ -606,16 +569,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                                          proto::plan::Match,
                                          filter_type>
                     func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
+                run_func(func);
                 break;
             }
             case proto::plan::RegexMatch: {
@@ -623,16 +577,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                                          proto::plan::RegexMatch,
                                          filter_type>
                     func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
+                run_func(func);
                 break;
             }
             case proto::plan::PostfixMatch: {
@@ -640,16 +585,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                                          proto::plan::PostfixMatch,
                                          filter_type>
                     func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
+                run_func(func);
                 break;
             }
             case proto::plan::InnerMatch: {
@@ -657,16 +593,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                                          proto::plan::InnerMatch,
                                          filter_type>
                     func;
-                func(data,
-                     valid_data,
-                     size,
-                     val,
-                     index,
-                     res,
-                     valid_res,
-                     bitmap_input,
-                     processed_cursor,
-                     offsets);
+                run_func(func);
                 break;
             }
             default:
@@ -686,10 +613,17 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
                                                     res,
                                                     valid_res,
                                                     val,
-                                                    index);
+                                                    index,
+                                                    element_nullable_);
     } else {
         processed_size = ProcessDataChunks<milvus::ArrayView>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, val, index);
+            execute_sub_batch,
+            std::nullptr_t{},
+            res,
+            valid_res,
+            val,
+            index,
+            element_nullable_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -760,8 +694,11 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                     auto pw = segment_->template chunk_view<milvus::ArrayView>(
                         op_ctx_, field_id_, chunk_idx);
                     auto chunk = pw.get();
-                    return chunk.first[chunk_offset].is_same_array(val) ^
-                           reverse;
+                    const auto& array = chunk.first[chunk_offset];
+                    if (element_nullable_ && array.has_invalid_element()) {
+                        return false;
+                    }
+                    return array.is_same_array(val) ^ reverse;
                 };
             } else {
                 auto size_per_chunk = segment_->size_per_chunk();
@@ -770,11 +707,14 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                               int64_t offset) -> bool {
                     auto chunk_idx = offset / size_per_chunk;
                     auto chunk_offset = offset % size_per_chunk;
-                    auto pw = segment_->template chunk_data<milvus::ArrayView>(
+                    auto pw = segment_->template chunk_data<milvus::Array>(
                         op_ctx_, field_id_, chunk_idx);
                     auto chunk = pw.get();
-                    auto array_view = chunk.data() + chunk_offset;
-                    return array_view->is_same_array(val) ^ reverse;
+                    auto array = chunk.data() + chunk_offset;
+                    if (element_nullable_ && array->has_invalid_element()) {
+                        return false;
+                    }
+                    return array->is_same_array(val) ^ reverse;
                 };
             }
 
@@ -1695,24 +1635,15 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
         if (milvus::query::out_of_range<T>(val)) {
             auto make_overflow_result =
                 [this, input](bool match_value) -> ColumnVectorPtr {
-                TargetBitmap valid;
-                if (expr_->column_.element_level_) {
-                    // Element batches are derived from the row cursor so
-                    // MoveCursor()-based short-circuiting stays aligned.
-                    // Individual elements cannot be null; their containing
-                    // row's validity is applied by the element consumer.
-                    auto batch_size =
-                        GetNextRealBatchSize(input, /*element_level=*/true);
-                    valid = TargetBitmap(batch_size, true);
-                    if (input == nullptr) {
-                        MoveCursor();
-                    }
-                } else if (input != nullptr) {
-                    valid = ProcessChunksForValidByOffsets<T>(UseIndexCursor(),
-                                                              *input);
-                } else {
-                    valid = ProcessChunksForValid<T>(UseIndexCursor());
-                }
+                auto valid =
+                    input != nullptr
+                        ? ProcessChunksForValidByOffsets<T>(
+                              UseIndexCursor(),
+                              *input,
+                              expr_->column_.element_level_)
+                        : ProcessChunksForValid<T>(
+                              UseIndexCursor(),
+                              expr_->column_.element_level_);
 
                 auto batch_size = valid.size();
                 TargetBitmap res(batch_size, match_value);
@@ -2072,6 +2003,14 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
     }
 
     if (data_type == DataType::ARRAY) {
+        // Whole-array equality is UNKNOWN when either side contains a null
+        // element. ARRAY indexes only expose value postings, so they cannot
+        // preserve that validity for rows outside the candidate set.
+        if (element_nullable_) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
+
         const auto val_case = expr_->val_.val_case();
         const auto& array = expr_->val_.array_val();
         auto literal_matches_index_type = [&]() {
@@ -2124,6 +2063,10 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
 
     SegmentExpr::DetermineExecPath();
     if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
+    }
+    if (expr_->column_.element_level_ && !PinnedIndexIsNested()) {
+        exec_path_ = ExprExecPath::RawData;
         return;
     }
 

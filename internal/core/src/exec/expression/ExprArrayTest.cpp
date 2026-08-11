@@ -23,6 +23,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -34,6 +35,7 @@
 #include "common/Consts.h"
 #include "common/IndexMeta.h"
 #include "common/Schema.h"
+#include "common/Slice.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "common/Vector.h"
@@ -54,6 +56,7 @@
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "storage/MmapManager.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/storage_test_utils.h"
@@ -109,6 +112,81 @@ AssertColumnVector(const ColumnVectorPtr& vec,
         EXPECT_EQ(bits[i], expected_bits[i]) << label << ", row " << i;
         EXPECT_EQ(valid[i], expected_valid[i]) << label << ", row " << i;
     }
+}
+
+ScalarFieldProto
+BuildElementNullableLongArray(const std::vector<int64_t>& values,
+                              const std::vector<bool>& valid_data) {
+    ScalarFieldProto proto;
+    proto.mutable_long_data()->mutable_data()->Add(values.begin(), values.end());
+    for (auto valid : valid_data) {
+        proto.add_valid_data(valid);
+    }
+    return proto;
+}
+
+ScalarFieldProto
+BuildElementNullableStringArray(const std::vector<std::string>& values,
+                                const std::vector<bool>& valid_data) {
+    ScalarFieldProto proto;
+    for (const auto& value : values) {
+        proto.mutable_string_data()->add_data(value);
+    }
+    for (auto valid : valid_data) {
+        proto.add_valid_data(valid);
+    }
+    return proto;
+}
+
+std::unique_ptr<DataArray>
+BuildElementNullableArrayDataArray(
+    FieldId field_id,
+    DataType element_type,
+    const std::vector<ScalarFieldProto>& rows,
+    const std::vector<bool>& row_valid_data) {
+    auto data_array = std::make_unique<DataArray>();
+    data_array->set_field_id(field_id.get());
+    data_array->set_type(static_cast<proto::schema::DataType>(DataType::ARRAY));
+    auto* scalars = data_array->mutable_scalars();
+    for (auto valid : row_valid_data) {
+        scalars->add_valid_data(valid);
+    }
+    auto* array_data = scalars->mutable_array_data();
+    array_data->set_element_type(
+        static_cast<proto::schema::DataType>(element_type));
+    for (const auto& row : rows) {
+        *array_data->add_data() = row;
+    }
+    return data_array;
+}
+
+FixedVector<uint8_t>
+BuildValidityBitmap(const std::vector<bool>& valid_data) {
+    FixedVector<uint8_t> bitmap((valid_data.size() + 7) / 8, 0);
+    for (size_t i = 0; i < valid_data.size(); ++i) {
+        if (valid_data[i]) {
+            bitmap[i >> 3] |= 1 << (i & 0x07);
+        }
+    }
+    return bitmap;
+}
+
+FieldDataPtr
+BuildElementNullableArrayFieldData(
+    DataType element_type,
+    const std::vector<ScalarFieldProto>& rows,
+    const std::vector<bool>& row_valid_data) {
+    FixedVector<Array> arrays;
+    arrays.reserve(rows.size());
+    for (const auto& row : rows) {
+        arrays.emplace_back(row, true);
+    }
+    auto valid_bitmap = BuildValidityBitmap(row_valid_data);
+    auto field_data = storage::CreateFieldData(
+        DataType::ARRAY, element_type, true, true, 1, rows.size());
+    field_data->FillFieldData(
+        arrays.data(), valid_bitmap.data(), rows.size(), 0);
+    return field_data;
 }
 
 }  // namespace
@@ -241,6 +319,313 @@ TEST(Expr, TestArraySubscriptMissingElementIsUnknown) {
     }
 }
 
+TEST(Expr, TestElementNullableArraySemanticsOnGrowingAndSealed) {
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto id_fid = schema->AddDebugField("id", DataType::INT64);
+    auto int_array_fid = FieldId(2001);
+    auto string_array_fid = FieldId(2002);
+    schema->AddField(FieldMeta(FieldName("int_array"),
+                               int_array_fid,
+                               DataType::ARRAY,
+                               DataType::INT64,
+                               true,
+                               true,
+                               std::nullopt));
+    schema->AddField(FieldMeta(FieldName("string_array"),
+                               string_array_fid,
+                               DataType::ARRAY,
+                               DataType::VARCHAR,
+                               true,
+                               true,
+                               std::nullopt));
+    schema->set_primary_field_id(id_fid);
+
+    constexpr int N = 5;
+    const std::vector<bool> row_valid = {true, true, true, false, true};
+    const std::vector<ScalarFieldProto> int_rows = {
+        BuildElementNullableLongArray({0, 2}, {false, true}),
+        BuildElementNullableLongArray({1, 0}, {true, false}),
+        BuildElementNullableLongArray({}, {}),
+        BuildElementNullableLongArray({}, {}),
+        BuildElementNullableLongArray({1, 2}, {true, true}),
+    };
+    const std::vector<ScalarFieldProto> string_rows = {
+        BuildElementNullableStringArray({"abc", "def"}, {false, true}),
+        BuildElementNullableStringArray({"abc", ""}, {true, false}),
+        BuildElementNullableStringArray({}, {}),
+        BuildElementNullableStringArray({}, {}),
+        BuildElementNullableStringArray({"abc", "def"}, {true, true}),
+    };
+
+    std::vector<int64_t> row_ids = {0, 1, 2, 3, 4};
+    std::vector<Timestamp> timestamps(N, 100);
+    std::vector<float> vectors(N * 16, 0.1F);
+    std::vector<int64_t> ids = {10, 11, 12, 13, 14};
+
+    auto insert_record = std::make_unique<InsertRecordProto>();
+    insert_record->set_num_rows(N);
+    insert_record->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(vectors.data(), nullptr, N, (*schema)[fakevec_fid])
+            .release());
+    insert_record->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(ids.data(), nullptr, N, (*schema)[id_fid])
+            .release());
+    insert_record->mutable_fields_data()->AddAllocated(
+        BuildElementNullableArrayDataArray(
+            int_array_fid, DataType::INT64, int_rows, row_valid)
+            .release());
+    insert_record->mutable_fields_data()->AddAllocated(
+        BuildElementNullableArrayDataArray(
+            string_array_fid, DataType::VARCHAR, string_rows, row_valid)
+            .release());
+
+    auto& mmap_config =
+        storage::MmapManager::GetInstance().GetMmapConfig();
+    const auto original_growing_mmap = mmap_config.GetEnableGrowingMmap();
+    mmap_config.SetEnableGrowingMmap(false);
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    mmap_config.SetEnableGrowingMmap(true);
+    auto growing_mmap = CreateGrowingSegment(schema, empty_index_meta);
+    mmap_config.SetEnableGrowingMmap(original_growing_mmap);
+
+    for (auto* segment : {growing.get(), growing_mmap.get()}) {
+        auto insert_offset = segment->PreInsert(N);
+        segment->Insert(insert_offset,
+                        N,
+                        row_ids.data(),
+                        timestamps.data(),
+                        insert_record.get());
+    }
+    auto* growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+    ASSERT_NE(growing_segment, nullptr);
+    auto* growing_mmap_segment =
+        dynamic_cast<SegmentGrowingImpl*>(growing_mmap.get());
+    ASSERT_NE(growing_mmap_segment, nullptr);
+
+    auto chunk_manager = storage::RemoteChunkManagerSingleton::GetInstance()
+                             .GetRemoteChunkManager();
+    auto sealed_segment = CreateSealedSegment(schema);
+    sealed_segment->LoadFieldData(PrepareSingleFieldInsertBinlog(
+        kCollectionID,
+        kPartitionID,
+        kSegmentID,
+        int_array_fid.get(),
+        {BuildElementNullableArrayFieldData(
+            DataType::INT64, int_rows, row_valid)},
+        chunk_manager));
+    sealed_segment->LoadFieldData(PrepareSingleFieldInsertBinlog(
+        kCollectionID,
+        kPartitionID,
+        kSegmentID,
+        string_array_fid.get(),
+        {BuildElementNullableArrayFieldData(
+            DataType::VARCHAR, string_rows, row_valid)},
+        chunk_manager));
+
+    ScopedSchemaHandle schema_handle(*schema);
+    auto parse = [&](const std::string& expression) {
+        auto plan_bytes = schema_handle.ParseSearch(
+            expression, "fakevec", 10, "L2", R"({"nprobe": 10})", 3);
+        return CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
+    };
+
+    struct TestCase {
+        std::string expression;
+        std::vector<bool> expected;
+    };
+    const std::vector<TestCase> test_cases = {
+        {"int_array is null", {false, false, false, true, false}},
+        {"int_array is not null", {true, true, true, false, true}},
+        {"int_array[0] is null", {true, false, false, false, false}},
+        {"int_array[0] is not null", {false, true, false, false, true}},
+        {"not (int_array[0] is null)",
+         {false, true, false, false, true}},
+        {"int_array[1] is null", {false, true, false, false, false}},
+        {"int_array[2] is null", {false, false, false, false, false}},
+        {"int_array[2] is not null", {false, false, false, false, false}},
+        {"not (int_array[2] is null)",
+         {false, false, false, false, false}},
+        {"int_array[0] == 0", {false, false, false, false, false}},
+        {"int_array[0] != 0", {false, true, false, false, true}},
+        {"int_array[0] > 0", {false, true, false, false, true}},
+        {"1 < int_array[1] < 3", {true, false, false, false, true}},
+        {"int_array[0] + 1 > 1", {false, true, false, false, true}},
+        {"int_array[0] in [0, 1]", {false, true, false, false, true}},
+        {"int_array == [1, 2]", {false, false, false, false, true}},
+        {"int_array != [1, 2]", {false, false, true, false, false}},
+        {"array_contains(int_array, 0)",
+         {false, false, false, false, false}},
+        {"array_contains(int_array, 2)",
+         {true, false, false, false, true}},
+        {"array_contains_all(int_array, [1, 2])",
+         {false, false, false, false, true}},
+        {"array_contains_any(int_array, [0, 2])",
+         {true, false, false, false, true}},
+        {"array_length(int_array) == 2", {true, true, false, false, true}},
+        {R"(string_array[0] == "abc")",
+         {false, true, false, false, true}},
+        {R"(string_array[0] == "")",
+         {false, false, false, false, false}},
+        {R"(string_array[0] like "abc%")",
+         {false, true, false, false, true}},
+        {R"(string_array[0] =~ "^abc")",
+         {false, true, false, false, true}},
+    };
+
+    const std::array<const SegmentInternalInterface*, 3> segments = {
+        growing_segment, growing_mmap_segment, sealed_segment.get()};
+    for (const auto& test_case : test_cases) {
+        auto plan = parse(test_case.expression);
+        auto filter_node =
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0];
+        for (auto* segment : segments) {
+            SCOPED_TRACE(test_case.expression);
+            SCOPED_TRACE(segment->type());
+            auto result = ExecuteQueryExpr(
+                filter_node, segment, N, MAX_TIMESTAMP);
+            ASSERT_EQ(result.size(), N);
+            for (int row = 0; row < N; ++row) {
+                EXPECT_EQ(result[row], test_case.expected[row])
+                    << "row " << row;
+            }
+
+            exec::OffsetVector offsets = {0, 2, 4};
+            auto offset_result = milvus::test::gen_filter_res(filter_node.get(),
+                                                               segment,
+                                                               N,
+                                                               MAX_TIMESTAMP,
+                                                               &offsets);
+            BitsetTypeView offset_bits(offset_result->GetRawData(),
+                                       offset_result->size());
+            ASSERT_EQ(offset_bits.size(), offsets.size());
+            for (size_t i = 0; i < offsets.size(); ++i) {
+                EXPECT_EQ(offset_bits[i], test_case.expected[offsets[i]])
+                    << "offset row " << offsets[i];
+            }
+        }
+    }
+}
+
+TEST(Expr, TestElementNullableWholeArrayCompareWithLoadedIndex) {
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto id_fid = schema->AddDebugField("id", DataType::INT64);
+    auto int_array_fid = FieldId(2003);
+    schema->AddField(FieldMeta(FieldName("int_array"),
+                               int_array_fid,
+                               DataType::ARRAY,
+                               DataType::INT64,
+                               true,
+                               true,
+                               std::nullopt));
+    schema->set_primary_field_id(id_fid);
+
+    constexpr int N = 5;
+    const std::vector<bool> row_valid = {true, true, true, false, true};
+    const std::vector<ScalarFieldProto> rows = {
+        BuildElementNullableLongArray({0, 2}, {false, true}),
+        BuildElementNullableLongArray({1, 0}, {true, false}),
+        BuildElementNullableLongArray({}, {}),
+        BuildElementNullableLongArray({}, {}),
+        BuildElementNullableLongArray({1, 2}, {true, true}),
+    };
+    auto field_data = BuildElementNullableArrayFieldData(
+        DataType::INT64, rows, row_valid);
+
+    auto chunk_manager = storage::RemoteChunkManagerSingleton::GetInstance()
+                             .GetRemoteChunkManager();
+    auto segment = CreateSealedSegment(schema);
+    segment->LoadFieldData(PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                          kPartitionID,
+                                                          kSegmentID,
+                                                          int_array_fid.get(),
+                                                          {field_data},
+                                                          chunk_manager));
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("int_array");
+    field_schema.set_fieldid(int_array_fid.get());
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Int64);
+    field_schema.set_nullable(true);
+    field_schema.set_element_nullable(true);
+    storage::FileManagerContext ctx;
+    ctx.fieldDataMeta = storage::FieldDataMeta{kCollectionID,
+                                               kPartitionID,
+                                               kSegmentID,
+                                               int_array_fid.get(),
+                                               field_schema};
+    ctx.indexMeta =
+        storage::IndexMeta{kSegmentID, int_array_fid.get(), 4002, 4002};
+
+    auto bitmap_index =
+        std::make_unique<index::BitmapIndex<int64_t>>(ctx, true);
+    bitmap_index->BuildWithFieldData({field_data});
+    ASSERT_TRUE(bitmap_index->IsNestedIndex());
+
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = int_array_fid.get();
+    load_index_info.field_type = DataType::ARRAY;
+    load_index_info.element_type = DataType::INT64;
+    load_index_info.index_params = GenIndexParams(bitmap_index.get());
+    load_index_info.cache_index = CreateTestCacheIndex(
+        "element_nullable_array_bitmap", std::move(bitmap_index));
+    segment->LoadIndex(load_index_info);
+
+    ScopedSchemaHandle schema_handle(*schema);
+    struct TestCase {
+        std::string expression;
+        std::vector<bool> expected_bits;
+        std::vector<bool> expected_valid;
+    };
+    const std::vector<TestCase> test_cases = {
+        {"int_array == [1, 2]",
+         {false, false, false, false, true},
+         {false, false, true, false, true}},
+        {"int_array != [1, 2]",
+         {false, false, true, false, false},
+         {false, false, true, false, true}},
+        {"not (int_array == [1, 2])",
+         {false, false, true, false, false},
+         {false, false, true, false, true}},
+    };
+
+    for (const auto& test_case : test_cases) {
+        auto plan_bytes = schema_handle.ParseSearch(test_case.expression,
+                                                    "fakevec",
+                                                    10,
+                                                    "L2",
+                                                    R"({"nprobe": 10})",
+                                                    3);
+        auto plan = CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
+        auto filter_node =
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0];
+        auto result = milvus::test::gen_filter_res(
+            filter_node.get(), segment.get(), N, MAX_TIMESTAMP);
+        AssertColumnVector(result,
+                           test_case.expected_bits,
+                           test_case.expected_valid,
+                           test_case.expression);
+
+        auto final =
+            ExecuteQueryExpr(filter_node, segment.get(), N, MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N);
+        for (int row = 0; row < N; ++row) {
+            EXPECT_EQ(final[row],
+                      test_case.expected_bits[row] &&
+                          test_case.expected_valid[row])
+                << test_case.expression << ", row " << row;
+        }
+    }
+
+    (void)fakevec_fid;
+}
+
 TEST(Expr, TestArrayElementPredicateWithoutNestedPathThrows) {
     auto schema = std::make_shared<Schema>();
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
@@ -304,7 +689,7 @@ TEST(Expr, TestArrayRange) {
             {"1 < long_array[0] < 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return 1 < val && val < 10000;
              }},
             // binary_range_expr: 1 < long_array[1024] < 10000
@@ -314,14 +699,14 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return 1 < val && val < 10000;
              }},
             // binary_range_expr: 1 <= long_array[0] < 10000
             {"1 <= long_array[0] < 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return 1 <= val && val < 10000;
              }},
             // binary_range_expr: 1 <= long_array[1024] < 10000
@@ -331,14 +716,14 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return 1 <= val && val < 10000;
              }},
             // binary_range_expr: 1 < long_array[0] <= 10000
             {"1 < long_array[0] <= 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return 1 < val && val <= 10000;
              }},
             // binary_range_expr: 1 < long_array[1024] <= 10000
@@ -348,14 +733,14 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return 1 < val && val <= 10000;
              }},
             // binary_range_expr: 1 <= long_array[0] <= 10000
             {"1 <= long_array[0] <= 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return 1 <= val && val <= 10000;
              }},
             // binary_range_expr: 1 <= long_array[1024] <= 10000
@@ -365,84 +750,84 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return 1 <= val && val <= 10000;
              }},
             // binary_range_expr: "aaa" <= string_array[0] <= "zzz"
             {R"("aaa" <= string_array[0] <= "zzz")",
              "string",
              [](milvus::Array& array) {
-                 auto val = array.get_data<std::string_view>(0);
+                 auto val = array.get_data_unchecked<std::string_view>(0);
                  return "aaa" <= val && val <= "zzz";
              }},
             // binary_range_expr: 1.1 <= double_array[0] <= 2048.12
             {"1.1 <= double_array[0] <= 2048.12",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return 1.1 <= val && val <= 2048.12;
              }},
             // unary_range_expr: long_array[0] >= 10000
             {"long_array[0] >= 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val >= 10000;
              }},
             // unary_range_expr: long_array[0] > 2000
             {"long_array[0] > 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val > 2000;
              }},
             // unary_range_expr: long_array[0] <= 2000
             {"long_array[0] <= 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val <= 2000;
              }},
             // unary_range_expr: long_array[0] < 2000
             {"long_array[0] < 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val < 2000;
              }},
             // unary_range_expr: long_array[0] == 2000
             {"long_array[0] == 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val == 2000;
              }},
             // unary_range_expr: long_array[0] != 2000
             {"long_array[0] != 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val != 2000;
              }},
             // unary_range_expr: bool_array[0] == false
             {"bool_array[0] == false",
              "bool",
              [](milvus::Array& array) {
-                 auto val = array.get_data<bool>(0);
+                 auto val = array.get_data_unchecked<bool>(0);
                  return !val;
              }},
             // unary_range_expr: string_array[0] == "abc"
             {R"(string_array[0] == "abc")",
              "string",
              [](milvus::Array& array) {
-                 auto val = array.get_data<std::string_view>(0);
+                 auto val = array.get_data_unchecked<std::string_view>(0);
                  return val == "abc";
              }},
             // unary_range_expr: double_array[0] == 2.2
             {"double_array[0] == 2.2",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val == 2.2;
              }},
             // unary_range_expr: double_array[1024] == 2.2
@@ -452,7 +837,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val == 2.2;
              }},
             // unary_range_expr: double_array[1024] != 2.2
@@ -462,7 +847,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val != 2.2;
              }},
             // unary_range_expr: double_array[1024] >= 2.2
@@ -472,7 +857,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val >= 2.2;
              }},
             // unary_range_expr: double_array[1024] > 2.2
@@ -482,7 +867,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val > 2.2;
              }},
             // unary_range_expr: double_array[1024] <= 2.2
@@ -492,7 +877,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val <= 2.2;
              }},
             // unary_range_expr: double_array[1024] < 2.2
@@ -502,7 +887,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val < 2.2;
              }},
 
@@ -696,7 +1081,7 @@ TEST(Expr, TestArrayEqual) {
             auto array = milvus::Array(long_array_col[i]);
             std::vector<int64_t> array_values(array.length());
             for (int j = 0; j < array.length(); ++j) {
-                array_values.push_back(array.get_data<int64_t>(j));
+                array_values.push_back(array.get_data_unchecked<int64_t>(j));
             }
             auto ref = ref_func(array_values);
             ASSERT_EQ(ans, ref);
@@ -874,6 +1259,87 @@ TEST(Expr, TestArrayNullExprWithBitmapIndex) {
     for (int i = 0; i < offsets.size(); ++i) {
         ASSERT_EQ(view[i], !valid_data[offsets[i]])
             << "offset row " << offsets[i];
+    }
+}
+
+TEST(Expr, TestArrayNullExprFallsBackForLegacyNestedIndex) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto long_array_fid = schema->AddDebugField(
+        "long_array", DataType::ARRAY, DataType::INT64, true);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int N = 128;
+    auto raw_data = DataGen(schema, N, 45, 0, 1, 3);
+    auto valid_data = raw_data.get_col_valid(long_array_fid);
+    auto long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    FixedVector<Array> arrays;
+    arrays.reserve(N);
+    std::vector<uint8_t> valid_bitmap((N + 7) / 8, 0);
+    for (int i = 0; i < N; ++i) {
+        arrays.emplace_back(long_array_col[i]);
+        if (valid_data[i]) {
+            valid_bitmap[i >> 3] |= 1 << (i & 0x07);
+        }
+    }
+    auto field_data = storage::CreateFieldData(
+        DataType::ARRAY, DataType::INT64, true, false, 1, N);
+    field_data->FillFieldData(arrays.data(), valid_bitmap.data(), N, 0);
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("long_array");
+    field_schema.set_fieldid(long_array_fid.get());
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Int64);
+    field_schema.set_nullable(true);
+    storage::FileManagerContext ctx;
+    ctx.fieldDataMeta = storage::FieldDataMeta{
+        kCollectionID,
+        kPartitionID,
+        kSegmentID,
+        long_array_fid.get(),
+        field_schema,
+    };
+    ctx.indexMeta =
+        storage::IndexMeta{kSegmentID, long_array_fid.get(), 4001, 4001};
+
+    auto built_index =
+        std::make_unique<index::BitmapIndex<int64_t>>(ctx, true);
+    built_index->BuildWithFieldData({field_data});
+    auto binary_set = built_index->Serialize({});
+    milvus::Assemble(binary_set);
+    ASSERT_NE(binary_set.Erase("row_valid_bitset"), nullptr);
+
+    auto legacy_index =
+        std::make_unique<index::BitmapIndex<int64_t>>(ctx, true);
+    legacy_index->Load(binary_set, {});
+    ASSERT_TRUE(legacy_index->IsNestedIndex());
+    ASSERT_FALSE(legacy_index->HasRowLevelValidity());
+
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = long_array_fid.get();
+    load_index_info.field_type = DataType::ARRAY;
+    load_index_info.element_type = DataType::INT64;
+    load_index_info.index_params = GenIndexParams(legacy_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("legacy_nested_array_bitmap",
+                             std::move(legacy_index));
+    segment->LoadIndex(load_index_info);
+
+    auto null_expr = std::make_shared<expr::NullExpr>(
+        expr::ColumnInfo(
+            long_array_fid, DataType::ARRAY, DataType::INT64, {}, true),
+        proto::plan::NullExpr_NullOp_IsNull);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, null_expr);
+    auto final = ExecuteQueryExpr(plan, segment.get(), N, MAX_TIMESTAMP);
+    ASSERT_EQ(final.size(), N);
+    for (int i = 0; i < N; ++i) {
+        EXPECT_EQ(final[i], !valid_data[i]) << "row " << i;
     }
 }
 
@@ -1379,7 +1845,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["bool"][i]);
             std::vector<bool> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<bool>(j));
+                res.push_back(array.get_data_unchecked<bool>(j));
             }
             ASSERT_EQ(ans, check(res)) << "@" << i;
             if (i % 2 == 0) {
@@ -1445,7 +1911,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["double"][i]);
             std::vector<double> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<double>(j));
+                res.push_back(array.get_data_unchecked<double>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1500,7 +1966,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["float"][i]);
             std::vector<float> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<float>(j));
+                res.push_back(array.get_data_unchecked<float>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1565,7 +2031,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["int"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1621,7 +2087,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["long"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1685,7 +2151,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["string"][i]);
             std::vector<std::string_view> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<std::string_view>(j));
+                res.push_back(array.get_data_unchecked<std::string_view>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1757,7 +2223,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["long"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
@@ -1788,7 +2254,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["string"][i]);
             std::vector<std::string_view> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<std::string_view>(j));
+                res.push_back(array.get_data_unchecked<std::string_view>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
@@ -1818,7 +2284,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["long"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
@@ -1858,7 +2324,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["long"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
@@ -1898,7 +2364,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["string"][i]);
             std::vector<std::string_view> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<std::string_view>(j));
+                res.push_back(array.get_data_unchecked<std::string_view>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
@@ -2141,238 +2607,238 @@ TEST(Expr, TestArrayBinaryArith) {
             {"int_array[0] + 2 == 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 == 5;
              }},
             // int_array[0] + 2 != 5
             {"int_array[0] + 2 != 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 != 5;
              }},
             // int_array[0] + 2 > 5
             {"int_array[0] + 2 > 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 > 5;
              }},
             // int_array[0] + 2 >= 5
             {"int_array[0] + 2 >= 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 >= 5;
              }},
             // int_array[0] + 2 < 5
             {"int_array[0] + 2 < 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 < 5;
              }},
             // int_array[0] + 2 <= 5
             {"int_array[0] + 2 <= 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 <= 5;
              }},
             // long_array[0] - 1 == 144
             {"long_array[0] - 1 == 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 == 144;
              }},
             // long_array[0] - 1 != 144
             {"long_array[0] - 1 != 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 != 144;
              }},
             // long_array[0] - 1 > 144
             {"long_array[0] - 1 > 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 > 144;
              }},
             // long_array[0] - 1 >= 144
             {"long_array[0] - 1 >= 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 >= 144;
              }},
             // long_array[0] - 1 < 144
             {"long_array[0] - 1 < 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 < 144;
              }},
             // long_array[0] - 1 <= 144
             {"long_array[0] - 1 <= 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 <= 144;
              }},
             // float_array[0] + 2.2 == 133.2
             {"float_array[0] + 2.2 == 133.2",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val + 2.2 == 133.2;
              }},
             // float_array[0] + 2.2 != 133.2
             {"float_array[0] + 2.2 != 133.2",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val + 2.2 != 133.2;
              }},
             // double_array[0] - 11.1 == 125.7
             {"double_array[0] - 11.1 == 125.7",
              "double",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val - 11.1 == 125.7;
              }},
             // double_array[0] - 11.1 != 125.7
             {"double_array[0] - 11.1 != 125.7",
              "double",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val - 11.1 != 125.7;
              }},
             // long_array[0] * 2 == 8
             {"long_array[0] * 2 == 8",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 == 8;
              }},
             // long_array[0] * 2 != 20
             {"long_array[0] * 2 != 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 != 20;
              }},
             // long_array[0] * 2 > 20
             {"long_array[0] * 2 > 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 > 20;
              }},
             // long_array[0] * 2 >= 20
             {"long_array[0] * 2 >= 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 >= 20;
              }},
             // long_array[0] * 2 < 20
             {"long_array[0] * 2 < 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 < 20;
              }},
             // long_array[0] * 2 <= 20
             {"long_array[0] * 2 <= 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 <= 20;
              }},
             // long_array[0] / 2 == 8
             {"long_array[0] / 2 == 8",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 == 8;
              }},
             // long_array[0] / 2 != 20
             {"long_array[0] / 2 != 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 != 20;
              }},
             // long_array[0] / 2 > 20
             {"long_array[0] / 2 > 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 > 20;
              }},
             // long_array[0] / 2 >= 20
             {"long_array[0] / 2 >= 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 >= 20;
              }},
             // long_array[0] / 2 < 20
             {"long_array[0] / 2 < 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 < 20;
              }},
             // long_array[0] / 2 <= 20
             {"long_array[0] / 2 <= 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 <= 20;
              }},
             // long_array[0] % 3 == 0
             {"long_array[0] % 3 == 0",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 == 0;
              }},
             // long_array[0] % 3 != 2
             {"long_array[0] % 3 != 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 != 2;
              }},
             // long_array[0] % 3 > 2
             {"long_array[0] % 3 > 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 > 2;
              }},
             // long_array[0] % 3 >= 2
             {"long_array[0] % 3 >= 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 >= 2;
              }},
             // long_array[0] % 3 < 2
             {"long_array[0] % 3 < 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 < 2;
              }},
             // long_array[0] % 3 <= 2
             {"long_array[0] % 3 <= 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 <= 2;
              }},
             // Bitwise AND/OR/XOR over an array integer element. long_array
@@ -2381,31 +2847,31 @@ TEST(Expr, TestArrayBinaryArith) {
             {"(long_array[0] & 1) == 0",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (val & 1) == 0;
              }},
             {"(long_array[0] & 1) != 0",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (val & 1) != 0;
              }},
             {"(long_array[0] & 8) == 8",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (val & 8) == 8;
              }},
             {"(long_array[0] | 4) < 5000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (val | 4) < 5000;
              }},
             {"(long_array[0] ^ 15) < 5000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (val ^ 15) < 5000;
              }},
             // Shift / bitwise-NOT over an array integer element. ~ is rewritten
@@ -2413,19 +2879,19 @@ TEST(Expr, TestArrayBinaryArith) {
             {"(long_array[0] >> 1) < 5000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (int64_t(val) >> 1) < 5000;
              }},
             {"(long_array[0] >> 2) >= 0",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (int64_t(val) >> 2) >= 0;
              }},
             {"~long_array[0] != 0",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (~int64_t(val)) != 0;
              }},
             // float_array[1024] + 2.2 == 133.2
@@ -2435,7 +2901,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val + 2.2 == 133.2;
              }},
             // float_array[1024] + 2.2 != 133.2
@@ -2445,7 +2911,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val + 2.2 != 133.2;
              }},
             // double_array[1024] - 11.1 == 125.7
@@ -2455,7 +2921,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val - 11.1 == 125.7;
              }},
             // double_array[1024] - 11.1 != 125.7
@@ -2465,7 +2931,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val - 11.1 != 125.7;
              }},
             // long_array[1024] * 2 == 8
@@ -2475,7 +2941,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val * 2 == 8;
              }},
             // long_array[1024] * 2 != 20
@@ -2485,7 +2951,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val * 2 != 20;
              }},
             // long_array[1024] / 2 == 8
@@ -2495,7 +2961,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val / 2 == 8;
              }},
             // long_array[1024] / 2 != 20
@@ -2505,7 +2971,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val / 2 != 20;
              }},
             // long_array[1024] % 3 == 0
@@ -2515,7 +2981,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val % 3 == 0;
              }},
             // long_array[1024] % 3 != 2
@@ -2525,7 +2991,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val % 3 != 2;
              }},
             // array_length(int_array) == 10
@@ -2637,13 +3103,13 @@ TEST(Expr, TestArrayStringMatch) {
          "abc",
          {"0"},
          [](milvus::Array& array) {
-             return PrefixMatch(array.get_data<std::string_view>(0), "abc");
+             return PrefixMatch(array.get_data_unchecked<std::string_view>(0), "abc");
          }},
         {OpType::PrefixMatch,
          "def",
          {"1"},
          [](milvus::Array& array) {
-             return PrefixMatch(array.get_data<std::string_view>(1), "def");
+             return PrefixMatch(array.get_data_unchecked<std::string_view>(1), "def");
          }},
         {OpType::PrefixMatch,
          "def",
@@ -2652,7 +3118,7 @@ TEST(Expr, TestArrayStringMatch) {
              if (array.length() <= 1024) {
                  return false;
              }
-             return PrefixMatch(array.get_data<std::string_view>(1024), "def");
+             return PrefixMatch(array.get_data_unchecked<std::string_view>(1024), "def");
          }},
     };
     //vector_anns:<field_id:201 predicates:<unary_range_expr:<column_info:<field_id:131 data_type:Array nested_path:"0" element_type:VarChar > op:PrefixMatch value:<string_val:"abc" > > > query_info:<> placeholder_tag:"$0" >
@@ -2756,7 +3222,7 @@ TEST(Expr, TestArrayInTerm) {
             {"long_array[0] in [1, 2, 3]",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val == 1 || val == 2 || val == 3;
              }},
             // term_expr: long_array[0] in [] (empty list)
@@ -2767,7 +3233,7 @@ TEST(Expr, TestArrayInTerm) {
             {"bool_array[0] in [false, false]",
              "bool",
              [](milvus::Array& array) {
-                 auto val = array.get_data<bool>(0);
+                 auto val = array.get_data_unchecked<bool>(0);
                  return !val;
              }},
             // term_expr: bool_array[0] in [] (empty list)
@@ -2778,7 +3244,7 @@ TEST(Expr, TestArrayInTerm) {
             {"float_array[0] in [1.23, 124.31]",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val == 1.23 || val == 124.31;
              }},
             // term_expr: float_array[0] in [] (empty list)
@@ -2789,7 +3255,7 @@ TEST(Expr, TestArrayInTerm) {
             {R"(string_array[0] in ["abc", "idhgf1s"])",
              "string",
              [](milvus::Array& array) {
-                 auto val = array.get_data<std::string_view>(0);
+                 auto val = array.get_data_unchecked<std::string_view>(0);
                  return val == "abc" || val == "idhgf1s";
              }},
             // term_expr: string_array[0] in [] (empty list)
@@ -2803,7 +3269,7 @@ TEST(Expr, TestArrayInTerm) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<std::string_view>(1024);
+                 auto val = array.get_data_unchecked<std::string_view>(1024);
                  return val == "abc" || val == "idhgf1s";
              }},
         };
@@ -2887,7 +3353,7 @@ TEST(Expr, TestTermInArray) {
          {},
          [](milvus::Array& array) {
              for (int i = 0; i < array.length(); ++i) {
-                 auto val = array.get_data<int64_t>(i);
+                 auto val = array.get_data_unchecked<int64_t>(i);
                  if (val == 100) {
                      return true;
                  }
@@ -2898,7 +3364,7 @@ TEST(Expr, TestTermInArray) {
          {},
          [](milvus::Array& array) {
              for (int i = 0; i < array.length(); ++i) {
-                 auto val = array.get_data<int64_t>(i);
+                 auto val = array.get_data_unchecked<int64_t>(i);
                  if (val == 1024) {
                      return true;
                  }

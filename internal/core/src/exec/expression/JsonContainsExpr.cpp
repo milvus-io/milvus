@@ -390,39 +390,53 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            const TypedSet& elements) {
+            const TypedSet& elements,
+            bool element_nullable) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
             processed_cursor += size;
             return;
         }
-        auto executor = [&](size_t i) {
-            const auto& array = data[i];
-            for (int j = 0; j < array.length(); ++j) {
-                if (elements.find(array.template get_data<GetType>(j)) !=
-                    elements.end()) {
-                    return true;
+        auto run = [&]<bool ElementNullable>() {
+            auto executor = [&](size_t i) {
+                const auto& array = data[i];
+                for (int j = 0; j < array.length(); ++j) {
+                    if constexpr (ElementNullable) {
+                        if (!array.is_element_valid(j)) {
+                            continue;
+                        }
+                    }
+                    auto value =
+                        array.template get_data_unchecked<GetType>(j);
+                    if (elements.find(value) != elements.end()) {
+                        return true;
+                    }
                 }
+                return false;
+            };
+            bool has_bitmap_input = !bitmap_input.empty();
+            for (int i = 0; i < size; ++i) {
+                auto offset = i;
+                if constexpr (filter_type == FilterType::random) {
+                    offset = offsets ? offsets[i] : i;
+                }
+                if (valid_data != nullptr && !valid_data[offset]) {
+                    res[i] = valid_res[i] = false;
+                    continue;
+                }
+                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                    continue;
+                }
+                res[i] = executor(offset);
             }
-            return false;
+            processed_cursor += size;
         };
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (int i = 0; i < size; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
-            }
-            if (valid_data != nullptr && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                continue;
-            }
-            res[i] = executor(offset);
+        if (element_nullable) {
+            run.template operator()<true>();
+        } else {
+            run.template operator()<false>();
         }
-        processed_cursor += size;
     };
 
     int64_t processed_size;
@@ -433,10 +447,16 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
                                                     input,
                                                     res,
                                                     valid_res,
-                                                    *elements);
+                                                    *elements,
+                                                    element_nullable_);
     } else {
         processed_size = ProcessDataChunks<milvus::ArrayView>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
+            execute_sub_batch,
+            std::nullptr_t{},
+            res,
+            valid_res,
+            *elements,
+            element_nullable_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -988,57 +1008,76 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            const std::set<GetType>& elements) {
+            const std::set<GetType>& elements,
+            bool element_nullable) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
             processed_cursor += size;
             return;
         }
-        auto executor = [&](size_t i) {
-            if (static_cast<size_t>(data[i].length()) <
-                matcher.target_count()) {
-                return false;
-            }
-            if (matcher.use_small()) {
-                uint64_t found = 0;
-                for (int j = 0; j < data[i].length(); ++j) {
-                    if (matcher.set_if_found(
-                            data[i].template get_data<GetType>(j), found)) {
-                        return true;
-                    }
+        auto run = [&]<bool ElementNullable>() {
+            auto executor = [&](size_t i) {
+                if (static_cast<size_t>(data[i].length()) <
+                    matcher.target_count()) {
+                    return false;
                 }
-                return found == matcher.full_mask();
-            } else {
-                std::fill(found_large.begin(), found_large.end(), 0);
-                size_t remaining = matcher.target_count();
-                for (int j = 0; j < data[i].length(); ++j) {
-                    if (matcher.set_if_found(
-                            data[i].template get_data<GetType>(j),
-                            found_large,
-                            remaining)) {
-                        return true;
+                if (matcher.use_small()) {
+                    uint64_t found = 0;
+                    for (int j = 0; j < data[i].length(); ++j) {
+                        if constexpr (ElementNullable) {
+                            if (!data[i].is_element_valid(j)) {
+                                continue;
+                            }
+                        }
+                        auto value =
+                            data[i].template get_data_unchecked<GetType>(j);
+                        if (matcher.set_if_found(value, found)) {
+                            return true;
+                        }
                     }
+                    return found == matcher.full_mask();
+                } else {
+                    std::fill(found_large.begin(), found_large.end(), 0);
+                    size_t remaining = matcher.target_count();
+                    for (int j = 0; j < data[i].length(); ++j) {
+                        if constexpr (ElementNullable) {
+                            if (!data[i].is_element_valid(j)) {
+                                continue;
+                            }
+                        }
+                        auto value =
+                            data[i].template get_data_unchecked<GetType>(j);
+                        if (matcher.set_if_found(
+                                value, found_large, remaining)) {
+                            return true;
+                        }
+                    }
+                    return remaining == 0;
                 }
-                return remaining == 0;
+            };
+            bool has_bitmap_input = !bitmap_input.empty();
+            for (int i = 0; i < size; ++i) {
+                auto offset = i;
+                if constexpr (filter_type == FilterType::random) {
+                    offset = offsets ? offsets[i] : i;
+                }
+                if (valid_data != nullptr && !valid_data[offset]) {
+                    res[i] = valid_res[i] = false;
+                    continue;
+                }
+                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                    continue;
+                }
+                res[i] = executor(offset);
             }
+            processed_cursor += size;
         };
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (int i = 0; i < size; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
-            }
-            if (valid_data != nullptr && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                continue;
-            }
-            res[i] = executor(offset);
+        if (element_nullable) {
+            run.template operator()<true>();
+        } else {
+            run.template operator()<false>();
         }
-        processed_cursor += size;
     };
     int64_t processed_size;
     if (has_offset_input_) {
@@ -1048,10 +1087,16 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
                                                     input,
                                                     res,
                                                     valid_res,
-                                                    *elements);
+                                                    *elements,
+                                                    element_nullable_);
     } else {
         processed_size = ProcessDataChunks<milvus::ArrayView>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
+            execute_sub_batch,
+            std::nullptr_t{},
+            res,
+            valid_res,
+            *elements,
+            element_nullable_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "

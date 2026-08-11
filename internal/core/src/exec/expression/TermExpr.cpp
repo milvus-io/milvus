@@ -324,38 +324,52 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            const ValueType& target_val) {
+            const ValueType& target_val,
+            bool element_nullable) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
             processed_cursor += size;
             return;
         }
-        auto executor = [&](size_t offset) {
-            for (int i = 0; i < data[offset].length(); i++) {
-                auto val = data[offset].template get_data<GetType>(i);
-                if (val == target_val) {
-                    return true;
+        auto run = [&]<bool ElementNullable>() {
+            auto executor = [&](size_t offset) {
+                for (int i = 0; i < data[offset].length(); ++i) {
+                    if constexpr (ElementNullable) {
+                        if (!data[offset].is_element_valid(i)) {
+                            continue;
+                        }
+                    }
+                    auto value =
+                        data[offset].template get_data_unchecked<GetType>(i);
+                    if (value == target_val) {
+                        return true;
+                    }
                 }
+                return false;
+            };
+            bool has_bitmap_input = !bitmap_input.empty();
+            for (int i = 0; i < size; ++i) {
+                auto offset = i;
+                if constexpr (filter_type == FilterType::random) {
+                    offset = offsets ? offsets[i] : i;
+                }
+                if (valid_data != nullptr && !valid_data[offset]) {
+                    res[i] = valid_res[i] = false;
+                    continue;
+                }
+                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                    continue;
+                }
+                res[i] = executor(offset);
             }
-            return false;
+            processed_cursor += size;
         };
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (int i = 0; i < size; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
-            }
-            if (valid_data != nullptr && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                continue;
-            }
-            res[i] = executor(offset);
+        if (element_nullable) {
+            run.template operator()<true>();
+        } else {
+            run.template operator()<false>();
         }
-        processed_cursor += size;
     };
 
     int64_t processed_size;
@@ -366,10 +380,16 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
                                                     input,
                                                     res,
                                                     valid_res,
-                                                    target_val);
+                                                    target_val,
+                                                    element_nullable_);
     } else {
         processed_size = ProcessDataChunks<milvus::ArrayView>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, target_val);
+            execute_sub_batch,
+            std::nullptr_t{},
+            res,
+            valid_res,
+            target_val,
+            element_nullable_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -426,7 +446,8 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             int index,
-            const std::shared_ptr<MultiElement>& term_set) {
+            const std::shared_ptr<MultiElement>& term_set,
+            bool element_nullable) {
         if (!term_set->Empty()) {
             AssertInfo(index >= 0,
                        "array element term predicate requires nested path");
@@ -437,32 +458,45 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
             processed_cursor += size;
             return;
         }
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (int i = 0; i < size; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
+        auto run = [&]<bool ElementNullable>() {
+            bool has_bitmap_input = !bitmap_input.empty();
+            for (int i = 0; i < size; ++i) {
+                auto offset = i;
+                if constexpr (filter_type == FilterType::random) {
+                    offset = offsets ? offsets[i] : i;
+                }
+                if (valid_data != nullptr && !valid_data[offset]) {
+                    res[i] = valid_res[i] = false;
+                    continue;
+                }
+                if (term_set->Empty()) {
+                    res[i] = false;
+                    continue;
+                }
+                if (index >= data[offset].length()) {
+                    res[i] = valid_res[i] = false;
+                    continue;
+                }
+                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                    continue;
+                }
+                if constexpr (ElementNullable) {
+                    if (!data[offset].is_element_valid(index)) {
+                        res[i] = valid_res[i] = false;
+                        continue;
+                    }
+                }
+                auto value =
+                    data[offset].template get_data_unchecked<GetType>(index);
+                res[i] = term_set->In(ValueType(value));
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (term_set->Empty()) {
-                res[i] = false;
-                continue;
-            }
-            if (index >= data[offset].length()) {
-                res[i] = false;
-                valid_res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                continue;
-            }
-            auto value = data[offset].get_data<GetType>(index);
-            res[i] = term_set->In(ValueType(value));
+            processed_cursor += size;
+        };
+        if (element_nullable) {
+            run.template operator()<true>();
+        } else {
+            run.template operator()<false>();
         }
-        processed_cursor += size;
     };
 
     int64_t processed_size;
@@ -474,14 +508,16 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
                                                     res,
                                                     valid_res,
                                                     index,
-                                                    arg_set_);
+                                                    arg_set_,
+                                                    element_nullable_);
     } else {
         processed_size = ProcessDataChunks<milvus::ArrayView>(execute_sub_batch,
                                                               std::nullptr_t{},
                                                               res,
                                                               valid_res,
                                                               index,
-                                                              arg_set_);
+                                                              arg_set_,
+                                                              element_nullable_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -1282,6 +1318,10 @@ PhyTermFilterExpr::DetermineExecPath() {
 
     SegmentExpr::DetermineExecPath();
     if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
+    }
+    if (expr_->column_.element_level_ && !PinnedIndexIsNested()) {
+        exec_path_ = ExprExecPath::RawData;
         return;
     }
 

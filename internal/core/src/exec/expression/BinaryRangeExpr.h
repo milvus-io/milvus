@@ -196,6 +196,7 @@ struct BinaryRangeElementFuncForArray {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
+    template <bool ElementNullable>
     void
     operator()(const ValueType& val1,
                const ValueType& val2,
@@ -228,7 +229,13 @@ struct BinaryRangeElementFuncForArray {
                 valid_res[i] = false;
                 continue;
             }
-            auto value = src[offset].get_data<GetType>(index);
+            if constexpr (ElementNullable) {
+                if (!src[offset].is_element_valid(index)) {
+                    res[i] = valid_res[i] = false;
+                    continue;
+                }
+            }
+            auto value = src[offset].get_data_unchecked<GetType>(index);
             if constexpr (lower_inclusive && upper_inclusive) {
                 res[i] = val1 <= value && value <= val2;
             } else if constexpr (lower_inclusive && !upper_inclusive) {
