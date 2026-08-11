@@ -491,22 +491,11 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 	require.Less(t, textLOBUnindexedSealedRows, textLOBMinRowsToEnableIndex)
 	require.GreaterOrEqual(t, textLOBIndexedSealedRows, textLOBMinRowsToEnableIndex)
 
-	previousStorageV3, err := hp.GetServerConfig("common.storage.useLoonFFI")
+	storageV3, err := hp.GetServerConfig("common.storage.useLoonFFI")
 	require.NoError(t, err)
-	_, err = hp.AlterServerConfig("common.storage.useLoonFFI", "true")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, _ = hp.AlterServerConfig("common.storage.useLoonFFI", previousStorageV3)
-	})
+	require.Equal(t, "true", storageV3)
 
 	minRowsValue := strconv.Itoa(textLOBMinRowsToEnableIndex)
-	previousMinRows, err := hp.GetServerConfig(textLOBMinRowsConfig)
-	require.NoError(t, err)
-	_, err = hp.AlterServerConfig(textLOBMinRowsConfig, minRowsValue)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, _ = hp.AlterServerConfig(textLOBMinRowsConfig, previousMinRows)
-	})
 	configuredMinRows, err := hp.GetServerConfig(textLOBMinRowsConfig)
 	require.NoError(t, err)
 	require.Equal(t, minRowsValue, configuredMinRows)
