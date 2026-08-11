@@ -600,6 +600,17 @@ func TestInsertRequestViewEncoder_MarshalContract(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
+func TestNestedMessageMarshalOptionsCachedSizeContract(t *testing.T) {
+	sizeOptions := nestedMessageMarshalOptions(false)
+	cachedOptions := nestedMessageMarshalOptions(true)
+
+	assert.True(t, sizeOptions.AllowPartial)
+	assert.True(t, cachedOptions.UseCachedSize)
+	cachedOptions.UseCachedSize = false
+	assert.Equal(t, sizeOptions, cachedOptions,
+		"cached marshal options must differ from sizing only by UseCachedSize")
+}
+
 func TestInsertRequestViewEncoder_InvalidUTF8(t *testing.T) {
 	invalid := string([]byte{0xff})
 	baseSource := func(field *schemapb.FieldData) *msgpb.InsertRequest {

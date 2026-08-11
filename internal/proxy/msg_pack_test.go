@@ -39,28 +39,28 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 )
 
-func TestInsertRequestBodyLimit(t *testing.T) {
+func TestMessageBodyLimit(t *testing.T) {
 	paramtable.Init()
 	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
 	defer Params.Reset(Params.PulsarCfg.MessageReserveSize.Key)
 
 	// The default reserve is taken out of the broker-facing limit.
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "2097152"))
-	assert.Equal(t, 2097152-4096, insertRequestBodyLimit())
+	assert.Equal(t, 2097152-4096, messageBodyLimit())
 
 	// A configured reserve replaces the default one.
 	require.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "1024"))
-	assert.Equal(t, 2097152-1024, insertRequestBodyLimit())
+	assert.Equal(t, 2097152-1024, messageBodyLimit())
 
 	// An oversized reserve falls back to the safe default instead of collapsing
 	// the body budget to one byte.
 	require.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "4194304"))
-	assert.Equal(t, 2097152-4096, insertRequestBodyLimit())
+	assert.Equal(t, 2097152-4096, messageBodyLimit())
 
 	// If the broker limit is then lowered below 4 KiB, the effective reserve is
 	// zero rather than max-1, so inserts do not degenerate into one-row messages.
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1024"))
-	assert.Equal(t, 1024, insertRequestBodyLimit())
+	assert.Equal(t, 1024, messageBodyLimit())
 }
 
 func TestSplitInsertRowsByMessageSizeSingleOversizedRow(t *testing.T) {
@@ -441,7 +441,7 @@ func TestGenInsertMessagesByPartitionSplitsByPlaintextBodyLimit(t *testing.T) {
 	// A limit just below the two-row plaintext body forces one row per message.
 	// The reserve shrinks the body budget further, so it stays below it too.
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(len(twoRowRecord.GetPayload())-1)))
-	bodyLimit := insertRequestBodyLimit()
+	bodyLimit := messageBodyLimit()
 
 	msgs, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1, 2}, channelName, source, nil, 7)
 	require.NoError(t, err)
@@ -531,7 +531,7 @@ func TestGenInsertMessagesByPartitionSmallScalars(t *testing.T) {
 	totalRows := 0
 	for i, msg := range msgs {
 		raw := msg.IntoMessageProto()
-		assert.LessOrEqual(t, len(raw.GetPayload()), insertRequestBodyLimit())
+		assert.LessOrEqual(t, len(raw.GetPayload()), messageBodyLimit())
 		body := message.MustAsMutableInsertMessageV1(msg).MustBody()
 		if i < len(msgs)-1 {
 			assert.Greater(t, body.GetNumRows(), uint64(1), "non-final messages should use the full body budget")

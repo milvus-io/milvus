@@ -29,6 +29,10 @@ func (e *testBodyEncoder) MarshalTo(dst []byte) (int, error) {
 	return e.marshalTo(dst)
 }
 
+func (e *testBodyEncoder) BodyType() *msgpb.InsertRequest {
+	return nil
+}
+
 func TestMutableBuilder(t *testing.T) {
 	b := message.NewTimeTickMessageBuilderV1().
 		WithHeader(&message.TimeTickMessageHeader{}).
@@ -96,7 +100,7 @@ func TestMutableBuilderWithBodyEncoder(t *testing.T) {
 }
 
 func TestMutableBuilderBodyEncoderValidation(t *testing.T) {
-	build := func(encoder message.BodyEncoder) (message.MutableMessage, error) {
+	build := func(encoder message.BodyEncoder[*msgpb.InsertRequest]) (message.MutableMessage, error) {
 		return message.NewInsertMessageBuilderV1().
 			WithHeader(&message.InsertMessageHeader{}).
 			WithBodyEncoder(encoder).

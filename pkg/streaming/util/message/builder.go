@@ -124,19 +124,21 @@ func newMutableMessageBuilder[H proto.Message, B proto.Message]() *mutableMesasg
 	}
 }
 
-// BodyEncoder encodes a message body directly into a caller-provided buffer.
-// EncodedSize must return the exact number of bytes MarshalTo writes. Builders
-// consume the encoder synchronously and retain only the encoded payload.
-type BodyEncoder interface {
+// BodyEncoder encodes a body of type B directly into a caller-provided buffer.
+// EncodedSize must return the exact number of bytes MarshalTo writes. BodyType
+// is a compile-time type marker; builders consume the encoder synchronously and
+// retain only the encoded payload.
+type BodyEncoder[B proto.Message] interface {
 	EncodedSize() (int, error)
 	MarshalTo([]byte) (int, error)
+	BodyType() B
 }
 
 // mutableMesasgeBuilder is the builder for message.
 type mutableMesasgeBuilder[H proto.Message, B proto.Message] struct {
 	header       H
 	body         B
-	bodyEncoder  BodyEncoder
+	bodyEncoder  BodyEncoder[B]
 	properties   propertiesImpl
 	cipherConfig *CipherConfig
 	allVChannel  bool
@@ -172,7 +174,7 @@ func (b *mutableMesasgeBuilder[H, B]) WithBody(body B) *mutableMesasgeBuilder[H,
 
 // WithBodyEncoder creates a new builder with a body encoder that writes the
 // encoded body directly into the message payload during Build.
-func (b *mutableMesasgeBuilder[H, B]) WithBodyEncoder(bodyEncoder BodyEncoder) *mutableMesasgeBuilder[H, B] {
+func (b *mutableMesasgeBuilder[H, B]) WithBodyEncoder(bodyEncoder BodyEncoder[B]) *mutableMesasgeBuilder[H, B] {
 	b.bodyEncoder = bodyEncoder
 	return b
 }
@@ -412,7 +414,7 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 	}, nil
 }
 
-func isNilBodyEncoder(bodyEncoder BodyEncoder) bool {
+func isNilBodyEncoder[B proto.Message](bodyEncoder BodyEncoder[B]) bool {
 	if bodyEncoder == nil {
 		return true
 	}
@@ -426,7 +428,7 @@ func isNilBodyEncoder(bodyEncoder BodyEncoder) bool {
 	}
 }
 
-func marshalBodyEncoder(bodyEncoder BodyEncoder) ([]byte, error) {
+func marshalBodyEncoder[B proto.Message](bodyEncoder BodyEncoder[B]) ([]byte, error) {
 	size, err := bodyEncoder.EncodedSize()
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to get encoded body size")

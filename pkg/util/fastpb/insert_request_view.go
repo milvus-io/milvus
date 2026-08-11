@@ -44,6 +44,12 @@ type InsertRequestViewEncoder struct {
 	consumed              bool
 }
 
+// BodyType binds this encoder to InsertRequest message builders at compile
+// time. The returned value is a type marker and is never inspected at runtime.
+func (*InsertRequestViewEncoder) BodyType() *msgpb.InsertRequest {
+	return nil
+}
+
 // InsertRequestViewCursor binds compact nullable-vector prefix state and
 // reusable encoding scratch to one source request. Source and every object
 // reachable from it must remain immutable from cursor creation until the cursor
@@ -1072,7 +1078,14 @@ func nullableProtoSize(message proto.Message, useCachedSize bool) int {
 	if isNilProto(message) {
 		return 0
 	}
-	return (proto.MarshalOptions{UseCachedSize: useCachedSize}).Size(message)
+	return nestedMessageMarshalOptions(useCachedSize).Size(message)
+}
+
+func nestedMessageMarshalOptions(useCachedSize bool) proto.MarshalOptions {
+	return proto.MarshalOptions{
+		AllowPartial:  true,
+		UseCachedSize: useCachedSize,
+	}
 }
 
 func isNilProto(message proto.Message) bool {
@@ -1261,7 +1274,7 @@ func (w *insertViewWriter) protoMessage(number protowire.Number, message proto.M
 	// The size pass seeds protobuf's per-message size cache. Reuse it through
 	// protobuf's public API during MarshalTo; with the current generated runtime,
 	// this avoids recursively traversing every ARRAY/ArrayOfVector row again.
-	options := proto.MarshalOptions{AllowPartial: true, UseCachedSize: true}
+	options := nestedMessageMarshalOptions(true)
 	size := options.Size(message)
 	return w.message(number, size, func() error {
 		if size == 0 {

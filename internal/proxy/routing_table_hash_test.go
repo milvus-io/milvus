@@ -141,6 +141,7 @@ func TestRepackDeleteMsgByHashTinyLimitDoesNotEmitEmptyMessage(t *testing.T) {
 	paramtable.Init()
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1"))
 	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+	defer Params.Reset(Params.PulsarCfg.MessageReserveSize.Key)
 
 	primaryKeys := &schemapb.IDs{
 		IdField: &schemapb.IDs_IntId{
@@ -168,6 +169,41 @@ func TestRepackDeleteMsgByHashTinyLimitDoesNotEmitEmptyMessage(t *testing.T) {
 	for _, msg := range got[0] {
 		assert.EqualValues(t, 1, msg.GetNumRows())
 		assert.Len(t, msg.HashValues, 1)
+	}
+}
+
+func TestRepackDeleteMsgByHashUsesMessageReserve(t *testing.T) {
+	paramtable.Init()
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "49"))
+	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+	require.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "24"))
+	defer Params.Reset(Params.PulsarCfg.MessageReserveSize.Key)
+
+	primaryKeys := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{1, 2}},
+		},
+	}
+	got, rows, err := repackDeleteMsgByHash(
+		context.Background(),
+		primaryKeys,
+		[]string{"vchan-0"},
+		allocator.NewLocalAllocator(100, 200),
+		1000,
+		1,
+		"collection",
+		2,
+		"partition",
+		"default",
+		nil,
+		nil,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), rows)
+	require.Len(t, got[0], 2)
+	for _, msg := range got[0] {
+		assert.EqualValues(t, 1, msg.GetNumRows())
 	}
 }
 

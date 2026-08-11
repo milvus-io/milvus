@@ -25,11 +25,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 )
 
-// insertRequestBodyLimit budgets the plaintext InsertRequest body inside the
-// broker-facing message limit. GetMessageSizeLimits normalizes mixed-generation
-// refreshable config as a pair; keep the final guard for invalid test-only
-// overrides. A single oversized row is still emitted by InsertRequestViewCursor.
-func insertRequestBodyLimit() int {
+// messageBodyLimit budgets a plaintext message body inside the broker-facing
+// message limit. GetMessageSizeLimits normalizes mixed-generation refreshable
+// config as a pair; keep the final guard for invalid test-only overrides.
+// Insert and Delete preserve their existing single-oversized-row behavior.
+func messageBodyLimit() int {
 	maxMessageSize, reserve := Params.PulsarCfg.GetMessageSizeLimits()
 	if maxMessageSize <= 0 || reserve < 0 || reserve >= maxMessageSize {
 		return 1
@@ -52,7 +52,7 @@ func visitInsertRowsByMessageSize(
 		return nil
 	}
 
-	bodyLimit := insertRequestBodyLimit()
+	bodyLimit := messageBodyLimit()
 	viewCursor, err := fastpb.NewInsertRequestViewCursor(insertMsg.InsertRequest)
 	if err != nil {
 		return err
