@@ -46,6 +46,7 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 		return nil, err
 	}
 	return &openerImpl{
-		c: c,
+		c:   c,
+		rmq: server.Rmq,
 	}, nil
 }

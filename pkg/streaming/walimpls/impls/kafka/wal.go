@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var _ walimpls.WALImpls = (*walImpl)(nil)
@@ -99,9 +100,20 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 	}
 
 	if err := c.Assign([]kafka.TopicPartition{seekPosition}); err != nil {
-		return nil, errors.Wrap(err, "failed to assign kafka consumer")
+		return nil, errors.Wrap(convertKafkaReadError(err, topic), "failed to assign kafka consumer")
 	}
-	return newScanner(opt.Name, exclude, c), nil
+	return newScanner(opt.Name, topic, exclude, c), nil
+}
+
+func convertKafkaReadError(err error, topic string) error {
+	var kafkaErr kafka.Error
+	if errors.As(err, &kafkaErr) {
+		switch kafkaErr.Code() {
+		case kafka.ErrUnknownTopic, kafka.ErrUnknownTopicOrPart:
+			return merr.WrapErrMqTopicNotFound(topic, kafkaErr.Error())
+		}
+	}
+	return err
 }
 
 func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
