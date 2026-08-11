@@ -216,7 +216,24 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 	}
 
 	// Get aggregated state from tasks
-	state, progress := c.refreshMeta.AggregateJobStateFromTasks(job.GetJobId())
+	state, progress, err := c.refreshMeta.AggregateJobStateFromTasks(job.GetJobId())
+	if err != nil {
+		applied, updateErr := c.refreshMeta.UpdateJobState(
+			job.GetJobId(),
+			indexpb.JobState_JobStateFailed,
+			err.Error(),
+		)
+		if updateErr != nil {
+			mlog.Warn(c.ctx, "failed to mark invalid external refresh task plan as failed",
+				mlog.FieldJobID(job.GetJobId()),
+				mlog.Err(updateErr))
+			return
+		}
+		if applied && c.onJobFailed != nil {
+			c.onJobFailed(job.GetJobId())
+		}
+		return
+	}
 	if state == indexpb.JobState_JobStateNone {
 		// No tasks yet
 		return
@@ -228,7 +245,10 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 		var failReason string
 		if state == indexpb.JobState_JobStateFailed {
 			// Get fail reason from first failed task
-			tasks := c.refreshMeta.GetTasksByJobID(job.GetJobId())
+			tasks, err := c.refreshMeta.GetCommittedTasksByJobID(job.GetJobId())
+			if err != nil {
+				failReason = err.Error()
+			}
 			for _, task := range tasks {
 				if task.GetState() == indexpb.JobState_JobStateFailed {
 					failReason = task.GetFailReason()
@@ -411,7 +431,13 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 		}
 
 		// Also mark all active tasks as failed
-		tasks := c.refreshMeta.GetTasksByJobID(job.GetJobId())
+		tasks, err := c.refreshMeta.GetCommittedTasksByJobID(job.GetJobId())
+		if err != nil {
+			mlog.Warn(c.ctx, "failed to resolve committed tasks while timing out refresh job",
+				mlog.FieldJobID(job.GetJobId()),
+				mlog.Err(err))
+			return
+		}
 		for _, task := range tasks {
 			if task.GetState() == indexpb.JobState_JobStateInit ||
 				task.GetState() == indexpb.JobState_JobStateRetry ||

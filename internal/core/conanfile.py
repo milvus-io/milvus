@@ -28,7 +28,7 @@ class MilvusConan(ConanFile):
         "prometheus-cpp/1.2.4#0918d66c13f97acb7809759f9de49b3f",
         "re2/20230301#f8efaf45f98d0193cd0b2ea08b6b4060",
         "folly/2026.04.20.00@milvus/dev#06852bea5b6449f0c4eb0df002b5779c",
-        "milvus-common/1.0.0-a3299ca@milvus/dev#eea0e22b8d5e36ff6f0a5ffbed14703e",
+        "milvus-common/1.0.0-b589c5a@milvus/dev#d431af735c8acb829feb7a94f05daf42",
         "google-cloud-cpp/2.28.0@milvus/dev#468918b43cec43624531a0340398cf43",
         "opentelemetry-cpp/1.23.0@milvus/dev#11bc565ec6e82910ae8f7471da756720",
         "librdkafka/1.9.1#ec1a00d5414f618555799be9566adfb7",
@@ -129,8 +129,8 @@ class MilvusConan(ConanFile):
         # azure-sdk-for-cpp is a transitive dep of Arrow, but must be declared
         # as a direct dep so CMakeDeps generates standalone cmake config files.
         # Without this, find_package(Azure) can't find include directories.
-        self.requires("azure-sdk-for-cpp/1.16.0@milvus/dev#9e2475502f8ee3b284c9e0731a3370c6", force=True)
-        self.requires("aws-sdk-cpp/1.11.692@milvus/dev#c309ce91fa572fff68f9f4e36d477a04")
+        self.requires("azure-sdk-for-cpp/1.16.4@milvus/dev#7c95e3df67cfea28b3cf6dbd60fbf137", force=True)
+        self.requires("aws-sdk-cpp/1.11.842@milvus/dev#363556887f622db23a10168c108dd55d", force=True)
         # Force snappy/lz4 versions to override Arrow's older transitive deps
         # (arrow/*:with_snappy and arrow/*:with_lz4 are enabled for Parquet decoding)
         self.requires("snappy/1.2.1#b940695c64ccbff63c1aabd4b1eee3f3", force=True)

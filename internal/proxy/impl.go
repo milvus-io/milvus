@@ -1048,6 +1048,7 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 		AlterCollectionSchemaRequest: request,
 		mixCoord:                     node.mixCoord,
 		oldSchema:                    dresp.GetSchema(),
+		collectionProperties:         dresp.GetProperties(),
 	}
 	method := "AlterCollectionSchema"
 	tr := timerecord.NewTimeRecorder(method)

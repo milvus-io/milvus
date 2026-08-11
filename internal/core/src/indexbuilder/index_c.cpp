@@ -52,6 +52,7 @@
 #include "storage/PluginLoader.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 #include "storage/plugin/PluginInterface.h"
 
@@ -218,6 +219,14 @@ configure_manifest_file_manager_context(
                                      build_index_info.external_source(),
                                      build_index_info.external_spec());
     }
+    // Widen the per-round read window for index-build manifest reads when
+    // configured. With loon's 32MB default each prefetch round admits a
+    // single 64MB-class row group, so the whole raw-data download degrades
+    // to one S3 range read at a time; a wider window lets one round span
+    // multiple row groups whose column chunks are prefetched in parallel
+    // on the arrow IO thread pool.
+    milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+        .ApplyIndexBuildReadWindow(*loon_properties);
     file_manager_context.set_loon_ffi_properties(loon_properties);
 
     auto is_milvus_table =
@@ -350,20 +359,15 @@ CreateIndex(CIndex* res_index,
             fileManagerContext, *build_index_info, storage_config);
 
         if (build_index_info->has_storage_plugin_context()) {
-            auto cipherPlugin =
-                milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-            AssertInfo(cipherPlugin != nullptr, "failed to get cipher plugin");
-            cipherPlugin->Update(
-                build_index_info->storage_plugin_context().encryption_zone_id(),
-                build_index_info->storage_plugin_context().collection_id(),
-                build_index_info->storage_plugin_context().encryption_key());
-
-            auto plugin_context = std::make_shared<CPluginContext>();
-            plugin_context->ez_id =
-                build_index_info->storage_plugin_context().encryption_zone_id();
-            plugin_context->collection_id =
-                build_index_info->storage_plugin_context().collection_id();
-            fileManagerContext.set_plugin_context(plugin_context);
+            fileManagerContext.set_plugin_context(
+                milvus::storage::PluginLoader::GetInstance()
+                    .registerCipherPluginContext(
+                        build_index_info->storage_plugin_context()
+                            .encryption_zone_id(),
+                        build_index_info->storage_plugin_context()
+                            .collection_id(),
+                        build_index_info->storage_plugin_context()
+                            .encryption_key()));
         }
 
         auto index =
@@ -458,20 +462,15 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
             fileManagerContext, *build_index_info, storage_config);
 
         if (build_index_info->has_storage_plugin_context()) {
-            auto cipherPlugin =
-                milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-            AssertInfo(cipherPlugin != nullptr, "failed to get cipher plugin");
-            cipherPlugin->Update(
-                build_index_info->storage_plugin_context().encryption_zone_id(),
-                build_index_info->storage_plugin_context().collection_id(),
-                build_index_info->storage_plugin_context().encryption_key());
-
-            auto plugin_context = std::make_shared<CPluginContext>();
-            plugin_context->ez_id =
-                build_index_info->storage_plugin_context().encryption_zone_id();
-            plugin_context->collection_id =
-                build_index_info->storage_plugin_context().collection_id();
-            fileManagerContext.set_plugin_context(plugin_context);
+            fileManagerContext.set_plugin_context(
+                milvus::storage::PluginLoader::GetInstance()
+                    .registerCipherPluginContext(
+                        build_index_info->storage_plugin_context()
+                            .encryption_zone_id(),
+                        build_index_info->storage_plugin_context()
+                            .collection_id(),
+                        build_index_info->storage_plugin_context()
+                            .encryption_key()));
         }
 
         auto field_schema =
@@ -555,19 +554,15 @@ BuildTextIndex(ProtoLayoutInterface result,
             fileManagerContext, *build_index_info, storage_config);
 
         if (build_index_info->has_storage_plugin_context()) {
-            auto cipherPlugin =
-                milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-            AssertInfo(cipherPlugin != nullptr, "failed to get cipher plugin");
-            cipherPlugin->Update(
-                build_index_info->storage_plugin_context().encryption_zone_id(),
-                build_index_info->storage_plugin_context().collection_id(),
-                build_index_info->storage_plugin_context().encryption_key());
-            auto plugin_context = std::make_shared<CPluginContext>();
-            plugin_context->ez_id =
-                build_index_info->storage_plugin_context().encryption_zone_id();
-            plugin_context->collection_id =
-                build_index_info->storage_plugin_context().collection_id();
-            fileManagerContext.set_plugin_context(plugin_context);
+            fileManagerContext.set_plugin_context(
+                milvus::storage::PluginLoader::GetInstance()
+                    .registerCipherPluginContext(
+                        build_index_info->storage_plugin_context()
+                            .encryption_zone_id(),
+                        build_index_info->storage_plugin_context()
+                            .collection_id(),
+                        build_index_info->storage_plugin_context()
+                            .encryption_key()));
         }
 
         auto scalar_index_engine_version =

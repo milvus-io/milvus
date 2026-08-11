@@ -93,6 +93,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(1048576), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
 		assert.Equal(t, int64(67108864), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())
 
+		assert.Equal(t, int32(0), Params.StorageReaderThreadPoolSize.GetAsInt32())
+		assert.Equal(t, int64(0), Params.IndexBuildReadWindowBytes.GetAsInt64())
+		params.Save(Params.StorageReaderThreadPoolSize.Key, "16")
+		params.Save(Params.IndexBuildReadWindowBytes.Key, "536870912")
+		assert.Equal(t, int32(16), Params.StorageReaderThreadPoolSize.GetAsInt32())
+		assert.Equal(t, int64(536870912), Params.IndexBuildReadWindowBytes.GetAsInt64())
+
 		assert.Equal(t, Params.GracefulTime.GetAsInt64(), int64(DefaultGracefulTime))
 		t.Logf("default grafeful time = %d", Params.GracefulTime.GetAsInt64())
 
@@ -546,6 +553,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100*time.Millisecond, Params.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse())
 		assert.Equal(t, 10.0, Params.CPURatio.GetAsFloat())
 		assert.Equal(t, uint32(hardware.GetCPUNum()), Params.KnowhereThreadPoolSize.GetAsUint32())
+		assert.Equal(t, "10s", Params.StandaloneMigrateDataTimeout.DefaultValue)
 
 		// chunk cache
 		assert.Equal(t, "willneed", Params.ReadAheadPolicy.GetValue())
@@ -768,6 +776,22 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 16*1024*1024, Params.ImportDeleteBufferSize.GetAsInt())
 		assert.Equal(t, 10.0, Params.ImportMemoryLimitPercentage.GetAsFloat())
 		assert.Equal(t, 0, Params.ImportMaxWriteRetryAttempts.GetAsInt())
+		assert.Equal(t, 1, Params.ImportWriteRetryInitialInterval.GetAsInt())
+		assert.Equal(t, 60, Params.ImportWriteRetryMaxInterval.GetAsInt())
+		// a non-positive or unparseable interval must fall back to the default,
+		// otherwise retry.Sleep(0) yields a zero-delay unbounded retry loop.
+		for _, invalid := range []string{"0", "-1", "1s"} {
+			params.Save(Params.ImportWriteRetryInitialInterval.Key, invalid)
+			assert.Equal(t, 1, Params.ImportWriteRetryInitialInterval.GetAsInt())
+			params.Save(Params.ImportWriteRetryMaxInterval.Key, invalid)
+			assert.Equal(t, 60, Params.ImportWriteRetryMaxInterval.GetAsInt())
+		}
+		params.Save(Params.ImportWriteRetryInitialInterval.Key, "2")
+		assert.Equal(t, 2, Params.ImportWriteRetryInitialInterval.GetAsInt())
+		params.Save(Params.ImportWriteRetryMaxInterval.Key, "120")
+		assert.Equal(t, 120, Params.ImportWriteRetryMaxInterval.GetAsInt())
+		params.Reset(Params.ImportWriteRetryInitialInterval.Key)
+		params.Reset(Params.ImportWriteRetryMaxInterval.Key)
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 		assert.Equal(t, 16, Params.SlotCap.GetAsInt())

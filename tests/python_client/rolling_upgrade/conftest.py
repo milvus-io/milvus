@@ -1,6 +1,5 @@
 import pytest
 
-
 timeout = 60
 dimension = 128
 delete_timeout = 60
@@ -49,9 +48,7 @@ def pytest_addoption(parser):
         default=300,
         help="paused duration for rolling update in some components",
     )
-    parser.addoption(
-        "--prepare_data", action="store", type=bool, default=False, help="prepare_data"
-    )
+    parser.addoption("--prepare_data", action="store", type=bool, default=False, help="prepare_data")
 
 
 @pytest.fixture

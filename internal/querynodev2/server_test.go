@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -39,12 +40,15 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type QueryNodeSuite struct {
@@ -251,6 +255,131 @@ func (suite *QueryNodeSuite) TestStop() {
 	err = suite.node.Stop()
 	suite.NoError(err)
 	suite.True(suite.node.manager.Segment.Empty())
+}
+
+func (suite *QueryNodeSuite) TestHasOtherActiveQueryNode() {
+	metaRoot := fmt.Sprintf("milvus-ut/test-has-other-active-qn/%d", time.Now().UnixNano())
+
+	// Create and register the current node's session.
+	sess := sessionutil.NewSessionWithEtcd(suite.node.ctx, metaRoot, suite.etcd)
+	sess.Init(typeutil.QueryNodeRole, "addr1", false)
+	sess.Register()
+	defer sess.Stop()
+
+	node := &QueryNode{
+		ctx:      suite.node.ctx,
+		session:  sess,
+		serverID: sess.ServerID,
+	}
+
+	// No other node registered — should return false.
+	hasOther, err := node.hasOtherActiveQueryNode()
+	suite.NoError(err)
+	suite.False(hasOther)
+
+	// Simulate a second active query node by writing session data directly to etcd.
+	otherSessionKey := fmt.Sprintf("%s/session/%s-%d", metaRoot, typeutil.QueryNodeRole, 99999)
+	activeSessionJSON := `{"ServerID":99999,"ServerName":"querynode","Address":"addr2","Stopping":false}`
+	_, err = suite.etcd.Put(context.Background(), otherSessionKey, activeSessionJSON)
+	suite.Require().NoError(err)
+	defer suite.etcd.Delete(context.Background(), otherSessionKey)
+
+	// Another active node exists — should return true.
+	hasOther, err = node.hasOtherActiveQueryNode()
+	suite.NoError(err)
+	suite.True(hasOther)
+
+	// Update the other session to stopping state.
+	stoppingSessionJSON := `{"ServerID":99999,"ServerName":"querynode","Address":"addr2","Stopping":true}`
+	_, err = suite.etcd.Put(context.Background(), otherSessionKey, stoppingSessionJSON)
+	suite.Require().NoError(err)
+
+	// Only stopping node exists — should return false.
+	hasOther, err = node.hasOtherActiveQueryNode()
+	suite.NoError(err)
+	suite.False(hasOther)
+
+	// Context cancellation stops the retry loop instead of being treated as no active node.
+	canceledCtx, cancel := context.WithCancel(node.ctx)
+	cancel()
+	node.ctx = canceledCtx
+	hasOther, err = node.hasOtherActiveQueryNode()
+	suite.Error(err)
+	suite.False(hasOther)
+
+	// Transient lookup errors should be retried inside the helper until a session
+	// result is available.
+	node.ctx = context.Background()
+	attempts := 0
+	patch := mockey.Mock((*sessionutil.Session).GetSessions).To(func(_ *sessionutil.Session, _ context.Context, _ string) (map[string]*sessionutil.Session, int64, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, 0, errors.New("transient session lookup failure")
+		}
+		return map[string]*sessionutil.Session{}, 0, nil
+	}).Build()
+	defer patch.UnPatch()
+
+	hasOther, err = node.hasOtherActiveQueryNode()
+	suite.NoError(err)
+	suite.False(hasOther)
+	suite.Equal(2, attempts)
+}
+
+func (suite *QueryNodeSuite) TestStopStandaloneMigrateTimeout() {
+	// Set standalone role and a very short migrate timeout so test finishes quickly.
+	paramtable.SetRole(typeutil.StandaloneRole)
+	defer paramtable.SetRole("")
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "10")
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.StandaloneMigrateDataTimeout.Key, "0s")
+	// Use a non-rocksmq WAL so the migrate data loop is entered.
+	paramtable.Get().Save("mq.type", "pulsar")
+
+	metaRoot := fmt.Sprintf("milvus-ut/test-standalone-migrate/%d", time.Now().UnixNano())
+
+	// Set up a registered session on suite.node so GoingStop succeeds and the migrate loop runs.
+	sess := sessionutil.NewSessionWithEtcd(suite.node.ctx, metaRoot, suite.etcd)
+	sess.Init(typeutil.QueryNodeRole, "addr-standalone", false)
+	sess.Register()
+	suite.node.session = sess
+	suite.node.serverID = sess.ServerID
+	suite.node.manager = segments.NewManager()
+
+	// Ensure segcore is initialized (needed by NewSegment).
+	initcore.InitLocalChunkManager(suite.T().TempDir())
+	err := initcore.InitMmapManager(paramtable.Get(), 1)
+	suite.Require().NoError(err)
+
+	// Put a sealed segment so the migrate data loop has something to wait for.
+	schema := mock_segcore.GenTestCollectionSchema("test_standalone_stop", schemapb.DataType_Int64, true)
+	collection, err := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
+		LoadType: querypb.LoadType_LoadCollection,
+	})
+	suite.Require().NoError(err)
+	segment, err := segments.NewSegment(
+		context.Background(),
+		collection,
+		suite.node.manager.Segment,
+		segments.SegmentTypeSealed,
+		1,
+		&querypb.SegmentLoadInfo{
+			SegmentID:     200,
+			PartitionID:   20,
+			CollectionID:  1,
+			Level:         datapb.SegmentLevel_Legacy,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", 1),
+		},
+	)
+	suite.Require().NoError(err)
+	suite.node.manager.Segment.Put(context.Background(), segments.SegmentTypeSealed, segment)
+
+	// Stop should exit as soon as the first successful session lookup confirms
+	// there is no other active query node.
+	start := time.Now()
+	err = suite.node.Stop()
+	elapsed := time.Since(start)
+	suite.NoError(err)
+	suite.Less(elapsed, time.Second, "standalone stop should exit after the first successful empty session result")
 }
 
 func TestResizeThreadPools(t *testing.T) {

@@ -1472,6 +1472,32 @@ func TestPasswordVerify(t *testing.T) {
 	assert.Equal(t, 2, invokedCount)
 }
 
+func BenchmarkPasswordVerifyCacheHit(b *testing.B) {
+	ctx := context.Background()
+	const (
+		username = "benchmark-user"
+		password = "benchmark-password"
+	)
+
+	privilege.ResetPrivilegeCacheForTest()
+	b.Cleanup(privilege.ResetPrivilegeCacheForTest)
+	require.NoError(b, privilege.InitPrivilegeCache(ctx, NewMixCoordMock()))
+
+	privilegeCache := privilege.GetPrivilegeCache()
+	privilegeCache.UpdateCredential(&internalpb.CredentialInfo{
+		Username:       username,
+		Sha256Password: crypto.SHA256(password, username),
+	})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if !passwordVerify(ctx, username, password, privilegeCache) {
+			b.Fatal("cached password verification failed")
+		}
+	}
+}
+
 func Test_isCollectionIsLoaded(t *testing.T) {
 	ctx := context.Background()
 	t.Run("normal", func(t *testing.T) {

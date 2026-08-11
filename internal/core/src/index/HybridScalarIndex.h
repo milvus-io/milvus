@@ -51,6 +51,10 @@ class HybridScalarIndex : public ScalarIndex<T> {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
+    HybridScalarIndex(uint32_t tantivy_index_version,
+                      const storage::FileManagerContext& file_manager_context,
+                      bool is_nested_index);
+
     ~HybridScalarIndex() override = default;
 
     BinarySet
@@ -70,6 +74,11 @@ class HybridScalarIndex : public ScalarIndex<T> {
     ScalarIndexType
     GetIndexType() const override {
         return ScalarIndexType::HYBRID;
+    }
+
+    bool
+    IsNestedIndex() const override {
+        return is_nested_index_;
     }
 
     void
@@ -225,6 +234,7 @@ class HybridScalarIndex : public ScalarIndex<T> {
     ScalarIndexType internal_index_type_;
     std::shared_ptr<ScalarIndex<T>> internal_index_{nullptr};
     storage::FileManagerContext file_manager_context_;
+    bool is_nested_index_{false};
 
     // `tantivy_index_version_` is used to control which kind of tantivy index should be used.
     // There could be the case where milvus version of read node is lower than the version of index builder node(and read node

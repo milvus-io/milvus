@@ -37,9 +37,10 @@ type AlterSchemaAddPlan struct {
 	Field    *schemapb.FieldSchema
 	Function *schemapb.FunctionSchema
 	// Index meta bound to the newly added field, parsed from
-	// FieldInfo.index_name/extra_params. Mandatory for vector-type function
-	// output fields so that bump-schema-version compaction results are never
-	// blocked on a missing vector index.
+	// FieldInfo.index_name/extra_params. A vector-type function output field
+	// always materializes a bound index so that bump-schema-version compaction
+	// results are never blocked on a missing vector index; empty or AUTOINDEX
+	// params resolve to concrete ones via the AutoIndex config at prepare.
 	IndexName        string
 	IndexExtraParams []*commonpb.KeyValuePair
 }
@@ -129,17 +130,10 @@ func ValidateAlterSchemaAddFunctionPlan(plan *AlterSchemaAddPlan) error {
 				plan.Field.GetName(),
 			)
 		}
-		// A vector output field MUST come with bound index params: without an index
-		// meta, bump-schema-version compaction results can never pass the
+		// A vector output field always gets a bound index (empty/AUTOINDEX params
+		// resolve via the AutoIndex config at prepare): without an index meta,
+		// bump-schema-version compaction results can never pass the
 		// indexed-visibility check and the whole backfill pipeline silently stalls.
-		if typeutil.IsVectorType(plan.Field.GetDataType()) && len(plan.IndexExtraParams) == 0 {
-			return merr.WrapErrParameterInvalidMsg(
-				"index params are required when adding function output field %q of vector type %s: "+
-					"provide index_type/metric_type (and params) in field_info.extra_params",
-				plan.Field.GetName(),
-				plan.Field.GetDataType().String(),
-			)
-		}
 		return nil
 	default:
 		return merr.WrapErrParameterInvalidMsg("unknown alter schema add request kind")

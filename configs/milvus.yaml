@@ -640,6 +640,7 @@ queryNode:
     nqMergeRatio: 16 # Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.
     maxDeadlineMergeGap: 50ms # Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped. Set a negative duration to disable this check.
     topKMergeRatio: 20
+  standaloneMigrateDataTimeout: 10s # Duration string (e.g. 10s, 3m). In standalone mode, after this duration, the node stops waiting for data migration if no other active query node is available.
   search:
     enableResultZeroCopy: false # When true, delegator passes reduced SearchResultData directly instead of re-marshaling to SlicedBlob. Toggle at runtime for instant fallback.
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
@@ -914,6 +915,13 @@ dataNode:
     readBufferSizeInMB: 16 # The base insert buffer size (in MB) during import. The actual buffer size will be dynamically calculated based on the number of shards.
     readDeleteBufferSizeInMB: 16 # The delete buffer size (in MB) during import.
     memoryLimitPercentage: 10 # The percentage of memory limit for import/pre-import tasks.
+    # Initial backoff interval in seconds for import write retry. Must be a positive integer;
+    # a non-positive or unparseable value falls back to the default.
+    writeRetryInitialInterval: 1
+    # Maximum backoff interval in seconds for import write retry. Must be a positive integer;
+    # a non-positive or unparseable value falls back to the default. Set it to at least twice
+    # writeRetryInitialInterval, otherwise the effective cap is raised to twice the initial interval.
+    writeRetryMaxInterval: 60
   compaction:
     levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
@@ -1125,7 +1133,7 @@ common:
     threshold:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
-    maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
+    maxWLockConditionalWaitTime: 600 # seconds before logging a wlock conditional wait that is taking long; the wait itself is not bounded by this value
   traceLogMode: 0 # trace request info
   bloomFilterEnabled: true # whether to load and apply bloom filter/pk stats on querynode
   bloomFilterSize: 100000 # bloom filter initial size

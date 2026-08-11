@@ -212,8 +212,10 @@ func (d dec) searchResultData(b []byte, srd *schemapb.SearchResultData) error {
 	return nil
 }
 
-// unmarshalIDs decodes schemapb.IDs: oneof int_id (LongArray, 1) /
-// str_id (StringArray, 2) / uuid_id (UUIDArray, 3).
+// unmarshalIDs decodes schemapb.IDs: oneof int_id (LongArray, 1) / str_id
+// (StringArray, 2) / uuid_id (UUIDArray, 3). All three variants are decoded
+// in-pass -- a variant left to the deferred protoMerge would break oneof
+// last-wins ordering against the ones handled here.
 func (d dec) ids(b []byte, ids *schemapb.IDs) error {
 	full := b
 	var rest []byte
