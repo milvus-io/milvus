@@ -305,7 +305,7 @@ func (t *bumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	case datapb.CompactionTaskState_failed:
 		log.Warn(context.TODO(), "bumpSchemaVersionTask fail in datanode")
 		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
-			setFailReason("compaction failed in datanode")); err != nil {
+			setFailReason(compactionFailReason(result))); err != nil {
 			log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 		}
 	default:

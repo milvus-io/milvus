@@ -186,7 +186,8 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 			return
 		}
 	case datapb.CompactionTaskState_failed:
-		if err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed)); err != nil {
+		if err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
+			setFailReason(compactionFailReason(result))); err != nil {
 			log.Warn(context.TODO(), "l0CompactionTask failed to set task failed state", mlog.Err(err))
 			return
 		}

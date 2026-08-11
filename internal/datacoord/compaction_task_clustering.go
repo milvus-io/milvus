@@ -207,7 +207,28 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:
 		return
 	case datapb.CompactionTaskState_failed:
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+		// The worker now carries the typed failure in FailStatus: a retryable
+		// error (OOM, transient storage) requeues within the existing retry
+		// budget instead of terminating, and a permanent one persists its
+		// code/reason instead of a bare `failed`.
+		if failErr := merr.Error(result.GetFailStatus()); failErr != nil &&
+			merr.IsRetryableErr(failErr) &&
+			t.GetTaskProto().RetryTimes < t.maxRetryTimes {
+			mlog.Info(context.TODO(), "clustering compaction worker failure is retryable, requeueing",
+				mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+				mlog.Int32("retryTimes", t.GetTaskProto().GetRetryTimes()),
+				mlog.Err(failErr))
+			err = t.updateAndSaveTaskMeta(
+				setState(datapb.CompactionTaskState_pipelining),
+				setNodeID(NullNodeID),
+				setRetryTimes(t.GetTaskProto().GetRetryTimes()+1))
+			if err != nil {
+				mlog.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
+			}
+			return
+		}
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
+			setFailReason(compactionFailReason(result)))
 		if err != nil {
 			mlog.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
 			return
@@ -783,6 +804,12 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 		}
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
+		// Return the ORIGINAL submission error after rolling the metadata back
+		// to pipelining: falling through to executing would record the task as
+		// running on a node that rejected it, the next poll would synthesize a
+		// terminal failed for the never-created worker task, and retryOnError's
+		// budget/reschedule would be bypassed entirely.
+		return err
 	}
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing), setNodeID(nodeID))
 }

@@ -159,8 +159,10 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 			return
 		}
 	case datapb.CompactionTaskState_failed:
-		mlog.Info(context.TODO(), "mixCompactionTask fail in datanode")
-		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+		mlog.Info(context.TODO(), "mixCompactionTask fail in datanode",
+			mlog.String("failReason", compactionFailReason(result)))
+		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
+			setFailReason(compactionFailReason(result)))
 		if err != nil {
 			mlog.Warn(context.TODO(), "fail to updateAndSaveTaskMeta")
 		}

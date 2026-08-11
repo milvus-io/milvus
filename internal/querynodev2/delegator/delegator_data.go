@@ -424,7 +424,10 @@ func (sd *shardDelegator) applyDelete(ctx context.Context,
 						return false, nil
 					} else if err != nil {
 						log.Warn(ctx, "worker failed to delete on segment", mlog.Err(err))
-						return true, err
+						// Retry only failures a retry can fix; a permanent typed
+						// error exits immediately instead of burning ten
+						// attempts before the same offline outcome.
+						return merr.IsRetryableErr(err), err
 					}
 					return false, nil
 				}, retry.Attempts(10))
