@@ -4828,6 +4828,19 @@ func WrapErrorToResponse(err error) *milvuspb.BoolResponse {
 	}
 }
 
+// searchParamsRootContainAny asks only the root of searchParams, not the
+// nested params object: the nested copies are inert (the proxy reads only
+// standalone pairs), so the questions "is grouping enabled" and "does a
+// spelling conflict" must be asked of the keys that actually act.
+func searchParamsRootContainAny(reqSearchParams map[string]interface{}, keys ...string) bool {
+	for _, key := range keys {
+		if _, ok := reqSearchParams[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func searchParamsContainAny(reqSearchParams map[string]interface{}, keys ...string) bool {
 	for _, key := range keys {
 		if _, ok := reqSearchParams[key]; ok {
