@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "bitset/bitset.h"
+#include "common/Array.h"
+#include "common/Slice.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
@@ -17,6 +19,7 @@
 #include "index/StringIndexSort.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
+#include "storage/Util.h"
 #include "test_utils/Constants.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
@@ -76,6 +79,92 @@ CorruptFirstPostingListRowId(BinarySet& binary_set, uint32_t row_id) {
         first_posting_list + sizeof(uint32_t), &row_id, sizeof(uint32_t));
 }
 
+ScalarFieldProto
+BuildNullableStringArrayValue(const std::vector<std::string>& values,
+                              const std::vector<bool>& valid_data) {
+    ScalarFieldProto proto;
+    for (const auto& value : values) {
+        proto.mutable_string_data()->add_data(value);
+    }
+    for (auto valid : valid_data) {
+        proto.add_valid_data(valid);
+    }
+    return proto;
+}
+
+FieldDataPtr
+BuildElementNullableStringArrayFieldData() {
+    std::vector<Array> rows = {
+        Array(BuildNullableStringArrayValue({"", "bee"}, {false, true}),
+              true),
+        Array(BuildNullableStringArrayValue({"row-null"}, {true}), true),
+        Array(BuildNullableStringArrayValue({"", "cat"}, {true, true}),
+              true),
+        Array(BuildNullableStringArrayValue({}, {}), true),
+        Array(BuildNullableStringArrayValue({"dog", ""}, {true, false}),
+              true),
+    };
+    auto field_data = storage::CreateFieldData(
+        DataType::ARRAY, DataType::VARCHAR, true, true, 1, rows.size());
+    uint8_t row_valid_data = 0x1D;  // rows 0,2,3,4 valid; row 1 null.
+    field_data->FillFieldData(
+        rows.data(), &row_valid_data, rows.size(), 0);
+    return field_data;
+}
+
+storage::FileManagerContext
+CreateElementNullableStringSortContext() {
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+
+    storage::FieldDataMeta field_meta{1, 2, 3, 103};
+    field_meta.field_schema.set_data_type(proto::schema::DataType::Array);
+    field_meta.field_schema.set_element_type(
+        proto::schema::DataType::VarChar);
+    field_meta.field_schema.set_nullable(true);
+    field_meta.field_schema.set_element_nullable(true);
+    storage::IndexMeta index_meta{3, 103, 1002, 10002};
+    return storage::FileManagerContext(
+        field_meta, index_meta, chunk_manager, fs);
+}
+
+void
+AssertBitmapEquals(const TargetBitmap& actual,
+                   const std::vector<bool>& expected) {
+    ASSERT_EQ(actual.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(actual[i], expected[i]) << "offset " << i;
+    }
+}
+
+void
+AssertElementNullableStringSort(StringIndexSort& index) {
+    ASSERT_TRUE(index.IsNestedIndex());
+    ASSERT_TRUE(index.HasRowLevelValidity());
+    ASSERT_EQ(index.Count(), 6);
+
+    std::string empty;
+    AssertBitmapEquals(index.In(1, &empty),
+                       {false, false, true, false, false, false});
+    AssertBitmapEquals(index.NotIn(1, &empty),
+                       {false, true, false, true, true, false});
+
+    std::string bee = "bee";
+    AssertBitmapEquals(index.In(1, &bee),
+                       {false, true, false, false, false, false});
+    AssertBitmapEquals(index.IsNull(), {false, true, false, false, false});
+    AssertBitmapEquals(index.IsNotNull(), {true, false, true, true, true});
+    AssertBitmapEquals(index.IsElementNull(),
+                       {true, false, false, false, false, true});
+    AssertBitmapEquals(index.IsElementNotNull(),
+                       {false, true, true, true, true, false});
+    AssertBitmapEquals(index.PrefixMatch("d"),
+                       {false, false, false, false, true, false});
+}
+
 }  // namespace
 
 TEST_F(StringIndexSortTest, ConstructorMemory) {
@@ -89,6 +178,48 @@ TEST_F(StringIndexSortTest, ConstructorMmap) {
     config["mmap_file_path"] = TestLocalPath + "milvus_test";
     auto index = milvus::index::CreateStringIndexSort({});
     ASSERT_NE(index, nullptr);
+}
+
+TEST_F(StringIndexSortTest, NestedArraySeparatesRowAndElementNull) {
+    auto field_data = BuildElementNullableStringArrayFieldData();
+    StringIndexSort index(storage::FileManagerContext(), true);
+    index.BuildWithFieldData({field_data});
+
+    AssertElementNullableStringSort(index);
+}
+
+TEST_F(StringIndexSortTest, NestedElementNullPersistsAcrossIndexFormats) {
+    auto field_data = BuildElementNullableStringArrayFieldData();
+    auto ctx = CreateElementNullableStringSortContext();
+    StringIndexSort index(ctx, true);
+    index.BuildWithFieldData({field_data});
+    AssertElementNullableStringSort(index);
+
+    auto binary_set = index.Serialize({});
+    StringIndexSort binary_loaded(ctx, true);
+    binary_loaded.Load(binary_set, {});
+    AssertElementNullableStringSort(binary_loaded);
+
+    auto legacy_binary_set = index.Serialize({});
+    milvus::Assemble(legacy_binary_set);
+    ASSERT_NE(legacy_binary_set.Erase("row_valid_bitset"), nullptr);
+    ASSERT_NE(legacy_binary_set.Erase("index_row_count"), nullptr);
+    Config legacy_config;
+    legacy_config[INDEX_NUM_ROWS_KEY] = 5;
+    StringIndexSort legacy_loaded(ctx, true);
+    legacy_loaded.Load(legacy_binary_set, legacy_config);
+    ASSERT_FALSE(legacy_loaded.HasRowLevelValidity());
+    EXPECT_EQ(legacy_loaded.IsNull().size(), 5);
+    EXPECT_EQ(legacy_loaded.IsNotNull().size(), 5);
+
+    auto upload_result = index.UploadUnified({});
+    Config config;
+    config["index_files"] = upload_result->GetIndexFiles();
+    config[milvus::LOAD_PRIORITY] =
+        proto::common::LoadPriority::HIGH;
+    StringIndexSort unified_loaded(ctx, true);
+    unified_loaded.LoadUnified(config);
+    AssertElementNullableStringSort(unified_loaded);
 }
 
 TEST_F(StringIndexSortTest, BuildMemory) {

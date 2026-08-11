@@ -10,9 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <boost/filesystem/operations.hpp>
+#include <arrow/record_batch.h>
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json_fwd.hpp>
+#include <parquet/properties.h>
 #include <string.h>
 #include <algorithm>
 #include <cstdint>
@@ -32,6 +34,7 @@
 #include "common/BitsetView.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FieldData.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
@@ -59,6 +62,7 @@
 #include "knowhere/sparse_utils.h"
 #include "knowhere/version.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/packed/writer.h"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
 #include "query/CachedSearchIterator.h"
@@ -1186,6 +1190,235 @@ TEST(Indexing, HnswEmbListBuildAllValidEmptyListsFromBinlog) {
         trailing_result.seg_offsets_.begin(),
         trailing_result.seg_offsets_.end(),
         [](int64_t offset) { return offset == INVALID_SEG_OFFSET; }));
+}
+
+TEST(Indexing, HnswEmbListBuildElementNullableFromBinlog) {
+    constexpr int64_t row_count = 3;
+    constexpr int64_t dim = 2;
+    constexpr int64_t collection_id = 500084;
+    constexpr int64_t partition_id = 2;
+    constexpr int64_t segment_id = 3;
+    constexpr int64_t field_id = 100;
+    constexpr int64_t build_id = 1000;
+    constexpr int64_t index_version = 1;
+    const auto metric_type = knowhere::metric::MAX_SIM;
+
+    VectorFieldProto row0;
+    row0.set_dim(dim);
+    for (auto value : {10.0F, 10.0F}) {
+        row0.mutable_float_vector()->add_data(value);
+    }
+    for (auto valid : {false, true}) {
+        row0.add_valid_data(valid);
+    }
+
+    VectorFieldProto row2;
+    row2.set_dim(dim);
+    for (auto value : {1.0F, 0.0F, 3.0F, 0.0F}) {
+        row2.mutable_float_vector()->add_data(value);
+    }
+    for (auto valid : {true, false, true}) {
+        row2.add_valid_data(valid);
+    }
+
+    std::vector<milvus::VectorArray> vec_arrays;
+    vec_arrays.emplace_back(row0, true);
+    vec_arrays.emplace_back(row2, true);
+    auto field_data = storage::CreateFieldData(DataType::VECTOR_ARRAY,
+                                               DataType::VECTOR_FLOAT,
+                                               true,
+                                               true,
+                                               dim,
+                                               0);
+    const std::vector<uint8_t> row_valid_data{0x05};
+    field_data->FillFieldData(
+        vec_arrays.data(), row_valid_data.data(), row_count, 0);
+
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    auto field_data_meta =
+        milvus::segcore::gen_field_meta(collection_id,
+                                        partition_id,
+                                        segment_id,
+                                        field_id,
+                                        DataType::VECTOR_ARRAY,
+                                        DataType::VECTOR_FLOAT,
+                                        true);
+    field_data_meta.field_schema.set_element_nullable(true);
+
+    auto schema = std::make_shared<Schema>();
+    auto vector_array_fid = schema->AddDebugVectorArrayField(
+        "vector_array",
+        DataType::VECTOR_FLOAT,
+        dim,
+        metric_type,
+        true,
+        true);
+    ASSERT_EQ(vector_array_fid.get(), field_id);
+    auto arrow_schema = schema->ConvertToArrowSchema();
+
+    auto arrow_data = storage::ConvertFieldDataToArrowDataWrapper(field_data);
+    std::shared_ptr<arrow::RecordBatch> field_batch;
+    ASSERT_TRUE(arrow_data->reader->ReadNext(&field_batch).ok());
+    ASSERT_NE(field_batch, nullptr);
+    ASSERT_EQ(field_batch->num_columns(), 1);
+    auto record_batch = arrow::RecordBatch::Make(
+        arrow_schema, row_count, {field_batch->column(0)});
+
+    auto data_dir = fmt::format("element_nullable_aov_{}", collection_id);
+    (void)fs->DeleteDir(data_dir);
+    auto column_group_dir = fmt::format("{}/{}", data_dir, field_id);
+    ASSERT_TRUE(fs->CreateDir(column_group_dir).ok());
+    auto data_path = fmt::format("{}/10000.parquet", column_group_dir);
+    std::vector<std::string> data_paths{data_path};
+    milvus_storage::StorageConfig writer_config;
+    std::vector<std::vector<int>> column_groups{{0}};
+    auto writer_result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs,
+        data_paths,
+        arrow_schema,
+        writer_config,
+        column_groups,
+        16 * 1024 * 1024,
+        ::parquet::default_writer_properties());
+    ASSERT_TRUE(writer_result.ok());
+    auto writer = writer_result.ValueOrDie();
+    ASSERT_TRUE(writer->Write(record_batch).ok());
+    ASSERT_TRUE(writer->Close().ok());
+
+    SegmentInsertFiles segment_insert_files{{data_path}};
+    auto restored_field_data = storage::GetFieldDatasFromStorageV2(
+        segment_insert_files,
+        field_id,
+        DataType::VECTOR_ARRAY,
+        DataType::VECTOR_FLOAT,
+        true,
+        dim,
+        fs);
+    ASSERT_EQ(restored_field_data.size(), 1);
+    auto* restored_arrays =
+        dynamic_cast<milvus::FieldData<milvus::VectorArray>*>(
+        restored_field_data.front().get());
+    ASSERT_NE(restored_arrays, nullptr);
+    ASSERT_EQ(restored_arrays->get_num_rows(), row_count);
+    EXPECT_TRUE(restored_arrays->is_valid(0));
+    EXPECT_FALSE(restored_arrays->is_valid(1));
+    EXPECT_TRUE(restored_arrays->is_valid(2));
+    const auto* restored_row0 = restored_arrays->value_at(0);
+    ASSERT_EQ(restored_row0->length(), 2);
+    EXPECT_FALSE(restored_row0->is_element_valid(0));
+    EXPECT_TRUE(restored_row0->is_element_valid(1));
+    EXPECT_FLOAT_EQ(restored_row0->get_data<float>(1)[0], 10.0F);
+    EXPECT_FLOAT_EQ(restored_row0->get_data<float>(1)[1], 10.0F);
+    const auto* restored_row2 = restored_arrays->value_at(1);
+    ASSERT_EQ(restored_row2->length(), 3);
+    EXPECT_TRUE(restored_row2->is_element_valid(0));
+    EXPECT_FALSE(restored_row2->is_element_valid(1));
+    EXPECT_TRUE(restored_row2->is_element_valid(2));
+    EXPECT_FLOAT_EQ(restored_row2->get_data<float>(0)[0], 1.0F);
+    EXPECT_FLOAT_EQ(restored_row2->get_data<float>(0)[1], 0.0F);
+    EXPECT_FLOAT_EQ(restored_row2->get_data<float>(2)[0], 3.0F);
+    EXPECT_FLOAT_EQ(restored_row2->get_data<float>(2)[1], 0.0F);
+
+    milvus::storage::IndexMeta index_meta{
+        segment_id, field_id, build_id, index_version};
+    milvus::storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager, fs);
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_index_info.metric_type = metric_type;
+    create_index_info.field_type = DataType::VECTOR_ARRAY;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+
+    Config build_conf;
+    build_conf[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
+    build_conf[knowhere::meta::METRIC_TYPE] = metric_type;
+    build_conf[knowhere::indexparam::M] = "16";
+    build_conf[knowhere::indexparam::EF] = "10";
+    build_conf[DIM_KEY] = dim;
+    build_conf[INDEX_NUM_ROWS_KEY] = row_count;
+    build_conf[STORAGE_VERSION_KEY] = STORAGE_V2;
+    build_conf[DATA_TYPE_KEY] = DataType::VECTOR_ARRAY;
+    build_conf[ELEMENT_TYPE_KEY] = DataType::VECTOR_FLOAT;
+    build_conf[SEGMENT_INSERT_FILES_KEY] = segment_insert_files;
+
+    ASSERT_NO_THROW(index->Build(build_conf));
+    auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(index.get());
+    ASSERT_NE(vec_index, nullptr);
+    EXPECT_EQ(vec_index->Count(), 3);
+    EXPECT_TRUE(vec_index->HasValidData());
+    EXPECT_EQ(vec_index->GetValidCount(), 2);
+
+    std::vector<int64_t> ids{0, 1};
+    auto ids_ds = GenIdsDataset(ids.size(), ids.data());
+    auto [raw_data, offsets] =
+        vec_index->GetEmbListByIds(ids_ds, metric_type);
+    EXPECT_EQ(offsets, std::vector<size_t>({0, 1, 3}));
+
+    const std::vector<float> expected{
+        10.0F, 10.0F, 1.0F, 0.0F, 3.0F, 0.0F};
+    ASSERT_EQ(raw_data.size(), expected.size() * sizeof(float));
+    const auto* actual_data =
+        reinterpret_cast<const float*>(raw_data.data());
+    std::vector<float> actual(actual_data, actual_data + expected.size());
+    EXPECT_EQ(actual, expected);
+
+    auto create_index_result = index->Upload();
+    ASSERT_GT(create_index_result->GetSerializedSize(), 0);
+    auto index_files = create_index_result->GetIndexFiles();
+    index.reset();
+
+    auto loaded_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+    auto loaded_vec_index =
+        dynamic_cast<milvus::index::VectorIndex*>(loaded_index.get());
+    ASSERT_NE(loaded_vec_index, nullptr);
+    auto load_conf = generate_load_conf(
+        knowhere::IndexEnum::INDEX_HNSW, metric_type, 3);
+    load_conf["index_files"] = index_files;
+    load_conf[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+    loaded_vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
+    EXPECT_EQ(loaded_vec_index->Count(), 3);
+    EXPECT_TRUE(loaded_vec_index->HasValidData());
+    EXPECT_EQ(loaded_vec_index->GetValidCount(), 2);
+
+    auto [loaded_raw_data, loaded_offsets] =
+        loaded_vec_index->GetEmbListByIds(ids_ds, metric_type);
+    EXPECT_EQ(loaded_offsets, offsets);
+    EXPECT_EQ(loaded_raw_data, raw_data);
+
+    std::vector<float> query_data{10.0F, 10.0F};
+    auto query_dataset =
+        knowhere::GenDataSet(1, dim, query_data.data());
+    std::vector<size_t> query_offsets{0, 1};
+    query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
+                       const_cast<const size_t*>(query_offsets.data()));
+    query_dataset->Set(knowhere::meta::NQ, int64_t{1});
+
+    milvus::SearchInfo search_info;
+    search_info.topk_ = 2;
+    search_info.metric_type_ = metric_type;
+    search_info.search_params_ = milvus::Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {knowhere::indexparam::EF, 10},
+    };
+    SearchResult result;
+    ASSERT_NO_THROW(loaded_vec_index->Query(
+        query_dataset, search_info, nullptr, nullptr, result));
+    ASSERT_EQ(result.total_nq_, 1);
+    ASSERT_EQ(result.seg_offsets_.size(), 2);
+    EXPECT_EQ(result.seg_offsets_[0], 0);
+    EXPECT_EQ(loaded_vec_index->GetLogicalOffset(result.seg_offsets_[0]), 0);
+    EXPECT_EQ(loaded_vec_index->GetLogicalOffset(result.seg_offsets_[1]), 2);
+
+    loaded_vec_index->CleanLocalData();
+    EXPECT_TRUE(fs->DeleteDir(data_dir).ok());
 }
 
 #ifdef BUILD_DISK_ANN

@@ -95,6 +95,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
         return is_nested_index_;
     }
 
+    bool
+    HasRowLevelValidity() const override {
+        return !is_nested_index_ || has_row_level_validity_;
+    }
+
     void
     Build(size_t n, const T* values, const bool* valid_data = nullptr) override;
 
@@ -112,6 +117,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     TargetBitmap
     IsNotNull() override;
+
+    const TargetBitmap
+    IsElementNull() override;
+
+    TargetBitmap
+    IsElementNotNull() override;
 
     const TargetBitmap
     Range(const T& value, OpType op) override;
@@ -149,6 +160,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
         // valid_bitset_: TargetBitmap
         total += valid_bitset_.size_in_bytes();
+        total += row_valid_bitset_.size_in_bytes();
 
         if (is_mmap_) {
             // mmap mode: add mmap size and filepath
@@ -265,8 +277,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager_;
     size_t total_num_rows_{0};
-    // generate valid_bitset_ to speed up NotIn and IsNull and IsNotNull operate
+    size_t total_row_count_{0};
+    // valid_bitset_ follows the index doc-id space. For nested ARRAY indexes,
+    // row_valid_bitset_ separately preserves row-level validity.
     TargetBitmap valid_bitset_;
+    TargetBitmap row_valid_bitset_;
+    bool has_row_level_validity_{true};
 
     // for ram and also used for building index.
     // Note: it should not be used directly for accessing data. Use data_ptr_ instead.

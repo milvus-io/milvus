@@ -90,6 +90,13 @@ class IndexBase {
         return false;
     }
 
+    // Nested scalar indexes built before row-level ARRAY validity was
+    // persisted cannot answer row-level null semantics by themselves.
+    virtual bool
+    HasRowLevelValidity() const {
+        return true;
+    }
+
     const IndexType&
     Type() const {
         return index_type_;

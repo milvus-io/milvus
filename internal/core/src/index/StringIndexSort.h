@@ -102,6 +102,11 @@ class StringIndexSort : public StringIndex {
         return is_nested_index_;
     }
 
+    bool
+    HasRowLevelValidity() const override {
+        return !is_nested_index_ || has_row_level_validity_;
+    }
+
     // Query methods - delegated to impl
     const TargetBitmap
     In(size_t n, const std::string* values) override;
@@ -114,6 +119,12 @@ class StringIndexSort : public StringIndex {
 
     TargetBitmap
     IsNotNull() override;
+
+    const TargetBitmap
+    IsElementNull() override;
+
+    TargetBitmap
+    IsElementNotNull() override;
 
     const TargetBitmap
     Range(const std::string& value, OpType op) override;
@@ -162,7 +173,11 @@ class StringIndexSort : public StringIndex {
     bool is_built_ = false;
     Config config_;
     size_t total_num_rows_{0};
+    size_t total_row_count_{0};
+    // valid_bitset_ follows the index doc-id space. For nested ARRAY indexes,
+    // row_valid_bitset_ separately preserves row-level validity.
     TargetBitmap valid_bitset_;
+    TargetBitmap row_valid_bitset_;
     // idx_to_offsets: maps row_id → unique value index.
     // Build/memory-load paths use the vector; mmap-load points into mmap_meta_data_.
     std::vector<int32_t> idx_to_offsets_;  // memory mode owner
@@ -176,6 +191,7 @@ class StringIndexSort : public StringIndex {
 
     bool is_nested_index_ = false;
     bool is_array_field_ = false;
+    bool has_row_level_validity_ = true;
 
     // for mmap: idx_to_offsets meta file
     char* mmap_meta_data_ = nullptr;

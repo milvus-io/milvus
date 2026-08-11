@@ -135,6 +135,18 @@ class ScalarIndex : public IndexBase {
     IsNotNull() = 0;
 
     virtual const TargetBitmap
+    IsElementNull() {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "IsElementNull is only supported by nested array index");
+    }
+
+    virtual TargetBitmap
+    IsElementNotNull() {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "IsElementNotNull is only supported by nested array index");
+    }
+
+    virtual const TargetBitmap
     InApplyFilter(size_t n,
                   const T* values,
                   const std::function<bool(size_t /* offset */)>& filter) {

@@ -185,6 +185,7 @@ StringIndexSort::Build(size_t n,
 
     index_build_begin_ = std::chrono::system_clock::now();
     total_num_rows_ = n;
+    total_row_count_ = n;
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
     idx_to_offsets_.clear();
 
@@ -224,15 +225,17 @@ StringIndexSort::BuildWithFieldData(
 
     index_build_begin_ = std::chrono::system_clock::now();
 
-    // Calculate total number of rows
     total_num_rows_ = 0;
+    total_row_count_ = 0;
     if (is_nested_index_) {
+        has_row_level_validity_ = true;
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
+            total_row_count_ += n;
             for (int64_t i = 0; i < n; i++) {
                 if (data->is_valid(i)) {
-                    // RawValue maps logical->physical so compact nullable array
-                    // FieldData is read correctly (Data()[i] would overrun).
+                    // ARRAY FieldData is row-dense; use the common logical-row
+                    // accessor here and in the indexing pass below.
                     total_num_rows_ +=
                         reinterpret_cast<const Array*>(data->RawValue(i))
                             ->length();
@@ -243,6 +246,7 @@ StringIndexSort::BuildWithFieldData(
         for (const auto& data : field_datas) {
             total_num_rows_ += data->get_num_rows();
         }
+        total_row_count_ = total_num_rows_;
     }
 
     if (total_num_rows_ == 0) {
@@ -251,6 +255,18 @@ StringIndexSort::BuildWithFieldData(
 
     // Initialize structures
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    if (is_nested_index_) {
+        row_valid_bitset_ = TargetBitmap(total_row_count_, false);
+        size_t row_offset = 0;
+        for (const auto& data : field_datas) {
+            auto n = data->get_num_rows();
+            for (int64_t i = 0; i < n; ++i, ++row_offset) {
+                if (data->is_valid(i)) {
+                    row_valid_bitset_.set(row_offset);
+                }
+            }
+        }
+    }
     idx_to_offsets_.clear();
 
     // Create MemoryImpl and build directly from field data
@@ -300,6 +316,14 @@ StringIndexSort::Serialize(const Config& config) {
         index_num_rows.get(), &total_num_rows_, sizeof(size_t));
     res_set.Append("index_num_rows", index_num_rows, sizeof(size_t));
 
+    if (is_nested_index_) {
+        std::shared_ptr<uint8_t[]> index_row_count(
+            new uint8_t[sizeof(size_t)]);
+        milvus::fastmem::FastMemcpy(
+            index_row_count.get(), &total_row_count_, sizeof(size_t));
+        res_set.Append("index_row_count", index_row_count, sizeof(size_t));
+    }
+
     // Serialize valid_bitset
     size_t valid_bitset_size =
         (total_num_rows_ + 7) / 8;  // Round up to byte boundary
@@ -312,6 +336,21 @@ StringIndexSort::Serialize(const Config& config) {
         }
     }
     res_set.Append("valid_bitset", valid_bitset_data, valid_bitset_size);
+
+    if (is_nested_index_) {
+        size_t row_valid_bitset_size = (total_row_count_ + 7) / 8;
+        std::shared_ptr<uint8_t[]> row_valid_bitset_data(
+            new uint8_t[row_valid_bitset_size]);
+        memset(row_valid_bitset_data.get(), 0, row_valid_bitset_size);
+        for (size_t i = 0; i < total_row_count_; ++i) {
+            if (row_valid_bitset_[i]) {
+                row_valid_bitset_data[i / 8] |= (1 << (i % 8));
+            }
+        }
+        res_set.Append("row_valid_bitset",
+                       row_valid_bitset_data,
+                       row_valid_bitset_size);
+    }
 
     // Serialize is_nested_index
     std::shared_ptr<uint8_t[]> is_nested_data(new uint8_t[sizeof(bool)]);
@@ -381,6 +420,7 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
                "Failed to find 'index_num_rows' in binary_set");
     milvus::fastmem::FastMemcpy(
         &total_num_rows_, index_num_rows->data.get(), sizeof(size_t));
+    total_row_count_ = total_num_rows_;
 
     // Initialize idx_to_offsets - it will be rebuilt by LoadFromBinary
     idx_to_offsets_.resize(total_num_rows_);
@@ -403,6 +443,38 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
         milvus::fastmem::FastMemcpy(
             &loaded_is_nested_index, is_nested_data->data.get(), sizeof(bool));
         is_nested_index_ = is_nested_index_ || loaded_is_nested_index;
+    }
+    auto index_row_count = binary_set.GetByName("index_row_count");
+    if (index_row_count != nullptr) {
+        milvus::fastmem::FastMemcpy(
+            &total_row_count_, index_row_count->data.get(), sizeof(size_t));
+    } else if (is_nested_index_) {
+        if (auto num_rows =
+                GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY);
+            num_rows.has_value() && num_rows.value() >= 0) {
+            total_row_count_ = num_rows.value();
+        }
+    }
+    if (is_nested_index_) {
+        has_row_level_validity_ = false;
+        row_valid_bitset_ = TargetBitmap(total_row_count_, true);
+        auto row_valid_data = binary_set.GetByName("row_valid_bitset");
+        if (row_valid_data != nullptr) {
+            has_row_level_validity_ = true;
+            auto expected_size = (total_row_count_ + 7) / 8;
+            AssertInfo(row_valid_data->size >= expected_size,
+                       "invalid row_valid_bitset size: expected at least {}, "
+                       "got {}",
+                       expected_size,
+                       row_valid_data->size);
+            row_valid_bitset_ = TargetBitmap(total_row_count_, false);
+            for (size_t i = 0; i < total_row_count_; ++i) {
+                uint8_t byte = row_valid_data->data[i / 8];
+                if (byte & (1 << (i % 8))) {
+                    row_valid_bitset_.set(i);
+                }
+            }
+        }
     }
 
     auto version_data = binary_set.GetByName("version");
@@ -461,12 +533,32 @@ StringIndexSort::NotIn(size_t n, const std::string* values) {
 const TargetBitmap
 StringIndexSort::IsNull() {
     assert(impl_ != nullptr);
+    if (is_nested_index_) {
+        return impl_->IsNull(total_row_count_, row_valid_bitset_);
+    }
     return impl_->IsNull(total_num_rows_, valid_bitset_);
 }
 
 TargetBitmap
 StringIndexSort::IsNotNull() {
     assert(impl_ != nullptr);
+    if (is_nested_index_) {
+        return impl_->IsNotNull(row_valid_bitset_);
+    }
+    return impl_->IsNotNull(valid_bitset_);
+}
+
+const TargetBitmap
+StringIndexSort::IsElementNull() {
+    assert(impl_ != nullptr);
+    AssertInfo(is_nested_index_, "IsElementNull requires nested index");
+    return impl_->IsNull(total_num_rows_, valid_bitset_);
+}
+
+TargetBitmap
+StringIndexSort::IsElementNotNull() {
+    assert(impl_ != nullptr);
+    AssertInfo(is_nested_index_, "IsElementNotNull requires nested index");
     return impl_->IsNotNull(valid_bitset_);
 }
 
@@ -543,6 +635,7 @@ StringIndexSort::CalculateTotalSize() const {
     // Add common structures (always present)
     size += idx_to_offsets_size_ * sizeof(int32_t);
     size += valid_bitset_.size() / 8;
+    size += row_valid_bitset_.size() / 8;
 
     // Add object overhead
     size += sizeof(*this);
@@ -564,6 +657,7 @@ StringIndexSort::ComputeByteSize() {
 
     // valid_bitset_: TargetBitmap
     total += valid_bitset_.size_in_bytes();
+    total += row_valid_bitset_.size_in_bytes();
 
     // Add impl-specific memory usage
     if (impl_) {
@@ -597,10 +691,23 @@ StringIndexSort::WriteEntries(storage::IndexEntryWriter* writer) {
 
     writer->PutMeta("version", SERIALIZATION_VERSION);
     writer->PutMeta("num_rows", total_num_rows_);
+    writer->PutMeta("row_count", total_row_count_);
     writer->PutMeta("is_nested", is_nested_index_);
     writer->WriteEntry("index_data", data_buffer.data(), total_size);
     writer->WriteEntry(
         "valid_bitset", valid_bitset_data.data(), valid_bitset_size);
+    if (is_nested_index_) {
+        size_t row_valid_bitset_size = (total_row_count_ + 7) / 8;
+        std::vector<uint8_t> row_valid_bitset_data(row_valid_bitset_size, 0);
+        for (size_t i = 0; i < total_row_count_; ++i) {
+            if (row_valid_bitset_[i]) {
+                row_valid_bitset_data[i / 8] |= (1 << (i % 8));
+            }
+        }
+        writer->WriteEntry("row_valid_bitset",
+                           row_valid_bitset_data.data(),
+                           row_valid_bitset_size);
+    }
     writer->WriteEntry("idx_to_offsets",
                        idx_to_offsets_.data(),
                        idx_to_offsets_.size() * sizeof(int32_t));
@@ -620,7 +727,16 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                               SERIALIZATION_VERSION));
     }
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
+    const bool has_row_count = reader.HasMeta("row_count");
+    total_row_count_ = reader.GetMeta<size_t>("row_count", total_num_rows_);
     is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
+    if (is_nested_index_ && !has_row_count) {
+        if (auto num_rows =
+                GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY);
+            num_rows.has_value() && num_rows.value() >= 0) {
+            total_row_count_ = num_rows.value();
+        }
+    }
 
     // valid_bitset is small (num_rows/8 bytes), keep as ReadEntry
     auto valid_bitset_entry = reader.ReadEntry("valid_bitset");
@@ -634,6 +750,27 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
         uint8_t byte = valid_bitset_entry.data[i / 8];
         if (byte & (1 << (i % 8))) {
             valid_bitset_.set(i);
+        }
+    }
+    if (is_nested_index_) {
+        has_row_level_validity_ = false;
+        row_valid_bitset_ = TargetBitmap(total_row_count_, true);
+        if (reader.HasEntry("row_valid_bitset")) {
+            has_row_level_validity_ = true;
+            auto row_valid_entry = reader.ReadEntry("row_valid_bitset");
+            auto expected_size = (total_row_count_ + 7) / 8;
+            AssertInfo(row_valid_entry.data.size() >= expected_size,
+                       "invalid row_valid_bitset size: expected at least {}, "
+                       "got {}",
+                       expected_size,
+                       row_valid_entry.data.size());
+            row_valid_bitset_ = TargetBitmap(total_row_count_, false);
+            for (size_t i = 0; i < total_row_count_; ++i) {
+                uint8_t byte = row_valid_entry.data[i / 8];
+                if (byte & (1 << (i % 8))) {
+                    row_valid_bitset_.set(i);
+                }
+            }
         }
     }
 
@@ -859,9 +996,12 @@ StringIndexSortMemoryImpl::BuildFromArrayDataNested(
             auto* array =
                 reinterpret_cast<const Array*>(field_data->RawValue(i));
             for (int64_t j = 0; j < array->length(); j++) {
-                auto value = array->get_data<std::string>(j);
-                map[value].push_back(static_cast<int32_t>(element_id));
-                valid_bitset.set(element_id);
+                if (array->is_element_valid(j)) {
+                    auto value =
+                        array->get_data_unchecked<std::string>(j);
+                    map[value].push_back(static_cast<int32_t>(element_id));
+                    valid_bitset.set(element_id);
+                }
                 element_id++;
             }
         }

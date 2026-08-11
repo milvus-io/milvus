@@ -49,6 +49,9 @@ namespace index {
 constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
 constexpr const char* BITMAP_INDEX_IS_NESTED = "is_nested_index";
 constexpr const char* BITMAP_INDEX_IS_NESTED_META = "is_nested";
+constexpr const char* BITMAP_INDEX_ROW_COUNT = "index_row_count";
+constexpr const char* BITMAP_INDEX_ROW_COUNT_META = "row_count";
+constexpr const char* BITMAP_INDEX_ROW_VALID_BITSET = "row_valid_bitset";
 
 template <typename T>
 BitmapIndex<T>::BitmapIndex(
@@ -103,6 +106,7 @@ BitmapIndex<T>::Build(size_t n, const T* data, const bool* valid_data) {
     }
 
     total_num_rows_ = n;
+    total_row_count_ = n;
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
 
     T* p = const_cast<T*>(data);
@@ -164,6 +168,7 @@ BitmapIndex<T>::BuildWithFieldData(
         ThrowInfo(DataIsEmpty, "scalar bitmap index can not build null values");
     }
     total_num_rows_ = total_num_rows;
+    total_row_count_ = total_num_rows_;
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
 
     switch (schema_.data_type()) {
@@ -202,7 +207,10 @@ BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
                 auto array =
                     reinterpret_cast<const milvus::Array*>(data->RawValue(i));
                 for (size_t j = 0; j < array->length(); ++j) {
-                    auto val = array->get_data<T>(j);
+                    if (!array->is_element_valid(j)) {
+                        continue;
+                    }
+                    auto val = array->template get_data_unchecked<T>(j);
                     data_[val].add(offset);
                 }
                 valid_bitset_.set(offset);
@@ -216,23 +224,32 @@ template <typename T>
 void
 BitmapIndex<T>::BuildArrayFieldNested(
     const std::vector<FieldDataPtr>& field_datas) {
+    has_row_level_validity_ = true;
     int64_t offset = 0;
+    int64_t row_offset = 0;
+    total_row_count_ = 0;
+    for (const auto& data : field_datas) {
+        total_row_count_ += data->get_num_rows();
+    }
+    row_valid_bitset_ = TargetBitmap(total_row_count_, false);
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
-        for (size_t i = 0; i < slice_row_num; ++i) {
+        for (size_t i = 0; i < slice_row_num; ++i, ++row_offset) {
             if (!data->is_valid(i)) {
                 continue;
             }
-            // Use RawValue(i), not Data()[i]: nullable array FieldData is stored
-            // compactly (NULL rows occupy no slot), so a logical row index into
-            // Data() runs past the buffer. RawValue() maps logical->physical and
-            // works for both dense and compact data (same as BuildArrayField).
+            row_valid_bitset_.set(row_offset);
+            // ARRAY FieldData is row-dense. RawValue() is the common logical-row
+            // accessor and keeps this path aligned with BuildArrayField.
             auto* array =
                 reinterpret_cast<const milvus::Array*>(data->RawValue(i));
             auto length = array->length();
             for (size_t j = 0; j < length; ++j) {
-                auto val = array->get_data<T>(j);
-                data_[val].add(offset++);
+                if (array->is_element_valid(j)) {
+                    auto val = array->template get_data_unchecked<T>(j);
+                    data_[val].add(offset);
+                }
+                offset++;
             }
         }
     }
@@ -242,7 +259,12 @@ BitmapIndex<T>::BuildArrayFieldNested(
                   "nested scalar bitmap index can not build null values");
     }
     total_num_rows_ = offset;
-    valid_bitset_ = TargetBitmap(total_num_rows_, true);
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    for (const auto& [_, postings] : data_) {
+        for (auto element_offset : postings) {
+            valid_bitset_.set(element_offset);
+        }
+    }
 }
 
 template <typename T>
@@ -300,6 +322,9 @@ BitmapIndex<T>::SerializeIndexMeta() {
     node[BITMAP_INDEX_LENGTH] = data_.size();
     node[BITMAP_INDEX_NUM_ROWS] = total_num_rows_;
     node[BITMAP_INDEX_IS_NESTED] = is_nested_index_;
+    if (is_nested_index_) {
+        node[BITMAP_INDEX_ROW_COUNT] = total_row_count_;
+    }
 
     std::stringstream ss;
     ss << node;
@@ -360,10 +385,21 @@ BitmapIndex<T>::Serialize(const Config& config) {
     BinarySet ret_set;
     ret_set.Append(BITMAP_INDEX_DATA, index_data, index_data_size);
     ret_set.Append(BITMAP_INDEX_META, index_meta.first, index_meta.second);
-    if (schema_.nullable()) {
+    if (schema_.nullable() || is_nested_index_) {
         auto valid_bitset = SerializeValidBitsetData();
         ret_set.Append(
             BITMAP_INDEX_VALID_BITSET, valid_bitset.first, valid_bitset.second);
+    }
+    if (is_nested_index_) {
+        auto row_valid_size = row_valid_bitset_.size_in_bytes();
+        std::shared_ptr<uint8_t[]> row_valid_data(new uint8_t[row_valid_size]);
+        milvus::fastmem::FastMemcpy(
+            row_valid_data.get(),
+            reinterpret_cast<const uint8_t*>(row_valid_bitset_.data()),
+            row_valid_size);
+        ret_set.Append(BITMAP_INDEX_ROW_VALID_BITSET,
+                       row_valid_data,
+                       row_valid_size);
     }
 
     LOG_INFO("build bitmap index with cardinality = {}, num_rows = {}",
@@ -405,7 +441,7 @@ BitmapIndex<T>::ConvertRoaringToBitset(const roaring::Roaring& values) {
 }
 
 template <typename T>
-std::pair<size_t, size_t>
+std::tuple<size_t, size_t, bool>
 BitmapIndex<T>::DeserializeIndexMeta(const uint8_t* data_ptr,
                                      size_t data_size) {
     std::string meta_str(reinterpret_cast<const char*>(data_ptr), data_size);
@@ -418,7 +454,12 @@ BitmapIndex<T>::DeserializeIndexMeta(const uint8_t* data_ptr,
         if (j.contains(BITMAP_INDEX_IS_NESTED)) {
             is_nested_index_ = j[BITMAP_INDEX_IS_NESTED].get<bool>();
         }
-        return std::make_pair(index_length, index_num_rows);
+        total_row_count_ = index_num_rows;
+        const bool has_row_count = j.contains(BITMAP_INDEX_ROW_COUNT);
+        if (has_row_count) {
+            total_row_count_ = j[BITMAP_INDEX_ROW_COUNT].get<size_t>();
+        }
+        return {index_length, index_num_rows, has_row_count};
     } catch (const nlohmann::json::parse_error&) {
         // Fall back to YAML for backward compatibility with V2
         YAML::Node node = YAML::Load(meta_str);
@@ -427,7 +468,12 @@ BitmapIndex<T>::DeserializeIndexMeta(const uint8_t* data_ptr,
         if (node[BITMAP_INDEX_IS_NESTED]) {
             is_nested_index_ = node[BITMAP_INDEX_IS_NESTED].as<bool>();
         }
-        return std::make_pair(index_length, index_num_rows);
+        total_row_count_ = index_num_rows;
+        const bool has_row_count = node[BITMAP_INDEX_ROW_COUNT].IsDefined();
+        if (has_row_count) {
+            total_row_count_ = node[BITMAP_INDEX_ROW_COUNT].as<size_t>();
+        }
+        return {index_length, index_num_rows, has_row_count};
     }
 }
 
@@ -635,14 +681,41 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
         GetValueFromConfig<bool>(config, ENABLE_OFFSET_CACHE);
 
     auto index_meta_buffer = binary_set.GetByName(BITMAP_INDEX_META);
-    auto index_meta = DeserializeIndexMeta(index_meta_buffer->data.get(),
-                                           index_meta_buffer->size);
-    auto index_length = index_meta.first;
-    total_num_rows_ = index_meta.second;
-    valid_bitset_ =
-        TargetBitmap(total_num_rows_, is_nested_index_ || !schema_.nullable());
+    auto [index_length, index_num_rows, has_row_count] = DeserializeIndexMeta(
+        index_meta_buffer->data.get(), index_meta_buffer->size);
+    total_num_rows_ = index_num_rows;
+    if (is_nested_index_ && !has_row_count) {
+        if (auto num_rows =
+                GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY);
+            num_rows.has_value() && num_rows.value() >= 0) {
+            total_row_count_ = num_rows.value();
+        }
+    }
+    valid_bitset_ = TargetBitmap(
+        total_num_rows_,
+        is_nested_index_ ? !schema_.element_nullable() : !schema_.nullable());
+    if (is_nested_index_) {
+        has_row_level_validity_ = false;
+        row_valid_bitset_ = TargetBitmap(total_row_count_, true);
+        auto row_valid_buffer =
+            binary_set.GetByName(BITMAP_INDEX_ROW_VALID_BITSET);
+        if (row_valid_buffer != nullptr) {
+            has_row_level_validity_ = true;
+            auto row_valid_size = row_valid_bitset_.size_in_bytes();
+            AssertInfo(row_valid_buffer->size >= row_valid_size,
+                       "bitmap row valid bitset size mismatch, expect at "
+                       "least {}, got {}",
+                       row_valid_size,
+                       row_valid_buffer->size);
+            milvus::fastmem::FastMemcpy(
+                reinterpret_cast<uint8_t*>(row_valid_bitset_.data()),
+                row_valid_buffer->data.get(),
+                row_valid_size);
+        }
+    }
     bool rebuild_validity_from_postings =
-        schema_.nullable() && !is_nested_index_;
+        (schema_.nullable() && !is_nested_index_) ||
+        (is_nested_index_ && schema_.element_nullable());
 
     auto valid_bitset_buffer = binary_set.GetByName(BITMAP_INDEX_VALID_BITSET);
     if (valid_bitset_buffer != nullptr) {
@@ -682,15 +755,23 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
         BuildOffsetCache();
     }
 
-    auto file_index_meta = this->file_manager_->GetIndexMeta();
-    LOG_INFO(
-        "load bitmap index with cardinality = {}, num_rows = {} for segment_id "
-        "= {}, field_id = {}, mmap = {}",
-        Cardinality(),
-        total_num_rows_,
-        file_index_meta.segment_id,
-        file_index_meta.field_id,
-        is_mmap_);
+    if (this->file_manager_ != nullptr) {
+        auto file_index_meta = this->file_manager_->GetIndexMeta();
+        LOG_INFO(
+            "load bitmap index with cardinality = {}, num_rows = {} for "
+            "segment_id = {}, field_id = {}, mmap = {}",
+            Cardinality(),
+            total_num_rows_,
+            file_index_meta.segment_id,
+            file_index_meta.field_id,
+            is_mmap_);
+    } else {
+        LOG_INFO("load in-memory bitmap index with cardinality = {}, "
+                 "num_rows = {}, mmap = {}",
+                 Cardinality(),
+                 total_num_rows_,
+                 is_mmap_);
+    }
 
     is_built_ = true;
     ComputeByteSize();
@@ -817,8 +898,9 @@ BitmapIndex<T>::IsNull() {
     tracer::AutoSpan span("BitmapIndex::IsNull", tracer::GetRootSpan());
 
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap res(total_num_rows_, true);
-    res &= valid_bitset_;
+    auto count = is_nested_index_ ? total_row_count_ : total_num_rows_;
+    TargetBitmap res(count, true);
+    res &= is_nested_index_ ? row_valid_bitset_ : valid_bitset_;
     res.flip();
     return res;
 }
@@ -829,6 +911,32 @@ BitmapIndex<T>::IsNotNull() {
     tracer::AutoSpan span("BitmapIndex::IsNotNull", tracer::GetRootSpan());
 
     AssertInfo(is_built_, "index has not been built");
+    auto count = is_nested_index_ ? total_row_count_ : total_num_rows_;
+    TargetBitmap res(count, true);
+    res &= is_nested_index_ ? row_valid_bitset_ : valid_bitset_;
+    return res;
+}
+
+template <typename T>
+const TargetBitmap
+BitmapIndex<T>::IsElementNull() {
+    tracer::AutoSpan span("BitmapIndex::IsElementNull",
+                          tracer::GetRootSpan());
+    AssertInfo(is_built_, "index has not been built");
+    AssertInfo(is_nested_index_, "IsElementNull requires nested index");
+    TargetBitmap res(total_num_rows_, true);
+    res &= valid_bitset_;
+    res.flip();
+    return res;
+}
+
+template <typename T>
+TargetBitmap
+BitmapIndex<T>::IsElementNotNull() {
+    tracer::AutoSpan span("BitmapIndex::IsElementNotNull",
+                          tracer::GetRootSpan());
+    AssertInfo(is_built_, "index has not been built");
+    AssertInfo(is_nested_index_, "IsElementNotNull requires nested index");
     TargetBitmap res(total_num_rows_, true);
     res &= valid_bitset_;
     return res;
@@ -1422,6 +1530,7 @@ BitmapIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     // V3 format: meta goes into __meta__ entry
     writer->PutMeta(BITMAP_INDEX_LENGTH, data_.size());
     writer->PutMeta(BITMAP_INDEX_NUM_ROWS, total_num_rows_);
+    writer->PutMeta(BITMAP_INDEX_ROW_COUNT_META, total_row_count_);
     writer->PutMeta(BITMAP_INDEX_IS_NESTED_META, is_nested_index_);
 
     auto index_data_size = GetIndexDataSize();
@@ -1429,11 +1538,17 @@ BitmapIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     uint8_t* data_ptr = index_data.get();
     SerializeIndexData(data_ptr);
     writer->WriteEntry(BITMAP_INDEX_DATA, index_data.get(), index_data_size);
-    if (schema_.nullable()) {
+    if (schema_.nullable() || is_nested_index_) {
         auto valid_bitset = SerializeValidBitsetData();
         writer->WriteEntry(BITMAP_INDEX_VALID_BITSET,
                            valid_bitset.first.get(),
                            valid_bitset.second);
+    }
+    if (is_nested_index_) {
+        writer->WriteEntry(
+            BITMAP_INDEX_ROW_VALID_BITSET,
+            reinterpret_cast<const uint8_t*>(row_valid_bitset_.data()),
+            row_valid_bitset_.size_in_bytes());
     }
 
     LOG_INFO("write bitmap index entries with cardinality = {}, num_rows = {}",
@@ -1451,12 +1566,44 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     // V3 format: meta is in __meta__ entry
     auto index_length = reader.GetMeta<size_t>(BITMAP_INDEX_LENGTH);
     total_num_rows_ = reader.GetMeta<size_t>(BITMAP_INDEX_NUM_ROWS);
+    const bool has_row_count =
+        reader.HasMeta(BITMAP_INDEX_ROW_COUNT_META);
+    total_row_count_ =
+        reader.GetMeta<size_t>(BITMAP_INDEX_ROW_COUNT_META, total_num_rows_);
     is_nested_index_ =
         reader.GetMeta<bool>(BITMAP_INDEX_IS_NESTED_META, is_nested_index_);
-    valid_bitset_ =
-        TargetBitmap(total_num_rows_, is_nested_index_ || !schema_.nullable());
+    if (is_nested_index_ && !has_row_count) {
+        if (auto num_rows =
+                GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY);
+            num_rows.has_value() && num_rows.value() >= 0) {
+            total_row_count_ = num_rows.value();
+        }
+    }
+    valid_bitset_ = TargetBitmap(
+        total_num_rows_,
+        is_nested_index_ ? !schema_.element_nullable() : !schema_.nullable());
+    if (is_nested_index_) {
+        has_row_level_validity_ = false;
+        row_valid_bitset_ = TargetBitmap(total_row_count_, true);
+        if (reader.HasEntry(BITMAP_INDEX_ROW_VALID_BITSET)) {
+            has_row_level_validity_ = true;
+            auto row_valid_entry =
+                reader.ReadEntry(BITMAP_INDEX_ROW_VALID_BITSET);
+            auto row_valid_size = row_valid_bitset_.size_in_bytes();
+            AssertInfo(row_valid_entry.data.size() >= row_valid_size,
+                       "bitmap row valid bitset size mismatch, expect at "
+                       "least {}, got {}",
+                       row_valid_size,
+                       row_valid_entry.data.size());
+            milvus::fastmem::FastMemcpy(
+                reinterpret_cast<uint8_t*>(row_valid_bitset_.data()),
+                row_valid_entry.data.data(),
+                row_valid_size);
+        }
+    }
     bool rebuild_validity_from_postings =
-        schema_.nullable() && !is_nested_index_;
+        (schema_.nullable() && !is_nested_index_) ||
+        (is_nested_index_ && schema_.element_nullable());
 
     auto entry_names = reader.GetEntryNames();
     if (std::find(entry_names.begin(),
