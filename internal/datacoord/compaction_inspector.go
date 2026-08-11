@@ -207,6 +207,13 @@ func (c *compactionInspector) checkSchedule() {
 
 func (c *compactionInspector) schedule() []CompactionTask {
 	selected := make([]CompactionTask, 0)
+
+	// Sync before the empty-queue early return, so a configuration change made
+	// while the queue happens to be empty is still adopted. The cost on an
+	// empty queue is one lock acquisition and one string compare -- the
+	// re-prioritize loop iterates zero times.
+	c.queueTasks.SyncPrioritizer(getPrioritizerName())
+
 	if c.queueTasks.Len() == 0 {
 		return selected
 	}
@@ -239,11 +246,6 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			c.queueTasks.Enqueue(t)
 		}
 	}()
-
-	p := getPrioritizer()
-	if &c.queueTasks.prioritizer != &p {
-		c.queueTasks.UpdatePrioritizer(p)
-	}
 
 	// The schedule loop will stop if either:
 	// 1. no more task to schedule (the task queue is empty)

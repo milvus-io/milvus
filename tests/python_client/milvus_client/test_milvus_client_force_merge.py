@@ -24,6 +24,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from common.constants import *  # noqa: F403
+from common.milvus_sys import MilvusSys
 from minio import Minio
 from pymilvus import DataType
 from utils.util_log import test_log as log
@@ -48,7 +49,6 @@ default_string_field_name = ct.default_string_field_name
 # ForceMerge specific constants
 max_int64 = (1 << 63) - 1
 auto_target_size_mb = max_int64 // (1024 * 1024) + 1  # Triggers server auto target-size mode.
-default_max_size_mb = 1024  # Default segment max size in MB
 actual_output_size_tolerance = 0.10
 
 
@@ -89,6 +89,15 @@ def get_insert_log_sizes(minio_client, bucket, collection_id, segment_ids):
     return {int(segment_id): size for segment_id, size in sizes.items()}
 
 
+def get_segment_max_size_mb(client):
+    for node in MilvusSys(client=client).get_nodes_by_type("datacoord"):
+        configurations = node.get("infos", {}).get("system_configurations", {})
+        max_size = configurations.get("segment_max_size")
+        if max_size is not None:
+            return int(max_size)
+    return None
+
+
 class TestMilvusClientForceMergeInvalid(TestMilvusClientV2Base):
     """Test cases for ForceMerge with invalid parameters"""
 
@@ -121,18 +130,31 @@ class TestMilvusClientForceMergeInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("target_size", [100, 512, 1000])
-    def test_force_merge_target_size_less_than_max_size(self, target_size):
+    @pytest.mark.parametrize(
+        "target_size_ratio",
+        [
+            pytest.param(0.1, id="low"),
+            pytest.param(0.5, id="half"),
+            pytest.param(0.99, id="near-max"),
+        ],
+    )
+    def test_force_merge_target_size_less_than_max_size(self, target_size_ratio):
         """
         target: test ForceMerge with target_size less than config maxSize
-        method: create collection, call compact with target_size < 1024 MB
+        method: read the server maxSize and call compact with a strictly smaller target_size
         expected: Raise exception
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
-        # 2. compact with target_size less than maxSize
+        # 2. compact with target_size less than the active server maxSize
+        segment_max_size_mb = get_segment_max_size_mb(client)
+        assert segment_max_size_mb is not None and segment_max_size_mb > 1
+        target_size = max(
+            1,
+            min(segment_max_size_mb - 1, int(segment_max_size_mb * target_size_ratio)),
+        )
         error = {ct.err_code: 1100, ct.err_msg: "targetSize"}
         self.compact(
             client,
