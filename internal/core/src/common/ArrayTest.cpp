@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "common/Array.h"
 #include "common/Types.h"
@@ -36,7 +37,7 @@ TEST(Array, TestConstructArray) {
     ASSERT_EQ(N, int_array.length());
     ASSERT_EQ(N * sizeof(int), int_array.byte_size());
     for (int i = 0; i < N; ++i) {
-        ASSERT_EQ(int_array.get_data<int>(i), i);
+        ASSERT_EQ(int_array.get_data_unchecked<int>(i), i);
     }
     ASSERT_TRUE(int_array.is_same_array(field_int_array));
     auto int_array_tmp = Array(const_cast<char*>(int_array.data()),
@@ -78,7 +79,7 @@ TEST(Array, TestConstructArray) {
     ASSERT_EQ(N, long_array.length());
     ASSERT_EQ(N * sizeof(int64_t), long_array.byte_size());
     for (int i = 0; i < N; ++i) {
-        ASSERT_EQ(long_array.get_data<int64_t>(i), i);
+        ASSERT_EQ(long_array.get_data_unchecked<int64_t>(i), i);
     }
     ASSERT_TRUE(long_array.is_same_array(field_int_array));
     auto long_array_tmp = Array(const_cast<char*>(long_array.data()),
@@ -110,7 +111,7 @@ TEST(Array, TestConstructArray) {
     auto string_array = Array(field_string_data);
     ASSERT_EQ(N, string_array.length());
     for (int i = 0; i < N; ++i) {
-        ASSERT_EQ(string_array.get_data<std::string_view>(i),
+        ASSERT_EQ(string_array.get_data_unchecked<std::string_view>(i),
                   std::to_string(i));
     }
     ASSERT_TRUE(string_array.is_same_array(field_string_array));
@@ -142,7 +143,7 @@ TEST(Array, TestConstructArray) {
     ASSERT_EQ(N, bool_array.length());
     ASSERT_EQ(N * sizeof(bool), bool_array.byte_size());
     for (int i = 0; i < N; ++i) {
-        ASSERT_EQ(bool_array.get_data<bool>(i), bool(i));
+        ASSERT_EQ(bool_array.get_data_unchecked<bool>(i), bool(i));
     }
     ASSERT_TRUE(bool_array.is_same_array(field_bool_array));
     auto bool_array_tmp = Array(const_cast<char*>(bool_array.data()),
@@ -173,7 +174,7 @@ TEST(Array, TestConstructArray) {
     ASSERT_EQ(N, float_array.length());
     ASSERT_EQ(N * sizeof(float), float_array.byte_size());
     for (int i = 0; i < N; ++i) {
-        ASSERT_DOUBLE_EQ(float_array.get_data<float>(i), float(i * 0.1));
+        ASSERT_DOUBLE_EQ(float_array.get_data_unchecked<float>(i), float(i * 0.1));
     }
     ASSERT_TRUE(float_array.is_same_array(field_float_array));
     auto float_array_tmp = Array(const_cast<char*>(float_array.data()),
@@ -205,7 +206,7 @@ TEST(Array, TestConstructArray) {
     ASSERT_EQ(N, double_array.length());
     ASSERT_EQ(N * sizeof(double), double_array.byte_size());
     for (int i = 0; i < N; ++i) {
-        ASSERT_DOUBLE_EQ(double_array.get_data<double>(i), double(i * 0.1));
+        ASSERT_DOUBLE_EQ(double_array.get_data_unchecked<double>(i), double(i * 0.1));
     }
     ASSERT_TRUE(double_array.is_same_array(field_double_array));
     auto double_array_tmp = Array(const_cast<char*>(double_array.data()),
@@ -230,6 +231,22 @@ TEST(Array, TestConstructArray) {
     ASSERT_EQ(0, empty_array.length());
     ASSERT_EQ(0, empty_array.byte_size());
     ASSERT_TRUE(empty_array.is_same_array(field_empty_array));
+
+    ArrayView null_view;
+    EXPECT_NO_THROW({
+        auto null_view_copy = null_view;
+        EXPECT_EQ(0, null_view_copy.length());
+    });
+
+    ScalarFieldProto typed_empty_data;
+    typed_empty_data.mutable_int_data();
+    auto typed_empty_array = Array(typed_empty_data);
+    EXPECT_NO_THROW({
+        auto typed_empty_view = ArrayView(typed_empty_array);
+        auto typed_empty_view_copy = typed_empty_view;
+        EXPECT_EQ(0, typed_empty_view_copy.length());
+        EXPECT_EQ(DataType::INT32, typed_empty_view_copy.get_element_type());
+    });
 }
 
 TEST(Array, TestLiteralElementTypeMismatch) {
@@ -270,4 +287,134 @@ TEST(Array, TestLiteralElementTypeMismatch) {
     bool_literal.set_same_type(true);
     bool_literal.mutable_array()->Add()->set_bool_val(false);
     expect_mismatch(string_array, bool_literal);
+}
+
+namespace {
+
+milvus::ScalarFieldProto
+BuildElementNullableIntArray(const std::vector<int32_t>& values,
+                             const std::vector<bool>& valid_data) {
+    milvus::ScalarFieldProto proto;
+    proto.mutable_int_data()->mutable_data()->Add(values.begin(), values.end());
+    for (auto valid : valid_data) {
+        proto.add_valid_data(valid);
+    }
+    return proto;
+}
+
+milvus::ScalarFieldProto
+BuildElementNullableStringArray(const std::vector<std::string>& values,
+                                const std::vector<bool>& valid_data) {
+    milvus::ScalarFieldProto proto;
+    for (const auto& value : values) {
+        proto.mutable_string_data()->add_data(value);
+    }
+    for (auto valid : valid_data) {
+        proto.add_valid_data(valid);
+    }
+    return proto;
+}
+
+}  // namespace
+
+TEST(Array, ElementNullableRoundTripPreservesDensePayloadAndValidity) {
+    using namespace milvus;
+
+    auto input = BuildElementNullableIntArray(
+        {10, 20, 30, 40}, {true, false, true, true});
+    Array array(input, true);
+
+    ASSERT_TRUE(array.is_element_nullable());
+    ASSERT_TRUE(array.has_invalid_element());
+    ASSERT_EQ(array.length(), 4);
+    EXPECT_TRUE(array.is_element_valid(0));
+    EXPECT_FALSE(array.is_element_valid(1));
+    EXPECT_TRUE(array.is_element_valid(2));
+    EXPECT_TRUE(array.is_element_valid(3));
+    EXPECT_EQ(array.get_data_unchecked<int32_t>(1), 20);
+
+    auto output = array.output_data();
+    ASSERT_EQ(output.int_data().data_size(), 4);
+    ASSERT_EQ(output.valid_data_size(), 4);
+    EXPECT_EQ(output.int_data().data(1), 20);
+    EXPECT_FALSE(output.valid_data(1));
+
+    Array restored(output, true);
+    EXPECT_EQ(restored, array);
+
+    ArrayView view(array);
+    auto view_output = view.output_data();
+    EXPECT_EQ(view_output.SerializeAsString(), output.SerializeAsString());
+}
+
+TEST(Array, ElementNullableCopyAndEqualityIgnoreInvalidPayload) {
+    using namespace milvus;
+
+    Array left(BuildElementNullableIntArray(
+                   {10, 20, 30}, {true, false, true}),
+               true);
+    Array same_logical_value(BuildElementNullableIntArray(
+                                 {10, 99, 30}, {true, false, true}),
+                             true);
+    Array different_validity(BuildElementNullableIntArray(
+                                 {10, 20, 30}, {true, true, true}),
+                             true);
+
+    EXPECT_EQ(left, same_logical_value);
+    EXPECT_NE(left, different_validity);
+
+    Array copied(left);
+    EXPECT_EQ(copied, left);
+    Array assigned;
+    assigned = left;
+    EXPECT_EQ(assigned, left);
+}
+
+TEST(Array, ElementNullableStringRoundTripPreservesOffsets) {
+    using namespace milvus;
+
+    Array array(BuildElementNullableStringArray(
+                    {"alpha", "placeholder", "gamma"},
+                    {true, false, true}),
+                true);
+    ArrayView view(array);
+
+    EXPECT_EQ(view.get_data_unchecked<std::string_view>(0), "alpha");
+    EXPECT_EQ(view.get_data_unchecked<std::string_view>(1), "placeholder");
+    EXPECT_EQ(view.get_data_unchecked<std::string_view>(2), "gamma");
+    EXPECT_FALSE(view.is_element_valid(1));
+
+    auto output = view.output_data();
+    ASSERT_EQ(output.string_data().data_size(), 3);
+    EXPECT_EQ(output.string_data().data(1), "placeholder");
+    EXPECT_FALSE(output.valid_data(1));
+}
+
+TEST(Array, ElementNullableValidationRejectsAmbiguousInput) {
+    using namespace milvus;
+
+    auto input = BuildElementNullableIntArray({1, 2}, {true, false});
+    EXPECT_ANY_THROW((void)Array(input));
+
+    input.add_valid_data(true);
+    EXPECT_ANY_THROW(Array(input, true));
+}
+
+TEST(Array, ElementNullablePlanLiteralRequiresAllElementsValid) {
+    using namespace milvus;
+
+    proto::plan::Array literal;
+    literal.set_same_type(true);
+    literal.mutable_array()->Add()->set_int64_val(1);
+    literal.mutable_array()->Add()->set_int64_val(2);
+
+    Array with_null(
+        BuildElementNullableIntArray({1, 2}, {true, false}), true);
+    Array all_valid(
+        BuildElementNullableIntArray({1, 2}, {true, true}), true);
+
+    EXPECT_FALSE(with_null.is_same_array(literal));
+    EXPECT_TRUE(all_valid.is_same_array(literal));
+    EXPECT_FALSE(ArrayView(with_null).is_same_array(literal));
+    EXPECT_TRUE(ArrayView(all_valid).is_same_array(literal));
 }

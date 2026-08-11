@@ -68,7 +68,26 @@ class Array {
           size_t size,
           DataType element_type,
           const uint32_t* offsets_ptr)
-        : size_(size), length_(len), element_type_(element_type) {
+        : Array(data,
+                len,
+                size,
+                element_type,
+                offsets_ptr,
+                TargetBitmapView(),
+                false) {
+    }
+
+    Array(char* data,
+          int len,
+          size_t size,
+          DataType element_type,
+          const uint32_t* offsets_ptr,
+          const TargetBitmapView& element_valid_data,
+          bool element_nullable)
+        : size_(size),
+          length_(len),
+          element_type_(element_type),
+          element_nullable_(element_nullable) {
         data_ = std::make_unique<char[]>(size);
         milvus::fastmem::FastMemcpy(data_.get(), data, size);
         if (IsVariableDataType(element_type)) {
@@ -79,9 +98,15 @@ class Array {
             milvus::fastmem::FastMemcpy(
                 offsets_ptr_.get(), offsets_ptr, len * sizeof(uint32_t));
         }
+        init_element_valid_data(element_valid_data);
     }
 
-    explicit Array(const ScalarFieldProto& field_data) {
+    explicit Array(const ScalarFieldProto& field_data)
+        : Array(field_data, false) {
+    }
+
+    Array(const ScalarFieldProto& field_data, bool element_nullable)
+        : element_nullable_(element_nullable) {
         switch (field_data.data_case()) {
             case ScalarFieldProto::kBoolData: {
                 element_type_ = DataType::BOOL;
@@ -162,12 +187,21 @@ class Array {
                 // empty array
             }
         }
+        if (element_nullable_) {
+            init_element_valid_data(field_data.valid_data());
+        } else {
+            AssertInfo(field_data.valid_data_size() == 0,
+                       "non-element-nullable array cannot carry element "
+                       "valid_data");
+        }
     }
 
     Array(const Array& array) noexcept
         : length_{array.length_},
           size_{array.size_},
-          element_type_{array.element_type_} {
+          element_type_{array.element_type_},
+          element_nullable_{array.element_nullable_},
+          has_invalid_element_{array.has_invalid_element_} {
         data_ = std::make_unique<char[]>(array.size_);
         milvus::fastmem::FastMemcpy(
             data_.get(), array.data_.get(), array.size_);
@@ -180,6 +214,14 @@ class Array {
                                         array.get_offsets_data(),
                                         array.length() * sizeof(uint32_t));
         }
+        if (element_nullable_) {
+            AssertInfo(array.get_element_valid_data_length() == length_,
+                       "element valid data bitmap length must equal array "
+                       "logical length, bitmap_length={}, array_length={}",
+                       array.get_element_valid_data_length(),
+                       length_);
+            element_valid_data_ = array.element_valid_data_.clone();
+        }
     }
 
     friend void
@@ -190,6 +232,9 @@ class Array {
         swap(array1.size_, array2.size_);
         swap(array1.element_type_, array2.element_type_);
         swap(array1.offsets_ptr_, array2.offsets_ptr_);
+        swap(array1.element_nullable_, array2.element_nullable_);
+        swap(array1.element_valid_data_, array2.element_valid_data_);
+        swap(array1.has_invalid_element_, array2.has_invalid_element_);
     }
 
     Array&
@@ -220,10 +265,24 @@ class Array {
         if (length_ == 0) {
             return true;
         }
+        if (element_nullable_ != arr.element_nullable_) {
+            return false;
+        }
+        if (element_nullable_) {
+            for (int i = 0; i < length_; ++i) {
+                if (is_element_valid(i) != arr.is_element_valid(i)) {
+                    return false;
+                }
+            }
+        }
         switch (element_type_) {
             case DataType::INT64: {
                 for (int i = 0; i < length_; ++i) {
-                    if (get_data<int64_t>(i) != arr.get_data<int64_t>(i)) {
+                    if (!is_element_valid(i)) {
+                        continue;
+                    }
+                    if (get_raw_data<int64_t>(i) !=
+                        arr.get_raw_data<int64_t>(i)) {
                         return false;
                     }
                 }
@@ -231,7 +290,10 @@ class Array {
             }
             case DataType::BOOL: {
                 for (int i = 0; i < length_; ++i) {
-                    if (get_data<bool>(i) != arr.get_data<bool>(i)) {
+                    if (!is_element_valid(i)) {
+                        continue;
+                    }
+                    if (get_raw_data<bool>(i) != arr.get_raw_data<bool>(i)) {
                         return false;
                     }
                 }
@@ -239,7 +301,11 @@ class Array {
             }
             case DataType::DOUBLE: {
                 for (int i = 0; i < length_; ++i) {
-                    if (get_data<double>(i) != arr.get_data<double>(i)) {
+                    if (!is_element_valid(i)) {
+                        continue;
+                    }
+                    if (get_raw_data<double>(i) !=
+                        arr.get_raw_data<double>(i)) {
                         return false;
                     }
                 }
@@ -247,7 +313,10 @@ class Array {
             }
             case DataType::FLOAT: {
                 for (int i = 0; i < length_; ++i) {
-                    if (get_data<float>(i) != arr.get_data<float>(i)) {
+                    if (!is_element_valid(i)) {
+                        continue;
+                    }
+                    if (get_raw_data<float>(i) != arr.get_raw_data<float>(i)) {
                         return false;
                     }
                 }
@@ -257,7 +326,10 @@ class Array {
             case DataType::INT16:
             case DataType::INT8: {
                 for (int i = 0; i < length_; ++i) {
-                    if (get_data<int>(i) != arr.get_data<int>(i)) {
+                    if (!is_element_valid(i)) {
+                        continue;
+                    }
+                    if (get_raw_data<int>(i) != arr.get_raw_data<int>(i)) {
                         return false;
                     }
                 }
@@ -268,8 +340,11 @@ class Array {
             //treat Geometry as wkb string
             case DataType::GEOMETRY: {
                 for (int i = 0; i < length_; ++i) {
-                    if (get_data<std::string_view>(i) !=
-                        arr.get_data<std::string_view>(i)) {
+                    if (!is_element_valid(i)) {
+                        continue;
+                    }
+                    if (get_raw_data<std::string_view>(i) !=
+                        arr.get_raw_data<std::string_view>(i)) {
                         return false;
                     }
                 }
@@ -282,7 +357,276 @@ class Array {
 
     template <typename T>
     T
-    get_data(const int index) const {
+    get_data_unchecked(const int index) const {
+        // Reads raw payload; caller must handle element validity separately.
+        return get_raw_data<T>(index);
+    }
+
+    uint32_t*
+    get_offsets_data() const {
+        return offsets_ptr_.get();
+    }
+
+    void
+    output_data(ScalarFieldProto& data_array) const {
+        output_scalar_payload(data_array);
+        data_array.clear_valid_data();
+        if (element_nullable_) {
+            data_array.mutable_valid_data()->Reserve(length_);
+            for (int i = 0; i < length_; ++i) {
+                data_array.add_valid_data(is_element_valid(i));
+            }
+        }
+    }
+
+    ScalarFieldProto
+    output_data() const {
+        ScalarFieldProto data_array;
+        output_data(data_array);
+        return data_array;
+    }
+
+    int
+    length() const {
+        return length_;
+    }
+
+    size_t
+    byte_size() const {
+        return size_;
+    }
+
+    DataType
+    get_element_type() const {
+        return element_type_;
+    }
+
+    const char*
+    data() const {
+        return data_.get();
+    }
+
+    bool
+    is_element_nullable() const {
+        return element_nullable_;
+    }
+
+    bool
+    is_element_valid(int index) const {
+        AssertInfo(index >= 0 && index < length_,
+                   "index out of range, index={}, length={}",
+                   index,
+                   length_);
+        if (!element_nullable_) {
+            return true;
+        }
+        AssertInfo(element_valid_data_.size() == length_,
+                   "element valid data bitmap length must equal array logical "
+                   "length, bitmap_length={}, array_length={}",
+                   element_valid_data_.size(),
+                   length_);
+        return element_valid_data_[index];
+    }
+
+    const TargetBitmap&
+    get_element_valid_data() const {
+        return element_valid_data_;
+    }
+
+    size_t
+    get_element_valid_data_length() const {
+        return element_valid_data_.size();
+    }
+
+    size_t
+    get_element_valid_data_byte_size() const {
+        return element_valid_data_.size_in_bytes();
+    }
+
+    bool
+    has_invalid_element() const {
+        return has_invalid_element_;
+    }
+
+    bool
+    is_same_array(const proto::plan::Array& arr2) const {
+        if (arr2.array_size() != length_) {
+            return false;
+        }
+        if (length_ == 0) {
+            return true;
+        }
+        if (!arr2.same_type()) {
+            return false;
+        }
+        if (has_invalid_element()) {
+            // TODO(SpadeA): support nullable proto::plan::Array constants.
+            return false;
+        }
+        const auto expected_val_case =
+            array_detail::ExpectedLiteralValCase(element_type_);
+        switch (element_type_) {
+            case DataType::BOOL: {
+                for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
+                    auto val = get_raw_data<bool>(i);
+                    if (val != arr2.array(i).bool_val()) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32: {
+                for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
+                    auto val = get_raw_data<int>(i);
+                    if (val != arr2.array(i).int64_val()) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            case DataType::INT64: {
+                for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
+                    auto val = get_raw_data<int64_t>(i);
+                    if (val != arr2.array(i).int64_val()) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            case DataType::FLOAT: {
+                for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
+                    auto val = get_raw_data<float>(i);
+                    if (val != static_cast<float>(arr2.array(i).float_val())) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            case DataType::DOUBLE: {
+                for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
+                    auto val = get_raw_data<double>(i);
+                    if (val != arr2.array(i).float_val()) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            case DataType::VARCHAR:
+            case DataType::STRING:
+            case DataType::GEOMETRY: {
+                for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
+                    auto val = get_raw_data<std::string>(i);
+                    if (val != arr2.array(i).string_val()) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            default:
+                return false;
+        }
+    }
+
+ private:
+    void
+    output_scalar_payload(ScalarFieldProto& data_array) const {
+        switch (element_type_) {
+            case DataType::BOOL: {
+                data_array.mutable_bool_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<bool>(j);
+                    data_array.mutable_bool_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32: {
+                data_array.mutable_int_data()->mutable_data()->Reserve(length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<int>(j);
+                    data_array.mutable_int_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::INT64: {
+                data_array.mutable_long_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<int64_t>(j);
+                    data_array.mutable_long_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::STRING:
+            case DataType::VARCHAR: {
+                data_array.mutable_string_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<std::string_view>(j);
+                    data_array.mutable_string_data()->add_data(element.data(),
+                                                               element.size());
+                }
+                break;
+            }
+            case DataType::FLOAT: {
+                data_array.mutable_float_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<float>(j);
+                    data_array.mutable_float_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::DOUBLE: {
+                data_array.mutable_double_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<double>(j);
+                    data_array.mutable_double_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::GEOMETRY: {
+                data_array.mutable_geometry_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<std::string_view>(j);
+                    data_array.mutable_geometry_data()->add_data(
+                        element.data(), element.size());
+                }
+                break;
+            }
+            default: {
+                // empty array
+            }
+        }
+    }
+
+    template <typename T>
+    T
+    get_raw_data(const int index) const {
         AssertInfo(index >= 0 && index < length_,
                    "index out of range, index={}, length={}",
                    index,
@@ -321,215 +665,67 @@ class Array {
         return reinterpret_cast<T*>(data_.get())[index];
     }
 
-    uint32_t*
-    get_offsets_data() const {
-        return offsets_ptr_.get();
+    void
+    init_element_valid_data(const TargetBitmapView& element_valid_data) {
+        if (!element_nullable_) {
+            return;
+        }
+
+        AssertInfo(element_valid_data.size() == length_,
+                   "element valid data bitmap length must equal array logical "
+                   "length, bitmap_length={}, array_length={}",
+                   element_valid_data.size(),
+                   length_);
+        element_valid_data_ = TargetBitmap(element_valid_data);
+        has_invalid_element_ = !element_valid_data_.all();
     }
 
     void
-    output_data(ScalarFieldProto& data_array) const {
-        switch (element_type_) {
-            case DataType::BOOL: {
-                data_array.mutable_bool_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<bool>(j);
-                    data_array.mutable_bool_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::INT8:
-            case DataType::INT16:
-            case DataType::INT32: {
-                data_array.mutable_int_data()->mutable_data()->Reserve(length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<int>(j);
-                    data_array.mutable_int_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::INT64: {
-                data_array.mutable_long_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<int64_t>(j);
-                    data_array.mutable_long_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::STRING:
-            case DataType::VARCHAR: {
-                data_array.mutable_string_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<std::string_view>(j);
-                    data_array.mutable_string_data()->add_data(element.data(),
-                                                               element.size());
-                }
-                break;
-            }
-            case DataType::FLOAT: {
-                data_array.mutable_float_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<float>(j);
-                    data_array.mutable_float_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::DOUBLE: {
-                data_array.mutable_double_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<double>(j);
-                    data_array.mutable_double_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::GEOMETRY: {
-                data_array.mutable_geometry_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<std::string_view>(j);
-                    data_array.mutable_geometry_data()->add_data(
-                        element.data(), element.size());
-                }
-                break;
-            }
-            default: {
-                // empty array
+    init_element_valid_data(const TargetBitmap& element_valid_data) {
+        if (!element_nullable_) {
+            return;
+        }
+
+        AssertInfo(element_valid_data.size() == length_,
+                   "element valid data bitmap length must equal array logical "
+                   "length, bitmap_length={}, array_length={}",
+                   element_valid_data.size(),
+                   length_);
+        element_valid_data_ = element_valid_data.clone();
+        has_invalid_element_ = !element_valid_data_.all();
+    }
+
+    void
+    init_element_valid_data(
+        const google::protobuf::RepeatedField<bool>& element_valid_data) {
+        if (!element_nullable_) {
+            return;
+        }
+
+        AssertInfo(element_valid_data.size() == length_,
+                   "element valid data length must equal array logical "
+                   "length, valid_data_size={}, array_length={}",
+                   element_valid_data.size(),
+                   length_);
+
+        element_valid_data_ = TargetBitmap(length_, false);
+
+        for (int i = 0; i < length_; ++i) {
+            if (element_valid_data.Get(i)) {
+                element_valid_data_.set(i);
             }
         }
+        has_invalid_element_ = !element_valid_data_.all();
     }
 
-    ScalarFieldProto
-    output_data() const {
-        ScalarFieldProto data_array;
-        output_data(data_array);
-        return data_array;
-    }
-
-    int
-    length() const {
-        return length_;
-    }
-
-    size_t
-    byte_size() const {
-        return size_;
-    }
-
-    DataType
-    get_element_type() const {
-        return element_type_;
-    }
-
-    const char*
-    data() const {
-        return data_.get();
-    }
-
-    bool
-    is_same_array(const proto::plan::Array& arr2) const {
-        if (arr2.array_size() != length_) {
-            return false;
-        }
-        if (length_ == 0) {
-            return true;
-        }
-        if (!arr2.same_type()) {
-            return false;
-        }
-        const auto expected_val_case =
-            array_detail::ExpectedLiteralValCase(element_type_);
-        switch (element_type_) {
-            case DataType::BOOL: {
-                for (int i = 0; i < length_; i++) {
-                    if (arr2.array(i).val_case() != expected_val_case) {
-                        return false;
-                    }
-                    auto val = get_data<bool>(i);
-                    if (val != arr2.array(i).bool_val()) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-            case DataType::INT8:
-            case DataType::INT16:
-            case DataType::INT32: {
-                for (int i = 0; i < length_; i++) {
-                    if (arr2.array(i).val_case() != expected_val_case) {
-                        return false;
-                    }
-                    auto val = get_data<int>(i);
-                    if (val != arr2.array(i).int64_val()) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-            case DataType::INT64: {
-                for (int i = 0; i < length_; i++) {
-                    if (arr2.array(i).val_case() != expected_val_case) {
-                        return false;
-                    }
-                    auto val = get_data<int64_t>(i);
-                    if (val != arr2.array(i).int64_val()) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-            case DataType::FLOAT: {
-                for (int i = 0; i < length_; i++) {
-                    if (arr2.array(i).val_case() != expected_val_case) {
-                        return false;
-                    }
-                    auto val = get_data<float>(i);
-                    if (val != static_cast<float>(arr2.array(i).float_val())) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-            case DataType::DOUBLE: {
-                for (int i = 0; i < length_; i++) {
-                    if (arr2.array(i).val_case() != expected_val_case) {
-                        return false;
-                    }
-                    auto val = get_data<double>(i);
-                    if (val != arr2.array(i).float_val()) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-            case DataType::VARCHAR:
-            case DataType::STRING:
-            case DataType::GEOMETRY: {
-                for (int i = 0; i < length_; i++) {
-                    if (arr2.array(i).val_case() != expected_val_case) {
-                        return false;
-                    }
-                    auto val = get_data<std::string>(i);
-                    if (val != arr2.array(i).string_val()) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-            default:
-                return false;
-        }
-    }
-
- private:
     std::unique_ptr<char[]> data_{nullptr};
     int length_ = 0;
     int size_ = 0;
     DataType element_type_ = DataType::NONE;
     std::unique_ptr<uint32_t[]> offsets_ptr_{nullptr};
+    bool element_nullable_ = false;
+    TargetBitmap element_valid_data_{};
+    bool has_invalid_element_ = false;
 };
 
 class ArrayView {
@@ -541,10 +737,14 @@ class ArrayView {
           length_(other.length_),
           size_(other.size_),
           element_type_(other.element_type_),
-          offsets_ptr_(other.offsets_ptr_) {
-        AssertInfo(data_ != nullptr,
-                   "data pointer for ArrayView cannot be nullptr");
-        if (IsVariableDataType(element_type_)) {
+          offsets_ptr_(other.offsets_ptr_),
+          element_nullable_(other.element_nullable_),
+          element_valid_data_(other.element_valid_data_),
+          has_invalid_element_computed_(other.has_invalid_element_computed_),
+          has_invalid_element_(other.has_invalid_element_) {
+        AssertInfo(data_ != nullptr || (length_ == 0 && size_ == 0),
+                   "data pointer for non-empty ArrayView cannot be nullptr");
+        if (length_ > 0 && IsVariableDataType(element_type_)) {
             AssertInfo(offsets_ptr_ != nullptr,
                        "for array with variable length elements, offsets_ptr "
                        "must not be nullptr");
@@ -556,138 +756,72 @@ class ArrayView {
               size_t size,
               DataType element_type,
               uint32_t* offsets_ptr)
+        : ArrayView(data,
+                    len,
+                    size,
+                    element_type,
+                    offsets_ptr,
+                    TargetBitmapView(),
+                    false) {
+    }
+
+    ArrayView(char* data,
+              int len,
+              size_t size,
+              DataType element_type,
+              uint32_t* offsets_ptr,
+              const TargetBitmapView& element_valid_data,
+              bool element_nullable)
         : data_(data),
           length_(len),
           size_(size),
           element_type_(element_type),
-          offsets_ptr_(offsets_ptr) {
-        AssertInfo(data != nullptr,
-                   "data pointer for ArrayView cannot be nullptr");
-        if (IsVariableDataType(element_type_)) {
+          offsets_ptr_(offsets_ptr),
+          element_nullable_(element_nullable),
+          element_valid_data_(element_valid_data) {
+        AssertInfo(!element_nullable_ || element_valid_data_.size() == length_,
+                   "element valid data bitmap length must equal array logical "
+                   "length, bitmap_length={}, array_length={}",
+                   element_valid_data_.size(),
+                   length_);
+        AssertInfo(data != nullptr || (length_ == 0 && size_ == 0),
+                   "data pointer for non-empty ArrayView cannot be nullptr");
+        if (length_ > 0 && IsVariableDataType(element_type_)) {
             AssertInfo(offsets_ptr != nullptr,
                        "for array with variable length elements, offsets_ptr "
                        "must not be nullptr");
         }
     }
 
+    explicit ArrayView(const Array& array)
+        : ArrayView(const_cast<char*>(array.data()),
+                    array.length(),
+                    array.byte_size(),
+                    array.get_element_type(),
+                    array.get_offsets_data(),
+                    array.is_element_nullable()
+                        ? array.get_element_valid_data().view(0)
+                        : TargetBitmapView(),
+                    array.is_element_nullable()) {
+        has_invalid_element_computed_ = array.is_element_nullable();
+        has_invalid_element_ = array.has_invalid_element();
+    }
+
     template <typename T>
     T
-    get_data(const int index) const {
-        AssertInfo(index >= 0 && index < length_,
-                   "index out of range, index={}, length={}",
-                   index,
-                   length_);
-
-        if constexpr (std::is_same_v<T, std::string> ||
-                      std::is_same_v<T, std::string_view>) {
-            size_t element_length =
-                (index == length_ - 1)
-                    ? size_ - offsets_ptr_[length_ - 1]
-                    : offsets_ptr_[index + 1] - offsets_ptr_[index];
-            return T(data_ + offsets_ptr_[index], element_length);
-        }
-        // Note: INT8/INT16 array elements are physically stored as int32_t, so
-        // int8_t/int16_t must go through this branch (4-byte stride, then
-        // narrow) rather than the raw reinterpret_cast below. This mirrors
-        // Array::get_data and keeps the offset-input element path correct.
-        if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
-                      std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
-                      std::is_same_v<T, float> || std::is_same_v<T, double>) {
-            switch (element_type_) {
-                case DataType::INT8:
-                case DataType::INT16:
-                case DataType::INT32:
-                    return static_cast<T>(
-                        reinterpret_cast<int32_t*>(data_)[index]);
-                case DataType::INT64:
-                    return static_cast<T>(
-                        reinterpret_cast<int64_t*>(data_)[index]);
-                case DataType::FLOAT:
-                    return static_cast<T>(
-                        reinterpret_cast<float*>(data_)[index]);
-                case DataType::DOUBLE:
-                    return static_cast<T>(
-                        reinterpret_cast<double*>(data_)[index]);
-                default:
-                    ThrowInfo(Unsupported,
-                              "unsupported element type for array");
-            }
-        }
-        return reinterpret_cast<T*>(data_)[index];
+    get_data_unchecked(const int index) const {
+        // Reads raw payload; caller must handle element validity separately.
+        return get_raw_data<T>(index);
     }
 
     void
     output_data(ScalarFieldProto& data_array) const {
-        switch (element_type_) {
-            case DataType::BOOL: {
-                data_array.mutable_bool_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<bool>(j);
-                    data_array.mutable_bool_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::INT8:
-            case DataType::INT16:
-            case DataType::INT32: {
-                data_array.mutable_int_data()->mutable_data()->Reserve(length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<int>(j);
-                    data_array.mutable_int_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::INT64: {
-                data_array.mutable_long_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<int64_t>(j);
-                    data_array.mutable_long_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::STRING:
-            case DataType::VARCHAR: {
-                data_array.mutable_string_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<std::string_view>(j);
-                    data_array.mutable_string_data()->add_data(element.data(),
-                                                               element.size());
-                }
-                break;
-            }
-            case DataType::FLOAT: {
-                data_array.mutable_float_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<float>(j);
-                    data_array.mutable_float_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::DOUBLE: {
-                data_array.mutable_double_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<double>(j);
-                    data_array.mutable_double_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::GEOMETRY: {
-                data_array.mutable_geometry_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<std::string_view>(j);
-                    data_array.mutable_geometry_data()->add_data(
-                        element.data(), element.size());
-                }
-                break;
-            }
-            default: {
-                // empty array
+        output_scalar_payload(data_array);
+        data_array.clear_valid_data();
+        if (element_nullable_) {
+            data_array.mutable_valid_data()->Reserve(length_);
+            for (int i = 0; i < length_; ++i) {
+                data_array.add_valid_data(is_element_valid(i));
             }
         }
     }
@@ -700,7 +834,9 @@ class ArrayView {
                       length_,
                       static_cast<size_t>(size_),
                       element_type_,
-                      offsets_ptr_);
+                      offsets_ptr_,
+                      element_valid_data_,
+                      element_nullable_);
     }
 
     ScalarFieldProto
@@ -731,11 +867,69 @@ class ArrayView {
     }
 
     bool
+    is_element_nullable() const {
+        return element_nullable_;
+    }
+
+    bool
+    is_element_valid(int index) const {
+        AssertInfo(index >= 0 && index < length_,
+                   "index out of range, index={}, length={}",
+                   index,
+                   length_);
+        if (!element_nullable_) {
+            return true;
+        }
+        AssertInfo(element_valid_data_.size() == length_,
+                   "element valid data bitmap length must equal array logical "
+                   "length, bitmap_length={}, array_length={}",
+                   element_valid_data_.size(),
+                   length_);
+        return element_valid_data_[index];
+    }
+
+    const TargetBitmapView&
+    get_element_valid_data() const {
+        return element_valid_data_;
+    }
+
+    size_t
+    get_element_valid_data_length() const {
+        return element_valid_data_.size();
+    }
+
+    size_t
+    get_element_valid_data_byte_size() const {
+        return element_valid_data_.size_in_bytes();
+    }
+
+    bool
+    has_invalid_element() const {
+        if (!element_nullable_) {
+            return false;
+        }
+        if (!has_invalid_element_computed_) {
+            AssertInfo(element_valid_data_.size() == length_,
+                       "element valid data bitmap length must equal array "
+                       "logical length, bitmap_length={}, array_length={}",
+                       element_valid_data_.size(),
+                       length_);
+            has_invalid_element_ = !element_valid_data_.all();
+            has_invalid_element_computed_ = true;
+        }
+        return has_invalid_element_;
+    }
+
+    bool
     is_same_array(const proto::plan::Array& arr2) const {
         if (arr2.array_size() != length_) {
             return false;
         }
         if (!arr2.same_type()) {
+            return false;
+        }
+        if (has_invalid_element()) {
+            // TODO(SpadeA): support nullable proto::plan::Array constants.
             return false;
         }
         const auto expected_val_case =
@@ -746,7 +940,7 @@ class ArrayView {
                     if (arr2.array(i).val_case() != expected_val_case) {
                         return false;
                     }
-                    auto val = get_data<bool>(i);
+                    auto val = get_raw_data<bool>(i);
                     if (val != arr2.array(i).bool_val()) {
                         return false;
                     }
@@ -760,7 +954,7 @@ class ArrayView {
                     if (arr2.array(i).val_case() != expected_val_case) {
                         return false;
                     }
-                    auto val = get_data<int>(i);
+                    auto val = get_raw_data<int>(i);
                     if (val != arr2.array(i).int64_val()) {
                         return false;
                     }
@@ -772,7 +966,7 @@ class ArrayView {
                     if (arr2.array(i).val_case() != expected_val_case) {
                         return false;
                     }
-                    auto val = get_data<int64_t>(i);
+                    auto val = get_raw_data<int64_t>(i);
                     if (val != arr2.array(i).int64_val()) {
                         return false;
                     }
@@ -784,7 +978,7 @@ class ArrayView {
                     if (arr2.array(i).val_case() != expected_val_case) {
                         return false;
                     }
-                    auto val = get_data<float>(i);
+                    auto val = get_raw_data<float>(i);
                     if (val != static_cast<float>(arr2.array(i).float_val())) {
                         return false;
                     }
@@ -796,7 +990,7 @@ class ArrayView {
                     if (arr2.array(i).val_case() != expected_val_case) {
                         return false;
                     }
-                    auto val = get_data<double>(i);
+                    auto val = get_raw_data<double>(i);
                     if (val != arr2.array(i).float_val()) {
                         return false;
                     }
@@ -810,7 +1004,7 @@ class ArrayView {
                     if (arr2.array(i).val_case() != expected_val_case) {
                         return false;
                     }
-                    auto val = get_data<std::string>(i);
+                    auto val = get_raw_data<std::string>(i);
                     if (val != arr2.array(i).string_val()) {
                         return false;
                     }
@@ -823,6 +1017,124 @@ class ArrayView {
     }
 
  private:
+    void
+    output_scalar_payload(ScalarFieldProto& data_array) const {
+        switch (element_type_) {
+            case DataType::BOOL: {
+                data_array.mutable_bool_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<bool>(j);
+                    data_array.mutable_bool_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32: {
+                data_array.mutable_int_data()->mutable_data()->Reserve(length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<int>(j);
+                    data_array.mutable_int_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::INT64: {
+                data_array.mutable_long_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<int64_t>(j);
+                    data_array.mutable_long_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::STRING:
+            case DataType::VARCHAR: {
+                data_array.mutable_string_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<std::string_view>(j);
+                    data_array.mutable_string_data()->add_data(element.data(),
+                                                               element.size());
+                }
+                break;
+            }
+            case DataType::FLOAT: {
+                data_array.mutable_float_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<float>(j);
+                    data_array.mutable_float_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::DOUBLE: {
+                data_array.mutable_double_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<double>(j);
+                    data_array.mutable_double_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::GEOMETRY: {
+                data_array.mutable_geometry_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<std::string_view>(j);
+                    data_array.mutable_geometry_data()->add_data(
+                        element.data(), element.size());
+                }
+                break;
+            }
+            default: {
+                // empty array
+            }
+        }
+    }
+
+    template <typename T>
+    T
+    get_raw_data(const int index) const {
+        AssertInfo(index >= 0 && index < length_,
+                   "index out of range, index={}, length={}",
+                   index,
+                   length_);
+
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            size_t element_length =
+                (index == length_ - 1)
+                    ? size_ - offsets_ptr_[length_ - 1]
+                    : offsets_ptr_[index + 1] - offsets_ptr_[index];
+            return T(data_ + offsets_ptr_[index], element_length);
+        }
+        if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
+                      std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
+                      std::is_same_v<T, float> || std::is_same_v<T, double>) {
+            switch (element_type_) {
+                case DataType::INT8:
+                case DataType::INT16:
+                case DataType::INT32:
+                    return static_cast<T>(
+                        reinterpret_cast<int32_t*>(data_)[index]);
+                case DataType::INT64:
+                    return static_cast<T>(
+                        reinterpret_cast<int64_t*>(data_)[index]);
+                case DataType::FLOAT:
+                    return static_cast<T>(
+                        reinterpret_cast<float*>(data_)[index]);
+                case DataType::DOUBLE:
+                    return static_cast<T>(
+                        reinterpret_cast<double*>(data_)[index]);
+                default:
+                    ThrowInfo(Unsupported,
+                              "unsupported element type for array");
+            }
+        }
+        return reinterpret_cast<T*>(data_)[index];
+    }
+
     char* data_{nullptr};
     int length_ = 0;
     int size_ = 0;
@@ -830,6 +1142,10 @@ class ArrayView {
 
     //offsets ptr
     uint32_t* offsets_ptr_{nullptr};
+    bool element_nullable_ = false;
+    TargetBitmapView element_valid_data_{};
+    mutable bool has_invalid_element_computed_ = false;
+    mutable bool has_invalid_element_ = false;
 };
 
 }  // namespace milvus
