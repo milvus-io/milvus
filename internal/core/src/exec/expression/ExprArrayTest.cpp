@@ -1249,6 +1249,7 @@ TEST(Expr, PraseArrayContainsExpr) {
                      FieldId(101),
                      DataType::ARRAY,
                      DataType::INT64,
+                     false,
                      false);
     ScopedSchemaHandle schema_handle(*schema);
 

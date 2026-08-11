@@ -178,27 +178,6 @@ class FieldMeta {
               int64_t dim,
               std::optional<knowhere::MetricType> metric_type,
               bool nullable,
-              std::string external_field_mapping = "",
-              std::string local_format = LOCAL_FORMAT_RAW)
-        : FieldMeta(std::move(name),
-                    id,
-                    type,
-                    element_type,
-                    dim,
-                    std::move(metric_type),
-                    nullable,
-                    false,
-                    std::move(external_field_mapping),
-                    std::move(local_format)) {
-    }
-
-    FieldMeta(FieldName name,
-              FieldId id,
-              DataType type,
-              DataType element_type,
-              int64_t dim,
-              std::optional<knowhere::MetricType> metric_type,
-              bool nullable,
               bool element_nullable,
               std::string external_field_mapping = "",
               std::string local_format = LOCAL_FORMAT_RAW)
