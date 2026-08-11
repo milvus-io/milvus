@@ -1813,6 +1813,27 @@ func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 	}
 }
 
+// maxBinlogTimestampTo returns the highest TimestampTo across a segment's insert
+// binlogs, or 0 when the arrays are absent.
+//
+// Absent is not the same as "no rows": a V3 (manifest-backed) segment never
+// persists these arrays -- buildAlterSegmentsKvs skips the per-FieldBinlog KVs
+// for it (kv_catalog.go:357) and the SegmentInfo is written without them -- so a
+// V3 segment reloaded after a DataCoord restart reports 0 here regardless of the
+// row timestamps it actually holds. Callers therefore get a bound that is safe
+// to compare against but that does not fire for reloaded V3 segments.
+func maxBinlogTimestampTo(fieldBinlogs []*datapb.FieldBinlog) uint64 {
+	var maxTsTo uint64
+	for _, fb := range fieldBinlogs {
+		for _, l := range fb.GetBinlogs() {
+			if l.GetTimestampTo() > maxTsTo {
+				maxTsTo = l.GetTimestampTo()
+			}
+		}
+	}
+	return maxTsTo
+}
+
 // UpdateCommitTimestamp sets the commit_timestamp on an import/CDC segment.
 // Non-zero marks it as committed at that transaction time, overriding
 // start_position.Timestamp for all temporal decisions.
@@ -1833,20 +1854,29 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 			return false
 		}
 		if ts != 0 {
-			var maxTsTo uint64
-			for _, fieldBinlogs := range segment.GetBinlogs() {
-				for _, l := range fieldBinlogs.GetBinlogs() {
-					if l.GetTimestampTo() > maxTsTo {
-						maxTsTo = l.GetTimestampTo()
-					}
-				}
-			}
+			maxTsTo := maxBinlogTimestampTo(segment.GetBinlogs())
 			if ts < maxTsTo {
 				mlog.Error(context.TODO(), "meta update: update commit timestamp rejected - commit_ts < max(binlog.TimestampTo)",
 					mlog.Int64("segmentID", segmentID),
 					mlog.Uint64("commitTs", ts),
 					mlog.Uint64("maxBinlogTimestampTo", maxTsTo))
-				return false
+				// Fail-stop. Unreachable for a normal import: its rows carry the
+				// Import message's timetick and the commit fence is a later
+				// timetick on the same WAL. Keep the error retriable so the
+				// flusher blocks on the fence instead of failing the job — a
+				// blocked pchannel surfaces as WAL lag, whereas a replica that
+				// commits what the source rejected can no longer be rolled back.
+				//
+				// Recovery from here is out of band. The job is already
+				// Committing by the time this runs -- commitImportV2AckCallback
+				// persists that state on the broadcast FastAck, independent of
+				// this fence -- and Committing is terminal for AbortImport while
+				// tryTimeoutJob never reaches it (TimeoutTs defaults to
+				// math.MaxUint64). Validating earlier does not change that: the
+				// ack path flips the state regardless of what this check says.
+				return modPack.fail(merr.WrapErrImportSysFailedMsg(
+					"commit timestamp %d is less than max binlog timestamp %d for import segment %d",
+					ts, maxTsTo, segmentID))
 			}
 		}
 		segment.CommitTimestamp = ts
