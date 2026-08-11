@@ -83,6 +83,7 @@ FieldMeta::ToProto() const {
     proto.set_name(name_.get());
     proto.set_data_type(ToProtoDataType(type_));
     proto.set_nullable(nullable_);
+    proto.set_element_nullable(element_nullable_);
 
     if (has_default_value()) {
         *proto.mutable_default_value() = *default_value_;
@@ -158,6 +159,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
     auto data_type = DataType(schema_proto.data_type());
     auto element_type = DataType(schema_proto.element_type());
     auto external_field_mapping = schema_proto.external_field();
+    AssertInfo(!schema_proto.element_nullable() || IsArrayDataType(data_type),
+               "element_nullable is only valid for ARRAY or VECTOR_ARRAY");
 
     if (data_type == DataType::VECTOR_ARRAY) {
         AssertInfo(element_type != DataType::NONE,
@@ -192,6 +195,7 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          dim,
                          std::nullopt,
                          nullable,
+                         schema_proto.element_nullable(),
                          external_field_mapping,
                          local_format()};
     }
@@ -278,6 +282,7 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          data_type,
                          DataType(schema_proto.element_type()),
                          nullable,
+                         schema_proto.element_nullable(),
                          default_value,
                          external_field_mapping,
                          local_format()};
