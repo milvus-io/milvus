@@ -70,7 +70,10 @@ func (s *CompactionTriggerManagerSuite) TestSubmitForceMergeViewAllocatesFromTar
 		RunAndReturn(func(task *datapb.CompactionTask) error {
 			s.EqualValues(500, task.GetPlanID())
 			s.EqualValues(100, task.GetMaxSize())
-			s.Equal(&datapb.IDRange{Begin: 601, End: 602}, task.GetPreAllocatedSegmentIDs())
+			allocatedIDs := task.GetPreAllocatedSegmentIDs()
+			s.Require().NotNil(allocatedIDs)
+			s.EqualValues(601, allocatedIDs.GetBegin())
+			s.EqualValues(602, allocatedIDs.GetEnd())
 			return nil
 		}).Once()
 
