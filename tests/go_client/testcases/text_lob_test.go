@@ -14,7 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// L0 CRUD and execution-path coverage for TEXT LOB through the public Go SDK.
 package testcases
 
 import (
@@ -28,12 +27,14 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/index"
 	client "github.com/milvus-io/milvus/client/v3/milvusclient"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -66,6 +67,7 @@ const (
 )
 
 const (
+	textLOBStorageV3Config      = "common.storage.useLoonFFI"
 	textLOBMinRowsConfig        = "indexCoord.segment.minSegmentNumRowsToEnableIndex"
 	textLOBMinRowsToEnableIndex = 1024
 )
@@ -311,7 +313,7 @@ func prepareTextLOBFixture(t *testing.T, ctx context.Context, mc *base.MilvusCli
 		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	t.Cleanup(func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		common.CheckErr(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName)), true)
 	})
@@ -415,10 +417,24 @@ func flushTextLOBCollectionWithRetry(ctx context.Context, mc *base.MilvusClient,
 
 		select {
 		case <-retryCtx.Done():
-			return fmt.Errorf("flush collection %q retry timed out: %w", collectionName, err)
+			return merr.Wrapf(err, "flush collection %q retry timed out", collectionName)
 		case <-ticker.C:
 		}
 	}
+}
+
+func requireTextFieldConfig(t *testing.T) {
+	t.Helper()
+
+	storageV3, err := hp.GetServerConfig(textLOBStorageV3Config)
+	require.NoError(t, err)
+	require.Equal(t, "true", storageV3)
+
+	configuredMinRows, err := hp.GetServerConfig(textLOBMinRowsConfig)
+	require.NoError(t, err)
+	require.Equal(t, strconv.Itoa(textLOBMinRowsToEnableIndex), configuredMinRows)
+	require.Less(t, textLOBUnindexedSealedRows, textLOBMinRowsToEnableIndex)
+	require.GreaterOrEqual(t, textLOBIndexedSealedRows, textLOBMinRowsToEnableIndex)
 }
 
 func requireExactTextLOB(t *testing.T, expected, actual string) {
@@ -459,21 +475,21 @@ func requireTextLOBResultRows(
 		ids[i] = id
 
 		for _, field := range []struct {
-			column   column.Column
+			actual   column.Column
 			expected *string
 		}{
-			{column: contentColumn, expected: row.content},
-			{column: contentZHColumn, expected: row.contentZH},
-			{column: altColumn, expected: row.alt},
+			{actual: contentColumn, expected: row.content},
+			{actual: contentZHColumn, expected: row.contentZH},
+			{actual: altColumn, expected: row.alt},
 		} {
-			isNull, err := field.column.IsNull(i)
+			isNull, err := field.actual.IsNull(i)
 			require.NoError(t, err)
 			if field.expected == nil {
 				require.True(t, isNull)
 				continue
 			}
 			require.False(t, isNull)
-			actual, err := field.column.GetAsString(i)
+			actual, err := field.actual.GetAsString(i)
 			require.NoError(t, err)
 			requireExactTextLOB(t, *field.expected, actual)
 		}
@@ -485,24 +501,15 @@ func requireTextLOBResultRows(
 	return ids
 }
 
-func TestTextLOBPublicSDKL0(t *testing.T) {
+// TestTextFieldCRUD verifies TEXT fields across indexed, sealed, and growing segments.
+func TestTextFieldCRUD(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	require.Less(t, textLOBUnindexedSealedRows, textLOBMinRowsToEnableIndex)
-	require.GreaterOrEqual(t, textLOBIndexedSealedRows, textLOBMinRowsToEnableIndex)
-
-	storageV3, err := hp.GetServerConfig("common.storage.useLoonFFI")
-	require.NoError(t, err)
-	require.Equal(t, "true", storageV3)
-
-	minRowsValue := strconv.Itoa(textLOBMinRowsToEnableIndex)
-	configuredMinRows, err := hp.GetServerConfig(textLOBMinRowsConfig)
-	require.NoError(t, err)
-	require.Equal(t, minRowsValue, configuredMinRows)
+	requireTextFieldConfig(t)
 
 	fixture := prepareTextLOBFixture(t, ctx, mc)
 
-	t.Run("schema_and_payloads", func(t *testing.T) {
+	t.Run("schema_and_query", func(t *testing.T) {
 		description, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(fixture.collectionName))
 		common.CheckErr(t, err, true)
 
@@ -577,7 +584,7 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 		}
 	})
 
-	t.Run("dense_search_output_fields", func(t *testing.T) {
+	t.Run("dense_search", func(t *testing.T) {
 		results, err := mc.Search(ctx, client.NewSearchOption(
 			fixture.collectionName,
 			3,
@@ -593,7 +600,7 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 		require.ElementsMatch(t, fixture.markerIDs, ids)
 	})
 
-	t.Run("bm25_search_output_fields", func(t *testing.T) {
+	t.Run("bm25_search", func(t *testing.T) {
 		for _, test := range []struct {
 			name     string
 			annField string
@@ -619,7 +626,7 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 		}
 	})
 
-	t.Run("query_iterator_payloads", func(t *testing.T) {
+	t.Run("query_iterator", func(t *testing.T) {
 		iterator, err := mc.QueryIterator(ctx, client.NewQueryIteratorOption(fixture.collectionName).
 			WithBatchSize(512).
 			WithFilter(fmt.Sprintf("%s >= 0", textLOBIDField)).
@@ -630,7 +637,7 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 		seen := make(map[int64]struct{}, len(fixture.rows))
 		for {
 			batch, err := iterator.Next(ctx)
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			common.CheckErr(t, err, true)
@@ -646,7 +653,7 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 		require.Len(t, seen, len(fixture.rows))
 	})
 
-	t.Run("upsert_payloads", func(t *testing.T) {
+	t.Run("upsert", func(t *testing.T) {
 		upsertRows := []textLOBRow{
 			{
 				id:        2,
@@ -706,7 +713,7 @@ func TestTextLOBPublicSDKL0(t *testing.T) {
 		}
 	})
 
-	t.Run("delete_payloads", func(t *testing.T) {
+	t.Run("delete", func(t *testing.T) {
 		deletedID := int64(7)
 		deleteResult, err := mc.Delete(ctx, client.NewDeleteOption(fixture.collectionName).
 			WithInt64IDs(textLOBIDField, []int64{deletedID}))
