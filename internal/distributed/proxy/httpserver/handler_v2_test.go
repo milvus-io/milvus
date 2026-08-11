@@ -3323,7 +3323,21 @@ func TestRestoreSnapshotRESTV2(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "source_db", proxy.restoreSnapshotReq.GetDbName())
-	assert.Equal(t, "source_db", proxy.restoreSnapshotReq.GetTargetDbName())
+	assert.Equal(t, "default", proxy.restoreSnapshotReq.GetTargetDbName())
+
+	req = httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, RestoreAction), bytes.NewReader([]byte(`{
+		"sourceDbName": "archive",
+		"sourceCollectionName": "source_books",
+		"targetCollectionName": "restored_books",
+		"snapshotName": "snapshot_1"
+	}`)))
+	req.Header.Set(HTTPHeaderDBName, "tenant_a")
+	w = httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "archive", proxy.restoreSnapshotReq.GetDbName())
+	assert.Equal(t, "tenant_a", proxy.restoreSnapshotReq.GetTargetDbName())
 }
 
 func TestPinSnapshotDataRESTV2(t *testing.T) {
