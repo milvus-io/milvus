@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -565,7 +566,14 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 		return err
 	}
 
-	t.SetTask(t.ShadowClone(setStartTime(time.Now().Unix())))
+	taskCreateTS, err := c.allocator.AllocTimestamp(context.TODO())
+	if err != nil {
+		c.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
+		log.Warn(context.TODO(), "Failed to enqueue compaction task, unable to allocate task create timestamp", mlog.Err(err))
+		return err
+	}
+	startTime := tsoutil.PhysicalTime(taskCreateTS).Unix()
+	t.SetTask(t.ShadowClone(setStartTime(startTime), setCreateTs(taskCreateTS)))
 	err = t.SaveTaskMeta()
 	if err != nil {
 		c.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
@@ -595,6 +603,11 @@ func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (Compa
 		task = newBumpSchemaVersionTask(t, c.allocator, c.meta, c.ievm)
 	default:
 		return nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
+	}
+	// Revalidate input and snapshot state at admission so a protection change
+	// after planning cannot enter the task queue unchecked.
+	if err := c.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t); err != nil {
+		return nil, err
 	}
 	exist, succeed := c.meta.CheckAndSetSegmentsCompacting(context.TODO(), t.GetInputSegments())
 	if !exist {
