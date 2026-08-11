@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ---------------------------------------------------------------------------
@@ -425,7 +426,8 @@ func TestAddPreparing_DataVersionRollbackRejected(t *testing.T) {
 	// Try to add v2 with DV(1,1) → should fail with DataVersion rollback.
 	b2 := testBuilder(1, 1, 1)
 	err := mgr.AddPreparing(context.Background(), b2)
-	assert.ErrorIs(t, err, errDataVersionRollback)
+	assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+	assert.ErrorContains(t, err, "new data version must not be lower than any existing view's data version")
 }
 
 func TestAddPreparing_BatchPersistAtomicity(t *testing.T) {

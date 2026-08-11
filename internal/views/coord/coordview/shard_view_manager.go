@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ShardViewManager manages multiple QueryViews for a single shard (vchannel)
@@ -519,7 +520,7 @@ func (m *ShardViewManager) removeView(target *CoordQueryViewStateMachine) {
 func (m *ShardViewManager) validateDataVersionLocked(newDV qviews.DataVersion) error {
 	for _, sm := range m.views {
 		if sm.Version().DataVersion.GT(newDV) {
-			return errDataVersionRollback
+			return merr.WrapErrServiceInternal("new data version must not be lower than any existing view's data version")
 		}
 	}
 	return nil

@@ -164,7 +164,7 @@ func (s *nodeScheduler) resize(concurrency int) {
 }
 
 func (s *nodeScheduler) Submit(task Task) TaskHandle {
-	ctx, cancel := context.WithCancel(s.ctx)
+	ctx, cancel := context.WithCancel(s.ctx) //nolint:gosec // G118: cancel is stored in taskEntry and called by finish on completion, cancellation, or close.
 	entry := &taskEntry{
 		task:   task,
 		ctx:    ctx,
