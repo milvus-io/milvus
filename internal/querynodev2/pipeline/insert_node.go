@@ -53,12 +53,12 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 		panic(err)
 	}
 	if len(skippedFields) > 0 {
-		// Attributing the skip to dropped fields is safe only because a SchemaChange
-		// message never shares a pack with inserts: the WAL adaptor emits every V1/V2
-		// message as its own pack, msgdispatcher never merges packs, and the DML
-		// micro-batcher refuses to merge non-Insert/Delete messages. If that
-		// pack-granularity invariant is ever relaxed, filtering against the current
-		// schema could silently drop fields that exist in a newer schema.
+		// Attributing the skip to dropped fields is safe because the WAL adaptor emits
+		// every V1/V2 message as its own pack, msgdispatcher never merges packs, and the
+		// DML micro-batcher only merges delete-only packs. An Insert message therefore
+		// never shares a pipeline batch with another MsgPack. If that pack-granularity
+		// invariant is ever relaxed, filtering against the current schema could silently
+		// drop fields that exist in a newer schema.
 		mlog.Warn(ctx, "skip insert payload fields absent from current schema, fields are dropped since the message was written",
 			mlog.FieldCollectionID(iNode.collectionID),
 			mlog.FieldSegmentID(msg.SegmentID),

@@ -6915,3 +6915,46 @@ func TestFailMetricLabel(t *testing.T) {
 	assertLabels(metrics.CauseCancel, context.Canceled)
 	assertLabels(metrics.CauseCancel, errors.Wrap(context.Canceled, "rpc aborted"))
 }
+
+func TestResolveTimezone(t *testing.T) {
+	ctx := context.Background()
+	colInfoWithTz := &collectionInfo{
+		properties: []*commonpb.KeyValuePair{
+			{Key: common.TimezoneKey, Value: "America/New_York"},
+		},
+	}
+	colInfoWithoutTz := &collectionInfo{}
+
+	t.Run("request timezone wins over collection timezone", func(t *testing.T) {
+		params := []*commonpb.KeyValuePair{{Key: common.TimezoneKey, Value: "Asia/Shanghai"}}
+		tz, err := resolveTimezone(ctx, params, colInfoWithTz)
+		assert.NoError(t, err)
+		assert.Equal(t, "Asia/Shanghai", tz)
+	})
+
+	t.Run("invalid request timezone is rejected as ParameterInvalid", func(t *testing.T) {
+		params := []*commonpb.KeyValuePair{{Key: common.TimezoneKey, Value: "Not/AZone"}}
+		_, err := resolveTimezone(ctx, params, colInfoWithTz)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("absent request timezone falls back to collection timezone", func(t *testing.T) {
+		tz, err := resolveTimezone(ctx, nil, colInfoWithTz)
+		assert.NoError(t, err)
+		assert.Equal(t, "America/New_York", tz)
+	})
+
+	t.Run("empty request timezone is treated as unspecified", func(t *testing.T) {
+		params := []*commonpb.KeyValuePair{{Key: common.TimezoneKey, Value: ""}}
+		tz, err := resolveTimezone(ctx, params, colInfoWithTz)
+		assert.NoError(t, err)
+		assert.Equal(t, "America/New_York", tz)
+	})
+
+	t.Run("no request or collection timezone defaults to UTC", func(t *testing.T) {
+		tz, err := resolveTimezone(ctx, nil, colInfoWithoutTz)
+		assert.NoError(t, err)
+		assert.Equal(t, common.DefaultTimezone, tz)
+	})
+}

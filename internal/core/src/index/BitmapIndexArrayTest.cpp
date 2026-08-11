@@ -807,6 +807,39 @@ TEST(BitmapIndexArrayNestedTest, FactoryCreatesNestedBitmapForStructSubField) {
     boost::filesystem::remove_all(root_path);
 }
 
+TEST(BitmapIndexArrayNestedTest, FactoryCreatesNestedHybridForStructSubField) {
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("struct_field[sub]");
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::VarChar);
+
+    auto field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+    auto index_meta = storage::IndexMeta{3, 101, 3002, 3002};
+
+    auto root_path =
+        fmt::format("{}/hybrid_nested_array_factory", TestLocalPath);
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    index::CreateIndexInfo index_info{};
+    index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
+    index_info.field_type = DataType::ARRAY;
+    index_info.field_name = "struct_field[sub]";
+    index_info.tantivy_index_version = 7;
+
+    auto index =
+        index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
+    ASSERT_TRUE(index->IsNestedIndex());
+    ASSERT_EQ(index->Type(), milvus::index::HYBRID_INDEX_TYPE);
+
+    boost::filesystem::remove_all(root_path);
+}
+
 struct BitmapIndexArrayRegressionParam {
     proto::schema::DataType element_type;
     bool use_v3;

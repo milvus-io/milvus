@@ -21,7 +21,7 @@ package chain
 import (
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -650,36 +650,59 @@ func collectOrderedFieldNames(inputs []*DataFrame) []string {
 // sortAndExtractResults sorts IDs by score and extracts results.
 // When descending is true, larger scores sort first (higher = better match).
 // When descending is false, smaller scores sort first (lower = better match, e.g. L2).
+// scoredID carries the score and location alongside the id so that sorting does
+// not have to look them up. Sorting a slice of these with slices.SortStableFunc
+// also avoids sort.SliceStable's reflect-based swapper.
+type scoredID struct {
+	id    any
+	score float32
+	loc   idLocation
+}
+
 func sortAndExtractResults(idScores map[any]float32, idLocs map[any]idLocation, descending bool) ([]any, []float32, []idLocation) {
-	ids := make([]any, 0, len(idScores))
-	for id := range idScores {
-		ids = append(ids, id)
+	entries := make([]scoredID, 0, len(idScores))
+	for id, score := range idScores {
+		entries = append(entries, scoredID{id: id, score: score, loc: idLocs[id]})
 	}
 
-	sortIDs(ids, idScores, descending)
+	sortScoredIDs(entries, descending)
 
-	scores := make([]float32, len(ids))
-	locs := make([]idLocation, len(ids))
-	for i, id := range ids {
-		scores[i] = idScores[id]
-		locs[i] = idLocs[id]
+	ids := make([]any, len(entries))
+	scores := make([]float32, len(entries))
+	locs := make([]idLocation, len(entries))
+	for i, e := range entries {
+		ids[i] = e.id
+		scores[i] = e.score
+		locs[i] = e.loc
 	}
 
 	return ids, scores, locs
 }
 
-// sortIDs sorts IDs by score with stable tie-breaking by ID.
-func sortIDs(ids []any, idScores map[any]float32, descending bool) {
-	sort.SliceStable(ids, func(i, j int) bool {
-		scoreI := idScores[ids[i]]
-		scoreJ := idScores[ids[j]]
-		if scoreI != scoreJ {
-			if descending {
-				return scoreI > scoreJ
-			}
-			return scoreI < scoreJ
+// lessScoredID is the ordering sortIDs used to express directly, kept as a
+// predicate so the three-way comparator below is equivalent to the previous
+// sort.SliceStable call by construction -- including for scores that compare
+// unequal in both directions, such as NaN.
+func lessScoredID(a, b scoredID, descending bool) bool {
+	if a.score != b.score {
+		if descending {
+			return a.score > b.score
 		}
-		return compareIDs(ids[i], ids[j]) < 0
+		return a.score < b.score
+	}
+	return compareIDs(a.id, b.id) < 0
+}
+
+// sortScoredIDs sorts by score with stable tie-breaking by ID.
+func sortScoredIDs(entries []scoredID, descending bool) {
+	slices.SortStableFunc(entries, func(a, b scoredID) int {
+		if lessScoredID(a, b, descending) {
+			return -1
+		}
+		if lessScoredID(b, a, descending) {
+			return 1
+		}
+		return 0
 	})
 }
 

@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -43,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -2887,6 +2889,91 @@ func TestSnapshotManager_RestoreCollection_SchemaNameAndDbName(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, targetCollectionName, schema.Name, "schema.Name should be updated to target collection name")
 	assert.Equal(t, targetDbName, schema.DbName, "schema.DbName should be updated to target database name")
+}
+
+func TestSnapshotManager_RestoreCollection_PreservesMetadata(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		name := "current snapshot"
+		if legacy {
+			name = "snapshot created before metadata fix"
+		}
+		t.Run(name, func(t *testing.T) {
+			sourceProperties := []*commonpb.KeyValuePair{
+				{Key: common.CollectionTTLConfigKey, Value: "360"},
+				{Key: common.CollectionAutoCompactionKey, Value: "false"},
+				{Key: common.MmapEnabledKey, Value: "false"},
+				{Key: common.AllowInsertAutoIDKey, Value: "false"},
+			}
+			schemaProperties := common.CloneKeyValuePairs(sourceProperties)
+			schemaProperties = append(schemaProperties, &commonpb.KeyValuePair{
+				Key:   common.ConsistencyLevel,
+				Value: strconv.Itoa(int(commonpb.ConsistencyLevel_Bounded)),
+			})
+
+			collection := &datapb.CollectionDescription{
+				Schema: &schemapb.CollectionSchema{
+					Name:       "original_collection",
+					DbName:     "original_db",
+					Properties: schemaProperties,
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+					},
+				},
+				NumShards: 1,
+			}
+			if !legacy {
+				collection.ConsistencyLevel = commonpb.ConsistencyLevel_Bounded
+				collection.Properties = common.CloneKeyValuePairs(sourceProperties)
+			}
+
+			originalCollectionProperties := common.CloneKeyValuePairs(collection.GetProperties())
+			originalSchemaProperties := common.CloneKeyValuePairs(collection.GetSchema().GetProperties())
+
+			var capturedReq *milvuspb.CreateCollectionRequest
+			fakeBroker := &embeddedBroker{}
+			mockCreateCollection := mockey.Mock((*embeddedBroker).CreateCollection).To(
+				func(_ *embeddedBroker, _ context.Context, req *milvuspb.CreateCollectionRequest) error {
+					capturedReq = proto.Clone(req).(*milvuspb.CreateCollectionRequest)
+					return nil
+				}).Build()
+			defer mockCreateCollection.UnPatch()
+
+			mockDescribeCollection := mockey.Mock((*embeddedBroker).DescribeCollectionByName).
+				Return(&milvuspb.DescribeCollectionResponse{
+					Status:       merr.Success(),
+					CollectionID: 12345,
+				}, nil).
+				Build()
+			defer mockDescribeCollection.UnPatch()
+
+			sm := &snapshotManager{broker: fakeBroker}
+			collectionID, err := sm.RestoreCollection(
+				context.Background(),
+				&SnapshotData{Collection: collection},
+				"target_collection",
+				"target_db",
+			)
+
+			require.NoError(t, err)
+			assert.Equal(t, int64(12345), collectionID)
+			require.NotNil(t, capturedReq)
+
+			requestProperties := common.KeyValuePairs(capturedReq.GetProperties()).ToMap()
+			for _, property := range sourceProperties {
+				assert.Equal(t, property.GetValue(), requestProperties[property.GetKey()])
+			}
+			assert.Equal(t, "true", requestProperties[util.PreserveFieldIdsKey])
+
+			if legacy {
+				assert.Equal(t, strconv.Itoa(int(commonpb.ConsistencyLevel_Bounded)), requestProperties[common.ConsistencyLevel])
+			} else {
+				assert.Equal(t, commonpb.ConsistencyLevel_Bounded, capturedReq.GetConsistencyLevel())
+			}
+
+			assert.Equal(t, originalCollectionProperties, common.KeyValuePairs(collection.GetProperties()))
+			assert.Equal(t, originalSchemaProperties, common.KeyValuePairs(collection.GetSchema().GetProperties()))
+		})
+	}
 }
 
 // --- Test DropSnapshotsByCollection ---
