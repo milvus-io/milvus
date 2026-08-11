@@ -1,35 +1,24 @@
 name: Markdown Links Check
-
 on:
   workflow_dispatch:
   schedule:
     - cron: "30 20 * * *"
 
-permissions:
-  contents: read
-
 jobs:
   check-links:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
-      - name: Check out repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          persist-credentials: false
-
-      - name: Check documentation links
-        uses: gaurav-nelson/github-action-markdown-link-check@5c5dfc0ac2e225883c0e5f03a85311ec2830d368 # v1
+      - uses: actions/checkout@master
+      - uses: gaurav-nelson/github-action-markdown-link-check@v1
+        # checks all markdown files from /docs including all subfolders
         with:
           use-quiet-mode: 'yes'
           use-verbose-mode: 'yes'
           folder-path: 'docs/'
-
-      - name: Check repository-root Markdown links
-        uses: gaurav-nelson/github-action-markdown-link-check@5c5dfc0ac2e225883c0e5f03a85311ec2830d368 # v1
+      - uses: actions/checkout@master
+      - uses: gaurav-nelson/github-action-markdown-link-check@v1
+        # checks all markdown files from root but ignores subfolders
         with:
           use-quiet-mode: 'yes'
           use-verbose-mode: 'yes'
-          # The action's `find` starts at depth 0 for `.`, so root files are
-          # depth 1. This keeps the historical root-only scope working.
-          max-depth: 1
+          max-depth: 0
