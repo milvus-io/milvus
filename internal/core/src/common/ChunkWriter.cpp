@@ -258,13 +258,25 @@ ArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
                    "type id {}; upstream normalizer must coerce to BINARY",
                    data ? static_cast<int>(data->type_id()) : -1);
         for (int64_t i = 0; i < array->length(); ++i) {
+            header_.push_back(static_cast<uint32_t>(cursor));  // off_i
+            if (array->IsNull(i)) {
+                AssertInfo(nullable_,
+                           "ArrayChunkWriter got null row for non-nullable "
+                           "ARRAY field");
+                cached_arrays_.emplace_back();
+                header_.push_back(0);  // len_i
+                continue;
+            }
             auto str = array->GetView(i);
             ScalarFieldProto scalar_array;
-            scalar_array.ParseFromArray(str.data(), str.size());
-            cached_arrays_.emplace_back(scalar_array);
+            auto success = scalar_array.ParseFromArray(str.data(), str.size());
+            AssertInfo(success, "parse array from string failed");
+            cached_arrays_.emplace_back(scalar_array, element_nullable_);
             const auto& arr = cached_arrays_.back();
-            header_.push_back(static_cast<uint32_t>(cursor));        // off_i
             header_.push_back(static_cast<uint32_t>(arr.length()));  // len_i
+            if (element_nullable_) {
+                cursor += arr.get_element_valid_data_byte_size();
+            }
             if (is_string) {
                 cursor += sizeof(uint32_t) * arr.length();
             }
@@ -296,11 +308,22 @@ ArrayChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
     target->write(header_.data(), header_.size() * sizeof(uint32_t));
 
     for (auto& arr : cached_arrays_) {
-        if (is_string) {
-            target->write(arr.get_offsets_data(),
-                          arr.length() * sizeof(uint32_t));
+        if (element_nullable_) {
+            auto element_valid_bytes = arr.get_element_valid_data_byte_size();
+            if (element_valid_bytes > 0) {
+                target->write(arr.get_element_valid_data().data(),
+                              element_valid_bytes);
+            }
         }
-        target->write(arr.data(), arr.byte_size());
+        if (is_string) {
+            auto offsets_bytes = arr.length() * sizeof(uint32_t);
+            if (offsets_bytes > 0) {
+                target->write(arr.get_offsets_data(), offsets_bytes);
+            }
+        }
+        if (arr.byte_size() > 0) {
+            target->write(arr.data(), arr.byte_size());
+        }
     }
 
     char padding[MMAP_ARRAY_PADDING] = {};
@@ -315,6 +338,7 @@ ArrayChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
 std::pair<size_t, size_t>
 VectorArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
     size_t total_rows = 0;
+    size_t valid_rows = 0;
     size_t total_size = 0;
 
     for (const auto& array_data : array_vec) {
@@ -336,14 +360,22 @@ VectorArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
                 int byte_width = binary_values->byte_width();
                 const int32_t* list_offsets = list_array->raw_value_offsets();
                 int64_t actual_values_count = 0;
+                int64_t element_bitmap_bytes = 0;
                 for (int64_t i = 0; i < list_array->length(); ++i) {
                     if (nullable_ && list_array->IsNull(i)) {
                         continue;
                     }
-                    actual_values_count +=
-                        list_offsets[i + 1] - list_offsets[i];
+                    ++valid_rows;
+                    auto value_count = list_offsets[i + 1] - list_offsets[i];
+                    actual_values_count += value_count;
+                    if (element_nullable_) {
+                        element_bitmap_bytes +=
+                            TargetBitmap::policy_type::get_required_size_in_bytes(
+                                value_count);
+                    }
                 }
                 total_size += actual_values_count * byte_width;
+                total_size += element_bitmap_bytes;
                 break;
             }
             default:
@@ -354,12 +386,15 @@ VectorArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
     }
 
     row_nums_ = total_rows;
+    valid_row_nums_ = nullable_ ? valid_rows : total_rows;
 
     if (nullable_) {
         total_size += (total_rows + 7) / 8;
     }
-    // Add space for logical-row offset and length arrays.
-    total_size += sizeof(uint32_t) * (row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
+    // Nullable rows have no physical payload, so the header only describes
+    // valid rows. Chunk::PhysicalOffsetOf maps logical rows to these entries.
+    total_size +=
+        sizeof(uint32_t) * (valid_row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
     return {total_size, total_rows};
 }
 
@@ -368,9 +403,7 @@ VectorArrayChunkWriter::write_to_target(
     const arrow::ArrayVector& array_vec,
     const std::shared_ptr<ChunkTarget>& target) {
     std::vector<uint32_t> offsets_lens;
-    offsets_lens.reserve(row_nums_ * 2 + 1);
-    std::vector<const uint8_t*> vector_data_ptrs;
-    std::vector<size_t> data_sizes;
+    offsets_lens.reserve(valid_row_nums_ * 2 + 1);
 
     if (nullable_) {
         std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
@@ -382,9 +415,28 @@ VectorArrayChunkWriter::write_to_target(
         write_null_bit_maps(null_bitmaps, target);
     }
 
+    uint32_t element_bitmap_total_bytes = 0;
+    if (element_nullable_) {
+        for (const auto& array_data : array_vec) {
+            auto list_array =
+                std::static_pointer_cast<arrow::ListArray>(array_data);
+            const int32_t* list_offsets = list_array->raw_value_offsets();
+            for (int64_t i = 0; i < list_array->length(); ++i) {
+                if (nullable_ && list_array->IsNull(i)) {
+                    continue;
+                }
+                auto vector_count = list_offsets[i + 1] - list_offsets[i];
+                element_bitmap_total_bytes +=
+                    TargetBitmap::policy_type::get_required_size_in_bytes(
+                        vector_count);
+            }
+        }
+    }
+
     uint32_t current_offset =
         (nullable_ ? static_cast<uint32_t>((row_nums_ + 7) / 8) : 0) +
-        sizeof(uint32_t) * (row_nums_ * 2 + 1);
+        sizeof(uint32_t) * (valid_row_nums_ * 2 + 1) +
+        element_bitmap_total_bytes;
 
     for (const auto& array_data : array_vec) {
         auto list_array =
@@ -399,8 +451,6 @@ VectorArrayChunkWriter::write_to_target(
         // Each list contains multiple vectors, each stored as a fixed-size binary chunk
         for (int64_t i = 0; i < list_array->length(); i++) {
             if (nullable_ && list_array->IsNull(i)) {
-                offsets_lens.push_back(current_offset);
-                offsets_lens.push_back(0);
                 continue;
             }
             auto start_idx = list_offsets[i];
@@ -410,12 +460,6 @@ VectorArrayChunkWriter::write_to_target(
 
             offsets_lens.push_back(current_offset);
             offsets_lens.push_back(static_cast<uint32_t>(vector_count));
-
-            for (int32_t j = start_idx; j < end_idx; ++j) {
-                vector_data_ptrs.push_back(binary_values->GetValue(j));
-                data_sizes.push_back(byte_width);
-            }
-
             current_offset += byte_size;
         }
     }
@@ -429,11 +473,67 @@ VectorArrayChunkWriter::write_to_target(
     }
     target->write(&offsets_lens.back(), sizeof(uint32_t));  // final offset
 
-    for (size_t i = 0; i < vector_data_ptrs.size(); i++) {
-        target->write(vector_data_ptrs[i], data_sizes[i]);
+    if (element_nullable_) {
+        for (const auto& array_data : array_vec) {
+            auto list_array =
+                std::static_pointer_cast<arrow::ListArray>(array_data);
+            auto binary_values =
+                std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
+                    list_array->values());
+            const int32_t* list_offsets = list_array->raw_value_offsets();
+
+            for (int64_t i = 0; i < list_array->length(); ++i) {
+                if (nullable_ && list_array->IsNull(i)) {
+                    continue;
+                }
+                auto start_idx = list_offsets[i];
+                auto end_idx = list_offsets[i + 1];
+                auto vector_count = end_idx - start_idx;
+                TargetBitmap element_valid_data(vector_count, true);
+                for (int32_t j = start_idx; j < end_idx; ++j) {
+                    if (binary_values->IsNull(j)) {
+                        element_valid_data.reset(j - start_idx);
+                    }
+                }
+                auto element_valid_bytes = element_valid_data.size_in_bytes();
+                if (element_valid_bytes > 0) {
+                    target->write(element_valid_data.data(),
+                                  element_valid_bytes);
+                }
+            }
+        }
     }
 
-    char padding[MMAP_ARRAY_PADDING];
+    for (const auto& array_data : array_vec) {
+        auto list_array =
+            std::static_pointer_cast<arrow::ListArray>(array_data);
+        auto binary_values =
+            std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
+                list_array->values());
+        const int32_t* list_offsets = list_array->raw_value_offsets();
+        int byte_width = binary_values->byte_width();
+        std::vector<uint8_t> zero_value(byte_width, 0);
+
+        for (int64_t i = 0; i < list_array->length(); ++i) {
+            if (nullable_ && list_array->IsNull(i)) {
+                continue;
+            }
+            auto start_idx = list_offsets[i];
+            auto end_idx = list_offsets[i + 1];
+            for (int32_t j = start_idx; j < end_idx; ++j) {
+                AssertInfo(element_nullable_ || !binary_values->IsNull(j),
+                           "VectorArrayChunkWriter got null child value for "
+                           "non-element-nullable VECTOR_ARRAY field");
+                if (element_nullable_ && binary_values->IsNull(j)) {
+                    target->write(zero_value.data(), byte_width);
+                } else {
+                    target->write(binary_values->GetValue(j), byte_width);
+                }
+            }
+        }
+    }
+
+    char padding[MMAP_ARRAY_PADDING] = {};
     target->write(padding, MMAP_ARRAY_PADDING);
 }
 
@@ -604,12 +704,17 @@ create_chunk_writer(const FieldMeta& field_meta) {
         }
         case milvus::DataType::ARRAY:
             return std::make_shared<ArrayChunkWriter>(
-                field_meta.get_element_type(), nullable);
+                field_meta.get_element_type(),
+                nullable,
+                field_meta.is_element_nullable());
         case milvus::DataType::VECTOR_SPARSE_U32_F32:
             return std::make_shared<SparseFloatVectorChunkWriter>(nullable);
         case milvus::DataType::VECTOR_ARRAY:
             return std::make_shared<VectorArrayChunkWriter>(
-                dim, field_meta.get_element_type(), nullable);
+                dim,
+                field_meta.get_element_type(),
+                nullable,
+                field_meta.is_element_nullable());
         default:
             ThrowInfo(Unsupported, "Unsupported data type");
     }
@@ -744,12 +849,14 @@ make_chunk(const FieldMeta& field_meta,
                 row_nums, data, size, nullable, chunk_mmap_guard);
         }
         case milvus::DataType::ARRAY:
-            return std::make_unique<ArrayChunk>(row_nums,
-                                                data,
-                                                size,
-                                                field_meta.get_element_type(),
-                                                nullable,
-                                                chunk_mmap_guard);
+            return std::make_unique<ArrayChunk>(
+                row_nums,
+                data,
+                size,
+                field_meta.get_element_type(),
+                nullable,
+                field_meta.is_element_nullable(),
+                chunk_mmap_guard);
         case milvus::DataType::VECTOR_SPARSE_U32_F32:
             return std::make_unique<SparseFloatVectorChunk>(
                 row_nums, data, size, nullable, chunk_mmap_guard);
@@ -761,7 +868,8 @@ make_chunk(const FieldMeta& field_meta,
                 size,
                 field_meta.get_element_type(),
                 chunk_mmap_guard,
-                nullable);
+                nullable,
+                field_meta.is_element_nullable());
         default:
             ThrowInfo(DataTypeInvalid, "Unsupported data type");
     }

@@ -104,7 +104,8 @@ BuildChunkBuffer(int64_t row_num,
 std::vector<char>
 BuildNullableVectorArrayChunkBuffer() {
     const auto bitmap_bytes = (kVectorArrayRows + 7) / 8;
-    const auto header_bytes = sizeof(uint32_t) * (kVectorArrayRows * 2 + 1);
+    constexpr int64_t valid_rows = 3;
+    const auto header_bytes = sizeof(uint32_t) * (valid_rows * 2 + 1);
     const std::array<float, 6> payload{1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
     const auto payload_bytes = payload.size() * sizeof(float);
 
@@ -118,11 +119,9 @@ BuildNullableVectorArrayChunkBuffer() {
         payload_offset + static_cast<uint32_t>(kVectorArrayDim * sizeof(float));
     const auto row3_end =
         row0_end + static_cast<uint32_t>(2 * kVectorArrayDim * sizeof(float));
-    const std::array<uint32_t, kVectorArrayRows * 2 + 1> header{
+    const std::array<uint32_t, valid_rows * 2 + 1> header{
         payload_offset,
         1,
-        row0_end,
-        0,
         row0_end,
         0,
         row0_end,
@@ -152,7 +151,8 @@ MakeVectorArrayChunk(char* data, size_t size) {
                                               size,
                                               DataType::VECTOR_FLOAT,
                                               guard,
-                                              /*nullable=*/true);
+                                              /*nullable=*/true,
+                                              /*element_nullable=*/false);
 }
 
 class CountingChunkTranslator : public TestChunkTranslator {
