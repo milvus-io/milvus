@@ -3348,6 +3348,26 @@ func getColTimezone(colInfo *collectionInfo) string {
 	return timezone
 }
 
+// resolveTimezone returns the effective timezone for a request: the validated
+// request-level timezone when one is specified in params, otherwise the
+// collection timezone (UTC by default). Callers must resolve the timezone
+// before generating any plan that parses naive TIMESTAMPTZ literals, so that
+// filtering and result formatting use the same timezone.
+func resolveTimezone(ctx context.Context, params []*commonpb.KeyValuePair, colInfo *collectionInfo) (string, error) {
+	timezone, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, params)
+	if timezone != "" {
+		if !timestamptz.IsTimezoneValid(timezone) {
+			mlog.Info(ctx, "get invalid timezone from request", mlog.String("timezone", timezone))
+			return "", merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", timezone)
+		}
+		mlog.Debug(ctx, "determine timezone from request", mlog.String("user defined timezone", timezone))
+		return timezone, nil
+	}
+	timezone = getColTimezone(colInfo)
+	mlog.Debug(ctx, "determine timezone from collection", mlog.String("collection timezone", timezone))
+	return timezone, nil
+}
+
 // timestamptzUTC2IsoStr converts Timestamptz (Unix Microsecond) data
 // within FieldData results into ISO-8601 strings, applying the correct
 // timezone offset and using the optimized format (microsecond precision, no trailing zeros).
