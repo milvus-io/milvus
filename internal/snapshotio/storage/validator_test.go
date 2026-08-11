@@ -420,6 +420,8 @@ func TestParseForeignURIRejectsTraversalInSchemelessObjectKey(t *testing.T) {
 }
 
 func TestBuildInstanceSnapshotURIRoundTrip(t *testing.T) {
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
+
 	objectKey := "files/snapshots/100/metadata/1.json"
 	tests := []struct {
 		name         string

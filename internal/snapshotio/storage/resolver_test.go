@@ -134,6 +134,8 @@ func TestResolveForeignStorageRestoreDoesNotCreateForeignSourceBucket(t *testing
 }
 
 func TestResolveForeignStorageAppliesRawCredentialsFromExternalSpec(t *testing.T) {
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
+
 	var captured []objectstorage.Config
 	patchRemoteChunkManager(t, &captured)
 

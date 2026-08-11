@@ -3132,7 +3132,7 @@ func TestSnapshotManager_RestoreCollection_PreservesMetadata(t *testing.T) {
 			sm := &snapshotManager{broker: fakeBroker}
 			collectionID, err := sm.RestoreCollection(
 				context.Background(),
-				&SnapshotData{Collection: collection},
+				&snapshotstorage.SnapshotData{Collection: collection},
 				"target_collection",
 				"target_db",
 			)
