@@ -1,0 +1,317 @@
+package adaptor
+
+import (
+	"context"
+
+	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
+
+var _ walimpls.ScannerImpls = (*underlyingWALScannerAdaptor)(nil)
+
+type underlyingROWALImplsOpener func(
+	ctx context.Context,
+	walName message.WALName,
+	channel types.PChannelInfo,
+) (walimpls.ROWALImpls, error)
+
+func getDeliverPolicyWALName(deliverPolicy options.DeliverPolicy) (message.WALName, bool) {
+	if deliverPolicy == nil {
+		return message.WALNameUnknown, false
+	}
+	var msgID *commonpb.MessageID
+	switch policy := deliverPolicy.GetPolicy().(type) {
+	case *streamingpb.DeliverPolicy_StartFrom:
+		msgID = policy.StartFrom
+	case *streamingpb.DeliverPolicy_StartAfter:
+		msgID = policy.StartAfter
+	default:
+		return message.WALNameUnknown, false
+	}
+	if msgID == nil {
+		return message.WALNameUnknown, false
+	}
+	return message.WALName(msgID.WALName), true
+}
+
+// underlyingWALScannerAdaptor exposes one continuous ScannerImpls stream backed
+// by a sequence of underlying WAL scanners. An AlterWAL message replaces the
+// active underlying WAL and scanner without involving the caller.
+//
+// This adaptor only joins persisted WAL streams. It does not manage the
+// catchup/tailing transition or access the write-ahead buffer.
+// sharedWAL, when provided, is caller-owned and is never closed by the adaptor.
+type underlyingWALScannerAdaptor struct {
+	*helper.ScannerHelper
+
+	logger                     *mlog.Logger
+	channel                    types.PChannelInfo
+	sharedWAL                  walimpls.ROWALImpls
+	underlyingROWALImplsOpener underlyingROWALImplsOpener
+	onUnderlyingScannerChanged func(message.WALName)
+
+	underlyingWALName    message.WALName
+	underlyingReadOption walimpls.ReadOption
+	cutTs                uint64
+	excludedMessageID    message.MessageID
+	readerChangePending  bool
+	messageCh            chan message.ImmutableMessage
+}
+
+func newUnderlyingWALScannerAdaptor(
+	logger *mlog.Logger,
+	channel types.PChannelInfo,
+	sharedWAL walimpls.ROWALImpls,
+	readOption walimpls.ReadOption,
+	underlyingROWALImplsOpener underlyingROWALImplsOpener,
+	onUnderlyingScannerChanged func(message.WALName),
+) (walimpls.ScannerImpls, error) {
+	walName, ok := getDeliverPolicyWALName(readOption.DeliverPolicy)
+	if !ok {
+		return nil, status.NewUnrecoverableError("underlying WAL scanner requires a WAL-specific start position")
+	}
+	if underlyingROWALImplsOpener == nil {
+		return nil, status.NewUnrecoverableError("underlying WAL opener is unavailable for %s", walName)
+	}
+
+	normalizedPolicy, excludedMessageID, err := normalizeUnderlyingWALDeliverPolicy(readOption.DeliverPolicy)
+	if err != nil {
+		return nil, status.NewUnrecoverableError(
+			"invalid underlying WAL start position for %s: %s", walName, err.Error(),
+		)
+	}
+	readOption.DeliverPolicy = normalizedPolicy
+
+	adaptor := &underlyingWALScannerAdaptor{
+		ScannerHelper:              helper.NewScannerHelper(readOption.Name),
+		logger:                     logger,
+		channel:                    channel,
+		sharedWAL:                  sharedWAL,
+		underlyingROWALImplsOpener: underlyingROWALImplsOpener,
+		onUnderlyingScannerChanged: onUnderlyingScannerChanged,
+		underlyingWALName:          walName,
+		underlyingReadOption:       readOption,
+		excludedMessageID:          excludedMessageID,
+		messageCh:                  make(chan message.ImmutableMessage),
+	}
+	go adaptor.execute()
+	return adaptor, nil
+}
+
+func (a *underlyingWALScannerAdaptor) Chan() <-chan message.ImmutableMessage {
+	return a.messageCh
+}
+
+func (a *underlyingWALScannerAdaptor) Close() error {
+	return a.ScannerHelper.Close()
+}
+
+func (a *underlyingWALScannerAdaptor) execute() {
+	var executeErr error
+	defer func() {
+		close(a.messageCh)
+		a.Finish(executeErr)
+	}()
+
+	executeErr = a.consume()
+	if a.Context().Err() != nil && errors.Is(executeErr, context.Canceled) {
+		executeErr = nil
+	}
+}
+
+func (a *underlyingWALScannerAdaptor) consume() error {
+	for {
+		if a.Context().Err() != nil {
+			return a.Context().Err()
+		}
+
+		underlyingWAL, owned, err := a.openUnderlyingWAL(a.Context())
+		if err != nil {
+			if isReadWALUnavailable(err) {
+				return newUnderlyingWALUnavailableError(a.underlyingWALName, err)
+			}
+			return err
+		}
+
+		err = a.consumeUnderlying(a.Context(), underlyingWAL)
+		if owned {
+			underlyingWAL.Close()
+		}
+		if err == nil {
+			continue
+		}
+		if isReadWALUnavailable(err) {
+			return newUnderlyingWALUnavailableError(a.underlyingWALName, err)
+		}
+		if status.AsStreamingError(err).IsUnrecoverable() {
+			return err
+		}
+		if a.Context().Err() != nil {
+			return a.Context().Err()
+		}
+		a.logger.Warn(a.Context(), "underlying WAL scanner was interrupted, retrying",
+			mlog.Stringer("walName", a.underlyingWALName),
+			mlog.Err(err))
+	}
+}
+
+func (a *underlyingWALScannerAdaptor) consumeUnderlying(
+	ctx context.Context,
+	underlyingWAL walimpls.ROWALImpls,
+) error {
+	underlyingScanner, err := a.createUnderlyingScannerWithBackoff(ctx, underlyingWAL)
+	if err != nil {
+		return err
+	}
+	defer underlyingScanner.Close()
+	if a.readerChangePending && a.onUnderlyingScannerChanged != nil {
+		a.onUnderlyingScannerChanged(a.underlyingWALName)
+	}
+	a.readerChangePending = false
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case msg, ok := <-underlyingScanner.Chan():
+			if !ok {
+				if err := underlyingScanner.Error(); err != nil {
+					return err
+				}
+				return status.NewUnrecoverableError(
+					"underlying WAL %s reached end of stream before an AlterWAL boundary", a.underlyingWALName,
+				)
+			}
+
+			if msg.TimeTick() <= a.cutTs {
+				continue
+			}
+
+			messageType := msg.MessageType()
+			messageTimeTick := msg.TimeTick()
+			var targetWALName message.WALName
+			if messageType == message.MessageTypeAlterWAL {
+				alterWAL := message.MustAsImmutableAlterWALMessageV2(msg)
+				targetWALName = message.WALName(alterWAL.Header().TargetWalName)
+				if targetWALName == message.WALNameUnknown || targetWALName.String() == "" {
+					return status.NewUnrecoverableError(
+						"underlying WAL %s contains an AlterWAL boundary with invalid target %d",
+						a.underlyingWALName,
+						targetWALName,
+					)
+				}
+			}
+
+			shouldDeliver := a.excludedMessageID == nil || !msg.MessageID().EQ(a.excludedMessageID)
+			if shouldDeliver {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case a.messageCh <- msg:
+				}
+			}
+
+			// The receiver may attach trace context to the message as soon as it is
+			// delivered, so do not access msg below this point.
+			if messageType != message.MessageTypeAlterWAL {
+				continue
+			}
+
+			a.logger.Info(ctx, "underlying WAL scanner found AlterWAL boundary",
+				mlog.Stringer("sourceWALName", a.underlyingWALName),
+				mlog.Stringer("targetWALName", targetWALName),
+				mlog.Uint64("timeTick", messageTimeTick))
+
+			a.underlyingWALName = targetWALName
+			a.underlyingReadOption.DeliverPolicy = options.DeliverPolicyAll()
+			a.cutTs = messageTimeTick
+			a.excludedMessageID = nil
+			a.readerChangePending = true
+			return nil
+		}
+	}
+}
+
+func (a *underlyingWALScannerAdaptor) openUnderlyingWAL(
+	ctx context.Context,
+) (walimpls.ROWALImpls, bool, error) {
+	if a.sharedWAL != nil && a.sharedWAL.WALName() == a.underlyingWALName {
+		return a.sharedWAL, false, nil
+	}
+	underlyingWAL, err := a.underlyingROWALImplsOpener(ctx, a.underlyingWALName, a.channel)
+	if err != nil {
+		return nil, false, err
+	}
+	if underlyingWAL.WALName() != a.underlyingWALName {
+		actualWALName := underlyingWAL.WALName()
+		underlyingWAL.Close()
+		return nil, false, status.NewWALNameMismatchError(actualWALName.String(), a.underlyingWALName.String())
+	}
+	return underlyingWAL, true, nil
+}
+
+func (a *underlyingWALScannerAdaptor) createUnderlyingScannerWithBackoff(
+	ctx context.Context,
+	underlyingWAL walimpls.ROWALImpls,
+) (walimpls.ScannerImpls, error) {
+	backoffTimer := newScannerReadBackoffTimer()
+	for {
+		underlyingScanner, err := underlyingWAL.Read(ctx, a.underlyingReadOption)
+		if err == nil {
+			return underlyingScanner, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if isReadWALUnavailable(err) {
+			return nil, err
+		}
+
+		waker, nextInterval := backoffTimer.NextTimer()
+		a.logger.Warn(ctx, "create underlying WAL scanner failed, start a backoff",
+			mlog.Stringer("walName", underlyingWAL.WALName()),
+			mlog.Duration("nextInterval", nextInterval),
+			mlog.Err(err))
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-waker:
+		}
+	}
+}
+
+func normalizeUnderlyingWALDeliverPolicy(
+	deliverPolicy options.DeliverPolicy,
+) (options.DeliverPolicy, message.MessageID, error) {
+	switch policy := deliverPolicy.GetPolicy().(type) {
+	case *streamingpb.DeliverPolicy_StartFrom:
+		_, err := message.UnmarshalMessageID(policy.StartFrom)
+		return deliverPolicy, nil, err
+	case *streamingpb.DeliverPolicy_StartAfter:
+		messageID, err := message.UnmarshalMessageID(policy.StartAfter)
+		if err != nil {
+			return nil, nil, err
+		}
+		return options.DeliverPolicyStartFrom(messageID), messageID, nil
+	default:
+		return deliverPolicy, nil, nil
+	}
+}
+
+func isReadWALUnavailable(err error) bool {
+	return status.AsStreamingError(err).IsWALNameMismatch() || errors.Is(err, merr.ErrMqTopicNotFound)
+}
+
+func newUnderlyingWALUnavailableError(walName message.WALName, err error) error {
+	return status.NewUnrecoverableError("underlying WAL %s is unavailable: %s", walName, err.Error())
+}

@@ -121,7 +121,7 @@ func newScannerAdaptor(
 	}
 	readerWALName := innerWAL.WALName()
 	readerRole := metrics.WALReaderRoleCurrent
-	if startWALName, ok := getDeliverPolicyWALName(readOption.DeliverPolicy); ok && startWALName != innerWAL.WALName() {
+	if startWALName, ok := getDeliverPolicyWALName(readOption.DeliverPolicy); ok {
 		readerWALName = startWALName
 		readerRole = metrics.WALReaderRoleHistorical
 	}
