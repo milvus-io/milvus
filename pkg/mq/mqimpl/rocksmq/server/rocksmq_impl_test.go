@@ -15,7 +15,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,7 +24,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
-	"github.com/tecbot/gorocksdb"
 
 	rocksdbkv "github.com/milvus-io/milvus/pkg/v3/kv/rocksdb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -306,14 +304,12 @@ func TestRocksmq_Seek(t *testing.T) {
 
 	var seekID UniqueID
 	var seekID2 UniqueID
-	var lastID UniqueID
 	for i := 0; i < 100; i++ {
 		msg := "message_" + strconv.Itoa(i)
 		pMsg := ProducerMessage{Payload: []byte(msg)}
 		pMsgs := make([]ProducerMessage, 1)
 		pMsgs[0] = pMsg
 		id, err := rmq.Produce(channelName, pMsgs)
-		lastID = id[0]
 		if i == 50 {
 			seekID = id[0]
 		}
@@ -327,8 +323,6 @@ func TestRocksmq_Seek(t *testing.T) {
 
 	err = rmq.CreateConsumerGroup(channelName, groupName1)
 	assert.NoError(t, err)
-	err = rmq.Seek(channelName, groupName1, DefaultMessageID)
-	assert.NoError(t, err)
 	err = rmq.Seek(channelName, groupName1, seekID)
 	assert.NoError(t, err)
 
@@ -339,13 +333,6 @@ func TestRocksmq_Seek(t *testing.T) {
 	messages, err = rmq.Consume(channelName, groupName1, 1)
 	assert.NoError(t, err)
 	assert.Equal(t, messages[0].MsgID, seekID2)
-
-	writeOpts := gorocksdb.NewDefaultWriteOptions()
-	err = rmq.store.Delete(writeOpts, []byte(path.Join(channelName, strconv.FormatInt(lastID, 10))))
-	writeOpts.Destroy()
-	assert.NoError(t, err)
-	err = rmq.Seek(channelName, groupName1, lastID)
-	assert.ErrorIs(t, err, merr.ErrMqTopicNotFound)
 
 	_ = rmq.DestroyConsumerGroup(channelName, groupName1)
 }

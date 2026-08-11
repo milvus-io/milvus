@@ -64,7 +64,6 @@ type underlyingWALScannerAdaptor struct {
 	underlyingReadOption walimpls.ReadOption
 	cutTs                uint64
 	excludedMessageID    message.MessageID
-	readerChangePending  bool
 	messageCh            chan message.ImmutableMessage
 }
 
@@ -174,10 +173,9 @@ func (a *underlyingWALScannerAdaptor) consumeUnderlying(
 		return err
 	}
 	defer underlyingScanner.Close()
-	if a.readerChangePending && a.onUnderlyingScannerChanged != nil {
+	if a.onUnderlyingScannerChanged != nil {
 		a.onUnderlyingScannerChanged(a.underlyingWALName)
 	}
-	a.readerChangePending = false
 
 	for {
 		select {
@@ -236,7 +234,6 @@ func (a *underlyingWALScannerAdaptor) consumeUnderlying(
 			a.underlyingReadOption.DeliverPolicy = options.DeliverPolicyAll()
 			a.cutTs = messageTimeTick
 			a.excludedMessageID = nil
-			a.readerChangePending = true
 			return nil
 		}
 	}

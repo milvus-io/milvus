@@ -9,7 +9,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -156,9 +155,6 @@ func (rc *resumableConsumerImpl) createNewConsumer(opts *handler.ConsumerOptions
 			return nil, err
 		}
 		if err != nil {
-			if status.AsStreamingError(err).IsUnrecoverable() {
-				return nil, err
-			}
 			nextBackoff := backoff.NextBackOff()
 			logger.Warn(rc.ctx, "create consumer failed, retry...", mlog.Err(err), mlog.Duration("nextRetryInterval", nextBackoff))
 			time.Sleep(nextBackoff)
@@ -185,16 +181,11 @@ func (rc *resumableConsumerImpl) waitUntilUnavailable(consumer handler.Consumer)
 	case <-rc.ctx.Done():
 		return rc.ctx.Err()
 	case <-consumer.Done():
-		consumerErr := consumer.Error()
-		rc.logger.Warn(
-			rc.ctx, "consumer is done or encounter error, try to resume...",
-			mlog.Err(consumerErr),
+		rc.logger.Warn(rc.ctx, "consumer is done or encounter error, try to resume...",
+			mlog.Err(consumer.Error()),
 			mlog.Any("lastConfirmedMessageID", rc.mh.lastConfirmedMessageID),
 			mlog.Uint64("lastTimeTick", rc.mh.lastTimeTick),
 		)
-		if consumerErr != nil && status.AsStreamingError(consumerErr).IsUnrecoverable() {
-			return consumerErr
-		}
 		return nil
 	}
 }

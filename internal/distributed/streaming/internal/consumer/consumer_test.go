@@ -4,7 +4,6 @@ import (
 	"context"
 	"math/rand"
 	"strconv"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -43,8 +41,7 @@ func TestResumableConsumer(t *testing.T) {
 						"_tt": message.EncodeUint64(456),
 						"_v":  strconv.FormatInt(int64(rand.Int31n(2)), 10),
 						"_lc": walimplstest.NewTestMessageID(123).Marshal(),
-					},
-				),
+					}),
 			})
 			assert.True(t, result.MessageHandled)
 			assert.NoError(t, result.Error)
@@ -81,63 +78,6 @@ func TestResumableConsumer(t *testing.T) {
 
 	rc.Close()
 	<-rc.Done()
-}
-
-func TestResumableConsumerStopsOnUnrecoverableError(t *testing.T) {
-	t.Run("consumer runtime error", func(t *testing.T) {
-		c := mock_consumer.NewMockConsumer(t)
-		done := make(chan struct{})
-		close(done)
-		unrecoverable := status.NewUnrecoverableError("historical WAL unavailable")
-		c.EXPECT().Done().Return(done)
-		c.EXPECT().Error().Return(unrecoverable)
-		c.EXPECT().Close().Return(nil)
-
-		var factoryCalls atomic.Int32
-		rc := NewResumableConsumer(func(context.Context, *handler.ConsumerOptions) (consumer.Consumer, error) {
-			factoryCalls.Add(1)
-			return c, nil
-		}, &ConsumerOptions{
-			PChannel:      "test",
-			DeliverPolicy: options.DeliverPolicyAll(),
-			MessageHandler: adaptor.ChanMessageHandler(
-				make(chan message.ImmutableMessage, 1),
-			),
-		})
-		defer rc.Close()
-
-		select {
-		case <-rc.Done():
-		case <-time.After(time.Second):
-			t.Fatal("resumable consumer did not stop on unrecoverable runtime error")
-		}
-		assert.Equal(t, int32(1), factoryCalls.Load())
-		assert.True(t, status.AsStreamingError(rc.Error()).IsUnrecoverable())
-	})
-
-	t.Run("consumer creation error", func(t *testing.T) {
-		unrecoverable := status.NewUnrecoverableError("invalid historical checkpoint")
-		var factoryCalls atomic.Int32
-		rc := NewResumableConsumer(func(context.Context, *handler.ConsumerOptions) (consumer.Consumer, error) {
-			factoryCalls.Add(1)
-			return nil, unrecoverable
-		}, &ConsumerOptions{
-			PChannel:      "test",
-			DeliverPolicy: options.DeliverPolicyAll(),
-			MessageHandler: adaptor.ChanMessageHandler(
-				make(chan message.ImmutableMessage, 1),
-			),
-		})
-		defer rc.Close()
-
-		select {
-		case <-rc.Done():
-		case <-time.After(time.Second):
-			t.Fatal("resumable consumer did not stop on unrecoverable creation error")
-		}
-		assert.Equal(t, int32(1), factoryCalls.Load())
-		assert.True(t, status.AsStreamingError(rc.Error()).IsUnrecoverable())
-	})
 }
 
 func TestHandler(t *testing.T) {

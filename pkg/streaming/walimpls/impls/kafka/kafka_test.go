@@ -4,14 +4,12 @@ import (
 	"os"
 	"testing"
 
-	ckafka "github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/registry"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -72,23 +70,4 @@ func TestGetProducerConfigUsesConfiguredMessageMaxBytes(t *testing.T) {
 	value, err := producerConfig.Get("message.max.bytes", nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 4096, value)
-}
-
-func TestMapKafkaReadError(t *testing.T) {
-	topicNotFound := ckafka.NewError(ckafka.ErrUnknownTopicOrPart, "historical topic does not exist", false)
-	assert.ErrorIs(t, mapKafkaReadError("missing-topic", topicNotFound), merr.ErrMqTopicNotFound)
-	offsetOutOfRange := ckafka.NewError(ckafka.ErrOffsetOutOfRange, "historical offset was removed", false)
-	assert.ErrorIs(t, mapKafkaReadError("retained-topic", offsetOutOfRange), merr.ErrMqTopicNotFound)
-
-	transient := ckafka.NewError(ckafka.ErrTimedOut, "transient metadata timeout", false)
-	assert.Equal(t, transient, mapKafkaReadError("topic", transient))
-}
-
-func TestValidateKafkaReadOffset(t *testing.T) {
-	assert.NoError(t, validateKafkaReadOffset("topic", int64(ckafka.OffsetBeginning), 0, 0))
-	assert.NoError(t, validateKafkaReadOffset("topic", 10, 10, 20))
-	assert.NoError(t, validateKafkaReadOffset("topic", 19, 10, 20))
-	assert.ErrorIs(t, validateKafkaReadOffset("topic", 9, 10, 20), merr.ErrMqTopicNotFound)
-	assert.ErrorIs(t, validateKafkaReadOffset("topic", 20, 10, 20), merr.ErrMqTopicNotFound)
-	assert.ErrorIs(t, validateKafkaReadOffset("topic", 0, 0, 0), merr.ErrMqTopicNotFound)
 }

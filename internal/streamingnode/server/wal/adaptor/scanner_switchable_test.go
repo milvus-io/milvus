@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
 	mock_message "github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
@@ -279,7 +278,7 @@ func TestCrossWALCatchupSwitchesToTailingWAB(t *testing.T) {
 	defer writeAheadBuffer.Close()
 
 	outputCh := make(chan message.ImmutableMessage, 4)
-	readerRoles := make([]string, 0, 2)
+	readerWALNames := make([]message.WALName, 0, 2)
 	scanner := newSwitchableScanner(
 		"cross-wal-catchup-reader",
 		mlog.With(),
@@ -291,8 +290,8 @@ func TestCrossWALCatchupSwitchesToTailingWAB(t *testing.T) {
 			require.Equal(t, message.WALNameRocksmq, walName)
 			return oldWAL, nil
 		},
-		func(_ message.WALName, role string) {
-			readerRoles = append(readerRoles, role)
+		func(walName message.WALName) {
+			readerWALNames = append(readerWALNames, walName)
 		},
 	)
 
@@ -302,7 +301,7 @@ func TestCrossWALCatchupSwitchesToTailingWAB(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, marker, <-outputCh)
 	require.Equal(t, currentTimeTick, <-outputCh)
-	require.Equal(t, []string{metrics.WALReaderRoleHistorical, metrics.WALReaderRoleCurrent}, readerRoles)
+	require.Equal(t, []message.WALName{message.WALNameRocksmq, message.WALNameTest}, readerWALNames)
 
 	idleTimeTick := newTestNonPersistedTimeTickMessage(
 		201,
@@ -352,7 +351,7 @@ func TestUnderlyingWALScannerAdaptorFollowsChainWithCleanRepeatedWAL(t *testing.
 	)
 
 	opened := 0
-	readerSwitches := make([]message.WALName, 0, 3)
+	readerWALNames := make([]message.WALName, 0, 4)
 	outputCh := make(chan message.ImmutableMessage, 10)
 	scanner := newSwitchableScanner(
 		"migration-chain-reader",
@@ -381,8 +380,8 @@ func TestUnderlyingWALScannerAdaptorFollowsChainWithCleanRepeatedWAL(t *testing.
 				return nil, nil
 			}
 		},
-		func(walName message.WALName, _ string) {
-			readerSwitches = append(readerSwitches, walName)
+		func(walName message.WALName) {
+			readerWALNames = append(readerWALNames, walName)
 		},
 	)
 
@@ -391,10 +390,11 @@ func TestUnderlyingWALScannerAdaptorFollowsChainWithCleanRepeatedWAL(t *testing.
 	})
 	require.Equal(t, 4, opened)
 	require.Equal(t, []message.WALName{
+		message.WALNameRocksmq,
 		message.WALNameWoodpecker,
 		message.WALNameRocksmq,
 		message.WALNameTest,
-	}, readerSwitches)
+	}, readerWALNames)
 
 	var timeTicks []uint64
 	for _, msg := range messages {

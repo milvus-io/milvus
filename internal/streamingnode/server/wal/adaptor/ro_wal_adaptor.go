@@ -95,7 +95,7 @@ func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.S
 		w.roWALImpls,
 		opts,
 		w.underlyingROWALImplsOpener,
-		w.scanMetrics.NewScannerMetrics(),
+		w.scanMetrics.NewConsumerScannerMetrics(opts.VChannel, name),
 		func() { w.scanners.Remove(id) },
 		w.forceRecovery)
 	w.scanners.Insert(id, s)

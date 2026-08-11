@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
@@ -80,7 +79,6 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 		metrics:         scanMetrics,
 		readRateCounter: utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
-	s.metrics.SetReaderInfo(l.WALName(), metrics.WALReaderRoleCurrent)
 	go s.execute()
 	return s
 }
@@ -119,13 +117,6 @@ func newScannerAdaptor(
 		metrics:                    scanMetrics,
 		readRateCounter:            utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
-	readerWALName := innerWAL.WALName()
-	readerRole := metrics.WALReaderRoleCurrent
-	if startWALName, ok := getDeliverPolicyWALName(readOption.DeliverPolicy); ok {
-		readerWALName = startWALName
-		readerRole = metrics.WALReaderRoleHistorical
-	}
-	s.metrics.SetReaderInfo(readerWALName, readerRole)
 	go s.execute()
 	return s
 }
@@ -250,8 +241,8 @@ func (s *scannerAdaptorImpl) produceEventLoop(ctx context.Context, msgChan chan<
 		s.readOption.DeliverPolicy,
 		msgChan,
 		s.underlyingROWALImplsOpener,
-		func(walName message.WALName, role string) {
-			s.metrics.SwitchReaderInfo(walName, role)
+		func(walName message.WALName) {
+			s.metrics.SetReaderWALName(walName)
 		},
 	)
 	s.logger.Info(context.TODO(), "start produce loop of scanner at model", mlog.String("model", getScannerModel(scanner)))
@@ -262,7 +253,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(ctx context.Context, msgChan chan<
 			// so we need to enter slowdown mode to protect the wal from being overloaded.
 			// 2. when the scanner is working at tailing mode, the write operation is slow than the consume operation,
 			// so we enter into recovery mode to speed up the rate limit.
-			if getScannerModel(scanner) == metrics.WALScannerModelCatchup {
+			if _, ok := scanner.(*catchupScanner); ok {
 				// Create a checker that returns false when read rate > append rate.
 				// This indicates the scanner has caught up and slowdown should stop.
 				checker := s.createSlowdownChecker()
