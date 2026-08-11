@@ -59,6 +59,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "storage/FileManager.h"
+#include "storage/MmapManager.h"
 #include "storage/ThreadPool.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
@@ -124,6 +125,27 @@ class ScopedAsyncGrowingCatchupPolicy {
     SegcoreConfig& config_;
     int64_t previous_finalize_budget_ms_;
     int64_t previous_catchup_deadline_ms_;
+};
+
+class ScopedVectorFieldMmap {
+ public:
+    explicit ScopedVectorFieldMmap(bool value)
+        : config_(storage::MmapManager::GetInstance().GetMmapConfig()),
+          previous_(config_.GetVectorFieldEnableMmap()) {
+        config_.SetVectorFieldEnableMmap(value);
+    }
+
+    ~ScopedVectorFieldMmap() {
+        config_.SetVectorFieldEnableMmap(previous_);
+    }
+
+    ScopedVectorFieldMmap(const ScopedVectorFieldMmap&) = delete;
+    ScopedVectorFieldMmap&
+    operator=(const ScopedVectorFieldMmap&) = delete;
+
+ private:
+    storage::MmapConfig& config_;
+    bool previous_;
 };
 
 }  // namespace
@@ -2658,6 +2680,61 @@ TEST(GrowingIndexAsyncBuildTest, DestroyDuringBuildJoinsCleanly) {
     // BuildAsync re-checks IsCancelled() right after the kBeforeBuild hook, so
     // no first build was ever run for a segment that was already going away.
     EXPECT_FALSE(after_build_seen.load());
+}
+
+TEST(GrowingIndexAsyncBuildTest,
+     DestroyDuringMmapBuildKeepsRawBlocksUntilJoin) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ScopedVectorFieldMmap vector_field_mmap(true);
+    InterimIndexConfigForTest interim_config;
+    interim_config.chunk_rows = 1024;
+    interim_config.dense_vector_interim_index_type =
+        knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR;
+    ApplyInterimIndexConfigForTest(interim_config, config);
+
+    std::atomic<bool> at_before_build{false};
+    std::atomic<bool> release_build{false};
+    ScopedBuildHook hook([&](VectorFieldIndexing::GrowingBuildPhase phase) {
+        if (phase != VectorFieldIndexing::GrowingBuildPhase::kBeforeBuild) {
+            return;
+        }
+        at_before_build.store(true);
+        while (!release_build.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    });
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+    auto& mmap_manager = storage::MmapManager::GetInstance();
+    const auto usage_before = mmap_manager.GetDiskUsage();
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    InsertAsyncBatch(segment.get(), fixture.schema, 25000, 13);
+    ASSERT_TRUE(WaitFlag(at_before_build, /*timeout_ms=*/60000));
+    const auto usage_while_building = mmap_manager.GetDiskUsage();
+    ASSERT_GT(usage_while_building, usage_before);
+
+    std::atomic<bool> destroy_started{false};
+    std::atomic<bool> destroyed{false};
+    std::thread destroyer([&] {
+        destroy_started.store(true);
+        segment.reset();
+        destroyed.store(true);
+    });
+    EXPECT_TRUE(WaitFlag(destroy_started, /*timeout_ms=*/30000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_FALSE(destroyed.load());
+    EXPECT_EQ(mmap_manager.GetDiskUsage(), usage_while_building);
+
+    release_build.store(true);
+    destroyer.join();
+    EXPECT_TRUE(destroyed.load());
+    EXPECT_EQ(mmap_manager.GetDiskUsage(), usage_before);
 }
 
 // Spec §7 G2 step 3b / §4.6, the kQueued half of the destructor handshake
