@@ -123,6 +123,7 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
 
     data_.reserve(n);
     total_num_rows_ = n;
+    total_row_count_ = n;
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
     idx_to_offsets_.resize(n);
 
@@ -162,6 +163,7 @@ ScalarIndexSort<T>::BuildWithFieldData(
         total_num_rows_ += data->get_num_rows();
         length += data->get_num_rows() - data->get_null_count();
     }
+    total_row_count_ = total_num_rows_;
     if (total_num_rows_ == 0) {
         ThrowInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
     }
@@ -201,13 +203,16 @@ template <typename T>
 void
 ScalarIndexSort<T>::BuildWithArrayDataNested(
     const std::vector<FieldDataPtr>& datas) {
-    // calculate total_num_rows_
+    has_row_level_validity_ = true;
+    total_num_rows_ = 0;
+    total_row_count_ = 0;
     for (const auto& data : datas) {
         auto n = data->get_num_rows();
+        total_row_count_ += n;
         for (int64_t i = 0; i < n; i++) {
             if (data->is_valid(i)) {
-                // RawValue maps logical->physical so compact nullable array
-                // FieldData is read correctly (Data()[i] would overrun).
+                // ARRAY FieldData is row-dense; use the common logical-row
+                // accessor here and in the indexing pass below.
                 total_num_rows_ +=
                     reinterpret_cast<const Array*>(data->RawValue(i))->length();
             }
@@ -219,27 +224,33 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
     }
 
     data_.reserve(total_num_rows_);
-    // all values are valid for nested index because any given slot in a valid_bitset_ denotes one element in a valid row
-    valid_bitset_ = TargetBitmap(total_num_rows_, true);
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    row_valid_bitset_ = TargetBitmap(total_row_count_, false);
     int64_t offset = 0;
+    int64_t row_offset = 0;
     for (const auto& data : datas) {
         auto n = data->get_num_rows();
-        for (int64_t i = 0; i < n; i++) {
+        for (int64_t i = 0; i < n; i++, row_offset++) {
             if (!data->is_valid(i)) {
                 continue;
             }
+            row_valid_bitset_.set(row_offset);
             auto* array = reinterpret_cast<const Array*>(data->RawValue(i));
             auto length = array->length();
             for (int64_t j = 0; j < length; j++) {
-                data_.emplace_back(
-                    IndexStructure(array->get_data<T>(j), offset));
+                if (array->is_element_valid(j)) {
+                    auto value = array->template get_data_unchecked<T>(j);
+                    data_.emplace_back(IndexStructure(value, offset));
+                    valid_bitset_.set(offset);
+                }
                 offset++;
             }
         }
     }
     std::sort(data_.begin(), data_.end());
     idx_to_offsets_.resize(total_num_rows_);
-    for (size_t i = 0; i < total_num_rows_; ++i) {
+    std::fill(idx_to_offsets_.begin(), idx_to_offsets_.end(), -1);
+    for (size_t i = 0; i < data_.size(); ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
     }
     idx_to_offsets_ptr_ = idx_to_offsets_.data();
@@ -269,6 +280,10 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
     milvus::fastmem::FastMemcpy(
         index_num_rows.get(), &total_num_rows_, sizeof(size_t));
 
+    std::shared_ptr<uint8_t[]> index_row_count(new uint8_t[sizeof(size_t)]);
+    milvus::fastmem::FastMemcpy(
+        index_row_count.get(), &total_row_count_, sizeof(size_t));
+
     std::shared_ptr<uint8_t[]> is_nested_data(new uint8_t[sizeof(bool)]);
     milvus::fastmem::FastMemcpy(
         is_nested_data.get(), &is_nested_index_, sizeof(bool));
@@ -278,6 +293,16 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
     res_set.Append("index_length", index_length, sizeof(size_t));
     res_set.Append("index_num_rows", index_num_rows, sizeof(size_t));
     res_set.Append("is_nested_index", is_nested_data, sizeof(bool));
+    if (is_nested_index_) {
+        auto row_valid_bytes = row_valid_bitset_.size_in_bytes();
+        std::shared_ptr<uint8_t[]> row_valid_data(new uint8_t[row_valid_bytes]);
+        milvus::fastmem::FastMemcpy(
+            row_valid_data.get(),
+            reinterpret_cast<const uint8_t*>(row_valid_bitset_.data()),
+            row_valid_bytes);
+        res_set.Append("index_row_count", index_row_count, sizeof(size_t));
+        res_set.Append("row_valid_bitset", row_valid_data, row_valid_bytes);
+    }
 
     milvus::Disassemble(res_set);
 
@@ -407,14 +432,46 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
     } else {
         total_num_rows_ = index_size;
     }
+    total_row_count_ = total_num_rows_;
+    auto index_row_count = index_binary.GetByName("index_row_count");
+    if (index_row_count) {
+        milvus::fastmem::FastMemcpy(&total_row_count_,
+                                    index_row_count->data.get(),
+                                    (size_t)index_row_count->size);
+    } else if (is_nested_index_) {
+        if (auto num_rows =
+                GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY);
+            num_rows.has_value() && num_rows.value() >= 0) {
+            total_row_count_ = num_rows.value();
+        }
+    }
 
     idx_to_offsets_.resize(total_num_rows_);
+    std::fill(idx_to_offsets_.begin(), idx_to_offsets_.end(), -1);
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
 
     for (size_t i = 0; i < Size(); ++i) {
         const auto& item = operator[](i);
         idx_to_offsets_[item.idx_] = i;
         valid_bitset_.set(item.idx_);
+    }
+    if (is_nested_index_) {
+        has_row_level_validity_ = false;
+        row_valid_bitset_ = TargetBitmap(total_row_count_, true);
+        auto row_valid_data = index_binary.GetByName("row_valid_bitset");
+        if (row_valid_data) {
+            has_row_level_validity_ = true;
+            auto row_valid_bytes = row_valid_bitset_.size_in_bytes();
+            AssertInfo(row_valid_data->size >= row_valid_bytes,
+                       "invalid row_valid_bitset size: expected at least {}, "
+                       "got {}",
+                       row_valid_bytes,
+                       row_valid_data->size);
+            milvus::fastmem::FastMemcpy(
+                reinterpret_cast<uint8_t*>(row_valid_bitset_.data()),
+                row_valid_data->data.get(),
+                row_valid_bytes);
+        }
     }
     idx_to_offsets_ptr_ = idx_to_offsets_.data();
     idx_to_offsets_size_ = idx_to_offsets_.size();
@@ -507,8 +564,9 @@ template <typename T>
 const TargetBitmap
 ScalarIndexSort<T>::IsNull() {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(total_num_rows_, true);
-    bitset &= valid_bitset_;
+    auto count = is_nested_index_ ? total_row_count_ : total_num_rows_;
+    TargetBitmap bitset(count, true);
+    bitset &= is_nested_index_ ? row_valid_bitset_ : valid_bitset_;
     bitset.flip();
     return bitset;
 }
@@ -517,6 +575,28 @@ template <typename T>
 TargetBitmap
 ScalarIndexSort<T>::IsNotNull() {
     AssertInfo(is_built_, "index has not been built");
+    auto count = is_nested_index_ ? total_row_count_ : total_num_rows_;
+    TargetBitmap bitset(count, true);
+    bitset &= is_nested_index_ ? row_valid_bitset_ : valid_bitset_;
+    return bitset;
+}
+
+template <typename T>
+const TargetBitmap
+ScalarIndexSort<T>::IsElementNull() {
+    AssertInfo(is_built_, "index has not been built");
+    AssertInfo(is_nested_index_, "IsElementNull requires nested index");
+    TargetBitmap bitset(total_num_rows_, true);
+    bitset &= valid_bitset_;
+    bitset.flip();
+    return bitset;
+}
+
+template <typename T>
+TargetBitmap
+ScalarIndexSort<T>::IsElementNotNull() {
+    AssertInfo(is_built_, "index has not been built");
+    AssertInfo(is_nested_index_, "IsElementNotNull requires nested index");
     TargetBitmap bitset(total_num_rows_, true);
     bitset &= valid_bitset_;
     return bitset;
@@ -696,6 +776,7 @@ ScalarIndexSort<T>::WriteEntries(storage::IndexEntryWriter* writer) {
 
     writer->PutMeta("index_length", data_.size());
     writer->PutMeta("num_rows", total_num_rows_);
+    writer->PutMeta("row_count", total_row_count_);
     writer->PutMeta("is_nested", is_nested_index_);
 
     writer->WriteEntry(
@@ -708,6 +789,12 @@ ScalarIndexSort<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     writer->WriteEntry("valid_bitset",
                        reinterpret_cast<const uint8_t*>(valid_bitset_.data()),
                        valid_bitset_.size_in_bytes());
+    if (is_nested_index_) {
+        writer->WriteEntry(
+            "row_valid_bitset",
+            reinterpret_cast<const uint8_t*>(row_valid_bitset_.data()),
+            row_valid_bitset_.size_in_bytes());
+    }
 }
 
 template <typename T>
@@ -716,7 +803,16 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                                 const Config& config) {
     size_t index_size = reader.GetMeta<size_t>("index_length");
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
+    const bool has_row_count = reader.HasMeta("row_count");
+    total_row_count_ = reader.GetMeta<size_t>("row_count", total_num_rows_);
     is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
+    if (is_nested_index_ && !has_row_count) {
+        if (auto num_rows =
+                GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY);
+            num_rows.has_value() && num_rows.value() >= 0) {
+            total_row_count_ = num_rows.value();
+        }
+    }
 
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 
@@ -803,6 +899,27 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                bitset_entry.data.data(),
                bitset_bytes);
     };
+    auto load_row_valid_bitset = [&]() {
+        if (!is_nested_index_) {
+            return;
+        }
+        has_row_level_validity_ = false;
+        row_valid_bitset_ = TargetBitmap(total_row_count_, true);
+        if (!reader.HasEntry("row_valid_bitset")) {
+            return;
+        }
+        has_row_level_validity_ = true;
+        auto bitset_entry = reader.ReadEntry("row_valid_bitset");
+        auto bitset_bytes = row_valid_bitset_.size_in_bytes();
+        AssertInfo(bitset_entry.data.size() >= bitset_bytes,
+                   "invalid row_valid_bitset size: expected at least {}, got "
+                   "{}",
+                   bitset_bytes,
+                   bitset_entry.data.size());
+        memcpy(reinterpret_cast<uint8_t*>(row_valid_bitset_.data()),
+               bitset_entry.data.data(),
+               bitset_bytes);
+    };
     auto get_idx_to_offsets_bytes = [&]() {
         auto offsets_bytes = reader.GetEntrySize("idx_to_offsets");
         auto expected_offsets_bytes = total_num_rows_ * sizeof(int32_t);
@@ -886,6 +1003,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
     } else {
         // Backward compat: recompute from index_data
         idx_to_offsets_.resize(total_num_rows_);
+        std::fill(idx_to_offsets_.begin(), idx_to_offsets_.end(), -1);
         valid_bitset_ = TargetBitmap(total_num_rows_, false);
         for (size_t i = 0; i < Size(); ++i) {
             const auto& item = operator[](i);
@@ -895,6 +1013,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         idx_to_offsets_ptr_ = idx_to_offsets_.data();
         idx_to_offsets_size_ = idx_to_offsets_.size();
     }
+    load_row_valid_bitset();
 
     is_built_ = true;
     ComputeByteSize();

@@ -546,6 +546,81 @@ TEST(Util_Segcore, MergeDataArrayWithNullableVectorArrayUsesLogicalOffsets) {
     }
 }
 
+TEST(Util_Segcore, MergeDataArrayPreservesNullableVectorArrayElementValidity) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    constexpr int64_t dim = 2;
+    auto vec = schema->AddDebugVectorArrayField("embeddings",
+                                                DataType::VECTOR_FLOAT,
+                                                dim,
+                                                knowhere::metric::MAX_SIM,
+                                                true,
+                                                true);
+    auto& field_meta = (*schema)[vec];
+
+    std::array<bool, 3> row_valid = {true, false, true};
+    std::array<VectorFieldProto, 2> compact_rows;
+
+    compact_rows[0].set_dim(dim);
+    const std::array<float, 4> row0_payload = {1.0F, 2.0F, 5.0F, 6.0F};
+    compact_rows[0].mutable_float_vector()->mutable_data()->Add(
+        row0_payload.begin(), row0_payload.end());
+    compact_rows[0].add_valid_data(true);
+    compact_rows[0].add_valid_data(false);
+    compact_rows[0].add_valid_data(true);
+
+    compact_rows[1].set_dim(dim);
+    compact_rows[1].mutable_float_vector();
+    compact_rows[1].add_valid_data(false);
+
+    auto data_array = CreateVectorDataArrayFrom(compact_rows.data(),
+                                                row_valid.data(),
+                                                row_valid.size(),
+                                                compact_rows.size(),
+                                                field_meta);
+
+    std::map<FieldId, std::unique_ptr<DataArray>> output_fields_data;
+    output_fields_data[vec] = std::move(data_array);
+
+    std::vector<MergeBase> merge_bases;
+    merge_bases.emplace_back(&output_fields_data, 2);
+    merge_bases.emplace_back(&output_fields_data, 0);
+    merge_bases.emplace_back(&output_fields_data, 1);
+
+    auto merged = MergeDataArray(merge_bases, field_meta);
+
+    const auto& merged_row_valid = GetFieldDataRowValidData(*merged);
+    ASSERT_EQ(merged_row_valid.size(), 3);
+    EXPECT_TRUE(merged_row_valid[0]);
+    EXPECT_TRUE(merged_row_valid[1]);
+    EXPECT_FALSE(merged_row_valid[2]);
+
+    const auto& rows = merged->vectors().vector_array().data();
+    ASSERT_EQ(rows.size(), 3);
+
+    ASSERT_TRUE(rows.Get(0).has_float_vector());
+    EXPECT_EQ(rows.Get(0).float_vector().data_size(), 0);
+    ASSERT_EQ(rows.Get(0).valid_data_size(), 1);
+    EXPECT_FALSE(rows.Get(0).valid_data(0));
+
+    ASSERT_TRUE(rows.Get(1).has_float_vector());
+    ASSERT_EQ(rows.Get(1).float_vector().data_size(), 4);
+    EXPECT_FLOAT_EQ(rows.Get(1).float_vector().data(0), 1.0F);
+    EXPECT_FLOAT_EQ(rows.Get(1).float_vector().data(1), 2.0F);
+    EXPECT_FLOAT_EQ(rows.Get(1).float_vector().data(2), 5.0F);
+    EXPECT_FLOAT_EQ(rows.Get(1).float_vector().data(3), 6.0F);
+    ASSERT_EQ(rows.Get(1).valid_data_size(), 3);
+    EXPECT_TRUE(rows.Get(1).valid_data(0));
+    EXPECT_FALSE(rows.Get(1).valid_data(1));
+    EXPECT_TRUE(rows.Get(1).valid_data(2));
+
+    ASSERT_TRUE(rows.Get(2).has_float_vector());
+    EXPECT_EQ(rows.Get(2).float_vector().data_size(), 0);
+    EXPECT_EQ(rows.Get(2).valid_data_size(), 0);
+}
+
 // Tests for CheckCancellation utility function
 TEST(UtilSegcore, CheckCancellationNullContext) {
     using namespace milvus::segcore;

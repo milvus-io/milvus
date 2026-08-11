@@ -9,6 +9,8 @@
 #include <vector>
 
 #include "bitset/bitset.h"
+#include "common/Array.h"
+#include "common/Slice.h"
 #include "common/Tracer.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
@@ -28,6 +30,82 @@
 
 using namespace milvus;
 using namespace milvus::index;
+
+namespace {
+
+ScalarFieldProto
+BuildNullableIntArrayValue(const std::vector<int32_t>& values,
+                           const std::vector<bool>& valid_data) {
+    ScalarFieldProto proto;
+    proto.mutable_int_data()->mutable_data()->Add(values.begin(), values.end());
+    for (auto valid : valid_data) {
+        proto.add_valid_data(valid);
+    }
+    return proto;
+}
+
+FieldDataPtr
+BuildElementNullableIntArrayFieldData() {
+    std::vector<Array> rows = {
+        Array(BuildNullableIntArrayValue({0, 2}, {false, true}), true),
+        Array(BuildNullableIntArrayValue({1, 2}, {true, true}), true),
+        Array(BuildNullableIntArrayValue({0, 3}, {true, true}), true),
+        Array(BuildNullableIntArrayValue({}, {}), true),
+        Array(BuildNullableIntArrayValue({4, 0}, {true, false}), true),
+    };
+    auto field_data = storage::CreateFieldData(
+        DataType::ARRAY, DataType::INT32, true, true, 1, rows.size());
+    uint8_t row_valid_data = 0x1D;  // rows 0,2,3,4 valid; row 1 null.
+    field_data->FillFieldData(
+        rows.data(), &row_valid_data, rows.size(), 0);
+    return field_data;
+}
+
+storage::FileManagerContext
+CreateElementNullableScalarSortContext() {
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+
+    storage::FieldDataMeta field_meta{1, 2, 3, 102};
+    field_meta.field_schema.set_data_type(proto::schema::DataType::Array);
+    field_meta.field_schema.set_element_type(proto::schema::DataType::Int32);
+    field_meta.field_schema.set_nullable(true);
+    field_meta.field_schema.set_element_nullable(true);
+    storage::IndexMeta index_meta{3, 102, 1001, 10001};
+    return storage::FileManagerContext(
+        field_meta, index_meta, chunk_manager, fs);
+}
+
+void
+AssertElementNullableScalarSort(ScalarIndex<int32_t>& index) {
+    auto assert_bitmap = [](const TargetBitmap& actual,
+                            const std::vector<bool>& expected) {
+        ASSERT_EQ(actual.size(), expected.size());
+        for (size_t i = 0; i < expected.size(); ++i) {
+            EXPECT_EQ(actual[i], expected[i]) << "offset " << i;
+        }
+    };
+
+    ASSERT_TRUE(index.HasRowLevelValidity());
+    int32_t zero = 0;
+    assert_bitmap(index.In(1, &zero),
+                  {false, false, true, false, false, false});
+    assert_bitmap(index.NotIn(1, &zero),
+                  {false, true, false, true, true, false});
+    assert_bitmap(index.IsNull(), {false, true, false, false, false});
+    assert_bitmap(index.IsNotNull(), {true, false, true, true, true});
+    assert_bitmap(index.IsElementNull(),
+                  {true, false, false, false, false, true});
+    assert_bitmap(index.IsElementNotNull(),
+                  {false, true, true, true, true, false});
+    assert_bitmap(index.Range(1, OpType::GreaterThan),
+                  {false, true, false, true, true, false});
+}
+
+}  // namespace
 
 static storage::FileManagerContext
 CreateScalarSortTestFileManagerContext() {
@@ -82,6 +160,45 @@ test_stlsort_for_range(
         }
     }
 }
+
+TEST(StlSortIndexTest, NestedElementNullPersistsAcrossIndexFormats) {
+    auto field_data = BuildElementNullableIntArrayFieldData();
+    auto ctx = CreateElementNullableScalarSortContext();
+
+    ScalarIndexSort<int32_t> index(ctx, true);
+    index.BuildWithFieldData({field_data});
+    ASSERT_EQ(index.Count(), 6);
+    AssertElementNullableScalarSort(index);
+
+    auto binary_set = index.Serialize({});
+    ScalarIndexSort<int32_t> binary_loaded(ctx, true);
+    binary_loaded.Load(binary_set, {});
+    ASSERT_EQ(binary_loaded.Count(), 6);
+    AssertElementNullableScalarSort(binary_loaded);
+
+    auto legacy_binary_set = index.Serialize({});
+    milvus::Assemble(legacy_binary_set);
+    ASSERT_NE(legacy_binary_set.Erase("row_valid_bitset"), nullptr);
+    ASSERT_NE(legacy_binary_set.Erase("index_row_count"), nullptr);
+    Config legacy_config;
+    legacy_config[INDEX_NUM_ROWS_KEY] = 5;
+    ScalarIndexSort<int32_t> legacy_loaded(ctx, true);
+    legacy_loaded.Load(legacy_binary_set, legacy_config);
+    ASSERT_FALSE(legacy_loaded.HasRowLevelValidity());
+    EXPECT_EQ(legacy_loaded.IsNull().size(), 5);
+    EXPECT_EQ(legacy_loaded.IsNotNull().size(), 5);
+
+    auto upload_result = index.UploadUnified({});
+    Config config;
+    config["index_files"] = upload_result->GetIndexFiles();
+    config[milvus::LOAD_PRIORITY] =
+        proto::common::LoadPriority::HIGH;
+    ScalarIndexSort<int32_t> v3_loaded(ctx, true);
+    v3_loaded.LoadUnified(config);
+    ASSERT_EQ(v3_loaded.Count(), 6);
+    AssertElementNullableScalarSort(v3_loaded);
+}
+
 TEST(StlSortIndexTest, TestRange) {
     std::vector<int64_t> data = {10, 2, 6, 5, 9, 3, 7, 8, 4, 1};
     {

@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "bitset/bitset.h"
+#include "common/Array.h"
 #include "common/Consts.h"
 #include "common/PrometheusClient.h"
 #include "common/Schema.h"
@@ -576,4 +577,197 @@ TEST(ArrayInvertedIndexRegression,
                 << "nested=" << nested_index << ", mixed row=" << row;
         }
     }
+}
+
+namespace {
+
+storage::FileManagerContext
+CreateElementNullableInvertedIndexContext(
+    proto::schema::DataType element_type,
+    int64_t field_id,
+    int64_t index_build_id) {
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+
+    storage::FieldDataMeta field_meta{1, 2, 3, field_id};
+    field_meta.field_schema.set_data_type(proto::schema::DataType::Array);
+    field_meta.field_schema.set_element_type(element_type);
+    field_meta.field_schema.set_nullable(true);
+    field_meta.field_schema.set_element_nullable(true);
+    storage::IndexMeta index_meta{
+        3, field_id, index_build_id, index_build_id};
+    return storage::FileManagerContext(
+        field_meta, index_meta, chunk_manager, fs);
+}
+
+ScalarFieldProto
+BuildNullableIntArrayValueForInvertedTest(
+    const std::vector<int32_t>& values,
+    const std::vector<bool>& valid_data) {
+    ScalarFieldProto proto;
+    proto.mutable_int_data()->mutable_data()->Add(values.begin(), values.end());
+    for (auto valid : valid_data) {
+        proto.add_valid_data(valid);
+    }
+    return proto;
+}
+
+ScalarFieldProto
+BuildNullableStringArrayValueForInvertedTest(
+    const std::vector<std::string>& values,
+    const std::vector<bool>& valid_data) {
+    ScalarFieldProto proto;
+    for (const auto& value : values) {
+        proto.mutable_string_data()->add_data(value);
+    }
+    for (auto valid : valid_data) {
+        proto.add_valid_data(valid);
+    }
+    return proto;
+}
+
+FieldDataPtr
+BuildElementNullableIntArrayFieldDataForInvertedTest() {
+    std::vector<Array> rows = {
+        Array(BuildNullableIntArrayValueForInvertedTest(
+                  {0, 2}, {false, true}),
+              true),
+        Array(BuildNullableIntArrayValueForInvertedTest(
+                  {1, 2}, {true, true}),
+              true),
+        Array(BuildNullableIntArrayValueForInvertedTest(
+                  {0, 3}, {true, true}),
+              true),
+        Array(BuildNullableIntArrayValueForInvertedTest({}, {}), true),
+        Array(BuildNullableIntArrayValueForInvertedTest(
+                  {4, 0}, {true, false}),
+              true),
+    };
+    auto field_data = storage::CreateFieldData(
+        DataType::ARRAY, DataType::INT32, true, true, 1, rows.size());
+    uint8_t row_valid_data = 0x1D;  // rows 0,2,3,4 valid; row 1 null.
+    field_data->FillFieldData(
+        rows.data(), &row_valid_data, rows.size(), 0);
+    return field_data;
+}
+
+FieldDataPtr
+BuildElementNullableStringArrayFieldDataForInvertedTest() {
+    std::vector<Array> rows = {
+        Array(BuildNullableStringArrayValueForInvertedTest(
+                  {"", "bee"}, {false, true}),
+              true),
+        Array(BuildNullableStringArrayValueForInvertedTest(
+                  {"row", "null"}, {true, true}),
+              true),
+        Array(BuildNullableStringArrayValueForInvertedTest(
+                  {"", "cat"}, {true, true}),
+              true),
+        Array(BuildNullableStringArrayValueForInvertedTest({}, {}), true),
+        Array(BuildNullableStringArrayValueForInvertedTest(
+                  {"dog", ""}, {true, false}),
+              true),
+    };
+    auto field_data = storage::CreateFieldData(
+        DataType::ARRAY, DataType::VARCHAR, true, true, 1, rows.size());
+    uint8_t row_valid_data = 0x1D;  // rows 0,2,3,4 valid; row 1 null.
+    field_data->FillFieldData(
+        rows.data(), &row_valid_data, rows.size(), 0);
+    return field_data;
+}
+
+void
+AssertElementNullableBitmap(const TargetBitmap& actual,
+                            const std::vector<bool>& expected) {
+    ASSERT_EQ(actual.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(actual[i], expected[i]) << "offset " << i;
+    }
+}
+
+template <typename T>
+std::unique_ptr<index::InvertedIndexTantivy<T>>
+BuildAndLoadElementNullableInvertedIndex(
+    proto::schema::DataType element_type,
+    int64_t field_id,
+    int64_t index_build_id,
+    const FieldDataPtr& field_data) {
+    auto ctx = CreateElementNullableInvertedIndexContext(
+        element_type, field_id, index_build_id);
+    std::vector<std::string> index_files;
+    {
+        index::InvertedIndexTantivy<T> build_index(
+            index::TANTIVY_INDEX_LATEST_VERSION, ctx, false, true, true);
+        build_index.BuildWithFieldData({field_data});
+        auto upload_result = build_index.UploadUnified({});
+        index_files = upload_result->GetIndexFiles();
+    }
+
+    ctx.set_for_loading_index(true);
+    auto loaded_index = std::make_unique<index::InvertedIndexTantivy<T>>(
+        index::TANTIVY_INDEX_LATEST_VERSION, ctx, false, true, true);
+    Config config;
+    config["index_files"] = index_files;
+    config[milvus::LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+    loaded_index->LoadUnified(config);
+    return loaded_index;
+}
+
+}  // namespace
+
+TEST(ArrayInvertedIndexElementNullable,
+     NestedIntPersistsRowAndElementValidity) {
+    auto index = BuildAndLoadElementNullableInvertedIndex<int32_t>(
+        proto::schema::DataType::Int32,
+        201,
+        1201,
+        BuildElementNullableIntArrayFieldDataForInvertedTest());
+
+    ASSERT_TRUE(index->HasRowLevelValidity());
+    ASSERT_EQ(index->Count(), 6);
+    int32_t zero = 0;
+    AssertElementNullableBitmap(index->In(1, &zero),
+                                {false, false, true, false, false, false});
+    AssertElementNullableBitmap(index->NotIn(1, &zero),
+                                {false, true, false, true, true, false});
+    AssertElementNullableBitmap(index->IsNull(),
+                                {false, true, false, false, false});
+    AssertElementNullableBitmap(index->IsNotNull(),
+                                {true, false, true, true, true});
+    AssertElementNullableBitmap(index->IsElementNull(),
+                                {true, false, false, false, false, true});
+    AssertElementNullableBitmap(index->IsElementNotNull(),
+                                {false, true, true, true, true, false});
+    AssertElementNullableBitmap(index->Range(1, OpType::GreaterThan),
+                                {false, true, false, true, true, false});
+}
+
+TEST(ArrayInvertedIndexElementNullable,
+     NestedStringPersistsRowAndElementValidity) {
+    auto index = BuildAndLoadElementNullableInvertedIndex<std::string>(
+        proto::schema::DataType::VarChar,
+        202,
+        1202,
+        BuildElementNullableStringArrayFieldDataForInvertedTest());
+
+    ASSERT_TRUE(index->HasRowLevelValidity());
+    ASSERT_EQ(index->Count(), 6);
+    std::string empty;
+    AssertElementNullableBitmap(index->In(1, &empty),
+                                {false, false, true, false, false, false});
+    AssertElementNullableBitmap(index->NotIn(1, &empty),
+                                {false, true, false, true, true, false});
+    AssertElementNullableBitmap(index->IsNull(),
+                                {false, true, false, false, false});
+    AssertElementNullableBitmap(index->IsNotNull(),
+                                {true, false, true, true, true});
+    AssertElementNullableBitmap(index->IsElementNull(),
+                                {true, false, false, false, false, true});
+    AssertElementNullableBitmap(index->IsElementNotNull(),
+                                {false, true, true, true, true, false});
+    AssertElementNullableBitmap(index->PrefixMatch("d"),
+                                {false, false, false, false, true, false});
 }

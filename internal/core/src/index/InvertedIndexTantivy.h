@@ -47,6 +47,9 @@
 namespace milvus::index {
 
 const std::string INDEX_NULL_OFFSET_FILE_NAME = "index_null_offset";
+const std::string INDEX_ELEMENT_NULL_OFFSET_FILE_NAME =
+    "index_element_null_offset";
+const std::string INDEX_NESTED_ROW_COUNT_FILE_NAME = "index_nested_row_count";
 
 inline TantivyDataType
 get_tantivy_data_type(proto::schema::DataType data_type) {
@@ -177,6 +180,12 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     IsNotNull() override;
 
     const TargetBitmap
+    IsElementNull() override;
+
+    TargetBitmap
+    IsElementNotNull() override;
+
+    const TargetBitmap
     InApplyFilter(
         size_t n,
         const T* values,
@@ -227,12 +236,20 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         // null_offset_: vector<size_t>
         total += null_offset_.capacity() * sizeof(size_t);
 
+        // element_null_offset_: vector<size_t>
+        total += element_null_offset_.capacity() * sizeof(size_t);
+
         this->cached_byte_size_ = total;
     }
 
     bool
     IsNestedIndex() const override {
         return is_nested_index_;
+    }
+
+    bool
+    HasRowLevelValidity() const override {
+        return !is_nested_index_ || has_row_level_validity_;
     }
 
     virtual const TargetBitmap
@@ -380,6 +397,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // all data need to be built to align the offset
     // so need to store null_offset_ in inverted index additionally
     std::vector<size_t> null_offset_{};
+    // Nested ARRAY only. null_offset_ records row nulls, while
+    // element_null_offset_ records nulls in the element doc-id space.
+    std::vector<size_t> element_null_offset_{};
+    size_t nested_row_count_{0};
+    bool has_row_level_validity_{true};
 
     // `inverted_index_single_segment_` is used to control whether to build tantivy index with single segment.
     //

@@ -20,13 +20,16 @@
 #include <stdlib.h>
 #include <iosfwd>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include <yaml-cpp/yaml.h>
 
 #include "common/Array.h"
 #include "common/Consts.h"
+#include "common/FastMem.h"
 #include "common/FieldDataInterface.h"
 #include "common/Tracer.h"
 #include "common/TracerBase.h"
@@ -329,7 +332,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         for (size_t i = 0; i < data_.size() && s.size() < max_vals; i++) {
             auto& array = data_[i];
             for (size_t j = 0; j < array.length() && s.size() < max_vals; ++j) {
-                auto val = array.template get_data<T>(j);
+                auto val = array.template get_data_unchecked<T>(j);
                 if (s.insert(val).second) {
                     test_data.push_back(val);
                 }
@@ -359,7 +362,7 @@ class ArrayBitmapIndexTest : public testing::Test {
                     return false;
                 }
                 for (size_t j = 0; j < array.length(); ++j) {
-                    auto val = array.template get_data<T>(j);
+                    auto val = array.template get_data_unchecked<T>(j);
                     if (s.find(val) != s.end()) {
                         return true;
                     }
@@ -392,7 +395,7 @@ class ArrayBitmapIndexTest : public testing::Test {
                     return false;
                 }
                 for (size_t j = 0; j < array.length(); ++j) {
-                    auto val = array.template get_data<T>(j);
+                    auto val = array.template get_data_unchecked<T>(j);
                     if (s.find(val) != s.end()) {
                         // contains a queried value -> excluded from NotIn
                         return false;
@@ -610,9 +613,20 @@ TEST(BitmapIndexArrayNestedTest, BuildAndLoadElementLevelBitmap) {
 
     auto is_null = loaded_index->IsNull();
     auto is_not_null = loaded_index->IsNotNull();
+    ASSERT_EQ(is_null.size(), 4);
+    ASSERT_EQ(is_not_null.size(), 4);
     for (size_t i = 0; i < 4; ++i) {
-        EXPECT_FALSE(is_null[i]);
-        EXPECT_TRUE(is_not_null[i]);
+        EXPECT_EQ(is_null[i], i == 2);
+        EXPECT_EQ(is_not_null[i], i != 2);
+    }
+
+    auto is_element_null = loaded_index->IsElementNull();
+    auto is_element_not_null = loaded_index->IsElementNotNull();
+    ASSERT_EQ(is_element_null.size(), 4);
+    ASSERT_EQ(is_element_not_null.size(), 4);
+    for (size_t i = 0; i < 4; ++i) {
+        EXPECT_FALSE(is_element_null[i]);
+        EXPECT_TRUE(is_element_not_null[i]);
     }
 
     auto element = loaded_index->Reverse_Lookup(3);
@@ -688,9 +702,20 @@ TEST(BitmapIndexArrayNestedTest, UnifiedLoadRestoresNestedBitmapMeta) {
 
     auto is_null = loaded_index->IsNull();
     auto is_not_null = loaded_index->IsNotNull();
+    ASSERT_EQ(is_null.size(), 4);
+    ASSERT_EQ(is_not_null.size(), 4);
     for (size_t i = 0; i < 4; ++i) {
-        EXPECT_FALSE(is_null[i]);
-        EXPECT_TRUE(is_not_null[i]);
+        EXPECT_EQ(is_null[i], i == 2);
+        EXPECT_EQ(is_not_null[i], i != 2);
+    }
+
+    auto is_element_null = loaded_index->IsElementNull();
+    auto is_element_not_null = loaded_index->IsElementNotNull();
+    ASSERT_EQ(is_element_null.size(), 4);
+    ASSERT_EQ(is_element_not_null.size(), 4);
+    for (size_t i = 0; i < 4; ++i) {
+        EXPECT_FALSE(is_element_null[i]);
+        EXPECT_TRUE(is_element_not_null[i]);
     }
 
     boost::filesystem::remove_all(root_path);
@@ -767,9 +792,20 @@ TEST(BitmapIndexArrayNestedTest, UnifiedMmapLoadRestoresNestedBitmapMeta) {
 
     auto is_null = loaded_index->IsNull();
     auto is_not_null = loaded_index->IsNotNull();
-    for (size_t i = 0; i < is_null.size(); ++i) {
-        EXPECT_FALSE(is_null[i]);
-        EXPECT_TRUE(is_not_null[i]);
+    ASSERT_EQ(is_null.size(), 4);
+    ASSERT_EQ(is_not_null.size(), 4);
+    for (size_t i = 0; i < 4; ++i) {
+        EXPECT_EQ(is_null[i], i == 2);
+        EXPECT_EQ(is_not_null[i], i != 2);
+    }
+
+    auto is_element_null = loaded_index->IsElementNull();
+    auto is_element_not_null = loaded_index->IsElementNotNull();
+    ASSERT_EQ(is_element_null.size(), posting_count + 1);
+    ASSERT_EQ(is_element_not_null.size(), posting_count + 1);
+    for (size_t i = 0; i < is_element_null.size(); ++i) {
+        EXPECT_FALSE(is_element_null[i]);
+        EXPECT_TRUE(is_element_not_null[i]);
     }
 
     boost::filesystem::remove_all(root_path);
@@ -1088,29 +1124,29 @@ INSTANTIATE_TEST_SUITE_P(
 // ============================================================================
 // Regression tests for struct-array nested-index bug fixes.
 //
-// These cover the compact-buffer / stride / byte-size / array-offsets fixes on
-// branch fix/struct-array-nested-bugs. All nested scalar indexes are
-// element-indexed: In()/Range()/Count() operate over the flattened, valid-only
-// element stream (NULL rows and empty arrays contribute no element), which is
-// exactly the path the bugs corrupted.
+// These cover row access, stride, byte-size, and array-offset handling. Nested
+// scalar indexes are element-indexed: In()/Range()/Count() operate over the
+// flattened element stream, while null rows and empty arrays contribute no
+// element documents.
 // ============================================================================
 
 namespace {
 
 // Build an ARRAY FieldData from per-row int proto arrays plus an optional
-// validity bitmap. NULL rows are represented by an (ignored) placeholder Array
-// entry; the validity bitmap marks them so the FieldData stores valid rows
-// compactly -- the exact condition under which the old Data()[i] build overran.
+// validity bitmap. ARRAY FieldData remains row-dense; the validity bitmap marks
+// which placeholder rows are logically null.
 storage::FileManagerContext
 MakeNestedCtx(const std::string& root_path,
               proto::schema::DataType element_type,
               bool nullable,
-              int64_t index_id) {
+              int64_t index_id,
+              bool element_nullable = false) {
     proto::schema::FieldSchema field_schema;
     field_schema.set_name("struct_field[sub]");
     field_schema.set_data_type(proto::schema::DataType::Array);
     field_schema.set_element_type(element_type);
     field_schema.set_nullable(nullable);
+    field_schema.set_element_nullable(element_nullable);
 
     auto field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
     auto index_meta = storage::IndexMeta{3, 101, index_id, index_id};
@@ -1145,7 +1181,124 @@ MakeIntArrayFieldData(const std::vector<ScalarFieldProto>& scalar_arrays,
     return field_data;
 }
 
+FieldDataPtr
+MakeElementNullableIntArrayFieldData() {
+    auto make_row = [](const std::vector<int32_t>& values,
+                       const std::vector<bool>& valid_data) {
+        ScalarFieldProto proto;
+        proto.mutable_int_data()->mutable_data()->Add(values.begin(),
+                                                       values.end());
+        for (auto valid : valid_data) {
+            proto.add_valid_data(valid);
+        }
+        return Array(proto, true);
+    };
+
+    std::vector<Array> rows = {
+        make_row({0, 2}, {false, true}),
+        make_row({1, 2}, {true, true}),
+        make_row({0, 3}, {true, true}),
+        make_row({}, {}),
+        make_row({4, 0}, {true, false}),
+    };
+    auto field_data = storage::CreateFieldData(
+        DataType::ARRAY, DataType::INT32, true, true, 1, rows.size());
+    uint8_t row_valid_data = 0x1D;  // rows 0,2,3,4 valid; row 1 null.
+    field_data->FillFieldData(
+        rows.data(), &row_valid_data, rows.size(), 0);
+    return field_data;
+}
+
+void
+CheckElementNullableBitmapIndex(index::BitmapIndex<int32_t>* index) {
+    auto check = [](const TargetBitmap& actual,
+                    const std::vector<bool>& expected) {
+        ASSERT_EQ(actual.size(), expected.size());
+        for (size_t i = 0; i < expected.size(); ++i) {
+            EXPECT_EQ(actual[i], expected[i]) << "offset " << i;
+        }
+    };
+
+    ASSERT_TRUE(index->IsNestedIndex());
+    ASSERT_TRUE(index->HasRowLevelValidity());
+    ASSERT_EQ(index->Count(), 6);
+    int32_t zero = 0;
+    check(index->In(1, &zero),
+          {false, false, true, false, false, false});
+    check(index->NotIn(1, &zero),
+          {false, true, false, true, true, false});
+    check(index->IsNull(), {false, true, false, false, false});
+    check(index->IsNotNull(), {true, false, true, true, true});
+    check(index->IsElementNull(),
+          {true, false, false, false, false, true});
+    check(index->IsElementNotNull(),
+          {false, true, true, true, true, false});
+    check(index->Range(1, OpType::GreaterThan),
+          {false, true, false, true, true, false});
+}
+
 }  // namespace
+
+TEST(BitmapIndexArrayNestedTest,
+     ElementNullablePersistsRowAndElementValidity) {
+    auto root_path =
+        fmt::format("{}/bitmap_nested_element_nullable", TestLocalPath);
+    auto ctx = MakeNestedCtx(root_path,
+                             proto::schema::DataType::Int32,
+                             true,
+                             3100,
+                             true);
+    auto field_data = MakeElementNullableIntArrayFieldData();
+
+    auto build_index =
+        std::make_unique<index::BitmapIndex<int32_t>>(ctx, true);
+    build_index->BuildWithFieldData({field_data});
+
+    auto binary_set = build_index->Serialize({});
+    auto legacy_loaded =
+        std::make_unique<index::BitmapIndex<int32_t>>(ctx, false);
+    legacy_loaded->Load(binary_set, {});
+    CheckElementNullableBitmapIndex(legacy_loaded.get());
+
+    auto old_binary_set = build_index->Serialize({});
+    milvus::Assemble(old_binary_set);
+    ASSERT_NE(old_binary_set.Erase("row_valid_bitset"), nullptr);
+    auto old_meta = old_binary_set.Erase(BITMAP_INDEX_META);
+    ASSERT_NE(old_meta, nullptr);
+    YAML::Node old_meta_node = YAML::Load(std::string(
+        reinterpret_cast<const char*>(old_meta->data.get()), old_meta->size));
+    ASSERT_TRUE(old_meta_node.remove("index_row_count"));
+    std::stringstream old_meta_stream;
+    old_meta_stream << old_meta_node;
+    auto old_meta_text = old_meta_stream.str();
+    std::shared_ptr<uint8_t[]> old_meta_data(
+        new uint8_t[old_meta_text.size()]);
+    milvus::fastmem::FastMemcpy(old_meta_data.get(),
+                                old_meta_text.data(),
+                                old_meta_text.size());
+    old_binary_set.Append(
+        BITMAP_INDEX_META, old_meta_data, old_meta_text.size());
+
+    Config old_config;
+    old_config[INDEX_NUM_ROWS_KEY] = 5;
+    auto old_loaded =
+        std::make_unique<index::BitmapIndex<int32_t>>(ctx, false);
+    old_loaded->Load(old_binary_set, old_config);
+    ASSERT_TRUE(old_loaded->IsNestedIndex());
+    ASSERT_FALSE(old_loaded->HasRowLevelValidity());
+    EXPECT_EQ(old_loaded->IsNull().size(), 5);
+    EXPECT_EQ(old_loaded->IsNotNull().size(), 5);
+
+    auto upload_result = build_index->UploadUnified({});
+    Config config;
+    config["index_files"] = upload_result->GetIndexFiles();
+    config[milvus::LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+    auto v3_loaded = std::make_unique<index::BitmapIndex<int32_t>>(ctx, false);
+    v3_loaded->LoadUnified(config);
+    CheckElementNullableBitmapIndex(v3_loaded.get());
+
+    boost::filesystem::remove_all(root_path);
+}
 
 // Bug #1: nullable nested build with NULL rows *before* valid rows. Under the
 // old code, the compact FieldData (valid rows only) was indexed with the
@@ -1381,8 +1534,8 @@ TEST(BitmapIndexArrayNestedTest, Int16NestedElementBitmapStride) {
 
 // Bug #3: ScalarIndexSort::BuildWithArrayDataNested previously skipped the
 // final ComputeByteSize(), so ByteSize() under-reported (stayed 0) for nested
-// numeric sort indexes. Also confirms the nested STL-sort build reads compact
-// nullable FieldData correctly (same RawValue fix as bug #1).
+// numeric sort indexes. It also confirms nested STL-sort reads nullable,
+// row-dense ARRAY FieldData through the logical-row accessor.
 TEST(ScalarIndexSortArrayNestedTest, NestedBuildByteSizeAndQuery) {
     std::vector<ScalarFieldProto> scalar_arrays(6);
     scalar_arrays[1].mutable_int_data()->add_data(10);

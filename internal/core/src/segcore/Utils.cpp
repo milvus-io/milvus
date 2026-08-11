@@ -1487,6 +1487,9 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
 
     auto config = milvus::index::ParseConfigFromIndexParams(
         load_index_info->index_params);
+    if (load_index_info->num_rows > 0) {
+        config[INDEX_NUM_ROWS_KEY] = load_index_info->num_rows;
+    }
     auto load_priority_str = config[milvus::LOAD_PRIORITY].get<std::string>();
     auto priority_for_load = milvus::PriorityForLoad(load_priority_str);
     config[milvus::LOAD_PRIORITY] = priority_for_load;

@@ -19,6 +19,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <roaring/roaring.hh>
 
 #include "common/RegexQuery.h"
@@ -89,6 +90,11 @@ class BitmapIndex : public ScalarIndex<T> {
         return is_nested_index_;
     }
 
+    bool
+    HasRowLevelValidity() const override {
+        return !is_nested_index_ || has_row_level_validity_;
+    }
+
     void
     Build(size_t n, const T* values, const bool* valid_data = nullptr) override;
 
@@ -109,6 +115,12 @@ class BitmapIndex : public ScalarIndex<T> {
 
     TargetBitmap
     IsNotNull() override;
+
+    const TargetBitmap
+    IsElementNull() override;
+
+    TargetBitmap
+    IsElementNotNull() override;
 
     const TargetBitmap
     Range(const T& value, OpType op) override;
@@ -134,6 +146,7 @@ class BitmapIndex : public ScalarIndex<T> {
 
         // valid_bitset_
         total += valid_bitset_.size_in_bytes();
+        total += row_valid_bitset_.size_in_bytes();
 
         if (is_mmap_) {
             // mmap mode
@@ -351,7 +364,7 @@ class BitmapIndex : public ScalarIndex<T> {
     std::pair<std::shared_ptr<uint8_t[]>, size_t>
     SerializeIndexMeta();
 
-    std::pair<size_t, size_t>
+    std::tuple<size_t, size_t, bool>
     DeserializeIndexMeta(const uint8_t* data_ptr, size_t data_size);
 
     void
@@ -442,7 +455,7 @@ class BitmapIndex : public ScalarIndex<T> {
 
  public:
     bool is_built_{false};
-    BitmapIndexBuildMode build_mode_;
+    BitmapIndexBuildMode build_mode_{BitmapIndexBuildMode::ROARING};
     std::map<T, roaring::Roaring> data_;
     std::map<T, TargetBitmap> bitsets_;
     bool is_mmap_{false};
@@ -451,6 +464,7 @@ class BitmapIndex : public ScalarIndex<T> {
     int64_t mmap_size_;
     std::map<T, roaring::Roaring> bitmap_info_map_;
     size_t total_num_rows_{0};
+    size_t total_row_count_{0};
     proto::schema::FieldSchema schema_;
     bool use_offset_cache_{false};
     std::vector<typename std::map<T, roaring::Roaring>::iterator>
@@ -460,8 +474,11 @@ class BitmapIndex : public ScalarIndex<T> {
     std::vector<typename std::map<T, roaring::Roaring>::iterator>
         mmap_offsets_cache_;
 
-    // generate valid_bitset to speed up NotIn and IsNull and IsNotNull operate
+    // valid_bitset_ follows the index doc-id space. For nested ARRAY indexes,
+    // row_valid_bitset_ separately preserves row-level validity.
     TargetBitmap valid_bitset_;
+    TargetBitmap row_valid_bitset_;
+    bool has_row_level_validity_{true};
 };
 
 }  // namespace index

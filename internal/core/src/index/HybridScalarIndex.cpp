@@ -135,10 +135,16 @@ HybridScalarIndex<T>::SelectBuildTypeForArrayType(
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
         for (size_t i = 0; i < slice_row_num; ++i) {
+            if (!data->is_valid(i)) {
+                continue;
+            }
             auto array =
                 reinterpret_cast<const milvus::Array*>(data->RawValue(i));
             for (size_t j = 0; j < array->length(); ++j) {
-                auto val = array->template get_data<T>(j);
+                if (!array->is_element_valid(j)) {
+                    continue;
+                }
+                auto val = array->template get_data_unchecked<T>(j);
                 distinct_vals.insert(val);
 
                 // Limit the bitmap index cardinality because of memory usage
