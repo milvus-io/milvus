@@ -41,7 +41,7 @@ const (
 	// defaultPulsarMessageReserveSize is the headroom kept outside the plaintext
 	// message body for the streaming message header, cipher metadata/expansion,
 	// properties added before WAL append, and Pulsar message metadata.
-	defaultPulsarMessageReserveSize = "4096"
+	defaultPulsarMessageReserveSize = 4 * 1024
 
 	KafkaProducerConfigPrefix = "kafka.producer."
 	KafkaConsumerConfigPrefix = "kafka.consumer."
@@ -1175,6 +1175,29 @@ type PulsarConfig struct {
 	BacklogAutoClearBytes ParamItem `refreshable:"false"`
 }
 
+// GetMessageSizeLimits returns a self-consistent broker limit and plaintext
+// reserve. The individual ParamItems are refreshable and may be observed across
+// two config generations, so the cross-parameter constraint is applied only at
+// this point of use rather than inside either independently cached formatter.
+func (p *PulsarConfig) GetMessageSizeLimits() (maxMessageSize, messageReserveSize int) {
+	maxMessageSize = p.MaxMessageSize.GetAsInt()
+	messageReserveSize = normalizePulsarMessageReserve(maxMessageSize, p.MessageReserveSize.GetAsInt())
+	return maxMessageSize, messageReserveSize
+}
+
+func normalizePulsarMessageReserve(maxMessageSize, messageReserveSize int) int {
+	if maxMessageSize <= 0 {
+		return 0
+	}
+	if messageReserveSize >= 0 && messageReserveSize < maxMessageSize {
+		return messageReserveSize
+	}
+	if defaultPulsarMessageReserveSize < maxMessageSize {
+		return defaultPulsarMessageReserveSize
+	}
+	return 0
+}
+
 func (p *PulsarConfig) Init(base *BaseTable) {
 	p.Port = ParamItem{
 		Key:          "pulsar.port",
@@ -1233,27 +1256,6 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 	}
 	p.WebAddress.Init(base.mgr)
 
-	p.MessageReserveSize = ParamItem{
-		Key:          "pulsar.messageReserveSize",
-		Version:      "3.0.0",
-		DefaultValue: defaultPulsarMessageReserveSize,
-		Doc: `The headroom reserved out of pulsar.maxMessageSize for message overhead outside the plaintext body. Unit: Byte.
-A produced record carries a streaming message header, properties added before WAL append, cipher metadata/expansion, and Pulsar message metadata on top of the body, so the producer budgets only pulsar.maxMessageSize minus this value for the body itself.
-Must be a non-negative 32-bit integer; invalid or out-of-range values fall back to the default 4 KiB. pulsar.maxMessageSize must stay greater than this value.`,
-		Export: true,
-		Formatter: func(value string) string {
-			reserveSize, err := strconv.ParseInt(value, 10, 32)
-			if err != nil || reserveSize < 0 {
-				mlog.Warn(context.TODO(), "pulsar.messageReserveSize must be a non-negative 32-bit integer, using default",
-					mlog.String("configured", value),
-					mlog.String("default", defaultPulsarMessageReserveSize))
-				return defaultPulsarMessageReserveSize
-			}
-			return value
-		},
-	}
-	p.MessageReserveSize.Init(base.mgr)
-
 	p.MaxMessageSize = ParamItem{
 		Key:          "pulsar.maxMessageSize",
 		Version:      "2.0.0",
@@ -1261,15 +1263,13 @@ Must be a non-negative 32-bit integer; invalid or out-of-range values fall back 
 		Doc: `The maximum size of each message in Pulsar. Unit: Byte.
 By default, Pulsar can transmit at most 2 MiB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
 If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
-Must be a 32-bit integer greater than pulsar.messageReserveSize so a positive plaintext body budget remains; invalid, out-of-range, or too small values fall back to the default 2 MiB limit.`,
+Must be a positive 32-bit integer; invalid or out-of-range values fall back to the default 2 MiB limit.`,
 		Export: true,
 		Formatter: func(value string) string {
 			maxMessageSize, err := strconv.ParseInt(value, 10, 32)
-			reserveSize := int64(p.MessageReserveSize.GetAsInt())
-			if err != nil || maxMessageSize <= reserveSize {
-				mlog.Warn(context.TODO(), "pulsar.maxMessageSize must be a 32-bit integer greater than pulsar.messageReserveSize, using default",
+			if err != nil || maxMessageSize <= 0 {
+				mlog.Warn(context.TODO(), "pulsar.maxMessageSize must be a positive 32-bit integer, using default",
 					mlog.String("configured", value),
-					mlog.Int64("messageReserveSize", reserveSize),
 					mlog.String("default", defaultPulsarMaxMessageSize))
 				return defaultPulsarMaxMessageSize
 			}
@@ -1277,6 +1277,27 @@ Must be a 32-bit integer greater than pulsar.messageReserveSize so a positive pl
 		},
 	}
 	p.MaxMessageSize.Init(base.mgr)
+
+	p.MessageReserveSize = ParamItem{
+		Key:          "pulsar.messageReserveSize",
+		Version:      "3.0.0",
+		DefaultValue: strconv.Itoa(defaultPulsarMessageReserveSize),
+		Doc: `The headroom reserved out of pulsar.maxMessageSize for message overhead outside the plaintext body. Unit: Byte.
+A produced record carries a streaming message header, properties added before WAL append, cipher metadata/expansion, and Pulsar message metadata on top of the body, so the producer budgets only pulsar.maxMessageSize minus this value for the body itself.
+Must be a non-negative 32-bit integer. Invalid or out-of-range values use 4 KiB. When paired with pulsar.maxMessageSize, an oversized reserve uses 4 KiB if it fits, otherwise 0.`,
+		Export: true,
+		Formatter: func(value string) string {
+			reserveSize, err := strconv.ParseInt(value, 10, 32)
+			if err != nil || reserveSize < 0 {
+				mlog.Warn(context.TODO(), "pulsar.messageReserveSize must be a non-negative 32-bit integer, using default",
+					mlog.String("configured", value),
+					mlog.Int("default", defaultPulsarMessageReserveSize))
+				return strconv.Itoa(defaultPulsarMessageReserveSize)
+			}
+			return value
+		},
+	}
+	p.MessageReserveSize.Init(base.mgr)
 
 	p.Tenant = ParamItem{
 		Key:          "pulsar.tenant",

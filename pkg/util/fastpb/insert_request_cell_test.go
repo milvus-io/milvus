@@ -184,6 +184,28 @@ func TestScalarCell_FallbackCases(t *testing.T) {
 		assert.False(t, ok, "a cell with unknown fields must not take the arithmetic path")
 	})
 
+	t.Run("packed nested unknown fields", func(t *testing.T) {
+		array := &schemapb.LongArray{Data: []int64{1, 2, 3}}
+		unknown := protowire.AppendTag(nil, 999, protowire.VarintType)
+		unknown = protowire.AppendVarint(unknown, 11)
+		array.ProtoReflect().SetUnknown(protoreflect.RawFields(unknown))
+		cell := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: array}}
+
+		_, ok := classifyScalarCell(cell)
+		assert.False(t, ok, "a packed nested message with unknown fields must use protobuf")
+	})
+
+	t.Run("repeated nested unknown fields", func(t *testing.T) {
+		array := &schemapb.StringArray{Data: []string{"a", "b"}}
+		unknown := protowire.AppendTag(nil, 998, protowire.BytesType)
+		unknown = protowire.AppendBytes(unknown, []byte("future"))
+		array.ProtoReflect().SetUnknown(protoreflect.RawFields(unknown))
+		cell := &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: array}}
+
+		_, ok := classifyScalarCell(cell)
+		assert.False(t, ok, "a repeated nested message with unknown fields must use protobuf")
+	})
+
 	t.Run("nested array", func(t *testing.T) {
 		cell := &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{
 			ArrayData: &schemapb.ArrayArray{Data: []*schemapb.ScalarField{{}}},
@@ -197,6 +219,49 @@ func TestScalarCell_FallbackCases(t *testing.T) {
 		_, ok := classifyScalarCell(cell)
 		assert.False(t, ok, "a set-but-nil oneof wrapper must not take the arithmetic path")
 	})
+}
+
+func TestAppendArrayCell_ReplaysPayloadToken(t *testing.T) {
+	unknown := protowire.AppendTag(nil, 999, protowire.VarintType)
+	unknown = protowire.AppendVarint(unknown, 7)
+	fallbackArray := &schemapb.StringArray{Data: []string{"future"}}
+	fallbackArray.ProtoReflect().SetUnknown(protoreflect.RawFields(unknown))
+
+	for _, tc := range []struct {
+		name  string
+		cell  *schemapb.ScalarField
+		token int
+	}{
+		{
+			name: "arithmetic",
+			cell: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{
+				LongData: &schemapb.LongArray{Data: []int64{1, 128, -1}},
+			}},
+		},
+		{
+			name: "protobuf fallback",
+			cell: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{
+				StringData: fallbackArray,
+			}},
+			token: scalarCellProtoFallbackPayload,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.token != scalarCellProtoFallbackPayload {
+				plan, ok := classifyScalarCell(tc.cell)
+				require.True(t, ok)
+				tc.token = scalarCellPayload(tc.cell, plan)
+			}
+			want, err := proto.Marshal(&schemapb.ArrayArray{Data: []*schemapb.ScalarField{tc.cell}})
+			require.NoError(t, err)
+
+			w := newInsertViewMarshalWriter(make([]byte, 0, len(want)), nil)
+			require.NoError(t, appendArrayCell(w, tc.cell, tc.token))
+			require.NoError(t, w.err)
+			assert.Equal(t, 0, w.planIndex)
+			assert.Equal(t, want, w.out)
+		})
+	}
 }
 
 // TestScalarCell_InvalidUTF8 pins that an array cell now passes invalid UTF-8

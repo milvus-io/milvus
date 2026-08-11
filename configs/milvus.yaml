@@ -283,11 +283,11 @@ pulsar:
   # The maximum size of each message in Pulsar. Unit: Byte.
   # By default, Pulsar can transmit at most 2 MiB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
   # If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
-  # Must be a 32-bit integer greater than pulsar.messageReserveSize so a positive plaintext body budget remains; invalid, out-of-range, or too small values fall back to the default 2 MiB limit.
+  # Must be a positive 32-bit integer; invalid or out-of-range values fall back to the default 2 MiB limit.
   maxMessageSize: 2097152
   # The headroom reserved out of pulsar.maxMessageSize for message overhead outside the plaintext body. Unit: Byte.
   # A produced record carries a streaming message header, properties added before WAL append, cipher metadata/expansion, and Pulsar message metadata on top of the body, so the producer budgets only pulsar.maxMessageSize minus this value for the body itself.
-  # Must be a non-negative 32-bit integer; invalid or out-of-range values fall back to the default 4 KiB. pulsar.maxMessageSize must stay greater than this value.
+  # Must be a non-negative 32-bit integer. Invalid or out-of-range values use 4 KiB. When paired with pulsar.maxMessageSize, an oversized reserve uses 4 KiB if it fits, otherwise 0.
   messageReserveSize: 4096
   # Pulsar can be provisioned for specific tenants with appropriate capacity allocated to the tenant.
   # To share a Pulsar instance among multiple Milvus instances, you can change this to an Pulsar tenant rather than the default one for each Milvus instance before you start them. However, if you do not want Pulsar multi-tenancy, you are advised to change msgChannel.chanNamePrefix.cluster to the different value.

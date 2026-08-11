@@ -40,6 +40,7 @@ const (
 	insertFieldValueScalarEmpty
 	insertFieldValueScalarPacked
 	insertFieldValueScalarRepeated
+	insertFieldValueScalarArray
 	insertFieldValueVectorEmpty
 	insertFieldValueVectorDenseBytes
 	insertFieldValueVectorFloat
@@ -47,9 +48,10 @@ const (
 	insertFieldValueVectorArray
 )
 
-// insertFieldSizeState keeps only aggregate protobuf payload sizes. It never
-// owns row data. A finalized state is flattened into the exact replay plan used
-// by InsertRequestViewEncoder.MarshalTo.
+// insertFieldSizeState keeps aggregate protobuf payload sizes and the ordinal
+// of an ARRAY field in the request-level row-major token arena. It never owns
+// row data. Aggregate sizes are flattened into the replay plan; ARRAY tokens
+// remain cursor scratch that InsertRequestViewEncoder borrows during MarshalTo.
 type insertFieldSizeState struct {
 	field            *schemapb.FieldData
 	class            insertFieldPlanClass
@@ -61,12 +63,14 @@ type insertFieldSizeState struct {
 	sparseDim        int64
 	stride           int
 	compactVector    bool
+	arrayOrdinal     int
 }
 
 type insertFieldRowDelta struct {
-	payloadSize  int
-	selectedRows int
-	sparseDim    int64
+	payloadSize      int
+	selectedRows     int
+	sparseDim        int64
+	arrayCellPayload int
 }
 
 type insertFieldComputedSize struct {
@@ -78,15 +82,17 @@ type insertFieldComputedSize struct {
 }
 
 type insertRequestSizeState struct {
-	template         *msgpb.InsertRequest
-	source           *msgpb.InsertRequest
-	fixedSize        int
-	rowCount         int
-	timestampPayload int
-	rowIDPayload     int
-	encodedSize      int
-	fields           []insertFieldSizeState
-	rowDeltas        []insertFieldRowDelta
+	template          *msgpb.InsertRequest
+	source            *msgpb.InsertRequest
+	fixedSize         int
+	rowCount          int
+	timestampPayload  int
+	rowIDPayload      int
+	encodedSize       int
+	fields            []insertFieldSizeState
+	rowDeltas         []insertFieldRowDelta
+	arrayCellPayloads []int
+	arrayFieldCount   int
 }
 
 func (s *insertRequestSizeState) reset(template, source *msgpb.InsertRequest) error {
@@ -104,6 +110,8 @@ func (s *insertRequestSizeState) reset(template, source *msgpb.InsertRequest) er
 	if err != nil {
 		return err
 	}
+	arrayCellPayloads := s.arrayCellPayloads[:0]
+	s.arrayFieldCount = 0
 	fieldCount := len(source.GetFieldsData())
 	if cap(s.fields) < fieldCount {
 		s.fields = make([]insertFieldSizeState, fieldCount)
@@ -120,6 +128,10 @@ func (s *insertRequestSizeState) reset(template, source *msgpb.InsertRequest) er
 		if err := s.fields[i].reset(field); err != nil {
 			return err
 		}
+		if s.fields[i].valuePlan == insertFieldValueScalarArray {
+			s.fields[i].arrayOrdinal = s.arrayFieldCount
+			s.arrayFieldCount++
+		}
 	}
 
 	s.template = template
@@ -129,6 +141,7 @@ func (s *insertRequestSizeState) reset(template, source *msgpb.InsertRequest) er
 	s.timestampPayload = 0
 	s.rowIDPayload = 0
 	s.encodedSize = 0
+	s.arrayCellPayloads = arrayCellPayloads
 	return nil
 }
 
@@ -237,6 +250,9 @@ func (s *insertRequestSizeState) commitRow(row, encodedSize int) {
 	s.rowIDPayload += protowire.SizeVarint(uint64(s.source.GetRowIDs()[row]))
 	for i := range s.fields {
 		s.fields[i].commit(s.rowDeltas[i])
+		if s.fields[i].arrayOrdinal >= 0 {
+			s.arrayCellPayloads = append(s.arrayCellPayloads, s.rowDeltas[i].arrayCellPayload)
+		}
 	}
 	s.encodedSize = encodedSize
 }
@@ -244,6 +260,13 @@ func (s *insertRequestSizeState) commitRow(row, encodedSize int) {
 func (s *insertRequestSizeState) buildPlan(plan []int) ([]int, int, error) {
 	if s.rowCount == 0 {
 		return nil, 0, insertViewInternal("cannot finalize an empty insert request view")
+	}
+	expectedArrayCellPayloads, err := checkedProduct(s.rowCount, s.arrayFieldCount, "array cell payload plan")
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(s.arrayCellPayloads) != expectedArrayCellPayloads {
+		return nil, 0, insertViewInternal("array cell payload plan has %d entries, expected %d", len(s.arrayCellPayloads), expectedArrayCellPayloads)
 	}
 	plan = prepareSizePlan(plan, len(s.fields))
 	plan = append(plan, s.timestampPayload, s.rowIDPayload)
@@ -292,7 +315,10 @@ func (s *insertRequestSizeState) buildPlan(plan []int) ([]int, int, error) {
 }
 
 func (s *insertFieldSizeState) reset(field *schemapb.FieldData) error {
-	*s = insertFieldSizeState{field: field}
+	*s = insertFieldSizeState{
+		field:        field,
+		arrayOrdinal: -1,
+	}
 	if field == nil {
 		return insertViewInternal("source FieldsData contains nil field")
 	}
@@ -376,7 +402,7 @@ func (s *insertFieldSizeState) resetScalar(scalar *schemapb.ScalarField) error {
 		if value.ArrayData == nil {
 			return insertViewInternal("nil array scalar payload")
 		}
-		s.valuePlan, s.valueFieldNumber = insertFieldValueScalarRepeated, 8
+		s.valuePlan, s.valueFieldNumber = insertFieldValueScalarArray, 8
 		s.payloadSize = insertProto3VarintFieldSize(2, uint64(value.ArrayData.GetElementType()))
 	case *schemapb.ScalarField_JsonData:
 		if value.JsonData == nil {
@@ -538,12 +564,13 @@ func (s *insertFieldSizeState) previewScalarRow(scalar *schemapb.ScalarField, ro
 		if row >= len(value.ArrayData.GetData()) {
 			return insertViewInternal("row offset %d exceeds array scalar length %d", row, len(value.ArrayData.GetData()))
 		}
-		itemSize := scalarCellWireSize(value.ArrayData.GetData()[row])
+		itemSize, cellPayload := scalarCellWirePlan(value.ArrayData.GetData()[row])
 		wireSize, err := insertBytesFieldSize(1, itemSize)
 		if err != nil {
 			return err
 		}
 		delta.payloadSize = wireSize
+		delta.arrayCellPayload = cellPayload
 	case *schemapb.ScalarField_JsonData:
 		return previewBytesRow(value.JsonData.GetData(), row, 1, "JSON scalar", delta)
 	case *schemapb.ScalarField_GeometryData:
@@ -720,7 +747,7 @@ func (s *insertFieldSizeState) scalarSize(payloadSize, rowCount int) (int, error
 			}
 		}
 		return insertBytesFieldSize(s.valueFieldNumber, arraySize)
-	case insertFieldValueScalarRepeated:
+	case insertFieldValueScalarRepeated, insertFieldValueScalarArray:
 		return insertBytesFieldSize(s.valueFieldNumber, payloadSize)
 	default:
 		return 0, insertViewInternal("unexpected scalar size plan %d", s.valuePlan)

@@ -20,6 +20,7 @@ import (
 	"math"
 
 	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
@@ -36,8 +37,8 @@ import (
 //	scalarCellPayload  -- O(elements), pure arithmetic, no reflection
 //	appendScalarCell   -- the bytes, byte-identical to proto.Marshal
 //
-// Sizing runs classify+payload and stores the payload in the encoder's size
-// plan; MarshalTo runs classify again and replays the stored payload, so the
+// Sizing runs classify+payload and stores the payload in cursor scratch;
+// MarshalTo runs classify again and replays the stored payload, so the
 // O(elements) pass happens exactly once per cell.
 //
 // Note this is exact, not an estimate. A cheap over-approximation was
@@ -50,10 +51,10 @@ import (
 //
 // Cells the fast path does not cover -- an unknown oneof, a nested ArrayData,
 // or any cell carrying unknown fields -- report ok=false from classify and go
-// back through proto.Marshal on both the sizing and the writing side. Dropping
-// unknown fields on only one of those sides would make the length prefix
-// disagree with the bytes written, which corrupts the message rather than
-// merely losing data.
+// back through the protobuf runtime for both sizing and writing. Dropping
+// unknown fields on only one of those sides would make the length prefix disagree
+// with the bytes written, which corrupts the message rather than merely losing
+// data.
 
 type scalarCellKind uint8
 
@@ -98,35 +99,35 @@ func classifyScalarCell(cell *schemapb.ScalarField) (scalarCellPlan, bool) {
 	case nil:
 		return scalarCellPlan{kind: scalarCellEmpty}, true
 	case *schemapb.ScalarField_BoolData:
-		return packedCellPlan(1, value.BoolData == nil)
+		return packedCellPlan(1, value.BoolData)
 	case *schemapb.ScalarField_IntData:
-		return packedCellPlan(2, value.IntData == nil)
+		return packedCellPlan(2, value.IntData)
 	case *schemapb.ScalarField_LongData:
-		return packedCellPlan(3, value.LongData == nil)
+		return packedCellPlan(3, value.LongData)
 	case *schemapb.ScalarField_FloatData:
-		return packedCellPlan(4, value.FloatData == nil)
+		return packedCellPlan(4, value.FloatData)
 	case *schemapb.ScalarField_DoubleData:
-		return packedCellPlan(5, value.DoubleData == nil)
+		return packedCellPlan(5, value.DoubleData)
 	case *schemapb.ScalarField_StringData:
-		return repeatedCellPlan(6, value.StringData == nil)
+		return repeatedCellPlan(6, value.StringData)
 	case *schemapb.ScalarField_BytesData:
-		return repeatedCellPlan(7, value.BytesData == nil)
+		return repeatedCellPlan(7, value.BytesData)
 	case *schemapb.ScalarField_JsonData:
-		return repeatedCellPlan(9, value.JsonData == nil)
+		return repeatedCellPlan(9, value.JsonData)
 	case *schemapb.ScalarField_GeometryData:
-		return repeatedCellPlan(10, value.GeometryData == nil)
+		return repeatedCellPlan(10, value.GeometryData)
 	case *schemapb.ScalarField_TimestamptzData:
-		return packedCellPlan(11, value.TimestamptzData == nil)
+		return packedCellPlan(11, value.TimestamptzData)
 	case *schemapb.ScalarField_GeometryWktData:
-		return repeatedCellPlan(12, value.GeometryWktData == nil)
+		return repeatedCellPlan(12, value.GeometryWktData)
 	case *schemapb.ScalarField_MolData:
-		return repeatedCellPlan(13, value.MolData == nil)
+		return repeatedCellPlan(13, value.MolData)
 	case *schemapb.ScalarField_MolSmilesData:
-		return repeatedCellPlan(14, value.MolSmilesData == nil)
+		return repeatedCellPlan(14, value.MolSmilesData)
 	case *schemapb.ScalarField_DateData:
-		return packedCellPlan(15, value.DateData == nil)
+		return packedCellPlan(15, value.DateData)
 	case *schemapb.ScalarField_TimeData:
-		return packedCellPlan(16, value.TimeData == nil)
+		return packedCellPlan(16, value.TimeData)
 	default:
 		// A nested ArrayData, or an oneof added after this code was written.
 		return scalarCellPlan{}, false
@@ -137,18 +138,25 @@ func classifyScalarCell(cell *schemapb.ScalarField) (scalarCellPlan, bool) {
 // the empty array message for one, and the arithmetic path agrees, but the
 // row-selection encoders treat it as a malformed source, so keep the two paths
 // consistent by refusing it here too.
-func packedCellPlan(oneofNumber protowire.Number, nilArray bool) (scalarCellPlan, bool) {
-	if nilArray {
+func packedCellPlan(oneofNumber protowire.Number, array proto.Message) (scalarCellPlan, bool) {
+	if !scalarCellNestedArraySupported(array) {
 		return scalarCellPlan{}, false
 	}
 	return scalarCellPlan{kind: scalarCellPacked, oneofNumber: oneofNumber}, true
 }
 
-func repeatedCellPlan(oneofNumber protowire.Number, nilArray bool) (scalarCellPlan, bool) {
-	if nilArray {
+func repeatedCellPlan(oneofNumber protowire.Number, array proto.Message) (scalarCellPlan, bool) {
+	if !scalarCellNestedArraySupported(array) {
 		return scalarCellPlan{}, false
 	}
 	return scalarCellPlan{kind: scalarCellRepeated, oneofNumber: oneofNumber}, true
+}
+
+// scalarCellNestedArraySupported rejects both malformed set-but-nil oneofs and
+// nested messages carrying fields this arithmetic encoder does not know about.
+// The protobuf fallback preserves those unknown bytes verbatim.
+func scalarCellNestedArraySupported(array proto.Message) bool {
+	return !isNilProto(array) && len(array.ProtoReflect().GetUnknown()) == 0
 }
 
 // scalarCellPayload computes the cell's inner payload size arithmetically. The
@@ -340,18 +348,19 @@ func appendBytesCell(w *insertViewWriter, values [][]byte) error {
 	return w.err
 }
 
-// scalarCellWireSize is the sizing side's entry point: the exact wire size of
-// one ArrayArray element, computed arithmetically when the cell is on the fast
-// path and measured with proto.Size otherwise. The fallback deliberately seeds
-// protobuf's per-message size cache, which protoMessage reuses when it later
-// writes that same cell.
-func scalarCellWireSize(cell *schemapb.ScalarField) int {
+const scalarCellProtoFallbackPayload = -1
+
+// scalarCellWirePlan is the sizing side's entry point. It returns the exact
+// wire size of one ArrayArray element plus the payload token MarshalTo replays.
+// Non-negative tokens are arithmetic payload sizes; -1 selects protobuf's
+// cached-size fallback so unknown fields remain byte-preserving.
+func scalarCellWirePlan(cell *schemapb.ScalarField) (int, int) {
 	plan, ok := classifyScalarCell(cell)
 	if !ok {
-		return nullableProtoSize(cell, false)
+		return nullableProtoSize(cell, false), scalarCellProtoFallbackPayload
 	}
 	plan.payload = scalarCellPayload(cell, plan)
-	return plan.scalarCellSize()
+	return plan.scalarCellSize(), plan.payload
 }
 
 func int32VarintPayload(values []int32) int {

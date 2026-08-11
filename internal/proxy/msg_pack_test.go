@@ -52,15 +52,23 @@ func TestInsertRequestBodyLimit(t *testing.T) {
 	require.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "1024"))
 	assert.Equal(t, 2097152-1024, insertRequestBodyLimit())
 
-	// A reserve wider than the limit still leaves a positive body budget.
+	// An oversized reserve falls back to the safe default instead of collapsing
+	// the body budget to one byte.
 	require.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "4194304"))
-	assert.Equal(t, 1, insertRequestBodyLimit())
+	assert.Equal(t, 2097152-4096, insertRequestBodyLimit())
+
+	// If the broker limit is then lowered below 4 KiB, the effective reserve is
+	// zero rather than max-1, so inserts do not degenerate into one-row messages.
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1024"))
+	assert.Equal(t, 1024, insertRequestBodyLimit())
 }
 
 func TestSplitInsertRowsByMessageSizeSingleOversizedRow(t *testing.T) {
 	// One byte above the default reserve, so the plaintext body budget is 1 byte.
 	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "4097"))
 	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "4096"))
+	defer Params.Reset(Params.PulsarCfg.MessageReserveSize.Key)
 
 	t.Run("only row", func(t *testing.T) {
 		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))

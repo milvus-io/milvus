@@ -225,7 +225,7 @@ func repackDeleteMsgByHash(
 		}
 		curMsg := msgs[len(msgs)-1]
 		size, id := typeutil.GetId(primaryKeys, index)
-		if lastMessageSize[key]+16+size > maxSize {
+		if curMsg.GetNumRows() > 0 && lastMessageSize[key]+16+size > maxSize {
 			curMsg = createMessage(key, vchannel)
 			result[key] = append(result[key], curMsg)
 		}

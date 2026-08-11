@@ -26,14 +26,12 @@ import (
 )
 
 // insertRequestBodyLimit budgets the plaintext InsertRequest body inside the
-// broker-facing message limit. paramtable keeps pulsar.maxMessageSize above
-// pulsar.messageReserveSize, but a reserve larger than the 2 MiB fallback still
-// swallows the whole limit, so keep the body budget positive here. A single
-// oversized row is still emitted by InsertRequestViewCursor.
+// broker-facing message limit. GetMessageSizeLimits normalizes mixed-generation
+// refreshable config as a pair; keep the final guard for invalid test-only
+// overrides. A single oversized row is still emitted by InsertRequestViewCursor.
 func insertRequestBodyLimit() int {
-	maxMessageSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
-	reserve := Params.PulsarCfg.MessageReserveSize.GetAsInt()
-	if reserve >= maxMessageSize {
+	maxMessageSize, reserve := Params.PulsarCfg.GetMessageSizeLimits()
+	if maxMessageSize <= 0 || reserve < 0 || reserve >= maxMessageSize {
 		return 1
 	}
 	return maxMessageSize - reserve

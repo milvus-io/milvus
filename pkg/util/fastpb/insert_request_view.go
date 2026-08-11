@@ -36,6 +36,9 @@ type InsertRequestViewEncoder struct {
 	rows                  []int
 	firstFieldDataIndices []int64
 	sizePlan              []int
+	fieldSizeStates       []insertFieldSizeState
+	arrayCellPayloads     []int
+	arrayFieldCount       int
 	size                  int
 	owner                 *InsertRequestViewCursor
 	consumed              bool
@@ -104,8 +107,9 @@ func (c *InsertRequestViewCursor) newEncoder(template *msgpb.InsertRequest, rows
 // always returned even when it reaches or exceeds the limit, matching the
 // existing insert split behavior. A non-positive limit disables splitting.
 //
-// The exact sizing pass and MarshalTo share one replay plan. Callers must
-// synchronously marshal the returned encoder before requesting the next one.
+// The exact sizing pass and MarshalTo share a replay plan plus row-major ARRAY
+// scratch. Callers must synchronously marshal the returned encoder before
+// requesting the next one.
 func (c *InsertRequestViewCursor) NextEncoder(template *msgpb.InsertRequest, rows []int, sizeLimit int) (*InsertRequestViewEncoder, int, error) {
 	if c == nil || c.source == nil {
 		return nil, 0, insertViewInternal("nil insert request view cursor")
@@ -197,6 +201,9 @@ func (c *InsertRequestViewCursor) NextEncoder(template *msgpb.InsertRequest, row
 		rows:                  rows[:consumed],
 		firstFieldDataIndices: c.encoderFirstFieldDataIndices,
 		sizePlan:              sizePlan,
+		fieldSizeStates:       c.sizeState.fields,
+		arrayCellPayloads:     c.sizeState.arrayCellPayloads,
+		arrayFieldCount:       c.sizeState.arrayFieldCount,
 		size:                  encodedSize,
 	}
 
@@ -437,7 +444,7 @@ func (e *InsertRequestViewEncoder) appendFieldData(w *insertViewWriter, fieldInd
 			return err
 		}
 		if err := w.message(3, scalarSize, func() error {
-			return e.appendScalarField(w, value.Scalars)
+			return e.appendScalarField(w, fieldIndex, value.Scalars)
 		}); err != nil {
 			return err
 		}
@@ -486,7 +493,7 @@ func (e *InsertRequestViewEncoder) appendFieldData(w *insertViewWriter, fieldInd
 	return w.err
 }
 
-func (e *InsertRequestViewEncoder) appendScalarField(w *insertViewWriter, field *schemapb.ScalarField) error {
+func (e *InsertRequestViewEncoder) appendScalarField(w *insertViewWriter, fieldIndex int, field *schemapb.ScalarField) error {
 	switch value := field.Data.(type) {
 	case nil:
 		return nil
@@ -509,7 +516,7 @@ func (e *InsertRequestViewEncoder) appendScalarField(w *insertViewWriter, field 
 	case *schemapb.ScalarField_BytesData:
 		return e.appendBytesArray(w, 7, value.BytesData, "bytes scalar")
 	case *schemapb.ScalarField_ArrayData:
-		return e.appendArrayArray(w, 8, value.ArrayData)
+		return e.appendArrayArray(w, fieldIndex, 8, value.ArrayData)
 	case *schemapb.ScalarField_JsonData:
 		return e.appendRawBytesRows(w, 9, value.JsonData.GetData(), "JSON scalar", value.JsonData == nil)
 	case *schemapb.ScalarField_GeometryData:
@@ -720,17 +727,32 @@ func (e *InsertRequestViewEncoder) appendRawBytesRows(w *insertViewWriter, field
 	})
 }
 
-func (e *InsertRequestViewEncoder) appendArrayArray(w *insertViewWriter, fieldNumber protowire.Number, values *schemapb.ArrayArray) error {
+func (e *InsertRequestViewEncoder) appendArrayArray(w *insertViewWriter, fieldIndex int, fieldNumber protowire.Number, values *schemapb.ArrayArray) error {
 	if values == nil {
 		return insertViewInternal("nil array scalar payload")
+	}
+	if fieldIndex < 0 || fieldIndex >= len(e.fieldSizeStates) {
+		return insertViewInternal("array cell payload field index %d is out of range", fieldIndex)
+	}
+	arrayOrdinal := e.fieldSizeStates[fieldIndex].arrayOrdinal
+	if arrayOrdinal < 0 || arrayOrdinal >= e.arrayFieldCount {
+		return insertViewInternal("array field %d has invalid payload ordinal %d of %d", fieldIndex, arrayOrdinal, e.arrayFieldCount)
+	}
+	expectedPayloads, err := checkedProduct(len(e.rows), e.arrayFieldCount, "array cell payload plan")
+	if err != nil {
+		return err
+	}
+	if len(e.arrayCellPayloads) != expectedPayloads {
+		return insertViewInternal("array cell payload plan has %d entries, expected %d", len(e.arrayCellPayloads), expectedPayloads)
 	}
 	arraySize, err := w.plannedInt()
 	if err != nil {
 		return err
 	}
 	return w.message(fieldNumber, arraySize, func() error {
-		for _, row := range e.rows {
-			if err := appendArrayCell(w, values.GetData()[row]); err != nil {
+		for i, row := range e.rows {
+			payload := e.arrayCellPayloads[i*e.arrayFieldCount+arrayOrdinal]
+			if err := appendArrayCell(w, values.GetData()[row], payload); err != nil {
 				return err
 			}
 		}
@@ -739,20 +761,26 @@ func (e *InsertRequestViewEncoder) appendArrayArray(w *insertViewWriter, fieldNu
 	})
 }
 
-// appendArrayCell writes one ArrayArray element. Cells the arithmetic encoder
-// covers skip the protobuf reflection encoder entirely; the rest fall back to
-// it, reusing the size cache scalarCellWireSize seeded for that same cell.
-//
-// The payload is measured again here rather than carried over from the sizing
-// pass. Threading a per-row entry through the size plan avoids the second pass
-// but couples the two far more tightly -- a misaligned plan writes a wrong
-// length prefix -- and measured only ~6% on an array-heavy encode.
-func appendArrayCell(w *insertViewWriter, cell *schemapb.ScalarField) error {
+// appendArrayCell writes one ArrayArray element. The sizing pass stores one
+// payload token per selected cell in cursor scratch: a non-negative arithmetic
+// payload size or scalarCellProtoFallbackPayload. Replaying that token removes
+// the second O(elements) sizing traversal while the writer's byte-count checks
+// detect borrowed-data mutation.
+func appendArrayCell(w *insertViewWriter, cell *schemapb.ScalarField, payload int) error {
 	plan, ok := classifyScalarCell(cell)
-	if !ok {
+	if payload == scalarCellProtoFallbackPayload {
+		if ok {
+			return insertViewInternal("array cell classification changed after planning: expected protobuf fallback")
+		}
 		return w.protoMessage(1, cell, "array scalar row")
 	}
-	plan.payload = scalarCellPayload(cell, plan)
+	if payload < 0 {
+		return insertViewInternal("array cell plan contains invalid payload size %d", payload)
+	}
+	if !ok {
+		return insertViewInternal("array cell classification changed after planning: expected arithmetic path")
+	}
+	plan.payload = payload
 	return w.message(1, plan.scalarCellSize(), func() error {
 		return appendScalarCell(w, cell, plan)
 	})
@@ -1230,10 +1258,9 @@ func (w *insertViewWriter) protoMessage(number protowire.Number, message proto.M
 	if isNilProto(message) {
 		return w.message(number, 0, func() error { return nil })
 	}
-	// The size pass seeds protobuf's per-message size cache. Reuse that cache
-	// through protobuf's public API during MarshalTo. Size and MarshalAppend each
-	// perform an O(1) cache lookup for generated messages rather than recursively
-	// traversing every ARRAY/ArrayOfVector row again.
+	// The size pass seeds protobuf's per-message size cache. Reuse it through
+	// protobuf's public API during MarshalTo; with the current generated runtime,
+	// this avoids recursively traversing every ARRAY/ArrayOfVector row again.
 	options := proto.MarshalOptions{AllowPartial: true, UseCachedSize: true}
 	size := options.Size(message)
 	return w.message(number, size, func() error {

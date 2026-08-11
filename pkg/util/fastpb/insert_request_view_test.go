@@ -70,6 +70,62 @@ func TestInsertRequestViewEncoder_DifferentialNilRepeatedMessages(t *testing.T) 
 	assertViewMatchesMaterialized(t, template, source, []int{2})
 }
 
+func TestInsertRequestViewEncoder_ArrayNestedUnknownFields(t *testing.T) {
+	packedUnknown := protowire.AppendTag(nil, 999, protowire.VarintType)
+	packedUnknown = protowire.AppendVarint(packedUnknown, 17)
+	packed := &schemapb.LongArray{Data: []int64{1, 128, -1}}
+	packed.ProtoReflect().SetUnknown(packedUnknown)
+
+	repeatedUnknown := protowire.AppendTag(nil, 998, protowire.BytesType)
+	repeatedUnknown = protowire.AppendBytes(repeatedUnknown, []byte("future-string-array-field"))
+	repeated := &schemapb.StringArray{Data: []string{"a", "b"}}
+	repeated.ProtoReflect().SetUnknown(repeatedUnknown)
+
+	source := &msgpb.InsertRequest{
+		NumRows:    2,
+		RowIDs:     []int64{1, 2},
+		Timestamps: []uint64{10, 20},
+		FieldsData: []*schemapb.FieldData{
+			scalarField(1, schemapb.DataType_Array, &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+				ElementType: schemapb.DataType_Int64,
+				Data: []*schemapb.ScalarField{
+					{Data: &schemapb.ScalarField_LongData{LongData: packed}},
+					{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{2}}}},
+				},
+			}}),
+			scalarField(2, schemapb.DataType_Array, &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+				ElementType: schemapb.DataType_VarChar,
+				Data: []*schemapb.ScalarField{
+					{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"known"}}}},
+					{Data: &schemapb.ScalarField_StringData{StringData: repeated}},
+				},
+			}}),
+		},
+	}
+
+	rows := []int{0, 1}
+	expected := materializeWithAppendFieldData(insertViewTemplate(), source, rows)
+
+	encoder, err := NewInsertRequestViewEncoder(insertViewTemplate(), source, rows)
+	require.NoError(t, err)
+	size, err := encoder.EncodedSize()
+	require.NoError(t, err)
+	actualBytes := make([]byte, size)
+	_, err = encoder.MarshalTo(actualBytes)
+	require.NoError(t, err)
+	assert.Equal(t, proto.Size(expected), len(actualBytes))
+	replayedBytes := make([]byte, size)
+	_, err = encoder.MarshalTo(replayedBytes)
+	require.NoError(t, err)
+	assert.Equal(t, actualBytes, replayedBytes)
+
+	decoded := &msgpb.InsertRequest{}
+	require.NoError(t, proto.Unmarshal(actualBytes, decoded))
+	assert.True(t, proto.Equal(expected, decoded))
+	assert.True(t, bytes.Equal(packedUnknown, decoded.GetFieldsData()[0].GetScalars().GetArrayData().GetData()[0].GetLongData().ProtoReflect().GetUnknown()))
+	assert.True(t, bytes.Equal(repeatedUnknown, decoded.GetFieldsData()[1].GetScalars().GetArrayData().GetData()[1].GetStringData().ProtoReflect().GetUnknown()))
+}
+
 func TestInsertRequestViewEncoder_ExtendedScalarOneofs(t *testing.T) {
 	// Bytes/Mol/MolSmiles/Date/Time are current ScalarField oneofs, but the old
 	// AppendFieldData repack helper does not handle them. Keep this explicit
@@ -266,40 +322,65 @@ func TestInsertRequestViewCursor_ExactPrefixSizing(t *testing.T) {
 }
 
 func TestInsertRequestViewCursor_ExactSplitPendingRow(t *testing.T) {
-	template := insertViewTemplate()
-	source := insertViewAllRepackTypesSource()
-	// Row 2 is the first rejected/pending row below. Keep nil repeated-message
-	// entries there so the cached pending delta also covers ARRAY and
-	// ArrayOfVector's zero-length nested-message representation.
-	source.GetFieldsData()[6].GetScalars().GetArrayData().Data[2] = nil
-	source.GetFieldsData()[17].GetVectors().GetVectorArray().Data[2] = nil
-	oracleSource := proto.Clone(source).(*msgpb.InsertRequest)
-	rows := []int{0, 1, 2, 3, 4}
-	limit := proto.Size(materializeWithAppendFieldData(template, oracleSource, rows[:3]))
+	unknown := protowire.AppendTag(nil, 999, protowire.VarintType)
+	unknown = protowire.AppendVarint(unknown, 17)
+	fallbackArray := &schemapb.LongArray{Data: []int64{1, 128, -1}}
+	fallbackArray.ProtoReflect().SetUnknown(unknown)
 
-	cursor, err := NewInsertRequestViewCursor(source)
-	require.NoError(t, err)
-	start := 0
-	var selections [][]int
-	for start < len(rows) {
-		encoder, consumed, err := cursor.NextEncoder(template, rows[start:], limit)
-		require.NoError(t, err)
-		selection := rows[start : start+consumed]
-		selections = append(selections, append([]int(nil), selection...))
+	for _, tc := range []struct {
+		name string
+		cell *schemapb.ScalarField
+	}{
+		{
+			name: "arithmetic payload token",
+			cell: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{
+				LongData: &schemapb.LongArray{Data: []int64{1, 128, -1}},
+			}},
+		},
+		{
+			name: "protobuf fallback token",
+			cell: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{
+				LongData: fallbackArray,
+			}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			template := insertViewTemplate()
+			source := insertViewAllRepackTypesSource()
+			// Row 2 is the first rejected/pending row below. Its ARRAY token must
+			// survive into the next view without re-sizing the cell. Keep
+			// ArrayOfVector nil to retain zero-length nested-message coverage.
+			source.GetFieldsData()[6].GetScalars().GetArrayData().Data[2] = tc.cell
+			source.GetFieldsData()[17].GetVectors().GetVectorArray().Data[2] = nil
+			oracleSource := proto.Clone(source).(*msgpb.InsertRequest)
+			rows := []int{0, 1, 2, 3, 4}
+			limit := proto.Size(materializeWithAppendFieldData(template, oracleSource, rows[:3]))
 
-		size, err := encoder.EncodedSize()
-		require.NoError(t, err)
-		payload := make([]byte, size)
-		_, err = encoder.MarshalTo(payload)
-		require.NoError(t, err)
-		got := &msgpb.InsertRequest{}
-		require.NoError(t, proto.Unmarshal(payload, got))
-		expected := materializeWithAppendFieldData(template, oracleSource, selection)
-		require.True(t, proto.Equal(expected, got), "selection=%v", selection)
-		start += consumed
+			cursor, err := NewInsertRequestViewCursor(source)
+			require.NoError(t, err)
+			start := 0
+			var selections [][]int
+			for start < len(rows) {
+				encoder, consumed, err := cursor.NextEncoder(template, rows[start:], limit)
+				require.NoError(t, err)
+				selection := rows[start : start+consumed]
+				selections = append(selections, append([]int(nil), selection...))
+
+				size, err := encoder.EncodedSize()
+				require.NoError(t, err)
+				payload := make([]byte, size)
+				_, err = encoder.MarshalTo(payload)
+				require.NoError(t, err)
+				got := &msgpb.InsertRequest{}
+				require.NoError(t, proto.Unmarshal(payload, got))
+				expected := materializeWithAppendFieldData(template, oracleSource, selection)
+				require.True(t, proto.Equal(expected, got), "selection=%v", selection)
+				start += consumed
+			}
+			assert.Equal(t, []int{0, 1}, selections[0], "candidate equal to the limit must roll over")
+			assert.Equal(t, rows, flattenRowSelections(selections))
+		})
 	}
-	assert.Equal(t, []int{0, 1}, selections[0], "candidate equal to the limit must roll over")
-	assert.Equal(t, rows, flattenRowSelections(selections))
 }
 
 func TestInsertRequestViewCursor_SingleOversizedPendingRow(t *testing.T) {
@@ -496,6 +577,13 @@ func TestInsertRequestViewEncoder_MarshalContract(t *testing.T) {
 	require.NoError(t, err)
 	size, err := encoder.EncodedSize()
 	require.NoError(t, err)
+	first := make([]byte, size)
+	_, err = encoder.MarshalTo(first)
+	require.NoError(t, err)
+	second := make([]byte, size)
+	_, err = encoder.MarshalTo(second)
+	require.NoError(t, err)
+	assert.Equal(t, first, second, "standalone ARRAY size plans must be replayable")
 
 	_, err = encoder.MarshalTo(make([]byte, size-1))
 	require.Error(t, err)
