@@ -11,8 +11,9 @@ import (
 // query view on the Coordinator.
 //
 // The state machine is purely in-memory and non-blocking.
-// All I/O (ETCD persistence, node sync) is signaled through pending proto
-// consumed by the Manager via ConsumePersist / ConsumeSync.
+// All I/O (ETCD persistence, node sync) is represented by the latest pending
+// external effect and atomically drained by the shared flush scheduler through
+// ShardViewManager.
 //
 // State flow:
 //
@@ -35,17 +36,28 @@ type CoordQueryViewStateMachine struct {
 	// Used by Balancer/Manager for progress tracking and decision-making.
 	qnReadySegments map[int64][]int64
 
-	// Pending I/O signals, consumed once by Manager.
-	pendingPersist *viewpb.QueryViewOfShard
-	pendingSync    []qviews.QueryViewAtWorkNode
+	// Pending external effects, atomically drained through ShardViewManager by
+	// the Coordinator flush scheduler.
+	pending queryViewFlush
+}
+
+// queryViewFlush is the latest unflushed external effect of a state machine.
+// Persist and Sync are replaced independently so multiple transitions that
+// have not been externalized can fast-forward to their latest desired state.
+type queryViewFlush struct {
+	Persist *viewpb.QueryViewOfShard
+	Sync    []qviews.QueryViewAtWorkNode
+}
+
+func (f queryViewFlush) Empty() bool {
+	return f.Persist == nil && len(f.Sync) == 0
 }
 
 // NewCoordQueryViewStateMachine creates a state machine for a freshly
 // generated query view.
 //
-// After construction:
-//   - ConsumePersist returns the Preparing view (write-ahead).
-//   - ConsumeSync returns the Preparing view (push to all nodes).
+// After construction, the pending flush contains the Preparing view for
+// write-ahead persistence and the Preparing targets for all work nodes.
 func NewCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard) *CoordQueryViewStateMachine {
 	sm := &CoordQueryViewStateMachine{
 		state:           qviews.QueryViewStatePreparing,
@@ -57,8 +69,8 @@ func NewCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard) *CoordQueryVie
 	for _, qn := range view.QueryNode {
 		sm.qnStates[qn.NodeId] = qviews.QueryViewStateNil
 	}
-	sm.pendingPersist = sm.viewWithState(qviews.QueryViewStatePreparing)
-	sm.pendingSync = sm.syncViewsForState(qviews.QueryViewStatePreparing)
+	sm.pending.Persist = sm.viewWithState(qviews.QueryViewStatePreparing)
+	sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStatePreparing)
 	return sm
 }
 
@@ -86,13 +98,13 @@ func RecoverCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard) *CoordQuer
 	switch recoveredState {
 	case qviews.QueryViewStatePreparing:
 		// Already persisted; re-push to all nodes.
-		sm.pendingSync = sm.syncViewsForState(qviews.QueryViewStatePreparing)
+		sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStatePreparing)
 	case qviews.QueryViewStateUp:
 		// Active view; no re-push needed. Up is persisted precisely to
 		// avoid unnecessary Coord↔node communication on recovery.
 	case qviews.QueryViewStateDown:
 		// Re-push Down to SN.
-		sm.pendingSync = sm.syncViewsForState(qviews.QueryViewStateDown)
+		sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStateDown)
 	case qviews.QueryViewStateUnrecoverable:
 		// Stable state; wait for Manager to call EnterDropping.
 	default:
@@ -168,7 +180,7 @@ func (sm *CoordQueryViewStateMachine) OnQueryNodeLost(node qviews.QueryNode) {
 		sm.qnStates[node.ID] = qviews.QueryViewStateDropped
 		if sm.allNodesDropped() {
 			sm.state = qviews.QueryViewStateDropped
-			sm.pendingPersist = sm.viewWithState(qviews.QueryViewStateDropped)
+			sm.pending.Persist = sm.viewWithState(qviews.QueryViewStateDropped)
 		}
 	}
 }
@@ -181,8 +193,8 @@ func (sm *CoordQueryViewStateMachine) EnterDown() {
 		return
 	}
 	sm.state = qviews.QueryViewStateDown
-	sm.pendingPersist = sm.viewWithState(qviews.QueryViewStateDown)
-	sm.pendingSync = sm.syncViewsForState(qviews.QueryViewStateDown)
+	sm.pending.Persist = sm.viewWithState(qviews.QueryViewStateDown)
+	sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStateDown)
 }
 
 // EnterDropping is called by the Manager to transition this view from
@@ -194,26 +206,14 @@ func (sm *CoordQueryViewStateMachine) EnterDropping() {
 		return
 	}
 	sm.state = qviews.QueryViewStateDropping
-	sm.pendingSync = sm.syncViewsForState(qviews.QueryViewStateDropped)
+	sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStateDropped)
 }
 
-// ConsumePersist returns the view to persist to ETCD and clears the flag.
-// Returns nil if no persistence is needed.
-//
-//   - Meta.State == Dropped → Manager should delete from ETCD.
-//   - Meta.State == other   → Manager should save/overwrite in ETCD.
-func (sm *CoordQueryViewStateMachine) ConsumePersist() *viewpb.QueryViewOfShard {
-	v := sm.pendingPersist
-	sm.pendingPersist = nil
-	return v
-}
-
-// ConsumeSync returns the per-node views to push and clears the flag.
-// Returns nil if no sync is needed.
-func (sm *CoordQueryViewStateMachine) ConsumeSync() []qviews.QueryViewAtWorkNode {
-	v := sm.pendingSync
-	sm.pendingSync = nil
-	return v
+// ConsumeFlush atomically drains the latest pending persist and sync effects.
+func (sm *CoordQueryViewStateMachine) ConsumeFlush() queryViewFlush {
+	flush := sm.pending
+	sm.pending = queryViewFlush{}
+	return flush
 }
 
 // --- State handlers ---
@@ -233,11 +233,11 @@ func (sm *CoordQueryViewStateMachine) handlePreparing(report qviews.QueryViewAtW
 	if sm.snState == qviews.QueryViewStateUp {
 		// Fast-forward: SN already Up from recovery.
 		sm.state = qviews.QueryViewStateUp
-		sm.pendingPersist = sm.viewWithState(qviews.QueryViewStateUp)
+		sm.pending.Persist = sm.viewWithState(qviews.QueryViewStateUp)
 	} else {
 		// Normal flow: all Ready → Ready, push Up to SN.
 		sm.state = qviews.QueryViewStateReady
-		sm.pendingSync = sm.syncViewsForState(qviews.QueryViewStateUp)
+		sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStateUp)
 	}
 }
 
@@ -255,11 +255,11 @@ func (sm *CoordQueryViewStateMachine) handleReady(report qviews.QueryViewAtWorkN
 	}
 	if report.State() == qviews.QueryViewStateUp {
 		sm.state = qviews.QueryViewStateUp
-		sm.pendingPersist = sm.viewWithState(qviews.QueryViewStateUp)
+		sm.pending.Persist = sm.viewWithState(qviews.QueryViewStateUp)
 		return
 	}
 	// SN not Up yet (e.g., still Ready) → re-push Up.
-	sm.pendingSync = sm.syncViewsForState(qviews.QueryViewStateUp)
+	sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStateUp)
 }
 
 // Up: active view serving queries.
@@ -287,11 +287,11 @@ func (sm *CoordQueryViewStateMachine) handleDown(report qviews.QueryViewAtWorkNo
 	}
 	if report.State() == qviews.QueryViewStateDown || report.State() == qviews.QueryViewStateDropped {
 		sm.state = qviews.QueryViewStateDropping
-		sm.pendingSync = sm.syncViewsForState(qviews.QueryViewStateDropped)
+		sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStateDropped)
 		return
 	}
 	// SN not Down yet → re-push Down.
-	sm.pendingSync = sm.syncViewsForState(qviews.QueryViewStateDown)
+	sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStateDown)
 }
 
 // Dropping: wait for all nodes to confirm Dropped.
@@ -301,19 +301,19 @@ func (sm *CoordQueryViewStateMachine) handleDropping(report qviews.QueryViewAtWo
 	if report.State() == qviews.QueryViewStateDropped {
 		if sm.allNodesDropped() {
 			sm.state = qviews.QueryViewStateDropped
-			sm.pendingPersist = sm.viewWithState(qviews.QueryViewStateDropped)
+			sm.pending.Persist = sm.viewWithState(qviews.QueryViewStateDropped)
 		}
 		return
 	}
 	// Node not Dropped → re-push Dropped.
-	sm.pendingSync = sm.syncViewsForState(qviews.QueryViewStateDropped)
+	sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStateDropped)
 }
 
 // transitionToUnrecoverable persists Unrecoverable and stays.
 // The Manager must call EnterDropping to advance to Dropping.
 func (sm *CoordQueryViewStateMachine) transitionToUnrecoverable() {
 	sm.state = qviews.QueryViewStateUnrecoverable
-	sm.pendingPersist = sm.viewWithState(qviews.QueryViewStateUnrecoverable)
+	sm.pending.Persist = sm.viewWithState(qviews.QueryViewStateUnrecoverable)
 }
 
 // --- Helpers ---

@@ -1,6 +1,7 @@
 package coordview
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -82,7 +83,7 @@ func qnReport(view *viewpb.QueryViewOfShard, nodeID int64, state qviews.QueryVie
 // expected state, then clears it.
 func assertPendingPersistState(t *testing.T, sm *CoordQueryViewStateMachine, expected qviews.QueryViewState) {
 	t.Helper()
-	v := sm.ConsumePersist()
+	v := consumePendingPersistForTest(sm)
 	require.NotNil(t, v, "expected pending persist with state %s", expected)
 	assert.Equal(t, viewpb.QueryViewState(expected), v.Meta.State)
 }
@@ -91,7 +92,7 @@ func assertPendingPersistState(t *testing.T, sm *CoordQueryViewStateMachine, exp
 // expected state, then clears it.
 func assertPendingSyncState(t *testing.T, sm *CoordQueryViewStateMachine, expected qviews.QueryViewState) {
 	t.Helper()
-	views := sm.ConsumeSync()
+	views := consumePendingSyncForTest(sm)
 	require.NotEmpty(t, views, "expected pending sync with state %s", expected)
 	for _, v := range views {
 		assert.Equal(t, expected, v.State(), "sync view state mismatch")
@@ -101,13 +102,13 @@ func assertPendingSyncState(t *testing.T, sm *CoordQueryViewStateMachine, expect
 // assertNoPendingPersist checks that ConsumePersist returns nil.
 func assertNoPendingPersist(t *testing.T, sm *CoordQueryViewStateMachine) {
 	t.Helper()
-	assert.Nil(t, sm.ConsumePersist(), "expected no pending persist")
+	assert.Nil(t, sm.pending.Persist, "expected no pending persist")
 }
 
 // assertNoPendingSync checks that ConsumeSync returns nil/empty.
 func assertNoPendingSync(t *testing.T, sm *CoordQueryViewStateMachine) {
 	t.Helper()
-	assert.Empty(t, sm.ConsumeSync(), "expected no pending sync")
+	assert.Empty(t, sm.pending.Sync, "expected no pending sync")
 }
 
 // assertNoPending checks that both ConsumePersist and ConsumeSync return nil.
@@ -119,8 +120,19 @@ func assertNoPending(t *testing.T, sm *CoordQueryViewStateMachine) {
 
 // drainPending consumes and discards both pending persist and sync.
 func drainPending(sm *CoordQueryViewStateMachine) {
-	sm.ConsumePersist()
-	sm.ConsumeSync()
+	sm.pending = queryViewFlush{}
+}
+
+func consumePendingPersistForTest(sm *CoordQueryViewStateMachine) *viewpb.QueryViewOfShard {
+	persist := sm.pending.Persist
+	sm.pending.Persist = nil
+	return persist
+}
+
+func consumePendingSyncForTest(sm *CoordQueryViewStateMachine) []qviews.QueryViewAtWorkNode {
+	sync := sm.pending.Sync
+	sm.pending.Sync = nil
+	return sync
 }
 
 // ===========================================================================
@@ -814,32 +826,47 @@ func TestRecovery_Up_ThenUnrecoverable(t *testing.T) {
 // 6. PENDING I/O CONSUMPTION SEMANTICS
 // ===========================================================================
 
-// TestConsumePersist_ConsumeOnce: second ConsumePersist returns nil.
-func TestConsumePersist_ConsumeOnce(t *testing.T) {
-	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
-
-	v := sm.ConsumePersist()
-	require.NotNil(t, v)
-	assert.Equal(t, viewpb.QueryViewState_QueryViewStatePreparing, v.Meta.State)
-
-	assert.Nil(t, sm.ConsumePersist())
-	assert.Nil(t, sm.ConsumePersist()) // third call also nil
+func TestCoordQueryViewStateMachineExposesOnlyAtomicFlush(t *testing.T) {
+	typ := reflect.TypeOf((*CoordQueryViewStateMachine)(nil))
+	_, hasConsumePersist := typ.MethodByName("ConsumePersist")
+	_, hasConsumeSync := typ.MethodByName("ConsumeSync")
+	assert.False(t, hasConsumePersist)
+	assert.False(t, hasConsumeSync)
 }
 
-// TestConsumeSync_ConsumeOnce: second ConsumeSync returns nil.
-func TestConsumeSync_ConsumeOnce(t *testing.T) {
+func TestConsumeFlush_CoalescesUnflushedTransitions(t *testing.T) {
 	view := buildTestView(1)
 	sm := NewCoordQueryViewStateMachine(view)
 
-	views := sm.ConsumeSync()
-	require.NotEmpty(t, views)
-	for _, v := range views {
+	// None of these intermediate transitions has been externalized yet.
+	sm.EnterUnrecoverable()
+	sm.EnterDropping()
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateDropped))
+	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateDropped))
+
+	flush := sm.ConsumeFlush()
+	require.NotNil(t, flush.Persist)
+	assert.Equal(t, viewpb.QueryViewState_QueryViewStateDropped, flush.Persist.GetMeta().GetState())
+	require.NotEmpty(t, flush.Sync)
+	for _, target := range flush.Sync {
+		assert.Equal(t, qviews.QueryViewStateDropped, target.State())
+	}
+	assert.True(t, sm.ConsumeFlush().Empty())
+}
+
+func TestConsumeFlush_ConsumeOnce(t *testing.T) {
+	view := buildTestView(1)
+	sm := NewCoordQueryViewStateMachine(view)
+
+	flush := sm.ConsumeFlush()
+	require.NotNil(t, flush.Persist)
+	assert.Equal(t, viewpb.QueryViewState_QueryViewStatePreparing, flush.Persist.Meta.State)
+	require.NotEmpty(t, flush.Sync)
+	for _, v := range flush.Sync {
 		assert.Equal(t, qviews.QueryViewStatePreparing, v.State())
 	}
-
-	assert.Empty(t, sm.ConsumeSync())
-	assert.Empty(t, sm.ConsumeSync()) // third call also nil
+	assert.True(t, sm.ConsumeFlush().Empty())
+	assert.True(t, sm.ConsumeFlush().Empty())
 }
 
 // TestPendingPersist_Dropped_MeansDelete: Dropped persist signals ETCD delete.
@@ -856,7 +883,7 @@ func TestPendingPersist_Dropped_MeansDelete(t *testing.T) {
 	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateDropped))
 	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateDropped))
 
-	v := sm.ConsumePersist()
+	v := consumePendingPersistForTest(sm)
 	require.NotNil(t, v)
 	assert.Equal(t, viewpb.QueryViewState_QueryViewStateDropped, v.Meta.State)
 	assertNoPendingSync(t, sm)
@@ -1336,7 +1363,7 @@ func TestPendingSync_PreservesMeta(t *testing.T) {
 	view := buildTestView(1)
 	sm := NewCoordQueryViewStateMachine(view)
 
-	views := sm.ConsumeSync()
+	views := consumePendingSyncForTest(sm)
 	require.NotEmpty(t, views)
 	expectedVersion := qviews.FromProtoQueryViewVersion(view.Meta.Version)
 	for _, v := range views {
@@ -1349,7 +1376,7 @@ func TestPendingPersist_PreservesMeta(t *testing.T) {
 	view := buildTestView(1)
 	sm := NewCoordQueryViewStateMachine(view)
 
-	persist := sm.ConsumePersist()
+	persist := consumePendingPersistForTest(sm)
 	require.NotNil(t, persist)
 	assert.Equal(t, view.Meta.CollectionId, persist.Meta.CollectionId)
 	assert.Equal(t, view.Meta.ReplicaId, persist.Meta.ReplicaId)
@@ -1361,7 +1388,7 @@ func TestViewWithState_IsClone(t *testing.T) {
 	view := buildTestView(1)
 	sm := NewCoordQueryViewStateMachine(view)
 
-	persist := sm.ConsumePersist()
+	persist := consumePendingPersistForTest(sm)
 	require.NotNil(t, persist)
 
 	persist.Meta.CollectionId = 999
