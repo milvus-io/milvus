@@ -1257,27 +1257,43 @@ func TestCreateFieldDataRangeView(t *testing.T) {
 		}{
 			{
 				name: "binary",
-				fd: &schemapb.FieldData{Type: schemapb.DataType_BinaryVector, FieldId: 100,
-					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 8,
-						Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2, 3}}}}},
+				fd: &schemapb.FieldData{
+					Type: schemapb.DataType_BinaryVector, FieldId: 100,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim:  8,
+						Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2, 3}},
+					}},
+				},
 			},
 			{
 				name: "float16",
-				fd: &schemapb.FieldData{Type: schemapb.DataType_Float16Vector, FieldId: 100,
-					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2,
-						Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}}}}},
+				fd: &schemapb.FieldData{
+					Type: schemapb.DataType_Float16Vector, FieldId: 100,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim:  2,
+						Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}},
+					}},
+				},
 			},
 			{
 				name: "bfloat16",
-				fd: &schemapb.FieldData{Type: schemapb.DataType_BFloat16Vector, FieldId: 100,
-					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2,
-						Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}}}}},
+				fd: &schemapb.FieldData{
+					Type: schemapb.DataType_BFloat16Vector, FieldId: 100,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim:  2,
+						Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}},
+					}},
+				},
 			},
 			{
 				name: "int8",
-				fd: &schemapb.FieldData{Type: schemapb.DataType_Int8Vector, FieldId: 100,
-					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2,
-						Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3, 4, 5, 6}}}}},
+				fd: &schemapb.FieldData{
+					Type: schemapb.DataType_Int8Vector, FieldId: 100,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim:  2,
+						Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3, 4, 5, 6}},
+					}},
+				},
 			},
 			{
 				name: "vector array",
