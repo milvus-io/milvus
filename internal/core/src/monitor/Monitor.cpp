@@ -253,6 +253,8 @@ std::map<std::string, std::string> growingIndexCatchupRowsLabels{
 std::map<std::string, std::string> growingIndexInflightLabels{
     {"type", "first_build"}};
 std::map<std::string, std::string> growingIndexFailureLabels{{"type", "build"}};
+std::map<std::string, std::string> growingIndexDeadlineFailureLabels{
+    {"type", "deadline"}};
 
 const prometheus::Histogram::BucketBoundaries growingIndexLatencyBuckets = {
     1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 60000};  // ms
@@ -294,6 +296,9 @@ DEFINE_PROMETHEUS_COUNTER_FAMILY(
 DEFINE_PROMETHEUS_COUNTER(internal_core_growing_index_build_failures,
                           internal_core_growing_index_failures,
                           growingIndexFailureLabels)
+DEFINE_PROMETHEUS_COUNTER(internal_core_growing_index_deadline_failures,
+                          internal_core_growing_index_failures,
+                          growingIndexDeadlineFailureLabels)
 
 // Saturation of the background build pool: queue_depth rising while capacity
 // stays flat is the signal that first builds are waiting on the executor

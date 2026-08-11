@@ -74,6 +74,11 @@ ElapsedMs(const std::chrono::steady_clock::time_point& since) {
         .count();
 }
 
+class CatchupDeadlineExceeded final : public std::runtime_error {
+ public:
+    using std::runtime_error::runtime_error;
+};
+
 // Executor for async growing-index first builds. Sized to the knowhere
 // build pool ratio so this layer never out-submits it; tasks spend most
 // of their life blocked on the knowhere pool, which is why we do not
@@ -409,23 +414,41 @@ VectorFieldIndexing::CopySparseRows(
             static_cast<const value_type*>(vec->get_chunk_data(start_chunk));
         return chunk_data + (from - start_chunk * size_per_chunk);
     }
-    staging.resize(to - from);
-    int64_t copied = 0;
+    staging.clear();
+    staging.reserve(to - from);
     for (int64_t chunk_id = start_chunk; chunk_id <= end_chunk; ++chunk_id) {
         int64_t copy_start = std::max(from, chunk_id * size_per_chunk);
         int64_t copy_end = std::min(to, (chunk_id + 1) * size_per_chunk);
         int64_t copy_count = copy_end - copy_start;
-        // For mapping storage, chunk data is already compactly stored,
-        // so we can copy directly from chunk
         auto chunk_data =
             static_cast<const value_type*>(vec->get_chunk_data(chunk_id));
         int64_t chunk_offset = copy_start - chunk_id * size_per_chunk;
         for (int64_t i = 0; i < copy_count; ++i) {
-            staging[copied + i] = chunk_data[chunk_offset + i];
+            const auto& source = chunk_data[chunk_offset + i];
+            staging.emplace_back(
+                source.size(),
+                const_cast<uint8_t*>(
+                    static_cast<const uint8_t*>(source.data())),
+                /*own_data=*/false);
         }
-        copied += copy_count;
     }
     return staging.data();
+}
+
+void
+VectorFieldIndexing::UpdateValidDataTo(const VectorBase* field_raw_data,
+                                       int64_t logical_target) {
+    if (!field_raw_data->is_mapping_storage()) {
+        return;
+    }
+    int64_t index_logical = index_->GetOffsetMapping().GetTotalCount();
+    if (logical_target <= index_logical) {
+        return;
+    }
+    int64_t count = logical_target - index_logical;
+    auto validity = std::make_unique<bool[]>(count);
+    field_raw_data->copy_valid_data(index_logical, count, validity.get());
+    index_->UpdateValidData(validity.get(), count);
 }
 
 void
@@ -434,7 +457,6 @@ VectorFieldIndexing::BuildFirstIndexDense(const VectorBase* field_raw_data) {
     auto conf = get_build_params(get_data_type());
     auto build_threshold = get_build_threshold();
     bool is_mapping_storage = field_raw_data->is_mapping_storage();
-    auto valid_data = field_raw_data->get_valid_data();
 
     size_t vec_length;
     if (get_data_type() == DataType::VECTOR_FLOAT) {
@@ -455,8 +477,7 @@ VectorFieldIndexing::BuildFirstIndexDense(const VectorBase* field_raw_data) {
     if (is_mapping_storage) {
         auto logical_offset =
             field_raw_data->get_logical_offset(build_threshold - 1);
-        auto update_count = logical_offset + 1;
-        index_->UpdateValidData(valid_data.data(), update_count);
+        UpdateValidDataTo(field_raw_data, logical_offset + 1);
     }
     built_ = true;
     index_cur_.fetch_add(build_threshold);
@@ -470,7 +491,6 @@ VectorFieldIndexing::BuildFirstIndexSparse(const VectorBase* field_raw_data,
     auto dim = new_data_dim;
     auto build_threshold = get_build_threshold();
     bool is_mapping_storage = field_raw_data->is_mapping_storage();
-    auto valid_data = field_raw_data->get_valid_data();
 
     std::vector<value_type> staging;
     const void* data_ptr =
@@ -482,8 +502,7 @@ VectorFieldIndexing::BuildFirstIndexSparse(const VectorBase* field_raw_data,
     if (is_mapping_storage) {
         auto logical_offset =
             field_raw_data->get_logical_offset(build_threshold - 1);
-        auto update_count = logical_offset + 1;
-        index_->UpdateValidData(valid_data.data(), update_count);
+        UpdateValidDataTo(field_raw_data, logical_offset + 1);
     }
     built_ = true;
     index_cur_.fetch_add(build_threshold);
@@ -838,9 +857,10 @@ VectorFieldIndexing::BuildAsync(const VectorBase* field_raw_data,
         operator=(const InflightBuildGuard&) = delete;
     } inflight_guard;
 
-    // Shared by both catch clauses below (a non-std exception must not leak
-    // the inflight gauge nor strand the field in kBuilding forever).
-    auto handle_failure = [&](const char* reason) {
+    enum class FailureKind { kBuild, kDeadline };
+    // Shared by the catch clauses below (a non-std exception must not leak the
+    // inflight gauge nor strand the field in kBuilding forever).
+    auto handle_failure = [&](const char* reason, FailureKind kind) {
         if (sync_with_index_.load()) {
             // The index is already published: CatchUp flips sync_with_index_
             // and state_ under append_mutex_, and only post-publish
@@ -865,13 +885,21 @@ VectorFieldIndexing::BuildAsync(const VectorBase* field_raw_data,
         built_ = false;
         index_cur_.store(0);
         state_.store(GrowingIndexState::kDisabled);
-        milvus::monitor::internal_core_growing_index_build_failures.Increment();
+        if (kind == FailureKind::kDeadline) {
+            milvus::monitor::internal_core_growing_index_deadline_failures
+                .Increment();
+        } else {
+            milvus::monitor::internal_core_growing_index_build_failures
+                .Increment();
+        }
         try {
-            LOG_WARN(
-                "async growing index build failed, disabling interim index "
-                "for this field, falling back to brute-force scan "
-                "permanently: {}",
-                reason);
+            if (kind == FailureKind::kBuild) {
+                LOG_WARN(
+                    "async growing index build failed, disabling interim "
+                    "index for this field, falling back to brute-force scan "
+                    "permanently: {}",
+                    reason);
+            }
             // Legal here because the index has NOT taken raw-data ownership
             // yet: sync_with_index_ was never set, so HasRawData() stayed
             // false and try_remove_chunks never cleared the source chunks
@@ -924,10 +952,12 @@ VectorFieldIndexing::BuildAsync(const VectorBase* field_raw_data,
             CallBuildHook(GrowingBuildPhase::kAfterBuild);
             CatchUp(field_raw_data);
         }
+    } catch (const CatchupDeadlineExceeded& error) {
+        handle_failure(error.what(), FailureKind::kDeadline);
     } catch (const std::exception& error) {
-        handle_failure(error.what());
+        handle_failure(error.what(), FailureKind::kBuild);
     } catch (...) {
-        handle_failure("unknown exception");
+        handle_failure("unknown exception", FailureKind::kBuild);
     }
 }
 
@@ -951,7 +981,7 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
         return rate > 0.0 ? static_cast<double>(gap) / rate
                           : std::numeric_limits<double>::infinity();
     };
-    auto throw_deadline = [&](int64_t gap) {
+    auto throw_deadline = [&](int64_t gap, int64_t logical_tail = 0) {
         double elapsed_ms = ElapsedMs(catchup_start);
         double rate = consume_rate();
         double estimate_ms = estimated_finalize_ms(gap);
@@ -960,7 +990,8 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
             "unpublished index and falling back to raw search permanently: "
             "elapsed_ms={}, deadline_ms={}, gap_rows={}, consumed_rows={}, "
             "consumed_ms={}, consume_rows_per_ms={}, "
-            "estimated_finalize_ms={}, finalize_budget_ms={}",
+            "estimated_finalize_ms={}, finalize_budget_ms={}, "
+            "logical_tail_rows={}",
             elapsed_ms,
             async_catchup_deadline_ms_,
             gap,
@@ -968,17 +999,20 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
             consumed_ms,
             rate,
             estimate_ms,
-            async_finalize_budget_ms_);
-        throw std::runtime_error(fmt::format(
+            async_finalize_budget_ms_,
+            logical_tail);
+        throw CatchupDeadlineExceeded(fmt::format(
             "async growing index catch-up exceeded deadline: elapsed_ms={}, "
             "deadline_ms={}, gap_rows={}, consume_rows_per_ms={}, "
-            "estimated_finalize_ms={}, finalize_budget_ms={}",
+            "estimated_finalize_ms={}, finalize_budget_ms={}, "
+            "logical_tail_rows={}",
             elapsed_ms,
             async_catchup_deadline_ms_,
             gap,
             rate,
             estimate_ms,
-            async_finalize_budget_ms_));
+            async_finalize_budget_ms_,
+            logical_tail));
     };
 
     for (;;) {
@@ -986,7 +1020,13 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
             // Segment tearing down: stay kBuilding, never publish.
             return;
         }
-        int64_t target = PhysicalTarget(field_raw_data, pending_upto_.load());
+        int64_t pending_snapshot = pending_upto_.load();
+        // The index is unpublished while kBuilding, so its logical mapping can
+        // advance independently of physical Add. Keep all O(logical rows)
+        // validity work outside append_mutex_; finalization only publishes
+        // after both watermarks match the frozen insert watermark.
+        UpdateValidDataTo(field_raw_data, pending_snapshot);
+        int64_t target = PhysicalTarget(field_raw_data, pending_snapshot);
         int64_t gap = target - static_cast<int64_t>(index_cur_.load());
         if (gap > 0 && ElapsedMs(catchup_start) >= async_catchup_deadline_ms_ &&
             estimated_finalize_ms(gap) > async_finalize_budget_ms_) {
@@ -995,7 +1035,9 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
         if (gap > 0) {
             auto round_start = std::chrono::steady_clock::now();
             int64_t round_from = static_cast<int64_t>(index_cur_.load());
-            AddRange(field_raw_data, target, /*interruptible=*/true);
+            int64_t round_target =
+                std::min(target, round_from + CatchupSliceRows());
+            AddRange(field_raw_data, round_target, /*interruptible=*/true);
             double round_ms = ElapsedMs(round_start);
             int64_t round_rows =
                 static_cast<int64_t>(index_cur_.load()) - round_from;
@@ -1053,42 +1095,42 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
         int64_t final_target = PhysicalTarget(field_raw_data, pending);
         int64_t frozen_gap =
             final_target - static_cast<int64_t>(index_cur_.load());
+        bool is_mapping_storage = field_raw_data->is_mapping_storage();
+        int64_t index_logical = is_mapping_storage
+                                    ? index_->GetOffsetMapping().GetTotalCount()
+                                    : pending;
+        int64_t logical_tail = pending - index_logical;
         double frozen_estimate_ms = estimated_finalize_ms(frozen_gap);
-        if (frozen_estimate_ms > async_finalize_budget_ms_) {
+        if (logical_tail > 0 ||
+            frozen_estimate_ms > async_finalize_budget_ms_) {
             LOG_INFO(
                 "async growing index finalize deferred after locking: "
                 "frozen_gap_rows={}, estimated_finalize_ms={}, "
-                "finalize_budget_ms={}, consume_rows_per_ms={}, "
+                "finalize_budget_ms={}, logical_tail_rows={}, "
+                "consume_rows_per_ms={}, "
                 "lock_wait_ms={}, catchup_elapsed_ms={}, decision=continue",
                 frozen_gap,
                 frozen_estimate_ms,
                 async_finalize_budget_ms_,
+                logical_tail,
                 consume_rate(),
                 lock_wait_ms,
                 ElapsedMs(catchup_start));
             lock.unlock();
             if (ElapsedMs(catchup_start) >= async_catchup_deadline_ms_) {
-                throw_deadline(frozen_gap);
+                throw_deadline(frozen_gap, logical_tail);
             }
             continue;
         }
 
         auto lock_hold_start = std::chrono::steady_clock::now();
         AddRange(field_raw_data, final_target, /*interruptible=*/false);
-        // get_valid_data() materializes an O(rows) copy, so it is fetched once
-        // here and never inside the catch-up loop.
-        auto valid_data = field_raw_data->get_valid_data();
-        if (!valid_data.empty()) {
-            AssertInfo(static_cast<int64_t>(valid_data.size()) >= pending,
-                       "validity bitmap ({} rows) shorter than the raw-data "
-                       "watermark ({} rows)",
-                       valid_data.size(),
-                       pending);
-            int64_t index_logical = index_->GetOffsetMapping().GetTotalCount();
-            if (pending > index_logical) {
-                index_->UpdateValidData(valid_data.data() + index_logical,
-                                        pending - index_logical);
-            }
+        if (is_mapping_storage) {
+            AssertInfo(
+                index_->GetOffsetMapping().GetTotalCount() == pending,
+                "validity mapping ({}) did not reach frozen watermark ({})",
+                index_->GetOffsetMapping().GetTotalCount(),
+                pending);
         }
         // Atomic with the final AddRange under the same lock: readers that
         // observe sync_with_index_==true are guaranteed the index covers
@@ -1139,6 +1181,22 @@ VectorFieldIndexing::PhysicalTarget(const VectorBase* vec,
     return lo;
 }
 
+int64_t
+VectorFieldIndexing::CatchupSliceRows() const {
+    if (IsSparseFloatVectorDataType(get_data_type())) {
+        return kCatchupSparseRows;
+    }
+    int64_t bytes_per_row = 0;
+    if (get_data_type() == DataType::VECTOR_FLOAT) {
+        bytes_per_row = get_dim() * sizeof(float);
+    } else if (get_data_type() == DataType::VECTOR_FLOAT16) {
+        bytes_per_row = get_dim() * sizeof(float16);
+    } else {
+        bytes_per_row = get_dim() * sizeof(bfloat16);
+    }
+    return std::max<int64_t>(1, kCatchupStagingBytes / bytes_per_row);
+}
+
 void
 VectorFieldIndexing::AddRange(const VectorBase* field_raw_data,
                               int64_t target,
@@ -1179,8 +1237,7 @@ VectorFieldIndexing::AddRange(const VectorBase* field_raw_data,
     } else {
         vec_length = get_dim() * sizeof(bfloat16);
     }
-    int64_t budget_rows = std::max<int64_t>(
-        1, kCatchupStagingBytes / static_cast<int64_t>(vec_length));
+    int64_t budget_rows = CatchupSliceRows();
     while (static_cast<int64_t>(index_cur_.load()) < target) {
         if (interruptible && IsCancelled()) {
             return;

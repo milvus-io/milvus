@@ -402,10 +402,11 @@ class VectorFieldIndexing : public FieldIndexing {
                   size_t vec_length,
                   std::unique_ptr<char[]>& staging) const;
 
-    // Sparse counterpart of CopyDenseRows: copies physical rows [from, to)
-    // element-wise; single-chunk ranges are returned without copying.
-    // NOTE: the same aliasing caveat as CopyDenseRows applies to the
-    // single-chunk fast path.
+    // Sparse counterpart of CopyDenseRows. Single-chunk ranges directly
+    // borrow the chunk's SparseRow array; cross-chunk ranges build a
+    // contiguous array of non-owning SparseRow views, avoiding one heap
+    // allocation + memcpy per row. The views are consumed synchronously by
+    // knowhere before staging is destroyed.
     const void*
     CopySparseRows(const VectorBase* vec,
                    int64_t from,
@@ -426,6 +427,12 @@ class VectorFieldIndexing : public FieldIndexing {
     void
     BuildFirstIndexSparse(const VectorBase* field_raw_data,
                           int64_t new_data_dim);
+
+    // Advance the index-side logical validity mapping to `logical_target`
+    // using only the missing range. This is safe before publication and lets
+    // async catch-up keep all O(logical rows) work outside append_mutex_.
+    void
+    UpdateValidDataTo(const VectorBase* field_raw_data, int64_t logical_target);
 
     // Append data to an already-built index. Moved verbatim from the former
     // "add" branch of AppendSegmentIndexDense/Sparse, including the
@@ -479,9 +486,10 @@ class VectorFieldIndexing : public FieldIndexing {
 
     // Adds physical rows [index_cur_, target) to the index in staging-budget
     // sized slices, checking IsCancelled() between slices when `interruptible`.
-    // The finalize call passes interruptible=false: publishing
-    // sync_with_index_ requires the whole range to be absorbed, so a cancel
-    // there can only be honored by bailing out before taking the lock.
+    // CatchUp bounds each unlocked call to one slice so it can re-check the
+    // absolute deadline between calls. The finalize call may cover multiple
+    // slices under append_mutex_, but only after the measured ETA fits the
+    // finalize budget.
     // knowhere failures propagate to BuildAsync's handler.
     void
     AddRange(const VectorBase* field_raw_data,
@@ -493,6 +501,9 @@ class VectorFieldIndexing : public FieldIndexing {
     // physical -> logical map.
     int64_t
     PhysicalTarget(const VectorBase* vec, int64_t logical_upto) const;
+
+    int64_t
+    CatchupSliceRows() const;
 
     static constexpr int64_t kCatchupStagingBytes = 8 << 20;
     static constexpr int64_t kCatchupSparseRows = 4096;
