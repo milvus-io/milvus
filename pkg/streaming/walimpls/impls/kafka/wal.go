@@ -64,7 +64,7 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls.ScannerImpls, err error) {
 	// The scanner is stateless, so we can create a scanner with an anonymous consumer.
 	// and there's no commit opeartions.
-	consumerConfig := cloneKafkaConfig(w.consumerConfig)
+	consumerConfig := w.consumerConfigForRead()
 	consumerConfig.SetKey("group.id", opt.Name)
 	c, err := kafka.NewConsumer(&consumerConfig)
 	if err != nil {
@@ -103,6 +103,16 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 		return nil, errors.Wrap(convertKafkaReadError(err, topic), "failed to assign kafka consumer")
 	}
 	return newScanner(opt.Name, topic, exclude, c), nil
+}
+
+func (w *walImpl) consumerConfigForRead() kafka.ConfigMap {
+	consumerConfig := cloneKafkaConfig(w.consumerConfig)
+	if w.Channel().AccessMode == types.AccessModeRO {
+		// A historical reader must never recreate a deleted topic as an empty
+		// stream, otherwise it can wait forever for an AlterWAL boundary.
+		consumerConfig.SetKey("allow.auto.create.topics", false)
+	}
+	return consumerConfig
 }
 
 func convertKafkaReadError(err error, topic string) error {
