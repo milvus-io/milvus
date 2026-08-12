@@ -41,6 +41,7 @@ const (
 	FileResourceMetaPrefix              = MetaPrefix + "/file_resource_info"
 	FileResourceVersionKey              = MetaPrefix + "/file_resource_version"
 	SnapshotPrefix                      = MetaPrefix + "/snapshot"
+	ExportSnapshotJobPrefix             = MetaPrefix + "/export-snapshot-job"
 
 	NonRemoveFlagTomestone = "non-removed"
 	RemoveFlagTomestone    = "removed"

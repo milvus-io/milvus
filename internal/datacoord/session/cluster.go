@@ -36,6 +36,7 @@ import (
 type WorkerSlots struct {
 	NodeID         int64
 	AvailableSlots int64
+	Version        string
 }
 
 // Cluster defines the interface for tasks
@@ -199,6 +200,7 @@ func (c *cluster) QuerySlot() map[int64]*WorkerSlots {
 			availableNodeSlots[nodeID] = &WorkerSlots{
 				NodeID:         nodeID,
 				AvailableSlots: resp.GetAvailableSlots(),
+				Version:        resp.GetVersion(),
 			}
 		}()
 	}
