@@ -91,7 +91,7 @@ func HashString2Uint32(v string) uint32 {
 		subString = v[:substringLengthForCRC]
 	}
 
-	return crc32.ChecksumIEEE([]byte(subString))
+	return crc32.ChecksumIEEE(unsafe.Slice(unsafe.StringData(subString), len(subString)))
 }
 
 // HashString2LessUint32 hashing a string to uint32 but less than uint32 max

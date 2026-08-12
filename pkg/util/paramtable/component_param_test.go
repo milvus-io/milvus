@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -993,6 +994,41 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.enableVectorClusteringKey", "true")
 		assert.Equal(t, true, Params.EnableVectorClusteringKey.GetAsBool())
 	})
+}
+
+func TestDataCoordCompactionTargetConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true))
+	var params ComponentParam
+	params.Init(base)
+
+	cfg := &params.DataCoordCfg
+	assert.Equal(t, "dataCoord.compaction.enableTargetBasedCompaction", cfg.EnableTargetBasedCompaction.Key)
+	assert.Equal(t, "3.0.0", cfg.EnableTargetBasedCompaction.Version)
+	assert.Equal(t, "false", cfg.EnableTargetBasedCompaction.DefaultValue)
+	assert.False(t, cfg.EnableTargetBasedCompaction.GetAsBool())
+
+	base.Save(cfg.EnableTargetBasedCompaction.Key, "true")
+	assert.True(t, cfg.EnableTargetBasedCompaction.GetAsBool())
+
+	field, ok := reflect.TypeOf(dataCoordConfig{}).FieldByName("EnableTargetBasedCompaction")
+	assert.True(t, ok)
+	assert.Equal(t, "false", field.Tag.Get("refreshable"))
+
+	assert.Equal(t, "dataCoord.compaction.target.maxEventsPerReconcile", cfg.TargetCompactionMaxEvents.Key)
+	assert.Equal(t, "3.0.0", cfg.TargetCompactionMaxEvents.Version)
+	assert.Equal(t, "100", cfg.TargetCompactionMaxEvents.DefaultValue)
+	assert.Equal(t, 100, cfg.TargetCompactionMaxEvents.GetAsInt())
+
+	for _, value := range []string{"0", "-1", "invalid"} {
+		base.Save(cfg.TargetCompactionMaxEvents.Key, value)
+		assert.Equal(t, 100, cfg.TargetCompactionMaxEvents.GetAsInt())
+	}
+	base.Save(cfg.TargetCompactionMaxEvents.Key, "25")
+	assert.Equal(t, 25, cfg.TargetCompactionMaxEvents.GetAsInt())
+
+	field, ok = reflect.TypeOf(dataCoordConfig{}).FieldByName("TargetCompactionMaxEvents")
+	assert.True(t, ok)
+	assert.Equal(t, "true", field.Tag.Get("refreshable"))
 }
 
 func TestForbiddenItem(t *testing.T) {

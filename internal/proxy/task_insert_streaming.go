@@ -95,6 +95,7 @@ func repackInsertDataForStreamingService(
 	schemaVersion int32,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
+	walName := getActiveWALName()
 
 	channel2RowOffsets, err := assignChannelsByPK(result.IDs, channelNames, insertMsg)
 	if err != nil {
@@ -108,7 +109,7 @@ func repackInsertDataForStreamingService(
 
 	for channel, rowOffsets := range channel2RowOffsets {
 		// segment id is assigned at streaming node.
-		msgs, err := genInsertMsgsByPartition(ctx, 0, partitionID, partitionName, rowOffsets, channel, insertMsg)
+		msgs, err := genInsertMsgsByPartition(ctx, 0, partitionID, partitionName, rowOffsets, channel, insertMsg, walName)
 		if err != nil {
 			return nil, err
 		}
@@ -150,6 +151,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	schemaVersion int32,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
+	walName := getActiveWALName()
 
 	var channel2RowOffsets map[string][]int
 	var err error
@@ -201,7 +203,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 		}
 
 		for partitionName, rowOffsets := range partition2RowOffsets {
-			msgs, err := genInsertMsgsByPartition(ctx, 0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg)
+			msgs, err := genInsertMsgsByPartition(ctx, 0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg, walName)
 			if err != nil {
 				return nil, err
 			}

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -896,6 +897,112 @@ func TestDocInDocOutInsert(t *testing.T) {
 	}
 
 	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+}
+
+func TestTextFieldDMLV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	collSchema := generateTextCollectionSchema(false)
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         collSchema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+
+	assertTextFieldData := func(fieldsData []*schemapb.FieldData) {
+		textFieldData := getFieldDataByName(fieldsData, FieldText)
+		require.NotNil(t, textFieldData)
+		assert.Equal(t, schemapb.DataType_Text, textFieldData.GetType())
+		assert.Equal(t, []string{"rest text value"}, textFieldData.GetScalars().GetStringData().GetData())
+	}
+	mp.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+		assertTextFieldData(req.GetFieldsData())
+		return &milvuspb.MutationResult{
+			Status:    commonSuccessStatus,
+			InsertCnt: 1,
+			IDs:       generateIDs(schemapb.DataType_Int64, 1),
+		}, nil
+	}).Once()
+	mp.EXPECT().Upsert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+		assertTextFieldData(req.GetFieldsData())
+		return &milvuspb.MutationResult{
+			Status:    commonSuccessStatus,
+			UpsertCnt: 1,
+			IDs:       generateIDs(schemapb.DataType_Int64, 1),
+		}, nil
+	}).Once()
+
+	testEngine := initHTTPServerV2(mp, false)
+	requestBody := []byte(`{
+		"collectionName": "book",
+		"data": [{
+			"book_id": 1,
+			"word_count": 10,
+			"book_intro": [0.1, 0.2],
+			"text_field": "rest text value"
+		}]
+	}`)
+	for _, action := range []string{InsertAction, UpsertAction} {
+		testcase := requestBodyTestCase{
+			path:        versionalV2(EntityCategory, action),
+			requestBody: requestBody,
+		}
+		sendReqAndVerify(t, testEngine, action, http.MethodPost, testcase)
+	}
+}
+
+func TestTextFieldQueryV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	collSchema := generateTextCollectionSchema(false)
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         collSchema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{
+		Status:       commonSuccessStatus,
+		OutputFields: []string{FieldText},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Text,
+				FieldName: FieldText,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: []string{"rest query text"}},
+						},
+					},
+				},
+			},
+		},
+	}, nil).Once()
+
+	testEngine := initHTTPServerV2(mp, false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, QueryAction), bytes.NewReader([]byte(`{
+		"collectionName": "book",
+		"filter": "book_id > 0",
+		"outputFields": ["text_field"],
+		"limit": 10
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	resp := map[string]interface{}{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, float64(0), resp[HTTPReturnCode])
+	data := resp[HTTPReturnData].([]interface{})
+	require.Len(t, data, 1)
+	assert.Equal(t, "rest query text", data[0].(map[string]interface{})[FieldText])
 }
 
 func TestDocInDocOutInsertInvalid(t *testing.T) {
@@ -4020,6 +4127,96 @@ func TestAllowInt64(t *testing.T) {
 	validateTestCases(t, testEngine, queryTestCases, true)
 }
 
+func TestNarrowIntegerOverflowV2(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateNarrowIntegerCollectionSchema(schemapb.DataType_Int8),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+	testEngine := initHTTPServerV2(mp, false)
+	body := []byte(`{"collectionName":"book","data":[{"book_id":1,"book_intro":[0.1,0.2],"word_count":2,"narrow_int":128}]}`)
+
+	for _, action := range []string{InsertAction, UpsertAction} {
+		t.Run(action, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, action), bytes.NewReader(body))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.Equal(t, merr.Code(merr.ErrInvalidInsertData), returnBody.Code)
+			assert.Contains(t, returnBody.Message, "actual=128")
+			assert.Contains(t, returnBody.Message, "field narrow_int value must be an integer in range [-128, 127]")
+		})
+	}
+}
+
+func TestStructArrayIntegerExponentV2(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         buildStructArrayTestSchema(),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+	testEngine := initHTTPServerV2(mp, false)
+	body := []byte(`{"collectionName":"book","data":[{"id":1,"vec":[0.1,0.2,0.3,0.4],"my_struct":[{"sub_int":1e-999999,"sub_vec":[1.1,1.2,1.3,1.4]}]}]}`)
+
+	for _, action := range []string{InsertAction, UpsertAction} {
+		t.Run(action, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, action), bytes.NewReader(body))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.Equal(t, merr.Code(merr.ErrInvalidInsertData), returnBody.Code)
+			assert.Contains(t, returnBody.Message, "sub-field sub_int")
+			assert.Contains(t, returnBody.Message, "value=1e-999999")
+		})
+	}
+}
+
+func TestStructArrayExactInt64V2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	schema := buildStructArrayTestSchema()
+	schema.GetStructArrayFields()[0].GetFields()[0].ElementType = schemapb.DataType_Int64
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         schema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Insert(mock.Anything, mock.MatchedBy(func(req *milvuspb.InsertRequest) bool {
+		return hasStructArrayInt64Value(req.GetFieldsData(), "my_struct", "sub_int", 9007199254740993)
+	})).Return(&milvuspb.MutationResult{
+		Status:    &StatusSuccess,
+		InsertCnt: 1,
+		IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{1}},
+		}},
+	}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+	body := []byte(`{"collectionName":"book","data":[{"id":1,"vec":[0.1,0.2,0.3,0.4],"my_struct":[{"sub_int":9007199254740993.0,"sub_vec":[1.1,1.2,1.3,1.4]}]}]}`)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, InsertAction), bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+	assert.Equal(t, merr.Code(nil), returnBody.Code)
+}
+
 func generateCollectionSchemaWithVectorFields() *schemapb.CollectionSchema {
 	collSchema := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 	binaryVectorField := generateVectorFieldSchema(schemapb.DataType_BinaryVector)
@@ -5326,7 +5523,7 @@ func TestSearchByPK(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "ids": [1.5, 2.9], "limit": 10, "outputFields": ["word_count"]}`),
-		errMsg:      "has fractional part",
+		errMsg:      "is not an integer in the int64 range",
 		errCode:     1100, // ErrParameterInvalid
 	})
 
@@ -5626,5 +5823,200 @@ func TestAbortImportJob(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), returnBody)
 		assert.Nil(t, err)
 		assert.Equal(t, int32(0), returnBody.Code)
+	})
+}
+
+// The insert path stores a JSON or dynamic field from its original token
+// without re-validating it, on the grounds that the binder has already parsed
+// the whole body as JSON. That premise is what makes the passthrough safe, so
+// pin it: a malformed body must be refused before any Insert RPC is issued.
+//
+// The mock carries no Insert expectation, so reaching the proxy fails the test.
+// PostgreSQL's json.sql spends about twenty five cases on this shape of input;
+// here it only has to be established that none of them get through.
+func TestInsertMalformedBodyNeverReachesProxy(t *testing.T) {
+	paramtable.Init()
+
+	malformed := []struct {
+		name string
+		body string
+	}{
+		{"not json at all", `invalid json`},
+		{"unclosed object", `{"collectionName":"book","data":[{"a":1}`},
+		{"trailing comma", `{"collectionName":"book","data":[1,2,]}`},
+		{"single quotes", `{'collectionName':'book'}`},
+		{"unquoted key", `{collectionName:"book"}`},
+		{"leading zero number", `{"collectionName":"book","data":[{"a":01}]}`},
+		{"two values", `{"collectionName":"book"} {"a":1}`},
+		{"empty body", ``},
+		{"whitespace only", `   `},
+	}
+
+	for _, tt := range malformed {
+		t.Run(tt.name, func(t *testing.T) {
+			mp := mocks.NewMockProxy(t)
+			testEngine := initHTTPServerV2(mp, false)
+
+			req := httptest.NewRequest(http.MethodPost,
+				versionalV2(EntityCategory, InsertAction), bytes.NewReader([]byte(tt.body)))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.NotEqual(t, int32(0), returnBody.Code,
+				"a malformed body must not be accepted: %s", tt.body)
+		})
+	}
+}
+
+// The old gate forwarded groupSize only when it was greater than zero, which
+// conflated an absent knob (server default), an explicitly invalid one (the
+// server rejects 0 and negatives, but never saw them), and strictGroupSize on
+// its own (silently dropped behind the same gate).
+func TestAppendGroupParamsValidatesTheKnobs(t *testing.T) {
+	i32 := func(v int32) *int32 { return &v }
+	b := func(v bool) *bool { return &v }
+	kv := func(pairs []*commonpb.KeyValuePair) map[string]string {
+		m := map[string]string{}
+		for _, p := range pairs {
+			m[p.Key] = p.Value
+		}
+		return m
+	}
+
+	t.Run("absent knobs mean the server default", func(t *testing.T) {
+		params, err := appendGroupParams(nil, "cat", nil, nil)
+		require.NoError(t, err)
+		m := kv(params)
+		assert.Equal(t, "cat", m[ParamGroupByField])
+		_, hasSize := m[ParamGroupSize]
+		assert.False(t, hasSize)
+	})
+
+	t.Run("explicit zero and negative are refused, not swallowed", func(t *testing.T) {
+		for _, v := range []int32{0, -1} {
+			_, err := appendGroupParams(nil, "cat", i32(v), nil)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		}
+	})
+
+	t.Run("a positive size is forwarded", func(t *testing.T) {
+		params, err := appendGroupParams(nil, "cat", i32(3), b(true))
+		require.NoError(t, err)
+		m := kv(params)
+		assert.Equal(t, "3", m[ParamGroupSize])
+		assert.Equal(t, "true", m[ParamStrictGroupSize])
+	})
+
+	t.Run("strictGroupSize no longer rides behind groupSize", func(t *testing.T) {
+		params, err := appendGroupParams(nil, "cat", nil, b(true))
+		require.NoError(t, err)
+		assert.Equal(t, "true", kv(params)[ParamStrictGroupSize])
+	})
+
+	t.Run("group knobs without a grouping field are refused", func(t *testing.T) {
+		_, err := appendGroupParams(nil, "", i32(2), nil)
+		require.Error(t, err)
+		_, err = appendGroupParams(nil, "", nil, b(true))
+		require.Error(t, err)
+	})
+
+	t.Run("a grouping field of blanks is absent, not provided", func(t *testing.T) {
+		// the proxy trims the name before resolving it, so blanks must count
+		// as absent here too or the knobs are swallowed downstream again
+		_, err := appendGroupParams(nil, "  ", i32(2), nil)
+		require.Error(t, err)
+
+		params, err := appendGroupParams(nil, " cat ", i32(2), nil)
+		require.NoError(t, err)
+		assert.Equal(t, "cat", kv(params)[ParamGroupByField])
+	})
+}
+
+// The group knobs have two spellings -- the top-level fields and the
+// searchParams keys -- and the searchParams one was appended first, so it
+// silently won any disagreement. The ambiguity is refused now, and the
+// searchParams spelling can no longer smuggle group knobs past the
+// searchAggregation conflict check either.
+func TestGroupKnobSpellingsCannotDisagree(t *testing.T) {
+	postReq := func(body string) (int, string) {
+		paramtable.Init()
+		// tolerated shapes travel the whole handler; keep the limiter out of it
+		quotaKey := paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key
+		paramtable.Get().Save(quotaKey, "false")
+		t.Cleanup(func() { paramtable.Get().Reset(quotaKey) })
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			CollectionName: "book",
+			Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+			ShardsNum:      ShardNumDefault,
+			Status:         &StatusSuccess,
+		}, nil).Maybe()
+		// requests that pass validation reach the proxy; answer them so the
+		// tolerated shapes complete instead of riding the timeout middleware
+		mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
+			Status:  &StatusSuccess,
+			Results: &schemapb.SearchResultData{NumQueries: 1, TopK: 0, Topks: []int64{0}, Ids: &schemapb.IDs{}},
+		}, nil).Maybe()
+		testEngine := initHTTPServerV2(mp, false)
+		req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, SearchAction), strings.NewReader(body))
+		req.Header.Set(HTTPHeaderDBName, DefaultDbName)
+		// requests that pass validation ride into the mocked proxy; a short
+		// per-request timeout keeps the tolerated shapes from idling there
+		req.Header.Set(HTTPHeaderRequestTimeout, "1")
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+		return w.Code, w.Body.String()
+	}
+
+	t.Run("both spellings at once is ambiguous", func(t *testing.T) {
+		code, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"groupingField": "cat",
+			"searchParams": {"group_size": 5}}`)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Contains(t, body, "ambiguous grouping")
+	})
+
+	t.Run("searchParams size knobs alone still need a group field", func(t *testing.T) {
+		code, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"searchParams": {"group_size": 5}}`)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Contains(t, body, "require a group field")
+	})
+
+	t.Run("nested-only group keys are inert and refused", func(t *testing.T) {
+		code, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"searchParams": {"params": {"group_by_field": "cat", "group_size": 2}}}`)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Contains(t, body, "cannot carry")
+	})
+
+	t.Run("nested copies beside a working root spelling are tolerated", func(t *testing.T) {
+		// generateSearchParams itself duplicates root keys into the params
+		// JSON, so this is the shape a previously-working client sends
+		_, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"searchParams": {"group_by_field": "cat", "group_size": 5,
+				"params": {"group_by_field": "cat", "group_size": 5}}}`)
+		assert.NotContains(t, body, "cannot carry")
+		assert.NotContains(t, body, "ambiguous grouping")
+	})
+
+	t.Run("nested copies beside the top-level spelling are tolerated", func(t *testing.T) {
+		_, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"groupingField": "cat",
+			"searchParams": {"params": {"group_size": 5}}}`)
+		assert.NotContains(t, body, "cannot carry")
+		assert.NotContains(t, body, "ambiguous grouping")
+	})
+
+	t.Run("searchParams group size cannot ride under searchAggregation", func(t *testing.T) {
+		code, body := postReq(`{"collectionName": "book", "data": [[0.1, 0.2]],
+			"searchParams": {"strict_group_size": true},
+			"searchAggregation": {"fields": ["cat"], "size": 10}}`)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Contains(t, body, "cannot be used simultaneously")
 	})
 }

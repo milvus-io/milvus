@@ -461,6 +461,9 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 	case schemapb.DataType_VarChar:
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnVarChar, NewNullableColumnVarChar)
 
+	case schemapb.DataType_Text:
+		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnText, NewNullableColumnText)
+
 	case schemapb.DataType_Array:
 		// handle struct array field (legacy server may use DataType_Array as top-level)
 		if fd.GetStructArrays() != nil {

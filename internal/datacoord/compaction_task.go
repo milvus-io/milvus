@@ -91,6 +91,12 @@ func setStartTime(startTime int64) compactionTaskOpt {
 	}
 }
 
+func setCreateTs(createTS uint64) compactionTaskOpt {
+	return func(task *datapb.CompactionTask) {
+		task.CreateTs = createTS
+	}
+}
+
 func setRetryTimes(retryTimes int32) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
 		task.RetryTimes = retryTimes

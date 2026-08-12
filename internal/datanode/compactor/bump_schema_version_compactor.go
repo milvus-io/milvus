@@ -871,7 +871,8 @@ func (t *bumpSchemaVersionCompactionTask) addV3Stats(prefix string, fieldID int6
 // The receiver (completeBumpSchemaVersionCompactionMutation in
 // internal/datacoord/meta.go) merges this array onto SegmentInfo.Binlogs,
 // which is where the materialized field's data becomes visible to the rest of
-// DataCoord — including index building.
+// DataCoord — including index building — without replacing untouched groups.
+// Index eligibility is gated separately by the segment schema version.
 // This result is therefore load-bearing: dropping it silently makes the
 // materialized field permanently un-indexable.
 func (t *bumpSchemaVersionCompactionTask) buildNewInsertLogsV3(writerResult *bumpSchemaVersionWriterResult, sparseFieldMemorySizes map[int64]int, totalRows int64) ([]*datapb.FieldBinlog, error) {
