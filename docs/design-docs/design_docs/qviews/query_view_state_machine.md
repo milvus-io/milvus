@@ -136,6 +136,10 @@ transition and leave an inconsistent externalization boundary.
   - Dropped → Coord transitions to Dropping. This fast-forwards recovery when
     Coord regresses from the unpersisted Dropping state to persisted Down while
     SN has already completed Dropped.
+  - If a recovered Down view is no longer present on SN, SN reports Dropped
+    immediately. Coord then follows the same fast-forward path and pushes
+    Dropped to all nodes, allowing QueryNode resources and the persisted Coord
+    record to be cleaned up.
   - Unrecoverable → Coord transitions to Unrecoverable.
 - **QN**: Ready / Unrecoverable
   - Ready → Coord does nothing.

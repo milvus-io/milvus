@@ -119,7 +119,7 @@ loop() goroutine:
         start recvLoop(attemptCtx)       // Recv → MatchResponse
 
         either loop exits
-        → cancel attemptCtx → CloseSend → wait for both loops
+        → cancel attemptCtx → wait for both loops → CloseSend
         → backoff → retry
 ```
 
@@ -287,7 +287,7 @@ resumableSyncer
 ├── ctx / cancel
 └── loop goroutine:
         attempt context → create stream → rePush → sendLoop + recvLoop
-        → cancel + CloseSend + join → backoff → retry
+        → cancel + join + CloseSend → backoff → retry
 
 pendingSyncQueryViews
 ├── mu sync.Mutex

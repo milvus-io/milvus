@@ -83,6 +83,7 @@ When a Coord push arrives for a view not in the handler (e.g., node restarted):
 | Pushed State | Behavior |
 |---|---|
 | Preparing | Create new SM, start resource acquisition |
+| Down | Report Dropped immediately: the SN has already lost this teardown view, so Coord can fast-forward cleanup |
 | Dropped | Report Dropped immediately (let Coord finish cleanup) |
 | Other | Report Unrecoverable (state lost, Coord generates replacement) |
 

@@ -143,8 +143,8 @@ func (rs *resumableSyncer) loop() {
 		case <-rs.ctx.Done():
 		}
 		attemptCancel()
-		_ = stream.CloseSend()
 		loops.Wait()
+		_ = stream.CloseSend()
 		if rs.ctx.Err() != nil {
 			return
 		}

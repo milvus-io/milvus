@@ -267,6 +267,21 @@ func TestSNHandler_ApplyViews_UnknownViewReportsUnrecoverable(t *testing.T) {
 	assert.Equal(t, 0, mgr.acquiredCount())
 }
 
+func TestSNHandler_ApplyViews_UnknownDownReportsDropped(t *testing.T) {
+	cat := newMockCatalog()
+	mgr := newMockResourceManager()
+	h := recoverSNQueryViewHandler(context.Background(), testPChannel, cat, mgr, nil)
+
+	rc := &reportCollector{}
+	h.ApplyViews([]handler.ApplyView{
+		{View: newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateDown), OnReport: rc.onReport},
+	})
+
+	require.Equal(t, 1, rc.count())
+	assert.Equal(t, qviews.QueryViewStateDropped, rc.last().State())
+	assert.Equal(t, 0, mgr.acquiredCount())
+}
+
 func TestSNHandler_ApplyViews_DroppedOnUnknownViewReportsBack(t *testing.T) {
 	cat := newMockCatalog()
 	mgr := newMockResourceManager()

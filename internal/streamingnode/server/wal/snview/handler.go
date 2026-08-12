@@ -38,7 +38,8 @@ var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
 //
 //   - Preparing: creates SM + calls Acquire. No immediate response.
 //     Response depends on ResourceManager calling OnReady.
-//   - Dropped: responds immediately with the Dropped view (SN restart case).
+//   - Down or Dropped: responds immediately with Dropped (teardown already
+//     complete locally after SN restart or handoff).
 //   - Other states: responds immediately with Unrecoverable (state lost after restart).
 //
 // View already exists in handler:

@@ -185,11 +185,14 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 					s.notifyUnrecoverable(version)
 				},
 			})
-		case qviews.QueryViewStateDropped:
-			// View doesn't exist (e.g., SN restarted). Report Dropped immediately
-			// so Coord can finish cleanup.
+		case qviews.QueryViewStateDown, qviews.QueryViewStateDropped:
+			// A missing teardown view means the SN has already lost its local
+			// state and resources. Report Dropped so Coord can finish cleanup
+			// and notify all QueryNodes.
 			if av.OnReport != nil {
-				av.OnReport(av.View)
+				pb := av.View.IntoProto()
+				pb.Meta.State = viewpb.QueryViewState(qviews.QueryViewStateDropped)
+				av.OnReport(qviews.NewQueryViewAtWorkNodeFromProto(pb))
 			}
 		default:
 			// View unknown to this node (e.g., state lost after restart).

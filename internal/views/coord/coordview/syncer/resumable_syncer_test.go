@@ -338,6 +338,32 @@ func TestResumable_SendFailureCancelsBlockedRecv(t *testing.T) {
 	}, time.Second), "send failure must cancel blocked recv and close the attempt")
 }
 
+func TestResumable_CloseSendAfterSendLoopStops(t *testing.T) {
+	rs, streamReady, cancel := newResumableTestSetup(t)
+	defer cancel()
+	defer rs.Close()
+
+	stream := waitStream(t, streamReady)
+	first := newTestSyncView(1, 1, func(qviews.QueryViewAtWorkNode) bool { return false }, nil)
+	rs.Sync([]SyncView{first})
+	_, ok := stream.waitSend(time.Second)
+	require.True(t, ok)
+
+	stream.blockNextSend.Store(true)
+	rs.Sync([]SyncView{newTestSyncView(1, 1, func(qviews.QueryViewAtWorkNode) bool { return false }, nil)})
+	select {
+	case <-stream.sendEntered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocked send")
+	}
+
+	close(stream.recvCh)
+	assert.Eventually(t, func() bool {
+		return stream.closeCount() > 0
+	}, time.Second, time.Millisecond)
+	assert.False(t, stream.closeBeforeSendReturn.Load(), "CloseSend must wait for Send to return")
+}
+
 func TestResumable_RapidBreaksUseReconnectBackoff(t *testing.T) {
 	node := qviews.NewQueryNode(1)
 	client := newMockViewSyncClient()
