@@ -514,8 +514,9 @@ func TestCommittedWriteRecordFromTxnMessageWithIdempotency(t *testing.T) {
 	}).WithTxnContext(txnCtx).WithTimeTick(102).IntoImmutableMessage(rmq.NewRmqID(102))
 	commit := message.NewCommitTxnMessageBuilderV2().
 		WithVChannel("v1").
-		WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+		WithHeader(&message.CommitTxnMessageHeader{}).
 		WithBody(&message.CommitTxnMessageBody{}).
+		WithIdempotencyKey("txn-key").
 		MustBuildMutable().
 		WithTxnContext(txnCtx).
 		WithTimeTick(103).
@@ -607,8 +608,9 @@ func TestCommittedWriteRecordSkipsReplicatedTxnCommitKey(t *testing.T) {
 		WithTxnContext(txnCtx).WithTimeTick(101).IntoImmutableMessage(rmq.NewRmqID(101))
 	commit := message.NewCommitTxnMessageBuilderV2().
 		WithVChannel("v1").
-		WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+		WithHeader(&message.CommitTxnMessageHeader{}).
 		WithBody(&message.CommitTxnMessageBody{}).
+		WithIdempotencyKey("txn-key").
 		MustBuildMutable().
 		WithTxnContext(txnCtx).
 		WithReplicateHeader(testReplicateHeader(102)).
@@ -1702,14 +1704,14 @@ func newTestIdempotentCommittedInsertMessage(t *testing.T, vchannel string, key 
 func newTestIdempotentInsertMessage(t *testing.T, vchannel string, key string, extra *messagespb.IdempotentInsertResult) message.MutableMessage {
 	t.Helper()
 	header := &message.InsertMessageHeader{
-		CollectionId:   1,
-		IdempotencyKey: proto.String(key),
+		CollectionId: 1,
 	}
 	message.SetInsertHeaderIdempotentInsertResult(header, extra)
 	return message.NewInsertMessageBuilderV1().
 		WithVChannel(vchannel).
 		WithHeader(header).
 		WithBody(&msgpb.InsertRequest{}).
+		WithIdempotencyKey(key).
 		MustBuildMutable()
 }
 

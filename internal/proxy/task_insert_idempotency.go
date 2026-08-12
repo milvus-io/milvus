@@ -117,30 +117,62 @@ func (it *insertTask) reassignAutoIDForIdempotencyIfNeeded(ctx context.Context, 
 	return nil
 }
 
-// idempotentInsertHeaderDecorator single-sources idempotency header construction
-// for inserts in the proxy: it stamps both the idempotency key and the
-// per-write-unit insert result onto each insert header, so the idempotency
-// interceptor's "insert result requires key" invariant is satisfied at one site.
-// It returns nil (a no-op) when idempotency is disabled for this insert; the
-// transaction commit message, synthesized later in the producer, still gets the
-// key applied there.
-func (it *insertTask) idempotentInsertHeaderDecorator() func(*message.InsertMessageHeader, []int) error {
+// insertIdempotencyDecoration single-sources idempotency marking for inserts in
+// the proxy. It pairs the two things that together make a write unit idempotent:
+//   - the idempotency key, which travels in the `_ik` message property rather
+//     than in the insert header (so every message type is read the same way);
+//   - the per-write-unit insert result, which is stamped onto the insert header.
+//
+// They are carried in one value so the idempotency interceptor's "insert result
+// requires key" invariant cannot be broken by applying one without the other. A
+// nil decoration means idempotency is disabled for this insert and every method
+// below is a no-op.
+type insertIdempotencyDecoration struct {
+	key            string
+	decorateHeader func(*message.InsertMessageHeader, []int) error
+}
+
+// idempotentInsertDecoration returns the idempotency decoration for this insert,
+// or nil when idempotency is disabled for it. The transaction commit message,
+// synthesized later in the producer, gets the key applied there.
+func (it *insertTask) idempotentInsertDecoration() *insertIdempotencyDecoration {
 	if !it.idempotencyEnabled {
 		return nil
 	}
 	ids := it.result.GetIDs()
-	key := it.idempotencyKey
-	return func(header *message.InsertMessageHeader, rowOffsets []int) error {
-		result, err := buildInsertWriteUnitIdempotentInsertResult(ids, rowOffsets)
-		if err != nil {
-			return err
-		}
-		message.SetInsertHeaderIdempotentInsertResult(header, result)
-		if key != "" {
-			header.IdempotencyKey = proto.String(key)
-		}
+	return &insertIdempotencyDecoration{
+		key: it.idempotencyKey,
+		decorateHeader: func(header *message.InsertMessageHeader, rowOffsets []int) error {
+			result, err := buildInsertWriteUnitIdempotentInsertResult(ids, rowOffsets)
+			if err != nil {
+				return err
+			}
+			message.SetInsertHeaderIdempotentInsertResult(header, result)
+			return nil
+		},
+	}
+}
+
+// enabled reports whether this insert is an idempotent write.
+func (d *insertIdempotencyDecoration) enabled() bool {
+	return d != nil
+}
+
+// idempotencyKey returns the key to stamp on the message property, or "" when
+// the insert is not idempotent (WithIdempotencyKey then no-ops).
+func (d *insertIdempotencyDecoration) idempotencyKey() string {
+	if d == nil {
+		return ""
+	}
+	return d.key
+}
+
+// decorate stamps the per-write-unit insert result onto the insert header.
+func (d *insertIdempotencyDecoration) decorate(header *message.InsertMessageHeader, rowOffsets []int) error {
+	if d == nil {
 		return nil
 	}
+	return d.decorateHeader(header, rowOffsets)
 }
 
 func buildInsertWriteUnitIdempotentInsertResult(ids *schemapb.IDs, rowOffsets []int) (*messagespb.IdempotentInsertResult, error) {

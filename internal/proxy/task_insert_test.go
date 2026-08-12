@@ -67,7 +67,7 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 
 	mockMetaCache := NewMockCache(t)
 	mockMetaCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(0), nil)
-	// Idempotency disabled: no header decorator, so no key and no insert result.
+	// Idempotency disabled: no decoration, so no key property and no insert result.
 	msgs, err := repackInsertDataForStreamingService(context.Background(), mockMetaCache, []string{"ch"}, insertMsg, result, nil, 0, nil, nil)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
@@ -76,20 +76,20 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 	header := msg.Header()
 	assert.NotNil(t, header.SchemaVersion)
 	assert.Equal(t, int32(0), header.GetSchemaVersion())
-	assert.Empty(t, header.GetIdempotencyKey())
+	assert.Empty(t, message.IdempotencyKeyOf(msgs[0]))
 	_, ok := message.IdempotentInsertResultFromInsertHeader(header)
 	assert.False(t, ok)
 
-	// Idempotency enabled: the proxy decorator single-sources both the idempotency
-	// key and the per-write-unit insert result onto the insert header.
+	// Idempotency enabled: the proxy decoration single-sources both the idempotency
+	// key (message property) and the per-write-unit insert result (insert header).
 	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-1", result: result}
-	msgs, err = repackInsertDataForStreamingService(context.Background(), []string{"ch"}, insertMsg, result, nil, 0, nil, it.idempotentInsertHeaderDecorator())
+	msgs, err = repackInsertDataForStreamingService(context.Background(), mockMetaCache, []string{"ch"}, insertMsg, result, nil, 0, nil, it.idempotentInsertDecoration())
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
 
 	msg = message.MustAsMutableInsertMessageV1(msgs[0])
 	header = msg.Header()
-	assert.Equal(t, "key-1", header.GetIdempotencyKey())
+	assert.Equal(t, "key-1", message.IdempotencyKeyOf(msgs[0]))
 	extra, ok := message.IdempotentInsertResultFromInsertHeader(header)
 	assert.True(t, ok)
 	assert.Equal(t, []uint32{0}, extra.GetRowOffsets())
@@ -97,6 +97,8 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 }
 
 func TestRepackInsertDataForStreamingServiceSplitIdempotentMessagesShareKey(t *testing.T) {
+	mockMetaCache := NewMockCache(t)
+	mockMetaCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(0), nil).Maybe()
 	paramtable.Init()
 
 	oldCache := globalMetaCache
@@ -121,13 +123,14 @@ func TestRepackInsertDataForStreamingServiceSplitIdempotentMessagesShareKey(t *t
 
 	msgs, err := repackInsertDataForStreamingService(
 		context.Background(),
+		mockMetaCache,
 		[]string{"ch"},
 		insertMsg,
 		result,
 		nil,
 		0,
 		nil,
-		it.idempotentInsertHeaderDecorator(),
+		it.idempotentInsertDecoration(),
 	)
 	require.NoError(t, err)
 	require.Greater(t, len(msgs), 1)
@@ -136,6 +139,8 @@ func TestRepackInsertDataForStreamingServiceSplitIdempotentMessagesShareKey(t *t
 }
 
 func TestRepackInsertDataForStreamingServiceRejectsOversizedFinalIdempotentMessage(t *testing.T) {
+	mockMetaCache := NewMockCache(t)
+	mockMetaCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(0), nil).Maybe()
 	paramtable.Init()
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
 	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
@@ -151,6 +156,7 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedFinalIdempotentMessa
 
 	bodyOnly, err := repackInsertDataForStreamingService(
 		context.Background(),
+		mockMetaCache,
 		[]string{"ch"},
 		insertMsg,
 		result,
@@ -164,13 +170,14 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedFinalIdempotentMessa
 
 	withIdempotency, err := repackInsertDataForStreamingService(
 		context.Background(),
+		mockMetaCache,
 		[]string{"ch"},
 		insertMsg,
 		result,
 		nil,
 		0,
 		nil,
-		it.idempotentInsertHeaderDecorator(),
+		it.idempotentInsertDecoration(),
 	)
 	require.NoError(t, err)
 	require.Len(t, withIdempotency, 1)
@@ -183,11 +190,13 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedFinalIdempotentMessa
 	// guard exists specifically for the extra idempotency metadata.
 	withoutIdempotency, err := repackInsertDataForStreamingService(
 		context.Background(),
+		mockMetaCache,
 		[]string{"ch"},
 		insertMsg,
 		result,
 		nil,
 		0,
+		nil,
 		nil,
 	)
 	require.NoError(t, err)
@@ -196,19 +205,22 @@ func TestRepackInsertDataForStreamingServiceRejectsOversizedFinalIdempotentMessa
 
 	_, err = repackInsertDataForStreamingService(
 		context.Background(),
+		mockMetaCache,
 		[]string{"ch"},
 		insertMsg,
 		result,
 		nil,
 		0,
 		nil,
-		it.idempotentInsertHeaderDecorator(),
+		it.idempotentInsertDecoration(),
 	)
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 	require.Contains(t, err.Error(), "after adding streaming headers")
 }
 
 func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempotentHeaders(t *testing.T) {
+	mockMetaCache := NewMockCache(t)
+	mockMetaCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(0), nil).Maybe()
 	paramtable.Init()
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
 	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
@@ -237,6 +249,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempot
 
 	bodyOnly, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockMetaCache,
 		[]string{"ch"},
 		insertMsg,
 		result,
@@ -244,6 +257,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempot
 		nil,
 		schema,
 		0,
+		nil,
 		nil,
 	)
 	require.NoError(t, err)
@@ -253,6 +267,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempot
 
 	withoutIdempotency, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockMetaCache,
 		[]string{"ch"},
 		insertMsg,
 		result,
@@ -260,6 +275,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempot
 		nil,
 		schema,
 		0,
+		nil,
 		nil,
 	)
 	require.NoError(t, err)
@@ -269,6 +285,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempot
 	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-too-large", result: result}
 	_, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockMetaCache,
 		[]string{"ch"},
 		insertMsg,
 		result,
@@ -276,13 +293,16 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempot
 		nil,
 		schema,
 		0,
-		it.idempotentInsertHeaderDecorator(),
+		nil,
+		it.idempotentInsertDecoration(),
 	)
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 	require.Contains(t, err.Error(), "after adding streaming headers")
 }
 
 func TestRepackInsertDataWithPartitionKeyForStreamingServiceSameVChannelMessagesShareKey(t *testing.T) {
+	mockMetaCache := NewMockCache(t)
+	mockMetaCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(0), nil).Maybe()
 	paramtable.Init()
 
 	oldCache := globalMetaCache
@@ -315,6 +335,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceSameVChannelMessages
 
 	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
+		mockMetaCache,
 		[]string{"ch"},
 		insertMsg,
 		result,
@@ -323,7 +344,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceSameVChannelMessages
 		schema,
 		0,
 		nil,
-		it.idempotentInsertHeaderDecorator(),
+		it.idempotentInsertDecoration(),
 	)
 	require.NoError(t, err)
 	require.Greater(t, len(msgs), 1)
@@ -401,7 +422,7 @@ func collectIdempotentRepackOffsets(t *testing.T, msgs []message.MutableMessage,
 		require.Equal(t, vchannel, raw.VChannel())
 		msg := message.MustAsMutableInsertMessageV1(raw)
 		header := msg.Header()
-		require.Equal(t, key, header.GetIdempotencyKey())
+		require.Equal(t, key, message.IdempotencyKeyOf(raw))
 		extra, ok := message.IdempotentInsertResultFromInsertHeader(header)
 		require.True(t, ok)
 		body := msg.MustBody()

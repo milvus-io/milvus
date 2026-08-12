@@ -274,6 +274,21 @@ func (b *mutableMesasgeBuilder[H, B]) WithProperties(kvs map[string]string) *mut
 	return b
 }
 
+// WithIdempotencyKey creates a new builder carrying the idempotency key of an
+// idempotent write. An empty key is a no-op, so callers can pass the key
+// unconditionally without materializing an empty property.
+//
+// The key is a property rather than a per-message-type header field so that
+// every producer and consumer reads it the same way (see `IdempotencyKeyOf`);
+// the specialized header itself is stored as the `_h` property, so this choice
+// changes neither the persisted layout nor the encryption posture.
+func (b *mutableMesasgeBuilder[H, B]) WithIdempotencyKey(key string) *mutableMesasgeBuilder[H, B] {
+	if key != "" {
+		b.properties.Set(messageIdempotencyKey, key)
+	}
+	return b
+}
+
 // WithCipher creates a new builder with cipher property.
 func (b *mutableMesasgeBuilder[H, B]) WithCipher(cipherConfig *CipherConfig) *mutableMesasgeBuilder[H, B] {
 	b.cipherConfig = cipherConfig

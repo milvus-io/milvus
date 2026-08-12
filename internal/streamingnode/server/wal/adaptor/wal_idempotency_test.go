@@ -256,7 +256,8 @@ func initIdempotencyResourceForTest(t *testing.T) {
 func newIdempotencyWALAppendMessage(key string) message.MutableMessage {
 	return message.NewInsertMessageBuilderV1().
 		WithVChannel("v1").
-		WithHeader(&message.InsertMessageHeader{CollectionId: 1, IdempotencyKey: proto.String(key)}).
+		WithHeader(&message.InsertMessageHeader{CollectionId: 1}).
 		WithBody(&msgpb.InsertRequest{}).
+		WithIdempotencyKey(key).
 		MustBuildMutable()
 }

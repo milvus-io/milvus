@@ -5,10 +5,49 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestIdempotencyKeyProperty(t *testing.T) {
+	require.Empty(t, IdempotencyKeyOf(nil))
+
+	// An insert and a commit-txn message expose their key through the same
+	// accessor: the key is a message property, not a per-type header field.
+	insert := NewInsertMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&InsertMessageHeader{}).
+		WithBody(&msgpb.InsertRequest{}).
+		WithIdempotencyKey("key-1").
+		MustBuildMutable()
+	require.Equal(t, "key-1", IdempotencyKeyOf(insert))
+	require.Equal(t, "key-1", insert.Properties().ToRawMap()[messageIdempotencyKey])
+
+	commit := NewCommitTxnMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&CommitTxnMessageHeader{}).
+		WithBody(&CommitTxnMessageBody{}).
+		WithIdempotencyKey("key-1").
+		MustBuildMutable()
+	require.Equal(t, "key-1", IdempotencyKeyOf(commit))
+
+	// An empty key must not materialize the property at all, so a non-idempotent
+	// write carries exactly the properties it carried before this feature.
+	keyless := NewInsertMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&InsertMessageHeader{}).
+		WithBody(&msgpb.InsertRequest{}).
+		WithIdempotencyKey("").
+		MustBuildMutable()
+	require.Empty(t, IdempotencyKeyOf(keyless))
+	require.NotContains(t, keyless.Properties().ToRawMap(), messageIdempotencyKey)
+
+	// The key counts toward the estimated message size, so the proxy's
+	// max-message-size guard still accounts for the idempotency overhead.
+	require.Greater(t, insert.EstimateSize(), keyless.EstimateSize())
+}
 
 func TestIdempotencyKeyFingerprint(t *testing.T) {
 	fingerprint := IdempotencyKeyFingerprint("tenant-secret-key")

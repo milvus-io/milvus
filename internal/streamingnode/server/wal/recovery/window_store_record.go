@@ -134,7 +134,10 @@ func newCommittedWriteRecordFromTxnMessage(pchannel string, msg message.Immutabl
 }
 
 func idempotencyKeyFromImmutableMessage(msg message.ImmutableMessage) string {
-	// A replicated message preserves the SOURCE cluster's insert/commit header,
+	if msg == nil {
+		return ""
+	}
+	// A replicated message preserves the SOURCE cluster's message properties,
 	// including its idempotency key. That key must never materialize a window
 	// entry here: the local window's key history is independent of the source's,
 	// and a poisoned entry would drive replicated appends down the duplicate
@@ -143,19 +146,12 @@ func idempotencyKeyFromImmutableMessage(msg message.ImmutableMessage) string {
 	if msg.ReplicateHeader() != nil {
 		return ""
 	}
+	// Gated to the message types the window deduplicates, mirroring
+	// getIdempotencyKey on the interceptor side: the key property alone must not
+	// materialize an entry for a type the append path never dedups.
 	switch msg.MessageType() {
-	case message.MessageTypeInsert:
-		insertMsg, err := message.AsImmutableInsertMessageV1(msg)
-		if err != nil {
-			return ""
-		}
-		return insertMsg.Header().GetIdempotencyKey()
-	case message.MessageTypeCommitTxn:
-		commitMsg, err := message.AsImmutableCommitTxnMessageV2(msg)
-		if err != nil {
-			return ""
-		}
-		return commitMsg.Header().GetIdempotencyKey()
+	case message.MessageTypeInsert, message.MessageTypeCommitTxn:
+		return message.IdempotencyKeyOf(msg)
 	default:
 		return ""
 	}

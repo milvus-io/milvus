@@ -457,29 +457,20 @@ func (impl *idempotencyInterceptor) window(vchannel string) *Window {
 	return window
 }
 
+// getIdempotencyKey reads the idempotency key from the message property. The
+// property is readable on any message type, so the window is deliberately gated
+// here to the two types it is designed to deduplicate; a key carried by any
+// other type is ignored rather than silently creating a window entry.
 func getIdempotencyKey(msg message.MutableMessage, config WindowConfig) (key IdempotencyKey, hasIdempotencyKey bool, err error) {
-	var rawKey string
-	var hasInsertResult bool
 	switch msg.MessageType() {
-	case message.MessageTypeInsert:
-		insertMsg, err := message.AsMutableInsertMessageV1(msg)
-		if err != nil {
-			return "", false, status.NewInvalidArgument("malformed insert message header")
-		}
-		rawKey = insertMsg.Header().GetIdempotencyKey()
-		_, hasInsertResult = message.IdempotentInsertResultFromInsertHeader(insertMsg.Header())
-	case message.MessageTypeCommitTxn:
-		commitMsg, err := message.AsMutableCommitTxnMessageV2(msg)
-		if err != nil {
-			return "", false, status.NewInvalidArgument("malformed commit txn message header")
-		}
-		rawKey = commitMsg.Header().GetIdempotencyKey()
+	case message.MessageTypeInsert, message.MessageTypeCommitTxn:
 	default:
 		return "", false, nil
 	}
+	rawKey := message.IdempotencyKeyOf(msg)
 	if rawKey == "" {
-		if hasInsertResult {
-			return "", false, status.NewInvalidArgument("idempotency insert result header requires idempotency key")
+		if err := rejectInsertResultWithoutKey(msg); err != nil {
+			return "", false, err
 		}
 		return "", false, nil
 	}
@@ -487,6 +478,24 @@ func getIdempotencyKey(msg message.MutableMessage, config WindowConfig) (key Ide
 		return "", false, status.NewInvalidArgument("idempotency key length %d exceeds limit %d", len(rawKey), config.MaxKeyLength)
 	}
 	return IdempotencyKey(rawKey), true, nil
+}
+
+// rejectInsertResultWithoutKey enforces the producer-side invariant that the two
+// halves of an idempotent insert travel together: an insert carrying a duplicate
+// insert result but no key would be appended outside the window, so its result
+// could never be served and a later retry would duplicate the rows.
+func rejectInsertResultWithoutKey(msg message.MutableMessage) error {
+	if msg.MessageType() != message.MessageTypeInsert {
+		return nil
+	}
+	insertMsg, err := message.AsMutableInsertMessageV1(msg)
+	if err != nil {
+		return status.NewInvalidArgument("malformed insert message header")
+	}
+	if _, hasInsertResult := message.IdempotentInsertResultFromInsertHeader(insertMsg.Header()); hasInsertResult {
+		return status.NewInvalidArgument("idempotency insert result header requires idempotency key")
+	}
+	return nil
 }
 
 func isTxnMessage(msg message.MutableMessage) bool {

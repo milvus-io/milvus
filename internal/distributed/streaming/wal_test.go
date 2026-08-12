@@ -335,12 +335,8 @@ func TestAppendMessagesWithOptionsGroupsSameVChannelIdempotentBodiesIntoTxn(t *t
 				mu.Unlock()
 				return &types.AppendResult{}, nil
 			case message.MessageTypeCommitTxn:
-				commitMsg, err := message.AsMutableCommitTxnMessageV2(mm)
-				if err != nil {
-					return nil, err
-				}
 				mu.Lock()
-				commitKey = commitMsg.Header().GetIdempotencyKey()
+				commitKey = message.IdempotencyKeyOf(mm)
 				committedTxn = mm.TxnContext().TxnID
 				mu.Unlock()
 				return &types.AppendResult{

@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel/codes"
 	"golang.org/x/time/rate"
 
@@ -133,10 +132,9 @@ func (g *ProduceGuard) commit(ctx context.Context) (*types.AppendResult, error) 
 		return g.producer.produceInternal(ctx, g.msgs[0])
 	}
 	if len(g.msgs) == 1 {
-		msg, err := applyProduceOptionsToMessage(g.msgs[0], g.opts...)
-		if err != nil {
-			return nil, err
-		}
+		// No idempotency key is applied here: a single message already carries its
+		// own key from the layer that built it (the proxy, for inserts).
+		msg := g.msgs[0]
 		// Only a local CAS message without transaction context needs wrapping.
 		// Replication already carries the source transaction and must preserve it.
 		if !message.HasPartialUpdateCAS(msg) || msg.TxnContext() != nil || msg.ReplicateHeader() != nil {
@@ -264,6 +262,11 @@ func (g *ProduceGuard) appendTxnBody(ctx context.Context, txn *message.TxnContex
 }
 
 // commitTxn commits the transaction.
+//
+// The idempotency key for a single insert is stamped on the message by the proxy
+// (single-sourced alongside the insert result). Only the commit-txn message is
+// synthesized here in the producer, out of the proxy's reach, so it is the one
+// message that needs the key applied at this layer.
 func (g *ProduceGuard) commitTxn(
 	ctx context.Context,
 	vchannel string,
@@ -274,40 +277,16 @@ func (g *ProduceGuard) commitTxn(
 		WithVChannel(vchannel).
 		WithHeader(&message.CommitTxnMessageHeader{}).
 		WithBody(&message.CommitTxnMessageBody{}).
+		WithIdempotencyKey(idempotencyKeyFromProduceOptions(g.opts...)).
 		MustBuildMutable()
 	if partialUpdateCAS {
 		if err := message.MarkPartialUpdateCASCommit(commitTxn); err != nil {
 			return nil, err
 		}
 	}
-	commitTxnOverwrite, err := applyProduceOptionsToMessage(commitTxn, g.opts...)
-	if err != nil {
-		return nil, err
-	}
-	message.InjectTraceContext(ctx, commitTxnOverwrite)
+	message.InjectTraceContext(ctx, commitTxn)
 
-	return g.producer.produceInternal(ctx, commitTxnOverwrite.WithTxnContext(*txn))
-}
-
-func applyProduceOptionsToMessage(msg message.MutableMessage, opts ...ProduceOption) (message.MutableMessage, error) {
-	idempotencyKey := idempotencyKeyFromProduceOptions(opts...)
-	if idempotencyKey == "" {
-		return msg, nil
-	}
-	// The idempotency key for a single insert is stamped on the insert header by
-	// the proxy (single-sourced alongside the insert result). Only the commit-txn
-	// message — synthesized here in the producer, so the proxy cannot reach it —
-	// needs the key applied at this layer.
-	if msg.MessageType() == message.MessageTypeCommitTxn {
-		commitMsg, err := message.AsMutableCommitTxnMessageV2(msg)
-		if err != nil {
-			return nil, errors.Wrap(err, "set idempotency key for commit txn message")
-		}
-		header := commitMsg.Header()
-		header.IdempotencyKey = idempotencyKey
-		commitMsg.OverwriteHeader(header)
-	}
-	return msg, nil
+	return g.producer.produceInternal(ctx, commitTxn.WithTxnContext(*txn))
 }
 
 func idempotencyKeyFromProduceOptions(opts ...ProduceOption) string {

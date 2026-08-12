@@ -67,11 +67,11 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	// start to repack insert data
 	var msgs []message.MutableMessage
-	decorateHeader := it.idempotentInsertHeaderDecorator()
+	idempotency := it.idempotentInsertDecoration()
 	if it.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil, decorateHeader)
+		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil, idempotency)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil, decorateHeader)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), it.getMetaCache(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil, idempotency)
 	}
 	if err != nil {
 		mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
@@ -128,7 +128,7 @@ func repackInsertDataForStreamingService(
 	ez *message.CipherConfig,
 	schemaVersion int32,
 	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
-	decorateHeader func(*message.InsertMessageHeader, []int) error,
+	idempotency *insertIdempotencyDecoration,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 	walName := channelmgr.GetActiveWALName()
@@ -161,7 +161,7 @@ func repackInsertDataForStreamingService(
 			schemaVersion,
 			partialUpdateCAS,
 			walName,
-			decorateHeader,
+			idempotency,
 		)
 		if err != nil {
 			return nil, err
@@ -182,7 +182,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	schema *schemapb.CollectionSchema,
 	schemaVersion int32,
 	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
-	decorateHeader func(*message.InsertMessageHeader, []int) error,
+	idempotency *insertIdempotencyDecoration,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 	walName := channelmgr.GetActiveWALName()
@@ -253,7 +253,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 				schemaVersion,
 				partialUpdateCAS,
 				walName,
-				decorateHeader,
+				idempotency,
 			)
 			if err != nil {
 				return nil, err
@@ -292,7 +292,7 @@ func repackInsertDataByPartitionForStreamingService(
 	schemaVersion int32,
 	partialUpdateCAS *messagespb.PartialUpdateCAS,
 	walName message.WALName,
-	decorateHeader func(*message.InsertMessageHeader, []int) error,
+	idempotency *insertIdempotencyDecoration,
 ) ([]message.MutableMessage, error) {
 	type pendingInsertPack struct {
 		rowOffsets []int
@@ -344,7 +344,7 @@ func repackInsertDataByPartitionForStreamingService(
 			ez,
 			partialUpdateCAS,
 			pack.rowOffsets,
-			decorateHeader,
+			idempotency,
 		)
 		if err != nil {
 			return nil, err
@@ -354,7 +354,7 @@ func repackInsertDataByPartitionForStreamingService(
 		// metadata. Validate the fully built message and split the original row
 		// offsets again when that final envelope crosses the transport limit.
 		if partialUpdateCAS == nil || msg.EstimateSize() <= maxMessageSize {
-			if decorateHeader != nil {
+			if idempotency.enabled() {
 				if err := validateStreamingInsertMessageSize(msg); err != nil {
 					return nil, err
 				}
@@ -385,7 +385,7 @@ func buildInsertMessageForStreamingService(
 	ez *message.CipherConfig,
 	partialUpdateCAS *messagespb.PartialUpdateCAS,
 	rowOffsets []int,
-	decorateHeader func(*message.InsertMessageHeader, []int) error,
+	idempotency *insertIdempotencyDecoration,
 ) (message.MutableMessage, error) {
 	header := &message.InsertMessageHeader{
 		CollectionId: collectionID,
@@ -398,15 +398,14 @@ func buildInsertMessageForStreamingService(
 		},
 		SchemaVersion: &schemaVersion,
 	}
-	if decorateHeader != nil {
-		if err := decorateHeader(header, rowOffsets); err != nil {
-			return nil, err
-		}
+	if err := idempotency.decorate(header, rowOffsets); err != nil {
+		return nil, err
 	}
 	builder := message.NewInsertMessageBuilderV1().
 		WithVChannel(channel).
 		WithHeader(header).
-		WithBody(insertRequest)
+		WithBody(insertRequest).
+		WithIdempotencyKey(idempotency.idempotencyKey())
 	if partialUpdateCAS != nil {
 		if err := builder.AddPartialUpdateCAS(partialUpdateCAS); err != nil {
 			return nil, err

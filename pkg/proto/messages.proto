@@ -162,8 +162,10 @@ message InsertMessageHeader {
     repeated PartitionSegmentAssignment partitions = 2;
     // optional so consumers can distinguish omitted (legacy producer) from explicit value.
     optional int32 schema_version                  = 3;
-    optional string idempotency_key                         = 4;
-    optional IdempotentInsertResult idempotent_result       = 5;
+    // The idempotency key of an idempotent insert is NOT carried here: it lives in
+    // the message property `_ik` (see pkg/streaming/util/message/properties.go), so
+    // it is readable uniformly across message types without decoding a header.
+    optional IdempotentInsertResult idempotent_result = 4;
 }
 
 // IdempotentInsertResult carries the first successful insert result for a
@@ -269,9 +271,8 @@ message BeginTxnMessageHeader {
 }
 
 // CommitTxnMessageHeader is the header of commit transaction message.
-message CommitTxnMessageHeader {
-    string idempotency_key = 1;
-}
+// Just do nothing now.
+message CommitTxnMessageHeader {}
 
 // RollbackTxnMessageHeader is the header of rollback transaction
 // message.

@@ -180,8 +180,9 @@ func TestInterceptorBypassesReplicatedTxnCommit(t *testing.T) {
 	newCommit := func() message.MutableMessage {
 		return message.NewCommitTxnMessageBuilderV2().
 			WithVChannel("v1").
-			WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+			WithHeader(&message.CommitTxnMessageHeader{}).
 			WithBody(&message.CommitTxnMessageBody{}).
+			WithIdempotencyKey("txn-key").
 			MustBuildMutable().
 			WithTxnContext(txnCtx)
 	}
@@ -229,8 +230,9 @@ func TestInterceptorDuplicateTxnCommitRollsBackRetriedTxn(t *testing.T) {
 	newCommit := func(txnCtx message.TxnContext) message.MutableMessage {
 		return message.NewCommitTxnMessageBuilderV2().
 			WithVChannel("v1").
-			WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+			WithHeader(&message.CommitTxnMessageHeader{}).
 			WithBody(&message.CommitTxnMessageBody{}).
+			WithIdempotencyKey("txn-key").
 			MustBuildMutable().
 			WithTxnContext(txnCtx)
 	}
@@ -311,8 +313,9 @@ func TestInterceptorWaitErrorReclaimsRetriedTxnBuffer(t *testing.T) {
 	newCommit := func(txnCtx message.TxnContext) message.MutableMessage {
 		return message.NewCommitTxnMessageBuilderV2().
 			WithVChannel("v1").
-			WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+			WithHeader(&message.CommitTxnMessageHeader{}).
 			WithBody(&message.CommitTxnMessageBody{}).
+			WithIdempotencyKey("txn-key").
 			MustBuildMutable().
 			WithTxnContext(txnCtx)
 	}
@@ -399,8 +402,9 @@ func TestInterceptorWaitCtxCancelKeepsTxnBuffer(t *testing.T) {
 	newCommit := func(txnCtx message.TxnContext) message.MutableMessage {
 		return message.NewCommitTxnMessageBuilderV2().
 			WithVChannel("v1").
-			WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+			WithHeader(&message.CommitTxnMessageHeader{}).
 			WithBody(&message.CommitTxnMessageBody{}).
+			WithIdempotencyKey("txn-key").
 			MustBuildMutable().
 			WithTxnContext(txnCtx)
 	}
@@ -503,8 +507,9 @@ func TestInterceptorOwnerCommitFailsOnLostInsertResults(t *testing.T) {
 	interceptor := newInterceptor(WindowConfig{})
 	commit := message.NewCommitTxnMessageBuilderV2().
 		WithVChannel("v1").
-		WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+		WithHeader(&message.CommitTxnMessageHeader{}).
 		WithBody(&message.CommitTxnMessageBody{}).
+		WithIdempotencyKey("txn-key").
 		MustBuildMutable().
 		WithTxnContext(message.TxnContext{TxnID: 1, Keepalive: 10})
 
@@ -740,8 +745,9 @@ func TestInterceptorTxnCommitAssemblesInsertResultsFromBody(t *testing.T) {
 	}).WithTxnContext(txnCtx)
 	commit := message.NewCommitTxnMessageBuilderV2().
 		WithVChannel("v1").
-		WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+		WithHeader(&message.CommitTxnMessageHeader{}).
 		WithBody(&message.CommitTxnMessageBody{}).
+		WithIdempotencyKey("txn-key").
 		MustBuildMutable().
 		WithTxnContext(txnCtx)
 
@@ -782,8 +788,9 @@ func TestInterceptorTxnCommitAppendFailureClearsBuffer(t *testing.T) {
 	}).WithTxnContext(txnCtx)
 	commit := message.NewCommitTxnMessageBuilderV2().
 		WithVChannel("v1").
-		WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+		WithHeader(&message.CommitTxnMessageHeader{}).
 		WithBody(&message.CommitTxnMessageBody{}).
+		WithIdempotencyKey("txn-key").
 		MustBuildMutable().
 		WithTxnContext(txnCtx)
 
@@ -820,8 +827,9 @@ func TestInterceptorConcurrentDuplicateTxnCommitKeepsInsertIDs(t *testing.T) {
 	newCommit := func() message.MutableMessage {
 		return message.NewCommitTxnMessageBuilderV2().
 			WithVChannel("v1").
-			WithHeader(&message.CommitTxnMessageHeader{IdempotencyKey: "txn-key"}).
+			WithHeader(&message.CommitTxnMessageHeader{}).
 			WithBody(&message.CommitTxnMessageBody{}).
+			WithIdempotencyKey("txn-key").
 			MustBuildMutable().
 			WithTxnContext(txnCtx)
 	}
@@ -1229,14 +1237,14 @@ func newIdempotentInsertMessage(t *testing.T, vchannel string, key string) messa
 func newIdempotentInsertMessageWithInsertResult(t *testing.T, vchannel string, key string, extra *messagespb.IdempotentInsertResult) message.MutableMessage {
 	t.Helper()
 	header := &message.InsertMessageHeader{
-		CollectionId:   1,
-		IdempotencyKey: proto.String(key),
+		CollectionId: 1,
 	}
 	message.SetInsertHeaderIdempotentInsertResult(header, extra)
 	return message.NewInsertMessageBuilderV1().
 		WithVChannel(vchannel).
 		WithHeader(header).
 		WithBody(&msgpb.InsertRequest{CollectionID: 1}).
+		WithIdempotencyKey(key).
 		MustBuildMutable()
 }
 
