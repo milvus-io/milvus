@@ -44,6 +44,37 @@ func TestIsSystemField(t *testing.T) {
 	}
 }
 
+func TestMilvusVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		envValue string
+		expected string
+	}{
+		{
+			name:     "uses build tag",
+			envValue: "v3.0.0",
+			expected: "v3.0.0",
+		},
+		{
+			name:     "falls back when empty",
+			envValue: "",
+			expected: Version.String(),
+		},
+		{
+			name:     "falls back when unknown",
+			envValue: "unknown",
+			expected: Version.String(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(gitBuildTagsEnvKey, tt.envValue)
+			assert.Equal(t, tt.expected, MilvusVersion())
+		})
+	}
+}
+
 func TestDatabaseProperties(t *testing.T) {
 	props := []*commonpb.KeyValuePair{
 		{

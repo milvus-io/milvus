@@ -23,6 +23,7 @@ import (
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage/aliyun"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage/gcp"
@@ -151,6 +152,8 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Identify Milvus to S3-compatible backends while preserving minio-go's User-Agent.
+	minIOClient.SetAppInfo("milvus", common.MilvusVersion())
 	var bucketExists bool
 	// check valid in first query
 	checkBucketFn := func() error {
