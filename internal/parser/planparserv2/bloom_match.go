@@ -114,7 +114,7 @@ func checkBloomMatchField(columnInfo *planpb.ColumnInfo, argText string) error {
 // and bounds the size to 128 MB, so a malformed, oversized or wrong-domain blob
 // is rejected here at the proxy rather than fanned out to QueryNodes.
 func validateBloomFilterBlob(blob []byte) ([]byte, error) {
-	// Per-blob gate. proxy.maxBloomFilterSize budgets the SBBF *body* (default
+	// Per-blob gate. proxy.maxMembershipFilterSize budgets the SBBF *body* (default
 	// 64 MiB); the fixed 32-byte MBF1 header is allowed on top, hence the
 	// `+ mbf1HeaderSize`. Budgeting the body rather than the whole blob matters
 	// because the SBBF body is always a power of two: a full 64 MiB body is
@@ -123,12 +123,12 @@ func validateBloomFilterBlob(blob []byte) ([]byte, error) {
 	// body, ~half the member capacity). The 128 MiB MBF1 num_blocks format cap
 	// (checked in validateMBF1Envelope) remains the hard ceiling above this.
 	//
-	// The proxy separately budgets the assembled request's bloom-bearing plans
-	// with proxy.maxBloomFilterPlanSize before proto.Marshal. This per-blob gate
+	// The proxy separately budgets the assembled request's membership-filter-bearing plans
+	// with proxy.maxMembershipFilterPlanSize before proto.Marshal. This per-blob gate
 	// remains necessary to reject one oversized filter at its input boundary.
-	if maxSize := paramtable.Get().ProxyCfg.MaxBloomFilterSize.GetAsInt(); len(blob) > maxSize+mbf1HeaderSize {
+	if maxSize := paramtable.Get().ProxyCfg.MaxMembershipFilterSize.GetAsInt(); len(blob) > maxSize+mbf1HeaderSize {
 		return nil, merr.WrapErrParameterInvalidMsg(
-			"bloom_match filter blob body is %d bytes, exceeding proxy.maxBloomFilterSize (%d)%s",
+			"bloom_match filter blob body is %d bytes, exceeding proxy.maxMembershipFilterSize (%d)%s",
 			len(blob)-mbf1HeaderSize, maxSize, oversizedBlobHint(blob, maxSize))
 	}
 	if err := validateMBF1Envelope(blob); err != nil {
@@ -169,7 +169,7 @@ func oversizedBlobHint(blob []byte, maxSize int) string {
 	}
 	if fpr > mbf1MaxFPR {
 		return fmt.Sprintf("; the declared %d members do not fit %d bytes even at the maximum fpr %g — "+
-			"reduce the member count or raise proxy.maxBloomFilterSize", n, usable, mbf1MaxFPR)
+			"reduce the member count or raise proxy.maxMembershipFilterSize", n, usable, mbf1MaxFPR)
 	}
 	return fmt.Sprintf("; rebuild the filter with fpr >= %g for the declared %d members "+
 		"(SBBF bodies are powers of two, so a smaller fpr jumps straight to the next size)", fpr, n)
@@ -299,12 +299,13 @@ func (v *ParserVisitor) visitBloomMatch(ctx *parser.CallContext) interface{} {
 
 	values := allArgs[1].Accept(v)
 	if err := getError(values); err != nil {
-		return err
+		return merr.WrapErrParameterInvalidMsg(
+			"the second argument of bloom_match must be a {template} placeholder carrying a client pre-built filter blob")
 	}
 	valueExpr := getValueExpr(values)
 	if valueExpr == nil || !isTemplateExpr(valueExpr) {
 		return merr.WrapErrParameterInvalidMsg(
-			"the second argument of bloom_match must be a {template} placeholder carrying a client pre-built filter blob, got: %s", allArgs[1].GetText())
+			"the second argument of bloom_match must be a {template} placeholder carrying a client pre-built filter blob")
 	}
 
 	// Deferred: the blob is validated and embedded by
@@ -367,46 +368,66 @@ func FillBloomMatchExpressionValue(expr *planpb.Expr, call *planpb.CallExpr, tem
 	return nil
 }
 
+// walkExpr visits every expression node until visit returns true. Keeping the
+// recursion in one place prevents blob accounting, delete safety, element-level
+// guards, and log redaction from drifting as new container nodes are added.
+func walkExpr(expr *planpb.Expr, visit func(*planpb.Expr) bool) bool {
+	if expr == nil {
+		return false
+	}
+	if visit(expr) {
+		return true
+	}
+	switch e := expr.GetExpr().(type) {
+	case *planpb.Expr_CallExpr:
+		for _, param := range e.CallExpr.GetFunctionParameters() {
+			if walkExpr(param, visit) {
+				return true
+			}
+		}
+	case *planpb.Expr_UnaryExpr:
+		return walkExpr(e.UnaryExpr.GetChild(), visit)
+	case *planpb.Expr_BinaryExpr:
+		return walkExpr(e.BinaryExpr.GetLeft(), visit) || walkExpr(e.BinaryExpr.GetRight(), visit)
+	case *planpb.Expr_BinaryArithExpr:
+		return walkExpr(e.BinaryArithExpr.GetLeft(), visit) || walkExpr(e.BinaryArithExpr.GetRight(), visit)
+	case *planpb.Expr_RandomSampleExpr:
+		return walkExpr(e.RandomSampleExpr.GetPredicate(), visit)
+	case *planpb.Expr_ElementFilterExpr:
+		return walkExpr(e.ElementFilterExpr.GetElementExpr(), visit) ||
+			walkExpr(e.ElementFilterExpr.GetPredicate(), visit)
+	case *planpb.Expr_MatchExpr:
+		return walkExpr(e.MatchExpr.GetPredicate(), visit)
+	}
+	return false
+}
+
 // hasBloomFilterExpr reports whether the expression tree contains a bloom
 // filter membership node — either a materialized BloomFilterExpr or a
 // still-deferred bloom_match call.
 func hasBloomFilterExpr(expr *planpb.Expr) bool {
-	switch e := expr.GetExpr().(type) {
-	case *planpb.Expr_BloomFilterExpr:
-		return true
-	case *planpb.Expr_CallExpr:
-		if e.CallExpr.GetFunctionName() == BloomMatchFunctionName {
+	return walkExpr(expr, func(node *planpb.Expr) bool {
+		switch e := node.GetExpr().(type) {
+		case *planpb.Expr_BloomFilterExpr:
 			return true
+		case *planpb.Expr_CallExpr:
+			return e.CallExpr.GetFunctionName() == BloomMatchFunctionName
+		default:
+			return false
 		}
-		for _, param := range e.CallExpr.GetFunctionParameters() {
-			if hasBloomFilterExpr(param) {
-				return true
-			}
-		}
-		return false
-	case *planpb.Expr_UnaryExpr:
-		return hasBloomFilterExpr(e.UnaryExpr.GetChild())
-	case *planpb.Expr_BinaryExpr:
-		return hasBloomFilterExpr(e.BinaryExpr.GetLeft()) || hasBloomFilterExpr(e.BinaryExpr.GetRight())
-	case *planpb.Expr_RandomSampleExpr:
-		return hasBloomFilterExpr(e.RandomSampleExpr.GetPredicate())
-	case *planpb.Expr_ElementFilterExpr:
-		return hasBloomFilterExpr(e.ElementFilterExpr.GetElementExpr()) ||
-			hasBloomFilterExpr(e.ElementFilterExpr.GetPredicate())
-	case *planpb.Expr_MatchExpr:
-		// MATCH_*(struct_array, <predicate>) nests a predicate that may itself
-		// contain bloom_match; recurse so the delete-safety guard is not bypassed.
-		return hasBloomFilterExpr(e.MatchExpr.GetPredicate())
-	default:
-		return false
-	}
+	})
 }
 
-// PlanContainsBloomFilter reports whether the plan's main predicate or any
-// scorer filter contains a bloom_match expression. bloom_match is approximate
-// (false positives) and is therefore rejected by the proxy delete path, where
-// a false positive would delete rows outside the user's set. Proxy plan-size
-// accounting also uses this function, so scorer filters must be included.
+// PlanContainsMembershipFilter reports whether a main plan predicate or scorer
+// filter carries either supported client-built membership encoding.
+func PlanContainsMembershipFilter(plan *planpb.PlanNode) bool {
+	return PlanContainsBloomFilter(plan) || PlanContainsRoaringFilter(plan)
+}
+
+// PlanContainsBloomFilter reports whether the plan's main predicate or a scorer
+// filter contains a bloom_match expression. bloom_match is approximate (false
+// positives) and is therefore also rejected by the proxy delete path, where a
+// false positive would delete rows outside the user's set.
 func PlanContainsBloomFilter(plan *planpb.PlanNode) bool {
 	if plan == nil {
 		return false
@@ -430,29 +451,12 @@ func PlanContainsBloomFilter(plan *planpb.PlanNode) bool {
 // collectBloomFilterExprs appends every BloomFilterExpr node in the tree.
 // Mirrors the node set of hasBloomFilterExpr.
 func collectBloomFilterExprs(expr *planpb.Expr, out *[]*planpb.BloomFilterExpr) {
-	if expr == nil {
-		return
-	}
-	switch e := expr.GetExpr().(type) {
-	case *planpb.Expr_BloomFilterExpr:
-		*out = append(*out, e.BloomFilterExpr)
-	case *planpb.Expr_CallExpr:
-		for _, param := range e.CallExpr.GetFunctionParameters() {
-			collectBloomFilterExprs(param, out)
+	walkExpr(expr, func(node *planpb.Expr) bool {
+		if e, ok := node.GetExpr().(*planpb.Expr_BloomFilterExpr); ok {
+			*out = append(*out, e.BloomFilterExpr)
 		}
-	case *planpb.Expr_UnaryExpr:
-		collectBloomFilterExprs(e.UnaryExpr.GetChild(), out)
-	case *planpb.Expr_BinaryExpr:
-		collectBloomFilterExprs(e.BinaryExpr.GetLeft(), out)
-		collectBloomFilterExprs(e.BinaryExpr.GetRight(), out)
-	case *planpb.Expr_RandomSampleExpr:
-		collectBloomFilterExprs(e.RandomSampleExpr.GetPredicate(), out)
-	case *planpb.Expr_ElementFilterExpr:
-		collectBloomFilterExprs(e.ElementFilterExpr.GetElementExpr(), out)
-		collectBloomFilterExprs(e.ElementFilterExpr.GetPredicate(), out)
-	case *planpb.Expr_MatchExpr:
-		collectBloomFilterExprs(e.MatchExpr.GetPredicate(), out)
-	}
+		return false
+	})
 }
 
 func planPredicates(plan *planpb.PlanNode) *planpb.Expr {
@@ -467,48 +471,59 @@ func planPredicates(plan *planpb.PlanNode) *planpb.Expr {
 	return nil
 }
 
-// bloomRedactedPlan wraps a plan so its String() elides bloom_match blobs. As a
-// fmt.Stringer, mlog.Stringer defers the work: when the log level is disabled,
-// String() is never called and there is zero cost.
-type bloomRedactedPlan struct{ plan *planpb.PlanNode }
+// membershipRedactedPlan wraps a plan so its String() elides both approximate
+// bloom_match blobs and exact roaring_match blobs. As a fmt.Stringer,
+// mlog.Stringer defers the work: when the log level is disabled, String() is
+// never called and there is zero cost.
+type membershipRedactedPlan struct{ plan *planpb.PlanNode }
 
-func (p bloomRedactedPlan) String() string {
+func (p membershipRedactedPlan) String() string {
 	if p.plan == nil {
 		return "<nil>"
 	}
+
 	var blooms []*planpb.BloomFilterExpr
+	var roarings []*planpb.RoaringFilterExpr
 	collectBloomFilterExprs(planPredicates(p.plan), &blooms)
-	// Scorer filters carry their own predicate tree and can embed a bloom blob
-	// too (function-score / rerank filters); redact those as well.
-	for _, sc := range p.plan.GetScorers() {
-		collectBloomFilterExprs(sc.GetFilter(), &blooms)
+	collectRoaringFilterExprs(planPredicates(p.plan), &roarings)
+	for _, scorer := range p.plan.GetScorers() {
+		collectBloomFilterExprs(scorer.GetFilter(), &blooms)
+		collectRoaringFilterExprs(scorer.GetFilter(), &roarings)
 	}
-	if len(blooms) == 0 {
+	if len(blooms) == 0 && len(roarings) == 0 {
 		return p.plan.String()
 	}
-	// Swap each blob for a short {N bytes} marker (a byte-slice pointer
-	// assignment — no copy, unlike proto.Clone which would duplicate the
-	// up-to-tens-of-MiB body), stringify, then restore the originals via defer.
+	// Swap each blob for one short marker (a byte-slice pointer assignment -- no
+	// copy, unlike proto.Clone which would duplicate the up-to-tens-of-MiB body),
+	// stringify, then restore the originals via defer.
 	// Safe because zap evaluates a Stringer field synchronously in this
-	// goroutine at the log call, before the plan is marshaled downstream, so no
-	// other reader observes the temporary state.
-	saved := make([][]byte, len(blooms))
-	for i, bf := range blooms {
-		saved[i] = bf.FilterBlob
-		bf.FilterBlob = []byte(fmt.Sprintf("<%d bytes elided>", len(saved[i])))
+	// goroutine at the log call, and these call sites own the task-local plan, so
+	// no other reader observes the temporary state.
+	blobs := make([]*[]byte, 0, len(blooms)+len(roarings))
+	for _, bf := range blooms {
+		blobs = append(blobs, &bf.FilterBlob)
+	}
+	for _, rf := range roarings {
+		blobs = append(blobs, &rf.BitmapBlob)
+	}
+	saved := make([][]byte, len(blobs))
+	for i, blob := range blobs {
+		saved[i] = *blob
+		*blob = []byte("<blob>")
 	}
 	defer func() {
-		for i, bf := range blooms {
-			bf.FilterBlob = saved[i]
+		for i, blob := range blobs {
+			*blob = saved[i]
 		}
 	}()
 	return p.plan.String()
 }
 
 // RedactPlanForLog returns a fmt.Stringer that renders the plan with every
-// bloom_match filter blob replaced by a {size} marker, so a client's up-to-tens
-// -of-MiB blob never lands verbatim in a proxy debug log. Cheap when logging is
-// disabled (lazy) and when the plan has no bloom_match (no clone).
+// bloom_match or roaring_match blob replaced by <blob>, so a client's
+// up-to-tens-of-MiB membership payload never lands verbatim in a proxy debug
+// log. Cheap when logging is disabled (lazy) and when the plan has no
+// membership blob (no clone).
 func RedactPlanForLog(plan *planpb.PlanNode) fmt.Stringer {
-	return bloomRedactedPlan{plan: plan}
+	return membershipRedactedPlan{plan: plan}
 }
