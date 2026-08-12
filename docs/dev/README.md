@@ -9,7 +9,6 @@ current repository.
 - [Error handling guide](error_handling_guide.md)
 - [Error handling casebook](error_handling_casebook.md)
 - [Error sentinel convention](error_sentinel_convention.md)
-- [Repository governance enforcement](repository_governance.md)
 
 Historical Milvus 2.0 developer documentation, including the superseded local
 `milvus-proto` workflow, is retained under

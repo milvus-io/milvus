@@ -3,12 +3,9 @@ name: Approval Policy
 on:
   pull_request_target:
     branches: [master]
-    types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review]
+    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]
   issue_comment:
     types: [created, edited, deleted]
-  workflow_run:
-    workflows: [Design Doc Policy Review Signal]
-    types: [completed]
 
 permissions: {}
 
@@ -16,7 +13,7 @@ concurrency:
   group: >-
     approval-policy-${{ github.event.pull_request.number ||
     github.event.issue.number ||
-    github.event.workflow_run.display_title || github.run_id }}
+    github.run_id }}
   # Serialize events so a newer run cannot interrupt check finalization.
   cancel-in-progress: false
 
@@ -44,14 +41,6 @@ jobs:
             let pullNumber =
               context.payload.pull_request?.number ??
               context.payload.issue?.number;
-            const workflowRun = context.payload.workflow_run;
-            if (!pullNumber && workflowRun) {
-              const match = workflowRun.display_title?.match(/^([1-9][0-9]*)$/);
-              if (!match) {
-                throw new Error("Review signal run name does not identify a PR");
-              }
-              pullNumber = Number(match[1]);
-            }
             if (!pullNumber) {
               throw new Error("Could not determine the pull request number");
             }
@@ -61,22 +50,6 @@ jobs:
               repo,
               pull_number: pullNumber,
             });
-            if (workflowRun) {
-              const supportedEvents = new Set([
-                "pull_request_review",
-                "pull_request_review_comment",
-              ]);
-              if (
-                !supportedEvents.has(workflowRun.event) ||
-                pullResponse.data.head.sha !== workflowRun.head_sha ||
-                pullResponse.data.head.ref !== workflowRun.head_branch
-              ) {
-                throw new Error(
-                  "Review signal does not match the identified pull request",
-                );
-              }
-            }
-
             const applicable = pullResponse.data.base.ref === "master";
             core.setOutput("applicable", applicable ? "true" : "false");
             if (!applicable) {
@@ -160,14 +133,6 @@ jobs:
           ref: ${{ github.workflow_sha }}
           fetch-depth: 1
           persist-credentials: false
-
-      - name: Test approval validator
-        if: ${{ steps.start-policy-check.outputs.applicable == 'true' }}
-        timeout-minutes: 2
-        run: >-
-          python3 -m unittest discover
-          -s .github/scripts
-          -p 'test_check_approval_policy.py'
 
       - name: Validate approval policy
         id: validate-policy

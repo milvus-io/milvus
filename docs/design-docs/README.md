@@ -48,13 +48,12 @@ after the level-one title and before the first section heading:
 - Design Review: YYYY-MM-DD
 ```
 
-Replace every placeholder when using this block. `Feature DRI`, `Primary
-Approver`, and `Independent Approver` should identify three distinct GitHub
-users. The exact format lets automation recognize the fields and clear its
-advisory reminder. Missing or invalid review metadata does not fail the policy
-check and does not block merging. The template also contains recommended
-lifecycle and discovery fields such as `Created`, `Status`, `Component`,
-related issues, and release information.
+Replace every placeholder when using this block. The exact format lets
+automation recognize the fields and clear its advisory reminder. Missing or
+invalid review metadata does not fail the policy check and does not block
+merging. The template also contains recommended lifecycle and discovery fields
+such as `Created`, `Status`, `Component`, related issues, and release
+information.
 
 When an older design document is substantively revised, add the four review
 fields when practical. Pure path, link, or formatting maintenance may preserve
@@ -71,8 +70,8 @@ Use [`TEMPLATE.md`](TEMPLATE.md) as the starting point for a new document.
 
 - Every Milvus feature must have a related design document in this repository
   and link it from the feature pull request.
-- A pull request that adds, modifies, renames, or removes a formal design
-  document requires two distinct non-author Approver approvals.
+- A pull request targeting `master` that adds, modifies, renames, or removes a
+  formal design document requires two distinct non-author Approver approvals.
 - Pull-request authors cannot satisfy either required approval themselves.
 - Approvers can use the existing Prow flow by commenting `/approve`; a GitHub
   Review approval is not required. Automation adds `approved/design-doc` while

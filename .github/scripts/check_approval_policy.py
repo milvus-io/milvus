@@ -2,8 +2,6 @@
 """Publish the narrow, non-author approval policy check for master PRs."""
 
 import argparse
-import base64
-import binascii
 import datetime
 import html
 import json
@@ -19,25 +17,23 @@ from typing import Any
 
 POLICY_CHECK_NAME = "Approval Policy"
 POLICY_EXTERNAL_ID_PREFIX = "approval-policy"
-TARGET_BRANCH = "master"
 APPROVED_LABEL = "approved"
-OWNERS_ALIASES_PATH = "OWNERS_ALIASES"
 PROW_BOT_LOGIN = "sre-ci-robot"
 PROW_BOT_USER_ID = 56469371
 PROW_APPROVAL_NOTIFICATION_PREFIX = "[APPROVALNOTIFIER]"
-AUTOMATED_KNOWHERE_AUTHOR = "sre-ci-robot"
-AUTOMATED_KNOWHERE_TITLE = "[automated] Update Knowhere Commit"
-AUTOMATED_KNOWHERE_FILE = "internal/core/thirdparty/knowhere/CMakeLists.txt"
-AUTOMATED_KNOWHERE_REQUIRED_LABEL = "ci-passed"
-MAX_OWNERS_ALIASES_BYTES = 1024 * 1024
+MERGIFY_BOT_LOGIN = "mergify[bot]"
+MERGIFY_BOT_USER_ID = 37929162
+KNOWHERE_UPDATE_TITLE_FRAGMENT = "Update Knowhere Commit"
+KNOWHERE_UPDATE_REQUIRED_LABEL = "ci-passed"
 API_VERSION = "2022-11-28"
 
-REVIEW_SIGNAL_RUN_TITLE_PATTERN = re.compile(r"^([1-9][0-9]*)$")
-PROW_APPROVAL_HEADER_PATTERN = re.compile(
-    r"\[APPROVALNOTIFIER\] This PR is \*\*(?:NOT )?APPROVED\*\*"
-)
+PROW_APPROVED_HEADER = "[APPROVALNOTIFIER] This PR is **APPROVED**"
+PROW_NOT_APPROVED_HEADER = "[APPROVALNOTIFIER] This PR is **NOT APPROVED**"
 PROW_APPROVAL_LINE_PATTERN = re.compile(
     r"(?m)^This pull-request has been approved by:(?P<approvals>[^\r\n]*)$"
+)
+PROW_MANUAL_APPROVAL_BYPASS = (
+    "Approval requirements bypassed by manually added approval."
 )
 GITHUB_USER_LOGIN_FRAGMENT = r"[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}"
 # GitHub App actors append the five-character "[bot]" suffix; cap the stem at
@@ -53,6 +49,11 @@ PROW_APPROVAL_LINK_PATTERN = re.compile(
     r'title="(?:Approved|LGTM|Author self-approved)">'
     rf"({GITHUB_ACTOR_LOGIN_FRAGMENT})</a>\*"
 )
+PROW_APPROVED_OWNERS_LINE_PATTERN = re.compile(
+    r"(?m)^- ~~\[[^\r\n]+\]\([^\r\n]+\)~~ " r"\[(?P<approvers>[^\]\r\n]+)\]$"
+)
+GITHUB_ACTOR_LOGIN_PATTERN = re.compile(rf"^{GITHUB_ACTOR_LOGIN_FRAGMENT}$")
+TARGET_BRANCH = "master"
 
 
 @dataclass(frozen=True)
@@ -73,16 +74,11 @@ class ApprovalResult:
     """The ordinary one-Approver result captured from one GitHub snapshot."""
 
     approvers: tuple[str, ...]
-    automated_knowhere_update: bool
-    manual_approval_actor: str | None = None
+    automated_knowhere_update: bool = False
 
     @property
     def satisfied(self) -> bool:
-        return bool(
-            self.approvers
-            or self.automated_knowhere_update
-            or self.manual_approval_actor is not None
-        )
+        return bool(self.approvers or self.automated_knowhere_update)
 
 
 class GitHubClient:
@@ -249,48 +245,6 @@ class GitHubClient:
             "The pull request has too many issue events to evaluate safely"
         )
 
-    def get_owners_aliases(self, repository: str, ref: str) -> str:
-        """Load only OWNERS_ALIASES, pinned to the target base SHA."""
-
-        repository_path = urllib.parse.quote(repository, safe="/")
-        file_path = urllib.parse.quote(OWNERS_ALIASES_PATH, safe="/")
-        encoded_ref = urllib.parse.quote(ref, safe="")
-        content = self.request(
-            "GET",
-            f"/repos/{repository_path}/contents/{file_path}?ref={encoded_ref}",
-        )
-        if not isinstance(content, dict) or content.get("type") != "file":
-            raise RuntimeError(
-                "GitHub returned an invalid OWNERS_ALIASES file response"
-            )
-        try:
-            return decode_repository_file(content)
-        except ValueError as error:
-            raise RuntimeError(f"Could not read OWNERS_ALIASES: {error}") from error
-
-    def list_pull_request_files(
-        self, repository: str, pull_number: int
-    ) -> list[dict[str, Any]]:
-        """List files only after the caller identifies a Knowhere candidate."""
-
-        repository_path = urllib.parse.quote(repository, safe="/")
-        files: list[dict[str, Any]] = []
-        for page in range(1, 31):
-            page_items = self.request(
-                "GET",
-                f"/repos/{repository_path}/pulls/{pull_number}/files"
-                f"?per_page=100&page={page}",
-            )
-            if not isinstance(page_items, list):
-                raise RuntimeError("GitHub returned an invalid pull-request file list")
-            files.extend(page_items)
-            if len(page_items) < 100:
-                return files
-        raise RuntimeError(
-            "The pull request has at least 3000 files, so the exact Knowhere "
-            "exception cannot be verified"
-        )
-
     def begin_policy_check(
         self, repository: str, head_sha: str, pull_number: int
     ) -> int:
@@ -399,82 +353,8 @@ def utc_now() -> str:
     )
 
 
-def decode_repository_file(content: dict[str, Any]) -> str:
-    size = content.get("size")
-    if not isinstance(size, int) or size < 0:
-        raise ValueError("The file size could not be verified.")
-    if size > MAX_OWNERS_ALIASES_BYTES:
-        raise ValueError(
-            f"The file is larger than the "
-            f"{MAX_OWNERS_ALIASES_BYTES // 1024} KiB validation limit."
-        )
-    if content.get("encoding") != "base64" or not isinstance(
-        content.get("content"), str
-    ):
-        raise ValueError("The file content could not be decoded.")
-
-    encoded = "".join(content["content"].splitlines())
-    try:
-        decoded = base64.b64decode(encoded, validate=True)
-    except (binascii.Error, ValueError) as error:
-        raise ValueError("The file content is not valid base64.") from error
-    if len(decoded) != size:
-        raise ValueError("The file content size did not match GitHub metadata.")
-    try:
-        return decoded.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise ValueError("The file content is not valid UTF-8.") from error
-
-
-def extract_maintainers(owners_aliases: str) -> tuple[str, ...]:
-    """Parse the trusted maintainers alias without a YAML dependency."""
-
-    maintainers: list[str] = []
-    in_maintainers = False
-    for line in owners_aliases.splitlines():
-        if line == "  maintainers:":
-            if in_maintainers:
-                raise ValueError("OWNERS_ALIASES defines maintainers more than once")
-            in_maintainers = True
-            continue
-        if not in_maintainers:
-            continue
-        if re.match(r"^  [A-Za-z0-9_-]+:$", line):
-            break
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        match = re.fullmatch(r"    - ([A-Za-z0-9-]+)", line)
-        if match is None:
-            raise ValueError("OWNERS_ALIASES has an invalid maintainers entry")
-        maintainers.append(match.group(1))
-
-    if not in_maintainers or not maintainers:
-        raise ValueError("OWNERS_ALIASES does not define any maintainers")
-    if len({login.casefold() for login in maintainers}) != len(maintainers):
-        raise ValueError("OWNERS_ALIASES contains duplicate maintainers")
-    return tuple(maintainers)
-
-
-def load_trusted_approvers(
-    client: GitHubClient, state: PullRequestState
-) -> tuple[str, ...]:
-    """Load Approvers from OWNERS_ALIASES at the immutable PR base SHA."""
-
-    try:
-        owners_aliases = client.get_owners_aliases(
-            state.base_repository, state.base_sha
-        )
-        return extract_maintainers(owners_aliases)
-    except (RuntimeError, ValueError) as error:
-        raise RuntimeError(
-            "Could not load trusted Approvers from the target base revision: "
-            f"{error}"
-        ) from error
-
-
 def extract_prow_approvers(
     issue_comments: list[dict[str, Any]],
-    maintainers: tuple[str, ...] | list[str],
     author: str,
     repository: str,
     pull_number: int,
@@ -516,7 +396,7 @@ def extract_prow_approvers(
     first_line = notification.splitlines()[0] if notification else ""
     approval_lines = list(PROW_APPROVAL_LINE_PATTERN.finditer(notification))
     if (
-        PROW_APPROVAL_HEADER_PATTERN.fullmatch(first_line) is None
+        first_line not in {PROW_APPROVED_HEADER, PROW_NOT_APPROVED_HEADER}
         or len(approval_lines) != 1
     ):
         raise RuntimeError("The Prow approval notification has an unknown format")
@@ -538,27 +418,60 @@ def extract_prow_approvers(
     if len(normalized_notified_logins) != len(set(normalized_notified_logins)):
         raise RuntimeError("The Prow approval notification repeats an approver")
 
-    notified_logins = set(normalized_notified_logins)
-    trusted_logins = {login.casefold(): login for login in maintainers}
+    if first_line == PROW_NOT_APPROVED_HEADER:
+        return ()
+
+    # Prow's "approved by" line contains every current /approve actor, even a
+    # user who is not an Approver for any changed path.  The struck-through
+    # OWNERS rows are the part of the same trusted notification where Prow
+    # reports which of those actors actually matched the repository OWNERS
+    # rules.  Count only that intersection, and never inherit Prow's generic
+    # manually-added-label bypass.
+    if PROW_MANUAL_APPROVAL_BYPASS in notification:
+        return ()
+
+    qualified_logins: set[str] = set()
+    for owners_match in PROW_APPROVED_OWNERS_LINE_PATTERN.finditer(notification):
+        rendered_logins = owners_match.group("approvers")
+        for login in rendered_logins.split(","):
+            if GITHUB_ACTOR_LOGIN_PATTERN.fullmatch(login) is None:
+                raise RuntimeError(
+                    "The Prow approval notification has an unknown OWNERS format"
+                )
+            qualified_logins.add(login.casefold())
+
+    notified_logins_by_key = {
+        match.group(2).casefold(): match.group(2) for match in approval_links
+    }
+    if not qualified_logins.issubset(notified_logins_by_key):
+        raise RuntimeError(
+            "The Prow approval notification lists an OWNERS approver without "
+            "a matching approval"
+        )
+
     author_login = author.casefold()
     return tuple(
         sorted(
             (
-                canonical_login
-                for normalized_login, canonical_login in trusted_logins.items()
+                login
+                for normalized_login, login in notified_logins_by_key.items()
                 if normalized_login != author_login
-                and normalized_login in notified_logins
+                and normalized_login in qualified_logins
             ),
             key=str.casefold,
         )
     )
 
 
-def extract_non_author_manual_approval_actor(
-    issue_events: list[dict[str, Any]], author: str
-) -> str | None:
-    """Preserve non-author manual approved labels without trusting Prow itself."""
+def possible_knowhere_automation(state: PullRequestState) -> bool:
+    return (
+        APPROVED_LABEL in state.labels
+        and KNOWHERE_UPDATE_REQUIRED_LABEL in state.labels
+        and KNOWHERE_UPDATE_TITLE_FRAGMENT in state.title
+    )
 
+
+def approved_label_actor(issue_events: list[dict[str, Any]]) -> tuple[str, int, str]:
     approved_label_events: list[tuple[int, dict[str, Any]]] = []
     for event in issue_events:
         if not isinstance(event, dict):
@@ -600,38 +513,21 @@ def extract_non_author_manual_approval_actor(
         raise RuntimeError(
             "GitHub returned an approved-label event without a valid actor"
         )
-
-    if (
-        actor_id == PROW_BOT_USER_ID
-        or actor_login.casefold() == PROW_BOT_LOGIN.casefold()
-        or actor_login.casefold() == author.casefold()
-    ):
-        return None
-    return actor_login
-
-
-def possible_knowhere_automation(state: PullRequestState) -> bool:
-    """Decide whether the file-list API is allowed for this PR snapshot."""
-
-    return (
-        state.author.casefold() == AUTOMATED_KNOWHERE_AUTHOR.casefold()
-        and state.title == AUTOMATED_KNOWHERE_TITLE
-        and AUTOMATED_KNOWHERE_REQUIRED_LABEL in state.labels
-    )
+    return actor_login, actor_id, actor_type
 
 
 def exact_knowhere_automation(
-    state: PullRequestState, files: list[dict[str, Any]] | None
+    state: PullRequestState, issue_events: list[dict[str, Any]] | None
 ) -> bool:
     if not possible_knowhere_automation(state):
         return False
-    if files is None:
-        raise RuntimeError("The candidate Knowhere update file list was not loaded")
+    if issue_events is None:
+        raise RuntimeError("The candidate Knowhere label history was not loaded")
+    actor_login, actor_id, actor_type = approved_label_actor(issue_events)
     return (
-        len(files) == 1
-        and isinstance(files[0], dict)
-        and files[0].get("filename") == AUTOMATED_KNOWHERE_FILE
-        and files[0].get("status") == "modified"
+        actor_login.casefold() == MERGIFY_BOT_LOGIN.casefold()
+        and actor_id == MERGIFY_BOT_USER_ID
+        and actor_type == "Bot"
     )
 
 
@@ -640,32 +536,19 @@ def evaluate_ordinary_approval(
     repository: str,
     pull_number: int,
     state: PullRequestState,
-    knowhere_files: list[dict[str, Any]] | None,
+    knowhere_events: list[dict[str, Any]] | None,
 ) -> ApprovalResult:
     """Evaluate one ordinary approval snapshot without Design Doc APIs."""
 
-    maintainers = load_trusted_approvers(client, state)
     approvers = extract_prow_approvers(
         client.list_issue_comments(repository, pull_number),
-        maintainers,
         state.author,
         repository,
         pull_number,
     )
-    automated_knowhere_update = exact_knowhere_automation(state, knowhere_files)
-    manual_approval_actor = None
-    if (
-        not automated_knowhere_update
-        and not approvers
-        and APPROVED_LABEL in state.labels
-    ):
-        manual_approval_actor = extract_non_author_manual_approval_actor(
-            client.list_issue_events(repository, pull_number), state.author
-        )
     return ApprovalResult(
         approvers=approvers,
-        automated_knowhere_update=automated_knowhere_update,
-        manual_approval_actor=manual_approval_actor,
+        automated_knowhere_update=exact_knowhere_automation(state, knowhere_events),
     )
 
 
@@ -688,20 +571,10 @@ def build_check_summary(approval: ApprovalResult) -> str:
     if approval.automated_knowhere_update:
         lines.extend(
             [
-                "- Non-author Approver requirement: existing tested "
+                "- Non-author Approver requirement: existing "
                 "Knowhere-update automation applies",
-                "  - Restricted to @sre-ci-robot, the exact automated title, "
-                "one modified Knowhere file, and `ci-passed`",
-            ]
-        )
-    elif approval.manual_approval_actor is not None:
-        lines.extend(
-            [
-                "- Non-author Approver requirement: existing manual "
-                "approved-label path applies",
-                "  - The current `approved` label was last added by a "
-                "non-author, non-Prow actor "
-                f"@{approval.manual_approval_actor}",
+                "  - The current `approved` label was added by the trusted "
+                "Mergify App after the existing title and `ci-passed` rule matched",
             ]
         )
     else:
@@ -728,19 +601,10 @@ def load_event(path: str) -> tuple[str, int]:
         repository = str(event["repository"]["full_name"])
         pull_request = event.get("pull_request")
         issue = event.get("issue")
-        workflow_run = event.get("workflow_run")
         if isinstance(pull_request, dict):
             pull_number = int(pull_request["number"])
         elif isinstance(issue, dict) and isinstance(issue.get("pull_request"), dict):
             pull_number = int(issue["number"])
-        elif isinstance(workflow_run, dict):
-            display_title = workflow_run.get("display_title")
-            if not isinstance(display_title, str):
-                raise KeyError("workflow_run.display_title")
-            match = REVIEW_SIGNAL_RUN_TITLE_PATTERN.fullmatch(display_title)
-            if match is None:
-                raise ValueError("invalid workflow_run.display_title")
-            pull_number = int(match.group(1))
         else:
             raise KeyError("pull_request")
         if not repository or pull_number <= 0:
@@ -779,7 +643,8 @@ def run(event_path: str) -> int:
     initial_state = client.get_pull_request_state(repository, pull_number)
     if initial_state.base_ref != TARGET_BRANCH:
         print(
-            f"Approval Policy applies only to pull requests targeting {TARGET_BRANCH}."
+            "Approval Policy does not apply to pull requests targeting "
+            f"{initial_state.base_ref}."
         )
         return 0
 
@@ -787,8 +652,8 @@ def run(event_path: str) -> int:
         repository, initial_state.head_sha, pull_number
     )
     try:
-        knowhere_files = (
-            client.list_pull_request_files(repository, pull_number)
+        knowhere_events = (
+            client.list_issue_events(repository, pull_number)
             if possible_knowhere_automation(initial_state)
             else None
         )
@@ -797,7 +662,7 @@ def run(event_path: str) -> int:
             repository,
             pull_number,
             initial_state,
-            knowhere_files,
+            knowhere_events,
         )
 
         current_state = client.get_pull_request_state(repository, pull_number)
@@ -811,12 +676,17 @@ def run(event_path: str) -> int:
             )
             return 0
 
+        final_knowhere_events = (
+            client.list_issue_events(repository, pull_number)
+            if possible_knowhere_automation(current_state)
+            else None
+        )
         final_approval = evaluate_ordinary_approval(
             client,
             repository,
             pull_number,
             current_state,
-            knowhere_files,
+            final_knowhere_events,
         )
         if final_approval != approval:
             complete_stale_policy_check(client, repository, check_run_id)

@@ -67,7 +67,7 @@ As for everything else in the project, the contributions to Milvus are governed 
 If you want to become a contributor of Milvus, submit your pull requests! For those just getting started, see [GitHub workflow](#github-workflow) below.
 
 All submissions will be reviewed as quickly as possible.
-See [code review](CODE_REVIEW.md) for the general review process. Every pull request must receive at least one approval from an Approver other than the pull request author; self-approval does not count. Pull requests that contain a formal Design Doc have the additional approval requirement described below.
+See [code review](CODE_REVIEW.md) for the general review process. Every pull request targeting `master` must receive at least one approval from an Approver other than the pull request author; self-approval does not count. Pull requests targeting `master` that contain a formal Design Doc have the additional approval requirement described below.
 
 ### GitHub workflow
 
@@ -120,7 +120,7 @@ Formal Design Docs are Markdown files under `docs/design-docs/design_docs/`, inc
 
 For new documents, use the recommended `YYYYMMDD-short-descriptive-name.md` filename with lowercase letters, numbers, hyphens, or underscores, and keep one design per file. Put images or diagrams under `docs/design-docs/assets/graphs/` or `docs/design-docs/assets/images/`. See [the Design Doc guide](docs/design-docs/README.md) for more details.
 
-Any pull request that adds, modifies, renames, or deletes a formal Design Doc must be approved by at least two distinct Approvers, neither of whom may be the pull request author. Approvers can record approval through the existing Prow process by commenting `/approve`; clicking the GitHub Review `Approve` button is not required. When both valid approvals are present, automation adds the dedicated `approved/design-doc` label. Renaming or moving a Design Doc out of the formal directory still counts as a Design Doc change.
+Any pull request targeting `master` that adds, modifies, renames, or deletes a formal Design Doc must be approved by at least two distinct Approvers, neither of whom may be the pull request author. Approvers can record approval through the existing Prow process by commenting `/approve`; clicking the GitHub Review `Approve` button is not required. When both valid approvals are present, automation adds the dedicated `approved/design-doc` label. Renaming or moving a Design Doc out of the formal directory still counts as a Design Doc change.
 
 For easier ownership and review tracking, new or substantively revised Design Docs should include the four review fields below in the exact unbolded, machine-readable format shown:
 
@@ -133,7 +133,7 @@ For easier ownership and review tracking, new or substantively revised Design Do
 - Design Review: YYYY-MM-DD
 ```
 
-When supplied, the Feature DRI, Primary Approver, and Independent Approver should identify three distinct GitHub users. These fields are recommended metadata, not a merge requirement: missing or invalid values produce a best-effort advisory pull-request comment but do not block merging. Metadata inspection and reminder-comment updates can report warnings in the policy check or workflow log, but those warnings do not change the approval or Design Doc existence result. The Design Doc template includes additional recommended lifecycle and discovery fields.
+These fields are recommended metadata, not a merge requirement: missing or invalid values produce a best-effort advisory pull-request comment but do not block merging. Metadata inspection and reminder-comment updates can report warnings in the policy check or workflow log, but those warnings do not change the approval or Design Doc existence result. The Design Doc template includes additional recommended lifecycle and discovery fields.
 
 Every design document should explain the problem, the proposed design, and how the design will be verified. Use these sections:
 

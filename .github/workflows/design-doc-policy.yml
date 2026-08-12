@@ -2,12 +2,10 @@ name: Design Doc Policy
 
 on:
   pull_request_target:
+    branches: [master]
     types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review]
   issue_comment:
     types: [created, edited, deleted]
-  workflow_run:
-    workflows: [Design Doc Policy Review Signal]
-    types: [completed]
 
 permissions: {}
 
@@ -15,7 +13,7 @@ concurrency:
   group: >-
     design-doc-policy-${{ github.event.pull_request.number ||
     github.event.issue.number ||
-    github.event.workflow_run.display_title || github.run_id }}
+    github.run_id }}
   # Serialize events so a newer run cannot interrupt check finalization.
   cancel-in-progress: false
 
@@ -43,14 +41,6 @@ jobs:
             let pullNumber =
               context.payload.pull_request?.number ??
               context.payload.issue?.number;
-            const workflowRun = context.payload.workflow_run;
-            if (!pullNumber && workflowRun) {
-              const match = workflowRun.display_title?.match(/^([1-9][0-9]*)$/);
-              if (!match) {
-                throw new Error("Review signal run name does not identify a PR");
-              }
-              pullNumber = Number(match[1]);
-            }
             if (!pullNumber) {
               throw new Error("Could not determine the pull request number");
             }
@@ -59,25 +49,55 @@ jobs:
               repo,
               pull_number: pullNumber,
             });
-            if (workflowRun) {
-              const supportedEvents = new Set([
-                "pull_request_review",
-                "pull_request_review_comment",
-              ]);
-              if (
-                !supportedEvents.has(workflowRun.event) ||
-                pullResponse.data.head.sha !== workflowRun.head_sha ||
-                pullResponse.data.head.ref !== workflowRun.head_branch
-              ) {
+            const headSha = pullResponse.data.head.sha;
+            const externalId = `design-doc-policy-pr-${pullNumber}`;
+            // Publish cleanup coordinates before classification. If the file
+            // API fails, the final step can invalidate a stale success.
+            core.setOutput("head_sha", headSha);
+            core.setOutput("external_id", externalId);
+            const supportedBase = pullResponse.data.base.ref === "master";
+            const featurePullRequest =
+              !pullResponse.data.title.includes("[automated]") &&
+              (pullResponse.data.title.startsWith("feat:") ||
+                pullResponse.data.labels.some(
+                  (label) => label.name === "kind/feature",
+                ));
+            let formalDesignDocChanged = false;
+            for (let page = 1; page <= 30; page += 1) {
+              const response = await github.rest.pulls.listFiles({
+                owner,
+                repo,
+                pull_number: pullNumber,
+                per_page: 100,
+                page,
+              });
+              for (const file of response.data) {
+                if (
+                  [file.filename, file.previous_filename].some(
+                    (path) =>
+                      typeof path === "string" &&
+                      /^docs\/design-docs\/design_docs\/.+\.md$/.test(path),
+                  )
+                ) {
+                  formalDesignDocChanged = true;
+                  break;
+                }
+              }
+              if (formalDesignDocChanged || response.data.length < 100) {
+                break;
+              }
+              if (page === 30) {
                 throw new Error(
-                  "Review signal does not match the identified pull request",
+                  "The pull request file list is too large to classify",
                 );
               }
             }
-            const headSha = pullResponse.data.head.sha;
-            const externalId = `design-doc-policy-pr-${pullNumber}`;
-            core.setOutput("head_sha", headSha);
-            core.setOutput("external_id", externalId);
+            const applicable =
+              supportedBase && (featurePullRequest || formalDesignDocChanged);
+            core.setOutput("applicable", applicable ? "true" : "false");
+            if (!applicable) {
+              return [];
+            }
             const checkIds = [];
 
             for (let page = 1; page <= 10; page += 1) {
@@ -109,8 +129,8 @@ jobs:
             const output = {
               title: "Design Doc policy is being evaluated",
               summary:
-                "Validating feature documentation, repository governance, " +
-                "changed Design Doc metadata, and the two-Approver requirement.",
+                "Validating feature documentation, changed Design Doc metadata, " +
+                "and the two-Approver requirement.",
             };
             const startedAt = new Date().toISOString();
             const uniqueCheckIds = [...new Set(checkIds)].sort((a, b) => a - b);
@@ -142,6 +162,7 @@ jobs:
             return uniqueCheckIds;
 
       - name: Checkout trusted workflow revision
+        if: ${{ steps.start-policy-check.outputs.applicable == 'true' }}
         timeout-minutes: 2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -149,15 +170,9 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Test validator
-        timeout-minutes: 2
-        run: >-
-          python3 -m unittest discover
-          -s .github/scripts
-          -p 'test_check_design_doc_policy.py'
-
       - name: Validate Design Doc policy
         id: validate-policy
+        if: ${{ steps.start-policy-check.outputs.applicable == 'true' }}
         timeout-minutes: 5
         env:
           GH_TOKEN: ${{ github.token }}
@@ -167,7 +182,8 @@ jobs:
 
       - name: Fail any unfinished head-SHA policy check
         if: >-
-          ${{ always() && steps.validate-policy.outcome != 'success' &&
+          ${{ always() &&
+          steps.validate-policy.outcome != 'success' &&
           steps.start-policy-check.outputs.head_sha != '' }}
         timeout-minutes: 2
         uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
@@ -198,7 +214,8 @@ jobs:
                 if (
                   check.external_id === externalId &&
                   check.app?.slug === "github-actions" &&
-                  check.status !== "completed"
+                  (check.status !== "completed" ||
+                    check.conclusion === "success")
                 ) {
                   checkIds.push(check.id);
                 }

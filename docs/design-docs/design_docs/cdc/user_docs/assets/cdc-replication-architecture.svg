@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="640" viewBox="0 0 1500 640" role="img" aria-labelledby="title desc">
+  <title id="title">Milvus CDC replication architecture</title>
+  <desc id="desc">CDC nodes in a source cluster consume messages from source streaming nodes and replicate them to target proxies. Target proxies write DDL, DCL, and DML messages to target streaming nodes, which append them to WAL.</desc>
+  <defs>
+    <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4d9b63"/>
+    </marker>
+    <marker id="arrow-purple" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8162cc"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#d35d59"/>
+    </marker>
+  </defs>
+
+  <rect width="1500" height="640" fill="#ffffff"/>
+
+  <rect x="30" y="35" width="690" height="570" rx="6" fill="none" stroke="#7f8b94" stroke-width="1.8" stroke-dasharray="6 6"/>
+  <text x="40" y="75" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="700" fill="#20262d">Source Cluster</text>
+
+  <rect x="85" y="130" width="585" height="180" rx="8" fill="#ffd0b2"/>
+  <text x="95" y="163" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700" fill="#20262d">Streaming Nodes</text>
+  <rect x="116" y="185" width="155" height="72" rx="7" fill="#f7f7f7"/>
+  <text x="129" y="224" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#2b3036">Streaming Node</text>
+  <rect x="300" y="185" width="155" height="72" rx="7" fill="#f7f7f7"/>
+  <text x="313" y="224" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#2b3036">Streaming Node</text>
+  <rect x="485" y="185" width="155" height="72" rx="7" fill="#f7f7f7"/>
+  <text x="498" y="224" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#2b3036">Streaming Node</text>
+
+  <rect x="85" y="415" width="585" height="180" rx="8" fill="#9fd5b2"/>
+  <text x="95" y="448" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700" fill="#20262d">CDC Nodes</text>
+  <rect x="116" y="470" width="155" height="72" rx="7" fill="#f7f7f7"/>
+  <text x="153" y="512" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#2b3036">CDC Node</text>
+  <rect x="300" y="470" width="155" height="72" rx="7" fill="#f7f7f7"/>
+  <text x="337" y="512" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#2b3036">CDC Node</text>
+  <rect x="485" y="470" width="155" height="72" rx="7" fill="#f7f7f7"/>
+  <text x="522" y="512" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#2b3036">CDC Node</text>
+
+  <path d="M 377 412 L 377 325" fill="none" stroke="#4d9b63" stroke-width="3" marker-end="url(#arrow-green)"/>
+  <text x="338" y="363" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#2b3036">Consume</text>
+
+  <rect x="880" y="35" width="580" height="570" rx="6" fill="none" stroke="#7f8b94" stroke-width="1.8" stroke-dasharray="6 6"/>
+  <text x="890" y="75" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="700" fill="#20262d">Target Cluster</text>
+
+  <rect x="935" y="130" width="142" height="465" rx="7" fill="#d2daf9"/>
+  <text x="945" y="163" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700" fill="#20262d">Proxy</text>
+  <rect x="956" y="185" width="100" height="46" rx="7" fill="#f7f7f7"/>
+  <text x="983" y="216" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#2b3036">Proxy</text>
+  <rect x="956" y="286" width="100" height="46" rx="7" fill="#f7f7f7"/>
+  <text x="983" y="317" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#2b3036">Proxy</text>
+  <rect x="956" y="392" width="100" height="46" rx="7" fill="#f7f7f7"/>
+  <text x="983" y="423" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#2b3036">Proxy</text>
+  <rect x="956" y="500" width="100" height="46" rx="7" fill="#f7f7f7"/>
+  <text x="983" y="531" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#2b3036">Proxy</text>
+
+  <rect x="1200" y="130" width="215" height="155" rx="7" fill="#ffd0b2"/>
+  <text x="1215" y="217" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#20262d">Streaming Nodes</text>
+
+  <rect x="1200" y="445" width="215" height="150" rx="7" fill="#8ebcf0"/>
+  <text x="1285" y="525" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#20262d">WAL</text>
+
+  <path d="M 672 505 H 795 Q 797 505 797 503 V 212 Q 797 210 799 210 H 930" fill="none" stroke="#4d9b63" stroke-width="3" marker-end="url(#arrow-green)"/>
+  <text x="760" y="306" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#2b3036">Replicate</text>
+
+  <path d="M 1080 365 H 1125 Q 1140 365 1140 350 V 217 Q 1140 208 1149 208 H 1195" fill="none" stroke="#8162cc" stroke-width="3" marker-end="url(#arrow-purple)"/>
+  <text x="1082" y="305" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#2b3036">DDL/DCL/DML</text>
+
+  <path d="M 1308 290 V 430" fill="none" stroke="#d35d59" stroke-width="3" marker-end="url(#arrow-red)"/>
+  <text x="1275" y="376" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#2b3036">Append</text>
+</svg>

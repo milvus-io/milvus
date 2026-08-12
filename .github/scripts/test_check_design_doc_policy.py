@@ -1,6 +1,5 @@
 import base64
 import importlib.util
-import itertools
 import json
 import os
 import pathlib
@@ -37,7 +36,7 @@ TEST_APPROVAL_COMMAND = re.compile(
 )
 
 
-def prow_notification(*approvers, comment_id=700, titles=None):
+def prow_notification(*approvers, comment_id=700, titles=None, qualified=None):
     titles = ("Approved",) * len(approvers) if titles is None else tuple(titles)
     if len(titles) != len(approvers):
         raise ValueError("Each rendered approver needs one title")
@@ -46,16 +45,27 @@ def prow_notification(*approvers, comment_id=700, titles=None):
         f'title="{title}">{login}</a>*'
         for login, title in zip(approvers, titles)
     )
+    qualified = approvers if qualified is None else tuple(qualified)
+    owners_rows = "\n".join(
+        "- ~~[docs/OWNERS](https://github.com/milvus-io/milvus/blob/master/"
+        f"docs/OWNERS)~~ [{login}]"
+        for login in qualified
+    )
     return {
         "id": comment_id,
         "user": {
-            "login": checker.PROW_BOT_LOGIN,
-            "id": checker.PROW_BOT_USER_ID,
+            "login": checker.approval_policy.PROW_BOT_LOGIN,
+            "id": checker.approval_policy.PROW_BOT_USER_ID,
         },
         "body": (
-            f"{checker.PROW_APPROVAL_NOTIFICATION_PREFIX} This PR is **APPROVED**\n\n"
+            f"{checker.approval_policy.PROW_APPROVAL_NOTIFICATION_PREFIX} "
+            "This PR is **APPROVED**\n\n"
             f"This pull-request has been approved by: {rendered}\n\n"
-            "The full list of commands accepted by this bot follows."
+            "The full list of commands accepted by this bot follows.\n\n"
+            "<details>\n"
+            "Needs approval from an approver in each of these files:\n\n"
+            f"{owners_rows}\n"
+            "</details>"
         ),
         "created_at": "2026-08-08T00:00:00Z",
         "updated_at": "2026-08-08T00:00:00Z",
@@ -76,56 +86,22 @@ def infer_prow_approvers(comments):
     return tuple(sorted(login for login, approved in states.items() if approved))
 
 
-class GovernanceConfigTest(unittest.TestCase):
+class PolicyConfigurationTest(unittest.TestCase):
     def test_mergify_uses_prow_and_dedicated_design_doc_labels(self):
-        owners_aliases = (REPOSITORY_ROOT / "OWNERS_ALIASES").read_text(
-            encoding="utf-8"
-        )
         mergify = (REPOSITORY_ROOT / ".github/mergify.yml").read_text(encoding="utf-8")
 
-        self.assertEqual(
-            [], checker.validate_approver_governance(owners_aliases, mergify)
-        )
-        self.assertNotIn("approved-reviews-by", mergify)
-        protections = checker.merge_protections_section(mergify)
-        general_rule = checker.configuration_rule(protections, "Review / Prow approval")
-        self.assertEqual(
-            checker.MASTER_ONLY_IF_LINES,
-            checker.if_condition_lines(general_rule),
-        )
-        self.assertEqual(
-            checker.GENERAL_REVIEW_SUCCESS_LINES,
-            checker.success_condition_lines(general_rule),
-        )
-
-        design_rule = checker.configuration_rule(
-            protections, "Review / formal Design Doc"
-        )
-        self.assertEqual(
-            (*checker.MASTER_ONLY_IF_LINES, "      - *design_doc_area"),
-            checker.if_condition_lines(design_rule),
-        )
-        self.assertEqual(
-            checker.DESIGN_DOC_REVIEW_SUCCESS_LINES,
-            checker.success_condition_lines(design_rule),
-        )
-
-        governance_rule = checker.configuration_rule(
-            protections, "Review / governance enforcement"
-        )
-        self.assertEqual(
-            (*checker.MASTER_ONLY_IF_LINES, "      - *governance_area"),
-            checker.if_condition_lines(governance_rule),
-        )
-        self.assertEqual(
-            checker.POLICY_CHECK_SUCCESS_LINES,
-            checker.success_condition_lines(governance_rule),
-        )
+        for rule_name in (
+            "Review / Prow approval",
+            "Review / formal Design Doc",
+            "Docs / formal Design Doc policy",
+            "Docs / feature Design Doc policy",
+        ):
+            self.assertEqual(1, mergify.count(f"  - name: {rule_name}\n"))
 
     def test_formal_design_doc_classifier_matches_repository_tree(self):
         mergify = (REPOSITORY_ROOT / ".github/mergify.yml").read_text(encoding="utf-8")
         anchor_match = re.search(
-            r"^  design_doc_file: &design_doc_file 'files~=(.+)'$",
+            r"^  - &design_doc_area 'files~=(.+)'$",
             mergify,
             re.MULTILINE,
         )
@@ -168,38 +144,22 @@ class GovernanceConfigTest(unittest.TestCase):
         self.assertIn(r"-title~=\[automated\]", label_rule)
         self.assertIn("do-not-merge/missing-design-doc", automated_rule)
 
-    def test_review_events_relay_to_the_trusted_policy_workflow(self):
-        signal_workflow = (
-            REPOSITORY_ROOT / ".github/workflows/design-doc-policy-review-signal.yml"
-        ).read_text(encoding="utf-8")
+    def test_approve_comments_trigger_the_trusted_policy_workflow_directly(self):
         trusted_workflow = (
             REPOSITORY_ROOT / ".github/workflows/design-doc-policy.yml"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("  pull_request_review:\n", signal_workflow)
-        self.assertIn("    types: [submitted, edited, dismissed]\n", signal_workflow)
-        self.assertIn("  pull_request_review_comment:\n", signal_workflow)
-        self.assertIn("    types: [created, edited, deleted]\n", signal_workflow)
+        self.assertIn("  issue_comment:\n", trusted_workflow)
+        self.assertIn("    types: [created, edited, deleted]\n", trusted_workflow)
+        self.assertIn("    branches: [master]\n", trusted_workflow)
         self.assertIn(
-            'run-name: "${{ github.event.pull_request.number }}"\n',
-            signal_workflow,
-        )
-        self.assertIn("  workflow_run:\n", trusted_workflow)
-        self.assertIn(
-            "    workflows: [Design Doc Policy Review Signal]\n", trusted_workflow
-        )
-        self.assertIn(
-            "github.event.workflow_run.display_title || github.run_id",
+            "supportedBase && (featurePullRequest || formalDesignDocChanged);",
             trusted_workflow,
         )
-        self.assertNotIn("workflow_run.pull_requests[0]", trusted_workflow)
         self.assertIn(
-            "pullResponse.data.head.sha !== workflowRun.head_sha", trusted_workflow
+            "steps.start-policy-check.outputs.applicable == 'true'",
+            trusted_workflow,
         )
-        self.assertIn(
-            "pullResponse.data.head.ref !== workflowRun.head_branch", trusted_workflow
-        )
-        self.assertNotIn("workflowRun.head_repository", trusted_workflow)
 
     def test_trusted_workflow_bounds_failures_and_uses_least_privilege(self):
         trusted_workflow = (
@@ -207,13 +167,14 @@ class GovernanceConfigTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("    timeout-minutes: 20\n", trusted_workflow)
-        self.assertGreaterEqual(trusted_workflow.count("        timeout-minutes:"), 5)
+        self.assertGreaterEqual(trusted_workflow.count("        timeout-minutes:"), 4)
         self.assertIn("      pull-requests: read\n", trusted_workflow)
         self.assertNotIn("      pull-requests: write\n", trusted_workflow)
         self.assertIn('core.setOutput("head_sha", headSha);', trusted_workflow)
         self.assertIn('core.setOutput("external_id", externalId);', trusted_workflow)
         self.assertIn(
-            "${{ always() && steps.validate-policy.outcome != 'success' &&\n"
+            "${{ always() &&\n"
+            "          steps.validate-policy.outcome != 'success' &&\n"
             "          steps.start-policy-check.outputs.head_sha != '' }}",
             trusted_workflow,
         )
@@ -229,374 +190,13 @@ class GovernanceConfigTest(unittest.TestCase):
             "${{ steps.start-policy-check.outputs.external_id }}",
             trusted_workflow,
         )
-
-
-class GovernanceValidationTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.owners_aliases = (REPOSITORY_ROOT / "OWNERS_ALIASES").read_text(
-            encoding="utf-8"
+        self.assertLess(
+            trusted_workflow.index('core.setOutput("head_sha", headSha);'),
+            trusted_workflow.index("github.rest.pulls.listFiles"),
         )
-        cls.mergify = (REPOSITORY_ROOT / ".github/mergify.yml").read_text(
-            encoding="utf-8"
-        )
-
-    def comment_out_rule_line(self, rule_name: str, line: str) -> str:
-        marker = f"  - name: {rule_name}"
-        rule_start = self.mergify.index(marker)
-        rule_end = self.mergify.find("\n  - name:", rule_start + len(marker))
-        if rule_end == -1:
-            rule_end = len(self.mergify)
-        line_start = self.mergify.index(f"\n{line}\n", rule_start, rule_end) + 1
-        indentation = line[: len(line) - len(line.lstrip())]
-        commented_line = f"{indentation}# {line.lstrip()}"
-        return (
-            self.mergify[:line_start]
-            + commented_line
-            + self.mergify[line_start + len(line) :]
-        )
-
-    def replace_rule_fragment(
-        self, rule_name: str, fragment: str, replacement: str
-    ) -> str:
-        marker = f"  - name: {rule_name}"
-        rule_start = self.mergify.index(marker)
-        rule_end = self.mergify.find("\n  - name:", rule_start + len(marker))
-        if rule_end == -1:
-            rule_end = len(self.mergify)
-        fragment_start = self.mergify.index(fragment, rule_start, rule_end)
-        return (
-            self.mergify[:fragment_start]
-            + replacement
-            + self.mergify[fragment_start + len(fragment) :]
-        )
-
-    def test_detects_governance_changes_on_either_side_of_rename(self):
-        for file_info in (
-            {"filename": ".github/mergify.yml", "status": "modified"},
-            {
-                "filename": ".github/workflows/design-doc-policy-review-signal.yml",
-                "status": "modified",
-            },
-            {
-                "filename": ".github/workflows/approval-policy.yml",
-                "status": "modified",
-            },
-            {
-                "filename": ".github/scripts/test_check_approval_policy.py",
-                "status": "modified",
-            },
-            {
-                "filename": "archive/old-policy.py",
-                "previous_filename": ".github/scripts/check_approval_policy.py",
-                "status": "renamed",
-            },
-        ):
-            with self.subTest(file_info=file_info):
-                self.assertTrue(checker.governance_enforcement_changed([file_info]))
-        self.assertFalse(
-            checker.governance_enforcement_changed(
-                [{"filename": "docs/design-docs/README.md", "status": "modified"}]
-            )
-        )
-
-    def test_rejects_github_review_conditions(self):
-        drifted = self.mergify.replace(
-            "  # Build and test status conditions",
-            "  approved_by_example: &approved_by_example "
-            "'approved-reviews-by = example'\n\n"
-            "  # Build and test status conditions",
-        )
-        issues = checker.validate_approver_governance(self.owners_aliases, drifted)
-        self.assertTrue(any("Prow approval labels" in issue for issue in issues))
-
-    def test_rejects_merge_protection_reporting_drift(self):
-        for original, replacement in (
-            ("  reporting_method: check-runs", "  reporting_method: deployments"),
-            ("  post_comment: false", "  post_comment: true"),
-            ("merge_protections_settings:", "disabled_merge_protections_settings:"),
-        ):
-            with self.subTest(original=original):
-                drifted = self.mergify.replace(original, replacement, 1)
-                issues = checker.validate_approver_governance(
-                    self.owners_aliases, drifted
-                )
-                self.assertTrue(
-                    any("required check-run configuration" in issue for issue in issues)
-                )
-
-    def test_rejects_general_rule_drift(self):
-        cases = (
-            "      - base=master",
-            "      - label=approved",
-            "      - '-check-stale = @github-actions/Approval Policy'",
-        )
-        for line in cases:
-            with self.subTest(line=line):
-                drifted = self.comment_out_rule_line("Review / Prow approval", line)
-                issues = checker.validate_approver_governance(
-                    self.owners_aliases, drifted
-                )
-                self.assertTrue(any("general review rule" in issue for issue in issues))
-
-    def test_rejects_design_doc_rule_drift(self):
-        cases = (
-            (
-                "      - base=master",
-                "does not cover the formal Design Doc area",
-            ),
-            (
-                "      - *design_doc_area",
-                "does not cover the formal Design Doc area",
-            ),
-            (
-                "      - label=approved/design-doc",
-                "do not require exactly the approved/design-doc label",
-            ),
-        )
-        for line, expected in cases:
-            with self.subTest(line=line):
-                drifted = self.comment_out_rule_line("Review / formal Design Doc", line)
-                issues = checker.validate_approver_governance(
-                    self.owners_aliases, drifted
-                )
-                self.assertTrue(any(expected in issue for issue in issues))
-
-    def test_rejects_governance_rule_drift(self):
-        cases = (
-            (
-                "      - base=master",
-                "do not require the trusted policy check",
-            ),
-            (
-                "      - *governance_area",
-                "do not require the trusted policy check",
-            ),
-            (
-                "      - '-check-stale = @github-actions/Design Doc Policy'",
-                "do not require exact Design Doc Policy success",
-            ),
-        )
-        for line, expected in cases:
-            with self.subTest(line=line):
-                drifted = self.comment_out_rule_line(
-                    "Review / governance enforcement", line
-                )
-                issues = checker.validate_approver_governance(
-                    self.owners_aliases, drifted
-                )
-                self.assertTrue(any(expected in issue for issue in issues))
-
-    def test_rejects_tested_knowhere_automation_drift(self):
-        for line in (
-            f"      - author={checker.AUTOMATED_KNOWHERE_AUTHOR}",
-            f"      - 'title={checker.AUTOMATED_KNOWHERE_TITLE}'",
-            f"      - modified-files={checker.AUTOMATED_KNOWHERE_FILE}",
-            "      - '#files=1'",
-            "      - label=ci-passed",
-            "          - lgtm",
-            "          - approved",
-        ):
-            with self.subTest(line=line):
-                drifted = self.comment_out_rule_line(
-                    checker.AUTOMATED_KNOWHERE_RULE_NAME,
-                    line,
-                )
-                issues = checker.validate_approver_governance(
-                    self.owners_aliases, drifted
-                )
-                self.assertTrue(
-                    any(
-                        "Knowhere-update approval automation" in issue
-                        for issue in issues
-                    )
-                )
-
-    def test_rejects_automated_feature_compatibility_drift(self):
-        cases = (
-            (
-                checker.AUTOMATED_FEATURE_CLEANUP_RULE_NAME,
-                "          - do-not-merge/missing-design-doc",
-                "automated-PR cleanup",
-            ),
-            (
-                checker.FEATURE_MISSING_DOC_RULE_NAME,
-                r"      - -title~=\[automated\]",
-                "automated-title exception",
-            ),
-        )
-        for rule_name, line, expected in cases:
-            with self.subTest(rule=rule_name):
-                drifted = self.comment_out_rule_line(rule_name, line)
-                issues = checker.validate_approver_governance(
-                    self.owners_aliases, drifted
-                )
-                self.assertTrue(any(expected in issue for issue in issues))
-
-    def test_merge_protections_section_cannot_be_disabled(self):
-        drifted = self.mergify.replace(
-            "\nmerge_protections:\n",
-            "\ndisabled_merge_protections:\n",
-            1,
-        )
-        issues = checker.validate_approver_governance(self.owners_aliases, drifted)
-        self.assertTrue(any("merge_protections" in issue for issue in issues))
-
-    def test_rule_triggers_reject_extra_never_matching_condition(self):
-        cases = (
-            (
-                "Review / formal Design Doc",
-                "    if:\n      - base=master\n      - *design_doc_area",
-                "formal Design Doc area",
-            ),
-            (
-                "Review / governance enforcement",
-                "    if:\n      - base=master\n      - *governance_area",
-                "trusted policy check",
-            ),
-            (
-                "Docs / repository governance policy",
-                "    if:\n      - base=master\n      - *governance_area",
-                "Governance changes",
-            ),
-            (
-                "Docs / formal Design Doc policy",
-                "    if:\n      - base=master\n      - *design_doc_area",
-                "Design Doc changes",
-            ),
-            (
-                "Docs / feature Design Doc policy",
-                "    if:\n"
-                "      - base=master\n"
-                "      - or:\n"
-                "          - 'title~=^feat:'\n"
-                "          - label=kind/feature\n"
-                "      - -title~=\\[automated\\]",
-                "Feature policy trigger",
-            ),
-        )
-        for rule_name, trigger, expected_issue in cases:
-            with self.subTest(rule=rule_name):
-                drifted = self.replace_rule_fragment(
-                    rule_name,
-                    trigger,
-                    f"{trigger}\n      - base = __never__",
-                )
-                issues = checker.validate_approver_governance(
-                    self.owners_aliases, drifted
-                )
-                self.assertTrue(any(expected_issue in issue for issue in issues))
-
-    def test_policy_rules_require_each_trusted_check_state_guard(self):
-        rule_names = (
-            "Review / Prow approval",
-            "Review / governance enforcement",
-            "Docs / repository governance policy",
-            "Docs / formal Design Doc policy",
-            "Docs / feature Design Doc policy",
-        )
-        states = (
-            "failure",
-            "neutral",
-            "skipped",
-            "cancelled",
-            "timed-out",
-            "pending",
-            "stale",
-        )
-        for rule_name, state in itertools.product(rule_names, states):
-            with self.subTest(rule=rule_name, state=state):
-                check_name = (
-                    "Approval Policy"
-                    if rule_name == "Review / Prow approval"
-                    else "Design Doc Policy"
-                )
-                condition = f"      - '-check-{state} = @github-actions/{check_name}'"
-                drifted = self.replace_rule_fragment(rule_name, condition, "")
-                issues = checker.validate_approver_governance(
-                    self.owners_aliases, drifted
-                )
-                self.assertTrue(issues)
-
-    def test_detects_area_path_drift(self):
-        design_drift = self.mergify.replace(
-            "  design_doc_area: &design_doc_area "
-            "'files~=^docs/design-docs/design_docs/.+\\.md$'",
-            "  design_doc_area: &design_doc_area "
-            "'files~=^docs/design-docs/drafts/.+\\.md$'",
-        )
-        self.assertTrue(
-            any(
-                "Design Doc area matcher" in issue
-                for issue in checker.validate_approver_governance(
-                    self.owners_aliases, design_drift
-                )
-            )
-        )
-
-        governance_drift = self.mergify.replace(
-            "|test_check_design_doc_policy)\\.py)$'",
-            ")\\.py)$'",
-        )
-        self.assertTrue(
-            any(
-                "governance area matcher" in issue
-                for issue in checker.validate_approver_governance(
-                    self.owners_aliases, governance_drift
-                )
-            )
-        )
-
-    def test_feature_policy_requires_each_native_design_doc_condition(self):
-        rule_start = self.mergify.index("  - name: Docs / feature Design Doc policy")
-        rule_end = self.mergify.index("# PULL REQUEST RULES", rule_start)
-        for alias in (
-            "added_design_doc",
-            "modified_design_doc",
-            "design_doc_body",
-        ):
-            with self.subTest(alias=alias):
-                condition = f"          - *{alias}\n"
-                condition_start = self.mergify.index(condition, rule_start, rule_end)
-                drifted = (
-                    self.mergify[:condition_start]
-                    + self.mergify[condition_start + len(condition) :]
-                )
-                issues = checker.validate_approver_governance(
-                    self.owners_aliases, drifted
-                )
-                self.assertTrue(
-                    any("native Design Doc requirement" in issue for issue in issues)
-                )
-
-    def test_changed_governance_is_validated_from_pull_request_head(self):
-        client = FakeRepositoryFileClient(
-            {
-                checker.OWNERS_ALIASES_PATH: self.owners_aliases,
-                checker.MERGIFY_CONFIG_PATH: self.mergify,
-            }
-        )
-        issues = checker.validate_changed_governance(
-            client,
-            "contributor/milvus",
-            "head-sha",
-            [{"filename": checker.OWNERS_ALIASES_PATH, "status": "modified"}],
-        )
-        self.assertEqual([], issues)
-        self.assertEqual(
-            [
-                (
-                    "contributor/milvus",
-                    checker.OWNERS_ALIASES_PATH,
-                    "head-sha",
-                ),
-                (
-                    "contributor/milvus",
-                    checker.MERGIFY_CONFIG_PATH,
-                    "head-sha",
-                ),
-            ],
-            client.requests,
+        self.assertIn(
+            'check.conclusion === "success"',
+            trusted_workflow,
         )
 
 
@@ -628,9 +228,7 @@ class ApprovalRequirementTest(unittest.TestCase):
             )
         )
 
-    def test_evaluation_loads_trusted_approvers_from_base_revision(self):
-        owners = "aliases:\n  maintainers:\n    - Bob\n"
-        client = FakeRepositoryFileClient({checker.OWNERS_ALIASES_PATH: owners})
+    def test_evaluation_uses_the_authenticated_prow_approver_snapshot(self):
         state = checker.PullRequestState(
             head_sha="head",
             base_sha="base",
@@ -642,21 +240,14 @@ class ApprovalRequirementTest(unittest.TestCase):
             labels=(),
         )
         approval = checker.evaluate_design_doc_approval_requirement(
-            client,
             "milvus-io/milvus",
             1,
             state,
             [prow_notification("Bob")],
         )
         self.assertEqual(("Bob",), approval.approvers)
-        self.assertEqual(
-            [("milvus-io/milvus", checker.OWNERS_ALIASES_PATH, "base")],
-            client.requests,
-        )
 
     def test_design_doc_evaluation_always_requires_two_approvers(self):
-        owners = "aliases:\n  maintainers:\n    - Bob\n    - Carol\n"
-        client = FakeRepositoryFileClient({checker.OWNERS_ALIASES_PATH: owners})
         state = checker.PullRequestState(
             head_sha="head",
             base_sha="base",
@@ -668,7 +259,6 @@ class ApprovalRequirementTest(unittest.TestCase):
             labels=(),
         )
         approval = checker.evaluate_design_doc_approval_requirement(
-            client,
             "milvus-io/milvus",
             1,
             state,
@@ -677,8 +267,6 @@ class ApprovalRequirementTest(unittest.TestCase):
         self.assertFalse(approval.satisfied)
 
     def test_bot_author_does_not_poison_two_design_doc_approvals(self):
-        owners = "aliases:\n  maintainers:\n    - Bob\n    - Carol\n"
-        client = FakeRepositoryFileClient({checker.OWNERS_ALIASES_PATH: owners})
         state = checker.PullRequestState(
             head_sha="head",
             base_sha="base",
@@ -690,7 +278,6 @@ class ApprovalRequirementTest(unittest.TestCase):
             labels=(),
         )
         approval = checker.evaluate_design_doc_approval_requirement(
-            client,
             "milvus-io/milvus",
             1,
             state,
@@ -802,21 +389,15 @@ class EventLoadingTest(unittest.TestCase):
             return checker.load_event(event_file.name)
 
     def test_supports_pull_request_events(self):
-        for event_name in (
-            "pull_request_target",
-            "pull_request_review_comment",
-            "pull_request_review",
-        ):
-            with self.subTest(event=event_name):
-                self.assertEqual(
-                    ("milvus-io/milvus", 12),
-                    self.load(
-                        {
-                            "repository": {"full_name": "milvus-io/milvus"},
-                            "pull_request": {"number": 12},
-                        }
-                    ),
-                )
+        self.assertEqual(
+            ("milvus-io/milvus", 12),
+            self.load(
+                {
+                    "repository": {"full_name": "milvus-io/milvus"},
+                    "pull_request": {"number": 12},
+                }
+            ),
+        )
 
     def test_supports_issue_comment_for_pull_request_only(self):
         self.assertEqual(
@@ -835,29 +416,6 @@ class EventLoadingTest(unittest.TestCase):
                     "issue": {"number": 12},
                 }
             )
-
-    def test_supports_review_signal_workflow_run(self):
-        self.assertEqual(
-            ("milvus-io/milvus", 12),
-            self.load(
-                {
-                    "repository": {"full_name": "milvus-io/milvus"},
-                    "workflow_run": {
-                        "display_title": "12",
-                        "pull_requests": [],
-                    },
-                }
-            ),
-        )
-        for display_title in (None, "PR #12", "0"):
-            with self.subTest(display_title=display_title):
-                with self.assertRaisesRegex(RuntimeError, "not a valid pull request"):
-                    self.load(
-                        {
-                            "repository": {"full_name": "milvus-io/milvus"},
-                            "workflow_run": {"display_title": display_title},
-                        }
-                    )
 
 
 class GitHubClientApprovalApiTest(unittest.TestCase):
@@ -962,11 +520,6 @@ class HeaderValidationTest(unittest.TestCase):
         document = VALID_HEADER.replace("- Feature DRI: @feature-dri\n", duplicate)
         issues = checker.validate_header(document)
         self.assertTrue(any("exactly once" in issue for issue in issues))
-
-    def test_rejects_duplicate_role_logins(self):
-        document = VALID_HEADER.replace("@primary-reviewer", "@feature-dri")
-        issues = checker.validate_header(document)
-        self.assertTrue(any("three distinct GitHub users" in issue for issue in issues))
 
     def test_ignores_fields_in_fenced_code(self):
         document = VALID_HEADER.replace(
@@ -1976,33 +1529,13 @@ class RunTest(unittest.TestCase):
         )
         self.assertEqual(
             1,
-            self.run_with_client(client, labels=[checker.APPROVED_LABEL]),
+            self.run_with_client(
+                client, labels=[checker.approval_policy.APPROVED_LABEL]
+            ),
         )
         self.assertEqual("failure", client.completed_checks[-1][1])
         self.assertIn("(1/2)", client.completed_checks[-1][3])
         self.assertEqual([], client.added_labels)
-
-    def test_governance_change_does_not_recheck_ordinary_approval(self):
-        mergify = (REPOSITORY_ROOT / checker.MERGIFY_CONFIG_PATH).read_text(
-            encoding="utf-8"
-        )
-        client = FakeRunClient(
-            files=[
-                {
-                    "filename": checker.MERGIFY_CONFIG_PATH,
-                    "status": "modified",
-                }
-            ],
-            documents={},
-            refs=("head", "base"),
-            comments=[],
-            repository_documents={checker.MERGIFY_CONFIG_PATH: mergify},
-        )
-        self.assertEqual(0, self.run_with_client(client))
-        self.assertEqual("success", client.completed_checks[-1][1])
-        self.assertNotIn(
-            "Non-author Approver requirement", client.completed_checks[-1][3]
-        )
 
     def test_non_doc_policy_path_does_not_parse_prow_approval(self):
         client = FakeRunClient(
@@ -2061,10 +1594,6 @@ class RunTest(unittest.TestCase):
                 self.approval_comment("contributor", "/approve", 1),
                 self.approval_comment("congqixia", "/approve", 2),
             ],
-            "outsider plus approver": [
-                self.approval_comment("outside-user", "/approve", 1),
-                self.approval_comment("congqixia", "/approve", 2),
-            ],
         }
         for name, approval_comments in scenarios.items():
             with self.subTest(name=name):
@@ -2084,6 +1613,28 @@ class RunTest(unittest.TestCase):
                 self.assertEqual(1, self.run_with_client(client))
                 self.assertEqual([], client.added_labels)
                 self.assertIn("(1/2)", client.completed_checks[-1][3])
+
+    def test_two_non_author_non_owners_in_prow_snapshot_do_not_count(self):
+        client = FakeRunClient(
+            files=[
+                {
+                    "filename": "docs/design-docs/design_docs/example.md",
+                    "status": "modified",
+                    "sha": "valid",
+                }
+            ],
+            documents={"valid": VALID_HEADER},
+            refs=("head", "base"),
+            comments=[],
+            approval_comments=[
+                self.approval_comment("path-approver-one", "/approve", 1),
+                self.approval_comment("path-approver-two", "/approve", 2),
+            ],
+            prow_qualified=(),
+        )
+        self.assertEqual(1, self.run_with_client(client))
+        self.assertEqual([], client.added_labels)
+        self.assertIn("(0/2)", client.completed_checks[-1][3])
 
     def test_formal_design_doc_gets_dedicated_label_after_two_approvers(self):
         client = FakeRunClient(
@@ -2562,43 +2113,7 @@ class RunTest(unittest.TestCase):
                     client.completed_checks[-1][2],
                 )
 
-    def test_missing_or_malformed_base_approvers_fail_closed(self):
-        malformed = "aliases:\n  maintainers: not-a-list\n"
-        for name, repository_documents, error in (
-            (
-                "missing",
-                {},
-                RuntimeError("OWNERS_ALIASES missing"),
-            ),
-            (
-                "malformed",
-                {checker.OWNERS_ALIASES_PATH: malformed},
-                None,
-            ),
-        ):
-            with self.subTest(name=name):
-                client = FakeRunClient(
-                    files=[
-                        {
-                            "filename": "docs/design-docs/design_docs/example.md",
-                            "status": "modified",
-                            "sha": "valid",
-                        }
-                    ],
-                    documents={"valid": VALID_HEADER},
-                    refs=("head", "base"),
-                    comments=[],
-                    repository_documents=repository_documents,
-                )
-                if error is not None:
-                    client.get_repository_file = mock.Mock(side_effect=error)
-                with self.assertRaisesRegex(
-                    RuntimeError, "Could not load trusted Approvers"
-                ):
-                    self.run_with_client(client)
-                self.assertEqual("failure", client.completed_checks[-1][1])
-
-    def test_pull_request_head_cannot_add_a_trusted_approver(self):
+    def test_prow_snapshot_is_not_narrowed_to_a_global_alias(self):
         client = FakeRunClient(
             files=[
                 {
@@ -2615,25 +2130,8 @@ class RunTest(unittest.TestCase):
                 self.approval_comment("congqixia", "/approve", 2),
             ],
         )
-        base_owners = client.repository_documents[checker.OWNERS_ALIASES_PATH]
-        requests = []
-
-        def get_repository_file(repository, path, ref):
-            requests.append((repository, path, ref))
-            if repository == "contributor/milvus":
-                return "aliases:\n  maintainers:\n    - outside-user\n"
-            return base_owners
-
-        client.get_repository_file = get_repository_file
-        self.assertEqual(1, self.run_with_client(client))
-        self.assertIn("(1/2)", client.completed_checks[-1][3])
-        self.assertEqual(2, len(requests))
-        self.assertTrue(
-            all(
-                request == ("milvus-io/milvus", checker.OWNERS_ALIASES_PATH, "base")
-                for request in requests
-            )
-        )
+        self.assertEqual(0, self.run_with_client(client))
+        self.assertIn("(2/2)", client.completed_checks[-1][3])
 
     def test_cancel_and_remove_approve_revoke_sticky_approval(self):
         for revoke in ("/approve cancel", "/remove-approve"):
@@ -2912,33 +2410,6 @@ class RunTest(unittest.TestCase):
         )
         self.assertEqual("failure", client.completed_checks[-1][1])
 
-    def test_governance_drift_fails_and_posts_reminder(self):
-        owners_aliases = (REPOSITORY_ROOT / "OWNERS_ALIASES").read_text(
-            encoding="utf-8"
-        )
-        mergify = (
-            (REPOSITORY_ROOT / ".github/mergify.yml")
-            .read_text(encoding="utf-8")
-            .replace(
-                "      - label=approved\n",
-                "",
-                1,
-            )
-        )
-        client = FakeRunClient(
-            files=[{"filename": "OWNERS_ALIASES", "status": "modified"}],
-            documents={},
-            repository_documents={
-                checker.OWNERS_ALIASES_PATH: owners_aliases,
-                checker.MERGIFY_CONFIG_PATH: mergify,
-            },
-            refs=("head", "base"),
-            comments=[],
-        )
-        self.assertEqual(1, self.run_with_client(client))
-        self.assertEqual("failure", client.completed_checks[-1][1])
-        self.assertIn("Repository governance enforcement", client.created[0])
-
 
 class FakeCommentClient:
     def __init__(self, comments=None):
@@ -2991,16 +2462,6 @@ class FakeBlobClient:
         }
 
 
-class FakeRepositoryFileClient:
-    def __init__(self, documents):
-        self.documents = documents
-        self.requests = []
-
-    def get_repository_file(self, repository, path, ref):
-        self.requests.append((repository, path, ref))
-        return self.documents[path]
-
-
 class FakeRunClient(FakeCommentClient):
     def __init__(
         self,
@@ -3009,12 +2470,12 @@ class FakeRunClient(FakeCommentClient):
         refs,
         comments,
         existing_paths=None,
-        repository_documents=None,
         initial_state=None,
         final_state=None,
         completion_state=None,
         approval_comments=None,
         prow_approvers=PROW_APPROVERS_UNSET,
+        prow_qualified=PROW_APPROVERS_UNSET,
         label_error=False,
     ):
         normalized_comments = [
@@ -3029,12 +2490,6 @@ class FakeRunClient(FakeCommentClient):
         self.documents = documents
         self.refs = refs
         self.existing_paths = set(existing_paths or [])
-        self.repository_documents = {
-            checker.OWNERS_ALIASES_PATH: (
-                REPOSITORY_ROOT / checker.OWNERS_ALIASES_PATH
-            ).read_text(encoding="utf-8"),
-            **(repository_documents or {}),
-        }
         self.initial_state = initial_state
         self.final_state = final_state
         self.completion_state = completion_state
@@ -3061,6 +2516,10 @@ class FakeRunClient(FakeCommentClient):
             self.prow_approvers = infer_prow_approvers(self.approval_comments)
         else:
             self.prow_approvers = tuple(prow_approvers)
+        if prow_qualified is PROW_APPROVERS_UNSET:
+            self.prow_qualified = self.prow_approvers
+        else:
+            self.prow_qualified = tuple(prow_qualified)
         self.ensured_labels = []
         self.added_labels = []
         self.removed_labels = []
@@ -3108,7 +2567,10 @@ class FakeRunClient(FakeCommentClient):
         return [
             *self.comments,
             *self.approval_comments,
-            prow_notification(*self.prow_approvers),
+            prow_notification(
+                *self.prow_approvers,
+                qualified=self.prow_qualified,
+            ),
         ]
 
     def get_blob(self, repository, sha):
@@ -3129,9 +2591,6 @@ class FakeRunClient(FakeCommentClient):
 
     def file_exists(self, repository, path, ref):
         return path in self.existing_paths
-
-    def get_repository_file(self, repository, path, ref):
-        return self.repository_documents[path]
 
     def ensure_repository_label(self, repository, name, color, description):
         self.ensured_labels.append((repository, name, color, description))

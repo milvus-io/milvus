@@ -10,9 +10,12 @@ feature Design Doc requirement and are not formal Design Docs.
 
 Currently retained staging content:
 
+- [Clustering Compaction](clustering_compaction.md)
+- [Collection TTL](collection_ttl.md)
 - [External Table](external_table.md)
+- [Snapshot](snapshot_user_guide.md)
+- [TLS for Proxy](tls_proxy.md)
 - [Per-Cluster mTLS for CDC Cross-Cluster Replication](cdc/06-cdc-per-cluster-mtls.md)
 
-Collection TTL, clustering compaction, TLS, snapshot, and the published CDC
-documentation were removed from this repository after their maintained versions
-became available in `milvus-docs`.
+Legacy CDC user documentation remains under the historical Design Doc tree
+until its publication and migration status is confirmed.

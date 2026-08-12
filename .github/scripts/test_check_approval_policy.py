@@ -1,4 +1,3 @@
-import base64
 import importlib.util
 import json
 import pathlib
@@ -14,14 +13,6 @@ SPEC = importlib.util.spec_from_file_location("check_approval_policy", CHECKER_P
 checker = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = checker
 SPEC.loader.exec_module(checker)
-
-
-OWNERS = """aliases:
-  maintainers:
-    - Alice
-    - Bob
-    - Carol
-"""
 
 
 def pull_state(
@@ -51,6 +42,9 @@ def prow_notification(
     comment_id=700,
     repository="milvus-io/milvus",
     titles=None,
+    approved=True,
+    qualified=None,
+    manual_bypass=False,
 ):
     titles = ("Approved",) * len(approvers) if titles is None else tuple(titles)
     if len(titles) != len(approvers):
@@ -60,6 +54,13 @@ def prow_notification(
         f'title="{title}">{login}</a>*'
         for login, title in zip(approvers, titles)
     )
+    qualified = approvers if qualified is None else tuple(qualified)
+    owners_rows = "\n".join(
+        f"- ~~[path-{index}/OWNERS](https://github.com/{repository}/blob/master/"
+        f"path-{index}/OWNERS)~~ [{login}]"
+        for index, login in enumerate(qualified, start=1)
+    )
+    bypass = f"{checker.PROW_MANUAL_APPROVAL_BYPASS}\n\n" if manual_bypass else ""
     return {
         "id": comment_id,
         "user": {
@@ -68,9 +69,14 @@ def prow_notification(
         },
         "body": (
             f"{checker.PROW_APPROVAL_NOTIFICATION_PREFIX} "
-            "This PR is **APPROVED**\n\n"
+            f"This PR is **{'APPROVED' if approved else 'NOT APPROVED'}**\n\n"
+            f"{bypass}"
             f"This pull-request has been approved by: {rendered}\n\n"
-            "The full list of commands accepted by this bot follows."
+            "The full list of commands accepted by this bot follows.\n\n"
+            "<details>\n"
+            "Needs approval from an approver in each of these files:\n\n"
+            f"{owners_rows}\n"
+            "</details>"
         ),
     }
 
@@ -95,52 +101,46 @@ def approved_label_event(
     }
 
 
-class MaintainersTest(unittest.TestCase):
-    def test_extracts_maintainers_and_stops_at_the_next_alias(self):
-        owners = (
-            "aliases:\n"
-            "  maintainers:\n"
-            "    - Alice\n"
-            "    - Bob\n"
-            "  another-team:\n"
-            "    - outsider\n"
-        )
-        self.assertEqual(("Alice", "Bob"), checker.extract_maintainers(owners))
-
-    def test_rejects_missing_malformed_and_duplicate_maintainers(self):
-        for owners, message in (
-            ("aliases:\n  reviewers:\n    - Bob\n", "does not define"),
-            ("aliases:\n  maintainers: [Bob]\n", "does not define"),
-            (
-                "aliases:\n  maintainers:\n    - Bob\n    - bob\n",
-                "duplicate",
-            ),
-            (
-                "aliases:\n  maintainers:\n    - '@Bob'\n",
-                "invalid maintainers entry",
-            ),
-        ):
-            with self.subTest(owners=owners):
-                with self.assertRaisesRegex(ValueError, message):
-                    checker.extract_maintainers(owners)
-
-
 class ProwApprovalSnapshotTest(unittest.TestCase):
-    def parse(self, comments, maintainers=("Alice", "Bob", "Carol"), author="alice"):
+    def parse(self, comments, author="alice"):
         return checker.extract_prow_approvers(
             comments,
-            maintainers,
             author,
             "milvus-io/milvus",
             1,
         )
 
-    def test_latest_snapshot_filters_the_author_and_outsiders(self):
+    def test_latest_snapshot_filters_the_author_and_non_owners(self):
         comments = [
             prow_notification("Alice", "Bob", comment_id=700),
-            prow_notification("Alice", "Carol", "outsider", comment_id=701),
+            prow_notification(
+                "Alice",
+                "Carol",
+                "outsider",
+                comment_id=701,
+                qualified=("Alice", "Carol"),
+            ),
         ]
         self.assertEqual(("Carol",), self.parse(comments))
+
+    def test_manual_approved_label_bypass_never_counts_approve_actors(self):
+        self.assertEqual(
+            (),
+            self.parse(
+                [
+                    prow_notification(
+                        "Bob",
+                        "outsider",
+                        qualified=("Bob",),
+                        manual_bypass=True,
+                    )
+                ]
+            ),
+        )
+
+    def test_rejects_owners_rows_without_matching_approval(self):
+        with self.assertRaisesRegex(RuntimeError, "without a matching approval"):
+            self.parse([prow_notification("Bob", qualified=("Carol",))])
 
     def test_accepts_github_app_bot_logins_and_filters_the_bot_author(self):
         for bot_author in ("mergify[bot]", "dependabot[bot]"):
@@ -154,7 +154,6 @@ class ProwApprovalSnapshotTest(unittest.TestCase):
                     ("Bob",),
                     self.parse(
                         [notification],
-                        maintainers=("Bob",),
                         author=bot_author,
                     ),
                 )
@@ -178,7 +177,6 @@ class ProwApprovalSnapshotTest(unittest.TestCase):
             (longest_user_login,),
             self.parse(
                 [prow_notification(longest_user_login)],
-                maintainers=(longest_user_login,),
                 author="author",
             ),
         )
@@ -206,6 +204,21 @@ class ProwApprovalSnapshotTest(unittest.TestCase):
 
     def test_missing_snapshot_means_no_prow_approval(self):
         self.assertEqual((), self.parse([]))
+
+    def test_not_approved_snapshot_never_counts_rendered_users(self):
+        self.assertEqual(
+            (),
+            self.parse(
+                [
+                    prow_notification(
+                        "mergify[bot]",
+                        titles=("Author self-approved",),
+                        approved=False,
+                    )
+                ],
+                author="mergify[bot]",
+            ),
+        )
 
     def test_human_cannot_forge_a_snapshot(self):
         forged = prow_notification("Bob")
@@ -244,116 +257,53 @@ class ProwApprovalSnapshotTest(unittest.TestCase):
             self.parse([prow_notification("Bob", "bob")])
 
 
-class ManualApprovalCompatibilityTest(unittest.TestCase):
-    def test_accepts_non_author_authenticated_actor_types(self):
-        for actor_type in ("User", "Bot", "Mannequin", "Organization"):
-            with self.subTest(actor_type=actor_type):
-                event = approved_label_event("reviewer", actor_type=actor_type)
-                self.assertEqual(
-                    "reviewer",
-                    checker.extract_non_author_manual_approval_actor([event], "author"),
-                )
+class KnowhereAutomationCompatibilityTest(unittest.TestCase):
+    def state(self):
+        return pull_state(
+            title="[automated] Update Knowhere Commit",
+            labels=(checker.APPROVED_LABEL, checker.KNOWHERE_UPDATE_REQUIRED_LABEL),
+        )
 
-    def test_rejects_the_author_and_prow_as_approval_actors(self):
-        for event in (
-            approved_label_event("author"),
+    def test_accepts_only_the_mergify_app_actor(self):
+        event = approved_label_event(
+            checker.MERGIFY_BOT_LOGIN,
+            actor_id=checker.MERGIFY_BOT_USER_ID,
+            actor_type="Bot",
+        )
+        self.assertTrue(checker.exact_knowhere_automation(self.state(), [event]))
+
+        for changed_event in (
+            approved_label_event("reviewer"),
             approved_label_event(
-                checker.PROW_BOT_LOGIN,
-                actor_id=checker.PROW_BOT_USER_ID,
+                checker.MERGIFY_BOT_LOGIN,
+                actor_id=123,
                 actor_type="Bot",
             ),
             approved_label_event(
-                "renamed-prow",
-                actor_id=checker.PROW_BOT_USER_ID,
+                "renamed-mergify[bot]",
+                actor_id=checker.MERGIFY_BOT_USER_ID,
                 actor_type="Bot",
             ),
         ):
-            with self.subTest(event=event):
-                self.assertIsNone(
-                    checker.extract_non_author_manual_approval_actor([event], "author")
+            with self.subTest(changed_event=changed_event):
+                self.assertFalse(
+                    checker.exact_knowhere_automation(self.state(), [changed_event])
                 )
-
-    def test_latest_approved_label_event_controls_the_result(self):
-        events = [
-            approved_label_event("reviewer", event_id=900),
-            approved_label_event("reviewer", event_id=901, event="unlabeled"),
-            approved_label_event("author", event_id=902),
-        ]
-        self.assertIsNone(
-            checker.extract_non_author_manual_approval_actor(events, "author")
-        )
 
     def test_rejects_invalid_actor_types_and_inconsistent_history(self):
         with self.assertRaisesRegex(RuntimeError, "valid actor"):
-            checker.extract_non_author_manual_approval_actor(
-                [approved_label_event("reviewer", actor_type=None)],
-                "author",
+            checker.approved_label_actor(
+                [approved_label_event("reviewer", actor_type=None)]
             )
         with self.assertRaisesRegex(RuntimeError, "no corresponding issue event"):
-            checker.extract_non_author_manual_approval_actor([], "author")
+            checker.approved_label_actor([])
         with self.assertRaisesRegex(RuntimeError, "state conflicts"):
-            checker.extract_non_author_manual_approval_actor(
-                [approved_label_event("reviewer", event="unlabeled")],
-                "author",
+            checker.approved_label_actor(
+                [approved_label_event("reviewer", event="unlabeled")]
             )
-
-
-class KnowhereAutomationTest(unittest.TestCase):
-    def candidate(self, **overrides):
-        values = {
-            "author": checker.AUTOMATED_KNOWHERE_AUTHOR,
-            "title": checker.AUTOMATED_KNOWHERE_TITLE,
-            "labels": (checker.AUTOMATED_KNOWHERE_REQUIRED_LABEL,),
-        }
-        values.update(overrides)
-        return pull_state(**values)
-
-    def test_exact_exception_requires_the_established_contract(self):
-        state = self.candidate()
-        files = [
-            {
-                "filename": checker.AUTOMATED_KNOWHERE_FILE,
-                "status": "modified",
-            }
-        ]
-        self.assertTrue(checker.possible_knowhere_automation(state))
-        self.assertTrue(checker.exact_knowhere_automation(state, files))
-
-        for changed_files in (
-            [{"filename": checker.AUTOMATED_KNOWHERE_FILE, "status": "added"}],
-            [{"filename": "another-file", "status": "modified"}],
-            [*files, {"filename": "another-file", "status": "modified"}],
-        ):
-            with self.subTest(files=changed_files):
-                self.assertFalse(
-                    checker.exact_knowhere_automation(state, changed_files)
-                )
-
-    def test_file_list_is_required_only_after_narrow_candidate_match(self):
-        with self.assertRaisesRegex(RuntimeError, "file list was not loaded"):
-            checker.exact_knowhere_automation(self.candidate(), None)
-
-        for state in (
-            self.candidate(author="contributor"),
-            self.candidate(title="[automated] Update Knowhere Commit "),
-            self.candidate(labels=()),
-        ):
-            with self.subTest(state=state):
-                self.assertFalse(checker.possible_knowhere_automation(state))
-                self.assertFalse(checker.exact_knowhere_automation(state, None))
 
 
 class GitHubClientTest(unittest.TestCase):
-    def test_client_surface_excludes_design_doc_and_general_content_apis(self):
-        for method_name in (
-            "get_blob",
-            "get_default_branch",
-            "file_exists",
-            "get_repository_file",
-            "validate_changed_governance",
-        ):
-            self.assertFalse(hasattr(checker.GitHubClient, method_name))
-
     def test_pull_request_state_includes_refs_author_and_base_repository(self):
         client = checker.GitHubClient("token", "https://api.github.test")
         client.request = lambda *args, **kwargs: {
@@ -376,36 +326,6 @@ class GitHubClientTest(unittest.TestCase):
         self.assertEqual("master", state.base_ref)
         self.assertEqual("milvus-io/milvus", state.base_repository)
         self.assertEqual(("approved",), state.labels)
-
-    def test_owners_aliases_is_loaded_from_the_base_sha_only(self):
-        client = checker.GitHubClient("token", "https://api.github.test")
-        encoded = base64.b64encode(OWNERS.encode("utf-8")).decode("ascii")
-        calls = []
-
-        def request(method, path, payload=None):
-            calls.append((method, path, payload))
-            return {
-                "type": "file",
-                "size": len(OWNERS.encode("utf-8")),
-                "encoding": "base64",
-                "content": encoded,
-            }
-
-        client.request = request
-        self.assertEqual(
-            OWNERS,
-            client.get_owners_aliases("milvus-io/milvus", "base sha"),
-        )
-        self.assertEqual(
-            [
-                (
-                    "GET",
-                    "/repos/milvus-io/milvus/contents/OWNERS_ALIASES?ref=base%20sha",
-                    None,
-                )
-            ],
-            calls,
-        )
 
     def test_check_identity_is_independent(self):
         client = checker.GitHubClient("token", "https://api.github.test")
@@ -437,8 +357,6 @@ class FakeClient:
         states=None,
         comment_snapshots=None,
         event_snapshots=None,
-        files=None,
-        owners=OWNERS,
     ):
         self.states = list(states or [pull_state()])
         self.comment_snapshots = list(
@@ -447,13 +365,9 @@ class FakeClient:
             else [[prow_notification("Bob")]]
         )
         self.event_snapshots = list(event_snapshots or [[]])
-        self.files = list(files or [])
-        self.owners = owners
         self.state_calls = 0
         self.comment_calls = 0
         self.event_calls = 0
-        self.file_calls = 0
-        self.owners_calls = []
         self.begun = []
         self.completed = []
 
@@ -466,10 +380,6 @@ class FakeClient:
         self.state_calls += 1
         return state
 
-    def get_owners_aliases(self, repository, ref):
-        self.owners_calls.append((repository, ref))
-        return self.owners
-
     def list_issue_comments(self, repository, pull_number):
         comments = self.snapshot(self.comment_snapshots, self.comment_calls)
         self.comment_calls += 1
@@ -479,10 +389,6 @@ class FakeClient:
         events = self.snapshot(self.event_snapshots, self.event_calls)
         self.event_calls += 1
         return events
-
-    def list_pull_request_files(self, repository, pull_number):
-        self.file_calls += 1
-        return self.files
 
     def begin_policy_check(self, repository, head_sha, pull_number):
         self.begun.append((repository, head_sha, pull_number))
@@ -507,33 +413,30 @@ class RunTest(unittest.TestCase):
                 with mock.patch("builtins.print"):
                     return checker.run(event_file.name)
 
-    def test_normal_prow_approval_passes_without_file_or_event_apis(self):
+    def test_normal_prow_approval_passes_without_event_api(self):
         client = FakeClient()
         self.assertEqual(0, self.run_with_client(client))
         self.assertEqual("success", client.completed[-1][2])
         self.assertIn("@Bob", client.completed[-1][4])
-        self.assertEqual(0, client.file_calls)
         self.assertEqual(0, client.event_calls)
-        self.assertEqual(
-            [("milvus-io/milvus", "base")] * 2,
-            client.owners_calls,
-        )
 
-    def test_author_and_outsider_approvals_do_not_count(self):
-        cases = (
-            (pull_state(author="Alice"), "Alice"),
-            (pull_state(), "outsider"),
+    def test_author_approval_does_not_count(self):
+        state = pull_state(author="Alice")
+        client = FakeClient(
+            states=[state],
+            comment_snapshots=[[prow_notification("Alice")]],
         )
-        for state, approver in cases:
-            with self.subTest(author=state.author, approver=approver):
-                client = FakeClient(
-                    states=[state],
-                    comment_snapshots=[[prow_notification(approver)]],
-                )
-                self.assertEqual(1, self.run_with_client(client))
-                self.assertEqual("failure", client.completed[-1][2])
-                self.assertIn("(0/1)", client.completed[-1][4])
-                self.assertEqual(0, client.file_calls)
+        self.assertEqual(1, self.run_with_client(client))
+        self.assertEqual("failure", client.completed[-1][2])
+        self.assertIn("(0/1)", client.completed[-1][4])
+
+    def test_non_author_without_owners_qualification_does_not_count(self):
+        client = FakeClient(
+            comment_snapshots=[[prow_notification("path-approver", qualified=())]]
+        )
+        self.assertEqual(1, self.run_with_client(client))
+        self.assertEqual("failure", client.completed[-1][2])
+        self.assertIn("(0/1)", client.completed[-1][4])
 
     def test_github_app_bot_author_does_not_poison_a_valid_approval(self):
         bot_author = "mergify[bot]"
@@ -553,115 +456,73 @@ class RunTest(unittest.TestCase):
         self.assertIn("@Bob", client.completed[-1][4])
         self.assertEqual(0, client.event_calls)
 
-    def test_manual_approved_label_compatibility_is_preserved(self):
-        for actor_type in ("User", "Bot", "Mannequin", "Organization"):
-            with self.subTest(actor_type=actor_type):
-                state = pull_state(labels=(checker.APPROVED_LABEL,))
-                client = FakeClient(
-                    states=[state],
-                    comment_snapshots=[[prow_notification()]],
-                    event_snapshots=[
-                        [approved_label_event("reviewer", actor_type=actor_type)]
-                    ],
-                )
-                self.assertEqual(0, self.run_with_client(client))
-                self.assertEqual("success", client.completed[-1][2])
-                self.assertIn("@reviewer", client.completed[-1][4])
-                self.assertEqual(0, client.file_calls)
-                self.assertEqual(2, client.event_calls)
-
-    def test_author_or_prow_manual_label_does_not_count(self):
-        for event in (
-            approved_label_event("contributor"),
-            approved_label_event(
-                checker.PROW_BOT_LOGIN,
-                actor_id=checker.PROW_BOT_USER_ID,
-                actor_type="Bot",
-            ),
-        ):
-            with self.subTest(event=event):
-                state = pull_state(labels=(checker.APPROVED_LABEL,))
-                client = FakeClient(
-                    states=[state],
-                    comment_snapshots=[[prow_notification()]],
-                    event_snapshots=[[event]],
-                )
-                self.assertEqual(1, self.run_with_client(client))
-                self.assertEqual("failure", client.completed[-1][2])
-
-    def test_only_a_narrow_knowhere_candidate_reads_the_file_list(self):
-        normal_variants = (
-            pull_state(
-                author=checker.AUTOMATED_KNOWHERE_AUTHOR,
-                title=checker.AUTOMATED_KNOWHERE_TITLE,
-                labels=(),
-            ),
-            pull_state(
-                author="contributor",
-                title=checker.AUTOMATED_KNOWHERE_TITLE,
-                labels=(checker.AUTOMATED_KNOWHERE_REQUIRED_LABEL,),
-            ),
-            pull_state(
-                author=checker.AUTOMATED_KNOWHERE_AUTHOR,
-                title=f"{checker.AUTOMATED_KNOWHERE_TITLE} ",
-                labels=(checker.AUTOMATED_KNOWHERE_REQUIRED_LABEL,),
-            ),
+    def test_generic_manual_approved_label_does_not_count(self):
+        state = pull_state(labels=(checker.APPROVED_LABEL,))
+        client = FakeClient(
+            states=[state],
+            comment_snapshots=[[prow_notification()]],
+            event_snapshots=[[approved_label_event("reviewer")]],
         )
-        for state in normal_variants:
-            with self.subTest(state=state):
-                client = FakeClient(states=[state])
-                self.assertEqual(0, self.run_with_client(client))
-                self.assertEqual(0, client.file_calls)
+        self.assertEqual(1, self.run_with_client(client))
+        self.assertEqual("failure", client.completed[-1][2])
+        self.assertEqual(0, client.event_calls)
 
-        candidate = pull_state(
-            author=checker.AUTOMATED_KNOWHERE_AUTHOR,
-            title=checker.AUTOMATED_KNOWHERE_TITLE,
-            labels=(checker.AUTOMATED_KNOWHERE_REQUIRED_LABEL,),
+    def test_existing_knowhere_mergify_automation_is_preserved(self):
+        state = pull_state(
+            author="sre-ci-robot",
+            title="[automated] Update Knowhere Commit",
+            labels=(checker.APPROVED_LABEL, checker.KNOWHERE_UPDATE_REQUIRED_LABEL),
+        )
+        event = approved_label_event(
+            checker.MERGIFY_BOT_LOGIN,
+            actor_id=checker.MERGIFY_BOT_USER_ID,
+            actor_type="Bot",
         )
         client = FakeClient(
-            states=[candidate],
+            states=[state],
             comment_snapshots=[[prow_notification()]],
-            files=[
-                {
-                    "filename": checker.AUTOMATED_KNOWHERE_FILE,
-                    "status": "modified",
-                }
+            event_snapshots=[[event]],
+        )
+        self.assertEqual(0, self.run_with_client(client))
+        self.assertEqual("success", client.completed[-1][2])
+        self.assertIn("Knowhere-update automation", client.completed[-1][4])
+        self.assertEqual(2, client.event_calls)
+
+    def test_knowhere_label_actor_change_makes_the_result_stale(self):
+        state = pull_state(
+            title="[automated] Update Knowhere Commit",
+            labels=(checker.APPROVED_LABEL, checker.KNOWHERE_UPDATE_REQUIRED_LABEL),
+        )
+        client = FakeClient(
+            states=[state],
+            comment_snapshots=[[prow_notification()]],
+            event_snapshots=[
+                [
+                    approved_label_event(
+                        checker.MERGIFY_BOT_LOGIN,
+                        actor_id=checker.MERGIFY_BOT_USER_ID,
+                        actor_type="Bot",
+                    )
+                ],
+                [approved_label_event("reviewer")],
             ],
         )
         self.assertEqual(0, self.run_with_client(client))
-        self.assertEqual(1, client.file_calls)
-        self.assertEqual("success", client.completed[-1][2])
-        self.assertIn("Knowhere-update automation", client.completed[-1][4])
+        self.assertEqual("neutral", client.completed[-1][2])
 
-    def test_near_match_knowhere_files_do_not_bypass_approval(self):
-        candidate = pull_state(
-            author=checker.AUTOMATED_KNOWHERE_AUTHOR,
-            title=checker.AUTOMATED_KNOWHERE_TITLE,
-            labels=(checker.AUTOMATED_KNOWHERE_REQUIRED_LABEL,),
-        )
-        client = FakeClient(
-            states=[candidate],
-            comment_snapshots=[[prow_notification()]],
-            files=[
-                {
-                    "filename": checker.AUTOMATED_KNOWHERE_FILE,
-                    "status": "added",
-                }
-            ],
-        )
-        self.assertEqual(1, self.run_with_client(client))
-        self.assertEqual(1, client.file_calls)
-        self.assertEqual("failure", client.completed[-1][2])
-
-    def test_non_master_pr_does_not_publish_or_evaluate_a_check(self):
+    def test_release_pr_is_not_evaluated_until_the_workflow_is_backported(self):
         client = FakeClient(states=[pull_state(base_ref="2.6")])
         self.assertEqual(0, self.run_with_client(client))
         self.assertEqual([], client.begun)
         self.assertEqual([], client.completed)
-        self.assertEqual([], client.owners_calls)
+
+    def test_unsupported_base_does_not_publish_or_evaluate_a_check(self):
+        client = FakeClient(states=[pull_state(base_ref="experimental")])
+        self.assertEqual(0, self.run_with_client(client))
+        self.assertEqual([], client.begun)
+        self.assertEqual([], client.completed)
         self.assertEqual(0, client.comment_calls)
         self.assertEqual(0, client.event_calls)
-        self.assertEqual(0, client.file_calls)
 
     def test_pull_request_state_change_completes_the_check_neutral(self):
         client = FakeClient(states=[pull_state(), pull_state(head_sha="new-head")])
@@ -699,7 +560,7 @@ class EventAndWorkflowTest(unittest.TestCase):
             event_file.flush()
             return checker.load_event(event_file.name)
 
-    def test_loads_pull_request_issue_comment_and_review_signal_events(self):
+    def test_loads_pull_request_and_issue_comment_events(self):
         repository = {"full_name": "milvus-io/milvus"}
         for event in (
             {"repository": repository, "pull_request": {"number": 7}},
@@ -707,29 +568,17 @@ class EventAndWorkflowTest(unittest.TestCase):
                 "repository": repository,
                 "issue": {"number": 7, "pull_request": {}},
             },
-            {
-                "repository": repository,
-                "workflow_run": {"display_title": "7"},
-            },
         ):
             with self.subTest(event=event):
                 self.assertEqual(("milvus-io/milvus", 7), self.load(event))
-
-    def test_rejects_an_unstructured_review_signal_title(self):
-        with self.assertRaisesRegex(RuntimeError, "valid pull request"):
-            self.load(
-                {
-                    "repository": {"full_name": "milvus-io/milvus"},
-                    "workflow_run": {"display_title": "PR 7"},
-                }
-            )
 
     def test_workflow_has_independent_identity_scope_and_cleanup(self):
         workflow = (
             REPOSITORY_ROOT / ".github/workflows/approval-policy.yml"
         ).read_text(encoding="utf-8")
         self.assertIn("name: Approval Policy\n", workflow)
-        self.assertIn("workflows: [Design Doc Policy Review Signal]", workflow)
+        self.assertIn("    branches: [master]\n", workflow)
+        self.assertIn("  issue_comment:\n", workflow)
         self.assertIn("approval-policy-${{", workflow)
         self.assertIn('check_name: "Approval Policy"', workflow)
         self.assertIn("`approval-policy-pr-${pullNumber}`", workflow)
@@ -739,6 +588,19 @@ class EventAndWorkflowTest(unittest.TestCase):
         self.assertIn("pull-requests: read", workflow)
         self.assertNotIn("issues: write", workflow)
         self.assertNotIn("pull-requests: write", workflow)
+
+    def test_knowhere_auto_approval_keeps_its_existing_conditions(self):
+        mergify = (REPOSITORY_ROOT / ".github/mergify.yml").read_text(encoding="utf-8")
+        rule = mergify.split(
+            "  - name: Assign the 'lgtm' and 'approved' labels following the "
+            "successful testing of the 'Update Knowhere Commit'",
+            1,
+        )[1]
+
+        self.assertIn("      - 'title~=Update Knowhere Commit'\n", rule)
+        self.assertIn("      - label=ci-passed\n", rule)
+        self.assertNotIn("      - author=sre-ci-robot\n", rule)
+        self.assertNotIn("      - '#files=1'\n", rule)
 
 
 if __name__ == "__main__":

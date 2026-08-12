@@ -26,143 +26,15 @@ DESIGN_DOC_REFERENCE_PATTERN = re.compile(
 )
 COMMENT_MARKER = "<!-- milvus-design-doc-policy-check -->"
 COMMENT_PREFIX = f"{COMMENT_MARKER}\n## Design document policy check\n"
-APPROVAL_POLICY_CHECK_NAME = "Approval Policy"
 POLICY_CHECK_NAME = "Design Doc Policy"
 BOT_LOGIN = "github-actions[bot]"
-PROW_BOT_LOGIN = approval_policy.PROW_BOT_LOGIN
-PROW_BOT_USER_ID = approval_policy.PROW_BOT_USER_ID
-PROW_APPROVAL_NOTIFICATION_PREFIX = approval_policy.PROW_APPROVAL_NOTIFICATION_PREFIX
-extract_maintainers = approval_policy.extract_maintainers
 extract_prow_approvers = approval_policy.extract_prow_approvers
-OWNERS_ALIASES_PATH = "OWNERS_ALIASES"
-MERGIFY_CONFIG_PATH = ".github/mergify.yml"
-DESIGN_DOC_AREA_MATCHER = r"files~=^docs/design-docs/design_docs/.+\.md$"
-GOVERNANCE_AREA_MATCHER = (
-    r"files~=^(OWNERS_ALIASES|\.github/mergify\.yml|"
-    r"\.github/workflows/(approval-policy|design-doc-policy(-review-signal)?)\.yml|"
-    r"\.github/scripts/(check_approval_policy|test_check_approval_policy|"
-    r"check_design_doc_policy|test_check_design_doc_policy)\.py)$"
-)
-CHECK_TERMINAL_STATES = (
-    "failure",
-    "neutral",
-    "skipped",
-    "cancelled",
-    "timed-out",
-    "pending",
-    "stale",
-)
-
-
-def policy_check_success_lines(check_name: str) -> tuple[str, ...]:
-    return (
-        f"      - 'check-success = @github-actions/{check_name}'",
-        *(
-            f"      - '-check-{state} = @github-actions/{check_name}'"
-            for state in CHECK_TERMINAL_STATES
-        ),
-    )
-
-
-APPROVAL_POLICY_CHECK_SUCCESS_LINES = policy_check_success_lines(
-    APPROVAL_POLICY_CHECK_NAME
-)
-DESIGN_DOC_POLICY_CHECK_SUCCESS_LINES = policy_check_success_lines(POLICY_CHECK_NAME)
-# Design Doc governance validation historically refers to this shorter name.
-POLICY_CHECK_SUCCESS_LINES = DESIGN_DOC_POLICY_CHECK_SUCCESS_LINES
-APPROVED_LABEL = "approved"
-APPROVED_LABEL_LINE = f"      - label={APPROVED_LABEL}"
 DESIGN_DOC_APPROVAL_LABEL = "approved/design-doc"
-DESIGN_DOC_APPROVAL_LABEL_LINE = f"      - label={DESIGN_DOC_APPROVAL_LABEL}"
 DESIGN_DOC_APPROVAL_LABEL_COLOR = "0ffa16"
 DESIGN_DOC_APPROVAL_LABEL_DESCRIPTION = (
     "Two distinct non-author Approvers approved a formal Design Doc change."
 )
 DESIGN_DOC_REQUIRED_APPROVALS = 2
-AUTOMATED_KNOWHERE_AUTHOR = "sre-ci-robot"
-AUTOMATED_KNOWHERE_TITLE = "[automated] Update Knowhere Commit"
-AUTOMATED_KNOWHERE_FILE = "internal/core/thirdparty/knowhere/CMakeLists.txt"
-AUTOMATED_KNOWHERE_REQUIRED_LABEL = "ci-passed"
-AUTOMATED_KNOWHERE_RULE_NAME = (
-    "Assign the 'lgtm' and 'approved' labels following the successful testing "
-    "of the 'Update Knowhere Commit'"
-)
-AUTOMATED_KNOWHERE_CONDITION_LINES = (
-    "      - or: *BRANCHES",
-    f"      - author={AUTOMATED_KNOWHERE_AUTHOR}",
-    f"      - 'title={AUTOMATED_KNOWHERE_TITLE}'",
-    f"      - modified-files={AUTOMATED_KNOWHERE_FILE}",
-    "      - '#files=1'",
-    "      - label=ci-passed",
-)
-AUTOMATED_KNOWHERE_ACTION_LINES = (
-    "      label:",
-    "        add:",
-    "          - lgtm",
-    "          - approved",
-)
-AUTOMATED_FEATURE_CLEANUP_RULE_NAME = "Dismiss block label if automated create PR"
-AUTOMATED_FEATURE_CLEANUP_CONDITION_LINES = (
-    "      - or: *BRANCHES",
-    r"      - title~=\[automated\]",
-)
-AUTOMATED_FEATURE_CLEANUP_ACTION_LINES = (
-    "      label:",
-    "        remove:",
-    "          - do-not-merge/missing-related-issue",
-    "          - do-not-merge/missing-related-pr",
-    "          - do-not-merge/missing-design-doc",
-)
-FEATURE_MISSING_DOC_RULE_NAME = "Blocking PR if feat PR missing design doc"
-FEATURE_MISSING_DOC_CONDITION_LINES = (
-    "      - or: *BRANCHES",
-    "      - or:",
-    "          - 'title~=^feat:'",
-    "          - label=kind/feature",
-    r"      - -title~=\[automated\]",
-    "      - *no_design_doc_body",
-    "      - not:",
-    "          or:",
-    "            - *added_design_doc",
-    "            - *modified_design_doc",
-)
-GENERAL_REVIEW_SUCCESS_LINES = (
-    APPROVED_LABEL_LINE,
-    *APPROVAL_POLICY_CHECK_SUCCESS_LINES,
-)
-DESIGN_DOC_REVIEW_SUCCESS_LINES = (DESIGN_DOC_APPROVAL_LABEL_LINE,)
-MASTER_ONLY_IF_LINES = ("      - base=master",)
-MERGE_PROTECTIONS_SETTINGS_LINES = (
-    "  reporting_method: check-runs",
-    "  post_comment: false",
-)
-FEATURE_POLICY_IF_LINES = (
-    "      - base=master",
-    "      - or:",
-    "          - 'title~=^feat:'",
-    "          - label=kind/feature",
-    r"      - -title~=\[automated\]",
-)
-FEATURE_POLICY_SUCCESS_LINES = (
-    "      - or:",
-    "          - *added_design_doc",
-    "          - *modified_design_doc",
-    "          - *design_doc_body",
-    *POLICY_CHECK_SUCCESS_LINES,
-)
-GOVERNANCE_ENFORCEMENT_PATHS = frozenset(
-    {
-        OWNERS_ALIASES_PATH,
-        MERGIFY_CONFIG_PATH,
-        ".github/workflows/approval-policy.yml",
-        ".github/workflows/design-doc-policy.yml",
-        ".github/workflows/design-doc-policy-review-signal.yml",
-        ".github/scripts/check_approval_policy.py",
-        ".github/scripts/test_check_approval_policy.py",
-        ".github/scripts/check_design_doc_policy.py",
-        ".github/scripts/test_check_design_doc_policy.py",
-    }
-)
 MAX_HEADER_LINES = 50
 MAX_BLOB_BYTES = 1024 * 1024
 MAX_METADATA_INSPECTION_FILES = 20
@@ -221,7 +93,6 @@ class MetadataInspection:
         return not self.warnings
 
 
-REVIEW_SIGNAL_RUN_TITLE_PATTERN = re.compile(r"^([1-9][0-9]*)$")
 LOGIN_PATTERN = re.compile(r"^@[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
 LOGIN_PLACEHOLDERS = {
     "@github-handle",
@@ -344,21 +215,6 @@ class GitHubClient:
         if not isinstance(blob, dict):
             raise RuntimeError("GitHub returned an invalid blob response")
         return blob
-
-    def get_repository_file(self, repository: str, path: str, ref: str) -> str:
-        repository_path = urllib.parse.quote(repository, safe="/")
-        file_path = urllib.parse.quote(path, safe="/")
-        encoded_ref = urllib.parse.quote(ref, safe="")
-        content = self.request(
-            "GET",
-            f"/repos/{repository_path}/contents/{file_path}?ref={encoded_ref}",
-        )
-        if not isinstance(content, dict) or content.get("type") != "file":
-            raise RuntimeError(f"GitHub returned an invalid file response for {path}")
-        try:
-            return decode_blob(content)
-        except ValueError as error:
-            raise RuntimeError(f"Could not read {path}: {error}") from error
 
     def file_exists(self, repository: str, path: str, ref: str) -> bool:
         repository_path = urllib.parse.quote(repository, safe="/")
@@ -566,9 +422,8 @@ class GitHubClient:
                         .replace("+00:00", "Z"),
                         "output": {
                             "title": "Design Doc policy is being evaluated",
-                            "summary": "Validating feature documentation, "
-                            "repository governance, changed Design Doc metadata, "
-                            "and the two-Approver requirement.",
+                            "summary": "Validating feature documentation, changed "
+                            "Design Doc metadata, and the two-Approver requirement.",
                         },
                     },
                 )
@@ -586,9 +441,8 @@ class GitHubClient:
                 "external_id": external_id,
                 "output": {
                     "title": "Design Doc policy is being evaluated",
-                    "summary": "Validating feature documentation, repository "
-                    "governance, changed Design Doc metadata, and the "
-                    "two-Approver requirement.",
+                    "summary": "Validating feature documentation, changed Design "
+                    "Doc metadata, and the two-Approver requirement.",
                 },
             },
         )
@@ -670,26 +524,13 @@ def formal_design_doc_changed(files: list[dict[str, Any]]) -> bool:
 
 
 def evaluate_design_doc_approval_requirement(
-    client: GitHubClient,
     repository: str,
     pull_number: int,
     state: PullRequestState,
     issue_comments: list[dict[str, Any]],
 ) -> ApprovalRequirement:
-    try:
-        owners_aliases = client.get_repository_file(
-            state.base_repository, OWNERS_ALIASES_PATH, state.base_sha
-        )
-        maintainers = extract_maintainers(owners_aliases)
-    except (RuntimeError, ValueError) as error:
-        raise RuntimeError(
-            "Could not load trusted Approvers from the target base revision: "
-            f"{error}"
-        ) from error
-
     approvers = extract_prow_approvers(
         issue_comments,
-        maintainers,
         state.author,
         repository,
         pull_number,
@@ -943,19 +784,6 @@ def validate_header(document: str) -> list[str]:
                 f"<code>{name}</code> has an invalid value; expected {expected}."
             )
 
-    role_names = ("Feature DRI", "Primary Approver", "Independent Approver")
-    role_values = [values[name][0] for name in role_names if len(values[name]) == 1]
-    if (
-        len(role_values) == len(role_names)
-        and all(is_valid_login(value) for value in role_values)
-        and len({value.casefold() for value in role_values}) != len(role_values)
-    ):
-        issues.append(
-            "<code>Feature DRI</code>, <code>Primary Approver</code>, and "
-            "<code>Independent Approver</code> should name three distinct GitHub "
-            "users."
-        )
-
     return issues
 
 
@@ -982,358 +810,6 @@ def decode_blob(blob: dict[str, Any]) -> str:
         return content.decode("utf-8")
     except UnicodeDecodeError as error:
         raise ValueError("The file content is not valid UTF-8.") from error
-
-
-def governance_enforcement_changed(files: list[dict[str, Any]]) -> bool:
-    for file_info in files:
-        for field in ("filename", "previous_filename"):
-            path = file_info.get(field)
-            if isinstance(path, str) and path in GOVERNANCE_ENFORCEMENT_PATHS:
-                return True
-    return False
-
-
-def merge_protections_section(mergify: str) -> str:
-    markers = list(re.finditer(r"^merge_protections:$", mergify, re.MULTILINE))
-    if len(markers) != 1:
-        raise ValueError(
-            "Mergify must define exactly one active merge_protections section"
-        )
-
-    section_start = markers[0].end()
-    next_section = re.search(
-        r"^[A-Za-z_][A-Za-z0-9_-]*:",
-        mergify[section_start:],
-        re.MULTILINE,
-    )
-    section_end = (
-        section_start + next_section.start()
-        if next_section is not None
-        else len(mergify)
-    )
-    return mergify[section_start:section_end]
-
-
-def configuration_rule(merge_protections: str, name: str) -> str:
-    marker = f"  - name: {name}"
-    matches = list(
-        re.finditer(rf"^{re.escape(marker)}$", merge_protections, re.MULTILINE)
-    )
-    if len(matches) != 1:
-        raise ValueError(
-            f"Mergify must define the {name!r} rule exactly once under "
-            "merge_protections"
-        )
-
-    rule_start = matches[0].end()
-    next_rule = re.search(
-        r"^  - name: .+$",
-        merge_protections[rule_start:],
-        re.MULTILINE,
-    )
-    rule_end = (
-        rule_start + next_rule.start()
-        if next_rule is not None
-        else len(merge_protections)
-    )
-    return merge_protections[rule_start:rule_end]
-
-
-def has_exact_shared_anchor(mergify: str, name: str, matcher: str) -> bool:
-    expected_line = f"  {name}: &{name} '{matcher}'"
-    key_pattern = re.compile(rf"^  {re.escape(name)}:")
-    anchor_pattern = re.compile(rf"&{re.escape(name)}(?=\s|$)")
-    key_definitions = [line for line in mergify.splitlines() if key_pattern.match(line)]
-    anchor_definitions = [
-        line for line in mergify.splitlines() if anchor_pattern.search(line)
-    ]
-    return key_definitions == [expected_line] and anchor_definitions == [expected_line]
-
-
-def rule_block_lines(rule: str, declaration: str) -> tuple[str, ...] | None:
-    lines = rule.splitlines()
-    markers = [index for index, line in enumerate(lines) if line == declaration]
-    if len(markers) != 1:
-        return None
-
-    conditions: list[str] = []
-    for line in lines[markers[0] + 1 :]:
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        indentation = len(line) - len(line.lstrip())
-        if indentation <= 4:
-            break
-        conditions.append(line)
-    return tuple(conditions)
-
-
-def top_level_block_lines(document: str, declaration: str) -> tuple[str, ...] | None:
-    lines = document.splitlines()
-    markers = [index for index, line in enumerate(lines) if line == declaration]
-    if len(markers) != 1:
-        return None
-
-    values: list[str] = []
-    for line in lines[markers[0] + 1 :]:
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        if not line.startswith(" "):
-            break
-        values.append(line)
-    return tuple(values)
-
-
-def if_condition_lines(rule: str) -> tuple[str, ...] | None:
-    return rule_block_lines(rule, "    if:")
-
-
-def success_condition_lines(rule: str) -> tuple[str, ...] | None:
-    return rule_block_lines(rule, "    success_conditions:")
-
-
-def has_exact_rule_scalar(rule: str, field: str, value: str) -> bool:
-    expected_line = f"    {field}: {value}"
-    definitions = [
-        line
-        for line in rule.splitlines()
-        if re.match(rf"^    {re.escape(field)}:", line)
-    ]
-    return definitions == [expected_line]
-
-
-def validate_approver_governance(
-    owners_aliases: str,
-    mergify: str,
-) -> list[str]:
-    issues: list[str] = []
-    try:
-        extract_maintainers(owners_aliases)
-    except ValueError as error:
-        return [str(error)]
-
-    if not has_exact_shared_anchor(mergify, "design_doc_area", DESIGN_DOC_AREA_MATCHER):
-        issues.append("The Mergify Design Doc area matcher must use the canonical path")
-    if not has_exact_shared_anchor(mergify, "governance_area", GOVERNANCE_AREA_MATCHER):
-        issues.append(
-            "The Mergify governance area matcher must cover every enforcement file"
-        )
-
-    if re.search(r"approved-reviews-by|approved_by_", mergify):
-        issues.append(
-            "Mergify must use Prow approval labels instead of GitHub review Approver "
-            "conditions"
-        )
-
-    if (
-        top_level_block_lines(mergify, "merge_protections_settings:")
-        != MERGE_PROTECTIONS_SETTINGS_LINES
-    ):
-        issues.append(
-            "Mergify merge protections must publish the exact required check-run "
-            "configuration"
-        )
-
-    try:
-        merge_protections = merge_protections_section(mergify)
-    except ValueError as error:
-        issues.append(str(error))
-        return issues
-
-    try:
-        general_rule = configuration_rule(
-            merge_protections,
-            "Review / Prow approval",
-        )
-        if if_condition_lines(general_rule) != MASTER_ONLY_IF_LINES:
-            issues.append(
-                "The general review rule must apply exactly to master during "
-                "the staged rollout"
-            )
-        if success_condition_lines(general_rule) != GENERAL_REVIEW_SUCCESS_LINES:
-            issues.append(
-                "The general review rule must require the Prow approved label and "
-                "exact trusted Approval Policy success"
-            )
-    except ValueError as error:
-        issues.append(str(error))
-
-    try:
-        design_rule = configuration_rule(
-            merge_protections,
-            "Review / formal Design Doc",
-        )
-        if if_condition_lines(design_rule) != (
-            *MASTER_ONLY_IF_LINES,
-            "      - *design_doc_area",
-        ):
-            issues.append(
-                "The Design Doc approval-label rule does not cover the formal "
-                "Design Doc area"
-            )
-        if success_condition_lines(design_rule) != DESIGN_DOC_REVIEW_SUCCESS_LINES:
-            issues.append(
-                "Formal Design Doc changes do not require exactly the "
-                f"{DESIGN_DOC_APPROVAL_LABEL} label"
-            )
-    except ValueError as error:
-        issues.append(str(error))
-
-    try:
-        governance_review_rule = configuration_rule(
-            merge_protections,
-            "Review / governance enforcement",
-        )
-        if if_condition_lines(governance_review_rule) != (
-            *MASTER_ONLY_IF_LINES,
-            "      - *governance_area",
-        ):
-            issues.append(
-                "Governance enforcement changes do not require the trusted policy "
-                "check"
-            )
-        if (
-            success_condition_lines(governance_review_rule)
-            != POLICY_CHECK_SUCCESS_LINES
-        ):
-            issues.append(
-                "Governance enforcement changes do not require exact Design Doc "
-                "Policy success"
-            )
-    except ValueError as error:
-        issues.append(str(error))
-
-    try:
-        governance_policy_rule = configuration_rule(
-            merge_protections,
-            "Docs / repository governance policy",
-        )
-        if if_condition_lines(governance_policy_rule) != (
-            *MASTER_ONLY_IF_LINES,
-            "      - *governance_area",
-        ):
-            issues.append("Governance changes do not require the trusted policy check")
-        if (
-            success_condition_lines(governance_policy_rule)
-            != POLICY_CHECK_SUCCESS_LINES
-        ):
-            issues.append(
-                "Governance changes do not require exact Design Doc Policy success"
-            )
-    except ValueError as error:
-        issues.append(str(error))
-
-    try:
-        design_policy_rule = configuration_rule(
-            merge_protections,
-            "Docs / formal Design Doc policy",
-        )
-        if if_condition_lines(design_policy_rule) != (
-            *MASTER_ONLY_IF_LINES,
-            "      - *design_doc_area",
-        ):
-            issues.append("Design Doc changes do not require the trusted policy check")
-        if success_condition_lines(design_policy_rule) != POLICY_CHECK_SUCCESS_LINES:
-            issues.append(
-                "Design Doc changes do not require exact Design Doc Policy success"
-            )
-    except ValueError as error:
-        issues.append(str(error))
-
-    try:
-        feature_policy_rule = configuration_rule(
-            merge_protections,
-            "Docs / feature Design Doc policy",
-        )
-        if if_condition_lines(feature_policy_rule) != FEATURE_POLICY_IF_LINES:
-            issues.append(
-                "Feature policy trigger must be exactly feat: title or "
-                "kind/feature label"
-            )
-        if success_condition_lines(feature_policy_rule) != FEATURE_POLICY_SUCCESS_LINES:
-            issues.append(
-                "Feature changes do not require the native Design Doc requirement "
-                "and exact Design Doc Policy success"
-            )
-    except ValueError as error:
-        issues.append(str(error))
-
-    try:
-        automated_knowhere_rule = configuration_rule(
-            mergify,
-            AUTOMATED_KNOWHERE_RULE_NAME,
-        )
-        if (
-            rule_block_lines(automated_knowhere_rule, "    conditions:")
-            != AUTOMATED_KNOWHERE_CONDITION_LINES
-            or rule_block_lines(automated_knowhere_rule, "    actions:")
-            != AUTOMATED_KNOWHERE_ACTION_LINES
-        ):
-            issues.append(
-                "The tested Knowhere-update approval automation must keep its "
-                "exact author, title, file, ci-passed, lgtm, and approved contract"
-            )
-    except ValueError as error:
-        issues.append(str(error))
-
-    try:
-        automated_feature_cleanup_rule = configuration_rule(
-            mergify,
-            AUTOMATED_FEATURE_CLEANUP_RULE_NAME,
-        )
-        if (
-            rule_block_lines(automated_feature_cleanup_rule, "    conditions:")
-            != AUTOMATED_FEATURE_CLEANUP_CONDITION_LINES
-            or rule_block_lines(automated_feature_cleanup_rule, "    actions:")
-            != AUTOMATED_FEATURE_CLEANUP_ACTION_LINES
-        ):
-            issues.append(
-                "The existing automated-PR cleanup must keep removing the "
-                "missing Design Doc label"
-            )
-    except ValueError as error:
-        issues.append(str(error))
-
-    try:
-        feature_missing_doc_rule = configuration_rule(
-            mergify,
-            FEATURE_MISSING_DOC_RULE_NAME,
-        )
-        if (
-            rule_block_lines(feature_missing_doc_rule, "    conditions:")
-            != FEATURE_MISSING_DOC_CONDITION_LINES
-            or feature_missing_doc_rule.count(
-                "          - do-not-merge/missing-design-doc"
-            )
-            != 1
-        ):
-            issues.append(
-                "The feature Design Doc label rule must preserve the existing "
-                "automated-title exception"
-            )
-    except ValueError as error:
-        issues.append(str(error))
-
-    return issues
-
-
-def validate_changed_governance(
-    client: GitHubClient,
-    head_repository: str,
-    head_sha: str,
-    files: list[dict[str, Any]],
-) -> list[str]:
-    if not governance_enforcement_changed(files):
-        return []
-    try:
-        owners_aliases = client.get_repository_file(
-            head_repository, OWNERS_ALIASES_PATH, head_sha
-        )
-        mergify = client.get_repository_file(
-            head_repository, MERGIFY_CONFIG_PATH, head_sha
-        )
-    except RuntimeError as error:
-        return [str(error)]
-    return validate_approver_governance(owners_aliases, mergify)
 
 
 def validate_changed_design_docs(
@@ -1383,9 +859,7 @@ def validate_changed_design_docs(
 def build_comment(
     issues: dict[str, list[str]],
     feature_requirement_issue: str | None = None,
-    governance_issues: list[str] | None = None,
 ) -> str:
-    governance_issues = governance_issues or []
     intro = [
         COMMENT_MARKER,
         "## Design document policy check",
@@ -1397,18 +871,6 @@ def build_comment(
                 "### Feature design document requirement",
                 "",
                 feature_requirement_issue,
-                "",
-            ]
-        )
-    if governance_issues:
-        intro.extend(
-            [
-                "### Repository governance enforcement",
-                "",
-                "The proposed governance files do not preserve the trusted "
-                "Approver policy:",
-                "",
-                *[f"- {html.escape(issue)}" for issue in governance_issues],
                 "",
             ]
         )
@@ -1517,13 +979,11 @@ def report_advisory_warning(warning: str) -> None:
 def build_check_summary(
     issues: dict[str, list[str]],
     feature_requirement_issue: str | None,
-    governance_issues: list[str] | None = None,
     approval: ApprovalRequirement | None = None,
     metadata_complete: bool = True,
     comment_synchronized: bool = True,
     advisory_warnings: list[str] | None = None,
 ) -> str:
-    governance_issues = governance_issues or []
     advisory_warnings = advisory_warnings or []
     lines = ["## Design Doc policy"]
     if approval is not None:
@@ -1537,13 +997,6 @@ def build_check_summary(
                 f"  - {feature_requirement_issue}",
             ]
         )
-
-    if governance_issues:
-        lines.append("- Repository governance enforcement: failed")
-        for issue in governance_issues:
-            lines.append(f"  - {issue}")
-    else:
-        lines.append("- Repository governance enforcement: passed or not applicable")
 
     if not metadata_complete:
         lines.append(
@@ -1633,19 +1086,10 @@ def load_event(
         repository = str(event["repository"]["full_name"])
         pull_request = event.get("pull_request")
         issue = event.get("issue")
-        workflow_run = event.get("workflow_run")
         if isinstance(pull_request, dict):
             pull_number = int(pull_request["number"])
         elif isinstance(issue, dict) and isinstance(issue.get("pull_request"), dict):
             pull_number = int(issue["number"])
-        elif isinstance(workflow_run, dict):
-            display_title = workflow_run.get("display_title")
-            if not isinstance(display_title, str):
-                raise KeyError("workflow_run.display_title")
-            match = REVIEW_SIGNAL_RUN_TITLE_PATTERN.fullmatch(display_title)
-            if match is None:
-                raise ValueError("invalid workflow_run.display_title")
-            pull_number = int(match.group(1))
         else:
             raise KeyError("pull_request")
     except (KeyError, TypeError, ValueError) as error:
@@ -1705,12 +1149,6 @@ def run(event_path: str) -> int:
         advisory_warnings.extend(metadata_inspection.warnings)
         for warning in metadata_inspection.warnings:
             report_advisory_warning(warning)
-        governance_issues = validate_changed_governance(
-            client,
-            initial_state.head_repository,
-            initial_state.head_sha,
-            files,
-        )
         feature_requirement_issue = validate_feature_design_doc_requirement(
             client,
             repository,
@@ -1726,7 +1164,6 @@ def run(event_path: str) -> int:
         existing_comments = client.list_issue_comments(repository, pull_number)
         approval = (
             evaluate_design_doc_approval_requirement(
-                client,
                 repository,
                 pull_number,
                 initial_state,
@@ -1773,13 +1210,8 @@ def run(event_path: str) -> int:
                     build_comment(
                         issues,
                         feature_requirement_issue,
-                        governance_issues,
                     )
-                    if (
-                        issues
-                        or feature_requirement_issue is not None
-                        or governance_issues
-                    )
+                    if (issues or feature_requirement_issue is not None)
                     else None
                 )
                 sync_comment(
@@ -1824,7 +1256,6 @@ def run(event_path: str) -> int:
 
         final_approval = (
             evaluate_design_doc_approval_requirement(
-                client,
                 repository,
                 pull_number,
                 final_state,
@@ -1854,10 +1285,8 @@ def run(event_path: str) -> int:
             return 0
 
         failed = (
-            (approval is not None and not approval.satisfied)
-            or feature_requirement_issue is not None
-            or bool(governance_issues)
-        )
+            approval is not None and not approval.satisfied
+        ) or feature_requirement_issue is not None
         if approval is not None and not approval.satisfied:
             check_title = "Two non-author Design Doc approvals are required"
         elif failed:
@@ -1876,7 +1305,6 @@ def run(event_path: str) -> int:
             build_check_summary(
                 issues,
                 feature_requirement_issue,
-                governance_issues,
                 approval,
                 metadata_complete=metadata_inspection.complete,
                 comment_synchronized=comment_synchronized,
@@ -1905,10 +1333,6 @@ def run(event_path: str) -> int:
                 "The feature design document requirement is satisfied or does "
                 "not apply."
             )
-        if governance_issues:
-            print("Repository governance enforcement is inconsistent.")
-        else:
-            print("Repository governance enforcement is valid or does not apply.")
         if approval is not None:
             if approval.satisfied:
                 print(
