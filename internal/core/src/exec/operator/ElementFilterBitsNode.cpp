@@ -62,6 +62,7 @@ PhyElementFilterBitsNode::PhyElementFilterBitsNode(
       struct_name_(element_filter_bits_node->struct_name()) {
     ExecContext* exec_context = operator_context_->get_exec_context();
     query_context_ = exec_context->get_query_context();
+    schema_snapshot_ = query_context_->get_segment()->get_schema_snapshot();
 
     // Build expression set from element-level expression
     std::vector<expr::TypedExprPtr> exprs;
@@ -90,8 +91,8 @@ PhyElementFilterBitsNode::GetOutput() {
 
     // Step 1: Get array offsets
     auto segment = query_context_->get_segment();
-    auto schema = segment->get_schema_snapshot();
-    auto& field_meta = schema->GetFirstArrayFieldInStruct(struct_name_);
+    auto& field_meta =
+        schema_snapshot_->GetFirstArrayFieldInStruct(struct_name_);
     auto field_id = field_meta.get_id();
     auto array_offsets = segment->GetArrayOffsets(field_id);
     if (array_offsets == nullptr) {

@@ -1008,8 +1008,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
              expr_->op_type_ == proto::plan::OpType::RegexMatch)) {
             // try to pin ngram index for json
             auto field_id = expr_->column_.field_id_;
-            auto schema = segment->get_schema_snapshot();
-            auto field_meta = (*schema)[field_id];
+            auto field_meta = (*schema_snapshot_)[field_id];
 
             if (field_meta.is_json()) {
                 auto pointer =
