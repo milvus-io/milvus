@@ -333,6 +333,66 @@ func TestInsertRequestViewEncoder_ArrayNestedUnknownFields(t *testing.T) {
 	assert.True(t, bytes.Equal(repeatedUnknown, decoded.GetFieldsData()[1].GetScalars().GetArrayData().GetData()[1].GetStringData().ProtoReflect().GetUnknown()))
 }
 
+// TestInsertRequestViewEncoder_ArrayCellValidDataFallback pins the fix for a
+// real proto change, not a synthetic one: schemapb.ScalarField and
+// schemapb.VectorField each gained a ValidData field (element-level nullability
+// within one cell) that has no producer anywhere in this repo yet. Because
+// proto reflection recognizes it, GetUnknown() no longer catches it -- the
+// arithmetic cell path only writes the oneof value, so a cell carrying it would
+// silently lose that data. classifyScalarCell / classifyVectorArrayCell must
+// treat a non-empty ValidData the same as an unrecognized field: fall back to
+// the protobuf path, which serializes every field it does not know to drop.
+func TestInsertRequestViewEncoder_ArrayCellValidDataFallback(t *testing.T) {
+	scalarCell := &schemapb.ScalarField{
+		Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}},
+		ValidData: []bool{true, false},
+	}
+	vectorCell := &schemapb.VectorField{
+		Dim:       2,
+		Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}},
+		ValidData: []bool{true},
+	}
+
+	source := &msgpb.InsertRequest{
+		NumRows:    1,
+		RowIDs:     []int64{1},
+		Timestamps: []uint64{10},
+		FieldsData: []*schemapb.FieldData{
+			scalarField(1, schemapb.DataType_Array, &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+				ElementType: schemapb.DataType_Int64,
+				Data:        []*schemapb.ScalarField{scalarCell},
+			}}),
+			vectorField(2, schemapb.DataType_ArrayOfVector, 2,
+				&schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+					Dim: 2, ElementType: schemapb.DataType_FloatVector,
+					Data: []*schemapb.VectorField{vectorCell},
+				}}, nil),
+		},
+	}
+
+	rows := []int{0}
+	expected := materializeWithAppendFieldData(insertViewTemplate(), source, rows)
+
+	encoder, err := NewInsertRequestViewEncoder(insertViewTemplate(), source, rows)
+	require.NoError(t, err)
+	size, err := encoder.EncodedSize()
+	require.NoError(t, err)
+	actualBytes := make([]byte, size)
+	_, err = encoder.MarshalTo(actualBytes)
+	require.NoError(t, err)
+	assert.Equal(t, proto.Size(expected), len(actualBytes))
+
+	decoded := &msgpb.InsertRequest{}
+	require.NoError(t, proto.Unmarshal(actualBytes, decoded))
+	assert.True(t, proto.Equal(expected, decoded))
+	assert.Equal(t, []bool{true, false},
+		decoded.GetFieldsData()[0].GetScalars().GetArrayData().GetData()[0].GetValidData(),
+		"ScalarField.ValidData must survive the cell, not be silently dropped")
+	assert.Equal(t, []bool{true},
+		decoded.GetFieldsData()[1].GetVectors().GetVectorArray().GetData()[0].GetValidData(),
+		"VectorField.ValidData must survive the cell, not be silently dropped")
+}
+
 func TestInsertRequestViewEncoder_ExtendedScalarOneofs(t *testing.T) {
 	// Bytes/Mol/MolSmiles/Date/Time are current ScalarField oneofs, but the old
 	// AppendFieldData repack helper does not handle them. Keep this explicit

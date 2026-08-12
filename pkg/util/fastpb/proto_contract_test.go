@@ -92,8 +92,8 @@ func TestProtoContract_FieldDescriptorsPinned(t *testing.T) {
 		{"schemapb.SearchResultData", &schemapb.SearchResultData{}, "f17c51046b4baf17f67a48938a244aaa0a5ca50fbfe649fd0e88e03af8c53ecd"},
 		// nested hand-decoded types (oneof-bearing — highest divergence risk)
 		{"schemapb.FieldData", &schemapb.FieldData{}, "dde2cc5e2e91394c5f3c2099f2529b7ef2e6f6707744c98a73bd4b86505cc081"},
-		{"schemapb.ScalarField", &schemapb.ScalarField{}, "40e7e267fa6b4b2102fe9f380eb5e99232a9140a3611a6d9e0fd0abe8239eab1"},
-		{"schemapb.VectorField", &schemapb.VectorField{}, "32604f511b4d1972e28e252b957d54997de9058a251bf0be277868c7ac63880e"},
+		{"schemapb.ScalarField", &schemapb.ScalarField{}, "4e8d38191186856584bf0b02593b8d6f513b775845b1c1cebddeb98cff11ffda"},
+		{"schemapb.VectorField", &schemapb.VectorField{}, "157f02036ff1af36827de849900cb9a0430e99258acded8e11a589b227df0411"},
 		{"schemapb.IDs", &schemapb.IDs{}, "350a0a056fcd16e1aa576276108dcfac0ff2dd368d51bb49a7c9e05b67e00a6c"},
 		// leaf arrays with their own hand-written field switches (no unknown-field
 		// fallback in some — a new field here would mis-parse)
