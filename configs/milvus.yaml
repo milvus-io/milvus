@@ -1491,9 +1491,6 @@ streaming:
     # The threshold of slow log, 1s by default. 
     # If the wal implementation is woodpecker, the minimum threshold is 3s
     appendSlowThreshold: 1s
-  partialUpdate:
-    # The node-wide memory budget for the partial update primary-key version index.
-    versionIndexMaxBytes: 640000000
   flush:
     # The threshold of memory usage for one streaming node,
     # If the memory usage is higher than this threshold, the node will try to trigger flush action to decrease the total of growing segment until growingSegmentBytesLwmThreshold,

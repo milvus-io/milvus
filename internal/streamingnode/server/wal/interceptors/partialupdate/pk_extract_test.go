@@ -216,9 +216,9 @@ func TestExtractPKsFromCASInsert(t *testing.T) {
 			},
 		}
 
-		pks, scope, err := extractPKsFromCASInsert(newInsertMessage([]*schemapb.FieldData{
+		pks, scope, err := extractPKsFromCASInsert(newCASInsertMessage(t, []*schemapb.FieldData{
 			int64PKFieldData(10, 20),
-		}), getter)
+		}, validCASMeta(100, 1)), getter)
 
 		require.NoError(t, err)
 		require.Equal(t, []any{int64(10), int64(20)}, pks)
@@ -235,9 +235,9 @@ func TestExtractPKsFromCASInsert(t *testing.T) {
 			},
 		}
 
-		pks, scope, err := extractPKsFromCASInsert(newInsertMessage([]*schemapb.FieldData{
+		pks, scope, err := extractPKsFromCASInsert(newCASInsertMessage(t, []*schemapb.FieldData{
 			varcharPKFieldData("pk-1", "pk-2"),
-		}), getter)
+		}, validCASMeta(100, 1)), getter)
 
 		require.NoError(t, err)
 		require.Equal(t, []any{"pk-1", "pk-2"}, pks)
@@ -251,7 +251,7 @@ func TestExtractPKsFromCASInsert(t *testing.T) {
 				DataType: schemapb.DataType_Int64,
 			},
 		}
-		msg := newInsertMessage([]*schemapb.FieldData{int64PKFieldData(10)})
+		msg := newCASInsertMessage(t, []*schemapb.FieldData{int64PKFieldData(10)}, validCASMeta(100, 1))
 		insertMsg := message.MustAsMutableInsertMessageV1(msg)
 		header := insertMsg.Header()
 		zero := int32(0)

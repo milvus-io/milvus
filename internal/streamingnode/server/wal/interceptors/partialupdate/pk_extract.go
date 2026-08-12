@@ -42,6 +42,9 @@ type casInsertScope struct {
 // ok=false means callers must handle inserts and collection-wide writes separately.
 func extractPKs(msg message.MutableMessage) ([]any, bool, error) {
 	keys, ok, err := extractPKsWithContext(context.Background(), msg)
+	if !ok {
+		return nil, false, err
+	}
 	return keys.toAny(), ok, err
 }
 
