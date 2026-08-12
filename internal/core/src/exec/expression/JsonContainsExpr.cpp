@@ -400,7 +400,7 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
         auto executor = [&](size_t i) {
             const auto& array = data[i];
             for (int j = 0; j < array.length(); ++j) {
-                if (elements.find(array.template get_data<GetType>(j)) !=
+                if (elements.find(array.template get_data_unchecked<GetType>(j)) !=
                     elements.end()) {
                     return true;
                 }
@@ -1004,7 +1004,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
                 uint64_t found = 0;
                 for (int j = 0; j < data[i].length(); ++j) {
                     if (matcher.set_if_found(
-                            data[i].template get_data<GetType>(j), found)) {
+                            data[i].template get_data_unchecked<GetType>(j), found)) {
                         return true;
                     }
                 }
@@ -1014,7 +1014,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
                 size_t remaining = matcher.target_count();
                 for (int j = 0; j < data[i].length(); ++j) {
                     if (matcher.set_if_found(
-                            data[i].template get_data<GetType>(j),
+                            data[i].template get_data_unchecked<GetType>(j),
                             found_large,
                             remaining)) {
                         return true;

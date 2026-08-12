@@ -777,7 +777,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                 valid_res[i] = false;                           \
                 continue;                                       \
             }                                                   \
-            auto value = data[offset].get_data<GetType>(index); \
+            auto value = data[offset].get_data_unchecked<GetType>(index); \
             res[i] = (cmp);                                     \
         }                                                       \
     } while (false)

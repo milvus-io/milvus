@@ -196,7 +196,7 @@ class Array {
         }
     }
 
-    Array(const Array& array) noexcept
+    Array(const Array& array)
         : length_{array.length_},
           size_{array.size_},
           element_type_{array.element_type_},
@@ -215,11 +215,6 @@ class Array {
                                         array.length() * sizeof(uint32_t));
         }
         if (element_nullable_) {
-            AssertInfo(array.get_element_valid_data_length() == length_,
-                       "element valid data bitmap length must equal array "
-                       "logical length, bitmap_length={}, array_length={}",
-                       array.get_element_valid_data_length(),
-                       length_);
             element_valid_data_ = array.element_valid_data_.clone();
         }
     }
@@ -254,112 +249,23 @@ class Array {
         return *this;
     }
 
-    bool
-    operator==(const Array& arr) const {
-        if (element_type_ != arr.element_type_) {
-            return false;
-        }
-        if (length_ != arr.length_) {
-            return false;
-        }
-        if (length_ == 0) {
-            return true;
-        }
-        if (element_nullable_ != arr.element_nullable_) {
-            return false;
-        }
-        if (element_nullable_) {
-            for (int i = 0; i < length_; ++i) {
-                if (is_element_valid(i) != arr.is_element_valid(i)) {
-                    return false;
-                }
-            }
-        }
-        switch (element_type_) {
-            case DataType::INT64: {
-                for (int i = 0; i < length_; ++i) {
-                    if (!is_element_valid(i)) {
-                        continue;
-                    }
-                    if (get_raw_data<int64_t>(i) !=
-                        arr.get_raw_data<int64_t>(i)) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-            case DataType::BOOL: {
-                for (int i = 0; i < length_; ++i) {
-                    if (!is_element_valid(i)) {
-                        continue;
-                    }
-                    if (get_raw_data<bool>(i) != arr.get_raw_data<bool>(i)) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-            case DataType::DOUBLE: {
-                for (int i = 0; i < length_; ++i) {
-                    if (!is_element_valid(i)) {
-                        continue;
-                    }
-                    if (get_raw_data<double>(i) !=
-                        arr.get_raw_data<double>(i)) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-            case DataType::FLOAT: {
-                for (int i = 0; i < length_; ++i) {
-                    if (!is_element_valid(i)) {
-                        continue;
-                    }
-                    if (get_raw_data<float>(i) != arr.get_raw_data<float>(i)) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-            case DataType::INT32:
-            case DataType::INT16:
-            case DataType::INT8: {
-                for (int i = 0; i < length_; ++i) {
-                    if (!is_element_valid(i)) {
-                        continue;
-                    }
-                    if (get_raw_data<int>(i) != arr.get_raw_data<int>(i)) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-            case DataType::STRING:
-            case DataType::VARCHAR:
-            //treat Geometry as wkb string
-            case DataType::GEOMETRY: {
-                for (int i = 0; i < length_; ++i) {
-                    if (!is_element_valid(i)) {
-                        continue;
-                    }
-                    if (get_raw_data<std::string_view>(i) !=
-                        arr.get_raw_data<std::string_view>(i)) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-            default:
-                ThrowInfo(Unsupported, "unsupported element type for array");
-        }
-    }
-
     template <typename T>
     T
     get_data_unchecked(const int index) const {
         // Reads raw payload; caller must handle element validity separately.
         return get_raw_data<T>(index);
+    }
+
+    bool
+    is_element_valid(int index) const {
+        AssertInfo(index >= 0 && index < length_,
+                   "index out of range, index={}, length={}",
+                   index,
+                   length_);
+        if (!element_nullable_) {
+            return true;
+        }
+        return element_valid_data_[index];
     }
 
     uint32_t*
@@ -369,8 +275,78 @@ class Array {
 
     void
     output_data(ScalarFieldProto& data_array) const {
-        output_scalar_payload(data_array);
-        data_array.clear_valid_data();
+        switch (element_type_) {
+            case DataType::BOOL: {
+                data_array.mutable_bool_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<bool>(j);
+                    data_array.mutable_bool_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32: {
+                data_array.mutable_int_data()->mutable_data()->Reserve(length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<int>(j);
+                    data_array.mutable_int_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::INT64: {
+                data_array.mutable_long_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<int64_t>(j);
+                    data_array.mutable_long_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::STRING:
+            case DataType::VARCHAR: {
+                data_array.mutable_string_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<std::string_view>(j);
+                    data_array.mutable_string_data()->add_data(element.data(),
+                                                               element.size());
+                }
+                break;
+            }
+            case DataType::FLOAT: {
+                data_array.mutable_float_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<float>(j);
+                    data_array.mutable_float_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::DOUBLE: {
+                data_array.mutable_double_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<double>(j);
+                    data_array.mutable_double_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::GEOMETRY: {
+                data_array.mutable_geometry_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<std::string_view>(j);
+                    data_array.mutable_geometry_data()->add_data(
+                        element.data(), element.size());
+                }
+                break;
+            }
+            default: {
+                // empty array
+            }
+        }
         if (element_nullable_) {
             data_array.mutable_valid_data()->Reserve(length_);
             for (int i = 0; i < length_; ++i) {
@@ -407,48 +383,6 @@ class Array {
     }
 
     bool
-    is_element_nullable() const {
-        return element_nullable_;
-    }
-
-    bool
-    is_element_valid(int index) const {
-        AssertInfo(index >= 0 && index < length_,
-                   "index out of range, index={}, length={}",
-                   index,
-                   length_);
-        if (!element_nullable_) {
-            return true;
-        }
-        AssertInfo(element_valid_data_.size() == length_,
-                   "element valid data bitmap length must equal array logical "
-                   "length, bitmap_length={}, array_length={}",
-                   element_valid_data_.size(),
-                   length_);
-        return element_valid_data_[index];
-    }
-
-    const TargetBitmap&
-    get_element_valid_data() const {
-        return element_valid_data_;
-    }
-
-    size_t
-    get_element_valid_data_length() const {
-        return element_valid_data_.size();
-    }
-
-    size_t
-    get_element_valid_data_byte_size() const {
-        return element_valid_data_.size_in_bytes();
-    }
-
-    bool
-    has_invalid_element() const {
-        return has_invalid_element_;
-    }
-
-    bool
     is_same_array(const proto::plan::Array& arr2) const {
         if (arr2.array_size() != length_) {
             return false;
@@ -459,7 +393,7 @@ class Array {
         if (!arr2.same_type()) {
             return false;
         }
-        if (has_invalid_element()) {
+        if (has_invalid_element_) {
             // TODO(SpadeA): support nullable proto::plan::Array constants.
             return false;
         }
@@ -548,82 +482,6 @@ class Array {
     }
 
  private:
-    void
-    output_scalar_payload(ScalarFieldProto& data_array) const {
-        switch (element_type_) {
-            case DataType::BOOL: {
-                data_array.mutable_bool_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_raw_data<bool>(j);
-                    data_array.mutable_bool_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::INT8:
-            case DataType::INT16:
-            case DataType::INT32: {
-                data_array.mutable_int_data()->mutable_data()->Reserve(length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_raw_data<int>(j);
-                    data_array.mutable_int_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::INT64: {
-                data_array.mutable_long_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_raw_data<int64_t>(j);
-                    data_array.mutable_long_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::STRING:
-            case DataType::VARCHAR: {
-                data_array.mutable_string_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_raw_data<std::string_view>(j);
-                    data_array.mutable_string_data()->add_data(element.data(),
-                                                               element.size());
-                }
-                break;
-            }
-            case DataType::FLOAT: {
-                data_array.mutable_float_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_raw_data<float>(j);
-                    data_array.mutable_float_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::DOUBLE: {
-                data_array.mutable_double_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_raw_data<double>(j);
-                    data_array.mutable_double_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::GEOMETRY: {
-                data_array.mutable_geometry_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_raw_data<std::string_view>(j);
-                    data_array.mutable_geometry_data()->add_data(
-                        element.data(), element.size());
-                }
-                break;
-            }
-            default: {
-                // empty array
-            }
-        }
-    }
-
     template <typename T>
     T
     get_raw_data(const int index) const {
@@ -668,6 +526,10 @@ class Array {
     void
     init_element_valid_data(const TargetBitmapView& element_valid_data) {
         if (!element_nullable_) {
+            AssertInfo(element_valid_data.size() == 0,
+                       "non-element-nullable array cannot carry element valid "
+                       "data, bitmap_length={}",
+                       element_valid_data.size());
             return;
         }
 
@@ -677,21 +539,6 @@ class Array {
                    element_valid_data.size(),
                    length_);
         element_valid_data_ = TargetBitmap(element_valid_data);
-        has_invalid_element_ = !element_valid_data_.all();
-    }
-
-    void
-    init_element_valid_data(const TargetBitmap& element_valid_data) {
-        if (!element_nullable_) {
-            return;
-        }
-
-        AssertInfo(element_valid_data.size() == length_,
-                   "element valid data bitmap length must equal array logical "
-                   "length, bitmap_length={}, array_length={}",
-                   element_valid_data.size(),
-                   length_);
-        element_valid_data_ = element_valid_data.clone();
         has_invalid_element_ = !element_valid_data_.all();
     }
 
@@ -779,11 +626,19 @@ class ArrayView {
           offsets_ptr_(offsets_ptr),
           element_nullable_(element_nullable),
           element_valid_data_(element_valid_data) {
-        AssertInfo(!element_nullable_ || element_valid_data_.size() == length_,
-                   "element valid data bitmap length must equal array logical "
-                   "length, bitmap_length={}, array_length={}",
-                   element_valid_data_.size(),
-                   length_);
+        if (element_nullable_) {
+            AssertInfo(
+                element_valid_data_.size() == length_,
+                "element valid data bitmap length must equal array logical "
+                "length, bitmap_length={}, array_length={}",
+                element_valid_data_.size(),
+                length_);
+        } else {
+            AssertInfo(element_valid_data_.size() == 0,
+                       "non-element-nullable array cannot carry element valid "
+                       "data, bitmap_length={}",
+                       element_valid_data_.size());
+        }
         AssertInfo(data != nullptr || (length_ == 0 && size_ == 0),
                    "data pointer for non-empty ArrayView cannot be nullptr");
         if (length_ > 0 && IsVariableDataType(element_type_)) {
@@ -793,20 +648,6 @@ class ArrayView {
         }
     }
 
-    explicit ArrayView(const Array& array)
-        : ArrayView(const_cast<char*>(array.data()),
-                    array.length(),
-                    array.byte_size(),
-                    array.get_element_type(),
-                    array.get_offsets_data(),
-                    array.is_element_nullable()
-                        ? array.get_element_valid_data().view(0)
-                        : TargetBitmapView(),
-                    array.is_element_nullable()) {
-        has_invalid_element_computed_ = array.is_element_nullable();
-        has_invalid_element_ = array.has_invalid_element();
-    }
-
     template <typename T>
     T
     get_data_unchecked(const int index) const {
@@ -814,10 +655,92 @@ class ArrayView {
         return get_raw_data<T>(index);
     }
 
+    bool
+    is_element_valid(int index) const {
+        AssertInfo(index >= 0 && index < length_,
+                   "index out of range, index={}, length={}",
+                   index,
+                   length_);
+        if (!element_nullable_) {
+            return true;
+        }
+        return element_valid_data_[index];
+    }
+
     void
     output_data(ScalarFieldProto& data_array) const {
-        output_scalar_payload(data_array);
-        data_array.clear_valid_data();
+        switch (element_type_) {
+            case DataType::BOOL: {
+                data_array.mutable_bool_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<bool>(j);
+                    data_array.mutable_bool_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32: {
+                data_array.mutable_int_data()->mutable_data()->Reserve(length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<int>(j);
+                    data_array.mutable_int_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::INT64: {
+                data_array.mutable_long_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<int64_t>(j);
+                    data_array.mutable_long_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::STRING:
+            case DataType::VARCHAR: {
+                data_array.mutable_string_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<std::string_view>(j);
+                    data_array.mutable_string_data()->add_data(element.data(),
+                                                               element.size());
+                }
+                break;
+            }
+            case DataType::FLOAT: {
+                data_array.mutable_float_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<float>(j);
+                    data_array.mutable_float_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::DOUBLE: {
+                data_array.mutable_double_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<double>(j);
+                    data_array.mutable_double_data()->add_data(element);
+                }
+                break;
+            }
+            case DataType::GEOMETRY: {
+                data_array.mutable_geometry_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<std::string_view>(j);
+                    data_array.mutable_geometry_data()->add_data(
+                        element.data(), element.size());
+                }
+                break;
+            }
+            default: {
+                // empty array
+            }
+        }
         if (element_nullable_) {
             data_array.mutable_valid_data()->Reserve(length_);
             for (int i = 0; i < length_; ++i) {
@@ -828,8 +751,6 @@ class ArrayView {
 
     void
     output_data(Array& array) const {
-        // Create a new Array object from ArrayView's data and assign it to the
-        // output array
         array = Array(data_,
                       length_,
                       static_cast<size_t>(size_),
@@ -851,73 +772,9 @@ class ArrayView {
         return length_;
     }
 
-    size_t
-    byte_size() const {
-        return size_;
-    }
-
-    DataType
-    get_element_type() const {
-        return element_type_;
-    }
-
     const void*
     data() const {
         return data_;
-    }
-
-    bool
-    is_element_nullable() const {
-        return element_nullable_;
-    }
-
-    bool
-    is_element_valid(int index) const {
-        AssertInfo(index >= 0 && index < length_,
-                   "index out of range, index={}, length={}",
-                   index,
-                   length_);
-        if (!element_nullable_) {
-            return true;
-        }
-        AssertInfo(element_valid_data_.size() == length_,
-                   "element valid data bitmap length must equal array logical "
-                   "length, bitmap_length={}, array_length={}",
-                   element_valid_data_.size(),
-                   length_);
-        return element_valid_data_[index];
-    }
-
-    const TargetBitmapView&
-    get_element_valid_data() const {
-        return element_valid_data_;
-    }
-
-    size_t
-    get_element_valid_data_length() const {
-        return element_valid_data_.size();
-    }
-
-    size_t
-    get_element_valid_data_byte_size() const {
-        return element_valid_data_.size_in_bytes();
-    }
-
-    bool
-    has_invalid_element() const {
-        if (!element_nullable_) {
-            return false;
-        }
-        if (!has_invalid_element_computed_) {
-            AssertInfo(element_valid_data_.size() == length_,
-                       "element valid data bitmap length must equal array "
-                       "logical length, bitmap_length={}, array_length={}",
-                       element_valid_data_.size(),
-                       length_);
-            has_invalid_element_ = !element_valid_data_.all();
-            has_invalid_element_computed_ = true;
-        }
-        return has_invalid_element_;
     }
 
     bool
@@ -1017,80 +874,16 @@ class ArrayView {
     }
 
  private:
-    void
-    output_scalar_payload(ScalarFieldProto& data_array) const {
-        switch (element_type_) {
-            case DataType::BOOL: {
-                data_array.mutable_bool_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_raw_data<bool>(j);
-                    data_array.mutable_bool_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::INT8:
-            case DataType::INT16:
-            case DataType::INT32: {
-                data_array.mutable_int_data()->mutable_data()->Reserve(length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_raw_data<int>(j);
-                    data_array.mutable_int_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::INT64: {
-                data_array.mutable_long_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_raw_data<int64_t>(j);
-                    data_array.mutable_long_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::STRING:
-            case DataType::VARCHAR: {
-                data_array.mutable_string_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_raw_data<std::string_view>(j);
-                    data_array.mutable_string_data()->add_data(element.data(),
-                                                               element.size());
-                }
-                break;
-            }
-            case DataType::FLOAT: {
-                data_array.mutable_float_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_raw_data<float>(j);
-                    data_array.mutable_float_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::DOUBLE: {
-                data_array.mutable_double_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_raw_data<double>(j);
-                    data_array.mutable_double_data()->add_data(element);
-                }
-                break;
-            }
-            case DataType::GEOMETRY: {
-                data_array.mutable_geometry_data()->mutable_data()->Reserve(
-                    length_);
-                for (int j = 0; j < length_; ++j) {
-                    auto element = get_raw_data<std::string_view>(j);
-                    data_array.mutable_geometry_data()->add_data(
-                        element.data(), element.size());
-                }
-                break;
-            }
-            default: {
-                // empty array
-            }
+    bool
+    has_invalid_element() const {
+        if (!element_nullable_) {
+            return false;
         }
+        if (!has_invalid_element_computed_) {
+            has_invalid_element_ = !element_valid_data_.all();
+            has_invalid_element_computed_ = true;
+        }
+        return has_invalid_element_;
     }
 
     template <typename T>

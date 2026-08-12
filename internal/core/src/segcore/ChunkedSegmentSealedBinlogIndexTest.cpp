@@ -801,12 +801,12 @@ TEST(test_chunk_segment,
     auto result = sealed->bulk_subscript(
         nullptr, vec_field_id, offsets.data(), offsets.size());
 
-    const auto& valid_data = GetFieldDataRowValidData(*result);
-    ASSERT_EQ(valid_data.size(), offsets.size());
-    EXPECT_FALSE(valid_data[0]);
-    EXPECT_TRUE(valid_data[1]);
-    EXPECT_FALSE(valid_data[2]);
-    EXPECT_TRUE(valid_data[3]);
+    const auto& result_valid_data = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(result_valid_data.size(), offsets.size());
+    EXPECT_FALSE(result_valid_data[0]);
+    EXPECT_TRUE(result_valid_data[1]);
+    EXPECT_FALSE(result_valid_data[2]);
+    EXPECT_TRUE(result_valid_data[3]);
 
     const auto& returned = result->vectors().float_vector().data();
     ASSERT_EQ(returned.size(), 2 * dim);

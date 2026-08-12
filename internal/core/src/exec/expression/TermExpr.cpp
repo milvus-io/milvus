@@ -333,7 +333,7 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
         }
         auto executor = [&](size_t offset) {
             for (int i = 0; i < data[offset].length(); i++) {
-                auto val = data[offset].template get_data<GetType>(i);
+                auto val = data[offset].template get_data_unchecked<GetType>(i);
                 if (val == target_val) {
                     return true;
                 }
@@ -459,7 +459,7 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
                 continue;
             }
-            auto value = data[offset].get_data<GetType>(index);
+            auto value = data[offset].get_data_unchecked<GetType>(index);
             res[i] = term_set->In(ValueType(value));
         }
         processed_cursor += size;
