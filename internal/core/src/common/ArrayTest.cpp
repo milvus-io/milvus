@@ -21,6 +21,58 @@
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 
+namespace {
+
+milvus::ScalarFieldProto
+OutputArrayForTest(const milvus::Array& array) {
+    milvus::ScalarFieldProto output;
+    array.output_data(output);
+    return output;
+}
+
+void
+ExpectArraysEqualForTest(const milvus::Array& left,
+                         const milvus::Array& right) {
+    EXPECT_EQ(left.get_element_type(), right.get_element_type());
+    EXPECT_EQ(left.length(), right.length());
+    EXPECT_EQ(OutputArrayForTest(left).SerializeAsString(),
+              OutputArrayForTest(right).SerializeAsString());
+}
+
+milvus::TargetBitmap
+ElementValidityForTest(const milvus::ScalarFieldProto& input) {
+    milvus::TargetBitmap validity(input.valid_data_size(), false);
+    for (int i = 0; i < input.valid_data_size(); ++i) {
+        if (input.valid_data(i)) {
+            validity.set(i);
+        }
+    }
+    return validity;
+}
+
+milvus::ArrayView
+MakeArrayViewForTest(const milvus::Array& array) {
+    return milvus::ArrayView(const_cast<char*>(array.data()),
+                             array.length(),
+                             array.byte_size(),
+                             array.get_element_type(),
+                             array.get_offsets_data());
+}
+
+milvus::ArrayView
+MakeElementNullableArrayViewForTest(const milvus::Array& array,
+                                    const milvus::TargetBitmap& validity) {
+    return milvus::ArrayView(const_cast<char*>(array.data()),
+                             array.length(),
+                             array.byte_size(),
+                             array.get_element_type(),
+                             array.get_offsets_data(),
+                             validity.view(0),
+                             true);
+}
+
+}  // namespace
+
 TEST(Array, TestConstructArray) {
     using namespace milvus;
 
@@ -57,15 +109,13 @@ TEST(Array, TestConstructArray) {
                               DataType::INT16,
                               int_array.get_offsets_data());
     ASSERT_EQ(int_array.length(), int_16_array.length());
-    ASSERT_TRUE(int_array_tmp == int_array);
+    ExpectArraysEqualForTest(int_array_tmp, int_array);
     auto int_array_view = ArrayView(const_cast<char*>(int_array.data()),
                                     int_array.length(),
                                     int_array.byte_size(),
                                     int_array.get_element_type(),
                                     int_array.get_offsets_data());
     ASSERT_EQ(int_array.length(), int_array_view.length());
-    ASSERT_EQ(int_array.byte_size(), int_array_view.byte_size());
-    ASSERT_EQ(int_array.get_element_type(), int_array_view.get_element_type());
 
     // 2. test long
     milvus::proto::schema::ScalarField field_long_data;
@@ -87,16 +137,13 @@ TEST(Array, TestConstructArray) {
                                 long_array.byte_size(),
                                 long_array.get_element_type(),
                                 long_array.get_offsets_data());
-    ASSERT_TRUE(long_array_tmp == long_array);
+    ExpectArraysEqualForTest(long_array_tmp, long_array);
     auto long_array_view = ArrayView(const_cast<char*>(long_array.data()),
                                      long_array.length(),
                                      long_array.byte_size(),
                                      long_array.get_element_type(),
                                      long_array.get_offsets_data());
     ASSERT_EQ(long_array.length(), long_array_view.length());
-    ASSERT_EQ(long_array.byte_size(), long_array_view.byte_size());
-    ASSERT_EQ(long_array.get_element_type(),
-              long_array_view.get_element_type());
 
     // 3. test string
     milvus::proto::schema::ScalarField field_string_data;
@@ -120,16 +167,13 @@ TEST(Array, TestConstructArray) {
                                   string_array.byte_size(),
                                   string_array.get_element_type(),
                                   string_array.get_offsets_data());
-    ASSERT_TRUE(string_array_tmp == string_array);
+    ExpectArraysEqualForTest(string_array_tmp, string_array);
     auto string_array_view = ArrayView(const_cast<char*>(string_array.data()),
                                        string_array.length(),
                                        string_array.byte_size(),
                                        string_array.get_element_type(),
                                        string_array.get_offsets_data());
     ASSERT_EQ(string_array.length(), string_array_view.length());
-    ASSERT_EQ(string_array.byte_size(), string_array_view.byte_size());
-    ASSERT_EQ(string_array.get_element_type(),
-              string_array_view.get_element_type());
 
     // 4. test bool
     milvus::proto::schema::ScalarField field_bool_data;
@@ -151,16 +195,13 @@ TEST(Array, TestConstructArray) {
                                 bool_array.byte_size(),
                                 bool_array.get_element_type(),
                                 bool_array.get_offsets_data());
-    ASSERT_TRUE(bool_array_tmp == bool_array);
+    ExpectArraysEqualForTest(bool_array_tmp, bool_array);
     auto bool_array_view = ArrayView(const_cast<char*>(bool_array.data()),
                                      bool_array.length(),
                                      bool_array.byte_size(),
                                      bool_array.get_element_type(),
                                      bool_array.get_offsets_data());
     ASSERT_EQ(bool_array.length(), bool_array_view.length());
-    ASSERT_EQ(bool_array.byte_size(), bool_array_view.byte_size());
-    ASSERT_EQ(bool_array.get_element_type(),
-              bool_array_view.get_element_type());
 
     //5. test float
     milvus::proto::schema::ScalarField field_float_data;
@@ -174,7 +215,8 @@ TEST(Array, TestConstructArray) {
     ASSERT_EQ(N, float_array.length());
     ASSERT_EQ(N * sizeof(float), float_array.byte_size());
     for (int i = 0; i < N; ++i) {
-        ASSERT_DOUBLE_EQ(float_array.get_data_unchecked<float>(i), float(i * 0.1));
+        ASSERT_DOUBLE_EQ(float_array.get_data_unchecked<float>(i),
+                         float(i * 0.1));
     }
     ASSERT_TRUE(float_array.is_same_array(field_float_array));
     auto float_array_tmp = Array(const_cast<char*>(float_array.data()),
@@ -182,16 +224,13 @@ TEST(Array, TestConstructArray) {
                                  float_array.byte_size(),
                                  float_array.get_element_type(),
                                  float_array.get_offsets_data());
-    ASSERT_TRUE(float_array_tmp == float_array);
+    ExpectArraysEqualForTest(float_array_tmp, float_array);
     auto float_array_view = ArrayView(const_cast<char*>(float_array.data()),
                                       float_array.length(),
                                       float_array.byte_size(),
                                       float_array.get_element_type(),
                                       float_array.get_offsets_data());
     ASSERT_EQ(float_array.length(), float_array_view.length());
-    ASSERT_EQ(float_array.byte_size(), float_array_view.byte_size());
-    ASSERT_EQ(float_array.get_element_type(),
-              float_array_view.get_element_type());
 
     //6. test double
     milvus::proto::schema::ScalarField field_double_data;
@@ -206,7 +245,8 @@ TEST(Array, TestConstructArray) {
     ASSERT_EQ(N, double_array.length());
     ASSERT_EQ(N * sizeof(double), double_array.byte_size());
     for (int i = 0; i < N; ++i) {
-        ASSERT_DOUBLE_EQ(double_array.get_data_unchecked<double>(i), double(i * 0.1));
+        ASSERT_DOUBLE_EQ(double_array.get_data_unchecked<double>(i),
+                         double(i * 0.1));
     }
     ASSERT_TRUE(double_array.is_same_array(field_double_array));
     auto double_array_tmp = Array(const_cast<char*>(double_array.data()),
@@ -214,16 +254,13 @@ TEST(Array, TestConstructArray) {
                                   double_array.byte_size(),
                                   double_array.get_element_type(),
                                   double_array.get_offsets_data());
-    ASSERT_TRUE(double_array_tmp == double_array);
+    ExpectArraysEqualForTest(double_array_tmp, double_array);
     auto double_array_view = ArrayView(const_cast<char*>(double_array.data()),
                                        double_array.length(),
                                        double_array.byte_size(),
                                        double_array.get_element_type(),
                                        double_array.get_offsets_data());
     ASSERT_EQ(double_array.length(), double_array_view.length());
-    ASSERT_EQ(double_array.byte_size(), double_array_view.byte_size());
-    ASSERT_EQ(double_array.get_element_type(),
-              double_array_view.get_element_type());
 
     milvus::proto::schema::ScalarField field_empty_data;
     milvus::proto::plan::Array field_empty_array;
@@ -242,10 +279,11 @@ TEST(Array, TestConstructArray) {
     typed_empty_data.mutable_int_data();
     auto typed_empty_array = Array(typed_empty_data);
     EXPECT_NO_THROW({
-        auto typed_empty_view = ArrayView(typed_empty_array);
+        auto typed_empty_view = MakeArrayViewForTest(typed_empty_array);
         auto typed_empty_view_copy = typed_empty_view;
         EXPECT_EQ(0, typed_empty_view_copy.length());
-        EXPECT_EQ(DataType::INT32, typed_empty_view_copy.get_element_type());
+        EXPECT_EQ(ScalarFieldProto::kIntData,
+                  typed_empty_view_copy.output_data().data_case());
     });
 }
 
@@ -256,11 +294,7 @@ TEST(Array, TestLiteralElementTypeMismatch) {
                               const proto::plan::Array& literal) {
         EXPECT_FALSE(array.is_same_array(literal));
 
-        auto array_view = ArrayView(const_cast<char*>(array.data()),
-                                    array.length(),
-                                    array.byte_size(),
-                                    array.get_element_type(),
-                                    array.get_offsets_data());
+        auto array_view = MakeArrayViewForTest(array);
         EXPECT_FALSE(array_view.is_same_array(literal));
     };
 
@@ -320,70 +354,122 @@ BuildElementNullableStringArray(const std::vector<std::string>& values,
 TEST(Array, ElementNullableRoundTripPreservesDensePayloadAndValidity) {
     using namespace milvus;
 
-    auto input = BuildElementNullableIntArray(
-        {10, 20, 30, 40}, {true, false, true, true});
+    auto input = BuildElementNullableIntArray({10, 20, 30, 40},
+                                              {true, false, true, true});
     Array array(input, true);
 
-    ASSERT_TRUE(array.is_element_nullable());
-    ASSERT_TRUE(array.has_invalid_element());
     ASSERT_EQ(array.length(), 4);
-    EXPECT_TRUE(array.is_element_valid(0));
     EXPECT_FALSE(array.is_element_valid(1));
-    EXPECT_TRUE(array.is_element_valid(2));
-    EXPECT_TRUE(array.is_element_valid(3));
     EXPECT_EQ(array.get_data_unchecked<int32_t>(1), 20);
 
-    auto output = array.output_data();
+    auto output = OutputArrayForTest(array);
     ASSERT_EQ(output.int_data().data_size(), 4);
     ASSERT_EQ(output.valid_data_size(), 4);
     EXPECT_EQ(output.int_data().data(1), 20);
     EXPECT_FALSE(output.valid_data(1));
 
     Array restored(output, true);
-    EXPECT_EQ(restored, array);
+    ExpectArraysEqualForTest(restored, array);
 
-    ArrayView view(array);
+    auto validity = ElementValidityForTest(input);
+    auto view = MakeElementNullableArrayViewForTest(array, validity);
     auto view_output = view.output_data();
     EXPECT_EQ(view_output.SerializeAsString(), output.SerializeAsString());
+
+    Array copied_from_view;
+    view.output_data(copied_from_view);
+    ExpectArraysEqualForTest(copied_from_view, array);
 }
 
-TEST(Array, ElementNullableCopyAndEqualityIgnoreInvalidPayload) {
+TEST(Array, ElementNullableRawConstructorPreservesDensePayloadAndValidity) {
     using namespace milvus;
 
-    Array left(BuildElementNullableIntArray(
-                   {10, 20, 30}, {true, false, true}),
+    std::vector<int32_t> values = {10, 20, 30};
+    TargetBitmap validity(values.size(), false);
+    validity.set(0);
+    validity.set(2);
+
+    Array array(reinterpret_cast<char*>(values.data()),
+                static_cast<int>(values.size()),
+                values.size() * sizeof(int32_t),
+                DataType::INT32,
+                nullptr,
+                validity.view(),
+                true);
+
+    ASSERT_EQ(array.length(), 3);
+    EXPECT_FALSE(array.is_element_valid(1));
+    EXPECT_EQ(array.get_data_unchecked<int32_t>(1), 20);
+    auto output = OutputArrayForTest(array);
+    ASSERT_EQ(output.int_data().data_size(), 3);
+    EXPECT_EQ(output.int_data().data(0), 10);
+    EXPECT_EQ(output.int_data().data(1), 20);
+    EXPECT_EQ(output.int_data().data(2), 30);
+    ASSERT_EQ(output.valid_data_size(), 3);
+    EXPECT_TRUE(output.valid_data(0));
+    EXPECT_FALSE(output.valid_data(1));
+    EXPECT_TRUE(output.valid_data(2));
+}
+
+TEST(Array, ElementNullableTypedEmptyArrayPreservesElementType) {
+    using namespace milvus;
+
+    ScalarFieldProto input;
+    input.mutable_int_data();
+
+    Array array(input, true);
+    EXPECT_EQ(array.length(), 0);
+    EXPECT_EQ(array.byte_size(), 0);
+
+    auto output = OutputArrayForTest(array);
+    EXPECT_EQ(output.data_case(), ScalarFieldProto::kIntData);
+    EXPECT_EQ(output.int_data().data_size(), 0);
+    EXPECT_EQ(output.valid_data_size(), 0);
+}
+
+TEST(Array, ElementNullableAllNullArrayPreservesDensePlaceholders) {
+    using namespace milvus;
+
+    auto input = BuildElementNullableIntArray({10, 20}, {false, false});
+    Array array(input, true);
+
+    ASSERT_EQ(array.length(), 2);
+    auto output = OutputArrayForTest(array);
+    ASSERT_EQ(output.int_data().data_size(), 2);
+    EXPECT_EQ(output.int_data().data(0), 10);
+    EXPECT_EQ(output.int_data().data(1), 20);
+    ASSERT_EQ(output.valid_data_size(), 2);
+    EXPECT_FALSE(output.valid_data(0));
+    EXPECT_FALSE(output.valid_data(1));
+}
+
+TEST(Array, ElementNullableCopyPreservesPayloadAndValidity) {
+    using namespace milvus;
+
+    Array left(BuildElementNullableIntArray({10, 20, 30}, {true, false, true}),
                true);
-    Array same_logical_value(BuildElementNullableIntArray(
-                                 {10, 99, 30}, {true, false, true}),
-                             true);
-    Array different_validity(BuildElementNullableIntArray(
-                                 {10, 20, 30}, {true, true, true}),
-                             true);
-
-    EXPECT_EQ(left, same_logical_value);
-    EXPECT_NE(left, different_validity);
-
     Array copied(left);
-    EXPECT_EQ(copied, left);
+    ExpectArraysEqualForTest(copied, left);
     Array assigned;
     assigned = left;
-    EXPECT_EQ(assigned, left);
+    ExpectArraysEqualForTest(assigned, left);
 }
 
 TEST(Array, ElementNullableStringRoundTripPreservesOffsets) {
     using namespace milvus;
 
-    Array array(BuildElementNullableStringArray(
-                    {"alpha", "placeholder", "gamma"},
-                    {true, false, true}),
-                true);
-    ArrayView view(array);
+    auto input = BuildElementNullableStringArray(
+        {"alpha", "placeholder", "gamma"}, {true, false, true});
+    Array array(input, true);
+    auto validity = ElementValidityForTest(input);
+    auto view = MakeElementNullableArrayViewForTest(array, validity);
 
+    EXPECT_TRUE(view.is_element_valid(0));
+    EXPECT_FALSE(view.is_element_valid(1));
+    EXPECT_TRUE(view.is_element_valid(2));
     EXPECT_EQ(view.get_data_unchecked<std::string_view>(0), "alpha");
     EXPECT_EQ(view.get_data_unchecked<std::string_view>(1), "placeholder");
     EXPECT_EQ(view.get_data_unchecked<std::string_view>(2), "gamma");
-    EXPECT_FALSE(view.is_element_valid(1));
-
     auto output = view.output_data();
     ASSERT_EQ(output.string_data().data_size(), 3);
     EXPECT_EQ(output.string_data().data(1), "placeholder");
@@ -408,13 +494,19 @@ TEST(Array, ElementNullablePlanLiteralRequiresAllElementsValid) {
     literal.mutable_array()->Add()->set_int64_val(1);
     literal.mutable_array()->Add()->set_int64_val(2);
 
-    Array with_null(
-        BuildElementNullableIntArray({1, 2}, {true, false}), true);
-    Array all_valid(
-        BuildElementNullableIntArray({1, 2}, {true, true}), true);
+    auto with_null_input = BuildElementNullableIntArray({1, 2}, {true, false});
+    auto all_valid_input = BuildElementNullableIntArray({1, 2}, {true, true});
+    Array with_null(with_null_input, true);
+    Array all_valid(all_valid_input, true);
 
     EXPECT_FALSE(with_null.is_same_array(literal));
     EXPECT_TRUE(all_valid.is_same_array(literal));
-    EXPECT_FALSE(ArrayView(with_null).is_same_array(literal));
-    EXPECT_TRUE(ArrayView(all_valid).is_same_array(literal));
+    auto with_null_validity = ElementValidityForTest(with_null_input);
+    auto all_valid_validity = ElementValidityForTest(all_valid_input);
+    EXPECT_FALSE(
+        MakeElementNullableArrayViewForTest(with_null, with_null_validity)
+            .is_same_array(literal));
+    EXPECT_TRUE(
+        MakeElementNullableArrayViewForTest(all_valid, all_valid_validity)
+            .is_same_array(literal));
 }

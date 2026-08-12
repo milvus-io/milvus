@@ -62,6 +62,18 @@ using namespace milvus;
 
 namespace {
 
+void
+ExpectArraysEqualForTest(const Array& left, const Array& right) {
+    proto::schema::ScalarField left_output;
+    proto::schema::ScalarField right_output;
+    left.output_data(left_output);
+    right.output_data(right_output);
+    EXPECT_EQ(left.get_element_type(), right.get_element_type());
+    EXPECT_EQ(left.length(), right.length());
+    EXPECT_EQ(left_output.SerializeAsString(),
+              right_output.SerializeAsString());
+}
+
 FieldMeta
 MakeExternalFieldMetaForTest(DataType data_type,
                              DataType element_type = DataType::NONE,
@@ -2001,7 +2013,7 @@ TEST(storage, InsertDataStringArray) {
     for (int i = 0; i < data.size(); ++i) {
         new_data[i] = *static_cast<const Array*>(new_payload->RawValue(i));
         ASSERT_EQ(new_payload->DataSize(i), data[i].byte_size());
-        ASSERT_TRUE(data[i].operator==(new_data[i]));
+        ExpectArraysEqualForTest(data[i], new_data[i]);
     }
 }
 
@@ -2051,7 +2063,7 @@ TEST(storage, InsertDataStringArrayNullable) {
     for (int i = 0; i < data.size(); ++i) {
         new_data[i] = *static_cast<const Array*>(new_payload->RawValue(i));
         ASSERT_EQ(new_payload->DataSize(i), data[i].byte_size());
-        ASSERT_TRUE(expected_data[i].operator==(new_data[i]));
+        ExpectArraysEqualForTest(expected_data[i], new_data[i]);
     }
     ASSERT_EQ(*new_payload->ValidData(), *valid_data);
 }

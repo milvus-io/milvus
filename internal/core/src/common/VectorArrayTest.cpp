@@ -147,6 +147,41 @@ GetByteVectorPayload(const VectorFieldProto& field, DataType data_type) {
     }
 }
 
+void
+ExpectVectorArraysEqualForTest(const milvus::VectorArray& lhs,
+                               const milvus::VectorArray& rhs) {
+    EXPECT_EQ(lhs.length(), rhs.length());
+    EXPECT_EQ(lhs.dim(), rhs.dim());
+    EXPECT_EQ(lhs.get_element_type(), rhs.get_element_type());
+    EXPECT_EQ(lhs.byte_size(), rhs.byte_size());
+    EXPECT_EQ(lhs.output_data().SerializeAsString(),
+              rhs.output_data().SerializeAsString());
+}
+
+TargetBitmap
+ElementValidityForTest(const VectorFieldProto& field) {
+    TargetBitmap validity(field.valid_data_size(), false);
+    for (int i = 0; i < field.valid_data_size(); ++i) {
+        if (field.valid_data(i)) {
+            validity.set(i);
+        }
+    }
+    return validity;
+}
+
+VectorArrayView
+MakeElementNullableVectorArrayViewForTest(
+    const milvus::VectorArray& array,
+    const TargetBitmapView& element_valid_data) {
+    return VectorArrayView(const_cast<char*>(array.data()),
+                           array.dim(),
+                           array.length(),
+                           array.byte_size(),
+                           array.get_element_type(),
+                           element_valid_data,
+                           true);
+}
+
 class ElementNullableByteVectorArrayTest
     : public ::testing::TestWithParam<ElementNullableByteVectorParam> {};
 
@@ -171,23 +206,25 @@ TEST(VectorArray, TestConstructVectorArray) {
     ASSERT_EQ(float_vector_array.get_element_type(), DataType::VECTOR_FLOAT);
     ASSERT_EQ(float_vector_array.byte_size(), N * dim * sizeof(float));
 
-    ASSERT_TRUE(float_vector_array.is_same_array(field_float_vector_array));
-
     auto float_vector_array_tmp = milvus::VectorArray(float_vector_array);
-
-    ASSERT_TRUE(float_vector_array_tmp.is_same_array(field_float_vector_array));
-
-    auto float_vector_array_view =
-        milvus::VectorArrayView(const_cast<char*>(float_vector_array.data()),
-                                float_vector_array.length(),
-                                float_vector_array.dim(),
-                                float_vector_array.byte_size(),
-                                float_vector_array.get_element_type());
-
-    ASSERT_TRUE(
-        float_vector_array_view.is_same_array(field_float_vector_array));
+    ExpectVectorArraysEqualForTest(float_vector_array_tmp, float_vector_array);
 
     // todo: add other vector types
+}
+
+TEST(VectorArray, DefaultPlaceholderCanBeCopied) {
+    milvus::VectorArray array;
+    milvus::VectorArray copied(array);
+
+    EXPECT_EQ(copied.length(), 0);
+    EXPECT_EQ(copied.dim(), 0);
+    EXPECT_EQ(copied.byte_size(), 0);
+    EXPECT_EQ(copied.get_element_type(), DataType::NONE);
+    EXPECT_EQ(copied.data(), nullptr);
+
+    milvus::VectorArrayView view;
+    milvus::VectorArrayView copied_view(view);
+    EXPECT_EQ(copied_view.length(), 0);
 }
 
 TEST(VectorArray, TestConstructorWithData) {
@@ -208,13 +245,8 @@ TEST(VectorArray, TestConstructorWithData) {
         ASSERT_EQ(va.get_element_type(), DataType::VECTOR_FLOAT);
         ASSERT_EQ(va.byte_size(), N * dim * sizeof(float));
 
-        // Verify data integrity
-        for (int i = 0; i < N; ++i) {
-            auto vec_data = va.get_data<float>(i);
-            for (int j = 0; j < dim; ++j) {
-                ASSERT_FLOAT_EQ(vec_data[j], data[i * dim + j]);
-            }
-        }
+        auto actual = reinterpret_cast<const float*>(va.data());
+        ASSERT_TRUE(std::equal(data.begin(), data.end(), actual));
     }
 
     // Test 2: Compare with protobuf-based constructor
@@ -236,14 +268,7 @@ TEST(VectorArray, TestConstructorWithData) {
         ASSERT_EQ(va_proto.byte_size(), va_direct.byte_size());
         ASSERT_EQ(va_proto.get_element_type(), va_direct.get_element_type());
 
-        // Compare data
-        for (int i = 0; i < N; ++i) {
-            auto proto_vec = va_proto.get_data<float>(i);
-            auto direct_vec = va_direct.get_data<float>(i);
-            for (int j = 0; j < dim; ++j) {
-                ASSERT_FLOAT_EQ(proto_vec[j], direct_vec[j]);
-            }
-        }
+        ExpectVectorArraysEqualForTest(va_proto, va_direct);
     }
 
     // Test 3: Test with edge cases
@@ -264,7 +289,7 @@ TEST(VectorArray, TestConstructorWithData) {
     }
 }
 
-TEST(VectorArray, ElementNullableCompactProtoExpandsToDenseRuntime) {
+TEST(VectorArray, ElementNullableCompactProtoStaysCompactAtRuntime) {
     constexpr int64_t dim = 2;
 
     VectorFieldProto input;
@@ -278,22 +303,14 @@ TEST(VectorArray, ElementNullableCompactProtoExpandsToDenseRuntime) {
     input.add_valid_data(true);
 
     milvus::VectorArray array(input, true);
-    ASSERT_TRUE(array.is_element_nullable());
-    ASSERT_TRUE(array.has_invalid_element());
     ASSERT_EQ(array.length(), 3);
-    EXPECT_TRUE(array.is_element_valid(0));
-    EXPECT_FALSE(array.is_element_valid(1));
-    EXPECT_TRUE(array.is_element_valid(2));
+    ASSERT_EQ(array.byte_size(), 4 * sizeof(float));
 
-    auto first = array.get_data<float>(0);
-    EXPECT_FLOAT_EQ(first[0], 1.0F);
-    EXPECT_FLOAT_EQ(first[1], 2.0F);
-    auto null_slot = array.get_data<float>(1);
-    EXPECT_FLOAT_EQ(null_slot[0], 0.0F);
-    EXPECT_FLOAT_EQ(null_slot[1], 0.0F);
-    auto third = array.get_data<float>(2);
-    EXPECT_FLOAT_EQ(third[0], 5.0F);
-    EXPECT_FLOAT_EQ(third[1], 6.0F);
+    auto compact_data = reinterpret_cast<const float*>(array.data());
+    EXPECT_FLOAT_EQ(compact_data[0], 1.0F);
+    EXPECT_FLOAT_EQ(compact_data[1], 2.0F);
+    EXPECT_FLOAT_EQ(compact_data[2], 5.0F);
+    EXPECT_FLOAT_EQ(compact_data[3], 6.0F);
 
     auto output = array.output_data();
     ASSERT_EQ(output.valid_data_size(), 3);
@@ -307,10 +324,76 @@ TEST(VectorArray, ElementNullableCompactProtoExpandsToDenseRuntime) {
     EXPECT_FLOAT_EQ(output.float_vector().data(3), 6.0F);
 
     milvus::VectorArray restored(output, true);
-    EXPECT_EQ(restored, array);
-    VectorArrayView view(array);
+    ExpectVectorArraysEqualForTest(restored, array);
+    milvus::VectorArray copied(array);
+    ExpectVectorArraysEqualForTest(copied, array);
+    milvus::VectorArray assigned;
+    assigned = array;
+    ExpectVectorArraysEqualForTest(assigned, array);
+
+    auto validity = ElementValidityForTest(output);
+    auto view =
+        MakeElementNullableVectorArrayViewForTest(array, validity.view());
+    EXPECT_EQ(view.length(), 3);
     EXPECT_EQ(view.output_data().SerializeAsString(),
               output.SerializeAsString());
+    milvus::VectorArrayView copied_view(view);
+    EXPECT_EQ(copied_view.output_data().SerializeAsString(),
+              output.SerializeAsString());
+}
+
+TEST(VectorArray, ElementNullableRawConstructorUsesCompactPayload) {
+    constexpr int64_t dim = 2;
+    std::vector<float> compact_data = {1.0F, 2.0F, 5.0F, 6.0F};
+    TargetBitmap validity(3, false);
+    validity.set(0);
+    validity.set(2);
+
+    milvus::VectorArray array(compact_data.data(),
+                              3,
+                              dim,
+                              DataType::VECTOR_FLOAT,
+                              validity.view(),
+                              true);
+
+    EXPECT_EQ(array.length(), 3);
+    EXPECT_EQ(array.byte_size(), compact_data.size() * sizeof(float));
+    auto output = array.output_data();
+    ASSERT_EQ(output.float_vector().data_size(), 4);
+    EXPECT_FLOAT_EQ(output.float_vector().data(0), 1.0F);
+    EXPECT_FLOAT_EQ(output.float_vector().data(1), 2.0F);
+    EXPECT_FLOAT_EQ(output.float_vector().data(2), 5.0F);
+    EXPECT_FLOAT_EQ(output.float_vector().data(3), 6.0F);
+    ASSERT_EQ(output.valid_data_size(), 3);
+    EXPECT_TRUE(output.valid_data(0));
+    EXPECT_FALSE(output.valid_data(1));
+    EXPECT_TRUE(output.valid_data(2));
+}
+
+TEST(VectorArray, ElementNullableLogicalEmptyPreservesTypedPayload) {
+    constexpr int64_t dim = 2;
+    VectorFieldProto input;
+    input.set_dim(dim);
+    input.mutable_float_vector();
+
+    milvus::VectorArray array(input, true);
+    EXPECT_EQ(array.length(), 0);
+    EXPECT_EQ(array.byte_size(), 0);
+    EXPECT_EQ(array.data(), nullptr);
+
+    auto output = array.output_data();
+    EXPECT_EQ(output.data_case(), VectorFieldProto::kFloatVector);
+    EXPECT_EQ(output.dim(), dim);
+    EXPECT_EQ(output.float_vector().data_size(), 0);
+    EXPECT_EQ(output.valid_data_size(), 0);
+}
+
+TEST(VectorArray, ElementNullableMissingTypedPayloadIsRejected) {
+    VectorFieldProto input;
+    input.set_dim(2);
+    input.add_valid_data(false);
+
+    EXPECT_ANY_THROW((void)milvus::VectorArray(input, true));
 }
 
 TEST(VectorArray, ElementNullableByteVectorRoundTrip) {
@@ -325,21 +408,16 @@ TEST(VectorArray, ElementNullableByteVectorRoundTrip) {
 
     milvus::VectorArray array(input, true);
     ASSERT_EQ(array.length(), 3);
-    EXPECT_EQ(array.byte_size(), 6);
-    auto dense_data = reinterpret_cast<const uint8_t*>(array.data());
-    EXPECT_EQ(dense_data[0], 0x01);
-    EXPECT_EQ(dense_data[1], 0x02);
-    EXPECT_EQ(dense_data[2], 0x00);
-    EXPECT_EQ(dense_data[3], 0x00);
-    EXPECT_EQ(dense_data[4], 0x03);
-    EXPECT_EQ(dense_data[5], 0x04);
+    EXPECT_EQ(array.byte_size(), 4);
+    EXPECT_EQ(std::string(array.data(), array.byte_size()),
+              std::string("\x01\x02\x03\x04", 4));
 
     auto output = array.output_data();
     EXPECT_EQ(output.binary_vector(), std::string("\x01\x02\x03\x04", 4));
     EXPECT_EQ(output.valid_data_size(), 3);
 }
 
-TEST_P(ElementNullableByteVectorArrayTest, CompactProtoExpandsAndRoundTrips) {
+TEST_P(ElementNullableByteVectorArrayTest, CompactProtoRoundTrips) {
     const auto& param = GetParam();
     const auto bytes_per_vector =
         vector_bytes_per_element(param.data_type, param.dim);
@@ -358,16 +436,9 @@ TEST_P(ElementNullableByteVectorArrayTest, CompactProtoExpandsAndRoundTrips) {
     milvus::VectorArray array(input, true);
     ASSERT_EQ(array.get_element_type(), param.data_type);
     ASSERT_EQ(array.length(), 3);
-    ASSERT_EQ(array.byte_size(), bytes_per_vector * 3);
-    ASSERT_TRUE(array.has_invalid_element());
+    ASSERT_EQ(array.byte_size(), bytes_per_vector * 2);
 
-    const auto* dense = array.data();
-    EXPECT_EQ(std::string(dense, bytes_per_vector),
-              compact_payload.substr(0, bytes_per_vector));
-    EXPECT_EQ(std::string(dense + bytes_per_vector, bytes_per_vector),
-              std::string(bytes_per_vector, '\0'));
-    EXPECT_EQ(std::string(dense + bytes_per_vector * 2, bytes_per_vector),
-              compact_payload.substr(bytes_per_vector, bytes_per_vector));
+    EXPECT_EQ(std::string(array.data(), array.byte_size()), compact_payload);
 
     auto output = array.output_data();
     EXPECT_EQ(GetByteVectorPayload(output, param.data_type), compact_payload);
@@ -379,7 +450,10 @@ TEST_P(ElementNullableByteVectorArrayTest, CompactProtoExpandsAndRoundTrips) {
     milvus::VectorArray restored(output, true);
     EXPECT_EQ(std::string(restored.data(), restored.byte_size()),
               std::string(array.data(), array.byte_size()));
-    EXPECT_EQ(VectorArrayView(array).output_data().SerializeAsString(),
+    auto validity = ElementValidityForTest(output);
+    auto view =
+        MakeElementNullableVectorArrayViewForTest(array, validity.view());
+    EXPECT_EQ(view.output_data().SerializeAsString(),
               output.SerializeAsString());
 }
 
@@ -394,9 +468,7 @@ TEST_P(ElementNullableByteVectorArrayTest,
 
     milvus::VectorArray array(input, true);
     ASSERT_EQ(array.length(), 2);
-    ASSERT_TRUE(array.has_invalid_element());
-    EXPECT_EQ(array.byte_size(),
-              vector_bytes_per_element(param.data_type, param.dim) * 2);
+    EXPECT_EQ(array.byte_size(), 0);
 
     auto output = array.output_data();
     EXPECT_NE(output.data_case(), VectorFieldProto::DATA_NOT_SET);
@@ -404,6 +476,10 @@ TEST_P(ElementNullableByteVectorArrayTest,
     ASSERT_EQ(output.valid_data_size(), 2);
     EXPECT_FALSE(output.valid_data(0));
     EXPECT_FALSE(output.valid_data(1));
+
+    milvus::VectorArray copied(array);
+    EXPECT_EQ(copied.output_data().SerializeAsString(),
+              output.SerializeAsString());
 }
 
 INSTANTIATE_TEST_SUITE_P(

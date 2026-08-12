@@ -165,7 +165,7 @@ class FieldMeta {
           default_value_(std::move(default_value)),
           external_field_mapping_(std::move(external_field_mapping)),
           local_format_(std::move(local_format)) {
-        Assert(IsVectorDataType(type_));
+        Assert(IsVectorDataType(type_) && type_ != DataType::VECTOR_ARRAY);
         Assert(!default_value_.has_value() &&
                "vector fields do not support default values");
     }
@@ -191,7 +191,9 @@ class FieldMeta {
           external_field_mapping_(std::move(external_field_mapping)),
           local_format_(std::move(local_format)) {
         Assert(type_ == DataType::VECTOR_ARRAY);
-        Assert(IsVectorDataType(element_type_));
+        Assert(IsBinaryVectorDataType(element_type_) ||
+               IsDenseFloatVectorDataType(element_type_) ||
+               IsIntVectorDataType(element_type_));
     }
 
     // for json stats shredding column field meta,

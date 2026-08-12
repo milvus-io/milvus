@@ -304,7 +304,7 @@ TEST(Expr, TestArrayRange) {
             {"1 < long_array[0] < 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return 1 < val && val < 10000;
              }},
             // binary_range_expr: 1 < long_array[1024] < 10000
@@ -314,14 +314,14 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return 1 < val && val < 10000;
              }},
             // binary_range_expr: 1 <= long_array[0] < 10000
             {"1 <= long_array[0] < 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return 1 <= val && val < 10000;
              }},
             // binary_range_expr: 1 <= long_array[1024] < 10000
@@ -331,14 +331,14 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return 1 <= val && val < 10000;
              }},
             // binary_range_expr: 1 < long_array[0] <= 10000
             {"1 < long_array[0] <= 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return 1 < val && val <= 10000;
              }},
             // binary_range_expr: 1 < long_array[1024] <= 10000
@@ -348,14 +348,14 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return 1 < val && val <= 10000;
              }},
             // binary_range_expr: 1 <= long_array[0] <= 10000
             {"1 <= long_array[0] <= 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return 1 <= val && val <= 10000;
              }},
             // binary_range_expr: 1 <= long_array[1024] <= 10000
@@ -365,84 +365,84 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return 1 <= val && val <= 10000;
              }},
             // binary_range_expr: "aaa" <= string_array[0] <= "zzz"
             {R"("aaa" <= string_array[0] <= "zzz")",
              "string",
              [](milvus::Array& array) {
-                 auto val = array.get_data<std::string_view>(0);
+                 auto val = array.get_data_unchecked<std::string_view>(0);
                  return "aaa" <= val && val <= "zzz";
              }},
             // binary_range_expr: 1.1 <= double_array[0] <= 2048.12
             {"1.1 <= double_array[0] <= 2048.12",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return 1.1 <= val && val <= 2048.12;
              }},
             // unary_range_expr: long_array[0] >= 10000
             {"long_array[0] >= 10000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val >= 10000;
              }},
             // unary_range_expr: long_array[0] > 2000
             {"long_array[0] > 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val > 2000;
              }},
             // unary_range_expr: long_array[0] <= 2000
             {"long_array[0] <= 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val <= 2000;
              }},
             // unary_range_expr: long_array[0] < 2000
             {"long_array[0] < 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val < 2000;
              }},
             // unary_range_expr: long_array[0] == 2000
             {"long_array[0] == 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val == 2000;
              }},
             // unary_range_expr: long_array[0] != 2000
             {"long_array[0] != 2000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val != 2000;
              }},
             // unary_range_expr: bool_array[0] == false
             {"bool_array[0] == false",
              "bool",
              [](milvus::Array& array) {
-                 auto val = array.get_data<bool>(0);
+                 auto val = array.get_data_unchecked<bool>(0);
                  return !val;
              }},
             // unary_range_expr: string_array[0] == "abc"
             {R"(string_array[0] == "abc")",
              "string",
              [](milvus::Array& array) {
-                 auto val = array.get_data<std::string_view>(0);
+                 auto val = array.get_data_unchecked<std::string_view>(0);
                  return val == "abc";
              }},
             // unary_range_expr: double_array[0] == 2.2
             {"double_array[0] == 2.2",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val == 2.2;
              }},
             // unary_range_expr: double_array[1024] == 2.2
@@ -452,7 +452,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val == 2.2;
              }},
             // unary_range_expr: double_array[1024] != 2.2
@@ -462,7 +462,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val != 2.2;
              }},
             // unary_range_expr: double_array[1024] >= 2.2
@@ -472,7 +472,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val >= 2.2;
              }},
             // unary_range_expr: double_array[1024] > 2.2
@@ -482,7 +482,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val > 2.2;
              }},
             // unary_range_expr: double_array[1024] <= 2.2
@@ -492,7 +492,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val <= 2.2;
              }},
             // unary_range_expr: double_array[1024] < 2.2
@@ -502,7 +502,7 @@ TEST(Expr, TestArrayRange) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val < 2.2;
              }},
 
@@ -696,7 +696,7 @@ TEST(Expr, TestArrayEqual) {
             auto array = milvus::Array(long_array_col[i]);
             std::vector<int64_t> array_values(array.length());
             for (int j = 0; j < array.length(); ++j) {
-                array_values.push_back(array.get_data<int64_t>(j));
+                array_values.push_back(array.get_data_unchecked<int64_t>(j));
             }
             auto ref = ref_func(array_values);
             ASSERT_EQ(ans, ref);
@@ -1380,7 +1380,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["bool"][i]);
             std::vector<bool> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<bool>(j));
+                res.push_back(array.get_data_unchecked<bool>(j));
             }
             ASSERT_EQ(ans, check(res)) << "@" << i;
             if (i % 2 == 0) {
@@ -1446,7 +1446,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["double"][i]);
             std::vector<double> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<double>(j));
+                res.push_back(array.get_data_unchecked<double>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1501,7 +1501,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["float"][i]);
             std::vector<float> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<float>(j));
+                res.push_back(array.get_data_unchecked<float>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1566,7 +1566,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["int"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1622,7 +1622,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["long"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1686,7 +1686,7 @@ TEST(Expr, TestArrayContains) {
             auto array = milvus::Array(array_cols["string"][i]);
             std::vector<std::string_view> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<std::string_view>(j));
+                res.push_back(array.get_data_unchecked<std::string_view>(j));
             }
             ASSERT_EQ(ans, check(res));
             if (i % 2 == 0) {
@@ -1758,7 +1758,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["long"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
@@ -1789,7 +1789,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["string"][i]);
             std::vector<std::string_view> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<std::string_view>(j));
+                res.push_back(array.get_data_unchecked<std::string_view>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
@@ -1819,7 +1819,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["long"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
@@ -1859,7 +1859,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["long"][i]);
             std::vector<int64_t> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<int64_t>(j));
+                res.push_back(array.get_data_unchecked<int64_t>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
@@ -1899,7 +1899,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
             auto array = milvus::Array(array_cols["string"][i]);
             std::vector<std::string_view> res;
             for (int j = 0; j < array.length(); ++j) {
-                res.push_back(array.get_data<std::string_view>(j));
+                res.push_back(array.get_data_unchecked<std::string_view>(j));
             }
             ASSERT_EQ(final_bits[i], check(res)) << "@" << i;
         }
@@ -2142,238 +2142,238 @@ TEST(Expr, TestArrayBinaryArith) {
             {"int_array[0] + 2 == 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 == 5;
              }},
             // int_array[0] + 2 != 5
             {"int_array[0] + 2 != 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 != 5;
              }},
             // int_array[0] + 2 > 5
             {"int_array[0] + 2 > 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 > 5;
              }},
             // int_array[0] + 2 >= 5
             {"int_array[0] + 2 >= 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 >= 5;
              }},
             // int_array[0] + 2 < 5
             {"int_array[0] + 2 < 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 < 5;
              }},
             // int_array[0] + 2 <= 5
             {"int_array[0] + 2 <= 5",
              "int",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val + 2 <= 5;
              }},
             // long_array[0] - 1 == 144
             {"long_array[0] - 1 == 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 == 144;
              }},
             // long_array[0] - 1 != 144
             {"long_array[0] - 1 != 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 != 144;
              }},
             // long_array[0] - 1 > 144
             {"long_array[0] - 1 > 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 > 144;
              }},
             // long_array[0] - 1 >= 144
             {"long_array[0] - 1 >= 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 >= 144;
              }},
             // long_array[0] - 1 < 144
             {"long_array[0] - 1 < 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 < 144;
              }},
             // long_array[0] - 1 <= 144
             {"long_array[0] - 1 <= 144",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val - 1 <= 144;
              }},
             // float_array[0] + 2.2 == 133.2
             {"float_array[0] + 2.2 == 133.2",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val + 2.2 == 133.2;
              }},
             // float_array[0] + 2.2 != 133.2
             {"float_array[0] + 2.2 != 133.2",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val + 2.2 != 133.2;
              }},
             // double_array[0] - 11.1 == 125.7
             {"double_array[0] - 11.1 == 125.7",
              "double",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val - 11.1 == 125.7;
              }},
             // double_array[0] - 11.1 != 125.7
             {"double_array[0] - 11.1 != 125.7",
              "double",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val - 11.1 != 125.7;
              }},
             // long_array[0] * 2 == 8
             {"long_array[0] * 2 == 8",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 == 8;
              }},
             // long_array[0] * 2 != 20
             {"long_array[0] * 2 != 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 != 20;
              }},
             // long_array[0] * 2 > 20
             {"long_array[0] * 2 > 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 > 20;
              }},
             // long_array[0] * 2 >= 20
             {"long_array[0] * 2 >= 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 >= 20;
              }},
             // long_array[0] * 2 < 20
             {"long_array[0] * 2 < 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 < 20;
              }},
             // long_array[0] * 2 <= 20
             {"long_array[0] * 2 <= 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val * 2 <= 20;
              }},
             // long_array[0] / 2 == 8
             {"long_array[0] / 2 == 8",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 == 8;
              }},
             // long_array[0] / 2 != 20
             {"long_array[0] / 2 != 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 != 20;
              }},
             // long_array[0] / 2 > 20
             {"long_array[0] / 2 > 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 > 20;
              }},
             // long_array[0] / 2 >= 20
             {"long_array[0] / 2 >= 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 >= 20;
              }},
             // long_array[0] / 2 < 20
             {"long_array[0] / 2 < 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 < 20;
              }},
             // long_array[0] / 2 <= 20
             {"long_array[0] / 2 <= 20",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val / 2 <= 20;
              }},
             // long_array[0] % 3 == 0
             {"long_array[0] % 3 == 0",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 == 0;
              }},
             // long_array[0] % 3 != 2
             {"long_array[0] % 3 != 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 != 2;
              }},
             // long_array[0] % 3 > 2
             {"long_array[0] % 3 > 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 > 2;
              }},
             // long_array[0] % 3 >= 2
             {"long_array[0] % 3 >= 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 >= 2;
              }},
             // long_array[0] % 3 < 2
             {"long_array[0] % 3 < 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 < 2;
              }},
             // long_array[0] % 3 <= 2
             {"long_array[0] % 3 <= 2",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val % 3 <= 2;
              }},
             // Bitwise AND/OR/XOR over an array integer element. long_array
@@ -2382,31 +2382,31 @@ TEST(Expr, TestArrayBinaryArith) {
             {"(long_array[0] & 1) == 0",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (val & 1) == 0;
              }},
             {"(long_array[0] & 1) != 0",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (val & 1) != 0;
              }},
             {"(long_array[0] & 8) == 8",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (val & 8) == 8;
              }},
             {"(long_array[0] | 4) < 5000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (val | 4) < 5000;
              }},
             {"(long_array[0] ^ 15) < 5000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (val ^ 15) < 5000;
              }},
             // Shift / bitwise-NOT over an array integer element. ~ is rewritten
@@ -2414,19 +2414,19 @@ TEST(Expr, TestArrayBinaryArith) {
             {"(long_array[0] >> 1) < 5000",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (int64_t(val) >> 1) < 5000;
              }},
             {"(long_array[0] >> 2) >= 0",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (int64_t(val) >> 2) >= 0;
              }},
             {"~long_array[0] != 0",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return (~int64_t(val)) != 0;
              }},
             // float_array[1024] + 2.2 == 133.2
@@ -2436,7 +2436,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val + 2.2 == 133.2;
              }},
             // float_array[1024] + 2.2 != 133.2
@@ -2446,7 +2446,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val + 2.2 != 133.2;
              }},
             // double_array[1024] - 11.1 == 125.7
@@ -2456,7 +2456,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val - 11.1 == 125.7;
              }},
             // double_array[1024] - 11.1 != 125.7
@@ -2466,7 +2466,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<double>(1024);
+                 auto val = array.get_data_unchecked<double>(1024);
                  return val - 11.1 != 125.7;
              }},
             // long_array[1024] * 2 == 8
@@ -2476,7 +2476,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val * 2 == 8;
              }},
             // long_array[1024] * 2 != 20
@@ -2486,7 +2486,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val * 2 != 20;
              }},
             // long_array[1024] / 2 == 8
@@ -2496,7 +2496,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val / 2 == 8;
              }},
             // long_array[1024] / 2 != 20
@@ -2506,7 +2506,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val / 2 != 20;
              }},
             // long_array[1024] % 3 == 0
@@ -2516,7 +2516,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val % 3 == 0;
              }},
             // long_array[1024] % 3 != 2
@@ -2526,7 +2526,7 @@ TEST(Expr, TestArrayBinaryArith) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<int64_t>(1024);
+                 auto val = array.get_data_unchecked<int64_t>(1024);
                  return val % 3 != 2;
              }},
             // array_length(int_array) == 10
@@ -2638,13 +2638,15 @@ TEST(Expr, TestArrayStringMatch) {
          "abc",
          {"0"},
          [](milvus::Array& array) {
-             return PrefixMatch(array.get_data<std::string_view>(0), "abc");
+             return PrefixMatch(array.get_data_unchecked<std::string_view>(0),
+                                "abc");
          }},
         {OpType::PrefixMatch,
          "def",
          {"1"},
          [](milvus::Array& array) {
-             return PrefixMatch(array.get_data<std::string_view>(1), "def");
+             return PrefixMatch(array.get_data_unchecked<std::string_view>(1),
+                                "def");
          }},
         {OpType::PrefixMatch,
          "def",
@@ -2653,7 +2655,8 @@ TEST(Expr, TestArrayStringMatch) {
              if (array.length() <= 1024) {
                  return false;
              }
-             return PrefixMatch(array.get_data<std::string_view>(1024), "def");
+             return PrefixMatch(
+                 array.get_data_unchecked<std::string_view>(1024), "def");
          }},
     };
     //vector_anns:<field_id:201 predicates:<unary_range_expr:<column_info:<field_id:131 data_type:Array nested_path:"0" element_type:VarChar > op:PrefixMatch value:<string_val:"abc" > > > query_info:<> placeholder_tag:"$0" >
@@ -2757,7 +2760,7 @@ TEST(Expr, TestArrayInTerm) {
             {"long_array[0] in [1, 2, 3]",
              "long",
              [](milvus::Array& array) {
-                 auto val = array.get_data<int64_t>(0);
+                 auto val = array.get_data_unchecked<int64_t>(0);
                  return val == 1 || val == 2 || val == 3;
              }},
             // term_expr: long_array[0] in [] (empty list)
@@ -2768,7 +2771,7 @@ TEST(Expr, TestArrayInTerm) {
             {"bool_array[0] in [false, false]",
              "bool",
              [](milvus::Array& array) {
-                 auto val = array.get_data<bool>(0);
+                 auto val = array.get_data_unchecked<bool>(0);
                  return !val;
              }},
             // term_expr: bool_array[0] in [] (empty list)
@@ -2779,7 +2782,7 @@ TEST(Expr, TestArrayInTerm) {
             {"float_array[0] in [1.23, 124.31]",
              "float",
              [](milvus::Array& array) {
-                 auto val = array.get_data<double>(0);
+                 auto val = array.get_data_unchecked<double>(0);
                  return val == 1.23 || val == 124.31;
              }},
             // term_expr: float_array[0] in [] (empty list)
@@ -2790,7 +2793,7 @@ TEST(Expr, TestArrayInTerm) {
             {R"(string_array[0] in ["abc", "idhgf1s"])",
              "string",
              [](milvus::Array& array) {
-                 auto val = array.get_data<std::string_view>(0);
+                 auto val = array.get_data_unchecked<std::string_view>(0);
                  return val == "abc" || val == "idhgf1s";
              }},
             // term_expr: string_array[0] in [] (empty list)
@@ -2804,7 +2807,7 @@ TEST(Expr, TestArrayInTerm) {
                  if (array.length() <= 1024) {
                      return false;
                  }
-                 auto val = array.get_data<std::string_view>(1024);
+                 auto val = array.get_data_unchecked<std::string_view>(1024);
                  return val == "abc" || val == "idhgf1s";
              }},
         };
@@ -2888,7 +2891,7 @@ TEST(Expr, TestTermInArray) {
          {},
          [](milvus::Array& array) {
              for (int i = 0; i < array.length(); ++i) {
-                 auto val = array.get_data<int64_t>(i);
+                 auto val = array.get_data_unchecked<int64_t>(i);
                  if (val == 100) {
                      return true;
                  }
@@ -2899,7 +2902,7 @@ TEST(Expr, TestTermInArray) {
          {},
          [](milvus::Array& array) {
              for (int i = 0; i < array.length(); ++i) {
-                 auto val = array.get_data<int64_t>(i);
+                 auto val = array.get_data_unchecked<int64_t>(i);
                  if (val == 1024) {
                      return true;
                  }
