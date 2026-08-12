@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
@@ -4444,6 +4445,28 @@ func Test_GetFlushState(t *testing.T) {
 		resp, err := proxy.GetFlushState(context.TODO(), nil)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 		assert.NoError(t, err)
+	})
+}
+
+func TestProxy_SyncFileResource(t *testing.T) {
+	oldManager := fileresource.GlobalFileManager
+	defer func() { fileresource.GlobalFileManager = oldManager }()
+
+	t.Run("unhealthy", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+		status, err := proxy.SyncFileResource(context.Background(), &internalpb.SyncFileResourceRequest{Version: 1})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		fileresource.GlobalFileManager = fileresource.NewManager(nil, fileresource.CloseMode)
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		status, err := proxy.SyncFileResource(context.Background(), &internalpb.SyncFileResourceRequest{Version: 1})
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(status))
 	})
 }
 

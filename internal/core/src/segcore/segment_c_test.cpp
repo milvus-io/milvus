@@ -130,7 +130,7 @@ TEST(CApiTest, DeleteTest) {
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
                                                delete_row_ids.end());
     auto delete_data = serialize(ids.get());
@@ -169,7 +169,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
 
     // delete data pks = {1}
     std::vector<int64_t> delete_pks = {1};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(),
                                                delete_pks.end());
     auto delete_data = serialize(ids.get());
@@ -233,7 +233,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
 
     // delete pks = {2}
     delete_pks = {2};
-    ids = std::make_unique<IdArray>();
+    ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(),
                                                delete_pks.end());
     delete_data = serialize(ids.get());
@@ -280,7 +280,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 
     // delete data pks = {1}
     std::vector<int64_t> delete_pks = {1};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(),
                                                delete_pks.end());
     auto delete_data = serialize(ids.get());
@@ -345,7 +345,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 
     // delete pks = {2}
     delete_pks = {2};
-    ids = std::make_unique<IdArray>();
+    ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(),
                                                delete_pks.end());
     delete_data = serialize(ids.get());
@@ -442,7 +442,7 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
 
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
                                                delete_row_ids.end());
     auto delete_data = serialize(ids.get());
@@ -526,7 +526,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
 
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
                                                delete_row_ids.end());
     auto delete_data = serialize(ids.get());
@@ -650,7 +650,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 
     // delete data pks = {1, 2, 3}, timestamps = {9, 9, 9}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
                                                delete_row_ids.end());
     auto delete_data = serialize(ids.get());
@@ -782,7 +782,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
 
     // delete data pks = {1, 2, 3}, timestamps = {4, 4, 4}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
                                                delete_row_ids.end());
     auto delete_data = serialize(ids.get());
@@ -1113,7 +1113,7 @@ TEST(CApiTest, GetDeletedCountTest) {
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
                                                delete_row_ids.end());
     auto delete_data = serialize(ids.get());
@@ -1186,7 +1186,7 @@ TEST(CApiTest, GetRealCount) {
 
     auto pks = dataset.get_col<int64_t>(schema->get_primary_field_id().value());
     std::vector<int64_t> delete_row_ids(pks.begin(), pks.begin() + 3);
-    auto ids = std::make_unique<IdArray>();
+    auto ids = std::make_unique<milvus::IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
                                                delete_row_ids.end());
     auto delete_data = serialize(ids.get());

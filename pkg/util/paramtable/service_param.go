@@ -1317,20 +1317,21 @@ If this option is zero or negative, it will be ignored and the default value (10
 
 // --- kafka ---
 type KafkaConfig struct {
-	Address              ParamItem  `refreshable:"false"`
-	SaslUsername         ParamItem  `refreshable:"false"`
-	SaslPassword         ParamItem  `refreshable:"false"`
-	SaslMechanisms       ParamItem  `refreshable:"false"`
-	SecurityProtocol     ParamItem  `refreshable:"false"`
-	KafkaUseSSL          ParamItem  `refreshable:"false"`
-	KafkaTLSCert         ParamItem  `refreshable:"false"`
-	KafkaTLSKey          ParamItem  `refreshable:"false"`
-	KafkaTLSCACert       ParamItem  `refreshable:"false"`
-	KafkaTLSKeyPassword  ParamItem  `refreshable:"false"`
-	ConsumerExtraConfig  ParamGroup `refreshable:"false"`
-	ProducerExtraConfig  ParamGroup `refreshable:"false"`
-	ReadTimeout          ParamItem  `refreshable:"true"`
-	QueuedMessagesKbytes ParamItem  `refreshable:"false"`
+	Address                 ParamItem  `refreshable:"false"`
+	SaslUsername            ParamItem  `refreshable:"false"`
+	SaslPassword            ParamItem  `refreshable:"false"`
+	SaslMechanisms          ParamItem  `refreshable:"false"`
+	SecurityProtocol        ParamItem  `refreshable:"false"`
+	KafkaUseSSL             ParamItem  `refreshable:"false"`
+	KafkaTLSCert            ParamItem  `refreshable:"false"`
+	KafkaTLSKey             ParamItem  `refreshable:"false"`
+	KafkaTLSCACert          ParamItem  `refreshable:"false"`
+	KafkaTLSKeyPassword     ParamItem  `refreshable:"false"`
+	ProducerMessageMaxBytes ParamItem  `refreshable:"false"`
+	ConsumerExtraConfig     ParamGroup `refreshable:"false"`
+	ProducerExtraConfig     ParamGroup `refreshable:"false"`
+	ReadTimeout             ParamItem  `refreshable:"true"`
+	QueuedMessagesKbytes    ParamItem  `refreshable:"false"`
 }
 
 func (k *KafkaConfig) Init(base *BaseTable) {
@@ -1415,6 +1416,16 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Export:  true,
 	}
 	k.KafkaTLSKeyPassword.Init(base.mgr)
+
+	k.ProducerMessageMaxBytes = ParamItem{
+		Key:          KafkaProducerConfigPrefix + "message.max.bytes",
+		DefaultValue: strconv.Itoa(10 * 1024 * 1024),
+		Version:      "3.0.0",
+		Doc:          "Maximum size of a Kafka producer message in bytes. Requires a restart to take effect.",
+		Export:       true,
+		Immutable:    true,
+	}
+	k.ProducerMessageMaxBytes.Init(base.mgr)
 
 	k.ConsumerExtraConfig = ParamGroup{
 		KeyPrefix: "kafka.consumer.",

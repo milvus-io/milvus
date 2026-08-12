@@ -2120,6 +2120,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
     milvus::OpContext* op_ctx,
+    bool is_replace,
     StagedStateCommitter& committer) {
     auto load_cg_start = std::chrono::high_resolution_clock::now();
     CheckCancellation(
@@ -2273,6 +2274,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                                    size_estimate =
                                        std::move(task.size_estimate),
                                    op_ctx,
+                                   is_replace,
                                    &committer]() mutable {
             CheckCancellation(op_ctx,
                               id_,
@@ -2286,7 +2288,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                             schema_snapshot,
                             eager_load,
                             op_ctx,
-                            /*is_replace=*/false,
+                            is_replace,
                             committer,
                             std::move(size_estimate));
         });
@@ -7259,7 +7261,11 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (diff.load_external_manifest) {
-        LoadColumnGroups(segment_load_info, schema_snapshot, op_ctx, committer);
+        LoadColumnGroups(segment_load_info,
+                         schema_snapshot,
+                         op_ctx,
+                         /*is_replace=*/diff.manifest_updated,
+                         committer);
     } else {
         bool has_cg_changes = !diff.column_groups_to_load.empty() ||
                               !diff.column_groups_to_replace.empty() ||

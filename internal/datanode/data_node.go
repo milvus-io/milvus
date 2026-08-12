@@ -196,7 +196,7 @@ func (node *DataNode) Init() error {
 		syncMgr := syncmgr.NewSyncManager(nil)
 		node.syncMgr = syncMgr
 
-		fileMode := fileresource.ParseMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue())
+		fileMode := fileresource.GetLocalMode()
 		if fileMode == fileresource.SyncMode {
 			storageConfig := compaction.CreateStorageConfig()
 			if storageConfig.GetStorageType() != "local" && storageConfig.GetAddress() == "" {

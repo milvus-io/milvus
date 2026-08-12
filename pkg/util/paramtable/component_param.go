@@ -364,10 +364,13 @@ type commonConfig struct {
 	UsingJSONStatsForQuery ParamItem `refreshable:"true"`
 	ClusterID              ParamItem `refreshable:"false"`
 
-	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
-	SearchRequeryPolicy       ParamItem `refreshable:"true"`
-	QNFileResourceMode        ParamItem `refreshable:"true"`
-	DNFileResourceMode        ParamItem `refreshable:"true"`
+	HybridSearchRequeryPolicy   ParamItem `refreshable:"true"`
+	SearchRequeryPolicy         ParamItem `refreshable:"true"`
+	QNFileResourceMode          ParamItem `refreshable:"false"`
+	DNFileResourceMode          ParamItem `refreshable:"false"`
+	ProxyFileResourceMode       ParamItem `refreshable:"false"`
+	FileResourceMaxFileSize     ParamItem `refreshable:"true"`
+	FileResourceDownloadTimeout ParamItem `refreshable:"true"`
 
 	// group by
 	GroupByMaxGroups ParamItem `refreshable:"false"`
@@ -1577,6 +1580,69 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       true,
 	}
 	p.DNFileResourceMode.Init(base.mgr)
+
+	p.ProxyFileResourceMode = ParamItem{
+		Key:          "common.fileResource.mode.proxy",
+		Version:      "3.0",
+		DefaultValue: "close",
+		Doc:          "File resource mode for proxy, options: [sync, close]. Default is close.",
+		Export:       true,
+	}
+	p.ProxyFileResourceMode.Init(base.mgr)
+
+	p.FileResourceMaxFileSize = ParamItem{
+		Key:          "common.fileResource.maxFileSize",
+		Version:      "3.0",
+		DefaultValue: "0",
+		Doc:          "Maximum size of a single file resource accepted by AddFileResource. Set to 0 to disable the admission limit.",
+		Export:       true,
+		Formatter: func(v string) string {
+			value := strings.ToLower(v)
+			multiplier := int64(1)
+			switch {
+			case strings.HasSuffix(value, "gb"):
+				value = strings.TrimSuffix(value, "gb")
+				multiplier = 1024 * 1024 * 1024
+			case strings.HasSuffix(value, "g"):
+				value = strings.TrimSuffix(value, "g")
+				multiplier = 1024 * 1024 * 1024
+			case strings.HasSuffix(value, "mb"):
+				value = strings.TrimSuffix(value, "mb")
+				multiplier = 1024 * 1024
+			case strings.HasSuffix(value, "m"):
+				value = strings.TrimSuffix(value, "m")
+				multiplier = 1024 * 1024
+			case strings.HasSuffix(value, "kb"):
+				value = strings.TrimSuffix(value, "kb")
+				multiplier = 1024
+			case strings.HasSuffix(value, "k"):
+				value = strings.TrimSuffix(value, "k")
+				multiplier = 1024
+			}
+			size, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || size < 0 || size > math.MaxInt64/multiplier {
+				return "0"
+			}
+			return v
+		},
+	}
+	p.FileResourceMaxFileSize.Init(base.mgr)
+
+	p.FileResourceDownloadTimeout = ParamItem{
+		Key:          "common.fileResource.downloadTimeout",
+		Version:      "3.0",
+		DefaultValue: "5m",
+		Doc:          "Timeout for downloading a single file resource. It accepts duration strings such as 30s or 5m.",
+		Export:       true,
+		Formatter: func(v string) string {
+			duration, err := time.ParseDuration(v)
+			if err != nil || duration <= 0 {
+				return "5m"
+			}
+			return v
+		},
+	}
+	p.FileResourceDownloadTimeout.Init(base.mgr)
 
 	p.GroupByMaxGroups = ParamItem{
 		Key:          "common.groupBy.maxGroups",
@@ -5388,6 +5454,8 @@ type dataCoordConfig struct {
 	// compaction
 	EnableCompaction                       ParamItem `refreshable:"false"`
 	EnableAutoCompaction                   ParamItem `refreshable:"true"`
+	EnableTargetBasedCompaction            ParamItem `refreshable:"false"`
+	TargetCompactionMaxEvents              ParamItem `refreshable:"true"`
 	IndexBasedCompaction                   ParamItem `refreshable:"true"`
 	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
@@ -5752,6 +5820,33 @@ This configuration takes effect only when dataCoord.enableCompaction is set as t
 		Export: true,
 	}
 	p.EnableAutoCompaction.Init(base.mgr)
+
+	p.EnableTargetBasedCompaction = ParamItem{
+		Key:          "dataCoord.compaction.enableTargetBasedCompaction",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Whether target-based compaction is enabled.",
+		Export:       true,
+	}
+	p.EnableTargetBasedCompaction.Init(base.mgr)
+
+	p.TargetCompactionMaxEvents = ParamItem{
+		Key:          "dataCoord.compaction.target.maxEventsPerReconcile",
+		Version:      "3.0.0",
+		DefaultValue: "100",
+		Doc:          "Maximum number of compaction events emitted by one target reconciliation.",
+		Export:       true,
+		Formatter: func(value string) string {
+			if getAsInt(value) <= 0 {
+				mlog.Warn(context.TODO(), "invalid target compaction event limit, using default",
+					mlog.String("configured", value),
+					mlog.String("default", "100"))
+				return "100"
+			}
+			return value
+		},
+	}
+	p.TargetCompactionMaxEvents.Init(base.mgr)
 
 	p.IndexBasedCompaction = ParamItem{
 		Key:          "dataCoord.compaction.indexBasedCompaction",

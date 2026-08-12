@@ -313,6 +313,10 @@ pulsar:
 #     tlsKey:  # path to client's private key (PEM) used for authentication
 #     tlsCaCert:  # file or directory path to CA certificate(s) for verifying the broker's key
 #     tlsKeyPassword:  # private key passphrase for use with ssl.key.location and set_ssl_cert(), if any
+#   producer:
+#     message:
+#       max:
+#         bytes: 10485760 # Maximum size of a Kafka producer message in bytes. Requires a restart to take effect.
 #   readTimeout: 10
 #   queuedmaxkbytes: 100000
 
@@ -775,6 +779,9 @@ dataCoord:
     # Switch value to control if to enable automatic segment compaction during which data coord locates and merges compactable segments in the background.
     # This configuration takes effect only when dataCoord.enableCompaction is set as true.
     enableAutoCompaction: true
+    enableTargetBasedCompaction: false # Whether target-based compaction is enabled.
+    target:
+      maxEventsPerReconcile: 100 # Maximum number of compaction events emitted by one target reconciliation.
     indexBasedCompaction: true
     # compaction task prioritizer, options: [default, level, mix].
     # default is FIFO.
@@ -1178,6 +1185,9 @@ common:
     mode:
       queryNode: sync # File resource mode for query node, options: [sync, close]. Default is sync.
       dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
+      proxy: close # File resource mode for proxy, options: [sync, close]. Default is close.
+    maxFileSize: 0 # Maximum size of a single file resource accepted by AddFileResource. Set to 0 to disable the admission limit.
+    downloadTimeout: 5m # Timeout for downloading a single file resource. It accepts duration strings such as 30s or 5m.
   groupBy:
     maxGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.
 
