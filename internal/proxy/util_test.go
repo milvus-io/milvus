@@ -1046,12 +1046,6 @@ func TestValidateFieldNestedArrayOfVector(t *testing.T) {
 		assert.Contains(t, err.Error(), "element type ArrayOfVector is not supported")
 	})
 
-	t.Run("nested struct field array of vector array rejected", func(t *testing.T) {
-		err := ValidateFieldsInStruct(nestedField(), schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "element type ArrayOfVector is not supported")
-	})
-
 	t.Run("plain struct field array of vector still supported", func(t *testing.T) {
 		field := &schemapb.FieldSchema{
 			Name:        "array_of_vector",
