@@ -7543,6 +7543,17 @@ type dataNodeConfig struct {
 	// slot
 	SlotCap ParamItem `refreshable:"true"`
 
+	// resource guard
+	ResourceCPURatio            ParamItem `refreshable:"true"`
+	ResourceMemoryRatio         ParamItem `refreshable:"true"`
+	ResourceHighWatermark       ParamItem `refreshable:"true"`
+	ResourceLowWatermark        ParamItem `refreshable:"true"`
+	ResourceNonTaskMemoryFloor  ParamItem `refreshable:"true"`
+	ResourceNonTaskWindow       ParamItem `refreshable:"true"`
+	ResourceSlowGrowPeriods     ParamItem `refreshable:"true"`
+	ResourceLegacyMemoryPerSlot ParamItem `refreshable:"true"`
+	ResourceHeadOfLineReserve   ParamItem `refreshable:"true"`
+
 	// clustering compaction
 	ClusteringCompactionMemoryBufferRatio ParamItem `refreshable:"true"`
 	ClusteringCompactionWorkerPoolSize    ParamItem `refreshable:"true"`
@@ -8138,6 +8149,87 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       false,
 	}
 	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
+
+	p.ResourceCPURatio = ParamItem{
+		Key:          "dataNode.resource.cpuRatio",
+		Version:      "3.0.0",
+		DefaultValue: "1.0",
+		Doc:          "ratio of node CPU cores usable by scheduled tasks",
+		Export:       true,
+	}
+	p.ResourceCPURatio.Init(base.mgr)
+
+	p.ResourceMemoryRatio = ParamItem{
+		Key:          "dataNode.resource.memoryRatio",
+		Version:      "3.0.0",
+		DefaultValue: "0.75",
+		Doc:          "ratio of node memory usable by scheduled tasks",
+		Export:       true,
+	}
+	p.ResourceMemoryRatio.Init(base.mgr)
+
+	p.ResourceHighWatermark = ParamItem{
+		Key:          "dataNode.resource.highWatermark",
+		Version:      "3.0.0",
+		DefaultValue: "0.85",
+		Doc:          "measured memory ratio above which the node stops admitting new tasks",
+		Export:       true,
+	}
+	p.ResourceHighWatermark.Init(base.mgr)
+
+	p.ResourceLowWatermark = ParamItem{
+		Key:          "dataNode.resource.lowWatermark",
+		Version:      "3.0.0",
+		DefaultValue: "0.75",
+		Doc:          "measured memory ratio below which admission resumes",
+		Export:       true,
+	}
+	p.ResourceLowWatermark.Init(base.mgr)
+
+	p.ResourceNonTaskMemoryFloor = ParamItem{
+		Key:          "dataNode.resource.nonTaskMemoryFloor",
+		Version:      "3.0.0",
+		DefaultValue: "1073741824",
+		Doc:          "lower bound in bytes reserved for memory outside the task ledger",
+		Export:       true,
+	}
+	p.ResourceNonTaskMemoryFloor.Init(base.mgr)
+
+	p.ResourceNonTaskWindow = ParamItem{
+		Key:          "dataNode.resource.nonTaskWindowSeconds",
+		Version:      "3.0.0",
+		DefaultValue: "600",
+		Doc:          "sliding window length used to take the peak of non-task memory",
+		Export:       true,
+	}
+	p.ResourceNonTaskWindow.Init(base.mgr)
+
+	p.ResourceSlowGrowPeriods = ParamItem{
+		Key:          "dataNode.resource.slowGrowPeriods",
+		Version:      "3.0.0",
+		DefaultValue: "5",
+		Doc:          "consecutive samples required before the budget is allowed to grow",
+		Export:       true,
+	}
+	p.ResourceSlowGrowPeriods.Init(base.mgr)
+
+	p.ResourceLegacyMemoryPerSlot = ParamItem{
+		Key:          "dataNode.resource.legacyMemoryPerSlot",
+		Version:      "3.0.0",
+		DefaultValue: "134217728",
+		Doc:          "bytes per legacy slot, used only when a request carries too little information to estimate",
+		Export:       true,
+	}
+	p.ResourceLegacyMemoryPerSlot.Init(base.mgr)
+
+	p.ResourceHeadOfLineReserve = ParamItem{
+		Key:          "dataNode.resource.headOfLineReservation",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "reserve budget for the longest-waiting task so large tasks cannot starve",
+		Export:       true,
+	}
+	p.ResourceHeadOfLineReserve.Init(base.mgr)
 }
 
 type streamingConfig struct {
