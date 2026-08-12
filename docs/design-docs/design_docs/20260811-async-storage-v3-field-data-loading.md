@@ -33,8 +33,13 @@ The path is guarded by the temporary
 `queryNode.segcore.storageV2.enableAsyncLoad` switch, which defaults to
 `false`. The legacy `LoadCellBatchAsync` path remains available during rollout.
 
-This PR covers Storage V3 field data and JSON key-stat column groups. It does
-not make scalar-index loading asynchronous.
+The same rollout switch also controls Scalar Index V3 packed-file entry
+loading. Scalar indexes read the current value when `LoadUnified` starts,
+while field-data translators capture it when they are constructed.
+
+The parent field-data change covers Storage V3 field data and JSON key-stat
+column groups. The Scalar Index V3 follow-up extends the same rollout and
+admission foundation to packed-index entry loading.
 
 ## Terminology
 
@@ -479,7 +484,7 @@ remote record batches are not considered consumed until the final
 
 | Parameter | Default | Refresh behavior | Purpose |
 |---|---:|---|---|
-| `queryNode.segcore.storageV2.enableAsyncLoad` | `false` | watched dynamically; mode is captured by newly constructed translators | temporary rollout and rollback switch |
+| `queryNode.segcore.storageV2.enableAsyncLoad` | `false` | watched dynamically; translators capture the mode at construction and scalar indexes read it when loading starts | shared field-data and Scalar Index V3 rollout switch |
 | `queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes` | `16777216` (16 MiB) | watched dynamically; non-positive values fall back to 16 MiB | target loaded bytes per contiguous read window |
 | `common.loadTransientBudgetBytes` | `0` (unlimited) | refreshable | process-wide admitted transient bytes across load paths |
 | `common.diskWriteNumThreads` | `0` | applied through disk-writer configuration | optional local mmap-finalization executor and write concurrency limit |
@@ -509,10 +514,12 @@ Recommended rollout sequence:
    should be isolated from the async load executor.
 3. Enable `queryNode.segcore.storageV2.enableAsyncLoad` on a limited set of
    QueryNodes.
-4. Reload or replace test segments so their translators capture the new mode.
+4. Reload or replace test segments and scalar indexes so new loads use the
+   enabled mode.
 5. Compare load latency, peak memory, object-storage errors, cancellation, and
    query availability with the legacy cohort.
-6. Disable the switch for new translators if rollback is needed.
+6. Disable the switch for new translators and scalar-index loads if rollback is
+   needed.
 
 ## Compatibility
 

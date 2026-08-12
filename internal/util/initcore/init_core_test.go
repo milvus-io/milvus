@@ -186,20 +186,6 @@ func TestRegisterStorageV2AsyncLoadEnabledWatcherCatchesUp(t *testing.T) {
 	assert.False(t, applied.Load())
 }
 
-func TestRegisterScalarIndexV3AsyncLoadEnabledWatcherCatchesUp(t *testing.T) {
-	pt := &paramtable.ComponentParam{}
-	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
-	item := &pt.QueryNodeCfg.ScalarIndexV3EnableAsyncLoad
-	assert.NoError(t, pt.Save(item.Key, "true"))
-
-	var applied atomic.Bool
-	registerScalarIndexV3AsyncLoadEnabledWatcher(t.Context(), pt, "test", applied.Store)
-	assert.True(t, applied.Load())
-
-	assert.NoError(t, pt.Save(item.Key, "false"))
-	assert.False(t, applied.Load())
-}
-
 // TestRegisterArrowIOThreadPoolWatchers verifies the lifted helper registers
 // a handler under each of the two watched keys. The sentinel handler we
 // register after the helper fires whenever the dispatcher receives an event

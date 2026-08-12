@@ -27,11 +27,11 @@
 #include "index/IndexStats.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
-#include "index/ScalarIndexV3Config.h"
 #include "index/Utils.h"
 #include "knowhere/dataset.h"
 #include "log/Log.h"
 #include "pb/schema.pb.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/FileManager.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/IndexEntryWriter.h"
@@ -266,7 +266,7 @@ ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
                                         cancellation_token);
     AssertInfo(reader != nullptr, "failed to create IndexEntryReader");
 
-    if (ScalarIndexV3AsyncLoadEnabled()) {
+    if (milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled()) {
         ScalarIndexV3AsyncLoadContext async_ctx{
             op_ctx,
             load_priority,

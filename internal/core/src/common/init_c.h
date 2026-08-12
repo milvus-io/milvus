@@ -123,7 +123,8 @@ UpdateArrowIOThreadPoolMetrics();
 void
 SetStorageV2CellTargetSizeBytes(int64_t bytes);
 
-// Updates the rollout default used by newly constructed manifest translators.
+// Updates the shared rollout switch for storage v2 field-data translators and
+// scalar packed-index v3 loads.
 void
 SetStorageV2AsyncLoadEnabled(bool enabled);
 
@@ -136,10 +137,6 @@ SetStorageV2AsyncLoadReadWindowSizeBytes(int64_t bytes);
 
 int64_t
 GetStorageV2AsyncLoadReadWindowSizeBytes();
-
-// Enable async entry loading for scalar packed-index v3 files.
-void
-SetScalarIndexV3AsyncLoadEnabled(bool enabled);
 
 #ifdef __cplusplus
 };

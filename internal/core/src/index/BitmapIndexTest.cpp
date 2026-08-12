@@ -46,7 +46,6 @@
 #include "index/IndexInfo.h"
 #include "index/IndexStats.h"
 #include "index/Meta.h"
-#include "index/ScalarIndexV3Config.h"
 #include "indexbuilder/IndexCreatorBase.h"
 #include "indexbuilder/IndexFactory.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -273,11 +272,6 @@ GenerateData<std::string>(const size_t size, const size_t cardinality) {
 TEST(BitmapIndexV3AsyncLoadTest, MemoryPathUsesAsyncEntryReads) {
     milvus::test::ScopedLoadTransientBudget budget_guard(0);
     BitmapAsyncLoadFixture fixture("bitmap_async_memory");
-    auto old_enabled = milvus::index::ScalarIndexV3AsyncLoadEnabled();
-    auto guard = folly::makeGuard([old_enabled]() {
-        milvus::index::SetScalarIndexV3AsyncLoadEnabled(old_enabled);
-    });
-    milvus::index::SetScalarIndexV3AsyncLoadEnabled(true);
 
     std::vector<int32_t> data{1, 2, 1, 3, 2, 4, 1};
     std::vector<bool> valid_flags{true, false, true, true, true, false, true};

@@ -33,20 +33,18 @@
 #include "common/protobuf_utils.h"
 #include "common/type_c.h"
 #include "gtest/gtest.h"
-#include "index/ScalarIndexV3Config.h"
 #include "index/BitmapIndex.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
-#include "pb/common.pb.h"
-#include "storage/ChunkManager.h"
-#include "storage/Types.h"
-#include "storage/Util.h"
 #include "index/StringIndexMarisa.h"
+#include "pb/common.pb.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/schema.pb.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -224,26 +222,15 @@ class TestScalarIndexV3AsyncOptIn : public TestScalarIndexV3AsyncFallback {
     int async_load_entries_calls_{0};
 };
 
-TEST(ScalarIndexV3AsyncLoadConfigTest, DefaultsDisabledAndCanToggle) {
-    auto old_enabled = milvus::index::ScalarIndexV3AsyncLoadEnabled();
-    auto guard = folly::makeGuard([old_enabled]() {
-        milvus::index::SetScalarIndexV3AsyncLoadEnabled(old_enabled);
-    });
-
-    milvus::index::SetScalarIndexV3AsyncLoadEnabled(false);
-    EXPECT_FALSE(milvus::index::ScalarIndexV3AsyncLoadEnabled());
-
-    milvus::index::SetScalarIndexV3AsyncLoadEnabled(true);
-    EXPECT_TRUE(milvus::index::ScalarIndexV3AsyncLoadEnabled());
-}
-
 TEST(ScalarIndexV3AsyncLoadConfigTest,
-     LoadUnifiedUsesSyncPathWhenFlagDisabled) {
-    auto old_enabled = milvus::index::ScalarIndexV3AsyncLoadEnabled();
+     LoadUnifiedUsesSyncPathWhenSharedFlagDisabled) {
+    auto old_enabled =
+        milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
     auto guard = folly::makeGuard([old_enabled]() {
-        milvus::index::SetScalarIndexV3AsyncLoadEnabled(old_enabled);
+        milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
+            old_enabled);
     });
-    milvus::index::SetScalarIndexV3AsyncLoadEnabled(false);
+    milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(false);
 
     auto ctx = GetTempFileManagerCtx(Int32);
     TestScalarIndexV3AsyncOptIn build_index(ctx);
@@ -262,12 +249,14 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
 }
 
 TEST(ScalarIndexV3AsyncLoadConfigTest,
-     LoadUnifiedUsesAsyncHookWhenFlagEnabled) {
-    auto old_enabled = milvus::index::ScalarIndexV3AsyncLoadEnabled();
+     LoadUnifiedUsesAsyncHookWhenSharedFlagEnabled) {
+    auto old_enabled =
+        milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
     auto guard = folly::makeGuard([old_enabled]() {
-        milvus::index::SetScalarIndexV3AsyncLoadEnabled(old_enabled);
+        milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
+            old_enabled);
     });
-    milvus::index::SetScalarIndexV3AsyncLoadEnabled(true);
+    milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(true);
 
     auto ctx = GetTempFileManagerCtx(Int32);
     TestScalarIndexV3AsyncOptIn build_index(ctx);
@@ -287,11 +276,13 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
 
 TEST(ScalarIndexV3AsyncLoadConfigTest,
      LoadUnifiedFallsBackToSyncPathWhenAsyncHookIsNotOverridden) {
-    auto old_enabled = milvus::index::ScalarIndexV3AsyncLoadEnabled();
+    auto old_enabled =
+        milvus::segcore::storagev2translator::StorageV2AsyncLoadEnabled();
     auto guard = folly::makeGuard([old_enabled]() {
-        milvus::index::SetScalarIndexV3AsyncLoadEnabled(old_enabled);
+        milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
+            old_enabled);
     });
-    milvus::index::SetScalarIndexV3AsyncLoadEnabled(true);
+    milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(true);
 
     auto ctx = GetTempFileManagerCtx(Int32);
     TestScalarIndexV3AsyncFallback build_index(ctx);

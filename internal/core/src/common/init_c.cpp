@@ -32,7 +32,6 @@
 #include "storage/ThreadPool.h"
 #include "exec/expression/ExprCache.h"
 #include "log/Log.h"
-#include "index/ScalarIndexV3Config.h"
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
@@ -239,11 +238,6 @@ int64_t
 GetStorageV2AsyncLoadReadWindowSizeBytes() {
     return milvus::segcore::storagev2translator::
         StorageV2AsyncLoadReadWindowSizeBytes();
-}
-
-void
-SetScalarIndexV3AsyncLoadEnabled(bool enabled) {
-    milvus::index::SetScalarIndexV3AsyncLoadEnabled(enabled);
 }
 
 void
