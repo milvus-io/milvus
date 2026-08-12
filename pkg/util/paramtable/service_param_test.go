@@ -390,6 +390,35 @@ func TestServiceParam(t *testing.T) {
 		pulsarConfig.MessageReserveSize.SwapTempValue(oldReserve)
 	})
 
+	t.Run("test message size limits for an arbitrary WAL backend", func(t *testing.T) {
+		base := NewBaseTable(SkipRemote(true))
+		var pulsarConfig PulsarConfig
+		pulsarConfig.Init(base)
+
+		// GetMessageSizeLimits is GetMessageSizeLimitsFor pinned to Pulsar's own
+		// max; the reserve normalization is identical either way, driven by the
+		// same pulsar.messageReserveSize regardless of whose max is passed in.
+		pulsarMax, pulsarReserve := pulsarConfig.GetMessageSizeLimits()
+		otherMax, otherReserve := pulsarConfig.GetMessageSizeLimitsFor(pulsarMax)
+		assert.Equal(t, pulsarMax, otherMax)
+		assert.Equal(t, pulsarReserve, otherReserve)
+
+		// A smaller backend limit gets the same reserve subtracted from it, not
+		// Pulsar's.
+		maxMessageSize, reserveSize := pulsarConfig.GetMessageSizeLimitsFor(512 * 1024)
+		assert.Equal(t, 512*1024, maxMessageSize)
+		assert.Equal(t, 4096, reserveSize)
+
+		// The oversized-reserve and non-positive-max edge cases hold for any
+		// backend's max, not just Pulsar's.
+		maxMessageSize, reserveSize = pulsarConfig.GetMessageSizeLimitsFor(256)
+		assert.Equal(t, 256, maxMessageSize)
+		assert.Equal(t, 0, reserveSize)
+		maxMessageSize, reserveSize = pulsarConfig.GetMessageSizeLimitsFor(0)
+		assert.Equal(t, 0, maxMessageSize)
+		assert.Equal(t, 0, reserveSize)
+	})
+
 	t.Run("test pulsar web config", func(t *testing.T) {
 		assert.NotEqual(t, SParams.PulsarCfg.Address.GetValue(), "")
 

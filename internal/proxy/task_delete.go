@@ -161,7 +161,7 @@ func repackDeleteMsgByHash(
 	namespace *string,
 	schema *schemapb.CollectionSchema,
 ) (map[uint32][]*msgstream.DeleteMsg, int64, error) {
-	bodyLimit := messageBodyLimit()
+	bodyLimit := messageBodyLimit(getActiveWALName())
 	var hashValues []uint32
 	// Delete tombstones are PK+timestamp based. Namespace can narrow routing,
 	// but it is not part of the tombstone identity; PKs must stay unique across

@@ -46,21 +46,53 @@ func TestMessageBodyLimit(t *testing.T) {
 
 	// The default reserve is taken out of the broker-facing limit.
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "2097152"))
-	assert.Equal(t, 2097152-4096, messageBodyLimit())
+	assert.Equal(t, 2097152-4096, messageBodyLimit(message.WALNamePulsar))
 
 	// A configured reserve replaces the default one.
 	require.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "1024"))
-	assert.Equal(t, 2097152-1024, messageBodyLimit())
+	assert.Equal(t, 2097152-1024, messageBodyLimit(message.WALNamePulsar))
 
 	// An oversized reserve falls back to the safe default instead of collapsing
 	// the body budget to one byte.
 	require.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "4194304"))
-	assert.Equal(t, 2097152-4096, messageBodyLimit())
+	assert.Equal(t, 2097152-4096, messageBodyLimit(message.WALNamePulsar))
 
 	// If the broker limit is then lowered below 4 KiB, the effective reserve is
 	// zero rather than max-1, so inserts do not degenerate into one-row messages.
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1024"))
-	assert.Equal(t, 1024, messageBodyLimit())
+	assert.Equal(t, 1024, messageBodyLimit(message.WALNamePulsar))
+}
+
+// The body budget now tracks the active WAL's own broker limit instead of
+// always Pulsar's, so a message packed for Kafka stays under Kafka's limit
+// even when it differs from Pulsar's -- in either direction. RocksMQ and
+// Woodpecker have no broker limit of their own, so they keep using the
+// Pulsar-shaped default as a general-purpose packing threshold.
+func TestMessageBodyLimitIsWALSpecific(t *testing.T) {
+	paramtable.Init()
+	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+	defer Params.Reset(Params.PulsarCfg.MessageReserveSize.Key)
+	defer Params.Reset(Params.KafkaCfg.ProducerMessageMaxBytes.Key)
+
+	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "2097152"))
+	require.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "4096"))
+
+	t.Run("kafka limit below pulsar's", func(t *testing.T) {
+		require.NoError(t, Params.Save(Params.KafkaCfg.ProducerMessageMaxBytes.Key, "524288"))
+		assert.Equal(t, 524288-4096, messageBodyLimit(message.WALNameKafka))
+		assert.Equal(t, 2097152-4096, messageBodyLimit(message.WALNamePulsar))
+	})
+
+	t.Run("kafka limit above pulsar's", func(t *testing.T) {
+		require.NoError(t, Params.Save(Params.KafkaCfg.ProducerMessageMaxBytes.Key, "10485760"))
+		assert.Equal(t, 10485760-4096, messageBodyLimit(message.WALNameKafka))
+	})
+
+	for _, walName := range []message.WALName{message.WALNameRocksmq, message.WALNameWoodpecker} {
+		t.Run(walName.String()+" uses the pulsar-shaped default", func(t *testing.T) {
+			assert.Equal(t, 2097152-4096, messageBodyLimit(walName))
+		})
+	}
 }
 
 // A row that does not fit under the plaintext body budget is still emitted on
@@ -166,6 +198,40 @@ func TestSplitInsertRowsByMessageSizeSplitsMultipleRows(t *testing.T) {
 	selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0, 1}, message.WALNamePulsar)
 	assert.NoError(t, err)
 	assert.Equal(t, [][]int{{0}, {1}}, selections)
+}
+
+// The scenario #52413's original fix left open: several rows, each individually
+// well under Pulsar's limit, packed into one message that only Kafka's own
+// (smaller) limit would have rejected. Before bodyLimit became WAL-specific,
+// splitting used Pulsar's budget regardless of which backend was actually
+// sending the message, so this message would have gone out at a size the
+// active Kafka broker does not accept, on every retry, forever.
+func TestGenInsertMessagesByPartitionKafkaBodyStaysUnderKafkaLimit(t *testing.T) {
+	paramtable.Init()
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "2097152"))
+	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "0"))
+	defer Params.Reset(Params.PulsarCfg.MessageReserveSize.Key)
+	assert.NoError(t, Params.Save(Params.KafkaCfg.ProducerMessageMaxBytes.Key, "512"))
+	defer Params.Reset(Params.KafkaCfg.ProducerMessageMaxBytes.Key)
+
+	insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 200), strings.Repeat("y", 200), strings.Repeat("z", 200))
+	kafkaLimit := int(Params.KafkaCfg.ProducerMessageMaxBytes.GetAsInt32())
+
+	kafkaMsgs, err := genInsertMessagesByPartition(0, 1, "test_partition", []int{0, 1, 2}, "test_channel",
+		insertMsg, nil, 7, message.WALNameKafka)
+	require.NoError(t, err)
+	require.Greater(t, len(kafkaMsgs), 1, "packing against pulsar's much larger budget would wrongly keep this to one message")
+	for _, msg := range kafkaMsgs {
+		payload := msg.IntoMessageProto().GetPayload()
+		assert.Less(t, len(payload), kafkaLimit)
+	}
+
+	// Pulsar's own budget is unaffected: the same rows still fit in one message.
+	pulsarMsgs, err := genInsertMessagesByPartition(0, 1, "test_partition", []int{0, 1, 2}, "test_channel",
+		insertMsg, nil, 7, message.WALNamePulsar)
+	require.NoError(t, err)
+	require.Len(t, pulsarMsgs, 1)
 }
 
 func newVarCharInsertMsgForPackTest(rows ...string) *msgstream.InsertMsg {
@@ -467,7 +533,7 @@ func TestGenInsertMessagesByPartitionSplitsByPlaintextBodyLimit(t *testing.T) {
 	// A limit just below the two-row plaintext body forces one row per message.
 	// The reserve shrinks the body budget further, so it stays below it too.
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(len(twoRowRecord.GetPayload())-1)))
-	bodyLimit := messageBodyLimit()
+	bodyLimit := messageBodyLimit(message.WALNameRocksmq)
 
 	msgs, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1, 2}, channelName, source, nil, 7, message.WALNameRocksmq)
 	require.NoError(t, err)
@@ -557,7 +623,7 @@ func TestGenInsertMessagesByPartitionSmallScalars(t *testing.T) {
 	totalRows := 0
 	for i, msg := range msgs {
 		raw := msg.IntoMessageProto()
-		assert.LessOrEqual(t, len(raw.GetPayload()), messageBodyLimit())
+		assert.LessOrEqual(t, len(raw.GetPayload()), messageBodyLimit(message.WALNameRocksmq))
 		body := message.MustAsMutableInsertMessageV1(msg).MustBody()
 		if i < len(msgs)-1 {
 			assert.Greater(t, body.GetNumRows(), uint64(1), "non-final messages should use the full body budget")

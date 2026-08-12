@@ -33,12 +33,34 @@ func getActiveWALName() message.WALName {
 	return streamingutil.MustSelectWALName()
 }
 
-// messageBodyLimit budgets a plaintext message body inside the broker-facing
-// message limit. GetMessageSizeLimits normalizes mixed-generation refreshable
-// config as a pair; keep the final guard for invalid test-only overrides.
-// Insert and Delete preserve their existing single-oversized-row behavior.
-func messageBodyLimit() int {
-	maxMessageSize, reserve := Params.PulsarCfg.GetMessageSizeLimits()
+// activeWALMessageSize reports the message-size limit the split budget should
+// be computed against for walName. Pulsar and Kafka each report their own
+// broker limit. RocksMQ's page size and Woodpecker's batch size are not
+// per-entry limits, so they have nothing backend-specific to budget against;
+// the Pulsar-shaped packing threshold is a reasonable general-purpose default
+// for them, same as before either backend had its own hard limit checked.
+func activeWALMessageSize(walName message.WALName) int {
+	if walName == message.WALNameKafka {
+		return Params.KafkaCfg.ProducerMessageMaxBytes.GetAsInt()
+	}
+	return Params.PulsarCfg.MaxMessageSize.GetAsInt()
+}
+
+// messageBodyLimit budgets a plaintext message body inside the active WAL
+// backend's broker-facing message limit -- not always Pulsar's, so a message
+// packed for Kafka stays under Kafka's own limit instead of Pulsar's. Before
+// this, every backend budgeted against pulsar.maxMessageSize regardless of
+// which one was actually sending the message: on a deployment where
+// kafka.message.max.bytes was set below Pulsar's default, several small rows
+// could still be packed past what Kafka would accept, and the broker would
+// reject the message on every send (#52413's failure mode, reached from a
+// packed message instead of a single oversized row).
+//
+// GetMessageSizeLimitsFor normalizes mixed-generation refreshable config as a
+// pair; keep the final guard for invalid test-only overrides. Insert and
+// Delete preserve their existing single-oversized-row behavior.
+func messageBodyLimit(walName message.WALName) int {
+	maxMessageSize, reserve := Params.PulsarCfg.GetMessageSizeLimitsFor(activeWALMessageSize(walName))
 	if maxMessageSize <= 0 || reserve < 0 || reserve >= maxMessageSize {
 		return 1
 	}
@@ -91,7 +113,7 @@ func visitInsertRowsByMessageSize(
 		return nil
 	}
 
-	bodyLimit := messageBodyLimit()
+	bodyLimit := messageBodyLimit(walName)
 	singleMessageLimit, hasSingleMessageLimit := maxSingleMessageSize(walName)
 	viewCursor, err := fastpb.NewInsertRequestViewCursor(insertMsg.InsertRequest)
 	if err != nil {
@@ -106,10 +128,10 @@ func visitInsertRowsByMessageSize(
 		rows := rowOffsets[start : start+consumed]
 		// Only a message carrying a single row is refused, matching the rule
 		// #52420 established: that row cannot be split any further, so there is
-		// nothing left to try. A message holding several rows stays bounded by
-		// the body budget and is left alone, which also leaves that fix's blind
-		// spot intact -- a Kafka deployment whose producer limit sits below the
-		// budget can still pack a message the broker will not take.
+		// nothing left to try. A message holding several rows does not need the
+		// same check -- bodyLimit is already computed against this walName's own
+		// backend limit, so a packed message's body cannot reach it in the first
+		// place; only a single row too large to split can still get there.
 		if hasSingleMessageLimit && len(rows) == 1 {
 			size, err := encoder.EncodedSize()
 			if err != nil {

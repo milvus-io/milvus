@@ -1180,9 +1180,18 @@ type PulsarConfig struct {
 // two config generations, so the cross-parameter constraint is applied only at
 // this point of use rather than inside either independently cached formatter.
 func (p *PulsarConfig) GetMessageSizeLimits() (maxMessageSize, messageReserveSize int) {
-	maxMessageSize = p.MaxMessageSize.GetAsInt()
-	messageReserveSize = normalizePulsarMessageReserve(maxMessageSize, p.MessageReserveSize.GetAsInt())
-	return maxMessageSize, messageReserveSize
+	return p.GetMessageSizeLimitsFor(p.MaxMessageSize.GetAsInt())
+}
+
+// GetMessageSizeLimitsFor is GetMessageSizeLimits generalized to an arbitrary
+// WAL backend's broker limit -- not necessarily Pulsar's own. The reserve
+// amount (streaming message header, properties added before WAL append,
+// cipher metadata/expansion, and broker message metadata) covers the same
+// envelope regardless of which backend produced maxMessageSize, so it is
+// still read from pulsar.messageReserveSize; that config item is not
+// Pulsar-specific in what it represents, only in where it is set.
+func (p *PulsarConfig) GetMessageSizeLimitsFor(maxMessageSize int) (int, int) {
+	return maxMessageSize, normalizePulsarMessageReserve(maxMessageSize, p.MessageReserveSize.GetAsInt())
 }
 
 func normalizePulsarMessageReserve(maxMessageSize, messageReserveSize int) int {
