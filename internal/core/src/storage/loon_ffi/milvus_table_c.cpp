@@ -152,6 +152,26 @@ struct OwnedColumnGroups {
     }
 };
 
+// Carries the ORIGINAL loon err_code alongside the classified segcore code.
+// This file is itself a C-ABI export layer whose tail returns a LoonFFIResult,
+// and RETURN_EXCEPTION is hardcoded to LOON_GOT_EXCEPTION(5) -- so a plain
+// SegcoreError would still reach Go as 5 (non-retryable) no matter what code
+// it carried. Keeping the raw code lets the tail hand it back unchanged.
+class LoonFFIError : public milvus::SegcoreError {
+ public:
+    LoonFFIError(int loon_code, milvus::ErrorCode code, const std::string& msg)
+        : milvus::SegcoreError(code, msg), loon_code_(loon_code) {
+    }
+
+    int
+    loon_code() const {
+        return loon_code_;
+    }
+
+ private:
+    int loon_code_;
+};
+
 void
 ThrowIfFFIError(LoonFFIResult result, const std::string& context) {
     if (loon_ffi_is_success(&result) != 0) {
@@ -163,14 +183,9 @@ ThrowIfFFIError(LoonFFIResult result, const std::string& context) {
     std::string detail = msg != nullptr ? msg : "unknown error";
     const int err_code = result.err_code;
     loon_ffi_free_result(&result);
-    // Carry result.err_code across this nested FFI boundary: throwing a bare
-    // runtime_error let the outer RETURN_EXCEPTION collapse every failure to
-    // one code, so a transient object-storage error was indistinguishable
-    // from a permanent one.
-    ThrowInfo(milvus::storage::LoonErrCodeToErrorCode(err_code),
-              "{}: {}",
-              context,
-              detail);
+    throw LoonFFIError(err_code,
+                       milvus::storage::LoonErrCodeToErrorCode(err_code),
+                       fmt::format("{}: {}", context, detail));
 }
 
 char*
@@ -912,6 +927,12 @@ loon_milvus_table_create_manifest_from_segment_manifests(
                          "failed to allocate milvus-table manifest path");
         }
         RETURN_SUCCESS();
+    } catch (const LoonFFIError& e) {
+        // Preserve the producer's own err_code instead of collapsing to
+        // LOON_GOT_EXCEPTION: Go classifies on it via
+        // loon_ffi_is_retryable_errcode, so a transient object-storage
+        // failure must not arrive as a permanent one.
+        RETURN_ERROR(e.loon_code(), e.what());
     } catch (const std::exception& e) {
         RETURN_EXCEPTION(e.what());
     } catch (...) {

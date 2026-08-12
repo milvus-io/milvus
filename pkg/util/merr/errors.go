@@ -18,6 +18,7 @@ package merr
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/errors/markers"
@@ -402,6 +403,17 @@ func (e milvusError) code() int32 {
 
 func (e milvusError) Error() string {
 	if e.inner != nil {
+		// A relabeled error (the segcore pass-through) keeps the family
+		// sentinel as inner purely so errors.Is still matches the umbrella;
+		// both carry the same msg, so rendering the chain would repeat it
+		// ("segcore error[segcoreCode=2028]: segcore error") in Status.Reason
+		// and Detail. Skip only that exact shape -- identical msg, or ours is
+		// the inner's msg plus wrapFields' "[k=v]" decorations -- so ordinary
+		// wrapped chains keep rendering in full.
+		if inner, ok := e.inner.(milvusError); ok &&
+			(inner.msg == e.msg || strings.HasPrefix(e.msg, inner.msg+"[")) {
+			return e.msg
+		}
 		return e.msg + ": " + e.inner.Error()
 	}
 	return e.msg

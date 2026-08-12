@@ -438,6 +438,16 @@ func (sd *shardDelegator) applyDeleteBatch(ctx context.Context,
 				}
 				return false, nil
 			}, retry.Attempts(10))
+			if err != nil && len(segmentIDs) > 0 {
+				// The retry budget is spent and these segments still have not
+				// applied the delete. AwaitAll below discards this error, so
+				// leaving them alone would silently drop the delete and keep
+				// the segments serving deleted rows; offline them so a reload
+				// reapplies it (what master did on the first failure).
+				log.Warn(ctx, "delete still failing after retries, marking segments offline",
+					mlog.Int64s("segmentIDs", segmentIDs), mlog.Err(err))
+				offlineSegments.Upsert(segmentIDs...)
+			}
 
 			return struct{}{}, err
 		})
