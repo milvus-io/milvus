@@ -17,13 +17,21 @@
 package proxy
 
 import (
+	"fmt"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	streamingutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func getActiveWALName() message.WALName {
+	return streamingutil.MustSelectWALName()
+}
 
 // messageBodyLimit budgets a plaintext message body inside the broker-facing
 // message limit. GetMessageSizeLimits normalizes mixed-generation refreshable
@@ -37,15 +45,46 @@ func messageBodyLimit() int {
 	return maxMessageSize - reserve
 }
 
+// maxSingleMessageSize reports the hard limit the active WAL backend enforces on
+// one message, separately from the body budget rows are packed against.
+//
+// The two are not the same thing. The body budget is what a message is split at,
+// and a row that does not fit under it is still emitted on its own, because
+// there is nothing left to split. That row is only a problem when it also
+// exceeds what the broker will accept: the message is then rejected on every
+// send and the DML channel stops making progress (#52413). RocksMQ's page size
+// and Woodpecker's batch size are not per-entry limits, so they report none.
+func maxSingleMessageSize(walName message.WALName) (int, bool) {
+	switch walName {
+	case message.WALNamePulsar:
+		limit := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+		return limit, limit > 0
+	case message.WALNameKafka:
+		limit := Params.KafkaCfg.ProducerMessageMaxBytes.GetAsInt()
+		return limit, limit > 0
+	case message.WALNameRocksmq, message.WALNameWoodpecker:
+		return 0, false
+	default:
+		return 0, false
+	}
+}
+
 // visitInsertRowsByMessageSize partitions a monotonically increasing row
 // selection by the exact plaintext InsertRequest protobuf size and
 // synchronously visits each per-message encoder. Both the rows slice and the
 // encoder borrow reusable cursor scratch and are valid only until visit
 // returns.
+//
+// A message the active WAL cannot carry is refused here rather than handed to
+// the broker. The size compared against that limit is the exact encoded body,
+// not the per-row estimate the materializing path used, so it accounts for the
+// message envelope as well and cannot let a row through that the broker would
+// then reject.
 func visitInsertRowsByMessageSize(
 	template *msgpb.InsertRequest,
 	insertMsg *msgstream.InsertMsg,
 	rowOffsets []int,
+	walName message.WALName,
 	visit func(rows []int, encoder *fastpb.InsertRequestViewEncoder) error,
 ) error {
 	if len(rowOffsets) == 0 {
@@ -53,6 +92,7 @@ func visitInsertRowsByMessageSize(
 	}
 
 	bodyLimit := messageBodyLimit()
+	singleMessageLimit, hasSingleMessageLimit := maxSingleMessageSize(walName)
 	viewCursor, err := fastpb.NewInsertRequestViewCursor(insertMsg.InsertRequest)
 	if err != nil {
 		return err
@@ -64,6 +104,23 @@ func visitInsertRowsByMessageSize(
 			return err
 		}
 		rows := rowOffsets[start : start+consumed]
+		// Only a message carrying a single row is refused, matching the rule
+		// #52420 established: that row cannot be split any further, so there is
+		// nothing left to try. A message holding several rows stays bounded by
+		// the body budget and is left alone, which also leaves that fix's blind
+		// spot intact -- a Kafka deployment whose producer limit sits below the
+		// budget can still pack a message the broker will not take.
+		if hasSingleMessageLimit && len(rows) == 1 {
+			size, err := encoder.EncodedSize()
+			if err != nil {
+				return err
+			}
+			if size >= singleMessageLimit {
+				return merr.WrapErrParameterTooLarge(fmt.Sprintf(
+					"single row at offset %d is too large to fit in one WAL message: encoded size=%d bytes, limit=%d bytes",
+					rows[0], size, singleMessageLimit))
+			}
+		}
 		if err := visit(rows, encoder); err != nil {
 			return err
 		}
@@ -75,7 +132,7 @@ func visitInsertRowsByMessageSize(
 // splitInsertRowsByMessageSize exposes the borrowed row views for focused
 // message-boundary tests. Production encoding uses the synchronous visitor
 // above so it does not allocate an outer selection slice.
-func splitInsertRowsByMessageSize(insertMsg *msgstream.InsertMsg, rowOffsets []int) ([][]int, error) {
+func splitInsertRowsByMessageSize(insertMsg *msgstream.InsertMsg, rowOffsets []int, walName message.WALName) ([][]int, error) {
 	template := &msgpb.InsertRequest{
 		Base:           insertMsg.GetBase(),
 		ShardName:      insertMsg.GetShardName(),
@@ -90,7 +147,7 @@ func splitInsertRowsByMessageSize(insertMsg *msgstream.InsertMsg, rowOffsets []i
 		Namespace:      insertMsg.Namespace,
 	}
 	var selections [][]int
-	err := visitInsertRowsByMessageSize(template, insertMsg, rowOffsets, func(rows []int, encoder *fastpb.InsertRequestViewEncoder) error {
+	err := visitInsertRowsByMessageSize(template, insertMsg, rowOffsets, walName, func(rows []int, encoder *fastpb.InsertRequestViewEncoder) error {
 		selections = append(selections, rows)
 		size, err := encoder.EncodedSize()
 		if err != nil {
@@ -99,7 +156,12 @@ func splitInsertRowsByMessageSize(insertMsg *msgstream.InsertMsg, rowOffsets []i
 		_, err = encoder.MarshalTo(make([]byte, size))
 		return err
 	})
-	return selections, err
+	if err != nil {
+		// Same contract as genInsertMessagesByPartition: a rejected batch
+		// produces no selections, not a partial prefix.
+		return nil, err
+	}
+	return selections, nil
 }
 
 // genInsertMessagesByPartition builds V1 WAL insert messages directly from
@@ -114,6 +176,7 @@ func genInsertMessagesByPartition(
 	insertMsg *msgstream.InsertMsg,
 	ez *message.CipherConfig,
 	schemaVersion int32,
+	walName message.WALName,
 ) ([]message.MutableMessage, error) {
 	template := &msgpb.InsertRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -131,7 +194,7 @@ func genInsertMessagesByPartition(
 		Version:        msgpb.InsertDataVersion_ColumnBased,
 	}
 	messages := make([]message.MutableMessage, 0, 1)
-	err := visitInsertRowsByMessageSize(template, insertMsg, rowOffsets, func(rows []int, encoder *fastpb.InsertRequestViewEncoder) error {
+	err := visitInsertRowsByMessageSize(template, insertMsg, rowOffsets, walName, func(rows []int, encoder *fastpb.InsertRequestViewEncoder) error {
 		// BuildMutable consumes the borrowed encoder synchronously. Once it
 		// returns, the message owns only the final payload and the splitter may
 		// safely reuse the cursor scratch for the next view.

@@ -109,7 +109,7 @@ func repackInsertDataForStreamingService(
 
 	for channel, rowOffsets := range channel2RowOffsets {
 		// segment id is assigned at streaming node.
-		msgs, err := genInsertMessagesByPartition(0, partitionID, partitionName, rowOffsets, channel, insertMsg, ez, schemaVersion)
+		msgs, err := genInsertMessagesByPartition(0, partitionID, partitionName, rowOffsets, channel, insertMsg, ez, schemaVersion, walName)
 		if err != nil {
 			return nil, err
 		}
@@ -181,7 +181,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 		}
 
 		for partitionName, rowOffsets := range partition2RowOffsets {
-			msgs, err := genInsertMessagesByPartition(0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg, ez, schemaVersion)
+			msgs, err := genInsertMessagesByPartition(0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg, ez, schemaVersion, walName)
 			if err != nil {
 				return nil, err
 			}

@@ -63,6 +63,10 @@ func TestMessageBodyLimit(t *testing.T) {
 	assert.Equal(t, 1024, messageBodyLimit())
 }
 
+// A row that does not fit under the plaintext body budget is still emitted on
+// its own -- there is nothing left to split -- as long as the active WAL has no
+// hard limit of its own that it would breach. RocksMQ's page size and
+// Woodpecker's batch size are not per-entry limits.
 func TestSplitInsertRowsByMessageSizeSingleOversizedRow(t *testing.T) {
 	// One byte above the default reserve, so the plaintext body budget is 1 byte.
 	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "4097"))
@@ -70,72 +74,98 @@ func TestSplitInsertRowsByMessageSizeSingleOversizedRow(t *testing.T) {
 	assert.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "4096"))
 	defer Params.Reset(Params.PulsarCfg.MessageReserveSize.Key)
 
+	insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
+	for _, walName := range []message.WALName{message.WALNameRocksmq, message.WALNameWoodpecker} {
+		t.Run(walName.String(), func(t *testing.T) {
+			selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0}, walName)
+			assert.NoError(t, err)
+			assert.Equal(t, [][]int{{0}}, selections)
+		})
+	}
+}
+
+// The same row is refused when the WAL would reject the message on the wire:
+// the send never succeeds, so retrying it forever stalls the DML channel
+// (#52413). The limit is compared against the exact encoded message, which
+// includes the envelope, not against a per-row estimate.
+func TestSplitInsertRowsByMessageSizeRejectsOversizedMessage(t *testing.T) {
+	// Large enough that a small row's message -- envelope included -- fits, so
+	// the row that does not can be named.
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "512"))
+	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "0"))
+	defer Params.Reset(Params.PulsarCfg.MessageReserveSize.Key)
+
 	t.Run("only row", func(t *testing.T) {
 		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
-		msgs, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNamePulsar)
-		assert.Nil(t, msgs)
+		selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0}, message.WALNamePulsar)
+		assert.Nil(t, selections)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 		assert.Contains(t, err.Error(), "single row at offset 0")
 		assert.False(t, merr.Status(err).GetRetriable())
 	})
 
-	t.Run("row at limit", func(t *testing.T) {
-		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 64))
-		msgs, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNamePulsar)
-		assert.Nil(t, msgs)
-		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
-	})
-
 	t.Run("later row", func(t *testing.T) {
 		insertMsg := newVarCharInsertMsgForPackTest("small", strings.Repeat("x", 1024))
-		msgs, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0, 1}, "test_channel", insertMsg, message.WALNamePulsar)
-		assert.Nil(t, msgs)
+		selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0, 1}, message.WALNamePulsar)
+		assert.Nil(t, selections)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 		assert.Contains(t, err.Error(), "single row at offset 1")
 	})
+
+	t.Run("built messages are refused too", func(t *testing.T) {
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
+		msgs, err := genInsertMessagesByPartition(0, 1, "test_partition", []int{0}, "test_channel",
+			insertMsg, nil, 7, message.WALNamePulsar)
+		assert.Nil(t, msgs)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	})
 }
 
-func TestGenInsertMsgsByPartitionUsesWALSpecificSingleRowLimit(t *testing.T) {
+// Each backend answers with its own limit, so a row Pulsar would refuse can be
+// perfectly sendable on Kafka.
+func TestSplitInsertRowsByMessageSizeUsesWALSpecificLimit(t *testing.T) {
 	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "64"))
 	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
-	assert.NoError(t, Params.Save(Params.KafkaCfg.ProducerMessageMaxBytes.Key, "2048"))
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "0"))
+	defer Params.Reset(Params.PulsarCfg.MessageReserveSize.Key)
+	assert.NoError(t, Params.Save(Params.KafkaCfg.ProducerMessageMaxBytes.Key, "4096"))
 	defer Params.Reset(Params.KafkaCfg.ProducerMessageMaxBytes.Key)
 
-	t.Run("kafka allows row above pulsar split threshold", func(t *testing.T) {
+	t.Run("kafka allows a row above the pulsar limit", func(t *testing.T) {
 		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
-		msgs, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNameKafka)
+		selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0}, message.WALNameKafka)
 		assert.NoError(t, err)
-		assert.Len(t, msgs, 1)
+		assert.Equal(t, [][]int{{0}}, selections)
 	})
 
-	t.Run("kafka rejects row at its own limit", func(t *testing.T) {
-		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 2048))
-		msgs, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, message.WALNameKafka)
-		assert.Nil(t, msgs)
+	t.Run("kafka refuses a row above its own limit", func(t *testing.T) {
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 8192))
+		selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0}, message.WALNameKafka)
+		assert.Nil(t, selections)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	})
 
 	for _, walName := range []message.WALName{message.WALNameRocksmq, message.WALNameWoodpecker} {
-		t.Run(walName.String()+" has no single row limit", func(t *testing.T) {
-			insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
-			msgs, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0}, "test_channel", insertMsg, walName)
+		t.Run(walName.String()+" has no single message limit", func(t *testing.T) {
+			insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 8192))
+			selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0}, walName)
 			assert.NoError(t, err)
-			assert.Len(t, msgs, 1)
+			assert.Equal(t, [][]int{{0}}, selections)
 		})
 	}
 }
 
-func TestGenInsertMsgsByPartitionSplitsMultipleRows(t *testing.T) {
+func TestSplitInsertRowsByMessageSizeSplitsMultipleRows(t *testing.T) {
 	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "512"))
 	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+	assert.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "0"))
+	defer Params.Reset(Params.PulsarCfg.MessageReserveSize.Key)
 
 	insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 300), strings.Repeat("y", 300))
-	msgs, err := genInsertMsgsByPartition(context.Background(), 0, 1, "test_partition", []int{0, 1}, "test_channel", insertMsg, message.WALNamePulsar)
+	selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0, 1}, message.WALNamePulsar)
 	assert.NoError(t, err)
-	assert.Len(t, msgs, 2)
-	for _, msg := range msgs {
-		assert.Equal(t, uint64(1), msg.(*msgstream.InsertMsg).GetNumRows())
-	}
+	assert.Equal(t, [][]int{{0}, {1}}, selections)
 }
 
 func newVarCharInsertMsgForPackTest(rows ...string) *msgstream.InsertMsg {
@@ -181,10 +211,6 @@ func newVarCharInsertMsgForPackTest(rows ...string) *msgstream.InsertMsg {
 			Version:    msgpb.InsertDataVersion_ColumnBased,
 		},
 	}
-
-	selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0})
-	assert.NoError(t, err)
-	assert.Equal(t, [][]int{{0}}, selections)
 }
 
 func TestRepackInsertData(t *testing.T) {
@@ -374,7 +400,7 @@ func TestSplitInsertRowsByMessageSize(t *testing.T) {
 
 	t.Run("all rows borrow one selection", func(t *testing.T) {
 		rows := offsets(100)
-		selections, err := splitInsertRowsByMessageSize(newInsertMsg(len(rows)), rows)
+		selections, err := splitInsertRowsByMessageSize(newInsertMsg(len(rows)), rows, message.WALNameRocksmq)
 		assert.NoError(t, err)
 		assert.Len(t, selections, 1)
 		assert.Equal(t, rows, selections[0])
@@ -391,13 +417,13 @@ func TestSplitInsertRowsByMessageSize(t *testing.T) {
 
 		const rows = 5
 		rowOffsets := offsets(rows)
-		selections, err := splitInsertRowsByMessageSize(newInsertMsg(rows), rowOffsets)
+		selections, err := splitInsertRowsByMessageSize(newInsertMsg(rows), rowOffsets, message.WALNameRocksmq)
 		assert.NoError(t, err)
 		assert.Equal(t, [][]int{{0}, {1}, {2}, {3}, {4}}, selections)
 	})
 
 	t.Run("no rows produces no messages", func(t *testing.T) {
-		selections, err := splitInsertRowsByMessageSize(newInsertMsg(3), nil)
+		selections, err := splitInsertRowsByMessageSize(newInsertMsg(3), nil, message.WALNameRocksmq)
 		assert.NoError(t, err)
 		assert.Empty(t, selections)
 	})
@@ -434,7 +460,7 @@ func TestGenInsertMessagesByPartitionSplitsByPlaintextBodyLimit(t *testing.T) {
 	partitionName := strings.Repeat("partition", 16)
 	channelName := strings.Repeat("channel", 16)
 
-	twoRows, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1}, channelName, source, nil, 7)
+	twoRows, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1}, channelName, source, nil, 7, message.WALNameRocksmq)
 	require.NoError(t, err)
 	require.Len(t, twoRows, 1)
 	twoRowRecord := twoRows[0].IntoMessageProto()
@@ -443,7 +469,7 @@ func TestGenInsertMessagesByPartitionSplitsByPlaintextBodyLimit(t *testing.T) {
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(len(twoRowRecord.GetPayload())-1)))
 	bodyLimit := messageBodyLimit()
 
-	msgs, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1, 2}, channelName, source, nil, 7)
+	msgs, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1, 2}, channelName, source, nil, 7, message.WALNameRocksmq)
 	require.NoError(t, err)
 	require.Len(t, msgs, 3, "each row must land in its own message under this body limit")
 	for _, msg := range msgs {
@@ -523,7 +549,7 @@ func TestGenInsertMessagesByPartitionSmallScalars(t *testing.T) {
 		},
 	}
 
-	msgs, err := genInsertMessagesByPartition(200, 300, "partition", selection, "vchannel", source, nil, 7)
+	msgs, err := genInsertMessagesByPartition(200, 300, "partition", selection, "vchannel", source, nil, 7, message.WALNameRocksmq)
 	require.NoError(t, err)
 	require.Greater(t, len(msgs), 1)
 	require.Less(t, len(msgs), rows/2, "splitting must not degenerate into one WAL message per row")
@@ -583,7 +609,7 @@ func TestGenInsertMessagesByPartitionEncodesSelectionView(t *testing.T) {
 	}
 
 	selection := []int{1, 3}
-	msgs, err := genInsertMessagesByPartition(0, 200, "target-partition", selection, "vchannel", source, nil, 7)
+	msgs, err := genInsertMessagesByPartition(0, 200, "target-partition", selection, "vchannel", source, nil, 7, message.WALNameRocksmq)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
 	builtPayload := append([]byte(nil), msgs[0].Payload()...)
@@ -615,7 +641,7 @@ func TestGenInsertMessagesByPartitionEncodesSelectionView(t *testing.T) {
 	// compact-vector prefix state at each later selection boundary; advancing it
 	// incorrectly would return the wrong physical vector row.
 	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "4097"))
-	msgs, err = genInsertMessagesByPartition(0, 200, "target-partition", []int{0, 1, 2, 3}, "vchannel", source, nil, 7)
+	msgs, err = genInsertMessagesByPartition(0, 200, "target-partition", []int{0, 1, 2, 3}, "vchannel", source, nil, 7, message.WALNameRocksmq)
 	assert.NoError(t, err)
 	require.Len(t, msgs, 4)
 	expectedVectors := [][]float32{{0, 1}, nil, {4, 5}, {6, 7}}

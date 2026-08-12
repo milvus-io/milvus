@@ -30,15 +30,28 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
-// TestInsertRequestViewParity encodes a fixed corpus and prints a digest of
-// every byte produced. It uses only the exported cursor API and the shared test
-// helpers, so the same file compiles against the pre-change encoder: running it
-// on both revisions and comparing the digest proves the arithmetic array
-// encoder is byte-for-byte identical to the protobuf one it replaced.
+// TestInsertRequestViewParity holds every message the cursor produces to the
+// encoding it replaces: decoding it must yield exactly the message that
+// materializing the same rows through AppendFieldData and marshaling it would
+// have produced. It runs the whole corpus of field shapes against several
+// message budgets, so the split boundaries move around and each shape is
+// checked at more than one selection.
+//
+// The two encodings are wire-equivalent, not byte-identical, and the difference
+// is the order fields go out in. Inside a FieldData this encoder writes strictly
+// by field number -- type, field_name, the scalars/vectors oneof, field_id --
+// while Go's marshaler emits a oneof payload after the plain fields that follow
+// it by number, so it writes field_id before the oneof. Both decode to the same
+// InsertRequest, which is the contract a consumer depends on. Do not tighten
+// this to bytes.Equal without reordering the encoder to match.
+//
+// The digest is logged, not asserted. It is there to compare two builds by
+// hand; a golden value would have to be regenerated for changes that are not
+// regressions, such as a new field in the corpus.
 //
 // The corpus deliberately avoids invalid UTF-8, which is the one intentional
-// behavior change and would make the old encoder error out instead of
-// producing bytes to compare.
+// behavior change: proto.Marshal errors on it, so there would be no oracle to
+// compare against.
 func TestInsertRequestViewParity(t *testing.T) {
 	template := insertViewTemplate()
 	digest := sha256.New()
@@ -67,12 +80,17 @@ func TestInsertRequestViewParity(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, size, written)
 
-					// Every message must also decode back into a valid
-					// InsertRequest -- a digest alone would not catch bytes
-					// that are stable but malformed.
 					var decoded msgpb.InsertRequest
 					require.NoError(t, proto.Unmarshal(payload, &decoded))
 					require.Equal(t, uint64(consumed), decoded.GetNumRows())
+
+					selection := rows[start : start+consumed]
+					expected := materializeWithAppendFieldData(template, tc.source, selection)
+					require.True(t, proto.Equal(expected, &decoded),
+						"encoding drifted from the materialized oracle: budget=%d selection=%v",
+						budget, selection)
+					require.Equal(t, proto.Size(expected), size,
+						"encoded size drifted: budget=%d selection=%v", budget, selection)
 
 					digest.Write(payload)
 					totalMessages++
