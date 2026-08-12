@@ -4185,6 +4185,24 @@ func TestCheckAndSetDataInvalidUTF8(t *testing.T) {
 		assert.Contains(t, err.Error(), "element 1")
 	})
 
+	// gjson.Parse is a lenient scanner, not a validator: unlike json.Unmarshal,
+	// it does not require a comma between array elements and does not notice
+	// trailing garbage after the closing bracket. gjson.Valid runs the same
+	// strict syntax check json.Unmarshal used to apply, so a request body a
+	// client did not actually intend to send still gets rejected instead of
+	// silently reinterpreted.
+	t.Run("array of varchar still rejects malformed JSON syntax", func(t *testing.T) {
+		missingComma := []byte(`{"data": [{"id": 1, "tokens": ["a" "b"]}]}`)
+		_, _, err := checkAndSetData(missingComma, arraySchema, false)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		trailingComma := []byte(`{"data": [{"id": 1, "tokens": ["a",]}]}`)
+		_, _, err = checkAndSetData(trailingComma, arraySchema, false)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
 	// Also gjson: the sub-field cell keeps the byte, and the Array FieldData it
 	// becomes is the shape checkInputUtf8Compatiable scans after flattening.
 	t.Run("struct array string sub-field reaches the proxy intact", func(t *testing.T) {

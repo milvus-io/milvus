@@ -1328,6 +1328,19 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						// common Proxy Insert/Upsert ingress (checkInputUtf8Compatiable),
 						// which is the only place that scans them -- same as every
 						// other gjson-decoded string path here.
+						//
+						// gjson.Parse itself is a lenient scanner, not a validator:
+						// it tolerates malformed syntax json.Unmarshal used to
+						// reject (a missing comma between elements, a trailing
+						// comma, trailing garbage after the closing bracket).
+						// gjson.Valid runs the strict syntax check without
+						// unquoting anything, so it restores that rejection while
+						// leaving the raw-byte-preserving walk below unchanged for
+						// input that passes it.
+						if !gjson.Valid(dataString) {
+							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
+								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, "invalid JSON array")
+						}
 						parsed := gjson.Parse(dataString)
 						if !parsed.IsArray() {
 							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+

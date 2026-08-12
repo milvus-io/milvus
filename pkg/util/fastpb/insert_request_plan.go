@@ -773,6 +773,18 @@ func (s *insertFieldSizeState) reset(field *schemapb.FieldData) error {
 }
 
 func (s *insertFieldSizeState) resetScalar(scalar *schemapb.ScalarField) error {
+	// ValidData (field 17) is element-level nullability on a single top-level
+	// column, holding one bit per row across the whole field. The arithmetic
+	// path only ever writes the oneof value array, so a column carrying it
+	// would silently lose that data. Unlike a per-row array/vector cell, this
+	// field is columnar and gets row-selected and split across WAL messages;
+	// a whole-object protobuf fallback (as cells use) would re-emit every row
+	// into each split message instead of just the rows selected for it. Fail
+	// closed until this earns real row-selected support instead of silently
+	// dropping the nullability.
+	if len(scalar.GetValidData()) != 0 {
+		return insertViewInternal("scalar field %q (%d) carries element-level ValidData, which the arithmetic insert encoder does not yet support", s.field.GetFieldName(), s.field.GetFieldId())
+	}
 	switch value := scalar.Data.(type) {
 	case nil:
 		s.valuePlan = insertFieldValueScalarEmpty
@@ -864,6 +876,12 @@ func (s *insertFieldSizeState) resetScalar(scalar *schemapb.ScalarField) error {
 }
 
 func (s *insertFieldSizeState) resetVector(vector *schemapb.VectorField) error {
+	// ValidData (field 9) is the same element-level nullability as ScalarField
+	// above, on a top-level vector column. Same reasoning: fail closed rather
+	// than silently drop it or unsafely fall back across split messages.
+	if len(vector.GetValidData()) != 0 {
+		return insertViewInternal("vector field %q (%d) carries element-level ValidData, which the arithmetic insert encoder does not yet support", s.field.GetFieldName(), s.field.GetFieldId())
+	}
 	switch value := vector.Data.(type) {
 	case nil:
 		s.valuePlan = insertFieldValueVectorEmpty
