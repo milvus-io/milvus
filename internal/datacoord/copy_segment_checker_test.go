@@ -625,6 +625,107 @@ func (s *CopySegmentCheckerSuite) TestTryTimeoutJob_NotElapsedKeepsExecuting() {
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
 }
 
+// TestTryTimeoutJob_BoundsPublishingRetry: Publishing has no exit other than a
+// successful FinalizeJobPublication, so the job deadline must apply to it —
+// otherwise a persistent publication failure (etcd quota, an oversized write
+// that keeps failing, a target segment gone from meta) leaves the job in
+// Publishing forever: never timed out, never reclaimed by GC, reported to the
+// user as an executing restore, its source pin held until the pin TTL.
+func (s *CopySegmentCheckerSuite) TestTryTimeoutJob_BoundsPublishingRetry() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPublishing,
+			TimeoutTs:    CopyJobTimeoutTs(-time.Minute),
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	s.checker.tryTimeoutJob(job)
+
+	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
+	s.Contains(updatedJob.GetReason(), "timeout")
+	s.Contains(updatedJob.GetReason(), "publishing")
+}
+
+// TestTryTimeoutJob_PublishingNotElapsedKeepsRetrying: until the deadline a
+// Publishing job is left alone so retryPublishingJob can complete it.
+func (s *CopySegmentCheckerSuite) TestTryTimeoutJob_PublishingNotElapsedKeepsRetrying() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(1)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        s.jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPublishing,
+			TimeoutTs:    CopyJobTimeoutTs(time.Hour),
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	s.checker.tryTimeoutJob(job)
+
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobPublishing,
+		s.copyMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
+// TestFinishJob_TimedOutPublishingJobIsNotPublished: once the deadline has
+// converged a Publishing job to Failed, a later retry round must not publish
+// its targets — the outcome fence still holds in the failure direction, and
+// the inspector's failed-job cleanup owns the targets from here.
+func (s *CopySegmentCheckerSuite) TestFinishJob_TimedOutPublishingJobIsNotPublished() {
+	jobID := int64(601)
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
+	// No catalog.Update expectation: publication must not be attempted.
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        jobID,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPublishing,
+			TimeoutTs:    CopyJobTimeoutTs(-time.Minute),
+			IdMappings: []*datapb.CopySegmentIDMapping{
+				{SourceSegmentId: 1, TargetSegmentId: 111, PartitionId: 10},
+			},
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+	s.meta.AddSegment(context.TODO(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 111, State: commonpb.SegmentState_Importing, IsImporting: true,
+		NumOfRows: 100, CollectionID: s.collectionID, InsertChannel: "ch1",
+	}})
+	task := &copySegmentTask{copyMeta: s.copyMeta, meta: s.meta, tr: timerecord.NewTimeRecorder("t"), times: taskcommon.NewTimes()}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId: 1101, JobId: jobID, CollectionId: s.collectionID,
+		State:      datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		IdMappings: []*datapb.CopySegmentIDMapping{{SourceSegmentId: 1, TargetSegmentId: 111, PartitionId: 10}},
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), task))
+
+	// Same round order as the checker loop for a stale Publishing snapshot:
+	// timeout first this time, then the retry sees Failed and stops.
+	s.checker.tryTimeoutJob(job)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed,
+		s.copyMeta.GetJob(context.TODO(), jobID).GetState())
+
+	s.checker.retryPublishingJob(job)
+
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed,
+		s.copyMeta.GetJob(context.TODO(), jobID).GetState())
+	target := s.meta.GetSegment(context.TODO(), 111)
+	s.Equal(commonpb.SegmentState_Importing, target.GetState())
+	s.True(target.GetIsImporting())
+}
+
 func (s *CopySegmentCheckerSuite) TestCheckGC_RemoveCompletedJob() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
@@ -725,9 +826,9 @@ func (s *CopySegmentCheckerSuite) TestCheckGC_ReclaimsTaskConvergedAfterWorkerLo
 
 	// The delayed worker-loss response arrives; the parent job is terminal, so
 	// the task converges to Failed + NullNodeID.
-	resolution, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1001, "worker lost")
+	outcome, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1001, "worker lost")
 	s.NoError(err)
-	s.Equal(workerLossFailed, resolution)
+	s.Equal(workerLossFailed, outcome.resolution)
 
 	// Now GC reclaims task and job.
 	s.checker.checkGC(job)

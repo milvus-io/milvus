@@ -28,8 +28,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metastore"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -343,6 +345,31 @@ func (s *CopySegmentMetaSuite) TestCommitTaskDispatchOutcomes() {
 			taskState: datapb.CopySegmentTaskState_CopySegmentTaskInProgress, existingNodeID: 11,
 			dispatchNodeID: 10, wantResolution: taskDispatchCleanupUntracked,
 			wantState: datapb.CopySegmentTaskState_CopySegmentTaskInProgress, wantNodeID: 11,
+		},
+		// The regression: a dispatch absorbed by the authoritative task on the
+		// SAME node must reach the tracked cleanup path, never the untracked one.
+		// The untracked drop is an unconditional abort at this dispatch's epoch,
+		// which the worker accepts because CreateCopySegment adopted that epoch
+		// onto the runtime shared with the task already registered there — so it
+		// would delete the completed task's output, whose binlog paths are
+		// already in segment metadata and about to be published as Flushed.
+		{
+			name: "completed task on same node keeps tracked cleanup", jobState: datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			taskState: datapb.CopySegmentTaskState_CopySegmentTaskCompleted, existingNodeID: 10,
+			dispatchNodeID: 10, wantResolution: taskDispatchCleanupTracked,
+			wantState: datapb.CopySegmentTaskState_CopySegmentTaskCompleted, wantNodeID: 10,
+		},
+		{
+			name: "failed task on same node keeps tracked cleanup", jobState: datapb.CopySegmentJobState_CopySegmentJobFailed,
+			taskState: datapb.CopySegmentTaskState_CopySegmentTaskFailed, existingNodeID: 10,
+			dispatchNodeID: 10, wantResolution: taskDispatchCleanupTracked,
+			wantState: datapb.CopySegmentTaskState_CopySegmentTaskFailed, wantNodeID: 10,
+		},
+		{
+			name: "completed task on a different node stays untracked", jobState: datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			taskState: datapb.CopySegmentTaskState_CopySegmentTaskCompleted, existingNodeID: 11,
+			dispatchNodeID: 10, wantResolution: taskDispatchCleanupUntracked,
+			wantState: datapb.CopySegmentTaskState_CopySegmentTaskCompleted, wantNodeID: 11,
 		},
 	}
 
@@ -676,6 +703,7 @@ func (s *CopySegmentMetaSuite) TestAddTask_Success() {
 		JobId:        100,
 		CollectionId: s.collectionID,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		NodeId:       NullNodeID,
 	})
 
 	err := s.copyMeta.AddTask(context.TODO(), task)
@@ -724,6 +752,7 @@ func (s *CopySegmentMetaSuite) TestUpdateTask_Success() {
 		JobId:        100,
 		CollectionId: s.collectionID,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		NodeId:       NullNodeID,
 	})
 	err := s.copyMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
@@ -755,6 +784,7 @@ func (s *CopySegmentMetaSuite) TestUpdateTask_SaveFailureLeavesCacheUnchanged() 
 		JobId:        100,
 		CollectionId: s.collectionID,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		NodeId:       NullNodeID,
 	})
 	err := s.copyMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
@@ -770,7 +800,17 @@ func (s *CopySegmentMetaSuite) TestUpdateTask_SaveFailureLeavesCacheUnchanged() 
 	s.Empty(cachedTask.GetReason())
 }
 
-func (s *CopySegmentMetaSuite) TestBumpTaskDispatchVersion() {
+// addActiveCopyJob registers the parent job that a dispatch claim requires.
+// ClaimTaskDispatch re-validates the job state under its own lock, so a task
+// whose job is unknown to meta is deliberately not dispatchable.
+func (s *CopySegmentMetaSuite) addActiveCopyJob(jobID int64) {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+	s.NoError(s.copyMeta.AddJob(context.TODO(), newTestCopyJob(jobID,
+		datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+}
+
+func (s *CopySegmentMetaSuite) TestClaimTaskDispatch() {
+	s.addActiveCopyJob(100)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(3)
 
 	task := &copySegmentTask{
@@ -783,25 +823,37 @@ func (s *CopySegmentMetaSuite) TestBumpTaskDispatchVersion() {
 		JobId:        100,
 		CollectionId: s.collectionID,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		NodeId:       NullNodeID,
 	})
 	s.NoError(s.copyMeta.AddTask(context.TODO(), task))
 
 	// Each dispatch claims a distinct epoch, and it is persisted before the
 	// worker can accept the task so it stays monotonic across a restart.
-	first, err := s.copyMeta.BumpTaskDispatchVersion(context.TODO(), 1001)
+	first, err := s.copyMeta.ClaimTaskDispatch(context.TODO(), 1001)
 	s.NoError(err)
 	s.EqualValues(1, first)
 	s.EqualValues(1, s.copyMeta.GetTask(context.TODO(), 1001).GetTaskVersion())
+	s.copyMeta.ReleaseTaskDispatch(1001)
 
-	second, err := s.copyMeta.BumpTaskDispatchVersion(context.TODO(), 1001)
+	second, err := s.copyMeta.ClaimTaskDispatch(context.TODO(), 1001)
 	s.NoError(err)
 	s.EqualValues(2, second)
 	s.EqualValues(2, s.copyMeta.GetTask(context.TODO(), 1001).GetTaskVersion())
 }
 
-func (s *CopySegmentMetaSuite) TestBumpTaskDispatchVersion_SaveFailureKeepsEpoch() {
-	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
-	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(errors.New("etcd unavailable")).Once()
+// TestClaimTaskDispatch_RefusesSecondClaimWhileInFlight is the regression for the
+// cross-node double-dispatch hole: the scheduler pops a task out of pendingTasks
+// and only inserts it into runningTasks after CommitTaskDispatch, so while the
+// first dispatch is still in flight the task is invisible to Enqueue's dedup and
+// gets dispatched a second time — possibly to a different node. The epoch fence
+// lives on the worker runtime and so only covers a re-dispatch to the SAME node,
+// and the untracked-drop gate only covers a dispatch that starts after the drop
+// is queued. Neither closes this window, so the claim has to.
+func (s *CopySegmentMetaSuite) TestClaimTaskDispatch_RefusesSecondClaimWhileInFlight() {
+	s.addActiveCopyJob(100)
+	// Two saves only: AddTask and the single successful claim. A second claim
+	// that reached the catalog would fail this expectation.
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 
 	task := &copySegmentTask{
 		copyMeta: s.copyMeta,
@@ -813,21 +865,100 @@ func (s *CopySegmentMetaSuite) TestBumpTaskDispatchVersion_SaveFailureKeepsEpoch
 		JobId:        100,
 		CollectionId: s.collectionID,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		NodeId:       NullNodeID,
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), task))
+
+	first, err := s.copyMeta.ClaimTaskDispatch(context.TODO(), 1001)
+	s.NoError(err)
+	s.EqualValues(1, first)
+
+	// The second dispatcher must be turned away before it can reach the worker,
+	// and it must not burn an epoch either: the task stays exactly as the first
+	// dispatch left it, so the scheduler simply re-queues it.
+	second, err := s.copyMeta.ClaimTaskDispatch(context.TODO(), 1001)
+	s.ErrorIs(err, errCopySegmentDispatchInFlight)
+	s.EqualValues(0, second)
+	s.EqualValues(1, s.copyMeta.GetTask(context.TODO(), 1001).GetTaskVersion())
+}
+
+// TestClaimTaskDispatch_ReleaseIsPerTask keeps one task's in-flight dispatch from
+// blocking every other task's.
+func (s *CopySegmentMetaSuite) TestClaimTaskDispatch_ReleaseIsPerTask() {
+	s.addActiveCopyJob(100)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(4)
+
+	for _, taskID := range []int64{1001, 1002} {
+		task := &copySegmentTask{
+			copyMeta: s.copyMeta,
+			tr:       timerecord.NewTimeRecorder("task"),
+			times:    taskcommon.NewTimes(),
+		}
+		task.task.Store(&datapb.CopySegmentTask{
+			TaskId:       taskID,
+			JobId:        100,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+			NodeId:       NullNodeID,
+		})
+		s.NoError(s.copyMeta.AddTask(context.TODO(), task))
+	}
+
+	_, err := s.copyMeta.ClaimTaskDispatch(context.TODO(), 1001)
+	s.NoError(err)
+
+	// A different task is unaffected by 1001's in-flight dispatch.
+	_, err = s.copyMeta.ClaimTaskDispatch(context.TODO(), 1002)
+	s.NoError(err)
+
+	// Releasing one task must not release the other.
+	s.copyMeta.ReleaseTaskDispatch(1002)
+	_, err = s.copyMeta.ClaimTaskDispatch(context.TODO(), 1001)
+	s.ErrorIs(err, errCopySegmentDispatchInFlight)
+}
+
+func (s *CopySegmentMetaSuite) TestClaimTaskDispatch_SaveFailureKeepsEpoch() {
+	s.addActiveCopyJob(100)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(errors.New("etcd unavailable")).Once()
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		NodeId:       NullNodeID,
 	})
 	s.NoError(s.copyMeta.AddTask(context.TODO(), task))
 
 	// An unpersisted epoch must not be handed out: the dispatch is abandoned
 	// instead, so no worker task can exist under an epoch metadata forgot.
-	version, err := s.copyMeta.BumpTaskDispatchVersion(context.TODO(), 1001)
+	version, err := s.copyMeta.ClaimTaskDispatch(context.TODO(), 1001)
 	s.Error(err)
 	s.EqualValues(0, version)
 	s.EqualValues(0, s.copyMeta.GetTask(context.TODO(), 1001).GetTaskVersion())
+
+	// A claim that never reached the worker must not be left holding the task:
+	// nothing else releases it, so a leak here would stall the task forever.
+	retried, err := s.copyMeta.ClaimTaskDispatch(context.TODO(), 1001)
+	s.NoError(err)
+	s.EqualValues(1, retried)
 }
 
-func (s *CopySegmentMetaSuite) TestBumpTaskDispatchVersion_TaskNotFound() {
-	version, err := s.copyMeta.BumpTaskDispatchVersion(context.TODO(), 9999)
+func (s *CopySegmentMetaSuite) TestClaimTaskDispatch_TaskNotFound() {
+	version, err := s.copyMeta.ClaimTaskDispatch(context.TODO(), 9999)
 	s.Error(err)
+	s.NotErrorIs(err, errCopySegmentDispatchInFlight)
 	s.EqualValues(0, version)
+
+	// The failed claim left nothing behind for a task that may yet be created.
+	s.False(s.copyMeta.(*copySegmentMeta).hasInFlightDispatch(9999))
 }
 
 func (s *CopySegmentMetaSuite) TestUpdateTask_NotFound() {
@@ -1383,6 +1514,127 @@ func (s *CopySegmentMetaSuite) TestUpdateJobStateAndReleaseRef_SkipsPublishingJo
 		s.copyMeta.GetJob(context.TODO(), 702).GetState())
 }
 
+// TestTimeoutJob_TakesPublishingJob: the deadline is the only exit from
+// Publishing other than success. UpdateJobStateAndReleaseRef fences Publishing
+// against every failure path (they act on a stale view of a job that claimed
+// success); TimeoutJob is the one transition allowed through, so a persistent
+// publication failure converges instead of retrying forever.
+func (s *CopySegmentMetaSuite) TestTimeoutJob_TakesPublishingJob() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        703,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPublishing,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	applied, err := s.copyMeta.TimeoutJob(context.TODO(), 703, "timeout while publishing")
+	s.NoError(err)
+	s.True(applied)
+	saved := s.copyMeta.GetJob(context.TODO(), 703)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, saved.GetState())
+	s.Equal("timeout while publishing", saved.GetReason())
+
+	// Failed is terminal: FinalizeJobPublication must now be a no-op.
+	applied, err = s.copyMeta.FinalizeJobPublication(context.TODO(), 703, 0, 1)
+	s.NoError(err)
+	s.False(applied)
+}
+
+// TestTimeoutJob_SkipsTerminalJob: the terminal fence still holds — a job that
+// completed (or failed) concurrently is never overwritten by a late timeout.
+func (s *CopySegmentMetaSuite) TestTimeoutJob_SkipsTerminalJob() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        704,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobCompleted,
+			TotalRows:    9,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	applied, err := s.copyMeta.TimeoutJob(context.TODO(), 704, "timeout")
+	s.NoError(err)
+	s.False(applied)
+	saved := s.copyMeta.GetJob(context.TODO(), 704)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, saved.GetState())
+	s.Empty(saved.GetReason())
+	s.EqualValues(9, saved.GetTotalRows())
+
+	// Missing job: nothing applied, no error.
+	applied, err = s.copyMeta.TimeoutJob(context.TODO(), 9999, "timeout")
+	s.NoError(err)
+	s.False(applied)
+}
+
+// TestFinalizeJobPublication_MirrorsUpdateSegmentsInfoEncoding: the publication
+// hand-builds its catalog actions instead of going through meta.UpdateSegmentsInfo,
+// so it pins the two ways it could silently diverge from it: binlog increments
+// are refused (they would be dropped on the floor here), and segment records
+// are written with the AlterSegments encoding, which keeps the V3 guard on
+// binlog-based row-count reconciliation that the record-only encoding bypasses.
+func (s *CopySegmentMetaSuite) TestFinalizeJobPublication_MirrorsUpdateSegmentsInfoEncoding() {
+	ctx := context.TODO()
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        705,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobPublishing,
+			IdMappings:   []*datapb.CopySegmentIDMapping{{SourceSegmentId: 1, TargetSegmentId: 7051, PartitionId: 10}},
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(ctx, job))
+	s.NoError(s.meta.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 7051, CollectionID: s.collectionID, PartitionID: 10, InsertChannel: "ch1",
+		State: commonpb.SegmentState_Importing, IsImporting: true, NumOfRows: 3,
+		// Every restore target looks V3 from pre-registration onward.
+		StorageVersion: storage.StorageV3, ManifestPath: `{"ver":1,"base_path":"files/insert_log/1/10/7051"}`,
+	}}))
+
+	// An operator that produces a binlog increment is refused before any write.
+	applied, err := s.copyMeta.FinalizeJobPublication(ctx, 705, 3, 1,
+		UpdateStatusOperator(7051, commonpb.SegmentState_Flushed),
+		AddBinlogsOperator(7051, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 9, EntriesNum: 3}}}}, nil, nil, nil))
+	s.Error(err)
+	s.False(applied)
+	s.Contains(err.Error(), "must not carry binlog increments")
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobPublishing, s.copyMeta.GetJob(ctx, 705).GetState())
+	s.Equal(commonpb.SegmentState_Importing, s.meta.GetSegment(ctx, 7051).GetState())
+
+	// The visibility-only publication goes through, with the AlterSegments
+	// encoding for every segment record and the job as the last action.
+	s.catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, actions ...metastore.UpdateAction) error {
+			s.Require().Len(actions, 2)
+			entry, ok := actions[0].Entry.(metastore.SegmentEntry)
+			s.Require().True(ok)
+			s.Equal(metastore.ActionUpdate, actions[0].Type)
+			s.True(entry.AlterEncoding, "publication must use the AlterSegments encoding, not the record-only one")
+			s.EqualValues(7051, entry.Segment.GetID())
+			s.Equal(commonpb.SegmentState_Flushed, entry.Segment.GetState())
+			s.False(entry.Segment.GetIsImporting())
+			_, ok = actions[1].Entry.(metastore.CopySegmentJobEntry)
+			s.True(ok, "the Completed job record is the commit marker and comes last")
+			return nil
+		}).Once()
+	applied, err = s.copyMeta.FinalizeJobPublication(ctx, 705, 3, 1,
+		UpdateStatusOperator(7051, commonpb.SegmentState_Flushed),
+		UpdateIsImporting(7051, false))
+	s.NoError(err)
+	s.True(applied)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, s.copyMeta.GetJob(ctx, 705).GetState())
+	s.Equal(commonpb.SegmentState_Flushed, s.meta.GetSegment(ctx, 7051).GetState())
+}
+
 // TestUpdateJobStateAndReleaseRef_AppliesOnNonTerminalJob is the positive
 // counterpart: the guard must not block the legitimate Executing -> Failed
 // transition that the timeout and fail-fast paths rely on.
@@ -1435,6 +1687,7 @@ func (s *CopySegmentMetaSuite) addJobWithTask(jobID, taskID int64,
 		CollectionId: s.collectionID,
 		State:        taskState,
 		NodeId:       7,
+		TaskVersion:  3,
 	})
 	s.NoError(s.copyMeta.AddTask(context.TODO(), task))
 }
@@ -1450,9 +1703,13 @@ func (s *CopySegmentMetaSuite) TestResolveTaskOnWorkerLoss_RedispatchesWhenJobAc
 		datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		datapb.CopySegmentTaskState_CopySegmentTaskInProgress)
 
-	resolution, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1710, "worker lost")
+	outcome, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1710, "worker lost")
 	s.NoError(err)
-	s.Equal(workerLossRedispatched, resolution)
+	s.Equal(workerLossRedispatched, outcome.resolution)
+	// The outcome names the exact dispatch that was cleared so the caller can
+	// queue its worker-side cleanup: the node it was on and its epoch.
+	s.EqualValues(7, outcome.nodeID)
+	s.EqualValues(3, outcome.taskVersion)
 
 	saved := s.copyMeta.GetTask(context.TODO(), 1710)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, saved.GetState())
@@ -1474,9 +1731,11 @@ func (s *CopySegmentMetaSuite) TestResolveTaskOnWorkerLoss_ConvergesToFailedWhen
 		datapb.CopySegmentJobState_CopySegmentJobFailed,
 		datapb.CopySegmentTaskState_CopySegmentTaskInProgress)
 
-	resolution, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1711, "worker lost after job failed")
+	outcome, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1711, "worker lost after job failed")
 	s.NoError(err)
-	s.Equal(workerLossFailed, resolution)
+	s.Equal(workerLossFailed, outcome.resolution)
+	s.EqualValues(7, outcome.nodeID)
+	s.EqualValues(3, outcome.taskVersion)
 
 	saved := s.copyMeta.GetTask(context.TODO(), 1711)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, saved.GetState())
@@ -1496,9 +1755,10 @@ func (s *CopySegmentMetaSuite) TestResolveTaskOnWorkerLoss_SkipsWhenTaskStateMis
 		datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		datapb.CopySegmentTaskState_CopySegmentTaskFailed)
 
-	resolution, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1712, "worker lost")
+	outcome, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1712, "worker lost")
 	s.NoError(err)
-	s.Equal(workerLossSkipped, resolution)
+	s.Equal(workerLossSkipped, outcome.resolution)
+	s.EqualValues(NullNodeID, outcome.nodeID, "a skipped resolution cleared nothing and names no dispatch")
 
 	saved := s.copyMeta.GetTask(context.TODO(), 1712)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, saved.GetState())
@@ -1511,9 +1771,9 @@ func (s *CopySegmentMetaSuite) TestResolveTaskOnWorkerLoss_MissingTaskOrJob() {
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	// Task does not exist at all.
-	resolution, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 9999, "worker lost")
+	outcome, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 9999, "worker lost")
 	s.NoError(err)
-	s.Equal(workerLossSkipped, resolution)
+	s.Equal(workerLossSkipped, outcome.resolution)
 
 	// Task exists but its parent job is absent from meta: same as a terminal
 	// job — the task is unrecoverable and must converge to Failed.
@@ -1531,9 +1791,9 @@ func (s *CopySegmentMetaSuite) TestResolveTaskOnWorkerLoss_MissingTaskOrJob() {
 	})
 	s.NoError(s.copyMeta.AddTask(context.TODO(), orphan))
 
-	resolution, err = s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1713, "worker lost")
+	outcome, err = s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1713, "worker lost")
 	s.NoError(err)
-	s.Equal(workerLossFailed, resolution)
+	s.Equal(workerLossFailed, outcome.resolution)
 	saved := s.copyMeta.GetTask(context.TODO(), 1713)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, saved.GetState())
 	s.EqualValues(NullNodeID, saved.GetNodeId())
@@ -1551,11 +1811,151 @@ func (s *CopySegmentMetaSuite) TestResolveTaskOnWorkerLoss_CatalogErrorLeavesTas
 		datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		datapb.CopySegmentTaskState_CopySegmentTaskInProgress)
 
-	resolution, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1714, "worker lost")
+	outcome, err := s.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), 1714, "worker lost")
 	s.Error(err)
-	s.Equal(workerLossSkipped, resolution)
+	s.Equal(workerLossSkipped, outcome.resolution)
 
 	saved := s.copyMeta.GetTask(context.TODO(), 1714)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, saved.GetState())
 	s.Equal(int64(7), saved.GetNodeId())
+}
+
+// newClaimTestTask registers a Pending, unassigned task ready to be claimed.
+func (s *CopySegmentMetaSuite) newClaimTestTask(taskID, jobID int64) {
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       taskID,
+		JobId:        jobID,
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+		NodeId:       NullNodeID,
+	})
+	s.NoError(s.copyMeta.AddTask(context.TODO(), task))
+}
+
+// TestClaimTaskDispatch_RevalidatesPreconditions is the regression for promoting
+// a stale observation into a second dispatch. The caller samples the task state,
+// its assignment, the job state and the pending-cleanup gate BEFORE
+// AssembleCopySegmentRequest, whose remote snapshot read can outlast several
+// inspector rounds while the task is invisible to the scheduler's dedup. The
+// claim is the only point that serializes a dispatch against its predecessor's
+// committed outcome, so every precondition has to be re-checked here — otherwise
+// a second dispatch reaches another node and its own cleanup deletes the
+// winner's output from the deterministic target keys the two share.
+func (s *CopySegmentMetaSuite) TestClaimTaskDispatch_RevalidatesPreconditions() {
+	testCases := []struct {
+		name      string
+		taskState datapb.CopySegmentTaskState
+		nodeID    int64
+	}{
+		{
+			name:      "already dispatched elsewhere",
+			taskState: datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+			nodeID:    7,
+		},
+		{
+			name:      "already completed",
+			taskState: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+			nodeID:    NullNodeID,
+		},
+		{
+			name:      "already failed",
+			taskState: datapb.CopySegmentTaskState_CopySegmentTaskFailed,
+			nodeID:    NullNodeID,
+		},
+		{
+			name:      "still pending but assigned",
+			taskState: datapb.CopySegmentTaskState_CopySegmentTaskPending,
+			nodeID:    7,
+		},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			s.addActiveCopyJob(100)
+			// One save for AddTask, one for the state the case sets up. A claim
+			// that persisted an epoch would exceed this expectation.
+			s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+			s.newClaimTestTask(1001, 100)
+			s.NoError(s.copyMeta.UpdateTask(context.TODO(), 1001,
+				UpdateCopyTaskState(tc.taskState),
+				UpdateCopyTaskNodeID(tc.nodeID)))
+
+			version, err := s.copyMeta.ClaimTaskDispatch(context.TODO(), 1001)
+			s.ErrorIs(err, errCopySegmentDispatchStale)
+			s.EqualValues(0, version)
+
+			// No epoch burned and no claim held: the refused dispatch leaves the
+			// task exactly as it found it.
+			s.EqualValues(0, s.copyMeta.GetTask(context.TODO(), 1001).GetTaskVersion())
+			s.False(s.copyMeta.(*copySegmentMeta).hasInFlightDispatch(1001))
+		})
+	}
+}
+
+// TestClaimTaskDispatch_RefusesInactiveJob covers the job-level half of the same
+// revalidation: a job that ended while the snapshot was being read must not get
+// another worker task written against a snapshot whose pin has been released.
+func (s *CopySegmentMetaSuite) TestClaimTaskDispatch_RefusesInactiveJob() {
+	for _, jobState := range []datapb.CopySegmentJobState{
+		datapb.CopySegmentJobState_CopySegmentJobFailed,
+		datapb.CopySegmentJobState_CopySegmentJobCompleted,
+	} {
+		s.Run(jobState.String(), func() {
+			s.SetupTest()
+			s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Once()
+			s.NoError(s.copyMeta.AddJob(context.TODO(), newTestCopyJob(100, jobState)))
+			s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+			s.newClaimTestTask(1001, 100)
+
+			version, err := s.copyMeta.ClaimTaskDispatch(context.TODO(), 1001)
+			s.ErrorIs(err, errCopySegmentDispatchStale)
+			s.EqualValues(0, version)
+			s.False(s.copyMeta.(*copySegmentMeta).hasInFlightDispatch(1001))
+		})
+	}
+}
+
+// TestClaimTaskDispatch_RefusesUnknownJob keeps a task whose job meta has already
+// forgotten from being dispatched: CommitTaskDispatch treats a missing job as
+// inactive, so a dispatch granted here could only ever be cleaned up again.
+func (s *CopySegmentMetaSuite) TestClaimTaskDispatch_RefusesUnknownJob() {
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+	s.newClaimTestTask(1001, 100)
+
+	version, err := s.copyMeta.ClaimTaskDispatch(context.TODO(), 1001)
+	s.ErrorIs(err, errCopySegmentDispatchStale)
+	s.EqualValues(0, version)
+	s.False(s.copyMeta.(*copySegmentMeta).hasInFlightDispatch(1001))
+}
+
+// TestClaimTaskDispatch_RefusesWhilePendingUntrackedDrop moves the
+// pending-cleanup gate under the serializing lock. Checked only at the caller,
+// it is sampled before the snapshot read, so a queued abort for an earlier
+// dispatch can be registered while this dispatch is still assembling — and that
+// abort deletes from the exact target keys this dispatch would write.
+func (s *CopySegmentMetaSuite) TestClaimTaskDispatch_RefusesWhilePendingUntrackedDrop() {
+	s.addActiveCopyJob(100)
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+	s.newClaimTestTask(1001, 100)
+
+	handler := &fakeUntrackedDropHandler{pending: map[int64]bool{1001: true}}
+	s.copyMeta.(*copySegmentMeta).setUntrackedDropHandler(handler)
+
+	version, err := s.copyMeta.ClaimTaskDispatch(context.TODO(), 1001)
+	s.ErrorIs(err, errCopySegmentDispatchStale)
+	s.EqualValues(0, version)
+	s.False(s.copyMeta.(*copySegmentMeta).hasInFlightDispatch(1001))
+
+	// Once the earlier dispatch is provably gone the claim succeeds.
+	handler.pending[1001] = false
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+	version, err = s.copyMeta.ClaimTaskDispatch(context.TODO(), 1001)
+	s.NoError(err)
+	s.EqualValues(1, version)
 }

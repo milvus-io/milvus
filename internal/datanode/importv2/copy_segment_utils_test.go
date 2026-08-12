@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -2123,6 +2124,39 @@ func TestTransformManifestPath(t *testing.T) {
 	assert.Contains(t, basePath, "111")
 	assert.Contains(t, basePath, "222")
 	assert.Contains(t, basePath, "2001")
+}
+
+// TestTransformManifestPath_ExternalRootMatchesSharedTransform pins the
+// invariant DataCoord relies on when it pre-registers the target manifest path
+// (deriveCopySegmentTargetManifestPath): the DataNode-side transform IS
+// snapshotstorage.TransformCopySegmentManifestPath applied to the request's
+// (SourceRootPath, TargetRootPath, target IDs) — byte for byte, for an
+// external source root where the root remap is not the identity.
+func TestTransformManifestPath_ExternalRootMatchesSharedTransform(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:   100,
+		PartitionId:    10,
+		SegmentId:      11,
+		SourceRootPath: "s3://srcbucket/bundle/files",
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId:   200,
+		PartitionId:    20,
+		SegmentId:      2001,
+		TargetRootPath: "files",
+	}
+	sourceManifest := packed.MarshalManifestPath("s3://srcbucket/bundle/files/insert_log/100/10/11", 7)
+
+	fromDataNode, err := transformManifestPath(sourceManifest, source, target)
+	require.NoError(t, err)
+	fromShared, err := snapshotstorage.TransformCopySegmentManifestPath(
+		sourceManifest, source.GetSourceRootPath(), target.GetTargetRootPath(),
+		target.GetCollectionId(), target.GetPartitionId(), target.GetSegmentId())
+	require.NoError(t, err)
+
+	assert.Equal(t, fromShared, fromDataNode)
+	assert.Equal(t, packed.MarshalManifestPath("files/insert_log/200/20/2001", 7), fromDataNode,
+		"the target manifest must be re-rooted under the target root, not left in the source bucket")
 }
 
 func TestTransformManifestPath_ExternalTable(t *testing.T) {

@@ -1468,6 +1468,59 @@ func (s *DataNodeServicesSuite) TestDropCopySegment_UnversionedPeerStillDrops() 
 	s.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 }
 
+// TestDropCopySegment_LegacyNonAbortDropOfLiveTaskAborts closes the remaining
+// rolling-upgrade combination: a legacy coordinator (no abort bit, no epoch)
+// converges a job by marking its side Failed and dropping the worker task while
+// the worker still runs it. Rejecting that drop would strand the task forever —
+// the legacy caller only logs the error, and the Drop RPC is the sole removal
+// path — so the datanode honors the release intent by aborting.
+func (s *DataNodeServicesSuite) TestDropCopySegment_LegacyNonAbortDropOfLiveTaskAborts() {
+	createReq := &datapb.CopySegmentRequest{
+		JobID:         303,
+		TaskID:        603,
+		TaskSlot:      1,
+		StorageConfig: s.storageConfig,
+		Sources:       []*datapb.CopySegmentSource{{CollectionId: 111, PartitionId: 222, SegmentId: 333}},
+		Targets:       []*datapb.CopySegmentTarget{{CollectionId: 444, PartitionId: 555, SegmentId: 666}},
+	}
+	status, err := s.node.CopySegment(s.ctx, createReq)
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	// Task is Pending/InProgress; the legacy drop carries neither field.
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 603, JobID: 303,
+	})
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	resp, err := s.node.QueryCopySegment(s.ctx, &datapb.QueryCopySegmentRequest{TaskID: 603})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+
+	// An epoch-stamped caller asking to release a live task is still refused:
+	// every current call site sets the abort bit for any non-release drop, so
+	// this is a caller bug, not an upgrade artifact.
+	createReq.TaskID = 604
+	createReq.TaskVersion = 3
+	status, err = s.node.CopySegment(s.ctx, createReq)
+	s.NoError(merr.CheckRPCCall(status, err))
+
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 604, JobID: 303, TaskVersion: 3,
+	})
+	s.Error(merr.CheckRPCCall(status, err))
+	s.ErrorContains(merr.CheckRPCCall(status, err), "cannot release copy segment task")
+
+	resp, err = s.node.QueryCopySegment(s.ctx, &datapb.QueryCopySegmentRequest{TaskID: 604})
+	s.NoError(err)
+	s.NotEqual(commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+
+	// Clean up the still-registered task.
+	status, err = s.node.DropCopySegment(s.ctx, &datapb.DropCopySegmentRequest{
+		TaskID: 604, JobID: 303, Abort: true, TaskVersion: 3,
+	})
+	s.NoError(merr.CheckRPCCall(status, err))
+}
+
 // TestCopySegment_RedispatchAdoptsNewerEpoch covers the same-node redispatch:
 // TaskManager keeps the first entry for a duplicate taskID, so the re-dispatched
 // copy is served by the task already running here. Unless that task adopts the
