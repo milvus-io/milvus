@@ -499,7 +499,7 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
-	).Return(&collectionInfo{schema: info}, nil)
+	).Return(&collectionInfo{Schema: info}, nil)
 
 	globalMetaCache = cache
 
@@ -637,17 +637,17 @@ func TestInsertTask_Function(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(&partitionInfo{
-		name:                "p1",
-		partitionID:         10,
-		createdTimestamp:    10001,
-		createdUtcTimestamp: 10002,
+		Name:                "p1",
+		PartitionID:         10,
+		CreatedTimestamp:    10001,
+		CreatedUtcTimestamp: 10002,
 	}, nil)
 	cache.On("GetCollectionInfo",
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
 		mock.Anything,
-	).Return(&collectionInfo{schema: info}, nil)
+	).Return(&collectionInfo{Schema: info}, nil)
 	globalMetaCache = cache
 	err = task.PreExecute(ctx)
 	assert.NoError(t, err)
@@ -673,8 +673,8 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 		}
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-			updateTimestamp: 100,
-			schema: mustNewSchemaInfo(&schemapb.CollectionSchema{
+			UpdateTimestamp: 100,
+			Schema: mustNewSchemaInfo(&schemapb.CollectionSchema{
 				Name: "fooooo",
 				Fields: []*schemapb.FieldSchema{
 					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -694,7 +694,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 	cache.On("GetDatabaseInfo",
 		mock.Anything,
 		mock.Anything,
-	).Return(&databaseInfo{properties: []*commonpb.KeyValuePair{}}, nil).Maybe()
+	).Return(&databaseInfo{Properties: []*commonpb.KeyValuePair{}}, nil).Maybe()
 	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil).Maybe()
 	ctx := context.Background()
 	rc := mocks.NewMockRootCoordClient(t)
@@ -731,14 +731,14 @@ func TestInsertTask_Namespace(t *testing.T) {
 		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Unset()
 		cache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Unset()
 		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-			schema: mustNewSchemaInfo(schemaWithNamespaceEnabled),
+			Schema: mustNewSchemaInfo(schemaWithNamespaceEnabled),
 		}, nil).Maybe()
 		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(mustNewSchemaInfo(schemaWithNamespaceEnabled), nil).Maybe()
 		cache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{
-			name:                "p1",
-			partitionID:         10,
-			createdTimestamp:    10001,
-			createdUtcTimestamp: 10002,
+			Name:                "p1",
+			PartitionID:         10,
+			CreatedTimestamp:    10001,
+			CreatedUtcTimestamp: 10002,
 		}, nil).Maybe()
 		namespace := "test"
 		it := insertTask{
@@ -778,14 +778,14 @@ func TestInsertTask_Namespace(t *testing.T) {
 		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Unset()
 		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Unset()
 		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-			schema: mustNewSchemaInfo(schemaWithNamespaceDisabled),
+			Schema: mustNewSchemaInfo(schemaWithNamespaceDisabled),
 		}, nil).Maybe()
 		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(mustNewSchemaInfo(schemaWithNamespaceDisabled), nil).Maybe()
 		cache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{
-			name:                "p1",
-			partitionID:         10,
-			createdTimestamp:    10001,
-			createdUtcTimestamp: 10002,
+			Name:                "p1",
+			PartitionID:         10,
+			CreatedTimestamp:    10001,
+			CreatedUtcTimestamp: 10002,
 		}, nil).Maybe()
 		it := insertTask{
 			ctx: context.Background(),

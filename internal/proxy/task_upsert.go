@@ -305,15 +305,15 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		if typeutil.IsStructSubField(fieldName) {
 			return merr.WrapErrParameterInvalidMsg("partial struct update is not supported for struct sub-field '%s'; use the whole struct field instead", fieldName)
 		}
-		if structSchema := it.schema.schemaHelper.GetStructArrayFieldFromName(fieldName); structSchema != nil {
+		if structSchema := it.schema.SchemaHelper.GetStructArrayFieldFromName(fieldName); structSchema != nil {
 			fieldData.FieldId = structSchema.GetFieldID()
 			fieldData.FieldName = fieldName
-			if err := validateWholeStructFieldDataForPartialUpdate(it.schema.schemaHelper, structSchema, fieldData, upsertIDSize); err != nil {
+			if err := validateWholeStructFieldDataForPartialUpdate(it.schema.SchemaHelper, structSchema, fieldData, upsertIDSize); err != nil {
 				return err
 			}
 			for _, subField := range fieldData.GetStructArrays().GetFields() {
 				if len(subField.GetValidData()) != 0 && subFieldHasData(subField) {
-					subFieldSchema, err := it.schema.schemaHelper.GetFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
+					subFieldSchema, err := it.schema.SchemaHelper.GetFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
 					if err != nil {
 						log.Info(ctx, "get struct sub-field schema failed", mlog.Err(err))
 						return err
@@ -331,7 +331,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			}
 			continue
 		}
-		fieldSchema, err := it.schema.schemaHelper.GetFieldFromName(fieldName)
+		fieldSchema, err := it.schema.SchemaHelper.GetFieldFromName(fieldName)
 		if err != nil {
 			log.Info(ctx, "get field schema failed", mlog.Err(err))
 			return err
@@ -371,7 +371,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	}
 
 	// Validate field data alignment before processing to prevent index out of range panic
-	if err := newValidateUtil().checkAligned(fieldsDataToCheckAligned, it.schema.schemaHelper, uint64(upsertIDSize)); err != nil {
+	if err := newValidateUtil().checkAligned(fieldsDataToCheckAligned, it.schema.SchemaHelper, uint64(upsertIDSize)); err != nil {
 		log.Warn(ctx, "check field data aligned failed", mlog.Err(err))
 		return err
 	}
@@ -448,7 +448,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				}
 			}
 
-			if it.schema.schemaHelper.GetStructArrayFieldFromName(existField.GetFieldName()) != nil {
+			if it.schema.SchemaHelper.GetStructArrayFieldFromName(existField.GetFieldName()) != nil {
 				if upsertField != nil {
 					if op != schemapb.FieldPartialUpdateOp_REPLACE {
 						return merr.WrapErrParameterInvalidMsg("op %s is not supported for struct field %q", op.String(), existField.GetFieldName())
@@ -460,7 +460,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				continue
 			}
 
-			fieldSchema, err := it.schema.schemaHelper.GetFieldFromName(existField.GetFieldName())
+			fieldSchema, err := it.schema.SchemaHelper.GetFieldFromName(existField.GetFieldName())
 			if err != nil {
 				log.Info(ctx, "get field schema failed", mlog.Err(err))
 				return err
@@ -1459,7 +1459,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 
 	if err := newValidateUtil(withNANCheck(), withOverflowCheck(), withMaxLenCheck(), withMaxCapCheck()).
-		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.schemaHelper, it.upsertMsg.InsertMsg.NRows()); err != nil {
+		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.SchemaHelper, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
 	}
 
@@ -1545,11 +1545,11 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	}
 
 	if it.schemaTimestamp != 0 {
-		if it.schemaTimestamp != colInfo.updateTimestamp {
+		if it.schemaTimestamp != colInfo.UpdateTimestamp {
 			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
 			log.Info(ctx, "collection schema mismatch", mlog.String("collectionName", collectionName),
 				mlog.Uint64("requestSchemaTs", it.schemaTimestamp),
-				mlog.Uint64("collectionSchemaTs", colInfo.updateTimestamp),
+				mlog.Uint64("collectionSchemaTs", colInfo.UpdateTimestamp),
 				mlog.Err(err))
 			return err
 		}
@@ -1609,7 +1609,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 				log.Warn(ctx, "get partition info failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 				return err
 			}
-			it.req.PartitionName = pinfo.name
+			it.req.PartitionName = pinfo.Name
 		}
 	}
 

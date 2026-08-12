@@ -6919,7 +6919,7 @@ func TestFailMetricLabel(t *testing.T) {
 func TestResolveTimezone(t *testing.T) {
 	ctx := context.Background()
 	colInfoWithTz := &collectionInfo{
-		properties: []*commonpb.KeyValuePair{
+		Properties: []*commonpb.KeyValuePair{
 			{Key: common.TimezoneKey, Value: "America/New_York"},
 		},
 	}

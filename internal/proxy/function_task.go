@@ -110,12 +110,12 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 			mlog.Err(err))
 		return err
 	}
-	if err := rejectExternalCollectionFunctionMutation(coll.schema.CollectionSchema); err != nil {
+	if err := rejectExternalCollectionFunctionMutation(coll.Schema.CollectionSchema); err != nil {
 		return err
 	}
 	funcExist := false
 	newFunctions := []*schemapb.FunctionSchema{}
-	for _, fSchema := range coll.schema.Functions {
+	for _, fSchema := range coll.Schema.Functions {
 		if t.FunctionName == fSchema.Name {
 			if fSchema.Type == schemapb.FunctionType_BM25 {
 				return merr.WrapErrParameterInvalidMsg("currently does not support alter BM25 function")
@@ -133,7 +133,7 @@ func (t *alterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("function %s not found", t.FunctionName)
 	}
 
-	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)
+	newColl := proto.Clone(coll.Schema.CollectionSchema).(*schemapb.CollectionSchema)
 	newColl.Functions = newFunctions
 	if err := validator.ValidateFunction(newColl, t.FunctionName, false); err != nil {
 		return err
@@ -163,6 +163,6 @@ func getCollectionInfo(ctx context.Context, dbName string, collectionName string
 	if err != nil {
 		return nil, err
 	}
-	coll.schema.DbName = dbName
+	coll.Schema.DbName = dbName
 	return coll, nil
 }

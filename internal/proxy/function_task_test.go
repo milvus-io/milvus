@@ -223,7 +223,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		coll := &collectionInfo{
-			schema: &schemaInfo{
+			Schema: &schemaInfo{
 				CollectionSchema: &schemapb.CollectionSchema{
 					Functions: []*schemapb.FunctionSchema{
 						{Name: req.FunctionName, Type: schemapb.FunctionType_BM25},
@@ -291,7 +291,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			AlterCollectionFunctionRequest: req,
 		}
 		coll := &collectionInfo{
-			schema: &schemaInfo{
+			Schema: &schemaInfo{
 				CollectionSchema: &schemapb.CollectionSchema{
 					Fields: []*schemapb.FieldSchema{
 						{Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text_col"},
@@ -335,7 +335,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			AlterCollectionFunctionRequest: req,
 		}
 		coll := &collectionInfo{
-			schema: &schemaInfo{
+			Schema: &schemaInfo{
 				CollectionSchema: &schemapb.CollectionSchema{
 					Functions: []*schemapb.FunctionSchema{
 						// identity matches the request; a valid alter changes only params
@@ -373,7 +373,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			AlterCollectionFunctionRequest: req,
 		}
 		coll := &collectionInfo{
-			schema: &schemaInfo{
+			Schema: &schemaInfo{
 				CollectionSchema: &schemapb.CollectionSchema{
 					Functions: []*schemapb.FunctionSchema{
 						{Name: "test_function", Type: schemapb.FunctionType_TextEmbedding, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"vec"}},
