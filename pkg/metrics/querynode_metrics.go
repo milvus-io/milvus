@@ -318,7 +318,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "read_task_ready_len",
-			Help:      "number of ready read tasks in readyQueue",
+			Help:      "number of read tasks waiting in the scheduler across regular and requery queues",
 		}, []string{
 			nodeIDLabelName,
 		})
@@ -328,7 +328,17 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "read_task_ready_nq",
-			Help:      "total NQ of ready read tasks in scheduler queue",
+			Help:      "total NQ of read tasks waiting in the scheduler across regular and requery queues",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeReadTaskRequeryReadyLen = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_requery_ready_len",
+			Help:      "number of requery read tasks waiting in the scheduler, including a task staged for execution handoff",
 		}, []string{
 			nodeIDLabelName,
 		})
@@ -1022,6 +1032,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeLoadSegmentLatency)
 	registry.MustRegister(QueryNodeReadTaskReadyLen)
 	registry.MustRegister(QueryNodeReadTaskReadyNQ)
+	registry.MustRegister(QueryNodeReadTaskRequeryReadyLen)
 	registry.MustRegister(QueryNodeReadTaskQueueDuration)
 	registry.MustRegister(QueryNodeReadTaskExecuteDuration)
 	registry.MustRegister(QueryNodeReadTaskConcurrency)
