@@ -5699,7 +5699,7 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RestoreRBAC")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "RestoreRBAC", mlog.Any("req", req))
+	mlog.Debug(ctx, "RestoreRBAC", mlog.Any("req", redactRestoreRBACRequestForLog(req)))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -7352,8 +7352,8 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	if srcSet != specSet {
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrParameterInvalidMsg(
-				"external_source and external_spec must be both provided or both omitted on refresh (got source=%q, spec=%q)",
-				req.GetExternalSource(), req.GetExternalSpec())),
+				"external_source and external_spec must be both provided or both omitted on refresh (source_set=%t, spec_set=%t)",
+				srcSet, specSet)),
 		}, nil
 	}
 

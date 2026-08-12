@@ -224,7 +224,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	var aggs []agg.AggregateBase
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, aggs, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
 	if err != nil {
-		log.Warn(ctx, "translate output fields failed", mlog.Err(err), mlog.Any("schema", t.schema))
+		log.Warn(ctx, "translate output fields failed", mlog.Err(err), mlog.FieldSchema(t.schema.CollectionSchema))
 		return err
 	}
 	if len(aggs) > 0 {
