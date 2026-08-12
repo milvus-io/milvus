@@ -19,7 +19,7 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from common.external_table_common import build_external_spec, get_minio_config
 from ml_dtypes import bfloat16
-from pymilvus import DataType, Function, FunctionType
+from pymilvus import DataType, Function, FunctionType, MilvusException
 
 pytestmark = pytest.mark.xdist_group(name="milvus_table_external")
 
@@ -661,6 +661,26 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
 
         self.delete(client, source, ids=[0])
         self.upsert(client, source, [_core_row(1, marker=9), _core_row(SMALL_ROWS, marker=9)])
+
+        source_rows = self.query(
+            client,
+            source,
+            filter=f"pk in [0, 1, {SMALL_ROWS}]",
+            output_fields=["pk", "group_id", "score", "tag", "payload", "numbers"],
+            consistency_level="Strong",
+            limit=10,
+        )[0]
+        rows_by_pk = {_row_value(row, "pk"): row for row in source_rows}
+        assert set(rows_by_pk) == {1, SMALL_ROWS}
+        for row_id in (1, SMALL_ROWS):
+            expected = _core_row(row_id, marker=9)
+            actual = rows_by_pk[row_id]
+            assert _row_value(actual, "group_id") == expected["group_id"]
+            assert float(_row_value(actual, "score")) == pytest.approx(expected["score"], abs=1e-5)
+            assert _row_value(actual, "tag") == expected["tag"]
+            assert _json_value(_row_value(actual, "payload")) == expected["payload"]
+            assert list(_row_value(actual, "numbers")) == expected["numbers"]
+
         snapshot = self._create_snapshot_ref(client, source, cfg, suffix="unflushed")
 
         schema = self._build_core_target_schema(client, snapshot, cfg, real_pk=True)
@@ -953,13 +973,12 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
             kwargs["pk_external_field"] = "group_id"
             kwargs["group_external_field"] = "pk"
         schema = self._build_core_target_schema(client, snapshot, cfg, **kwargs)
-        self.create_collection(
-            client,
-            collection_name=target,
-            schema=schema,
-            check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: expected_message},
-        )
+        if target not in self.tear_down_collection_names:
+            self.tear_down_collection_names.append(target)
+        with pytest.raises(MilvusException) as exc_info:
+            client.create_collection(collection_name=target, schema=schema)
+        assert exc_info.value.code == 1100
+        assert expected_message in str(exc_info.value)
         self._assert_collection_absent(client, target)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1294,6 +1313,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         assert row["varchar_alias"] == expected["varchar_field"]
         assert _timestamp_value(row["timestamptz_alias"]) == _timestamp_value(expected["timestamptz_field"])
         assert _json_value(row["json_alias"]) == expected["json_field"]
+        assert row["geometry_alias"] == expected["geometry_field"]
         assert list(row["array_alias"]) == expected["array_int64"]
 
         filter_cases = (
