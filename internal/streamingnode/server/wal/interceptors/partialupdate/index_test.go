@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -17,7 +19,7 @@ func snapshotPKVersionIndex(idx *pkVersionIndex) (size int, withinCapacity bool)
 	idx.channels.Range(func(_, value any) bool {
 		channel := value.(*vchannelPKVersionIndex)
 		channel.mu.Lock()
-		size += len(channel.versions)
+		size += len(channel.int64Versions) + len(channel.stringVersions)
 		channel.mu.Unlock()
 		return true
 	})
@@ -39,6 +41,25 @@ func TestVersionByteBudget(t *testing.T) {
 	require.Panics(t, func() {
 		budget.release(1)
 	})
+}
+
+func TestVersionByteBudgetRecordsMissedWriteOnce(t *testing.T) {
+	missed := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "test_partial_update_missed_writes_total",
+	})
+	budget := newVersionByteBudgetWithMetrics(
+		estimatedVersionEntryFixedBytes,
+		nil,
+		missed,
+	)
+	idx := newPKVersionIndexWithBudget(30*time.Second, budget)
+
+	idx.UpdateAllTyped("v1", primaryKeys{
+		kind:        primaryKeyKindInt64,
+		int64Values: []int64{1, 2, 3},
+	}, 100)
+
+	require.Equal(t, float64(1), testutil.ToFloat64(missed))
 }
 
 func TestVersionByteBudgetConcurrentReservations(t *testing.T) {
@@ -218,7 +239,8 @@ func TestPKVersionIndexMaintainsOneExpirationPerPK(t *testing.T) {
 	channel := idx.channel("v1")
 	channel.mu.Lock()
 	defer channel.mu.Unlock()
-	require.Len(t, channel.versions, 1)
+	require.Len(t, channel.int64Versions, 1)
+	require.Empty(t, channel.stringVersions)
 	require.Len(t, channel.expirations, 1)
 }
 

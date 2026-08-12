@@ -3,18 +3,24 @@ package partialupdate
 import (
 	"context"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const interceptorName = "partialupdate"
 
 var _ interceptors.InterceptorBuilder = (*interceptorBuilder)(nil)
 
-type interceptorBuilder struct{}
+type interceptorBuilder struct {
+	versionIndexBudget *versionByteBudget
+}
 
 type primaryKeyDescriptorGetter interface {
 	GetPrimaryKeyDescriptor(collectionID int64, schemaVersion int32) (shards.PrimaryKeyDescriptor, error)
@@ -22,11 +28,19 @@ type primaryKeyDescriptorGetter interface {
 
 // NewInterceptorBuilder creates one per-WAL partial-update write tracker.
 func NewInterceptorBuilder() interceptors.InterceptorBuilder {
-	return &interceptorBuilder{}
+	maxBytes := paramtable.Get().StreamingCfg.PartialUpdateVersionIndexMaxBytes.GetAsSize()
+	labels := prometheus.Labels{metrics.NodeIDLabelName: paramtable.GetStringNodeID()}
+	used := metrics.StreamingNodePartialUpdateVersionIndexBytes.With(labels)
+	limit := metrics.StreamingNodePartialUpdateVersionIndexMaxBytes.With(labels)
+	missed := metrics.StreamingNodePartialUpdateVersionIndexMissedWrites.With(labels)
+	limit.Set(float64(maxBytes))
+	return &interceptorBuilder{
+		versionIndexBudget: newVersionByteBudgetWithMetrics(maxBytes, used, missed),
+	}
 }
 
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
-	state := newPartialUpdateState(defaultVersionIndexTTL, defaultVersionIndexBudgetBytes)
+	state := newPartialUpdateStateWithBudget(defaultVersionIndexTTL, b.versionIndexBudget)
 	state.channel = param.ChannelInfo
 	pkDescriptorGetter, _ := param.ShardManager.(primaryKeyDescriptorGetter)
 	return &appendInterceptor{
@@ -98,28 +112,31 @@ func (i *appendInterceptor) appendWrite(
 	msg message.MutableMessage,
 	appendOp interceptors.Append,
 ) (message.MessageID, error) {
-	meta, err := message.ExtractPartialUpdateCAS(msg)
-	if err != nil {
-		return nil, status.NewUnrecoverableError("partial update CAS proof is malformed: %v", err)
-	}
-	if meta != nil && msg.TxnContext() == nil {
+	markedCAS := message.HasPartialUpdateCAS(msg)
+	if markedCAS && msg.TxnContext() == nil {
 		return nil, status.NewUnrecoverableError("partial update CAS message must be transactional")
 	}
 
-	var pks []any
+	var pks primaryKeys
+	var metaEncoded string
 	var casScope casInsertScope
 	var fenceCollectionID int64
 	var droppedCollectionID int64
-	if meta != nil {
-		pks, casScope, err = extractPKsFromCASInsert(msg, i.pkDescriptorGetter)
+	var err error
+	if markedCAS {
+		pks, casScope, metaEncoded, err = extractPKsFromCASInsertWithContext(ctx, msg, i.pkDescriptorGetter)
 		if err != nil {
 			return nil, err
+		}
+		meta, err := message.DecodePartialUpdateCASMetadata(metaEncoded)
+		if err != nil {
+			return nil, status.NewUnrecoverableError("partial update CAS proof is malformed: %v", err)
 		}
 		if err := i.state.recordTxnCAS(msg.TxnContext().TxnID, meta, casScope); err != nil {
 			return nil, err
 		}
 	} else {
-		extractedPKs, ok, err := extractPKs(msg)
+		extractedPKs, ok, err := extractPKsWithContext(ctx, msg)
 		if err != nil {
 			return nil, err
 		}
@@ -136,7 +153,7 @@ func (i *appendInterceptor) appendWrite(
 			}
 			droppedCollectionID = collectionID
 		} else if msg.MessageType() == message.MessageTypeInsert {
-			pks, fenceCollectionID, err = extractPKsFromOrdinaryInsert(msg, i.pkDescriptorGetter)
+			pks, fenceCollectionID, err = extractPKsFromOrdinaryInsertWithContext(ctx, msg, i.pkDescriptorGetter)
 			if err != nil {
 				return nil, err
 			}
@@ -157,13 +174,13 @@ func (i *appendInterceptor) appendWrite(
 		if msg.MessageType() == message.MessageTypeBeginTxn {
 			i.state.recordTxnBegin(txnID)
 		}
-		i.state.recordTxnWrites(txnID, pks)
+		i.state.recordTxnWritesTyped(txnID, pks)
 		i.state.recordTxnFence(txnID, fenceCollectionID)
 		return msgID, nil
 	}
 
-	if len(pks) > 0 {
-		i.state.pkVersions.UpdateAll(msg.VChannel(), pks, msg.TimeTick())
+	if pks.Len() > 0 {
+		i.state.pkVersions.UpdateAllTyped(msg.VChannel(), pks, msg.TimeTick())
 	} else {
 		i.state.pkVersions.Advance(msg.TimeTick())
 	}
@@ -176,4 +193,6 @@ func (i *appendInterceptor) appendWrite(
 	return msgID, nil
 }
 
-func (i *appendInterceptor) Close() {}
+func (i *appendInterceptor) Close() {
+	i.state.pkVersions.Close()
+}

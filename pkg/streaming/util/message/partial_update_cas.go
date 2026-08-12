@@ -1,6 +1,8 @@
 package message
 
 import (
+	"context"
+
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -93,12 +95,33 @@ func ExtractPartialUpdateCAS(msg BasicMessage) (*messagespb.PartialUpdateCAS, er
 	return meta, nil
 }
 
+// DecodePartialUpdateCASMetadata decodes the serialized CAS metadata stored in
+// the Insert body properties map.
+func DecodePartialUpdateCASMetadata(encoded string) (*messagespb.PartialUpdateCAS, error) {
+	meta := &messagespb.PartialUpdateCAS{}
+	if err := DecodeProto(encoded, meta); err != nil {
+		return nil, merr.WrapErrServiceInternalErr(err, "decode partial update CAS metadata")
+	}
+	if err := validatePartialUpdateCAS(meta); err != nil {
+		return nil, err
+	}
+	return meta, nil
+}
+
 func extractPartialUpdateCASBody(msg BasicMessage) (string, error) {
 	if msg.MessageType() != MessageTypeInsert {
 		return "", merr.WrapErrServiceInternalMsg("partial update CAS marker requires an insert message")
 	}
+	payload, err := DecodePayload(context.Background(), msg)
+	if err != nil {
+		return "", merr.WrapErrServiceInternalErr(err, "decode partial update insert body")
+	}
+	return extractPartialUpdateCASPayload(payload)
+}
+
+func extractPartialUpdateCASPayload(payload []byte) (string, error) {
 	body := &msgpb.InsertRequest{}
-	if err := proto.Unmarshal(msg.Payload(), body); err != nil {
+	if err := proto.Unmarshal(payload, body); err != nil {
 		return "", merr.WrapErrServiceInternalErr(err, "decode partial update insert body")
 	}
 	properties := body.GetBase().GetProperties()

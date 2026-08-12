@@ -24,8 +24,18 @@ type partialUpdateState struct {
 }
 
 func newPartialUpdateState(versionIndexTTL time.Duration, maxVersionIndexBytes int64) *partialUpdateState {
+	return newPartialUpdateStateWithBudget(
+		versionIndexTTL,
+		newVersionByteBudget(maxVersionIndexBytes),
+	)
+}
+
+func newPartialUpdateStateWithBudget(
+	versionIndexTTL time.Duration,
+	versionIndexBudget *versionByteBudget,
+) *partialUpdateState {
 	return &partialUpdateState{
-		pkVersions:          newPKVersionIndex(versionIndexTTL, maxVersionIndexBytes),
+		pkVersions:          newPKVersionIndexWithBudget(versionIndexTTL, versionIndexBudget),
 		fences:              newCollectionFenceIndex(),
 		incompleteTxnFences: newVChannelFenceIndex(),
 		txns:                make(map[message.TxnID]*pendingTxn),
@@ -86,7 +96,7 @@ func (s *partialUpdateState) validateCommit(msg message.MutableMessage, txnID me
 			txnID,
 		)
 	}
-	if len(txnState.pks) == 0 {
+	if txnState.pks.Len() == 0 {
 		return nil, status.NewUnrecoverableError("partial update transaction %d has no primary key writes", txnID)
 	}
 	if txnState.fenceCollection != 0 && txnState.collectionID != txnState.fenceCollection {
@@ -110,7 +120,7 @@ func (s *partialUpdateState) validateCommit(msg message.MutableMessage, txnID me
 	if err := s.incompleteTxnFences.Verify(msg.VChannel(), txnState.meta.GetReadTs()); err != nil {
 		return nil, err
 	}
-	if err := s.pkVersions.Verify(msg.VChannel(), txnState.pks, txnState.meta.GetReadTs(), msg.TimeTick()); err != nil {
+	if err := s.pkVersions.VerifyTyped(msg.VChannel(), txnState.pks, txnState.meta.GetReadTs(), msg.TimeTick()); err != nil {
 		return nil, err
 	}
 	if err := s.fences.Verify(msg.VChannel(), txnState.collectionID, txnState.meta.GetReadTs()); err != nil {
@@ -125,8 +135,8 @@ func (s *partialUpdateState) publishCommit(msg message.MutableMessage, txnState 
 		s.incompleteTxnFences.Update(msg.VChannel(), msg.TimeTick())
 		return
 	}
-	if len(txnState.pks) > 0 {
-		s.pkVersions.UpdateAll(msg.VChannel(), txnState.pks, msg.TimeTick())
+	if txnState.pks.Len() > 0 {
+		s.pkVersions.UpdateAllTyped(msg.VChannel(), txnState.pks, msg.TimeTick())
 	} else {
 		s.pkVersions.Advance(msg.TimeTick())
 	}
@@ -139,7 +149,7 @@ func (s *partialUpdateState) publishCommit(msg message.MutableMessage, txnState 
 // transaction. observedBegin distinguishes a complete runtime write set from
 // a recovered transaction for which only a body suffix or CommitTxn was seen.
 type pendingTxn struct {
-	pks               []any
+	pks               primaryKeys
 	meta              *messagespb.PartialUpdateCAS
 	collectionID      int64
 	schemaVersion     int32
@@ -158,14 +168,22 @@ func (s *partialUpdateState) txnLocked(txnID message.TxnID) *pendingTxn {
 	return txnState
 }
 
-func (s *partialUpdateState) recordTxnWrites(txnID message.TxnID, pks []any) {
-	if len(pks) == 0 {
+func (s *partialUpdateState) recordTxnWritesTyped(txnID message.TxnID, pks primaryKeys) {
+	if pks.Len() == 0 {
 		return
 	}
 	s.txnMu.Lock()
 	defer s.txnMu.Unlock()
 	txnState := s.txnLocked(txnID)
-	txnState.pks = append(txnState.pks, pks...)
+	txnState.pks.append(pks)
+}
+
+func (s *partialUpdateState) recordTxnWrites(txnID message.TxnID, pks []any) {
+	keys, err := primaryKeysFromAny(pks)
+	if err != nil {
+		panic(err)
+	}
+	s.recordTxnWritesTyped(txnID, keys)
 }
 
 func (s *partialUpdateState) recordTxnBegin(txnID message.TxnID) {
@@ -244,7 +262,7 @@ func (s *partialUpdateState) getTxn(txnID message.TxnID) *pendingTxn {
 		return nil
 	}
 	return &pendingTxn{
-		pks:               append([]any(nil), txnState.pks...),
+		pks:               txnState.pks.clone(),
 		meta:              cloneCASMeta(txnState.meta),
 		collectionID:      txnState.collectionID,
 		schemaVersion:     txnState.schemaVersion,

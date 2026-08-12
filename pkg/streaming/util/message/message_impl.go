@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type messageImpl struct {
@@ -43,20 +44,54 @@ func (m *messageImpl) MessageTypeWithVersion() MessageTypeWithVersion {
 // Payload returns payload of current message.
 // If the message is encrypted, it will be decrypted with automatic retry for transient KMS errors.
 func (m *messageImpl) Payload() []byte {
-	if ch := m.cipherHeader(); ch != nil {
-		// Use getDecryptorWithRetry for resilient decryption with automatic retry
-		// for transient KMS key errors (e.g., temporarily invalid/revoked keys)
-		decryptor, err := getDecryptorWithRetry(ch.EzId, ch.CollectionId, ch.SafeKey)
+	payload, err := m.decodePayload(context.Background())
+	if err != nil {
+		panic(fmt.Sprintf("can not decode message payload: %s", err))
+	}
+	return payload
+}
+
+// DecodePayload returns the message payload without converting decryption
+// failures into a process-wide panic. It is intended for append-path callers
+// that must reject one message when its encrypted body cannot be read.
+func DecodePayload(ctx context.Context, msg BasicMessage) ([]byte, error) {
+	if msg == nil {
+		return nil, merr.WrapErrServiceInternalMsg("message is nil")
+	}
+	if decoder, ok := msg.(interface {
+		decodePayload(context.Context) ([]byte, error)
+	}); ok {
+		return decoder.decodePayload(ctx)
+	}
+	return msg.Payload(), nil
+}
+
+func (m *messageImpl) decodePayload(ctx context.Context) ([]byte, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	ch, err := m.decodeCipherHeader()
+	if err != nil {
+		return nil, err
+	}
+	if ch != nil {
+		decryptor, err := getDecryptorWithRetryContext(ctx, ch.EzId, ch.CollectionId, ch.SafeKey)
 		if err != nil {
-			panic(fmt.Sprintf("can not get decryptor for message: %s", err))
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		payload, err := decryptor.Decrypt(m.payload)
 		if err != nil {
-			panic(fmt.Sprintf("can not decrypt message: %s", err))
+			return nil, err
 		}
-		return payload
+		return payload, nil
 	}
-	return m.payload
+	return m.payload, nil
 }
 
 // Properties returns the message properties.
@@ -365,15 +400,23 @@ func (m *messageImpl) broadcastHeader() *messagespb.BroadcastHeader {
 
 // cipherHeader returns the cipher header of current message.
 func (m *messageImpl) cipherHeader() *messagespb.CipherHeader {
-	value, ok := m.properties.Get(messageCipherHeader)
-	if !ok {
-		return nil
-	}
-	header := &messagespb.CipherHeader{}
-	if err := DecodeProto(value, header); err != nil {
+	header, err := m.decodeCipherHeader()
+	if err != nil {
 		panic("can not decode cipher header")
 	}
 	return header
+}
+
+func (m *messageImpl) decodeCipherHeader() (*messagespb.CipherHeader, error) {
+	value, ok := m.properties.Get(messageCipherHeader)
+	if !ok {
+		return nil, nil
+	}
+	header := &messagespb.CipherHeader{}
+	if err := DecodeProto(value, header); err != nil {
+		return nil, err
+	}
+	return header, nil
 }
 
 // SplitIntoMutableMessage splits the current broadcast message into multiple messages.

@@ -6,13 +6,13 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestExtractPKsFromDelete(t *testing.T) {
@@ -179,14 +179,33 @@ func TestExtractPKsFromInsert(t *testing.T) {
 		requireUnrecoverable(t, err)
 	})
 
-	t.Run("skip unrelated field", func(t *testing.T) {
-		pks, err := extractPKsFromFieldData([]*schemapb.FieldData{
-			{FieldId: 101},
-			int64PKFieldData(10),
-		}, 100)
-		require.NoError(t, err)
-		require.Equal(t, []any{int64(10)}, pks)
-	})
+}
+
+func TestExtractPKsFromInsertSkipsVectorPayload(t *testing.T) {
+	pkField := protowire.AppendTag(nil, fieldDataFieldIDField, protowire.VarintType)
+	pkField = protowire.AppendVarint(pkField, 100)
+	longArray := protowire.AppendTag(nil, longArrayDataField, protowire.BytesType)
+	packedPKs := protowire.AppendVarint(nil, 10)
+	packedPKs = protowire.AppendVarint(packedPKs, 20)
+	longArray = protowire.AppendBytes(longArray, packedPKs)
+	scalars := protowire.AppendTag(nil, scalarLongDataField, protowire.BytesType)
+	scalars = protowire.AppendBytes(scalars, longArray)
+	pkField = protowire.AppendTag(pkField, fieldDataScalarsField, protowire.BytesType)
+	pkField = protowire.AppendBytes(pkField, scalars)
+
+	vectorField := protowire.AppendTag(nil, fieldDataFieldIDField, protowire.VarintType)
+	vectorField = protowire.AppendVarint(vectorField, 101)
+	vectorField = protowire.AppendTag(vectorField, 4, protowire.BytesType)
+	vectorField = protowire.AppendBytes(vectorField, []byte{0xff})
+
+	payload := protowire.AppendTag(nil, insertFieldsDataFieldNumber, protowire.BytesType)
+	payload = protowire.AppendBytes(payload, pkField)
+	payload = protowire.AppendTag(payload, insertFieldsDataFieldNumber, protowire.BytesType)
+	payload = protowire.AppendBytes(payload, vectorField)
+
+	pks, err := scanInsertPKs(payload, 100, false)
+	require.NoError(t, err)
+	require.Equal(t, []int64{10, 20}, pks.int64Values)
 }
 
 func TestExtractPKsFromCASInsert(t *testing.T) {
@@ -364,6 +383,13 @@ func TestExtractPKsFromCASInsertErrors(t *testing.T) {
 		_, _, err := extractPKsFromCASInsert(newInsertMessage([]*schemapb.FieldData{field}), validGetter())
 		requireUnrecoverable(t, err)
 	})
+
+	t.Run("declared primary key type mismatch", func(t *testing.T) {
+		field := int64PKFieldData(10)
+		field.Type = schemapb.DataType_VarChar
+		_, _, err := extractPKsFromCASInsert(newInsertMessage([]*schemapb.FieldData{field}), validGetter())
+		requireUnrecoverable(t, err)
+	})
 }
 
 func TestExtractPKsFromOrdinaryInsertErrors(t *testing.T) {
@@ -411,6 +437,25 @@ func TestExtractPKsFromOrdinaryInsertErrors(t *testing.T) {
 		})
 		requireUnrecoverable(t, err)
 	})
+}
+
+func TestExtractPKsFromOrdinaryInsertAllowsMissingDeclaredType(t *testing.T) {
+	field := int64PKFieldData(10)
+	field.Type = schemapb.DataType_None
+
+	pks, fenceCollectionID, err := extractPKsFromOrdinaryInsert(
+		newInsertMessage([]*schemapb.FieldData{field}),
+		&staticPrimaryKeyDescriptorGetter{
+			descriptor: shards.PrimaryKeyDescriptor{
+				FieldID:  100,
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, []any{int64(10)}, pks)
+	require.Zero(t, fenceCollectionID)
 }
 
 func TestExtractCollectionFenceID(t *testing.T) {
@@ -509,27 +554,6 @@ func TestExtractDropCollectionIDReturnsEmptyForMalformedMessage(t *testing.T) {
 	collectionID, ok := extractDropCollectionID(newDropCollectionMessage(10))
 	require.True(t, ok)
 	require.Zero(t, collectionID)
-}
-
-func TestPKsFromIDsRejectsNilArraysAndPK(t *testing.T) {
-	_, err := pksFromIDs(&schemapb.IDs{
-		IdField: &schemapb.IDs_IntId{},
-	})
-	requireUnrecoverable(t, err)
-
-	_, err = pksFromIDs(&schemapb.IDs{
-		IdField: &schemapb.IDs_StrId{},
-	})
-	requireUnrecoverable(t, err)
-
-	patch := mockey.Mock(typeutil.GetPK).Return(nil).Build()
-	defer patch.UnPatch()
-	_, err = pksFromIDs(&schemapb.IDs{
-		IdField: &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{Data: []int64{10}},
-		},
-	})
-	requireUnrecoverable(t, err)
 }
 
 type staticPrimaryKeyDescriptorGetter struct {
