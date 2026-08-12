@@ -52,7 +52,7 @@ metadata, approval policy, and template.
 
 ## Validation
 
-Pull requests validate deterministic local documentation links. Design-document
+Scheduled and manually triggered checks validate deterministic local documentation links. Design-document
 pull requests also receive automated classification, advisory metadata
 reminders, and the additional approval policy described in the design-document
 guide.
