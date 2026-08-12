@@ -899,6 +899,112 @@ func TestDocInDocOutInsert(t *testing.T) {
 	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
 }
 
+func TestTextFieldDMLV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	collSchema := generateTextCollectionSchema(false)
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         collSchema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+
+	assertTextFieldData := func(fieldsData []*schemapb.FieldData) {
+		textFieldData := getFieldDataByName(fieldsData, FieldText)
+		require.NotNil(t, textFieldData)
+		assert.Equal(t, schemapb.DataType_Text, textFieldData.GetType())
+		assert.Equal(t, []string{"rest text value"}, textFieldData.GetScalars().GetStringData().GetData())
+	}
+	mp.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+		assertTextFieldData(req.GetFieldsData())
+		return &milvuspb.MutationResult{
+			Status:    commonSuccessStatus,
+			InsertCnt: 1,
+			IDs:       generateIDs(schemapb.DataType_Int64, 1),
+		}, nil
+	}).Once()
+	mp.EXPECT().Upsert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+		assertTextFieldData(req.GetFieldsData())
+		return &milvuspb.MutationResult{
+			Status:    commonSuccessStatus,
+			UpsertCnt: 1,
+			IDs:       generateIDs(schemapb.DataType_Int64, 1),
+		}, nil
+	}).Once()
+
+	testEngine := initHTTPServerV2(mp, false)
+	requestBody := []byte(`{
+		"collectionName": "book",
+		"data": [{
+			"book_id": 1,
+			"word_count": 10,
+			"book_intro": [0.1, 0.2],
+			"text_field": "rest text value"
+		}]
+	}`)
+	for _, action := range []string{InsertAction, UpsertAction} {
+		testcase := requestBodyTestCase{
+			path:        versionalV2(EntityCategory, action),
+			requestBody: requestBody,
+		}
+		sendReqAndVerify(t, testEngine, action, http.MethodPost, testcase)
+	}
+}
+
+func TestTextFieldQueryV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	collSchema := generateTextCollectionSchema(false)
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         collSchema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{
+		Status:       commonSuccessStatus,
+		OutputFields: []string{FieldText},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Text,
+				FieldName: FieldText,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: []string{"rest query text"}},
+						},
+					},
+				},
+			},
+		},
+	}, nil).Once()
+
+	testEngine := initHTTPServerV2(mp, false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, QueryAction), bytes.NewReader([]byte(`{
+		"collectionName": "book",
+		"filter": "book_id > 0",
+		"outputFields": ["text_field"],
+		"limit": 10
+	}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	resp := map[string]interface{}{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, float64(0), resp[HTTPReturnCode])
+	data := resp[HTTPReturnData].([]interface{})
+	require.Len(t, data, 1)
+	assert.Equal(t, "rest query text", data[0].(map[string]interface{})[FieldText])
+}
+
 func TestDocInDocOutInsertInvalid(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit

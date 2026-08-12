@@ -48,6 +48,7 @@ const (
 	FieldBookIntro = "book_intro"
 	FieldVarchar   = "varchar_field"
 	FieldNarrowInt = "narrow_int"
+	FieldText      = "text_field"
 )
 
 var DefaultScores = []float32{0.01, 0.04, 0.09}
@@ -175,6 +176,17 @@ func hasStructArrayInt64Value(fieldsData []*schemapb.FieldData, structName, subN
 		}
 	}
 	return false
+}
+
+func generateTextCollectionSchema(nullable bool) *schemapb.CollectionSchema {
+	coll := generateCollectionSchema(schemapb.DataType_Int64, false, false)
+	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+		FieldID:  common.StartOfUserFieldID + 10,
+		Name:     FieldText,
+		DataType: schemapb.DataType_Text,
+		Nullable: nullable,
+	})
+	return coll
 }
 
 func generateDocInDocOutCollectionSchema(primaryDataType schemapb.DataType) *schemapb.CollectionSchema {
@@ -1319,6 +1331,103 @@ func TestInsertWithNullableField(t *testing.T) {
 	assert.Equal(t, len(coll.Fields), len(fieldData))
 }
 
+func TestTextFieldDMLConversion(t *testing.T) {
+	longText := strings.Repeat("x", 64*1024+1)
+	coll := generateTextCollectionSchema(true)
+	body, err := wrapRequestBody([]map[string]interface{}{
+		{FieldBookID: int64(1), FieldWordCount: int64(10), FieldBookIntro: []float32{0.1, 0.2}, FieldText: "short text"},
+		{FieldBookID: int64(2), FieldWordCount: int64(20), FieldBookIntro: []float32{0.3, 0.4}, FieldText: nil},
+		{FieldBookID: int64(3), FieldWordCount: int64(30), FieldBookIntro: []float32{0.5, 0.6}, FieldText: longText},
+	})
+	require.NoError(t, err)
+
+	rows, validData, err := checkAndSetData(body, coll, false)
+	require.NoError(t, err)
+	assert.Equal(t, "short text", rows[0][FieldText])
+	assert.NotContains(t, rows[1], FieldText)
+	assert.Equal(t, longText, rows[2][FieldText])
+	assert.Equal(t, []bool{true, false, true}, validData[FieldText])
+
+	for _, testcase := range []struct {
+		name     string
+		inInsert bool
+	}{
+		{name: "insert", inInsert: true},
+		{name: "upsert", inInsert: false},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			fieldsData, err := anyToColumns(rows, validData, coll, testcase.inInsert, false)
+			require.NoError(t, err)
+
+			textFieldData := getFieldDataByName(fieldsData, FieldText)
+			require.NotNil(t, textFieldData)
+			assert.Equal(t, schemapb.DataType_Text, textFieldData.GetType())
+			assert.Equal(t, []string{"short text", longText}, textFieldData.GetScalars().GetStringData().GetData())
+			assert.Equal(t, []bool{true, false, true}, textFieldData.GetValidData())
+		})
+	}
+}
+
+func TestTextFieldRESTInputValidation(t *testing.T) {
+	coll := generateTextCollectionSchema(false)
+	newRow := func() map[string]interface{} {
+		return map[string]interface{}{
+			FieldBookID:    int64(1),
+			FieldWordCount: int64(10),
+			FieldBookIntro: []float32{0.1, 0.2},
+		}
+	}
+
+	t.Run("missing required text", func(t *testing.T) {
+		body, err := wrapRequestBody([]map[string]interface{}{newRow()})
+		require.NoError(t, err)
+
+		rows, validData, err := checkAndSetData(body, coll, false)
+		require.NoError(t, err)
+		require.NotContains(t, rows[0], FieldText)
+
+		_, err = anyToColumns(rows, validData, coll, true, false)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "does not has field "+FieldText)
+	})
+
+	for _, testcase := range []struct {
+		name  string
+		value interface{}
+	}{
+		{name: "null", value: nil},
+		{name: "number", value: 123},
+		{name: "boolean", value: true},
+	} {
+		t.Run("reject "+testcase.name, func(t *testing.T) {
+			row := newRow()
+			row[FieldText] = testcase.value
+			body, err := wrapRequestBody([]map[string]interface{}{row})
+			require.NoError(t, err)
+
+			_, _, err = checkAndSetData(body, coll, false)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		})
+	}
+
+	t.Run("accept empty string", func(t *testing.T) {
+		row := newRow()
+		row[FieldText] = ""
+		body, err := wrapRequestBody([]map[string]interface{}{row})
+		require.NoError(t, err)
+
+		rows, validData, err := checkAndSetData(body, coll, false)
+		require.NoError(t, err)
+		assert.Equal(t, "", rows[0][FieldText])
+
+		fieldsData, err := anyToColumns(rows, validData, coll, true, false)
+		require.NoError(t, err)
+		textFieldData := getFieldDataByName(fieldsData, FieldText)
+		require.NotNil(t, textFieldData)
+		assert.Equal(t, []string{""}, textFieldData.GetScalars().GetStringData().GetData())
+	})
+}
+
 func TestInsertWithNullableVectorFields(t *testing.T) {
 	testcases := []struct {
 		name        string
@@ -2064,6 +2173,33 @@ func TestBuildQueryRespDynamicFieldLargeIntPrecision(t *testing.T) {
 		assert.Contains(t, string(out), "9223372036854775807")
 		assert.Contains(t, string(out), "9007199254740993")
 	})
+}
+
+func TestBuildQueryRespWithTextField(t *testing.T) {
+	longText := strings.Repeat("x", 64*1024+1)
+	fieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Text,
+		FieldName: FieldText,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{Data: []string{"short text", longText}},
+				},
+			},
+		},
+		ValidData: []bool{true, false, true},
+	}
+
+	count, err := fieldDataValueCount(fieldData)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	rows, err := buildQueryResp(0, []string{FieldText}, []*schemapb.FieldData{fieldData}, nil, nil, true, generateTextCollectionSchema(true))
+	require.NoError(t, err)
+	require.Len(t, rows, 3)
+	assert.Equal(t, "short text", rows[0][FieldText])
+	assert.Nil(t, rows[1][FieldText])
+	assert.Equal(t, longText, rows[2][FieldText])
 }
 
 func TestBuildQueryRespWithNullableCompactFields(t *testing.T) {
