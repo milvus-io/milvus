@@ -597,6 +597,16 @@ TEST_P(IndexTest, BuildAndQuery) {
     EXPECT_EQ(result.unity_topK_, K);
     EXPECT_EQ(result.distances_.size(), NQ * K);
     EXPECT_EQ(result.seg_offsets_.size(), NQ * K);
+    // regression guard for the out-of-range sanitization in
+    // VectorMemIndex<T>::Query / VectorDiskAnnIndex<T>::Query: every offset
+    // knowhere returns must either be a valid row in [0, NB) or the
+    // INVALID_SEG_OFFSET sentinel.
+    EXPECT_TRUE(std::all_of(result.seg_offsets_.begin(),
+                            result.seg_offsets_.end(),
+                            [this](int64_t offset) {
+                                return offset == INVALID_SEG_OFFSET ||
+                                       (offset >= 0 && offset < NB);
+                            }));
     if (metric_type == knowhere::metric::L2) {
         // for L2 metric each vector is closest to itself
         for (int i = 0; i < NQ; i++) {
