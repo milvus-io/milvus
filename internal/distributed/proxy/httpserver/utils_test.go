@@ -4185,22 +4185,27 @@ func TestCheckAndSetDataInvalidUTF8(t *testing.T) {
 		assert.Contains(t, err.Error(), "element 1")
 	})
 
-	// gjson.Parse is a lenient scanner, not a validator: unlike json.Unmarshal,
-	// it does not require a comma between array elements and does not notice
-	// trailing garbage after the closing bracket. gjson.Valid runs the same
-	// strict syntax check json.Unmarshal used to apply, so a request body a
-	// client did not actually intend to send still gets rejected instead of
-	// silently reinterpreted.
-	t.Run("array of varchar still rejects malformed JSON syntax", func(t *testing.T) {
+	// gjson.Parse alone is a lenient scanner, not a validator: unlike
+	// json.Unmarshal, it does not require a comma between array elements and
+	// does not notice trailing garbage after the closing bracket. checkAndSetData
+	// does not re-check that here on purpose -- every real caller already binds
+	// this same body with gin's ShouldBindBodyWith(..., binding.JSON) into a
+	// []map[string]interface{}/map[string]interface{} destination first, which
+	// forces a full, deep, spec-strict parse of the whole body (see
+	// TestCheckAndSetDataInvalidUTF8's package comment above the VarChar case
+	// for why), so malformed syntax anywhere in it -- including a nested
+	// VarChar array like this one -- is already rejected before checkAndSetData
+	// runs. This test documents that checkAndSetData called directly, the way
+	// this whole suite calls it, skips that guarantee; it is not itself a
+	// production code path.
+	t.Run("array of varchar in isolation trusts the caller for JSON syntax", func(t *testing.T) {
 		missingComma := []byte(`{"data": [{"id": 1, "tokens": ["a" "b"]}]}`)
-		_, _, err := checkAndSetData(missingComma, arraySchema, false)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-
-		trailingComma := []byte(`{"data": [{"id": 1, "tokens": ["a",]}]}`)
-		_, _, err = checkAndSetData(trailingComma, arraySchema, false)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		rows, _, err := checkAndSetData(missingComma, arraySchema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		tokens, ok := rows[0]["tokens"].(*schemapb.ScalarField)
+		require.True(t, ok)
+		assert.Equal(t, []string{"a", "b"}, tokens.GetStringData().GetData())
 	})
 
 	// Also gjson: the sub-field cell keeps the byte, and the Array FieldData it

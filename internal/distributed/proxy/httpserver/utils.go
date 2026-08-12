@@ -1329,18 +1329,23 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						// which is the only place that scans them -- same as every
 						// other gjson-decoded string path here.
 						//
-						// gjson.Parse itself is a lenient scanner, not a validator:
-						// it tolerates malformed syntax json.Unmarshal used to
-						// reject (a missing comma between elements, a trailing
-						// comma, trailing garbage after the closing bracket).
-						// gjson.Valid runs the strict syntax check without
-						// unquoting anything, so it restores that rejection while
-						// leaving the raw-byte-preserving walk below unchanged for
-						// input that passes it.
-						if !gjson.Valid(dataString) {
-							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, "invalid JSON array")
-						}
+						// gjson.Parse itself is a lenient scanner, not a validator: it
+						// tolerates malformed syntax json.Unmarshal would reject (a
+						// missing comma between elements, a trailing comma, trailing
+						// garbage after the closing bracket). That is safe here only
+						// because every caller of checkAndSetData first binds this
+						// same request body with gin's ShouldBindBodyWith(..., binding.JSON)
+						// into a struct whose Data field is typed []map[string]interface{}
+						// (or map[string]interface{} for a single-object insert) --
+						// decoding into that loosely-typed destination still requires a
+						// full, deep, spec-strict parse of the entire body, so malformed
+						// syntax anywhere in it, including inside a nested VarChar array
+						// like this one, is already rejected before checkAndSetData ever
+						// runs. Re-validating it here with gjson.Valid would just be a
+						// second scan of something the binder already scanned once for
+						// every real request. Do not re-add that check without either
+						// removing the binder's deep-parse guarantee or auditing that it
+						// still covers every checkAndSetData caller.
 						parsed := gjson.Parse(dataString)
 						if !parsed.IsArray() {
 							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
