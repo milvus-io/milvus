@@ -702,9 +702,9 @@ func (s *CopySegmentTaskSuite) TestScheduler_OneOffTransientErrorDoesNotRedispat
 func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_NodeGoneResetsToPending() {
 	// Regression test for DataNode restart/replacement: the node manager
 	// returns NodeNotFound, surfaced as a query error. The worker-side task is
-	// confirmed lost, so the task must be reset to Pending with NullNodeID so
-	// the scheduler re-dispatches it to a live node rather than polling the
-	// dead node until the job-level timeout.
+	// lost as far as DataCoord can tell, so the task must be reset to Pending
+	// with NullNodeID so the scheduler re-dispatches it to a live node rather
+	// than polling the dead node until the job-level timeout.
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(
 		nil,
@@ -713,9 +713,14 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_NodeGoneResetsToPending() {
 
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	task.task.Load().NodeId = 10
+	task.task.Load().TaskVersion = 4
 	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
 	s.NoError(copyMeta.AddJob(context.Background(), newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+	handler := &fakeUntrackedDropHandler{}
+	copyMeta.(*copySegmentMeta).setUntrackedDropHandler(handler)
 
+	// No DropCopySegment expectation: the lost dispatch must be handed to the
+	// inspector's retry queue, not dropped synchronously here.
 	task.QueryTaskOnWorker(cluster)
 
 	updatedTask := copyMeta.GetTask(context.Background(), 1001)
@@ -723,6 +728,16 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_NodeGoneResetsToPending() {
 	s.EqualValues(NullNodeID, updatedTask.GetNodeId())
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		copyMeta.GetJob(context.Background(), 100).GetState())
+
+	// ErrNodeNotFound only says DataCoord's client map lost node 10, not that
+	// the DataNode — and the task entry, slot and copy goroutines it holds — is
+	// gone. Once NodeId is cleared nothing else will ever address that
+	// dispatch, so it must be queued for untracked cleanup at its own epoch:
+	// the inspector treats ErrNodeNotFound as done if the node really is gone,
+	// and aborts the stale worker task if it is not.
+	s.EqualValues(10, handler.nodeID)
+	s.EqualValues(1001, handler.taskID)
+	s.EqualValues(4, handler.taskVersion)
 }
 
 func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_TaskNotFoundOnWorkerResetsToPending() {
@@ -744,6 +759,8 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_TaskNotFoundOnWorkerResetsT
 	task.task.Load().NodeId = 10
 	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
 	s.NoError(copyMeta.AddJob(context.Background(), newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+	handler := &fakeUntrackedDropHandler{}
+	copyMeta.(*copySegmentMeta).setUntrackedDropHandler(handler)
 
 	task.QueryTaskOnWorker(cluster)
 
@@ -754,6 +771,10 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_TaskNotFoundOnWorkerResetsT
 	// The parent job must NOT be failed - the task is re-dispatched.
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		copyMeta.GetJob(context.Background(), 100).GetState())
+	// The cleared dispatch is still handed to cleanup; the drop is idempotent
+	// and the worker answers task-not-found again, which converges it.
+	s.EqualValues(10, handler.nodeID)
+	s.EqualValues(1001, handler.taskID)
 }
 
 func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_MarksFailedOnWorkerFailure() {
@@ -2155,10 +2176,13 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_WorkerLossConvergesToFailed
 
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	task.task.Load().NodeId = 10
+	task.task.Load().TaskVersion = 2
 	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
 	// Parent job already failed (fail-fast triggered by a sibling task).
 	s.NoError(copyMeta.AddJob(context.Background(),
 		newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobFailed)))
+	handler := &fakeUntrackedDropHandler{}
+	copyMeta.(*copySegmentMeta).setUntrackedDropHandler(handler)
 
 	task.QueryTaskOnWorker(cluster)
 
@@ -2173,6 +2197,11 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_WorkerLossConvergesToFailed
 	s.NotEmpty(updatedTask.GetReason())
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed,
 		copyMeta.GetJob(context.Background(), 100).GetState())
+	// With NodeId cleared, processTerminal can no longer address the worker
+	// task; the abort of the lost dispatch is queued at its own epoch instead.
+	s.EqualValues(10, handler.nodeID)
+	s.EqualValues(1001, handler.taskID)
+	s.EqualValues(2, handler.taskVersion)
 }
 
 func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_WorkerLossResolveErrorLeavesTask() {
@@ -2191,7 +2220,7 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_WorkerLossResolveErrorLeave
 		newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
 
 	mockResolve := mockey.Mock((*copySegmentMeta).ResolveTaskOnWorkerLoss).
-		Return(workerLossSkipped, errors.New("catalog down")).Build()
+		Return(workerLossOutcome{resolution: workerLossSkipped, nodeID: NullNodeID}, errors.New("catalog down")).Build()
 	defer mockResolve.UnPatch()
 
 	task.QueryTaskOnWorker(cluster)
@@ -2217,7 +2246,7 @@ func (s *CopySegmentTaskSuite) TestQueryTaskOnWorker_WorkerLossSkippedResolution
 		newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting)))
 
 	mockResolve := mockey.Mock((*copySegmentMeta).ResolveTaskOnWorkerLoss).
-		Return(workerLossSkipped, nil).Build()
+		Return(workerLossOutcome{resolution: workerLossSkipped, nodeID: NullNodeID}, nil).Build()
 	defer mockResolve.UnPatch()
 
 	task.QueryTaskOnWorker(cluster)
@@ -2322,9 +2351,15 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_QueuesUntrackedWorkerDrop(
 }
 
 func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_QueuesUntrackedWorkerDropAfterCommitFailure() {
+	ctx := context.Background()
 	cluster := session.NewMockCluster(s.T())
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	// The claim re-validates the dispatch preconditions, so the task has to be
+	// genuinely dispatchable to reach the commit this case is about.
+	s.NoError(copyMeta.UpdateTask(ctx, task.GetTaskId(),
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+		UpdateCopyTaskNodeID(NullNodeID)))
 
 	assembleMock := mockey.Mock(AssembleCopySegmentRequest).
 		Return(&datapb.CopySegmentRequest{TaskID: task.GetTaskId()}, nil).Build()
@@ -2418,6 +2453,124 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_SkipsDispatchWhileCleanupP
 	handler.pending[task.GetTaskId()] = false
 	cluster.EXPECT().CreateCopySegment(int64(20), mock.Anything, int64(100)).Return(nil).Once()
 	task.CreateTaskOnWorker(20, cluster)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		copyMeta.GetTask(ctx, task.GetTaskId()).GetState())
+}
+
+// TestCreateTaskOnWorker_SkipsDispatchWhileAnotherDispatchInFlight is the
+// regression for the cross-node double-dispatch hole. The scheduler pops a task
+// out of pendingTasks and only inserts it into runningTasks once
+// CommitTaskDispatch has persisted InProgress; in between, Enqueue's dedup sees
+// the task in neither queue, so the inspector's next round re-queues it and a
+// second dispatch starts while the first is still in flight — on a different
+// node, since pickNode rebuilds its slot heap every round. Neither existing
+// defense covers that: the epoch fence lives on the worker runtime and so only
+// fences a re-dispatch to the SAME node, and the untracked-drop gate only fences
+// a dispatch beginning after the drop is queued. Both dispatches would then write
+// the same deterministic target keys, and the loser's abort would delete the
+// winner's published output.
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_SkipsDispatchWhileAnotherDispatchInFlight() {
+	ctx := context.Background()
+	cluster := session.NewMockCluster(s.T())
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(copyMeta.UpdateTask(ctx, task.GetTaskId(),
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+		UpdateCopyTaskNodeID(NullNodeID)))
+
+	assembleMock := mockey.Mock(AssembleCopySegmentRequest).
+		Return(&datapb.CopySegmentRequest{TaskID: task.GetTaskId()}, nil).Build()
+	defer assembleMock.UnPatch()
+
+	// Stand in for a dispatch that has claimed the task and is still between its
+	// CreateCopySegment RPC and CommitTaskDispatch.
+	inFlightVersion, err := copyMeta.ClaimTaskDispatch(ctx, task.GetTaskId())
+	s.NoError(err)
+
+	// No CreateCopySegment expectation: a second dispatch fails the test.
+	task.CreateTaskOnWorker(20, cluster)
+
+	// The task is untouched by the refused dispatch — same Pending state, same
+	// epoch — so the scheduler re-queues it and it goes out once the in-flight
+	// dispatch resolves.
+	refused := copyMeta.GetTask(ctx, task.GetTaskId())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, refused.GetState())
+	s.EqualValues(NullNodeID, refused.GetNodeId())
+	s.EqualValues(inFlightVersion, refused.GetTaskVersion())
+
+	// Once the earlier dispatch releases the task, the next one proceeds and
+	// claims a fresh epoch.
+	copyMeta.ReleaseTaskDispatch(task.GetTaskId())
+	cluster.EXPECT().CreateCopySegment(int64(20), mock.Anything, int64(100)).Return(nil).Once()
+	task.CreateTaskOnWorker(20, cluster)
+
+	dispatched := copyMeta.GetTask(ctx, task.GetTaskId())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, dispatched.GetState())
+	s.EqualValues(20, dispatched.GetNodeId())
+	s.EqualValues(inFlightVersion+1, dispatched.GetTaskVersion())
+}
+
+// TestCreateTaskOnWorker_SkipsDispatchWhenClaimFails covers the other way a
+// claim can be refused: the epoch could not be persisted. No worker may be told
+// about a dispatch whose epoch metadata has forgotten, since the drop that
+// fences it would then never match.
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_SkipsDispatchWhenClaimFails() {
+	ctx := context.Background()
+	cluster := session.NewMockCluster(s.T())
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(copyMeta.UpdateTask(ctx, task.GetTaskId(),
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+		UpdateCopyTaskNodeID(NullNodeID)))
+
+	assembleMock := mockey.Mock(AssembleCopySegmentRequest).
+		Return(&datapb.CopySegmentRequest{TaskID: task.GetTaskId()}, nil).Build()
+	defer assembleMock.UnPatch()
+
+	claimMock := mockey.Mock((*copySegmentMeta).ClaimTaskDispatch).
+		Return(int64(0), errors.New("etcd unavailable")).Build()
+	defer claimMock.UnPatch()
+
+	// No CreateCopySegment expectation: any dispatch fails the test.
+	task.CreateTaskOnWorker(20, cluster)
+
+	unchanged := copyMeta.GetTask(ctx, task.GetTaskId())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, unchanged.GetState())
+	s.EqualValues(NullNodeID, unchanged.GetNodeId())
+}
+
+// TestCreateTaskOnWorker_ReleasesDispatchClaimOnEveryPath guards the other side
+// of the claim: it is the only thing standing between the task and the worker,
+// so any exit path that forgets to release it stalls the task permanently.
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_ReleasesDispatchClaimOnEveryPath() {
+	ctx := context.Background()
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(copyMeta.UpdateTask(ctx, task.GetTaskId(),
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+		UpdateCopyTaskNodeID(NullNodeID)))
+
+	assembleMock := mockey.Mock(AssembleCopySegmentRequest).
+		Return(&datapb.CopySegmentRequest{TaskID: task.GetTaskId()}, nil).Build()
+	defer assembleMock.UnPatch()
+
+	// A dispatch the worker rejects: the claim must not outlive the attempt. The
+	// error is ambiguous, so the dispatch is also handed to cleanup — with no
+	// retry handler registered here that falls back to a direct drop.
+	rejecting := session.NewMockCluster(s.T())
+	rejecting.EXPECT().CreateCopySegment(int64(20), mock.Anything, int64(100)).
+		Return(errors.New("datanode unavailable")).Once()
+	rejecting.EXPECT().DropCopySegment(mock.Anything, int64(20), task.GetTaskId(), int64(1), true).
+		Return(nil).Once()
+	task.CreateTaskOnWorker(20, rejecting)
+	s.False(copyMeta.(*copySegmentMeta).hasInFlightDispatch(task.GetTaskId()))
+
+	// A dispatch the worker accepts: the claim is released once the outcome is
+	// committed, and the untracked-drop gate takes over from there.
+	accepting := session.NewMockCluster(s.T())
+	accepting.EXPECT().CreateCopySegment(int64(21), mock.Anything, int64(100)).Return(nil).Once()
+	task.CreateTaskOnWorker(21, accepting)
+	s.False(copyMeta.(*copySegmentMeta).hasInFlightDispatch(task.GetTaskId()))
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
 		copyMeta.GetTask(ctx, task.GetTaskId()).GetState())
 }
@@ -2636,4 +2789,128 @@ func (s *CopySegmentTaskSuite) TestDropTaskOnWorker_NoAssignmentIsNoop() {
 	newCopySegmentTaskTestMeta(s.T(), task)
 
 	task.DropTaskOnWorker(cluster)
+}
+
+// TestCreateTaskOnWorker_QueuesCleanupWhenCreateRPCFails covers the ambiguous
+// CreateCopySegment failure. cluster.createTask runs the call under a request
+// timeout, so an error can surface after the DataNode already registered the
+// task — and the worker only ever removes a task on a Drop RPC, with no timeout
+// GC. Returning silently would leave that worker task, its slot, and its copied
+// objects behind forever, still writing the very target keys the re-dispatch
+// will write. The dispatch therefore has to be handed to the cleanup retry loop.
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_QueuesCleanupWhenCreateRPCFails() {
+	ctx := context.Background()
+	cluster := session.NewMockCluster(s.T())
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(copyMeta.UpdateTask(ctx, task.GetTaskId(),
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+		UpdateCopyTaskNodeID(NullNodeID)))
+
+	assembleMock := mockey.Mock(AssembleCopySegmentRequest).
+		Return(&datapb.CopySegmentRequest{TaskID: task.GetTaskId()}, nil).Build()
+	defer assembleMock.UnPatch()
+
+	handler := &fakeUntrackedDropHandler{}
+	copyMeta.(*copySegmentMeta).setUntrackedDropHandler(handler)
+
+	var dispatchedVersion int64
+	cluster.EXPECT().CreateCopySegment(int64(10), mock.Anything, int64(100)).RunAndReturn(
+		func(_ int64, req *datapb.CopySegmentRequest, _ int64) error {
+			dispatchedVersion = req.GetTaskVersion()
+			return errors.New("context deadline exceeded")
+		}).Once()
+
+	// No direct DropCopySegment expectation: the handler owns the retry, so one
+	// synchronous best-effort attempt here would consume the only chance.
+	task.CreateTaskOnWorker(10, cluster)
+
+	// Queued under the exact dispatch identity the worker would recognize.
+	s.EqualValues(10, handler.nodeID)
+	s.EqualValues(task.GetTaskId(), handler.taskID)
+	s.EqualValues(dispatchedVersion, handler.taskVersion)
+
+	// The task itself is untouched, so the scheduler re-queues it once the
+	// cleanup converges.
+	unchanged := copyMeta.GetTask(ctx, task.GetTaskId())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, unchanged.GetState())
+	s.EqualValues(NullNodeID, unchanged.GetNodeId())
+}
+
+// TestCreateTaskOnWorker_SameNodeCommitDropsWithoutAbort is the regression for
+// the missing same-node comparison in CommitTaskDispatch. A lagging dispatch can
+// be scheduled back onto the node that already holds the authoritative task —
+// and CreateCopySegment adopts this dispatch's epoch onto that shared worker
+// runtime, so an unconditional abort at this epoch WOULD be honored. Routing it
+// through the untracked path would therefore delete a Completed task's output,
+// whose binlog paths are already in segment metadata. It must instead go through
+// the task's own handle, which derives the abort flag from the task and job
+// state — false here, i.e. a plain release.
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_SameNodeCommitDropsWithoutAbort() {
+	ctx := context.Background()
+	cluster := session.NewMockCluster(s.T())
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(copyMeta.UpdateTask(ctx, task.GetTaskId(),
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+		UpdateCopyTaskNodeID(NullNodeID)))
+
+	assembleMock := mockey.Mock(AssembleCopySegmentRequest).
+		Return(&datapb.CopySegmentRequest{TaskID: task.GetTaskId()}, nil).Build()
+	defer assembleMock.UnPatch()
+
+	// No retry handler: if this took the untracked path it would fall back to a
+	// direct DropCopySegment with abort=true, which the expectation below rejects.
+	cluster.EXPECT().CreateCopySegment(int64(10), mock.Anything, int64(100)).RunAndReturn(
+		func(int64, *datapb.CopySegmentRequest, int64) error {
+			// The task completes on this very node while the RPC is in flight.
+			return copyMeta.UpdateTask(ctx, task.GetTaskId(),
+				UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskCompleted),
+				UpdateCopyTaskNodeID(10))
+		}).Once()
+	cluster.EXPECT().DropCopySegment(mock.Anything, int64(10), task.GetTaskId(), int64(1), false).
+		Return(nil).Once()
+
+	task.CreateTaskOnWorker(10, cluster)
+
+	// The completed outcome survives, and the assignment is cleared so checkGC
+	// can reclaim the task.
+	settled := copyMeta.GetTask(ctx, task.GetTaskId())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, settled.GetState())
+	s.EqualValues(NullNodeID, settled.GetNodeId())
+}
+
+// TestCreateTaskOnWorker_DifferentNodeCommitStillAborts is the other side of the
+// same-node check: a dispatch that finds a DIFFERENT node authoritative must
+// still be force-aborted, since metadata holds no handle on the node this
+// dispatch reached.
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorker_DifferentNodeCommitStillAborts() {
+	ctx := context.Background()
+	cluster := session.NewMockCluster(s.T())
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	s.NoError(copyMeta.UpdateTask(ctx, task.GetTaskId(),
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
+		UpdateCopyTaskNodeID(NullNodeID)))
+
+	assembleMock := mockey.Mock(AssembleCopySegmentRequest).
+		Return(&datapb.CopySegmentRequest{TaskID: task.GetTaskId()}, nil).Build()
+	defer assembleMock.UnPatch()
+
+	handler := &fakeUntrackedDropHandler{}
+	copyMeta.(*copySegmentMeta).setUntrackedDropHandler(handler)
+
+	cluster.EXPECT().CreateCopySegment(int64(10), mock.Anything, int64(100)).RunAndReturn(
+		func(int64, *datapb.CopySegmentRequest, int64) error {
+			return copyMeta.UpdateTask(ctx, task.GetTaskId(),
+				UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskCompleted),
+				UpdateCopyTaskNodeID(11))
+		}).Once()
+
+	task.CreateTaskOnWorker(10, cluster)
+
+	// Queued against node 10, while metadata keeps node 11 as its own handle.
+	s.EqualValues(10, handler.nodeID)
+	s.EqualValues(task.GetTaskId(), handler.taskID)
+	s.EqualValues(11, copyMeta.GetTask(ctx, task.GetTaskId()).GetNodeId())
 }

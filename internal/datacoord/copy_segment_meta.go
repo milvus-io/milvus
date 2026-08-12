@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -85,6 +86,7 @@ type CopySegmentMeta interface {
 	UpdateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
 	UpdateJobInState(ctx context.Context, jobID int64, expectedState datapb.CopySegmentJobState, actions ...UpdateCopySegmentJobAction) (bool, error)
 	UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) (bool, error)
+	TimeoutJob(ctx context.Context, jobID int64, reason string) (bool, error)
 	FinalizeJobPublication(ctx context.Context, jobID int64, totalRows int64, completeTs uint64, operators ...UpdateOperator) (bool, error)
 	GetJob(ctx context.Context, jobID int64) CopySegmentJob
 	GetJobBy(ctx context.Context, filters ...CopySegmentJobFilter) []CopySegmentJob
@@ -94,9 +96,19 @@ type CopySegmentMeta interface {
 	// Task operations
 	AddTask(ctx context.Context, task CopySegmentTask) error
 	UpdateTask(ctx context.Context, taskID int64, actions ...UpdateCopySegmentTaskAction) error
-	BumpTaskDispatchVersion(ctx context.Context, taskID int64) (int64, error)
+	ClaimTaskDispatch(ctx context.Context, taskID int64) (int64, error)
+	ReleaseTaskDispatch(taskID int64)
 	CommitTaskDispatch(ctx context.Context, taskID, nodeID int64, inactiveReason string) (taskDispatchResolution, error)
-	ResolveTaskOnWorkerLoss(ctx context.Context, taskID int64, failReason string) (workerLossResolution, error)
+	ResolveTaskOnWorkerLoss(ctx context.Context, taskID int64, failReason string) (workerLossOutcome, error)
+	// EnqueueUntrackedDrop hands the cleanup of one exact worker dispatch
+	// (nodeID, taskID, taskVersion) to the retry owner and reports whether it
+	// took ownership. HasPendingUntrackedDrop reports whether such a cleanup is
+	// still outstanding for taskID. They are part of the dispatch fence, not an
+	// optimization: a dispatch must not start while an earlier one's abort may
+	// still land on the shared target keys, and a worker task that metadata can
+	// no longer address must still be dropped.
+	EnqueueUntrackedDrop(nodeID, taskID, taskVersion int64) bool
+	HasPendingUntrackedDrop(taskID int64) bool
 	TaskAcceptsWorkerResult(ctx context.Context, taskID int64) bool
 	CompleteTaskIfActive(ctx context.Context, taskID int64, completeTs uint64) (bool, error)
 	ClearTaskNodeAssignment(ctx context.Context, taskID, expectedNodeID int64) (bool, error)
@@ -263,7 +275,31 @@ type copySegmentMeta struct {
 	// its retry loop instead of taking one synchronous, lossy attempt.
 	untrackedDropMu      lock.RWMutex
 	untrackedDropHandler UntrackedCopySegmentDropHandler
+
+	// Task IDs whose dispatch has been claimed but not yet resolved. The
+	// scheduler pops a task out of pendingTasks and only inserts it into
+	// runningTasks once CommitTaskDispatch has persisted InProgress, so in
+	// between the task is invisible to Enqueue's dedup and the inspector's next
+	// round re-queues it — a second dispatch then starts, on a different node,
+	// while the first is still in flight. Neither the worker-side epoch fence
+	// (same node only) nor the untracked-drop gate (drops queued earlier only)
+	// covers that window. Guarded by mu so claiming a dispatch and stamping its
+	// epoch are one atomic step.
+	dispatching map[int64]struct{}
 }
+
+// errCopySegmentDispatchInFlight reports that another dispatch of this task has
+// already been handed to a worker and has not resolved yet. It is a scheduling
+// signal, not a failure: the caller abandons its attempt and leaves the task
+// Pending so the scheduler re-queues it.
+var errCopySegmentDispatchInFlight = errors.New("copy segment task dispatch already in flight")
+
+// errCopySegmentDispatchStale reports that the preconditions this dispatch was
+// started under no longer hold — the task has moved on, is already assigned, its
+// job is over, or cleanup of an earlier dispatch is still outstanding. Like
+// errCopySegmentDispatchInFlight it is a scheduling signal, not a failure: the
+// caller abandons its attempt without touching the task.
+var errCopySegmentDispatchStale = errors.New("copy segment task dispatch preconditions no longer hold")
 
 // UntrackedCopySegmentDropHandler owns the retry of worker-side cleanup for a
 // dispatch that metadata cannot represent. Implemented by the copy segment
@@ -286,14 +322,20 @@ func (m *copySegmentMeta) setUntrackedDropHandler(handler UntrackedCopySegmentDr
 	m.untrackedDropHandler = handler
 }
 
-func (m *copySegmentMeta) enqueueUntrackedDrop(nodeID, taskID, taskVersion int64) bool {
+// EnqueueUntrackedDrop delegates to the registered handler (the inspector).
+// It returns false when no handler is registered or the handler can no longer
+// own the retry, in which case the caller must fall back to a direct attempt.
+func (m *copySegmentMeta) EnqueueUntrackedDrop(nodeID, taskID, taskVersion int64) bool {
 	m.untrackedDropMu.RLock()
 	handler := m.untrackedDropHandler
 	m.untrackedDropMu.RUnlock()
 	return handler != nil && handler.EnqueueUntrackedDrop(nodeID, taskID, taskVersion)
 }
 
-func (m *copySegmentMeta) hasPendingUntrackedDrop(taskID int64) bool {
+// HasPendingUntrackedDrop delegates to the registered handler (the inspector).
+// Uses untrackedDropMu and the handler's own state, never m.mu, so it is safe
+// to consult while holding m.mu.
+func (m *copySegmentMeta) HasPendingUntrackedDrop(taskID int64) bool {
 	m.untrackedDropMu.RLock()
 	handler := m.untrackedDropHandler
 	m.untrackedDropMu.RUnlock()
@@ -345,6 +387,10 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 		meta:         meta,
 		snapshotMeta: snapshotMeta,
 		alloc:        alloc,
+		// Deliberately not restored from the catalog: no dispatch survives a
+		// DataCoord restart, and the persisted epoch is monotonic, so a task
+		// reloaded as InProgress is handled by the existing worker-loss paths.
+		dispatching: make(map[int64]struct{}),
 	}
 
 	// Reconstruct task objects with metadata references
@@ -643,9 +689,42 @@ func isActiveCopyJobState(state datapb.CopySegmentJobState) bool {
 // active and wasTerminal is always false; the `!wasTerminal` term in
 // shouldUnpin is kept only as a local invariant assertion.
 func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) (bool, error) {
+	return m.transitionJobAndReleaseRef(ctx, jobID, func(state datapb.CopySegmentJobState) bool {
+		return isTerminalCopyJobState(state) || state == datapb.CopySegmentJobState_CopySegmentJobPublishing
+	}, actions...)
+}
+
+// TimeoutJob converges a job whose deadline has elapsed to Failed. Unlike
+// UpdateJobStateAndReleaseRef it is allowed to take a Publishing job: the
+// deadline is the bound on publication retry. Publishing rejects every other
+// failure path because those observe a stale view of a job that has claimed
+// the successful outcome, but a job that cannot persist that outcome before
+// its deadline must still converge — otherwise a persistent catalog failure
+// (etcd quota, an oversized write that keeps failing, a target segment gone
+// from meta) leaves the job in Publishing forever: never timed out, never
+// reclaimed by GC, reported to the user as an executing restore, and its
+// source pin held until the pin TTL expires.
+//
+// Failing a Publishing job is safe with respect to the outcome fence:
+// FinalizeJobPublication commits target visibility and Completed in one
+// catalog write under m.mu, so this transition either lands before it (and
+// FinalizeJobPublication then sees Failed and does nothing) or after it (and
+// the terminal-state guard here rejects). Target segments that a chunked
+// fallback write already persisted as Flushed are dropped by the inspector's
+// failed-job cleanup and hidden by reconcileRestoredTargetSegments on
+// restart, exactly as for any other Failed job.
+func (m *copySegmentMeta) TimeoutJob(ctx context.Context, jobID int64, reason string) (bool, error) {
+	return m.transitionJobAndReleaseRef(ctx, jobID, isTerminalCopyJobState,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+		UpdateCopyJobReason(reason))
+}
+
+// transitionJobAndReleaseRef applies actions unless fenced(currentState) holds,
+// with the check and the mutate under m.mu, and unpins the source snapshot when
+// the job thereby becomes terminal. See UpdateJobStateAndReleaseRef.
+func (m *copySegmentMeta) transitionJobAndReleaseRef(ctx context.Context, jobID int64, fenced func(datapb.CopySegmentJobState) bool, actions ...UpdateCopySegmentJobAction) (bool, error) {
 	m.mu.Lock()
-	if current, ok := m.jobs[jobID]; ok && (isTerminalCopyJobState(current.GetState()) ||
-		current.GetState() == datapb.CopySegmentJobState_CopySegmentJobPublishing) {
+	if current, ok := m.jobs[jobID]; ok && fenced(current.GetState()) {
 		currentState := current.GetState()
 		m.mu.Unlock()
 		mlog.Info(ctx, "copy segment job outcome already fenced, skip state transition",
@@ -730,6 +809,18 @@ func (m *copySegmentMeta) FinalizeJobPublication(ctx context.Context, jobID int6
 		m.mu.Unlock()
 		return false, err
 	}
+	// This path hand-builds its catalog actions instead of going through
+	// meta.UpdateSegmentsInfo, so it must not silently diverge from it. The
+	// publication operators only flip visibility (state, IsImporting); binlog
+	// increments would be dropped on the floor here, so reject any operator
+	// that produces one rather than persist a segment record without its logs.
+	if updatePack != nil && len(updatePack.increments) > 0 {
+		m.meta.segMu.Unlock()
+		m.mu.Unlock()
+		return false, merr.WrapErrServiceInternalMsg(
+			"copy segment publication of job %d must not carry binlog increments (%d segments)",
+			jobID, len(updatePack.increments))
+	}
 
 	updatedJob := job.Clone()
 	UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted)(updatedJob)
@@ -740,7 +831,12 @@ func (m *copySegmentMeta) FinalizeJobPublication(ctx context.Context, jobID int6
 	if updatePack != nil {
 		actions = make([]metastore.UpdateAction, 0, len(updatePack.segments)+1)
 		for _, segment := range updatePack.segments {
-			actions = append(actions, metastore.UpdateSegment(segment.SegmentInfo))
+			// AlterSegment is the encoding meta.UpdateSegmentsInfo uses
+			// (catalog.AlterSegments): it keeps the V3 guard on binlog-based
+			// row-count reconciliation, which the record-only UpdateSegment
+			// encoding bypasses — and every restore target looks V3 from
+			// pre-registration onward.
+			actions = append(actions, metastore.AlterSegment(segment.SegmentInfo))
 		}
 	}
 	actions = append(actions, metastore.SaveCopySegmentJob(updatedJob.(*copySegmentJob).CopySegmentJob))
@@ -871,8 +967,12 @@ func (m *copySegmentMeta) UpdateTask(ctx context.Context, taskID int64, actions 
 	return nil
 }
 
-// BumpTaskDispatchVersion persists the next dispatch epoch of a task and
-// returns it.
+// ClaimTaskDispatch takes exclusive ownership of a task's dispatch and returns
+// the epoch the claiming dispatch must carry. It is the single authoritative
+// gate on whether a dispatch may reach a worker: it returns
+// errCopySegmentDispatchInFlight when another dispatch already holds the task,
+// and errCopySegmentDispatchStale when the preconditions the caller sampled
+// before its snapshot read no longer hold.
 //
 // The epoch fences worker-side cleanup: DataNode binds an accepted task to the
 // epoch carried by its CreateCopySegment request and ignores a drop whose epoch
@@ -881,20 +981,85 @@ func (m *copySegmentMeta) UpdateTask(ctx context.Context, taskID int64, actions 
 // are a deterministic transform of the source keys, identical across dispatches
 // — its abort would delete the output the current dispatch already published.
 //
-// The bump is persisted before the RPC, so it is monotonic across a DataCoord
+// The epoch alone is not enough, because it is bound to the worker's task
+// runtime and therefore only recognizes a re-dispatch landing on the same node.
+// Two dispatches racing onto two different nodes both pass it: the loser's
+// CommitTaskDispatch finds the winner already tracked, queues an abort for its
+// own node, and that abort deletes the winner's output from the shared target
+// keys. The claim closes that window at the source by letting only one dispatch
+// of a task reach a worker at a time; ownership is released once the outcome is
+// committed, after which the untracked-drop gate takes over.
+//
+// The epoch is persisted before the RPC, so it is monotonic across a DataCoord
 // restart: an epoch is never reused for a worker task that may still exist.
-func (m *copySegmentMeta) BumpTaskDispatchVersion(ctx context.Context, taskID int64) (int64, error) {
+func (m *copySegmentMeta) ClaimTaskDispatch(ctx context.Context, taskID int64) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	task := m.tasks.get(taskID)
 	if task == nil {
 		return 0, merr.WrapErrParameterInvalidMsg("copy segment task %d not found", taskID)
 	}
+	if _, inFlight := m.dispatching[taskID]; inFlight {
+		return 0, errCopySegmentDispatchInFlight
+	}
+
+	// Re-check every dispatch precondition here rather than trusting the
+	// caller's pre-flight checks. Those are sampled before
+	// AssembleCopySegmentRequest, whose remote snapshot read can outlast several
+	// inspector rounds while the task is invisible to the scheduler's dedup
+	// (popped out of pendingTasks, not yet in runningTasks), so a second closure
+	// can arrive here holding a view of the task from before the first dispatch
+	// even started. The claim is the only point at which a dispatch is
+	// serialized against its predecessor's committed outcome, so it is the only
+	// place these can be observed and acted on atomically. The caller keeps its
+	// checks purely to skip the snapshot read early.
+	//
+	// Without this, a stale Pending observation is promoted into a real second
+	// dispatch on another node, and that dispatch's own cleanup deletes the
+	// winner's output — the target object keys are a deterministic transform of
+	// the source keys, so both dispatches write the very same objects.
+	if task.GetState() != datapb.CopySegmentTaskState_CopySegmentTaskPending ||
+		task.GetNodeId() != NullNodeID {
+		return 0, errCopySegmentDispatchStale
+	}
+	job, jobExists := m.jobs[task.GetJobId()]
+	if !jobExists || !isActiveCopyJobState(job.GetState()) {
+		return 0, errCopySegmentDispatchStale
+	}
+	// Uses untrackedDropMu and the inspector's own set, never m.mu, so it is
+	// safe to consult while holding the write lock here.
+	if m.HasPendingUntrackedDrop(taskID) {
+		return 0, errCopySegmentDispatchStale
+	}
+
 	version := task.GetTaskVersion() + 1
 	if err := m.updateTaskLocked(ctx, task, UpdateCopyTaskVersion(version)); err != nil {
+		// The claim is not taken when the epoch could not be persisted: no
+		// worker can be holding this dispatch, and holding the task would stall
+		// it for good since nothing would ever release it.
 		return 0, err
 	}
+	m.dispatching[taskID] = struct{}{}
 	return version, nil
+}
+
+// ReleaseTaskDispatch gives up ownership taken by ClaimTaskDispatch. It must run
+// on every path out of a dispatch, including the failed ones — the claim is the
+// only thing standing between the task and a worker, so a leaked claim stalls
+// the task permanently.
+func (m *copySegmentMeta) ReleaseTaskDispatch(taskID int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.dispatching, taskID)
+}
+
+// hasInFlightDispatch reports whether a dispatch of this task is currently
+// claimed. Test-facing view of the claim set.
+func (m *copySegmentMeta) hasInFlightDispatch(taskID int64) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, inFlight := m.dispatching[taskID]
+	return inFlight
 }
 
 // ClearTaskNodeAssignment clears a terminal cleanup handle only when it still
@@ -968,8 +1133,11 @@ func isTerminalCopyTaskState(state datapb.CopySegmentTaskState) bool {
 //   - terminal/inactive task with no assignment -> preserve/converge terminal
 //     state and persist nodeID so cleanup is retryable;
 //   - same task already InProgress on this node -> idempotent no-op;
-//   - otherwise -> do not overwrite existing metadata; caller directly drops
-//     the newly accepted worker task.
+//   - task already assigned to this same node -> metadata is already the
+//     cleanup handle for this worker, so hand it to the tracked drop path
+//     rather than forcing an abort on it;
+//   - a different node is assigned -> do not overwrite existing metadata;
+//     caller directly drops the newly accepted worker task.
 func (m *copySegmentMeta) CommitTaskDispatch(ctx context.Context, taskID, nodeID int64, inactiveReason string) (taskDispatchResolution, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -994,13 +1162,29 @@ func (m *copySegmentMeta) CommitTaskDispatch(ctx context.Context, taskID, nodeID
 		return taskDispatchAlreadyTracked, nil
 	}
 
-	// A different assignment is already authoritative. Never overwrite it:
-	// doing so would lose the only retry handle for that worker-side task.
-	if task.GetNodeId() != NullNodeID {
+	// An assignment pointing at a *different* node is already authoritative.
+	// Never overwrite it: it is the only retry handle for that worker-side task,
+	// so the caller has to drop the node it just dispatched to directly.
+	//
+	// The same node is a different situation and must not take that path. The
+	// untracked drop is an unconditional abort at this dispatch's epoch, and the
+	// worker accepts it — CreateCopySegment folded this dispatch into the task
+	// already registered there and adopted its epoch onto the shared runtime.
+	// The abort would then delete the output of the very task the assignment
+	// points at, including a Completed one whose binlogs are already in segment
+	// metadata and about to be published. Metadata already tracks this exact
+	// worker, so cleanup is retryable through the task's own assignment; fall
+	// through to the tracked paths below, which drop with an abort flag derived
+	// from the task and job state instead of forcing one.
+	if task.GetNodeId() != NullNodeID && task.GetNodeId() != nodeID {
 		return taskDispatchCleanupUntracked, nil
 	}
 
 	if isTerminalCopyTaskState(task.GetState()) {
+		if task.GetNodeId() == nodeID {
+			// Already the persisted handle; nothing to write.
+			return taskDispatchCleanupTracked, nil
+		}
 		if err := m.updateTaskLocked(ctx, task, UpdateCopyTaskNodeID(nodeID)); err != nil {
 			return taskDispatchCleanupUntracked, err
 		}
@@ -1038,6 +1222,23 @@ const (
 	workerLossFailed
 )
 
+// workerLossOutcome is what ResolveTaskOnWorkerLoss decided and, when it
+// cleared a node assignment, which exact worker dispatch that assignment
+// named. The caller queues the worker-side cleanup of that dispatch: the loss
+// was inferred from DataCoord's view (a QueryCopySegment error), which does
+// not prove the DataNode process — and the task entry, its slot and its copy
+// goroutines — is gone. Once NodeId is cleared nothing else will ever address
+// that dispatch, so it must be handed to the untracked cleanup path here.
+type workerLossOutcome struct {
+	resolution workerLossResolution
+	// nodeID is the worker whose assignment was cleared; NullNodeID when the
+	// resolution is workerLossSkipped.
+	nodeID int64
+	// taskVersion is the epoch of the dispatch that was lost, i.e. the epoch
+	// the cleanup must carry so a later dispatch is never aborted by it.
+	taskVersion int64
+}
+
 // ResolveTaskOnWorkerLoss atomically decides the fate of a task whose
 // worker-side counterpart is confirmed lost (DataNode restarted/replaced, or
 // its task manager dropped the task). All checks and the resulting update run
@@ -1055,32 +1256,47 @@ const (
 // later path clears an assignment that never reaches a worker again.
 // The task must never be revived to Pending here: the scheduler would issue one
 // more dispatch for an already-dead job before checkFailedJob converges it.
-func (m *copySegmentMeta) ResolveTaskOnWorkerLoss(ctx context.Context, taskID int64, failReason string) (workerLossResolution, error) {
+//
+// Both non-skip outcomes clear the task's NodeId. The outcome carries the
+// cleared node and the epoch of the lost dispatch so the caller can queue an
+// untracked drop for it: "confirmed lost" is DataCoord's inference from a
+// query error, and if the worker is in fact alive its task entry, slot and
+// copy goroutines would otherwise be orphaned — nothing addresses a dispatch
+// whose NodeId is gone. Re-dispatch is then withheld until that cleanup
+// converges (ClaimTaskDispatch consults HasPendingUntrackedDrop), which is
+// what keeps a live stale worker from writing the shared target keys
+// alongside the new dispatch. A node that is really gone converges on the
+// first attempt through ErrNodeNotFound.
+func (m *copySegmentMeta) ResolveTaskOnWorkerLoss(ctx context.Context, taskID int64, failReason string) (workerLossOutcome, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	skipped := workerLossOutcome{resolution: workerLossSkipped, nodeID: NullNodeID}
 	task := m.tasks.get(taskID)
 	if task == nil || task.GetState() != datapb.CopySegmentTaskState_CopySegmentTaskInProgress {
-		return workerLossSkipped, nil
+		return skipped, nil
 	}
+	lost := workerLossOutcome{nodeID: task.GetNodeId(), taskVersion: task.GetTaskVersion()}
 
 	job, ok := m.jobs[task.GetJobId()]
 	if ok && isActiveCopyJobState(job.GetState()) {
 		if err := m.updateTaskLocked(ctx, task,
 			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskPending),
 			UpdateCopyTaskNodeID(NullNodeID)); err != nil {
-			return workerLossSkipped, err
+			return skipped, err
 		}
-		return workerLossRedispatched, nil
+		lost.resolution = workerLossRedispatched
+		return lost, nil
 	}
 
 	if err := m.updateTaskLocked(ctx, task,
 		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
 		UpdateCopyTaskNodeID(NullNodeID),
 		UpdateCopyTaskReason(failReason)); err != nil {
-		return workerLossSkipped, err
+		return skipped, err
 	}
-	return workerLossFailed, nil
+	lost.resolution = workerLossFailed
+	return lost, nil
 }
 
 // taskAcceptsResultLocked reports whether a worker result for taskID may still

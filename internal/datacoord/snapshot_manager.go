@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -50,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -1619,6 +1617,16 @@ func (sm *snapshotManager) createRestoreJob(
 		return err
 	}
 
+	// The V3 manifest base path persisted at pre-registration must be the very
+	// path DataNode will write to, or dropped-segment GC of a target that never
+	// reported back removes nothing. Both sides derive it from the same source
+	// and target storage roots through the same shared transform.
+	sourceRootPath, targetRootPath, err := deriveCopySegmentRootPaths(external, snapshotS3Location, snapshotData.Layout)
+	if err != nil {
+		mlog.Error(ctx, "failed to derive copy segment storage roots", mlog.Err(err))
+		return err
+	}
+
 	// Create ID mappings and pre-register target segments
 	idMappings := make([]*datapb.CopySegmentIDMapping, 0, len(validSegments))
 	totalRows := int64(0)
@@ -1671,6 +1679,8 @@ func (sm *snapshotManager) createRestoreJob(
 
 		targetManifestPath, err := deriveCopySegmentTargetManifestPath(
 			segDesc,
+			sourceRootPath,
+			targetRootPath,
 			targetCollection,
 			targetPartitionID,
 			targetSegmentID,
@@ -1782,10 +1792,19 @@ func (sm *snapshotManager) createRestoreJob(
 }
 
 // deriveCopySegmentTargetManifestPath persists the V3 target base path before
-// the DataNode task starts. This lets dropped-segment GC remove partially
-// copied data even if the DataNode restarts before reporting its result.
+// the DataNode reports it, so that dropped-segment GC can reclaim a target whose
+// worker restarted before returning a result. Missing, malformed, or unsupported
+// V3 manifests fail here, before any target metadata is persisted.
+//
+// sourceRootPath/targetRootPath come from deriveCopySegmentRootPaths, exactly
+// as AssembleCopySegmentRequest hands them to DataNode; the transform itself is
+// snapshotstorage.TransformCopySegmentManifestPath, the one DataNode applies.
+// For an external restore the source root is a foreign URI and the target root
+// is this cluster's storage root, so ID substitution alone would persist a
+// source-rooted prefix that does not exist in the target bucket.
 func deriveCopySegmentTargetManifestPath(
 	segment *datapb.SegmentDescription,
+	sourceRootPath, targetRootPath string,
 	targetCollectionID, targetPartitionID, targetSegmentID int64,
 ) (string, error) {
 	if segment.GetStorageVersion() < storage.StorageV3 {
@@ -1797,22 +1816,19 @@ func deriveCopySegmentTargetManifestPath(
 			segment.GetStorageVersion(), segment.GetSegmentId())
 	}
 
-	basePath, version, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
-	if err != nil {
-		return "", merr.WrapErrServiceInternalErr(err,
-			"failed to unmarshal manifest path for copy segment source %d", segment.GetSegmentId())
-	}
-	targetBasePath, err := metautil.ReplaceSegmentIDsInPath(
-		basePath,
+	targetManifestPath, err := snapshotstorage.TransformCopySegmentManifestPath(
+		segment.GetManifestPath(),
+		sourceRootPath,
+		targetRootPath,
 		targetCollectionID,
 		targetPartitionID,
 		targetSegmentID,
 	)
 	if err != nil {
 		return "", merr.WrapErrServiceInternalErr(err,
-			"failed to derive manifest base path for copy segment source %d", segment.GetSegmentId())
+			"failed to derive manifest path for copy segment source %d", segment.GetSegmentId())
 	}
-	return packed.MarshalManifestPath(targetBasePath, version), nil
+	return targetManifestPath, nil
 }
 
 // ============================================================================

@@ -377,7 +377,9 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	// publishes, would delete live data. The inspector retries that cleanup every
 	// round and the scheduler re-queues this task, so the dispatch resumes as
 	// soon as the previous one is provably gone.
-	if meta, ok := t.copyMeta.(*copySegmentMeta); ok && meta.hasPendingUntrackedDrop(t.GetTaskId()) {
+	// ClaimTaskDispatch re-checks this authoritatively under its lock; the
+	// pre-check only spares the snapshot read in AssembleCopySegmentRequest.
+	if t.copyMeta.HasPendingUntrackedDrop(t.GetTaskId()) {
 		mlog.Info(ctx, "skip dispatching copy segment task: cleanup of an earlier dispatch is still pending",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
 		return
@@ -391,25 +393,58 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		}
 		return
 	}
-	// Claim a fresh epoch before the worker can accept the task, so every
-	// worker-side task is bound to exactly one dispatch and a drop issued for an
-	// earlier one is recognizable as stale. Persisting first keeps the epoch
-	// monotonic across a DataCoord restart.
-	taskVersion, err := t.copyMeta.BumpTaskDispatchVersion(ctx, t.GetTaskId())
+	// Claim the dispatch before the worker can accept the task. The claim yields
+	// a fresh epoch, so every worker-side task is bound to exactly one dispatch
+	// and a drop issued for an earlier one is recognizable as stale; persisting
+	// it first keeps the epoch monotonic across a DataCoord restart. The claim
+	// also excludes a concurrent dispatch of this same task: the epoch is bound
+	// to the worker's runtime and so only fences a re-dispatch to the same node,
+	// while two dispatches racing onto two different nodes would both be
+	// accepted, and the loser's cleanup would delete the winner's output from
+	// the target keys the two share.
+	taskVersion, err := t.copyMeta.ClaimTaskDispatch(ctx, t.GetTaskId())
 	if err != nil {
-		mlog.Warn(ctx, "failed to bump copy segment task dispatch version",
+		if errors.Is(err, errCopySegmentDispatchInFlight) {
+			mlog.Info(ctx, "skip dispatching copy segment task: another dispatch is still in flight",
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
+			return
+		}
+		if errors.Is(err, errCopySegmentDispatchStale) {
+			mlog.Info(ctx, "skip dispatching copy segment task: preconditions no longer hold at claim time",
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
+			return
+		}
+		mlog.Warn(ctx, "failed to claim copy segment task dispatch",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 		return
 	}
+	// Released only after the outcome is committed and any cleanup for this
+	// dispatch has been queued, so the untracked-drop gate is already in place
+	// when the next dispatch is allowed to start.
+	defer t.copyMeta.ReleaseTaskDispatch(t.GetTaskId())
 	req.TaskVersion = taskVersion
 	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId(), job.GetExternal())
 	if err != nil {
-		mlog.Warn(ctx, "failed to create copy segment task on datanode",
+		// The error is ambiguous: the RPC runs under a timeout, so it can fail
+		// after the worker already registered the task. Treat it as possibly
+		// accepted and hand this exact dispatch to the cleanup retry loop. The
+		// drop is idempotent — a worker that never received the task answers
+		// success — so over-reporting costs one round, while under-reporting
+		// leaks a worker task nothing can ever remove (the worker only drops on
+		// RPC, with no timeout GC) that keeps writing the very target keys the
+		// re-dispatch will write.
+		mlog.Warn(ctx, "failed to create copy segment task on datanode, dropping possibly accepted worker task",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 		if job.GetExternal() && errors.Is(err, merr.ErrServiceUnimplemented) {
+			// A typed capability rejection: the worker refused the task at type
+			// routing and never registered it, so there is no dispatch to clean
+			// up — fail fast instead of retrying against a node that will never
+			// accept.
 			t.markTaskAndJobFailed(merr.Wrap(err,
 				"datanode does not support external copy segment tasks").Error())
+			return
 		}
+		t.dropUntrackedCopySegmentTask(cluster, nodeID, taskVersion)
 		return
 	}
 	mlog.Info(ctx, "create copy segment task on datanode done",
@@ -429,10 +464,14 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
 		return
 	case taskDispatchCleanupTracked:
-		// The worker accepted the task, but the task/job became terminal while
-		// the RPC was in flight. CommitTaskDispatch preserved that terminal
-		// outcome and recorded this node solely as a retry handle for cleanup.
-		mlog.Info(ctx, "copy segment task became inactive during dispatch, dropping accepted worker task",
+		// The worker accepted the task, but metadata does not want this dispatch
+		// executed: either the task/job went terminal while the RPC was in
+		// flight, or the authoritative task is already assigned to this same
+		// node. Either way CommitTaskDispatch left the assignment pointing here,
+		// so the drop goes through the task's own handle — and derives its abort
+		// flag from the task and job state, which is what keeps a Completed
+		// task's published output from being deleted.
+		mlog.Info(ctx, "copy segment task dispatch superseded by tracked metadata, dropping accepted worker task",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
 		t.DropTaskOnWorker(cluster)
 		return
@@ -453,12 +492,13 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 			mlog.Duration("taskTimeCost/pending", pendingDuration))...)
 }
 
-// dropUntrackedCopySegmentTask schedules removal of a worker task that was
-// accepted after metadata moved elsewhere and therefore cannot be retried
-// through the task's single NodeID field. The copy-segment inspector keeps the
-// exact (nodeID, taskID, taskVersion) triple until DropCopySegment succeeds or
-// the node is confirmed gone for the lifetime of the current DataCoord
-// ownership.
+// dropUntrackedCopySegmentTask schedules removal of a worker task that
+// metadata can no longer address through the task's single NodeID field — a
+// dispatch that was accepted after metadata moved elsewhere, one whose
+// CreateCopySegment RPC failed ambiguously, or one whose assignment was
+// cleared on worker loss. The copy-segment inspector keeps the exact
+// (nodeID, taskID, taskVersion) triple until DropCopySegment succeeds or the
+// node is confirmed gone for the lifetime of the current DataCoord ownership.
 //
 // taskVersion is the epoch of the dispatch being cleaned up, not the task's
 // current epoch: the worker executes the abort only while it still holds this
@@ -466,15 +506,16 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 // output deleted by this cleanup.
 func (t *copySegmentTask) dropUntrackedCopySegmentTask(cluster session.Cluster, nodeID, taskVersion int64) {
 	taskID := t.GetTaskId()
-	if meta, ok := t.copyMeta.(*copySegmentMeta); ok && meta.enqueueUntrackedDrop(nodeID, taskID, taskVersion) {
+	if t.copyMeta.EnqueueUntrackedDrop(nodeID, taskID, taskVersion) {
 		mlog.Info(context.TODO(), "queued untracked copy segment task for worker-side cleanup",
 			mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID), mlog.Int64("taskVersion", taskVersion))
 		return
 	}
 
-	// Production registers the retry handler before the scheduler starts. Keep a
-	// synchronous fallback for isolated task implementations and tests so an
-	// alternate CopySegmentMeta cannot silently skip cleanup altogether.
+	// The retry owner (the inspector) refused: it is closed, or none is
+	// registered. Fall back to one direct attempt so cleanup is never skipped
+	// silently; the drop is idempotent and the epoch keeps it from touching a
+	// later dispatch.
 	mlog.Warn(context.TODO(), "untracked copy segment drop retry handler unavailable, dropping synchronously",
 		mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID))
 	err := cluster.DropCopySegment(context.TODO(), nodeID, taskID, taskVersion, true)
@@ -519,17 +560,24 @@ func (t *copySegmentTask) markTaskAndJobFailed(reason string) {
 }
 
 // isCopyTaskLostOnWorker reports whether a QueryCopySegment error means the
-// worker-side task is confirmed lost, as opposed to a transient transport error.
+// worker-side task is lost as far as DataCoord can tell, as opposed to a
+// transient transport error.
 //
-// Confirmed-loss signals (audited against every construction site on the
+// Loss signals (audited against every construction site on the
 // QueryCopySegment path):
 //   - merr.ErrNodeNotFound: the node manager no longer knows the assigned
-//     DataNode (its session was removed after a restart/replacement), so its
-//     in-memory task manager — and the task with it — is gone.
+//     DataNode. This is DataCoord's view — the session-watch-maintained client
+//     map — not proof about the DataNode process: a lease expiry or a gap
+//     during Startup() reconciliation removes the entry while the DataNode and
+//     its task manager may still be alive.
 //   - merr.ErrImportSysFailed: on this RPC the code is produced only by the
 //     DataNode's task-not-found branch (importv2.WrapTaskNotFoundError when the
 //     queried task is absent from its task manager), i.e. the DataNode is alive
 //     but restarted and lost the task.
+//
+// Because the first signal is not proof, the caller never relies on it: the
+// dispatch that was lost is always handed to the untracked cleanup path, which
+// converges either way (drop lands, or ErrNodeNotFound is treated as done).
 //
 // Everything else (gRPC transport errors, node briefly not serving/not ready,
 // response decode failures) may coexist with a still-running worker task and
@@ -587,37 +635,50 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 			return
 		}
-		// Confirmed loss: the worker-side task no longer exists (DataNode
-		// restarted/replaced, or its in-memory task manager lost the task).
-		// Leaving the task InProgress would make the scheduler poll a dead
-		// node until the job-level timeout, since only Pending tasks are
-		// re-dispatched. ResolveTaskOnWorkerLoss decides atomically (all checks
-		// and the update under one meta write lock):
+		// Worker loss: the worker-side task no longer exists as far as
+		// DataCoord can tell (DataNode restarted/replaced, or its in-memory
+		// task manager lost the task). Leaving the task InProgress would make
+		// the scheduler poll a dead node until the job-level timeout, since
+		// only Pending tasks are re-dispatched. ResolveTaskOnWorkerLoss decides
+		// atomically (all checks and the update under one meta write lock):
 		//   - parent job still active: reset to Pending with NullNodeID so the
-		//     scheduler re-dispatches to a live node. Re-dispatch is idempotent:
-		//     target binlog paths are deterministic transforms of the source
-		//     paths (same content on overwrite), and each dispatch allocates
-		//     fresh buildIDs, so index files from a partial earlier attempt are
-		//     never referenced by meta and are removed by GC.
+		//     scheduler re-dispatches to a live node.
 		//   - parent job terminal (this response arrived after another task
 		//     already failed the job): converge to Failed with NullNodeID.
 		//     Reviving to Pending would earn the scheduler one extra dispatch
 		//     for a dead job, and leaving it InProgress on the dead node would
 		//     block checkGC forever (GC skips tasks with a node assignment).
-		resolution, resolveErr := t.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), t.GetTaskId(),
+		//
+		// Either way the cleared assignment is handed to the untracked cleanup
+		// path — exactly as CreateTaskOnWorker does for an ambiguous dispatch
+		// error. The loss is inferred, not proven: ErrNodeNotFound only says
+		// DataCoord's client map lost the node, and if the DataNode is still
+		// alive its task entry, its slot and its copy goroutines would be
+		// orphaned for good once NodeId is cleared, while still writing the
+		// very target keys the re-dispatch writes. Queuing the drop is safe and
+		// converges in both cases: a node that is really gone answers
+		// ErrNodeNotFound, which the inspector treats as done on the first
+		// attempt, delaying the re-dispatch by at most one round; a live node
+		// aborts the stale task. The drop carries the lost dispatch's epoch,
+		// so it can never abort the re-dispatch even if it lands on the same
+		// node, and ClaimTaskDispatch withholds the re-dispatch until this
+		// cleanup is settled.
+		outcome, resolveErr := t.copyMeta.ResolveTaskOnWorkerLoss(context.TODO(), t.GetTaskId(),
 			fmt.Sprintf("copy segment task lost on worker node %d after parent job terminated: %v", nodeID, err))
 		if resolveErr != nil {
 			mlog.Warn(context.TODO(), "failed to resolve copy segment task after worker loss",
 				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(resolveErr))...)
 			return
 		}
-		switch resolution {
+		switch outcome.resolution {
 		case workerLossRedispatched:
-			mlog.Info(context.TODO(), "reset copy segment task to pending due to worker loss, will re-dispatch",
-				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+			mlog.Info(context.TODO(), "reset copy segment task to pending due to worker loss, will re-dispatch once the lost dispatch is cleaned up",
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(outcome.nodeID), mlog.Int64("taskVersion", outcome.taskVersion), mlog.Err(err))...)
+			t.dropUntrackedCopySegmentTask(cluster, outcome.nodeID, outcome.taskVersion)
 		case workerLossFailed:
 			mlog.Info(context.TODO(), "converged lost copy segment task to failed: parent job no longer active",
-				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
+				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(outcome.nodeID), mlog.Int64("taskVersion", outcome.taskVersion), mlog.Err(err))...)
+			t.dropUntrackedCopySegmentTask(cluster, outcome.nodeID, outcome.taskVersion)
 		case workerLossSkipped:
 			mlog.Info(context.TODO(), "skip resolving copy segment task after worker loss: task no longer in progress",
 				WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
@@ -834,14 +895,12 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		return nil, err
 	}
 	storageConfig := createStorageConfig()
-	sourceRootPath := ""
-	if job.GetExternal() {
-		// DataNode uses SourceRootPath both to detect a foreign source bucket and
-		// to rebase source object keys into the target storage root.
-		sourceRootPath, err = deriveSnapshotSourceRootURI(job.GetSnapshotS3Location(), snapshotData.Layout)
-		if err != nil {
-			return nil, err
-		}
+	// DataNode uses SourceRootPath both to detect a foreign source bucket and
+	// to rebase source object keys into the target storage root. The same pair
+	// is what createRestoreJob used to pre-register the target manifest paths.
+	sourceRootPath, targetRootPath, err := deriveCopySegmentRootPaths(job.GetExternal(), job.GetSnapshotS3Location(), snapshotData.Layout)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build source segment map for quick lookup
@@ -931,7 +990,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			PartitionId:    partitionID,
 			SegmentId:      targetSegID,
 			NewBuildIds:    newBuildIDs,
-			TargetRootPath: storageConfig.GetRootPath(),
+			TargetRootPath: targetRootPath,
 		}
 		mlog.Info(ctx, "prepare copy segment source and target",
 			WrapCopySegmentTaskLog(task,
@@ -957,6 +1016,26 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		TaskSlot:      task.GetTaskSlot(),
 		ExternalSpec:  job.GetExternalSpec(),
 	}, nil
+}
+
+// deriveCopySegmentRootPaths returns the (sourceRootPath, targetRootPath)
+// pair every copy-segment path transform is keyed on. It is the single source
+// of both values: AssembleCopySegmentRequest hands them to DataNode on
+// CopySegmentSource/CopySegmentTarget, and createRestoreJob uses them to
+// pre-register the target manifest path. If the two ever diverge, the path
+// DataCoord persists is not the path DataNode writes, and dropped-segment GC
+// of a target that never reported back deletes nothing.
+//
+// sourceRootPath is empty for a same-cluster restore and the snapshot's storage
+// root URI for an external one; targetRootPath is this cluster's storage root.
+func deriveCopySegmentRootPaths(external bool, snapshotS3Location string, layout datapb.SnapshotLayout) (sourceRootPath, targetRootPath string, err error) {
+	if external {
+		sourceRootPath, err = deriveSnapshotSourceRootURI(snapshotS3Location, layout)
+		if err != nil {
+			return "", "", err
+		}
+	}
+	return sourceRootPath, createStorageConfig().GetRootPath(), nil
 }
 
 func deriveSnapshotSourceRootURI(snapshotS3Location string, layout datapb.SnapshotLayout) (string, error) {

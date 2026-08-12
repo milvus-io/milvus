@@ -738,13 +738,34 @@ func (node *DataNode) DropCopySegment(ctx context.Context, req *datapb.DropCopyS
 	}
 
 	// Failed-state inference preserves compatibility with coordinators that do
-	// not yet send the explicit abort bit during a rolling upgrade.
+	// not yet send the explicit abort bit during a rolling upgrade. A request
+	// carrying no dispatch epoch either comes from such a coordinator too: both
+	// fields were introduced together, and a current coordinator stamps every
+	// dispatch with an epoch >= 1 before the worker can accept it, so a live
+	// task can only see task_version == 0 from a legacy caller.
+	legacyCoordinator := req.GetTaskVersion() == 0 && !req.GetAbort()
 	abort := req.GetAbort() || copyTask.GetState() == datapb.ImportTaskStateV2_Failed
+	if !abort && legacyCoordinator && copyTask.GetState() != datapb.ImportTaskStateV2_Completed {
+		// A legacy coordinator converges a job by marking its tasks Failed on
+		// its own side and dropping them here without the abort bit. Rejecting
+		// the drop would strand the worker task forever — the legacy caller
+		// only logs the error and the Drop RPC is the sole removal path — so
+		// honor the release intent by aborting: the task is not Completed, its
+		// output is not referenced by any metadata, and a legacy coordinator
+		// has no epoch-fenced re-dispatch this cleanup could collide with.
+		mlog.Info(ctx, "aborting copy segment task released by a legacy coordinator without an abort flag",
+			mlog.Int64("taskID", req.GetTaskID()), mlog.String("state", copyTask.GetState().String()))
+		abort = true
+	}
 	if abort {
 		if err := copyTask.Abort(ctx); err != nil {
 			return merr.Status(merr.WrapErrServiceInternalMsg("abort copy segment task %d: %v", req.GetTaskID(), err)), nil
 		}
 	} else if copyTask.GetState() != datapb.ImportTaskStateV2_Completed {
+		// A current coordinator never takes this branch: every same-version
+		// call site sets the abort bit for any non-release drop. Reaching it
+		// means an epoch-stamped caller asked to release a task that has not
+		// completed — refuse rather than delete or preserve the wrong thing.
 		return merr.Status(merr.WrapErrServiceInternalMsg(
 			"cannot release copy segment task %d in state %s", req.GetTaskID(), copyTask.GetState().String())), nil
 	}

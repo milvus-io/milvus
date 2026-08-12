@@ -183,7 +183,19 @@ func (c *copySegmentChecker) Start() {
 	}
 }
 
+// retryPublishingJob re-runs finishJob for a job whose publication claim was
+// persisted but whose FinalizeJobPublication did not go through.
+//
+// The retry is bounded by the job deadline (tryTimeoutJob). Until then, every
+// round that finds the job still Publishing is a publication that failed to
+// persist, which is logged at warn level with the time spent so far so the
+// condition is visible in logs and metrics (CopySegmentJobs{state=Publishing})
+// without inspecting metadata.
 func (c *copySegmentChecker) retryPublishingJob(job CopySegmentJob) {
+	mlog.Warn(c.ctx, "copy segment job publication did not persist, retrying until the job deadline",
+		mlog.FieldJobID(job.GetJobId()),
+		mlog.Duration("elapsed", job.GetTR().ElapseSpan()),
+		mlog.Time("deadline", tsoutil.PhysicalTime(job.GetTimeoutTs())))
 	var totalRows int64
 	for _, mapping := range job.GetIdMappings() {
 		if segment := c.meta.GetSegment(c.ctx, mapping.GetTargetSegmentId()); segment != nil {
@@ -701,15 +713,19 @@ func (c *copySegmentChecker) checkFailedJob(job CopySegmentJob) {
 
 // tryTimeoutJob checks if job has exceeded timeout and marks it as failed.
 //
-// Only applies to non-terminal jobs (Pending/Executing).
-// Timeout prevents jobs from running indefinitely due to stuck tasks.
+// Applies to every non-terminal job (Pending/Executing/Publishing). Timeout
+// prevents jobs from running indefinitely due to stuck tasks — and it is the
+// bound on publication retry: Publishing has no other exit than a successful
+// FinalizeJobPublication, so without it a persistent catalog failure would
+// keep the job in Publishing forever (see CopySegmentMeta.TimeoutJob).
 //
 // Timeout is set when job is created based on configuration.
 func (c *copySegmentChecker) tryTimeoutJob(job CopySegmentJob) {
 	// Only apply timeout to non-terminal jobs
 	switch job.GetState() {
 	case datapb.CopySegmentJobState_CopySegmentJobPending,
-		datapb.CopySegmentJobState_CopySegmentJobExecuting:
+		datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		datapb.CopySegmentJobState_CopySegmentJobPublishing:
 		// Continue to check timeout
 	default:
 		// Skip timeout check for terminal states (Completed/Failed)
@@ -721,9 +737,11 @@ func (c *copySegmentChecker) tryTimeoutJob(job CopySegmentJob) {
 		return
 	}
 
-	applied, err := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-		UpdateCopyJobReason("timeout"))
+	reason := "timeout"
+	if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobPublishing {
+		reason = "timeout while publishing restored segments"
+	}
+	applied, err := c.copyMeta.TimeoutJob(c.ctx, job.GetJobId(), reason)
 	if err != nil {
 		mlog.Error(c.ctx, "failed to update timed-out job state to Failed",
 			mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
