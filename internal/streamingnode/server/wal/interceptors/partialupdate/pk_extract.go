@@ -320,7 +320,7 @@ func validatePrimaryKeysType(pks primaryKeys, declaredType, dataType schemapb.Da
 }
 
 func validatePrimaryKeysScalarType(pks primaryKeys, dataType schemapb.DataType) error {
-	expected := primaryKeyKindNone
+	var expected primaryKeyKind
 	switch dataType {
 	case schemapb.DataType_Int64:
 		expected = primaryKeyKindInt64
@@ -631,9 +631,10 @@ func scanStringMapEntry(payload []byte) (string, string, error) {
 		if valueLength < 0 {
 			return "", "", malformedPayloadError("message property", valueLength)
 		}
-		if number == 1 {
+		switch number {
+		case 1:
 			key = string(bytesValue)
-		} else if number == 2 {
+		case 2:
 			value = string(bytesValue)
 		}
 		payload = payload[valueLength:]

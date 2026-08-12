@@ -178,7 +178,6 @@ func TestExtractPKsFromInsert(t *testing.T) {
 		_, err := extractPKsFromInsert(corruptMessageBody(newInsertMessage(nil)), 100)
 		requireUnrecoverable(t, err)
 	})
-
 }
 
 func TestExtractPKsFromInsertSkipsVectorPayload(t *testing.T) {
