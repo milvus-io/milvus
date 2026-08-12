@@ -49,6 +49,9 @@ fail=0
 ############################################################################
 # Allowed throw operands:
 #   SegcoreError / milvus::SegcoreError   the typed base
+#   LoonFFIError                          derives from SegcoreError and also
+#                                         carries the producer's raw LOON code
+#                                         across milvus's own C-ABI export tail
 #   ExecOperatorException / ExecDriverException
 #                                         typed, derive from SegcoreError
 #   folly::Future*                        folly's own control-flow signals,
@@ -59,7 +62,7 @@ fail=0
 #                                         deliberately NOT allowed: it rethrows
 #                                         by the CAUGHT type, slicing a derived
 #                                         SegcoreError back to its base
-ALLOWED_THROW='^(milvus::)?(SegcoreError|ExecOperatorException|ExecDriverException)\(|^folly::Future[A-Za-z]*\(|^;'
+ALLOWED_THROW='^(milvus::)?(SegcoreError|ExecOperatorException|ExecDriverException|LoonFFIError)\(|^folly::Future[A-Za-z]*\(|^;'
 
 # `throw` is matched anywhere on the line, not just at its start: `if (bad)
 # throw ...;` and `} else throw ...;` are throws too. Line comments are stripped
