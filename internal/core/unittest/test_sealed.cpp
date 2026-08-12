@@ -3646,15 +3646,18 @@ TEST(SealedVectorArrayFallback,
 
     auto index_params = GenIndexParams(emb_list_hnsw_sq_index.get());
     index_params["metric_type"] = metric_type;
-    auto request = milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-        DataType::VECTOR_ARRAY,
-        element_type,
-        create_index_info.index_engine_version,
-        0,
-        index_params,
-        false,
-        dataset_size * emb_list_len,
-        dim);
+    auto request =
+        milvus::index::IndexFactory::GetInstance().EstimateIndexLoadResource(
+            milvus::index::IndexLoadSpec{
+                .field_type = DataType::VECTOR_ARRAY,
+                .element_type = element_type,
+                .index_version = create_index_info.index_engine_version,
+                .index_size_in_bytes = 0,
+                .index_params = index_params,
+                .mmap_enable = false,
+                .num_rows = dataset_size * emb_list_len,
+                .dim = dim,
+            });
     ASSERT_FALSE(request.has_raw_data);
 
     LoadIndexInfo load_info;
