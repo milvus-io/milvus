@@ -195,6 +195,20 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.storage.zstd.concurrency", "2")
 		assert.Equal(t, 2, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
 
+		assert.Equal(t, "close", params.CommonCfg.ProxyFileResourceMode.GetValue())
+		params.Save("common.fileResource.mode.proxy", "sync")
+		assert.Equal(t, "sync", params.CommonCfg.ProxyFileResourceMode.GetValue())
+		assert.Equal(t, int64(0), params.CommonCfg.FileResourceMaxFileSize.GetAsSize())
+		params.Save("common.fileResource.maxFileSize", "2g")
+		assert.Equal(t, int64(2*1024*1024*1024), params.CommonCfg.FileResourceMaxFileSize.GetAsSize())
+		params.Save("common.fileResource.maxFileSize", "-1")
+		assert.Equal(t, int64(0), params.CommonCfg.FileResourceMaxFileSize.GetAsSize())
+		assert.Equal(t, 5*time.Minute, params.CommonCfg.FileResourceDownloadTimeout.GetAsDurationByParse())
+		params.Save("common.fileResource.downloadTimeout", "30s")
+		assert.Equal(t, 30*time.Second, params.CommonCfg.FileResourceDownloadTimeout.GetAsDurationByParse())
+		params.Save("common.fileResource.downloadTimeout", "invalid")
+		assert.Equal(t, 5*time.Minute, params.CommonCfg.FileResourceDownloadTimeout.GetAsDurationByParse())
+
 		assert.Equal(t, 0, params.CommonCfg.ClusterID.GetAsInt())
 		params.Save("common.clusterID", "32")
 		assert.Panics(t, func() {

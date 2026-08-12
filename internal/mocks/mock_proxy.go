@@ -9117,6 +9117,65 @@ func (_c *MockProxy_Stop_Call) RunAndReturn(run func() error) *MockProxy_Stop_Ca
 	return _c
 }
 
+// SyncFileResource provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) SyncFileResource(_a0 context.Context, _a1 *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SyncFileResource")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.SyncFileResourceRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.SyncFileResourceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_SyncFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncFileResource'
+type MockProxy_SyncFileResource_Call struct {
+	*mock.Call
+}
+
+// SyncFileResource is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *internalpb.SyncFileResourceRequest
+func (_e *MockProxy_Expecter) SyncFileResource(_a0 interface{}, _a1 interface{}) *MockProxy_SyncFileResource_Call {
+	return &MockProxy_SyncFileResource_Call{Call: _e.mock.On("SyncFileResource", _a0, _a1)}
+}
+
+func (_c *MockProxy_SyncFileResource_Call) Run(run func(_a0 context.Context, _a1 *internalpb.SyncFileResourceRequest)) *MockProxy_SyncFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.SyncFileResourceRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_SyncFileResource_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_SyncFileResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_SyncFileResource_Call) RunAndReturn(run func(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)) *MockProxy_SyncFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // TransferNode provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) TransferNode(_a0 context.Context, _a1 *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
