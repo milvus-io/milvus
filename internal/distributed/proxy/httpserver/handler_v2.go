@@ -477,19 +477,47 @@ func restfulSizeMiddleware(handler gin.HandlerFunc, observeOutbound bool) gin.Ha
 
 func getTraceLogRequestFieldWithoutSensitiveInfo(req any) mlog.Field {
 	switch request := req.(type) {
+	case *CollectionReq:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		redactedReq := *request
+		redactedReq.Schema.ExternalSource = externalspec.RedactExternalSource(request.Schema.ExternalSource)
+		redactedReq.Schema.ExternalSpec = externalspec.RedactExternalSpecForLog(request.Schema.ExternalSpec)
+		redactedReq.TopLevelExternalSource = externalspec.RedactExternalSource(request.TopLevelExternalSource)
+		redactedReq.TopLevelExternalSpec = externalspec.RedactExternalSpecForLog(request.TopLevelExternalSpec)
+		return mlog.Any("request", &redactedReq)
+	case *RefreshExternalCollectionReq:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		redactedReq := *request
+		redactedReq.ExternalSource = externalspec.RedactExternalSource(request.ExternalSource)
+		redactedReq.ExternalSpec = externalspec.RedactExternalSpecForLog(request.ExternalSpec)
+		return mlog.Any("request", &redactedReq)
+	case *PasswordReq:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		return mlog.Any("request", &UserReq{UserName: request.UserName})
+	case *NewPasswordReq:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		return mlog.Any("request", &UserReq{UserName: request.UserName})
 	case *RestoreExternalSnapshotReq:
 		if request == nil {
 			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
 		}
 		redactedReq := *request
-		redactedReq.ExternalSpec = externalspec.RedactExternalSpec(request.ExternalSpec)
+		redactedReq.ExternalSpec = externalspec.RedactExternalSpecForLog(request.ExternalSpec)
 		return mlog.Any("request", &redactedReq)
 	case *ExportSnapshotReq:
 		if request == nil {
 			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
 		}
 		redactedReq := *request
-		redactedReq.ExternalSpec = externalspec.RedactExternalSpec(request.ExternalSpec)
+		redactedReq.ExternalSpec = externalspec.RedactExternalSpecForLog(request.ExternalSpec)
 		return mlog.Any("request", &redactedReq)
 	default:
 		return proxy.GetRequestFieldWithoutSensitiveInfo(req)
@@ -686,7 +714,7 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 	primaryField, ok := getPrimaryField(coll.Schema)
 	autoID := false
 	if !ok {
-		mlog.Warn(ctx, "high level restful api, get primary field from collection schema fail", mlog.Any("collection schema", coll.Schema), mlog.Any("request", anyReq))
+		mlog.Warn(ctx, "high level restful api, get primary field from collection schema fail", mlog.FieldSchema(coll.Schema), mlog.Any("request", anyReq))
 	} else {
 		autoID = primaryField.AutoID
 	}
@@ -1412,7 +1440,16 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		})
 		return nil, err
 	}
-	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
+	templateValues, err := generateExpressionTemplate(httpReq.ExprParams)
+	if err != nil {
+		mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	req.ExprTemplateValues = templateValues
 	c.Set(ContextRequest, req)
 	if httpReq.Offset > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
@@ -1473,7 +1510,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		return nil, err
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
-	filter, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+	filter, idTemplateValues, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 	if err != nil {
 		HTTPReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -1482,11 +1519,12 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		return nil, err
 	}
 	req := &milvuspb.QueryRequest{
-		DbName:         dbName,
-		CollectionName: httpReq.CollectionName,
-		OutputFields:   httpReq.OutputFields,
-		PartitionNames: httpReq.PartitionNames,
-		Expr:           filter,
+		DbName:             dbName,
+		CollectionName:     httpReq.CollectionName,
+		OutputFields:       httpReq.OutputFields,
+		PartitionNames:     httpReq.PartitionNames,
+		Expr:               filter,
+		ExprTemplateValues: idTemplateValues,
 	}
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
@@ -1546,11 +1584,20 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 		PartitionName:  httpReq.PartitionName,
 		Expr:           httpReq.Filter,
 	}
-	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
+	templateValues, err := generateExpressionTemplate(httpReq.ExprParams)
+	if err != nil {
+		mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	req.ExprTemplateValues = templateValues
 	c.Set(ContextRequest, req)
 	if req.Expr == "" {
 		body, _ := c.Get(gin.BodyBytesKey)
-		filter, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+		filter, idTemplateValues, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 		if err != nil {
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -1559,6 +1606,7 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 			return nil, err
 		}
 		req.Expr = filter
+		req.ExprTemplateValues = idTemplateValues
 	}
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Delete", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Delete(reqCtx, req.(*milvuspb.DeleteRequest))
@@ -1841,6 +1889,42 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	})
 }
 
+// appendGroupParams validates the grouping knobs and appends them to params.
+//
+// The previous gate forwarded groupSize only when it was greater than zero,
+// which conflated three different requests: an absent groupSize (use the
+// server default), an explicit invalid one (0 or negative -- the server
+// rejects these, but it never saw them), and strictGroupSize on its own
+// (silently dropped because it rode behind the same gate). A knob that is
+// present is now either forwarded or refused; only absence means default.
+func appendGroupParams(params []*commonpb.KeyValuePair, groupByField string, groupSize *int32, strictGroupSize *bool) ([]*commonpb.KeyValuePair, error) {
+	// Trimmed with the same rule the proxy applies when it parses the field
+	// name back out. Without this, a groupingField of blanks counts as
+	// provided here, the proxy trims it to nothing, and the knobs it
+	// authorized are swallowed downstream -- the exact silence this function
+	// exists to remove.
+	groupByField = strings.TrimSpace(groupByField)
+	if groupByField == "" {
+		if groupSize != nil || strictGroupSize != nil {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"groupSize and strictGroupSize require groupingField")
+		}
+		return params, nil
+	}
+	params = append(params, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: groupByField})
+	if groupSize != nil {
+		if *groupSize <= 0 {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"groupSize must be a positive integer, got: %d", *groupSize)
+		}
+		params = append(params, &commonpb.KeyValuePair{Key: ParamGroupSize, Value: strconv.FormatInt(int64(*groupSize), 10)})
+	}
+	if strictGroupSize != nil {
+		params = append(params, &commonpb.KeyValuePair{Key: ParamStrictGroupSize, Value: strconv.FormatBool(*strictGroupSize)})
+	}
+	return params, nil
+}
+
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*SearchReqV2)
 	req := &milvuspb.SearchRequest{
@@ -1907,13 +1991,16 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
-		if httpReq.GroupByField != "" || httpReq.GroupSize != 0 || httpReq.StrictGroupSize {
+		if httpReq.GroupByField != "" || httpReq.GroupSize != nil || httpReq.StrictGroupSize != nil {
 			err := merr.WrapErrParameterInvalidMsg("groupingField/groupSize/strictGroupSize and searchAggregation cannot be used simultaneously")
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
-		if searchParamsContainAny(httpReq.SearchParams, proxy.GroupByFieldKey, proxy.GroupByFieldsKey) {
-			err := merr.WrapErrParameterInvalidMsg("searchParams.group_by_field(s) and searchAggregation cannot be used simultaneously")
+		if searchParamsContainAny(httpReq.SearchParams,
+			proxy.GroupByFieldKey, proxy.GroupByFieldsKey, proxy.GroupSizeKey, proxy.StrictGroupSize) {
+			// wording kept compatible: the group_by_field(s) sentence is what
+			// clients and the REST e2e suite already pin on
+			err := merr.WrapErrParameterInvalidMsg("searchParams.group_by_field(s) and searchAggregation cannot be used simultaneously, and neither can group_size/strict_group_size")
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
@@ -1938,6 +2025,54 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 
+	// The group knobs have the same two spellings, and the searchParams one is
+	// appended first, so it silently won any disagreement. Same rule: one
+	// spelling per request. Asked of the root keys only: generateSearchParams
+	// itself duplicates root keys into the params JSON, so nested copies are
+	// an artifact of the working spelling, not a spelling of their own.
+	if (httpReq.GroupByField != "" || httpReq.GroupSize != nil || httpReq.StrictGroupSize != nil) &&
+		searchParamsRootContainAny(httpReq.SearchParams,
+			proxy.GroupByFieldKey, proxy.GroupByFieldsKey, proxy.GroupSizeKey, proxy.StrictGroupSize) {
+		err := merr.WrapErrParameterInvalidMsg(
+			"ambiguous grouping: use either the top-level groupingField/groupSize/strictGroupSize or the searchParams group keys, not both")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+
+	// The rule that a size knob needs a grouping field holds for the legacy
+	// spelling too: group_size or strict_group_size in searchParams with no
+	// group field anywhere used to parse downstream into a grouping that never
+	// enabled, an ungrouped search reporting success. The field must be a
+	// working spelling -- a field name nested under params is inert.
+	groupingEnabled := httpReq.GroupByField != "" ||
+		searchParamsRootContainAny(httpReq.SearchParams, proxy.GroupByFieldKey, proxy.GroupByFieldsKey)
+	if !groupingEnabled &&
+		searchParamsRootContainAny(httpReq.SearchParams, proxy.GroupSizeKey, proxy.StrictGroupSize) {
+		err := merr.WrapErrParameterInvalidMsg(
+			"searchParams group_size/strict_group_size require a group field")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+
+	// Group keys nested under searchParams.params never act -- the proxy reads
+	// only standalone pairs. When a working spelling enables grouping they are
+	// tolerated as the compatibility duplicates generateSearchParams itself
+	// produces; when they are the only grouping in the request, the caller
+	// asked for grouping and would silently not get it, so the request is
+	// refused rather than half-honored.
+	if !groupingEnabled {
+		if nested, ok := httpReq.SearchParams[Params].(map[string]interface{}); ok {
+			for _, key := range []string{proxy.GroupByFieldKey, proxy.GroupByFieldsKey, proxy.GroupSizeKey, proxy.StrictGroupSize} {
+				if _, present := nested[key]; present {
+					err := merr.WrapErrParameterInvalidMsg(
+						"searchParams.params cannot carry %s; use the top-level grouping fields or searchParams.%s", key, key)
+					HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+					return nil, err
+				}
+			}
+		}
+	}
+
 	searchParams, err := generateSearchParams(httpReq.SearchParams)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, generate SearchParams failed", mlog.Err(err))
@@ -1949,12 +2084,10 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
-	if httpReq.GroupByField != "" {
-		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
-	}
-	if httpReq.GroupByField != "" && httpReq.GroupSize > 0 {
-		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupSize, Value: strconv.FormatInt(int64(httpReq.GroupSize), 10)})
-		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamStrictGroupSize, Value: strconv.FormatBool(httpReq.StrictGroupSize)})
+	searchParams, err = appendGroupParams(searchParams, httpReq.GroupByField, httpReq.GroupSize, httpReq.StrictGroupSize)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
 	}
 	if len(httpReq.OrderByFields) > 0 {
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OrderByFieldsKey, Value: strings.Join(httpReq.OrderByFields, ",")})
@@ -2021,7 +2154,16 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 
 	req.SearchParams = searchParams
-	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
+	templateValues, err := generateExpressionTemplate(httpReq.ExprParams)
+	if err != nil {
+		mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	req.ExprTemplateValues = templateValues
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Search", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
 	})
@@ -2194,7 +2336,16 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			PartitionNames: httpReq.PartitionNames,
 			SearchParams:   searchParams,
 		}
-		searchReq.ExprTemplateValues = generateExpressionTemplate(subReq.ExprParams)
+		subTemplateValues, err := generateExpressionTemplate(subReq.ExprParams)
+		if err != nil {
+			mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+		searchReq.ExprTemplateValues = subTemplateValues
 		req.Requests = append(req.Requests, searchReq)
 	}
 
@@ -2207,12 +2358,10 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)},
 		{Key: ParamRoundDecimal, Value: "-1"},
 	}
-	if httpReq.GroupByField != "" {
-		req.RankParams = append(req.RankParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
-	}
-	if httpReq.GroupByField != "" && httpReq.GroupSize > 0 {
-		req.RankParams = append(req.RankParams, &commonpb.KeyValuePair{Key: ParamGroupSize, Value: strconv.FormatInt(int64(httpReq.GroupSize), 10)})
-		req.RankParams = append(req.RankParams, &commonpb.KeyValuePair{Key: ParamStrictGroupSize, Value: strconv.FormatBool(httpReq.StrictGroupSize)})
+	req.RankParams, err = appendGroupParams(req.RankParams, httpReq.GroupByField, httpReq.GroupSize, httpReq.StrictGroupSize)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
 	}
 	if len(httpReq.FunctionScore.Functions) != 0 {
 		if req.FunctionScore, err = genFunctionScore(ctx, &httpReq.FunctionScore); err != nil {
@@ -2328,6 +2477,7 @@ func consistencyLevelForCreateCollection(httpReq *CollectionReq) (commonpb.Consi
 
 func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionReq)
+	requestLogField := getTraceLogRequestFieldWithoutSensitiveInfo(anyReq)
 	req := &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
@@ -2338,7 +2488,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	if httpReq.HasTopLevelExternalConfig() {
 		err := merr.WrapErrParameterInvalid("schema.externalSource/schema.externalSpec", "top-level externalSource/externalSpec",
 			"externalSource and externalSpec must be set under schema when creating an external collection")
-		mlog.Warn(ctx, "high level restful api, create external collection with top-level external config fail", mlog.Err(err), mlog.Any("request", anyReq))
+		mlog.Warn(ctx, "high level restful api, create external collection with top-level external config fail", mlog.Err(err), requestLogField)
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
@@ -2355,7 +2505,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		if httpReq.GetExternalSource() != "" || httpReq.GetExternalSpec() != "" {
 			err := merr.WrapErrParameterInvalid("schema.fields", "empty schema fields",
 				"external collection is not supported by quick create; provide schema.fields with externalField")
-			mlog.Warn(ctx, "high level restful api, quickly create external collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			mlog.Warn(ctx, "high level restful api, quickly create external collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2365,7 +2515,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		if len(httpReq.Schema.Functions) > 0 {
 			err := merr.WrapErrParameterInvalid("schema", "functions",
 				"functions are not supported for quickly create collection")
-			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2387,7 +2537,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		default:
 			err := merr.WrapErrParameterInvalid("FloatVector, BinaryVector, Float16Vector, BFloat16Vector, SparseFloatVector", httpReq.VectorFieldType,
 				"vectorFieldType can only be [FloatVector, BinaryVector, Float16Vector, BFloat16Vector, SparseFloatVector], default: FloatVector")
-			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2398,7 +2548,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		if quickCreateVectorDataType == schemapb.DataType_SparseFloatVector && httpReq.Dimension != 0 {
 			err := merr.WrapErrParameterInvalid(int32(0), httpReq.Dimension,
 				"dimension should not be specified for SparseFloatVector quick create")
-			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2409,7 +2559,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		if quickCreateVectorDataType != schemapb.DataType_SparseFloatVector && httpReq.Dimension == 0 {
 			err := merr.WrapErrParameterInvalid("collectionName & dimension", "collectionName",
 				"dimension is required for quickly create collection(default metric type: "+DefaultMetricType+")")
-			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2420,7 +2570,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			httpReq.MetricType = defaultMetricTypeForQuickCreate(quickCreateVectorDataType)
 		}
 		if err := validateMetricTypeForQuickCreate(quickCreateVectorDataType, httpReq.MetricType); err != nil {
-			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2442,7 +2592,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		default:
 			err := merr.WrapErrParameterInvalid("Int64, Varchar", httpReq.IDType,
 				"idType can only be [Int64, VarChar], default: Int64")
-			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+			mlog.Warn(ctx, "high level restful api, quickly create collection fail", mlog.Err(err), requestLogField)
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
@@ -2459,7 +2609,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		if enStr, ok := httpReq.Params["enableDynamicField"]; ok {
 			enableDynamic, err = strconv.ParseBool(fmt.Sprintf("%v", enStr))
 			if err != nil {
-				mlog.Warn(ctx, "high level restful api, parse enableDynamicField fail", mlog.Err(err), mlog.Any("request", anyReq))
+				mlog.Warn(ctx, "high level restful api, parse enableDynamicField fail", mlog.Err(err), requestLogField)
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: "parse enableDynamicField fail, err:" + err.Error(),
@@ -2597,7 +2747,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			structField := httpReq.Schema.StructFields[i]
 			if _, dup := fieldNames[structField.FieldName]; dup {
 				err := merr.WrapErrParameterInvalidMsg("duplicated field name: %s", structField.FieldName)
-				mlog.Warn(ctx, "high level restful api, create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+				mlog.Warn(ctx, "high level restful api, create collection fail", mlog.Err(err), requestLogField)
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: err.Error(),
@@ -2624,7 +2774,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		schema, err = proto.Marshal(&collSchema)
 	}
 	if err != nil {
-		mlog.Warn(ctx, "high level restful api, marshal collection schema fail", mlog.Err(err), mlog.Any("request", anyReq))
+		mlog.Warn(ctx, "high level restful api, marshal collection schema fail", mlog.Err(err), requestLogField)
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrMarshalCollectionSchema),
 			HTTPReturnMessage: merr.ErrMarshalCollectionSchema.Error() + ", error: " + err.Error(),
@@ -2643,7 +2793,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 
 	consistencyLevel, err := consistencyLevelForCreateCollection(httpReq)
 	if err != nil {
-		mlog.Warn(ctx, "high level restful api, create collection fail", mlog.Err(err), mlog.Any("request", anyReq))
+		mlog.Warn(ctx, "high level restful api, create collection fail", mlog.Err(err), requestLogField)
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
@@ -2761,7 +2911,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			createIndexReq.ExtraParams, err = convertToExtraParams(indexParam)
 			if err != nil {
 				// will not happen
-				mlog.Warn(ctx, "high level restful api, convertToExtraParams fail", mlog.Err(err), mlog.Any("request", anyReq))
+				mlog.Warn(ctx, "high level restful api, convertToExtraParams fail", mlog.Err(err), requestLogField)
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(err),
 					HTTPReturnMessage: err.Error(),

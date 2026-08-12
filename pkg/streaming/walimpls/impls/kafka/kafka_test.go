@@ -60,3 +60,14 @@ func TestGetBasicConfig(t *testing.T) {
 	assert.NotNil(t, basicConfig["sasl.username"])
 	assert.NotNil(t, basicConfig["security.protocol"])
 }
+
+func TestGetProducerConfigUsesConfiguredMessageMaxBytes(t *testing.T) {
+	config := &paramtable.Get().KafkaCfg
+	oldValue := config.ProducerMessageMaxBytes.SwapTempValue("4096")
+	defer config.ProducerMessageMaxBytes.SwapTempValue(oldValue)
+
+	producerConfig := (&builderImpl{}).getProducerConfig()
+	value, err := producerConfig.Get("message.max.bytes", nil)
+	assert.NoError(t, err)
+	assert.Equal(t, 4096, value)
+}

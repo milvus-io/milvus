@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -225,7 +224,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	var aggs []agg.AggregateBase
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, aggs, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
 	if err != nil {
-		log.Warn(ctx, "translate output fields failed", mlog.Err(err), mlog.Any("schema", t.schema))
+		log.Warn(ctx, "translate output fields failed", mlog.Err(err), mlog.FieldSchema(t.schema.CollectionSchema))
 		return err
 	}
 	if len(aggs) > 0 {
@@ -263,16 +262,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	// searches with small result size could no longer need requery.
 	traceVal, _ := funcutil.GetAttrByKeyFromRepeatedKV(PipelineTraceKey, t.request.GetSearchParams())
 	t.traceEnabled = strings.EqualFold(traceVal, "true")
-	timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.request.SearchParams)
-	if exist {
-		if !timestamptz.IsTimezoneValid(timezone) {
-			log.Info(ctx, "get invalid timezone from request", mlog.String("timezone", timezone))
-			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", timezone)
-		}
-		log.Debug(ctx, "determine timezone from request", mlog.String("user defined timezone", timezone))
-	} else {
-		timezone = getColTimezone(collectionInfo)
-		log.Debug(ctx, "determine timezone from collection", mlog.Any("collection timezone", timezone))
+	timezone, err := resolveTimezone(ctx, t.request.GetSearchParams(), collectionInfo)
+	if err != nil {
+		return err
 	}
 	t.resolvedTimezoneStr = timezone
 	// initSearchAggregation must run before init{,Advanced}SearchRequest so
