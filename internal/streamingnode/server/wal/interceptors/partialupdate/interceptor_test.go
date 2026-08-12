@@ -881,7 +881,7 @@ func (e *partialUpdateChainTestEnv) nextMessageID() message.MessageID {
 	return walimplstest.NewTestMessageID(e.nextID.Add(1))
 }
 
-func (e *partialUpdateChainTestEnv) hasPKVersionAfter(vchannel string, pk any, readTS uint64) bool {
+func (e *partialUpdateChainTestEnv) hasPKVersionAfter(vchannel string, pk int64, readTS uint64) bool {
 	channel := e.partial.state.pkVersions.channel(vchannel)
 	channel.mu.Lock()
 	defer channel.mu.Unlock()
