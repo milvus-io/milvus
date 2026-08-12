@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -913,5 +914,31 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 		err := it.setJobInfo(result)
 		s.NoError(err)
 		s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
+	})
+
+	s.Run("manifest and index metadata are published together", func() {
+		current := packed.MarshalManifestPath("base", 1)
+		incoming := packed.MarshalManifestPath("base", 2)
+		s.mt.segments.segments[s.segID].ManifestPath = current
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		s.mt.indexMeta.catalog = catalog
+		result := &workerpb.IndexTaskInfo{BuildID: s.taskID, State: commonpb.IndexState_Finished, ManifestPath: incoming}
+		s.NoError(it.setJobInfo(result))
+		s.Equal(incoming, s.mt.segments.segments[s.segID].GetManifestPath())
+	})
+
+	s.Run("failed atomic publish leaves in-memory metadata unchanged", func() {
+		current := packed.MarshalManifestPath("base", 2)
+		incoming := packed.MarshalManifestPath("base", 3)
+		s.mt.segments.segments[s.segID].ManifestPath = current
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
+		s.mt.indexMeta.catalog = catalog
+		it.SetState(indexpb.JobState_JobStateInProgress, "")
+		result := &workerpb.IndexTaskInfo{BuildID: s.taskID, State: commonpb.IndexState_Finished, ManifestPath: incoming}
+		s.Error(it.setJobInfo(result))
+		s.Equal(current, s.mt.segments.segments[s.segID].GetManifestPath())
+		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
 	})
 }

@@ -18,18 +18,25 @@ package datacoord
 
 import (
 	"context"
+	"net/url"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/server/v3/embed"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	embedetcd "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -52,6 +59,117 @@ func TestCatalog_Update_Empty(t *testing.T) {
 	c := NewCatalog(metakv, "", "")
 	err := c.Update(context.TODO())
 	assert.NoError(t, err)
+}
+
+func TestCatalog_Update_IndexAndManifestMetadataAreOneWrite(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Once()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+			assert.Empty(t, removals)
+			assert.Len(t, saves, 2)
+			assert.Contains(t, saves, buildSegmentPath(1, 2, 3))
+			assert.Contains(t, saves, BuildSegmentIndexKey(1, 2, 3, 4))
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+	seg := &datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, ManifestPath: "base/manifest-2"}
+	segIdx := &model.SegmentIndex{SegmentID: 3, CollectionID: 1, PartitionID: 2, BuildID: 4, IndexState: commonpb.IndexState_Finished, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED}
+	assert.NoError(t, c.Update(context.TODO(), metastore.UpdateSegment(seg), metastore.UpdateSegmentIndex(segIdx)))
+}
+
+func TestCatalog_Update_IndexAndManifestMetadataUsesOneEmbeddedEtcdTransaction(t *testing.T) {
+	config := embed.NewConfig()
+	config.Dir = t.TempDir()
+	config.LogLevel = "error"
+	clientURL, err := url.Parse("http://localhost:0")
+	require.NoError(t, err)
+	config.ListenClientUrls = []url.URL{*clientURL}
+	peerURL, err := url.Parse("http://localhost:0")
+	require.NoError(t, err)
+	config.ListenPeerUrls = []url.URL{*peerURL}
+
+	metaKV, err := embedetcd.NewEmbededEtcdKV(config, "datacoord-update-atomic")
+	require.NoError(t, err)
+	defer metaKV.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	watch := metaKV.WatchWithPrefix(ctx, "")
+	select {
+	case response := <-watch:
+		require.True(t, response.Created)
+	case <-ctx.Done():
+		t.Fatal("embedded etcd watch was not created")
+	}
+
+	catalog := NewCatalog(metaKV, "", "")
+	segment := &datapb.SegmentInfo{
+		ID:           3,
+		CollectionID: 1,
+		PartitionID:  2,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: "base/manifest-2",
+	}
+	segmentIndex := &model.SegmentIndex{
+		SegmentID:    3,
+		CollectionID: 1,
+		PartitionID:  2,
+		BuildID:      4,
+		IndexState:   commonpb.IndexState_Finished,
+		IndexFileKeys: []string{
+			"index-file",
+		},
+	}
+	require.NoError(t, catalog.Update(ctx,
+		metastore.UpdateSegment(segment),
+		metastore.UpdateSegmentIndex(segmentIndex)))
+
+	select {
+	case response := <-watch:
+		require.Len(t, response.Events, 2)
+		assert.Equal(t, int64(1), response.Events[0].Kv.Version)
+		assert.Equal(t, int64(1), response.Events[1].Kv.Version)
+	case <-ctx.Done():
+		t.Fatal("embedded etcd did not publish the combined transaction")
+	}
+
+	segmentValue, err := metaKV.Load(ctx, buildSegmentPath(1, 2, 3))
+	require.NoError(t, err)
+	storedSegment := &datapb.SegmentInfo{}
+	require.NoError(t, proto.Unmarshal([]byte(segmentValue), storedSegment))
+	assert.Equal(t, "base/manifest-2", storedSegment.GetManifestPath())
+
+	indexValue, err := metaKV.Load(ctx, BuildSegmentIndexKey(1, 2, 3, 4))
+	require.NoError(t, err)
+	storedIndex := &indexpb.SegmentIndex{}
+	require.NoError(t, proto.Unmarshal([]byte(indexValue), storedIndex))
+	assert.Equal(t, commonpb.IndexState_Finished, storedIndex.GetState())
+	assert.Equal(t, []string{"index-file"}, storedIndex.GetIndexFileKeys())
+}
+
+func TestCatalog_Update_V3SegmentPreservesRowCount(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Once()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string, _ []string, _ ...predicates.Predicate) error {
+			stored := &datapb.SegmentInfo{}
+			assert.NoError(t, proto.Unmarshal([]byte(saves[buildSegmentPath(1, 2, 3)]), stored))
+			assert.EqualValues(t, 100, stored.GetNumOfRows())
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+	seg := &datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, NumOfRows: 100, ManifestPath: "base/manifest-2"}
+	assert.NoError(t, c.Update(context.TODO(), metastore.UpdateSegment(seg)))
+}
+
+func TestCatalog_Update_IndexAndManifestRejectsNonAtomicFallback(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(1).Once()
+	c := NewCatalog(metakv, "", "")
+	seg := &datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, ManifestPath: "base/manifest-2"}
+	segIdx := &model.SegmentIndex{SegmentID: 3, CollectionID: 1, PartitionID: 2, BuildID: 4, IndexState: commonpb.IndexState_Finished}
+	assert.Error(t, c.Update(context.TODO(), metastore.UpdateSegment(seg), metastore.UpdateSegmentIndex(segIdx)))
 }
 
 // TestCatalog_Update_AddSegmentEncodingMatchesLegacy proves AddSegment writes

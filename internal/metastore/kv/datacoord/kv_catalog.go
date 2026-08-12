@@ -455,7 +455,12 @@ func buildDroppedSegmentKvs(segments []*datapb.SegmentInfo) (map[string]string, 
 		key := buildSegmentPath(s.GetCollectionID(), s.GetPartitionID(), s.GetID())
 		noBinlogsSegment, _, _, _, _ := CloneSegmentWithExcludeBinlogs(s)
 		// `s` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `s`.
-		segmentutil.ReCalcRowCount(s, noBinlogsSegment)
+		// V3 keeps authoritative row counts on SegmentInfo / Stats; its legacy
+		// binlog arrays can be empty after migration, so recomputing from them
+		// would persist zero rows during a record-only metadata update.
+		if !isV3Segment(s) {
+			segmentutil.ReCalcRowCount(s, noBinlogsSegment)
+		}
 		segBytes, err := marshalSegmentInfo(noBinlogsSegment)
 		if err != nil {
 			return nil, merr.WrapErrSerializationFailed(err, "marshal segment: %d", s.GetID())

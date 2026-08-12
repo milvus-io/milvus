@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -49,6 +50,24 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			if err := kc.applySegmentEntry(ctx, b, action.Type, e); err != nil {
 				return err
 			}
+		case metastore.SegmentIndexEntry:
+			if action.Type != metastore.ActionUpdate {
+				return unsupportedAction(action)
+			}
+			if e.SegmentIndex == nil {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil segment index in UpdateAction")
+			}
+			value, err := proto.Marshal(model.MarshalSegmentIndexModel(e.SegmentIndex))
+			if err != nil {
+				return err
+			}
+			key := BuildSegmentIndexKey(
+				e.SegmentIndex.CollectionID,
+				e.SegmentIndex.PartitionID,
+				e.SegmentIndex.SegmentID,
+				e.SegmentIndex.BuildID,
+			)
+			b.Save(key, string(value))
 		case metastore.ChannelEntry:
 			if action.Type != metastore.ActionUpdate {
 				return unsupportedAction(action)
@@ -142,7 +161,19 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply entry %T", action.Entry)
 		}
 	}
+	if containsSegmentIndexUpdate(actions) {
+		return txn.CommitWithoutFallback(ctx, kc.MetaKv, b)
+	}
 	return txn.Commit(ctx, kc.MetaKv, b)
+}
+
+func containsSegmentIndexUpdate(actions []metastore.UpdateAction) bool {
+	for _, action := range actions {
+		if _, ok := action.Entry.(metastore.SegmentIndexEntry); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // applySegmentEntry stages the kv writes for a segment action.

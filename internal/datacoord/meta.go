@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -2052,6 +2053,55 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 		m.segments.SetSegment(id, s)
 	}
 	mlog.Info(ctx, "meta update: update flush segments info - update flush segments info successfully")
+	return nil
+}
+
+// FinishIndexTaskWithManifest atomically publishes an index task result and
+// the manifest revision that contains the published index. Both metadata
+// records are staged in one catalog transaction; in-memory state is changed
+// only after that transaction succeeds.
+func (m *meta) FinishIndexTaskWithManifest(ctx context.Context, taskInfo *workerpb.IndexTaskInfo, segmentID int64, manifestPath string) error {
+	if taskInfo == nil {
+		return merr.WrapErrServiceInternalMsg("nil index task result")
+	}
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
+
+	seg := m.segments.GetSegment(segmentID)
+	if seg == nil {
+		return merr.WrapErrSegmentNotFound(segmentID)
+	}
+	segUpdated := seg.Clone()
+	pack := &updateSegmentPack{meta: m, segments: map[int64]*SegmentInfo{segmentID: segUpdated}, increments: make(map[int64]metastore.BinlogsIncrement), metricMutation: &segMetricMutation{stateChange: make(segmentMetricStateChange), deferSegmentLabelChange: true}}
+	if !UpdateManifestPathForIndex(segmentID, manifestPath)(pack) {
+		if pack.err != nil {
+			return pack.err
+		}
+		return nil
+	}
+
+	m.indexMeta.keyLock.Lock(taskInfo.GetBuildID())
+	defer m.indexMeta.keyLock.Unlock(taskInfo.GetBuildID())
+	segIdx, ok := m.indexMeta.segmentBuildInfo.Get(taskInfo.GetBuildID())
+	if !ok {
+		// The task can be deleted while its worker result is in flight. Keep the
+		// legacy FinishTask behavior: do not publish an artifact for a task that
+		// no longer exists, but let the scheduler retire the local task.
+		mlog.Warn(ctx, "index task no longer exists while publishing manifest",
+			mlog.Int64("buildID", taskInfo.GetBuildID()),
+			mlog.Int64("segmentID", segmentID))
+		return nil
+	}
+	updatedIdx, oldSize, err := m.indexMeta.buildFinishedSegmentIndex(segIdx, taskInfo)
+	if err != nil {
+		return err
+	}
+	if err := m.catalog.Update(ctx, metastore.UpdateSegment(segUpdated.SegmentInfo), metastore.UpdateSegmentIndex(updatedIdx)); err != nil {
+		return err
+	}
+	m.segments.SetSegment(segmentID, segUpdated)
+	m.indexMeta.updateSegmentIndex(updatedIdx)
+	m.indexMeta.recordFinishedTask(segIdx, updatedIdx, oldSize, taskInfo)
 	return nil
 }
 
