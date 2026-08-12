@@ -1319,54 +1319,76 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 							},
 						}
 					case schemapb.DataType_VarChar:
-						// Decoded by walking gjson elements, not by json.Unmarshal
-						// into []string: both encoding/json and sonic replace an
-						// invalid byte with U+FFFD while unquoting a JSON string,
-						// which would silently rewrite the caller's text before
-						// the elements exist. gjson does not re-validate UTF-8 on
-						// its way out, so the bytes stay intact all the way to the
-						// common Proxy Insert/Upsert ingress (checkInputUtf8Compatiable),
-						// which is the only place that scans them -- same as every
-						// other gjson-decoded string path here.
-						//
-						// gjson.Parse itself is a lenient scanner, not a validator: it
-						// tolerates malformed syntax json.Unmarshal would reject (a
-						// missing comma between elements, a trailing comma, trailing
-						// garbage after the closing bracket). That is safe here only
-						// because every caller of checkAndSetData first binds this
-						// same request body with gin's ShouldBindBodyWith(..., binding.JSON)
-						// into a struct whose Data field is typed []map[string]interface{}
-						// (or map[string]interface{} for a single-object insert) --
-						// decoding into that loosely-typed destination still requires a
-						// full, deep, spec-strict parse of the entire body, so malformed
-						// syntax anywhere in it, including inside a nested VarChar array
-						// like this one, is already rejected before checkAndSetData ever
-						// runs. Re-validating it here with gjson.Valid would just be a
-						// second scan of something the binder already scanned once for
-						// every real request. Do not re-add that check without either
-						// removing the binder's deep-parse guarantee or auditing that it
-						// still covers every checkAndSetData caller.
-						parsed := gjson.Parse(dataString)
-						if !parsed.IsArray() {
-							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-								" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, "expect a JSON array of strings")
-						}
-						elements := parsed.Array()
-						arr := make([]string, 0, len(elements))
-						for i, v := range elements {
-							if v.Type != gjson.String {
+						if compatibilityMode {
+							// Restore the exact pre-existing behavior for clients that
+							// opted into it: json.Unmarshal both enforces strict JSON
+							// syntax and silently substitutes invalid UTF-8 bytes with
+							// U+FFFD while unquoting, so a caller relying on that
+							// lenient substitution still gets it instead of the hard
+							// rejection checkInputUtf8Compatiable now applies to the
+							// gjson path below.
+							arr := make([]string, 0)
+							err := json.Unmarshal([]byte(dataString), &arr)
+							if err != nil {
 								return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
-									" of "+schemapb.DataType_name[int32(field.ElementType)], dataString,
-									fmt.Sprintf("element %d is not a string", i))
+									" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, err.Error())
 							}
-							arr = append(arr, v.String())
-						}
-						reallyData[fieldName] = &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_StringData{
-								StringData: &schemapb.StringArray{
-									Data: arr,
+							reallyData[fieldName] = &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_StringData{
+									StringData: &schemapb.StringArray{
+										Data: arr,
+									},
 								},
-							},
+							}
+						} else {
+							// Decoded by walking gjson elements, not by json.Unmarshal
+							// into []string: both encoding/json and sonic replace an
+							// invalid byte with U+FFFD while unquoting a JSON string,
+							// which would silently rewrite the caller's text before
+							// the elements exist. gjson does not re-validate UTF-8 on
+							// its way out, so the bytes stay intact all the way to the
+							// common Proxy Insert/Upsert ingress (checkInputUtf8Compatiable),
+							// which is the only place that scans them -- same as every
+							// other gjson-decoded string path here.
+							//
+							// gjson.Parse itself is a lenient scanner, not a validator: it
+							// tolerates malformed syntax json.Unmarshal would reject (a
+							// missing comma between elements, a trailing comma, trailing
+							// garbage after the closing bracket). The outer gin binder does
+							// not save us here the way it does for a natively-embedded
+							// array: an Array field is also allowed to arrive as a JSON
+							// *string* containing array text (e.g. "tokens": "[\"a\" \"b\"]"),
+							// and in that shape the outer body is fully valid JSON on its
+							// own -- the binder only ever validates that the wrapper is a
+							// well-formed string, never re-parses its unescaped content as
+							// JSON. dataString is that unwrapped content, so gjson.Valid is
+							// the only check that ever looks at its syntax.
+							if !gjson.Valid(dataString) {
+								return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
+									" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, "invalid JSON array")
+							}
+							parsed := gjson.Parse(dataString)
+							if !parsed.IsArray() {
+								return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
+									" of "+schemapb.DataType_name[int32(field.ElementType)], dataString, "expect a JSON array of strings")
+							}
+							elements := parsed.Array()
+							arr := make([]string, 0, len(elements))
+							for i, v := range elements {
+								if v.Type != gjson.String {
+									return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)]+
+										" of "+schemapb.DataType_name[int32(field.ElementType)], dataString,
+										fmt.Sprintf("element %d is not a string", i))
+								}
+								arr = append(arr, v.String())
+							}
+							reallyData[fieldName] = &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_StringData{
+									StringData: &schemapb.StringArray{
+										Data: arr,
+									},
+								},
+							}
 						}
 					}
 				case schemapb.DataType_JSON:

@@ -154,6 +154,51 @@ func TestSplitInsertRowsByMessageSizeRejectsOversizedMessage(t *testing.T) {
 	})
 }
 
+// The single-row hard check is compared against bodyLimit, not the WAL
+// backend's raw message-size config, because bodyLimit is what already
+// reserves headroom for the header, properties, and cipher overhead
+// StreamingNode wraps around this plaintext measurement afterward -- and that
+// overhead lands on a solo row's message exactly the same as a packed one's,
+// so the same reservation has to apply to both. A row measured just under the
+// raw limit but over bodyLimit used to pass this check and could still come
+// out of StreamingNode's wrapping over the raw limit, so the broker would
+// reject the message on every send and permanently stall the DML channel
+// (#52413's failure mode, reached through a row this check was supposed to
+// catch instead of the packed-message case #52413 originally covered).
+func TestSplitInsertRowsByMessageSizeRejectsRowOverBodyLimitEvenUnderRawLimit(t *testing.T) {
+	insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
+	// This row's exact plaintext encoded size is 1109 bytes (measured directly
+	// against the production encoder, not estimated).
+	const encodedSize = 1109
+
+	t.Run("under the raw limit alone is not enough", func(t *testing.T) {
+		assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(encodedSize+1)))
+		defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+		// A reserve bigger than the one-byte raw headroom: the row fits under
+		// the raw limit (1109 < 1110) but not under bodyLimit (1109 >= 1060).
+		assert.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "50"))
+		defer Params.Reset(Params.PulsarCfg.MessageReserveSize.Key)
+
+		selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0}, message.WALNamePulsar)
+		assert.Nil(t, selections)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		assert.Contains(t, err.Error(), "single row at offset 0")
+	})
+
+	t.Run("passes once it is also under bodyLimit", func(t *testing.T) {
+		assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(encodedSize+1)))
+		defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
+		// Same raw limit as above, but a reserve small enough that bodyLimit
+		// (encodedSize+1-1 == encodedSize) still clears the row.
+		assert.NoError(t, Params.Save(Params.PulsarCfg.MessageReserveSize.Key, "0"))
+		defer Params.Reset(Params.PulsarCfg.MessageReserveSize.Key)
+
+		selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0}, message.WALNamePulsar)
+		assert.NoError(t, err)
+		assert.Equal(t, [][]int{{0}}, selections)
+	})
+}
+
 // Each backend answers with its own limit, so a row Pulsar would refuse can be
 // perfectly sendable on Kafka.
 func TestSplitInsertRowsByMessageSizeUsesWALSpecificLimit(t *testing.T) {

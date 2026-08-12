@@ -67,27 +67,15 @@ func messageBodyLimit(walName message.WALName) int {
 	return maxMessageSize - reserve
 }
 
-// maxSingleMessageSize reports the hard limit the active WAL backend enforces on
-// one message, separately from the body budget rows are packed against.
-//
-// The two are not the same thing. The body budget is what a message is split at,
-// and a row that does not fit under it is still emitted on its own, because
-// there is nothing left to split. That row is only a problem when it also
-// exceeds what the broker will accept: the message is then rejected on every
-// send and the DML channel stops making progress (#52413). RocksMQ's page size
-// and Woodpecker's batch size are not per-entry limits, so they report none.
-func maxSingleMessageSize(walName message.WALName) (int, bool) {
+// walHasSingleMessageLimit reports whether the active WAL backend enforces a
+// hard limit on one message at all. RocksMQ's page size and Woodpecker's
+// batch size are not per-entry limits, so they report false.
+func walHasSingleMessageLimit(walName message.WALName) bool {
 	switch walName {
-	case message.WALNamePulsar:
-		limit := Params.PulsarCfg.MaxMessageSize.GetAsInt()
-		return limit, limit > 0
-	case message.WALNameKafka:
-		limit := Params.KafkaCfg.ProducerMessageMaxBytes.GetAsInt()
-		return limit, limit > 0
-	case message.WALNameRocksmq, message.WALNameWoodpecker:
-		return 0, false
+	case message.WALNamePulsar, message.WALNameKafka:
+		return activeWALMessageSize(walName) > 0
 	default:
-		return 0, false
+		return false
 	}
 }
 
@@ -99,9 +87,20 @@ func maxSingleMessageSize(walName message.WALName) (int, bool) {
 //
 // A message the active WAL cannot carry is refused here rather than handed to
 // the broker. The size compared against that limit is the exact encoded body,
-// not the per-row estimate the materializing path used, so it accounts for the
-// message envelope as well and cannot let a row through that the broker would
-// then reject.
+// but that body is still only the plaintext InsertRequest this Proxy builds --
+// not the final WAL record StreamingNode later wraps it into with a header,
+// properties, and (if enabled) cipher overhead, all of which land on top of
+// this measurement after this check runs. bodyLimit, not the backend's raw
+// message-size config, is what is compared against here: it already reserves
+// pulsar.messageReserveSize bytes off the broker limit for exactly that
+// envelope, and that reservation has to apply the same way whether the bytes
+// it protects belong to several packed rows or to one row alone -- the
+// envelope is added once per message either way, not once per row. A row
+// measured just under the raw broker limit but over bodyLimit can still come
+// out of StreamingNode's wrapping over that raw limit and be rejected by the
+// broker on every send, permanently stalling the DML channel (#52413's
+// failure mode) -- reusing bodyLimit here instead of the raw limit is what
+// closes that gap.
 func visitInsertRowsByMessageSize(
 	template *msgpb.InsertRequest,
 	insertMsg *msgstream.InsertMsg,
@@ -114,7 +113,7 @@ func visitInsertRowsByMessageSize(
 	}
 
 	bodyLimit := messageBodyLimit(walName)
-	singleMessageLimit, hasSingleMessageLimit := maxSingleMessageSize(walName)
+	checkSingleMessageLimit := walHasSingleMessageLimit(walName)
 	viewCursor, err := fastpb.NewInsertRequestViewCursor(insertMsg.InsertRequest)
 	if err != nil {
 		return err
@@ -132,15 +131,15 @@ func visitInsertRowsByMessageSize(
 		// same check -- bodyLimit is already computed against this walName's own
 		// backend limit, so a packed message's body cannot reach it in the first
 		// place; only a single row too large to split can still get there.
-		if hasSingleMessageLimit && len(rows) == 1 {
+		if checkSingleMessageLimit && len(rows) == 1 {
 			size, err := encoder.EncodedSize()
 			if err != nil {
 				return err
 			}
-			if size >= singleMessageLimit {
+			if size >= bodyLimit {
 				return merr.WrapErrParameterTooLarge(fmt.Sprintf(
 					"single row at offset %d is too large to fit in one WAL message: encoded size=%d bytes, limit=%d bytes",
-					rows[0], size, singleMessageLimit))
+					rows[0], size, bodyLimit))
 			}
 		}
 		if err := visit(rows, encoder); err != nil {
