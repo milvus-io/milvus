@@ -3539,28 +3539,14 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	// Clone the segment for update
 	cloned := oldSegment.Clone()
 
-	// SegmentInfo.Binlogs is where a field's data becomes visible: this array's
-	// ChildFields carry the real field IDs of a StorageV2/V3 column group, and a
-	// function-output field with no data here has nothing to index.
-	// Materialization exists precisely to make such a field indexable, and
-	// compaction_task_bump_schema_version enqueues the segment for index
-	// building right after this mutation — so the column groups this run wrote
-	// must land here, or the index on the materialized field is never built.
-	//
-	// This is an upsert, not an assignment: the compactor ships only the groups
-	// it just wrote, so overwriting would drop the segment's other groups. Same
-	// semantics as the backfill path's UpdateSegmentColumnGroupsOperator, shared
-	// through mergeSegmentColumnGroups. The merge is idempotent (groups are
-	// upserted by FieldID and the result is FieldID-sorted), so unlike the
-	// additive Stats increment below it needs no manifest gate: re-applying a
-	// replayed result cannot double-count. Index eligibility is gated by the
-	// schema-version update below, while Binlogs retains the materialized column
-	// group metadata on the live SegmentInfo.
-	var droppedBinlogFieldIDs []int64
-	if newGroups := resultSegment.GetInsertLogs(); len(newGroups) > 0 {
-		cloned.Binlogs, droppedBinlogFieldIDs = mergeSegmentColumnGroups(cloned.GetBinlogs(),
-			lo.KeyBy(newGroups, func(fb *datapb.FieldBinlog) int64 { return fb.GetFieldID() }))
-	}
+	// Deliberately do NOT merge the result's InsertLogs into SegmentInfo.Binlogs.
+	// A V3 segment's Binlogs stay empty to match persistence (kv_catalog resets
+	// the array and skips per-FieldBinlog KVs for V3): a partially populated
+	// in-memory array would defeat QueryNode's memory estimation, which must
+	// fall through to the complete Stats.LoadResource summary
+	// (resolveSegmentEstimateLogs returns early on any non-empty BinlogPaths).
+	// Index build does not need it either: eligibility is gated by the
+	// schema-version update below, and the worker reads the manifest.
 
 	if newSchemaVersion > cloned.GetSchemaVersion() {
 		cloned.SchemaVersion = newSchemaVersion
@@ -3601,12 +3587,8 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 		cloned.DataVersion = oldSegment.GetDataVersion() + 1
 	}
 
-	// Prepare binlogs increment for catalog update. droppedBinlogFieldIDs is
-	// empty unless the merge above emptied a pre-existing group; when it is not,
-	// the catalog must delete that group's KV or listBinlogs resurrects it.
 	binlogsIncrement := metastore.BinlogsIncrement{
-		Segment:               cloned.SegmentInfo,
-		DroppedBinlogFieldIDs: droppedBinlogFieldIDs,
+		Segment: cloned.SegmentInfo,
 	}
 
 	mlog.Info(m.ctx, "meta update: prepare for complete schema bump compaction mutation - complete",

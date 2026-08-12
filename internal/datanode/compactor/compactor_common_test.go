@@ -77,19 +77,12 @@ func TestCompactionReadSchemaNilSchema(t *testing.T) {
 	require.Nil(t, compactionReadSchema(nil, map[int64]struct{}{}))
 }
 
-func TestMissingSchemaFunctionsAndDroppedFields(t *testing.T) {
-	functionSchema := &schemapb.FunctionSchema{
-		Name:           "bm25",
-		Type:           schemapb.FunctionType_BM25,
-		InputFieldIds:  []int64{100},
-		OutputFieldIds: []int64{101},
-	}
+func TestDroppedSchemaFieldIDs(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
 			{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
 		},
-		Functions: []*schemapb.FunctionSchema{functionSchema},
 	}
 	droppedUserField := int64(common.StartOfUserFieldID + 1000)
 	systemField := int64(common.StartOfUserFieldID - 1)
@@ -98,10 +91,6 @@ func TestMissingSchemaFunctionsAndDroppedFields(t *testing.T) {
 		droppedUserField: {},
 		systemField:      {},
 	}
-
-	missingFunctions := missingSchemaFunctions(schema, existingFields)
-	require.Len(t, missingFunctions, 1)
-	require.Equal(t, functionSchema.GetName(), missingFunctions[0].GetName())
 
 	dropped := droppedSchemaFieldIDs(schema, existingFields)
 	require.Equal(t, []int64{droppedUserField}, dropped)

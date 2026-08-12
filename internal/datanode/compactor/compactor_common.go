@@ -264,19 +264,6 @@ func collectionSchemaFields(schema *schemapb.CollectionSchema) map[int64]struct{
 	return fields
 }
 
-func missingSchemaFunctions(schema *schemapb.CollectionSchema, existingFields map[int64]struct{}) []*schemapb.FunctionSchema {
-	var missing []*schemapb.FunctionSchema
-	for _, functionSchema := range schema.GetFunctions() {
-		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
-			if _, ok := existingFields[outputFieldID]; !ok {
-				missing = append(missing, functionSchema)
-				break
-			}
-		}
-	}
-	return missing
-}
-
 func droppedSchemaFieldIDs(schema *schemapb.CollectionSchema, existingFields map[int64]struct{}) []int64 {
 	targetFields := collectionSchemaFields(schema)
 	dropped := make([]int64, 0)

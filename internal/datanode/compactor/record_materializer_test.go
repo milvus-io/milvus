@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -80,6 +81,33 @@ func (m selectedColumnMaterializer) Materialize(rec storage.Record) (map[int64]a
 }
 
 func (m selectedColumnMaterializer) Close() {}
+
+type inputViewMaterializer struct {
+	inputFieldID  int64
+	hiddenFieldID int64
+	outputFieldID int64
+	output        arrow.Array
+	view          storage.Record
+	input         arrow.Array
+	hidden        arrow.Array
+}
+
+func (m *inputViewMaterializer) Materialize(rec storage.Record) (map[int64]arrow.Array, error) {
+	m.view = rec
+	m.input = rec.Column(m.inputFieldID)
+	if m.input == nil {
+		return nil, merr.WrapErrFunctionFailedMsg("input field %d not found", m.inputFieldID)
+	}
+	if m.hiddenFieldID != 0 {
+		m.hidden = rec.Column(m.hiddenFieldID)
+	}
+	if m.output == nil {
+		return nil, nil
+	}
+	return map[int64]arrow.Array{m.outputFieldID: m.output}, nil
+}
+
+func (m *inputViewMaterializer) Close() {}
 
 type materializerTestFunctionRunner struct {
 	schema       *schemapb.FunctionSchema
@@ -384,6 +412,110 @@ func TestRecordMaterializerWrapFailsForMissingNonNullableField(t *testing.T) {
 	require.Equal(t, 0, record.releaseCount)
 }
 
+func TestRecordMaterializerWrapFillsNullableDefault(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+		{
+			FieldID: 101, Name: "required", DataType: schemapb.DataType_VarChar,
+			Nullable:     true,
+			DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "default"}},
+		},
+	}}
+	materializer, err := NewRecordMaterializer(schema, nil, map[int64]struct{}{100: {}})
+	require.NoError(t, err)
+	defer materializer.Close()
+
+	record := &materializerTestRecord{len: 2}
+	wrapped, err := materializer.Wrap(record)
+	require.NoError(t, err)
+	defer cleanupMaterializedRecord(wrapped)
+
+	column := wrapped.Column(101).(*array.String)
+	require.Equal(t, 0, column.NullN())
+	require.Equal(t, []string{"default", "default"}, []string{column.Value(0), column.Value(1)})
+}
+
+func TestRecordMaterializerFunctionsShareOrdinaryInputView(t *testing.T) {
+	ordinaryField := &schemapb.FieldSchema{
+		FieldID: 101, Name: "added_input", DataType: schemapb.DataType_VarChar,
+		Nullable:     true,
+		DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "default"}},
+	}
+	output := newInt64Array(t, []int64{10, 20})
+	first := &inputViewMaterializer{
+		inputFieldID:  ordinaryField.GetFieldID(),
+		outputFieldID: 102,
+		output:        output,
+	}
+	second := &inputViewMaterializer{
+		inputFieldID:  ordinaryField.GetFieldID(),
+		hiddenFieldID: first.outputFieldID,
+	}
+	materializer := &RecordMaterializer{
+		missingFields:  []*schemapb.FieldSchema{ordinaryField},
+		materializers:  []FunctionMaterializer{first, second},
+		existingFields: map[int64]struct{}{100: {}},
+	}
+
+	record := &materializerTestRecord{len: 2}
+	wrapped, err := materializer.Wrap(record)
+	require.NoError(t, err)
+	defer cleanupMaterializedRecord(wrapped)
+
+	require.Same(t, first.view, second.view)
+	require.Nil(t, second.hidden, "one function must not observe another function's new output")
+	for _, input := range []arrow.Array{first.input, second.input} {
+		column := input.(*array.String)
+		require.Equal(t, []string{"default", "default"}, []string{column.Value(0), column.Value(1)})
+	}
+	require.Nil(t, first.view.Column(first.outputFieldID), "the immutable function input view must remain output-free")
+	require.Same(t, output, wrapped.Column(first.outputFieldID))
+}
+
+func TestRecordMaterializerOrdinaryAndFunctionOutputLifecycleExact(t *testing.T) {
+	alloc := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	original := memory.DefaultAllocator
+	memory.DefaultAllocator = alloc
+	defer func() { memory.DefaultAllocator = original }()
+
+	func() {
+		builder := array.NewInt64Builder(alloc)
+		builder.AppendValues([]int64{10, 20}, nil)
+		output := builder.NewArray()
+		builder.Release()
+
+		ordinaryField := &schemapb.FieldSchema{
+			FieldID: 101, Name: "added_input", DataType: schemapb.DataType_VarChar,
+			Nullable:     true,
+			DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "default"}},
+		}
+		functionMaterializer := &inputViewMaterializer{
+			inputFieldID:  ordinaryField.GetFieldID(),
+			outputFieldID: 102,
+			output:        output,
+		}
+		materializer := &RecordMaterializer{
+			missingFields: []*schemapb.FieldSchema{ordinaryField},
+			materializers: []FunctionMaterializer{functionMaterializer},
+		}
+		record := &materializerTestRecord{len: 2}
+
+		wrapped, err := materializer.Wrap(record)
+		require.NoError(t, err)
+		wrapped.Retain()
+		cleanupMaterializedRecord(wrapped)
+
+		// The retained view must keep both overlay layers alive after the reader's
+		// original derived references have been cleaned up.
+		require.Equal(t, "default", wrapped.Column(ordinaryField.GetFieldID()).(*array.String).Value(0))
+		require.Equal(t, int64(10), wrapped.Column(functionMaterializer.outputFieldID).(*array.Int64).Value(0))
+		wrapped.Release()
+		require.Equal(t, record.retainCount, record.releaseCount)
+	}()
+
+	alloc.AssertSize(t, 0)
+}
+
 func TestBM25FunctionMaterializerMaterializesSparseOutput(t *testing.T) {
 	schema, functionSchema, inputField, outputField := materializerBM25Schema()
 	runner := &materializerTestFunctionRunner{
@@ -541,10 +673,32 @@ func TestBM25FunctionMaterializerRejectsBadRunnerOutput(t *testing.T) {
 	})
 }
 
-func TestFunctionOutputIndexesToMaterializePartialStateReturnsAllOutputs(t *testing.T) {
-	functionSchema := &schemapb.FunctionSchema{OutputFieldIds: []int64{101, 102}}
-	require.Nil(t, functionOutputIndexesToMaterialize(functionSchema, map[int64]struct{}{101: {}, 102: {}}))
-	require.Equal(t, []int{0, 1}, functionOutputIndexesToMaterialize(functionSchema, map[int64]struct{}{101: {}}))
+func TestFunctionOutputIndexesToMaterialize(t *testing.T) {
+	functionSchema := &schemapb.FunctionSchema{Name: "multi_output", OutputFieldIds: []int64{101, 102}}
+
+	indexes, err := functionOutputIndexesToMaterialize(functionSchema, map[int64]struct{}{101: {}, 102: {}})
+	require.NoError(t, err)
+	require.Nil(t, indexes)
+
+	indexes, err = functionOutputIndexesToMaterialize(functionSchema, nil)
+	require.NoError(t, err)
+	require.Equal(t, []int{0, 1}, indexes)
+
+	indexes, err = functionOutputIndexesToMaterialize(functionSchema, map[int64]struct{}{101: {}})
+	require.Nil(t, indexes)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.ErrorContains(t, err, "partially materialized output fields")
+}
+
+func TestNewRecordMaterializerRejectsPartiallyPresentFunctionOutputs(t *testing.T) {
+	functionSchema := &schemapb.FunctionSchema{Name: "multi_output", OutputFieldIds: []int64{101, 102}}
+	materializer, err := NewRecordMaterializer(
+		&schemapb.CollectionSchema{},
+		[]*schemapb.FunctionSchema{functionSchema},
+		map[int64]struct{}{101: {}},
+	)
+	require.Nil(t, materializer)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
 
 func TestMaterializedRecordReaderReleasesPreviousRecordOnNextAndClose(t *testing.T) {

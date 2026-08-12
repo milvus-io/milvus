@@ -271,6 +271,19 @@ func (pw *packedRecordBatchWriter) Close() (packed.WriterOutput, error) {
 	return out, nil
 }
 
+// Abort releases the underlying FFI writer without producing column groups for
+// CommitManifestUpdates. It prevents metadata publication only: files already
+// flushed before the abort stay on storage as unreferenced objects, and GC
+// skips files under a registered V3 segment prefix, so their reclamation
+// depends on the manifest-aware orphan cleanup tracked by #51649.
+func (pw *packedRecordBatchWriter) Abort() {
+	if pw.writer == nil {
+		return
+	}
+	pw.writer.Destroy()
+	pw.writer = nil
+}
+
 func (pw *packedRecordBatchWriter) AsNewColumnGroups() {
 	if pw.writer != nil {
 		pw.writer.AsNewColumnGroups()
@@ -303,6 +316,25 @@ func NewPartialPackedRecordBatchWriter(
 	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
 	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, false, writerFormat, schemaBasedFormats)
+}
+
+// NewPartialPackedRecordBatchWriterWithTextRefsAsBinary creates a partial
+// column-group writer whose TEXT columns use the binary LOB-reference Arrow
+// representation. Schema-bump reconciliation uses this for newly added,
+// nullable TEXT columns, whose historical values are materialized as binary
+// NULLs without rewriting any existing LOB data.
+func NewPartialPackedRecordBatchWriterWithTextRefsAsBinary(
+	basePath string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	writerFormat string,
+	schemaBasedFormats []string,
+) (*packedRecordBatchWriter, error) {
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, true, writerFormat, schemaBasedFormats)
 }
 
 func validatePackedRecordBatchWriterSchema(schema *schemapb.CollectionSchema) error {

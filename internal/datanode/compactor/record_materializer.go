@@ -64,7 +64,11 @@ func NewRecordMaterializer(schema *schemapb.CollectionSchema, functions []*schem
 	materializer := &RecordMaterializer{schema: schema, existingFields: existingFields}
 	materializedFields := make(map[int64]struct{})
 	for _, functionSchema := range functions {
-		outputIndexes := functionOutputIndexesToMaterialize(functionSchema, existingFields)
+		outputIndexes, err := functionOutputIndexesToMaterialize(functionSchema, existingFields)
+		if err != nil {
+			materializer.Close()
+			return nil, err
+		}
 		if len(outputIndexes) == 0 {
 			continue
 		}
@@ -116,35 +120,44 @@ func (m *RecordMaterializer) WrapWithSelection(rec storage.Record, selection *re
 		return base, nil
 	}
 
-	computed := make(map[int64]arrow.Array)
-	for _, materializer := range m.materializers {
-		arrays, err := materializer.Materialize(base)
+	ordinaryFields := make(map[int64]arrow.Array, len(m.missingFields))
+	for _, field := range m.missingFields {
+		arr, err := storage.GenerateEmptyArrayFromSchema(field, base.Len())
 		if err != nil {
-			releaseArrowArrays(computed)
+			releaseArrowArrays(ordinaryFields)
 			cleanupMaterializedRecord(base)
+			return nil, err
+		}
+		ordinaryFields[field.GetFieldID()] = arr
+	}
+
+	// Functions must see the target-schema values of ordinary fields, including
+	// defaults and nulls for fields absent from the physical record. Keep this
+	// input view immutable so function execution order cannot affect results.
+	inputView := base
+	if len(ordinaryFields) > 0 {
+		inputView = &materializedRecord{base: base, computed: ordinaryFields}
+	}
+
+	functionOutputs := make(map[int64]arrow.Array)
+	for _, materializer := range m.materializers {
+		arrays, err := materializer.Materialize(inputView)
+		if err != nil {
+			releaseArrowArrays(functionOutputs)
+			cleanupMaterializedRecord(inputView)
 			return nil, err
 		}
 		for fieldID, arr := range arrays {
-			computed[fieldID] = arr
+			functionOutputs[fieldID] = arr
 		}
 	}
-	for _, field := range m.missingFields {
-		fieldID := field.GetFieldID()
-		if _, ok := computed[fieldID]; ok {
-			continue
-		}
-		arr, err := storage.GenerateEmptyArrayFromSchema(field, base.Len())
-		if err != nil {
-			releaseArrowArrays(computed)
-			cleanupMaterializedRecord(base)
-			return nil, err
-		}
-		computed[fieldID] = arr
+	if len(functionOutputs) == 0 {
+		return inputView, nil
 	}
-	if len(computed) == 0 {
-		return base, nil
+	if len(ordinaryFields) == 0 {
+		return &materializedRecord{base: base, computed: functionOutputs}, nil
 	}
-	return &materializedRecord{base: base, computed: computed}, nil
+	return &materializedRecord{base: inputView, computed: functionOutputs}, nil
 }
 
 func (m *RecordMaterializer) Close() {
@@ -549,20 +562,32 @@ func (m *minHashFunctionMaterializer) Close() {
 	}
 }
 
-func functionOutputIndexesToMaterialize(functionSchema *schemapb.FunctionSchema, existingFields map[int64]struct{}) []int {
+func functionOutputIndexesToMaterialize(functionSchema *schemapb.FunctionSchema, existingFields map[int64]struct{}) ([]int, error) {
 	outputFieldIDs := functionSchema.GetOutputFieldIds()
+	// A persisted function with no output fields is schema corruption; reject
+	// before the all-present early-return treats the empty set as "nothing to
+	// materialize" and silently drops it.
+	if len(outputFieldIDs) == 0 {
+		return nil, merr.WrapErrDataIntegrityMsg("persisted function %s has no output fields", functionSchema.GetName())
+	}
 	indexes := make([]int, 0, len(outputFieldIDs))
-	hasMissingOutput := false
+	presentCount := 0
 	for idx, outputFieldID := range outputFieldIDs {
 		indexes = append(indexes, idx)
-		if _, ok := existingFields[outputFieldID]; !ok {
-			hasMissingOutput = true
+		if _, ok := existingFields[outputFieldID]; ok {
+			presentCount++
 		}
 	}
-	if !hasMissingOutput {
-		return nil
+	if presentCount == len(outputFieldIDs) {
+		return nil, nil
 	}
-	return indexes
+	if presentCount != 0 {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"function %s has partially materialized output fields: %d of %d are physically present",
+			functionSchema.GetName(), presentCount, len(outputFieldIDs),
+		)
+	}
+	return indexes, nil
 }
 
 func missingNonMaterializedSchemaFields(schema *schemapb.CollectionSchema, existingFields map[int64]struct{}, materializedFields map[int64]struct{}) []*schemapb.FieldSchema {
