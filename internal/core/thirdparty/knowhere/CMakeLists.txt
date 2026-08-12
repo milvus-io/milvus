@@ -14,9 +14,9 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-# v3.0.7 includes zilliztech/knowhere#1745 with the Cardinal and
-# milvus-common revisions required by the loading-overhead group API.
-set( KNOWHERE_VERSION v3.0.7 )
+# Includes zilliztech/knowhere#1761, which fixes COSINE/IP CalcDistByIDs
+# when all requested DiskANN vectors are cached.
+set( KNOWHERE_VERSION 6d0f7fe5 )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
