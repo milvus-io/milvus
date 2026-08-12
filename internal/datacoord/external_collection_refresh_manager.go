@@ -572,8 +572,8 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 		mlog.FieldCollectionID(job.GetCollectionId()),
 		mlog.String("oldSource", currentSource),
 		mlog.String("newSource", newSource),
-		mlog.String("oldSpec", externalspec.RedactExternalSpec(currentSpec)),
-		mlog.String("newSpec", externalspec.RedactExternalSpec(newSpec)))
+		mlog.String("oldSpec", externalspec.RedactExternalSpecForLog(currentSpec)),
+		mlog.String("newSpec", externalspec.RedactExternalSpecForLog(newSpec)))
 
 	if err := m.schemaUpdater(ctx, job.GetCollectionId(), newSource, newSpec); err != nil {
 		mlog.Warn(ctx, "failed to update external schema after refresh, schema may be stale until next refresh",

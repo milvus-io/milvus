@@ -2,13 +2,17 @@ package proxy
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -53,6 +57,20 @@ type afterMock struct {
 	hookutil.DefaultHook
 	method string
 	err    error
+}
+
+type errorHook struct {
+	hookutil.DefaultHook
+	beforeErr error
+	afterErr  error
+}
+
+func (h errorHook) Before(ctx context.Context, req interface{}, fullMethod string) (context.Context, error) {
+	return ctx, h.beforeErr
+}
+
+func (h errorHook) After(ctx context.Context, resp interface{}, err error, fullMethod string) error {
+	return h.afterErr
 }
 
 func (a afterMock) After(ctx context.Context, r interface{}, err error, fullMethod string) error {
@@ -128,6 +146,60 @@ func TestHookInterceptor(t *testing.T) {
 	})
 	assert.Equal(t, res.(*resp).method, r.method)
 	assert.NoError(t, err)
+}
+
+func TestHookInterceptorDoesNotLogCredentialRequests(t *testing.T) {
+	logs := captureProxyLogs(t)
+	hookutil.InitOnceHook()
+	t.Cleanup(func() {
+		hookutil.SetTestHook(hookutil.DefaultHook{})
+	})
+
+	createPassword := "CREATE_PASSWORD_SENTINEL_DO_NOT_LOG"
+	encodedCreatePassword := crypto.Base64Encode(createPassword)
+	hookutil.SetTestHook(errorHook{beforeErr: errors.New("before hook failed")})
+	_, err := HookInterceptor(
+		context.Background(),
+		&milvuspb.CreateCredentialRequest{Username: "alice", Password: encodedCreatePassword},
+		"admin",
+		"/milvus.proto.milvus.MilvusService/CreateCredential",
+		func(ctx context.Context, req interface{}) (interface{}, error) { return nil, nil },
+	)
+	require.Error(t, err)
+
+	oldPassword := "OLD_PASSWORD_SENTINEL_DO_NOT_LOG"
+	newPassword := "NEW_PASSWORD_SENTINEL_DO_NOT_LOG"
+	encodedOldPassword := crypto.Base64Encode(oldPassword)
+	encodedNewPassword := crypto.Base64Encode(newPassword)
+	hookutil.SetTestHook(errorHook{afterErr: errors.New("after hook failed")})
+	_, err = HookInterceptor(
+		context.Background(),
+		&milvuspb.UpdateCredentialRequest{
+			Username:    "alice",
+			OldPassword: encodedOldPassword,
+			NewPassword: encodedNewPassword,
+		},
+		"admin",
+		"/milvus.proto.milvus.MilvusService/UpdateCredential",
+		func(ctx context.Context, req interface{}) (interface{}, error) { return nil, nil },
+	)
+	require.Error(t, err)
+
+	output := logs.String()
+	for _, secret := range []string{
+		createPassword,
+		encodedCreatePassword,
+		oldPassword,
+		encodedOldPassword,
+		newPassword,
+		encodedNewPassword,
+	} {
+		assert.NotContains(t, output, secret)
+	}
+	lowerOutput := strings.ToLower(output)
+	assert.NotContains(t, lowerOutput, "password:")
+	assert.NotContains(t, lowerOutput, "oldpassword")
+	assert.NotContains(t, lowerOutput, "newpassword")
 }
 
 func TestUpdateProxyFunctionCallMetric(t *testing.T) {
