@@ -4092,10 +4092,13 @@ func TestBuildStructArrayFieldDataRoundTrip(t *testing.T) {
 	assert.EqualValues(t, int32(3), extracted1[0]["sub_int"])
 }
 
-// Every REST path that turns request bytes into a proto3 string has to refuse
-// invalid UTF-8, because the insert encoder writes those bytes into the message
-// body without rescanning them.
-func TestCheckAndSetDataRejectsInvalidUTF8(t *testing.T) {
+// A string cell has to be valid UTF-8 before it becomes a proto3 string, and
+// which layer notices depends on the parser. The sonic paths have to refuse the
+// bytes here, because sonic substitutes U+FFFD while decoding and the Proxy
+// would only ever see a well-formed string. The gjson paths deliberately do not
+// check: the bytes stay intact all the way to checkInputUtf8Compatiable, and a
+// second scan here would cost more than it saves.
+func TestCheckAndSetDataInvalidUTF8(t *testing.T) {
 	// A raw 0xff, not an escape: this is a byte a client can put on the wire.
 	const invalidUTF8 = "bad\xffbyte"
 
@@ -4124,17 +4127,15 @@ func TestCheckAndSetDataRejectsInvalidUTF8(t *testing.T) {
 		},
 	}
 
-	t.Run("varchar scalar", func(t *testing.T) {
+	// gjson hands the bytes over untouched, which is what lets the Proxy ingress
+	// be the single scanner. If this ever starts sanitizing, the bytes stop being
+	// visible downstream and the check has to move back here.
+	t.Run("varchar scalar reaches the proxy intact", func(t *testing.T) {
 		body := []byte(`{"data": [{"id": 1, "text": "` + invalidUTF8 + `"}]}`)
-		_, _, err := checkAndSetData(body, varcharSchema, false)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "text")
-		assert.NotContains(t, err.Error(), invalidUTF8)
-
-		ok := []byte(`{"data": [{"id": 1, "text": "fine"}]}`)
-		_, _, err = checkAndSetData(ok, varcharSchema, false)
+		rows, _, err := checkAndSetData(body, varcharSchema, false)
 		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, invalidUTF8, rows[0]["text"])
 	})
 
 	// sonic replaces the invalid byte with U+FFFD before the elements exist, so
@@ -4151,17 +4152,20 @@ func TestCheckAndSetDataRejectsInvalidUTF8(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("struct array string sub-field", func(t *testing.T) {
+	// Also gjson: the sub-field cell keeps the byte, and the Array FieldData it
+	// becomes is the shape checkInputUtf8Compatiable scans after flattening.
+	t.Run("struct array string sub-field reaches the proxy intact", func(t *testing.T) {
 		schema := buildStructArrayTestSchema()
 		structSchema := schema.GetStructArrayFields()[0]
-		structSchema.Fields = append(structSchema.Fields, &schemapb.FieldSchema{
+		subStr := &schemapb.FieldSchema{
 			FieldID: 105, Name: "sub_str",
 			DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
 			TypeParams: []*commonpb.KeyValuePair{
 				{Key: common.MaxCapacityKey, Value: "10"},
 				{Key: common.MaxLengthKey, Value: "64"},
 			},
-		})
+		}
+		structSchema.Fields = append(structSchema.Fields, subStr)
 		body := []byte(`{
 			"data": [{
 				"id": 1,
@@ -4172,12 +4176,28 @@ func TestCheckAndSetDataRejectsInvalidUTF8(t *testing.T) {
 				]
 			}]
 		}`)
-		_, _, err := checkAndSetData(body, schema, false)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "sub_str")
-		assert.Contains(t, err.Error(), "element 1")
-		assert.NotContains(t, err.Error(), invalidUTF8)
+		rows, validData, err := checkAndSetData(body, schema, false)
+		require.NoError(t, err)
+
+		fds, err := anyToColumns(rows, validData, schema, true, false)
+		require.NoError(t, err)
+		var strSub *schemapb.FieldData
+		for _, fd := range fds {
+			if fd.GetType() != schemapb.DataType_ArrayOfStruct {
+				continue
+			}
+			for _, sub := range fd.GetStructArrays().GetFields() {
+				if sub.GetFieldName() == "sub_str" {
+					strSub = sub
+				}
+			}
+		}
+		require.NotNil(t, strSub)
+		assert.Equal(t, subStr.GetFieldID(), strSub.GetFieldId())
+		assert.Equal(t, schemapb.DataType_VarChar, strSub.GetScalars().GetArrayData().GetElementType())
+		cells := strSub.GetScalars().GetArrayData().GetData()
+		require.Len(t, cells, 1)
+		assert.Equal(t, []string{"ok", invalidUTF8}, cells[0].GetStringData().GetData())
 	})
 
 	// The low-level /api/v1 column form decodes with sonic as well.

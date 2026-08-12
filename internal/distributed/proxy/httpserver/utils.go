@@ -788,9 +788,21 @@ func jsonNumberLiteral(field string, raw string) (json.Number, error) {
 //
 // proxy.http.compatibilityMode restores the previous String() rendering for
 // every kind, including the object case.
+// A string cell has to be valid UTF-8 before it becomes a proto3 string, or the
+// insert encoder -- which does not rescan them -- writes bytes the consumer
+// cannot unmarshal. gjson reads string values straight out of the request body
+// and keeps whatever the caller sent, so those bytes stay visible all the way to
+// checkInputUtf8Compatiable at the common Proxy Insert/Upsert ingress, which is
+// where they are refused. Checking them here as well would scan the same bytes
+// twice; on multibyte text that second pass costs more than the encoding step it
+// was meant to make cheaper.
+//
+// The sonic paths are the exception and do check here: sonic substitutes U+FFFD
+// for an invalid byte while decoding, so the Proxy only ever sees a well-formed
+// string and the evidence is gone by then.
 func stringFieldValue(field string, value gjson.Result, compatibilityMode bool) (string, error) {
 	if compatibilityMode {
-		return checkedUTF8String(field, -1, value.String())
+		return value.String(), nil
 	}
 	switch value.Type {
 	case gjson.Number, gjson.True, gjson.False:
@@ -804,32 +816,8 @@ func stringFieldValue(field string, value gjson.Result, compatibilityMode bool) 
 			"field %s expects a string, got a JSON %s", field, kind)
 	default:
 		// String, plus Null which the nullable handling above already resolved.
-		return checkedUTF8String(field, -1, value.String())
+		return value.String(), nil
 	}
-}
-
-// A string cell has to be valid UTF-8 before it becomes a proto3 string: the
-// insert encoder writes these bytes into the message body without rescanning
-// them, and a message the consumer cannot unmarshal is dropped with a warning
-// while its checkpoint still advances. gjson reads string values straight out
-// of the request body and keeps whatever bytes the caller sent, so this is the
-// first place that can say no. The Proxy ingress repeats the check for gRPC and
-// for anything that reaches it another way; a caller who sends bad bytes should
-// hear about it from the HTTP layer, naming the field they wrote.
-//
-// The offending bytes are never echoed back -- they are invalid text by
-// definition, and the field name plus position is what locates the value.
-// element is the index inside an array cell, or -1 for a scalar field.
-func checkedUTF8String(field string, element int, value string) (string, error) {
-	if utf8.ValidString(value) {
-		return value, nil
-	}
-	if element < 0 {
-		return "", merr.WrapErrParameterInvalidMsg(
-			"field %s expects utf-8 text, but the value is not utf-8", field)
-	}
-	return "", merr.WrapErrParameterInvalidMsg(
-		"field %s expects utf-8 text, but element %d is not utf-8", field, element)
 }
 
 // checkVectorSpelling refuses a vector handed over as the text of its own JSON
@@ -1931,16 +1919,13 @@ func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result, c
 		}, nil
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		arr := make([]string, 0, len(vals))
-		for element, v := range vals {
+		for _, v := range vals {
 			if v.Type != gjson.String {
 				return nil, wrapStructSubParseError(sub, v, "expect string")
 			}
-			// gjson keeps the caller's bytes; see checkedUTF8String.
-			value, err := checkedUTF8String(sub.GetName(), element, v.String())
-			if err != nil {
-				return nil, err
-			}
-			arr = append(arr, value)
+			// gjson keeps the caller's bytes, so the Proxy ingress still sees
+			// them and is the single place that scans; see stringFieldValue.
+			arr = append(arr, v.String())
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: arr}},
