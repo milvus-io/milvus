@@ -684,6 +684,10 @@ func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *pro
 	return s.proxy.InvalidateCollectionMetaCache(ctx, request)
 }
 
+func (s *Server) SyncFileResource(ctx context.Context, request *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	return s.proxy.SyncFileResource(ctx, request)
+}
+
 // CreateCollection notifies Proxy to create a collection
 func (s *Server) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return s.proxy.CreateCollection(ctx, request)
