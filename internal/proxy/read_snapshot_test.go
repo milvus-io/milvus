@@ -34,6 +34,7 @@ type readSnapshotTestCache struct {
 	Cache
 
 	current        *collectionInfo
+	infoErr        error
 	infoCalls      int
 	partitions     map[UniqueID]*partitionInfos
 	partitionErrs  []error
@@ -47,7 +48,7 @@ func (c *readSnapshotTestCache) GetCollectionInfo(
 	int64,
 ) (*collectionInfo, error) {
 	c.infoCalls++
-	return c.current, nil
+	return c.current, c.infoErr
 }
 
 func (c *readSnapshotTestCache) GetPartitionInfosByID(
@@ -216,6 +217,84 @@ func TestReadRequestSnapshotRejectsIncompleteMetadata(t *testing.T) {
 			require.Equal(t, 1, cache.infoCalls)
 		})
 	}
+}
+
+func TestSearchAndHybridSearchInvalidCollectionNameCompatibility(t *testing.T) {
+	oldCache := globalMetaCache
+	t.Cleanup(func() {
+		globalMetaCache = oldCache
+	})
+
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	tests := map[string]func(context.Context) (*milvuspb.SearchResults, error){
+		"search": func(ctx context.Context) (*milvuspb.SearchResults, error) {
+			return node.Search(ctx, &milvuspb.SearchRequest{
+				DbName:         "default",
+				CollectionName: "12-s",
+			})
+		},
+		"hybrid search": func(ctx context.Context) (*milvuspb.SearchResults, error) {
+			return node.HybridSearch(ctx, &milvuspb.HybridSearchRequest{
+				DbName:         "default",
+				CollectionName: "12-s",
+			})
+		},
+	}
+	for name, call := range tests {
+		t.Run(name, func(t *testing.T) {
+			cache := &readSnapshotTestCache{
+				infoErr: merr.WrapErrAsInputError(
+					merr.WrapErrCollectionNotFoundWithDB("default", "12-s")),
+			}
+			globalMetaCache = cache
+
+			response, err := call(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, merr.Code(merr.ErrCollectionNotFound), response.GetStatus().GetCode())
+			require.Equal(t, "collection not found[database=default][collection=12-s]", response.GetStatus().GetReason())
+			require.Equal(t, 1, cache.infoCalls)
+		})
+	}
+}
+
+func TestReadRequestSnapshotQueryValidationPrecedesCachedLookupError(t *testing.T) {
+	ctx := withReadRequestSnapshotResult(context.Background(), &readRequestSnapshotResult{
+		err: merr.WrapErrCollectionNotFoundWithDB("default", "12-s"),
+	})
+
+	ctx, snapshot, err, ok := ensureReadRequestSnapshotForRequest(ctx, &milvuspb.QueryRequest{
+		DbName:         "default",
+		CollectionName: "12-s",
+	})
+	require.True(t, ok)
+	require.Nil(t, snapshot)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.Contains(t, err.Error(), "Invalid collection name: 12-s")
+	require.NotNil(t, ctx)
+}
+
+func TestQueryInvalidCollectionNamePrecedesCachedLookupError(t *testing.T) {
+	oldRateCol := rateCol
+	node := &Proxy{}
+	require.NoError(t, node.initRateCollector())
+	t.Cleanup(func() {
+		rateCol = oldRateCol
+	})
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	ctx := withReadRequestSnapshotResult(context.Background(), &readRequestSnapshotResult{
+		err: merr.WrapErrAsInputError(
+			merr.WrapErrCollectionNotFoundWithDB("default", "12-s")),
+	})
+	response, err := node.Query(ctx, &milvuspb.QueryRequest{
+		DbName:         "default",
+		CollectionName: "12-s",
+	})
+	require.NoError(t, err)
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), response.GetStatus().GetCode())
+	require.Contains(t, response.GetStatus().GetReason(), "Invalid collection name: 12-s")
 }
 
 func TestReadRequestSnapshotRetriesPartitionFetchAfterTransientFailure(t *testing.T) {

@@ -3809,6 +3809,15 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			Status: merr.Status(err),
 		}, nil
 	}
+	// Preserve Query's established validation precedence over a cached metadata
+	// lookup result populated by an interceptor (for example, privilege or rate
+	// limiting). Search and HybridSearch intentionally use metadata lookup
+	// precedence for compatibility with their collection-not-found contract.
+	if err := validateCollectionName(request.GetCollectionName()); err != nil {
+		return &milvuspb.QueryResults{
+			Status: merr.Status(err),
+		}, nil
+	}
 
 	ctx, readSnapshot, err := ensureReadRequestSnapshot(ctx, request.GetDbName(), request.GetCollectionName())
 	if err != nil {

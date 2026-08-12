@@ -218,9 +218,6 @@ func readRequestSnapshotFromContext(ctx context.Context) (*readRequestSnapshot, 
 }
 
 func resolveCollectionReadSnapshot(ctx context.Context, database, collectionName string) (*collectionReadSnapshot, error) {
-	if err := validateCollectionName(collectionName); err != nil {
-		return nil, err
-	}
 	if globalMetaCache == nil {
 		return nil, merr.WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), "initialization")
 	}
@@ -295,6 +292,16 @@ func ensureReadRequestSnapshotForRequest(ctx context.Context, req any) (context.
 	database, collectionName, ok := getReadRequestTarget(req)
 	if !ok {
 		return ctx, nil, nil, false
+	}
+	// Query has historically validated the collection name before consulting
+	// the metadata cache. Keep that request-specific ordering even when an
+	// interceptor has already cached a lookup result in the context. Search and
+	// HybridSearch intentionally leave lookup ordering to the metadata cache so
+	// invalid, non-existent names retain their collection-not-found contract.
+	if _, isQuery := req.(*milvuspb.QueryRequest); isQuery {
+		if err := validateCollectionName(collectionName); err != nil {
+			return ctx, nil, err, true
+		}
 	}
 	ctx, snapshot, err := ensureReadRequestSnapshot(ctx, database, collectionName)
 	return ctx, snapshot, err, true
