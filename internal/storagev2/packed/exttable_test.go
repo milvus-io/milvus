@@ -1645,6 +1645,22 @@ func TestMakePropertiesFromStorageConfig_MaxConnectionsUnsetOmitsKey(t *testing.
 	assert.Equal(t, "5000", loonPropertyString(props, PropertyFSRequestTimeoutMS))
 }
 
+func TestMakePropertiesFromStorageConfig_AzureRequestCredentials(t *testing.T) {
+	t.Setenv("AZURE_STORAGE_CONNECTION_STRING", "AccountName=ambient;AccountKey=ambient-key")
+	config := &indexpb.StorageConfig{
+		StorageType:     "remote",
+		CloudProvider:   "azure",
+		AccessKeyID:     "request-account",
+		SecretAccessKey: "request-key",
+	}
+
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	assert.Equal(t, "request-account", loonPropertyString(props, PropertyFSAccessKeyID))
+	assert.Equal(t, "request-key", loonPropertyString(props, PropertyFSAccessKeyValue))
+}
+
 // ==================== FetchFragmentsFromExternalSourceWithRange Tests ====================
 
 func TestFetchFragmentsFromExternalSourceWithRange_HappyPath(t *testing.T) {
