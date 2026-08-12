@@ -4126,6 +4126,15 @@ func TestCheckAndSetDataInvalidUTF8(t *testing.T) {
 			},
 		},
 	}
+	textSchema := &schemapb.CollectionSchema{
+		Name: "c_utf8_text",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			// No enable_analyzer: TEXT is StringData on the wire either way, and
+			// the analyzer only affects indexing, not this check.
+			{FieldID: 101, Name: "body", DataType: schemapb.DataType_Text, Nullable: true},
+		},
+	}
 
 	// gjson hands the bytes over untouched, which is what lets the Proxy ingress
 	// be the single scanner. If this ever starts sanitizing, the bytes stop being
@@ -4138,18 +4147,42 @@ func TestCheckAndSetDataInvalidUTF8(t *testing.T) {
 		assert.Equal(t, invalidUTF8, rows[0]["text"])
 	})
 
-	// sonic replaces the invalid byte with U+FFFD before the elements exist, so
-	// the raw token is what carries the evidence.
-	t.Run("array of varchar", func(t *testing.T) {
+	// Decoded by walking gjson elements now, not by json.Unmarshal into
+	// []string, so the bytes survive here too instead of being replaced with
+	// U+FFFD before the elements exist.
+	t.Run("array of varchar reaches the proxy intact", func(t *testing.T) {
 		body := []byte(`{"data": [{"id": 1, "tokens": ["ok", "` + invalidUTF8 + `"]}]}`)
-		_, _, err := checkAndSetData(body, arraySchema, false)
+		rows, _, err := checkAndSetData(body, arraySchema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		tokens, ok := rows[0]["tokens"].(*schemapb.ScalarField)
+		require.True(t, ok)
+		assert.Equal(t, []string{"ok", invalidUTF8}, tokens.GetStringData().GetData())
+	})
+
+	// TEXT is StringData on the wire whether or not the analyzer is enabled, so
+	// it has to reach the ingress the same way VarChar does.
+	t.Run("text scalar reaches the proxy intact", func(t *testing.T) {
+		body := []byte(`{"data": [{"id": 1, "body": "` + invalidUTF8 + `"}]}`)
+		rows, _, err := checkAndSetData(body, textSchema, false)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, invalidUTF8, rows[0]["body"])
+	})
+
+	// The gjson element walk still rejects a malformed array the same way
+	// json.Unmarshal used to: a non-array token, or a non-string element.
+	t.Run("array of varchar still rejects the wrong shape", func(t *testing.T) {
+		notArray := []byte(`{"data": [{"id": 1, "tokens": "not-an-array"}]}`)
+		_, _, err := checkAndSetData(notArray, arraySchema, false)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "tokens")
 
-		ok := []byte(`{"data": [{"id": 1, "tokens": ["ok", "fine"]}]}`)
-		_, _, err = checkAndSetData(ok, arraySchema, false)
-		require.NoError(t, err)
+		wrongElement := []byte(`{"data": [{"id": 1, "tokens": ["ok", 1]}]}`)
+		_, _, err = checkAndSetData(wrongElement, arraySchema, false)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "element 1")
 	})
 
 	// Also gjson: the sub-field cell keeps the byte, and the Array FieldData it

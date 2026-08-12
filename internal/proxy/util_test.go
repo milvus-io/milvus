@@ -3964,6 +3964,20 @@ func TestCheckVarcharFormat(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
+	// TEXT is StringData on the wire whether or not the analyzer is enabled --
+	// the analyzer only affects indexing -- so a plain, nullable TEXT field must
+	// be checked too. Nothing else catches this one: gjson does not sanitize on
+	// the way in, so this ingress is the only place that can.
+	t.Run("text without analyzer", func(t *testing.T) {
+		textField := &schemapb.FieldSchema{
+			FieldID: 100, DataType: schemapb.DataType_Text, Nullable: true,
+		}
+		require.NoError(t, checkInputUtf8Compatiable([]*schemapb.FieldSchema{textField}, newMessage(schemapb.DataType_Text, "合法字符串")))
+		err := checkInputUtf8Compatiable([]*schemapb.FieldSchema{textField}, newMessage(schemapb.DataType_Text, invalidUTF8))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
 	// A struct array's string sub-field reaches this check flattened into a
 	// top-level Array FieldData, which is the shape the REST handler builds and
 	// the one the encoder writes without rescanning UTF-8.

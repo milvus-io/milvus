@@ -2341,24 +2341,19 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 }
 
 // carriesProto3Strings reports whether a field can hand proto3 strings to the
-// insert encoder: VarChar and legacy String columns, analyzer-enabled Text, and
-// Array cells with a string element type. The last one is how a struct array's
-// string sub-field arrives here, since checkAndFlattenStructFieldData has
-// already turned every sub-field into a top-level Array FieldData.
+// insert encoder: VarChar, legacy String, Text (with or without an analyzer --
+// it is stored as StringData either way, the analyzer only affects indexing),
+// and Array cells with a string element type. The last one is how a struct
+// array's string sub-field arrives here, since checkAndFlattenStructFieldData
+// has already turned every sub-field into a top-level Array FieldData.
 func carriesProto3Strings(field *schemapb.FieldSchema) bool {
 	switch field.GetDataType() {
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
 		return true
 	case schemapb.DataType_Array:
 		switch field.GetElementType() {
 		case schemapb.DataType_VarChar, schemapb.DataType_String:
 			return true
-		}
-	case schemapb.DataType_Text:
-		for _, kv := range field.GetTypeParams() {
-			if kv.Key == common.EnableAnalyzerKey {
-				return true
-			}
 		}
 	}
 	return false
