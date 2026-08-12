@@ -1413,10 +1413,16 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 			retry.Attempts(updateSchemaWorkerRetryCount+1),
 			retry.Sleep(updateSchemaWorkerRetryInitialBackoff),
 			retry.MaxSleepTime(updateSchemaWorkerRetryMaxBackoff),
-			// Only transient failures may consume the retry budget: a permanent
-			// typed schema/segcore error resent to the same worker just adds
-			// fixed propagation latency and redundant RPC/log load.
-			retry.RetryErr(merr.IsRetryableErr),
+			// Stop only on a typed error explicitly classified non-retriable.
+			// merr.IsRetryableErr alone would be wrong here: it is an allowlist
+			// over milvusError, so a transport failure (connection refused/
+			// reset/EOF, returned raw by CheckRPCCall) would abort on the first
+			// attempt -- and delete_node panics on an UpdateSchema error, so a
+			// worker restarting during a schema change would crash this node
+			// instead of being waited out.
+			retry.RetryErr(func(err error) bool {
+				return !merr.IsMilvusError(err) || merr.IsRetryableErr(err)
+			}),
 		)
 		return (*StatusWrapper)(status), err
 	}, "UpdateSchema", log)

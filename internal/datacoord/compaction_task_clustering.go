@@ -218,6 +218,13 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 				mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
 				mlog.Int32("retryTimes", t.GetTaskProto().GetRetryTimes()),
 				mlog.Err(failErr))
+			// Drop the plan on the worker before requeueing: the DataNode only
+			// removes a failed task entry when DropCompactionPlan arrives, and
+			// the scheduler re-pushes a pipelining task without dropping it, so
+			// re-submitting the same planID to the same node would be rejected
+			// with ErrDuplicatedCompactionTask and the task would never leave
+			// the pending queue.
+			t.DropTaskOnWorker(cluster)
 			err = t.updateAndSaveTaskMeta(
 				setState(datapb.CompactionTaskState_pipelining),
 				setNodeID(NullNodeID),

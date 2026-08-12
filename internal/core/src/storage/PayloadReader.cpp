@@ -262,6 +262,17 @@ PayloadReader::init(const uint8_t* data,
             // parquet throws directly on malformed files (corrupt footer/
             // pages) in addition to returning statuses; classify as permanent
             // data corruption instead of collapsing to 2001 at the boundary.
+            // ParquetStatusException is the subclass PARQUET_THROW_NOT_OK
+            // raises for ANY non-ok arrow Status, including OutOfMemory --
+            // stamping DataFormatBroken on those would report a retriable
+            // allocation failure as permanent corruption, so its status goes
+            // through the same mapper the ok() checks above use.
+            if (auto* status_ex =
+                    dynamic_cast<const parquet::ParquetStatusException*>(&e)) {
+                ThrowInfo(ArrowStatusToErrorCode(status_ex->status()),
+                          "parquet parse failed: {}",
+                          e.what());
+            }
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "parquet parse failed: {}",
                       e.what());
