@@ -86,8 +86,11 @@ the resulting keyed tasks before returning.
 
 The Registry also maintains resident-shard reverse indexes by collection and by
 currently placed QueryNode. These indexes support scoped management snapshots.
-After the last QueryView completes durable removal, the manager is removed
-together with its stats and reverse-index entries.
+An empty manager remains resident so later QueryViews for the same replica and
+shard continue using the same manager lifecycle. After `RequestRelease`, once
+the last QueryView completes durable removal, the released manager is removed
+together with its stats and reverse-index entries. An already-empty manager is
+removed immediately by `RequestRelease`.
 
 `Close` closes the flush scheduler before the QueryView runtime closes the
 underlying `ReliableSyncer`.
@@ -311,11 +314,15 @@ Callbacks for an already removed view stop tracking without creating new work.
 
 ### 4.8 RequestRelease
 
+- Mark the manager as explicitly released. Ordinary QueryView cleanup does not
+  make an empty manager eligible for registry removal.
 - Preparing or Ready views enter Unrecoverable.
 - Up views enter Down.
 - All Unrecoverable views advance to Dropping.
 - The manager publishes the new stats, emits and submits one shard event, then
   unlocks.
+- If the manager is already empty, notify the registry after unlocking so it
+  can remove this released manager immediately.
 
 Cleanup continues asynchronously through reliable node callbacks.
 
@@ -371,10 +378,11 @@ from submitting new sync work after the syncer has closed.
     `ShardID` cannot be flushed by concurrent tasks.
 12. **Cross-Shard Parallelism**: Different `ShardID` lanes may execute in
     different NodeScheduler tasks concurrently.
-13. **Registry Cleanup**: After a manager's last QueryView completes durable
-    removal, the registry removes that exact empty manager, its stats, and its
-    collection/node reverse-index entries. Identity and emptiness are rechecked
-    to avoid deleting a replacement manager or a manager that received new work.
+13. **Registry Cleanup**: Only `RequestRelease` makes a manager eligible for
+    registry removal. After the released manager's last QueryView completes
+    durable removal, the registry removes that exact empty manager, its stats,
+    and its collection/node reverse-index entries. Release state, identity, and
+    emptiness are rechecked before deletion.
 
 ## 8. Package Location
 

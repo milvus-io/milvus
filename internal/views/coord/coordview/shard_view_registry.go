@@ -93,7 +93,7 @@ func RecoverShardViewRegistry(
 		registry.addCollectionShardLocked(sid)
 		registry.addNodeShardsLocked(sid, stats)
 		mgr.SetStatsObserver(registry.onShardStatsChanged)
-		mgr.setOnEmpty(registry.removeEmptyManager)
+		mgr.setOnReleasedEmpty(registry.removeReleasedManager)
 	}
 	// Recovery sync callbacks may update manager stats immediately. Install all
 	// observers and indexes before releasing the held recovery events so those
@@ -119,7 +119,7 @@ func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
 
 	mgr := newShardViewManager(r.ctx, shardID, r.flushScheduler, nil)
 	mgr.SetStatsObserver(r.onShardStatsChanged)
-	mgr.setOnEmpty(r.removeEmptyManager)
+	mgr.setOnReleasedEmpty(r.removeReleasedManager)
 	stats := emptyShardStats()
 
 	r.mu.Lock()
@@ -157,13 +157,13 @@ func (r *ShardViewRegistry) Get(shardID qviews.ShardID) *ShardViewManager {
 	return r.shards[shardID]
 }
 
-// removeEmptyManager reclaims a manager after its last QueryView has completed
-// durable removal. Both emptiness and identity are rechecked because a new view
-// or replacement manager may appear before this callback acquires the locks.
-func (r *ShardViewRegistry) removeEmptyManager(shardID qviews.ShardID, manager *ShardViewManager) {
+// removeReleasedManager reclaims a released manager after its last QueryView has
+// completed durable removal. Release state, emptiness, and identity are all
+// rechecked before removing the manager from the registry.
+func (r *ShardViewRegistry) removeReleasedManager(shardID qviews.ShardID, manager *ShardViewManager) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	if len(manager.views) != 0 {
+	if !manager.releaseRequested || len(manager.views) != 0 {
 		return
 	}
 

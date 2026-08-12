@@ -994,3 +994,23 @@ func TestShardViewManagerRemovesDroppedViewOnlyAfterPersist(t *testing.T) {
 	manager.mu.Unlock()
 	assert.False(t, retainedAfterPersist)
 }
+
+func TestShardViewManagerDoesNotPublishReleaseWithoutRequestRelease(t *testing.T) {
+	view := buildTestViewWithVersion(1, 1, 1, 1)
+	sm := NewCoordQueryViewStateMachine(view)
+	manager := &ShardViewManager{
+		ctx:     context.Background(),
+		shardID: testShardID,
+		views: map[qviews.QueryViewVersion]*CoordQueryViewStateMachine{
+			sm.Version(): sm,
+		},
+	}
+
+	released := false
+	manager.setOnReleasedEmpty(func(qviews.ShardID, *ShardViewManager) {
+		released = true
+	})
+	manager.finalizeRemoval(sm)
+
+	assert.False(t, released)
+}

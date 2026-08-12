@@ -24,12 +24,13 @@ import (
 //
 // Thread-safety: All methods are thread-safe.
 type ShardViewManager struct {
-	ctx            context.Context
-	mu             sync.Mutex
-	shardID        qviews.ShardID
-	eventSubmitter dirtyViewEventSubmitter
-	observe        func(qviews.ShardID, *ShardStats)
-	onEmpty        func(qviews.ShardID, *ShardViewManager)
+	ctx              context.Context
+	mu               sync.Mutex
+	shardID          qviews.ShardID
+	eventSubmitter   dirtyViewEventSubmitter
+	observe          func(qviews.ShardID, *ShardStats)
+	onReleasedEmpty  func(qviews.ShardID, *ShardViewManager)
+	releaseRequested bool
 
 	// All active views keyed by version for O(1) lookup.
 	views map[qviews.QueryViewVersion]*CoordQueryViewStateMachine
@@ -105,12 +106,12 @@ func (m *ShardViewManager) SetStatsObserver(observer func(qviews.ShardID, *Shard
 	m.observe = observer
 }
 
-// setOnEmpty installs the callback invoked after the manager's last QueryView
-// has completed durable removal.
-func (m *ShardViewManager) setOnEmpty(callback func(qviews.ShardID, *ShardViewManager)) {
+// setOnReleasedEmpty installs the callback invoked once RequestRelease has
+// completed and the manager contains no QueryViews.
+func (m *ShardViewManager) setOnReleasedEmpty(callback func(qviews.ShardID, *ShardViewManager)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.onEmpty = callback
+	m.onReleasedEmpty = callback
 }
 
 // Stats returns an atomic snapshot of this shard's current placement state.
@@ -280,10 +281,13 @@ func (m *ShardViewManager) AddPreparing(_ context.Context, builder *qviews.Query
 // - Up views: transition to Down (normal teardown via SN confirmation).
 // - Preparing/Ready views: force Unrecoverable → Dropping (abort immediately).
 // - Down/Dropping views: already tearing down, no-op.
+// - Empty manager: notify the registry for immediate removal.
 //
-// The actual cleanup completes asynchronously through callbacks.
+// This is the only operation that makes the manager eligible for registry
+// removal. Cleanup of resident views completes asynchronously through callbacks.
 func (m *ShardViewManager) RequestRelease(_ context.Context) error {
 	m.mu.Lock()
+	m.releaseRequested = true
 
 	if m.preparingView != nil {
 		m.preparingView.EnterUnrecoverable()
@@ -303,7 +307,13 @@ func (m *ShardViewManager) RequestRelease(_ context.Context) error {
 	event := m.consumeDirtyEventLocked()
 	m.publishStatsLocked()
 	m.submitDirtyEvent(event)
+	empty := len(m.views) == 0
+	onReleasedEmpty := m.onReleasedEmpty
 	m.mu.Unlock()
+
+	if empty && onReleasedEmpty != nil {
+		onReleasedEmpty(m.shardID, m)
+	}
 	return nil
 }
 
@@ -512,12 +522,12 @@ func (m *ShardViewManager) finalizeRemoval(target *CoordQueryViewStateMachine) {
 	}
 	m.removeView(target)
 	m.publishStatsLocked()
-	empty := len(m.views) == 0
-	onEmpty := m.onEmpty
+	released := m.releaseRequested && len(m.views) == 0
+	onReleasedEmpty := m.onReleasedEmpty
 	m.mu.Unlock()
 
-	if empty && onEmpty != nil {
-		onEmpty(m.shardID, m)
+	if released && onReleasedEmpty != nil {
+		onReleasedEmpty(m.shardID, m)
 	}
 }
 

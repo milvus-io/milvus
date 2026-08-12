@@ -81,6 +81,26 @@ func TestRegistry_EnsureCreatesOnce(t *testing.T) {
 	assert.Len(t, reg.Snapshot().StatsMap(), 1)
 }
 
+func TestRegistry_RequestReleaseRemovesEmptyManager(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	manager := reg.Ensure(testShardID)
+
+	require.NoError(t, manager.RequestRelease(context.Background()))
+
+	assert.Nil(t, reg.Get(testShardID))
+	assert.Empty(t, reg.ShardIDs())
+	assert.NotContains(t, reg.Snapshot().StatsMap(), testShardID)
+}
+
+func TestRegistry_DoesNotRemoveEmptyManagerWithoutRelease(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	manager := reg.Ensure(testShardID)
+
+	reg.removeReleasedManager(testShardID, manager)
+
+	assert.Same(t, manager, reg.Get(testShardID))
+}
+
 func TestRegistry_RemovesManagerAfterLastViewDurablyDropped(t *testing.T) {
 	catalog := newMockCatalog()
 	s := newMockSyncer()
@@ -119,12 +139,15 @@ func TestRegistry_DoesNotRemoveReplacementManager(t *testing.T) {
 	oldManager := reg.Ensure(shardID)
 	replacement := newShardViewManager(context.Background(), shardID, reg.flushScheduler, nil)
 	replacement.SetStatsObserver(reg.onShardStatsChanged)
-	replacement.setOnEmpty(reg.removeEmptyManager)
+	replacement.setOnReleasedEmpty(reg.removeReleasedManager)
 
 	reg.mu.Lock()
 	reg.shards[shardID] = replacement
 	reg.mu.Unlock()
-	reg.removeEmptyManager(shardID, oldManager)
+	oldManager.mu.Lock()
+	oldManager.releaseRequested = true
+	oldManager.mu.Unlock()
+	reg.removeReleasedManager(shardID, oldManager)
 
 	assert.Same(t, replacement, reg.Get(shardID))
 }
