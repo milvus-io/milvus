@@ -1008,7 +1008,7 @@ func TestCreateIndexVanillaFaissGeneric(t *testing.T) {
 	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).
 		WithANNSField(common.DefaultFloatVecFieldName).
 		// nprobe=nlist (IVF64) scans all lists so topK results are returned deterministically (#50392)
-		WithSearchParam("nprobe", "64").
+		WithAnnParam(index.NewIvfAnnParam(64)).
 		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
