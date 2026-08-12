@@ -35,9 +35,6 @@ func TestManifestIndexFallback(t *testing.T) {
 		indexID      = int64(101)
 		buildID      = int64(102)
 		indexVersion = int64(4)
-		fieldID2     = int64(200)
-		indexID2     = int64(201)
-		buildID2     = int64(202)
 	)
 	segmentIndex := &model.SegmentIndex{
 		SegmentID:    segmentID,
@@ -107,6 +104,9 @@ func TestServerGetIndexInfosManifestFallback(t *testing.T) {
 		indexID      = int64(101)
 		buildID      = int64(102)
 		indexVersion = int64(4)
+		fieldID2     = int64(200)
+		indexID2     = int64(201)
+		buildID2     = int64(202)
 	)
 
 	segmentIndex := &model.SegmentIndex{
