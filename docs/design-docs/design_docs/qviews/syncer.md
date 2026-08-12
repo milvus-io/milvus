@@ -164,16 +164,25 @@ SyncViews(ctx, group):
 QueryNode loss is determined by **service discovery**, not by reconnect timeout. StreamingNode unavailability is handled by the channel assignment layer and is not delivered as a per-view lost callback.
 
 A notifier registered through `ViewSyncClient.RegisterNodeChangedNotifier`
-invokes `drainRemovedNodes` when membership may have changed:
+performs a non-blocking send to a capacity-one notification channel when
+membership may have changed. A dedicated ReliableSyncer worker serially drains
+that channel and invokes `drainRemovedNodes`; concurrent notifications are
+coalesced while preserving a follow-up pass when a change arrives during an
+active drain:
 
 ```
-drainRemovedNodes():
-    snapshot current syncers
-    for each syncer whose IsNodeAlive is false:
-        remove it if the map entry is unchanged
-    for each removed syncer:
-        Close()
-        DrainPendingIfNodeLost()   // OnQueryNodeLost(qn) for QN pending entries
+service discovery callback:
+    non-blocking enqueue to nodeChanged
+
+node-change worker:
+    wait for nodeChanged
+    drainRemovedNodes():
+        snapshot current syncers
+        for each syncer whose IsNodeAlive is false:
+            remove it if the map entry is unchanged
+        for each removed syncer:
+            Close()
+            DrainPendingIfNodeLost()   // OnQueryNodeLost(qn) for QN pending entries
 ```
 
 Key design decisions:
@@ -197,7 +206,7 @@ Key design decisions:
 Close():
     set closed = true
     cancel context
-    wait for watchNodes goroutine
+    wait for node-change worker
     close all remaining resumableSyncers (no drain — graceful shutdown)
 ```
 
@@ -278,7 +287,8 @@ reliableSyncer
 ├── resumableSyncers map[WorkNodeKey]*resumableSyncer
 ├── closed bool
 ├── ctx / cancel
-└── watchNodes goroutine: watch changes → drainRemovedNodes
+├── nodeChanged chan struct{} (capacity 1)           // coalesced non-blocking notifier
+└── node-change worker: notifications → drainRemovedNodes
 
 resumableSyncer
 ├── node WorkNode
