@@ -552,6 +552,37 @@ func TestServiceParam(t *testing.T) {
 	})
 }
 
+// validateMessageSizeReserve fails startup fast on a nonsensical combination
+// instead of letting normalizePulsarMessageReserve silently degrade the
+// reserve to 0 the first time a WAL message is packed. Each subtest builds
+// its own isolated BaseTable/ServiceParam so a startup config it deliberately
+// makes invalid cannot leak into any other test's global paramtable state.
+func TestServiceParamValidateMessageSizeReserve(t *testing.T) {
+	t.Run("reserve at or above pulsar.maxMessageSize panics", func(t *testing.T) {
+		bt := NewBaseTable(SkipRemote(true))
+		assert.NoError(t, bt.Save("pulsar.maxMessageSize", "1000"))
+		assert.NoError(t, bt.Save("pulsar.messageReserveSize", "1000"))
+		var SParams ServiceParam
+		assert.Panics(t, func() { SParams.init(bt) })
+	})
+
+	t.Run("reserve at or above kafka.producer.message.max.bytes panics", func(t *testing.T) {
+		bt := NewBaseTable(SkipRemote(true))
+		// Kafka's default is 10 MiB; a reserve that size or larger is invalid
+		// against it even though pulsar.maxMessageSize (2 MiB default) is left
+		// untouched -- both backends have to be checked, not just Pulsar's own.
+		assert.NoError(t, bt.Save("pulsar.messageReserveSize", "10485760"))
+		var SParams ServiceParam
+		assert.Panics(t, func() { SParams.init(bt) })
+	})
+
+	t.Run("default configuration does not panic", func(t *testing.T) {
+		bt := NewBaseTable(SkipRemote(true))
+		var SParams ServiceParam
+		assert.NotPanics(t, func() { SParams.init(bt) })
+	})
+}
+
 func TestRuntimConfig(t *testing.T) {
 	SetRole(typeutil.StandaloneRole)
 	assert.Equal(t, GetRole(), typeutil.StandaloneRole)

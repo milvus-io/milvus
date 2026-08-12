@@ -19,6 +19,7 @@ package paramtable
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"path"
@@ -73,9 +74,38 @@ func (p *ServiceParam) init(bt *BaseTable) {
 	p.WoodpeckerCfg.Init(bt)
 	p.PulsarCfg.Init(bt)
 	p.KafkaCfg.Init(bt)
+	p.validateMessageSizeReserve()
 	p.RocksmqCfg.Init(bt)
 	p.MinioCfg.Init(bt)
 	p.ProfileCfg.Init(bt)
+}
+
+// validateMessageSizeReserve guarantees pulsar.messageReserveSize fits under
+// every backend limit GetMessageSizeLimitsFor ever compares it against --
+// Pulsar's own pulsar.maxMessageSize and Kafka's kafka.producer.message.max.bytes,
+// the only two values activeWALMessageSize ever reports (RocksMQ and Woodpecker
+// have no per-entry limit of their own and reuse Pulsar's). Both are checked
+// here, once, at startup, so a nonsensical combination fails fast instead of
+// silently degrading the reserve to 0 the first time a WAL message is packed --
+// see normalizePulsarMessageReserve's fallback for why that path exists at all.
+//
+// pulsar.maxMessageSize and pulsar.messageReserveSize are both refreshable, so
+// this cannot promise the invariant forever: an operator can still push a bad
+// value through a live config change after startup. normalizePulsarMessageReserve
+// keeps its own runtime fallback for exactly that case; this check only removes
+// the same mistake from ever being reachable through a fresh startup.
+func (p *ServiceParam) validateMessageSizeReserve() {
+	reserve := p.PulsarCfg.MessageReserveSize.GetAsInt()
+	if maxMessageSize := p.PulsarCfg.MaxMessageSize.GetAsInt(); reserve >= maxMessageSize {
+		panic(fmt.Sprintf(
+			"pulsar.messageReserveSize (%d) must be smaller than pulsar.maxMessageSize (%d)",
+			reserve, maxMessageSize))
+	}
+	if maxMessageSize := p.KafkaCfg.ProducerMessageMaxBytes.GetAsInt(); reserve >= maxMessageSize {
+		panic(fmt.Sprintf(
+			"pulsar.messageReserveSize (%d) must be smaller than kafka.producer.message.max.bytes (%d)",
+			reserve, maxMessageSize))
+	}
 }
 
 func (p *ServiceParam) RocksmqEnable() bool {
@@ -1272,7 +1302,7 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Doc: `The maximum size of each message in Pulsar. Unit: Byte.
 By default, Pulsar can transmit at most 2 MiB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
 If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
-Must be a positive 32-bit integer; invalid or out-of-range values fall back to the default 2 MiB limit.`,
+Must be a positive 32-bit integer larger than pulsar.messageReserveSize -- Milvus refuses to start otherwise. Invalid or out-of-range values fall back to the default 2 MiB limit.`,
 		Export: true,
 		Formatter: func(value string) string {
 			maxMessageSize, err := strconv.ParseInt(value, 10, 32)
@@ -1291,9 +1321,9 @@ Must be a positive 32-bit integer; invalid or out-of-range values fall back to t
 		Key:          "pulsar.messageReserveSize",
 		Version:      "3.0.0",
 		DefaultValue: strconv.Itoa(defaultPulsarMessageReserveSize),
-		Doc: `The headroom reserved out of pulsar.maxMessageSize for message overhead outside the plaintext body. Unit: Byte.
-A produced record carries a streaming message header, properties added before WAL append, cipher metadata/expansion, and Pulsar message metadata on top of the body, so the producer budgets only pulsar.maxMessageSize minus this value for the body itself.
-Must be a non-negative 32-bit integer. Invalid or out-of-range values use 4 KiB. When paired with pulsar.maxMessageSize, an oversized reserve uses 4 KiB if it fits, otherwise 0.`,
+		Doc: `The headroom reserved out of pulsar.maxMessageSize (and, if smaller, kafka.producer.message.max.bytes) for message overhead outside the plaintext body. Unit: Byte.
+A produced record carries a streaming message header, properties added before WAL append, cipher metadata/expansion, and broker message metadata on top of the body, so the producer budgets only the active WAL backend's own message-size limit minus this value for the body itself.
+Must be a non-negative 32-bit integer smaller than both pulsar.maxMessageSize and kafka.producer.message.max.bytes -- Milvus refuses to start otherwise. Invalid or out-of-range values use 4 KiB.`,
 		Export: true,
 		Formatter: func(value string) string {
 			reserveSize, err := strconv.ParseInt(value, 10, 32)
@@ -1493,7 +1523,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Key:          KafkaProducerConfigPrefix + "message.max.bytes",
 		DefaultValue: strconv.Itoa(10 * 1024 * 1024),
 		Version:      "3.0.0",
-		Doc:          "Maximum size of a Kafka producer message in bytes. Requires a restart to take effect.",
+		Doc:          "Maximum size of a Kafka producer message in bytes. Requires a restart to take effect. Must be larger than pulsar.messageReserveSize -- Milvus refuses to start otherwise.",
 		Export:       true,
 		Immutable:    true,
 	}
