@@ -29,6 +29,7 @@ type ShardViewManager struct {
 	shardID        qviews.ShardID
 	eventSubmitter dirtyViewEventSubmitter
 	observe        func(qviews.ShardID, *ShardStats)
+	onEmpty        func(qviews.ShardID, *ShardViewManager)
 
 	// All active views keyed by version for O(1) lookup.
 	views map[qviews.QueryViewVersion]*CoordQueryViewStateMachine
@@ -102,6 +103,14 @@ func (m *ShardViewManager) SetStatsObserver(observer func(qviews.ShardID, *Shard
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.observe = observer
+}
+
+// setOnEmpty installs the callback invoked after the manager's last QueryView
+// has completed durable removal.
+func (m *ShardViewManager) setOnEmpty(callback func(qviews.ShardID, *ShardViewManager)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onEmpty = callback
 }
 
 // Stats returns an atomic snapshot of this shard's current placement state.
@@ -497,12 +506,19 @@ func (m *ShardViewManager) publishStatsLocked() {
 // state has been durably persisted.
 func (m *ShardViewManager) finalizeRemoval(target *CoordQueryViewStateMachine) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.views[target.Version()] != target {
+		m.mu.Unlock()
 		return
 	}
 	m.removeView(target)
 	m.publishStatsLocked()
+	empty := len(m.views) == 0
+	onEmpty := m.onEmpty
+	m.mu.Unlock()
+
+	if empty && onEmpty != nil {
+		onEmpty(m.shardID, m)
+	}
 }
 
 // hasPendingRemoval reports whether target already has a post-persist removal

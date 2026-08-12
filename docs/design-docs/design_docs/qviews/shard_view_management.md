@@ -85,8 +85,9 @@ reconstructs every manager, commits all emitted recovery events, and waits for
 the resulting keyed tasks before returning.
 
 The Registry also maintains resident-shard reverse indexes by collection and by
-currently placed QueryNode. These indexes support scoped management snapshots;
-managers remain resident after their last QueryView reaches Dropped.
+currently placed QueryNode. These indexes support scoped management snapshots.
+After the last QueryView completes durable removal, the manager is removed
+together with its stats and reverse-index entries.
 
 `Close` closes the flush scheduler before the QueryView runtime closes the
 underlying `ReliableSyncer`.
@@ -370,8 +371,10 @@ from submitting new sync work after the syncer has closed.
     `ShardID` cannot be flushed by concurrent tasks.
 12. **Cross-Shard Parallelism**: Different `ShardID` lanes may execute in
     different NodeScheduler tasks concurrently.
-13. **Registry Residency**: Managers remain resident after their last QueryView
-    is removed; collection indexes are stable and node indexes follow stats.
+13. **Registry Cleanup**: After a manager's last QueryView completes durable
+    removal, the registry removes that exact empty manager, its stats, and its
+    collection/node reverse-index entries. Identity and emptiness are rechecked
+    to avoid deleting a replacement manager or a manager that received new work.
 
 ## 8. Package Location
 

@@ -81,6 +81,54 @@ func TestRegistry_EnsureCreatesOnce(t *testing.T) {
 	assert.Len(t, reg.Snapshot().StatsMap(), 1)
 }
 
+func TestRegistry_RemovesManagerAfterLastViewDurablyDropped(t *testing.T) {
+	catalog := newMockCatalog()
+	s := newMockSyncer()
+	reg := newTestRegistry(t, catalog, s)
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
+	version := testVersion(1, 1, 1)
+	manager := reg.Ensure(shardID)
+
+	require.NoError(t, manager.AddPreparing(context.Background(), testBuilderForShard(100, shardID)))
+	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
+	simulateNodeResponse(t, s, testQN1, version, qviews.QueryViewStateReady)
+	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
+	simulateNodeResponse(t, s, qviews.NewStreamingNodeFromVChannel(shardID.VChannel), version, qviews.QueryViewStateReady)
+	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
+	simulateNodeResponse(t, s, qviews.NewStreamingNodeFromVChannel(shardID.VChannel), version, qviews.QueryViewStateUp)
+	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
+	require.NoError(t, manager.RequestRelease(context.Background()))
+	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
+	simulateNodeResponse(t, s, qviews.NewStreamingNodeFromVChannel(shardID.VChannel), version, qviews.QueryViewStateDown)
+	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
+	simulateNodeResponse(t, s, qviews.NewStreamingNodeFromVChannel(shardID.VChannel), version, qviews.QueryViewStateDropped)
+	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
+	simulateNodeResponse(t, s, testQN1, version, qviews.QueryViewStateDropped)
+	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
+
+	assert.Nil(t, reg.Get(shardID))
+	assert.Empty(t, reg.ShardIDs())
+	assert.Empty(t, reg.CollectionShards(100))
+	assert.NotContains(t, reg.Snapshot().StatsMap(), shardID)
+	assert.NotSame(t, manager, reg.Ensure(shardID))
+}
+
+func TestRegistry_DoesNotRemoveReplacementManager(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
+	oldManager := reg.Ensure(shardID)
+	replacement := newShardViewManager(context.Background(), shardID, reg.flushScheduler, nil)
+	replacement.SetStatsObserver(reg.onShardStatsChanged)
+	replacement.setOnEmpty(reg.removeEmptyManager)
+
+	reg.mu.Lock()
+	reg.shards[shardID] = replacement
+	reg.mu.Unlock()
+	reg.removeEmptyManager(shardID, oldManager)
+
+	assert.Same(t, replacement, reg.Get(shardID))
+}
+
 func TestRegistry_RecoverWithPersistedViews(t *testing.T) {
 	catalog := newMockCatalog()
 
