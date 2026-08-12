@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -1075,9 +1076,31 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 			IndexInfos:   make([]*indexpb.IndexFilePathInfo, 0),
 		}
 		if len(segIdxes) != 0 {
-			ret.SegmentInfo[segID].EnableIndex = true
+			needsManifestFallback := false
+			for _, segIdx := range segIdxes {
+				if segIdx.IndexState == commonpb.IndexState_Finished && len(segIdx.IndexFileKeys) == 0 {
+					needsManifestFallback = true
+					break
+				}
+			}
+
+			var manifestIndexes []packed.ManifestIndexInfo
+			var manifestPath string
+			if needsManifestFallback {
+				manifestIndexes, manifestPath = s.getManifestIndexesForSegment(ctx, segID)
+			}
 			for _, segIdx := range segIdxes {
 				if segIdx.IndexState == commonpb.IndexState_Finished {
+					fieldID := s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
+					// SegmentIndex is the normal in-memory/etcd handoff source. Only
+					// consult the manifest if its artifact file list has been removed.
+					if len(segIdx.IndexFileKeys) == 0 {
+						if manifestInfo, ok := resolveManifestIndexFilePathInfo(ctx, manifestPath, manifestIndexes, segIdx, fieldID); ok {
+							ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos, manifestInfo)
+						}
+						continue
+					}
+
 					builder := metautil.NewIndexPathBuilder(s.meta.chunkManager.RootPath(),
 						segIdx.IndexStorePathVersion, segIdx.CollectionID,
 						segIdx.PartitionID, segIdx.SegmentID,
@@ -1099,7 +1122,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
 						&indexpb.IndexFilePathInfo{
 							SegmentID:                 segID,
-							FieldID:                   s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
+							FieldID:                   fieldID,
 							IndexID:                   segIdx.IndexID,
 							BuildID:                   segIdx.BuildID,
 							IndexName:                 indexName,
@@ -1116,6 +1139,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 				}
 			}
 		}
+		ret.SegmentInfo[segID].EnableIndex = len(ret.SegmentInfo[segID].IndexInfos) > 0
 	}
 
 	return ret, nil

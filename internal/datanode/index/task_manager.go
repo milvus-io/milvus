@@ -44,6 +44,7 @@ type IndexTaskInfo struct {
 	CurrentIndexVersion       int32
 	CurrentScalarIndexVersion int32
 	IndexStorePathVersion     indexpb.IndexStorePathVersion
+	ManifestPath              string
 	ExecStartMs               int64
 	ExecEndMs                 int64
 	CostTimeMs                int64
@@ -64,6 +65,7 @@ func (i *IndexTaskInfo) Clone() *IndexTaskInfo {
 		CurrentIndexVersion:       i.CurrentIndexVersion,
 		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
 		IndexStorePathVersion:     i.IndexStorePathVersion,
+		ManifestPath:              i.ManifestPath,
 		ExecStartMs:               i.ExecStartMs,
 		ExecEndMs:                 i.ExecEndMs,
 		CostTimeMs:                i.CostTimeMs,
@@ -83,6 +85,7 @@ func (i *IndexTaskInfo) ToIndexTaskInfo(buildID int64) *workerpb.IndexTaskInfo {
 		CurrentIndexVersion:       i.CurrentIndexVersion,
 		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
 		IndexStorePathVersion:     i.IndexStorePathVersion,
+		ManifestPath:              i.ManifestPath,
 	}
 }
 
@@ -196,6 +199,7 @@ func (m *TaskManager) StoreIndexFilesAndStatistic(
 	currentIndexVersion int32,
 	currentScalarIndexVersion int32,
 	indexStorePathVersion indexpb.IndexStorePathVersion,
+	manifestPath string,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: buildID}
 	m.stateLock.Lock()
@@ -207,6 +211,7 @@ func (m *TaskManager) StoreIndexFilesAndStatistic(
 		info.CurrentIndexVersion = currentIndexVersion
 		info.CurrentScalarIndexVersion = currentScalarIndexVersion
 		info.IndexStorePathVersion = indexStorePathVersion
+		info.ManifestPath = manifestPath
 		return
 	}
 }

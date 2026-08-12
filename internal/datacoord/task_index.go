@@ -130,6 +130,12 @@ func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
 }
 
 func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
+	if result.GetState() == commonpb.IndexState_Finished && result.GetManifestPath() != "" {
+		if err := it.meta.UpdateSegmentsInfo(it.meta.ctx, UpdateManifestPathForIndex(it.SegmentID, result.GetManifestPath())); err != nil {
+			return merr.Wrap(err, "failed to persist index manifest version")
+		}
+	}
+
 	if err := it.meta.indexMeta.FinishTask(result); err != nil {
 		return err
 	}

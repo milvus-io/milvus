@@ -146,15 +146,18 @@ func (s *statsTaskInfoSuite) TestIndexTaskInfoReturnsIndexStorePathVersion() {
 	info := &IndexTaskInfo{
 		State:                 commonpb.IndexState_Finished,
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		ManifestPath:          "files/manifest/100/42",
 	}
 
 	s.Equal(
 		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 		info.ToIndexTaskInfo(100).GetIndexStorePathVersion(),
 	)
+	s.Equal("files/manifest/100/42", info.ToIndexTaskInfo(100).GetManifestPath())
 
 	cloned := info.Clone()
 	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, cloned.IndexStorePathVersion)
+	s.Equal("files/manifest/100/42", cloned.ManifestPath)
 }
 
 func (s *statsTaskInfoSuite) Test_IndexTaskCostMethods() {

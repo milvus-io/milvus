@@ -1772,6 +1772,48 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 	}
 }
 
+// errIndexManifestPublicationStale is an in-process control-flow signal. It
+// never crosses an RPC boundary: indexBuildTask catches it and schedules a
+// rebuild against the segment's current manifest.
+var errIndexManifestPublicationStale = errors.New("index manifest publication is stale")
+
+// UpdateManifestPathForIndex advances to the exact manifest reference returned
+// by index publication.
+// Index publication must use the returned path rather than only its revision:
+// a concurrent compaction can replace the manifest base path, and combining the
+// old base with an index transaction's revision would point at unrelated data.
+func UpdateManifestPathForIndex(segmentID int64, manifestPath string) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			return modPack.fail(merr.WrapErrSegmentNotFound(segmentID))
+		}
+		if segment.GetManifestPath() == "" || manifestPath == "" {
+			return modPack.fail(merr.WrapErrServiceInternalMsg("cannot update index manifest for segment %d without both manifest paths", segmentID))
+		}
+
+		currentBase, currentVersion, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
+		if err != nil {
+			return modPack.fail(merr.Wrap(err, "failed to parse current manifest path"))
+		}
+		incomingBase, incomingVersion, err := packed.UnmarshalManifestPath(manifestPath)
+		if err != nil {
+			return modPack.fail(merr.Wrap(err, "failed to parse index result manifest path"))
+		}
+		if incomingBase != currentBase {
+			return modPack.fail(merr.Wrapf(errIndexManifestPublicationStale,
+				"index manifest base path mismatch for segment %d: current %s, incoming %s", segmentID, currentBase, incomingBase))
+		}
+		if incomingVersion != currentVersion+1 {
+			return modPack.fail(merr.Wrapf(errIndexManifestPublicationStale,
+				"index manifest revision does not immediately follow the source revision for segment %d: current %d, incoming %d", segmentID, currentVersion, incomingVersion))
+		}
+
+		segment.ManifestPath = manifestPath
+		return true
+	}
+}
+
 func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)

@@ -41,6 +41,61 @@ func TestDeltaLogEntry(t *testing.T) {
 	assert.Equal(t, int64(100), entry.NumEntries)
 }
 
+func TestManifestIndexRoundtrip(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+	basePath := filepath.Join(dir, "insert_log/1/2/3_index")
+	manifestPath := createBaseManifest(t, basePath, storageConfig)
+	index := ManifestIndexInfo{
+		ColumnName:                "pk",
+		IndexName:                 "pk_inverted",
+		IndexType:                 "INVERTED",
+		Path:                      filepath.Join(dir, "index_files/1/2/3/4"),
+		FieldID:                   100,
+		IndexID:                   101,
+		BuildID:                   4,
+		IndexVersion:              5,
+		NumRows:                   1000,
+		SerializedSize:            2048,
+		MemSize:                   4096,
+		CurrentIndexVersion:       6,
+		CurrentScalarIndexVersion: 7,
+		IndexStorePathVersion:     indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		IndexFileKeys:             []string{"a", "b"},
+		Properties: map[string]string{
+			"metric_type": "BM25",
+		},
+	}
+
+	newManifestPath, err := AddIndexInfoToManifest(manifestPath, storageConfig, index)
+	require.NoError(t, err)
+	_, sourceVersion, err := UnmarshalManifestPath(manifestPath)
+	require.NoError(t, err)
+	_, newVersion, err := UnmarshalManifestPath(newManifestPath)
+	require.NoError(t, err)
+	assert.Equal(t, sourceVersion+1, newVersion)
+
+	indexes, err := GetManifestIndexInfos(newManifestPath, storageConfig)
+	require.NoError(t, err)
+	require.Len(t, indexes, 1)
+	assert.Equal(t, index, indexes[0])
+
+	_, err = AddIndexInfoToManifest(manifestPath, storageConfig, index)
+	require.Error(t, err, "publishing from a stale manifest must fail")
+}
+
 // createBaseManifest creates a base manifest via FFIPackedWriter for delta log tests.
 // basePath should follow production pattern: filepath.Join(rootPath, "insert_log/collID/partID/segID")
 func createBaseManifest(t *testing.T, basePath string, storageConfig *indexpb.StorageConfig) string {

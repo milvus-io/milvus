@@ -242,6 +242,9 @@ message IndexTaskInfo {
   // The actual index file path layout used by the worker for this build.
   // See milvus.proto.index.IndexStorePathVersion for value semantics.
   index.IndexStorePathVersion index_store_path_version = 10;
+  // StorageV3 manifest revision that atomically publishes the built index
+  // artifact metadata. Empty for legacy and StorageV2 builds.
+  string manifest_path = 11;
 }
 
 message IndexJobResults {
