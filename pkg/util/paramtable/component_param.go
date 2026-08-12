@@ -5786,6 +5786,13 @@ type dataCoordConfig struct {
 	JSONStatsWriteBatchSize          ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
+
+	// Task resource estimation
+	ResourceMixCompactionV3Factor ParamItem `refreshable:"true"`
+	ResourceClusteringFactor      ParamItem `refreshable:"true"`
+	ResourceClusteringMinMemory   ParamItem `refreshable:"true"`
+	ResourceClusteringMaxMemory   ParamItem `refreshable:"true"`
+	ResourceArrowExpansionFactor  ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -7463,6 +7470,52 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Export:       true,
 	}
 	p.JSONStatsWriteBatchSize.Init(base.mgr)
+
+	p.ResourceMixCompactionV3Factor = ParamItem{
+		Key:          "dataCoord.resource.mixCompactionV3MemoryFactor",
+		Version:      "3.0.0",
+		DefaultValue: "1.0",
+		Doc: "memory per byte of input for storage-v3 mix compaction; empirically ~0.9 " +
+			"from issue #52180, kept at 1.0 as a conservative bound",
+		Export: true,
+	}
+	p.ResourceMixCompactionV3Factor.Init(base.mgr)
+
+	p.ResourceClusteringFactor = ParamItem{
+		Key:          "dataCoord.resource.clusteringMemoryFactor",
+		Version:      "3.0.0",
+		DefaultValue: "0.3",
+		Doc:          "memory per byte of input granted to clustering compaction",
+		Export:       true,
+	}
+	p.ResourceClusteringFactor.Init(base.mgr)
+
+	p.ResourceClusteringMinMemory = ParamItem{
+		Key:          "dataCoord.resource.clusteringMinMemory",
+		Version:      "3.0.0",
+		DefaultValue: "536870912",
+		Doc:          "lower bound in bytes of the clustering compaction grant",
+		Export:       true,
+	}
+	p.ResourceClusteringMinMemory.Init(base.mgr)
+
+	p.ResourceClusteringMaxMemory = ParamItem{
+		Key:          "dataCoord.resource.clusteringMaxMemory",
+		Version:      "3.0.0",
+		DefaultValue: "8589934592",
+		Doc:          "upper bound in bytes of the clustering compaction grant",
+		Export:       true,
+	}
+	p.ResourceClusteringMaxMemory.Init(base.mgr)
+
+	p.ResourceArrowExpansionFactor = ParamItem{
+		Key:          "dataCoord.resource.arrowExpansionFactor",
+		Version:      "3.0.0",
+		DefaultValue: "1.2",
+		Doc:          "arrow in-memory expansion over binlog MemorySize, for offsets and validity bitmaps",
+		Export:       true,
+	}
+	p.ResourceArrowExpansionFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

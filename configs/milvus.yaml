@@ -916,6 +916,14 @@ dataCoord:
     scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
+  resource:
+    mixCompactionV3MemoryFactor: 1.0 # memory per byte of input for storage-v3 mix compaction
+    clusteringMemoryFactor: 0.3 # memory per byte of input granted to clustering compaction
+    clusteringMinMemory: 536870912 # lower bound in bytes of the clustering compaction grant
+    clusteringMaxMemory: 8589934592 # upper bound in bytes of the clustering compaction grant
+    arrowExpansionFactor: 1.2 # arrow in-memory expansion over binlog MemorySize
+  jsonShreddingTriggerCount: 10 # jsonkey stats task count per trigger
+  jsonShreddingTriggerInterval: 10 # jsonkey task interval per trigger
   jsonShreddingMaxColumns: 1024 # the max number of columns to shred
   jsonShreddingRatioThreshold: 0.3 # the ratio threshold to shred
   jsonShreddingWriteBatchSize: 81920 # the batch size to write
