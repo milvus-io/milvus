@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -92,13 +93,25 @@ func TestRegistry_RequestReleaseRemovesEmptyManager(t *testing.T) {
 	assert.NotContains(t, reg.Snapshot().StatsMap(), testShardID)
 }
 
-func TestRegistry_DoesNotRemoveEmptyManagerWithoutRelease(t *testing.T) {
+func TestRegistry_RemoveReleasedManagerDoesNotAccessManagerState(t *testing.T) {
 	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
 	manager := reg.Ensure(testShardID)
 
-	reg.removeReleasedManager(testShardID, manager)
+	manager.mu.Lock()
+	done := make(chan struct{})
+	go func() {
+		reg.removeReleasedManager(testShardID, manager)
+		close(done)
+	}()
 
-	assert.Same(t, manager, reg.Get(testShardID))
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		manager.mu.Unlock()
+		t.Fatal("registry removal accessed manager state")
+	}
+	manager.mu.Unlock()
+	assert.Nil(t, reg.Get(testShardID))
 }
 
 func TestRegistry_RemovesManagerAfterLastViewDurablyDropped(t *testing.T) {
@@ -144,9 +157,6 @@ func TestRegistry_DoesNotRemoveReplacementManager(t *testing.T) {
 	reg.mu.Lock()
 	reg.shards[shardID] = replacement
 	reg.mu.Unlock()
-	oldManager.mu.Lock()
-	oldManager.releaseRequested = true
-	oldManager.mu.Unlock()
 	reg.removeReleasedManager(shardID, oldManager)
 
 	assert.Same(t, replacement, reg.Get(shardID))

@@ -158,15 +158,9 @@ func (r *ShardViewRegistry) Get(shardID qviews.ShardID) *ShardViewManager {
 }
 
 // removeReleasedManager reclaims a released manager after its last QueryView has
-// completed durable removal. Release state, emptiness, and identity are all
-// rechecked before removing the manager from the registry.
+// completed durable removal. The manager owns the release and emptiness
+// preconditions; the registry only verifies that it still owns this instance.
 func (r *ShardViewRegistry) removeReleasedManager(shardID qviews.ShardID, manager *ShardViewManager) {
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	if !manager.releaseRequested || len(manager.views) != 0 {
-		return
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.shards[shardID] != manager {

@@ -381,8 +381,9 @@ from submitting new sync work after the syncer has closed.
 13. **Registry Cleanup**: Only `RequestRelease` makes a manager eligible for
     registry removal. After the released manager's last QueryView completes
     durable removal, the registry removes that exact empty manager, its stats,
-    and its collection/node reverse-index entries. Release state, identity, and
-    emptiness are rechecked before deletion.
+    and its collection/node reverse-index entries. The manager owns the release
+    and emptiness preconditions; the registry only rechecks manager identity
+    before deletion.
 
 ## 8. Package Location
 
