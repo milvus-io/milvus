@@ -2744,13 +2744,71 @@ func versionalV2(category string, action string) string {
 	return "/v2/vectordb" + category + action
 }
 
-func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
-	h := NewHandlersV2(proxy)
+func initHTTPServerV2(proxyComponent types.ProxyComponent, needAuth bool) *gin.Engine {
+	h := NewHandlersV2(proxyComponent)
 	ginHandler := gin.Default()
 	appV2 := ginHandler.Group("/v2/vectordb", genAuthMiddleWare(needAuth))
+	proxy.InitGlobalCacheFromProxyForTest(proxyComponent)
 	h.RegisterRoutesToV2(appV2)
 
 	return ginHandler
+}
+
+func TestPrepareReadRequestSnapshotPreservesCollectionNotFoundMessage(t *testing.T) {
+	paramtable.Init()
+	proxy.InitEmptyGlobalCache()
+	t.Cleanup(proxy.InitEmptyGlobalCache)
+
+	snapshotErr := merr.WrapErrCollectionNotFound("missing_collection")
+	proxyComponent := mocks.NewMockProxy(t)
+	proxyComponent.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(
+		&milvuspb.DescribeCollectionResponse{Status: merr.Status(snapshotErr)},
+		nil,
+	).Once()
+	proxy.InitGlobalCacheFromProxyForTest(proxyComponent)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	_, err := prepareReadRequestSnapshot(c.Request.Context(), c, &milvuspb.SearchRequest{
+		DbName:         DefaultDbName,
+		CollectionName: "missing_collection",
+	}, false)
+	require.ErrorIs(t, err, merr.ErrCollectionNotFound)
+	assert.Equal(t, "can't find collection[database=default][collection=missing_collection]", err.Error())
+
+	var response ReturnErrMsg
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, merr.Code(snapshotErr), response.Code)
+	assert.Equal(t, "can't find collection[database=default][collection=missing_collection]", response.Message)
+}
+
+func TestSearchV2PreservesCollectionNotFoundMessage(t *testing.T) {
+	paramtable.Init()
+	proxy.InitEmptyGlobalCache()
+	t.Cleanup(proxy.InitEmptyGlobalCache)
+
+	const collectionName = "missing_collection"
+	snapshotErr := merr.WrapErrCollectionNotFoundWithDB(DefaultDbName, collectionName)
+	proxyComponent := mocks.NewMockProxy(t)
+	proxyComponent.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(
+		&milvuspb.DescribeCollectionResponse{Status: merr.Status(snapshotErr)},
+		nil,
+	).Once()
+	testEngine := initHTTPServerV2(proxyComponent, false)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		versionalV2(EntityCategory, SearchAction),
+		bytes.NewReader([]byte(`{"collectionName":"missing_collection","data":[[0.1,0.2]],"limit":10}`)),
+	)
+	recorder := httptest.NewRecorder()
+	testEngine.ServeHTTP(recorder, req)
+
+	var response ReturnErrMsg
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, merr.Code(snapshotErr), response.Code)
+	assert.Equal(t, "can't find collection[database=default][collection=missing_collection]", response.Message)
 }
 
 type externalCollectionRESTProxy struct {
@@ -5009,15 +5067,6 @@ func TestSearchAggregationV2UnsupportedCombinations(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
-		ShardsNum:      ShardNumDefault,
-		Status:         &StatusSuccess,
-	}, nil).Times(5)
-	testEngine := initHTTPServerV2(mp, false)
-
 	searchAggregation := `"searchAggregation": {"fields": ["brand"], "size": 1}`
 	testCases := []requestBodyTestCase{
 		{
@@ -5063,6 +5112,16 @@ func TestSearchAggregationV2UnsupportedCombinations(t *testing.T) {
 			errMsg:      "searchAggregation is not supported for hybrid search",
 		},
 	}
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(len(testCases))
+	testEngine := initHTTPServerV2(mp, false)
+
 	validateTestCases(t, testEngine, testCases, false)
 }
 

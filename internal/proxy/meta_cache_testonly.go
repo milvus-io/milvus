@@ -25,9 +25,12 @@ import (
 	"context"
 
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -61,6 +64,67 @@ func InitEmptyGlobalCache() {
 	}
 	mixcoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil)
 	privilege.InitPrivilegeCache(context.Background(), mixcoord)
+}
+
+type proxyComponentReadCache struct {
+	Cache
+	proxy types.ProxyComponent
+}
+
+func (c *proxyComponentReadCache) GetCollectionInfo(
+	ctx context.Context,
+	database string,
+	collectionName string,
+	collectionID int64,
+) (*collectionInfo, error) {
+	resp, err := c.proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		DbName:         database,
+		CollectionName: collectionName,
+		CollectionID:   collectionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, merr.WrapErrServiceInternalMsg("test proxy returned a nil DescribeCollection response")
+	}
+	if err := merr.Error(resp.GetStatus()); err != nil {
+		return nil, err
+	}
+	schema, err := newSchemaInfo(resp.GetSchema())
+	if err != nil {
+		return nil, err
+	}
+
+	// HTTP tests historically obtain schema through the mocked Proxy instead of
+	// a real MetaCache. Supply stable non-zero identities when old mock responses
+	// omit them; production never installs this test-only adapter.
+	normalized := proto.Clone(resp).(*milvuspb.DescribeCollectionResponse)
+	if normalized.CollectionID == 0 {
+		normalized.CollectionID = 1
+	}
+	if normalized.DbId == 0 {
+		normalized.DbId = 1
+	}
+	if normalized.DbName == "" {
+		normalized.DbName = normalizeDBName(database)
+	}
+	if normalized.CollectionName == "" {
+		normalized.CollectionName = schema.GetName()
+	}
+	if normalized.CollectionName == "" {
+		normalized.CollectionName = collectionName
+	}
+	return newCollectionInfo(normalized, schema, false, ""), nil
+}
+
+// InitGlobalCacheFromProxyForTest lets HTTP tests exercise request-snapshot
+// preprocessing while keeping their existing Proxy DescribeCollection mocks.
+func InitGlobalCacheFromProxyForTest(proxyComponent types.ProxyComponent) {
+	globalMetaCache = &proxyComponentReadCache{
+		Cache: globalMetaCache,
+		proxy: proxyComponent,
+	}
 }
 
 func SetGlobalMetaCache(metaCache *MetaCache) {

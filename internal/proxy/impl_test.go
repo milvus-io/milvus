@@ -2386,7 +2386,11 @@ func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
 		cache := NewMockCache(t)
 		cache.EXPECT().
 			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
-			Return(&collectionInfo{schema: mustNewSchemaInfo(schema)}, nil)
+			Return(&collectionInfo{
+				collID: 1,
+				dbName: "default",
+				schema: mustNewSchemaInfo(schema),
+			}, nil)
 		globalMetaCache = cache
 
 		var capturedNamespace *string

@@ -153,7 +153,10 @@ type CachedProxyServiceProvider struct {
 	*Proxy
 }
 
-func describeCollectionErrorStatus(err error, database, collectionName string) *commonpb.Status {
+// CollectionLookupErrorStatus converts a user-facing collection name lookup
+// failure to its public wire representation, including the established
+// collection-not-found message kept for SDK compatibility.
+func CollectionLookupErrorStatus(err error, database, collectionName string) *commonpb.Status {
 	// A user-facing DescribeCollection miss is an input error, but keep the
 	// precise source code: a missing database is ErrDatabaseNotFound while a
 	// missing collection is ErrCollectionNotFound. The sentinels remain system
@@ -280,7 +283,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		// are deliberately returned uncached because their database is unknown).
 		c, err = globalMetaCache.GetCollectionInfo(ctx, request.DbName, "", collectionID)
 		if err != nil {
-			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
+			resp.Status = CollectionLookupErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
 		}
 		collectionName = c.schema.GetName()
@@ -288,7 +291,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 
 	// validate collection name, ref describeCollectionTask.PreExecute
 	if err = validateCollectionName(collectionName); err != nil {
-		resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
+		resp.Status = CollectionLookupErrorStatus(err, request.DbName, collectionName)
 		return resp, nil
 	}
 
@@ -297,12 +300,12 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	if !resolvedNameByID {
 		collectionID, err = globalMetaCache.GetCollectionID(ctx, request.DbName, collectionName)
 		if err != nil {
-			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
+			resp.Status = CollectionLookupErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
 		}
 		c, err = globalMetaCache.GetCollectionInfo(ctx, request.DbName, collectionName, collectionID)
 		if err != nil {
-			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
+			resp.Status = CollectionLookupErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
 		}
 	}

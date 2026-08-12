@@ -69,6 +69,9 @@ type searchTask struct {
 
 	result  *milvuspb.SearchResults
 	request *milvuspb.SearchRequest
+	// readSnapshot pins alias resolution and collection metadata for the whole
+	// external Search request, including internal retries and requery.
+	readSnapshot *readRequestSnapshot
 
 	tr                     *timerecord.TimeRecorder
 	collectionName         string
@@ -130,6 +133,11 @@ type searchTask struct {
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
 	var consistencyLevel commonpb.ConsistencyLevel
+	if t.readSnapshot != nil {
+		if _, _, _, pinned := t.readSnapshot.GetPinnedTimestamp(); pinned {
+			return true
+		}
+	}
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
 	if !useDefaultConsistency {
 		// legacy SDK & restful behavior
@@ -138,6 +146,10 @@ func (t *searchTask) CanSkipAllocTimestamp() bool {
 		}
 		consistencyLevel = t.request.GetConsistencyLevel()
 	} else {
+		if t.readSnapshot != nil {
+			consistencyLevel = t.readSnapshot.Collection().Info().consistencyLevel
+			return consistencyLevel != commonpb.ConsistencyLevel_Strong
+		}
 		collID, err := globalMetaCache.GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
 		if err != nil { // err is not nil if collection not exists
 			mlog.Warn(t.ctx, "search task get collectionID failed, can't skip alloc timestamp",
@@ -164,39 +176,35 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = paramtable.GetNodeID()
 
-	collectionName := t.request.CollectionName
-	t.collectionName = collectionName
-	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
-	if err != nil { // err is not nil if collection not exists
+	requestedCollectionName := t.request.CollectionName
+	if t.readSnapshot == nil {
+		_, snapshot, err := ensureReadRequestSnapshot(ctx, t.request.GetDbName(), requestedCollectionName)
+		if err != nil {
+			return err
+		}
+		t.readSnapshot = snapshot
+	}
+	if err := t.readSnapshot.validateTarget(t.request.GetDbName(), requestedCollectionName); err != nil {
 		return err
 	}
+	collectionSnapshot := t.readSnapshot.Collection()
+	collectionName := collectionSnapshot.CanonicalName()
+	t.collectionName = collectionName
+	collID := collectionSnapshot.CollectionID()
 
 	t.DbID = 0 // todo
 	t.CollectionID = collID
 	log := mlog.With(mlog.Int64("collID", collID), mlog.String("collName", collectionName))
-	t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn(ctx, "get collection schema failed", mlog.Err(err))
-		return err
-	}
+	t.schema = collectionSnapshot.Schema()
 	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
 
-	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
-	if err2 != nil {
-		log.Warn(ctx, "Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
-			mlog.String("collectionName", collectionName), mlog.Int64("collectionID", t.CollectionID), mlog.Err(err2))
-		return err2
-	}
+	collectionInfo := collectionSnapshot.Info()
 	t.largeTopKEnabled = collectionInfo.queryMode == common.QueryModeLargeTopK
 	t.partitionKeyIsolation = collectionInfo.partitionKeyIsolation
 
-	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn(ctx, "is partition key mode failed", mlog.Err(err))
-		return err
-	}
+	t.partitionKeyMode = t.schema.IsPartitionKeyCollection()
 	partitionNames, namespaceAsPartition, err := resolveNamespacePartitionNames(t.schema.CollectionSchema, t.request.Namespace, t.request.GetPartitionNames())
 	if err != nil {
 		return err
@@ -214,7 +222,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	if !t.partitionKeyMode && len(t.request.GetPartitionNames()) > 0 {
 		// translate partition name to partition ids. Use regex-pattern to match partition name.
-		t.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), collectionName, t.request.GetPartitionNames())
+		t.PartitionIDs, err = getPartitionIDsFromSnapshot(ctx, t.readSnapshot, t.request.GetPartitionNames())
 		if err != nil {
 			log.Warn(ctx, "failed to get partition ids", mlog.Err(err))
 			return err
@@ -287,32 +295,38 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	guaranteeTs := t.request.GetGuaranteeTimestamp()
-	var consistencyLevel commonpb.ConsistencyLevel
+	consistencyLevel, requestTS, guaranteeTs, timestampPinned := t.readSnapshot.GetPinnedTimestamp()
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
-	if useDefaultConsistency {
-		consistencyLevel = collectionInfo.consistencyLevel
-		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
-	} else {
-		consistencyLevel = t.request.GetConsistencyLevel()
-		// Compatibility logic, parse guarantee timestamp
-		if consistencyLevel == 0 && guaranteeTs > 0 {
-			guaranteeTs = parseGuaranteeTs(guaranteeTs, t.BeginTs())
-		} else {
-			// parse from guarantee timestamp and user input consistency level
+	if !timestampPinned {
+		requestTS = t.BeginTs()
+		guaranteeTs = t.request.GetGuaranteeTimestamp()
+		if useDefaultConsistency {
+			consistencyLevel = collectionInfo.consistencyLevel
 			guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
+		} else {
+			consistencyLevel = t.request.GetConsistencyLevel()
+			// Compatibility logic, parse guarantee timestamp
+			if consistencyLevel == 0 && guaranteeTs > 0 {
+				guaranteeTs = parseGuaranteeTs(guaranteeTs, t.BeginTs())
+			} else {
+				// parse from guarantee timestamp and user input consistency level
+				guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
+			}
 		}
+
+		// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
+		// this make query view updated happens before new read request happens
+		// see also schema change design
+		if collectionInfo.updateTimestamp > guaranteeTs {
+			guaranteeTs = collectionInfo.updateTimestamp
+		}
+		t.readSnapshot.PinTimestamp(consistencyLevel, requestTS, guaranteeTs)
+		consistencyLevel, requestTS, guaranteeTs, _ = t.readSnapshot.GetPinnedTimestamp()
 	}
+	t.Base.Timestamp = requestTS
 
 	// update actual consistency level
 	accesslog.SetActualConsistencyLevel(ctx, consistencyLevel)
-
-	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
-	// this make query view updated happens before new read request happens
-	// see also schema change design
-	if collectionInfo.updateTimestamp > guaranteeTs {
-		guaranteeTs = collectionInfo.updateTimestamp
-	}
 
 	t.GuaranteeTimestamp = guaranteeTs
 	// Extract physical time for entity-level TTL (issue #47413)
@@ -689,7 +703,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			return err
 		}
 		if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, internalSubReq.FieldId) {
-			metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.HybridSearchLabel, strconv.FormatInt(internalSubReq.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(internalSubReq.PlaceholderGroup, int(internalSubReq.GetNq()))))
+			t.observeSparseVectorNNZ(metrics.HybridSearchLabel, internalSubReq.FieldId, internalSubReq.PlaceholderGroup, int(internalSubReq.GetNq()))
 		}
 		internalSubReq.PlaceholderGroup = convertedPlaceholder
 		t.SubReqs[index] = internalSubReq
@@ -1038,7 +1052,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	}
 	t.PkFilter = checkSegmentFilter(plan)
 	if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, t.FieldId) {
-		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.GetPlaceholderGroup(), int(t.request.GetNq()))))
+		t.observeSparseVectorNNZ(metrics.SearchLabel, t.FieldId, t.request.GetPlaceholderGroup(), int(t.request.GetNq()))
 	}
 	// Convert placeholder group vector type if needed (e.g., fp32 -> fp16/bf16)
 	var placeholderType commonpb.PlaceholderType
@@ -1120,6 +1134,15 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	return nil
 }
 
+func (t *searchTask) observeSparseVectorNNZ(queryType string, fieldID int64, placeholderGroup []byte, nq int) {
+	metrics.ProxySearchSparseNumNonZeros.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		t.request.GetCollectionName(),
+		queryType,
+		strconv.FormatInt(fieldID, 10),
+	).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(placeholderGroup, nq)))
+}
+
 func (t *searchTask) skipRequeryByNamespacePartitionMode() bool {
 	return t.schema != nil &&
 		t.schema.CollectionSchema != nil &&
@@ -1190,13 +1213,13 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 
 func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int64, error) {
 	if namespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
-		hashedPartitionNames, err := assignNamespacePartitionKey(t.ctx, t.request.GetDbName(), t.collectionName, t.request.Namespace)
+		hashedPartitionNames, err := assignNamespacePartitionKeyFromSnapshot(t.ctx, t.readSnapshot, t.request.Namespace)
 		if err != nil {
 			mlog.Warn(t.ctx, "failed to assign namespace partition key", mlog.Err(err))
 			return nil, err
 		}
 		if len(hashedPartitionNames) > 0 {
-			PartitionIDs, err2 := getPartitionIDs(t.ctx, t.request.GetDbName(), t.collectionName, hashedPartitionNames)
+			PartitionIDs, err2 := getPartitionIDsFromSnapshot(t.ctx, t.readSnapshot, hashedPartitionNames)
 			if err2 != nil {
 				mlog.Warn(t.ctx, "failed to get namespace partition ids", mlog.Err(err2))
 				return nil, err2
@@ -1212,7 +1235,7 @@ func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int6
 		return nil, err
 	}
 	partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-	hashedPartitionNames, err := assignPartitionKeys(t.ctx, t.request.GetDbName(), t.collectionName, partitionKeys)
+	hashedPartitionNames, err := assignPartitionKeysFromSnapshot(t.ctx, t.readSnapshot, partitionKeys)
 	if err != nil {
 		mlog.Warn(t.ctx, "failed to assign partition keys", mlog.Err(err))
 		return nil, err
@@ -1220,7 +1243,7 @@ func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int6
 
 	if len(hashedPartitionNames) > 0 {
 		// translate partition name to partition ids. Use regex-pattern to match partition name.
-		PartitionIDs, err2 := getPartitionIDs(t.ctx, t.request.GetDbName(), t.collectionName, hashedPartitionNames)
+		PartitionIDs, err2 := getPartitionIDsFromSnapshot(t.ctx, t.readSnapshot, hashedPartitionNames)
 		if err2 != nil {
 			mlog.Warn(t.ctx, "failed to get partition ids", mlog.Err(err2))
 			return nil, err2

@@ -1354,6 +1354,7 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 
 type requeryOperator struct {
 	traceCtx         context.Context
+	readSnapshot     *readRequestSnapshot
 	outputFieldNames []string
 
 	timestamp          uint64
@@ -1406,6 +1407,7 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 	}
 	return &requeryOperator{
 		traceCtx:           t.TraceCtx(),
+		readSnapshot:       t.readSnapshot,
 		outputFieldNames:   outputFieldNames.Collect(),
 		timestamp:          t.BeginTs(),
 		dbName:             t.request.GetDbName(),
@@ -1481,6 +1483,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 			QueryLabel:       metrics.ReQueryLabel,
 		},
 		request:        queryReq,
+		readSnapshot:   op.readSnapshot,
 		plan:           plan,
 		mixCoord:       op.node.(*Proxy).mixCoord,
 		lb:             op.node.(*Proxy).lbPolicy,
