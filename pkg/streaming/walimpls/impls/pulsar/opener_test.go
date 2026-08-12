@@ -71,7 +71,7 @@ func TestOpenReadOnlyWALAllowsExistingTopic(t *testing.T) {
 	wal.Close()
 }
 
-func TestOpenReadOnlyWALIgnoresInconclusiveTopicCheck(t *testing.T) {
+func TestOpenReadOnlyWALRejectsInconclusiveTopicCheck(t *testing.T) {
 	testCases := []struct {
 		name string
 		err  error
@@ -104,20 +104,20 @@ func TestOpenReadOnlyWALIgnoresInconclusiveTopicCheck(t *testing.T) {
 					AccessMode: types.AccessModeRO,
 				},
 			})
-			require.NoError(t, err)
-			require.NotNil(t, wal)
+			require.Nil(t, wal)
+			require.ErrorIs(t, err, merr.ErrMqInternal)
+			require.NotErrorIs(t, err, merr.ErrMqTopicNotFound)
 			require.True(t, topicAdmin.hasDeadline)
 			require.WithinDuration(t, time.Now().Add(pulsarTopicCheckTimeout), topicAdmin.deadline, time.Second)
-			wal.Close()
 		})
 	}
 }
 
-func TestOpenReadOnlyWALIgnoresTopicAdminCreationFailure(t *testing.T) {
+func TestOpenReadOnlyWALRejectsTopicAdminCreationFailure(t *testing.T) {
 	opener := &openerImpl{
 		tenant: tenant{tenant: "public", namespace: "default"},
 		newTopicAdmin: func() (pulsarTopicAdmin, error) {
-			return nil, errors.New("admin client is unavailable")
+			return nil, merr.WrapErrMqInternal(errors.New("admin client is unavailable"))
 		},
 	}
 
@@ -127,9 +127,9 @@ func TestOpenReadOnlyWALIgnoresTopicAdminCreationFailure(t *testing.T) {
 			AccessMode: types.AccessModeRO,
 		},
 	})
-	require.NoError(t, err)
-	require.NotNil(t, wal)
-	wal.Close()
+	require.Nil(t, wal)
+	require.ErrorIs(t, err, merr.ErrMqInternal)
+	require.NotErrorIs(t, err, merr.ErrMqTopicNotFound)
 }
 
 func TestOpenReadOnlyWALPreservesCanceledContext(t *testing.T) {

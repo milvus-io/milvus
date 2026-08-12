@@ -13,7 +13,6 @@ import (
 	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/utils"
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
@@ -109,15 +108,7 @@ func (o *openerImpl) checkTopicExists(ctx context.Context, topic string) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		mlog.Warn(ctx, "skip pulsar topic existence check because admin client is unavailable",
-			mlog.String("topic", topic),
-			mlog.Err(err))
-		return nil
-	}
-	if topicAdmin == nil {
-		mlog.Warn(ctx, "skip pulsar topic existence check because admin client returned no topic service",
-			mlog.String("topic", topic))
-		return nil
+		return merr.Wrap(err, "get pulsar topic admin")
 	}
 
 	checkCtx, cancel := context.WithTimeout(ctx, pulsarTopicCheckTimeout)
@@ -129,9 +120,7 @@ func (o *openerImpl) checkTopicExists(ctx context.Context, topic string) error {
 		if isExplicitPulsarTopicNotFound(err) {
 			return merr.WrapErrMqTopicNotFound(topic, err.Error())
 		}
-		mlog.Warn(ctx, "skip inconclusive pulsar topic existence check",
-			mlog.String("topic", topic),
-			mlog.Err(err))
+		return merr.WrapErrMqInternal(err, "check pulsar topic existence")
 	}
 	return nil
 }

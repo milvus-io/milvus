@@ -621,6 +621,48 @@ func TestUnderlyingWALScannerAdaptorReopensWALAfterReaderFailure(t *testing.T) {
 	require.Equal(t, currentMessage, messages[2])
 }
 
+func TestUnderlyingWALScannerAdaptorRetriesWALOpenFailure(t *testing.T) {
+	channel := types.PChannelInfo{Name: "test-channel"}
+	currentWAL := newTestCurrentWAL(t, channel)
+	marker := newTestAlterWALMessage(commonpb.WALName_Test, 100, rmq.NewRmqID(2), rmq.NewRmqID(1))
+	historicalWAL := newTestReadWAL(t, message.WALNameRocksmq, channel, marker)
+	currentMessage := newTestTimeTickMessage(101, walimplstest.NewTestMessageID(1), walimplstest.NewTestMessageID(1))
+	currentReadWAL := newTestReadWAL(t, message.WALNameTest, channel, currentMessage)
+
+	historicalOpenAttempts := 0
+	outputCh := make(chan message.ImmutableMessage, 2)
+	scanner := newSwitchableScanner(
+		"retry-open-reader",
+		mlog.With(),
+		currentWAL,
+		nil,
+		options.DeliverPolicyStartFrom(rmq.NewRmqID(1)),
+		outputCh,
+		func(_ context.Context, walName message.WALName, _ types.PChannelInfo) (walimpls.ROWALImpls, error) {
+			switch walName {
+			case message.WALNameRocksmq:
+				historicalOpenAttempts++
+				if historicalOpenAttempts == 1 {
+					return nil, merr.WrapErrMqInternalMsg("transient historical WAL open failure")
+				}
+				return historicalWAL, nil
+			case message.WALNameTest:
+				return currentReadWAL, nil
+			default:
+				t.Fatalf("unexpected WAL name %s", walName)
+				return nil, nil
+			}
+		},
+		nil,
+	)
+
+	messages := runSwitchableScannerUntil(t, scanner, outputCh, func(msg message.ImmutableMessage) bool {
+		return msg.MessageType() == message.MessageTypeTimeTick && msg.TimeTick() == 101
+	})
+	require.Equal(t, 2, historicalOpenAttempts)
+	require.Equal(t, []message.ImmutableMessage{marker, currentMessage}, messages)
+}
+
 func TestNormalizeUnderlyingWALDeliverPolicy(t *testing.T) {
 	messageID := rmq.NewRmqID(10)
 	normalized, excluded, err := normalizeUnderlyingWALDeliverPolicy(options.DeliverPolicyStartAfter(messageID))
