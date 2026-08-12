@@ -44,6 +44,7 @@ type ShardViewManager struct {
 	// Must only be accessed under m.mu.
 	pendingPersists []*viewpb.QueryViewOfShard
 	pendingSyncs    []syncEntry
+	pendingRemovals []*CoordQueryViewStateMachine
 }
 
 // syncEntry pairs a state machine with its per-node views for deferred event submission.
@@ -260,8 +261,8 @@ func (m *ShardViewManager) AddPreparing(_ context.Context, builder *qviews.Query
 	// Move all accumulated effects into one shard-scoped event.
 	event := m.consumeDirtyEventLocked()
 	m.publishStatsLocked()
-	m.mu.Unlock()
 	m.submitDirtyEvent(event)
+	m.mu.Unlock()
 	return nil
 }
 
@@ -292,8 +293,8 @@ func (m *ShardViewManager) RequestRelease(_ context.Context) error {
 
 	event := m.consumeDirtyEventLocked()
 	m.publishStatsLocked()
-	m.mu.Unlock()
 	m.submitDirtyEvent(event)
+	m.mu.Unlock()
 	return nil
 }
 
@@ -348,7 +349,9 @@ func (m *ShardViewManager) processStateMachine(sm *CoordQueryViewStateMachine) {
 	case qviews.QueryViewStateDropping:
 
 	case qviews.QueryViewStateDropped:
-		m.removeView(sm)
+		if !m.hasPendingRemoval(sm) {
+			m.pendingRemovals = append(m.pendingRemovals, sm)
+		}
 
 	default:
 	}
@@ -401,8 +404,15 @@ func (m *ShardViewManager) consumeDirtyEventLocked() dirtyViewEvent {
 			})
 		}
 	}
+	for _, sm := range m.pendingRemovals {
+		target := sm
+		event.afterPersist = append(event.afterPersist, func() {
+			m.finalizeRemoval(target)
+		})
+	}
 	m.pendingPersists = nil
 	m.pendingSyncs = nil
+	m.pendingRemovals = nil
 	return event
 }
 
@@ -427,8 +437,8 @@ func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion, t
 
 		_, exists := m.views[version]
 		completed := !exists || syncResponseCompletesTarget(target.State(), resp.State())
-		m.mu.Unlock()
 		m.submitDirtyEvent(event)
+		m.mu.Unlock()
 		return completed
 	}
 }
@@ -466,8 +476,8 @@ func (m *ShardViewManager) makeOnQueryNodeLost(version qviews.QueryViewVersion) 
 		m.processStateMachine(sm)
 		event := m.consumeDirtyEventLocked()
 		m.publishStatsLocked()
-		m.mu.Unlock()
 		m.submitDirtyEvent(event)
+		m.mu.Unlock()
 	}
 }
 
@@ -481,6 +491,31 @@ func (m *ShardViewManager) publishStatsLocked() {
 	if m.observe != nil {
 		m.observe(m.shardID, m.statsLocked())
 	}
+}
+
+// finalizeRemoval removes a Dropped state machine only after its terminal
+// state has been durably persisted.
+func (m *ShardViewManager) finalizeRemoval(target *CoordQueryViewStateMachine) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.views[target.Version()] != target {
+		return
+	}
+	m.removeView(target)
+	m.publishStatsLocked()
+}
+
+// hasPendingRemoval reports whether target already has a post-persist removal
+// callback waiting to be emitted.
+//
+// Must be called under m.mu.
+func (m *ShardViewManager) hasPendingRemoval(target *CoordQueryViewStateMachine) bool {
+	for _, pending := range m.pendingRemovals {
+		if pending == target {
+			return true
+		}
+	}
+	return false
 }
 
 // removeView removes the state machine from the views map and clears any

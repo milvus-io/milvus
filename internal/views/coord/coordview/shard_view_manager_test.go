@@ -954,3 +954,43 @@ func TestShardViewManagerConsumesOnlyProcessedStateMachineEffects(t *testing.T) 
 	assert.Len(t, event.syncs, 2)
 	assert.False(t, untouched.ConsumeFlush().Empty())
 }
+
+func TestShardViewManagerRemovesDroppedViewOnlyAfterPersist(t *testing.T) {
+	view := buildTestViewWithVersion(1, 1, 1, 1)
+	sm := NewCoordQueryViewStateMachine(view)
+	sm.ConsumeFlush()
+	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateReady))
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateReady))
+	sm.ConsumeFlush()
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateUp))
+	sm.ConsumeFlush()
+	sm.EnterDown()
+	sm.ConsumeFlush()
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateDown))
+	sm.ConsumeFlush()
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateDropped))
+	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateDropped))
+	require.Equal(t, qviews.QueryViewStateDropped, sm.State())
+
+	manager := &ShardViewManager{
+		ctx:     context.Background(),
+		shardID: testShardID,
+		views: map[qviews.QueryViewVersion]*CoordQueryViewStateMachine{
+			sm.Version(): sm,
+		},
+	}
+	manager.mu.Lock()
+	manager.processStateMachine(sm)
+	event := manager.consumeDirtyEventLocked()
+	_, retainedBeforePersist := manager.views[sm.Version()]
+	manager.mu.Unlock()
+
+	assert.True(t, retainedBeforePersist)
+	require.Len(t, event.afterPersist, 1)
+	event.afterPersist[0]()
+
+	manager.mu.Lock()
+	_, retainedAfterPersist := manager.views[sm.Version()]
+	manager.mu.Unlock()
+	assert.False(t, retainedAfterPersist)
+}

@@ -207,7 +207,7 @@ transition and leave an inconsistent externalization boundary.
 
 **Automatic Behavior:**
 1. Delete the view from ETCD.
-2. Destroy the state machine instance.
+2. After the ETCD deletion succeeds, destroy the state machine instance.
 
 **Transitions:** None (terminal state).
 

@@ -70,9 +70,10 @@ QueryView lifecycle caller
   notifications through callbacks registered by the manager.
 - **Node-level scheduling**: QueryView flush tasks reuse the common
   `NodeScheduler`; the QueryView package owns no dedicated worker goroutine.
-- **No external I/O under manager lock**: A manager consumes pending effects into
-  an immutable event while holding `m.mu`, then submits it after releasing the
-  lock.
+- **Ordered non-blocking submission**: A manager consumes pending effects and
+  submits the immutable event while holding `m.mu`, so event enqueue order
+  matches state-transition order. `Submit` only merges and enqueues work; ETCD,
+  RPC, task execution, and manager callbacks remain outside `m.mu`.
 
 ## 2. Components and Dependencies
 
@@ -180,7 +181,7 @@ func (m *ShardViewManager) RequestRelease(ctx context.Context) error
 and preempts an existing Preparing or Ready view. `RequestRelease` starts the
 normal teardown of all views in the shard. Both methods mutate state under
 `m.mu`, atomically consume the resulting effects into one `dirtyViewEvent`,
-release the lock, and submit that event to the Scheduler.
+submit that event to the Scheduler, and then release the lock.
 
 ## 4. Internal Flow
 
@@ -194,9 +195,10 @@ Every state-changing entry point follows the same pattern:
    state machine's `ConsumeFlush` result into manager-local pending slices and
    updates `preparingView`, `upView`, and cascading Up-then-Down state.
 4. Move the accumulated effects into one immutable shard-scoped event with
-   persistence and node-sync information.
-5. Release `m.mu`.
-6. Call `DirtyViewFlushScheduler.Submit(event)`.
+   persistence, node-sync, and post-persist callback information.
+5. Call the non-blocking `DirtyViewFlushScheduler.Submit(event)` while still
+   holding `m.mu`.
+6. Release `m.mu`.
 
 The same pattern is used by `AddPreparing`, `RequestRelease`,
 `OnSyncResponse`, and `OnQueryNodeLost`. The Scheduler never calls back into a
@@ -214,8 +216,9 @@ effects and handles its in-memory cross-view effects:
 - **Unrecoverable**: Clear the fast pointers and remain stable until
   `AddPreparing` or `RequestRelease` advances the view to Dropping.
 - **Dropping**: Wait for node callbacks.
-- **Dropped**: The final ETCD deletion effect is first moved into the manager's
-  pending persist slice, then the state machine is removed.
+- **Dropped**: Move the final ETCD deletion effect into the pending persist
+  slice and register a post-persist callback. The state machine remains
+  resident until that callback runs after persistence succeeds.
 
 Effects are consumed only from state machines explicitly processed by the
 current operation. Untouched resident views are not scanned.
@@ -229,9 +232,11 @@ pending effects:
 2. Reuse the persist effects accumulated by `processStateMachine`.
 3. Convert accumulated node targets into `syncer.SyncView` values with the
    correct callbacks.
-4. Move both pending slices into one immutable `dirtyViewEvent` keyed by the
+4. Attach callbacks that remove Dropped state machines only after their final
+   persistence succeeds.
+5. Move the pending effects into one immutable `dirtyViewEvent` keyed by the
    manager's `ShardID`.
-5. Clear the manager fields without retaining or reusing the event's backing
+6. Clear the manager fields without retaining or reusing the event's backing
    arrays.
 
 No Catalog or ReliableSyncer call is performed while `m.mu` is held.
@@ -244,9 +249,11 @@ WorkNode key. It packs ready, non-inflight shard lanes according to the configur
 maximum ETCD transaction operation count. For each claimed batch it performs:
 
 1. Flatten all `persists` and call `catalog.SaveQueryViews` once.
-2. Only after persistence succeeds, group every `syncer.SyncView` by
+2. After persistence succeeds, run the batch's post-persist callbacks, including
+   durable removal of Dropped state machines.
+3. Group every `syncer.SyncView` by
    `WorkNodeKey`.
-3. Call `syncer.SyncViews` once for the grouped node syncs.
+4. Call `syncer.SyncViews` once for the grouped node syncs.
 
 The ordering is local to each packed batch: all included QueryView states are
 persisted before any included node sync is dispatched. Different tasks contain
@@ -278,13 +285,14 @@ Each accepted sync registers callbacks:
 
 - **OnSyncResponse**: Looks up the state machine by version, applies
   `OnNodeStateReported`, processes in-memory cascading effects, publishes stats,
-  unlocks, and submits the resulting shard event. It returns whether the current
+  submits the resulting shard event, and unlocks. It returns whether the current
   node-targeted sync has completed.
 - **OnQueryNodeLost**: Registered only for QueryNode targets. It applies
-  `OnQueryNodeLost`, processes the resulting state, publishes stats, unlocks,
-  and marks the manager dirty. In Preparing this makes the view Unrecoverable;
+  `OnQueryNodeLost`, processes the resulting state, publishes stats, submits
+  the resulting shard event, and unlocks.
+  In Preparing this makes the view Unrecoverable;
   in Dropping it treats the lost QueryNode cleanup as complete. The resulting
-  shard event is submitted after unlocking.
+  shard event is submitted before unlocking to preserve transition order.
 
 Callbacks for an already removed view stop tracking without creating new work.
 
@@ -298,15 +306,15 @@ Callbacks for an already removed view stop tracking without creating new work.
    DataVersion is new.
 5. Build and register the new state machine.
 6. Update in-memory pointers and stats.
-7. Emit one shard event, unlock, and submit it.
+7. Emit and submit one shard event, then unlock.
 
 ### 4.8 RequestRelease
 
 - Preparing or Ready views enter Unrecoverable.
 - Up views enter Down.
 - All Unrecoverable views advance to Dropping.
-- The manager publishes the new stats, emits one shard event, unlocks, and
-  submits it.
+- The manager publishes the new stats, emits and submits one shard event, then
+  unlocks.
 
 Cleanup continues asynchronously through reliable node callbacks.
 
@@ -329,7 +337,8 @@ from submitting new sync work after the syncer has closed.
   event creation.
 - `DirtyViewFlushScheduler.mu` protects pending events, inflight and held shard
   lanes, queued task accounting, terminal error, and closed state.
-- No external ETCD or RPC enqueue operation runs while a manager lock is held.
+- No ETCD, RPC, task execution, or callback runs while a manager lock is held;
+  only the scheduler's non-blocking in-memory `Submit` runs under that lock.
 - No Catalog or ReliableSyncer I/O runs while the Scheduler lock is held.
 - The shared `NodeScheduler` queue is unbounded and non-blocking, so submitting
   an event does not wait for a batch task to execute.
@@ -356,7 +365,7 @@ from submitting new sync work after the syncer has closed.
 9. **Deferred Dropping**: Unrecoverable remains stable until replacement or
    release logic advances it to Dropping.
 10. **Dropped Persistence**: A Dropped state machine is removed only after its
-    final ETCD deletion effect has been captured in an immutable dirty event.
+    final ETCD deletion has been persisted successfully.
 11. **Shard-Lane Serialization**: Old and new QueryView versions of one
     `ShardID` cannot be flushed by concurrent tasks.
 12. **Cross-Shard Parallelism**: Different `ShardID` lanes may execute in

@@ -56,6 +56,45 @@ func (s *capturedDirtyViewEventSubmitter) snapshot() []dirtyViewEvent {
 	return append([]dirtyViewEvent(nil), s.events...)
 }
 
+type lockCheckingDirtyViewEventSubmitter struct {
+	manager  *ShardViewManager
+	lockHeld bool
+}
+
+func (s *lockCheckingDirtyViewEventSubmitter) Submit(dirtyViewEvent) {
+	if s.manager.mu.TryLock() {
+		s.manager.mu.Unlock()
+		return
+	}
+	s.lockHeld = true
+}
+
+type blockingFirstDirtyViewEventSubmitter struct {
+	mu           sync.Mutex
+	states       []viewpb.QueryViewState
+	firstStarted chan struct{}
+	releaseFirst chan struct{}
+	submitted    chan struct{}
+}
+
+func (s *blockingFirstDirtyViewEventSubmitter) Submit(event dirtyViewEvent) {
+	state := event.persists[0].GetMeta().GetState()
+	if state == viewpb.QueryViewState_QueryViewStatePreparing {
+		close(s.firstStarted)
+		<-s.releaseFirst
+	}
+	s.mu.Lock()
+	s.states = append(s.states, state)
+	s.mu.Unlock()
+	s.submitted <- struct{}{}
+}
+
+func (s *blockingFirstDirtyViewEventSubmitter) snapshot() []viewpb.QueryViewState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]viewpb.QueryViewState(nil), s.states...)
+}
+
 type concurrentSaveCatalog struct {
 	queryview.QueryViewCatalog
 	started chan struct{}
@@ -76,6 +115,14 @@ type blockingFlushSyncer struct {
 	once    sync.Once
 }
 
+type blockNextFlushCatalog struct {
+	*mockCatalog
+
+	mu      sync.Mutex
+	started chan struct{}
+	release chan struct{}
+}
+
 func (c *blockingFlushCatalog) SaveQueryViews(ctx context.Context, views []*viewpb.QueryViewOfShard) error {
 	c.once.Do(func() { close(c.started) })
 	select {
@@ -94,6 +141,34 @@ func (s *blockingFlushSyncer) SyncViews(ctx context.Context, group syncer.SyncGr
 		return ctx.Err()
 	}
 	return s.mockSyncer.SyncViews(ctx, group)
+}
+
+func (c *blockNextFlushCatalog) blockNext() (<-chan struct{}, func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.started = make(chan struct{})
+	c.release = make(chan struct{})
+	release := c.release
+	return c.started, func() { close(release) }
+}
+
+func (c *blockNextFlushCatalog) SaveQueryViews(ctx context.Context, views []*viewpb.QueryViewOfShard) error {
+	c.mu.Lock()
+	started := c.started
+	release := c.release
+	c.started = nil
+	c.release = nil
+	c.mu.Unlock()
+
+	if started != nil {
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return c.mockCatalog.SaveQueryViews(ctx, views)
 }
 
 func newTestDirtyViewFlushScheduler(
@@ -283,6 +358,43 @@ func TestDirtyViewFlushSchedulerPersistsBeforeSync(t *testing.T) {
 	assert.Equal(t, 1, s.numSyncCalls())
 }
 
+func TestDirtyViewFlushSchedulerRunsAfterPersistCallbacksAfterCatalogSave(t *testing.T) {
+	catalog := &blockingFlushCatalog{
+		mockCatalog: newMockCatalog(),
+		started:     make(chan struct{}),
+		release:     make(chan struct{}),
+	}
+	scheduler := newTestDirtyViewFlushScheduler(t, catalog, newMockSyncer(), 128)
+
+	called := make(chan struct{})
+	scheduler.Submit(dirtyViewEvent{
+		shardID: testShardID,
+		persists: []*viewpb.QueryViewOfShard{
+			buildTestViewWithVersion(1, 1, 1, 1),
+		},
+		afterPersist: []func(){func() { close(called) }},
+	})
+
+	select {
+	case <-catalog.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("catalog persist did not start")
+	}
+	select {
+	case <-called:
+		t.Fatal("afterPersist callback ran before catalog save completed")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(catalog.release)
+	select {
+	case <-called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("afterPersist callback did not run after catalog save")
+	}
+	require.NoError(t, scheduler.Flush(context.Background()))
+}
+
 func TestShardViewManagerSubmitsOneShardScopedDirtyEvent(t *testing.T) {
 	submitter := &capturedDirtyViewEventSubmitter{}
 	manager := newShardViewManager(context.Background(), testShardID, submitter, nil)
@@ -293,4 +405,99 @@ func TestShardViewManagerSubmitsOneShardScopedDirtyEvent(t *testing.T) {
 	assert.Equal(t, testShardID, events[0].shardID)
 	assert.Len(t, events[0].persists, 1)
 	assert.Len(t, events[0].syncs, 2)
+}
+
+func TestShardViewManagerSubmitsDirtyEventWhileHoldingManagerLock(t *testing.T) {
+	submitter := &lockCheckingDirtyViewEventSubmitter{}
+	manager := newShardViewManager(context.Background(), testShardID, submitter, nil)
+	submitter.manager = manager
+
+	require.NoError(t, manager.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
+	assert.True(t, submitter.lockHeld)
+}
+
+func TestShardViewManagerPreservesTransitionOrderWhenSubmitOverlaps(t *testing.T) {
+	submitter := &blockingFirstDirtyViewEventSubmitter{
+		firstStarted: make(chan struct{}),
+		releaseFirst: make(chan struct{}),
+		submitted:    make(chan struct{}, 2),
+	}
+	manager := newShardViewManager(context.Background(), testShardID, submitter, nil)
+
+	addDone := make(chan error, 1)
+	go func() {
+		addDone <- manager.AddPreparing(context.Background(), testBuilder(1, 1, 1))
+	}()
+	select {
+	case <-submitter.firstStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first event submission did not start")
+	}
+
+	releaseDone := make(chan error, 1)
+	go func() {
+		releaseDone <- manager.RequestRelease(context.Background())
+	}()
+	select {
+	case <-submitter.submitted:
+		t.Fatal("a newer transition was submitted before the blocked older event")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(submitter.releaseFirst)
+	require.NoError(t, <-addDone)
+	require.NoError(t, <-releaseDone)
+	require.Len(t, submitter.submitted, 2)
+	assert.Equal(t, []viewpb.QueryViewState{
+		viewpb.QueryViewState_QueryViewStatePreparing,
+		viewpb.QueryViewState_QueryViewStateUnrecoverable,
+	}, submitter.snapshot())
+}
+
+func TestShardViewManagerDoesNotReuseQueryVersionBeforeDroppedPersist(t *testing.T) {
+	catalog := &blockNextFlushCatalog{mockCatalog: newMockCatalog()}
+	s := newMockSyncer()
+	scheduler := newTestDirtyViewFlushScheduler(t, catalog, s, 128)
+	manager := newShardViewManager(context.Background(), testShardID, scheduler, nil)
+	flush := func() { require.NoError(t, scheduler.Flush(context.Background())) }
+	version1 := testVersion(1, 1, 1)
+
+	require.NoError(t, manager.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
+	flush()
+	simulateNodeResponse(t, s, testQN1, version1, qviews.QueryViewStateReady)
+	flush()
+	simulateNodeResponse(t, s, testSN, version1, qviews.QueryViewStateReady)
+	flush()
+	simulateNodeResponse(t, s, testSN, version1, qviews.QueryViewStateUp)
+	flush()
+	require.NoError(t, manager.RequestRelease(context.Background()))
+	flush()
+	simulateNodeResponse(t, s, testSN, version1, qviews.QueryViewStateDown)
+	flush()
+	simulateNodeResponse(t, s, testSN, version1, qviews.QueryViewStateDropped)
+
+	persistStarted, releasePersist := catalog.blockNext()
+	simulateNodeResponse(t, s, testQN1, version1, qviews.QueryViewStateDropped)
+	select {
+	case <-persistStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Dropped persist did not start")
+	}
+
+	require.NoError(t, manager.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
+	manager.mu.Lock()
+	_, oldViewRetained := manager.views[version1]
+	_, newViewCreated := manager.views[testVersion(1, 1, 2)]
+	manager.mu.Unlock()
+	assert.True(t, oldViewRetained)
+	assert.True(t, newViewCreated)
+
+	releasePersist()
+	flush()
+	manager.mu.Lock()
+	_, oldViewRetained = manager.views[version1]
+	_, newViewCreated = manager.views[testVersion(1, 1, 2)]
+	manager.mu.Unlock()
+	assert.False(t, oldViewRetained)
+	assert.True(t, newViewCreated)
 }

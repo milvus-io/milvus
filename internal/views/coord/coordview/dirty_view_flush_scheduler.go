@@ -14,22 +14,26 @@ import (
 // dirtyViewEvent is one immutable shard-scoped set of external effects emitted
 // by ShardViewManager after an in-memory state transition.
 type dirtyViewEvent struct {
-	shardID  qviews.ShardID
-	persists []*viewpb.QueryViewOfShard
-	syncs    []syncer.SyncView
+	shardID      qviews.ShardID
+	persists     []*viewpb.QueryViewOfShard
+	syncs        []syncer.SyncView
+	afterPersist []func()
 }
 
 type dirtyViewEventSubmitter interface {
+	// Submit must only enqueue the event and must not synchronously execute its
+	// external effects or callbacks.
 	Submit(dirtyViewEvent)
 }
 
 func (e dirtyViewEvent) empty() bool {
-	return len(e.persists) == 0 && len(e.syncs) == 0
+	return len(e.persists) == 0 && len(e.syncs) == 0 && len(e.afterPersist) == 0
 }
 
 type pendingDirtyViewEvent struct {
-	persists map[qviews.QueryViewKey]*viewpb.QueryViewOfShard
-	syncs    map[dirtyViewSyncKey]syncer.SyncView
+	persists     map[qviews.QueryViewKey]*viewpb.QueryViewOfShard
+	syncs        map[dirtyViewSyncKey]syncer.SyncView
+	afterPersist []func()
 }
 
 type dirtyViewSyncKey struct {
@@ -55,6 +59,7 @@ func (e *pendingDirtyViewEvent) merge(event dirtyViewEvent) {
 		}
 		e.syncs[key] = view
 	}
+	e.afterPersist = append(e.afterPersist, event.afterPersist...)
 }
 
 func (e *pendingDirtyViewEvent) operationCount() int {
@@ -288,6 +293,7 @@ func (s *DirtyViewFlushScheduler) flushBatch(
 	}
 	persists := make([]*viewpb.QueryViewOfShard, 0)
 	viewsByNode := make(map[qviews.WorkNodeKey][]syncer.SyncView)
+	afterPersist := make([]func(), 0)
 	for _, event := range batch {
 		for _, view := range event.persists {
 			persists = append(persists, view)
@@ -296,11 +302,15 @@ func (s *DirtyViewFlushScheduler) flushBatch(
 			nodeKey := view.View.WorkNode().Key()
 			viewsByNode[nodeKey] = append(viewsByNode[nodeKey], view)
 		}
+		afterPersist = append(afterPersist, event.afterPersist...)
 	}
 	if len(persists) > 0 {
 		if err := s.catalog.SaveQueryViews(ctx, persists); err != nil {
 			return err
 		}
+	}
+	for _, callback := range afterPersist {
+		callback()
 	}
 	if len(viewsByNode) > 0 {
 		if err := s.syncer.SyncViews(ctx, syncer.SyncGroup{ViewsByNode: viewsByNode}); err != nil {
