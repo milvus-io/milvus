@@ -2005,7 +2005,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 				FieldName: "test",
 				Type:      schemapb.DataType_FloatVector,
 				Field: &schemapb.FieldData_Vectors{
-					Vectors: &schemapb.VectorField{ValidData: []bool{false, false, false}},
+					Vectors: &schemapb.VectorField{Dim: 8, ValidData: []bool{false, false, false}},
 				},
 			},
 		}
@@ -2129,7 +2129,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 				FieldName: "test",
 				Type:      schemapb.DataType_BinaryVector,
 				Field: &schemapb.FieldData_Vectors{
-					Vectors: &schemapb.VectorField{ValidData: []bool{false, false, false}},
+					Vectors: &schemapb.VectorField{Dim: 8, ValidData: []bool{false, false, false}},
 				},
 			},
 		}
@@ -2165,7 +2165,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 				FieldName: "test",
 				Type:      schemapb.DataType_Float16Vector,
 				Field: &schemapb.FieldData_Vectors{
-					Vectors: &schemapb.VectorField{ValidData: []bool{false, false, false}},
+					Vectors: &schemapb.VectorField{Dim: 8, ValidData: []bool{false, false, false}},
 				},
 			},
 		}
@@ -2201,7 +2201,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 				FieldName: "test",
 				Type:      schemapb.DataType_BFloat16Vector,
 				Field: &schemapb.FieldData_Vectors{
-					Vectors: &schemapb.VectorField{ValidData: []bool{false, false, false}},
+					Vectors: &schemapb.VectorField{Dim: 8, ValidData: []bool{false, false, false}},
 				},
 			},
 		}
@@ -2297,7 +2297,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 				FieldName: "test",
 				Type:      schemapb.DataType_Int8Vector,
 				Field: &schemapb.FieldData_Vectors{
-					Vectors: &schemapb.VectorField{ValidData: []bool{false, false, false}},
+					Vectors: &schemapb.VectorField{Dim: 8, ValidData: []bool{false, false, false}},
 				},
 			},
 		}
@@ -2398,7 +2398,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 				Scalars: &schemapb.ScalarField{
 					ValidData: []bool{true, false},
 					Data: &schemapb.ScalarField_LongData{
-						LongData: &schemapb.LongArray{Data: []int64{10, 0}},
+						LongData: &schemapb.LongArray{Data: []int64{10}},
 					},
 				},
 			},
