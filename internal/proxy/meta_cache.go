@@ -33,12 +33,14 @@ import (
 //go:generate mockery --name=Cache --filename=mock_cache_test.go --outpkg=proxy --output=. --inpackage --structname=MockCache --with-expecter
 type Cache = metacache.Cache
 
-type MetaCache = metacache.MetaCache
-type collectionInfo = metacache.CollectionInfo
-type databaseInfo = metacache.DatabaseInfo
-type schemaInfo = metacache.SchemaInfo
-type partitionInfo = metacache.PartitionInfo
-type partitionInfos = metacache.PartitionInfos
+type (
+	MetaCache      = metacache.MetaCache
+	collectionInfo = metacache.CollectionInfo
+	databaseInfo   = metacache.DatabaseInfo
+	schemaInfo     = metacache.SchemaInfo
+	partitionInfo  = metacache.PartitionInfo
+	partitionInfos = metacache.PartitionInfos
+)
 
 func NewMetaCache(mixCoord types.MixCoordClient) (*MetaCache, error) {
 	return metacache.NewMetaCache(mixCoord)
