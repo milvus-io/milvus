@@ -2,7 +2,7 @@ use log::info;
 use std::sync::Arc;
 use tantivy::{
     schema::{Schema, FAST},
-    Index,
+    Index, SingleSegmentIndexWriter,
 };
 
 use crate::{
@@ -10,6 +10,7 @@ use crate::{
     index_writer_v7::index_writer::schema_builder_add_field,
 };
 
+use super::index_writer::Writer;
 use super::IndexWriterWrapperImpl;
 
 impl IndexWriterWrapperImpl {
@@ -19,6 +20,7 @@ impl IndexWriterWrapperImpl {
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
         in_ram: bool,
+        direct: bool,
     ) -> Result<IndexWriterWrapperImpl> {
         info!("create json key stats writer, field_name: {}", field_name);
         let mut schema_builder = Schema::builder();
@@ -31,6 +33,17 @@ impl IndexWriterWrapperImpl {
         } else {
             Index::create_in_dir(path, schema)?
         };
+        if direct {
+            let index_writer =
+                SingleSegmentIndexWriter::new(index.clone(), overall_memory_budget_in_bytes)?;
+            return Ok(IndexWriterWrapperImpl::from_direct_parts(
+                field,
+                index,
+                index_writer,
+                Some(id_field),
+                false,
+            ));
+        }
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
         // Json key stats writers are only used for sealed index builds, which
@@ -39,7 +52,7 @@ impl IndexWriterWrapperImpl {
         index_writer.set_merge_policy(Box::new(tantivy::merge_policy::NoMergePolicy));
         Ok(IndexWriterWrapperImpl {
             field,
-            index_writer,
+            index_writer: Writer::Regular(index_writer),
             index: Arc::new(index),
             id_field: Some(id_field),
             enable_user_specified_doc_id: false,

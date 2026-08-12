@@ -86,7 +86,13 @@ BsonInvertedIndex::BuildIndex() {
         }
         auto field_name = std::to_string(field_id_) + "_" + "shared";
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
-            field_name.c_str(), path_.c_str(), tantivy_index_version_);
+            field_name.c_str(),
+            path_.c_str(),
+            tantivy_index_version_,
+            milvus::tantivy::WriterBackend::Direct,
+            /*in_ram=*/false,
+            milvus::tantivy::DEFAULT_NUM_THREADS,
+            milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES);
         LOG_INFO("build bson inverted index for field id:{} with dir:{}",
                  field_id_,
                  path_);

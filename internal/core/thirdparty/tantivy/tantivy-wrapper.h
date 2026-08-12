@@ -6,8 +6,10 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <span>
 #include <vector>
 #include <type_traits>
+#include <utility>
 
 #include "common/EasyAssert.h"
 #include "common/Json.h"
@@ -26,6 +28,11 @@ static constexpr uintptr_t DEFAULT_NUM_THREADS =
     1;  // Every field with index writer will generate a thread, make huge thread amount, wait for refactoring.
 static constexpr uintptr_t DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES =
     DEFAULT_NUM_THREADS * 15 * 1024 * 1024;
+
+enum class WriterBackend {
+    Regular,
+    Direct,
+};
 
 template <typename T>
 inline TantivyDataType
@@ -51,6 +58,20 @@ struct TantivyIndexWrapper {
     using IndexWriter = void*;
     using IndexReader = void*;
 
+    struct NgramRowView {
+        const uint8_t* value;
+        uintptr_t value_len;
+        int64_t doc_id;
+        bool has_value;
+    };
+
+    template <typename T>
+    struct RowBatchView {
+        std::span<const T> values;
+        std::span<const uintptr_t> row_offsets;
+        std::span<const int64_t> doc_ids;
+    };
+
     NO_COPY_OR_ASSIGN(TantivyIndexWrapper);
 
     TantivyIndexWrapper() = default;
@@ -60,6 +81,12 @@ struct TantivyIndexWrapper {
         reader_ = other.reader_;
         finished_ = other.finished_;
         path_ = other.path_;
+        ngram_ptrs_ = std::move(other.ngram_ptrs_);
+        ngram_lens_ = std::move(other.ngram_lens_);
+        ngram_doc_ids_ = std::move(other.ngram_doc_ids_);
+        ngram_has_values_ = std::move(other.ngram_has_values_);
+        row_value_ptrs_ = std::move(other.row_value_ptrs_);
+        row_value_lens_ = std::move(other.row_value_lens_);
         other.writer_ = nullptr;
         other.reader_ = nullptr;
         other.finished_ = false;
@@ -74,6 +101,12 @@ struct TantivyIndexWrapper {
             reader_ = other.reader_;
             path_ = other.path_;
             finished_ = other.finished_;
+            ngram_ptrs_ = std::move(other.ngram_ptrs_);
+            ngram_lens_ = std::move(other.ngram_lens_);
+            ngram_doc_ids_ = std::move(other.ngram_doc_ids_);
+            ngram_has_values_ = std::move(other.ngram_has_values_);
+            row_value_ptrs_ = std::move(other.row_value_ptrs_);
+            row_value_lens_ = std::move(other.row_value_lens_);
             other.writer_ = nullptr;
             other.reader_ = nullptr;
             other.finished_ = false;
@@ -87,16 +120,19 @@ struct TantivyIndexWrapper {
                         TantivyDataType data_type,
                         const char* path,
                         uint32_t tantivy_index_version,
-                        bool inverted_single_semgnent = false,
+                        WriterBackend backend,
+                        bool legacy_v5_single_segment = false,
                         bool enable_user_specified_doc_id = true,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
                         bool enable_background_merge = false) {
+        AssertInfo(backend != WriterBackend::Direct || !enable_background_merge,
+                   "direct Tantivy writer cannot enable background merge");
         RustResultWrapper res;
-        if (inverted_single_semgnent) {
+        if (legacy_v5_single_segment) {
             AssertInfo(tantivy_index_version == 5,
-                       "TantivyIndexWrapper: inverted_single_semgnent only "
+                       "TantivyIndexWrapper: legacy_v5_single_segment only "
                        "support tantivy 5");
             res = RustResultWrapper(tantivy_create_index_with_single_segment(
                 field_name, data_type, path));
@@ -109,13 +145,49 @@ struct TantivyIndexWrapper {
                                      num_threads,
                                      overall_memory_budget_in_bytes,
                                      enable_user_specified_doc_id,
-                                     enable_background_merge));
+                                     enable_background_merge,
+                                     backend == WriterBackend::Direct));
         }
         AssertInfo(res.result_->success,
                    "failed to create index: {}",
                    res.result_->error);
         writer_ = res.result_->value.ptr._0;
         path_ = std::string(path);
+    }
+
+    void
+    add_ngram_batch(const NgramRowView* rows, uintptr_t len) {
+        assert(!finished_);
+        if (len == 0) {
+            return;
+        }
+
+        ngram_ptrs_.clear();
+        ngram_lens_.clear();
+        ngram_doc_ids_.clear();
+        ngram_has_values_.clear();
+        ngram_ptrs_.reserve(len);
+        ngram_lens_.reserve(len);
+        ngram_doc_ids_.reserve(len);
+        ngram_has_values_.reserve(len);
+
+        for (uintptr_t i = 0; i < len; ++i) {
+            ngram_ptrs_.push_back(rows[i].value);
+            ngram_lens_.push_back(rows[i].value_len);
+            ngram_doc_ids_.push_back(rows[i].doc_id);
+            ngram_has_values_.push_back(rows[i].has_value ? 1 : 0);
+        }
+
+        auto res = RustResultWrapper(
+            tantivy_index_add_ngram_batch(writer_,
+                                          ngram_ptrs_.data(),
+                                          ngram_lens_.data(),
+                                          ngram_doc_ids_.data(),
+                                          ngram_has_values_.data(),
+                                          len));
+        AssertInfo(res.result_->success,
+                   "failed to add ngram batch: {}",
+                   res.result_->error);
     }
 
     // load index. create index reader.
@@ -142,6 +214,7 @@ struct TantivyIndexWrapper {
                         bool in_ram,
                         const char* path,
                         uint32_t tantivy_index_version,
+                        WriterBackend backend,
                         const char* analyzer_name = DEFAULT_ANALYZER_NAME,
                         const char* analyzer_params = DEFAULT_ANALYZER_PARAMS,
                         const char* analyzer_extra_info = "",
@@ -149,6 +222,8 @@ struct TantivyIndexWrapper {
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
                         bool enable_background_merge = false) {
+        AssertInfo(backend != WriterBackend::Direct || !enable_background_merge,
+                   "direct Tantivy writer cannot enable background merge");
         auto res = RustResultWrapper(
             tantivy_create_text_writer(field_name,
                                        path,
@@ -159,7 +234,8 @@ struct TantivyIndexWrapper {
                                        num_threads,
                                        overall_memory_budget_in_bytes,
                                        in_ram,
-                                       enable_background_merge));
+                                       enable_background_merge,
+                                       backend == WriterBackend::Direct));
         AssertInfo(res.result_->success,
                    "failed to create text writer: {}",
                    res.result_->error);
@@ -171,17 +247,19 @@ struct TantivyIndexWrapper {
     TantivyIndexWrapper(const char* field_name,
                         const char* path,
                         uint32_t tantivy_index_version,
+                        WriterBackend backend,
                         bool in_ram = false,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
-        auto res = RustResultWrapper(
-            tantivy_create_json_key_stats_writer(field_name,
-                                                 path,
-                                                 tantivy_index_version,
-                                                 num_threads,
-                                                 overall_memory_budget_in_bytes,
-                                                 in_ram));
+        auto res = RustResultWrapper(tantivy_create_json_key_stats_writer(
+            field_name,
+            path,
+            tantivy_index_version,
+            num_threads,
+            overall_memory_budget_in_bytes,
+            in_ram,
+            backend == WriterBackend::Direct));
         AssertInfo(res.result_->success,
                    "failed to create text writer: {}",
                    res.result_->error);
@@ -194,9 +272,12 @@ struct TantivyIndexWrapper {
                         const char* path,
                         uintptr_t min_gram,
                         uintptr_t max_gram,
+                        WriterBackend backend,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+        AssertInfo(backend == WriterBackend::Direct,
+                   "ngram Tantivy writer only supports the Direct backend");
         auto res = RustResultWrapper(
             tantivy_create_ngram_writer(field_name,
                                         path,
@@ -326,23 +407,147 @@ struct TantivyIndexWrapper {
         }
 
         if constexpr (std::is_same_v<T, std::string>) {
-            // TODO: not very efficient, a lot of overhead due to rust-ffi call.
+            std::vector<const uint8_t*> ptrs;
+            std::vector<uintptr_t> str_lens;
+            ptrs.reserve(len);
+            str_lens.reserve(len);
             for (uintptr_t i = 0; i < len; i++) {
-                const auto& s = static_cast<const std::string*>(array)[i];
-                auto res = RustResultWrapper(tantivy_index_add_string(
-                    writer_,
-                    reinterpret_cast<const uint8_t*>(s.data()),
-                    s.size(),
-                    offset_begin + i));
-                AssertInfo(res.result_->success,
-                           "failed to add string: {}",
-                           res.result_->error);
+                ptrs.push_back(
+                    reinterpret_cast<const uint8_t*>(array[i].data()));
+                str_lens.push_back(array[i].size());
             }
+            auto res = RustResultWrapper(tantivy_index_add_strings_with_len(
+                writer_, ptrs.data(), str_lens.data(), len, offset_begin));
+            AssertInfo(res.result_->success,
+                       "failed to add strings: {}",
+                       res.result_->error);
             return;
         }
 
         throw fmt::format("InvertedIndex.add_data: unsupported data type: {}",
                           typeid(T).name());
+    }
+
+    template <typename T>
+    void
+    add_rows(const RowBatchView<T>& batch) {
+        assert(!finished_);
+        AssertInfo(batch.row_offsets.size() == batch.doc_ids.size() + 1,
+                   "row offset count must equal row count plus one");
+
+        auto add = [&]() -> RustResult {
+            if constexpr (std::is_same_v<T, bool>) {
+                return tantivy_index_add_bool_rows(writer_,
+                                                   batch.values.data(),
+                                                   batch.values.size(),
+                                                   batch.row_offsets.data(),
+                                                   batch.doc_ids.data(),
+                                                   batch.doc_ids.size());
+            }
+            if constexpr (std::is_same_v<T, int8_t>) {
+                return tantivy_index_add_int8_rows(writer_,
+                                                   batch.values.data(),
+                                                   batch.values.size(),
+                                                   batch.row_offsets.data(),
+                                                   batch.doc_ids.data(),
+                                                   batch.doc_ids.size());
+            }
+            if constexpr (std::is_same_v<T, int16_t>) {
+                return tantivy_index_add_int16_rows(writer_,
+                                                    batch.values.data(),
+                                                    batch.values.size(),
+                                                    batch.row_offsets.data(),
+                                                    batch.doc_ids.data(),
+                                                    batch.doc_ids.size());
+            }
+            if constexpr (std::is_same_v<T, int32_t>) {
+                return tantivy_index_add_int32_rows(writer_,
+                                                    batch.values.data(),
+                                                    batch.values.size(),
+                                                    batch.row_offsets.data(),
+                                                    batch.doc_ids.data(),
+                                                    batch.doc_ids.size());
+            }
+            if constexpr (std::is_same_v<T, int64_t>) {
+                return tantivy_index_add_int64_rows(writer_,
+                                                    batch.values.data(),
+                                                    batch.values.size(),
+                                                    batch.row_offsets.data(),
+                                                    batch.doc_ids.data(),
+                                                    batch.doc_ids.size());
+            }
+            if constexpr (std::is_same_v<T, float>) {
+                return tantivy_index_add_f32_rows(writer_,
+                                                  batch.values.data(),
+                                                  batch.values.size(),
+                                                  batch.row_offsets.data(),
+                                                  batch.doc_ids.data(),
+                                                  batch.doc_ids.size());
+            }
+            if constexpr (std::is_same_v<T, double>) {
+                return tantivy_index_add_f64_rows(writer_,
+                                                  batch.values.data(),
+                                                  batch.values.size(),
+                                                  batch.row_offsets.data(),
+                                                  batch.doc_ids.data(),
+                                                  batch.doc_ids.size());
+            }
+            if constexpr (std::is_same_v<T, std::string>) {
+                row_value_ptrs_.clear();
+                row_value_lens_.clear();
+                row_value_ptrs_.reserve(batch.values.size());
+                row_value_lens_.reserve(batch.values.size());
+                for (const auto& value : batch.values) {
+                    row_value_ptrs_.push_back(
+                        reinterpret_cast<const uint8_t*>(value.data()));
+                    row_value_lens_.push_back(value.size());
+                }
+                return tantivy_index_add_string_rows(writer_,
+                                                     row_value_ptrs_.data(),
+                                                     row_value_lens_.data(),
+                                                     row_value_ptrs_.size(),
+                                                     batch.row_offsets.data(),
+                                                     batch.doc_ids.data(),
+                                                     batch.doc_ids.size());
+            }
+            throw fmt::format(
+                "InvertedIndex.add_rows: unsupported data type: {}",
+                typeid(T).name());
+        }();
+
+        auto res = RustResultWrapper(add);
+        AssertInfo(res.result_->success,
+                   "failed to add row batch: {}",
+                   res.result_->error);
+    }
+
+    void
+    add_json_rows(std::span<const std::string> values,
+                  std::span<const uintptr_t> row_offsets,
+                  std::span<const int64_t> doc_ids) {
+        assert(!finished_);
+        AssertInfo(row_offsets.size() == doc_ids.size() + 1,
+                   "row offset count must equal row count plus one");
+        row_value_ptrs_.clear();
+        row_value_lens_.clear();
+        row_value_ptrs_.reserve(values.size());
+        row_value_lens_.reserve(values.size());
+        for (const auto& value : values) {
+            row_value_ptrs_.push_back(
+                reinterpret_cast<const uint8_t*>(value.data()));
+            row_value_lens_.push_back(value.size());
+        }
+        auto res = RustResultWrapper(
+            tantivy_index_add_json_rows(writer_,
+                                        row_value_ptrs_.data(),
+                                        row_value_lens_.data(),
+                                        row_value_ptrs_.size(),
+                                        row_offsets.data(),
+                                        doc_ids.data(),
+                                        doc_ids.size()));
+        AssertInfo(res.result_->success,
+                   "failed to add JSON row batch: {}",
+                   res.result_->error);
     }
 
     void
@@ -687,6 +892,9 @@ struct TantivyIndexWrapper {
             return;
         }
 
+        AssertInfo(writer_ != nullptr,
+                   "cannot finish tantivy index: writer is unavailable");
+
         // Null writer_ before the FFI call because tantivy_finish_index
         // always consumes (frees) the Rust-side IndexWriterWrapper via
         // Box::from_raw, regardless of success or failure.  If we leave
@@ -699,6 +907,25 @@ struct TantivyIndexWrapper {
         AssertInfo(res.result_->success,
                    "failed to finish index: {}",
                    res.result_->error);
+        finished_ = true;
+    }
+
+    inline void
+    finish_and_create_reader(SetBitsetFn set_bitset) {
+        if (finished_) {
+            return;
+        }
+        AssertInfo(writer_ != nullptr,
+                   "cannot finish tantivy index and create reader: writer is "
+                   "unavailable");
+        auto w = writer_;
+        writer_ = nullptr;
+        auto res = RustResultWrapper(
+            tantivy_finish_index_and_create_reader(w, set_bitset));
+        AssertInfo(res.result_->success,
+                   "failed to finish index and create reader: {}",
+                   res.result_->error);
+        reader_ = res.result_->value.ptr._0;
         finished_ = true;
     }
 
@@ -1586,5 +1813,11 @@ struct TantivyIndexWrapper {
     std::string path_;
     bool load_in_mmap_ = true;
     std::string analyzer_extra_info_ = "";
+    std::vector<const uint8_t*> ngram_ptrs_;
+    std::vector<uintptr_t> ngram_lens_;
+    std::vector<int64_t> ngram_doc_ids_;
+    std::vector<uint8_t> ngram_has_values_;
+    std::vector<const uint8_t*> row_value_ptrs_;
+    std::vector<uintptr_t> row_value_lens_;
 };
 }  // namespace milvus::tantivy

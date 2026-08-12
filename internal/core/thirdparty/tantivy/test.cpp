@@ -28,7 +28,11 @@ run() {
         return;
     }
 
-    auto w = TantivyIndexWrapper("test_field_name", guess_data_type<T>(), path);
+    auto w = TantivyIndexWrapper("test_field_name",
+                                 guess_data_type<T>(),
+                                 path,
+                                 7,
+                                 WriterBackend::Direct);
 
     T arr[] = {1, 2, 3, 4, 5, 6};
     auto l = sizeof(arr) / sizeof(T);
@@ -77,8 +81,11 @@ run<bool>() {
         return;
     }
 
-    auto w =
-        TantivyIndexWrapper("test_field_name", TantivyDataType::Bool, path);
+    auto w = TantivyIndexWrapper("test_field_name",
+                                 TantivyDataType::Bool,
+                                 path,
+                                 7,
+                                 WriterBackend::Direct);
 
     bool arr[] = {true, false, false, true, false, true};
     auto l = sizeof(arr) / sizeof(bool);
@@ -112,8 +119,11 @@ run<std::string>() {
         return;
     }
 
-    auto w =
-        TantivyIndexWrapper("test_field_name", TantivyDataType::Keyword, path);
+    auto w = TantivyIndexWrapper("test_field_name",
+                                 TantivyDataType::Keyword,
+                                 path,
+                                 7,
+                                 WriterBackend::Direct);
 
     std::vector<std::string> arr = {"a", "b", "aaa", "abbb"};
     auto l = arr.size();
@@ -171,7 +181,11 @@ test_32717() {
         return;
     }
 
-    auto w = TantivyIndexWrapper("test_field_name", guess_data_type<T>(), path);
+    auto w = TantivyIndexWrapper("test_field_name",
+                                 guess_data_type<T>(),
+                                 path,
+                                 7,
+                                 WriterBackend::Direct);
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -225,7 +239,11 @@ test_array_int() {
     auto path = "/tmp/inverted-index/test-binding/";
     boost::filesystem::remove_all(path);
     boost::filesystem::create_directories(path);
-    auto w = TantivyIndexWrapper("test_field_name", guess_data_type<T>(), path);
+    auto w = TantivyIndexWrapper("test_field_name",
+                                 guess_data_type<T>(),
+                                 path,
+                                 7,
+                                 WriterBackend::Direct);
 
     std::vector<std::vector<T>> vec_of_array{
         {10, 40, 50},
@@ -255,8 +273,11 @@ test_array_string() {
     auto path = "/tmp/inverted-index/test-binding/";
     boost::filesystem::remove_all(path);
     boost::filesystem::create_directories(path);
-    auto w =
-        TantivyIndexWrapper("test_field_name", TantivyDataType::Keyword, path);
+    auto w = TantivyIndexWrapper("test_field_name",
+                                 TantivyDataType::Keyword,
+                                 path,
+                                 7,
+                                 WriterBackend::Direct);
 
     std::vector<std::vector<T>> vec_of_array{
         {"10", "40", "50"},

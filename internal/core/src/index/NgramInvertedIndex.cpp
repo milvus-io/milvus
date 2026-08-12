@@ -21,6 +21,7 @@
 #include <map>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "bitset/bitset.h"
 #include "boost/filesystem/operations.hpp"
@@ -75,6 +76,16 @@ constexpr size_t kMaxIterationsForMediumRow = 3;
 constexpr double kBreakThresholdForSmallRow = 0.01;  // 1%
 constexpr size_t kMaxIterationsForSmallRow = 2;
 
+constexpr size_t kNgramBatchRows = 512;
+constexpr size_t kNgramJsonBatchBytes = 1024 * 1024;
+
+struct PendingNgramRow {
+    size_t value_offset;
+    uintptr_t value_len;
+    int64_t doc_id;
+    bool has_value;
+};
+
 inline size_t
 Utf8LiteralLength(const std::string& literal) {
     return Utf8CharCount(literal.data(), literal.size());
@@ -98,7 +109,11 @@ NgramInvertedIndex::NgramInvertedIndex(const storage::FileManagerContext& ctx,
         std::string field_name =
             std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
-            field_name.c_str(), path_.c_str(), min_gram_, max_gram_);
+            field_name.c_str(),
+            path_.c_str(),
+            min_gram_,
+            max_gram_,
+            milvus::tantivy::WriterBackend::Direct);
     }
 }
 
@@ -125,26 +140,56 @@ NgramInvertedIndex::BuildWithFieldData(const std::vector<FieldDataPtr>& datas) {
     if (schema_.data_type() == proto::schema::DataType::JSON) {
         BuildWithJsonFieldData(datas);
     } else {
-        // Calculate avg_row_size for String/VarChar types
         size_t total_bytes = 0;
         size_t total_rows = 0;
+        size_t total_nulls = 0;
         for (const auto& data : datas) {
-            auto n = data->get_num_rows();
-            for (size_t i = 0; i < n; i++) {
-                if (schema_.nullable() && !data->is_valid(i)) {
-                    continue;
+            total_nulls += data->get_null_count();
+        }
+        null_offset_.reserve(null_offset_.size() + total_nulls);
+
+        std::vector<TantivyIndexWrapper::NgramRowView> rows;
+        rows.reserve(kNgramBatchRows);
+        auto flush = [this, &rows]() {
+            if (rows.empty()) {
+                return;
+            }
+            wrapper_->add_ngram_batch(rows.data(), rows.size());
+            rows.clear();
+        };
+
+        int64_t doc_id = 0;
+        for (const auto& data : datas) {
+            const auto row_count = data->get_num_rows();
+            const auto* values = static_cast<const std::string*>(data->Data());
+            AssertInfo(values != nullptr || row_count == 0,
+                       "ngram string field data has {} rows but no values",
+                       row_count);
+            for (int64_t i = 0; i < row_count; ++i, ++doc_id) {
+                const bool has_value = !schema_.nullable() || data->is_valid(i);
+                if (!has_value) {
+                    null_offset_.push_back(doc_id);
+                    rows.push_back({nullptr, 0, doc_id, false});
+                } else {
+                    const auto& value = values[i];
+                    rows.push_back(
+                        {reinterpret_cast<const uint8_t*>(value.data()),
+                         value.size(),
+                         doc_id,
+                         true});
+                    total_bytes += value.size();
+                    ++total_rows;
                 }
-                auto* str = static_cast<const std::string*>(data->RawValue(i));
-                if (str) {
-                    total_bytes += str->size();
-                    total_rows += 1;
+
+                if (rows.size() == kNgramBatchRows) {
+                    flush();
                 }
             }
         }
+        flush();
+
         avg_row_size_ = total_rows > 0 ? total_bytes / total_rows : 0;
         LOG_INFO("Ngram index avg_row_size: {} bytes", avg_row_size_);
-
-        InvertedIndexTantivy<std::string>::BuildWithFieldData(datas);
     }
 }
 
@@ -160,9 +205,39 @@ NgramInvertedIndex::BuildWithJsonFieldData(
 
     index_build_begin_ = std::chrono::system_clock::now();
 
-    // Track total bytes and rows for avg_row_size calculation
     size_t total_bytes = 0;
     size_t total_rows = 0;
+    size_t total_nulls = 0;
+    for (const auto& data : field_datas) {
+        total_nulls += data->get_null_count();
+    }
+    null_offset_.reserve(null_offset_.size() + total_nulls);
+
+    std::vector<PendingNgramRow> pending_rows;
+    pending_rows.reserve(kNgramBatchRows);
+    std::vector<uint8_t> flat_values;
+    flat_values.reserve(kNgramJsonBatchBytes);
+    std::vector<TantivyIndexWrapper::NgramRowView> row_views;
+    row_views.reserve(kNgramBatchRows);
+
+    auto flush = [this, &pending_rows, &flat_values, &row_views]() {
+        if (pending_rows.empty()) {
+            return;
+        }
+
+        row_views.clear();
+        for (const auto& row : pending_rows) {
+            const uint8_t* value = nullptr;
+            if (row.has_value && row.value_len != 0) {
+                value = flat_values.data() + row.value_offset;
+            }
+            row_views.push_back(
+                {value, row.value_len, row.doc_id, row.has_value});
+        }
+        wrapper_->add_ngram_batch(row_views.data(), row_views.size());
+        pending_rows.clear();
+        flat_values.clear();
+    };
 
     ProcessJsonFieldData<std::string>(
         field_datas,
@@ -170,23 +245,47 @@ NgramInvertedIndex::BuildWithJsonFieldData(
         nested_path_,
         JSON_CAST_TYPE,
         JSON_CAST_FUNCTION,
-        // add data
-        [this, &total_bytes, &total_rows](
+        [&pending_rows, &flat_values, &flush, &total_bytes, &total_rows](
             const std::string* data, int64_t size, int64_t offset) {
-            this->wrapper_->template add_array_data<std::string>(
-                data, size, offset);
-            // Track row size
-            if (data && size > 0) {
-                total_bytes += data->size();
-                total_rows++;
+            AssertInfo(size == 0 || size == 1,
+                       "ngram JSON row {} produced {} string values",
+                       offset,
+                       size);
+            const bool has_value = size == 1;
+            const uintptr_t value_len =
+                has_value ? static_cast<uintptr_t>(data[0].size()) : 0;
+
+            if (!pending_rows.empty() &&
+                (pending_rows.size() == kNgramBatchRows ||
+                 flat_values.size() + value_len > kNgramJsonBatchBytes)) {
+                flush();
+            }
+
+            const size_t value_offset = flat_values.size();
+            if (has_value) {
+                const auto& value = data[0];
+                if (!value.empty()) {
+                    const auto* value_bytes =
+                        reinterpret_cast<const uint8_t*>(value.data());
+                    flat_values.insert(flat_values.end(),
+                                       value_bytes,
+                                       value_bytes + value.size());
+                }
+                total_bytes += value.size();
+                ++total_rows;
+            }
+            pending_rows.push_back(
+                {value_offset, value_len, offset, has_value});
+
+            if (pending_rows.size() == kNgramBatchRows ||
+                flat_values.size() >= kNgramJsonBatchBytes) {
+                flush();
             }
         },
-        // handle null
         [this](int64_t offset) { this->null_offset_.push_back(offset); },
-        // handle non exist
         [](int64_t offset) {},
-        // handle error (silently skip — error stats not tracked)
         [](const Json&, const std::string&, simdjson::error_code) {});
+    flush();
 
     avg_row_size_ = total_rows > 0 ? total_bytes / total_rows : 0;
     LOG_INFO("Ngram index (JSON) avg_row_size: {} bytes", avg_row_size_);

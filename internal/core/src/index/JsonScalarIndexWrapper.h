@@ -355,25 +355,53 @@ class JsonScalarIndexWrapper : public BaseIndex {
             total_rows += data->get_num_rows();
         }
 
+        FixedVector<T> values;
+        std::vector<uintptr_t> row_offsets{0};
+        std::vector<int64_t> doc_ids;
+        size_t value_bytes = 0;
+        row_offsets.reserve(this->kDirectBatchRowLimit + 1);
+        doc_ids.reserve(this->kDirectBatchRowLimit);
+        auto flush = [this, &values, &row_offsets, &doc_ids, &value_bytes]() {
+            this->SubmitRowBatch(values, row_offsets, doc_ids);
+            value_bytes = 0;
+        };
+
         ProcessJsonFieldData<T>(
             field_datas,
             json_schema_,
             nested_path_,
             cast_type_,
             cast_function_,
-            [this](const T* data, int64_t size, int64_t offset) {
-                if (!this->inverted_index_single_segment_) {
-                    this->wrapper_->template add_array_data<T>(
-                        data, size, offset);
-                } else {
-                    this->wrapper_
-                        ->template add_array_data_by_single_segment_writer<T>(
-                            data, size);
+            [&values,
+             &row_offsets,
+             &doc_ids,
+             &value_bytes,
+             &flush,
+             this](const T* data, int64_t size, int64_t offset) {
+                for (int64_t i = 0; i < size; ++i) {
+                    values.push_back(data[i]);
+                    if constexpr (std::is_same_v<T, std::string>) {
+                        value_bytes += data[i].size();
+                    }
+                }
+                row_offsets.push_back(values.size());
+                doc_ids.push_back(offset);
+                auto payload_bytes = [&]() {
+                    if constexpr (std::is_same_v<T, std::string>) {
+                        return value_bytes;
+                    } else {
+                        return values.size() * sizeof(T);
+                    }
+                }();
+                if (doc_ids.size() >= this->kDirectBatchRowLimit ||
+                    payload_bytes >= this->kDirectBatchValueLimit) {
+                    flush();
                 }
             },
             [this](int64_t offset) { this->null_offset_.push_back(offset); },
             [this](int64_t offset) { non_exist_offsets_.push_back(offset); },
             [](const Json&, const std::string&, simdjson::error_code) {});
+        flush();
 
         BuildExistsBitset(total_rows);
     }

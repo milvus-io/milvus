@@ -16,11 +16,21 @@ to_set(const RustArrayWrapper& w) {
 int
 main(int argc, char* argv[]) {
     std::string tokenizer_name = "jieba";
-    std::map<std::string, std::string> analyzer_params;
-    analyzer_params["tokenizer"] = tokenizer_name;
+    const char* analyzer_params = R"({"tokenizer":"jieba"})";
 
-    auto text_index = TantivyIndexWrapper(
-        "text_demo", true, "", tokenizer_name.c_str(), analyzer_params);
+    // This demo commits and queries before finalization, like a growing index.
+    auto text_index =
+        TantivyIndexWrapper("text_demo",
+                            true,
+                            "",
+                            7,
+                            WriterBackend::Regular,
+                            tokenizer_name.c_str(),
+                            analyzer_params,
+                            "",
+                            DEFAULT_NUM_THREADS,
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+                            true);
     auto write_single_text = [&text_index](const std::string& s,
                                            int64_t offset) {
         text_index.add_data(&s, 1, offset);

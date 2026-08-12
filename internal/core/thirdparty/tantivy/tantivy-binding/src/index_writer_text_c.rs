@@ -20,6 +20,7 @@ pub extern "C" fn tantivy_create_text_writer(
     overall_memory_budget_in_bytes: usize,
     in_ram: bool,
     enable_background_merge: bool,
+    direct: bool,
 ) -> RustResult {
     init_log();
     let field_name_str = cstr_to_str!(field_name);
@@ -42,6 +43,7 @@ pub extern "C" fn tantivy_create_text_writer(
         overall_memory_budget_in_bytes,
         in_ram,
         enable_background_merge,
+        direct,
         tantivy_index_version,
     ) {
         Ok(wrapper) => RustResult::from_ptr(create_binding(wrapper)),

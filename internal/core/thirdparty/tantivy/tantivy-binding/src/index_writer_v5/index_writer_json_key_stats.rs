@@ -3,7 +3,7 @@ use log::info;
 use std::sync::Arc;
 use tantivy_5::{
     schema::{Schema, FAST},
-    Index,
+    Index, SingleSegmentIndexWriter,
 };
 
 use crate::data_type::TantivyDataType;
@@ -19,6 +19,7 @@ impl IndexWriterWrapperImpl {
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
         in_ram: bool,
+        direct: bool,
     ) -> Result<IndexWriterWrapperImpl> {
         info!("create json key stats writer, field_name: {}", field_name);
         let mut schema_builder = Schema::builder();
@@ -31,6 +32,16 @@ impl IndexWriterWrapperImpl {
         } else {
             Index::create_in_dir(path, schema)?
         };
+        if direct {
+            let index_writer =
+                SingleSegmentIndexWriter::new(index.clone(), overall_memory_budget_in_bytes)?;
+            return Ok(IndexWriterWrapperImpl::from_direct_parts(
+                field,
+                index,
+                index_writer,
+                Some(id_field),
+            ));
+        }
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
         // Json key stats writers are only used for sealed index builds, which
@@ -44,6 +55,7 @@ impl IndexWriterWrapperImpl {
             _index: Arc::new(index),
             // Sealed-build only; merge-all runs in finish().
             enable_background_merge: false,
+            next_doc_id: 0,
         })
     }
 }

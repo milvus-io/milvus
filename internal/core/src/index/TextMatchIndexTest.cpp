@@ -25,6 +25,7 @@
 #include <ratio>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -73,6 +74,19 @@
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
+
+static_assert(!std::is_constructible_v<milvus::tantivy::TantivyIndexWrapper,
+                                       const char*,
+                                       TantivyDataType,
+                                       const char*,
+                                       uint32_t>,
+              "writer backend selection must be explicit");
+static_assert(!std::is_constructible_v<milvus::tantivy::TantivyIndexWrapper,
+                                       const char*,
+                                       const char*,
+                                       uintptr_t,
+                                       uintptr_t>,
+              "ngram writer backend selection must be explicit");
 
 namespace {
 SchemaPtr
@@ -270,19 +284,44 @@ TEST(ParseTokenizerParams, Default) {
     ASSERT_EQ(params.at("analyzer_params"), p);
 }
 
+TEST(TantivyIndexWrapper, RejectsDirectBackendWithBackgroundMerge) {
+    EXPECT_ANY_THROW({
+        milvus::tantivy::TantivyIndexWrapper wrapper(
+            "field",
+            TantivyDataType::I64,
+            "/tmp/tantivy-invalid-writer-mode",
+            index::TANTIVY_INDEX_LATEST_VERSION,
+            milvus::tantivy::WriterBackend::Direct,
+            /*legacy_v5_single_segment=*/false,
+            /*enable_user_specified_doc_id=*/true,
+            milvus::tantivy::DEFAULT_NUM_THREADS,
+            milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+            /*enable_background_merge=*/true);
+    });
+}
+
+TEST(TantivyIndexWrapper, RejectsRegularBackendForNgram) {
+    EXPECT_ANY_THROW({
+        milvus::tantivy::TantivyIndexWrapper wrapper(
+            "field",
+            "/tmp/tantivy-invalid-ngram-writer-mode",
+            2,
+            3,
+            milvus::tantivy::WriterBackend::Regular);
+    });
+}
+
 TEST(TextMatch, Index) {
     using Index = index::TextMatchIndex;
     auto index = std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
                                          "unique_id",
                                          "milvus_tokenizer",
                                          "{}",
-                                         /*enable_background_merge=*/false);
-    index->CreateReader(milvus::index::SetBitsetSealed);
+                                         Index::InMemoryMode::Sealed);
     index->AddTextSealed("football, basketball, pingpang", true, 0);
     index->AddTextSealed("", false, 1);
     index->AddTextSealed("swimming, football", true, 2);
-    index->Commit();
-    index->Reload();
+    index->FinishAndCreateReader(milvus::index::SetBitsetSealed);
 
     {
         auto res = index->MatchQuery("football", 1);
@@ -349,13 +388,11 @@ TEST(TextMatch, FuzzyIndex) {
                                          "unique_id",
                                          "milvus_tokenizer",
                                          "{}",
-                                         /*enable_background_merge=*/false);
-    index->CreateReader(milvus::index::SetBitsetSealed);
+                                         Index::InMemoryMode::Sealed);
     index->AddTextSealed("football, basketball, pingpang", true, 0);
     index->AddTextSealed("", false, 1);
     index->AddTextSealed("swimming, football", true, 2);
-    index->Commit();
-    index->Reload();
+    index->FinishAndCreateReader(milvus::index::SetBitsetSealed);
 
     {
         // "footbal" is one edit from "football", so distance 1 matches rows 0 and 2.
@@ -463,7 +500,7 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
                                          "test_multi_batch",
                                          "milvus_tokenizer",
                                          "{}",
-                                         /*enable_background_merge=*/true);
+                                         Index::InMemoryMode::Growing);
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer", "{}");
 
@@ -769,6 +806,43 @@ TEST(TextMatch, GrowingBuildTextIndexFromTextLobRefsDecodesText) {
     boost::filesystem::remove_all(TestLocalPath + test_dir);
 }
 
+TEST(TextMatch, BuildIndexFromFieldDataSealedNullableAcrossBatchBoundary) {
+    using Index = index::TextMatchIndex;
+
+    constexpr size_t kBatchRows = 4096;
+    const auto row_count = kBatchRows + 3;
+    std::vector<std::string> texts(row_count);
+    std::vector<uint8_t> valid_bytes((row_count + 7) / 8, 0xff);
+    for (size_t i = 0; i < row_count; ++i) {
+        texts[i] = "sealed row " + std::to_string(i);
+    }
+    valid_bytes[1 >> 3] &= ~(1u << (1 & 7));
+    valid_bytes[kBatchRows >> 3] &= ~(1u << (kBatchRows & 7));
+
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, row_count);
+    field_data->FillFieldData(texts.data(), valid_bytes.data(), row_count, 0);
+
+    auto index = std::make_unique<Index>(200,
+                                         "test_sealed_batch_boundary",
+                                         "milvus_tokenizer",
+                                         "{}",
+                                         Index::InMemoryMode::Sealed);
+    index->BuildIndexFromFieldData({field_data}, true);
+    index->FinishAndCreateReader(milvus::index::SetBitsetSealed);
+
+    auto null_bits = index->IsNull();
+    ASSERT_EQ(null_bits.size(), row_count);
+    EXPECT_TRUE(null_bits[1]);
+    EXPECT_FALSE(null_bits[kBatchRows - 1]);
+    EXPECT_TRUE(null_bits[kBatchRows]);
+    EXPECT_FALSE(null_bits[kBatchRows + 1]);
+
+    auto hits = index->MatchQuery(std::to_string(kBatchRows + 2), 1);
+    ASSERT_EQ(hits.size(), row_count);
+    EXPECT_TRUE(hits[kBatchRows + 2]);
+}
+
 // Regression test: BuildIndexFromFieldData with a single batch should still
 // work correctly (i == offset in this case, so the old bug was hidden).
 TEST(TextMatch, BuildIndexFromFieldDataSingleBatchNullable) {
@@ -793,7 +867,7 @@ TEST(TextMatch, BuildIndexFromFieldDataSingleBatchNullable) {
                                          "test_single_batch",
                                          "milvus_tokenizer",
                                          "{}",
-                                         /*enable_background_merge=*/true);
+                                         Index::InMemoryMode::Growing);
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer", "{}");
 

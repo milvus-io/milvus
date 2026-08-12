@@ -16,6 +16,7 @@ pub extern "C" fn tantivy_create_json_key_stats_writer(
     num_threads: usize,
     overall_memory_budget_in_bytes: usize,
     in_ram: bool,
+    direct: bool,
 ) -> RustResult {
     init_log();
     let field_name_str = cstr_to_str!(field_name);
@@ -33,6 +34,7 @@ pub extern "C" fn tantivy_create_json_key_stats_writer(
         overall_memory_budget_in_bytes,
         tantivy_index_version,
         in_ram,
+        direct,
     ) {
         Ok(wrapper) => RustResult::from_ptr(create_binding(wrapper)),
         Err(err) => RustResult::from_error(format!(

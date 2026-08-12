@@ -3,10 +3,12 @@ use std::sync::Arc;
 
 use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions};
 use tantivy::Index;
+use tantivy::SingleSegmentIndexWriter;
 
 use crate::analyzer::create_analyzer;
 use crate::error::Result;
 
+use super::index_writer::Writer;
 use super::IndexWriterWrapperImpl;
 
 fn build_text_schema(field_name: &str, tokenizer_name: &str) -> (Schema, Field) {
@@ -33,6 +35,7 @@ impl IndexWriterWrapperImpl {
         overall_memory_budget_in_bytes: usize,
         in_ram: bool,
         enable_background_merge: bool,
+        direct: bool,
     ) -> Result<IndexWriterWrapperImpl> {
         info!(
             "create text index writer, field_name: {}, tantivy_index_version 7, enable_background_merge: {}",
@@ -48,6 +51,17 @@ impl IndexWriterWrapperImpl {
             Index::create_in_dir(path, schema)?
         };
         index.tokenizers().register(analyzer_name, analyzer);
+        if direct {
+            let index_writer =
+                SingleSegmentIndexWriter::new(index.clone(), overall_memory_budget_in_bytes)?;
+            return Ok(IndexWriterWrapperImpl::from_direct_parts(
+                field,
+                index,
+                index_writer,
+                None,
+                true,
+            ));
+        }
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
         if !enable_background_merge {
@@ -60,7 +74,7 @@ impl IndexWriterWrapperImpl {
 
         Ok(IndexWriterWrapperImpl {
             field,
-            index_writer,
+            index_writer: Writer::Regular(index_writer),
             index: Arc::new(index),
             id_field: None,
             enable_user_specified_doc_id: true,
