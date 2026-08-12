@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -48,6 +49,34 @@ func GrpcAuthInterceptor(authFunc grpc_auth.AuthFunc) grpc.UnaryServerIntercepto
 			return nil, err
 		}
 		return handler(newCtx, req)
+	}
+}
+
+// GrpcAuthStreamInterceptor is the streaming counterpart of GrpcAuthInterceptor.
+// The external gRPC server only mounts UnaryInterceptor, so streaming RPCs such as
+// CreateReplicateStream would otherwise skip the authentication chain entirely. This
+// interceptor guarantees streaming calls are authenticated with the same logic as unary
+// calls before the handler observes the stream.
+func GrpcAuthStreamInterceptor(authFunc grpc_auth.AuthFunc) grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		var newCtx context.Context
+		var err error
+		if overrideSrv, ok := srv.(grpc_auth.ServiceAuthFuncOverride); ok {
+			newCtx, err = overrideSrv.AuthFuncOverride(ss.Context(), info.FullMethod)
+		} else {
+			newCtx, err = authFunc(ss.Context())
+		}
+		if err != nil {
+			hookutil.GetExtension().ReportAction(context.Background(), nil, &milvuspb.BoolResponse{
+				Status: merr.Status(err),
+			}, err, info.FullMethod, hookutil.ActionAuthorize)
+			return err
+		}
+		// Propagate the authenticated context (which carries the resolved user/token) to
+		// the handler by wrapping the ServerStream.
+		wrapped := grpc_middleware.WrapServerStream(ss)
+		wrapped.WrappedContext = newCtx
+		return handler(srv, wrapped)
 	}
 }
 

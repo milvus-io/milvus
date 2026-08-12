@@ -7,6 +7,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
@@ -15,6 +16,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+// mockServerStream is a minimal grpc.ServerStream implementation that only carries a
+// context, which is all the stream authentication interceptor needs.
+type mockServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (m *mockServerStream) Context() context.Context {
+	return m.ctx
+}
 
 // validAuth validates the authentication
 func TestValidAuth(t *testing.T) {
@@ -120,4 +132,62 @@ func TestAuthenticationInterceptor(t *testing.T) {
 		assert.Equal(t, "mockUser", user)
 	}
 	hookutil.SetTestHook(hookutil.DefaultHook{})
+}
+
+func TestGrpcAuthStreamInterceptor(t *testing.T) {
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true") // mock authorization is turned on
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	// mock metacache so AuthenticationInterceptor can verify credentials
+	mix := &MockMixCoordClientInterface{}
+	err := InitMetaCache(context.Background(), mix)
+	assert.NoError(t, err)
+
+	info := &grpc.StreamServerInfo{FullMethod: "/milvus.proto.milvus.MilvusService/CreateReplicateStream"}
+	interceptor := GrpcAuthStreamInterceptor(AuthenticationInterceptor)
+
+	t.Run("reject stream without authorization", func(t *testing.T) {
+		called := false
+		handler := func(srv interface{}, ss grpc.ServerStream) error {
+			called = true
+			return nil
+		}
+		ss := &mockServerStream{ctx: context.Background()}
+		err := interceptor(nil, ss, info, handler)
+		// authentication must fail and the handler must never be reached
+		assert.Error(t, err)
+		assert.False(t, called, "handler should not be invoked when authentication fails")
+	})
+
+	t.Run("reject stream with invalid credential", func(t *testing.T) {
+		called := false
+		handler := func(srv interface{}, ss grpc.ServerStream) error {
+			called = true
+			return nil
+		}
+		md := metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("mockUser:wrongPass"))
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+		ss := &mockServerStream{ctx: ctx}
+		err := interceptor(nil, ss, info, handler)
+		assert.Error(t, err)
+		assert.False(t, called, "handler should not be invoked when credential is invalid")
+	})
+
+	t.Run("accept stream with valid credential and propagate context", func(t *testing.T) {
+		called := false
+		var handlerCtx context.Context
+		handler := func(srv interface{}, ss grpc.ServerStream) error {
+			called = true
+			handlerCtx = ss.Context()
+			return nil
+		}
+		md := metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("mockUser:mockPass"))
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+		ss := &mockServerStream{ctx: ctx}
+		err := interceptor(nil, ss, info, handler)
+		assert.NoError(t, err)
+		assert.True(t, called, "handler should be invoked for an authenticated stream")
+		// the wrapped stream must expose the authenticated context to the handler
+		assert.NotNil(t, handlerCtx)
+	})
 }

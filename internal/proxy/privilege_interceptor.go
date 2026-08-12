@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sync"
 
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -207,6 +208,122 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 
 	return ctx, status.Error(codes.PermissionDenied,
 		fmt.Sprintf("%s: permission deny to %s in the `%s` database", objectPrivilege, username, dbName))
+}
+
+// streamPrivilegeExt describes the RBAC requirement of a streaming RPC. Streaming
+// interceptors have no `req` object to reflect the privilege from (unlike the unary
+// PrivilegeInterceptor which resolves it via funcutil.GetPrivilegeExtObj(req)), so the
+// required privilege is declared statically per full-method name.
+type streamPrivilegeExt struct {
+	objectType      string
+	objectPrivilege string
+}
+
+// streamMethodPrivileges is the static resource-privilege table for streaming RPCs.
+// It maps a streaming RPC's full method name to the cluster-level privilege it requires.
+// Both streaming methods on MilvusService touch the WAL data plane (CreateReplicateStream
+// writes replicate messages; DumpMessages streams messages out for data salvage), so both
+// require the cluster-admin-level replicate privilege. Any streaming method NOT present in
+// this table is denied by default (fail-closed) in StreamPrivilegeInterceptor, which
+// prevents a newly-added stream RPC from silently bypassing the RBAC chain.
+var streamMethodPrivileges = map[string]streamPrivilegeExt{
+	milvuspb.MilvusService_CreateReplicateStream_FullMethodName: {
+		objectType:      commonpb.ObjectType_Global.String(),
+		objectPrivilege: commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String(),
+	},
+	milvuspb.MilvusService_DumpMessages_FullMethodName: {
+		objectType:      commonpb.ObjectType_Global.String(),
+		objectPrivilege: commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String(),
+	},
+}
+
+// StreamPrivilegeFunc is the streaming counterpart of PrivilegeFunc. It authorizes a
+// streaming call using only the context (which already carries the authenticated user)
+// and the full method name (which identifies the required privilege via the static
+// streamMethodPrivileges table), returning the (possibly enriched) context on success.
+type StreamPrivilegeFunc func(ctx context.Context, fullMethod string) (context.Context, error)
+
+// PrivilegeStreamInterceptor returns a new stream server interceptor that performs
+// per-stream privilege access. It mirrors UnaryServerInterceptor: it takes the
+// authorization function as a parameter and wraps it into a grpc.StreamServerInterceptor,
+// propagating the authorized context to the handler via a wrapped ServerStream.
+func PrivilegeStreamInterceptor(privilegeFunc StreamPrivilegeFunc) grpc.StreamServerInterceptor {
+	privilege.InitPrivilegeGroups()
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		newCtx, err := privilegeFunc(ss.Context(), info.FullMethod)
+		if err != nil {
+			hookutil.GetExtension().ReportAction(newCtx, nil, &milvuspb.BoolResponse{
+				Status: merr.Status(err),
+			}, err, info.FullMethod, hookutil.ActionAuthorize)
+			return err
+		}
+		wrapped := grpc_middleware.WrapServerStream(ss)
+		wrapped.WrappedContext = newCtx
+		return handler(srv, wrapped)
+	}
+}
+
+// StreamPrivilegeInterceptor is the streaming counterpart of PrivilegeInterceptor. It
+// performs the same role→casbin authorization, but resolves the required privilege from
+// the full method name (via streamMethodPrivileges) instead of the absent request object,
+// and treats the operation as cluster/Global level (objectName == util.AnyWord).
+func StreamPrivilegeInterceptor(ctx context.Context, fullMethod string) (context.Context, error) {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return ctx, nil
+	}
+
+	ext, ok := streamMethodPrivileges[fullMethod]
+	if !ok {
+		// Unregistered streaming method: deny by default so no stream RPC can slip
+		// through the authorization chain unnoticed.
+		mlog.Warn(ctx, "stream method not registered for privilege check, denying", mlog.String("method", fullMethod))
+		return ctx, status.Error(codes.PermissionDenied, fmt.Sprintf("streaming method %s is not authorized", fullMethod))
+	}
+
+	username, password, err := contextutil.GetAuthInfoFromContext(ctx)
+	if err != nil {
+		mlog.Warn(ctx, "GetAuthInfoFromContext fail for stream", mlog.Err(err))
+		return ctx, err
+	}
+	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
+		return ctx, nil
+	}
+	roleNames, err := GetRole(username)
+	if err != nil {
+		mlog.Warn(ctx, "GetRole fail for stream", mlog.String("username", username), mlog.Err(err))
+		return ctx, err
+	}
+	roleNames = append(roleNames, util.RolePublic)
+	ctx = SetRBACRolesToContext(ctx, roleNames)
+
+	dbName := GetCurDBNameFromContextOrDefault(ctx)
+	object := funcutil.PolicyForResource(dbName, ext.objectType, util.AnyWord)
+	log := mlog.With(mlog.String("username", username), mlog.Strings("role_names", roleNames),
+		mlog.String("object_type", ext.objectType), mlog.String("object_privilege", ext.objectPrivilege),
+		mlog.FieldDbName(dbName), mlog.String("method", fullMethod))
+
+	e := privilege.GetEnforcer()
+	for _, roleName := range roleNames {
+		isPermit, cached, version := privilege.GetResultCache(roleName, object, ext.objectPrivilege)
+		if !cached {
+			isPermit, err = e.Enforce(roleName, object, ext.objectPrivilege)
+			if err != nil {
+				log.Warn(ctx, "fail to execute permit func for stream", mlog.Err(err))
+				return ctx, err
+			}
+			privilege.SetResultCache(roleName, object, ext.objectPrivilege, isPermit, version)
+		}
+		if isPermit {
+			return ctx, nil
+		}
+	}
+
+	log.Info(ctx, "permission deny for stream", mlog.Strings("roles", roleNames))
+	if password == util.PasswordHolder {
+		username = "apikey user"
+	}
+	return ctx, status.Error(codes.PermissionDenied,
+		fmt.Sprintf("%s: permission deny to %s in the `%s` database", ext.objectPrivilege, username, dbName))
 }
 
 // isCurUserObject Determine whether it is an Object of type User that operates on its own user information,
