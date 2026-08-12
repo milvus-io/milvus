@@ -820,16 +820,20 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 // GenNullableFieldData generates all-null nullable field data.
 // Scalar fields use expanded zero values; vector fields use compact empty data.
 func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schemapb.FieldData, error) {
+	withValidData := func(fieldData *schemapb.FieldData) *schemapb.FieldData {
+		typeutil.SetFieldDataValidData(fieldData, make([]bool, upsertIDSize))
+		return fieldData
+	}
+
 	switch field.DataType {
 	case schemapb.DataType_Bool:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_BoolData{
 						BoolData: &schemapb.BoolArray{
 							Data: make([]bool, upsertIDSize),
@@ -837,17 +841,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Int32:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_IntData{
 						IntData: &schemapb.IntArray{
 							Data: make([]int32, upsertIDSize),
@@ -855,17 +858,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Int64:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_LongData{
 						LongData: &schemapb.LongArray{
 							Data: make([]int64, upsertIDSize),
@@ -873,17 +875,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Float:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_FloatData{
 						FloatData: &schemapb.FloatArray{
 							Data: make([]float32, upsertIDSize),
@@ -891,17 +892,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Double:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_DoubleData{
 						DoubleData: &schemapb.DoubleArray{
 							Data: make([]float64, upsertIDSize),
@@ -909,17 +909,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_VarChar:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_StringData{
 						StringData: &schemapb.StringArray{
 							Data: make([]string, upsertIDSize),
@@ -927,17 +926,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_JSON:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_JsonData{
 						JsonData: &schemapb.JSONArray{
 							Data: make([][]byte, upsertIDSize),
@@ -945,17 +943,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Array:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_ArrayData{
 						ArrayData: &schemapb.ArrayArray{
 							Data:        make([]*schemapb.ScalarField, upsertIDSize),
@@ -964,17 +961,16 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Timestamptz:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_TimestamptzData{
 						TimestamptzData: &schemapb.TimestamptzArray{
 							Data: make([]int64, upsertIDSize),
@@ -982,18 +978,17 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	// the intput data of geometry field is in wkt format
 	case schemapb.DataType_Geometry:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					ValidData: make([]bool, upsertIDSize),
 					Data: &schemapb.ScalarField_GeometryWktData{
 						GeometryWktData: &schemapb.GeometryWktArray{
 							Data: make([]string, upsertIDSize),
@@ -1001,7 +996,7 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	// Nullable vector types
 	case schemapb.DataType_FloatVector:
@@ -1009,105 +1004,99 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					ValidData: make([]bool, upsertIDSize), // all false = all null
-					Dim:       dim,
-					Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{}}},
+				Vectors: &schemapb.VectorField{ // all false = all null
+					Dim:  dim,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{}}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Float16Vector:
 		dim, err := typeutil.GetDim(field)
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					ValidData: make([]bool, upsertIDSize), // all false = all null
-					Dim:       dim,
-					Data:      &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}},
+				Vectors: &schemapb.VectorField{ // all false = all null
+					Dim:  dim,
+					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_BFloat16Vector:
 		dim, err := typeutil.GetDim(field)
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					ValidData: make([]bool, upsertIDSize), // all false = all null
-					Dim:       dim,
-					Data:      &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}},
+				Vectors: &schemapb.VectorField{ // all false = all null
+					Dim:  dim,
+					Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_BinaryVector:
 		dim, err := typeutil.GetDim(field)
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					ValidData: make([]bool, upsertIDSize), // all false = all null
-					Dim:       dim,
-					Data:      &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}},
+				Vectors: &schemapb.VectorField{ // all false = all null
+					Dim:  dim,
+					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_SparseFloatVector:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					ValidData: make([]bool, upsertIDSize), // all false = all null
+				Vectors: &schemapb.VectorField{ // all false = all null
 					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
 						Contents: [][]byte{},
 					}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Int8Vector:
 		dim, err := typeutil.GetDim(field)
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					ValidData: make([]bool, upsertIDSize), // all false = all null
-					Dim:       dim,
-					Data:      &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}},
+				Vectors: &schemapb.VectorField{ // all false = all null
+					Dim:  dim,
+					Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}},
 				},
 			},
-		}, nil
+		}), nil
 
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.DataType.String())
@@ -1133,13 +1122,14 @@ func GenNullableStructArrayFieldData(structField *schemapb.StructArrayFieldSchem
 		validData := make([]bool, rowCount)
 		if typeutil.IsVectorType(subField.GetDataType()) {
 			fieldData.Field = &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{ValidData: validData},
+				Vectors: &schemapb.VectorField{},
 			}
 		} else {
 			fieldData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{ValidData: validData},
+				Scalars: &schemapb.ScalarField{},
 			}
 		}
+		typeutil.SetFieldDataValidData(fieldData, validData)
 		fields = append(fields, fieldData)
 	}
 	return &schemapb.FieldData{

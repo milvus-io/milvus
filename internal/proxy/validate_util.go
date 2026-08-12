@@ -85,7 +85,6 @@ func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
 		FieldName: (*fieldData).GetFieldName(),
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
-				ValidData: validData,
 				Data: &schemapb.ScalarField_GeometryWktData{
 					GeometryWktData: &schemapb.GeometryWktArray{
 						Data: wktArray,
@@ -96,6 +95,7 @@ func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
 		FieldId:   (*fieldData).GetFieldId(),
 		IsDynamic: (*fieldData).GetIsDynamic(),
 	}
+	typeutil.SetFieldDataValidData(*fieldData, validData)
 	return nil
 }
 
@@ -979,13 +979,13 @@ func (v *validateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSc
 		FieldName: field.GetFieldName(),
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
-				ValidData: validData,
-				Data:      &schemapb.ScalarField_GeometryData{GeometryData: &schemapb.GeometryArray{Data: wkbArray}},
+				Data: &schemapb.ScalarField_GeometryData{GeometryData: &schemapb.GeometryArray{Data: wkbArray}},
 			},
 		},
 		FieldId:   field.GetFieldId(),
 		IsDynamic: field.GetIsDynamic(),
 	}
+	typeutil.SetFieldDataValidData(field, validData)
 	return nil
 }
 

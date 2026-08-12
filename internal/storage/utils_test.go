@@ -3512,7 +3512,7 @@ func TestTransferInsertDataToInsertRecord_NullableArrayOfVector(t *testing.T) {
 	for _, fd := range record.FieldsData {
 		if fd.FieldId == 100 {
 			found = true
-			assert.False(t, typeutil.HasFieldDataValidDataConflict(fd))
+			assert.Nil(t, fd.GetValidData())
 			assert.Equal(t, []bool{true, false}, fd.GetVectors().GetValidData())
 			assert.NotNil(t, fd.GetVectors().GetVectorArray())
 			assert.Equal(t, 2, len(fd.GetVectors().GetVectorArray().GetData()))

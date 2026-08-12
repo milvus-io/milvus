@@ -91,7 +91,6 @@ func TestProjectSearchResultValidDataForLegacy(t *testing.T) {
 	for _, field := range []*schemapb.FieldData{outputField, legacyGroupBy, groupBy} {
 		assert.Equal(t, validData, field.GetValidData())
 		assert.Equal(t, validData, field.GetScalars().GetValidData())
-		assert.False(t, typeutil.HasFieldDataValidDataConflict(field))
 	}
 }
 

@@ -48,25 +48,31 @@ func setFieldDataValidData(fd *schemapb.FieldData, validData []bool) {
 	if fd == nil {
 		return
 	}
-	fd.ValidData = nil
-	switch field := fd.Field.(type) {
-	case *schemapb.FieldData_Scalars:
-		if field.Scalars == nil {
-			field.Scalars = &schemapb.ScalarField{}
-		}
-		field.Scalars.ValidData = validData
-	case *schemapb.FieldData_Vectors:
-		if field.Vectors == nil {
-			field.Vectors = &schemapb.VectorField{}
-		}
-		field.Vectors.ValidData = validData
+
+	if scalars := fd.GetScalars(); scalars != nil {
+		scalars.ValidData = validData
+	} else if vectors := fd.GetVectors(); vectors != nil {
+		vectors.ValidData = validData
+	} else {
+		return
 	}
+
+	fd.ValidData = nil
 }
 
-func hasFieldDataValidDataConflict(fd *schemapb.FieldData) bool {
-	if fd == nil {
+func validateAndNormalizeFieldDataValidData(fd *schemapb.FieldData) bool {
+	if !fieldDataValidDataConsistent(fd) {
 		return false
 	}
+	normalizeFieldDataValidData(fd)
+	return true
+}
+
+func fieldDataValidDataConsistent(fd *schemapb.FieldData) bool {
+	if fd == nil {
+		return true
+	}
+
 	legacy := fd.GetValidData()
 	var current []bool
 	if scalars := fd.GetScalars(); scalars != nil {
@@ -75,21 +81,14 @@ func hasFieldDataValidDataConflict(fd *schemapb.FieldData) bool {
 		current = fd.GetVectors().GetValidData()
 	}
 	if len(legacy) > 0 && len(current) > 0 && !slices.Equal(legacy, current) {
-		return true
-	}
-	for _, subField := range fd.GetStructArrays().GetFields() {
-		if hasFieldDataValidDataConflict(subField) {
-			return true
-		}
-	}
-	return false
-}
-
-func validateAndNormalizeFieldDataValidData(fd *schemapb.FieldData) bool {
-	if hasFieldDataValidDataConflict(fd) {
 		return false
 	}
-	normalizeFieldDataValidData(fd)
+
+	for _, subField := range fd.GetStructArrays().GetFields() {
+		if !fieldDataValidDataConsistent(subField) {
+			return false
+		}
+	}
 	return true
 }
 

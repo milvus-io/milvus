@@ -307,7 +307,7 @@ func (s *ArraySuite) TestNullableFieldDataValidity() {
 	s.Require().NoError(column.AppendNull())
 
 	fd := column.FieldData()
-	s.False(hasFieldDataValidDataConflict(fd))
+	s.Nil(fd.GetValidData())
 	s.Equal([]bool{true, false}, fd.GetScalars().GetValidData())
 }
 

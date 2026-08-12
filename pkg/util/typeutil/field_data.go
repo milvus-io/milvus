@@ -7,6 +7,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// FieldData valid_data is handled in three stages:
+//   - At an input boundary, ValidateAndNormalizeFieldDataValidData validates
+//     that the legacy and field-specific values do not conflict, then keeps
+//     only the field-specific representation.
+//   - Internal code uses GetFieldDataValidData and SetFieldDataValidData to
+//     process validity without depending on where it is physically stored.
+//   - At a user-facing response boundary,
+//     ProjectFieldDataValidDataForLegacy restores the legacy representation
+//     while retaining the field-specific value for SDK compatibility.
+
 // GetFieldDataValidData returns the validity of the immediate values carried by
 // FieldData. New payloads store it on ScalarField or VectorField; FieldData is
 // retained as a legacy fallback for older payloads.
@@ -14,13 +24,7 @@ func GetFieldDataValidData(fieldData *schemapb.FieldData) []bool {
 	if legacy := fieldData.GetValidData(); len(legacy) > 0 {
 		return legacy
 	}
-	var current []bool
-	if scalars := fieldData.GetScalars(); scalars != nil {
-		current = scalars.GetValidData()
-	} else if vectors := fieldData.GetVectors(); vectors != nil {
-		current = vectors.GetValidData()
-	}
-	return current
+	return getFieldSpecificValidData(fieldData)
 }
 
 // SetFieldDataValidData writes validity to the current field-specific location
@@ -29,41 +33,16 @@ func SetFieldDataValidData(fieldData *schemapb.FieldData, validData []bool) {
 	if fieldData == nil {
 		return
 	}
+
+	if scalars := fieldData.GetScalars(); scalars != nil {
+		scalars.ValidData = validData
+	} else if vectors := fieldData.GetVectors(); vectors != nil {
+		vectors.ValidData = validData
+	} else {
+		return
+	}
+
 	fieldData.ValidData = nil
-	switch field := fieldData.Field.(type) {
-	case *schemapb.FieldData_Scalars:
-		if field.Scalars == nil {
-			field.Scalars = &schemapb.ScalarField{}
-		}
-		field.Scalars.ValidData = validData
-	case *schemapb.FieldData_Vectors:
-		if field.Vectors == nil {
-			field.Vectors = &schemapb.VectorField{}
-		}
-		field.Vectors.ValidData = validData
-	}
-}
-
-// HasFieldDataValidDataConflict reports whether the legacy and current
-// validity locations are both populated with different values. Struct fields
-// are checked recursively.
-func HasFieldDataValidDataConflict(fieldData *schemapb.FieldData) bool {
-	if fieldData == nil {
-		return false
-	}
-
-	legacy := fieldData.GetValidData()
-	current := getFieldSpecificValidData(fieldData)
-	if len(legacy) > 0 && len(current) > 0 && !slices.Equal(legacy, current) {
-		return true
-	}
-
-	for _, subField := range fieldData.GetStructArrays().GetFields() {
-		if HasFieldDataValidDataConflict(subField) {
-			return true
-		}
-	}
-	return false
 }
 
 // ValidateAndNormalizeFieldDataValidData checks the legacy and current
@@ -71,33 +50,30 @@ func HasFieldDataValidDataConflict(fieldData *schemapb.FieldData) bool {
 // and normalized to the current field-specific location. It returns false if
 // any immediate or nested FieldData carries different values in both places.
 func ValidateAndNormalizeFieldDataValidData(fieldData *schemapb.FieldData) bool {
-	if HasFieldDataValidDataConflict(fieldData) {
+	if !fieldDataValidDataConsistent(fieldData) {
 		return false
 	}
 	normalizeFieldDataValidData(fieldData)
 	return true
 }
 
-// ProjectFieldDataValidDataForLegacy copies current top-level validity to the
-// legacy location without clearing the current value. This is intended only
-// for user-facing response boundaries so old SDKs can read the validity mask.
-func ProjectFieldDataValidDataForLegacy(fieldData *schemapb.FieldData) {
+func fieldDataValidDataConsistent(fieldData *schemapb.FieldData) bool {
 	if fieldData == nil {
-		return
+		return true
 	}
-	if validData := getFieldSpecificValidData(fieldData); len(validData) > 0 {
-		fieldData.ValidData = slices.Clone(validData)
-	}
-	for _, subField := range fieldData.GetStructArrays().GetFields() {
-		ProjectFieldDataValidDataForLegacy(subField)
-	}
-}
 
-func getFieldSpecificValidData(fieldData *schemapb.FieldData) []bool {
-	if scalars := fieldData.GetScalars(); scalars != nil {
-		return scalars.GetValidData()
+	legacy := fieldData.GetValidData()
+	current := getFieldSpecificValidData(fieldData)
+	if len(legacy) > 0 && len(current) > 0 && !slices.Equal(legacy, current) {
+		return false
 	}
-	return fieldData.GetVectors().GetValidData()
+
+	for _, subField := range fieldData.GetStructArrays().GetFields() {
+		if !fieldDataValidDataConsistent(subField) {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeFieldDataValidData(fieldData *schemapb.FieldData) {
@@ -120,6 +96,28 @@ func normalizeFieldDataValidData(fieldData *schemapb.FieldData) {
 	default:
 		fieldData.ValidData = nil
 	}
+}
+
+// ProjectFieldDataValidDataForLegacy copies current top-level validity to the
+// legacy location without clearing the current value. This is intended only
+// for user-facing response boundaries so old SDKs can read the validity mask.
+func ProjectFieldDataValidDataForLegacy(fieldData *schemapb.FieldData) {
+	if fieldData == nil {
+		return
+	}
+	if validData := getFieldSpecificValidData(fieldData); len(validData) > 0 {
+		fieldData.ValidData = slices.Clone(validData)
+	}
+	for _, subField := range fieldData.GetStructArrays().GetFields() {
+		ProjectFieldDataValidDataForLegacy(subField)
+	}
+}
+
+func getFieldSpecificValidData(fieldData *schemapb.FieldData) []bool {
+	if scalars := fieldData.GetScalars(); scalars != nil {
+		return scalars.GetValidData()
+	}
+	return fieldData.GetVectors().GetValidData()
 }
 
 type FieldDataBuilder struct {

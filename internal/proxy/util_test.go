@@ -6109,7 +6109,7 @@ func TestCheckAndFlattenStructFieldData_ValidDataCopied(t *testing.T) {
 		if fd.FieldName == transformedName {
 			found = true
 			assert.Equal(t, validData, typeutil.GetFieldDataValidData(fd), "ValidData should be preserved in flattened sub-field")
-			assert.False(t, typeutil.HasFieldDataValidDataConflict(fd), "flattened sub-field should have one ValidData source")
+			assert.Nil(t, fd.GetValidData(), "flattened sub-field should use only field-specific ValidData")
 			break
 		}
 	}

@@ -58,7 +58,7 @@ func (s *NullableScalarSuite) TestBasic() {
 
 		fd := column.FieldData()
 		s.Equal(validData, getFieldDataValidData(fd))
-		s.False(hasFieldDataValidDataConflict(fd))
+		s.Nil(fd.GetValidData())
 		result, err := FieldDataColumn(fd, 0, -1)
 		s.NoError(err)
 		parsed, ok := result.(*ColumnBool)

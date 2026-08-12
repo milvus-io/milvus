@@ -2317,7 +2317,7 @@ func (s *ConverterSuite) TestNullableRoundTrip_WithNulls() {
 	s.Require().Len(exported.FieldsData, 1)
 	s.Require().NotNil(typeutil.GetFieldDataValidData(exported.FieldsData[0]))
 	s.Equal([]bool{true, false, true}, typeutil.GetFieldDataValidData(exported.FieldsData[0]))
-	s.False(typeutil.HasFieldDataValidDataConflict(exported.FieldsData[0]))
+	s.Nil(exported.FieldsData[0].GetValidData())
 
 	// Verify data values
 	longData := exported.FieldsData[0].GetScalars().GetLongData().GetData()

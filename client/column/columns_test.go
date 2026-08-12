@@ -144,6 +144,26 @@ func TestFieldDataColumnValidDataSources(t *testing.T) {
 	}
 }
 
+func TestValidateAndNormalizeFieldDataValidDataRejectsNestedMismatch(t *testing.T) {
+	legacy := []bool{true, false}
+	current := []bool{false, true}
+	subField := &schemapb.FieldData{
+		ValidData: legacy,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{ValidData: current},
+		},
+	}
+	field := &schemapb.FieldData{
+		Field: &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{subField}},
+		},
+	}
+
+	assert.False(t, validateAndNormalizeFieldDataValidData(field))
+	assert.Equal(t, legacy, subField.GetValidData())
+	assert.Equal(t, current, subField.GetScalars().GetValidData())
+}
+
 func TestGetIntData(t *testing.T) {
 	type testCase struct {
 		tag      string

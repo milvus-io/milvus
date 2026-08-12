@@ -2278,11 +2278,11 @@ func buildStructArrayFieldDataInternal(structSchema *schemapb.StructArrayFieldSc
 				FieldId:   sub.GetFieldID(),
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
-						ValidData: validData,
-						Data:      &schemapb.ScalarField_ArrayData{ArrayData: arrayArray},
+						Data: &schemapb.ScalarField_ArrayData{ArrayData: arrayArray},
 					},
 				},
 			})
+			typeutil.SetFieldDataValidData(subFieldData[len(subFieldData)-1], validData)
 		case schemapb.DataType_ArrayOfVector:
 			dim, err := getDim(sub)
 			if err != nil {
@@ -2312,14 +2312,14 @@ func buildStructArrayFieldDataInternal(structSchema *schemapb.StructArrayFieldSc
 				FieldId:   sub.GetFieldID(),
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
-						ValidData: validData,
-						Dim:       dim,
+						Dim: dim,
 						Data: &schemapb.VectorField_VectorArray{
 							VectorArray: vecArray,
 						},
 					},
 				},
 			})
+			typeutil.SetFieldDataValidData(subFieldData[len(subFieldData)-1], validData)
 		default:
 			return nil, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field data type: %s", sub.GetDataType())
 		}
