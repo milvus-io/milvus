@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
+	"github.com/milvus-io/milvus/internal/datanode/importv3"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/types"
@@ -82,6 +83,7 @@ type DataNode struct {
 	syncMgr         syncmgr.SyncManager
 	importTaskMgr   importv2.TaskManager
 	importScheduler importv2.Scheduler
+	importV3TaskMgr *importv3.TaskManager
 
 	// indexnode related
 	storageFactory StorageFactory
@@ -217,6 +219,7 @@ func (node *DataNode) Init() error {
 
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)
+		node.importV3TaskMgr = importv3.NewTaskManagerWithContext(node.ctx)
 
 		err := index.InitSegcore(serverID)
 		if err != nil {
@@ -304,6 +307,10 @@ func (node *DataNode) Stop() error {
 		// https://github.com/milvus-io/milvus/issues/12282
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		node.lifetime.Wait()
+
+		if node.importV3TaskMgr != nil {
+			node.importV3TaskMgr.Close()
+		}
 
 		if node.syncMgr != nil {
 			err := node.syncMgr.Close()

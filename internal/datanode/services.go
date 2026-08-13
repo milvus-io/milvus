@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
+	"github.com/milvus-io/milvus/internal/datanode/importv3"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -814,6 +815,22 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 			return merr.Status(err), nil
 		}
 		return node.ImportV2(ctx, req)
+	case taskcommon.Reshard:
+		req := &datapb.ReshardTaskRequest{}
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		return node.createImportV3WorkerTask(ctx, req.GetTaskId(), req.GetRunId(), func(runCtx context.Context, runID int64) (*importv3.Result, error) {
+			return node.executeReshardTask(runCtx, req, runID)
+		})
+	case taskcommon.ImportV3:
+		req := &datapb.ImportTaskV3Request{}
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		return node.createImportV3WorkerTask(ctx, req.GetTaskId(), req.GetRunId(), func(runCtx context.Context, runID int64) (*importv3.Result, error) {
+			return node.executeImportTaskV3(runCtx, req, runID)
+		})
 	case taskcommon.Compaction:
 		req := &datapb.CompactionPlan{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -933,6 +950,10 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendTaskState(taskcommon.FromImportState(resp.GetState()))
 		resProperties.AppendReason(resp.GetReason())
 		return wrapQueryTaskResult(resp, resProperties)
+	case taskcommon.Reshard:
+		return node.queryImportV3WorkerTask(ctx, taskID, reqProperties.GetTaskVersion(), taskcommon.Reshard)
+	case taskcommon.ImportV3:
+		return node.queryImportV3WorkerTask(ctx, taskID, reqProperties.GetTaskVersion(), taskcommon.ImportV3)
 	case taskcommon.Compaction:
 		resp, err := node.GetCompactionState(ctx, &datapb.CompactionStateRequest{PlanID: taskID})
 		if err != nil {
@@ -1059,6 +1080,8 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 	switch taskType {
 	case taskcommon.PreImport, taskcommon.Import:
 		return node.DropImport(ctx, &datapb.DropImportRequest{TaskID: taskID})
+	case taskcommon.Reshard, taskcommon.ImportV3:
+		return node.dropImportV3WorkerTask(taskID, properties.GetTaskVersion())
 	case taskcommon.CopySegment:
 		return node.DropCopySegment(ctx, &datapb.DropCopySegmentRequest{TaskID: taskID})
 	case taskcommon.Compaction:
