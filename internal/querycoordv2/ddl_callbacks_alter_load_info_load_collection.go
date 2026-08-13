@@ -163,7 +163,7 @@ func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
 	return message.NewAlterLoadConfigMessageBuilderV2().
 		WithHeader(header).
 		WithBody(&messagespb.AlterLoadConfigMessageBody{}).
-		WithBroadcast(collectionLoadConfigBroadcastChannels(coll), message.OptBuildBroadcastAckSyncUp()).
+		WithBroadcast([]string{loadConfigBroadcastChannel()}).
 		MustBuildBroadcast(), nil
 }
 
@@ -284,11 +284,8 @@ func sortedInt64s(values []int64) []int64 {
 	return out
 }
 
-func collectionLoadConfigBroadcastChannels(coll *milvuspb.DescribeCollectionResponse) []string {
-	channels := make([]string, 0, len(coll.GetVirtualChannelNames())+1)
-	channels = append(channels, streaming.WAL().ControlChannel())
-	channels = append(channels, coll.GetVirtualChannelNames()...)
-	return channels
+func loadConfigBroadcastChannel() string {
+	return streaming.WAL().ControlChannel()
 }
 
 // getDefaultResourceGroupsAndReplicaNumber gets the default resource groups and replica number for the collection.

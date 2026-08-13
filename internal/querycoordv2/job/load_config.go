@@ -32,11 +32,11 @@ import (
 )
 
 type AlterLoadConfigRequest struct {
-	Meta              *meta.Meta
-	CollectionInfo    *milvuspb.DescribeCollectionResponse
-	BroadcastChannels []string
-	Expected          ExpectedLoadConfig
-	Current           CurrentLoadConfig
+	Meta           *meta.Meta
+	CollectionInfo *milvuspb.DescribeCollectionResponse
+	ControlChannel string
+	Expected       ExpectedLoadConfig
+	Current        CurrentLoadConfig
 }
 
 // CheckIfLoadPartitionsExecutable checks if the load partitions is executable.
@@ -168,7 +168,7 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 	return message.NewAlterLoadConfigMessageBuilderV2().
 		WithHeader(header).
 		WithBody(&messagespb.AlterLoadConfigMessageBody{}).
-		WithBroadcast(req.BroadcastChannels, message.OptBuildBroadcastAckSyncUp()).
+		WithBroadcast([]string{req.ControlChannel}).
 		MustBuildBroadcast(), nil
 }
 

@@ -25,8 +25,8 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
 | Flush *(SelfControlled)* | Single VChannel | No | — |
 | ManualFlush | Single VChannel | Yes (VChannel) | — |
-| AlterLoadConfig | Broadcast: VChannels + CChannel (AckSyncUp) | No | SharedDBName + ExclusiveCollectionName |
-| DropLoadConfig | Broadcast: VChannels + CChannel (AckSyncUp) | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
+| AlterLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
+| DropLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
 | RefreshExternalCollection | Broadcast: CChannel | No | — |
 
@@ -43,8 +43,8 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
 - **ManualFlush**: Seals all growing segments for a collection on a VChannel.
-- **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. Broadcasts to all collection VChannels plus the CChannel with AckSyncUp. StreamingNode consumes the VChannel copies to persist vchannel load state; QueryView state machines later drive StreamingNode resource loading through `Acquire`.
-- **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Broadcasts to all collection VChannels plus the CChannel with AckSyncUp. Uses ExclusiveCluster when part of DropCollection flow.
+- **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. Broadcasts only to the CChannel and uses append-result FastAck. The callback persists the desired load config in QueryCoord; the Balancer expands shards from DataView, and QueryView state machines drive StreamingNode resource loading through `Acquire`.
+- **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Broadcasts only to the CChannel and uses append-result FastAck. Uses ExclusiveCluster when part of DropCollection flow.
 - **BatchUpdateManifest**: Updates segment manifest versions in batch. Used after compaction or index building. CChannel-only.
 - **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. CChannel-only.
 

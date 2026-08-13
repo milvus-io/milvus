@@ -61,10 +61,10 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 		partitionIDsSet.Insert(partition)
 	}
 	alterLoadConfigReq := &job.AlterLoadConfigRequest{
-		Meta:              s.meta,
-		CollectionInfo:    coll,
-		BroadcastChannels: collectionLoadConfigBroadcastChannels(coll),
-		Current:           s.getCurrentLoadConfig(ctx, req.GetCollectionID()),
+		Meta:           s.meta,
+		CollectionInfo: coll,
+		ControlChannel: loadConfigBroadcastChannel(),
+		Current:        s.getCurrentLoadConfig(ctx, req.GetCollectionID()),
 		Expected: job.ExpectedLoadConfig{
 			ExpectedPartitionIDs:             partitionIDsSet.Collect(),
 			ExpectedReplicaNumber:            expectedReplicasNumber,

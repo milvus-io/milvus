@@ -140,9 +140,6 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	}
 	loadManager := loadmgr.NewCollectionLoadManager(
 		loadConfigStore,
-		func(shardID qviews.ShardID) {
-			shardViewRegistry.Ensure(shardID)
-		},
 		func(collectionID int64) {
 			balancerController.Trigger(balancer.TriggerScope{DirtyCollections: []int64{collectionID}})
 		},

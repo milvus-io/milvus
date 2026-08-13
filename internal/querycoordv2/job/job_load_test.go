@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -69,6 +70,26 @@ func (suite *LoadCollectionJobSuite) buildBroadcastResult(collectionID int64, pa
 			controlChannel: {},
 		},
 	}
+}
+
+func (suite *LoadCollectionJobSuite) TestGenerateAlterLoadConfigMessageUsesControlChannelWithoutAckSyncUp() {
+	controlChannel := funcutil.GetControlChannel("test")
+	msg, err := GenerateAlterLoadConfigMessage(context.Background(), &AlterLoadConfigRequest{
+		CollectionInfo: &milvuspb.DescribeCollectionResponse{
+			DbId:         10,
+			CollectionID: 100,
+		},
+		ControlChannel: controlChannel,
+		Expected: ExpectedLoadConfig{
+			ExpectedPartitionIDs:  []int64{20},
+			ExpectedReplicaNumber: map[string]int{},
+		},
+	})
+
+	suite.NoError(err)
+	suite.NotNil(msg)
+	suite.Equal([]string{controlChannel}, msg.BroadcastHeader().VChannels)
+	suite.False(msg.BroadcastHeader().AckSyncUp)
 }
 
 // TestDescribeCollectionNotFound tests that Execute returns nil when the collection is not found.
