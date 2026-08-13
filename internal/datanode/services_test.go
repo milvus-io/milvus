@@ -43,6 +43,7 @@ import (
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
@@ -1916,4 +1917,60 @@ func TestChunkManagerFailureDoesNotLogStorageAccessKey(t *testing.T) {
 
 	assert.NotContains(t, logs.String(), accessKey)
 	assert.Contains(t, logs.String(), "audit-bucket")
+}
+
+func TestLegacyAvailableSlotsFoldsWorstDimension(t *testing.T) {
+	paramtable.Init()
+
+	// Memory is 90% consumed while CPU is only 10% consumed. The folded
+	// scalar must follow the worse dimension so an old coordinator sees the
+	// node as full early rather than late.
+	snap := resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 1, Memory: 900},
+	}
+
+	assert.Equal(t, int64(12), legacyAvailableSlots(snap, 128))
+}
+
+func TestLegacyAvailableSlotsZeroWhenFrozen(t *testing.T) {
+	paramtable.Init()
+
+	snap := resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 0, Memory: 0},
+		Frozen:   true,
+	}
+
+	assert.Equal(t, int64(0), legacyAvailableSlots(snap, 128))
+}
+
+func TestLegacyAvailableSlotsNeverNegative(t *testing.T) {
+	paramtable.Init()
+
+	snap := resource.Snapshot{
+		Total:    taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved: taskresource.Capacity{CPU: 50, Memory: 5000},
+	}
+
+	assert.Equal(t, int64(0), legacyAvailableSlots(snap, 128))
+}
+
+// TestLegacyAvailableSlotsZeroWhenExclusive guards Resolution 1: an oversized
+// task running alone must read as a full node even though Reserved is tiny
+// relative to Total here -- the utilisation formula alone would report the
+// node as nearly empty (util=0.1, ~115 slots free). Node capacity is runtime
+// config and can grow after the oversized task is admitted, which can pull
+// its ratio back under 1; ExclusiveTaskID must be checked explicitly so the
+// scalar does not depend on that race.
+func TestLegacyAvailableSlotsZeroWhenExclusive(t *testing.T) {
+	paramtable.Init()
+
+	snap := resource.Snapshot{
+		Total:           taskresource.Capacity{CPU: 10, Memory: 1000},
+		Reserved:        taskresource.Capacity{CPU: 1, Memory: 10},
+		ExclusiveTaskID: 42,
+	}
+
+	assert.Equal(t, int64(0), legacyAvailableSlots(snap, 128))
 }

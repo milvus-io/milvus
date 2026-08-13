@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/index"
+	"github.com/milvus-io/milvus/internal/datanode/resource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -190,30 +191,36 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 	}
 	defer node.lifetime.Done()
 
-	var (
-		totalSlots     = index.CalculateNodeSlots()
-		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
-		compactionUsed = node.compactionExecutor.Slots()
-		importUsed     = node.importScheduler.Slots()
-	)
+	snap := resource.GetGuard().Snapshot()
+	legacyTotal := index.CalculateNodeSlots()
+	available := legacyAvailableSlots(snap, legacyTotal)
 
-	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed
-	if availableSlots < 0 {
-		availableSlots = 0
+	// A sustained watermark freeze can leave tasks parked in Acquire
+	// indefinitely (Acquire only returns on ctx cancellation), reporting
+	// nothing to DataCoord. The log line makes that state unmistakable so an
+	// operator does not mistake it for "genuinely busy": both otherwise read
+	// as availableSlots=0.
+	if snap.Frozen {
+		mlog.Warn(ctx, "query slots done: node frozen by memory watermark, reporting zero available slots",
+			mlog.Int64("legacyTotalSlots", legacyTotal),
+			mlog.Int64("reservedMemoryMiB", snap.Reserved.Memory>>20),
+			mlog.Int64("budgetMemoryMiB", snap.Total.Memory>>20),
+			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20))
+	} else {
+		mlog.Info(ctx, "query slots done",
+			mlog.Int64("legacyTotalSlots", legacyTotal),
+			mlog.Int64("legacyAvailableSlots", available),
+			mlog.Float64("reservedCPU", snap.Reserved.CPU),
+			mlog.Int64("reservedMemoryMiB", snap.Reserved.Memory>>20),
+			mlog.Int64("budgetMemoryMiB", snap.Total.Memory>>20),
+			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20),
+			mlog.Int64("exclusiveTaskID", snap.ExclusiveTaskID))
 	}
-
-	mlog.Info(ctx, "query slots done",
-		mlog.Int64("totalSlots", totalSlots),
-		mlog.Int64("availableSlots", availableSlots),
-		mlog.Int64("indexStatsUsed", indexStatsUsed),
-		mlog.Int64("compactionUsed", compactionUsed),
-		mlog.Int64("importUsed", importUsed),
-	)
 
 	return &workerpb.GetJobStatsResponse{
 		Status:         merr.Success(),
-		TotalSlots:     totalSlots,
-		AvailableSlots: availableSlots,
+		TotalSlots:     legacyTotal,
+		AvailableSlots: available,
 	}, nil
 }
 
