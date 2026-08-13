@@ -5793,6 +5793,14 @@ type dataCoordConfig struct {
 	ResourceClusteringMinMemory   ParamItem `refreshable:"true"`
 	ResourceClusteringMaxMemory   ParamItem `refreshable:"true"`
 	ResourceArrowExpansionFactor  ParamItem `refreshable:"true"`
+
+	ResourceIndexBuildFactorDefault ParamItem `refreshable:"true"`
+	ResourceIndexBuildCPU           ParamItem `refreshable:"true"`
+	ResourceIndexDecodeWindow       ParamItem `refreshable:"true"`
+	ResourceTextIndexFactor         ParamItem `refreshable:"true"`
+	ResourceJSONKeyIndexFactor      ParamItem `refreshable:"true"`
+	ResourceAnalyzeFactor           ParamItem `refreshable:"true"`
+	ResourceAnalyzeMaxMemory        ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -7516,6 +7524,69 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Export:       true,
 	}
 	p.ResourceArrowExpansionFactor.Init(base.mgr)
+
+	p.ResourceIndexBuildFactorDefault = ParamItem{
+		Key:          "dataCoord.resource.indexBuildMemoryFactorDefault",
+		Version:      "3.0.0",
+		DefaultValue: "1.5",
+		Doc:          "build-stage memory multiplier over raw field size for index types not in the built-in factor table",
+		Export:       true,
+	}
+	p.ResourceIndexBuildFactorDefault.Init(base.mgr)
+
+	p.ResourceIndexBuildCPU = ParamItem{
+		Key:          "dataCoord.resource.indexBuildCPU",
+		Version:      "3.0.0",
+		DefaultValue: "1.0",
+		Doc:          "CPU cores charged per index build task; knowhere's build parallelism is fixed by its own pool, so this does not scale with data volume",
+		Export:       true,
+	}
+	p.ResourceIndexBuildCPU.Init(base.mgr)
+
+	p.ResourceIndexDecodeWindow = ParamItem{
+		Key:          "dataCoord.resource.indexBuildDecodeWindow",
+		Version:      "3.0.0",
+		DefaultValue: "67108864",
+		Doc:          "extra in-flight decode window (in bytes) added to storage-v3 index build memory on top of the retained column",
+		Export:       true,
+	}
+	p.ResourceIndexDecodeWindow.Init(base.mgr)
+
+	p.ResourceTextIndexFactor = ParamItem{
+		Key:          "dataCoord.resource.textIndexMemoryFactor",
+		Version:      "3.0.0",
+		DefaultValue: "2.0",
+		Doc:          "memory per byte of touched field for text-index stats sub-jobs",
+		Export:       true,
+	}
+	p.ResourceTextIndexFactor.Init(base.mgr)
+
+	p.ResourceJSONKeyIndexFactor = ParamItem{
+		Key:          "dataCoord.resource.jsonKeyIndexMemoryFactor",
+		Version:      "3.0.0",
+		DefaultValue: "2.0",
+		Doc:          "memory per byte of touched field for json-key-index stats sub-jobs",
+		Export:       true,
+	}
+	p.ResourceJSONKeyIndexFactor.Init(base.mgr)
+
+	p.ResourceAnalyzeFactor = ParamItem{
+		Key:          "dataCoord.resource.analyzeMemoryFactor",
+		Version:      "3.0.0",
+		DefaultValue: "1.0",
+		Doc:          "memory per byte of input granted to the analyze (kmeans training) task",
+		Export:       true,
+	}
+	p.ResourceAnalyzeFactor.Init(base.mgr)
+
+	p.ResourceAnalyzeMaxMemory = ParamItem{
+		Key:          "dataCoord.resource.analyzeMaxMemory",
+		Version:      "3.0.0",
+		DefaultValue: "4294967296",
+		Doc:          "upper bound in bytes of the analyze task memory grant",
+		Export:       true,
+	}
+	p.ResourceAnalyzeMaxMemory.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
