@@ -384,12 +384,15 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 				return
 			}
 		}
-		if err := publishImportV3Segments(c.ctx, c.meta, tasks); err != nil {
-			log.Warn(c.ctx, "publish import v3 segments failed", mlog.Err(err))
-			return
-		}
 		if err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_IndexBuilding)); err != nil {
 			log.Warn(c.ctx, "advance import v3 job to IndexBuilding failed", mlog.Err(err))
+			return
+		}
+		// IndexBuilding is the durable accepted-result gate.  Publish the
+		// accepted segments only after that marker is persisted; recovery from
+		// IndexBuilding will retry this idempotently if the process stops here.
+		if err := publishImportV3Segments(c.ctx, c.meta, tasks); err != nil {
+			log.Warn(c.ctx, "publish import v3 segments failed", mlog.Err(err))
 		}
 		return
 	}
@@ -510,13 +513,26 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
 	if job.GetImportTaskVersion() == msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3 {
 		tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskV3Type), WithJob(job.GetJobID()))
+		// Recovery may enter IndexBuilding after the durable job marker but
+		// before every accepted segment has cleared its invisible gate.
+		if err := publishImportV3Segments(c.ctx, c.meta, tasks); err != nil {
+			log.Warn(c.ctx, "recover publish of import v3 segments failed", mlog.Err(err))
+			return
+		}
 		segmentIDs := make([]int64, 0)
 		for _, task := range tasks {
 			for _, segmentID := range task.(*importTaskV3).task.Load().GetOutputSegmentIds() {
 				segment := c.meta.GetHealthySegment(c.ctx, segmentID)
-				if segment != nil && segment.GetNumOfRows() > 0 {
-					segmentIDs = append(segmentIDs, segmentID)
+				if segment == nil || segment.GetNumOfRows() == 0 {
+					continue
 				}
+				// The accepted-result gate is cleared only after the job's
+				// IndexBuilding marker is durable.  Do not enqueue index work for
+				// a segment while recovery still needs to publish it.
+				if segment.GetIsInvisible() {
+					return
+				}
+				segmentIDs = append(segmentIDs, segmentID)
 			}
 		}
 		healthySegments := c.meta.GetSegments(segmentIDs, isSegmentHealthy)
