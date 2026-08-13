@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 func TestDropLoadConfigV2AckCallbackUpdatesQViewsRuntime(t *testing.T) {
@@ -72,18 +73,16 @@ func TestDropLoadConfigV2AckCallbackUpdatesQViewsRuntime(t *testing.T) {
 }
 
 func buildDropLoadConfigBroadcastResult(collectionID int64) message.BroadcastResultDropLoadConfigMessageV2 {
+	controlChannel := funcutil.GetControlChannel("test")
 	broadcastMsg := message.NewDropLoadConfigMessageBuilderV2().
 		WithHeader(&messagespb.DropLoadConfigMessageHeader{
 			CollectionId: collectionID,
 		}).
 		WithBody(&messagespb.DropLoadConfigMessageBody{}).
-		WithBroadcast([]string{"v0", "v1"}).
+		WithBroadcast([]string{controlChannel}).
 		MustBuildBroadcast()
 	return message.BroadcastResultDropLoadConfigMessageV2{
 		Message: message.MustAsBroadcastDropLoadConfigMessageV2(broadcastMsg),
-		Results: map[string]*message.AppendResult{
-			"v0": {},
-			"v1": {},
-		},
+		Results: map[string]*message.AppendResult{controlChannel: {}},
 	}
 }

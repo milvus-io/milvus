@@ -49,8 +49,7 @@ DDL Callbacks (WAL message acknowledgment)
 │  │  • ETCD persistence      │ │    across all shards     │  │
 │  └──────────────────────────┘ └──────────────────────────┘  │
 │  CollectionLoadManager lives in loadmgr and connects DDL     │
-│  broadcast results to LoadConfigStore, ShardEnsurer, and     │
-│  Balancer.                                                   │
+│  broadcast results to LoadConfigStore and Balancer.          │
 │                                                              │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐            │
 │  │ShardViewMgr │ │ShardViewMgr │ │ShardViewMgr │  ...       │
@@ -232,7 +231,6 @@ loadmgr.CollectionLoadManager
 │   ├── Replica RG constraints (persisted, embedded in LoadConfig)
 │   └── Full-config writes with orphan cleanup
 │
-├── ShardEnsurer             ← uses broadcast result vchannels
 └── DirtyCollectionNotifier  ← injected balancer trigger callback
 ```
 
@@ -341,8 +339,7 @@ disappear when the shard no longer references that node.
 ```go
 type CollectionLoadManager interface {
     // Facade parses the WAL ack broadcast result, calls LoadConfigStore.Put,
-    // ensures shard managers for the vchannels acknowledged by the broadcast,
-    // and triggers Balancer. No CollectionShardProvider is needed.
+    // and triggers Balancer. Balancer derives shards from DataView.
     UpdateLoadConfig(ctx context.Context, result message.BroadcastResultAlterLoadConfigMessageV2) error
     ReleaseCollection(ctx context.Context, msg *messagespb.DropLoadConfigMessageHeader) error
 }
@@ -351,18 +348,13 @@ type CollectionLoadManager interface {
 **DDL callback integration**:
 
 ```
-// Before (legacy):
-WAL ack → LoadCollectionJob → CollectionManager.PutCollection() + ReplicaManager.Spawn()
-
-// After (new):
-WAL ack of collection-vchannel AlterLoadConfig broadcast
+WAL ack of CChannel AlterLoadConfig broadcast
         → CollectionLoadManager.UpdateLoadConfig(result)
          ├── parse result.Message.Header() → LoadConfig
          ├── LoadConfigStore.Put(fullCfg)  // full write + orphan cleanup
-         ├── ShardViewRegistry.Ensure(replicaID, vchannel) for result vchannels
          └── Balancer.Trigger(DirtyCollections: [collID])
 
-WAL ack of collection-vchannel DropLoadConfig broadcast
+WAL ack of CChannel DropLoadConfig broadcast
         → CollectionLoadManager.ReleaseCollection(msg.Header())
          ├── LoadConfigStore.Remove(collID)
          └── Balancer.Trigger(DirtyCollections: [collID])
@@ -370,11 +362,10 @@ WAL ack of collection-vchannel DropLoadConfig broadcast
          // sees "desired absent + current exists" → actionRelease
 ```
 
-`AlterLoadConfig` and `DropLoadConfig` are broadcast to all vchannels of the collection,
-not only to CChannel. Coord still uses the broadcast completion callback to update
-`CollectionLoadManager`. StreamingNode does not persist a vchannel-local load config;
-QueryView metadata identifies the versioned load info used when the local state machine
-acquires resources.
+`AlterLoadConfig` and `DropLoadConfig` are CChannel-only broadcasts. Coord uses the
+broadcast completion callback to update `CollectionLoadManager`. StreamingNode does not
+persist a vchannel-local load config; QueryView metadata identifies the versioned load
+info used when the local state machine acquires resources.
 
 **Release semantics (Option A)**: `ReleaseCollection` immediately removes the LoadConfig and triggers Balancer. Orphan views (view exists but no config) are naturally detected by reconcile Phase 1 and released via `RequestRelease`. No "releasing" state needed. Crash recovery is handled uniformly by reconcile.
 
@@ -966,9 +957,9 @@ rebuilding it per shard, or double-counting the replacement view.
 ### 5.2 Load Collection
 
 ```
-1. Load RPC → broadcast AlterLoadConfigMessage to all collection vchannels → WAL ack
+1. Load RPC → broadcast AlterLoadConfigMessage to CChannel → append-result FastAck
 2. DDL callback: CollectionLoadManager.UpdateLoadConfig(result)
-   → persist load config + ensure result vchannel ShardViewManagers + Trigger(DirtyCollections: [C1])
+   → persist load config + Trigger(DirtyCollections: [C1])
 3. Balancer resolves C1, reads only its DataView and resident ShardStats, and
    expands its DataView shards across the configured replicas
 4. policy.Plan(snap, [shards of C1]):
@@ -1001,7 +992,7 @@ rebuilding it per shard, or double-counting the replacement view.
 | Balancer | Single goroutine reconcile loop. `Trigger()` is thread-safe (enqueue only). |
 | SnapshotBuilder | Row-count ledger is owned by the serialized reconcile loop; a separate mutex protects observer-written dirty shard marks. |
 | BalancePolicy | Stateless pure function; receives immutable snapshot. Thread-safe by definition. |
-| CollectionLoadManager | Delegates desired-state mutation to LoadConfigStore (RWMutex); shard creation is an injected callback. |
+| CollectionLoadManager | Delegates desired-state mutation to LoadConfigStore (RWMutex). |
 | ShardViewRegistry | RWMutex protects resident managers, stats, reverse indexes, and observer registration. |
 | ShardViewManager | `sync.Mutex` per instance (existing). `Stats()` returns an atomic snapshot. |
 
@@ -1012,7 +1003,7 @@ rebuilding it per shard, or double-counting the replacement view.
 | Balancer | Scheduling framework: work queue + reconcile loop + plan executor | Work queue |
 | SnapshotBuilder | Resolve trigger scope, compose scoped snapshots, and maintain cluster-wide row totals | Row-count ledger + dirty shard set |
 | BalancePolicy | Batch planning: classify dirty shards + compute normalized incremental assignments + emit changed optional candidates | None |
-| CollectionLoadManager | Load-config lifecycle: DDL broadcast-result handling, desired-state persistence, shard ensure callback from result vchannels, dirty collection notify. | None beyond dependencies |
+| CollectionLoadManager | Load-config lifecycle: DDL broadcast-result handling, desired-state persistence, dirty collection notify. | None beyond dependencies |
 | ShardViewRegistry | Actual shard view state aggregation, scoped snapshots, reverse indexes, and stats notifications. | Resident managers + stats + indexes + snapshot cache |
 | ShardViewManager | Per-shard multi-version view management (existing). Exposes `Stats()` for aggregation. | Per-shard state |
 
