@@ -56,10 +56,13 @@ func TestAcquireChargesCommitmentNotObservation(t *testing.T) {
 	g := newTestGuard(t, 100, 100)
 
 	var observed atomic.Int32
-	probing := false
+	// Both flags are atomic because a mockey patch is process-wide: paramtable
+	// and friends run background goroutines, and any of them calling
+	// GetUsedMemoryCount would land in this body concurrently with the test.
+	var probing atomic.Bool
 	mk := mockey.Mock(hardware.GetUsedMemoryCount).To(func() uint64 {
 		observed.Add(1)
-		if !probing {
+		if !probing.Load() {
 			t.Errorf("admission must not consult observed memory; the ledger is the only input")
 		}
 		return 0
@@ -83,7 +86,7 @@ func TestAcquireChargesCommitmentNotObservation(t *testing.T) {
 
 	require.Zero(t, observed.Load(), "admission read observed memory")
 
-	probing = true
+	probing.Store(true)
 	_ = hardware.GetUsedMemoryCount()
 	require.Equal(t, int32(1), observed.Load(),
 		"mockey did not patch hardware.GetUsedMemoryCount, so the assertion above proved nothing "+
@@ -496,6 +499,101 @@ func TestFrozenGuardRefusesAdmissionWithoutError(t *testing.T) {
 	ok, _, err = g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 10})
 	require.NoError(t, err)
 	assert.True(t, ok, "thawing must let the same task in")
+}
+
+// The second return value is the headroom left once the call has been decided,
+// so a caller can log how far short it fell and Task 12 can export it. CPU and
+// memory are deliberately given different numbers here: a test that used the
+// same value for both would not notice the two fields being swapped.
+func TestTryAcquireReportsRemainingHeadroom(t *testing.T) {
+	g := newTestGuard(t, 8, 1000)
+
+	// Admitted: the headroom reported must already exclude this task's charge,
+	// so it agrees with a Snapshot taken straight afterwards.
+	ok, avail, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 2, Memory: 300})
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, float64(6), avail.CPU, "admitted: headroom must be net of the charge just made")
+	assert.Equal(t, int64(700), avail.Memory, "admitted: headroom must be net of the charge just made")
+
+	snap := g.Snapshot()
+	assert.Equal(t, snap.Total.CPU-snap.Reserved.CPU, avail.CPU)
+	assert.Equal(t, snap.Total.Memory-snap.Reserved.Memory, avail.Memory)
+
+	// Short: nothing was charged, so the headroom is unchanged and shows the
+	// caller it was 200 bytes short of the 900 it asked for.
+	ok, avail, err = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 900})
+	require.NoError(t, err)
+	require.False(t, ok)
+	assert.Equal(t, float64(6), avail.CPU)
+	assert.Equal(t, int64(700), avail.Memory)
+
+	// Exhausted: the headroom still describes the node, which is what makes the
+	// "impossible" verdict legible in a log line.
+	ok, avail, err = g.TryAcquire(3, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 5000})
+	require.ErrorIs(t, err, ErrResourceExhausted)
+	require.False(t, ok)
+	assert.Equal(t, float64(6), avail.CPU)
+	assert.Equal(t, int64(700), avail.Memory)
+
+	// Re-requesting a live id reports headroom too, without charging again.
+	ok, avail, err = g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 2, Memory: 300})
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, float64(6), avail.CPU)
+	assert.Equal(t, int64(700), avail.Memory)
+}
+
+// Headroom goes negative when the budget shrinks below what is already
+// committed. That is the over-commitment Task 6 needs to see, so it must not be
+// clamped away to zero.
+func TestHeadroomGoesNegativeWhenOverCommitted(t *testing.T) {
+	g := newTestGuard(t, 8, 1000)
+
+	_, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 2, Memory: 300})
+	require.NoError(t, err)
+
+	g.mu.Lock()
+	g.nonTask = 900 // budget drops to 100, but 300 is already committed
+	g.mu.Unlock()
+
+	_, avail, err := g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{Memory: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(-200), avail.Memory, "over-commitment must be reported, not clamped")
+}
+
+// A running task holds its charge; a budget that shrinks under it does not
+// un-admit it. Re-requesting must still say "you have it" rather than
+// ErrResourceExhausted -- "impossible on this node, forever" is a verdict for
+// work that has not started, and a running task acting on it would abort while
+// still holding a reservation.
+func TestShrunkBudgetDoesNotEvictALiveReservation(t *testing.T) {
+	g := newTestGuard(t, 8, 1000)
+
+	ok, _, err := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 800})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	// The node shrinks under the running task -- exactly what Task 6 does when
+	// it raises nonTask after observing memory outside the ledger.
+	g.mu.Lock()
+	g.nonTask = 700 // budget is now 300, less than the 800 already committed
+	g.mu.Unlock()
+
+	ok, _, err = g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 800})
+	require.NoError(t, err, "a live reservation must not be reported as impossible")
+	assert.True(t, ok)
+	assert.Equal(t, int64(800), g.Snapshot().Reserved.Memory, "and must not be charged twice")
+
+	// The blocking form must not queue it either.
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	require.NoError(t, g.Acquire(ctx, 1, taskcommon.Compaction, taskresource.Requirement{Memory: 800}))
+
+	// A *new* task of the same size is still correctly impossible.
+	ok, _, err = g.TryAcquire(2, taskcommon.Compaction, taskresource.Requirement{Memory: 800})
+	assert.False(t, ok)
+	assert.ErrorIs(t, err, ErrResourceExhausted)
 }
 
 // A freeze stops new charges; it does not un-admit work that is already

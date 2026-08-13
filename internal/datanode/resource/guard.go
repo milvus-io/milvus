@@ -44,6 +44,14 @@ type Guard interface {
 	//   admitted=true             reserved
 	//   admitted=false, err=nil   temporarily short, or frozen; retry later
 	//   err=ErrResourceExhausted  impossible on this node; retrying is futile
+	//
+	// The middle value is the headroom left on the node *after* this call has
+	// been decided: budget minus everything the ledger has committed, including
+	// the charge just made when admitted=true. It therefore always agrees with a
+	// Snapshot taken immediately afterwards, and a refused caller can report how
+	// far short it fell by comparing it against its own requirement. It goes
+	// negative when the budget has shrunk below what is already committed, and is
+	// deliberately not clamped: that over-commitment is a signal, not noise.
 	TryAcquire(taskID int64, taskType taskcommon.Type, req taskresource.Requirement) (bool, taskresource.Capacity, error)
 
 	// Acquire blocks until the reservation succeeds or ctx ends. It returns
@@ -127,11 +135,30 @@ func (g *guard) TryAcquire(taskID int64, taskType taskcommon.Type, req taskresou
 	return g.tryAcquireLocked(taskID, taskType, req)
 }
 
-func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req taskresource.Requirement) (bool, taskresource.Capacity, error) {
-	budget := g.budgetLocked()
-	avail := taskresource.Capacity{
+// availLocked is the headroom the node has left: the budget minus everything
+// the ledger has committed. It is evaluated at each return site rather than once
+// up front, so an admitted caller sees the figure net of its own charge. It is
+// not clamped -- a negative result means the budget has shrunk below what is
+// already committed, which callers and metrics need to see.
+func (g *guard) availLocked(budget taskresource.Capacity) taskresource.Capacity {
+	return taskresource.Capacity{
 		CPU:    budget.CPU - g.reserved.CPU,
 		Memory: budget.Memory - g.reserved.Memory,
+	}
+}
+
+func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req taskresource.Requirement) (bool, taskresource.Capacity, error) {
+	budget := g.budgetLocked()
+
+	// An id already on the books is answered before every rule below, including
+	// the node-capacity check. A task that already holds its charge is running:
+	// it must never be told to wait for a reservation it owns, and it must never
+	// be told its work is impossible. The budget can shrink under a running task
+	// -- that is precisely what Task 6 does when it raises nonTask -- and
+	// answering ErrResourceExhausted there would make it abort while still
+	// holding a reservation. Re-requests are idempotent for the same reason.
+	if _, exists := g.ledger[taskID]; exists {
+		return true, g.availLocked(budget), nil
 	}
 
 	// Note what is *not* consulted here: the process's current memory usage.
@@ -140,23 +167,16 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 	// observation is what let issue #52180 admit eight compactions in a row
 	// while every one of them was still downloading.
 	if !req.FitsIn(budget) {
-		return false, avail, ErrResourceExhausted
-	}
-	// An id already on the books is answered before any of the rules below.
-	// Retries stay idempotent, and -- more importantly -- a task that already
-	// holds its charge is never sent to wait for one: doing so would have it
-	// hold budget while queueing for budget, blocking everyone behind it.
-	if _, exists := g.ledger[taskID]; exists {
-		return true, avail, nil
+		return false, g.availLocked(budget), ErrResourceExhausted
 	}
 	if g.frozen {
-		return false, avail, nil
+		return false, g.availLocked(budget), nil
 	}
 	if g.blockedByHeadOfLineLocked(taskID, budget) {
-		return false, avail, nil
+		return false, g.availLocked(budget), nil
 	}
 	if !g.reserved.Add(req).FitsIn(budget) {
-		return false, avail, nil
+		return false, g.availLocked(budget), nil
 	}
 
 	g.reserved = g.reserved.Add(req)
@@ -166,7 +186,7 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 		mlog.String("taskType", taskType),
 		mlog.String("requirement", req.String()),
 		mlog.String("reserved", g.reserved.String()))
-	return true, avail, nil
+	return true, g.availLocked(budget), nil
 }
 
 // blockedByHeadOfLineLocked keeps the longest-waiting task's budget from being
@@ -206,11 +226,26 @@ func (g *guard) Acquire(ctx context.Context, taskID int64, taskType taskcommon.T
 
 	defer g.removeWaiter(w)
 
-	// Retry before waiting, every time round. A Release that lands between the
-	// failed attempt above and the append would otherwise wake a waiter list
-	// that does not yet contain w, and this call would block until its context
-	// expired even though budget was free. Keep the reservation attempt at the
-	// top of the loop, ahead of the channel receive, if this is ever rewritten.
+	// Retry before waiting, every time round: the reservation attempt must stay
+	// at the top of this loop, ahead of the channel receive, if it is ever
+	// rewritten. Two things depend on that order.
+	//
+	// First, wakeups can be dropped. w.ch is buffered to one, so a send is
+	// discarded whenever an unconsumed token is already sitting in it. Release
+	// mutates the ledger under the lock and only then sends, so a dropped send
+	// implies the waiter had not yet consumed the earlier token -- and consuming
+	// it leads straight back to a retry, which therefore strictly follows the
+	// mutation that freed the budget. Retrying first is what makes that hold;
+	// select-first would only be safe here by accident.
+	//
+	// Second, Release is not the only thing that can make a waiter admissible.
+	// Task 6's watermark loop widens the budget by lowering nonTask or clearing
+	// frozen, neither of which goes through Release. A waiter that blocked
+	// without re-checking would sleep through those changes.
+	//
+	// (What this ordering does *not* guard is a Release slipping between the
+	// first failed attempt and the append above: both happen under a single
+	// lock hold, so that interleaving cannot occur.)
 	for {
 		g.mu.Lock()
 		ok, _, err = g.tryAcquireLocked(taskID, taskType, req)
