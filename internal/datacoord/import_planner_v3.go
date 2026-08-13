@@ -5,6 +5,7 @@ package datacoord
 // same task set without re-reading source files or depending on map iteration.
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"hash/crc64"
@@ -18,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -37,6 +39,12 @@ func writeImportV3Proto(ctx context.Context, cm storage.ChunkManager, ref string
 		return nil, merr.WrapErrSerializationFailed(err, "marshal import v3 object")
 	}
 	digest := importV3Digest(payload)
+	if existing, err := cm.Read(ctx, ref); err == nil {
+		if !bytes.Equal(existing, payload) {
+			return nil, merr.WrapErrDataIntegrityMsg("import v3 object already exists with different content: %s", ref)
+		}
+		return digest, nil
+	}
 	if err := cm.Write(ctx, ref, payload); err != nil {
 		return nil, merr.Wrap(err, "write import v3 object")
 	}
@@ -65,6 +73,12 @@ func (c *importChecker) createV3ReshardTasks(job ImportJob) error {
 	files := job.GetFiles()
 	if len(files) == 0 {
 		return c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing))
+	}
+	if existing := c.importMeta.GetTaskBy(c.ctx, WithType(ReshardTaskType), WithJob(job.GetJobID())); len(existing) > 0 {
+		if len(existing) != len(files) {
+			return merr.WrapErrDataIntegrityMsg("import v3 reshard task set is incomplete: got=%d want=%d", len(existing), len(files))
+		}
+		return c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
 	}
 	start, _, err := c.alloc.AllocN(int64(len(files)))
 	if err != nil {
@@ -108,15 +122,44 @@ func v3DefaultSortSpec(schema *schemapb.CollectionSchema) *datapb.SortSpec {
 	return &datapb.SortSpec{FormatVersion: 1, Fields: []*datapb.SortFieldSpec{{FieldId: pk.GetFieldID(), KeyType: keyType}}}
 }
 
+// buildImportV3TemporarySchema describes the fields physically present in
+// immutable fragments. Ordinary fragments carry user fields plus materialized
+// PK/RowID, but timestamp is supplied by the import data timestamp at final
+// merge. Backup fragments retain source timestamp, so they use the full system
+// field schema. Function outputs are produced only by the final transform and
+// are therefore omitted from the temporary reader schema.
+func buildImportV3TemporarySchema(schema *schemapb.CollectionSchema, backup bool) *schemapb.CollectionSchema {
+	cloned := proto.Clone(schema).(*schemapb.CollectionSchema)
+	fields := make([]*schemapb.FieldSchema, 0, len(cloned.GetFields())+2)
+	for _, field := range cloned.GetFields() {
+		if field.GetIsFunctionOutput() {
+			continue
+		}
+		fields = append(fields, field)
+	}
+	cloned.Fields = fields
+	if backup {
+		return typeutil.AppendSystemFields(cloned)
+	}
+	cloned.Fields = append(cloned.Fields, &schemapb.FieldSchema{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64})
+	return cloned
+}
+
 type v3PlanningFragment struct {
 	ref   *datapb.FragmentRef
 	bytes int64
 }
 
 func (c *importChecker) planV3Job(job ImportJob) error {
+	if job.GetPlanningSnapshotRef() != "" || job.GetImportPlanIndexRef() != "" {
+		return c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing))
+	}
 	reshards := c.importMeta.GetTaskBy(c.ctx, WithType(ReshardTaskType), WithJob(job.GetJobID()))
 	if len(reshards) == 0 {
 		return c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing))
+	}
+	if len(job.GetVchannels()) == 0 {
+		return merr.WrapErrDataIntegrityMsg("import v3 job has no vchannels")
 	}
 	fragments := make([]v3PlanningFragment, 0)
 	for _, generic := range reshards {
@@ -153,8 +196,9 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 	if gen <= 0 {
 		gen = 1
 	}
-	frozenSchema := typeutil.AppendSystemFields(job.GetSchema())
-	snapshot := &datapb.PlanningSnapshot{FormatVersion: 1, JobId: job.GetJobID(), Generation: gen, SortSpec: v3DefaultSortSpec(job.GetSchema()), MergeFanInCap: int32(Params.DataCoordCfg.ImportMaxMergeFanIn.GetAsInt()), TargetSchema: frozenSchema, TemporarySchema: frozenSchema, DataTs: job.GetDataTs(), CollectionId: job.GetCollectionID()}
+	targetSchema := typeutil.AppendSystemFields(job.GetSchema())
+	temporarySchema := buildImportV3TemporarySchema(job.GetSchema(), importutilv2.IsBackup(job.GetOptions()))
+	snapshot := &datapb.PlanningSnapshot{FormatVersion: 1, JobId: job.GetJobID(), Generation: gen, SortSpec: v3DefaultSortSpec(job.GetSchema()), MergeFanInCap: int32(Params.DataCoordCfg.ImportMaxMergeFanIn.GetAsInt()), TargetSchema: targetSchema, TemporarySchema: temporarySchema, DataTs: job.GetDataTs(), CollectionId: job.GetCollectionID(), ClusterId: Params.CommonCfg.ClusterPrefix.GetValue()}
 	target := int64(128 * 1024 * 1024)
 	var current *datapb.SegmentPlan
 	var currentBytes int64
@@ -183,11 +227,21 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 	for _, segment := range snapshot.GetSegmentPlans() {
 		_ = segment
 	}
-	taskStart, _, err := c.alloc.AllocN(int64(len(job.GetVchannels())))
+	activeChannelCount := 0
+	for _, channel := range job.GetVchannels() {
+		for _, s := range snapshot.GetSegmentPlans() {
+			if s.GetVchannel() == channel {
+				activeChannelCount++
+				break
+			}
+		}
+	}
+	taskStart, _, err := c.alloc.AllocN(int64(activeChannelCount))
 	if err != nil {
 		return err
 	}
-	for i, channel := range job.GetVchannels() {
+	taskOrdinal := 0
+	for _, channel := range job.GetVchannels() {
 		segments := make([]*datapb.SegmentPlan, 0)
 		for _, s := range snapshot.GetSegmentPlans() {
 			if s.GetVchannel() == channel {
@@ -197,7 +251,8 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 		if len(segments) == 0 {
 			continue
 		}
-		taskID := taskStart + int64(i)
+		taskID := taskStart + int64(taskOrdinal)
+		taskOrdinal++
 		outputIDs := make([]int64, len(segments))
 		for j, segment := range segments {
 			seg, err := AllocImportSegment(c.ctx, c.alloc, c.meta, job.GetJobID(), taskID, job.GetCollectionID(), segment.GetPartitionId(), segment.GetVchannel(), job.GetDataTs(), datapb.SegmentLevel_L1, importStorageVersion(false))
