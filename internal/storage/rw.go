@@ -519,6 +519,7 @@ func NewDeltalogWriter(
 }
 
 func NewDeltalogReader(
+	ctx context.Context,
 	pkType schemapb.DataType,
 	paths []string,
 	option ...RwOption,
@@ -539,7 +540,7 @@ func NewDeltalogReader(
 
 	switch rwOptions.version {
 	case StorageV1:
-		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths)
 	case StorageV2, StorageV3:
 		pathPos := 0
 		schema := &schemapb.CollectionSchema{
@@ -571,6 +572,7 @@ func NewDeltalogReader(
 // each binlog's EntriesNum. StorageV3 FFI readers need those row counts to
 // build column groups with stable start/end row offsets.
 func NewDeltalogReaderFromBinlogs(
+	ctx context.Context,
 	pkType schemapb.DataType,
 	binlogs []*datapb.Binlog,
 	option ...RwOption,
@@ -598,7 +600,7 @@ func NewDeltalogReaderFromBinlogs(
 			}
 			paths = append(paths, binlog.GetLogPath())
 		}
-		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths)
 	case StorageV2, StorageV3:
 		fragments, err := buildDeltalogFragmentsFromBinlogs(binlogs)
 		if err != nil {
