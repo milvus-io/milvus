@@ -567,6 +567,8 @@ func validateFieldType(schema *schemapb.CollectionSchema) error {
 		switch field.GetDataType() {
 		case schemapb.DataType_String:
 			return merr.WrapErrParameterInvalidMsg("string data type not supported yet, please use VarChar type instead")
+		case schemapb.DataType_Text:
+			return merr.WrapErrParameterInvalidMsg("text data type is not supported in Milvus 2.6")
 		case schemapb.DataType_None:
 			return merr.WrapErrParameterInvalidMsg("data type None is not valid")
 		case schemapb.DataType_Array:
@@ -611,6 +613,10 @@ func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 }
 
 func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchema) error {
+	if field.GetDataType() == schemapb.DataType_Text {
+		return merr.WrapErrParameterInvalidMsg("text data type is not supported in Milvus 2.6")
+	}
+
 	// validate field name
 	var err error
 	if err := validateFieldName(field.Name); err != nil {
