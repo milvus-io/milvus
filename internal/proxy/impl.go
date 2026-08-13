@@ -87,8 +87,8 @@ const moduleName = "Proxy"
 
 // checkExternalCollectionBlockedForWrite checks if the collection is external and returns error if so.
 // External collections do not support write operations (insert, delete, upsert, flush, etc).
-func checkExternalCollectionBlockedForWrite(ctx context.Context, dbName, collName, operation string) error {
-	collSchema, _ := globalMetaCache.GetCollectionSchema(ctx, dbName, collName)
+func checkExternalCollectionBlockedForWrite(ctx context.Context, metaCache Cache, dbName, collName, operation string) error {
+	collSchema, _ := metaCache.GetCollectionSchema(ctx, dbName, collName)
 	if collSchema != nil && typeutil.IsExternalCollection(collSchema.CollectionSchema) {
 		return merr.WrapErrParameterInvalidMsg(
 			"%s operation is not supported for external collection %s", operation, collName)
@@ -171,12 +171,12 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		}
 	}
 
-	if globalMetaCache != nil {
+	if node.getMetaCache() != nil {
 		switch msgType {
 		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias, commonpb.MsgType_CreateAlias:
 			aliasOperation := msgType == commonpb.MsgType_CreateAlias ||
 				msgType == commonpb.MsgType_AlterAlias || msgType == commonpb.MsgType_DropAlias
-			aliasName = globalMetaCache.InvalidateCollectionMeta(
+			aliasName = node.getMetaCache().InvalidateCollectionMeta(
 				ctx, request.GetDbName(), collectionName, collectionID, aliasOperation)
 			deprecateShardCaches(append(aliasName, collectionName)...)
 			if aliasOperation && collectionName != "" {
@@ -195,14 +195,14 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 					// resolution is race-free -- nothing re-points an alias
 					// concurrently with its drop), so scanning there would
 					// reintroduce a permanent O(N) stall on the normal path.
-					globalMetaCache.RemoveAliasHolders(ctx, request.GetDbName(), collectionName)
+					node.getMetaCache().RemoveAliasHolders(ctx, request.GetDbName(), collectionName)
 				}
 			}
 			mlog.Info(ctx, "complete to invalidate collection meta cache with collection name", mlog.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
 			// All the request from query use collectionID
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), "", collectionID, false)
+				aliasName = node.getMetaCache().InvalidateCollectionMeta(ctx, request.GetDbName(), "", collectionID, false)
 				deprecateShardCaches(aliasName...)
 			}
 			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
@@ -215,20 +215,20 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 					mlog.FieldCollectionID(collectionID))
 				return merr.Status(err), nil
 			}
-			globalMetaCache.RemovePartition(ctx, request.GetDbName(), collectionID, collectionName, request.GetPartitionName())
+			node.getMetaCache().RemovePartition(ctx, request.GetDbName(), collectionID, collectionName, request.GetPartitionName())
 			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			node.shardMgr.RemoveDatabase(request.GetDbName())
-			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
+			node.getMetaCache().RemoveDatabase(ctx, request.GetDbName())
 		case commonpb.MsgType_AlterDatabase:
-			globalMetaCache.RemoveDatabaseInfo(ctx, request.GetDbName())
+			node.getMetaCache().RemoveDatabaseInfo(ctx, request.GetDbName())
 		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
-			aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
+			aliasName = node.getMetaCache().InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
 			deprecateShardCaches(append(aliasName, collectionName)...)
 			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
 		default:
 			mlog.Warn(ctx, "receive unexpected msgType of invalidate collection meta cache", mlog.String("msgType", request.GetBase().GetMsgType().String()))
-			aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
+			aliasName = node.getMetaCache().InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
 			deprecateShardCaches(append(aliasName, collectionName)...)
 		}
 	}
@@ -1425,7 +1425,7 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 	tr := timerecord.NewTimeRecorder(method)
 
 	// Check for external collection - alter field is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "alter field"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.getMetaCache(), request.GetDbName(), request.GetCollectionName(), "alter field"); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -1478,7 +1478,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 	}
 
 	// Check for external collection - create partition is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "create partition"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.getMetaCache(), request.GetDbName(), request.GetCollectionName(), "create partition"); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -1536,7 +1536,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 	}
 
 	// Check for external collection - drop partition is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "drop partition"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.getMetaCache(), request.GetDbName(), request.GetCollectionName(), "drop partition"); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -1911,7 +1911,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	if err := validateCollectionName(request.CollectionName); err != nil {
 		return getErrResponse(err), nil
 	}
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
+	collectionID, err := node.getMetaCache().GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
 	if err != nil {
 		return getErrResponse(err), nil
 	}
@@ -1937,7 +1937,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 			return getErrResponse(err), nil
 		}
 	} else {
-		if loadProgress, refreshProgress, err = getPartitionProgress(ctx, node.mixCoord, request.GetBase(),
+		if loadProgress, refreshProgress, err = getPartitionProgress(ctx, node.getMetaCache(), node.mixCoord, request.GetBase(),
 			request.GetPartitionNames(), request.GetCollectionName(), collectionID, request.GetDbName()); err != nil {
 			return getErrResponse(err), nil
 		}
@@ -1995,7 +1995,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 		metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}()
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
+	collectionID, err := node.getMetaCache().GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to get collection id",
 			mlog.String("dbName", request.GetDbName()),
@@ -2029,7 +2029,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 			}, nil
 		}
 	} else {
-		if progress, _, err = getPartitionProgress(ctx, node.mixCoord, request.GetBase(),
+		if progress, _, err = getPartitionProgress(ctx, node.getMetaCache(), node.mixCoord, request.GetBase(),
 			request.GetPartitionNames(), request.GetCollectionName(), collectionID, request.GetDbName()); err != nil {
 			if errors.IsAny(err,
 				merr.ErrCollectionNotLoaded,
@@ -2457,7 +2457,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	}
 
 	// Check for external collection - insert is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "insert"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.getMetaCache(), request.GetDbName(), request.GetCollectionName(), "insert"); err != nil {
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
 		}, nil
@@ -2472,6 +2472,9 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		SetCollectionName(request.GetCollectionName())
 
 	it := &insertTask{
+		baseTask: baseTask{
+			metaCache: node.metaCache,
+		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		insertMsg: &msgstream.InsertMsg{
@@ -2594,7 +2597,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	}
 
 	// Check for external collection - delete is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "delete"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.getMetaCache(), request.GetDbName(), request.GetCollectionName(), "delete"); err != nil {
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
 		}, nil
@@ -2609,6 +2612,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	dr := &deleteRunner{
 		req:             request,
+		metaCache:       node.metaCache,
 		idAllocator:     node.rowIDAllocator,
 		tsoAllocatorIns: node.tsoAllocator,
 		chMgr:           node.chMgr,
@@ -2690,7 +2694,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	}
 
 	// Check for external collection - upsert is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "upsert"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.getMetaCache(), request.GetDbName(), request.GetCollectionName(), "upsert"); err != nil {
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
 		}, nil
@@ -2711,6 +2715,9 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	)
 
 	it := &upsertTask{
+		baseTask: baseTask{
+			metaCache: node.metaCache,
+		},
 		baseMsg: msgstream.BaseMsg{
 			HashValues: request.HashKeys,
 		},
@@ -2965,6 +2972,9 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	}
 
 	qt := &searchTask{
+		baseTask: baseTask{
+			metaCache: node.metaCache,
+		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		SearchRequest: &internalpb.SearchRequest{
@@ -3197,6 +3207,9 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	defer sp.End()
 	newSearchReq := convertHybridSearchToSearch(request)
 	qt := &searchTask{
+		baseTask: baseTask{
+			metaCache: node.metaCache,
+		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		SearchRequest: &internalpb.SearchRequest{
@@ -3414,7 +3427,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	}
 
 	// Get collection schema for validation and plan building
-	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx,
+	collectionInfo, err := node.getMetaCache().GetCollectionInfo(ctx,
 		request.GetDbName(), request.GetCollectionName(), 0)
 	if err != nil {
 		return nil, err
@@ -3496,6 +3509,9 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 
 	// Create queryTask to execute the retrieval
 	qt := &queryTask{
+		baseTask: baseTask{
+			metaCache: node.metaCache,
+		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		RetrieveRequest: &internalpb.RetrieveRequest{
@@ -3613,7 +3629,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 	// Check for external collection - flush is not supported
 	for _, collName := range request.GetCollectionNames() {
-		if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), collName, "flush"); err != nil {
+		if err := checkExternalCollectionBlockedForWrite(ctx, node.getMetaCache(), request.GetDbName(), collName, "flush"); err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
@@ -3777,6 +3793,9 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
 	qt := &queryTask{
+		baseTask: baseTask{
+			metaCache: node.metaCache,
+		},
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		RetrieveRequest: &internalpb.RetrieveRequest{
@@ -4223,7 +4242,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	tr := timerecord.NewTimeRecorder(method)
 
 	// list segments
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	collectionID, err := node.getMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -4382,7 +4401,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 	method := "GetQuerySegmentInfo"
 	tr := timerecord.NewTimeRecorder(method)
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.CollectionName)
+	collID, err := node.getMetaCache().GetCollectionID(ctx, req.GetDbName(), req.CollectionName)
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -4635,7 +4654,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 
 	status := merr.Success()
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	collectionID, err := node.getMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to get collection id",
 			mlog.String("collectionName", req.GetCollectionName()),
@@ -4694,7 +4713,7 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 
 	if req.GetCollectionName() != "" {
 		var err error
-		req.CollectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		req.CollectionID, err = node.getMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
@@ -4746,7 +4765,7 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	// before v2.4.18, manual compact request only pass collectionID, should correct sdk's behavior to pass collectionName
 	if req.GetCollectionName() != "" {
 		var err error
-		req.CollectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		req.CollectionID, err = node.getMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
@@ -4756,7 +4775,7 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	// Check for external collection - manual compaction is not supported
 	// Only check if we have collection identifier (collectionID > 0 or collectionName not empty)
 	if req.GetCollectionID() > 0 || req.GetCollectionName() != "" {
-		collInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), req.GetCollectionID())
+		collInfo, err := node.getMetaCache().GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), req.GetCollectionID())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
@@ -4826,7 +4845,7 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 			failResp.Status = merr.Status(err)
 			return failResp, nil
 		}
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		collectionID, err := node.getMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			failResp.Status = merr.Status(err)
 			return failResp, nil
@@ -5525,7 +5544,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 	// Resolve alias to actual collection name so grants are stored under the real name
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
 		req.CollectionName != util.AnyWord && req.CollectionName != "" {
-		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.DbName, req.CollectionName)
+		resolved, resolveErr := node.getMetaCache().ResolveCollectionAlias(ctx, req.DbName, req.CollectionName)
 		if resolveErr != nil {
 			mlog.Warn(context.TODO(), "failed to resolve collection alias for privilege operation",
 				mlog.String("collectionName", req.CollectionName), mlog.String("dbName", req.DbName), mlog.Err(resolveErr))
@@ -5597,7 +5616,7 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
 		req.Entity.Object != nil && req.Entity.Object.Name == commonpb.ObjectType_Collection.String() &&
 		req.Entity.ObjectName != util.AnyWord && req.Entity.ObjectName != "" {
-		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
+		resolved, resolveErr := node.getMetaCache().ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
 		if resolveErr != nil {
 			mlog.Warn(context.TODO(), "failed to resolve collection alias for privilege operation",
 				mlog.String("objectName", req.Entity.ObjectName), mlog.String("dbName", req.Entity.DbName), mlog.Err(resolveErr))
@@ -5680,7 +5699,7 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
 		req.Entity != nil && req.Entity.Object != nil && req.Entity.Object.Name == commonpb.ObjectType_Collection.String() &&
 		req.Entity.ObjectName != util.AnyWord && req.Entity.ObjectName != "" {
-		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
+		resolved, resolveErr := node.getMetaCache().ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
 		if resolveErr != nil {
 			mlog.Warn(context.TODO(), "failed to resolve collection alias for select grant",
 				mlog.String("objectName", req.Entity.ObjectName), mlog.String("dbName", req.Entity.DbName), mlog.Err(resolveErr))
@@ -6375,7 +6394,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	}
 
 	// Check for external collection - import is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, req.GetDbName(), req.GetCollectionName(), "import"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.getMetaCache(), req.GetDbName(), req.GetCollectionName(), "import"); err != nil {
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
 
@@ -6464,7 +6483,7 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 		collectionID UniqueID
 	)
 	if req.GetCollectionName() != "" {
-		collectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		collectionID, err = node.getMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
@@ -7395,7 +7414,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	}
 
 	// Get collection info from cache (includes schema for validation)
-	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
+	collectionInfo, err := node.getMetaCache().GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to get collection info", mlog.Err(err))
 		return &milvuspb.RefreshExternalCollectionResponse{
@@ -7529,7 +7548,7 @@ func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *m
 		}
 
 		// Get collection info from cache and validate it's an external collection
-		collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
+		collectionInfo, err := node.getMetaCache().GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to get collection info", mlog.Err(err))
 			return &milvuspb.ListRefreshExternalCollectionJobsResponse{

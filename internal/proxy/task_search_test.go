@@ -87,11 +87,6 @@ func TestSearchTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	})
 
-	oldCache := globalMetaCache
-	t.Cleanup(func() {
-		globalMetaCache = oldCache
-	})
-
 	const (
 		dbName         = "db"
 		collectionName = "text_collection"
@@ -101,7 +96,7 @@ func TestSearchTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
 	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil)
-	globalMetaCache = cache
+	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	task := &searchTask{
 		ctx:           context.Background(),
@@ -121,8 +116,6 @@ func TestSearchTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 
 func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
 	mockey.PatchConvey("TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter", t, func() {
-		globalMetaCache = &MetaCache{}
-
 		const (
 			dbName         = "db"
 			collectionName = "timestamptz_collection"
@@ -195,11 +188,13 @@ func TestSearchTask_PostExecute(t *testing.T) {
 
 	require.NoError(t, err)
 
-	err = InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	require.NoError(t, err)
+	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: cache},
 			ctx:            ctx,
 			collectionName: collName,
 			SearchRequest: &internalpb.SearchRequest{
@@ -795,9 +790,6 @@ func createCollWithFields(t *testing.T, collName string, rc types.MixCoordClient
 	require.NoError(t, createColT.Execute(ctx))
 	require.NoError(t, createColT.PostExecute(ctx))
 
-	_, err = globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collName)
-	assert.NoError(t, err)
-
 	fieldNameId := make(map[string]int64)
 	for _, field := range schema.Fields {
 		fieldNameId[field.Name] = field.FieldID
@@ -902,11 +894,13 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		ctx = context.TODO()
 	)
 	require.NoError(t, err)
-	err = InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	require.NoError(t, err)
+	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: cache},
 			ctx:            ctx,
 			collectionName: collName,
 			SearchRequest:  &internalpb.SearchRequest{},
@@ -924,6 +918,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	getSearchTaskWithNq := func(t *testing.T, collName string, nq int64) *searchTask {
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: cache},
 			ctx:            ctx,
 			collectionName: collName,
 			SearchRequest:  &internalpb.SearchRequest{},
@@ -954,6 +949,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 			},
 		}
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: cache},
 			ctx:            ctx,
 			collectionName: collName,
 			SearchRequest:  &internalpb.SearchRequest{},
@@ -1154,7 +1150,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		st.request.UseDefaultConsistency = false
 		st.request.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
 
-		collInfo, err := globalMetaCache.GetCollectionInfo(ctx, "", collName, 0)
+		collInfo, err := cache.GetCollectionInfo(ctx, "", collName, 0)
 		assert.NoError(t, err)
 
 		assert.NoError(t, st.PreExecute(ctx))
@@ -1481,8 +1477,9 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	err = InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	require.NoError(t, err)
+	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	getSearchTask := func(t *testing.T, collName string, data []string, withRerank bool) *searchTask {
 		placeholderValue := &commonpb.PlaceholderValue{
@@ -1510,6 +1507,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 		}
 
 		task := &searchTask{
+			baseTask:       baseTask{metaCache: cache},
 			ctx:            ctx,
 			collectionName: collectionName,
 			SearchRequest: &internalpb.SearchRequest{
@@ -1542,13 +1540,13 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 	}
 
 	collectionID := UniqueID(1000)
-	cache := NewMockCache(t)
+	mockCache := NewMockCache(t)
 	info := mustNewSchemaInfo(schema)
-	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
-	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(info, nil).Maybe()
-	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
-	globalMetaCache = cache
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(info, nil).Maybe()
+	mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
+	t.Cleanup(mockBaseTaskMetaCacheForTest(mockCache))
 
 	{
 		task := getSearchTask(t, collectionName, []string{"sentence"}, false)
@@ -1707,8 +1705,9 @@ func TestSearchTaskV2_Execute(t *testing.T) {
 		collectionName = t.Name() + funcutil.GenRandomStr()
 	)
 
-	err = InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	require.NoError(t, err)
+	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	defer qc.Close()
 
@@ -1775,7 +1774,7 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 	//
 	// ctx := context.Background()
 	//
-	// err = InitMetaCache(ctx, rc)
+	// err = initMetaCache(ctx, rc)
 	// assert.NoError(t, err)
 	//
 	// shardsNum := int32(2)
@@ -2017,7 +2016,7 @@ func TestSearchTaskV2_all(t *testing.T) {
 	//
 	// ctx := context.Background()
 	//
-	// err = InitMetaCache(ctx, rc)
+	// err = initMetaCache(ctx, rc)
 	// assert.NoError(t, err)
 	//
 	// shardsNum := int32(2)
@@ -2261,7 +2260,7 @@ func TestSearchTaskV2_7803_reduce(t *testing.T) {
 	//
 	// ctx := context.Background()
 	//
-	// err = InitMetaCache(ctx, rc)
+	// err = initMetaCache(ctx, rc)
 	// assert.NoError(t, err)
 	//
 	// shardsNum := int32(2)
@@ -3386,8 +3385,9 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 
 	defer rc.Close()
 
-	err = InitMetaCache(ctx, rc)
+	cache, err := initMetaCache(ctx, rc)
 	assert.NoError(t, err)
+	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	fieldName2Types := map[string]schemapb.DataType{
 		testBoolField:     schemapb.DataType_Bool,
@@ -3421,7 +3421,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	require.NoError(t, createColT.Execute(ctx))
 	require.NoError(t, createColT.PostExecute(ctx))
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	collectionID, err := cache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
 	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
@@ -4601,7 +4601,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
 	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 	cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
-	globalMetaCache = cache
+	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	mgr := shardclient.NewMockShardClientManager(t)
 	// mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
@@ -4889,11 +4889,9 @@ type GetPartitionIDsSuite struct {
 
 func (s *GetPartitionIDsSuite) SetupTest() {
 	s.mockMetaCache = NewMockCache(s.T())
-	globalMetaCache = s.mockMetaCache
 }
 
 func (s *GetPartitionIDsSuite) TearDownTest() {
-	globalMetaCache = nil
 	Params.Reset(Params.ProxyCfg.PartitionNameRegexp.Key)
 }
 
@@ -4906,7 +4904,7 @@ func (s *GetPartitionIDsSuite) TestPlainPartitionNames() {
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{"partition_1": 100, "partition_2": 200}, nil).Once()
 
-	result, err := getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	result, err := getPartitionIDs(ctx, s.mockMetaCache, "default_db", "test_collection", []string{"partition_1", "partition_2"})
 
 	s.NoError(err)
 	s.ElementsMatch([]int64{100, 200}, result)
@@ -4914,12 +4912,12 @@ func (s *GetPartitionIDsSuite) TestPlainPartitionNames() {
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{"partition_1": 100}, nil).Once()
 
-	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	_, err = getPartitionIDs(ctx, s.mockMetaCache, "default_db", "test_collection", []string{"partition_1", "partition_2"})
 	s.Error(err)
 
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(nil, errors.New("mocked")).Once()
-	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	_, err = getPartitionIDs(ctx, s.mockMetaCache, "default_db", "test_collection", []string{"partition_1", "partition_2"})
 	s.Error(err)
 }
 
@@ -4932,7 +4930,7 @@ func (s *GetPartitionIDsSuite) TestRegexpPartitionNames() {
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{"partition_1": 100, "partition_2": 200}, nil).Once()
 
-	result, err := getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	result, err := getPartitionIDs(ctx, s.mockMetaCache, "default_db", "test_collection", []string{"partition_1", "partition_2"})
 
 	s.NoError(err)
 	s.ElementsMatch([]int64{100, 200}, result)
@@ -4940,7 +4938,7 @@ func (s *GetPartitionIDsSuite) TestRegexpPartitionNames() {
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{"partition_1": 100, "partition_2": 200}, nil).Once()
 
-	result, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_.*"})
+	result, err = getPartitionIDs(ctx, s.mockMetaCache, "default_db", "test_collection", []string{"partition_.*"})
 
 	s.NoError(err)
 	s.ElementsMatch([]int64{100, 200}, result)
@@ -4948,12 +4946,12 @@ func (s *GetPartitionIDsSuite) TestRegexpPartitionNames() {
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[string]int64{"partition_1": 100}, nil).Once()
 
-	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	_, err = getPartitionIDs(ctx, s.mockMetaCache, "default_db", "test_collection", []string{"partition_1", "partition_2"})
 	s.Error(err)
 
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
 		Return(nil, errors.New("mocked")).Once()
-	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	_, err = getPartitionIDs(ctx, s.mockMetaCache, "default_db", "test_collection", []string{"partition_1", "partition_2"})
 	s.Error(err)
 }
 
@@ -4966,7 +4964,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 	collName := "test_skip_alloc_timestamp"
 	collID := UniqueID(111)
 	mockMetaCache := NewMockCache(t)
-	globalMetaCache = mockMetaCache
+	t.Cleanup(mockBaseTaskMetaCacheForTest(mockMetaCache))
 
 	t.Run("default consistency level", func(t *testing.T) {
 		st := &searchTask{
@@ -5137,11 +5135,7 @@ func (s *MaterializedViewTestSuite) SetupTest() {
 			CollID:                s.colID,
 			PartitionKeyIsolation: true,
 		}, nil)
-	globalMetaCache = s.mockMetaCache
-}
-
-func (s *MaterializedViewTestSuite) TearDownTest() {
-	globalMetaCache = nil
+	s.T().Cleanup(mockBaseTaskMetaCacheForTest(s.mockMetaCache))
 }
 
 func (s *MaterializedViewTestSuite) getSearchTask() *searchTask {

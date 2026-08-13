@@ -82,8 +82,9 @@ func TestQueryTask_all(t *testing.T) {
 	mgr.EXPECT().InvalidateShardLeaderCache(mock.Anything).Return().Maybe()
 	lb := shardclient.NewLBPolicyImpl(mgr)
 
-	err = InitMetaCache(ctx, qc)
+	cache, err := initMetaCache(ctx, qc)
 	assert.NoError(t, err)
+	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	fieldName2Types := map[string]schemapb.DataType{
 		testBoolField:     schemapb.DataType_Bool,
@@ -116,7 +117,7 @@ func TestQueryTask_all(t *testing.T) {
 	require.NoError(t, createColT.PreExecute(ctx))
 	require.NoError(t, createColT.Execute(ctx))
 	require.NoError(t, createColT.PostExecute(ctx))
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
+	collectionID, err := cache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), collectionName)
 	assert.NoError(t, err)
 
 	status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
@@ -1772,10 +1773,10 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 	collName := "test_skip_alloc_timestamp"
 	collID := UniqueID(111)
 	mockMetaCache := NewMockCache(t)
-	globalMetaCache = mockMetaCache
 
 	t.Run("default consistency level", func(t *testing.T) {
 		qt := &queryTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.QueryRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -1818,6 +1819,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 			}, nil).Times(3)
 
 		qt := &queryTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.QueryRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -1841,6 +1843,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 
 	t.Run("legacy_guarantee_ts", func(t *testing.T) {
 		qt := &queryTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.QueryRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -1869,6 +1872,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 			nil, errors.New("mock error")).Once()
 
 		qt := &queryTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.QueryRequest{
 				Base:                  nil,
 				DbName:                dbName,
@@ -1893,6 +1897,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.False(t, skip)
 
 		qt2 := &queryTask{
+			baseTask: baseTask{metaCache: mockMetaCache},
 			request: &milvuspb.QueryRequest{
 				Base:                  nil,
 				DbName:                dbName,

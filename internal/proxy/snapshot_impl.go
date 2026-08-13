@@ -296,7 +296,7 @@ func (node *Proxy) ExportSnapshot(ctx context.Context, req *milvuspb.ExportSnaps
 		return &milvuspb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
 	}
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	collectionID, err := node.getMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		failStatus, failCause := failMetricLabel(err)
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, failStatus, failCause, req.GetDbName(), req.GetCollectionName()).Inc()

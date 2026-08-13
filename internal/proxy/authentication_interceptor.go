@@ -59,9 +59,6 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 	if !ok {
 		return nil, merr.WrapErrIoKeyNotFound("metadata", "auth check failure, due to occurs inner error: missing metadata")
 	}
-	if globalMetaCache == nil {
-		return nil, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
-	}
 	// check rpc call from sdk
 	if Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		authStrArr := md[strings.ToLower(util.HeaderAuthorize)]

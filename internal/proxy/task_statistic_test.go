@@ -44,8 +44,9 @@ type StatisticTaskSuite struct {
 	mixc types.MixCoordClient
 	qn   *mocks.MockQueryNodeClient
 
-	lb  shardclient.LBPolicy
-	mgr shardclient.ShardClientMgr
+	lb        shardclient.LBPolicy
+	mgr       shardclient.ShardClientMgr
+	metaCache Cache
 
 	collectionName string
 	collectionID   int64
@@ -94,8 +95,10 @@ func (s *StatisticTaskSuite) SetupTest() {
 	s.mgr = mgr
 	s.lb = shardclient.NewLBPolicyImpl(mgr)
 
-	err := InitMetaCache(context.Background(), s.mixc)
+	cache, err := initMetaCache(context.Background(), s.mixc)
 	s.NoError(err)
+	s.metaCache = cache
+	s.T().Cleanup(mockBaseTaskMetaCacheForTest(cache))
 
 	s.collectionName = "test_statistics_task"
 	s.loadCollection()
@@ -135,7 +138,7 @@ func (s *StatisticTaskSuite) loadCollection() {
 	s.NoError(createColT.Execute(ctx))
 	s.NoError(createColT.PostExecute(ctx))
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), s.collectionName)
+	collectionID, err := s.metaCache.GetCollectionID(ctx, GetCurDBNameFromContextOrDefault(ctx), s.collectionName)
 	s.NoError(err)
 
 	status, err := s.mixc.LoadCollection(ctx, &querypb.LoadCollectionRequest{

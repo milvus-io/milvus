@@ -86,8 +86,9 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	}
 
 	// failed to get collection id.
-	err := InitMetaCache(ctx, queryCoord)
+	cache, err := initMetaCache(ctx, queryCoord)
 	assert.NoError(t, err)
+	t.Cleanup(mockBaseTaskMetaCacheForTest(cache))
 	assert.Error(t, gist.Execute(ctx))
 }
 
@@ -107,10 +108,9 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
-	globalMetaCache = mockCache
-
 	dit := dropIndexTask{
-		ctx: ctx,
+		baseTask: baseTask{metaCache: mockCache},
+		ctx:      ctx,
 		DropIndexRequest: &milvuspb.DropIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   0,
@@ -140,7 +140,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(UniqueID(0), errors.New("error"))
-		globalMetaCache = mockCache
+		dit.metaCache = mockCache
 		err := dit.PreExecute(ctx)
 		assert.Error(t, err)
 	})
@@ -150,8 +150,6 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
-	globalMetaCache = mockCache
-
 	t.Run("coll has been loaded", func(t *testing.T) {
 		qc := getMockQueryCoord()
 		qc.ExpectedCalls = nil
@@ -222,11 +220,9 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("int64"),
 	).Return(&collectionInfo{}, nil)
-
-	globalMetaCache = mockCache
-
 	cit := createIndexTask{
-		ctx: ctx,
+		baseTask: baseTask{metaCache: mockCache},
+		ctx:      ctx,
 		req: &milvuspb.CreateIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_CreateIndex,

@@ -165,7 +165,7 @@ func genAuthMiddleWare(needAuth bool) gin.HandlerFunc {
 }
 
 func InitMockGlobalMetaCache() {
-	proxy.InitEmptyGlobalCache()
+	proxy.InitEmptyMetaCacheForTest()
 }
 
 func Print(code int32, message string) string {

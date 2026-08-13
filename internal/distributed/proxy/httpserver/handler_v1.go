@@ -64,6 +64,7 @@ type RestRequestInterceptor func(ctx context.Context, ginCtx *gin.Context, req a
 // HandlersV1 handles http requests
 type HandlersV1 struct {
 	proxy        types.ProxyComponent
+	metaCache    proxy.Cache
 	interceptors []RestRequestInterceptor
 }
 
@@ -71,6 +72,7 @@ type HandlersV1 struct {
 func NewHandlersV1(proxyComponent types.ProxyComponent) *HandlersV1 {
 	h := &HandlersV1{
 		proxy:        proxyComponent,
+		metaCache:    getProxyMetaCache(proxyComponent),
 		interceptors: []RestRequestInterceptor{},
 	}
 	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
@@ -111,7 +113,7 @@ func (h *HandlersV1) checkDatabase(ctx context.Context, c *gin.Context, dbName s
 	if dbName == DefaultDbName {
 		return nil
 	}
-	if proxy.CheckDatabase(ctx, dbName) {
+	if proxy.CheckDatabase(ctx, h.metaCache, dbName) {
 		return nil
 	}
 	response, err := h.proxy.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})
@@ -135,7 +137,7 @@ func (h *HandlersV1) checkDatabase(ctx context.Context, c *gin.Context, dbName s
 }
 
 func (h *HandlersV1) describeCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (*schemapb.CollectionSchema, error) {
-	collSchema, err := proxy.GetCachedCollectionSchema(ctx, dbName, collectionName)
+	collSchema, err := proxy.GetCachedCollectionSchema(ctx, h.metaCache, dbName, collectionName)
 	if err == nil {
 		return collSchema.CollectionSchema, nil
 	}

@@ -81,8 +81,9 @@ func TestCreateSnapshotTask_PreExecute_Success(t *testing.T) {
 		},
 	}
 
-	// Mock globalMetaCache calls
-	globalMetaCache = &MetaCache{}
+	// Mock meta cache calls
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 
@@ -101,8 +102,9 @@ func TestCreateSnapshotTask_PreExecute_CollectionNotFound(t *testing.T) {
 		},
 	}
 
-	// Initialize globalMetaCache
-	globalMetaCache = &MetaCache{}
+	// Initialize meta cache
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	expectedError := errors.New("collection not found")
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(0), expectedError).Build()
 	defer mockGetCollectionID.UnPatch()
@@ -153,7 +155,8 @@ func TestCreateSnapshotTask_PreExecute_ProtectionZero(t *testing.T) {
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 
@@ -171,7 +174,8 @@ func TestCreateSnapshotTask_PreExecute_ProtectionValid(t *testing.T) {
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 
@@ -287,7 +291,8 @@ func TestDropSnapshotTask_PreExecute(t *testing.T) {
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 
@@ -319,7 +324,8 @@ func TestDropSnapshotTask_PreExecute_CollectionNotFound(t *testing.T) {
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	expectedError := errors.New("collection not found")
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(0), expectedError).Build()
 	defer mockGetCollectionID.UnPatch()
@@ -408,9 +414,10 @@ func TestDescribeSnapshotTask_Execute_Success(t *testing.T) {
 	mockDescribeSnapshot := mockey.Mock((*MixCoordMock).DescribeSnapshot).Return(mockResponse, nil).Build()
 	defer mockDescribeSnapshot.UnPatch()
 
-	// Initialize globalMetaCache
-	globalMetaCache = &MetaCache{}
-	// Mock globalMetaCache calls
+	// Initialize meta cache
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
+	// Mock meta cache calls
 	mockGetCollectionName := mockey.Mock((*MetaCache).GetCollectionName).Return("test_collection", nil).Build()
 	defer mockGetCollectionName.UnPatch()
 	mockGetPartitionName := mockey.Mock((*MetaCache).GetPartitionName).To(func(ctx context.Context, database, collectionName string, partitionID int64) (string, error) {
@@ -478,8 +485,9 @@ func TestDescribeSnapshotTask_Execute_CollectionNameResolutionError(t *testing.T
 	mockDescribeSnapshot := mockey.Mock((*MixCoordMock).DescribeSnapshot).Return(mockResponse, nil).Build()
 	defer mockDescribeSnapshot.UnPatch()
 
-	// Initialize globalMetaCache
-	globalMetaCache = &MetaCache{}
+	// Initialize meta cache
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	// Mock collection name resolution failure
 	expectedError := errors.New("collection name resolution failed")
 	mockGetCollectionName := mockey.Mock((*MetaCache).GetCollectionName).Return("", expectedError).Build()
@@ -512,8 +520,9 @@ func TestDescribeSnapshotTask_Execute_PartitionNameResolutionError(t *testing.T)
 	mockDescribeSnapshot := mockey.Mock((*MixCoordMock).DescribeSnapshot).Return(mockResponse, nil).Build()
 	defer mockDescribeSnapshot.UnPatch()
 
-	// Initialize globalMetaCache
-	globalMetaCache = &MetaCache{}
+	// Initialize meta cache
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	// Mock successful collection name resolution
 	mockGetCollectionName := mockey.Mock((*MetaCache).GetCollectionName).Return("test_collection", nil).Build()
 	defer mockGetCollectionName.UnPatch()
@@ -557,8 +566,9 @@ func TestListSnapshotsTask_PreExecute_Success(t *testing.T) {
 		},
 	}
 
-	// Initialize globalMetaCache
-	globalMetaCache = &MetaCache{}
+	// Initialize meta cache
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{DBID: 1}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
@@ -706,8 +716,9 @@ func TestCreateSnapshotTask_FullLifecycle(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, task.req.Base)
 
-	// Initialize globalMetaCache
-	globalMetaCache = &MetaCache{}
+	// Initialize meta cache
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	// Mock PreExecute dependencies
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
@@ -743,8 +754,9 @@ func TestCreateSnapshotTask_EmptyPartitionNames(t *testing.T) {
 		},
 	}
 
-	// Initialize globalMetaCache
-	globalMetaCache = &MetaCache{}
+	// Initialize meta cache
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 
@@ -915,7 +927,8 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 				}
 
 				// Mock globalMetaCache
-				globalMetaCache = &MetaCache{}
+				cache := &MetaCache{}
+				defer mockBaseTaskMetaCacheForTest(cache)()
 				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 				defer mockGetCollectionID.UnPatch()
 
@@ -938,7 +951,8 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 					},
 				}
 
-				globalMetaCache = &MetaCache{}
+				cache := &MetaCache{}
+				defer mockBaseTaskMetaCacheForTest(cache)()
 				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 				defer mockGetCollectionID.UnPatch()
 
@@ -961,7 +975,8 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 					},
 				}
 
-				globalMetaCache = &MetaCache{}
+				cache := &MetaCache{}
+				defer mockBaseTaskMetaCacheForTest(cache)()
 				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 				defer mockGetCollectionID.UnPatch()
 
@@ -995,7 +1010,8 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 					},
 				}
 
-				globalMetaCache = &MetaCache{}
+				cache := &MetaCache{}
+				defer mockBaseTaskMetaCacheForTest(cache)()
 				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 				defer mockGetCollectionID.UnPatch()
 
@@ -1017,7 +1033,8 @@ func TestListSnapshotsTask_PreExecute_EmptyCollectionName(t *testing.T) {
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{DBID: 1}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
 
@@ -1030,24 +1047,24 @@ func TestListSnapshotsTask_PreExecute_EmptyCollectionName(t *testing.T) {
 // =========================== resolveCollectionNames Tests ===========================
 
 func TestResolveCollectionNames_ZeroCollectionID(t *testing.T) {
-	dbName, collName := resolveCollectionNames(context.Background(), 0)
+	dbName, collName := resolveCollectionNames(context.Background(), nil, 0)
 	assert.Equal(t, "", dbName)
 	assert.Equal(t, "", collName)
 }
 
 func TestResolveCollectionNames_GetCollectionInfoError(t *testing.T) {
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
 	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).
 		Return(nil, errors.New("collection not found")).Build()
 	defer mockGetCollectionInfo.UnPatch()
 
-	dbName, collName := resolveCollectionNames(context.Background(), 100)
+	dbName, collName := resolveCollectionNames(context.Background(), cache, 100)
 	assert.Equal(t, "", dbName)
 	assert.Equal(t, "", collName)
 }
 
 func TestResolveCollectionNames_Success(t *testing.T) {
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
 	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).
 		Return(&collectionInfo{
 			DBName: "test_db",
@@ -1059,7 +1076,7 @@ func TestResolveCollectionNames_Success(t *testing.T) {
 		}, nil).Build()
 	defer mockGetCollectionInfo.UnPatch()
 
-	dbName, collName := resolveCollectionNames(context.Background(), 100)
+	dbName, collName := resolveCollectionNames(context.Background(), cache, 100)
 	assert.Equal(t, "test_db", dbName)
 	assert.Equal(t, "test_collection", collName)
 }
@@ -1106,7 +1123,8 @@ func TestRestoreSnapshotTask_PreExecute_GetCollectionIDError(t *testing.T) {
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).
 		Return(int64(0), errors.New("source collection not found")).Build()
 	defer mockGetCollectionID.UnPatch()
@@ -1142,7 +1160,8 @@ func TestDescribeSnapshotTask_PreExecute_GetCollectionIDError(t *testing.T) {
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).
 		Return(int64(0), errors.New("collection not found")).Build()
 	defer mockGetCollectionID.UnPatch()
@@ -1162,7 +1181,8 @@ func TestListSnapshotsTask_PreExecute_GetDatabaseInfoError(t *testing.T) {
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
 		Return(nil, errors.New("database not found")).Build()
 	defer mockGetDBInfo.UnPatch()
@@ -1181,7 +1201,8 @@ func TestListSnapshotsTask_PreExecute_GetCollectionIDError(t *testing.T) {
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
 		Return(&databaseInfo{DBID: 1}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
@@ -1250,8 +1271,9 @@ func TestGetRestoreSnapshotStateTask_Execute_Success(t *testing.T) {
 		Return(mockResponse, nil).Build()
 	defer mockGetState.UnPatch()
 
-	// Mock resolveCollectionNames via globalMetaCache.GetCollectionInfo
-	globalMetaCache = &MetaCache{}
+	// Mock resolveCollectionNames via meta cache GetCollectionInfo
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).
 		Return(&collectionInfo{
 			DBName: "test_db",
@@ -1376,7 +1398,8 @@ func TestListRestoreSnapshotJobsTask_PreExecute_DbNameError(t *testing.T) {
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
 		Return(nil, errors.New("database not found")).Build()
 	defer mockGetDBInfo.UnPatch()
@@ -1395,7 +1418,8 @@ func TestListRestoreSnapshotJobsTask_PreExecute_CollectionNameError(t *testing.T
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
 		Return(&databaseInfo{DBID: 1}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
@@ -1417,7 +1441,8 @@ func TestListRestoreSnapshotJobsTask_PreExecute_BothDbAndCollectionSuccess(t *te
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
 		Return(&databaseInfo{DBID: 5}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
@@ -1439,7 +1464,8 @@ func TestListRestoreSnapshotJobsTask_PreExecute_OnlyDbName(t *testing.T) {
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
 		Return(&databaseInfo{DBID: 5}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
@@ -1497,7 +1523,8 @@ func TestListRestoreSnapshotJobsTask_Execute_Success(t *testing.T) {
 	defer mockListJobs.UnPatch()
 
 	// Mock resolveCollectionNames for both collections
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	callCount := 0
 	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).
 		To(func(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionInfo, error) {
@@ -1659,7 +1686,8 @@ func TestPinSnapshotDataTask_PreExecute_Success(t *testing.T) {
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 
@@ -1736,7 +1764,8 @@ func TestPinSnapshotDataTask_PreExecute_TTLAtMaxBoundary(t *testing.T) {
 		},
 	}
 
-	globalMetaCache = &MetaCache{}
+	cache := &MetaCache{}
+	defer mockBaseTaskMetaCacheForTest(cache)()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 

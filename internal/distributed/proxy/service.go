@@ -290,6 +290,11 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	}
 	mlog.Debug(context.TODO(), "Get proxy rate limiter done")
 
+	var metaCache proxy.Cache
+	if metaCacheProvider, ok := s.proxy.(interface{ GetMetaCache() proxy.Cache }); ok {
+		metaCache = metaCacheProvider.GetMetaCache()
+	}
+
 	var unaryServerOption grpc.ServerOption
 	if enableCustomInterceptor {
 		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
@@ -298,10 +303,10 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 			UnaryRequestStatsInterceptor,
 			accesslog.UnaryAccessLogInterceptor,
 			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
-			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
+			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptorWithMetaCache(metaCache)),
 			proxy.UnaryServerHookInterceptor(),
 			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
-			proxy.RateLimitInterceptor(limiter),
+			proxy.RateLimitInterceptorWithMetaCache(metaCache, limiter),
 			accesslog.UnaryUpdateAccessInfoInterceptor,
 			proxy.TraceLogInterceptor,
 			connection.KeepActiveInterceptor,

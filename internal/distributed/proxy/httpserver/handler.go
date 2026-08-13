@@ -21,20 +21,30 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Handlers handles http requests
 type Handlers struct {
-	proxy types.ProxyComponent
+	proxy     types.ProxyComponent
+	metaCache proxy.Cache
 }
 
 // NewHandlers creates a new Handlers
-func NewHandlers(proxy types.ProxyComponent) *Handlers {
+func NewHandlers(proxyComponent types.ProxyComponent) *Handlers {
 	return &Handlers{
-		proxy: proxy,
+		proxy:     proxyComponent,
+		metaCache: getProxyMetaCache(proxyComponent),
 	}
+}
+
+func getProxyMetaCache(proxyComponent types.ProxyComponent) proxy.Cache {
+	if metaCacheProvider, ok := proxyComponent.(interface{ GetMetaCache() proxy.Cache }); ok {
+		return metaCacheProvider.GetMetaCache()
+	}
+	return nil
 }
 
 // RegisterRouters registers routes to given router

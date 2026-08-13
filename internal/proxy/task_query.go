@@ -641,14 +641,14 @@ func (t *queryTask) CanSkipAllocTimestamp() bool {
 		}
 		consistencyLevel = t.request.GetConsistencyLevel()
 	} else {
-		collID, err := globalMetaCache.GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
+		collID, err := t.getMetaCache().GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
 		if err != nil { // err is not nil if collection not exists
 			mlog.Warn(t.ctx, "query task get collectionID failed, can't skip alloc timestamp",
 				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
 			return false
 		}
 
-		collectionInfo, err2 := globalMetaCache.GetCollectionInfo(context.Background(), t.request.GetDbName(), t.request.GetCollectionName(), collID)
+		collectionInfo, err2 := t.getMetaCache().GetCollectionInfo(context.Background(), t.request.GetDbName(), t.request.GetCollectionName(), collID)
 		if err2 != nil {
 			mlog.Warn(t.ctx, "query task get collection info failed, can't skip alloc timestamp",
 				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
@@ -676,14 +676,14 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug(ctx, "Validate collectionName.")
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
+	collID, err := t.getMetaCache().GetCollectionID(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "Failed to get collection id.", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
 	}
 	t.CollectionID = collID
 
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
+	colInfo, err := t.getMetaCache().GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err != nil {
 		log.Warn(ctx, "Failed to get collection info.", mlog.String("collectionName", collectionName),
 			mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
@@ -695,7 +695,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug(ctx, "Get collection ID by name", mlog.Int64("collectionID", t.CollectionID))
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
+	schema, err := t.getMetaCache().GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
 	if err != nil {
 		log.Warn(ctx, "get collection schema failed", mlog.Err(err))
 		return err
@@ -712,7 +712,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.request.PartitionNames = partitionNames
 	}
 
-	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
+	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.getMetaCache(), t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "check partition key mode failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
 		return err
@@ -807,7 +807,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if !t.reQuery {
 		partitionNames := t.request.GetPartitionNames()
 		if namespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
-			hashedPartitionNames, err := assignNamespacePartitionKey(ctx, t.request.GetDbName(), t.request.CollectionName, t.request.Namespace)
+			hashedPartitionNames, err := assignNamespacePartitionKey(ctx, t.getMetaCache(), t.request.GetDbName(), t.request.CollectionName, t.request.Namespace)
 			if err != nil {
 				return err
 			}
@@ -819,14 +819,14 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 			partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), t.request.CollectionName, partitionKeys)
+			hashedPartitionNames, err := assignPartitionKeys(ctx, t.getMetaCache(), t.request.GetDbName(), t.request.CollectionName, partitionKeys)
 			if err != nil {
 				return err
 			}
 
 			partitionNames = append(partitionNames, hashedPartitionNames...)
 		}
-		t.PartitionIDs, err = getPartitionIDs(ctx, t.request.GetDbName(), t.request.CollectionName, partitionNames)
+		t.PartitionIDs, err = getPartitionIDs(ctx, t.getMetaCache(), t.request.GetDbName(), t.request.CollectionName, partitionNames)
 		if err != nil {
 			return err
 		}
@@ -849,7 +849,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.Username = username
 	}
 
-	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
+	collectionInfo, err2 := t.getMetaCache().GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
 		log.Warn(ctx, "Proxy::queryTask::PreExecute failed to GetCollectionInfo from cache",
 			mlog.String("collectionName", collectionName), mlog.Int64("collectionID", t.CollectionID),

@@ -334,12 +334,12 @@ func TestUpsertTask(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(collectionID, nil)
-		globalMetaCache = cache
 
 		chMgr := NewMockChannelsMgr(t)
 		chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
 		ut := upsertTask{
-			ctx: context.Background(),
+			baseTask: baseTask{metaCache: cache},
+			ctx:      context.Background(),
 			req: &milvuspb.UpsertRequest{
 				CollectionName: collectionName,
 			},
@@ -442,8 +442,6 @@ func TestUpsertTask_Function(t *testing.T) {
 
 	info := mustNewSchemaInfo(schema)
 	collectionID := UniqueID(0)
-	cache := NewMockCache(t)
-	globalMetaCache = cache
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -458,7 +456,8 @@ func TestUpsertTask_Function(t *testing.T) {
 	defer idAllocator.Close()
 	assert.NoError(t, err)
 	task := upsertTask{
-		ctx: context.Background(),
+		baseTask: baseTask{metaCache: &MetaCache{}},
+		ctx:      context.Background(),
 		req: &milvuspb.UpsertRequest{
 			CollectionName: collectionName,
 		},
@@ -497,15 +496,13 @@ func TestUpsertTask_Function(t *testing.T) {
 }
 
 func TestUpsertTaskForSchemaMismatch(t *testing.T) {
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
 	mockCache := NewMockCache(t)
-	globalMetaCache = mockCache
 	ctx := context.Background()
 
 	t.Run("schema ts mismatch", func(t *testing.T) {
 		ut := upsertTask{
-			ctx: ctx,
+			baseTask: baseTask{metaCache: mockCache},
+			ctx:      ctx,
 			req: &milvuspb.UpsertRequest{
 				CollectionName: "col-0",
 				NumRows:        10,
@@ -533,7 +530,7 @@ func createTestUpdateTask() *upsertTask {
 	mcClient := &grpcmixcoordclient.Client{}
 
 	upsertTask := &upsertTask{
-		baseTask:  baseTask{},
+		baseTask:  baseTask{metaCache: &MetaCache{}},
 		Condition: NewTaskCondition(context.Background()),
 		req: &milvuspb.UpsertRequest{
 			Base: commonpbutil.NewMsgBase(
@@ -2355,9 +2352,6 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 			},
 		}, segcore.StorageCost{}, nil).Build()
 
-		globalMetaCache = &MetaCache{}
-		mockey.Mock(globalMetaCache.GetPartitionID).Return(int64(1002), nil).Build()
-
 		// Execute test
 		task := createTestUpdateTask()
 		task.partitionKeyMode = false
@@ -2739,9 +2733,6 @@ func TestUpdateTask_queryPreExecute_EmptyOldIDs(t *testing.T) {
 
 func TestUpdateTask_PreExecute_Success(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_Success", t, func() {
-		// Setup mocks
-		globalMetaCache = &MetaCache{}
-
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 
 		schema := createTestSchema()
@@ -2847,8 +2838,6 @@ func TestUpdateTaskPreExecuteSnapshotsOriginalPartialFieldsBeforeMerge(t *testin
 
 func TestUpdateTask_PreExecute_GetCollectionIDError(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_GetCollectionIDError", t, func() {
-		globalMetaCache = &MetaCache{}
-
 		expectedErr := merr.WrapErrCollectionNotFound("test_collection")
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(0), expectedErr).Build()
 
@@ -2862,8 +2851,6 @@ func TestUpdateTask_PreExecute_GetCollectionIDError(t *testing.T) {
 
 func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_PartitionKeyModeError", t, func() {
-		globalMetaCache = &MetaCache{}
-
 		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
@@ -2886,8 +2873,6 @@ func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
 
 func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_InvalidNumRows", t, func() {
-		globalMetaCache = &MetaCache{}
-
 		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
@@ -2913,8 +2898,6 @@ func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 
 func TestUpdateTask_PreExecute_QueryPreExecuteError(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_QueryPreExecuteError", t, func() {
-		globalMetaCache = &MetaCache{}
-
 		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
@@ -4196,8 +4179,6 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{DBID: 0}, nil).Build()
 			mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 
-			globalMetaCache = &MetaCache{}
-
 			// Setup idAllocator
 			ctx := context.Background()
 			rc := mocks.NewMockRootCoordClient(t)
@@ -4212,8 +4193,9 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			defer idAllocator.Close()
 
 			task := &upsertTask{
-				ctx:    ctx,
-				schema: schema,
+				baseTask: baseTask{metaCache: &MetaCache{}},
+				ctx:      ctx,
+				schema:   schema,
 				req: &milvuspb.UpsertRequest{
 					CollectionName: "test_empty_data_array",
 					FieldsData:     upsertData,
@@ -4314,8 +4296,6 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{DBID: 0}, nil).Build()
 			mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 
-			globalMetaCache = &MetaCache{}
-
 			// Setup idAllocator
 			ctx := context.Background()
 			rc := mocks.NewMockRootCoordClient(t)
@@ -4330,8 +4310,9 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			defer idAllocator.Close()
 
 			task := &upsertTask{
-				ctx:    ctx,
-				schema: schema,
+				baseTask: baseTask{metaCache: &MetaCache{}},
+				ctx:      ctx,
+				schema:   schema,
 				req: &milvuspb.UpsertRequest{
 					CollectionName: "test_empty_data_array_non_nullable",
 					FieldsData:     upsertData,
