@@ -93,6 +93,24 @@ struct VectorizedRef {
         return false;
     }
 
+    // API requirement: size % 8 == 0. Depth-2 counterpart of
+    // op_arith_compare; no dedicated SIMD kernel exists for chained two-op
+    // comparisons yet, so this (and every platform's override) always
+    // returns false, falling back to the generic scalar path.
+    template <typename T,
+              ArithOpType AOp1,
+              ArithOpType AOp2,
+              CompareOpType CmpOp>
+    static inline bool
+    op_arith_compare2(uint8_t* const __restrict bitmask,
+                      const T* const __restrict src,
+                      const ArithHighPrecisionType<T>& right_operand1,
+                      const ArithHighPrecisionType<T>& right_operand2,
+                      const ArithHighPrecisionType<T>& value,
+                      const size_t size) {
+        return false;
+    }
+
     // The following functions just forward parameters to the reference code,
     //   generated for a particular platform.
     // The reference 'platform' is just a default platform.

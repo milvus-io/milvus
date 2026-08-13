@@ -254,6 +254,12 @@ message BinaryArithOpEvalRangeExpr {
   GenericValue value = 5;
   string operand_template_variable_name = 6;
   string value_template_variable_name = 7;
+  // Optional second arithmetic op, applied after arith_op, before the
+  // comparison: ((column arith_op right_operand) arith_op2 right_operand2) op value.
+  // ArithOpType_Unknown (proto3 default) means no second op is present.
+  ArithOpType arith_op2 = 8;
+  GenericValue right_operand2 = 9;
+  string operand2_template_variable_name = 10;
 }
 
 message RandomSampleExpr {
