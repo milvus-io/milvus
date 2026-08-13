@@ -20,6 +20,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -203,6 +204,11 @@ type Task interface {
 	GetSchema() *schemapb.CollectionSchema
 	GetSlots() int64
 	GetBufferSize() int64
+	// GetResourceRequirement prices the task for the node-wide resource ledger.
+	// Each kind of import task knows its own shape -- how many files it can
+	// have in flight, and how large a buffer each one holds -- so each derives
+	// its own figure rather than the scheduler guessing from the outside.
+	GetResourceRequirement() taskresource.Requirement
 	Cancel()
 	Clone() Task
 }

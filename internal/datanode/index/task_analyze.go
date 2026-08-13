@@ -23,11 +23,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -72,6 +74,18 @@ func (at *analyzeTask) Ctx() context.Context {
 
 func (at *analyzeTask) Name() string {
 	return at.ident
+}
+
+func (at *analyzeTask) GetTaskID() int64 {
+	return at.req.GetTaskID()
+}
+
+func (at *analyzeTask) GetTaskType() taskcommon.Type {
+	return taskcommon.Analyze
+}
+
+func (at *analyzeTask) GetResourceRequirement() taskresource.Requirement {
+	return taskresource.RequirementForAnalyze(at.req)
 }
 
 func (at *analyzeTask) GetSlot() int64 {

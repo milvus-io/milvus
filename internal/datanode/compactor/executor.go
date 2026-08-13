@@ -23,10 +23,13 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus/internal/datanode/resource"
 	"github.com/milvus-io/milvus/internal/storagev2"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -100,6 +103,20 @@ func getTaskSlotUsage(task Compactor) int64 {
 	}
 
 	return taskSlotUsage
+}
+
+// taskRequirement prices a compaction from its own plan. The plan may come from
+// a coordinator that has no notion of resource requirements -- the upgrade order
+// puts this node ahead of DataCoord -- so nothing the plan carries beyond its
+// input sizes is trusted.
+func taskRequirement(task Compactor) taskresource.Requirement {
+	if plan := task.GetPlan(); plan != nil {
+		return taskresource.RequirementForCompaction(plan)
+	}
+	// No plan means nothing to recompute from. Fall back to the legacy slot
+	// rather than admitting the task for free; LegacySlotToRequirement floors at
+	// one slot, so an absent slot is not read as "this task is free" either.
+	return taskresource.LegacySlotToRequirement(getTaskSlotUsage(task))
 }
 
 func (e *executor) Enqueue(task Compactor) (bool, error) {
@@ -192,32 +209,57 @@ func (e *executor) Start(ctx context.Context) {
 			return
 		case task := <-e.taskCh:
 			GetExecPool().Submit(func() (any, error) {
-				e.executeTask(task)
+				e.executeTask(ctx, task)
 				return nil, nil
 			})
 		}
 	}
 }
 
-func (e *executor) executeTask(task Compactor) {
+// executeTask runs one compaction. ctx is the node's lifecycle context, handed
+// down from Start: it is the only thing that bounds how long the task waits for
+// the node's budget, so a shutdown does not leave a task queued forever.
+func (e *executor) executeTask(ctx context.Context, task Compactor) {
+	planID := task.GetPlanID()
 	log := mlog.With(
-		mlog.Int64("planID", task.GetPlanID()),
+		mlog.Int64("planID", planID),
 		mlog.Int64("collection", task.GetCollection()),
 		mlog.String("channel", task.GetChannelName()),
 		mlog.String("type", task.GetCompactionType().String()),
 	)
 
-	log.Info(context.TODO(), "start to execute compaction")
+	// Reserve the node's budget before any work starts. Admission happens here,
+	// where the task actually begins, and not when the RPC arrived: waiting then
+	// shows up as a task sitting in this node's queue rather than as a dispatch
+	// the coordinator watches time out.
+	//
+	// The guard never refuses permanently -- a task larger than the whole node
+	// waits for it to drain and then runs alone -- so ctx is the only bound on
+	// this wait, and it is the node's lifecycle context. A timer here would only
+	// convert waiting into a re-dispatch of the same task by the coordinator,
+	// which is the same wait with a round trip added.
+	req := taskRequirement(task)
+	if err := resource.GetGuard().Acquire(ctx, planID, taskcommon.Compaction, req); err != nil {
+		log.Warn(ctx, "compaction gave up waiting for the node's budget",
+			mlog.String("requirement", req.String()), mlog.Err(err))
+		// Nothing was reserved, so nothing is released. The executor's own slot
+		// accounting still has to be unwound, which completeTask does.
+		e.completeTask(planID, nil)
+		return
+	}
+	defer resource.GetGuard().Release(planID)
+
+	log.Info(ctx, "start to execute compaction")
 
 	result, err := task.Compact()
 	if err != nil {
-		log.Warn(context.TODO(), "compaction task failed", mlog.Err(err))
-		e.completeTask(task.GetPlanID(), nil)
+		log.Warn(ctx, "compaction task failed", mlog.Err(err))
+		e.completeTask(planID, nil)
 		return
 	}
 
 	// Update task with result
-	e.completeTask(task.GetPlanID(), result)
+	e.completeTask(planID, result)
 
 	// Emit metrics
 	getDataCount := func(binlogs []*datapb.FieldBinlog) int64 {
@@ -246,7 +288,7 @@ func (e *executor) executeTask(task Compactor) {
 		metrics.CompactionDataSourceLabel,
 		metrics.DeleteLabel,
 		fmt.Sprint(task.GetCollection())).Add(float64(deleteCount))
-	log.Info(context.TODO(), "end to execute compaction")
+	log.Info(ctx, "end to execute compaction")
 }
 
 func (e *executor) GetResults(planID int64) []*datapb.CompactionPlanResult {

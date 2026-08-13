@@ -25,22 +25,28 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/resource"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -555,4 +561,202 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 
 func TestScheduler(t *testing.T) {
 	suite.Run(t, new(SchedulerSuite))
+}
+
+// useRecordingGuard routes the scheduler's admission calls at a double for the
+// duration of the test. The process-wide guard is deliberately kept out of the
+// unit tests: it samples the machine's real memory in the background, so a test
+// that reserved from it would pass or hang depending on the host's mood.
+func useRecordingGuard(t *testing.T) *resource.RecordingGuard {
+	g := resource.NewRecordingGuard()
+	mk := mockey.Mock(resource.GetGuard).Return(g).Build()
+	t.Cleanup(func() { mk.UnPatch() })
+	return g
+}
+
+func TestImportSchedulerAdmission(t *testing.T) {
+	paramtable.Init()
+
+	const taskID = int64(5001)
+	req := taskresource.Requirement{CPU: 2, Memory: 3 << 30}
+
+	newTask := func(t *testing.T) *MockTask {
+		task := NewMockTask(t)
+		task.EXPECT().GetTaskID().Return(taskID).Maybe()
+		task.EXPECT().GetJobID().Return(int64(1)).Maybe()
+		task.EXPECT().GetCollectionID().Return(int64(1)).Maybe()
+		task.EXPECT().GetType().Return(ImportTaskType).Maybe()
+		task.EXPECT().GetState().Return(datapb.ImportTaskStateV2_Pending).Maybe()
+		task.EXPECT().GetResourceRequirement().Return(req).Maybe()
+		return task
+	}
+
+	newScheduler := func(t *testing.T, task Task) *scheduler {
+		manager := NewMockTaskManager(t)
+		manager.EXPECT().GetBy(mock.Anything).Return([]Task{task}).Maybe()
+		manager.EXPECT().Update(taskID, mock.Anything).Return().Maybe()
+		return NewScheduler(manager).(*scheduler)
+	}
+
+	t.Run("reserves before executing and releases when the task ends", func(t *testing.T) {
+		g := useRecordingGuard(t)
+		task := newTask(t)
+		task.EXPECT().Execute().RunAndReturn(func() []*conc.Future[any] {
+			g.Note("execute")
+			return nil
+		}).Once()
+
+		newScheduler(t, task).scheduleTasks()
+
+		assert.Equal(t, []string{"acquire", "execute", "release"}, g.Events())
+		acquires := g.Acquires()
+		require.Len(t, acquires, 1)
+		assert.Equal(t, taskID, acquires[0].TaskID)
+		assert.Equal(t, taskcommon.Import, acquires[0].Type)
+		assert.Equal(t, req, acquires[0].Req)
+	})
+
+	t.Run("holds the reservation until the task's work is done", func(t *testing.T) {
+		g := useRecordingGuard(t)
+		gate := make(chan struct{})
+		task := newTask(t)
+		task.EXPECT().Execute().RunAndReturn(func() []*conc.Future[any] {
+			return []*conc.Future[any]{conc.Go(func() (any, error) {
+				<-gate
+				return nil, nil
+			})}
+		}).Once()
+
+		sched := newScheduler(t, task)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			sched.scheduleTasks()
+		}()
+
+		// Execute only dispatches the work; the reading happens afterwards in
+		// the pool. Releasing when Execute returns would hand the budget away
+		// while the task is still holding memory.
+		require.Eventually(t, func() bool { return len(g.Acquires()) == 1 }, time.Second, 10*time.Millisecond)
+		assert.Empty(t, g.Releases())
+
+		close(gate)
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			require.Fail(t, "scheduler never finished the task")
+		}
+		assert.Equal(t, []int64{taskID}, g.Releases())
+	})
+
+	t.Run("does not execute or release when the wait is cut short", func(t *testing.T) {
+		g := useRecordingGuard(t)
+		g.FailAcquire(context.Canceled)
+		task := newTask(t)
+		// Execute is not expected: running it would fail the test outright.
+
+		manager := NewMockTaskManager(t)
+		manager.EXPECT().GetBy(mock.Anything).Return([]Task{task}).Maybe()
+		// Update is not expected either: the task must stay Pending so the next
+		// tick picks it up again.
+		sched := NewScheduler(manager).(*scheduler)
+		sched.scheduleTasks()
+
+		assert.Empty(t, g.Releases(), "a task that never acquired must not release")
+	})
+
+	t.Run("parks in Acquire instead of polling TryAcquire", func(t *testing.T) {
+		g := useRecordingGuard(t)
+		g.Block()
+		task := newTask(t)
+		task.EXPECT().Execute().RunAndReturn(func() []*conc.Future[any] {
+			g.Note("execute")
+			return nil
+		}).Once()
+
+		sched := newScheduler(t, task)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			sched.scheduleTasks()
+		}()
+
+		time.Sleep(100 * time.Millisecond)
+		assert.NotContains(t, g.Events(), "execute", "import started before its reservation was granted")
+		assert.Empty(t, g.TryAcquires(), "waiting must happen in Acquire, where the guard can hold the queue head")
+
+		g.Unblock()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			require.Fail(t, "import never ran after the guard admitted it")
+		}
+		assert.Equal(t, []string{"acquire", "execute", "release"}, g.Events())
+	})
+
+	t.Run("reports each family to the ledger under its own type", func(t *testing.T) {
+		cases := []struct {
+			taskType TaskType
+			expected taskcommon.Type
+		}{
+			{PreImportTaskType, taskcommon.PreImport},
+			{ImportTaskType, taskcommon.Import},
+			{L0PreImportTaskType, taskcommon.PreImport},
+			{L0ImportTaskType, taskcommon.Import},
+			{CopySegmentTaskType, taskcommon.CopySegment},
+		}
+		for _, c := range cases {
+			assert.Equal(t, c.expected, ledgerTaskType(c.taskType), c.taskType.String())
+		}
+	})
+}
+
+func TestImportTaskResourceRequirements(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("preimport charges a base buffer per file in flight", func(t *testing.T) {
+		task := &PreImportTask{
+			PreImportTask: &datapb.PreImportTask{
+				FileStats: []*datapb.ImportFileStats{{}, {}, {}},
+			},
+		}
+		assert.Equal(t, taskresource.EstimateImport(taskresource.ImportInput{
+			IsPreImport: true,
+			FileNum:     3,
+		}), task.GetResourceRequirement())
+	})
+
+	t.Run("import charges the vchannel and partition fan-out", func(t *testing.T) {
+		task := &ImportTask{
+			ImportTaskV2: &datapb.ImportTaskV2{
+				FileStats: []*datapb.ImportFileStats{{TotalMemorySize: 1 << 30}, {TotalMemorySize: 2 << 30}},
+			},
+			req: &datapb.ImportRequest{
+				Vchannels:    []string{"ch-0", "ch-1"},
+				PartitionIDs: []int64{1, 2, 3},
+			},
+		}
+		expected := taskresource.EstimateImport(taskresource.ImportInput{
+			FileNum:           2,
+			VChannelNum:       2,
+			PartitionNum:      3,
+			MaxFileMemorySize: 2 << 30,
+		})
+		assert.Equal(t, expected, task.GetResourceRequirement())
+		// The fan-out has to reach the estimate: a task charged as if it had one
+		// vchannel and one partition would be six times too cheap here.
+		assert.Greater(t, expected.Memory, taskresource.EstimateImport(taskresource.ImportInput{
+			FileNum:           2,
+			VChannelNum:       1,
+			PartitionNum:      1,
+			MaxFileMemorySize: 2 << 30,
+		}).Memory)
+	})
+
+	t.Run("copy segment charges no segment bytes", func(t *testing.T) {
+		task := &CopySegmentTask{
+			segmentResults: map[int64]*datapb.CopySegmentResult{1: {}, 2: {}},
+		}
+		assert.Equal(t, taskresource.EstimateCopySegment(2), task.GetResourceRequirement())
+	})
 }

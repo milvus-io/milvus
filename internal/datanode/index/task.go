@@ -21,7 +21,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -47,4 +49,17 @@ type Task interface {
 	Reset()
 	GetSlot() int64
 	IsVectorIndex() bool
+
+	// GetTaskID identifies the task in the node-wide resource ledger. Index,
+	// stats and analyze IDs all come from the same global allocator, so they
+	// share one namespace with the compaction and import tasks the ledger also
+	// holds.
+	GetTaskID() int64
+	// GetTaskType says which family the task belongs to, for the ledger's logs
+	// and metrics.
+	GetTaskType() taskcommon.Type
+	// GetResourceRequirement prices the task from the request it carries. The
+	// node recomputes this itself rather than trusting the slot count the
+	// coordinator attached, which during an upgrade window may not exist.
+	GetResourceRequirement() taskresource.Requirement
 }

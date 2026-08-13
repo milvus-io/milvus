@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -50,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	_ "github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -137,6 +139,18 @@ func (st *statsTask) SetState(state indexpb.JobState, failReason string) {
 
 func (st *statsTask) GetState() indexpb.JobState {
 	return st.manager.GetStatsTaskState(st.req.GetClusterID(), st.req.GetTaskID())
+}
+
+func (st *statsTask) GetTaskID() int64 {
+	return st.req.GetTaskID()
+}
+
+func (st *statsTask) GetTaskType() taskcommon.Type {
+	return taskcommon.Stats
+}
+
+func (st *statsTask) GetResourceRequirement() taskresource.Requirement {
+	return taskresource.RequirementForStats(st.req)
 }
 
 func (st *statsTask) GetSlot() int64 {

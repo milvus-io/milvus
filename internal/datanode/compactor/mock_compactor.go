@@ -246,6 +246,53 @@ func (_c *MockCompactor_GetCompactionType_Call) RunAndReturn(run func() datapb.C
 	return _c
 }
 
+// GetPlan provides a mock function with no fields
+func (_m *MockCompactor) GetPlan() *datapb.CompactionPlan {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPlan")
+	}
+
+	var r0 *datapb.CompactionPlan
+	if rf, ok := ret.Get(0).(func() *datapb.CompactionPlan); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.CompactionPlan)
+		}
+	}
+
+	return r0
+}
+
+// MockCompactor_GetPlan_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPlan'
+type MockCompactor_GetPlan_Call struct {
+	*mock.Call
+}
+
+// GetPlan is a helper method to define mock.On call
+func (_e *MockCompactor_Expecter) GetPlan() *MockCompactor_GetPlan_Call {
+	return &MockCompactor_GetPlan_Call{Call: _e.mock.On("GetPlan")}
+}
+
+func (_c *MockCompactor_GetPlan_Call) Run(run func()) *MockCompactor_GetPlan_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCompactor_GetPlan_Call) Return(_a0 *datapb.CompactionPlan) *MockCompactor_GetPlan_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactor_GetPlan_Call) RunAndReturn(run func() *datapb.CompactionPlan) *MockCompactor_GetPlan_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetPlanID provides a mock function with no fields
 func (_m *MockCompactor) GetPlanID() int64 {
 	ret := _m.Called()
@@ -420,7 +467,8 @@ func (_c *MockCompactor_Stop_Call) RunAndReturn(run func()) *MockCompactor_Stop_
 func NewMockCompactor(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockCompactor {
+},
+) *MockCompactor {
 	mock := &MockCompactor{}
 	mock.Mock.Test(t)
 
