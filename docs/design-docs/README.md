@@ -10,8 +10,9 @@ compatibility impact, and verification plan before or alongside implementation.
   topic subdirectories are retained for compatibility.
 - [`assets/`](assets/) contains images shared by Design Docs.
 
-User guides, current subsystem references, and executable experiments do not
-belong under `design_docs/`. Maintain user documentation in
-[`milvus-io/milvus-docs`](https://github.com/milvus-io/milvus-docs), current
-subsystem documentation under `docs/agent_guides/`, and executable experiments
-with the implementation, tests, or benchmark suite they validate.
+New public user documentation belongs in
+[`milvus-io/milvus-docs`](https://github.com/milvus-io/milvus-docs). Existing
+topic directories under `design_docs/`, including their supporting material,
+remain in place for compatibility. Put current subsystem documentation under
+`docs/agent_guides/`, and keep executable experiments with the implementation,
+tests, or benchmark suite they validate.
