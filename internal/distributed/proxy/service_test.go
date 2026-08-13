@@ -1522,7 +1522,7 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 		CollectionName: "test_external",
 	}
 
-	m := mockey.Mock(mockey.GetMethod(mockProxy, "RefreshExternalCollection")).Return(&milvuspb.RefreshExternalCollectionResponse{
+	m := mockey.Mock((*mocks.MockProxy).RefreshExternalCollection).Return(&milvuspb.RefreshExternalCollectionResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		JobId:  12345,
 	}, nil).Build()
@@ -1543,7 +1543,7 @@ func TestServer_GetRefreshExternalCollectionProgress(t *testing.T) {
 		JobId: 12345,
 	}
 
-	m := mockey.Mock(mockey.GetMethod(mockProxy, "GetRefreshExternalCollectionProgress")).Return(&milvuspb.GetRefreshExternalCollectionProgressResponse{
+	m := mockey.Mock((*mocks.MockProxy).GetRefreshExternalCollectionProgress).Return(&milvuspb.GetRefreshExternalCollectionProgressResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 	}, nil).Build()
 	defer m.UnPatch()
@@ -1560,7 +1560,7 @@ func TestServer_ListRefreshExternalCollectionJobs(t *testing.T) {
 	ctx := context.Background()
 	req := &milvuspb.ListRefreshExternalCollectionJobsRequest{}
 
-	m := mockey.Mock(mockey.GetMethod(mockProxy, "ListRefreshExternalCollectionJobs")).Return(&milvuspb.ListRefreshExternalCollectionJobsResponse{
+	m := mockey.Mock((*mocks.MockProxy).ListRefreshExternalCollectionJobs).Return(&milvuspb.ListRefreshExternalCollectionJobsResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 	}, nil).Build()
 	defer m.UnPatch()
