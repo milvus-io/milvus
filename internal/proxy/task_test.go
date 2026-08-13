@@ -1223,6 +1223,44 @@ func TestAddFieldTask(t *testing.T) {
 	})
 }
 
+func TestAddFieldTaskRejectsText(t *testing.T) {
+	ctx := context.Background()
+	collectionName := "TestAddFieldTaskRejectsText"
+	fieldSchema := &schemapb.FieldSchema{
+		Name:     "text_field",
+		DataType: schemapb.DataType_Text,
+		Nullable: true,
+	}
+	fieldSchemaBytes, err := proto.Marshal(fieldSchema)
+	assert.NoError(t, err)
+
+	task := &addCollectionFieldTask{
+		Condition: NewTaskCondition(ctx),
+		AddCollectionFieldRequest: &milvuspb.AddCollectionFieldRequest{
+			CollectionName: collectionName,
+			Schema:         fieldSchemaBytes,
+		},
+		oldSchema: &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{
+					Name:     "vector",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: strconv.Itoa(testVecDim)},
+					},
+				},
+			},
+		},
+	}
+
+	assert.NoError(t, task.OnEnqueue())
+	err = task.PreExecute(ctx)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "text data type is not supported in Milvus 2.6")
+}
+
 func TestCreateCollectionTask(t *testing.T) {
 	mix := NewMixCoordMock()
 	ctx := context.Background()
@@ -1705,6 +1743,41 @@ func TestCreateCollectionTask(t *testing.T) {
 		err = task2.PreExecute(ctx)
 		assert.NoError(t, err)
 	})
+}
+
+func TestCreateCollectionTaskRejectsText(t *testing.T) {
+	ctx := context.Background()
+	collectionName := "TestCreateCollectionTaskRejectsText"
+	schema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				Name:     "vector",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: strconv.Itoa(testVecDim)},
+				},
+			},
+			{Name: "text_field", DataType: schemapb.DataType_Text},
+		},
+	}
+	schemaBytes, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	task := &createCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+			CollectionName: collectionName,
+			Schema:         schemaBytes,
+			ShardsNum:      common.DefaultShardsNum,
+		},
+	}
+
+	assert.NoError(t, task.OnEnqueue())
+	err = task.PreExecute(ctx)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "text data type is not supported in Milvus 2.6")
 }
 
 func TestHasCollectionTask(t *testing.T) {
