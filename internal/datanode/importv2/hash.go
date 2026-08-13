@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -43,11 +44,21 @@ func newHashedData(schema *schemapb.CollectionSchema, channelNum, partitionNum i
 }
 
 func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
+	return HashDataBySchema(typeutil.AppendSystemFields(task.GetSchema()), task.GetVchannels(), task.GetPartitionIDs(), rows)
+}
+
+// HashDataBySchema applies the same vchannel/partition hashing used by the
+// legacy ImportTask, but does not require a concrete V2 task object.  V3 uses
+// this adapter while keeping the old hash functions and field semantics as the
+// single source of truth.
+func HashDataBySchema(schema *schemapb.CollectionSchema, vchannels []string, partitionIDs []int64, rows *storage.InsertData) (HashedData, error) {
 	var (
-		schema       = typeutil.AppendSystemFields(task.GetSchema())
-		channelNum   = len(task.GetVchannels())
-		partitionNum = len(task.GetPartitionIDs())
+		channelNum   = len(vchannels)
+		partitionNum = len(partitionIDs)
 	)
+	if schema == nil || rows == nil || channelNum == 0 || partitionNum == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("invalid hash input")
+	}
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {

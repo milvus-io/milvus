@@ -432,6 +432,47 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum i
 	return nil
 }
 
+// AppendPreallocatedSystemFields materializes the deterministic RowID and
+// AutoID PK assigned to one ordinary ImportFile.  The range is [begin, end)
+// and the caller owns the per-file offset.  Backup import does not call this
+// helper and therefore keeps the source PK/RowID/timestamp.
+func AppendPreallocatedSystemFields(schema *schemapb.CollectionSchema, data *storage.InsertData, rowNum int, idRange *commonpb.IDRange, offset *int64) error {
+	if schema == nil || data == nil || offset == nil || idRange == nil || rowNum < 0 {
+		return merr.WrapErrDataIntegrityMsg("invalid preallocated import ID input")
+	}
+	if idRange.GetEnd() < idRange.GetBegin() || *offset < 0 || int64(rowNum) > idRange.GetEnd()-idRange.GetBegin()-*offset {
+		return merr.WrapErrDataIntegrityMsg(
+			"preallocated import ID range exhausted: begin=%d end=%d offset=%d rows=%d",
+			idRange.GetBegin(), idRange.GetEnd(), *offset, rowNum)
+	}
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return err
+	}
+	ids := make([]int64, rowNum)
+	for index := range ids {
+		ids[index] = idRange.GetBegin() + *offset + int64(index)
+	}
+	*offset += int64(rowNum)
+
+	pkData, hasPK := data.Data[pkField.GetFieldID()]
+	allowInsertAutoID, _ := common.IsAllowInsertAutoID(schema.GetProperties()...)
+	if pkField.GetAutoID() && (!hasPK || pkData == nil || pkData.RowNum() == 0 || !allowInsertAutoID) {
+		switch pkField.GetDataType() {
+		case schemapb.DataType_Int64:
+			data.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: ids}
+		case schemapb.DataType_VarChar:
+			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: lo.Map(ids, func(id int64, _ int) string {
+				return strconv.FormatInt(id, 10)
+			})}
+		default:
+			return merr.WrapErrDataIntegrityMsg("unsupported AutoID PK type %s", pkField.GetDataType())
+		}
+	}
+	data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
+	return nil
+}
+
 type nullDefaultAppender[T any] struct{}
 
 func (h *nullDefaultAppender[T]) AppendDefault(fieldData storage.FieldData, defaultVal T, rowNum int) error {

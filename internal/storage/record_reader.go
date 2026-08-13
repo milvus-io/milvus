@@ -7,6 +7,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -88,6 +89,54 @@ type RecordReader interface {
 	// Next or Close. Callers retaining it longer must Retain and Release it.
 	Next() (Record, error)
 	Close() error
+}
+
+// NewInsertDataRecordReader materializes one normalized InsertData batch as a
+// RecordReader. It is used by Import V3 to feed the existing storage.Sort
+// implementation without introducing a second sorting path.
+func NewInsertDataRecordReader(data *InsertData, schema *schemapb.CollectionSchema) (RecordReader, error) {
+	if data == nil || schema == nil {
+		return nil, merr.WrapErrServiceInternalMsg("insert data or schema is nil")
+	}
+	if data.GetRowNum() == 0 {
+		return &IterativeRecordReader{iterate: func() (RecordReader, error) { return nil, io.EOF }}, nil
+	}
+	arrowSchema, err := ConvertToArrowSchema(schema, false)
+	if err != nil {
+		return nil, err
+	}
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer builder.Release()
+	if err := BuildRecord(builder, data, schema); err != nil {
+		return nil, err
+	}
+	record := builder.NewRecord()
+	field2Col := make(map[FieldID]int)
+	for i, field := range typeutil.GetAllFieldSchemas(schema) {
+		field2Col[field.GetFieldID()] = i
+	}
+	return &singleRecordReader{record: NewSimpleArrowRecord(record, field2Col)}, nil
+}
+
+type singleRecordReader struct {
+	record Record
+	read   bool
+}
+
+func (r *singleRecordReader) Next() (Record, error) {
+	if r.read || r.record == nil {
+		return nil, io.EOF
+	}
+	r.read = true
+	return r.record, nil
+}
+
+func (r *singleRecordReader) Close() error {
+	if r.record != nil {
+		r.record.Release()
+		r.record = nil
+	}
+	return nil
 }
 
 type packedRecordReader struct {
