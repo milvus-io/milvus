@@ -194,6 +194,43 @@ func TestEstimateStatsFactorDiffersByJobType(t *testing.T) {
 	assert.Greater(t, jsonKey.Memory, text.Memory)
 }
 
+// TestEstimateStatsUnrecognizedSubJobUsesConservativeDefault pins the
+// default: branch of EstimateStats's switch: StatsSubJob_Sort and the
+// zero-value StatsSubJob_None (neither of which DataCoord submits today —
+// Sort is estimated as CompactionType_SortCompaction via EstimateCompaction
+// instead) must land on the larger of the two known factors, not silently
+// inherit whichever factor happens to be declared first or the smaller one.
+//
+// The factors are flipped between the two halves of this test specifically
+// so a default that quietly always picked one named factor (instead of
+// max-ing them), or that picked the smaller one, would fail here.
+func TestEstimateStatsUnrecognizedSubJobUsesConservativeDefault(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	const fieldSize = 100 * mib
+
+	// JSON-key factor is the larger one: the default must match it.
+	pt.Save(pt.DataCoordCfg.ResourceTextIndexFactor.Key, "2.0")
+	pt.Save(pt.DataCoordCfg.ResourceJSONKeyIndexFactor.Key, "5.0")
+	sortGot := EstimateStats(StatsInput{SubJobType: indexpb.StatsSubJob_Sort, FieldMemorySize: fieldSize})
+	noneGot := EstimateStats(StatsInput{SubJobType: indexpb.StatsSubJob_None, FieldMemorySize: fieldSize})
+	pt.Reset(pt.DataCoordCfg.ResourceTextIndexFactor.Key)
+	pt.Reset(pt.DataCoordCfg.ResourceJSONKeyIndexFactor.Key)
+
+	assert.Equal(t, int64(float64(fieldSize)*5.0), sortGot.Memory)
+	assert.Equal(t, int64(float64(fieldSize)*5.0), noneGot.Memory)
+
+	// Flip which factor is larger: the default must switch to tracking text,
+	// not stay pinned to json-key.
+	pt.Save(pt.DataCoordCfg.ResourceTextIndexFactor.Key, "7.0")
+	pt.Save(pt.DataCoordCfg.ResourceJSONKeyIndexFactor.Key, "3.0")
+	defer pt.Reset(pt.DataCoordCfg.ResourceTextIndexFactor.Key)
+	defer pt.Reset(pt.DataCoordCfg.ResourceJSONKeyIndexFactor.Key)
+	sortGot2 := EstimateStats(StatsInput{SubJobType: indexpb.StatsSubJob_Sort, FieldMemorySize: fieldSize})
+
+	assert.Equal(t, int64(float64(fieldSize)*7.0), sortGot2.Memory)
+}
+
 // TestEstimateStatsFloorAppliesToTinyField proves the 64MiB floor is wired
 // into EstimateStats too.
 func TestEstimateStatsFloorAppliesToTinyField(t *testing.T) {
