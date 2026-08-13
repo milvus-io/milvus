@@ -1403,6 +1403,7 @@ message ImportJob {
   uint64 data_ts = 18;
   repeated string committed_vchannels = 19;
   bool            auto_commit         = 20;
+  msg.ImportTaskVersion import_task_version = 21;
   int32 failure_code = 22;
   int64 planning_generation = 23;
   string planning_snapshot_ref = 24;
@@ -1589,6 +1590,7 @@ message QueryReshardTaskResponse {
   string reason = 3;
   string result_ref = 4;
   bytes result_digest = 5;
+  int32 failure_code = 6;
 }
 
 message DropReshardTaskRequest {
@@ -1609,6 +1611,7 @@ message QueryImportTaskV3Response {
   string reason = 3;
   string result_ref = 4;
   bytes result_digest = 5;
+  int32 failure_code = 6;
 }
 
 message DropImportTaskV3Request {

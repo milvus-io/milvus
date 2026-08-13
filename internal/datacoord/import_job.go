@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -121,7 +122,7 @@ type ImportJob interface {
 	GetAutoCommit() bool
 	GetTR() *timerecord.TimeRecorder
 	GetDataTs() uint64
-	GetImportTaskVersion() int32
+	GetImportTaskVersion() msgpb.ImportTaskVersion
 	GetFailureCode() int32
 	GetPlanningGeneration() int64
 	GetPlanningSnapshotRef() string

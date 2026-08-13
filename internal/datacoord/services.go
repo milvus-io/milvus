@@ -1938,6 +1938,14 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 	// Broadcast the import message
 	// dbName is retrieved inside broadcastImport via broker.DescribeCollectionInternal
+	importTaskVersion := in.GetImportTaskVersion()
+	if importTaskVersion == msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_UNSPECIFIED {
+		if importutilv2.IsL0Import(in.GetOptions()) {
+			importTaskVersion = msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V2
+		} else {
+			importTaskVersion = msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3
+		}
+	}
 	err = s.broadcastImport(
 		ctx,
 		in.GetCollectionName(),
@@ -1948,6 +1956,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		in.GetSchema(),
 		jobID,
 		in.GetChannelNames(),
+		importTaskVersion,
 	)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to broadcast import message", mlog.Err(err))
@@ -2040,21 +2049,22 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	createTime := time.Now()
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
-			JobID:          jobID,
-			CollectionID:   in.GetCollectionID(),
-			CollectionName: in.GetCollectionName(),
-			PartitionIDs:   in.GetPartitionIDs(),
-			Vchannels:      importCollectionInfo.VChannelNames,
-			Schema:         in.GetSchema(),
-			TimeoutTs:      timeoutTs,
-			CleanupTs:      math.MaxUint64,
-			State:          internalpb.ImportJobState_Pending,
-			Files:          files,
-			Options:        in.GetOptions(),
-			CreateTime:     createTime.Format("2006-01-02T15:04:05Z07:00"),
-			ReadyVchannels: in.GetChannelNames(),
-			DataTs:         in.GetDataTimestamp(),
-			AutoCommit:     importutilv2.IsAutoCommit(in.GetOptions()),
+			JobID:             jobID,
+			CollectionID:      in.GetCollectionID(),
+			CollectionName:    in.GetCollectionName(),
+			PartitionIDs:      in.GetPartitionIDs(),
+			Vchannels:         importCollectionInfo.VChannelNames,
+			Schema:            in.GetSchema(),
+			TimeoutTs:         timeoutTs,
+			CleanupTs:         math.MaxUint64,
+			State:             internalpb.ImportJobState_Pending,
+			Files:             files,
+			Options:           in.GetOptions(),
+			CreateTime:        createTime.Format("2006-01-02T15:04:05Z07:00"),
+			ReadyVchannels:    in.GetChannelNames(),
+			DataTs:            in.GetDataTimestamp(),
+			AutoCommit:        importutilv2.IsAutoCommit(in.GetOptions()),
+			ImportTaskVersion: in.GetImportTaskVersion(),
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}

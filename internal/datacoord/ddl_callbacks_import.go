@@ -72,9 +72,10 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 				PreAllocatedAutoIds: file.GetPreAllocatedAutoIds(),
 			}
 		}),
-		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
-		DataTimestamp: result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
-		JobID:         body.GetJobID(),
+		Options:           funcutil.Map2KeyValuePair(body.GetOptions()),
+		DataTimestamp:     result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
+		JobID:             body.GetJobID(),
+		ImportTaskVersion: body.GetImportTaskVersion(),
 	})
 
 	err = merr.CheckRPCCall(importResp, err)
@@ -178,7 +179,12 @@ func (s *Server) broadcastImport(ctx context.Context,
 	schema *schemapb.CollectionSchema,
 	jobID int64,
 	vchannels []string,
+	importTaskVersionArgs ...msgpb.ImportTaskVersion,
 ) error {
+	importTaskVersion := msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_UNSPECIFIED
+	if len(importTaskVersionArgs) > 0 {
+		importTaskVersion = importTaskVersionArgs[0]
+	}
 	// Convert files to msgpb format for validation
 	msgFiles := lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
 		return &msgpb.ImportFile{
@@ -213,14 +219,15 @@ func (s *Server) broadcastImport(ctx context.Context,
 				MsgType:   commonpb.MsgType_Import,
 				Timestamp: 0,
 			},
-			DbName:         coll.DbName,
-			CollectionName: collectionName,
-			CollectionID:   collectionID,
-			PartitionIDs:   partitionIDs,
-			Options:        funcutil.KeyValuePair2Map(options),
-			Files:          msgFiles,
-			Schema:         schema, // TODO: should we use the schema from the collection?
-			JobID:          jobID,
+			DbName:            coll.DbName,
+			CollectionName:    collectionName,
+			CollectionID:      collectionID,
+			PartitionIDs:      partitionIDs,
+			Options:           funcutil.KeyValuePair2Map(options),
+			Files:             msgFiles,
+			Schema:            schema, // TODO: should we use the schema from the collection?
+			JobID:             jobID,
+			ImportTaskVersion: importTaskVersion,
 		}).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()

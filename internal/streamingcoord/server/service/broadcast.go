@@ -101,16 +101,17 @@ func (s *broadcastServceImpl) forwardImportToDataCoord(ctx context.Context, msg 
 
 	// Build ImportRequestInternal from the broadcast message
 	importReq := &internalpb.ImportRequestInternal{
-		DbID:           0, // deprecated
-		CollectionID:   body.GetCollectionID(),
-		CollectionName: body.GetCollectionName(),
-		PartitionIDs:   body.GetPartitionIDs(),
-		ChannelNames:   msg.BroadcastHeader().VChannels,
-		Schema:         body.GetSchema(),
-		Files:          files,
-		Options:        funcutil.Map2KeyValuePair(body.GetOptions()),
-		DataTimestamp:  0, // Indicates this is from proxy, not from ack callback
-		JobID:          body.GetJobID(),
+		DbID:              0, // deprecated
+		CollectionID:      body.GetCollectionID(),
+		CollectionName:    body.GetCollectionName(),
+		PartitionIDs:      body.GetPartitionIDs(),
+		ChannelNames:      msg.BroadcastHeader().VChannels,
+		Schema:            body.GetSchema(),
+		Files:             files,
+		Options:           funcutil.Map2KeyValuePair(body.GetOptions()),
+		DataTimestamp:     0, // Indicates this is from proxy, not from ack callback
+		JobID:             body.GetJobID(),
+		ImportTaskVersion: body.GetImportTaskVersion(),
 	}
 
 	// Get MixCoordClient to call DataCoord.ImportV2

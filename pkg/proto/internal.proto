@@ -5,6 +5,7 @@ option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/internalpb";
 import "common.proto";
 import "schema.proto";
 import "milvus.proto";
+import "msg.proto";
 import "plan.proto";
 
 message GetTimeTickChannelRequest {
@@ -418,6 +419,7 @@ message ImportRequestInternal {
   repeated common.KeyValuePair options = 8;
   uint64 data_timestamp = 9;
   int64 jobID = 10;
+  msg.ImportTaskVersion import_task_version = 11;
 }
 
 message ImportRequest {

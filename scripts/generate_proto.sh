@@ -106,6 +106,10 @@ mkdir -p ./streamingpb
 mkdir -p ./viewpb
 mkdir -p $ROOT_DIR/cmd/tools/migration/legacy/legacypb
 
+# Keep the external API proto checkout and Go module in lockstep. The API
+# checkout must contain msg.ImportTaskVersion and common.IDRange before this
+# script is run; otherwise internal.proto/data_coord.proto cannot resolve the
+# single external enum contract.
 protoc_opt="${PROTOC_BIN} --proto_path=${API_PROTO_DIR} --proto_path=."
 
 backup_generated_files
