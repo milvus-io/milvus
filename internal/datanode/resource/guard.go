@@ -201,12 +201,32 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 		return false, g.availLocked(budget)
 	}
 
+	if g.blockedByHeadOfLineLocked(taskID, budget) {
+		return false, g.availLocked(budget)
+	}
+
 	if g.isOversizedLocked(req) {
+		// Taking the whole node must not be a way to jump the queue. The
+		// head-of-line rule above only holds the line for a head that does not
+		// fit, and on a drained node every ordinary head fits -- so between a
+		// Release and the head goroutine waking to retry there is a window in
+		// which that rule alone would let an oversized latecomer walk off with
+		// the node the head was reserved for, and the head would then wait out
+		// its whole runtime. An oversized task may claim the node only from the
+		// front of the queue, or when nobody is queued at all.
+		if len(g.waiters) > 0 && g.waiters[0].taskID != taskID {
+			return false, g.availLocked(budget)
+		}
 		// It cannot share the node, so it runs alone: admitted only once every
-		// other reservation has been released. It is never refused -- the
+		// other task has finished. The test is the ledger, not the reserved
+		// total -- CPU requirements are fractional (see estimate_import.go), so
+		// a released ledger leaves a float residue behind that never compares
+		// equal to zero, and a task charged a zero Requirement would not show up
+		// in the total at all. Both would be read as "the node is busy" or "the
+		// node is empty" against the evidence. It is never refused outright: the
 		// coordinator places such a task on the emptiest worker on purpose and
 		// relies on this wait.
-		if !g.reserved.IsZero() {
+		if len(g.ledger) != 0 {
 			return false, g.availLocked(budget)
 		}
 		g.exclusiveTaskID = taskID
@@ -219,9 +239,6 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 		return true, g.availLocked(budget)
 	}
 
-	if g.blockedByHeadOfLineLocked(taskID, budget) {
-		return false, g.availLocked(budget)
-	}
 	if !g.reserved.Add(req).FitsIn(budget) {
 		return false, g.availLocked(budget)
 	}
@@ -247,11 +264,13 @@ func (g *guard) blockedByHeadOfLineLocked(taskID int64, budget taskresource.Capa
 	if head.taskID == taskID {
 		return false
 	}
-	// An oversized head can only ever run on a drained node, so it always holds
-	// the line regardless of the configuration knob. Letting the knob release
-	// it would starve it forever: unlike an ordinary task it can never be
-	// admitted by a lucky gap.
-	if g.isOversizedLocked(head.req) {
+	// An oversized waiter can only ever run on a drained node, so it holds the
+	// line from wherever it sits in the queue and regardless of the
+	// configuration knob. Position does not matter because the reason does not:
+	// unlike an ordinary task it can never be admitted by a lucky gap, so a
+	// trickle of small tasks that keeps the node non-empty starves it forever.
+	// Letting the knob release it would do the same.
+	if g.hasOversizedWaiterLocked(taskID) {
 		return true
 	}
 	if !paramtable.Get().DataNodeCfg.ResourceHeadOfLineReserve.GetAsBool() {
@@ -260,6 +279,19 @@ func (g *guard) blockedByHeadOfLineLocked(taskID int64, budget taskresource.Capa
 	// The head is waiting because it does not fit yet. Anyone else taking
 	// budget now pushes its admission further away.
 	return !g.reserved.Add(head.req).FitsIn(budget)
+}
+
+// hasOversizedWaiterLocked reports whether anyone other than exceptTaskID is
+// queued for the whole node. Capacity is read once rather than per waiter: the
+// production path recomputes it from paramtable and hardware on every call.
+func (g *guard) hasOversizedWaiterLocked(exceptTaskID int64) bool {
+	capacity := g.nodeCapacityLocked()
+	for _, w := range g.waiters {
+		if w.taskID != exceptTaskID && !w.req.FitsIn(capacity) {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *guard) Acquire(ctx context.Context, taskID int64, taskType taskcommon.Type, req taskresource.Requirement) error {
