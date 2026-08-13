@@ -46,6 +46,14 @@ type Guard interface {
 	// reservation has been released, after which nothing else is admitted until
 	// it finishes.
 	//
+	// An oversized request has one further condition, which matters to
+	// TryAcquire callers: it is admitted only from the front of the waiter queue
+	// or with that queue empty, so that taking the whole node cannot become a
+	// way to jump ahead of tasks already waiting. It can therefore be refused on
+	// a node that is demonstrably empty, if someone else is queued. Acquire is
+	// the intended path for an oversized request -- the queue is FIFO, so
+	// waiting is what carries it to the front.
+	//
 	// The second value is the headroom left on the node *after* this call has
 	// been decided: budget minus everything the ledger has committed, including
 	// the charge just made when admitted=true. It therefore always agrees with a
@@ -374,6 +382,18 @@ func (g *guard) Release(taskID int64) {
 	}
 	delete(g.ledger, taskID)
 	g.reserved = g.reserved.Sub(req)
+	if len(g.ledger) == 0 {
+		// An empty ledger means nothing is reserved, by definition, and the
+		// arithmetic is not required to agree. Requirement.Sub clamps at
+		// negative but never snaps to zero, and CPU requirements are fractional
+		// (estimate_import.go charges 0.1 per import), so subtracting exactly
+		// what was added can leave a positive residue of a few 1e-17 behind --
+		// permanently, since nothing ever subtracts it again. Small as it is, it
+		// is enough to refuse a task sized exactly to the budget whenever the
+		// budget is small enough that the residue survives the addition, on a
+		// node the ledger says is empty.
+		g.reserved = taskresource.Requirement{}
+	}
 	// The node stops being exclusive the moment its occupant lets go.
 	if g.exclusiveTaskID == taskID {
 		g.exclusiveTaskID = 0

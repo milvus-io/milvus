@@ -48,6 +48,13 @@ func (r Requirement) Add(o Requirement) Requirement {
 // Sub clamps at zero. A ledger must never go negative: a negative balance
 // would silently enlarge the budget and let extra tasks in, which is exactly
 // the failure this package exists to prevent.
+//
+// Clamping is not snapping: subtracting exactly what was added does not
+// reliably land on zero, because CPU is a float. Three additions of 0.1
+// followed by three subtractions of 0.1 leave 2.7755575615628914e-17 behind,
+// and nothing here removes it. A caller that needs an exact zero has to
+// establish it some other way -- the DataNode guard's ledger does, by resetting
+// the total outright when its last task releases.
 func (r Requirement) Sub(o Requirement) Requirement {
 	out := Requirement{CPU: r.CPU - o.CPU, Memory: r.Memory - o.Memory}
 	if out.CPU < 0 {
