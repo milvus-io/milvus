@@ -70,6 +70,7 @@ type TaskManager struct {
 	mu      sync.RWMutex
 	tasks   map[int64]*task
 	workers sync.WaitGroup
+	closed  bool
 }
 
 func NewTaskManager() *TaskManager {
@@ -90,6 +91,10 @@ func (m *TaskManager) Add(taskID, runID int64, execute Run) error {
 		return merr.WrapErrImportSysFailedMsg("invalid import V3 task create request")
 	}
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return merr.WrapErrServiceNotReadyMsg("import V3 task manager is closed")
+	}
 	if existing, ok := m.tasks[taskID]; ok {
 		existing.mu.RLock()
 		existingRun := existing.runID
@@ -235,6 +240,7 @@ func (m *TaskManager) Close() {
 	}
 	m.cancel()
 	m.mu.Lock()
+	m.closed = true
 	for _, task := range m.tasks {
 		if task.cancel != nil {
 			task.cancel()
