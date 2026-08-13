@@ -3242,9 +3242,9 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.ChannelTaskTimeout = ParamItem{
 		Key:          "queryCoord.channelTaskTimeout",
 		Version:      "2.0.0",
-		DefaultValue: "300000",
+		DefaultValue: "120000",
 		PanicIfEmpty: true,
-		Doc:          "5 minutes",
+		Doc:          "2 minutes",
 		Export:       true,
 	}
 	p.ChannelTaskTimeout.Init(base.mgr)
@@ -3252,9 +3252,9 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.SegmentTaskTimeout = ParamItem{
 		Key:          "queryCoord.segmentTaskTimeout",
 		Version:      "2.0.0",
-		DefaultValue: "300000",
+		DefaultValue: "120000",
 		PanicIfEmpty: true,
-		Doc:          "5 minutes",
+		Doc:          "2 minutes",
 		Export:       true,
 	}
 	p.SegmentTaskTimeout.Init(base.mgr)
