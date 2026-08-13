@@ -99,6 +99,14 @@ func estimateSortCompaction(in CompactionInput) Requirement {
 	return Requirement{CPU: 1.0, Memory: atLeast(mem, binlogChunkBytes())}
 }
 
+// defaultL0BatchSize stands in for L0CompactionMaxBatchSize's "no limit"
+// sentinel (<= 0, default -1: see its Doc). The config counts segments per
+// batch, not bytes, so this is a rough per-segment bloom-filter allowance
+// times a batch count, not a unit conversion; 32 is a conservative stand-in
+// for "unbounded" chosen to keep the term positive and non-trivial at default
+// config, not a measured figure.
+const defaultL0BatchSize = 32
+
 // estimateL0Compaction models ComposeDeleteDataFromSegments, which loads every
 // L0 segment's deletes at once, plus the bloom filters of one target batch.
 //
@@ -108,7 +116,13 @@ func estimateSortCompaction(in CompactionInput) Requirement {
 // allowance (L0CompactionMaxBatchSize is a segment count, not a size) times the
 // batch count — a rough allowance, not a measured byte figure.
 func estimateL0Compaction(in CompactionInput) Requirement {
-	batchBFAllowance := paramtable.Get().DataNodeCfg.L0CompactionMaxBatchSize.GetAsInt64() * mib
+	batchSize := paramtable.Get().DataNodeCfg.L0CompactionMaxBatchSize.GetAsInt64()
+	if batchSize <= 0 {
+		// <= 0 is the "no limit" sentinel (default -1); it is a segment count,
+		// not a byte multiplier, so it cannot be used as-is.
+		batchSize = defaultL0BatchSize
+	}
+	batchBFAllowance := batchSize * mib
 	mem := in.MaxSegmentDeleteBytes + batchBFAllowance
 	return Requirement{CPU: 1.0, Memory: atLeast(mem, binlogChunkBytes())}
 }
