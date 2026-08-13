@@ -82,12 +82,14 @@ type guard struct {
 	waiters []*waiter
 
 	// frozen and nonTask are driven by the watermark loop; see watermark.go.
-	// nonTaskPeak is the reservation currently in force and lowSampleCount how
-	// many consecutive samples have come in under it.
+	// nonTaskPeak is the reservation currently in force; lowSampleCount and
+	// lowRunMax describe the run of samples below it -- how many have arrived,
+	// and the largest of them, which is what the reservation relaxes to.
 	frozen         bool
 	nonTask        int64
 	nonTaskPeak    int64
 	lowSampleCount int
+	lowRunMax      int64
 }
 
 var (

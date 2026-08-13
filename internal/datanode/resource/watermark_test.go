@@ -136,6 +136,29 @@ func TestFreezeOnlyAboveHighWatermark(t *testing.T) {
 	assert.False(t, g.Snapshot().Frozen, "0.80 is below the high mark, an unfrozen node stays unfrozen")
 }
 
+// Both marks are boundaries, and both belong to the conservative side: a node
+// exactly at the high mark is frozen, and a frozen node exactly at the low mark
+// stays frozen. Only strictly below the low mark does admission resume.
+func TestWatermarkBoundariesFavourTheConservativeSide(t *testing.T) {
+	g := newTestGuard(t, 100, 1000)
+
+	mkTotal := mockey.Mock(hardware.GetMemoryCount).Return(uint64(1000)).Build()
+	defer mkTotal.UnPatch()
+	used := stubUsedMemory(t)
+
+	used.set(850) // exactly 0.85
+	g.sampleOnce()
+	require.True(t, g.Snapshot().Frozen, "the high watermark is inclusive")
+
+	used.set(750) // exactly 0.75
+	g.sampleOnce()
+	assert.True(t, g.Snapshot().Frozen, "0.75 is not *below* the low watermark")
+
+	used.set(749)
+	g.sampleOnce()
+	assert.False(t, g.Snapshot().Frozen)
+}
+
 // A total of zero means the reading failed, not that the node has no memory.
 // Dividing by it yields +Inf, which would freeze the node on a measurement
 // error alone.
@@ -226,6 +249,43 @@ func TestNonTaskMemoryRiseResetsTheLowRun(t *testing.T) {
 	assert.Equal(t, int64(100), g.Snapshot().NonTask)
 }
 
+// slowGrowPeriods decides *when* the reservation may relax; the run's maximum
+// decides *how far*. Committing the run's last sample would let two ordinary
+// samples tick the counter and one outlier dictate the new value, handing back
+// budget that nothing else in the run supports -- sustained evidence applied to
+// the timing while the magnitude rests on a single reading.
+func TestRelaxationCommitsTheRunMaximumNotTheLastSample(t *testing.T) {
+	g := newTestGuard(t, 100, 1000)
+	saveParam(t, &paramtable.Get().DataNodeCfg.ResourceNonTaskMemoryFloor, "0")
+	saveParam(t, &paramtable.Get().DataNodeCfg.ResourceSlowGrowPeriods, "3")
+
+	mkTotal := mockey.Mock(hardware.GetMemoryCount).Return(uint64(1000)).Build()
+	defer mkTotal.UnPatch()
+	used := stubUsedMemory(t)
+
+	used.set(400)
+	g.sampleOnce()
+	require.Equal(t, int64(400), g.Snapshot().NonTask)
+
+	// Two samples barely under the reservation, then one far under it.
+	used.set(399)
+	g.sampleOnce()
+	g.sampleOnce()
+	used.set(1)
+	g.sampleOnce()
+
+	assert.Equal(t, int64(399), g.Snapshot().NonTask,
+		"the run relaxes to its own maximum, not to the outlier that ended it")
+	assert.Equal(t, int64(601), g.Snapshot().Total.Memory)
+
+	// The maximum belongs to the run that produced it: once committed it must
+	// not survive into the next run and hold the reservation up.
+	g.sampleOnce()
+	g.sampleOnce()
+	g.sampleOnce()
+	assert.Equal(t, int64(1), g.Snapshot().NonTask, "a fresh run of 1s must relax to 1")
+}
+
 func TestNonTaskMemoryExcludesLedger(t *testing.T) {
 	g := newTestGuard(t, 100, 1000)
 	saveParam(t, &paramtable.Get().DataNodeCfg.ResourceNonTaskMemoryFloor, "0")
@@ -243,33 +303,53 @@ func TestNonTaskMemoryExcludesLedger(t *testing.T) {
 	assert.Equal(t, int64(50), g.Snapshot().NonTask)
 }
 
-// Reserved memory that the tasks have not touched yet must not drive the
-// reservation negative: a negative reservation would *add* to the budget and
-// hand out memory the node does not have.
-func TestNonTaskMemoryNeverGoesNegativeWhenLedgerExceedsObservation(t *testing.T) {
+// An observation below what the ledger has committed says only that the
+// admitted tasks have not grown into their estimates yet. It says nothing about
+// what else is resident, so it is not evidence about non-task memory at all:
+// the reservation must neither move nor edge closer to relaxing. Reading it as
+// "there is no non-task memory" would let the ledger's own headroom decay the
+// reservation away -- a low reading widening the budget, the one thing this
+// package may never do.
+func TestObservationBelowTheLedgerCarriesNoInformation(t *testing.T) {
 	g := newTestGuard(t, 100, 1000)
 	saveParam(t, &paramtable.Get().DataNodeCfg.ResourceNonTaskMemoryFloor, "0")
-	// One low sample is enough to commit, so nothing but the clamp itself keeps
-	// the negative figure out of the budget.
-	saveParam(t, &paramtable.Get().DataNodeCfg.ResourceSlowGrowPeriods, "1")
+	saveParam(t, &paramtable.Get().DataNodeCfg.ResourceSlowGrowPeriods, "3")
 
 	mkTotal := mockey.Mock(hardware.GetMemoryCount).Return(uint64(1000)).Build()
 	defer mkTotal.UnPatch()
 	used := stubUsedMemory(t)
-	used.set(100)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 800})
+	// Establish a reservation from a real reading first.
+	used.set(400)
+	g.sampleOnce()
+	require.Equal(t, int64(400), g.Snapshot().NonTask)
+
+	// Now the node takes on work the tasks have not grown into.
+	_, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 500})
 	require.NoError(t, err)
+	used.set(450) // below the 500 committed
 
+	// However many such samples arrive, none of them is evidence.
+	for i := 0; i < 6; i++ { // twice slowGrowPeriods
+		g.sampleOnce()
+		require.Equal(t, int64(400), g.Snapshot().NonTask,
+			"a sample below the ledger must not move the reservation (sample %d)", i)
+	}
+
+	// And they must not have counted towards a relaxation either: a genuine run
+	// still needs its full slowGrowPeriods afterwards.
+	used.set(600) // 600 - 500 committed = 100 outside the ledger
 	g.sampleOnce()
+	assert.Equal(t, int64(400), g.Snapshot().NonTask, "the skipped samples must not have shortened the run")
 	g.sampleOnce()
-	assert.Equal(t, int64(0), g.Snapshot().NonTask, "an under-grown ledger must not create budget")
-	assert.Equal(t, int64(1000), g.Snapshot().Total.Memory, "the budget must never exceed the node")
+	assert.Equal(t, int64(400), g.Snapshot().NonTask)
+	g.sampleOnce()
+	assert.Equal(t, int64(100), g.Snapshot().NonTask)
 }
 
-// The floor is a lower bound, and a misconfigured negative one must not become
-// a licence to hand out memory the node does not have. Nothing validates this
-// key, so the reservation clamps itself rather than trusting the config.
+// The floor is a lower bound. A misconfigured negative one must not turn into a
+// licence to hand out memory the node does not have -- nothing validates this
+// key, so the sample may only ever be raised by it.
 func TestNegativeFloorCannotCreateBudget(t *testing.T) {
 	g := newTestGuard(t, 100, 1000)
 	saveParam(t, &paramtable.Get().DataNodeCfg.ResourceNonTaskMemoryFloor, "-1000000")
@@ -278,15 +358,21 @@ func TestNegativeFloorCannotCreateBudget(t *testing.T) {
 	mkTotal := mockey.Mock(hardware.GetMemoryCount).Return(uint64(1000)).Build()
 	defer mkTotal.UnPatch()
 	used := stubUsedMemory(t)
-	used.set(100)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 800})
+	_, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 100})
 	require.NoError(t, err)
 
+	used.set(500) // 500 - 100 committed = 400 outside the ledger
 	g.sampleOnce()
+	assert.Equal(t, int64(400), g.Snapshot().NonTask, "the floor may only raise a sample, never lower it")
+	assert.Equal(t, int64(600), g.Snapshot().Total.Memory)
+
+	// Sustained lower readings relax the reservation towards the observation,
+	// never towards the nonsense floor.
+	used.set(300)
 	g.sampleOnce()
-	assert.Equal(t, int64(0), g.Snapshot().NonTask)
-	assert.Equal(t, int64(1000), g.Snapshot().Total.Memory, "the budget must never exceed the node")
+	assert.Equal(t, int64(200), g.Snapshot().NonTask)
+	assert.Equal(t, int64(800), g.Snapshot().Total.Memory, "the budget must never exceed the node")
 }
 
 func TestNonTaskMemoryRespectsFloor(t *testing.T) {
@@ -296,7 +382,9 @@ func TestNonTaskMemoryRespectsFloor(t *testing.T) {
 	mkTotal := mockey.Mock(hardware.GetMemoryCount).Return(uint64(1) << 30).Build()
 	defer mkTotal.UnPatch()
 	used := stubUsedMemory(t)
-	used.set(0)
+	// One byte above the empty ledger: a real reading, and a negligible one, so
+	// whatever comes out is the floor's doing.
+	used.set(1)
 
 	g.sampleOnce()
 	assert.GreaterOrEqual(t, g.Snapshot().NonTask, int64(104857600))
@@ -369,13 +457,16 @@ func TestLoweredNonTaskMemoryWakesBlockedWaiters(t *testing.T) {
 	require.Eventually(t, func() bool { return g.waiterCount() == 1 }, time.Second, 5*time.Millisecond)
 	require.Len(t, done, 0)
 
-	used.set(300)
+	// Still above the 300 committed, so these are real readings of non-task
+	// memory rather than samples the ledger swallows.
+	used.set(400)
 	g.sampleOnce() // first low sample: not enough on its own
 	require.Equal(t, int64(300), g.Snapshot().NonTask)
 	require.Len(t, done, 0, "one low sample must not have widened the budget")
 
 	g.sampleOnce() // second: the reservation relaxes and the budget widens
-	require.Equal(t, int64(0), g.Snapshot().NonTask)
+	require.Equal(t, int64(100), g.Snapshot().NonTask)
+	require.Equal(t, int64(900), g.Snapshot().Total.Memory)
 
 	select {
 	case err := <-done:
