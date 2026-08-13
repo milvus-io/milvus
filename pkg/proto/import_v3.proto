@@ -242,6 +242,10 @@ message PlanningSnapshot {
   // timestamp materialization and TTL filtering. It is intentionally part of
   // the snapshot rather than read from current job metadata during recovery.
   uint64 data_ts = 16;
+  // Collection identity is frozen for final writer path/stat metadata. It is
+  // repeated in the worker request only as an assertion; the snapshot remains
+  // the recovery source of truth.
+  int64 collection_id = 17;
 }
 
 message ImportTaskPlan {
