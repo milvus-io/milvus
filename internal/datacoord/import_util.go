@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -517,6 +519,25 @@ func getPreImportingProgress(ctx context.Context, jobID int64, importMeta Import
 }
 
 func getImportRowsInfo(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) (importedRows, totalRows int64) {
+	job := importMeta.GetJob(ctx, jobID)
+	if job != nil && job.GetImportTaskVersion() == msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3 {
+		tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskV3Type))
+		segmentIDs := make([]int64, 0)
+		for _, generic := range tasks {
+			task := generic.(*importTaskV3)
+			segmentIDs = append(segmentIDs, task.task.Load().GetOutputSegmentIds()...)
+		}
+		importedRows = meta.GetSegmentsTotalNumRows(segmentIDs)
+		if job.GetPlanningSnapshotRef() != "" && len(job.GetPlanningSnapshotDigest()) > 0 && meta.chunkManager != nil {
+			if payload, err := meta.chunkManager.Read(ctx, job.GetPlanningSnapshotRef()); err == nil && bytes.Equal(importV3Digest(payload), job.GetPlanningSnapshotDigest()) {
+				snapshot := &datapb.PlanningSnapshot{}
+				if proto.Unmarshal(payload, snapshot) == nil {
+					totalRows = snapshot.GetTotalRows()
+				}
+			}
+		}
+		return importedRows, totalRows
+	}
 	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
 	segmentIDs := make([]int64, 0)
 	for _, task := range tasks {
@@ -562,6 +583,23 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 	job := importMeta.GetJob(ctx, jobID)
 	if !Params.DataCoordCfg.WaitForIndex.GetAsBool() {
 		return 1
+	}
+	if job.GetImportTaskVersion() == msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3 {
+		tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskV3Type))
+		targetSegmentIDs := make([]int64, 0)
+		for _, task := range tasks {
+			for _, segmentID := range task.(*importTaskV3).task.Load().GetOutputSegmentIds() {
+				segment := meta.GetHealthySegment(ctx, segmentID)
+				if segment != nil && segment.GetNumOfRows() > 0 {
+					targetSegmentIDs = append(targetSegmentIDs, segmentID)
+				}
+			}
+		}
+		if len(targetSegmentIDs) == 0 {
+			return 1
+		}
+		unindexed := meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
+		return float32(len(targetSegmentIDs)-len(unindexed)) / float32(len(targetSegmentIDs))
 	}
 	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
 	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {

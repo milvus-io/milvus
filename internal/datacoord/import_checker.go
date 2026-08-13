@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/samber/lo"
 
@@ -415,7 +416,12 @@ func publishImportV3Segments(ctx context.Context, meta *meta, tasks []ImportTask
 		if !ok {
 			continue
 		}
-		segmentIDs = append(segmentIDs, task.task.Load().GetOutputSegmentIds()...)
+		for _, segmentID := range task.task.Load().GetOutputSegmentIds() {
+			segment := meta.GetSegment(ctx, segmentID)
+			if segment != nil && segment.GetState() == commonpb.SegmentState_Flushed && segment.GetNumOfRows() > 0 {
+				segmentIDs = append(segmentIDs, segmentID)
+			}
+		}
 	}
 	if len(segmentIDs) == 0 {
 		return nil
@@ -504,9 +510,15 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
 	if job.GetImportTaskVersion() == msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3 {
 		tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskV3Type), WithJob(job.GetJobID()))
-		segmentIDs := lo.FlatMap(tasks, func(task ImportTask, _ int) []int64 {
-			return append([]int64(nil), task.(*importTaskV3).task.Load().GetOutputSegmentIds()...)
-		})
+		segmentIDs := make([]int64, 0)
+		for _, task := range tasks {
+			for _, segmentID := range task.(*importTaskV3).task.Load().GetOutputSegmentIds() {
+				segment := c.meta.GetHealthySegment(c.ctx, segmentID)
+				if segment != nil && segment.GetNumOfRows() > 0 {
+					segmentIDs = append(segmentIDs, segmentID)
+				}
+			}
+		}
 		healthySegments := c.meta.GetSegments(segmentIDs, isSegmentHealthy)
 		unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
 		if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 {

@@ -264,28 +264,28 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 		if len(segments) == 0 {
 			continue
 		}
+		// Worker result ordinals are task-local because output_segment_ids is
+		// carried on one ImportTaskV3 record. Snapshot plans keep their global
+		// order, while each task plan uses a cloned contiguous 0-based view.
+		taskSegments := make([]*datapb.SegmentPlan, len(segments))
+		for i, segment := range segments {
+			taskSegments[i] = proto.Clone(segment).(*datapb.SegmentPlan)
+			taskSegments[i].LogicalSegmentOrdinal = int64(i)
+		}
 		taskID := taskStart + int64(taskOrdinal)
 		taskOrdinal++
-		outputIDs := make([]int64, len(segments))
-		for j, segment := range segments {
-			seg, err := AllocImportSegment(c.ctx, c.alloc, c.meta, job.GetJobID(), taskID, job.GetCollectionID(), segment.GetPartitionId(), segment.GetVchannel(), job.GetDataTs(), datapb.SegmentLevel_L1, importStorageVersion(false))
+		outputIDs := make([]int64, len(taskSegments))
+		for j, segment := range taskSegments {
+			seg, err := AllocImportSegment(c.ctx, c.alloc, c.meta, job.GetJobID(), taskID, job.GetCollectionID(), segment.GetPartitionId(), segment.GetVchannel(), job.GetDataTs(), datapb.SegmentLevel_L1, importStorageVersion(importutilv2.IsL0Import(job.GetOptions())))
 			if err != nil {
 				return err
 			}
-			seg.SegmentInfo.IsInvisible = true
-			if err := c.meta.UpdateSegmentsInfo(c.ctx, func(pack *updateSegmentPack) bool {
-				s := pack.Get(seg.GetID())
-				if s == nil {
-					return false
-				}
-				s.IsInvisible = true
-				return true
-			}); err != nil {
+			if err := c.meta.UpdateSegmentsInfo(c.ctx, SetSegmentIsInvisible(seg.GetID(), true)); err != nil {
 				return err
 			}
 			outputIDs[j] = seg.GetID()
 		}
-		required := int64(len(segments) * 16)
+		required := int64(len(taskSegments) * 16)
 		if required <= 0 || required > math.MaxUint32 {
 			return merr.WrapErrImportSysFailedMsg("import v3 log id budget is invalid")
 		}
@@ -293,7 +293,7 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 		if err != nil {
 			return err
 		}
-		plan := &datapb.ImportTaskPlan{FormatVersion: 1, JobId: job.GetJobID(), TaskId: taskID, PlanningGeneration: gen, PlanningSnapshotDigest: snapshotDigest, SortSpec: proto.Clone(snapshot.GetSortSpec()).(*datapb.SortSpec), SegmentPlans: segments, MergeFanIn: int32(snapshot.GetMergeFanInCap()), RequiredLogIds: required, TaskSlot: 1, PlanningSnapshotRef: snapshotRef}
+		plan := &datapb.ImportTaskPlan{FormatVersion: 1, JobId: job.GetJobID(), TaskId: taskID, PlanningGeneration: gen, PlanningSnapshotDigest: snapshotDigest, SortSpec: proto.Clone(snapshot.GetSortSpec()).(*datapb.SortSpec), SegmentPlans: taskSegments, MergeFanIn: int32(snapshot.GetMergeFanInCap()), RequiredLogIds: required, TaskSlot: 1, PlanningSnapshotRef: snapshotRef}
 		planRef, planDigest, err := writeImportV3Proto(c.ctx, c.meta.chunkManager, path.Join(planningPrefix, "tasks"), strconv.FormatInt(taskID, 10), plan)
 		if err != nil {
 			return err
