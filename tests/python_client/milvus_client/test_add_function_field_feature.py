@@ -179,8 +179,8 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
                         f"first_error_seconds={first_error_seconds}, "
                         f"last_error_seconds={last_error_seconds}, last_errors={last_errors}"
                     )
-                    log.info(f"{label} waiting 10s after the first hit before fixed post-hit verification")
-                    time.sleep(10)
+                    log.info(f"{label} waiting 2s after the first hit before fixed post-hit verification")
+                    time.sleep(2)
                     return self._assert_post_hit_search_rounds(
                         client,
                         search_kwargs,
