@@ -45,8 +45,8 @@ func TestRecoveryStorage(t *testing.T) {
 
 	vchannelMetas := make(map[string]*streamingpb.VChannelMeta)
 	segmentMetas := make(map[int64]*streamingpb.SegmentAssignmentMeta)
-	idempotencyWindowMetas := make(map[string]*streamingpb.VChannelWindowMeta)
-	var pchannelWindowMeta *streamingpb.PChannelWindowMeta
+	summaryMetas := make(map[string]*streamingpb.VChannelSummaryMeta)
+	var pchannelSummaryMeta *streamingpb.PChannelSummaryMeta
 	cp := &streamingpb.WALCheckpoint{
 		MessageId:     rmq.NewRmqID(1).IntoProto(),
 		TimeTick:      1,
@@ -64,9 +64,9 @@ func TestRecoveryStorage(t *testing.T) {
 			return proto.Clone(v).(*streamingpb.VChannelMeta)
 		}), nil
 	})
-	snCatalog.EXPECT().ListVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, channel string, viewType string) ([]*streamingpb.VChannelWindowMeta, error) {
-		return lo.MapToSlice(idempotencyWindowMetas, func(_ string, v *streamingpb.VChannelWindowMeta) *streamingpb.VChannelWindowMeta {
-			return proto.Clone(v).(*streamingpb.VChannelWindowMeta)
+	snCatalog.EXPECT().ListVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, channel string, viewType string) ([]*streamingpb.VChannelSummaryMeta, error) {
+		return lo.MapToSlice(summaryMetas, func(_ string, v *streamingpb.VChannelSummaryMeta) *streamingpb.VChannelSummaryMeta {
+			return proto.Clone(v).(*streamingpb.VChannelSummaryMeta)
 		}), nil
 	})
 	snCatalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(cp, nil)
@@ -103,26 +103,26 @@ func TestRecoveryStorage(t *testing.T) {
 		}
 		return nil
 	})
-	snCatalog.EXPECT().SaveVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannelName string, viewType string, metas map[string]*streamingpb.VChannelWindowMeta) error {
+	snCatalog.EXPECT().SaveVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannelName string, viewType string, metas map[string]*streamingpb.VChannelSummaryMeta) error {
 		if rand.Int31n(3) == 0 {
 			return errors.New("save failed")
 		}
 		for k, v := range metas {
-			idempotencyWindowMetas[k] = v
+			summaryMetas[k] = v
 		}
 		return nil
 	})
-	snCatalog.EXPECT().GetPChannelWindowMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.PChannelWindowMeta, error) {
-		if pchannelWindowMeta == nil {
+	snCatalog.EXPECT().GetPChannelSummaryMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.PChannelSummaryMeta, error) {
+		if pchannelSummaryMeta == nil {
 			return nil, nil
 		}
-		return proto.Clone(pchannelWindowMeta).(*streamingpb.PChannelWindowMeta), nil
+		return proto.Clone(pchannelSummaryMeta).(*streamingpb.PChannelSummaryMeta), nil
 	})
-	snCatalog.EXPECT().SavePChannelWindowMeta(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannelName string, meta *streamingpb.PChannelWindowMeta) error {
+	snCatalog.EXPECT().SavePChannelSummaryMeta(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannelName string, meta *streamingpb.PChannelSummaryMeta) error {
 		if rand.Int31n(3) == 0 {
 			return errors.New("save failed")
 		}
-		pchannelWindowMeta = proto.Clone(meta).(*streamingpb.PChannelWindowMeta)
+		pchannelSummaryMeta = proto.Clone(meta).(*streamingpb.PChannelSummaryMeta)
 		return nil
 	}).Maybe()
 	mixCoord := mocks.NewMockMixCoordClient(t)
@@ -132,13 +132,13 @@ func TestRecoveryStorage(t *testing.T) {
 	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	f.Set(mixCoord)
 
-	windowStoreRoot := t.TempDir()
-	paramtable.Get().Save(paramtable.Get().MinioCfg.RootPath.Key, windowStoreRoot)
+	summaryStoreRoot := t.TempDir()
+	paramtable.Get().Save(paramtable.Get().MinioCfg.RootPath.Key, summaryStoreRoot)
 	t.Cleanup(func() {
 		paramtable.Get().Reset(paramtable.Get().MinioCfg.RootPath.Key)
 	})
-	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(windowStoreRoot))
-	pchannelWindowMeta = writeTestBootstrapPChannelWindowMeta(
+	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(summaryStoreRoot))
+	pchannelSummaryMeta = writeTestBootstrapPChannelSummaryMeta(
 		context.Background(),
 		t,
 		"test_channel",

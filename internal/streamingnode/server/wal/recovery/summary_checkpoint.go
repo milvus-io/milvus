@@ -1,33 +1,33 @@
 package recovery
 
 // effectivePersistCheckpoint clamps the consume checkpoint by the pchannel
-// window snapshot checkpoint and the flusher checkpoint, both supplied by the
-// caller (windowManager no longer reaches into recoveryStorageImpl for them).
-func (m *windowManager) effectivePersistCheckpoint(snapshot *RecoverySnapshot, flusherCheckpoint *WALCheckpoint) *WALCheckpoint {
-	return clampPersistCheckpoint(snapshot.Checkpoint, m.pchannelWindowCheckpointForPersist(snapshot), m.flusherClampCheckpoint(flusherCheckpoint))
+// summary snapshot checkpoint and the flusher checkpoint, both supplied by the
+// caller (summaryManager no longer reaches into recoveryStorageImpl for them).
+func (m *summaryManager) effectivePersistCheckpoint(snapshot *RecoverySnapshot, flusherCheckpoint *WALCheckpoint) *WALCheckpoint {
+	return clampPersistCheckpoint(snapshot.Checkpoint, m.pchannelSummaryCheckpointForPersist(snapshot), m.flusherClampCheckpoint(flusherCheckpoint))
 }
 
 // flusherClampCheckpoint gates the flusher term of the persist clamp on the
-// idempotency feature: only window replay (which must re-observe messages the
+// idempotency feature: only summary replay (which must re-observe messages the
 // flusher has not sealed yet) needs the consume checkpoint held back to the
 // flusher position. Without idempotency this clamp would just pin the persisted
 // consume checkpoint to the slowest vchannel's flusher and blow up the WAL span
 // replayed on restart — WAL truncation takes its own min against the flusher
 // separately (simpleTruncateCheckpoint), so it never needed this clamp.
-func (m *windowManager) flusherClampCheckpoint(flusherCheckpoint *WALCheckpoint) *WALCheckpoint {
+func (m *summaryManager) flusherClampCheckpoint(flusherCheckpoint *WALCheckpoint) *WALCheckpoint {
 	if !m.cfg.idempotencyEnabled {
 		return nil
 	}
 	return flusherCheckpoint
 }
 
-// truncateClampCheckpoint returns the durable pchannel window source checkpoint
+// truncateClampCheckpoint returns the durable pchannel summary source checkpoint
 // that WAL truncation must never pass, or nil when nothing constrains it.
 //
-// On restart rewindCheckpointForPChannelWindowReplay resumes consuming from the
-// source checkpoint recorded in the persisted window meta, so that position must
+// On restart rewindCheckpointForPChannelSummaryReplay resumes consuming from the
+// source checkpoint recorded in the persisted summary meta, so that position must
 // still be readable from the WAL. Unlike the persist clamp above, this one is NOT
-// gated on the window being dirty: an idle pchannel never marks a window dirty
+// gated on the summary being dirty: an idle pchannel never marks a summary dirty
 // (only committed write records do), so no snapshot is taken and the durable
 // source checkpoint freezes while timeticks keep pushing the consume and flusher
 // checkpoints forward — truncating by those alone would drop the WAL entries the
@@ -35,27 +35,27 @@ func (m *windowManager) flusherClampCheckpoint(flusherCheckpoint *WALCheckpoint)
 // because only that one is what the catalog will hand back after a restart.
 //
 // Truncation therefore stalls at the frozen position while a pchannel stays idle,
-// and resumes as soon as any write makes the window dirty and advances the
+// and resumes as soon as any write makes the summary dirty and advances the
 // durable source checkpoint again.
-func (m *windowManager) truncateClampCheckpoint() *WALCheckpoint {
+func (m *summaryManager) truncateClampCheckpoint() *WALCheckpoint {
 	if m == nil || !m.cfg.idempotencyEnabled {
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.getPersistedPChannelWindowSnapshotCheckpointUnsafe()
+	return m.getPersistedPChannelSummarySnapshotCheckpointUnsafe()
 }
 
 // clampPersistCheckpoint lowers base to the earliest (by timetick) of itself, the
-// pchannel window snapshot checkpoint, and the flusher checkpoint, so the consume
-// checkpoint never advances past un-persisted window data or unflushed data.
-func clampPersistCheckpoint(base, pchannelWindowCheckpoint, flusherCheckpoint *WALCheckpoint) *WALCheckpoint {
+// pchannel summary snapshot checkpoint, and the flusher checkpoint, so the consume
+// checkpoint never advances past un-persisted summary data or unflushed data.
+func clampPersistCheckpoint(base, pchannelSummaryCheckpoint, flusherCheckpoint *WALCheckpoint) *WALCheckpoint {
 	if base == nil {
 		return nil
 	}
 	checkpoint := base.Clone()
-	if pchannelWindowCheckpoint != nil {
-		checkpoint = clampCheckpointPositionByTimeTick(checkpoint, pchannelWindowCheckpoint)
+	if pchannelSummaryCheckpoint != nil {
+		checkpoint = clampCheckpointPositionByTimeTick(checkpoint, pchannelSummaryCheckpoint)
 	}
 	if flusherCheckpoint != nil {
 		checkpoint = clampCheckpointPositionByTimeTick(checkpoint, flusherCheckpoint)
@@ -64,10 +64,10 @@ func clampPersistCheckpoint(base, pchannelWindowCheckpoint, flusherCheckpoint *W
 }
 
 // canPersistConsumeCheckpoint reports whether the consume checkpoint, clamped by
-// the window snapshot checkpoint, has advanced past what is already persisted. It
-// reads window state, so it takes m.mu; callers hold rs.mu, preserving the
+// the summary snapshot checkpoint, has advanced past what is already persisted. It
+// reads summary state, so it takes m.mu; callers hold rs.mu, preserving the
 // rs.mu -> m.mu order.
-func (m *windowManager) canPersistConsumeCheckpoint(consumeCheckpoint, flusherCheckpoint *WALCheckpoint) bool {
+func (m *summaryManager) canPersistConsumeCheckpoint(consumeCheckpoint, flusherCheckpoint *WALCheckpoint) bool {
 	if consumeCheckpoint == nil {
 		return false
 	}
@@ -78,7 +78,7 @@ func (m *windowManager) canPersistConsumeCheckpoint(consumeCheckpoint, flusherCh
 	)
 }
 
-func (m *windowManager) markConsumeCheckpointPersisted(checkpoint *WALCheckpoint) {
+func (m *summaryManager) markConsumeCheckpointPersisted(checkpoint *WALCheckpoint) {
 	if checkpoint == nil {
 		return
 	}
@@ -89,45 +89,45 @@ func (m *windowManager) markConsumeCheckpointPersisted(checkpoint *WALCheckpoint
 	}
 }
 
-func (m *windowManager) effectivePersistCheckpointUnsafe(checkpoint, flusherCheckpoint *WALCheckpoint) *WALCheckpoint {
-	return clampPersistCheckpoint(checkpoint, m.pchannelWindowCheckpointForPersistUnsafe(), m.flusherClampCheckpoint(flusherCheckpoint))
+func (m *summaryManager) effectivePersistCheckpointUnsafe(checkpoint, flusherCheckpoint *WALCheckpoint) *WALCheckpoint {
+	return clampPersistCheckpoint(checkpoint, m.pchannelSummaryCheckpointForPersistUnsafe(), m.flusherClampCheckpoint(flusherCheckpoint))
 }
 
-func (m *windowManager) pchannelWindowCheckpointForPersist(snapshot *RecoverySnapshot) *WALCheckpoint {
-	if snapshot.pchannelWindowSourceCheckpoint != nil {
-		return snapshot.pchannelWindowSourceCheckpoint
+func (m *summaryManager) pchannelSummaryCheckpointForPersist(snapshot *RecoverySnapshot) *WALCheckpoint {
+	if snapshot.pchannelSummarySourceCheckpoint != nil {
+		return snapshot.pchannelSummarySourceCheckpoint
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.pchannelWindowCheckpointForPersistUnsafe()
+	return m.pchannelSummaryCheckpointForPersistUnsafe()
 }
 
-func (m *windowManager) pchannelWindowCheckpointForPersistUnsafe() *WALCheckpoint {
-	if !m.hasDirtyWindowUnsafe() && m.pendingIdempotencyPersistSnapshot == nil {
+func (m *summaryManager) pchannelSummaryCheckpointForPersistUnsafe() *WALCheckpoint {
+	if !m.hasDirtySummaryUnsafe() && m.pendingIdempotencyPersistSnapshot == nil {
 		return nil
 	}
-	return m.getPersistedPChannelWindowSnapshotCheckpointUnsafe()
+	return m.getPersistedPChannelSummarySnapshotCheckpointUnsafe()
 }
 
-func (m *windowManager) setPChannelWindowSnapshotCheckpoint(checkpoint *WALCheckpoint) {
-	m.windowSnapshotCheckpoint.set(checkpoint)
+func (m *summaryManager) setPChannelSummarySnapshotCheckpoint(checkpoint *WALCheckpoint) {
+	m.summarySnapshotCheckpoint.set(checkpoint)
 }
 
-func (m *windowManager) advancePChannelWindowSnapshotCheckpoint(checkpoint *WALCheckpoint) {
-	m.windowSnapshotCheckpoint.advance(checkpoint)
+func (m *summaryManager) advancePChannelSummarySnapshotCheckpoint(checkpoint *WALCheckpoint) {
+	m.summarySnapshotCheckpoint.advance(checkpoint)
 }
 
-func (m *windowManager) getPChannelWindowSnapshotCheckpointUnsafe() *WALCheckpoint {
-	return m.windowSnapshotCheckpoint.currentClone()
+func (m *summaryManager) getPChannelSummarySnapshotCheckpointUnsafe() *WALCheckpoint {
+	return m.summarySnapshotCheckpoint.currentClone()
 }
 
-func (m *windowManager) markPChannelWindowSnapshotCheckpointPersisted(checkpoint *WALCheckpoint) {
-	m.windowSnapshotCheckpoint.markPersisted(checkpoint)
+func (m *summaryManager) markPChannelSummarySnapshotCheckpointPersisted(checkpoint *WALCheckpoint) {
+	m.summarySnapshotCheckpoint.markPersisted(checkpoint)
 }
 
-func (m *windowManager) getPersistedPChannelWindowSnapshotCheckpointUnsafe() *WALCheckpoint {
-	return m.windowSnapshotCheckpoint.persistedClone()
+func (m *summaryManager) getPersistedPChannelSummarySnapshotCheckpointUnsafe() *WALCheckpoint {
+	return m.summarySnapshotCheckpoint.persistedClone()
 }
 
 // trackedCheckpoint holds a checkpoint position together with the position that
@@ -179,7 +179,7 @@ func (t *trackedCheckpoint) persistedClone() *WALCheckpoint {
 	return t.persisted.Clone()
 }
 
-func (m *windowManager) canPersistConsumeCheckpointUnsafe(checkpoint *WALCheckpoint) bool {
+func (m *summaryManager) canPersistConsumeCheckpointUnsafe(checkpoint *WALCheckpoint) bool {
 	if m.persistedConsumeCheckpoint == nil || checkpoint == nil {
 		return false
 	}

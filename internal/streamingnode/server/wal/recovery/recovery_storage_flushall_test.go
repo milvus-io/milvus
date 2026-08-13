@@ -72,7 +72,7 @@ func TestFlushAllOnControlChannel(t *testing.T) {
 			vchannels: make(map[string]*vchannelRecoveryInfo),
 			metrics:   newRecoveryStorageMetrics(types.PChannelInfo{Name: pchannel}),
 		}
-		attachTestWindowManager(rs)
+		attachTestSummaryManager(rs)
 		return rs
 	}
 

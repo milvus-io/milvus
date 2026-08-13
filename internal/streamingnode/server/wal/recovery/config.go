@@ -44,7 +44,7 @@ func (cfg *config) sanitizeIdempotency() {
 	}
 	params := paramtable.Get()
 	// A non-positive snapshot interval would disable the only task that persists
-	// and evicts recovery-side window entries, growing memory without bound.
+	// and evicts recovery-side summary entries, growing memory without bound.
 	if cfg.idempotencySnapshotInterval <= 0 {
 		fallback := defaultDuration(&params.StreamingCfg.IdempotencySnapshotInterval)
 		mlog.Warn(context.TODO(), "non-positive idempotency snapshot interval; falling back to default",
@@ -52,11 +52,11 @@ func (cfg *config) sanitizeIdempotency() {
 			mlog.Duration("fallback", fallback))
 		cfg.idempotencySnapshotInterval = fallback
 	}
-	// With neither a TTL nor a max byte cap the live window would grow without
+	// With neither a TTL nor a max byte cap the live summary would grow without
 	// bound per key; fall back to the default TTL.
 	if cfg.idempotencyWindowTTL <= 0 && cfg.idempotencyMaxBytes <= 0 {
 		fallback := defaultDuration(&params.StreamingCfg.IdempotencyWindowTTL)
-		mlog.Warn(context.TODO(), "idempotency window has neither a positive TTL nor a positive max byte cap; falling back to default TTL",
+		mlog.Warn(context.TODO(), "idempotency summary has neither a positive TTL nor a positive max byte cap; falling back to default TTL",
 			mlog.Duration("configuredTTL", cfg.idempotencyWindowTTL),
 			mlog.Duration("fallbackTTL", fallback))
 		cfg.idempotencyWindowTTL = fallback
@@ -79,11 +79,11 @@ type config struct {
 	persistInterval             time.Duration // persistInterval is the interval to persist the dirty recovery snapshot.
 	maxDirtyMessages            int           // maxDirtyMessages is the maximum number of dirty messages to be persisted.
 	gracefulTimeout             time.Duration // gracefulTimeout is the timeout for graceful close of recovery module.
-	idempotencyEnabled          bool          // idempotencyEnabled gates all idempotency-window machinery (recovery, bootstrap, in-memory windows).
+	idempotencyEnabled          bool          // idempotencyEnabled gates all idempotency-summary machinery (recovery, bootstrap, in-memory summaries).
 	idempotencyWindowTTL        time.Duration // idempotencyWindowTTL is the TTL for evicting entries during recovery.
-	idempotencyMinEntries       int           // idempotencyMinEntries is the minimum entries to keep per window during eviction.
-	idempotencyMaxBytes         int           // idempotencyMaxBytes is the hard byte cap per window during eviction (0 disables).
-	idempotencySnapshotInterval time.Duration // idempotencySnapshotInterval is the interval to persist idempotency window snapshots. Non-positive disables periodic window snapshots.
+	idempotencyMinEntries       int           // idempotencyMinEntries is the minimum entries to keep per summary during eviction.
+	idempotencyMaxBytes         int           // idempotencyMaxBytes is the hard byte cap per summary during eviction (0 disables).
+	idempotencySnapshotInterval time.Duration // idempotencySnapshotInterval is the interval to persist idempotency summary snapshots. Non-positive disables periodic summary snapshots.
 }
 
 func (cfg *config) validate() error {

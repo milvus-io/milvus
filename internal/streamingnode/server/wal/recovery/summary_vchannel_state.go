@@ -14,15 +14,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
-type vchannelWindow struct {
+type vchannelSummary struct {
 	pchannel                    string
 	vchannel                    string
 	snapshotCheckpointTimetick  uint64
 	snapshotCheckpointMessageID *commonpb.MessageID
 	evictedWatermarkTimetick    uint64
-	entries                     map[string]*windowEntry
+	entries                     map[string]*summaryEntry
 	commitOrder                 []string
-	pendingEntries              map[string]*streamingpb.WindowEntry
+	pendingEntries              map[string]*streamingpb.SummaryEntry
 	pendingRecords              []committedWriteRecord
 	latestAppliedGeneration     uint64
 	minRequiredGeneration       uint64
@@ -32,45 +32,45 @@ type vchannelWindow struct {
 	entryBytes int
 
 	// generationStats is the view's durable-retention ledger: one row per
-	// persisted chunk generation, tracking how many window entries it holds, how
+	// persisted chunk generation, tracking how many summary entries it holds, how
 	// many serialized bytes they occupy, and the newest commit timetick among
 	// them. minRequiredGeneration derives from this ledger under evictionCfg
 	// (TTL / min entries / max bytes) — NOT from the entries materialized in this
-	// staging window, which are cleared on persist (evictPersisted). Rebuilt on
+	// staging summary, which are cleared on persist (evictPersisted). Rebuilt on
 	// restart from the chunk replay.
-	generationStats map[uint64]*windowGenerationStat
-	// evictionCfg is the view's retention policy, assigned by the windowManager on
+	generationStats map[uint64]*summaryGenerationStat
+	// evictionCfg is the view's retention policy, assigned by the summaryManager on
 	// construction. A zero policy (no TTL, no byte cap) makes no durable
 	// retention promise: the ledger is ignored and only materialized entries pin
 	// chunks.
-	evictionCfg windowEvictionConfig
+	evictionCfg summaryEvictionConfig
 }
 
-// windowGenerationStat aggregates the entries persisted at one chunk
+// summaryGenerationStat aggregates the entries persisted at one chunk
 // generation.
-type windowGenerationStat struct {
+type summaryGenerationStat struct {
 	entryCount  int
 	byteSize    int
 	maxCommitTT uint64
 }
 
-// windowEntry is a committed idempotency entry together with the chunk
+// summaryEntry is a committed idempotency entry together with the chunk
 // generation it was persisted at. generationSet is false until the entry has
 // been written to a chunk; an entry without a generation still lives in the WAL
 // and must not advance the chunk-retention boundary.
-type windowEntry struct {
-	entry         *streamingpb.WindowEntry
+type summaryEntry struct {
+	entry         *streamingpb.SummaryEntry
 	generation    uint64
 	generationSet bool
 }
 
-type idempotencyWindowMetaUpdate struct {
-	meta             *streamingpb.VChannelWindowMeta
+type summaryMetaUpdate struct {
+	meta             *streamingpb.VChannelSummaryMeta
 	pendingEntryKeys []string
 	// retentionPinned captures hasRetentionPin() at construction time: whether
 	// any materialized entry or durable-retention-ledger generation still pins
 	// chunk retention. WithPersistedGeneration must consult it instead of
-	// inferring "nothing pinned" from EntryCount == 0 — the staging window is
+	// inferring "nothing pinned" from EntryCount == 0 — the staging summary is
 	// cleared on every persist, so an empty entry set says nothing about the
 	// ledger, and projecting the boundary forward past a pinned generation
 	// would poison the persisted meta (irreversibly, once chunk GC runs after
@@ -78,14 +78,14 @@ type idempotencyWindowMetaUpdate struct {
 	retentionPinned bool
 }
 
-func newEmptyVChannelWindow(pchannel, vchannel string, checkpoint *WALCheckpoint) *vchannelWindow {
-	state := &vchannelWindow{
+func newEmptyVChannelSummary(pchannel, vchannel string, checkpoint *WALCheckpoint) *vchannelSummary {
+	state := &vchannelSummary{
 		pchannel:        pchannel,
 		vchannel:        vchannel,
-		entries:         make(map[string]*windowEntry),
-		pendingEntries:  make(map[string]*streamingpb.WindowEntry),
+		entries:         make(map[string]*summaryEntry),
+		pendingEntries:  make(map[string]*streamingpb.SummaryEntry),
 		pendingRecords:  make([]committedWriteRecord, 0),
-		generationStats: make(map[uint64]*windowGenerationStat),
+		generationStats: make(map[uint64]*summaryGenerationStat),
 	}
 	if checkpoint != nil {
 		state.snapshotCheckpointTimetick = checkpoint.TimeTick
@@ -98,26 +98,26 @@ func newEmptyVChannelWindow(pchannel, vchannel string, checkpoint *WALCheckpoint
 	return state
 }
 
-func newVChannelWindowFromSnapshot(snapshot *streamingpb.WindowSnapshot) (*vchannelWindow, error) {
+func newVChannelSummaryFromSnapshot(snapshot *streamingpb.SummarySnapshot) (*vchannelSummary, error) {
 	if snapshot == nil {
-		return nil, merr.WrapErrServiceInternalMsg("nil idempotency window snapshot")
+		return nil, merr.WrapErrServiceInternalMsg("nil idempotency summary snapshot")
 	}
-	state := &vchannelWindow{
+	state := &vchannelSummary{
 		pchannel:                    snapshot.GetPchannel(),
 		vchannel:                    snapshot.GetVchannel(),
 		snapshotCheckpointTimetick:  snapshot.GetSnapshotCheckpointTimetick(),
 		snapshotCheckpointMessageID: cloneMessageIDProto(snapshot.GetSnapshotCheckpointMessageId()),
 		evictedWatermarkTimetick:    snapshot.GetEvictedWatermarkTimetick(),
-		entries:                     make(map[string]*windowEntry, len(snapshot.GetEntries())),
-		pendingEntries:              make(map[string]*streamingpb.WindowEntry),
+		entries:                     make(map[string]*summaryEntry, len(snapshot.GetEntries())),
+		pendingEntries:              make(map[string]*streamingpb.SummaryEntry),
 		pendingRecords:              make([]committedWriteRecord, 0),
 		commitOrder:                 make([]string, 0, len(snapshot.GetEntries())),
-		generationStats:             make(map[uint64]*windowGenerationStat),
+		generationStats:             make(map[uint64]*summaryGenerationStat),
 	}
-	sortedEntries := append([]*streamingpb.WindowEntry(nil), snapshot.GetEntries()...)
-	sortWindowEntries(sortedEntries)
+	sortedEntries := append([]*streamingpb.SummaryEntry(nil), snapshot.GetEntries()...)
+	sortSummaryEntries(sortedEntries)
 	for _, entry := range sortedEntries {
-		state.entries[entry.GetKey()] = &windowEntry{entry: entry}
+		state.entries[entry.GetKey()] = &summaryEntry{entry: entry}
 		state.entryBytes += proto.Size(entry)
 		state.commitOrder = append(state.commitOrder, entry.GetKey())
 	}
@@ -126,7 +126,7 @@ func newVChannelWindowFromSnapshot(snapshot *streamingpb.WindowSnapshot) (*vchan
 	return state, nil
 }
 
-func (s *vchannelWindow) observeMessage(msg message.ImmutableMessage) {
+func (s *vchannelSummary) observeMessage(msg message.ImmutableMessage) {
 	if msg == nil {
 		return
 	}
@@ -144,7 +144,7 @@ func (s *vchannelWindow) observeMessage(msg message.ImmutableMessage) {
 	_ = s.applyCommittedWriteRecord(*record, true)
 }
 
-func (s *vchannelWindow) advanceCheckpoint(msg message.ImmutableMessage) {
+func (s *vchannelSummary) advanceCheckpoint(msg message.ImmutableMessage) {
 	if msg == nil || msg.TimeTick() <= s.snapshotCheckpointTimetick {
 		return
 	}
@@ -156,7 +156,7 @@ func (s *vchannelWindow) advanceCheckpoint(msg message.ImmutableMessage) {
 	s.refreshEvictedWatermark()
 }
 
-func (s *vchannelWindow) advanceCheckpointTo(checkpoint *WALCheckpoint) {
+func (s *vchannelSummary) advanceCheckpointTo(checkpoint *WALCheckpoint) {
 	if checkpoint == nil || checkpoint.TimeTick <= s.snapshotCheckpointTimetick {
 		return
 	}
@@ -167,7 +167,7 @@ func (s *vchannelWindow) advanceCheckpointTo(checkpoint *WALCheckpoint) {
 	s.refreshEvictedWatermark()
 }
 
-func (s *vchannelWindow) consumePendingCommittedWriteRecords() ([]committedWriteRecord, *idempotencyWindowMetaUpdate) {
+func (s *vchannelSummary) consumePendingCommittedWriteRecords() ([]committedWriteRecord, *summaryMetaUpdate) {
 	if !s.dirty {
 		return nil, nil
 	}
@@ -177,28 +177,28 @@ func (s *vchannelWindow) consumePendingCommittedWriteRecords() ([]committedWrite
 		pendingEntryKeys = append(pendingEntryKeys, key)
 	}
 	sort.Strings(pendingEntryKeys)
-	update := &idempotencyWindowMetaUpdate{
-		meta:             s.windowMeta(),
+	update := &summaryMetaUpdate{
+		meta:             s.summaryMeta(),
 		pendingEntryKeys: pendingEntryKeys,
 		retentionPinned:  s.hasRetentionPin(),
 	}
 	s.dirty = false
-	s.pendingEntries = make(map[string]*streamingpb.WindowEntry)
+	s.pendingEntries = make(map[string]*streamingpb.SummaryEntry)
 	s.pendingRecords = s.pendingRecords[:0]
 	return records, update
 }
 
-func (s *vchannelWindow) snapshot() *streamingpb.WindowSnapshot {
-	entries := make([]*streamingpb.WindowEntry, 0, len(s.entries))
+func (s *vchannelSummary) snapshot() *streamingpb.SummarySnapshot {
+	entries := make([]*streamingpb.SummaryEntry, 0, len(s.entries))
 	for _, e := range s.entries {
 		entries = append(entries, e.entry)
 	}
-	sortWindowEntries(entries)
+	sortSummaryEntries(entries)
 	return s.snapshotWithEntries(entries)
 }
 
-func (s *vchannelWindow) snapshotWithEntries(entries []*streamingpb.WindowEntry) *streamingpb.WindowSnapshot {
-	snapshot := &streamingpb.WindowSnapshot{
+func (s *vchannelSummary) snapshotWithEntries(entries []*streamingpb.SummaryEntry) *streamingpb.SummarySnapshot {
+	snapshot := &streamingpb.SummarySnapshot{
 		Pchannel:                    s.pchannel,
 		Vchannel:                    s.vchannel,
 		EvictedWatermarkTimetick:    s.evictedWatermarkTimetick,
@@ -209,7 +209,7 @@ func (s *vchannelWindow) snapshotWithEntries(entries []*streamingpb.WindowEntry)
 	return snapshot
 }
 
-func (s *vchannelWindow) applyCommittedWriteRecordsAtGeneration(records []committedWriteRecord, generation uint64) error {
+func (s *vchannelSummary) applyCommittedWriteRecordsAtGeneration(records []committedWriteRecord, generation uint64) error {
 	records = cloneAndSortCommittedWriteRecords(s.pchannel, s.vchannel, records)
 	for _, record := range records {
 		if err := s.applyCommittedWriteRecord(record, false); err != nil {
@@ -220,12 +220,12 @@ func (s *vchannelWindow) applyCommittedWriteRecordsAtGeneration(records []commit
 	s.latestAppliedGeneration = maxUint64(s.latestAppliedGeneration, generation)
 	s.refreshMinRequiredGeneration()
 	s.dirty = false
-	s.pendingEntries = make(map[string]*streamingpb.WindowEntry)
+	s.pendingEntries = make(map[string]*streamingpb.SummaryEntry)
 	s.pendingRecords = s.pendingRecords[:0]
 	return nil
 }
 
-func (s *vchannelWindow) applyCommittedWriteRecord(record committedWriteRecord, markDirty bool) error {
+func (s *vchannelSummary) applyCommittedWriteRecord(record committedWriteRecord, markDirty bool) error {
 	if record.SourcePChannel != "" && s.pchannel != "" && record.SourcePChannel != s.pchannel {
 		return merr.WrapErrServiceInternalMsg("committed write record pchannel mismatch, state %s, record %s", s.pchannel, record.SourcePChannel)
 	}
@@ -254,11 +254,11 @@ func (s *vchannelWindow) applyCommittedWriteRecord(record committedWriteRecord, 
 			return nil
 		}
 	}
-	entry := record.WindowEntry()
+	entry := record.SummaryEntry()
 	if entry == nil {
-		return merr.WrapErrServiceInternalMsg("committed write record cannot materialize idempotency window entry")
+		return merr.WrapErrServiceInternalMsg("committed write record cannot materialize idempotency summary entry")
 	}
-	s.entries[key] = &windowEntry{entry: entry}
+	s.entries[key] = &summaryEntry{entry: entry}
 	s.entryBytes += proto.Size(entry)
 	s.commitOrder = append(s.commitOrder, key)
 	if markDirty {
@@ -270,15 +270,15 @@ func (s *vchannelWindow) applyCommittedWriteRecord(record committedWriteRecord, 
 	return nil
 }
 
-func (s *vchannelWindow) entryTTLExpiredAt(entry *streamingpb.WindowEntry, nowTT uint64) bool {
-	if entry == nil || s.evictionCfg.windowTTL <= 0 {
+func (s *vchannelSummary) entryTTLExpiredAt(entry *streamingpb.SummaryEntry, nowTT uint64) bool {
+	if entry == nil || s.evictionCfg.entryTTL <= 0 {
 		return false
 	}
-	evictBeforeTT := evictBeforeTimetick(nowTT, s.evictionCfg.windowTTL)
+	evictBeforeTT := evictBeforeTimetick(nowTT, s.evictionCfg.entryTTL)
 	return evictBeforeTT > 0 && entry.GetCommitTimetick() < evictBeforeTT
 }
 
-func (s *vchannelWindow) dropEntry(key string) {
+func (s *vchannelSummary) dropEntry(key string) {
 	e, ok := s.entries[key]
 	if !ok {
 		return
@@ -296,8 +296,8 @@ func (s *vchannelWindow) dropEntry(key string) {
 	}
 }
 
-func (s *vchannelWindow) rebuildGenerationStat(generation uint64) {
-	var stat windowGenerationStat
+func (s *vchannelSummary) rebuildGenerationStat(generation uint64) {
+	var stat summaryGenerationStat
 	for _, e := range s.entries {
 		if e == nil || !e.generationSet || e.generation != generation {
 			continue
@@ -313,12 +313,12 @@ func (s *vchannelWindow) rebuildGenerationStat(generation uint64) {
 		return
 	}
 	if s.generationStats == nil {
-		s.generationStats = make(map[uint64]*windowGenerationStat)
+		s.generationStats = make(map[uint64]*summaryGenerationStat)
 	}
 	s.generationStats[generation] = &stat
 }
 
-func (s *vchannelWindow) advanceCheckpointToCommittedWriteRecord(record committedWriteRecord, markDirty bool) {
+func (s *vchannelSummary) advanceCheckpointToCommittedWriteRecord(record committedWriteRecord, markDirty bool) {
 	if record.SourceTimeTick <= s.snapshotCheckpointTimetick {
 		return
 	}
@@ -330,7 +330,7 @@ func (s *vchannelWindow) advanceCheckpointToCommittedWriteRecord(record committe
 	}
 }
 
-func (s *vchannelWindow) checkpoint() *WALCheckpoint {
+func (s *vchannelSummary) checkpoint() *WALCheckpoint {
 	if s.snapshotCheckpointMessageID == nil {
 		return nil
 	}
@@ -340,7 +340,7 @@ func (s *vchannelWindow) checkpoint() *WALCheckpoint {
 	}
 }
 
-func (s *vchannelWindow) refreshEvictedWatermark() {
+func (s *vchannelSummary) refreshEvictedWatermark() {
 	for len(s.commitOrder) > 0 {
 		did := s.commitOrder[0]
 		e, ok := s.entries[did]
@@ -355,7 +355,7 @@ func (s *vchannelWindow) refreshEvictedWatermark() {
 	s.evictedWatermarkTimetick = s.snapshotCheckpointTimetick
 }
 
-func (s *vchannelWindow) markCommittedWriteRecordsPersisted(records []committedWriteRecord, generation uint64) {
+func (s *vchannelSummary) markCommittedWriteRecordsPersisted(records []committedWriteRecord, generation uint64) {
 	for _, record := range records {
 		s.markCommittedWriteRecordGeneration(record, generation)
 	}
@@ -363,7 +363,7 @@ func (s *vchannelWindow) markCommittedWriteRecordsPersisted(records []committedW
 	s.refreshMinRequiredGeneration()
 }
 
-func (s *vchannelWindow) markCommittedWriteRecordGeneration(record committedWriteRecord, generation uint64) {
+func (s *vchannelSummary) markCommittedWriteRecordGeneration(record committedWriteRecord, generation uint64) {
 	if record.Idempotency == nil {
 		return
 	}
@@ -385,16 +385,16 @@ func (s *vchannelWindow) markCommittedWriteRecordGeneration(record committedWrit
 // registerGenerationEntry records one persisted entry in the durable-retention
 // ledger. The generationSet guard on the caller ensures each entry is counted
 // exactly once.
-func (s *vchannelWindow) registerGenerationEntry(generation uint64, entry *streamingpb.WindowEntry) {
+func (s *vchannelSummary) registerGenerationEntry(generation uint64, entry *streamingpb.SummaryEntry) {
 	if entry == nil {
 		return
 	}
 	if s.generationStats == nil {
-		s.generationStats = make(map[uint64]*windowGenerationStat)
+		s.generationStats = make(map[uint64]*summaryGenerationStat)
 	}
 	stat, ok := s.generationStats[generation]
 	if !ok {
-		stat = &windowGenerationStat{}
+		stat = &summaryGenerationStat{}
 		s.generationStats[generation] = stat
 	}
 	stat.entryCount++
@@ -404,9 +404,9 @@ func (s *vchannelWindow) registerGenerationEntry(generation uint64, entry *strea
 	}
 }
 
-func (s *vchannelWindow) windowMeta() *streamingpb.VChannelWindowMeta {
+func (s *vchannelSummary) summaryMeta() *streamingpb.VChannelSummaryMeta {
 	s.refreshMinRequiredGeneration()
-	return &streamingpb.VChannelWindowMeta{
+	return &streamingpb.VChannelSummaryMeta{
 		Pchannel:                    s.pchannel,
 		Vchannel:                    s.vchannel,
 		EvictedWatermarkTimetick:    s.evictedWatermarkTimetick,
@@ -414,17 +414,17 @@ func (s *vchannelWindow) windowMeta() *streamingpb.VChannelWindowMeta {
 		SnapshotCheckpointMessageId: cloneMessageIDProto(s.snapshotCheckpointMessageID),
 		LatestAppliedGeneration:     s.latestAppliedGeneration,
 		MinRequiredGeneration:       s.minRequiredGeneration,
-		ViewType:                    common.VChannelWindowViewTypeIdempotency,
+		ViewType:                    common.VChannelSummaryViewTypeIdempotency,
 		EntryCount:                  uint64(len(s.entries)),
 	}
 }
 
-func (s *vchannelWindow) windowMetaAtGeneration(generation uint64) *streamingpb.VChannelWindowMeta {
-	meta := s.windowMeta()
+func (s *vchannelSummary) summaryMetaAtGeneration(generation uint64) *streamingpb.VChannelSummaryMeta {
+	meta := s.summaryMeta()
 	if generation > meta.GetLatestAppliedGeneration() {
 		meta.LatestAppliedGeneration = generation
 		// Project the boundary forward only when nothing pins retention — the
-		// staging window being empty (EntryCount==0) is NOT sufficient: the
+		// staging summary being empty (EntryCount==0) is NOT sufficient: the
 		// durable-retention ledger may still pin older generations even though
 		// every persisted entry was evicted from staging memory.
 		if !s.hasRetentionPin() {
@@ -434,7 +434,7 @@ func (s *vchannelWindow) windowMetaAtGeneration(generation uint64) *streamingpb.
 	return meta
 }
 
-func (s *vchannelWindow) hasRetentionPin() bool {
+func (s *vchannelSummary) hasRetentionPin() bool {
 	if _, ok := s.materializedMinGeneration(); ok {
 		return true
 	}
@@ -447,18 +447,18 @@ func (s *vchannelWindow) hasRetentionPin() bool {
 //   - materialized entries carrying a generation (recovery mode keeps replayed
 //     entries in memory until TTL eviction);
 //   - the durable-retention ledger (generationStats) under the view's eviction
-//     policy — the staging window is cleared on persist, so chunk retention
+//     policy — the staging summary is cleared on persist, so chunk retention
 //     must NOT depend on entries still being materialized here; the ledger is
 //     what keeps a TTL's worth of chunks recoverable across restarts.
 //
 // An entry that has never been persisted lives in the WAL, not in any chunk,
-// and is recovered by replaying the WAL from the window source checkpoint —
+// and is recovered by replaying the WAL from the summary source checkpoint —
 // it pins nothing. When nothing pins, nothing below the latest persisted
 // generation is still needed. NOTE: during recovery, the value loaded from the
-// persisted VChannelWindowMeta must not be recomputed before the chunk replay
+// persisted VChannelSummaryMeta must not be recomputed before the chunk replay
 // has rebuilt the ledger (the single-threaded recovery sequence guarantees
 // this today).
-func (s *vchannelWindow) refreshMinRequiredGeneration() {
+func (s *vchannelSummary) refreshMinRequiredGeneration() {
 	minimum := s.latestAppliedGeneration
 	if m, ok := s.materializedMinGeneration(); ok && m < minimum {
 		minimum = m
@@ -469,7 +469,7 @@ func (s *vchannelWindow) refreshMinRequiredGeneration() {
 	s.minRequiredGeneration = minimum
 }
 
-func (s *vchannelWindow) materializedMinGeneration() (uint64, bool) {
+func (s *vchannelSummary) materializedMinGeneration() (uint64, bool) {
 	var minimum uint64
 	initialized := false
 	for _, e := range s.entries {
@@ -489,11 +489,11 @@ func (s *vchannelWindow) materializedMinGeneration() (uint64, bool) {
 // retained entry: generations are kept while the byte cap is not exhausted and
 // either some entry is within TTL or the minEntries floor still needs them.
 // Rows older than the returned boundary are dropped from the ledger, keeping it
-// bounded to the retained window. A zero policy makes no durable retention
+// bounded to the retained summary. A zero policy makes no durable retention
 // promise and contributes no pin.
-func (s *vchannelWindow) statsMinRequiredGeneration() (uint64, bool) {
+func (s *vchannelSummary) statsMinRequiredGeneration() (uint64, bool) {
 	cfg := s.evictionCfg
-	if len(s.generationStats) == 0 || (cfg.windowTTL <= 0 && cfg.maxBytes <= 0) {
+	if len(s.generationStats) == 0 || (cfg.entryTTL <= 0 && cfg.maxBytes <= 0) {
 		return 0, false
 	}
 	generations := make([]uint64, 0, len(s.generationStats))
@@ -502,7 +502,7 @@ func (s *vchannelWindow) statsMinRequiredGeneration() (uint64, bool) {
 	}
 	sort.Slice(generations, func(i, j int) bool { return generations[i] > generations[j] })
 
-	evictBefore := evictBeforeTimetick(s.snapshotCheckpointTimetick, cfg.windowTTL)
+	evictBefore := evictBeforeTimetick(s.snapshotCheckpointTimetick, cfg.entryTTL)
 	cumulativeEntries := 0
 	cumulativeBytes := 0
 	var minRequired uint64
@@ -512,7 +512,7 @@ func (s *vchannelWindow) statsMinRequiredGeneration() (uint64, bool) {
 		if cfg.maxBytes > 0 && cumulativeBytes >= cfg.maxBytes {
 			break
 		}
-		withinTTL := cfg.windowTTL <= 0 || stat.maxCommitTT >= evictBefore
+		withinTTL := cfg.entryTTL <= 0 || stat.maxCommitTT >= evictBefore
 		if !withinTTL && cumulativeEntries >= cfg.minEntries {
 			break
 		}
@@ -532,7 +532,7 @@ func (s *vchannelWindow) statsMinRequiredGeneration() (uint64, bool) {
 	return minRequired, true
 }
 
-func (s *vchannelWindow) evictForRecovery(evictBeforeTT uint64, minEntries, maxBytes int) {
+func (s *vchannelSummary) evictForRecovery(evictBeforeTT uint64, minEntries, maxBytes int) {
 	for len(s.entries) > minEntries && len(s.commitOrder) > 0 {
 		key := s.commitOrder[0]
 		e, ok := s.entries[key]
@@ -558,8 +558,8 @@ func (s *vchannelWindow) evictForRecovery(evictBeforeTT uint64, minEntries, maxB
 }
 
 // dropEntryBytes subtracts a to-be-removed entry's serialized size from the
-// window's byte accounting.
-func (s *vchannelWindow) dropEntryBytes(key string) {
+// summary's byte accounting.
+func (s *vchannelSummary) dropEntryBytes(key string) {
 	if e, ok := s.entries[key]; ok && e.entry != nil {
 		s.entryBytes -= proto.Size(e.entry)
 	}
@@ -567,12 +567,12 @@ func (s *vchannelWindow) dropEntryBytes(key string) {
 
 // evictPersisted drops every entry that has already been durably persisted (its
 // generation is assigned), stopping at the first entry that is not persisted
-// yet. In normal mode the recovery-side window is only a persist-staging buffer
-// -- the interceptor serves live dedup from its own window -- so a persisted
+// yet. In normal mode the recovery-side summary is only a persist-staging buffer
+// -- the interceptor serves live dedup from its own summary -- so a persisted
 // entry is no longer needed here and is dropped regardless of TTL. Un-persisted
 // entries are never dropped, so no observed write can be lost before it lands in
 // a chunk.
-func (s *vchannelWindow) evictPersisted() {
+func (s *vchannelSummary) evictPersisted() {
 	for len(s.commitOrder) > 0 {
 		key := s.commitOrder[0]
 		e, ok := s.entries[key]
@@ -592,7 +592,7 @@ func (s *vchannelWindow) evictPersisted() {
 }
 
 // evictBeforeTimetick derives the TTL eviction bound from an observed message
-// timetick. Kept in sync with the live window's evictBeforeCommitTT (idempotency
+// timetick. Kept in sync with the live summary's evictBeforeCommitTT (idempotency
 // package), including the underflow guard for timeticks younger than the TTL.
 func evictBeforeTimetick(nowTT uint64, ttl time.Duration) uint64 {
 	if ttl <= 0 {
@@ -606,15 +606,15 @@ func evictBeforeTimetick(nowTT uint64, ttl time.Duration) uint64 {
 	return tsoutil.ComposeTS(physical-msecs, logical)
 }
 
-func (update *idempotencyWindowMetaUpdate) WithPersistedGeneration(generation uint64) *streamingpb.VChannelWindowMeta {
+func (update *summaryMetaUpdate) WithPersistedGeneration(generation uint64) *streamingpb.VChannelSummaryMeta {
 	if update == nil || update.meta == nil {
 		return nil
 	}
-	meta := proto.Clone(update.meta).(*streamingpb.VChannelWindowMeta)
+	meta := proto.Clone(update.meta).(*streamingpb.VChannelSummaryMeta)
 	meta.LatestAppliedGeneration = maxUint64(meta.GetLatestAppliedGeneration(), generation)
 	if meta.GetEntryCount() == 0 {
 		// Advance the boundary only when nothing pinned retention at capture
-		// time — mirroring windowMetaAtGeneration. An empty staging window is
+		// time — mirroring summaryMetaAtGeneration. An empty staging summary is
 		// NOT sufficient: the durable-retention ledger may still pin older
 		// generations after evictPersisted cleared the entries, and the captured
 		// meta already carries the ledger-derived MinRequiredGeneration.
@@ -638,7 +638,7 @@ func maxUint64(left, right uint64) uint64 {
 	return left
 }
 
-func sortWindowEntries(entries []*streamingpb.WindowEntry) {
+func sortSummaryEntries(entries []*streamingpb.SummaryEntry) {
 	sort.Slice(entries, func(i, j int) bool {
 		left, right := entries[i], entries[j]
 		if left.GetCommitTimetick() != right.GetCommitTimetick() {

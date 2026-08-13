@@ -535,7 +535,7 @@ func TestInterceptorOwnerCommitFailsOnLostInsertResults(t *testing.T) {
 
 // A DropCollection append reclaims the vchannel's window, metric series, and
 // buffered txn insert results, mirroring the recovery-side
-// removeIdempotencyWindow — without this every dropped vchannel pins retained
+// removeSummary — without this every dropped vchannel pins retained
 // PK memory or abandoned txn builders for the WAL's lifetime.
 func TestInterceptorRemovesWindowOnDropCollection(t *testing.T) {
 	interceptor := newInterceptor(WindowConfig{})
@@ -886,7 +886,7 @@ func TestInterceptorConcurrentDuplicateTxnCommitKeepsInsertIDs(t *testing.T) {
 	// result, its defer Remove has not yet run), a concurrent duplicate waiter must
 	// NOT clear the shared txn buffer the owner depends on. If it does, a different
 	// interleaving (waiter Remove before owner Build) would make the owner store a
-	// WindowEntry with no insert IDs.
+	// SummaryEntry with no insert IDs.
 	require.NotNil(t, interceptor.txnInsertResultBuffers.Build(ownerCommit),
 		"duplicate waiter must not remove the in-flight owner's txn insert-result buffer")
 
@@ -909,7 +909,7 @@ func TestFillDuplicateResultClearsStaleExtra(t *testing.T) {
 	ctx := utility.WithExtraAppendResult(context.Background(), extra)
 
 	// A keyed duplicate that committed without an idempotent insert payload.
-	entry := &streamingpb.WindowEntry{
+	entry := &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: 100,
 		MessageId:      message.MustMarshalMessageID(newTestMessageID(10)),

@@ -105,14 +105,14 @@ func TestUpdateCheckpointForcePromote(t *testing.T) {
 	})
 }
 
-// attachTestWindowManager gives a hand-built recoveryStorageImpl the windowManager
-// that newRecoveryStorage normally creates, so recovery paths that call window
+// attachTestSummaryManager gives a hand-built recoveryStorageImpl the summaryManager
+// that newRecoveryStorage normally creates, so recovery paths that call summary
 // methods (observe, isDirty, persist) don't dereference a nil manager.
-func attachTestWindowManager(rs *recoveryStorageImpl) {
+func attachTestSummaryManager(rs *recoveryStorageImpl) {
 	if rs.cfg == nil {
 		rs.cfg = &config{}
 	}
-	rs.windowManager = newWindowManager(rs.channel.Name, rs.channel.Term, rs.cfg, rs.metrics, rs.checkpoint, windowEvictionConfig{})
+	rs.summaryManager = newSummaryManager(rs.channel.Name, rs.channel.Term, rs.cfg, rs.metrics, rs.checkpoint, summaryEvictionConfig{})
 }
 
 func TestConsumeDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
@@ -136,7 +136,7 @@ func TestConsumeDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
 			metrics:                  newRecoveryStorageMetrics(types.PChannelInfo{Name: "test1-rootcoord-dml_0"}),
 		}
 
-		attachTestWindowManager(rs)
+		attachTestSummaryManager(rs)
 
 		// Recovery snapshots should pick up the pending salvage checkpoint even when dirtyCounter==0.
 		snapshot := rs.consumeDirtySnapshot()
@@ -166,7 +166,7 @@ func TestConsumeDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
 			metrics:                  newRecoveryStorageMetrics(types.PChannelInfo{Name: "test1-rootcoord-dml_0"}),
 		}
 
-		attachTestWindowManager(rs)
+		attachTestSummaryManager(rs)
 
 		snapshot := rs.consumeDirtySnapshot()
 		assert.NotNil(t, snapshot)
@@ -194,7 +194,7 @@ func TestConsumeDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
 			metrics:                  newRecoveryStorageMetrics(types.PChannelInfo{Name: "test1-rootcoord-dml_0"}),
 		}
 
-		attachTestWindowManager(rs)
+		attachTestSummaryManager(rs)
 
 		snapshot := rs.consumeDirtySnapshot()
 		assert.NotNil(t, snapshot)
@@ -221,7 +221,7 @@ func TestIsDirtyWithSalvageCheckpoint(t *testing.T) {
 		dirtyCounter:             0,
 		metrics:                  newRecoveryStorageMetrics(types.PChannelInfo{Name: "test-pchannel"}),
 	}
-	attachTestWindowManager(rs)
+	attachTestSummaryManager(rs)
 	assert.True(t, rs.isDirty())
 
 	// Consuming the snapshot clears pendingSalvageCheckpoint.
@@ -259,7 +259,7 @@ func TestPersistDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
 		metrics:                  newRecoveryStorageMetrics(types.PChannelInfo{Name: "test-pchannel"}),
 	}
 
-	attachTestWindowManager(rs)
+	attachTestSummaryManager(rs)
 
 	err := rs.persistRecoverySnapshot(context.Background(), mlog.InfoLevel)
 	assert.NoError(t, err)

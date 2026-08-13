@@ -58,7 +58,7 @@ func TestConfigValidate(t *testing.T) {
 		{"IdempotencyEnabledValidConfig", 10 * time.Second, 100, 5 * time.Second, true, 10 * time.Second, 10 * time.Minute, 0, false},
 		{"IdempotencyEnabledZeroSnapshotInterval", 10 * time.Second, 100, 5 * time.Second, true, 0, 10 * time.Minute, 0, false},
 		{"IdempotencyEnabledNoTTLNoMaxBytes", 10 * time.Second, 100, 5 * time.Second, true, 10 * time.Second, 0, 0, false},
-		// Disabled idempotency tolerates fully non-positive window config.
+		// Disabled idempotency tolerates fully non-positive summary config.
 		{"IdempotencyDisabledUnboundedWindow", 10 * time.Second, 100, 5 * time.Second, false, 0, 0, 0, false},
 	}
 

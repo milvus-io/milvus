@@ -90,7 +90,7 @@ func newIdempotencyInterceptorWithParam(config WindowConfig, param *interceptors
 	}
 }
 
-func newIdempotencyInterceptorWithSnapshots(config WindowConfig, snapshots map[string]*streamingpb.WindowSnapshot, param *interceptors.InterceptorBuildParam) *idempotencyInterceptor {
+func newIdempotencyInterceptorWithSnapshots(config WindowConfig, snapshots map[string]*streamingpb.SummarySnapshot, param *interceptors.InterceptorBuildParam) *idempotencyInterceptor {
 	interceptor := newIdempotencyInterceptorWithParam(config, param)
 	for vchannel, snapshot := range snapshots {
 		interceptor.windows.Insert(vchannel, NewWindowFromSnapshot(config, snapshot))
@@ -190,7 +190,7 @@ func (impl *idempotencyInterceptor) sweepWindowsOnTimeTick(ctx context.Context) 
 
 // removeWindow drops the in-memory window, its metric series, and any buffered
 // txn insert results for a reclaimed vchannel, mirroring the recovery-side
-// removeIdempotencyWindow. Without this, dropped vchannels pin retained PKs,
+// removeSummary. Without this, dropped vchannels pin retained PKs,
 // Prometheus series, or abandoned txn builders for the WAL's lifetime under
 // collection create/drop churn.
 func (impl *idempotencyInterceptor) removeWindow(vchannel string) {
@@ -540,7 +540,7 @@ func commitResultFromAppendContext(ctx context.Context, msgID message.MessageID,
 	return result
 }
 
-func fillDuplicateResult(ctx context.Context, entry *streamingpb.WindowEntry) (message.MessageID, error) {
+func fillDuplicateResult(ctx context.Context, entry *streamingpb.SummaryEntry) (message.MessageID, error) {
 	if entry == nil || entry.GetMessageId() == nil {
 		// Typed so the streamingnode->proxy status converter carries a real code
 		// instead of the untyped catch-all.

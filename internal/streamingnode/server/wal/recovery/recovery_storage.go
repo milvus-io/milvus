@@ -28,19 +28,20 @@ type RecoverySnapshot struct {
 	// It must be persisted before the consume checkpoint so that the ordering guarantee holds.
 	SalvageCheckpoint *utility.ReplicateCheckpoint
 
-	// IdempotencyWindows contains recovered in-memory DID windows used to initialize
-	// the idempotency interceptor. It is rebuilt from pchannelWindow store during recovery
-	// and is not persisted to etcd.
-	IdempotencyWindows map[string]*streamingpb.WindowSnapshot
-	// pchannelWindowRecords are pending physical window records grouped by vchannel.
-	// They are written to pchannelWindowChunk before advancing the pchannel consume checkpoint.
-	pchannelWindowRecords map[string][]committedWriteRecord
-	// vchannelWindowMetaUpdates are pending logical view metadata updates.
-	// They are persisted before PChannelWindowMeta uses their GC boundary.
-	vchannelWindowMetaUpdates map[string]*idempotencyWindowMetaUpdate
-	// pchannelWindowSourceCheckpoint is the source pchannel checkpoint covered by
-	// the latest pchannelWindowChunk. It is persisted before the pchannel consume checkpoint.
-	pchannelWindowSourceCheckpoint *WALCheckpoint
+	// SummarySnapshots contains the recovered in-memory summary snapshots. They are
+	// plain data: the idempotency interceptor is today's only consumer and turns
+	// them into its dedup window, but nothing here is specific to that use. Rebuilt
+	// from the pchannel summary store during recovery, never persisted to etcd.
+	SummarySnapshots map[string]*streamingpb.SummarySnapshot
+	// pchannelSummaryRecords are pending physical summary records grouped by vchannel.
+	// They are written to pchannelSummaryChunk before advancing the pchannel consume checkpoint.
+	pchannelSummaryRecords map[string][]committedWriteRecord
+	// vchannelSummaryMetaUpdates are pending logical view metadata updates.
+	// They are persisted before PChannelSummaryMeta uses their GC boundary.
+	vchannelSummaryMetaUpdates map[string]*summaryMetaUpdate
+	// pchannelSummarySourceCheckpoint is the source pchannel checkpoint covered by
+	// the latest pchannelSummaryChunk. It is persisted before the pchannel consume checkpoint.
+	pchannelSummarySourceCheckpoint *WALCheckpoint
 }
 
 // AlterWALInfo contains information about WAL alteration process.

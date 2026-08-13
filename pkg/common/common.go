@@ -255,10 +255,11 @@ const (
 	ExprUseJSONStatsKey = "expr_use_json_stats"
 )
 
-// Window view type keys.
+// Summary store view type keys. The summary store itself is business-agnostic;
+// a view type names the application that materializes a view from its entries.
 const (
-	VChannelWindowViewTypeIdempotency     = "idempotency"
-	VChannelWindowViewTypePrimaryKeyIndex = "pkindex"
+	VChannelSummaryViewTypeIdempotency     = "idempotency"
+	VChannelSummaryViewTypePrimaryKeyIndex = "pkindex"
 )
 
 // Doc-in-doc-out

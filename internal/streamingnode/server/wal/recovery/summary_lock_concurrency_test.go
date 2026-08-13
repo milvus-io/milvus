@@ -17,24 +17,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
 
-// TestWindowManagerConcurrentObserveAndPersist exercises the windowManager lock
+// TestSummaryManagerConcurrentObserveAndPersist exercises the summaryManager lock
 // model under real concurrency. The existing recovery tests are single-threaded,
-// so neither -race nor Go's map-access checker can catch a missing windowManager.mu
+// so neither -race nor Go's map-access checker can catch a missing summaryManager.mu
 // acquisition; this test runs the three production paths against each other:
 //
-//   - observe: rs.ObserveMessage takes rs.mu then windowManager.mu and creates
-//     windows (writes m.windows);
-//   - persist: the window persistence helpers take windowManager.mu alone and
-//     read/mutate the same window state;
-//   - dirty-check: rs.consumeDirtySnapshot takes rs.mu then windowManager.mu via
+//   - observe: rs.ObserveMessage takes rs.mu then summaryManager.mu and creates
+//     summaries (writes m.vchannelSummaries);
+//   - persist: the summary persistence helpers take summaryManager.mu alone and
+//     read/mutate the same summary state;
+//   - dirty-check: rs.consumeDirtySnapshot takes rs.mu then summaryManager.mu via
 //     canPersistConsumeCheckpoint.
 //
-// If observe failed to hold windowManager.mu, the concurrent map write/read on
-// m.windows would panic outright ("concurrent map read and map write"); -race
+// If observe failed to hold summaryManager.mu, the concurrent map write/read on
+// m.vchannelSummaries would panic outright ("concurrent map read and map write"); -race
 // additionally flags any unsynchronized field access. Because every path takes
-// rs.mu before windowManager.mu (and windowManager never takes rs.mu), the lock
+// rs.mu before summaryManager.mu (and summaryManager never takes rs.mu), the lock
 // order cannot invert, so the test also serves as a deadlock check.
-func TestWindowManagerConcurrentObserveAndPersist(t *testing.T) {
+func TestSummaryManagerConcurrentObserveAndPersist(t *testing.T) {
 	enableRecoveryIdempotency(t)
 	resource.InitForTest(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
@@ -44,9 +44,9 @@ func TestWindowManagerConcurrentObserveAndPersist(t *testing.T) {
 	rs.SetLogger(resource.Resource().Logger())
 	rs.vchannels = make(map[string]*vchannelRecoveryInfo)
 	rs.segments = make(map[int64]*segmentRecoveryInfo)
-	rs.windowManager.resetIdempotencyWindows()
-	rs.windowManager.markActiveViewsInitialized()
-	rs.windowManager.setNormalMode()
+	rs.summaryManager.resetSummaries()
+	rs.summaryManager.markActiveViewsInitialized()
+	rs.summaryManager.setNormalMode()
 
 	// Pre-build the observe messages on the test goroutine: require.* (and the
 	// builders' Must* helpers) must not run from a child goroutine.
@@ -71,7 +71,7 @@ func TestWindowManagerConcurrentObserveAndPersist(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(3)
 
-	// observe path — rs.mu -> windowManager.mu, writes m.windows.
+	// observe path — rs.mu -> summaryManager.mu, writes m.vchannelSummaries.
 	go func() {
 		defer wg.Done()
 		for _, msg := range msgs {
@@ -79,20 +79,20 @@ func TestWindowManagerConcurrentObserveAndPersist(t *testing.T) {
 		}
 	}()
 
-	// window persistence path — windowManager.mu alone.
+	// summary persistence path — summaryManager.mu alone.
 	go func() {
 		defer wg.Done()
 		for i := 0; i < persistRounds; i++ {
 			cp := &WALCheckpoint{MessageID: rmq.NewRmqID(int64(i + 1)), TimeTick: uint64(i + 1)}
-			rs.windowManager.ensurePendingIdempotencyPersistSnapshot()
-			rs.windowManager.clearPendingIdempotencyPersistSnapshot()
-			rs.windowManager.consumeIdempotencySnapshot()
-			rs.windowManager.markVChannelWindowsPersisted(nil, nil, uint64(i), cp)
-			rs.windowManager.markConsumeCheckpointPersisted(cp)
+			rs.summaryManager.ensurePendingIdempotencyPersistSnapshot()
+			rs.summaryManager.clearPendingIdempotencyPersistSnapshot()
+			rs.summaryManager.consumeIdempotencySnapshot()
+			rs.summaryManager.markVChannelSummariesPersisted(nil, nil, uint64(i), cp)
+			rs.summaryManager.markConsumeCheckpointPersisted(cp)
 		}
 	}()
 
-	// dirty-check path — rs.mu -> windowManager.mu via canPersistConsumeCheckpoint.
+	// dirty-check path — rs.mu -> summaryManager.mu via canPersistConsumeCheckpoint.
 	go func() {
 		defer wg.Done()
 		for i := 0; i < persistRounds; i++ {
@@ -101,13 +101,13 @@ func TestWindowManagerConcurrentObserveAndPersist(t *testing.T) {
 	}()
 
 	wg.Wait()
-	require.Len(t, rs.windowManager.idempotencyWindows(), collections)
+	require.Len(t, rs.summaryManager.summaries(), collections)
 }
 
-func TestWindowManagerConcurrentIdleAdvanceAndTruncateClamp(t *testing.T) {
+func TestSummaryManagerConcurrentIdleAdvanceAndTruncateClamp(t *testing.T) {
 	enableRecoveryIdempotency(t)
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCASCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCASCatalog(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
@@ -115,17 +115,17 @@ func TestWindowManagerConcurrentIdleAdvanceAndTruncateClamp(t *testing.T) {
 		TimeTick:  1,
 	})
 	rs.SetLogger(resource.Resource().Logger())
-	rs.windowManager.SetLogger(resource.Resource().Logger())
-	rs.windowManager.markActiveViewsInitialized()
-	rs.windowManager.setPChannelWindowSnapshotCheckpoint(&WALCheckpoint{
+	rs.summaryManager.SetLogger(resource.Resource().Logger())
+	rs.summaryManager.markActiveViewsInitialized()
+	rs.summaryManager.setPChannelSummarySnapshotCheckpoint(&WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
 	})
-	catalogState.storeMeta = &streamingpb.PChannelWindowMeta{
+	catalogState.storeMeta = &streamingpb.PChannelSummaryMeta{
 		Pchannel:                  "p1",
 		SourceCheckpointMessageId: rmq.NewRmqID(1).IntoProto(),
 		SourceCheckpointTimetick:  1,
-		Term:                      rs.windowManager.term,
+		Term:                      rs.summaryManager.term,
 	}
 
 	const rounds = 1000
@@ -134,19 +134,19 @@ func TestWindowManagerConcurrentIdleAdvanceAndTruncateClamp(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 2; i < rounds; i++ {
-			rs.windowManager.mu.Lock()
-			rs.windowManager.advancePChannelWindowSnapshotCheckpoint(&WALCheckpoint{
+			rs.summaryManager.mu.Lock()
+			rs.summaryManager.advancePChannelSummarySnapshotCheckpoint(&WALCheckpoint{
 				MessageID: rmq.NewRmqID(int64(i)),
 				TimeTick:  uint64(i),
 			})
-			rs.windowManager.mu.Unlock()
-			rs.windowManager.advanceIdleSourceCheckpoint(ctx)
+			rs.summaryManager.mu.Unlock()
+			rs.summaryManager.advanceIdleSourceCheckpoint(ctx)
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		for i := 2; i < rounds; i++ {
-			_ = rs.windowManager.truncateClampCheckpoint()
+			_ = rs.summaryManager.truncateClampCheckpoint()
 		}
 	}()
 	wg.Wait()

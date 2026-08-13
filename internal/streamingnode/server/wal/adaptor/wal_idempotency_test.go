@@ -119,8 +119,8 @@ func initIdempotencyResourceForTest(t *testing.T) {
 	var consumeCheckpoint *streamingpb.WALCheckpoint
 	segmentAssignments := make(map[int64]*streamingpb.SegmentAssignmentMeta)
 	vchannels := make(map[string]*streamingpb.VChannelMeta)
-	idempotencyWindowMetas := make(map[string]*streamingpb.VChannelWindowMeta)
-	var pchannelWindowMeta *streamingpb.PChannelWindowMeta
+	summaryMetas := make(map[string]*streamingpb.VChannelSummaryMeta)
+	var pchannelSummaryMeta *streamingpb.PChannelSummaryMeta
 
 	rc := mocks.NewMockMixCoordClient(t)
 	tso := atomic.Uint64{}
@@ -179,37 +179,37 @@ func initIdempotencyResourceForTest(t *testing.T) {
 		}
 		return values, nil
 	}).Maybe()
-	catalog.EXPECT().ListVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string) ([]*streamingpb.VChannelWindowMeta, error) {
-		values := make([]*streamingpb.VChannelWindowMeta, 0, len(idempotencyWindowMetas))
-		for _, meta := range idempotencyWindowMetas {
-			values = append(values, proto.Clone(meta).(*streamingpb.VChannelWindowMeta))
+	catalog.EXPECT().ListVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string) ([]*streamingpb.VChannelSummaryMeta, error) {
+		values := make([]*streamingpb.VChannelSummaryMeta, 0, len(summaryMetas))
+		for _, meta := range summaryMetas {
+			values = append(values, proto.Clone(meta).(*streamingpb.VChannelSummaryMeta))
 		}
 		return values, nil
 	}).Maybe()
-	catalog.EXPECT().SaveVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, saved map[string]*streamingpb.VChannelWindowMeta) error {
+	catalog.EXPECT().SaveVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, saved map[string]*streamingpb.VChannelSummaryMeta) error {
 		for key, meta := range saved {
-			idempotencyWindowMetas[key] = proto.Clone(meta).(*streamingpb.VChannelWindowMeta)
+			summaryMetas[key] = proto.Clone(meta).(*streamingpb.VChannelSummaryMeta)
 		}
 		return nil
 	}).Maybe()
-	catalog.EXPECT().RemoveVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, removed []string) error {
+	catalog.EXPECT().RemoveVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, removed []string) error {
 		for _, key := range removed {
-			delete(idempotencyWindowMetas, key)
+			delete(summaryMetas, key)
 		}
 		return nil
 	}).Maybe()
-	catalog.EXPECT().GetPChannelWindowMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.PChannelWindowMeta, error) {
-		if pchannelWindowMeta == nil {
+	catalog.EXPECT().GetPChannelSummaryMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.PChannelSummaryMeta, error) {
+		if pchannelSummaryMeta == nil {
 			return nil, nil
 		}
-		return proto.Clone(pchannelWindowMeta).(*streamingpb.PChannelWindowMeta), nil
+		return proto.Clone(pchannelSummaryMeta).(*streamingpb.PChannelSummaryMeta), nil
 	}).Maybe()
-	catalog.EXPECT().SavePChannelWindowMeta(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, meta *streamingpb.PChannelWindowMeta) error {
-		pchannelWindowMeta = proto.Clone(meta).(*streamingpb.PChannelWindowMeta)
+	catalog.EXPECT().SavePChannelSummaryMeta(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, meta *streamingpb.PChannelSummaryMeta) error {
+		pchannelSummaryMeta = proto.Clone(meta).(*streamingpb.PChannelSummaryMeta)
 		return nil
 	}).Maybe()
-	catalog.EXPECT().RemovePChannelWindowMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) error {
-		pchannelWindowMeta = nil
+	catalog.EXPECT().RemovePChannelSummaryMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) error {
+		pchannelSummaryMeta = nil
 		return nil
 	}).Maybe()
 	catalog.EXPECT().GetSalvageCheckpoint(mock.Anything, mock.Anything).Return(nil, nil).Maybe()

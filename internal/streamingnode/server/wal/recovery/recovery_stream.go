@@ -67,7 +67,8 @@ L:
 		mlog.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
 	}
 	if snapshot.AlterWALInfo != nil {
-		logFields = append(logFields,
+		logFields = append(
+			logFields,
 			mlog.Bool("foundAlterWALMsg", snapshot.AlterWALInfo.FoundAlterWALMsg),
 			mlog.Stringer("targetWALName", snapshot.AlterWALInfo.TargetWALName),
 		)
@@ -82,17 +83,17 @@ L:
 func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(r.segments))
 	vchannels := make(map[string]*streamingpb.VChannelMeta, len(r.vchannels))
-	// Snapshot the idempotency windows under windowManager.mu, per the
-	// idempotencyWindows() contract. getSnapshot runs in the single-threaded
-	// recovery phase today (before windowBackgroundTask starts), but taking the
+	// Snapshot the idempotency summaries under summaryManager.mu, per the
+	// summaries() contract. getSnapshot runs in the single-threaded
+	// recovery phase today (before summaryBackgroundTask starts), but taking the
 	// lock keeps this correct if the call ever moves.
-	r.windowManager.mu.Lock()
-	idempotencyRuntimeWindows := r.windowManager.idempotencyWindows()
-	idempotencyWindows := make(map[string]*streamingpb.WindowSnapshot, len(idempotencyRuntimeWindows))
-	for channelName, window := range idempotencyRuntimeWindows {
-		idempotencyWindows[channelName] = window.snapshot()
+	r.summaryManager.mu.Lock()
+	runtimeSummaries := r.summaryManager.summaries()
+	summaries := make(map[string]*streamingpb.SummarySnapshot, len(runtimeSummaries))
+	for channelName, summary := range runtimeSummaries {
+		summaries[channelName] = summary.snapshot()
 	}
-	r.windowManager.mu.Unlock()
+	r.summaryManager.mu.Unlock()
 	// Collect active vchannels and build a set of active partition IDs (globally unique).
 	activePartitions := make(map[int64]struct{})
 	for channelName, vchannel := range r.vchannels {
@@ -112,7 +113,8 @@ func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 		// non-atomic etcd persistence or Kafka offset compaction replaying CreateSegment
 		// for dropped collections/partitions.
 		if _, ok := vchannels[segment.meta.Vchannel]; !ok {
-			r.Logger().Warn(context.TODO(), "getSnapshot: skipping orphaned segment assignment with non-active vchannel",
+			r.Logger().Warn(
+				context.TODO(), "getSnapshot: skipping orphaned segment assignment with non-active vchannel",
 				mlog.Int64("segmentID", segmentID),
 				mlog.String("vchannel", segment.meta.Vchannel),
 				mlog.Int64("collectionID", segment.meta.CollectionId),
@@ -121,7 +123,8 @@ func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 			continue
 		}
 		if _, ok := activePartitions[segment.meta.PartitionId]; !ok {
-			r.Logger().Warn(context.TODO(), "getSnapshot: skipping orphaned segment assignment with dropped partition",
+			r.Logger().Warn(
+				context.TODO(), "getSnapshot: skipping orphaned segment assignment with dropped partition",
 				mlog.Int64("segmentID", segmentID),
 				mlog.String("vchannel", segment.meta.Vchannel),
 				mlog.Int64("collectionID", segment.meta.CollectionId),
@@ -135,7 +138,7 @@ func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 	snapshot := &RecoverySnapshot{
 		VChannels:          vchannels,
 		SegmentAssignments: segments,
-		IdempotencyWindows: idempotencyWindows,
+		SummarySnapshots:   summaries,
 		Checkpoint:         r.checkpoint.Clone(),
 	}
 	if r.alterWALInfo != nil {

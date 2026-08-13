@@ -17,82 +17,82 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
-func TestWindowManagerMinRequiredGenerationAggregatesIdempotencyWindows(t *testing.T) {
-	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
+func TestSummaryManagerMinRequiredGenerationAggregatesIdempotencySummaries(t *testing.T) {
+	manager := newSummaryManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, summaryEvictionConfig{})
 
-	idempotencyWindow := newEmptyVChannelWindow("p1", "v1", nil)
-	idempotencyWindow.latestAppliedGeneration = 7
-	idempotencyWindow.refreshMinRequiredGeneration()
-	manager.setIdempotencyWindows(map[string]*vchannelWindow{
-		"v1": idempotencyWindow,
+	summary := newEmptyVChannelSummary("p1", "v1", nil)
+	summary.latestAppliedGeneration = 7
+	summary.refreshMinRequiredGeneration()
+	manager.setSummaries(map[string]*vchannelSummary{
+		"v1": summary,
 	})
 
-	// With no override, the boundary is the window's own min-required generation.
+	// With no override, the boundary is the summary's own min-required generation.
 	boundary, _ := manager.minRequiredGeneration(nil, 0)
 	require.Equal(t, uint64(7), boundary)
 
 	// A supplied meta overrides that vchannel's contribution.
-	boundary, _ = manager.minRequiredGeneration(map[string]*streamingpb.VChannelWindowMeta{
+	boundary, _ = manager.minRequiredGeneration(map[string]*streamingpb.VChannelSummaryMeta{
 		"v1": {
 			Pchannel:              "p1",
 			Vchannel:              "v1",
-			ViewType:              common.VChannelWindowViewTypeIdempotency,
+			ViewType:              common.VChannelSummaryViewTypeIdempotency,
 			MinRequiredGeneration: 2,
 		},
 	}, 0)
 	require.Equal(t, uint64(2), boundary)
 }
 
-func TestWindowManagerCleanerWaitsForActiveViewInitialization(t *testing.T) {
-	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
-	require.False(t, manager.canCleanPChannelWindow())
+func TestSummaryManagerCleanerWaitsForActiveViewInitialization(t *testing.T) {
+	manager := newSummaryManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, summaryEvictionConfig{})
+	require.False(t, manager.canCleanPChannelSummary())
 
 	manager.markActiveViewsInitialized()
-	require.True(t, manager.canCleanPChannelWindow())
+	require.True(t, manager.canCleanPChannelSummary())
 }
 
-func TestWindowManagerMaintainsPChannelWindowSnapshotCheckpoint(t *testing.T) {
-	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
+func TestSummaryManagerMaintainsPChannelSummarySnapshotCheckpoint(t *testing.T) {
+	manager := newSummaryManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, summaryEvictionConfig{})
 
-	manager.setPChannelWindowSnapshotCheckpoint(&WALCheckpoint{
+	manager.setPChannelSummarySnapshotCheckpoint(&WALCheckpoint{
 		MessageID: rmq.NewRmqID(10),
 		TimeTick:  10,
 	})
-	checkpoint := manager.getPChannelWindowSnapshotCheckpointUnsafe()
+	checkpoint := manager.getPChannelSummarySnapshotCheckpointUnsafe()
 	require.NotNil(t, checkpoint)
 	require.Equal(t, uint64(10), checkpoint.TimeTick)
-	persisted := manager.getPersistedPChannelWindowSnapshotCheckpointUnsafe()
+	persisted := manager.getPersistedPChannelSummarySnapshotCheckpointUnsafe()
 	require.NotNil(t, persisted)
 	require.Equal(t, uint64(10), persisted.TimeTick)
 
 	checkpoint.TimeTick = 1
-	require.Equal(t, uint64(10), manager.getPChannelWindowSnapshotCheckpointUnsafe().TimeTick)
+	require.Equal(t, uint64(10), manager.getPChannelSummarySnapshotCheckpointUnsafe().TimeTick)
 
-	manager.advancePChannelWindowSnapshotCheckpoint(&WALCheckpoint{
+	manager.advancePChannelSummarySnapshotCheckpoint(&WALCheckpoint{
 		MessageID: rmq.NewRmqID(9),
 		TimeTick:  9,
 	})
-	require.Equal(t, uint64(10), manager.getPChannelWindowSnapshotCheckpointUnsafe().TimeTick)
+	require.Equal(t, uint64(10), manager.getPChannelSummarySnapshotCheckpointUnsafe().TimeTick)
 
-	manager.advancePChannelWindowSnapshotCheckpoint(&WALCheckpoint{
+	manager.advancePChannelSummarySnapshotCheckpoint(&WALCheckpoint{
 		MessageID: rmq.NewRmqID(20),
 		TimeTick:  20,
 	})
-	require.Equal(t, uint64(20), manager.getPChannelWindowSnapshotCheckpointUnsafe().TimeTick)
-	require.Equal(t, uint64(10), manager.getPersistedPChannelWindowSnapshotCheckpointUnsafe().TimeTick)
+	require.Equal(t, uint64(20), manager.getPChannelSummarySnapshotCheckpointUnsafe().TimeTick)
+	require.Equal(t, uint64(10), manager.getPersistedPChannelSummarySnapshotCheckpointUnsafe().TimeTick)
 
-	manager.markPChannelWindowSnapshotCheckpointPersisted(&WALCheckpoint{
+	manager.markPChannelSummarySnapshotCheckpointPersisted(&WALCheckpoint{
 		MessageID: rmq.NewRmqID(20),
 		TimeTick:  20,
 	})
-	require.Equal(t, uint64(20), manager.getPersistedPChannelWindowSnapshotCheckpointUnsafe().TimeTick)
+	require.Equal(t, uint64(20), manager.getPersistedPChannelSummarySnapshotCheckpointUnsafe().TimeTick)
 }
 
-func TestWindowManagerTracksPersistedConsumeCheckpoint(t *testing.T) {
-	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, &WALCheckpoint{
+func TestSummaryManagerTracksPersistedConsumeCheckpoint(t *testing.T) {
+	manager := newSummaryManager("p1", 0, &config{idempotencyEnabled: true}, nil, &WALCheckpoint{
 		MessageID: rmq.NewRmqID(10),
 		TimeTick:  10,
-	}, windowEvictionConfig{})
+	}, summaryEvictionConfig{})
 
 	require.False(t, manager.canPersistConsumeCheckpointUnsafe(&WALCheckpoint{
 		MessageID: rmq.NewRmqID(10),
@@ -114,12 +114,12 @@ func TestWindowManagerTracksPersistedConsumeCheckpoint(t *testing.T) {
 }
 
 func TestEvictForRecoveryByTTL(t *testing.T) {
-	state := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
+	state := newEmptyVChannelSummary("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
 	})
 	timeticks := []uint64{100, 200, 300, 400, 500}
-	populateWindowEntries(state, timeticks)
+	populateSummaryEntries(state, timeticks)
 	require.Len(t, state.entries, 5)
 
 	state.evictForRecovery(350, 0, 0)
@@ -129,11 +129,11 @@ func TestEvictForRecoveryByTTL(t *testing.T) {
 }
 
 func TestEvictForRecoveryRespectsMinEntries(t *testing.T) {
-	state := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
+	state := newEmptyVChannelSummary("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
 	})
-	populateWindowEntries(state, []uint64{100, 200, 300})
+	populateSummaryEntries(state, []uint64{100, 200, 300})
 	require.Len(t, state.entries, 3)
 
 	state.evictForRecovery(500, 2, 0)
@@ -143,7 +143,7 @@ func TestEvictForRecoveryRespectsMinEntries(t *testing.T) {
 }
 
 func TestEvictForRecoveryEnforcesMaxBytes(t *testing.T) {
-	state := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
+	state := newEmptyVChannelSummary("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
 	})
@@ -151,7 +151,7 @@ func TestEvictForRecoveryEnforcesMaxBytes(t *testing.T) {
 	for i := range timeticks {
 		timeticks[i] = uint64(1000 + i*100)
 	}
-	populateWindowEntries(state, timeticks)
+	populateSummaryEntries(state, timeticks)
 	require.Len(t, state.entries, 10)
 	require.Positive(t, state.entryBytes)
 
@@ -164,11 +164,11 @@ func TestEvictForRecoveryEnforcesMaxBytes(t *testing.T) {
 }
 
 func TestEvictPersistedRemovesPersistedEntries(t *testing.T) {
-	state := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
+	state := newEmptyVChannelSummary("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
 	})
-	populateWindowEntries(state, []uint64{100, 200, 300, 400})
+	populateSummaryEntries(state, []uint64{100, 200, 300, 400})
 
 	// key-0, key-1 are persisted; key-2, key-3 are not yet persisted.
 	state.markCommittedWriteRecordGeneration(makeRecord("key-0", 100), 3)
@@ -181,20 +181,20 @@ func TestEvictPersistedRemovesPersistedEntries(t *testing.T) {
 }
 
 func TestMinRequiredGenerationSkipsUnpersistedEntries(t *testing.T) {
-	state := newEmptyVChannelWindow("p1", "v1", nil)
+	state := newEmptyVChannelSummary("p1", "v1", nil)
 	// Generations up to 4 have already been persisted on this channel.
 	state.latestAppliedGeneration = 4
 	// A freshly-observed, not-yet-persisted entry lives in the WAL, not in any
 	// chunk, so it must not pin the chunk-retention boundary back to 0.
-	populateWindowEntries(state, []uint64{500})
+	populateSummaryEntries(state, []uint64{500})
 
 	state.refreshMinRequiredGeneration()
 	require.Equal(t, uint64(4), state.minRequiredGeneration)
 }
 
 func TestEvictPersistedAdvancesMinRequiredWithPendingEntries(t *testing.T) {
-	state := newEmptyVChannelWindow("p1", "v1", nil)
-	populateWindowEntries(state, []uint64{100, 200, 300})
+	state := newEmptyVChannelSummary("p1", "v1", nil)
+	populateSummaryEntries(state, []uint64{100, 200, 300})
 	// key-0, key-1 persisted at generations 1 and 2; key-2 still pending.
 	state.markCommittedWriteRecordGeneration(makeRecord("key-0", 100), 1)
 	state.markCommittedWriteRecordGeneration(makeRecord("key-1", 200), 2)
@@ -212,11 +212,11 @@ func TestEvictPersistedAdvancesMinRequiredWithPendingEntries(t *testing.T) {
 }
 
 func TestEvictPersistedStopsAtEntryWithoutGeneration(t *testing.T) {
-	state := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
+	state := newEmptyVChannelSummary("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
 	})
-	populateWindowEntries(state, []uint64{100, 200, 300, 400})
+	populateSummaryEntries(state, []uint64{100, 200, 300, 400})
 
 	state.markCommittedWriteRecordGeneration(makeRecord("key-0", 100), 1)
 	state.markCommittedWriteRecordGeneration(makeRecord("key-1", 200), 2)
@@ -231,18 +231,18 @@ func TestEvictPersistedStopsAtEntryWithoutGeneration(t *testing.T) {
 
 func TestObserveTimeTickTriggersRecoveryEviction(t *testing.T) {
 	ttl := 5 * time.Second
-	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{
-		windowTTL:  ttl,
+	manager := newSummaryManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, summaryEvictionConfig{
+		entryTTL:   ttl,
 		minEntries: 0,
 	})
-	state := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
+	state := newEmptyVChannelSummary("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
 	})
 	nowTT := tsoutil.ComposeTS(100000, 0)
 	oldTT := tsoutil.ComposeTS(90000, 0)
-	populateWindowEntriesWithBaseTT(state, oldTT, 5)
-	manager.setIdempotencyWindows(map[string]*vchannelWindow{"v1": state})
+	populateSummaryEntriesWithBaseTT(state, oldTT, 5)
+	manager.setSummaries(map[string]*vchannelSummary{"v1": state})
 	require.Len(t, state.entries, 5)
 
 	msg := buildTimeTickMessage(t, nowTT)
@@ -253,19 +253,19 @@ func TestObserveTimeTickTriggersRecoveryEviction(t *testing.T) {
 
 func TestObserveTimeTickNoEvictionInNormalMode(t *testing.T) {
 	ttl := 5 * time.Second
-	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{
-		windowTTL:  ttl,
+	manager := newSummaryManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, summaryEvictionConfig{
+		entryTTL:   ttl,
 		minEntries: 0,
 	})
 	manager.setNormalMode()
-	state := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
+	state := newEmptyVChannelSummary("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
 	})
 	nowTT := tsoutil.ComposeTS(100000, 0)
 	oldTT := tsoutil.ComposeTS(90000, 0)
-	populateWindowEntriesWithBaseTT(state, oldTT, 5)
-	manager.setIdempotencyWindows(map[string]*vchannelWindow{"v1": state})
+	populateSummaryEntriesWithBaseTT(state, oldTT, 5)
+	manager.setSummaries(map[string]*vchannelSummary{"v1": state})
 
 	msg := buildTimeTickMessage(t, nowTT)
 	manager.observeMessage(msg)
@@ -274,17 +274,17 @@ func TestObserveTimeTickNoEvictionInNormalMode(t *testing.T) {
 }
 
 func TestEvictPersistedEntriesInNormalMode(t *testing.T) {
-	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
+	manager := newSummaryManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, summaryEvictionConfig{})
 	manager.setNormalMode()
-	state := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
+	state := newEmptyVChannelSummary("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
 	})
-	populateWindowEntries(state, []uint64{100, 200, 300, 400})
+	populateSummaryEntries(state, []uint64{100, 200, 300, 400})
 	// key-0, key-1 persisted; key-2, key-3 still pending.
 	state.markCommittedWriteRecordGeneration(makeRecord("key-0", 100), 1)
 	state.markCommittedWriteRecordGeneration(makeRecord("key-1", 200), 2)
-	manager.setIdempotencyWindows(map[string]*vchannelWindow{"v1": state})
+	manager.setSummaries(map[string]*vchannelSummary{"v1": state})
 
 	manager.evictPersistedEntries()
 
@@ -294,60 +294,60 @@ func TestEvictPersistedEntriesInNormalMode(t *testing.T) {
 }
 
 func TestEvictPersistedEntriesNoOpInRecoveryMode(t *testing.T) {
-	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
-	state := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
+	manager := newSummaryManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, summaryEvictionConfig{})
+	state := newEmptyVChannelSummary("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
 	})
-	populateWindowEntries(state, []uint64{100, 200, 300})
+	populateSummaryEntries(state, []uint64{100, 200, 300})
 	state.markCommittedWriteRecordGeneration(makeRecord("key-0", 100), 1)
 	state.markCommittedWriteRecordGeneration(makeRecord("key-1", 200), 1)
 	state.markCommittedWriteRecordGeneration(makeRecord("key-2", 300), 1)
-	manager.setIdempotencyWindows(map[string]*vchannelWindow{"v1": state})
+	manager.setSummaries(map[string]*vchannelSummary{"v1": state})
 
 	manager.evictPersistedEntries()
 
 	require.Len(t, state.entries, 3)
 }
 
-func TestGetWindowSnapshotCheckpointSkipsNilCheckpoint(t *testing.T) {
-	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
+func TestGetSummarySnapshotCheckpointSkipsNilCheckpoint(t *testing.T) {
+	manager := newSummaryManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, summaryEvictionConfig{})
 
-	windowWithCP := newEmptyVChannelWindow("p1", "v1", &WALCheckpoint{
+	summaryWithCP := newEmptyVChannelSummary("p1", "v1", &WALCheckpoint{
 		MessageID: rmq.NewRmqID(50),
 		TimeTick:  50,
 	})
-	windowWithoutCP := newEmptyVChannelWindow("p1", "v2", nil)
-	manager.setIdempotencyWindows(map[string]*vchannelWindow{
-		"v1": windowWithCP,
-		"v2": windowWithoutCP,
+	summaryWithoutCP := newEmptyVChannelSummary("p1", "v2", nil)
+	manager.setSummaries(map[string]*vchannelSummary{
+		"v1": summaryWithCP,
+		"v2": summaryWithoutCP,
 	})
 
-	cp := manager.getWindowSnapshotCheckpointUnsafe()
+	cp := manager.getSummarySnapshotCheckpointUnsafe()
 	require.NotNil(t, cp)
 	require.Equal(t, uint64(50), cp.TimeTick)
 }
 
-func TestGetWindowSnapshotCheckpointAllNilReturnsNil(t *testing.T) {
-	manager := newWindowManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, windowEvictionConfig{})
+func TestGetSummarySnapshotCheckpointAllNilReturnsNil(t *testing.T) {
+	manager := newSummaryManager("p1", 0, &config{idempotencyEnabled: true}, nil, nil, summaryEvictionConfig{})
 
-	window1 := newEmptyVChannelWindow("p1", "v1", nil)
-	window2 := newEmptyVChannelWindow("p1", "v2", nil)
-	manager.setIdempotencyWindows(map[string]*vchannelWindow{
-		"v1": window1,
-		"v2": window2,
+	summary1 := newEmptyVChannelSummary("p1", "v1", nil)
+	summary2 := newEmptyVChannelSummary("p1", "v2", nil)
+	manager.setSummaries(map[string]*vchannelSummary{
+		"v1": summary1,
+		"v2": summary2,
 	})
 
-	cp := manager.getWindowSnapshotCheckpointUnsafe()
+	cp := manager.getSummarySnapshotCheckpointUnsafe()
 	require.Nil(t, cp)
 }
 
 // --- helpers ---
 
-func populateWindowEntries(state *vchannelWindow, timeticks []uint64) {
+func populateSummaryEntries(state *vchannelSummary, timeticks []uint64) {
 	for i, tt := range timeticks {
 		key := fmt.Sprintf("key-%d", i)
-		record := *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+		record := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 			Key:            key,
 			CommitTimetick: tt,
 			MessageId:      rmq.NewRmqID(int64(tt)).IntoProto(),
@@ -356,11 +356,11 @@ func populateWindowEntries(state *vchannelWindow, timeticks []uint64) {
 	}
 }
 
-func populateWindowEntriesWithBaseTT(state *vchannelWindow, baseTT uint64, count int) {
+func populateSummaryEntriesWithBaseTT(state *vchannelSummary, baseTT uint64, count int) {
 	for i := 0; i < count; i++ {
 		key := fmt.Sprintf("key-%d", i)
 		tt := baseTT + uint64(i)
-		record := *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+		record := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 			Key:            key,
 			CommitTimetick: tt,
 			MessageId:      rmq.NewRmqID(int64(tt)).IntoProto(),

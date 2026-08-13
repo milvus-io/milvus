@@ -24,7 +24,7 @@ func enableRecoveryIdempotency(t *testing.T) {
 	t.Cleanup(func() { _ = params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
 }
 
-func TestEffectivePersistCheckpointUsesPChannelWindowAndFlushOnly(t *testing.T) {
+func TestEffectivePersistCheckpointUsesPChannelSummaryAndFlushOnly(t *testing.T) {
 	enableRecoveryIdempotency(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(1, 1))
 	rs.vchannels = map[string]*vchannelRecoveryInfo{
@@ -37,14 +37,14 @@ func TestEffectivePersistCheckpointUsesPChannelWindowAndFlushOnly(t *testing.T) 
 		},
 	}
 	snapshot := &RecoverySnapshot{
-		Checkpoint:                     testRecoveryCheckpoint(120, 120),
-		pchannelWindowSourceCheckpoint: testRecoveryCheckpoint(110, 110),
-		vchannelWindowMetaUpdates: map[string]*idempotencyWindowMetaUpdate{
+		Checkpoint:                      testRecoveryCheckpoint(120, 120),
+		pchannelSummarySourceCheckpoint: testRecoveryCheckpoint(110, 110),
+		vchannelSummaryMetaUpdates: map[string]*summaryMetaUpdate{
 			"v1": {
-				meta: &streamingpb.VChannelWindowMeta{
+				meta: &streamingpb.VChannelSummaryMeta{
 					Pchannel:                    "p1",
 					Vchannel:                    "v1",
-					ViewType:                    common.VChannelWindowViewTypeIdempotency,
+					ViewType:                    common.VChannelSummaryViewTypeIdempotency,
 					SnapshotCheckpointMessageId: rmq.NewRmqID(10).IntoProto(),
 					SnapshotCheckpointTimetick:  10,
 				},
@@ -52,12 +52,12 @@ func TestEffectivePersistCheckpointUsesPChannelWindowAndFlushOnly(t *testing.T) 
 		},
 	}
 
-	checkpoint := rs.windowManager.effectivePersistCheckpoint(snapshot, rs.getFlusherCheckpoint())
+	checkpoint := rs.summaryManager.effectivePersistCheckpoint(snapshot, rs.getFlusherCheckpoint())
 	require.Equal(t, uint64(100), checkpoint.TimeTick)
 	require.True(t, rmq.NewRmqID(100).EQ(checkpoint.MessageID))
 }
 
-// The flusher clamp on the persisted consume checkpoint exists only for window
+// The flusher clamp on the persisted consume checkpoint exists only for summary
 // replay. With idempotency disabled the checkpoint must not be pinned to the
 // slowest vchannel's flusher — that would force every restart to replay the
 // whole flusher-to-consume WAL span through recovery for no benefit (WAL
@@ -79,7 +79,7 @@ func TestEffectivePersistCheckpointNotFlusherClampedWhenIdempotencyDisabled(t *t
 	}
 	snapshot := &RecoverySnapshot{Checkpoint: testRecoveryCheckpoint(120, 120)}
 
-	checkpoint := rs.windowManager.effectivePersistCheckpoint(snapshot, rs.getFlusherCheckpoint())
+	checkpoint := rs.summaryManager.effectivePersistCheckpoint(snapshot, rs.getFlusherCheckpoint())
 	require.Equal(t, uint64(120), checkpoint.TimeTick)
 	require.True(t, rmq.NewRmqID(120).EQ(checkpoint.MessageID))
 }
@@ -109,13 +109,13 @@ func TestEffectivePersistCheckpointPreservesReplicateAndAlterState(t *testing.T)
 	}
 
 	snapshot := &RecoverySnapshot{
-		Checkpoint:                     snapshotCheckpoint,
-		pchannelWindowSourceCheckpoint: testRecoveryCheckpoint(110, 110),
+		Checkpoint:                      snapshotCheckpoint,
+		pchannelSummarySourceCheckpoint: testRecoveryCheckpoint(110, 110),
 	}
 
-	checkpoint := rs.windowManager.effectivePersistCheckpoint(snapshot, rs.getFlusherCheckpoint())
+	checkpoint := rs.summaryManager.effectivePersistCheckpoint(snapshot, rs.getFlusherCheckpoint())
 	// The consume position is clamped back to the oldest durability bound (flusher at 100)
-	// so window/flusher state can still be rebuilt on restart.
+	// so summary/flusher state can still be rebuilt on restart.
 	require.Equal(t, uint64(100), checkpoint.TimeTick)
 	require.True(t, rmq.NewRmqID(100).EQ(checkpoint.MessageID))
 	// The control-plane metadata belongs to the consume checkpoint and must survive the clamp,
@@ -129,75 +129,75 @@ func TestEffectivePersistCheckpointPreservesReplicateAndAlterState(t *testing.T)
 	require.Equal(t, uint64(118), checkpoint.ReplicateCheckpoint.TimeTick)
 }
 
-func TestEffectivePersistCheckpointUsesPersistedPChannelWindowWhenWindowDirty(t *testing.T) {
+func TestEffectivePersistCheckpointUsesPersistedPChannelSummaryWhenSummaryDirty(t *testing.T) {
 	enableRecoveryIdempotency(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(1, 1))
-	rs.windowManager.setPChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
-	rs.windowManager.advancePChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(120, 120))
-	rs.windowManager.setIdempotencyWindows(map[string]*vchannelWindow{
+	rs.summaryManager.setPChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
+	rs.summaryManager.advancePChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(120, 120))
+	rs.summaryManager.setSummaries(map[string]*vchannelSummary{
 		"v1": {
 			dirty: true,
 		},
 	})
 
-	checkpoint := rs.windowManager.effectivePersistCheckpoint(&RecoverySnapshot{
+	checkpoint := rs.summaryManager.effectivePersistCheckpoint(&RecoverySnapshot{
 		Checkpoint: testRecoveryCheckpoint(120, 120),
 	}, rs.getFlusherCheckpoint())
 	require.Equal(t, uint64(10), checkpoint.TimeTick)
 	require.True(t, rmq.NewRmqID(10).EQ(checkpoint.MessageID))
 }
 
-func TestEffectivePersistCheckpointIgnoresPChannelWindowWhenWindowClean(t *testing.T) {
+func TestEffectivePersistCheckpointIgnoresPChannelSummaryWhenSummaryClean(t *testing.T) {
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(1, 1))
-	rs.windowManager.setPChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
-	rs.windowManager.advancePChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(120, 120))
+	rs.summaryManager.setPChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
+	rs.summaryManager.advancePChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(120, 120))
 
-	checkpoint := rs.windowManager.effectivePersistCheckpoint(&RecoverySnapshot{
+	checkpoint := rs.summaryManager.effectivePersistCheckpoint(&RecoverySnapshot{
 		Checkpoint: testRecoveryCheckpoint(120, 120),
 	}, rs.getFlusherCheckpoint())
 	require.Equal(t, uint64(120), checkpoint.TimeTick)
 	require.True(t, rmq.NewRmqID(120).EQ(checkpoint.MessageID))
 }
 
-func TestRecoveryCheckpointBecomesDirtyAfterWindowSnapshotPersisted(t *testing.T) {
+func TestRecoveryCheckpointBecomesDirtyAfterSummarySnapshotPersisted(t *testing.T) {
 	enableRecoveryIdempotency(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(10, 10))
-	window := newEmptyVChannelWindow("p1", "v1", testRecoveryCheckpoint(10, 10))
-	require.NoError(t, window.applyCommittedWriteRecord(*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+	summary := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(10, 10))
+	require.NoError(t, summary.applyCommittedWriteRecord(*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: 120,
 		MessageId:      rmq.NewRmqID(120).IntoProto(),
 	}), true))
-	rs.windowManager.setIdempotencyWindows(map[string]*vchannelWindow{"v1": window})
-	rs.windowManager.setPChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
-	rs.windowManager.advancePChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(120, 120))
+	rs.summaryManager.setSummaries(map[string]*vchannelSummary{"v1": summary})
+	rs.summaryManager.setPChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
+	rs.summaryManager.advancePChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(120, 120))
 	rs.checkpoint = testRecoveryCheckpoint(120, 120)
 	rs.dirtyCounter = 1
 
 	recoverySnapshot := rs.consumeDirtySnapshot()
 	require.NotNil(t, recoverySnapshot)
-	effectiveCheckpoint := rs.windowManager.effectivePersistCheckpoint(recoverySnapshot, rs.getFlusherCheckpoint())
+	effectiveCheckpoint := rs.summaryManager.effectivePersistCheckpoint(recoverySnapshot, rs.getFlusherCheckpoint())
 	require.Equal(t, uint64(10), effectiveCheckpoint.TimeTick)
-	rs.windowManager.markConsumeCheckpointPersisted(effectiveCheckpoint)
+	rs.summaryManager.markConsumeCheckpointPersisted(effectiveCheckpoint)
 	require.False(t, rs.isDirty())
 
-	idempotencySnapshot := rs.windowManager.consumeIdempotencySnapshot()
+	idempotencySnapshot := rs.summaryManager.consumeIdempotencySnapshot()
 	require.NotNil(t, idempotencySnapshot)
-	rs.windowManager.markVChannelWindowsPersisted(
-		idempotencySnapshot.pchannelWindowRecords,
+	rs.summaryManager.markVChannelSummariesPersisted(
+		idempotencySnapshot.pchannelSummaryRecords,
 		nil,
 		1,
-		idempotencySnapshot.pchannelWindowSourceCheckpoint,
+		idempotencySnapshot.pchannelSummarySourceCheckpoint,
 	)
 
 	require.True(t, rs.isDirty())
 	recoverySnapshot = rs.consumeDirtySnapshot()
 	require.NotNil(t, recoverySnapshot)
-	effectiveCheckpoint = rs.windowManager.effectivePersistCheckpoint(recoverySnapshot, rs.getFlusherCheckpoint())
+	effectiveCheckpoint = rs.summaryManager.effectivePersistCheckpoint(recoverySnapshot, rs.getFlusherCheckpoint())
 	require.Equal(t, uint64(120), effectiveCheckpoint.TimeTick)
 }
 
-func TestFlusherCheckpointIgnoresWindowSnapshotCheckpoint(t *testing.T) {
+func TestFlusherCheckpointIgnoresSummarySnapshotCheckpoint(t *testing.T) {
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(1, 1))
 	rs.vchannels = map[string]*vchannelRecoveryInfo{
 		"v1": {
@@ -208,7 +208,7 @@ func TestFlusherCheckpointIgnoresWindowSnapshotCheckpoint(t *testing.T) {
 			flusherCheckpoint: testRecoveryCheckpoint(100, 100),
 		},
 	}
-	rs.windowManager.setPChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
+	rs.summaryManager.setPChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
 
 	byTimeTick := rs.GetFlusherCheckpointByTimeTick(context.Background())
 	require.Equal(t, uint64(100), byTimeTick.TimeTick)
@@ -219,9 +219,9 @@ func TestFlusherCheckpointIgnoresWindowSnapshotCheckpoint(t *testing.T) {
 	require.True(t, rmq.NewRmqID(100).EQ(byMessageID.MessageID))
 }
 
-// WAL truncation must never pass the durable window source checkpoint: that is
+// WAL truncation must never pass the durable summary source checkpoint: that is
 // the position a restart rewinds the consume stream to.
-func TestSimpleTruncateCheckpointClampedByWindowSnapshotCheckpoint(t *testing.T) {
+func TestSimpleTruncateCheckpointClampedBySummarySnapshotCheckpoint(t *testing.T) {
 	enableRecoveryIdempotency(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(1, 1))
 	rs.vchannels = map[string]*vchannelRecoveryInfo{
@@ -233,7 +233,7 @@ func TestSimpleTruncateCheckpointClampedByWindowSnapshotCheckpoint(t *testing.T)
 			flusherCheckpoint: testRecoveryCheckpoint(100, 100),
 		},
 	}
-	rs.windowManager.setPChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
+	rs.summaryManager.setPChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
 	truncator := mock_walimpls.NewMockWALImpls(t)
 	truncator.EXPECT().Truncate(mock.Anything, rmq.NewRmqID(10)).Return(nil).Once()
 	rs.truncator = truncator
@@ -241,8 +241,8 @@ func TestSimpleTruncateCheckpointClampedByWindowSnapshotCheckpoint(t *testing.T)
 	rs.simpleTruncateCheckpoint(context.Background(), testRecoveryCheckpoint(120, 120))
 }
 
-// An idle pchannel takes no window snapshot (only committed write records mark a
-// window dirty), so its durable source checkpoint freezes while timeticks keep
+// An idle pchannel takes no summary snapshot (only committed write records mark a
+// summary dirty), so its durable source checkpoint freezes while timeticks keep
 // advancing the consume and flusher checkpoints. Truncation must stay clamped to
 // the frozen position, otherwise the restart rewind lands outside the WAL.
 func TestSimpleTruncateCheckpointClampedWhilePChannelIsIdle(t *testing.T) {
@@ -258,11 +258,11 @@ func TestSimpleTruncateCheckpointClampedWhilePChannelIsIdle(t *testing.T) {
 		},
 	}
 	// the last snapshot persisted the source checkpoint at 10...
-	rs.windowManager.setPChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
+	rs.summaryManager.setPChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
 	// ...and then only timeticks arrived: the in-memory position moves on, the
 	// persisted one stays where the last chunk was written.
-	rs.windowManager.advancePChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(200, 200))
-	require.Equal(t, uint64(10), rs.windowManager.truncateClampCheckpoint().TimeTick)
+	rs.summaryManager.advancePChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(200, 200))
+	require.Equal(t, uint64(10), rs.summaryManager.truncateClampCheckpoint().TimeTick)
 
 	truncator := mock_walimpls.NewMockWALImpls(t)
 	truncator.EXPECT().Truncate(mock.Anything, rmq.NewRmqID(10)).Return(nil).Once()
@@ -271,9 +271,9 @@ func TestSimpleTruncateCheckpointClampedWhilePChannelIsIdle(t *testing.T) {
 	rs.simpleTruncateCheckpoint(context.Background(), testRecoveryCheckpoint(220, 220))
 }
 
-// With idempotency disabled there is no window store to replay, so truncation
+// With idempotency disabled there is no summary store to replay, so truncation
 // keeps taking min(flusher, consume) only.
-func TestSimpleTruncateCheckpointNotWindowClampedWhenIdempotencyDisabled(t *testing.T) {
+func TestSimpleTruncateCheckpointNotSummaryClampedWhenIdempotencyDisabled(t *testing.T) {
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "false")
 	t.Cleanup(func() { params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
@@ -288,7 +288,7 @@ func TestSimpleTruncateCheckpointNotWindowClampedWhenIdempotencyDisabled(t *test
 			flusherCheckpoint: testRecoveryCheckpoint(100, 100),
 		},
 	}
-	rs.windowManager.setPChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
+	rs.summaryManager.setPChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(10, 10))
 	truncator := mock_walimpls.NewMockWALImpls(t)
 	truncator.EXPECT().Truncate(mock.Anything, rmq.NewRmqID(100)).Return(nil).Once()
 	rs.truncator = truncator

@@ -80,8 +80,8 @@ type openerAdaptorImpl struct {
 	interceptorBuilders []interceptors.InterceptorBuilder
 }
 
-type alterWALWindowPersistence interface {
-	ForcePersistIdempotencyWindowToTimeTick(ctx context.Context, targetTimeTick uint64) (*recovery.WALCheckpoint, error)
+type alterWALSummaryPersistence interface {
+	ForcePersistSummaryToTimeTick(ctx context.Context, targetTimeTick uint64) (*recovery.WALCheckpoint, error)
 }
 
 // Open opens a wal instance for the channel.
@@ -352,17 +352,17 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 
 	// Periodically check flush progress until target time tick is reached
 	var flusherCP *utility.WALCheckpoint
-	var windowCP *recovery.WALCheckpoint
-	windowPersistence, hasWindowPersistence := rs.(alterWALWindowPersistence)
+	var summaryCP *recovery.WALCheckpoint
+	summaryPersistence, hasSummaryPersistence := rs.(alterWALSummaryPersistence)
 waitPersistence:
 	for {
 		select {
 		case <-ticker.C:
-			if hasWindowPersistence {
+			if hasSummaryPersistence {
 				var err error
-				windowCP, err = windowPersistence.ForcePersistIdempotencyWindowToTimeTick(ctx, targetTimeTick)
+				summaryCP, err = summaryPersistence.ForcePersistSummaryToTimeTick(ctx, targetTimeTick)
 				if err != nil {
-					return errors.Wrap(err, "failed to persist idempotency window before WAL switch")
+					return errors.Wrap(err, "failed to persist write summary before WAL switch")
 				}
 			}
 			flusherCP = rs.GetFlusherCheckpointByTimeTick(ctx)
@@ -370,18 +370,18 @@ waitPersistence:
 				mlog.Info(ctx, "waiting for flusher checkpoint initialization")
 				continue
 			}
-			if hasWindowPersistence && (windowCP == nil || windowCP.TimeTick < targetTimeTick) {
-				mlog.Info(ctx, "waiting for idempotency window checkpoint",
+			if hasSummaryPersistence && (summaryCP == nil || summaryCP.TimeTick < targetTimeTick) {
+				mlog.Info(ctx, "waiting for summary store checkpoint",
 					mlog.String("channel", opt.Channel.Name),
-					mlog.Uint64("currentTS", checkpointTimeTickForLog(windowCP)),
+					mlog.Uint64("currentTS", checkpointTimeTickForLog(summaryCP)),
 					mlog.Uint64("targetTS", targetTimeTick))
 				continue
 			}
 			if flusherCP.TimeTick >= targetTimeTick {
-				mlog.Info(ctx, "flush and idempotency window persistence completed, ready for WAL switch",
+				mlog.Info(ctx, "flush and summary store persistence completed, ready for WAL switch",
 					mlog.String("channel", opt.Channel.Name),
 					mlog.Uint64("flusherCheckpointTS", flusherCP.TimeTick),
-					mlog.Uint64("windowCheckpointTS", checkpointTimeTickForLog(windowCP)),
+					mlog.Uint64("summaryCheckpointTS", checkpointTimeTickForLog(summaryCP)),
 					mlog.Uint64("targetTimeTick", targetTimeTick),
 					mlog.Stringer("targetWAL", targetWALName))
 				break waitPersistence
@@ -501,9 +501,9 @@ func (o *openerAdaptorImpl) handleAlterWALAdvanceCheckpointsStage(ctx context.Co
 		finalCheckpoint.ReplicateCheckpoint.MessageID = finalCheckpoint.MessageID
 	}
 
-	if err := recovery.UpdatePChannelWindowMetaSourceCheckpoint(ctx, opt.Channel.Name, finalCheckpoint); err != nil {
-		mlog.Warn(ctx, "failed to update pchannel window checkpoint after advance checkpoint stage", mlog.String("channel", opt.Channel.Name), mlog.Err(err))
-		return errors.Wrap(err, "failed to update pchannel window checkpoint after advance checkpoint stage")
+	if err := recovery.UpdatePChannelSummaryMetaSourceCheckpoint(ctx, opt.Channel.Name, finalCheckpoint); err != nil {
+		mlog.Warn(ctx, "failed to update pchannel summary checkpoint after advance checkpoint stage", mlog.String("channel", opt.Channel.Name), mlog.Err(err))
+		return errors.Wrap(err, "failed to update pchannel summary checkpoint after advance checkpoint stage")
 	}
 
 	// Persist final checkpoint to catalog

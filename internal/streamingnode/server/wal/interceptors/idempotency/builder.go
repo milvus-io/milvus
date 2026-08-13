@@ -25,7 +25,7 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 		MaxKeyLength: params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt(),
 	})
 	if param != nil && param.InitialRecoverSnapshot != nil {
-		return newIdempotencyInterceptorWithSnapshots(config, param.InitialRecoverSnapshot.IdempotencyWindows, param)
+		return newIdempotencyInterceptorWithSnapshots(config, param.InitialRecoverSnapshot.SummarySnapshots, param)
 	}
 	return newIdempotencyInterceptorWithParam(config, param)
 }

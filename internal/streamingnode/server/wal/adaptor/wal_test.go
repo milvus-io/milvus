@@ -57,7 +57,8 @@ func TestFencedError(t *testing.T) {
 func TestWAL(t *testing.T) {
 	walimplstest.Reset()
 	initResourceForTest(t)
-	b := registry.MustGetBuilder(message.WALNameTest,
+	b := registry.MustGetBuilder(
+		message.WALNameTest,
 		redo.NewInterceptorBuilder(),
 		lock.NewInterceptorBuilder(),
 		replicate.NewInterceptorBuilder(),
@@ -93,12 +94,12 @@ func initResourceForTest(t *testing.T) {
 	catalog.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().SaveVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
-	catalog.EXPECT().RemoveVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
-	catalog.EXPECT().GetPChannelWindowMeta(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().SavePChannelWindowMeta(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
-	catalog.EXPECT().RemovePChannelWindowMeta(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ListVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().RemoveVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetPChannelSummaryMeta(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SavePChannelSummaryMeta(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().RemovePChannelSummaryMeta(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().GetSalvageCheckpoint(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveRecoverySnapshot(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	fMixCoordClient := syncutil.NewFuture[internaltypes.MixCoordClient]()

@@ -32,17 +32,17 @@ import (
 )
 
 // The persisted-meta projection must honor the durable-retention ledger the
-// same way windowMetaAtGeneration does: after evictPersisted clears the staging
-// window, a later persist cycle carrying only keyless committed writes
+// same way summaryMetaAtGeneration does: after evictPersisted clears the staging
+// summary, a later persist cycle carrying only keyless committed writes
 // (EntryCount == 0) must not project MinRequiredGeneration forward past a
 // generation the ledger still pins — that poisoned meta would survive restart
 // and make the loss of in-TTL keys irreversible once chunk GC runs.
 func TestWithPersistedGenerationHonorsRetentionLedger(t *testing.T) {
-	state := newEmptyVChannelWindow("p1", "v1", testRecoveryCheckpoint(1, 1))
-	state.evictionCfg = windowEvictionConfig{windowTTL: 10 * time.Minute}
+	state := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(1, 1))
+	state.evictionCfg = summaryEvictionConfig{entryTTL: 10 * time.Minute}
 
-	// Generation 1 persists a keyed insert; the staging window is then cleared.
-	keyed := *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+	// Generation 1 persists a keyed insert; the staging summary is then cleared.
+	keyed := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: tsoutil.ComposeTS(600_000, 0),
 		MessageId:      rmq.NewRmqID(600_000).IntoProto(),
@@ -75,21 +75,21 @@ func TestWithPersistedGenerationHonorsRetentionLedger(t *testing.T) {
 // Previously minRequiredGeneration was derived from materialized entries only,
 // so every persist cycle collapsed it to the latest generation, chunk GC
 // trimmed everything below, and a restart could rebuild only ~one snapshot
-// interval of the window instead of a TTL's worth.
+// interval of the summary instead of a TTL's worth.
 func TestMinRequiredGenerationSurvivesEvictPersisted(t *testing.T) {
 	entryAt := func(vchannel, key string, physicalMs int64) committedWriteRecord {
-		return *committedWriteRecordFromWindowEntry("p1", vchannel, &streamingpb.WindowEntry{
+		return *committedWriteRecordFromSummaryEntry("p1", vchannel, &streamingpb.SummaryEntry{
 			Key:            key,
 			CommitTimetick: tsoutil.ComposeTS(physicalMs, 0),
 			MessageId:      rmq.NewRmqID(physicalMs).IntoProto(),
 		})
 	}
 
-	state := newEmptyVChannelWindow("p1", "v1", testRecoveryCheckpoint(1, 1))
-	state.evictionCfg = windowEvictionConfig{windowTTL: 10 * time.Minute}
+	state := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(1, 1))
+	state.evictionCfg = summaryEvictionConfig{entryTTL: 10 * time.Minute}
 
 	// Three persist cycles at generations 1..3, entries one minute apart; each
-	// cycle clears the staging memory like the window background task does.
+	// cycle clears the staging memory like the summary background task does.
 	for i, gen := range []uint64{1, 2, 3} {
 		rec := entryAt("v1", fmt.Sprintf("key-%d", gen), int64(600_000+i*60_000))
 		require.NoError(t, state.applyCommittedWriteRecord(rec, true))
@@ -99,11 +99,11 @@ func TestMinRequiredGenerationSurvivesEvictPersisted(t *testing.T) {
 	require.Empty(t, state.entries)
 
 	// All entries are within TTL: generation 1 stays pinned despite the empty
-	// staging window, and the persisted meta projection must not override it.
+	// staging summary, and the persisted meta projection must not override it.
 	state.snapshotCheckpointTimetick = tsoutil.ComposeTS(600_000+3*60_000, 0)
 	state.refreshMinRequiredGeneration()
 	require.Equal(t, uint64(1), state.minRequiredGeneration)
-	meta := state.windowMetaAtGeneration(4)
+	meta := state.summaryMetaAtGeneration(4)
 	require.Equal(t, uint64(1), meta.GetMinRequiredGeneration())
 	require.Equal(t, uint64(4), meta.GetLatestAppliedGeneration())
 
@@ -114,13 +114,13 @@ func TestMinRequiredGenerationSurvivesEvictPersisted(t *testing.T) {
 	require.Equal(t, uint64(3), state.minRequiredGeneration)
 
 	// A byte cap releases generations beyond the cap even within TTL.
-	capped := newEmptyVChannelWindow("p1", "v2", testRecoveryCheckpoint(1, 1))
-	capped.evictionCfg = windowEvictionConfig{windowTTL: 10 * time.Minute}
+	capped := newEmptyVChannelSummary("p1", "v2", testRecoveryCheckpoint(1, 1))
+	capped.evictionCfg = summaryEvictionConfig{entryTTL: 10 * time.Minute}
 	var capBytes int
 	for i, gen := range []uint64{1, 2} {
 		rec := entryAt("v2", fmt.Sprintf("cap-key-%d", gen), int64(600_000+i*60_000))
 		if capBytes == 0 {
-			capBytes = proto.Size(rec.WindowEntry())
+			capBytes = proto.Size(rec.SummaryEntry())
 			capped.evictionCfg.maxBytes = capBytes
 		}
 		require.NoError(t, capped.applyCommittedWriteRecord(rec, true))
@@ -134,20 +134,20 @@ func TestMinRequiredGenerationSurvivesEvictPersisted(t *testing.T) {
 
 func TestMinRequiredGenerationHonorsByteOnlyRetention(t *testing.T) {
 	entryAt := func(key string, physicalMs int64) committedWriteRecord {
-		return *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+		return *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 			Key:            key,
 			CommitTimetick: tsoutil.ComposeTS(physicalMs, 0),
 			MessageId:      rmq.NewRmqID(physicalMs).IntoProto(),
 		})
 	}
 
-	state := newEmptyVChannelWindow("p1", "v1", testRecoveryCheckpoint(1, 1))
+	state := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(1, 1))
 
 	totalBytes := 0
 	latestBytes := 0
 	for _, gen := range []uint64{1, 2} {
 		rec := entryAt(fmt.Sprintf("byte-key-%d", gen), int64(600_000+gen*60_000))
-		size := proto.Size(rec.WindowEntry())
+		size := proto.Size(rec.SummaryEntry())
 		totalBytes += size
 		latestBytes = size
 		require.NoError(t, state.applyCommittedWriteRecord(rec, true))
@@ -165,24 +165,24 @@ func TestMinRequiredGenerationHonorsByteOnlyRetention(t *testing.T) {
 	require.Equal(t, uint64(2), state.minRequiredGeneration)
 }
 
-func writeTestBootstrapPChannelWindowMeta(
+func writeTestBootstrapPChannelSummaryMeta(
 	ctx context.Context,
 	t require.TestingT,
 	pchannel string,
 	chunkManager storage.ChunkManager,
 	checkpoint *utility.WALCheckpoint,
-) *streamingpb.PChannelWindowMeta {
+) *streamingpb.PChannelSummaryMeta {
 	if helper, ok := t.(interface{ Helper() }); ok {
 		helper.Helper()
 	}
-	payload, footer, _, err := marshalPChannelWindowChunk(pchannel, 0, 0, checkpoint, nil)
+	payload, footer, _, err := marshalPChannelSummaryChunk(pchannel, 0, 0, checkpoint, nil)
 	require.NoError(t, err)
-	key := buildPChannelWindowChunkKey(pchannel, footer.Generation, footer.Term)
+	key := buildPChannelSummaryChunkKey(pchannel, footer.Generation, footer.Term)
 	require.NoError(t, chunkManager.Write(ctx, key, payload))
-	return newPChannelWindowStoreMetaFromChunk(pchannel, footer, 0, 0).intoCatalogMeta()
+	return newPChannelSummaryStoreMetaFromChunk(pchannel, footer, 0, 0).intoCatalogMeta()
 }
 
-func writeTestPChannelWindowChunk(
+func writeTestPChannelSummaryChunk(
 	ctx context.Context,
 	t require.TestingT,
 	pchannel string,
@@ -190,11 +190,11 @@ func writeTestPChannelWindowChunk(
 	chunkManager storage.ChunkManager,
 	checkpoint *utility.WALCheckpoint,
 	records map[string][]committedWriteRecord,
-) (*pchannelWindowChunkFooter, string, string) {
-	return writeTestPChannelWindowChunkWithTerm(ctx, t, pchannel, generation, 0, chunkManager, checkpoint, records)
+) (*pchannelSummaryChunkFooter, string, string) {
+	return writeTestPChannelSummaryChunkWithTerm(ctx, t, pchannel, generation, 0, chunkManager, checkpoint, records)
 }
 
-func writeTestPChannelWindowChunkWithTerm(
+func writeTestPChannelSummaryChunkWithTerm(
 	ctx context.Context,
 	t require.TestingT,
 	pchannel string,
@@ -203,32 +203,32 @@ func writeTestPChannelWindowChunkWithTerm(
 	chunkManager storage.ChunkManager,
 	checkpoint *utility.WALCheckpoint,
 	records map[string][]committedWriteRecord,
-) (*pchannelWindowChunkFooter, string, string) {
+) (*pchannelSummaryChunkFooter, string, string) {
 	if helper, ok := t.(interface{ Helper() }); ok {
 		helper.Helper()
 	}
-	payload, footer, checksum, err := marshalPChannelWindowChunk(pchannel, generation, term, checkpoint, records)
+	payload, footer, checksum, err := marshalPChannelSummaryChunk(pchannel, generation, term, checkpoint, records)
 	require.NoError(t, err)
-	key := buildPChannelWindowChunkKey(pchannel, generation, term)
+	key := buildPChannelSummaryChunkKey(pchannel, generation, term)
 	require.NoError(t, chunkManager.Write(ctx, key, payload))
 	return footer, key, checksum
 }
 
-func recoverTestIdempotencyWindows(ctx context.Context, t require.TestingT, rs *recoveryStorageImpl, pchannel string, allowBootstrap bool) {
+func recoverTestSummaries(ctx context.Context, t require.TestingT, rs *recoveryStorageImpl, pchannel string, allowBootstrap bool) {
 	if helper, ok := t.(interface{ Helper() }); ok {
 		helper.Helper()
 	}
-	require.NoError(t, recoverTestIdempotencyWindowsWithError(ctx, rs, pchannel, allowBootstrap))
+	require.NoError(t, recoverTestSummariesWithError(ctx, rs, pchannel, allowBootstrap))
 }
 
-func recoverTestIdempotencyWindowsWithError(ctx context.Context, rs *recoveryStorageImpl, pchannel string, allowBootstrap bool) error {
-	rs.windowManager.cfg.idempotencyEnabled = true
-	info, err := rs.windowManager.loadWindowInfoFromMeta(ctx, pchannel, allowBootstrap, rs.checkpoint)
+func recoverTestSummariesWithError(ctx context.Context, rs *recoveryStorageImpl, pchannel string, allowBootstrap bool) error {
+	rs.summaryManager.cfg.idempotencyEnabled = true
+	info, err := rs.summaryManager.loadSummaryInfoFromMeta(ctx, pchannel, allowBootstrap, rs.checkpoint)
 	if err != nil {
 		return err
 	}
-	rs.windowManager.initializeIdempotencyWindowsFromMeta(rs.vchannels, info.storeMeta.SourceCheckpoint, info.windowMetas)
-	rewound, err := rs.windowManager.recoverWindowStoreFromSnapshot(ctx, info, rs.checkpoint, rs.vchannels)
+	rs.summaryManager.initializeSummariesFromMeta(rs.vchannels, info.storeMeta.SourceCheckpoint, info.summaryMetas)
+	rewound, err := rs.summaryManager.recoverSummaryStoreFromSnapshot(ctx, info, rs.checkpoint, rs.vchannels)
 	if err != nil {
 		return err
 	}
@@ -237,26 +237,26 @@ func recoverTestIdempotencyWindowsWithError(ctx context.Context, rs *recoverySto
 	return nil
 }
 
-type testPChannelWindowCatalogState struct {
-	windowMetas map[string]*streamingpb.VChannelWindowMeta
-	storeMeta   *streamingpb.PChannelWindowMeta
-	operations  []string
+type testPChannelSummaryCatalogState struct {
+	summaryMetas map[string]*streamingpb.VChannelSummaryMeta
+	storeMeta    *streamingpb.PChannelSummaryMeta
+	operations   []string
 }
 
-type testPChannelWindowCASCatalog struct {
+type testPChannelSummaryCASCatalog struct {
 	*mock_metastore.MockStreamingNodeCataLog
-	state *testPChannelWindowCatalogState
+	state *testPChannelSummaryCatalogState
 }
 
-func newTestPChannelWindowCASCatalog(t *testing.T) (*testPChannelWindowCASCatalog, *testPChannelWindowCatalogState) {
-	catalog, state := newTestPChannelWindowCatalog(t)
-	return &testPChannelWindowCASCatalog{
+func newTestPChannelSummaryCASCatalog(t *testing.T) (*testPChannelSummaryCASCatalog, *testPChannelSummaryCatalogState) {
+	catalog, state := newTestPChannelSummaryCatalog(t)
+	return &testPChannelSummaryCASCatalog{
 		MockStreamingNodeCataLog: catalog,
 		state:                    state,
 	}, state
 }
 
-func (c *testPChannelWindowCASCatalog) CompareAndSwapPChannelWindowMeta(ctx context.Context, pchannelName string, expected *streamingpb.PChannelWindowMeta, target *streamingpb.PChannelWindowMeta) (bool, error) {
+func (c *testPChannelSummaryCASCatalog) CompareAndSwapPChannelSummaryMeta(ctx context.Context, pchannelName string, expected *streamingpb.PChannelSummaryMeta, target *streamingpb.PChannelSummaryMeta) (bool, error) {
 	if target == nil {
 		return true, nil
 	}
@@ -267,86 +267,86 @@ func (c *testPChannelWindowCASCatalog) CompareAndSwapPChannelWindowMeta(ctx cont
 	} else if c.state.storeMeta == nil || !proto.Equal(c.state.storeMeta, expected) {
 		return false, nil
 	}
-	c.state.operations = append(c.state.operations, "pchannel-window-meta")
-	c.state.storeMeta = proto.Clone(target).(*streamingpb.PChannelWindowMeta)
+	c.state.operations = append(c.state.operations, "pchannel-summary-meta")
+	c.state.storeMeta = proto.Clone(target).(*streamingpb.PChannelSummaryMeta)
 	return true, nil
 }
 
-func newTestPChannelWindowCatalog(t *testing.T) (*mock_metastore.MockStreamingNodeCataLog, *testPChannelWindowCatalogState) {
+func newTestPChannelSummaryCatalog(t *testing.T) (*mock_metastore.MockStreamingNodeCataLog, *testPChannelSummaryCatalogState) {
 	params := paramtable.Get()
 	params.Save(params.MinioCfg.RootPath.Key, t.TempDir())
 	t.Cleanup(func() {
 		params.Reset(params.MinioCfg.RootPath.Key)
 	})
-	state := &testPChannelWindowCatalogState{
-		windowMetas: make(map[string]*streamingpb.VChannelWindowMeta),
+	state := &testPChannelSummaryCatalogState{
+		summaryMetas: make(map[string]*streamingpb.VChannelSummaryMeta),
 	}
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
-	catalog.EXPECT().ListVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string) ([]*streamingpb.VChannelWindowMeta, error) {
-		values := make([]*streamingpb.VChannelWindowMeta, 0, len(state.windowMetas))
-		for _, meta := range state.windowMetas {
-			values = append(values, proto.Clone(meta).(*streamingpb.VChannelWindowMeta))
+	catalog.EXPECT().ListVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string) ([]*streamingpb.VChannelSummaryMeta, error) {
+		values := make([]*streamingpb.VChannelSummaryMeta, 0, len(state.summaryMetas))
+		for _, meta := range state.summaryMetas {
+			values = append(values, proto.Clone(meta).(*streamingpb.VChannelSummaryMeta))
 		}
 		return values, nil
 	}).Maybe()
-	catalog.EXPECT().SaveVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, saved map[string]*streamingpb.VChannelWindowMeta) error {
-		state.operations = append(state.operations, "vchannel-window-meta")
+	catalog.EXPECT().SaveVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, saved map[string]*streamingpb.VChannelSummaryMeta) error {
+		state.operations = append(state.operations, "vchannel-summary-meta")
 		for key, meta := range saved {
-			state.windowMetas[key] = proto.Clone(meta).(*streamingpb.VChannelWindowMeta)
+			state.summaryMetas[key] = proto.Clone(meta).(*streamingpb.VChannelSummaryMeta)
 		}
 		return nil
 	}).Maybe()
-	catalog.EXPECT().GetPChannelWindowMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.PChannelWindowMeta, error) {
+	catalog.EXPECT().GetPChannelSummaryMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.PChannelSummaryMeta, error) {
 		if state.storeMeta == nil {
 			return nil, nil
 		}
-		return proto.Clone(state.storeMeta).(*streamingpb.PChannelWindowMeta), nil
+		return proto.Clone(state.storeMeta).(*streamingpb.PChannelSummaryMeta), nil
 	}).Maybe()
-	catalog.EXPECT().SavePChannelWindowMeta(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, meta *streamingpb.PChannelWindowMeta) error {
-		state.operations = append(state.operations, "pchannel-window-meta")
-		state.storeMeta = proto.Clone(meta).(*streamingpb.PChannelWindowMeta)
+	catalog.EXPECT().SavePChannelSummaryMeta(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, meta *streamingpb.PChannelSummaryMeta) error {
+		state.operations = append(state.operations, "pchannel-summary-meta")
+		state.storeMeta = proto.Clone(meta).(*streamingpb.PChannelSummaryMeta)
 		return nil
 	}).Maybe()
-	catalog.EXPECT().RemoveVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, vchannels []string) error {
-		state.operations = append(state.operations, "remove-vchannel-window-metas")
+	catalog.EXPECT().RemoveVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, vchannels []string) error {
+		state.operations = append(state.operations, "remove-vchannel-summary-metas")
 		for _, vchannel := range vchannels {
-			delete(state.windowMetas, vchannel)
+			delete(state.summaryMetas, vchannel)
 		}
 		return nil
 	}).Maybe()
-	catalog.EXPECT().RemovePChannelWindowMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) error {
-		state.operations = append(state.operations, "remove-pchannel-window-meta")
+	catalog.EXPECT().RemovePChannelSummaryMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) error {
+		state.operations = append(state.operations, "remove-pchannel-summary-meta")
 		state.storeMeta = nil
 		return nil
 	}).Maybe()
 	return catalog, state
 }
 
-func TestPersistPChannelWindowRetriesTransientMetaLoad(t *testing.T) {
+func TestPersistPChannelSummaryRetriesTransientMetaLoad(t *testing.T) {
 	ctx := context.Background()
 	params := paramtable.Get()
 	params.Save(params.MinioCfg.RootPath.Key, t.TempDir())
 	t.Cleanup(func() { params.Reset(params.MinioCfg.RootPath.Key) })
 
-	state := &testPChannelWindowCatalogState{windowMetas: make(map[string]*streamingpb.VChannelWindowMeta)}
+	state := &testPChannelSummaryCatalogState{summaryMetas: make(map[string]*streamingpb.VChannelSummaryMeta)}
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
-	catalog.EXPECT().ListVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string) ([]*streamingpb.VChannelWindowMeta, error) {
+	catalog.EXPECT().ListVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string) ([]*streamingpb.VChannelSummaryMeta, error) {
 		return nil, nil
 	}).Maybe()
-	catalog.EXPECT().SaveVChannelWindowMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, saved map[string]*streamingpb.VChannelWindowMeta) error {
+	catalog.EXPECT().SaveVChannelSummaryMetas(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, viewType string, saved map[string]*streamingpb.VChannelSummaryMeta) error {
 		for key, meta := range saved {
-			state.windowMetas[key] = proto.Clone(meta).(*streamingpb.VChannelWindowMeta)
+			state.summaryMetas[key] = proto.Clone(meta).(*streamingpb.VChannelSummaryMeta)
 		}
 		return nil
 	}).Maybe()
-	catalog.EXPECT().SavePChannelWindowMeta(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, meta *streamingpb.PChannelWindowMeta) error {
-		state.storeMeta = proto.Clone(meta).(*streamingpb.PChannelWindowMeta)
+	catalog.EXPECT().SavePChannelSummaryMeta(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string, meta *streamingpb.PChannelSummaryMeta) error {
+		state.storeMeta = proto.Clone(meta).(*streamingpb.PChannelSummaryMeta)
 		return nil
 	}).Maybe()
-	// GetPChannelWindowMeta fails on its first call -- a transient etcd blip on the
+	// GetPChannelSummaryMeta fails on its first call -- a transient etcd blip on the
 	// one persist-path call that was not wrapped in retry -- then succeeds.
 	getCalls := 0
-	catalog.EXPECT().GetPChannelWindowMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.PChannelWindowMeta, error) {
+	catalog.EXPECT().GetPChannelSummaryMeta(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.PChannelSummaryMeta, error) {
 		getCalls++
 		if getCalls == 1 {
 			return nil, errors.New("transient etcd error")
@@ -354,7 +354,7 @@ func TestPersistPChannelWindowRetriesTransientMetaLoad(t *testing.T) {
 		if state.storeMeta == nil {
 			return nil, nil
 		}
-		return proto.Clone(state.storeMeta).(*streamingpb.PChannelWindowMeta), nil
+		return proto.Clone(state.storeMeta).(*streamingpb.PChannelSummaryMeta), nil
 	}).Maybe()
 
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
@@ -362,11 +362,11 @@ func TestPersistPChannelWindowRetriesTransientMetaLoad(t *testing.T) {
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{MessageID: rmq.NewRmqID(1), TimeTick: 1})
 	rs.SetLogger(resource.Resource().Logger())
-	rs.windowManager.SetLogger(resource.Resource().Logger())
+	rs.summaryManager.SetLogger(resource.Resource().Logger())
 
 	records := map[string][]committedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:                    "key-1",
 				CommitTimetick:         99,
 				MessageId:              rmq.NewRmqID(99).IntoProto(),
@@ -377,16 +377,16 @@ func TestPersistPChannelWindowRetriesTransientMetaLoad(t *testing.T) {
 	sourceCheckpoint := &utility.WALCheckpoint{MessageID: rmq.NewRmqID(120), TimeTick: 120}
 
 	// A transient meta-load error must be retried internally, not propagated: a
-	// propagated error kills the window background task and stalls idempotency
-	// durability (the windows then grow unbounded until OOM).
-	_, _, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), records, nil, sourceCheckpoint)
+	// propagated error kills the summary background task and stalls idempotency
+	// durability (the summaries then grow unbounded until OOM).
+	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), records, nil, sourceCheckpoint)
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, getCalls, 2, "transient GetPChannelWindowMeta error should have been retried")
+	require.GreaterOrEqual(t, getCalls, 2, "transient GetPChannelSummaryMeta error should have been retried")
 	require.NotNil(t, state.storeMeta)
 }
 
-func TestWindowSnapshotSerdeRoundTrip(t *testing.T) {
-	snapshot := &streamingpb.WindowSnapshot{
+func TestSummarySnapshotSerdeRoundTrip(t *testing.T) {
+	snapshot := &streamingpb.SummarySnapshot{
 		Pchannel:                   "p1",
 		Vchannel:                   "v1",
 		SnapshotCheckpointTimetick: 100,
@@ -395,7 +395,7 @@ func TestWindowSnapshotSerdeRoundTrip(t *testing.T) {
 			WALName: commonpb.WALName_Test,
 			Id:      "100",
 		},
-		Entries: []*streamingpb.WindowEntry{
+		Entries: []*streamingpb.SummaryEntry{
 			{
 				Key:            "key-2",
 				CommitTimetick: 95,
@@ -423,7 +423,7 @@ func TestWindowSnapshotSerdeRoundTrip(t *testing.T) {
 	payload, err := proto.Marshal(snapshot)
 	require.NoError(t, err)
 
-	decoded := &streamingpb.WindowSnapshot{}
+	decoded := &streamingpb.SummarySnapshot{}
 	require.NoError(t, proto.Unmarshal(payload, decoded))
 	require.Equal(t, snapshot.GetPchannel(), decoded.GetPchannel())
 	require.Equal(t, snapshot.GetVchannel(), decoded.GetVchannel())
@@ -431,18 +431,18 @@ func TestWindowSnapshotSerdeRoundTrip(t *testing.T) {
 	require.Len(t, decoded.GetEntries(), 2)
 }
 
-func TestDIDWindowRecoveryStateFromSnapshot(t *testing.T) {
-	snapshot := &streamingpb.WindowSnapshot{
+func TestSummaryRecoveryStateFromSnapshot(t *testing.T) {
+	snapshot := &streamingpb.SummarySnapshot{
 		Pchannel:                   "p1",
 		Vchannel:                   "v1",
 		SnapshotCheckpointTimetick: 100,
-		Entries: []*streamingpb.WindowEntry{
+		Entries: []*streamingpb.SummaryEntry{
 			{Key: "key-2", CommitTimetick: 95},
 			{Key: "key-1", CommitTimetick: 90},
 		},
 	}
 
-	state, err := newVChannelWindowFromSnapshot(snapshot)
+	state, err := newVChannelSummaryFromSnapshot(snapshot)
 	require.NoError(t, err)
 	roundTrip := state.snapshot()
 	require.Equal(t, uint64(100), roundTrip.GetSnapshotCheckpointTimetick())
@@ -479,7 +479,7 @@ func TestCommittedWriteRecordFromMessageWithIdempotency(t *testing.T) {
 	require.Equal(t, uint32(0), record.Rows[1].RowOffset)
 	require.Equal(t, int64(10), record.Rows[1].Int64PrimaryKeyValue)
 
-	entry := record.WindowEntry()
+	entry := record.SummaryEntry()
 	require.NotNil(t, entry)
 	require.Equal(t, "key-1", entry.GetKey())
 	require.Equal(t, []uint32{2, 0}, entry.GetIdempotentResult().GetRowOffsets())
@@ -546,15 +546,15 @@ func testReplicateHeader(msgID int64) *message.ReplicateHeader {
 	}
 }
 
-func TestVChannelWindowSkipsReplicatedIdempotencyKey(t *testing.T) {
-	state := newEmptyVChannelWindow("p1", "v1", testRecoveryCheckpoint(1, 1))
+func TestVChannelSummarySkipsReplicatedIdempotencyKey(t *testing.T) {
+	state := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(1, 1))
 
-	// A native keyed insert materializes a window entry.
+	// A native keyed insert materializes a summary entry.
 	state.observeMessage(newTestIdempotentCommittedInsertMessage(t, "v1", "native-key", 10))
 	require.Contains(t, state.entries, "native-key")
 
 	// A replicated insert preserves the SOURCE cluster's key AND insert result;
-	// it must be recorded as a keyless committed write: no window entry, while
+	// it must be recorded as a keyless committed write: no summary entry, while
 	// checkpoint bookkeeping still advances.
 	replicated := newTestIdempotentInsertMessage(t, "v1", "replicated-key", &messagespb.IdempotentInsertResult{
 		RowOffsets: []uint32{0},
@@ -632,7 +632,7 @@ func TestCommittedWriteRecordSkipsReplicatedTxnCommitKey(t *testing.T) {
 	require.Nil(t, record.DuplicateResponse)
 }
 
-func TestCommittedWriteRecordWithoutDIDDoesNotEnterDIDWindow(t *testing.T) {
+func TestCommittedWriteRecordWithoutKeyDoesNotEnterSummary(t *testing.T) {
 	extra := &messagespb.IdempotentInsertResult{
 		RowOffsets: []uint32{1},
 		Ids: &schemapb.IDs{
@@ -650,10 +650,10 @@ func TestCommittedWriteRecordWithoutDIDDoesNotEnterDIDWindow(t *testing.T) {
 	require.Len(t, record.Rows, 1)
 	require.Equal(t, committedWritePrimaryKeyTypeString, record.Rows[0].PrimaryKeyType)
 	require.Equal(t, "pk-1", record.Rows[0].StringPrimaryKeyValue)
-	require.Nil(t, record.WindowEntry())
+	require.Nil(t, record.SummaryEntry())
 }
 
-func TestRecoveryStorageRegistersRuntimeVChannelForIdempotencyWindow(t *testing.T) {
+func TestRecoveryStorageRegistersRuntimeVChannelForIdempotencySummary(t *testing.T) {
 	enableRecoveryIdempotency(t)
 	resource.InitForTest(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
@@ -663,7 +663,7 @@ func TestRecoveryStorageRegistersRuntimeVChannelForIdempotencyWindow(t *testing.
 	rs.SetLogger(resource.Resource().Logger())
 	rs.vchannels = make(map[string]*vchannelRecoveryInfo)
 	rs.segments = make(map[int64]*segmentRecoveryInfo)
-	rs.windowManager.resetIdempotencyWindows()
+	rs.summaryManager.resetSummaries()
 
 	msg := message.NewCreateCollectionMessageBuilderV1().
 		WithVChannel("v1").
@@ -678,14 +678,14 @@ func TestRecoveryStorageRegistersRuntimeVChannelForIdempotencyWindow(t *testing.
 		IntoImmutableMessage(rmq.NewRmqID(10))
 
 	require.NoError(t, rs.ObserveMessage(context.Background(), msg))
-	window := rs.windowManager.idempotencyWindows()["v1"]
-	require.NotNil(t, window)
-	require.False(t, window.dirty)
-	require.Equal(t, uint64(10), window.snapshotCheckpointTimetick)
-	require.Equal(t, uint64(10), rs.windowManager.getPChannelWindowSnapshotCheckpointUnsafe().TimeTick)
+	summary := rs.summaryManager.summaries()["v1"]
+	require.NotNil(t, summary)
+	require.False(t, summary.dirty)
+	require.Equal(t, uint64(10), summary.snapshotCheckpointTimetick)
+	require.Equal(t, uint64(10), rs.summaryManager.getPChannelSummarySnapshotCheckpointUnsafe().TimeTick)
 }
 
-func TestRecoveryStorageAdvancesOnlyTargetWindowForOrdinaryMessages(t *testing.T) {
+func TestRecoveryStorageAdvancesOnlyTargetSummaryForOrdinaryMessages(t *testing.T) {
 	enableRecoveryIdempotency(t)
 	resource.InitForTest(t)
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(10, 10))
@@ -694,9 +694,9 @@ func TestRecoveryStorageAdvancesOnlyTargetWindowForOrdinaryMessages(t *testing.T
 		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
 		{Vchannel: "v2", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
 	})
-	v1 := newEmptyVChannelWindow("p1", "v1", testRecoveryCheckpoint(10, 10))
-	v2 := newEmptyVChannelWindow("p1", "v2", testRecoveryCheckpoint(10, 10))
-	rs.windowManager.setIdempotencyWindows(map[string]*vchannelWindow{
+	v1 := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(10, 10))
+	v2 := newEmptyVChannelSummary("p1", "v2", testRecoveryCheckpoint(10, 10))
+	rs.summaryManager.setSummaries(map[string]*vchannelSummary{
 		"v1": v1,
 		"v2": v2,
 	})
@@ -712,54 +712,54 @@ func TestRecoveryStorageAdvancesOnlyTargetWindowForOrdinaryMessages(t *testing.T
 	require.NoError(t, rs.ObserveMessage(context.Background(), ordinary))
 	require.Equal(t, uint64(20), v1.snapshotCheckpointTimetick)
 	require.Equal(t, uint64(10), v2.snapshotCheckpointTimetick)
-	require.Equal(t, uint64(20), rs.windowManager.getPChannelWindowSnapshotCheckpointUnsafe().TimeTick)
+	require.Equal(t, uint64(20), rs.summaryManager.getPChannelSummarySnapshotCheckpointUnsafe().TimeTick)
 
 	require.NoError(t, rs.ObserveMessage(context.Background(), buildTimeTickMessage(t, 30)))
 	require.Equal(t, uint64(30), v1.snapshotCheckpointTimetick)
 	require.Equal(t, uint64(30), v2.snapshotCheckpointTimetick)
-	require.Equal(t, uint64(30), rs.windowManager.getPChannelWindowSnapshotCheckpointUnsafe().TimeTick)
+	require.Equal(t, uint64(30), rs.summaryManager.getPChannelSummarySnapshotCheckpointUnsafe().TimeTick)
 }
 
-func TestConsumeDirtySnapshotDoesNotConsumeIdempotencyWindows(t *testing.T) {
+func TestConsumeDirtySnapshotDoesNotConsumeIdempotencySummaries(t *testing.T) {
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(10, 10))
-	window := newEmptyVChannelWindow("p1", "v1", testRecoveryCheckpoint(10, 10))
-	require.NoError(t, window.applyCommittedWriteRecord(*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+	summary := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(10, 10))
+	require.NoError(t, summary.applyCommittedWriteRecord(*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: 20,
 		MessageId:      rmq.NewRmqID(20).IntoProto(),
 	}), true))
-	rs.windowManager.setIdempotencyWindows(map[string]*vchannelWindow{"v1": window})
+	rs.summaryManager.setSummaries(map[string]*vchannelSummary{"v1": summary})
 	rs.dirtyCounter = 1
 
 	snapshot := rs.consumeDirtySnapshot()
 	require.NotNil(t, snapshot)
-	require.Nil(t, snapshot.pchannelWindowSourceCheckpoint)
-	require.True(t, window.dirty)
+	require.Nil(t, snapshot.pchannelSummarySourceCheckpoint)
+	require.True(t, summary.dirty)
 	require.Equal(t, 0, rs.dirtyCounter)
 }
 
 func TestConsumeIdempotencySnapshotDoesNotConsumeRecoveryState(t *testing.T) {
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, testRecoveryCheckpoint(10, 10))
-	window := newEmptyVChannelWindow("p1", "v1", testRecoveryCheckpoint(10, 10))
-	require.NoError(t, window.applyCommittedWriteRecord(*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+	summary := newEmptyVChannelSummary("p1", "v1", testRecoveryCheckpoint(10, 10))
+	require.NoError(t, summary.applyCommittedWriteRecord(*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: 20,
 		MessageId:      rmq.NewRmqID(20).IntoProto(),
 	}), true))
-	rs.windowManager.setIdempotencyWindows(map[string]*vchannelWindow{"v1": window})
-	rs.windowManager.advancePChannelWindowSnapshotCheckpoint(testRecoveryCheckpoint(20, 20))
+	rs.summaryManager.setSummaries(map[string]*vchannelSummary{"v1": summary})
+	rs.summaryManager.advancePChannelSummarySnapshotCheckpoint(testRecoveryCheckpoint(20, 20))
 	rs.dirtyCounter = 1
 
-	snapshot := rs.windowManager.consumeIdempotencySnapshot()
+	snapshot := rs.summaryManager.consumeIdempotencySnapshot()
 	require.NotNil(t, snapshot)
-	require.NotNil(t, snapshot.pchannelWindowSourceCheckpoint)
-	require.Equal(t, uint64(20), snapshot.pchannelWindowSourceCheckpoint.TimeTick)
-	require.False(t, window.dirty)
+	require.NotNil(t, snapshot.pchannelSummarySourceCheckpoint)
+	require.Equal(t, uint64(20), snapshot.pchannelSummarySourceCheckpoint.TimeTick)
+	require.False(t, summary.dirty)
 	require.Equal(t, 1, rs.dirtyCounter)
 }
 
-func TestCommittedWriteRecordFromWindowEntry(t *testing.T) {
-	entry := &streamingpb.WindowEntry{
+func TestCommittedWriteRecordFromSummaryEntry(t *testing.T) {
+	entry := &streamingpb.SummaryEntry{
 		Key:                    "key-1",
 		CommitTimetick:         130,
 		MessageId:              rmq.NewRmqID(130).IntoProto(),
@@ -772,7 +772,7 @@ func TestCommittedWriteRecordFromWindowEntry(t *testing.T) {
 		},
 	}
 
-	record := committedWriteRecordFromWindowEntry("p1", "v1", entry)
+	record := committedWriteRecordFromSummaryEntry("p1", "v1", entry)
 	require.NotNil(t, record)
 	require.Equal(t, "p1", record.SourcePChannel)
 	require.Equal(t, "v1", record.VChannel)
@@ -786,16 +786,16 @@ func TestCommittedWriteRecordFromWindowEntry(t *testing.T) {
 	require.Equal(t, uint32(1), record.Rows[1].RowOffset)
 	require.Equal(t, "pk-1", record.Rows[1].StringPrimaryKeyValue)
 
-	roundTrip := record.WindowEntry()
+	roundTrip := record.SummaryEntry()
 	require.Equal(t, entry.GetKey(), roundTrip.GetKey())
 	require.Equal(t, entry.GetCommitTimetick(), roundTrip.GetCommitTimetick())
 	require.Equal(t, entry.GetIdempotentResult().GetRowOffsets(), roundTrip.GetIdempotentResult().GetRowOffsets())
 	require.Equal(t, entry.GetIdempotentResult().GetIds().GetStrId().GetData(), roundTrip.GetIdempotentResult().GetIds().GetStrId().GetData())
 }
 
-func TestDIDWindowMaterializerApplyCommittedWriteRecords(t *testing.T) {
-	state := newEmptyVChannelWindow("p1", "v1", nil)
-	record := *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+func TestSummaryMaterializerApplyCommittedWriteRecords(t *testing.T) {
+	state := newEmptyVChannelSummary("p1", "v1", nil)
+	record := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:                    "key-1",
 		CommitTimetick:         110,
 		MessageId:              rmq.NewRmqID(110).IntoProto(),
@@ -807,7 +807,7 @@ func TestDIDWindowMaterializerApplyCommittedWriteRecords(t *testing.T) {
 			},
 		},
 	})
-	noDIDRecord := committedWriteRecord{
+	keylessRecord := committedWriteRecord{
 		SourcePChannel:         "p1",
 		SourceMessageID:        rmq.NewRmqID(112).IntoProto(),
 		SourceTimeTick:         112,
@@ -822,7 +822,7 @@ func TestDIDWindowMaterializerApplyCommittedWriteRecords(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, state.applyCommittedWriteRecordsAtGeneration([]committedWriteRecord{noDIDRecord, record, record}, 0))
+	require.NoError(t, state.applyCommittedWriteRecordsAtGeneration([]committedWriteRecord{keylessRecord, record, record}, 0))
 	require.False(t, state.dirty)
 	require.Empty(t, state.pendingEntries)
 
@@ -834,15 +834,15 @@ func TestDIDWindowMaterializerApplyCommittedWriteRecords(t *testing.T) {
 	require.True(t, message.MustUnmarshalMessageID(snapshot.GetSnapshotCheckpointMessageId()).EQ(rmq.NewRmqID(111)))
 }
 
-func TestDIDWindowConsumesPendingCommittedWriteRecords(t *testing.T) {
-	state := newEmptyVChannelWindow("p1", "v1", nil)
-	didRecord := *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+func TestSummaryConsumesPendingCommittedWriteRecords(t *testing.T) {
+	state := newEmptyVChannelSummary("p1", "v1", nil)
+	didRecord := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:                    "key-1",
 		CommitTimetick:         110,
 		MessageId:              rmq.NewRmqID(110).IntoProto(),
 		LastConfirmedMessageId: rmq.NewRmqID(109).IntoProto(),
 	})
-	noDIDRecord := committedWriteRecord{
+	keylessRecord := committedWriteRecord{
 		SourcePChannel:         "p1",
 		SourceMessageID:        rmq.NewRmqID(111).IntoProto(),
 		SourceTimeTick:         111,
@@ -851,7 +851,7 @@ func TestDIDWindowConsumesPendingCommittedWriteRecords(t *testing.T) {
 	}
 
 	require.NoError(t, state.applyCommittedWriteRecord(didRecord, true))
-	require.NoError(t, state.applyCommittedWriteRecord(noDIDRecord, true))
+	require.NoError(t, state.applyCommittedWriteRecord(keylessRecord, true))
 
 	pending, metaUpdate := state.consumePendingCommittedWriteRecords()
 	require.Len(t, pending, 2)
@@ -866,8 +866,8 @@ func TestDIDWindowConsumesPendingCommittedWriteRecords(t *testing.T) {
 	require.Nil(t, metaUpdate)
 }
 
-func TestDIDWindowCheckpointOnlyDoesNotForceMetaUpdate(t *testing.T) {
-	state := newEmptyVChannelWindow("p1", "v1", &utility.WALCheckpoint{
+func TestSummaryCheckpointOnlyDoesNotForceMetaUpdate(t *testing.T) {
+	state := newEmptyVChannelSummary("p1", "v1", &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(10),
 		TimeTick:  10,
 	})
@@ -880,14 +880,14 @@ func TestDIDWindowCheckpointOnlyDoesNotForceMetaUpdate(t *testing.T) {
 	require.Nil(t, metaUpdate)
 }
 
-func TestDIDWindowMaterializerApplyCommittedWriteRecordDuplicate(t *testing.T) {
-	state := newEmptyVChannelWindow("p1", "v1", nil)
-	first := *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+func TestSummaryMaterializerApplyCommittedWriteRecordDuplicate(t *testing.T) {
+	state := newEmptyVChannelSummary("p1", "v1", nil)
+	first := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: 100,
 		MessageId:      rmq.NewRmqID(100).IntoProto(),
 	})
-	duplicate := *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+	duplicate := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: 101,
 		MessageId:      rmq.NewRmqID(101).IntoProto(),
@@ -902,17 +902,17 @@ func TestDIDWindowMaterializerApplyCommittedWriteRecordDuplicate(t *testing.T) {
 	require.Equal(t, uint64(101), snapshot.GetSnapshotCheckpointTimetick())
 }
 
-func TestDIDWindowMaterializerReplacesDuplicateAfterTTL(t *testing.T) {
-	state := newEmptyVChannelWindow("p1", "v1", nil)
-	state.evictionCfg = windowEvictionConfig{windowTTL: time.Second}
+func TestSummaryMaterializerReplacesDuplicateAfterTTL(t *testing.T) {
+	state := newEmptyVChannelSummary("p1", "v1", nil)
+	state.evictionCfg = summaryEvictionConfig{entryTTL: time.Second}
 	firstTT := tsoutil.ComposeTS(100_000, 0)
 	reusedTT := tsoutil.ComposeTS(102_000, 0)
-	first := *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+	first := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: firstTT,
 		MessageId:      rmq.NewRmqID(100).IntoProto(),
 	})
-	reused := *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+	reused := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: reusedTT,
 		MessageId:      rmq.NewRmqID(101).IntoProto(),
@@ -929,10 +929,10 @@ func TestDIDWindowMaterializerReplacesDuplicateAfterTTL(t *testing.T) {
 	require.False(t, oldGenerationPinned)
 }
 
-func TestPChannelWindowChunkCodecRoundTrip(t *testing.T) {
+func TestPChannelSummaryChunkCodecRoundTrip(t *testing.T) {
 	records := map[string][]committedWriteRecord{
 		"v2": {
-			*committedWriteRecordFromWindowEntry("p1", "v2", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v2", &streamingpb.SummaryEntry{
 				Key:            "key-2",
 				CommitTimetick: 119,
 				MessageId:      rmq.NewRmqID(119).IntoProto(),
@@ -952,7 +952,7 @@ func TestPChannelWindowChunkCodecRoundTrip(t *testing.T) {
 					},
 				},
 			},
-			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 110,
 				MessageId:      rmq.NewRmqID(110).IntoProto(),
@@ -960,7 +960,7 @@ func TestPChannelWindowChunkCodecRoundTrip(t *testing.T) {
 		},
 	}
 
-	payload, footer, checksum, err := marshalPChannelWindowChunk("p1", 7, 0, &utility.WALCheckpoint{
+	payload, footer, checksum, err := marshalPChannelSummaryChunk("p1", 7, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, records)
@@ -977,7 +977,7 @@ func TestPChannelWindowChunkCodecRoundTrip(t *testing.T) {
 	require.True(t, message.MustUnmarshalMessageID(footer.SourceStartMessageID).EQ(rmq.NewRmqID(105)))
 	require.True(t, message.MustUnmarshalMessageID(footer.SourceEndMessageID).EQ(rmq.NewRmqID(119)))
 
-	decoded, _, decodedChecksum, err := unmarshalPChannelWindowChunk(payload)
+	decoded, _, decodedChecksum, err := unmarshalPChannelSummaryChunk(payload)
 	require.NoError(t, err)
 	require.Equal(t, checksum, decodedChecksum)
 	require.Len(t, decoded, 2)
@@ -987,10 +987,10 @@ func TestPChannelWindowChunkCodecRoundTrip(t *testing.T) {
 	require.Equal(t, "key-2", decoded["v2"][0].Idempotency.Key)
 }
 
-func TestPChannelWindowChunkCodecHasNoViewTypeAndKeepsPayloadGeneration(t *testing.T) {
+func TestPChannelSummaryChunkCodecHasNoViewTypeAndKeepsPayloadGeneration(t *testing.T) {
 	records := map[string][]committedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 110,
 				MessageId:      rmq.NewRmqID(110).IntoProto(),
@@ -998,7 +998,7 @@ func TestPChannelWindowChunkCodecHasNoViewTypeAndKeepsPayloadGeneration(t *testi
 		},
 	}
 
-	payload, footer, _, err := marshalPChannelWindowChunk("p1", 9, 0, &utility.WALCheckpoint{
+	payload, footer, _, err := marshalPChannelSummaryChunk("p1", 9, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, records)
@@ -1008,15 +1008,15 @@ func TestPChannelWindowChunkCodecHasNoViewTypeAndKeepsPayloadGeneration(t *testi
 	chunkIndex := footer.Chunks[0]
 	chunkPayload := payload[int(chunkIndex.Offset):int(chunkIndex.Offset+chunkIndex.Length)]
 	require.NotContains(t, string(chunkPayload), "view_type")
-	decodedChunk, err := unmarshalVChannelWindowChunk(chunkPayload)
+	decodedChunk, err := unmarshalVChannelSummaryChunk(chunkPayload)
 	require.NoError(t, err)
 	require.Equal(t, uint64(9), decodedChunk.Generation)
 	require.Equal(t, "p1", decodedChunk.PChannel)
 	require.Equal(t, "v1", decodedChunk.VChannel)
 }
 
-func TestPChannelWindowChunkCodecCheckpointOnlyRoundTrip(t *testing.T) {
-	payload, footer, checksum, err := marshalPChannelWindowChunk("p1", 8, 0, &utility.WALCheckpoint{
+func TestPChannelSummaryChunkCodecCheckpointOnlyRoundTrip(t *testing.T) {
+	payload, footer, checksum, err := marshalPChannelSummaryChunk("p1", 8, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(200),
 		TimeTick:  200,
 	}, nil)
@@ -1027,7 +1027,7 @@ func TestPChannelWindowChunkCodecCheckpointOnlyRoundTrip(t *testing.T) {
 	require.Equal(t, uint64(200), footer.SourceCheckpointTimetick)
 	require.Empty(t, footer.Chunks)
 
-	decodedRecords, decodedFooter, decodedChecksum, err := unmarshalPChannelWindowChunk(payload)
+	decodedRecords, decodedFooter, decodedChecksum, err := unmarshalPChannelSummaryChunk(payload)
 	require.NoError(t, err)
 	require.Equal(t, checksum, decodedChecksum)
 	require.Empty(t, decodedRecords)
@@ -1035,35 +1035,35 @@ func TestPChannelWindowChunkCodecCheckpointOnlyRoundTrip(t *testing.T) {
 	require.Equal(t, uint64(200), decodedFooter.SourceCheckpointTimetick)
 }
 
-func TestPChannelWindowChunkCodecChecksumMismatch(t *testing.T) {
+func TestPChannelSummaryChunkCodecChecksumMismatch(t *testing.T) {
 	records := map[string][]committedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 100,
 				MessageId:      rmq.NewRmqID(100).IntoProto(),
 			}),
 		},
 	}
-	payload, _, _, err := marshalPChannelWindowChunk("p1", 1, 0, &utility.WALCheckpoint{
+	payload, _, _, err := marshalPChannelSummaryChunk("p1", 1, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(100),
 		TimeTick:  100,
 	}, records)
 	require.NoError(t, err)
-	payload[len(pchannelWindowChunkHeaderMagic)] ^= 0x01
+	payload[len(pchannelSummaryChunkHeaderMagic)] ^= 0x01
 
-	_, _, _, err = unmarshalPChannelWindowChunk(payload)
+	_, _, _, err = unmarshalPChannelSummaryChunk(payload)
 	require.Error(t, err)
-	require.ErrorIs(t, err, ErrPChannelWindowStoreCorrupted)
+	require.ErrorIs(t, err, ErrPChannelSummaryStoreCorrupted)
 }
 
-func TestPChannelWindowChunkCodecDetectsFooterChecksumMismatch(t *testing.T) {
-	payload, _, _, err := marshalPChannelWindowChunk("p1", 1, 0, &utility.WALCheckpoint{
+func TestPChannelSummaryChunkCodecDetectsFooterChecksumMismatch(t *testing.T) {
+	payload, _, _, err := marshalPChannelSummaryChunk("p1", 1, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, map[string][]committedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 100,
 				MessageId:      rmq.NewRmqID(100).IntoProto(),
@@ -1072,23 +1072,23 @@ func TestPChannelWindowChunkCodecDetectsFooterChecksumMismatch(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	payload = rewritePChannelWindowFooterPayload(t, payload, func(footer *pchannelWindowChunkFooter) {
+	payload = rewritePChannelSummaryFooterPayload(t, payload, func(footer *pchannelSummaryChunkFooter) {
 		footer.SourceEndTimetick++
 	})
 
-	_, _, _, err = unmarshalPChannelWindowChunk(payload)
+	_, _, _, err = unmarshalPChannelSummaryChunk(payload)
 	require.Error(t, err)
-	require.ErrorIs(t, err, ErrPChannelWindowStoreCorrupted)
-	require.Contains(t, err.Error(), "pchannel window chunk footer checksum mismatch")
+	require.ErrorIs(t, err, ErrPChannelSummaryStoreCorrupted)
+	require.Contains(t, err.Error(), "pchannel summary chunk footer checksum mismatch")
 }
 
-func TestPChannelWindowChunkCodecDetectsVChannelBlockChecksumMismatch(t *testing.T) {
-	payload, footer, _, err := marshalPChannelWindowChunk("p1", 1, 0, &utility.WALCheckpoint{
+func TestPChannelSummaryChunkCodecDetectsVChannelBlockChecksumMismatch(t *testing.T) {
+	payload, footer, _, err := marshalPChannelSummaryChunk("p1", 1, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, map[string][]committedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 100,
 				MessageId:      rmq.NewRmqID(100).IntoProto(),
@@ -1100,55 +1100,55 @@ func TestPChannelWindowChunkCodecDetectsVChannelBlockChecksumMismatch(t *testing
 	mutated := append([]byte(nil), payload...)
 	mutated[int(footer.Chunks[0].Offset)] ^= 0x01
 
-	_, _, _, err = unmarshalPChannelWindowChunk(mutated)
+	_, _, _, err = unmarshalPChannelSummaryChunk(mutated)
 	require.Error(t, err)
-	require.ErrorIs(t, err, ErrPChannelWindowStoreCorrupted)
-	require.Contains(t, err.Error(), "vchannel window chunk checksum mismatch")
+	require.ErrorIs(t, err, ErrPChannelSummaryStoreCorrupted)
+	require.Contains(t, err.Error(), "vchannel summary chunk checksum mismatch")
 }
 
-func TestPChannelWindowChunkKeyIsDeterministic(t *testing.T) {
-	key := buildPChannelWindowChunkKey("by-dev-rootcoord-dml_0", 42, 7)
-	require.Contains(t, key, "/streamingnode/window-store/by-dev-rootcoord-dml_0/chunks/chunk.42.term7.pwc")
+func TestPChannelSummaryChunkKeyIsDeterministic(t *testing.T) {
+	key := buildPChannelSummaryChunkKey("by-dev-rootcoord-dml_0", 42, 7)
+	require.Contains(t, key, "/streamingnode/summary-store/by-dev-rootcoord-dml_0/chunks/chunk.42.term7.psc")
 	require.NotContains(t, key, "manifests")
 	require.NotContains(t, key, "checksum")
 }
 
-func rewritePChannelWindowFooterPayload(
+func rewritePChannelSummaryFooterPayload(
 	t *testing.T,
 	payload []byte,
-	mutate func(*pchannelWindowChunkFooter),
+	mutate func(*pchannelSummaryChunkFooter),
 ) []byte {
 	t.Helper()
-	footerMagicStart := len(payload) - len(pchannelWindowChunkFooterMagic)
-	require.GreaterOrEqual(t, footerMagicStart, pchannelWindowChunkHeaderSize+pchannelWindowChunkChecksumSize+4)
-	require.Equal(t, pchannelWindowChunkFooterMagic, payload[footerMagicStart:])
+	footerMagicStart := len(payload) - len(pchannelSummaryChunkFooterMagic)
+	require.GreaterOrEqual(t, footerMagicStart, pchannelSummaryChunkHeaderSize+pchannelSummaryChunkChecksumSize+4)
+	require.Equal(t, pchannelSummaryChunkFooterMagic, payload[footerMagicStart:])
 	footerLenStart := footerMagicStart - 4
-	footerChecksumStart := footerLenStart - pchannelWindowChunkChecksumSize
+	footerChecksumStart := footerLenStart - pchannelSummaryChunkChecksumSize
 	footerLen := int(binary.BigEndian.Uint32(payload[footerLenStart:footerMagicStart]))
 	footerStart := footerChecksumStart - footerLen
-	require.GreaterOrEqual(t, footerStart, pchannelWindowChunkHeaderSize)
+	require.GreaterOrEqual(t, footerStart, pchannelSummaryChunkHeaderSize)
 	// Preserve the original (now stale) trailer checksum so mutating the footer
 	// body is detected as corruption.
 	staleChecksum := payload[footerChecksumStart:footerLenStart]
-	footer := &pchannelWindowChunkFooter{}
+	footer := &pchannelSummaryChunkFooter{}
 	require.NoError(t, json.Unmarshal(payload[footerStart:footerChecksumStart], footer))
 	mutate(footer)
 	footerPayload, err := json.Marshal(footer)
 	require.NoError(t, err)
-	mutated := make([]byte, 0, footerStart+len(footerPayload)+pchannelWindowChunkChecksumSize+4+len(pchannelWindowChunkFooterMagic))
+	mutated := make([]byte, 0, footerStart+len(footerPayload)+pchannelSummaryChunkChecksumSize+4+len(pchannelSummaryChunkFooterMagic))
 	mutated = append(mutated, payload[:footerStart]...)
 	mutated = append(mutated, footerPayload...)
 	mutated = append(mutated, staleChecksum...)
 	footerLenBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(footerLenBytes, uint32(len(footerPayload)))
 	mutated = append(mutated, footerLenBytes...)
-	mutated = append(mutated, pchannelWindowChunkFooterMagic...)
+	mutated = append(mutated, pchannelSummaryChunkFooterMagic...)
 	return mutated
 }
 
-func TestPChannelWindowPersistRecover(t *testing.T) {
+func TestPChannelSummaryPersistRecover(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1159,7 +1159,7 @@ func TestPChannelWindowPersistRecover(t *testing.T) {
 	rs.SetLogger(resource.Resource().Logger())
 	records := map[string][]committedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:                    "key-1",
 				CommitTimetick:         99,
 				MessageId:              rmq.NewRmqID(99).IntoProto(),
@@ -1172,11 +1172,11 @@ func TestPChannelWindowPersistRecover(t *testing.T) {
 		TimeTick:  120,
 	}
 
-	_, _, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), records, nil, sourceCheckpoint)
+	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), records, nil, sourceCheckpoint)
 	require.NoError(t, err)
 	meta := catalogState.storeMeta
 	require.NotNil(t, meta)
-	requirePChannelWindowChunkExists(t, ctx, chunkManager, "p1", meta.GetLatestGeneration(), true)
+	requirePChannelSummaryChunkExists(t, ctx, chunkManager, "p1", meta.GetLatestGeneration(), true)
 	require.Equal(t, uint64(120), meta.GetSourceCheckpointTimetick())
 	require.Equal(t, uint64(0), meta.GetLatestGeneration())
 	require.Equal(t, uint64(0), meta.GetMinAvailableGeneration())
@@ -1190,26 +1190,26 @@ func TestPChannelWindowPersistRecover(t *testing.T) {
 		{Vchannel: "v2", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
 	})
 	recovered.SetLogger(resource.Resource().Logger())
-	recoverTestIdempotencyWindows(ctx, t, recovered, "p1", false)
-	require.Len(t, recovered.windowManager.idempotencyWindows(), 2)
-	v1 := recovered.windowManager.idempotencyWindows()["v1"].snapshot()
+	recoverTestSummaries(ctx, t, recovered, "p1", false)
+	require.Len(t, recovered.summaryManager.summaries(), 2)
+	v1 := recovered.summaryManager.summaries()["v1"].snapshot()
 	require.Len(t, v1.GetEntries(), 1)
 	require.Equal(t, "key-1", v1.GetEntries()[0].GetKey())
 	require.Equal(t, uint64(120), v1.GetSnapshotCheckpointTimetick())
-	v2 := recovered.windowManager.idempotencyWindows()["v2"].snapshot()
+	v2 := recovered.summaryManager.summaries()["v2"].snapshot()
 	require.Empty(t, v2.GetEntries())
 	require.Equal(t, uint64(120), v2.GetSnapshotCheckpointTimetick())
 }
 
-func TestPChannelWindowRecoverWithContinuousChunks(t *testing.T) {
+func TestPChannelSummaryRecoverWithContinuousChunks(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	records0 := map[string][]committedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:                    "key-from-generation-0",
 				CommitTimetick:         110,
 				MessageId:              rmq.NewRmqID(110).IntoProto(),
@@ -1217,14 +1217,14 @@ func TestPChannelWindowRecoverWithContinuousChunks(t *testing.T) {
 			}),
 		},
 	}
-	writeTestPChannelWindowChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
+	writeTestPChannelSummaryChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, records0)
 
 	records1 := map[string][]committedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:                    "key-from-generation-1",
 				CommitTimetick:         130,
 				MessageId:              rmq.NewRmqID(130).IntoProto(),
@@ -1232,11 +1232,11 @@ func TestPChannelWindowRecoverWithContinuousChunks(t *testing.T) {
 			}),
 		},
 	}
-	footer, _, _ := writeTestPChannelWindowChunk(ctx, t, "p1", 1, chunkManager, &utility.WALCheckpoint{
+	footer, _, _ := writeTestPChannelSummaryChunk(ctx, t, "p1", 1, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(140),
 		TimeTick:  140,
 	}, records1)
-	catalogState.storeMeta = newPChannelWindowStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
+	catalogState.storeMeta = newPChannelSummaryStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
 
 	recovered := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
@@ -1246,54 +1246,54 @@ func TestPChannelWindowRecoverWithContinuousChunks(t *testing.T) {
 		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
 	})
 	recovered.SetLogger(resource.Resource().Logger())
-	recoverTestIdempotencyWindows(ctx, t, recovered, "p1", false)
+	recoverTestSummaries(ctx, t, recovered, "p1", false)
 
-	window := recovered.windowManager.idempotencyWindows()["v1"].snapshot()
-	require.Len(t, window.GetEntries(), 2)
-	require.Equal(t, "key-from-generation-0", window.GetEntries()[0].GetKey())
-	require.Equal(t, "key-from-generation-1", window.GetEntries()[1].GetKey())
-	require.Equal(t, uint64(140), window.GetSnapshotCheckpointTimetick())
+	summary := recovered.summaryManager.summaries()["v1"].snapshot()
+	require.Len(t, summary.GetEntries(), 2)
+	require.Equal(t, "key-from-generation-0", summary.GetEntries()[0].GetKey())
+	require.Equal(t, "key-from-generation-1", summary.GetEntries()[1].GetKey())
+	require.Equal(t, uint64(140), summary.GetSnapshotCheckpointTimetick())
 	require.Equal(t, uint64(0), catalogState.storeMeta.GetMinAvailableGeneration())
 }
 
-func TestPChannelWindowRecoveryIgnoresStaleViewMinRequired(t *testing.T) {
+func TestPChannelSummaryRecoveryIgnoresStaleViewMinRequired(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	records0 := map[string][]committedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-evicted",
 				CommitTimetick: 110,
 				MessageId:      rmq.NewRmqID(110).IntoProto(),
 			}),
 		},
 	}
-	writeTestPChannelWindowChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
+	writeTestPChannelSummaryChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, records0)
 
 	records1 := map[string][]committedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-retained",
 				CommitTimetick: 130,
 				MessageId:      rmq.NewRmqID(130).IntoProto(),
 			}),
 		},
 	}
-	footer, _, _ := writeTestPChannelWindowChunk(ctx, t, "p1", 1, chunkManager, &utility.WALCheckpoint{
+	footer, _, _ := writeTestPChannelSummaryChunk(ctx, t, "p1", 1, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(140),
 		TimeTick:  140,
 	}, records1)
-	catalogState.storeMeta = newPChannelWindowStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
-	catalogState.windowMetas["v1"] = &streamingpb.VChannelWindowMeta{
+	catalogState.storeMeta = newPChannelSummaryStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
+	catalogState.summaryMetas["v1"] = &streamingpb.VChannelSummaryMeta{
 		Pchannel:                    "p1",
 		Vchannel:                    "v1",
-		ViewType:                    common.VChannelWindowViewTypeIdempotency,
+		ViewType:                    common.VChannelSummaryViewTypeIdempotency,
 		SnapshotCheckpointMessageId: rmq.NewRmqID(20).IntoProto(),
 		SnapshotCheckpointTimetick:  20,
 		LatestAppliedGeneration:     1,
@@ -1308,28 +1308,28 @@ func TestPChannelWindowRecoveryIgnoresStaleViewMinRequired(t *testing.T) {
 		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
 	})
 	recovered.SetLogger(resource.Resource().Logger())
-	recoverTestIdempotencyWindows(ctx, t, recovered, "p1", false)
+	recoverTestSummaries(ctx, t, recovered, "p1", false)
 
-	window := recovered.windowManager.idempotencyWindows()["v1"].snapshot()
-	require.Len(t, window.GetEntries(), 2)
-	require.Equal(t, "key-evicted", window.GetEntries()[0].GetKey())
-	require.Equal(t, "key-retained", window.GetEntries()[1].GetKey())
-	require.Equal(t, uint64(0), recovered.windowManager.idempotencyWindows()["v1"].minRequiredGeneration)
+	summary := recovered.summaryManager.summaries()["v1"].snapshot()
+	require.Len(t, summary.GetEntries(), 2)
+	require.Equal(t, "key-evicted", summary.GetEntries()[0].GetKey())
+	require.Equal(t, "key-retained", summary.GetEntries()[1].GetKey())
+	require.Equal(t, uint64(0), recovered.summaryManager.summaries()["v1"].minRequiredGeneration)
 }
 
-func TestPChannelWindowRecoverFailsWhenGenerationHasHole(t *testing.T) {
+func TestPChannelSummaryRecoverFailsWhenGenerationHasHole(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-	writeTestPChannelWindowChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
+	writeTestPChannelSummaryChunk(ctx, t, "p1", 0, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, nil)
-	footer, _, _ := writeTestPChannelWindowChunk(ctx, t, "p1", 2, chunkManager, &utility.WALCheckpoint{
+	footer, _, _ := writeTestPChannelSummaryChunk(ctx, t, "p1", 2, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(140),
 		TimeTick:  140,
 	}, nil)
-	catalogState.storeMeta = newPChannelWindowStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
+	catalogState.storeMeta = newPChannelSummaryStoreMetaFromChunk("p1", footer, 0, 0).intoCatalogMeta()
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	recovered := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
@@ -1341,23 +1341,23 @@ func TestPChannelWindowRecoverFailsWhenGenerationHasHole(t *testing.T) {
 	})
 	recovered.SetLogger(resource.Resource().Logger())
 
-	err := recoverTestIdempotencyWindowsWithError(ctx, recovered, "p1", false)
+	err := recoverTestSummariesWithError(ctx, recovered, "p1", false)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "failed to read pchannel window chunk")
-	require.Contains(t, err.Error(), "chunk.1.term0.pwc")
+	require.Contains(t, err.Error(), "failed to read pchannel summary chunk")
+	require.Contains(t, err.Error(), "chunk.1.term0.psc")
 }
 
-func TestPChannelWindowRecoverFailsWhenChunkMissing(t *testing.T) {
+func TestPChannelSummaryRecoverFailsWhenChunkMissing(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-	catalogState.storeMeta = &streamingpb.PChannelWindowMeta{
+	catalogState.storeMeta = &streamingpb.PChannelSummaryMeta{
 		Pchannel:                  "p1",
 		LatestGeneration:          0,
 		MinAvailableGeneration:    0,
 		SourceCheckpointMessageId: rmq.NewRmqID(120).IntoProto(),
 		SourceCheckpointTimetick:  120,
-		CodecVersion:              uint32(pchannelWindowCodecVersion),
+		CodecVersion:              uint32(pchannelSummaryCodecVersion),
 	}
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1370,14 +1370,14 @@ func TestPChannelWindowRecoverFailsWhenChunkMissing(t *testing.T) {
 	})
 	recovered.SetLogger(resource.Resource().Logger())
 
-	err := recoverTestIdempotencyWindowsWithError(ctx, recovered, "p1", false)
+	err := recoverTestSummariesWithError(ctx, recovered, "p1", false)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "failed to read pchannel window chunk")
+	require.Contains(t, err.Error(), "failed to read pchannel summary chunk")
 }
 
-func TestPChannelWindowRecoveryRepairsLaggingPChannelMeta(t *testing.T) {
+func TestPChannelSummaryRecoveryRepairsLaggingPChannelMeta(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1385,11 +1385,11 @@ func TestPChannelWindowRecoveryRepairsLaggingPChannelMeta(t *testing.T) {
 		MessageID: rmq.NewRmqID(10),
 		TimeTick:  10,
 	}
-	catalogState.storeMeta = writeTestBootstrapPChannelWindowMeta(ctx, t, "p1", chunkManager, initialCheckpoint)
+	catalogState.storeMeta = writeTestBootstrapPChannelSummaryMeta(ctx, t, "p1", chunkManager, initialCheckpoint)
 
 	records := map[string][]committedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:                    "key-orphan",
 				CommitTimetick:         110,
 				MessageId:              rmq.NewRmqID(110).IntoProto(),
@@ -1397,14 +1397,14 @@ func TestPChannelWindowRecoveryRepairsLaggingPChannelMeta(t *testing.T) {
 			}),
 		},
 	}
-	writeTestPChannelWindowChunk(ctx, t, "p1", 1, chunkManager, &utility.WALCheckpoint{
+	writeTestPChannelSummaryChunk(ctx, t, "p1", 1, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	}, records)
-	catalogState.windowMetas["v1"] = &streamingpb.VChannelWindowMeta{
+	catalogState.summaryMetas["v1"] = &streamingpb.VChannelSummaryMeta{
 		Pchannel:                    "p1",
 		Vchannel:                    "v1",
-		ViewType:                    common.VChannelWindowViewTypeIdempotency,
+		ViewType:                    common.VChannelSummaryViewTypeIdempotency,
 		SnapshotCheckpointMessageId: rmq.NewRmqID(20).IntoProto(),
 		SnapshotCheckpointTimetick:  20,
 		LatestAppliedGeneration:     1,
@@ -1416,34 +1416,34 @@ func TestPChannelWindowRecoveryRepairsLaggingPChannelMeta(t *testing.T) {
 		{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
 	})
 	recovered.SetLogger(resource.Resource().Logger())
-	recoverTestIdempotencyWindows(ctx, t, recovered, "p1", false)
+	recoverTestSummaries(ctx, t, recovered, "p1", false)
 
-	window := recovered.windowManager.idempotencyWindows()["v1"].snapshot()
-	require.Len(t, window.GetEntries(), 1)
-	require.Equal(t, "key-orphan", window.GetEntries()[0].GetKey())
-	require.Equal(t, uint64(120), window.GetSnapshotCheckpointTimetick())
+	summary := recovered.summaryManager.summaries()["v1"].snapshot()
+	require.Len(t, summary.GetEntries(), 1)
+	require.Equal(t, "key-orphan", summary.GetEntries()[0].GetKey())
+	require.Equal(t, uint64(120), summary.GetSnapshotCheckpointTimetick())
 	require.Equal(t, uint64(1), catalogState.storeMeta.GetLatestGeneration())
 	require.Equal(t, uint64(120), catalogState.storeMeta.GetSourceCheckpointTimetick())
 }
 
-func TestPChannelWindowRecoveryDropsCorruptOrphanChunkAboveLatest(t *testing.T) {
+func TestPChannelSummaryRecoveryDropsCorruptOrphanChunkAboveLatest(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
 	initialCheckpoint := &utility.WALCheckpoint{MessageID: rmq.NewRmqID(10), TimeTick: 10}
-	catalogState.storeMeta = writeTestBootstrapPChannelWindowMeta(ctx, t, "p1", chunkManager, initialCheckpoint)
+	catalogState.storeMeta = writeTestBootstrapPChannelSummaryMeta(ctx, t, "p1", chunkManager, initialCheckpoint)
 	require.Equal(t, uint64(0), catalogState.storeMeta.GetLatestGeneration())
 
 	// A persist wrote chunk generation 1 but crashed before advancing the meta
 	// (still LatestGeneration=0), and the chunk on disk is corrupt/truncated.
-	payload, _, _, err := marshalPChannelWindowChunk("p1", 1, 0, &utility.WALCheckpoint{MessageID: rmq.NewRmqID(120), TimeTick: 120}, nil)
+	payload, _, _, err := marshalPChannelSummaryChunk("p1", 1, 0, &utility.WALCheckpoint{MessageID: rmq.NewRmqID(120), TimeTick: 120}, nil)
 	require.NoError(t, err)
-	corruptPayload := rewritePChannelWindowFooterPayload(t, payload, func(footer *pchannelWindowChunkFooter) {
+	corruptPayload := rewritePChannelSummaryFooterPayload(t, payload, func(footer *pchannelSummaryChunkFooter) {
 		footer.SourceCheckpointTimetick = 999999
 	})
-	orphanKey := buildPChannelWindowChunkKey("p1", 1, 0)
+	orphanKey := buildPChannelSummaryChunkKey("p1", 1, 0)
 	require.NoError(t, chunkManager.Write(ctx, orphanKey, corruptPayload))
 
 	recovered := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, initialCheckpoint)
@@ -1453,7 +1453,7 @@ func TestPChannelWindowRecoveryDropsCorruptOrphanChunkAboveLatest(t *testing.T) 
 	recovered.SetLogger(resource.Resource().Logger())
 
 	// Recovery must not fail on the corrupt orphan; the data is still in the WAL.
-	require.NoError(t, recoverTestIdempotencyWindowsWithError(ctx, recovered, "p1", false))
+	require.NoError(t, recoverTestSummariesWithError(ctx, recovered, "p1", false))
 
 	// The corrupt orphan must be deleted so the next persist can rewrite generation
 	// 1 instead of wedging on a byte-mismatch forever.
@@ -1463,9 +1463,9 @@ func TestPChannelWindowRecoveryDropsCorruptOrphanChunkAboveLatest(t *testing.T) 
 	require.Equal(t, uint64(0), catalogState.storeMeta.GetLatestGeneration())
 }
 
-func TestPChannelWindowRecoveryRewindsCheckpointByStore(t *testing.T) {
+func TestPChannelSummaryRecoveryRewindsCheckpointByStore(t *testing.T) {
 	ctx := context.Background()
-	catalog, _ := newTestPChannelWindowCatalog(t)
+	catalog, _ := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1474,7 +1474,7 @@ func TestPChannelWindowRecoveryRewindsCheckpointByStore(t *testing.T) {
 		TimeTick:  1,
 	})
 	rs.SetLogger(resource.Resource().Logger())
-	_, _, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), nil, nil, &utility.WALCheckpoint{
+	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), nil, nil, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	})
@@ -1486,14 +1486,14 @@ func TestPChannelWindowRecoveryRewindsCheckpointByStore(t *testing.T) {
 	})
 	recovered.SetLogger(resource.Resource().Logger())
 
-	recoverTestIdempotencyWindows(ctx, t, recovered, "p1", false)
+	recoverTestSummaries(ctx, t, recovered, "p1", false)
 	require.True(t, recovered.checkpoint.MessageID.EQ(rmq.NewRmqID(120)))
 	require.Equal(t, uint64(120), recovered.checkpoint.TimeTick)
 }
 
-func TestPChannelWindowRecoveryRewindsCheckpointByStoreAndFlusher(t *testing.T) {
+func TestPChannelSummaryRecoveryRewindsCheckpointByStoreAndFlusher(t *testing.T) {
 	ctx := context.Background()
-	catalog, _ := newTestPChannelWindowCatalog(t)
+	catalog, _ := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1504,7 +1504,7 @@ func TestPChannelWindowRecoveryRewindsCheckpointByStoreAndFlusher(t *testing.T) 
 	rs.SetLogger(resource.Resource().Logger())
 	records := map[string][]committedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:                    "key-1",
 				CommitTimetick:         99,
 				MessageId:              rmq.NewRmqID(99).IntoProto(),
@@ -1512,7 +1512,7 @@ func TestPChannelWindowRecoveryRewindsCheckpointByStoreAndFlusher(t *testing.T) 
 			}),
 		},
 	}
-	_, _, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), records, nil, &utility.WALCheckpoint{
+	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), records, nil, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	})
@@ -1535,14 +1535,14 @@ func TestPChannelWindowRecoveryRewindsCheckpointByStoreAndFlusher(t *testing.T) 
 	}
 	recovered.SetLogger(resource.Resource().Logger())
 
-	recoverTestIdempotencyWindows(ctx, t, recovered, "p1", false)
+	recoverTestSummaries(ctx, t, recovered, "p1", false)
 	require.True(t, recovered.checkpoint.MessageID.EQ(rmq.NewRmqID(90)))
 	require.Equal(t, uint64(90), recovered.checkpoint.TimeTick)
 }
 
-func TestPChannelWindowRecoveryReplayTailIdempotently(t *testing.T) {
+func TestPChannelSummaryRecoveryReplayTailIdempotently(t *testing.T) {
 	ctx := context.Background()
-	catalog, _ := newTestPChannelWindowCatalog(t)
+	catalog, _ := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1562,7 +1562,7 @@ func TestPChannelWindowRecoveryReplayTailIdempotently(t *testing.T) {
 		TimeTick:  1,
 	})
 	rs.SetLogger(resource.Resource().Logger())
-	_, _, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), map[string][]committedWriteRecord{
+	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]committedWriteRecord{
 		"v1": {*record100},
 	}, nil, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
@@ -1583,7 +1583,7 @@ func TestPChannelWindowRecoveryReplayTailIdempotently(t *testing.T) {
 	})
 	recovered.segments = make(map[int64]*segmentRecoveryInfo)
 	recovered.SetLogger(resource.Resource().Logger())
-	recoverTestIdempotencyWindows(ctx, t, recovered, "p1", false)
+	recoverTestSummaries(ctx, t, recovered, "p1", false)
 	require.True(t, recovered.checkpoint.MessageID.EQ(rmq.NewRmqID(80)))
 	require.Equal(t, uint64(80), recovered.checkpoint.TimeTick)
 
@@ -1596,17 +1596,17 @@ func TestPChannelWindowRecoveryReplayTailIdempotently(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, snapshot)
 
-	window := snapshot.IdempotencyWindows["v1"]
-	require.NotNil(t, window)
-	require.Len(t, window.GetEntries(), 2)
-	require.Equal(t, "key-1", window.GetEntries()[0].GetKey())
-	require.Equal(t, "key-2", window.GetEntries()[1].GetKey())
-	require.Equal(t, uint64(130), window.GetSnapshotCheckpointTimetick())
+	summary := snapshot.SummarySnapshots["v1"]
+	require.NotNil(t, summary)
+	require.Len(t, summary.GetEntries(), 2)
+	require.Equal(t, "key-1", summary.GetEntries()[0].GetKey())
+	require.Equal(t, "key-2", summary.GetEntries()[1].GetKey())
+	require.Equal(t, uint64(130), summary.GetSnapshotCheckpointTimetick())
 }
 
-func TestPChannelWindowCrashBeforeChunkFallsBackToWALReplay(t *testing.T) {
+func TestPChannelSummaryCrashBeforeChunkFallsBackToWALReplay(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1614,7 +1614,7 @@ func TestPChannelWindowCrashBeforeChunkFallsBackToWALReplay(t *testing.T) {
 		MessageID: rmq.NewRmqID(10),
 		TimeTick:  10,
 	}
-	catalogState.storeMeta = writeTestBootstrapPChannelWindowMeta(ctx, t, "p1", chunkManager, initialCheckpoint)
+	catalogState.storeMeta = writeTestBootstrapPChannelSummaryMeta(ctx, t, "p1", chunkManager, initialCheckpoint)
 	msg100 := newTestIdempotentCommittedInsertMessage(t, "v1", "key-from-wal", 100)
 
 	recovered := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, initialCheckpoint)
@@ -1627,7 +1627,7 @@ func TestPChannelWindowCrashBeforeChunkFallsBackToWALReplay(t *testing.T) {
 	})
 	recovered.segments = make(map[int64]*segmentRecoveryInfo)
 	recovered.SetLogger(resource.Resource().Logger())
-	recoverTestIdempotencyWindows(ctx, t, recovered, "p1", false)
+	recoverTestSummaries(ctx, t, recovered, "p1", false)
 
 	snapshot, err := recovered.recoverFromStream(ctx, &streamBuilder{
 		channel:   types.PChannelInfo{Name: "p1"},
@@ -1635,16 +1635,16 @@ func TestPChannelWindowCrashBeforeChunkFallsBackToWALReplay(t *testing.T) {
 	}, message.CreateTestTimeTickSyncMessage(t, 100, 100, rmq.NewRmqID(100)).IntoImmutableMessage(rmq.NewRmqID(100)))
 	require.NoError(t, err)
 	require.NotNil(t, snapshot)
-	window := snapshot.IdempotencyWindows["v1"]
-	require.NotNil(t, window)
-	require.Len(t, window.GetEntries(), 1)
-	require.Equal(t, "key-from-wal", window.GetEntries()[0].GetKey())
+	summary := snapshot.SummarySnapshots["v1"]
+	require.NotNil(t, summary)
+	require.Len(t, summary.GetEntries(), 1)
+	require.Equal(t, "key-from-wal", summary.GetEntries()[0].GetKey())
 	require.Equal(t, uint64(0), catalogState.storeMeta.GetLatestGeneration())
 }
 
-func TestPChannelWindowCrashAfterConsumeCheckpointRecoversFromChunkWithoutReplay(t *testing.T) {
+func TestPChannelSummaryCrashAfterConsumeCheckpointRecoversFromChunkWithoutReplay(t *testing.T) {
 	ctx := context.Background()
-	catalog, _ := newTestPChannelWindowCatalog(t)
+	catalog, _ := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1657,7 +1657,7 @@ func TestPChannelWindowCrashAfterConsumeCheckpointRecoversFromChunkWithoutReplay
 		TimeTick:  10,
 	})
 	rs.SetLogger(resource.Resource().Logger())
-	_, _, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), map[string][]committedWriteRecord{
+	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]committedWriteRecord{
 		"v1": {*record100},
 	}, nil, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
@@ -1678,7 +1678,7 @@ func TestPChannelWindowCrashAfterConsumeCheckpointRecoversFromChunkWithoutReplay
 	})
 	recovered.segments = make(map[int64]*segmentRecoveryInfo)
 	recovered.SetLogger(resource.Resource().Logger())
-	recoverTestIdempotencyWindows(ctx, t, recovered, "p1", false)
+	recoverTestSummaries(ctx, t, recovered, "p1", false)
 
 	snapshot, err := recovered.recoverFromStream(ctx, &streamBuilder{
 		channel:   types.PChannelInfo{Name: "p1"},
@@ -1686,11 +1686,11 @@ func TestPChannelWindowCrashAfterConsumeCheckpointRecoversFromChunkWithoutReplay
 	}, message.CreateTestTimeTickSyncMessage(t, 120, 120, rmq.NewRmqID(120)).IntoImmutableMessage(rmq.NewRmqID(120)))
 	require.NoError(t, err)
 	require.NotNil(t, snapshot)
-	window := snapshot.IdempotencyWindows["v1"]
-	require.NotNil(t, window)
-	require.Len(t, window.GetEntries(), 1)
-	require.Equal(t, "key-from-chunk", window.GetEntries()[0].GetKey())
-	require.Equal(t, uint64(120), window.GetSnapshotCheckpointTimetick())
+	summary := snapshot.SummarySnapshots["v1"]
+	require.NotNil(t, summary)
+	require.Len(t, summary.GetEntries(), 1)
+	require.Equal(t, "key-from-chunk", summary.GetEntries()[0].GetKey())
+	require.Equal(t, uint64(120), summary.GetSnapshotCheckpointTimetick())
 }
 
 func newTestIdempotentCommittedInsertMessage(t *testing.T, vchannel string, key string, id int64) message.ImmutableMessage {
@@ -1715,9 +1715,9 @@ func newTestIdempotentInsertMessage(t *testing.T, vchannel string, key string, e
 		MustBuildMutable()
 }
 
-func TestPChannelWindowRecoverFailsWhenLatestGenerationChunkMissing(t *testing.T) {
+func TestPChannelSummaryRecoverFailsWhenLatestGenerationChunkMissing(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1726,7 +1726,7 @@ func TestPChannelWindowRecoverFailsWhenLatestGenerationChunkMissing(t *testing.T
 		TimeTick:  1,
 	})
 	rs.SetLogger(resource.Resource().Logger())
-	_, _, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), nil, nil, &utility.WALCheckpoint{
+	_, _, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), nil, nil, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(120),
 		TimeTick:  120,
 	})
@@ -1742,14 +1742,14 @@ func TestPChannelWindowRecoverFailsWhenLatestGenerationChunkMissing(t *testing.T
 	})
 	recovered.SetLogger(resource.Resource().Logger())
 
-	err = recoverTestIdempotencyWindowsWithError(ctx, recovered, "p1", false)
+	err = recoverTestSummariesWithError(ctx, recovered, "p1", false)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "pchannel window chunk manifest misses latest generation 2")
+	require.Contains(t, err.Error(), "pchannel summary chunk manifest misses latest generation 2")
 }
 
-func TestPChannelWindowBootstrapCreatesGenerationZeroChunk(t *testing.T) {
+func TestPChannelSummaryBootstrapCreatesGenerationZeroChunk(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1762,7 +1762,7 @@ func TestPChannelWindowBootstrapCreatesGenerationZeroChunk(t *testing.T) {
 	})
 	rs.SetLogger(resource.Resource().Logger())
 
-	recoverTestIdempotencyWindows(ctx, t, rs, "p1", true)
+	recoverTestSummaries(ctx, t, rs, "p1", true)
 	meta := catalogState.storeMeta
 	require.NotNil(t, meta)
 	require.Equal(t, uint64(0), meta.GetLatestGeneration())
@@ -1770,19 +1770,19 @@ func TestPChannelWindowBootstrapCreatesGenerationZeroChunk(t *testing.T) {
 	require.Equal(t, uint64(0), meta.GetMinInUseGeneration())
 	require.Equal(t, uint64(10), meta.GetSourceCheckpointTimetick())
 
-	payload, err := chunkManager.Read(ctx, buildPChannelWindowChunkKey("p1", meta.GetLatestGeneration(), meta.GetTerm()))
+	payload, err := chunkManager.Read(ctx, buildPChannelSummaryChunkKey("p1", meta.GetLatestGeneration(), meta.GetTerm()))
 	require.NoError(t, err)
-	records, footer, _, err := unmarshalPChannelWindowChunk(payload)
+	records, footer, _, err := unmarshalPChannelSummaryChunk(payload)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), footer.Generation)
 	require.Equal(t, uint64(10), footer.SourceCheckpointTimetick)
 	require.Empty(t, records)
-	require.Len(t, rs.windowManager.idempotencyWindows(), 1)
+	require.Len(t, rs.summaryManager.summaries(), 1)
 }
 
-func TestPChannelWindowMissingMetaFailsWithoutBootstrap(t *testing.T) {
+func TestPChannelSummaryMissingMetaFailsWithoutBootstrap(t *testing.T) {
 	ctx := context.Background()
-	catalog, _ := newTestPChannelWindowCatalog(t)
+	catalog, _ := newTestPChannelSummaryCatalog(t)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
@@ -1794,14 +1794,14 @@ func TestPChannelWindowMissingMetaFailsWithoutBootstrap(t *testing.T) {
 	})
 	rs.SetLogger(resource.Resource().Logger())
 
-	err := recoverTestIdempotencyWindowsWithError(ctx, rs, "p1", false)
+	err := recoverTestSummariesWithError(ctx, rs, "p1", false)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "pchannel window meta missing")
+	require.Contains(t, err.Error(), "pchannel summary meta missing")
 }
 
-func TestPChannelWindowPersistsCheckpointOnlyGeneration(t *testing.T) {
+func TestPChannelSummaryPersistsCheckpointOnlyGeneration(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1815,7 +1815,7 @@ func TestPChannelWindowPersistsCheckpointOnlyGeneration(t *testing.T) {
 		TimeTick:  200,
 	}
 
-	_, generation, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), nil, nil, sourceCheckpoint)
+	_, generation, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), nil, nil, sourceCheckpoint)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), generation)
 	meta := catalogState.storeMeta
@@ -1825,20 +1825,20 @@ func TestPChannelWindowPersistsCheckpointOnlyGeneration(t *testing.T) {
 	require.Equal(t, uint64(0), meta.GetMinAvailableGeneration())
 	require.Equal(t, uint64(0), meta.GetMinInUseGeneration())
 
-	payload, err := chunkManager.Read(ctx, buildPChannelWindowChunkKey("p1", meta.GetLatestGeneration(), meta.GetTerm()))
+	payload, err := chunkManager.Read(ctx, buildPChannelSummaryChunkKey("p1", meta.GetLatestGeneration(), meta.GetTerm()))
 	require.NoError(t, err)
-	records, footer, _, err := unmarshalPChannelWindowChunk(payload)
+	records, footer, _, err := unmarshalPChannelSummaryChunk(payload)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), footer.Generation)
 	require.Equal(t, uint64(200), footer.SourceCheckpointTimetick)
 	require.Empty(t, records)
-	require.Equal(t, []string{"pchannel-window-meta"}, catalogState.operations)
+	require.Equal(t, []string{"pchannel-summary-meta"}, catalogState.operations)
 }
 
-func TestForcePersistIdempotencyWindowToTimeTickPersistsCleanCheckpoint(t *testing.T) {
+func TestForcePersistIdempotencySummaryToTimeTickPersistsCleanCheckpoint(t *testing.T) {
 	enableRecoveryIdempotency(t)
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCASCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCASCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1852,18 +1852,18 @@ func TestForcePersistIdempotencyWindowToTimeTickPersistsCleanCheckpoint(t *testi
 		MessageID: rmq.NewRmqID(100),
 		TimeTick:  100,
 	}
-	rs.windowManager.setPChannelWindowSnapshotCheckpoint(checkpoint100)
-	_, generation, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), nil, nil, checkpoint100)
+	rs.summaryManager.setPChannelSummarySnapshotCheckpoint(checkpoint100)
+	_, generation, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), nil, nil, checkpoint100)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), generation)
-	rs.windowManager.markPChannelWindowSnapshotCheckpointPersisted(checkpoint100)
+	rs.summaryManager.markPChannelSummarySnapshotCheckpointPersisted(checkpoint100)
 
 	checkpoint150 := &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(150),
 		TimeTick:  150,
 	}
-	rs.windowManager.advancePChannelWindowSnapshotCheckpoint(checkpoint150)
-	persisted, err := rs.ForcePersistIdempotencyWindowToTimeTick(ctx, checkpoint150.TimeTick)
+	rs.summaryManager.advancePChannelSummarySnapshotCheckpoint(checkpoint150)
+	persisted, err := rs.ForcePersistSummaryToTimeTick(ctx, checkpoint150.TimeTick)
 	require.NoError(t, err)
 	require.NotNil(t, persisted)
 	require.Equal(t, uint64(150), persisted.TimeTick)
@@ -1872,16 +1872,16 @@ func TestForcePersistIdempotencyWindowToTimeTickPersistsCleanCheckpoint(t *testi
 	require.Equal(t, uint64(150), catalogState.storeMeta.GetSourceCheckpointTimetick())
 	require.Equal(t, int64(0), catalogState.storeMeta.GetTerm())
 
-	payload, err := chunkManager.Read(ctx, buildPChannelWindowChunkKey("p1", 1, 0))
+	payload, err := chunkManager.Read(ctx, buildPChannelSummaryChunkKey("p1", 1, 0))
 	require.NoError(t, err)
-	records, footer, _, err := unmarshalPChannelWindowChunk(payload)
+	records, footer, _, err := unmarshalPChannelSummaryChunk(payload)
 	require.NoError(t, err)
 	require.Empty(t, records)
 	require.Equal(t, uint64(1), footer.Generation)
 	require.Equal(t, uint64(150), footer.SourceCheckpointTimetick)
 }
 
-func TestForcePersistIdempotencyWindowToTimeTickNoopsWhenDisabled(t *testing.T) {
+func TestForcePersistIdempotencySummaryToTimeTickNoopsWhenDisabled(t *testing.T) {
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "false")
 	t.Cleanup(func() { params.Reset(params.StreamingCfg.IdempotencyEnabled.Key) })
@@ -1891,15 +1891,15 @@ func TestForcePersistIdempotencyWindowToTimeTickNoopsWhenDisabled(t *testing.T) 
 		TimeTick:  1,
 	})
 
-	persisted, err := rs.ForcePersistIdempotencyWindowToTimeTick(context.Background(), 150)
+	persisted, err := rs.ForcePersistSummaryToTimeTick(context.Background(), 150)
 	require.NoError(t, err)
 	require.NotNil(t, persisted)
 	require.Equal(t, uint64(150), persisted.TimeTick)
 }
 
-func TestPChannelWindowPersistWritesContinuousGenerationsWhenCheckpointAdvances(t *testing.T) {
+func TestPChannelSummaryPersistWritesContinuousGenerationsWhenCheckpointAdvances(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1910,7 +1910,7 @@ func TestPChannelWindowPersistWritesContinuousGenerationsWhenCheckpointAdvances(
 	rs.SetLogger(resource.Resource().Logger())
 
 	for idx, timetick := range []uint64{100, 120, 140} {
-		_, generation, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), nil, nil, &utility.WALCheckpoint{
+		_, generation, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), nil, nil, &utility.WALCheckpoint{
 			MessageID: rmq.NewRmqID(int64(timetick)),
 			TimeTick:  timetick,
 		})
@@ -1921,25 +1921,25 @@ func TestPChannelWindowPersistWritesContinuousGenerationsWhenCheckpointAdvances(
 	}
 
 	for generation := uint64(0); generation <= 2; generation++ {
-		chunkKey := buildPChannelWindowChunkKey("p1", generation, 0)
+		chunkKey := buildPChannelSummaryChunkKey("p1", generation, 0)
 		exists, err := chunkManager.Exist(ctx, chunkKey)
 		require.NoError(t, err)
 		require.True(t, exists)
 		payload, err := chunkManager.Read(ctx, chunkKey)
 		require.NoError(t, err)
-		records, footer, _, err := unmarshalPChannelWindowChunk(payload)
+		records, footer, _, err := unmarshalPChannelSummaryChunk(payload)
 		require.NoError(t, err)
 		require.Empty(t, records)
 		require.Equal(t, generation, footer.Generation)
 	}
-	exists, err := chunkManager.Exist(ctx, buildPChannelWindowChunkKey("p1", 3, 0))
+	exists, err := chunkManager.Exist(ctx, buildPChannelSummaryChunkKey("p1", 3, 0))
 	require.NoError(t, err)
 	require.False(t, exists)
 }
 
-func TestPChannelWindowPersistEmptyActiveWindowAdvancesMinInUse(t *testing.T) {
+func TestPChannelSummaryPersistEmptyActiveSummaryAdvancesMinInUse(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -1947,8 +1947,8 @@ func TestPChannelWindowPersistEmptyActiveWindowAdvancesMinInUse(t *testing.T) {
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
 	})
-	rs.windowManager.setIdempotencyWindows(map[string]*vchannelWindow{
-		"v1": newEmptyVChannelWindow("p1", "v1", &utility.WALCheckpoint{
+	rs.summaryManager.setSummaries(map[string]*vchannelSummary{
+		"v1": newEmptyVChannelSummary("p1", "v1", &utility.WALCheckpoint{
 			MessageID: rmq.NewRmqID(1),
 			TimeTick:  1,
 		}),
@@ -1956,7 +1956,7 @@ func TestPChannelWindowPersistEmptyActiveWindowAdvancesMinInUse(t *testing.T) {
 	rs.SetLogger(resource.Resource().Logger())
 
 	for idx, timetick := range []uint64{100, 120} {
-		_, generation, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), nil, nil, &utility.WALCheckpoint{
+		_, generation, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), nil, nil, &utility.WALCheckpoint{
 			MessageID: rmq.NewRmqID(int64(timetick)),
 			TimeTick:  timetick,
 		})
@@ -1966,35 +1966,35 @@ func TestPChannelWindowPersistEmptyActiveWindowAdvancesMinInUse(t *testing.T) {
 
 	require.Equal(t, uint64(1), catalogState.storeMeta.GetLatestGeneration())
 	require.Equal(t, uint64(1), catalogState.storeMeta.GetMinInUseGeneration())
-	rs.windowManager.markVChannelWindowsPersisted(nil, nil, 1, nil)
-	require.Equal(t, uint64(1), rs.windowManager.idempotencyWindows()["v1"].windowMeta().GetMinRequiredGeneration())
+	rs.summaryManager.markVChannelSummariesPersisted(nil, nil, 1, nil)
+	require.Equal(t, uint64(1), rs.summaryManager.summaries()["v1"].summaryMeta().GetMinRequiredGeneration())
 }
 
-func TestPChannelWindowPersistSavesViewMetaAfterPChannelMeta(t *testing.T) {
+func TestPChannelSummaryPersistSavesViewMetaAfterPChannelMeta(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	window := newEmptyVChannelWindow("p1", "v1", nil)
-	record := *committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+	summary := newEmptyVChannelSummary("p1", "v1", nil)
+	record := *committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 		Key:            "key-1",
 		CommitTimetick: 210,
 		MessageId:      rmq.NewRmqID(210).IntoProto(),
 	})
-	require.NoError(t, window.applyCommittedWriteRecord(record, true))
-	records, metaUpdate := window.consumePendingCommittedWriteRecords()
+	require.NoError(t, summary.applyCommittedWriteRecord(record, true))
+	records, metaUpdate := summary.consumePendingCommittedWriteRecords()
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(200),
 		TimeTick:  200,
 	})
-	rs.windowManager.setIdempotencyWindows(map[string]*vchannelWindow{"v1": window})
+	rs.summaryManager.setSummaries(map[string]*vchannelSummary{"v1": summary})
 	rs.SetLogger(resource.Resource().Logger())
 
-	windowMetas, generation, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), map[string][]committedWriteRecord{
+	summaryMetas, generation, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]committedWriteRecord{
 		"v1": records,
-	}, map[string]*idempotencyWindowMetaUpdate{
+	}, map[string]*summaryMetaUpdate{
 		"v1": metaUpdate,
 	}, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(220),
@@ -2002,14 +2002,14 @@ func TestPChannelWindowPersistSavesViewMetaAfterPChannelMeta(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), generation)
-	require.Equal(t, uint64(0), windowMetas["v1"].GetMinRequiredGeneration())
-	require.Equal(t, []string{"pchannel-window-meta", "vchannel-window-meta"}, catalogState.operations)
+	require.Equal(t, uint64(0), summaryMetas["v1"].GetMinRequiredGeneration())
+	require.Equal(t, []string{"pchannel-summary-meta", "vchannel-summary-meta"}, catalogState.operations)
 	require.Equal(t, uint64(0), catalogState.storeMeta.GetMinInUseGeneration())
 }
 
-func TestPChannelWindowPersistRetryDoesNotAllocateNextGenerationWhenCheckpointCovered(t *testing.T) {
+func TestPChannelSummaryPersistRetryDoesNotAllocateNextGenerationWhenCheckpointCovered(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
@@ -2020,7 +2020,7 @@ func TestPChannelWindowPersistRetryDoesNotAllocateNextGenerationWhenCheckpointCo
 	rs.SetLogger(resource.Resource().Logger())
 	records := map[string][]committedWriteRecord{
 		"v1": {
-			*committedWriteRecordFromWindowEntry("p1", "v1", &streamingpb.WindowEntry{
+			*committedWriteRecordFromSummaryEntry("p1", "v1", &streamingpb.SummaryEntry{
 				Key:            "key-1",
 				CommitTimetick: 110,
 				MessageId:      rmq.NewRmqID(110).IntoProto(),
@@ -2032,59 +2032,59 @@ func TestPChannelWindowPersistRetryDoesNotAllocateNextGenerationWhenCheckpointCo
 		TimeTick:  120,
 	}
 
-	_, generation, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), records, nil, sourceCheckpoint)
+	_, generation, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), records, nil, sourceCheckpoint)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), generation)
-	_, generation, err = rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), records, nil, sourceCheckpoint)
+	_, generation, err = rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), records, nil, sourceCheckpoint)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), generation)
 	require.Equal(t, uint64(0), catalogState.storeMeta.GetLatestGeneration())
-	exists, err := chunkManager.Exist(ctx, buildPChannelWindowChunkKey("p1", 1, 0))
+	exists, err := chunkManager.Exist(ctx, buildPChannelSummaryChunkKey("p1", 1, 0))
 	require.NoError(t, err)
 	require.False(t, exists)
 }
 
-func TestPChannelWindowMetaMinInUseIncludesNonDirtyWindows(t *testing.T) {
+func TestPChannelSummaryMetaMinInUseIncludesNonDirtySummaries(t *testing.T) {
 	ctx := context.Background()
-	catalog, catalogState := newTestPChannelWindowCatalog(t)
+	catalog, catalogState := newTestPChannelSummaryCatalog(t)
 	chunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog), resource.OptChunkManager(chunkManager))
 
-	footer, _, _ := writeTestPChannelWindowChunk(ctx, t, "p1", 4, chunkManager, &utility.WALCheckpoint{
+	footer, _, _ := writeTestPChannelSummaryChunk(ctx, t, "p1", 4, chunkManager, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(400),
 		TimeTick:  400,
 	}, nil)
-	catalogState.storeMeta = newPChannelWindowStoreMetaFromChunk("p1", footer, 0, 4).intoCatalogMeta()
+	catalogState.storeMeta = newPChannelSummaryStoreMetaFromChunk("p1", footer, 0, 4).intoCatalogMeta()
 
-	oldWindow := newEmptyVChannelWindow("p1", "v-old", nil)
-	require.NoError(t, oldWindow.applyCommittedWriteRecordsAtGeneration([]committedWriteRecord{
-		*committedWriteRecordFromWindowEntry("p1", "v-old", &streamingpb.WindowEntry{
+	oldSummary := newEmptyVChannelSummary("p1", "v-old", nil)
+	require.NoError(t, oldSummary.applyCommittedWriteRecordsAtGeneration([]committedWriteRecord{
+		*committedWriteRecordFromSummaryEntry("p1", "v-old", &streamingpb.SummaryEntry{
 			Key:            "key-old",
 			CommitTimetick: 210,
 			MessageId:      rmq.NewRmqID(210).IntoProto(),
 		}),
 	}, 2))
-	newWindow := newEmptyVChannelWindow("p1", "v-new", nil)
-	require.NoError(t, newWindow.applyCommittedWriteRecord(*committedWriteRecordFromWindowEntry("p1", "v-new", &streamingpb.WindowEntry{
+	newSummary := newEmptyVChannelSummary("p1", "v-new", nil)
+	require.NoError(t, newSummary.applyCommittedWriteRecord(*committedWriteRecordFromSummaryEntry("p1", "v-new", &streamingpb.SummaryEntry{
 		Key:            "key-new",
 		CommitTimetick: 410,
 		MessageId:      rmq.NewRmqID(410).IntoProto(),
 	}), true))
-	records, metaUpdate := newWindow.consumePendingCommittedWriteRecords()
+	records, metaUpdate := newSummary.consumePendingCommittedWriteRecords()
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(400),
 		TimeTick:  400,
 	})
-	rs.windowManager.setIdempotencyWindows(map[string]*vchannelWindow{
-		"v-old": oldWindow,
-		"v-new": newWindow,
+	rs.summaryManager.setSummaries(map[string]*vchannelSummary{
+		"v-old": oldSummary,
+		"v-new": newSummary,
 	})
 	rs.SetLogger(resource.Resource().Logger())
 
-	windowMetas, generation, err := rs.windowManager.persistPChannelWindow(ctx, resource.Resource().Logger(), map[string][]committedWriteRecord{
+	summaryMetas, generation, err := rs.summaryManager.persistPChannelSummary(ctx, resource.Resource().Logger(), map[string][]committedWriteRecord{
 		"v-new": records,
-	}, map[string]*idempotencyWindowMetaUpdate{
+	}, map[string]*summaryMetaUpdate{
 		"v-new": metaUpdate,
 	}, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(500),
@@ -2092,14 +2092,14 @@ func TestPChannelWindowMetaMinInUseIncludesNonDirtyWindows(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, uint64(5), generation)
-	require.Equal(t, uint64(5), windowMetas["v-new"].GetMinRequiredGeneration())
+	require.Equal(t, uint64(5), summaryMetas["v-new"].GetMinRequiredGeneration())
 	require.Equal(t, uint64(2), catalogState.storeMeta.GetMinInUseGeneration())
 }
 
-func TestPChannelWindowRejectsVChannelOnlyMeta(t *testing.T) {
+func TestPChannelSummaryRejectsVChannelOnlyMeta(t *testing.T) {
 	ctx := context.Background()
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
-	catalog.EXPECT().ListVChannelWindowMetas(mock.Anything, "p1", common.VChannelWindowViewTypeIdempotency).Return([]*streamingpb.VChannelWindowMeta{
+	catalog.EXPECT().ListVChannelSummaryMetas(mock.Anything, "p1", common.VChannelSummaryViewTypeIdempotency).Return([]*streamingpb.VChannelSummaryMeta{
 		{
 			Pchannel:                    "p1",
 			Vchannel:                    "v1",
@@ -2108,7 +2108,7 @@ func TestPChannelWindowRejectsVChannelOnlyMeta(t *testing.T) {
 			SnapshotCheckpointMessageId: rmq.NewRmqID(100).IntoProto(),
 		},
 	}, nil)
-	catalog.EXPECT().GetPChannelWindowMeta(mock.Anything, "p1").Return(nil, nil)
+	catalog.EXPECT().GetPChannelSummaryMeta(mock.Anything, "p1").Return(nil, nil)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
 
 	rs := newRecoveryStorage(types.PChannelInfo{Name: "p1"}, &utility.WALCheckpoint{
@@ -2120,7 +2120,7 @@ func TestPChannelWindowRejectsVChannelOnlyMeta(t *testing.T) {
 	})
 	rs.SetLogger(resource.Resource().Logger())
 
-	err := recoverTestIdempotencyWindowsWithError(ctx, rs, "p1", false)
+	err := recoverTestSummariesWithError(ctx, rs, "p1", false)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "pchannel window meta missing")
+	require.Contains(t, err.Error(), "pchannel summary meta missing")
 }

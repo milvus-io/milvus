@@ -13,42 +13,42 @@ import (
 )
 
 const (
-	// pchannelWindowCodecVersion is bumped to 2: the footer checksum moved out of
+	// pchannelSummaryCodecVersion is bumped to 2: the footer checksum moved out of
 	// the JSON body into the binary trailer so integrity is verified against the
 	// exact stored bytes, not a JSON re-serialization of the parsed struct.
-	pchannelWindowCodecVersion      = 2
-	pchannelWindowChunkHeaderSize   = 16
-	pchannelWindowChunkChecksumSize = sha256.Size
+	pchannelSummaryCodecVersion      = 2
+	pchannelSummaryChunkHeaderSize   = 16
+	pchannelSummaryChunkChecksumSize = sha256.Size
 )
 
 var (
-	pchannelWindowChunkHeaderMagic = []byte("PWCCH001")
-	pchannelWindowChunkFooterMagic = []byte("PWCFT001")
+	pchannelSummaryChunkHeaderMagic = []byte("PSCCH001")
+	pchannelSummaryChunkFooterMagic = []byte("PSCFT001")
 )
 
-type pchannelWindowSourceCheckpoint struct {
+type pchannelSummarySourceCheckpoint struct {
 	MessageID *commonpb.MessageID `json:"message_id,omitempty"`
 	TimeTick  uint64              `json:"timetick"`
 }
 
-type pchannelWindowChunkFooter struct {
+type pchannelSummaryChunkFooter struct {
 	CodecVersion int    `json:"codec_version"`
 	PChannel     string `json:"pchannel"`
 	Generation   uint64 `json:"generation"`
 	// The WAL assignment term of the writer. Used to arbitrate a same-generation
 	// write conflict between two owners (split-brain): the newer term wins, the
 	// older term is fenced. Chunks written before this field decode as term 0.
-	Term                      int64                      `json:"term,omitempty"`
-	SourceCheckpointMessageID *commonpb.MessageID        `json:"source_checkpoint_message_id,omitempty"`
-	SourceCheckpointTimetick  uint64                     `json:"source_checkpoint_timetick,omitempty"`
-	SourceStartMessageID      *commonpb.MessageID        `json:"source_start_message_id,omitempty"`
-	SourceEndMessageID        *commonpb.MessageID        `json:"source_end_message_id,omitempty"`
-	SourceStartTimetick       uint64                     `json:"source_start_timetick,omitempty"`
-	SourceEndTimetick         uint64                     `json:"source_end_timetick,omitempty"`
-	Chunks                    []vchannelWindowChunkIndex `json:"chunks"`
+	Term                      int64                       `json:"term,omitempty"`
+	SourceCheckpointMessageID *commonpb.MessageID         `json:"source_checkpoint_message_id,omitempty"`
+	SourceCheckpointTimetick  uint64                      `json:"source_checkpoint_timetick,omitempty"`
+	SourceStartMessageID      *commonpb.MessageID         `json:"source_start_message_id,omitempty"`
+	SourceEndMessageID        *commonpb.MessageID         `json:"source_end_message_id,omitempty"`
+	SourceStartTimetick       uint64                      `json:"source_start_timetick,omitempty"`
+	SourceEndTimetick         uint64                      `json:"source_end_timetick,omitempty"`
+	Chunks                    []vchannelSummaryChunkIndex `json:"chunks"`
 }
 
-type vchannelWindowChunkIndex struct {
+type vchannelSummaryChunkIndex struct {
 	VChannel             string              `json:"vchannel"`
 	Offset               uint64              `json:"offset"`
 	Length               uint64              `json:"length"`
@@ -60,7 +60,7 @@ type vchannelWindowChunkIndex struct {
 	SourceEndTimetick    uint64              `json:"source_end_timetick,omitempty"`
 }
 
-type vchannelWindowChunk struct {
+type vchannelSummaryChunk struct {
 	CodecVersion         int                    `json:"codec_version"`
 	PChannel             string                 `json:"pchannel"`
 	VChannel             string                 `json:"vchannel"`
@@ -72,11 +72,11 @@ type vchannelWindowChunk struct {
 	Records              []committedWriteRecord `json:"records"`
 }
 
-func newPChannelWindowSourceCheckpoint(checkpoint *WALCheckpoint) *pchannelWindowSourceCheckpoint {
+func newPChannelSummarySourceCheckpoint(checkpoint *WALCheckpoint) *pchannelSummarySourceCheckpoint {
 	if checkpoint == nil {
 		return nil
 	}
-	sourceCheckpoint := &pchannelWindowSourceCheckpoint{
+	sourceCheckpoint := &pchannelSummarySourceCheckpoint{
 		TimeTick: checkpoint.TimeTick,
 	}
 	if checkpoint.MessageID != nil {
@@ -85,15 +85,15 @@ func newPChannelWindowSourceCheckpoint(checkpoint *WALCheckpoint) *pchannelWindo
 	return sourceCheckpoint
 }
 
-func marshalPChannelWindowChunk(
+func marshalPChannelSummaryChunk(
 	pchannel string,
 	generation uint64,
 	term int64,
 	sourceCheckpoint *WALCheckpoint,
 	recordsByVChannel map[string][]committedWriteRecord,
-) ([]byte, *pchannelWindowChunkFooter, string, error) {
+) ([]byte, *pchannelSummaryChunkFooter, string, error) {
 	buf := bytes.NewBuffer(make([]byte, 0))
-	buf.Write(newPChannelWindowChunkHeader())
+	buf.Write(newPChannelSummaryChunkHeader())
 
 	vchannels := make([]string, 0, len(recordsByVChannel))
 	for vchannel := range recordsByVChannel {
@@ -101,14 +101,14 @@ func marshalPChannelWindowChunk(
 	}
 	sort.Strings(vchannels)
 
-	footer := &pchannelWindowChunkFooter{
-		CodecVersion: pchannelWindowCodecVersion,
+	footer := &pchannelSummaryChunkFooter{
+		CodecVersion: pchannelSummaryCodecVersion,
 		PChannel:     pchannel,
 		Generation:   generation,
 		Term:         term,
-		Chunks:       make([]vchannelWindowChunkIndex, 0, len(vchannels)),
+		Chunks:       make([]vchannelSummaryChunkIndex, 0, len(vchannels)),
 	}
-	if checkpoint := newPChannelWindowSourceCheckpoint(sourceCheckpoint); checkpoint != nil {
+	if checkpoint := newPChannelSummarySourceCheckpoint(sourceCheckpoint); checkpoint != nil {
 		footer.SourceCheckpointMessageID = cloneMessageIDProto(checkpoint.MessageID)
 		footer.SourceCheckpointTimetick = checkpoint.TimeTick
 	}
@@ -118,21 +118,21 @@ func marshalPChannelWindowChunk(
 		if len(records) == 0 {
 			continue
 		}
-		chunk := &vchannelWindowChunk{
-			CodecVersion: pchannelWindowCodecVersion,
+		chunk := &vchannelSummaryChunk{
+			CodecVersion: pchannelSummaryCodecVersion,
 			PChannel:     pchannel,
 			VChannel:     vchannel,
 			Generation:   generation,
 			Records:      records,
 		}
-		payload, err := marshalVChannelWindowChunk(chunk)
+		payload, err := marshalVChannelSummaryChunk(chunk)
 		if err != nil {
 			return nil, nil, "", err
 		}
 		offset := uint64(buf.Len())
 		buf.Write(payload)
-		extendPChannelWindowChunkFooterSourceRange(footer, chunk)
-		footer.Chunks = append(footer.Chunks, vchannelWindowChunkIndex{
+		extendPChannelSummaryChunkFooterSourceRange(footer, chunk)
+		footer.Chunks = append(footer.Chunks, vchannelSummaryChunkIndex{
 			VChannel:             vchannel,
 			Offset:               offset,
 			Length:               uint64(len(payload)),
@@ -145,7 +145,7 @@ func marshalPChannelWindowChunk(
 		})
 	}
 
-	footerPayload, err := marshalPChannelWindowChunkFooter(footer)
+	footerPayload, err := marshalPChannelSummaryChunkFooter(footer)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -159,132 +159,132 @@ func marshalPChannelWindowChunk(
 	footerLen := make([]byte, 4)
 	binary.BigEndian.PutUint32(footerLen, uint32(len(footerPayload)))
 	buf.Write(footerLen)
-	buf.Write(pchannelWindowChunkFooterMagic)
+	buf.Write(pchannelSummaryChunkFooterMagic)
 	return buf.Bytes(), footer, hex.EncodeToString(footerChecksum[:]), nil
 }
 
-func unmarshalPChannelWindowChunk(payload []byte) (map[string][]committedWriteRecord, *pchannelWindowChunkFooter, string, error) {
-	if len(payload) < pchannelWindowChunkHeaderSize+pchannelWindowChunkChecksumSize+len(pchannelWindowChunkFooterMagic)+4 {
-		return nil, nil, "", pchannelWindowStoreCorruptedf("pchannel window chunk payload too short")
+func unmarshalPChannelSummaryChunk(payload []byte) (map[string][]committedWriteRecord, *pchannelSummaryChunkFooter, string, error) {
+	if len(payload) < pchannelSummaryChunkHeaderSize+pchannelSummaryChunkChecksumSize+len(pchannelSummaryChunkFooterMagic)+4 {
+		return nil, nil, "", pchannelSummaryStoreCorruptedf("pchannel summary chunk payload too short")
 	}
-	if !bytes.Equal(payload[:len(pchannelWindowChunkHeaderMagic)], pchannelWindowChunkHeaderMagic) {
-		return nil, nil, "", pchannelWindowStoreCorruptedf("invalid pchannel window chunk header magic")
+	if !bytes.Equal(payload[:len(pchannelSummaryChunkHeaderMagic)], pchannelSummaryChunkHeaderMagic) {
+		return nil, nil, "", pchannelSummaryStoreCorruptedf("invalid pchannel summary chunk header magic")
 	}
-	if version := binary.BigEndian.Uint16(payload[8:10]); version != pchannelWindowCodecVersion {
-		return nil, nil, "", pchannelWindowStoreCorruptedf("unsupported pchannel window chunk version %d", version)
+	if version := binary.BigEndian.Uint16(payload[8:10]); version != pchannelSummaryCodecVersion {
+		return nil, nil, "", pchannelSummaryStoreCorruptedf("unsupported pchannel summary chunk version %d", version)
 	}
-	if headerSize := binary.BigEndian.Uint32(payload[12:16]); headerSize != pchannelWindowChunkHeaderSize {
-		return nil, nil, "", pchannelWindowStoreCorruptedf("invalid pchannel window chunk header size %d", headerSize)
+	if headerSize := binary.BigEndian.Uint32(payload[12:16]); headerSize != pchannelSummaryChunkHeaderSize {
+		return nil, nil, "", pchannelSummaryStoreCorruptedf("invalid pchannel summary chunk header size %d", headerSize)
 	}
-	footerMagicStart := len(payload) - len(pchannelWindowChunkFooterMagic)
-	if !bytes.Equal(payload[footerMagicStart:], pchannelWindowChunkFooterMagic) {
-		return nil, nil, "", pchannelWindowStoreCorruptedf("invalid pchannel window chunk footer magic")
+	footerMagicStart := len(payload) - len(pchannelSummaryChunkFooterMagic)
+	if !bytes.Equal(payload[footerMagicStart:], pchannelSummaryChunkFooterMagic) {
+		return nil, nil, "", pchannelSummaryStoreCorruptedf("invalid pchannel summary chunk footer magic")
 	}
 	footerLenStart := footerMagicStart - 4
-	footerChecksumStart := footerLenStart - pchannelWindowChunkChecksumSize
-	if footerChecksumStart < pchannelWindowChunkHeaderSize {
-		return nil, nil, "", pchannelWindowStoreCorruptedf("invalid pchannel window chunk footer length offset")
+	footerChecksumStart := footerLenStart - pchannelSummaryChunkChecksumSize
+	if footerChecksumStart < pchannelSummaryChunkHeaderSize {
+		return nil, nil, "", pchannelSummaryStoreCorruptedf("invalid pchannel summary chunk footer length offset")
 	}
 	footerLen := int(binary.BigEndian.Uint32(payload[footerLenStart:footerMagicStart]))
 	footerStart := footerChecksumStart - footerLen
-	if footerLen <= 0 || footerStart < pchannelWindowChunkHeaderSize {
-		return nil, nil, "", pchannelWindowStoreCorruptedf("invalid pchannel window chunk footer length")
+	if footerLen <= 0 || footerStart < pchannelSummaryChunkHeaderSize {
+		return nil, nil, "", pchannelSummaryStoreCorruptedf("invalid pchannel summary chunk footer length")
 	}
 	footerPayload := payload[footerStart:footerChecksumStart]
 	storedFooterChecksum := payload[footerChecksumStart:footerLenStart]
 	if actual := sha256.Sum256(footerPayload); !bytes.Equal(storedFooterChecksum, actual[:]) {
-		return nil, nil, "", pchannelWindowStoreCorruptedf("pchannel window chunk footer checksum mismatch")
+		return nil, nil, "", pchannelSummaryStoreCorruptedf("pchannel summary chunk footer checksum mismatch")
 	}
-	footer, err := unmarshalPChannelWindowChunkFooter(footerPayload)
+	footer, err := unmarshalPChannelSummaryChunkFooter(footerPayload)
 	if err != nil {
-		return nil, nil, "", markPChannelWindowStoreCorrupted(err)
+		return nil, nil, "", markPChannelSummaryStoreCorrupted(err)
 	}
 
 	recordsByVChannel := make(map[string][]committedWriteRecord, len(footer.Chunks))
 	for _, chunkIndex := range footer.Chunks {
 		end := chunkIndex.Offset + chunkIndex.Length
-		if chunkIndex.Offset < uint64(pchannelWindowChunkHeaderSize) || end > uint64(footerStart) || chunkIndex.Offset > end {
-			return nil, nil, "", pchannelWindowStoreCorruptedf("invalid vchannel window chunk range for vchannel %s", chunkIndex.VChannel)
+		if chunkIndex.Offset < uint64(pchannelSummaryChunkHeaderSize) || end > uint64(footerStart) || chunkIndex.Offset > end {
+			return nil, nil, "", pchannelSummaryStoreCorruptedf("invalid vchannel summary chunk range for vchannel %s", chunkIndex.VChannel)
 		}
 		chunkPayload := payload[chunkIndex.Offset:end]
 		if chunkIndex.Checksum != "" && chunkIndex.Checksum != checksumHex(chunkPayload) {
-			return nil, nil, "", pchannelWindowStoreCorruptedf("vchannel window chunk checksum mismatch for vchannel %s", chunkIndex.VChannel)
+			return nil, nil, "", pchannelSummaryStoreCorruptedf("vchannel summary chunk checksum mismatch for vchannel %s", chunkIndex.VChannel)
 		}
-		decodedChunk, err := unmarshalVChannelWindowChunk(chunkPayload)
+		decodedChunk, err := unmarshalVChannelSummaryChunk(chunkPayload)
 		if err != nil {
-			return nil, nil, "", markPChannelWindowStoreCorrupted(err)
+			return nil, nil, "", markPChannelSummaryStoreCorrupted(err)
 		}
 		if decodedChunk.VChannel != chunkIndex.VChannel {
-			return nil, nil, "", pchannelWindowStoreCorruptedf("vchannel window chunk vchannel mismatch, footer %s, payload %s", chunkIndex.VChannel, decodedChunk.VChannel)
+			return nil, nil, "", pchannelSummaryStoreCorruptedf("vchannel summary chunk vchannel mismatch, footer %s, payload %s", chunkIndex.VChannel, decodedChunk.VChannel)
 		}
 		if decodedChunk.Generation != footer.Generation {
-			return nil, nil, "", pchannelWindowStoreCorruptedf("vchannel window chunk generation mismatch for vchannel %s, footer %d, payload %d", chunkIndex.VChannel, footer.Generation, decodedChunk.Generation)
+			return nil, nil, "", pchannelSummaryStoreCorruptedf("vchannel summary chunk generation mismatch for vchannel %s, footer %d, payload %d", chunkIndex.VChannel, footer.Generation, decodedChunk.Generation)
 		}
 		if uint64(len(decodedChunk.Records)) != chunkIndex.RecordCount {
-			return nil, nil, "", pchannelWindowStoreCorruptedf("vchannel window chunk record count mismatch for vchannel %s", chunkIndex.VChannel)
+			return nil, nil, "", pchannelSummaryStoreCorruptedf("vchannel summary chunk record count mismatch for vchannel %s", chunkIndex.VChannel)
 		}
 		recordsByVChannel[chunkIndex.VChannel] = decodedChunk.Records
 	}
 	return recordsByVChannel, footer, hex.EncodeToString(storedFooterChecksum), nil
 }
 
-func marshalVChannelWindowChunk(chunk *vchannelWindowChunk) ([]byte, error) {
+func marshalVChannelSummaryChunk(chunk *vchannelSummaryChunk) ([]byte, error) {
 	if chunk == nil {
-		return nil, merr.WrapErrServiceInternalMsg("nil vchannel window chunk")
+		return nil, merr.WrapErrServiceInternalMsg("nil vchannel summary chunk")
 	}
 	if len(chunk.Records) == 0 {
-		return nil, merr.WrapErrServiceInternalMsg("empty vchannel window chunk")
+		return nil, merr.WrapErrServiceInternalMsg("empty vchannel summary chunk")
 	}
-	chunk.CodecVersion = pchannelWindowCodecVersion
+	chunk.CodecVersion = pchannelSummaryCodecVersion
 	chunk.Records = cloneAndSortCommittedWriteRecords(chunk.PChannel, chunk.VChannel, chunk.Records)
 	chunk.SourceStartMessageID, chunk.SourceEndMessageID, chunk.SourceStartTimetick, chunk.SourceEndTimetick = committedWriteRecordSourceRange(chunk.Records)
 	// No self-checksum: the chunk's bytes are protected by the footer's per-chunk
-	// index checksum (vchannelWindowChunkIndex.Checksum), computed over these exact
+	// index checksum (vchannelSummaryChunkIndex.Checksum), computed over these exact
 	// bytes and verified before this chunk is ever decoded.
 	return json.Marshal(chunk)
 }
 
-func unmarshalVChannelWindowChunk(payload []byte) (*vchannelWindowChunk, error) {
-	chunk := &vchannelWindowChunk{}
+func unmarshalVChannelSummaryChunk(payload []byte) (*vchannelSummaryChunk, error) {
+	chunk := &vchannelSummaryChunk{}
 	if err := json.Unmarshal(payload, chunk); err != nil {
-		return nil, markPChannelWindowStoreCorrupted(err)
+		return nil, markPChannelSummaryStoreCorrupted(err)
 	}
-	if chunk.CodecVersion != pchannelWindowCodecVersion {
-		return nil, pchannelWindowStoreCorruptedf("unsupported vchannel window chunk version %d", chunk.CodecVersion)
+	if chunk.CodecVersion != pchannelSummaryCodecVersion {
+		return nil, pchannelSummaryStoreCorruptedf("unsupported vchannel summary chunk version %d", chunk.CodecVersion)
 	}
 	chunk.Records = cloneAndSortCommittedWriteRecords(chunk.PChannel, chunk.VChannel, chunk.Records)
 	return chunk, nil
 }
 
-func newPChannelWindowChunkHeader() []byte {
-	header := make([]byte, pchannelWindowChunkHeaderSize)
-	copy(header, pchannelWindowChunkHeaderMagic)
-	binary.BigEndian.PutUint16(header[8:10], pchannelWindowCodecVersion)
+func newPChannelSummaryChunkHeader() []byte {
+	header := make([]byte, pchannelSummaryChunkHeaderSize)
+	copy(header, pchannelSummaryChunkHeaderMagic)
+	binary.BigEndian.PutUint16(header[8:10], pchannelSummaryCodecVersion)
 	binary.BigEndian.PutUint16(header[10:12], 0)
-	binary.BigEndian.PutUint32(header[12:16], pchannelWindowChunkHeaderSize)
+	binary.BigEndian.PutUint32(header[12:16], pchannelSummaryChunkHeaderSize)
 	return header
 }
 
-func marshalPChannelWindowChunkFooter(footer *pchannelWindowChunkFooter) ([]byte, error) {
+func marshalPChannelSummaryChunkFooter(footer *pchannelSummaryChunkFooter) ([]byte, error) {
 	if footer == nil {
-		return nil, merr.WrapErrServiceInternalMsg("nil pchannel window chunk footer")
+		return nil, merr.WrapErrServiceInternalMsg("nil pchannel summary chunk footer")
 	}
-	footer.CodecVersion = pchannelWindowCodecVersion
+	footer.CodecVersion = pchannelSummaryCodecVersion
 	sort.Slice(footer.Chunks, func(i, j int) bool {
 		return footer.Chunks[i].VChannel < footer.Chunks[j].VChannel
 	})
 	// No self-checksum: integrity is verified against the trailer checksum over
-	// these exact bytes (see marshal/unmarshalPChannelWindowChunk).
+	// these exact bytes (see marshal/unmarshalPChannelSummaryChunk).
 	return json.Marshal(footer)
 }
 
-func unmarshalPChannelWindowChunkFooter(payload []byte) (*pchannelWindowChunkFooter, error) {
-	footer := &pchannelWindowChunkFooter{}
+func unmarshalPChannelSummaryChunkFooter(payload []byte) (*pchannelSummaryChunkFooter, error) {
+	footer := &pchannelSummaryChunkFooter{}
 	if err := json.Unmarshal(payload, footer); err != nil {
-		return nil, markPChannelWindowStoreCorrupted(err)
+		return nil, markPChannelSummaryStoreCorrupted(err)
 	}
-	if footer.CodecVersion != pchannelWindowCodecVersion {
-		return nil, pchannelWindowStoreCorruptedf("unsupported pchannel window chunk footer version %d", footer.CodecVersion)
+	if footer.CodecVersion != pchannelSummaryCodecVersion {
+		return nil, pchannelSummaryStoreCorruptedf("unsupported pchannel summary chunk footer version %d", footer.CodecVersion)
 	}
 	return footer, nil
 }
@@ -332,7 +332,7 @@ func committedWriteRecordSourceRange(records []committedWriteRecord) (*commonpb.
 	return cloneMessageIDProto(start.SourceMessageID), cloneMessageIDProto(end.SourceMessageID), start.SourceTimeTick, end.SourceTimeTick
 }
 
-func extendPChannelWindowChunkFooterSourceRange(footer *pchannelWindowChunkFooter, chunk *vchannelWindowChunk) {
+func extendPChannelSummaryChunkFooterSourceRange(footer *pchannelSummaryChunkFooter, chunk *vchannelSummaryChunk) {
 	if footer == nil || chunk == nil {
 		return
 	}

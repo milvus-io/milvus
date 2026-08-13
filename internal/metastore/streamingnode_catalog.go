@@ -15,24 +15,24 @@ type StreamingNodeCataLog interface {
 	// ListVChannel list all vchannels on current pchannel.
 	ListVChannel(ctx context.Context, pchannelName string) ([]*streamingpb.VChannelMeta, error)
 
-	// ListVChannelWindowMetas lists all vchannel window metadata for a view type on current pchannel.
-	ListVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string) ([]*streamingpb.VChannelWindowMeta, error)
+	// ListVChannelSummaryMetas lists all vchannel summary metadata for a view type on current pchannel.
+	ListVChannelSummaryMetas(ctx context.Context, pchannelName string, viewType string) ([]*streamingpb.VChannelSummaryMeta, error)
 
-	// SaveVChannelWindowMetas saves vchannel window metadata for a view type on current pchannel.
-	SaveVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string, windows map[string]*streamingpb.VChannelWindowMeta) error
+	// SaveVChannelSummaryMetas saves vchannel summary metadata for a view type on current pchannel.
+	SaveVChannelSummaryMetas(ctx context.Context, pchannelName string, viewType string, summaries map[string]*streamingpb.VChannelSummaryMeta) error
 
-	// RemoveVChannelWindowMetas removes vchannel window metadata for a view type on current pchannel.
-	RemoveVChannelWindowMetas(ctx context.Context, pchannelName string, viewType string, vchannels []string) error
+	// RemoveVChannelSummaryMetas removes vchannel summary metadata for a view type on current pchannel.
+	RemoveVChannelSummaryMetas(ctx context.Context, pchannelName string, viewType string, vchannels []string) error
 
-	// GetPChannelWindowMeta gets pchannel-level physical window metadata.
-	GetPChannelWindowMeta(ctx context.Context, pchannelName string) (*streamingpb.PChannelWindowMeta, error)
+	// GetPChannelSummaryMeta gets pchannel-level physical summary metadata.
+	GetPChannelSummaryMeta(ctx context.Context, pchannelName string) (*streamingpb.PChannelSummaryMeta, error)
 
-	// SavePChannelWindowMeta saves pchannel-level physical window metadata.
-	SavePChannelWindowMeta(ctx context.Context, pchannelName string, meta *streamingpb.PChannelWindowMeta) error
+	// SavePChannelSummaryMeta saves pchannel-level physical summary metadata.
+	SavePChannelSummaryMeta(ctx context.Context, pchannelName string, meta *streamingpb.PChannelSummaryMeta) error
 
-	// RemovePChannelWindowMeta removes pchannel-level physical window metadata.
+	// RemovePChannelSummaryMeta removes pchannel-level physical summary metadata.
 	// Removing a non-existent meta is a no-op.
-	RemovePChannelWindowMeta(ctx context.Context, pchannelName string) error
+	RemovePChannelSummaryMeta(ctx context.Context, pchannelName string) error
 
 	// ListSegmentAssignment list all segment assignments for the wal.
 	ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error)

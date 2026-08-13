@@ -26,7 +26,7 @@ func minCheckpointByTimeTick(left, right *WALCheckpoint) *WALCheckpoint {
 // AlterWalState).
 //
 // The persisted consume checkpoint must not advance past a durability bound
-// (idempotency window source or flusher) so that on restart the replayed range
+// (idempotency summary source or flusher) so that on restart the replayed range
 // can rebuild that state. Clamping the position alone is enough for that; the
 // replication / alter-WAL fields belong to the consume checkpoint and would be
 // silently lost if we swapped in the bound checkpoint wholesale (bound carries

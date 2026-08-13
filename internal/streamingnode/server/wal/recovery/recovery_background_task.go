@@ -122,7 +122,7 @@ func (rs *recoveryStorageImpl) persistRecoverySnapshotData(ctx context.Context, 
 	// The catalog persists the whole snapshot as a single compound write, with
 	// the consume checkpoint always the last/commit-marker op - so a
 	// whole-snapshot retry is always safe (every part is an idempotent put).
-	effectiveCheckpoint := rs.windowManager.effectivePersistCheckpoint(snapshot, rs.getFlusherCheckpoint())
+	effectiveCheckpoint := rs.summaryManager.effectivePersistCheckpoint(snapshot, rs.getFlusherCheckpoint())
 	recoverySnapshot := &metastore.WALRecoverySnapshot{
 		SegmentAssignments: snapshot.SegmentAssignments,
 		VChannels:          snapshot.VChannels,
@@ -142,7 +142,7 @@ func (rs *recoveryStorageImpl) persistRecoverySnapshotData(ctx context.Context, 
 		}); err != nil {
 		return err
 	}
-	rs.windowManager.markConsumeCheckpointPersisted(effectiveCheckpoint)
+	rs.summaryManager.markConsumeCheckpointPersisted(effectiveCheckpoint)
 
 	// sample the checkpoint for truncator to make wal truncation.
 	rs.metrics.ObServePersistedMetrics(effectiveCheckpoint.TimeTick)
@@ -157,7 +157,7 @@ func (rs *recoveryStorageImpl) simpleTruncateCheckpoint(ctx context.Context, che
 	}
 	// use the smallest one to truncate the wal.
 	truncateCP := minCheckpointByMessageID(flusherCP, checkpoint)
-	truncateCP = minCheckpointByMessageID(truncateCP, rs.windowManager.truncateClampCheckpoint())
+	truncateCP = minCheckpointByMessageID(truncateCP, rs.summaryManager.truncateClampCheckpoint())
 	if truncateCP == nil || truncateCP.MessageID == nil {
 		return
 	}
@@ -214,10 +214,10 @@ func retryOperationWithBackoff(ctx context.Context, logger *mlog.Logger, op func
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		// Terminal window-store states never heal by retrying: a fenced writer
+		// Terminal summary-store states never heal by retrying: a fenced writer
 		// stays fenced (a newer term owns the store) and a same-term payload
 		// mismatch stays corrupted. Retrying would spin until WAL close.
-		if errors.Is(err, ErrPChannelWindowStoreFenced) || errors.Is(err, ErrPChannelWindowStoreCorrupted) {
+		if errors.Is(err, ErrPChannelSummaryStoreFenced) || errors.Is(err, ErrPChannelSummaryStoreCorrupted) {
 			return err
 		}
 

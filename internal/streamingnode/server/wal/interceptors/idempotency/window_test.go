@@ -17,7 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
-func TestDIDWindowBeginCompleteAndDuplicate(t *testing.T) {
+func TestIdempotencyWindowBeginCompleteAndDuplicate(t *testing.T) {
 	startedAt := time.Unix(100, 0)
 	window := NewWindow(WindowConfig{Now: func() time.Time { return startedAt }})
 
@@ -175,7 +175,7 @@ func TestWindowByteCapEvictsOldestFirst(t *testing.T) {
 	require.Equal(t, BeginDecisionOwner, window.Begin("a", nil).Decision)
 }
 
-func TestDIDWindowSameKeyAlwaysDuplicate(t *testing.T) {
+func TestIdempotencyWindowSameKeyAlwaysDuplicate(t *testing.T) {
 	window := NewWindow(WindowConfig{})
 
 	begin := window.Begin("key-1", nil)
@@ -193,7 +193,7 @@ func TestDIDWindowSameKeyAlwaysDuplicate(t *testing.T) {
 	require.Equal(t, BeginDecisionDuplicate, duplicate.Decision)
 }
 
-func TestDIDWindowWaitsForInflightResult(t *testing.T) {
+func TestIdempotencyWindowWaitsForInflightResult(t *testing.T) {
 	window := NewWindow(WindowConfig{})
 
 	owner := window.Begin("key-1", nil)
@@ -212,7 +212,7 @@ func TestDIDWindowWaitsForInflightResult(t *testing.T) {
 	assert.Equal(t, uint64(100), result.Entry.GetCommitTimetick())
 }
 
-func TestDIDWindowMultipleWaitersAllReceiveResult(t *testing.T) {
+func TestIdempotencyWindowMultipleWaitersAllReceiveResult(t *testing.T) {
 	window := NewWindow(WindowConfig{})
 
 	owner := window.Begin("key-1", nil)
@@ -247,7 +247,7 @@ func TestDIDWindowMultipleWaitersAllReceiveResult(t *testing.T) {
 	}
 }
 
-func TestDIDWindowMultipleWaitersAllReceiveFailure(t *testing.T) {
+func TestIdempotencyWindowMultipleWaitersAllReceiveFailure(t *testing.T) {
 	window := NewWindow(WindowConfig{})
 	appendErr := errors.New("append failed")
 
@@ -279,7 +279,7 @@ func TestDIDWindowMultipleWaitersAllReceiveFailure(t *testing.T) {
 	}
 }
 
-func TestDIDWindowFailureRemovesInflight(t *testing.T) {
+func TestIdempotencyWindowFailureRemovesInflight(t *testing.T) {
 	window := NewWindow(WindowConfig{})
 	appendErr := errors.New("append failed")
 
@@ -296,7 +296,7 @@ func TestDIDWindowFailureRemovesInflight(t *testing.T) {
 	assert.Equal(t, BeginDecisionOwner, retry.Decision)
 }
 
-func TestDIDWindowEvictRespectsMinEntries(t *testing.T) {
+func TestIdempotencyWindowEvictRespectsMinEntries(t *testing.T) {
 	window := NewWindow(WindowConfig{MinEntries: 2})
 
 	completeKey(t, window, "key-1", 10)
@@ -312,7 +312,7 @@ func TestDIDWindowEvictRespectsMinEntries(t *testing.T) {
 	assert.Equal(t, BeginDecisionDuplicate, window.Begin("key-3", nil).Decision)
 }
 
-func TestDIDWindowEvictAppliesMaxBytes(t *testing.T) {
+func TestIdempotencyWindowEvictAppliesMaxBytes(t *testing.T) {
 	probe := NewWindow(WindowConfig{})
 	completeKey(t, probe, "key-1", 10)
 	entrySize := probe.bytes
@@ -332,7 +332,7 @@ func TestDIDWindowEvictAppliesMaxBytes(t *testing.T) {
 	assert.Equal(t, BeginDecisionDuplicate, window.Begin("key-3", nil).Decision)
 }
 
-func TestDIDWindowCompleteReportsEvictionCount(t *testing.T) {
+func TestIdempotencyWindowCompleteReportsEvictionCount(t *testing.T) {
 	probe := NewWindow(WindowConfig{})
 	completeKey(t, probe, "key-1", 10)
 	entrySize := probe.bytes
@@ -356,7 +356,7 @@ func TestDIDWindowCompleteReportsEvictionCount(t *testing.T) {
 	require.Equal(t, BeginDecisionDuplicate, window.Begin("key-2", nil).Decision)
 }
 
-func TestDIDWindowWatermarkFallsBackToSnapshotCheckpoint(t *testing.T) {
+func TestIdempotencyWindowWatermarkFallsBackToSnapshotCheckpoint(t *testing.T) {
 	window := NewWindow(WindowConfig{})
 	window.SetSnapshotCheckpointTT(100)
 	assert.Equal(t, uint64(100), window.SnapshotCheckpointTT())
@@ -368,15 +368,15 @@ func TestDIDWindowWatermarkFallsBackToSnapshotCheckpoint(t *testing.T) {
 // must seed the TTL visibility bound from the snapshot checkpoint so such an
 // entry stops answering duplicates at WAL open, not only after the first
 // TimeTick-driven sweep.
-func TestDIDWindowRestoreSeedsTTLBoundFromSnapshotCheckpoint(t *testing.T) {
+func TestIdempotencyWindowRestoreSeedsTTLBoundFromSnapshotCheckpoint(t *testing.T) {
 	ttl := 10 * time.Minute
 	checkpointTT := tsoutil.ComposeTS(time.Hour.Milliseconds(), 0)
 	expiredTT := tsoutil.ComposeTS((30 * time.Minute).Milliseconds(), 0)
 	freshTT := tsoutil.ComposeTS((59 * time.Minute).Milliseconds(), 0)
 
-	window := NewWindowFromSnapshot(WindowConfig{WindowTTL: ttl, MinEntries: 1000}, &streamingpb.WindowSnapshot{
+	window := NewWindowFromSnapshot(WindowConfig{WindowTTL: ttl, MinEntries: 1000}, &streamingpb.SummarySnapshot{
 		SnapshotCheckpointTimetick: checkpointTT,
-		Entries: []*streamingpb.WindowEntry{
+		Entries: []*streamingpb.SummaryEntry{
 			{Key: "expired", CommitTimetick: expiredTT},
 			{Key: "fresh", CommitTimetick: freshTT},
 		},
@@ -392,11 +392,11 @@ func TestDIDWindowRestoreSeedsTTLBoundFromSnapshotCheckpoint(t *testing.T) {
 	require.Equal(t, BeginDecisionDuplicate, dup.Decision)
 }
 
-func TestDIDWindowRestoreFromSnapshot(t *testing.T) {
-	window := NewWindowFromSnapshot(WindowConfig{}, &streamingpb.WindowSnapshot{
+func TestIdempotencyWindowRestoreFromSnapshot(t *testing.T) {
+	window := NewWindowFromSnapshot(WindowConfig{}, &streamingpb.SummarySnapshot{
 		SnapshotCheckpointTimetick: 100,
 		EvictedWatermarkTimetick:   90,
-		Entries: []*streamingpb.WindowEntry{
+		Entries: []*streamingpb.SummaryEntry{
 			{
 				Key:                    "key-1",
 				CommitTimetick:         90,

@@ -20,15 +20,15 @@ import (
 // day a proto field's JSON encoding changes. We prove the property by re-encoding
 // the footer JSON into a byte-different but semantically identical form (indented)
 // and refreshing the trailer checksum: decode must still accept it.
-func TestPChannelWindowFooterChecksumCoversStoredBytes(t *testing.T) {
-	payload, _, checksum, err := marshalPChannelWindowChunk("p1", 3, 0, &utility.WALCheckpoint{
+func TestPChannelSummaryFooterChecksumCoversStoredBytes(t *testing.T) {
+	payload, _, checksum, err := marshalPChannelSummaryChunk("p1", 3, 0, &utility.WALCheckpoint{
 		MessageID: rmq.NewRmqID(200),
 		TimeTick:  200,
 	}, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, checksum)
 
-	footerMagicStart := len(payload) - len(pchannelWindowChunkFooterMagic)
+	footerMagicStart := len(payload) - len(pchannelSummaryChunkFooterMagic)
 	footerLenStart := footerMagicStart - 4
 	footerChecksumStart := footerLenStart - sha256.Size
 	footerLen := int(binary.BigEndian.Uint32(payload[footerLenStart:footerMagicStart]))
@@ -40,16 +40,16 @@ func TestPChannelWindowFooterChecksumCoversStoredBytes(t *testing.T) {
 	require.NotEqual(t, payload[footerStart:footerChecksumStart], newFooter)
 	newChecksum := sha256.Sum256(newFooter)
 
-	rebuilt := make([]byte, 0, footerStart+len(newFooter)+sha256.Size+4+len(pchannelWindowChunkFooterMagic))
+	rebuilt := make([]byte, 0, footerStart+len(newFooter)+sha256.Size+4+len(pchannelSummaryChunkFooterMagic))
 	rebuilt = append(rebuilt, payload[:footerStart]...)
 	rebuilt = append(rebuilt, newFooter...)
 	rebuilt = append(rebuilt, newChecksum[:]...)
 	lenBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(lenBytes, uint32(len(newFooter)))
 	rebuilt = append(rebuilt, lenBytes...)
-	rebuilt = append(rebuilt, pchannelWindowChunkFooterMagic...)
+	rebuilt = append(rebuilt, pchannelSummaryChunkFooterMagic...)
 
-	records, footer, decodedChecksum, err := unmarshalPChannelWindowChunk(rebuilt)
+	records, footer, decodedChecksum, err := unmarshalPChannelSummaryChunk(rebuilt)
 	require.NoError(t, err)
 	require.Empty(t, records)
 	require.Equal(t, uint64(3), footer.Generation)

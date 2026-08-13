@@ -36,7 +36,7 @@ type WindowConfig struct {
 type Window struct {
 	mu sync.Mutex
 
-	entries  map[IdempotencyKey]*streamingpb.WindowEntry
+	entries  map[IdempotencyKey]*streamingpb.SummaryEntry
 	inflight map[IdempotencyKey]*PendingEntry
 
 	commitOrder          []IdempotencyKey
@@ -81,7 +81,7 @@ const (
 type BeginResult struct {
 	Decision BeginDecision
 	Pending  *PendingEntry
-	Entry    *streamingpb.WindowEntry
+	Entry    *streamingpb.SummaryEntry
 	Err      error
 }
 
@@ -93,7 +93,7 @@ type CommitResult struct {
 }
 
 type PendingResult struct {
-	Entry *streamingpb.WindowEntry
+	Entry *streamingpb.SummaryEntry
 	Err   error
 	// OwnerResolved reports that this result was published by the owner
 	// (Complete or Fail), which necessarily happens after the owner's Build
@@ -110,7 +110,7 @@ func NewWindow(config WindowConfig) *Window {
 		now = time.Now
 	}
 	return &Window{
-		entries:    make(map[IdempotencyKey]*streamingpb.WindowEntry),
+		entries:    make(map[IdempotencyKey]*streamingpb.SummaryEntry),
 		inflight:   make(map[IdempotencyKey]*PendingEntry),
 		minEntries: config.MinEntries,
 		maxBytes:   config.MaxBytes,
@@ -119,7 +119,7 @@ func NewWindow(config WindowConfig) *Window {
 	}
 }
 
-func NewWindowFromSnapshot(config WindowConfig, snapshot *streamingpb.WindowSnapshot) *Window {
+func NewWindowFromSnapshot(config WindowConfig, snapshot *streamingpb.SummarySnapshot) *Window {
 	window := NewWindow(config)
 	if snapshot == nil {
 		return window
@@ -191,7 +191,7 @@ func (w *Window) Complete(pending *PendingEntry, result CommitResult, msg messag
 		return false, 0
 	}
 
-	entry := &streamingpb.WindowEntry{
+	entry := &streamingpb.SummaryEntry{
 		Key:                    string(pending.Key),
 		CommitTimetick:         result.CommitTimeTick,
 		MessageId:              result.MessageID,
@@ -308,7 +308,7 @@ func (w *Window) insertCommitOrderLocked(key IdempotencyKey, commitTT uint64) {
 // duplicate visibility beyond the TTL bound. Hard capacity caps are different:
 // maxBytes may delete entries before TTL to bound memory, at which point there
 // is no entry left to serve.
-func (w *Window) servableLocked(entry *streamingpb.WindowEntry) bool {
+func (w *Window) servableLocked(entry *streamingpb.SummaryEntry) bool {
 	if w.windowTTL <= 0 || w.ttlEvictBoundTT == 0 {
 		return true
 	}

@@ -102,15 +102,15 @@ func TestCatalogSegmentAssignments(t *testing.T) {
 	assert.Equal(t, int64(2), segments[0].GetSegmentId())
 }
 
-func TestCatalogVChannelWindowMetas(t *testing.T) {
+func TestCatalogVChannelSummaryMetas(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("list_empty", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
 		catalog := NewCataLog(kv)
 
-		kv.EXPECT().LoadWithPrefix(mock.Anything, buildVChannelWindowMetaPrefix("p1", common.VChannelWindowViewTypeIdempotency)).Return(nil, nil, nil)
-		metas, err := catalog.ListVChannelWindowMetas(ctx, "p1", common.VChannelWindowViewTypeIdempotency)
+		kv.EXPECT().LoadWithPrefix(mock.Anything, buildVChannelSummaryMetaPrefix("p1", common.VChannelSummaryViewTypeIdempotency)).Return(nil, nil, nil)
+		metas, err := catalog.ListVChannelSummaryMetas(ctx, "p1", common.VChannelSummaryViewTypeIdempotency)
 		assert.NoError(t, err)
 		assert.Empty(t, metas)
 	})
@@ -118,10 +118,10 @@ func TestCatalogVChannelWindowMetas(t *testing.T) {
 	t.Run("save_and_list", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
 		catalog := NewCataLog(kv)
-		meta := &streamingpb.VChannelWindowMeta{
+		meta := &streamingpb.VChannelSummaryMeta{
 			Vchannel:                   "v1",
 			Pchannel:                   "p1",
-			ViewType:                   common.VChannelWindowViewTypeIdempotency,
+			ViewType:                   common.VChannelSummaryViewTypeIdempotency,
 			SnapshotCheckpointTimetick: 100,
 			EvictedWatermarkTimetick:   10,
 			EntryCount:                 3,
@@ -130,20 +130,20 @@ func TestCatalogVChannelWindowMetas(t *testing.T) {
 		assert.NoError(t, err)
 
 		expectedKVs := map[string]string{
-			buildVChannelWindowMetaKey("p1", common.VChannelWindowViewTypeIdempotency, "v1"): string(data),
+			buildVChannelSummaryMetaKey("p1", common.VChannelSummaryViewTypeIdempotency, "v1"): string(data),
 		}
 		kv.EXPECT().MultiSave(mock.Anything, expectedKVs).Return(nil)
-		err = catalog.SaveVChannelWindowMetas(ctx, "p1", common.VChannelWindowViewTypeIdempotency, map[string]*streamingpb.VChannelWindowMeta{
+		err = catalog.SaveVChannelSummaryMetas(ctx, "p1", common.VChannelSummaryViewTypeIdempotency, map[string]*streamingpb.VChannelSummaryMeta{
 			"v1": meta,
 		})
 		assert.NoError(t, err)
 
-		kv.EXPECT().LoadWithPrefix(mock.Anything, buildVChannelWindowMetaPrefix("p1", common.VChannelWindowViewTypeIdempotency)).Return(
-			[]string{buildVChannelWindowMetaKey("p1", common.VChannelWindowViewTypeIdempotency, "v1")},
+		kv.EXPECT().LoadWithPrefix(mock.Anything, buildVChannelSummaryMetaPrefix("p1", common.VChannelSummaryViewTypeIdempotency)).Return(
+			[]string{buildVChannelSummaryMetaKey("p1", common.VChannelSummaryViewTypeIdempotency, "v1")},
 			[]string{string(data)},
 			nil,
 		)
-		metas, err := catalog.ListVChannelWindowMetas(ctx, "p1", common.VChannelWindowViewTypeIdempotency)
+		metas, err := catalog.ListVChannelSummaryMetas(ctx, "p1", common.VChannelSummaryViewTypeIdempotency)
 		assert.NoError(t, err)
 		assert.Len(t, metas, 1)
 		assert.Equal(t, meta.GetVchannel(), metas[0].GetVchannel())
@@ -157,19 +157,19 @@ func TestCatalogVChannelWindowMetas(t *testing.T) {
 	t.Run("save_uses_map_key_when_vchannel_empty", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
 		catalog := NewCataLog(kv)
-		meta := &streamingpb.VChannelWindowMeta{ViewType: common.VChannelWindowViewTypeIdempotency}
-		stored := &streamingpb.VChannelWindowMeta{
+		meta := &streamingpb.VChannelSummaryMeta{ViewType: common.VChannelSummaryViewTypeIdempotency}
+		stored := &streamingpb.VChannelSummaryMeta{
 			Pchannel: "p1",
 			Vchannel: "v1",
-			ViewType: common.VChannelWindowViewTypeIdempotency,
+			ViewType: common.VChannelSummaryViewTypeIdempotency,
 		}
 		data, err := proto.Marshal(stored)
 		assert.NoError(t, err)
 
 		kv.EXPECT().MultiSave(mock.Anything, map[string]string{
-			buildVChannelWindowMetaKey("p1", common.VChannelWindowViewTypeIdempotency, "v1"): string(data),
+			buildVChannelSummaryMetaKey("p1", common.VChannelSummaryViewTypeIdempotency, "v1"): string(data),
 		}).Return(nil)
-		err = catalog.SaveVChannelWindowMetas(ctx, "p1", common.VChannelWindowViewTypeIdempotency, map[string]*streamingpb.VChannelWindowMeta{
+		err = catalog.SaveVChannelSummaryMetas(ctx, "p1", common.VChannelSummaryViewTypeIdempotency, map[string]*streamingpb.VChannelSummaryMeta{
 			"v1": meta,
 		})
 		assert.NoError(t, err)
@@ -179,18 +179,18 @@ func TestCatalogVChannelWindowMetas(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
 		catalog := NewCataLog(kv)
 
-		err := catalog.SaveVChannelWindowMetas(ctx, "p1", common.VChannelWindowViewTypeIdempotency, map[string]*streamingpb.VChannelWindowMeta{
-			"v1": {Pchannel: "p2", Vchannel: "v1", ViewType: common.VChannelWindowViewTypeIdempotency},
+		err := catalog.SaveVChannelSummaryMetas(ctx, "p1", common.VChannelSummaryViewTypeIdempotency, map[string]*streamingpb.VChannelSummaryMeta{
+			"v1": {Pchannel: "p2", Vchannel: "v1", ViewType: common.VChannelSummaryViewTypeIdempotency},
 		})
 		assert.Error(t, err)
 
-		err = catalog.SaveVChannelWindowMetas(ctx, "p1", common.VChannelWindowViewTypeIdempotency, map[string]*streamingpb.VChannelWindowMeta{
-			"v1": {Pchannel: "p1", Vchannel: "v2", ViewType: common.VChannelWindowViewTypeIdempotency},
+		err = catalog.SaveVChannelSummaryMetas(ctx, "p1", common.VChannelSummaryViewTypeIdempotency, map[string]*streamingpb.VChannelSummaryMeta{
+			"v1": {Pchannel: "p1", Vchannel: "v2", ViewType: common.VChannelSummaryViewTypeIdempotency},
 		})
 		assert.Error(t, err)
 
-		err = catalog.SaveVChannelWindowMetas(ctx, "p1", common.VChannelWindowViewTypeIdempotency, map[string]*streamingpb.VChannelWindowMeta{
-			"v1": {Pchannel: "p1", Vchannel: "v1", ViewType: common.VChannelWindowViewTypePrimaryKeyIndex},
+		err = catalog.SaveVChannelSummaryMetas(ctx, "p1", common.VChannelSummaryViewTypeIdempotency, map[string]*streamingpb.VChannelSummaryMeta{
+			"v1": {Pchannel: "p1", Vchannel: "v1", ViewType: common.VChannelSummaryViewTypePrimaryKeyIndex},
 		})
 		assert.Error(t, err)
 	})
@@ -198,22 +198,22 @@ func TestCatalogVChannelWindowMetas(t *testing.T) {
 	t.Run("view_type_isolated_keys", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
 		catalog := NewCataLog(kv)
-		meta := &streamingpb.VChannelWindowMeta{
+		meta := &streamingpb.VChannelSummaryMeta{
 			Pchannel: "p1",
 			Vchannel: "v1",
-			ViewType: common.VChannelWindowViewTypePrimaryKeyIndex,
+			ViewType: common.VChannelSummaryViewTypePrimaryKeyIndex,
 		}
 		data, err := proto.Marshal(meta)
 		assert.NoError(t, err)
 
 		kv.EXPECT().MultiSave(mock.Anything, map[string]string{
-			buildVChannelWindowMetaKey("p1", common.VChannelWindowViewTypePrimaryKeyIndex, "v1"): string(data),
+			buildVChannelSummaryMetaKey("p1", common.VChannelSummaryViewTypePrimaryKeyIndex, "v1"): string(data),
 		}).Return(nil)
-		err = catalog.SaveVChannelWindowMetas(ctx, "p1", common.VChannelWindowViewTypePrimaryKeyIndex, map[string]*streamingpb.VChannelWindowMeta{
+		err = catalog.SaveVChannelSummaryMetas(ctx, "p1", common.VChannelSummaryViewTypePrimaryKeyIndex, map[string]*streamingpb.VChannelSummaryMeta{
 			"v1": meta,
 		})
 		assert.NoError(t, err)
-		assert.NotEqual(t, buildVChannelWindowMetaPrefix("p1", common.VChannelWindowViewTypeIdempotency), buildVChannelWindowMetaPrefix("p1", common.VChannelWindowViewTypePrimaryKeyIndex))
+		assert.NotEqual(t, buildVChannelSummaryMetaPrefix("p1", common.VChannelSummaryViewTypeIdempotency), buildVChannelSummaryMetaPrefix("p1", common.VChannelSummaryViewTypePrimaryKeyIndex))
 	})
 
 	t.Run("remove", func(t *testing.T) {
@@ -221,10 +221,10 @@ func TestCatalogVChannelWindowMetas(t *testing.T) {
 		catalog := NewCataLog(kv)
 
 		kv.EXPECT().MultiRemove(mock.Anything, []string{
-			buildVChannelWindowMetaKey("p1", common.VChannelWindowViewTypeIdempotency, "v1"),
-			buildVChannelWindowMetaKey("p1", common.VChannelWindowViewTypeIdempotency, "v2"),
+			buildVChannelSummaryMetaKey("p1", common.VChannelSummaryViewTypeIdempotency, "v1"),
+			buildVChannelSummaryMetaKey("p1", common.VChannelSummaryViewTypeIdempotency, "v2"),
 		}).Return(nil)
-		err := catalog.RemoveVChannelWindowMetas(ctx, "p1", common.VChannelWindowViewTypeIdempotency, []string{"v1", "v2"})
+		err := catalog.RemoveVChannelSummaryMetas(ctx, "p1", common.VChannelSummaryViewTypeIdempotency, []string{"v1", "v2"})
 		assert.NoError(t, err)
 	})
 
@@ -232,65 +232,65 @@ func TestCatalogVChannelWindowMetas(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
 		catalog := NewCataLog(kv)
 
-		kv.EXPECT().LoadWithPrefix(mock.Anything, buildVChannelWindowMetaPrefix("p1", common.VChannelWindowViewTypeIdempotency)).Return(
-			[]string{buildVChannelWindowMetaKey("p1", common.VChannelWindowViewTypeIdempotency, "v1")},
+		kv.EXPECT().LoadWithPrefix(mock.Anything, buildVChannelSummaryMetaPrefix("p1", common.VChannelSummaryViewTypeIdempotency)).Return(
+			[]string{buildVChannelSummaryMetaKey("p1", common.VChannelSummaryViewTypeIdempotency, "v1")},
 			[]string{"invalid-proto"},
 			nil,
 		)
-		metas, err := catalog.ListVChannelWindowMetas(ctx, "p1", common.VChannelWindowViewTypeIdempotency)
+		metas, err := catalog.ListVChannelSummaryMetas(ctx, "p1", common.VChannelSummaryViewTypeIdempotency)
 		assert.Error(t, err)
 		assert.Nil(t, metas)
 	})
 }
 
-// TestCatalogVChannelWindowMetasRecover is a regression test for the recover-side
+// TestCatalogVChannelSummaryMetasRecover is a regression test for the recover-side
 // vchannel-prefix bug. A real etcdkv returns keys that INCLUDE the metaKV rootPath,
-// so ListVChannelWindowMetas must strip the prefix rootPath-tolerantly. A naive
+// so ListVChannelSummaryMetas must strip the prefix rootPath-tolerantly. A naive
 // strings.TrimPrefix leaves the whole key as the vchannel name and fails recovery
 // with "vchannel mismatch", which wedged the WAL reopen on streamingnode restart
 // (collections on the pchannel became permanently unloadable). The mock-based
 // save_and_list case above could not catch this because the mock returns the
 // relative key, not the rootPath-prefixed key a real metaKV returns.
-func TestCatalogVChannelWindowMetasRecover(t *testing.T) {
+func TestCatalogVChannelSummaryMetasRecover(t *testing.T) {
 	etcdCli, _ := kvfactory.GetEtcdAndPath()
-	rootPath := "testCatalogVChannelWindowMetasRecover-" + uuid.New().String() + "/meta"
+	rootPath := "testCatalogVChannelSummaryMetasRecover-" + uuid.New().String() + "/meta"
 	kv := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	catalog := NewCataLog(kv)
 	ctx := context.Background()
 
 	pchannel := "by-dev-rootcoord-dml_0"
 	vchannel := "by-dev-rootcoord-dml_0_123456789v0"
-	err := catalog.SaveVChannelWindowMetas(ctx, pchannel, common.VChannelWindowViewTypeIdempotency,
-		map[string]*streamingpb.VChannelWindowMeta{
+	err := catalog.SaveVChannelSummaryMetas(ctx, pchannel, common.VChannelSummaryViewTypeIdempotency,
+		map[string]*streamingpb.VChannelSummaryMeta{
 			vchannel: {
 				Pchannel:                   pchannel,
 				Vchannel:                   vchannel,
-				ViewType:                   common.VChannelWindowViewTypeIdempotency,
+				ViewType:                   common.VChannelSummaryViewTypeIdempotency,
 				SnapshotCheckpointTimetick: 100,
 			},
 		})
 	assert.NoError(t, err)
 
-	metas, err := catalog.ListVChannelWindowMetas(ctx, pchannel, common.VChannelWindowViewTypeIdempotency)
+	metas, err := catalog.ListVChannelSummaryMetas(ctx, pchannel, common.VChannelSummaryViewTypeIdempotency)
 	if assert.NoError(t, err) && assert.Len(t, metas, 1) {
 		assert.Equal(t, vchannel, metas[0].GetVchannel())
 		assert.Equal(t, pchannel, metas[0].GetPchannel())
-		assert.Equal(t, common.VChannelWindowViewTypeIdempotency, metas[0].GetViewType())
+		assert.Equal(t, common.VChannelSummaryViewTypeIdempotency, metas[0].GetViewType())
 	}
 
-	err = catalog.RemoveVChannelWindowMetas(ctx, pchannel, common.VChannelWindowViewTypeIdempotency, []string{vchannel})
+	err = catalog.RemoveVChannelSummaryMetas(ctx, pchannel, common.VChannelSummaryViewTypeIdempotency, []string{vchannel})
 	assert.NoError(t, err)
 }
 
-func TestCatalogPChannelWindowMeta(t *testing.T) {
+func TestCatalogPChannelSummaryMeta(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("get_missing", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
 		catalog := NewCataLog(kv)
 
-		kv.EXPECT().Load(mock.Anything, buildPChannelWindowMetaKey("p1")).Return("", merr.ErrIoKeyNotFound)
-		meta, err := catalog.GetPChannelWindowMeta(ctx, "p1")
+		kv.EXPECT().Load(mock.Anything, buildPChannelSummaryMetaKey("p1")).Return("", merr.ErrIoKeyNotFound)
+		meta, err := catalog.GetPChannelSummaryMeta(ctx, "p1")
 		assert.NoError(t, err)
 		assert.Nil(t, meta)
 	})
@@ -298,7 +298,7 @@ func TestCatalogPChannelWindowMeta(t *testing.T) {
 	t.Run("save_and_get", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
 		catalog := NewCataLog(kv)
-		meta := &streamingpb.PChannelWindowMeta{
+		meta := &streamingpb.PChannelSummaryMeta{
 			Pchannel:                 "p1",
 			SourceCheckpointTimetick: 120,
 			LatestGeneration:         3,
@@ -313,12 +313,12 @@ func TestCatalogPChannelWindowMeta(t *testing.T) {
 		data, err := proto.Marshal(meta)
 		assert.NoError(t, err)
 
-		kv.EXPECT().Save(mock.Anything, buildPChannelWindowMetaKey("p1"), string(data)).Return(nil)
-		err = catalog.SavePChannelWindowMeta(ctx, "p1", meta)
+		kv.EXPECT().Save(mock.Anything, buildPChannelSummaryMetaKey("p1"), string(data)).Return(nil)
+		err = catalog.SavePChannelSummaryMeta(ctx, "p1", meta)
 		assert.NoError(t, err)
 
-		kv.EXPECT().Load(mock.Anything, buildPChannelWindowMetaKey("p1")).Return(string(data), nil)
-		got, err := catalog.GetPChannelWindowMeta(ctx, "p1")
+		kv.EXPECT().Load(mock.Anything, buildPChannelSummaryMetaKey("p1")).Return(string(data), nil)
+		got, err := catalog.GetPChannelSummaryMeta(ctx, "p1")
 		assert.NoError(t, err)
 		assert.Equal(t, meta.GetPchannel(), got.GetPchannel())
 		assert.Equal(t, meta.GetSourceCheckpointTimetick(), got.GetSourceCheckpointTimetick())
@@ -333,7 +333,7 @@ func TestCatalogPChannelWindowMeta(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
 		catalog := NewCataLog(kv)
 
-		err := catalog.SavePChannelWindowMeta(ctx, "p1", &streamingpb.PChannelWindowMeta{Pchannel: "p2"})
+		err := catalog.SavePChannelSummaryMeta(ctx, "p1", &streamingpb.PChannelSummaryMeta{Pchannel: "p2"})
 		assert.Error(t, err)
 	})
 
@@ -341,8 +341,8 @@ func TestCatalogPChannelWindowMeta(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
 		catalog := NewCataLog(kv)
 
-		kv.EXPECT().Load(mock.Anything, buildPChannelWindowMetaKey("p1")).Return("invalid-proto", nil)
-		meta, err := catalog.GetPChannelWindowMeta(ctx, "p1")
+		kv.EXPECT().Load(mock.Anything, buildPChannelSummaryMetaKey("p1")).Return("invalid-proto", nil)
+		meta, err := catalog.GetPChannelSummaryMeta(ctx, "p1")
 		assert.Error(t, err)
 		assert.Nil(t, meta)
 	})
@@ -350,15 +350,15 @@ func TestCatalogPChannelWindowMeta(t *testing.T) {
 	t.Run("compare_and_swap", func(t *testing.T) {
 		kv := mocks.NewMetaKv(t)
 		catalog := NewCataLog(kv).(*catalog)
-		key := buildPChannelWindowMetaKey("p1")
-		current := &streamingpb.PChannelWindowMeta{
+		key := buildPChannelSummaryMetaKey("p1")
+		current := &streamingpb.PChannelSummaryMeta{
 			Pchannel:                 "p1",
 			SourceCheckpointTimetick: 100,
 			LatestGeneration:         1,
 		}
 		currentData, err := proto.Marshal(current)
 		assert.NoError(t, err)
-		target := &streamingpb.PChannelWindowMeta{
+		target := &streamingpb.PChannelSummaryMeta{
 			Pchannel:                 "p1",
 			SourceCheckpointTimetick: 200,
 			LatestGeneration:         2,
@@ -367,22 +367,22 @@ func TestCatalogPChannelWindowMeta(t *testing.T) {
 		assert.NoError(t, err)
 
 		kv.EXPECT().CompareVersionAndSwap(mock.Anything, key, int64(0), string(currentData)).Return(true, nil).Once()
-		swapped, err := catalog.CompareAndSwapPChannelWindowMeta(ctx, "p1", nil, current)
+		swapped, err := catalog.CompareAndSwapPChannelSummaryMeta(ctx, "p1", nil, current)
 		assert.NoError(t, err)
 		assert.True(t, swapped)
 
 		kv.EXPECT().CompareVersionAndSwap(mock.Anything, key, int64(0), string(currentData)).Return(false, nil).Once()
-		swapped, err = catalog.CompareAndSwapPChannelWindowMeta(ctx, "p1", nil, current)
+		swapped, err = catalog.CompareAndSwapPChannelSummaryMeta(ctx, "p1", nil, current)
 		assert.NoError(t, err)
 		assert.False(t, swapped)
 
 		kv.EXPECT().MultiSaveAndRemove(mock.Anything, map[string]string{key: string(targetData)}, mock.Anything, mock.Anything).Return(nil).Once()
-		swapped, err = catalog.CompareAndSwapPChannelWindowMeta(ctx, "p1", current, target)
+		swapped, err = catalog.CompareAndSwapPChannelSummaryMeta(ctx, "p1", current, target)
 		assert.NoError(t, err)
 		assert.True(t, swapped)
 
 		kv.EXPECT().MultiSaveAndRemove(mock.Anything, map[string]string{key: string(targetData)}, mock.Anything, mock.Anything).Return(merr.WrapErrIoFailedReason("failed to execute transaction")).Once()
-		swapped, err = catalog.CompareAndSwapPChannelWindowMeta(ctx, "p1", current, target)
+		swapped, err = catalog.CompareAndSwapPChannelSummaryMeta(ctx, "p1", current, target)
 		assert.NoError(t, err)
 		assert.False(t, swapped)
 	})
@@ -663,16 +663,16 @@ func TestBuildPrefixAndKey(t *testing.T) {
 	assert.Equal(t, "streamingnode-meta/wal/p1/consume-checkpoint", buildConsumeCheckpointKey("p1"))
 	assert.Equal(t, "streamingnode-meta/wal/p2/consume-checkpoint", buildConsumeCheckpointKey("p2"))
 
-	assert.Equal(t, "streamingnode-meta/wal/p1/window-store/", buildWindowStorePrefix("p1"))
-	assert.Equal(t, "streamingnode-meta/wal/p2/window-store/", buildWindowStorePrefix("p2"))
+	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/", buildSummaryStorePrefix("p1"))
+	assert.Equal(t, "streamingnode-meta/wal/p2/summary-store/", buildSummaryStorePrefix("p2"))
 
-	assert.Equal(t, "streamingnode-meta/wal/p1/window-store/pchannel-meta", buildPChannelWindowMetaKey("p1"))
-	assert.Equal(t, "streamingnode-meta/wal/p2/window-store/pchannel-meta", buildPChannelWindowMetaKey("p2"))
+	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/pchannel-meta", buildPChannelSummaryMetaKey("p1"))
+	assert.Equal(t, "streamingnode-meta/wal/p2/summary-store/pchannel-meta", buildPChannelSummaryMetaKey("p2"))
 
-	assert.Equal(t, "streamingnode-meta/wal/p1/window-store/vchannels/idempotency/", buildVChannelWindowMetaPrefix("p1", common.VChannelWindowViewTypeIdempotency))
-	assert.Equal(t, "streamingnode-meta/wal/p1/window-store/vchannels/pkindex/", buildVChannelWindowMetaPrefix("p1", common.VChannelWindowViewTypePrimaryKeyIndex))
-	assert.Equal(t, "streamingnode-meta/wal/p1/window-store/vchannels/idempotency/v1", buildVChannelWindowMetaKey("p1", common.VChannelWindowViewTypeIdempotency, "v1"))
-	assert.Equal(t, "streamingnode-meta/wal/p1/window-store/vchannels/pkindex/v1", buildVChannelWindowMetaKey("p1", common.VChannelWindowViewTypePrimaryKeyIndex, "v1"))
+	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/vchannels/idempotency/", buildVChannelSummaryMetaPrefix("p1", common.VChannelSummaryViewTypeIdempotency))
+	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/vchannels/pkindex/", buildVChannelSummaryMetaPrefix("p1", common.VChannelSummaryViewTypePrimaryKeyIndex))
+	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/vchannels/idempotency/v1", buildVChannelSummaryMetaKey("p1", common.VChannelSummaryViewTypeIdempotency, "v1"))
+	assert.Equal(t, "streamingnode-meta/wal/p1/summary-store/vchannels/pkindex/v1", buildVChannelSummaryMetaKey("p1", common.VChannelSummaryViewTypePrimaryKeyIndex, "v1"))
 
 	assert.Equal(t, "streamingnode-meta/wal/p1/salvage-checkpoint/cluster-a", buildSalvageCheckpointPath("p1", "cluster-a"))
 	assert.Equal(t, "streamingnode-meta/wal/p2/salvage-checkpoint/cluster-b", buildSalvageCheckpointPath("p2", "cluster-b"))

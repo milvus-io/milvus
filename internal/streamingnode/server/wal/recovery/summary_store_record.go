@@ -138,15 +138,15 @@ func idempotencyKeyFromImmutableMessage(msg message.ImmutableMessage) string {
 		return ""
 	}
 	// A replicated message preserves the SOURCE cluster's message properties,
-	// including its idempotency key. That key must never materialize a window
-	// entry here: the local window's key history is independent of the source's,
+	// including its idempotency key. That key must never materialize a summary
+	// entry here: the local summary's key history is independent of the source's,
 	// and a poisoned entry would drive replicated appends down the duplicate
 	// path after a restart. Replicated writes are treated as keyless committed
 	// writes (checkpoint bookkeeping only), matching the interceptor-side bypass.
 	if msg.ReplicateHeader() != nil {
 		return ""
 	}
-	// Gated to the message types the window deduplicates, mirroring
+	// Gated to the message types the summary deduplicates, mirroring
 	// getIdempotencyKey on the interceptor side: the key property alone must not
 	// materialize an entry for a type the append path never dedups.
 	switch msg.MessageType() {
@@ -176,7 +176,7 @@ func idempotentInsertResultFromImmutableInsert(msg message.ImmutableMessage) (*m
 	return message.IdempotentInsertResultFromInsertHeader(insertMsg.Header())
 }
 
-func committedWriteRecordFromWindowEntry(pchannel, vchannel string, entry *streamingpb.WindowEntry) *committedWriteRecord {
+func committedWriteRecordFromSummaryEntry(pchannel, vchannel string, entry *streamingpb.SummaryEntry) *committedWriteRecord {
 	if entry == nil {
 		return nil
 	}
@@ -194,11 +194,11 @@ func committedWriteRecordFromWindowEntry(pchannel, vchannel string, entry *strea
 	}
 }
 
-func (record *committedWriteRecord) WindowEntry() *streamingpb.WindowEntry {
+func (record *committedWriteRecord) SummaryEntry() *streamingpb.SummaryEntry {
 	if record == nil || record.Idempotency == nil {
 		return nil
 	}
-	entry := &streamingpb.WindowEntry{
+	entry := &streamingpb.SummaryEntry{
 		Key:                    record.Idempotency.Key,
 		CommitTimetick:         record.SourceTimeTick,
 		MessageId:              cloneMessageIDProto(record.SourceMessageID),
