@@ -300,9 +300,9 @@ DataCoord.ImportV2
 → ACK callback 原样创建 ImportJob
 ```
 
-backup 展开必须在广播前完成，否则主备 ACK callback 各自 LIST 后不仅 file ID 不同，规范文件顺序也可能不同。普通与 backup 都使用同一 stable file key：`format + 按语义顺序保留的 length-prefixed paths`。不同 key 按字节序排序；完全相同的 key 只能用原请求中的 occurrence ordinal 区分，因为相同路径没有其他可推导身份。这一处明确使用原请求 occurrence ordinal，其余不同 key 不依赖用户清单顺序、并发 LIST 返回顺序或完成顺序。规范顺序固化后再分配 file ID 和每文件唯一的 PK ID range。ACK callback 只有处理老 WAL 时才保留当前本地展开和 file-ID 分配兼容分支；不新增“拒绝重复路径”防御规则。
+backup 展开必须在广播前完成，否则主备 ACK callback 各自 LIST 后不仅 file ID 不同，规范文件顺序也可能不同。普通与 backup 都使用同一 stable file key：`format + 按语义顺序保留的 length-prefixed paths`。不同 key 按字节序排序；完全相同的 key 只能用原请求中的 occurrence ordinal 区分，因为相同路径没有其他可推导身份。这一处明确使用原请求 occurrence ordinal，其余不同 key 不依赖用户清单顺序、并发 LIST 返回顺序或完成顺序。规范顺序固化后再分配 file ID 和每文件唯一的 pre-allocated AutoID range。ACK callback 只有处理老 WAL 时才保留当前本地展开和 file-ID 分配兼容分支；不新增“拒绝重复路径”防御规则。
 
-继续复用当前真实的 `ImportMessageV1 + msgpb.ImportMsg`，只追加 `import_task_version` 和逐文件范围，改动小于新建一套 WAL message、builder、registry 和 adaptor。需要修改外部 `milvus-proto/proto/msg.proto` 的 `ImportMsg`/`ImportFile`，再更新本仓 go-api 依赖。不得手改生成文件。这里的 `ImportMessageV1` 是现有 Streaming message payload 版本名，不是新增 Import 链路名称。`ImportTaskVersion` 只用于兼容性和恢复路由；WAL 仍然同时保存真正影响数据结果的文件、路径、选项、schema、channel/partition 顺序、timestamp 和 `pk_id_range`。
+继续复用当前真实的 `ImportMessageV1 + msgpb.ImportMsg`，只追加 `import_task_version` 和逐文件范围，改动小于新建一套 WAL message、builder、registry 和 adaptor。需要修改外部 `milvus-proto/proto/msg.proto` 的 `ImportMsg`/`ImportFile`，再更新本仓 go-api 依赖。不得手改生成文件。这里的 `ImportMessageV1` 是现有 Streaming message payload 版本名，不是新增 Import 链路名称。`ImportTaskVersion` 只用于兼容性和恢复路由；WAL 仍然同时保存真正影响数据结果的文件、路径、选项、schema、channel/partition 顺序、timestamp 和 `pre_allocated_auto_ids`。
 
 ### 6.2 普通格式逐文件范围
 
@@ -310,16 +310,16 @@ backup 展开必须在广播前完成，否则主备 ACK callback 各自 LIST �
 message ImportFile {
   int64 id = 1;
   repeated string paths = 2;
-  common.IDRange pk_id_range = 3; // 普通格式每文件唯一的连续 range；backup/L0 为空
+  common.IDRange pre_allocated_auto_ids = 3; // 普通格式每文件唯一的连续 range；backup/L0 为空
 }
 ```
 
-以 PR #51825 的行为为准，直接复用它提供的单个 `common.IDRange`/`ImportFile.pk_id_range`，不新增 `ImportIDRange`，也不使用 repeated ranges。本次当前 checkout 的 go-api 依赖仍可能生成旧字段名（例如 `PreAllocatedAutoIds`）；实施时必须升级到 PR #51825 的最终 proto，并全仓统一使用最终字段名，不能同时保留两个同义字段。若合入时字段名发生调整，以 PR #51825 最终 proto 为准，但语义固定为“一个文件一个连续 range”。本仓 `internal.ImportFile`、ACK、StreamingCoord 转发、ImportJob 和 task plan 都原样复制这个单值 range；`internal.ImportRequestInternal.import_task_version` 和 `datapb.ImportJob.import_task_version` 直接使用同一个 `ImportTaskVersion` enum。实现前运行 proto dependency/lint 检查，不能复制同义 range 类型或形成 import 循环。
+以 PR #51825 的行为为准，直接复用它提供的单个 `common.IDRange`/`ImportFile.pre_allocated_auto_ids`，不新增 `ImportIDRange`，也不使用 repeated ranges。本次当前 checkout 的 go-api 依赖仍可能生成旧字段名（例如 `PreAllocatedAutoIds`）；实施时必须升级到 PR #51825 的最终 proto，并全仓统一使用最终字段名，不能同时保留两个同义字段。若合入时字段名发生调整，以 PR #51825 最终 proto 为准，但语义固定为“一个文件一个连续 range”。本仓 `internal.ImportFile`、ACK、StreamingCoord 转发、ImportJob 和 task plan 都原样复制这个单值 range；`internal.ImportRequestInternal.import_task_version` 和 `datapb.ImportJob.import_task_version` 直接使用同一个 `ImportTaskVersion` enum。实现前运行 proto dependency/lint 检查，不能复制同义 range 类型或形成 import 循环。
 
 对每个普通 `ImportFile` 分配一个互不相交的字面 `[begin, end)`。广播端按 PR #51825 的批处理方式调用当前 `common.AllocAutoID(..., paramtable.CommonCfg.ClusterID)`；单文件范围不能跨 allocation batch。写入 WAL 的 begin/end 已经物化主集群当前数字 `common.clusterID` 的 bits；这里不是字符串 `clusterPrefix`，也不从 CDC `ReplicateHeader.ClusterID` 推导。DataNode 和 CDC 备集群不得再用本地 cluster ID 做第二次变换：
 
 ```text
-range = file.pk_id_range
+range = file.pre_allocated_auto_ids
 generated_id = range.begin + row_offset
 RowID        = generated_id
 ```
@@ -343,7 +343,7 @@ VarChar PK = decimal(generated_id)
 
 每个文件只保存一个字面 range；多个文件的 range 总量可以自然超过 `MaxUint32`。备集群只消费字面值，不调用本地 allocator，也不按自己的 `common.clusterID` 重写。
 
-`pk_id_range` 的宽度就是该文件的行数上界，不再存第二个 `row_count_upper_bound` 字段，避免两个真相源不一致。正式 log ID 与这些 RowID/AutoID ranges 独立分配，不能从文件 range 剩余部分中切 log ID。
+`pre_allocated_auto_ids` 的宽度就是该文件的行数上界，不再存第二个 `row_count_upper_bound` 字段，避免两个真相源不一致。正式 log ID 与这些 RowID/AutoID ranges 独立分配，不能从文件 range 剩余部分中切 log ID。
 
 文件内 `row_offset` 从 0 开始，按现有 reader 的逻辑记录顺序：
 
@@ -356,7 +356,7 @@ VarChar PK = decimal(generated_id)
 
 ### 6.3 backup/binlog 差异
 
-backup 同样进入 Reshard，但不分配普通格式的 `pk_id_range`：
+backup 同样进入 Reshard，但不分配普通格式的 `pre_allocated_auto_ids`：
 
 - 保留源 PK、RowID、timestamp；
 - 临时 fragment 包含系统字段；
@@ -370,7 +370,7 @@ backup 同样进入 Reshard，但不分配普通格式的 `pk_id_range`：
 
 - job ID、ImportTask version；
 - 稳定 file ID；
-- 普通格式每文件唯一的连续字面 `pk_id_range`；
+- 普通格式每文件唯一的连续字面 `pre_allocated_auto_ids`；
 - 源文件清单和影响 PK/RowID 的不可变选项；
 - 生成的 RowID、AutoID PK 和行路由结果。
 
@@ -520,7 +520,7 @@ enum ImportSourceFormat {
 
 message SourceFileSpec {
   int32 source_ordinal = 1;             // 规范文件顺序
-  internal.ImportFile file = 2;         // id/paths/pk_id_range 的唯一真相源
+  internal.ImportFile file = 2;         // id/paths/pre_allocated_auto_ids 的唯一真相源
   int64 estimated_source_bytes = 3;     // 只用于已固定的 task 分组/观测
   ImportSourceFormat format = 4;
   bool is_backup = 5;
@@ -617,7 +617,7 @@ reader.Read
 → CheckStructArrayConsistency
 → AppendNullableDefaultFieldsData
 → FillDynamicData
-→ 按每文件唯一的连续 `pk_id_range` 物化 RowID/AutoID PK
+→ 按每文件唯一的连续 `pre_allocated_auto_ids` 物化 RowID/AutoID PK
 → HashData 的相同 hash 规则
 → fragment sort
 ```
@@ -1155,7 +1155,7 @@ V3 required IDs per segment
   = 1 PK stats + bm25_output_field_count
 ```
 
-task 的 `required_log_ids` 是所有已计划 segment 预算上界的求和。`WriterSpec.column_groups`、PK stats 和 BM25 output 集合冻结了最大消耗，但 final predicate 可能让某个计划为非空的 segment 最终零行。final adapter 必须懒创建正式 writer：只有第一批保留行到达时才调用 `NewBinlogRecordWriter`；若直到 EOF 都没有保留行，则不创建/Close V2 writer，实际消耗为 0。DataCoord 要求 `0 < required_log_ids <= MaxUint32`，单次 `AllocN(required_log_ids)`；超过上限时直接以 non-retriable 内部资源/协议错误拒绝 Planning 结果，不创建 task、不调用 ID allocator、不自动拆 task。DataNode 用当前 `[Begin,End)` 语义构造 local allocator；每个 segment close 后和 task 成功前都验证 cursor 从未超过 `End`，允许未使用的尾部 ID并记录 unused count。多用说明 WriterSpec/预算与实际 writer 分支不一致，是 non-retriable 内部协议错误；少用不是错误。不能本地再申请 ID，也不能复用源文件 `pk_id_range`。inline text-index 文件不通过该 allocator 分配名字，不计入公式。
+task 的 `required_log_ids` 是所有已计划 segment 预算上界的求和。`WriterSpec.column_groups`、PK stats 和 BM25 output 集合冻结了最大消耗，但 final predicate 可能让某个计划为非空的 segment 最终零行。final adapter 必须懒创建正式 writer：只有第一批保留行到达时才调用 `NewBinlogRecordWriter`；若直到 EOF 都没有保留行，则不创建/Close V2 writer，实际消耗为 0。DataCoord 要求 `0 < required_log_ids <= MaxUint32`，单次 `AllocN(required_log_ids)`；超过上限时直接以 non-retriable 内部资源/协议错误拒绝 Planning 结果，不创建 task、不调用 ID allocator、不自动拆 task。DataNode 用当前 `[Begin,End)` 语义构造 local allocator；每个 segment close 后和 task 成功前都验证 cursor 从未超过 `End`，允许未使用的尾部 ID并记录 unused count。多用说明 WriterSpec/预算与实际 writer 分支不一致，是 non-retriable 内部协议错误；少用不是错误。不能本地再申请 ID，也不能复用源文件 `pre_allocated_auto_ids`。inline text-index 文件不通过该 allocator 分配名字，不计入公式。
 
 当前 V2 `Bm25StatsCollector.Digest` 和 V3 `appendV3Stats` 都遍历 Go map，field 到 log ID 的映射不稳定。ImportTaskV3 final adapter 必须按 `bm25_output_field_ids ASC` 分配 ID并写 stats；PK stats 始终先于 BM25。这不改变预算公式，只保证同一输入的元数据和测试稳定。
 
@@ -1852,7 +1852,7 @@ commit_timestamp
 - planning snapshot/task plan/result 对象按 ref GET 得到 **key not found** 时保留 `ErrIoKeyNotFound(1000)`（SystemError、不可重试），表示 catalog 已引用的内部对象丢失；对象存在但 digest 不同才是 `ErrDataIntegrity(1009)`。两者都直接 Failed，不能通过 OSS LIST 猜另一个对象或创建新 run 掩盖。
 - `ErrImportSysFailed`（code **2101**，SystemError，`retriable=false`）：内部编排或配置协议错误，包括 invalid `merge_fan_in`、缺少/无法定位 planning snapshot 或 task plan、snapshot generation/ref 与 task 不一致、未知 V3 状态/字段组合、缺失必须的 writer spec。它不是用户输入错误，用户只能看到 Import Failed 的系统原因；scheduler 禁止无限重试同一 plan。
 - **schema projection mismatch** 也使用 `ErrImportSysFailed(2101)`，不可重试：它是 frozen Import schema 与运行中 collection schema 的物理/函数/index 输入不兼容，是合法 schema alter 与 Import 之间的 TOCTOU/内部协议冲突，不使用 InputError 的 `ErrCollectionSchemaMismatch(109)`，也不进入旧 schema-bump 等待环。
-- DataNode 在运行时发现实际 `row_offset` 已耗尽已持久化的 `pk_id_range` 时，使用 `ErrDataIntegrity(1009)`，而不是 `ErrImportFailed`：range 是 DataCoord 已生成并写进 WAL/plan 的内部事实，耗尽说明 source coverage 或上界估算契约被破坏。该当前 run 直接 Failed，不申请新号段、不换 run 重做同一错误输入。
+- DataNode 在运行时发现实际 `row_offset` 已耗尽已持久化的 `pre_allocated_auto_ids` 时，使用 `ErrDataIntegrity(1009)`，而不是 `ErrImportFailed`：range 是 DataCoord 已生成并写进 WAL/plan 的内部事实，耗尽说明 source coverage 或上界估算契约被破坏。该当前 run 直接 Failed，不申请新号段、不换 run 重做同一错误输入。
 - 暂时对象存储/节点故障必须保留底层可重试 merr code：`ErrServiceNotReady`(1)、`ErrServiceUnavailable`(2)、`ErrIoUnexpectEOF`(1002)、`ErrIoTooManyRequests`(1003) 等。只在 storage client 的当前 operation retry 用尽后返回；DataCoord 才创建新 run。不要用 `merr.WrapErrImportSysFailedErr` 把这些 code 改成 2101。
 - 资源暂不可用沿用现有 `ErrServiceResourceInsufficient`（12，retriable）或节点 slot Pending 语义；本地 ENOSPC 只允许在任务失败后换节点/新 run，不能在同一节点无界重试。若 job timeout 已到，统一终止为 Failed。
 - `stale result` 不是失败：run ID 小于当前 run、task 已被取消/终态，或相同 digest 已提交时，返回幂等 no-op，不生成 merr、不重试 scheduler、不改变 job 状态。只有同一 run 的不同 digest 才是 `ErrDataIntegrity`。
@@ -1889,8 +1889,8 @@ commit_timestamp
 | 失败 | 行为 | 与旧 Import 的关系 |
 | --- | --- | --- |
 | reader/parse/字段一致性失败 | `ErrImportFailed(2100)`；当前 run 失败，不发布 manifest/result，不创建新 run，job Failed | 输入错误分类和 job 终止语义与旧 Import 对齐；旧、新都不重试同一份无法解析的输入。 |
-| 单文件 `pk_id_range` 广播前上界超过 `MaxUint32` | `ErrImportFailed(2100)`；直接拒绝并要求拆文件 | 按 PR #51825 和旧 Import 的输入边界对齐。 |
-| 运行时 `pk_id_range` exhausted | `ErrDataIntegrity(1009)`；当前 run/job 直接 Failed，不续号、不换 run、不调用本地 allocator | 是已发布 range 与实际 source coverage 不一致的内部协议故障，不归咎用户。 |
+| 单文件 `pre_allocated_auto_ids` 广播前上界超过 `MaxUint32` | `ErrImportFailed(2100)`；直接拒绝并要求拆文件 | 按 PR #51825 和旧 Import 的输入边界对齐。 |
+| 运行时 `pre_allocated_auto_ids` exhausted | `ErrDataIntegrity(1009)`；当前 run/job 直接 Failed，不续号、不换 run、不调用本地 allocator | 是已发布 range 与实际 source coverage 不一致的内部协议故障，不归咎用户。 |
 | S3 暂时错误/节点暂时不可用 | 保留 `ErrServiceUnavailable(2)`、`ErrIoTooManyRequests(1003)` 等 retryable code；当前 run 先做 operation retry，耗尽后新 run/换节点。`ErrIoFailed(1001)` 本身不可重试，除非 storage mapper 已把具体 throttle/EOF 映射为 retryable code | 重试分类、有界 operation retry 和换节点行为与旧 Import 对齐；V3 额外使用新 run 及输出前缀隔离。 |
 | 本地 ENOSPC | 归一化为 `ErrServiceResourceInsufficient(12)`；当前 run 失败并清理本地目录，允许换节点创建新 run；同一节点不无界重试 | 资源错误导致任务失败并重派的旧 Import 行为保持；V3 清理的是新增的 local spill。 |
 | fragment 对象缺失 | 保留 `ErrIoKeyNotFound(1000)`，不可重试，job 直接 Failed；不能通过 LIST 找替代对象 | manifest 已经是 immutable ref，缺对象表示系统/GC 契约破坏。 |
@@ -2178,12 +2178,12 @@ ImportJob
 
 - 外部 `milvus-proto/proto/msg.proto`
   - 唯一的 `msg.ImportTaskVersion` enum；
-  - 直接复用 PR #51825 的 `common.IDRange` 和唯一的 `msg.ImportFile.pk_id_range`；
+  - 直接复用 PR #51825 的 `common.IDRange` 和唯一的 `msg.ImportFile.pre_allocated_auto_ids`；
   - `ImportMsg.import_task_version`，使用 `ImportTaskVersion`。
 - `ImportTaskVersion` 虽定义在外部 proto 仓库，但仍是 Milvus 内部消息兼容字段：原因只是 `ImportMsg` 本身定义在那里，并且该字段必须随 broadcaster catalog、WAL 和 CDC 保存。它不加入用户 RPC request，不允许 Proxy/用户选择，也不能与 Streaming `ImportMessageV1` 的 payload format version 混为一谈。旧消息的 enum 零值/缺失值解释为 V2；新消息必须显式写 V2 或 V3。
 - `pkg/proto/internal.proto`
   - 在 `ImportJobState` 尾部追加 `Planning`，复用现有 `PreImporting/Importing`；
-  - import `msg.proto`，`internal.ImportFile.pk_id_range` 直接使用单个 `common.IDRange`；
+  - import `msg.proto`，`internal.ImportFile.pre_allocated_auto_ids` 直接使用单个 `common.IDRange`；
   - `ImportRequestInternal.import_task_version` 是内部搬运字段：用户 Proxy 新请求不设置版本，由 DataCoord 在广播边界选择；老 Proxy/StreamingCoord 转发一个已经带版本的 ImportMsg 时必须原样复制，不能重新选择；ACK callback 也必须把 WAL body 中的版本原样带入 job 创建。全链路只使用这一份 `msg.ImportTaskVersion`，不复制同数值的内部 enum。
 - 固定新增 `pkg/proto/import_v3.proto`，只放不依赖 `data_coord.proto` 的纯 OSS/control-contract 类型：
   - SortSpec/SortKey/SortFieldSpec、ImportSourceFormat、ReaderOptions、SourceFileSpec、ExpandedBinlogField；
@@ -2212,13 +2212,13 @@ ImportJob
   - 普通格式和 backup/binlog 新请求在广播前固定 `import_task_version=V3`；L0 固定 V2；不读取 enable 开关，不按 `V×P`、文件大小或节点瞬时状态选择版本；
   - 用户 Proxy 进入 `ImportV2` 且未携带版本时，由 DataCoord 按 gate 规则归一化为 V3（L0 为 V2）；老 Proxy/StreamingCoord 转发已带版本的消息时沿用该版本，只有真正没有版本的旧用户消息才在该入口按“新请求”规则选择；ACK callback 使用 WAL 中已固定的版本创建 job；
   - backup 展开前移，并按稳定 paths 键排序；
-  - 保留旧 Proxy 传入的非零 job ID，只有零值时分配；再分配 file ID 和普通格式每文件唯一的连续 `pk_id_range`；
+  - 保留旧 Proxy 传入的非零 job ID，只有零值时分配；再分配 file ID 和普通格式每文件唯一的连续 `pre_allocated_auto_ids`；
   - 历史 WAL 缺失 version 时按 V2 创建；新消息原样创建对应版本 job。
 - `internal/datacoord/ddl_callbacks_import.go`
   - `broadcastImport` 写完整 WAL contract；
   - ACK 从 WAL `BroadcastHeader.VChannels` 恢复稳定顺序，不遍历 `result.Results` map 生成 ordinal；
   - ImportTaskV3 `createImportJobFromAck` 使用 ACK 传入的 `ChannelNames` 直接保存 `ImportJob.Vchannels`，不切换到 collection info 的另一列表；
-  - ACK 显式复制 `import_task_version` 和每个 file 的单个 `pk_id_range`；
+  - ACK 显式复制 `import_task_version` 和每个 file 的单个 `pre_allocated_auto_ids`；
   - 保持当前 ResourceKey 和 2PC callback。
 - `docs/agent_guides/streaming-system/message/message-semantic-collection.md`
   - 按当前 `startBroadcastWithCollectionID` 源码把 Import 的 ResourceKey 从“无”改为 `SharedDBName + ExclusiveCollectionName`，并注明 Broadcaster 自动附加 `SharedCluster`；
@@ -2227,7 +2227,7 @@ ImportJob
   - 对每一项从实际 producer 的 `StartBroadcastWithResourceKeys` 调用和 message builder 反查 ResourceKey，补充 callback/replication 语义测试；
   - 这是 pending documentation todo：随功能实现放在同一提交/PR完成；当前设计文档只记录差异，不直接改 agent guide，后续不能继续保留与源码冲突的表格。
 - `internal/streamingcoord/server/service/broadcast.go`
-  - 老 Proxy 转发 `msgpb.ImportFile → internal.ImportFile` 时显式复制 `pk_id_range`，并在 `ImportMsg.import_task_version` 非零时原样复制 task version；字段缺失只表示该消息是旧格式，DataCoord 结合入口语义处理：旧 broadcaster ACK 按 V2 恢复，旧 Proxy 发起的新请求按当前 gate 规则选择 V3；
+  - 老 Proxy 转发 `msgpb.ImportFile → internal.ImportFile` 时显式复制 `pre_allocated_auto_ids`，并在 `ImportMsg.import_task_version` 非零时原样复制 task version；字段缺失只表示该消息是旧格式，DataCoord 结合入口语义处理：旧 broadcaster ACK 按 V2 恢复，旧 Proxy 发起的新请求按当前 gate 规则选择 V3；
   - 追加字段透明序列化，保持现有 `ImportMessageV1` message type。
 
 ### 23.3 DataCoord meta、checker、scheduler
@@ -2501,7 +2501,7 @@ go test -tags dynamic,test -gcflags="all=-N -l" -count=1 ...
 
 这是一次完整实现，不把核心架构留到“后续阶段”。同一个 feature 合入必须包含：
 
-1. WAL `import_task_version`、file ID/每文件唯一 `pk_id_range` 前移和 CDC 测试；覆盖“旧无字段 broadcaster task 与新 V3 task 并存”的滚动升级场景。
+1. WAL `import_task_version`、file ID/每文件唯一 `pre_allocated_auto_ids` 前移和 CDC 测试；覆盖“旧无字段 broadcaster task 与新 V3 task 并存”的滚动升级场景。
 2. V3 job/task proto、task 内 run fencing、catalog、scheduler 和恢复。
 3. Reshard reader、规范化、spill、固定预排序、fragment/manifest。
 4. Planning barrier、规范序装箱、multi-segment Importing plans。
@@ -2532,7 +2532,7 @@ go test -tags dynamic,test -gcflags="all=-N -l" -count=1 ...
 
 - 删除 V×P 阈值回退；新普通格式和 backup/binlog job 固定 V3，L0 和历史/缺失 version job固定 V2；
 - backup 纳入，L0 保持 ImportTaskV2；
-- 普通格式每文件唯一的连续 `pk_id_range` 前移到 WAL，CDC 使用相同字面范围；单文件上界超过 `MaxUint32` 时按 PR #51825 拒绝并要求拆文件；
+- 普通格式每文件唯一的连续 `pre_allocated_auto_ids` 前移到 WAL，CDC 使用相同字面范围；单文件上界超过 `MaxUint32` 时按 PR #51825 拒绝并要求拆文件；
 - 保留旧 Proxy 传入的非零 job ID，零值才分配；
 - fragment 预排序固定开启；
 - V3 删除全局 `MemoryAllocator` 依赖，使用 task-local working-set + DataNode slot admission；同一 DataNode 允许多个 V3 task 并行，V2 allocator 和 V2 scheduler 保持不变；
@@ -2573,7 +2573,7 @@ go test -tags dynamic,test -gcflags="all=-N -l" -count=1 ...
 2. **DataNode session/node 失效**：与旧 Import 对齐。Query 失败、session 丢失、进程重启后 task-not-found或 worker 返回 Retry 时，task 回到 Pending/Retry，清理当前 Importing 进度，重新选择 capable/有 slot 的 DataNode，并从不可变 fragment 重做整个 task；DataNode task 状态只保存在内存，不增加本地 checkpoint恢复。Drop 遇到 `ErrNodeNotFound` 当作成功并解绑。ImportTaskV3 保留 run ID、独立文件名/segment ID和结果校验隔离迟到结果，但不新增 session 停写证明；task-not-found 是 ownership-lost 特殊重派分支，不按 2101 terminal错误处理。V3 task 被取消时只取消自己的 context 和本地 working set，不影响同节点其它 V3 task。
 3. **内部对象校验**：不做 fragment/intermediate 内容 SHA-256，不为校验额外执行完整 GET。`physical_bytes` 从 writer/file descriptor 取得。代码保留 no-op validation hook 和注释，提示未来可附加 content checksum；控制面 protobuf manifest digest继续保留。完整 result acceptance 仍必须 GET manifest，因为它是 V2 式“拉取完整结果”的必要动作，不是源文件完整性防御。
 4. **单行超过 task-local working-set 上限**：当前 run 按资源失败终止，不临时超额、不增加复杂防御。主要信任 task slot 的 peak-memory 估算，极端偏差交给现有 Prometheus/SRE 监控。
-5. **单文件 ID 上界超过 `MaxUint32`**：以 PR #51825 为权威，直接拒绝并要求拆文件。一个文件只有一个连续 `pk_id_range`，不能由多个 range 拼接；整个 job 可用多个文件、多个 allocator batch，因此总量可超过 `MaxUint32`。
+5. **单文件 ID 上界超过 `MaxUint32`**：以 PR #51825 为权威，直接拒绝并要求拆文件。一个文件只有一个连续 `pre_allocated_auto_ids`，不能由多个 range 拼接；整个 job 可用多个文件、多个 allocator batch，因此总量可超过 `MaxUint32`。
 6. **新请求的版本**：新普通格式和 backup/binlog 请求在广播前固定 `import_task_version=V3`；L0 固定 V2。历史消息缺失字段时按 V2恢复；已经进入 WAL/ACK/CDC、已经创建或正在执行的 job 始终按消息/Job 中已持久化的 version 继续，不能按节点瞬时能力回退。开 gate 前不要求旧 broadcaster task 排空，旧无字段消息与新显式 V3 消息可以并存；但解除 gate 后旧 DataCoord 不能再成为 active，否则它会把 V3 当缺失字段按 V2 误处理。
 7. **Storage V2 orphan GC 窗口**：沿用 `dataCoord.gc.missingTolerance`。它是在删除无 SegmentInfo 引用的旧 binlog/stats/delta 前等待的安全窗口；ImportTaskV3 不增加 active-run pin 或暂停 GC。由于首期不提供强停写证明，旧 run 的迟到对象仍依赖该窗口和 job retention 兜底。
 8. **TEXT LOB GC 窗口**：沿用现有 LOB safety window。LOB 在正式 manifest/SegmentInfo 可读前暂时像 orphan，该窗口避免刚写完就被清理；ImportTaskV3 不增加 active-run pin 或暂停 GC。
