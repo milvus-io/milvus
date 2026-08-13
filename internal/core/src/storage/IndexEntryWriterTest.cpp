@@ -67,6 +67,9 @@ class IndexEntryStreamConfigGuard {
     size_t capacity_bytes_;
 };
 
+constexpr size_t kMockTagSize = 4;
+constexpr char kMockTag[kMockTagSize] = {'M', 'O', 'C', 'K'};
+
 // Simple XOR-based mock cipher for testing (NOT for production use!)
 class MockEncryptor : public plugin::IEncryptor {
  public:
@@ -85,10 +88,15 @@ class MockEncryptor : public plugin::IEncryptor {
 
     std::string
     Encrypt(const void* data, size_t len) const override {
-        // Format: [1-byte key][XOR'd data]
+        // Mimics an AEAD: a fixed tag is encrypted together with the payload so
+        // that decrypting with the wrong key fails loudly instead of returning
+        // garbage. The ciphertext must NOT carry its own key - the DEK can only
+        // come from the EDEK persisted next to the data.
         std::string result;
-        result.reserve(1 + len);
-        result.push_back(static_cast<char>(key_));
+        result.reserve(kMockTagSize + len);
+        for (size_t i = 0; i < kMockTagSize; i++) {
+            result.push_back(static_cast<char>(kMockTag[i] ^ key_));
+        }
         const auto* src = static_cast<const uint8_t*>(data);
         for (size_t i = 0; i < len; i++) {
             result.push_back(static_cast<char>(src[i] ^ key_));
@@ -107,6 +115,9 @@ class MockEncryptor : public plugin::IEncryptor {
 
 class MockDecryptor : public plugin::IDecryptor {
  public:
+    explicit MockDecryptor(uint8_t key) : key_(key) {
+    }
+
     std::string
     Decrypt(const std::string& ciphertext) const override {
         return Decrypt(ciphertext.data(), ciphertext.size());
@@ -119,23 +130,33 @@ class MockDecryptor : public plugin::IDecryptor {
 
     std::string
     Decrypt(const void* data, size_t len) const override {
-        if (len < 1) {
-            return "";
+        if (len < kMockTagSize) {
+            throw std::runtime_error("Decryption failed: ciphertext too short");
         }
         const auto* src = static_cast<const uint8_t*>(data);
-        uint8_t key = src[0];
+        for (size_t i = 0; i < kMockTagSize; i++) {
+            if (static_cast<uint8_t>(src[i] ^ key_) !=
+                static_cast<uint8_t>(kMockTag[i])) {
+                // Same failure mode as a real AEAD fed the wrong DEK.
+                throw std::runtime_error(
+                    "Decryption failed: mock authentication tag mismatch");
+            }
+        }
         std::string result;
-        result.reserve(len - 1);
-        for (size_t i = 1; i < len; i++) {
-            result.push_back(static_cast<char>(src[i] ^ key));
+        result.reserve(len - kMockTagSize);
+        for (size_t i = kMockTagSize; i < len; i++) {
+            result.push_back(static_cast<char>(src[i] ^ key_));
         }
         return result;
     }
 
     std::string
     GetKey() const override {
-        return "";
+        return std::string(1, static_cast<char>(key_));
     }
+
+ private:
+    uint8_t key_;
 };
 
 class MockCipherPlugin : public plugin::ICipherPlugin {
@@ -149,15 +170,28 @@ class MockCipherPlugin : public plugin::ICipherPlugin {
     Update(int64_t, int64_t, const std::string&) override {
     }
 
+    // Mint a fresh DEK on every call, exactly like the production cipher
+    // plugin does. Whoever encrypts must persist the matching EDEK, otherwise
+    // the data can never be decrypted again.
     std::pair<std::shared_ptr<plugin::IEncryptor>, std::string>
     GetEncryptor(int64_t, int64_t) const override {
-        return {std::make_shared<MockEncryptor>(0x5A), "mock_edek"};
+        // 1..255, never 0: a zero XOR key would turn encryption into a no-op.
+        auto key = static_cast<uint8_t>(1 + next_key_.fetch_add(1) % 255);
+        return {std::make_shared<MockEncryptor>(key),
+                std::string(1, static_cast<char>(key))};
     }
 
     std::shared_ptr<plugin::IDecryptor>
-    GetDecryptor(int64_t, int64_t, const std::string&) const override {
-        return std::make_shared<MockDecryptor>();
+    GetDecryptor(int64_t, int64_t, const std::string& edek) const override {
+        if (edek.size() != 1) {
+            throw std::runtime_error(
+                "Get decryptor failed: mock edek must carry exactly one key");
+        }
+        return std::make_shared<MockDecryptor>(static_cast<uint8_t>(edek[0]));
     }
+
+ private:
+    mutable std::atomic<uint32_t> next_key_{0};
 };
 
 class ExpandingMockEncryptor : public plugin::IEncryptor {
@@ -1091,6 +1125,30 @@ class IndexEntryEncryptedV3Test : public IndexEntryWriterV3Test {
     SetUp() override {
         IndexEntryWriterV3Test::SetUp();
         mock_cipher_ = std::make_shared<MockCipherPlugin>();
+        // The read path resolves the cipher plugin through the loader
+        // singleton, so the same mock must be visible there.
+        PluginLoader::GetInstance().registerPluginForTest(mock_cipher_);
+    }
+
+    void
+    TearDown() override {
+        PluginLoader::GetInstance().unregisterPluginForTest("CipherPlugin");
+        IndexEntryWriterV3Test::TearDown();
+    }
+
+    // Reads an entry back through the public reader, using nothing but what
+    // the file itself persisted. This is what lets these tests catch a writer
+    // that encrypts with a DEK whose EDEK was never stored.
+    void
+    VerifyEncryptedEntry(const std::string& file_path,
+                         const std::string& entry_name,
+                         size_t expected_size) {
+        auto input = CreateInputStream(file_path);
+        int64_t file_size = GetFileSize(file_path);
+        auto reader = IndexEntryReader::Open(input, file_size, 100);
+        auto entry = reader->ReadEntry(entry_name);
+        ASSERT_EQ(entry.data.size(), expected_size);
+        VerifyPattern(entry.data, expected_size);
     }
 
     std::shared_ptr<MockCipherPlugin> mock_cipher_;
@@ -1120,6 +1178,8 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedSmallEntryRoundtrip) {
     auto info = fs_->GetFileInfo(file_path);
     ASSERT_TRUE(info.ok());
     EXPECT_GT(info.ValueOrDie().size(), entry_size);  // ciphertext > plaintext
+
+    VerifyEncryptedEntry(file_path, "enc_entry", entry_size);
 }
 
 TEST_F(IndexEntryEncryptedV3Test, EncryptedWriterCreatesMissingTempDir) {
@@ -1186,6 +1246,8 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
     auto info = fs_->GetFileInfo(file_path);
     ASSERT_TRUE(info.ok());
     EXPECT_GT(info.ValueOrDie().size(), entry_size);
+
+    VerifyEncryptedEntry(file_path, "large_enc", entry_size);
 }
 
 TEST_F(IndexEntryEncryptedV3Test,
@@ -1260,6 +1322,10 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultipleEntriesMultiSlice) {
     auto info = fs_->GetFileInfo(file_path);
     ASSERT_TRUE(info.ok());
     EXPECT_GT(info.ValueOrDie().size(), size_a + size_b + size_c);
+
+    VerifyEncryptedEntry(file_path, "entry_a", size_a);
+    VerifyEncryptedEntry(file_path, "entry_b", size_b);
+    VerifyEncryptedEntry(file_path, "entry_c", size_c);
 }
 
 TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
@@ -1287,6 +1353,13 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
 
     auto info = fs_->GetFileInfo(file_path);
     ASSERT_TRUE(info.ok());
+
+    VerifyEncryptedEntry(file_path, "data", 256);
+
+    auto input = CreateInputStream(file_path);
+    auto reader = IndexEntryReader::Open(input, GetFileSize(file_path), 100);
+    EXPECT_EQ(reader->GetMeta<std::string>("large_meta"),
+              std::string(5000, 'M'));
 }
 
 TEST_F(IndexEntryEncryptedV3Test, EncryptedFdEntryMultiSlice) {
@@ -1326,6 +1399,8 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedFdEntryMultiSlice) {
     EXPECT_GT(info.ValueOrDie().size(), entry_size);
 
     ::unlink(tmp_absolute.c_str());
+
+    VerifyEncryptedEntry(file_path, "fd_entry", entry_size);
 }
 
 // ---- ReadEntryStream tests ----
