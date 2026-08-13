@@ -201,19 +201,17 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 		return false, g.availLocked(budget)
 	}
 
-	if g.blockedByHeadOfLineLocked(taskID, budget) {
-		return false, g.availLocked(budget)
-	}
-
 	if g.isOversizedLocked(req) {
-		// Taking the whole node must not be a way to jump the queue. The
-		// head-of-line rule above only holds the line for a head that does not
-		// fit, and on a drained node every ordinary head fits -- so between a
-		// Release and the head goroutine waking to retry there is a window in
-		// which that rule alone would let an oversized latecomer walk off with
-		// the node the head was reserved for, and the head would then wait out
-		// its whole runtime. An oversized task may claim the node only from the
-		// front of the queue, or when nobody is queued at all.
+		// Taking the whole node must not be a way to jump the queue, and this
+		// check -- not where blockedByHeadOfLineLocked sits below -- is what
+		// stops it. That rule holds the line only for a head that does not fit,
+		// and on a drained node every ordinary head fits: in the window between
+		// a Release and the head goroutine waking to retry it would wave an
+		// oversized latecomer straight past the head it is reserved for, and the
+		// head would then wait out the latecomer's whole runtime. Evaluating it
+		// earlier would not change that, because the arithmetic it ends in does
+		// not depend on the order. An oversized task may claim the node only
+		// from the front of the queue, or when nobody is queued at all.
 		if len(g.waiters) > 0 && g.waiters[0].taskID != taskID {
 			return false, g.availLocked(budget)
 		}
@@ -239,6 +237,9 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 		return true, g.availLocked(budget)
 	}
 
+	if g.blockedByHeadOfLineLocked(taskID, budget) {
+		return false, g.availLocked(budget)
+	}
 	if !g.reserved.Add(req).FitsIn(budget) {
 		return false, g.availLocked(budget)
 	}
