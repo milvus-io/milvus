@@ -64,6 +64,7 @@ type DataNodeServicesSuite struct {
 	node          *DataNode
 	storageConfig *indexpb.StorageConfig
 	etcdCli       *clientv3.Client
+	guardMock     *mockey.Mocker
 	ctx           context.Context
 	cancel        context.CancelFunc
 }
@@ -148,6 +149,18 @@ func (s *DataNodeServicesSuite) SetupSuite() {
 }
 
 func (s *DataNodeServicesSuite) SetupTest() {
+	// The node's executors admit every task through the resource guard. Route
+	// that at a double: the process-wide guard freezes admission from the
+	// host's live memory reading, which would make these tests pass, fail or
+	// hang depending on what else the machine is doing.
+	//
+	// Several tests below re-enter SetupTest without a matching TearDownTest,
+	// and mockey panics on a second patch of a function it already holds, so
+	// the patch is installed once and left in place until teardown.
+	if s.guardMock == nil {
+		s.guardMock = mockey.Mock(resource.GetGuard).Return(resource.NewRecordingGuard()).Build()
+	}
+
 	s.node = NewIDLEDataNodeMock(s.ctx, schemapb.DataType_Int64)
 	s.node.SetEtcdClient(s.etcdCli)
 
@@ -182,6 +195,10 @@ func (s *DataNodeServicesSuite) TearDownTest() {
 	if s.node != nil {
 		s.node.Stop()
 		s.node = nil
+	}
+	if s.guardMock != nil {
+		s.guardMock.UnPatch()
+		s.guardMock = nil
 	}
 }
 
@@ -223,12 +240,6 @@ func (s *DataNodeServicesSuite) TestGetComponentStates() {
 
 func (s *DataNodeServicesSuite) TestGetCompactionState() {
 	s.Run("success", func() {
-		// The executor admits each task through the node's resource guard before
-		// running it. Route that at a double so this test does not depend on how
-		// much memory the host happens to have free.
-		mk := mockey.Mock(resource.GetGuard).Return(resource.NewRecordingGuard()).Build()
-		defer mk.UnPatch()
-
 		const (
 			collection = int64(100)
 			channel    = "ch-0"

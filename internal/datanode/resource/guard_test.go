@@ -450,7 +450,7 @@ func TestNonTaskMemoryShrinksTheBudget(t *testing.T) {
 	// empty here, which is what makes this discriminating: were oversizedness
 	// judged against the reduced budget instead of the node's capacity, this
 	// request would be admitted for *exclusive* execution, and a passing spike
-	// in non-task memory would serialise the whole node.
+	// in non-task memory would serialize the whole node.
 	ok, _ := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 700})
 	assert.False(t, ok, "700 no longer fits once 400 is spoken for")
 	assert.Zero(t, g.Snapshot().ExclusiveTaskID,

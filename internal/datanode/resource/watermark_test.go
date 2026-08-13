@@ -34,7 +34,7 @@ import (
 // saveParam sets a config key for the duration of the test. The floor in
 // particular defaults to 1GiB, which would swamp the deliberately tiny budgets
 // these tests use and make every refusal look like exhaustion rather than the
-// behaviour under test.
+// behavior under test.
 func saveParam(t *testing.T, item *paramtable.ParamItem, value string) {
 	t.Helper()
 	pt := paramtable.Get()
@@ -344,7 +344,7 @@ func TestObservationBelowTheLedgerCarriesNoInformation(t *testing.T) {
 }
 
 // The floor is a lower bound. A misconfigured negative one must not turn into a
-// licence to hand out memory the node does not have -- nothing validates this
+// license to hand out memory the node does not have -- nothing validates this
 // key, so the sample may only ever be raised by it.
 func TestNegativeFloorCannotCreateBudget(t *testing.T) {
 	g := newTestGuard(t, 100, 1000)
