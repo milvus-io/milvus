@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -169,6 +172,78 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		assert.Panics(t, func() {
 			privilege.GetPolicyModel("foo")
 		})
+	})
+}
+
+func TestPrivilegeInterceptorStatisticsRBAC(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer privilege.CleanPrivilegeCache()
+
+	const (
+		username       = "stats_user"
+		roleName       = "role_stats"
+		collectionName = "coll_stats"
+		partitionName  = "part_stats"
+	)
+
+	ctx := GetContext(context.Background(), username+":pwd")
+	client := &MockMixCoordClientInterface{}
+
+	initPolicy := func(policyInfos []string) {
+		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+			return &internalpb.ListPolicyResponse{
+				Status:      merr.Success(),
+				PolicyInfos: policyInfos,
+				UserRoles: []string{
+					funcutil.EncodeUserRoleCache(username, roleName),
+				},
+			}, nil
+		}
+		require.NoError(t, InitMetaCache(ctx, client))
+	}
+
+	collectionReq := func() *milvuspb.GetCollectionStatisticsRequest {
+		return &milvuspb.GetCollectionStatisticsRequest{
+			DbName:         util.DefaultDBName,
+			CollectionName: collectionName,
+		}
+	}
+	partitionReq := func() *milvuspb.GetPartitionStatisticsRequest {
+		return &milvuspb.GetPartitionStatisticsRequest{
+			DbName:         util.DefaultDBName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+		}
+	}
+
+	assertDenied := func(t *testing.T, req interface{}) {
+		_, err := PrivilegeInterceptor(ctx, req)
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	}
+	assertAllowed := func(t *testing.T, req interface{}) {
+		_, err := PrivilegeInterceptor(ctx, req)
+		assert.NoError(t, err)
+	}
+
+	t.Run("authenticated principal without GetStatistics is denied", func(t *testing.T) {
+		initPolicy([]string{
+			funcutil.PolicyForPrivilege(roleName, commonpb.ObjectType_Collection.String(), collectionName, commonpb.ObjectPrivilege_PrivilegeLoad.String(), util.DefaultDBName),
+		})
+
+		assertDenied(t, collectionReq())
+		assertDenied(t, partitionReq())
+	})
+
+	t.Run("GetStatistics grant allows statistics requests", func(t *testing.T) {
+		initPolicy([]string{
+			funcutil.PolicyForPrivilege(roleName, commonpb.ObjectType_Collection.String(), collectionName, commonpb.ObjectPrivilege_PrivilegeGetStatistics.String(), util.DefaultDBName),
+		})
+
+		assertAllowed(t, collectionReq())
+		assertAllowed(t, partitionReq())
 	})
 }
 
