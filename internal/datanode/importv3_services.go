@@ -157,7 +157,7 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 		FormatVersion: 1, JobId: plan.GetJobId(), TaskId: plan.GetTaskId(), RunId: req.GetRunId(),
 		TaskPlanDigest: append([]byte(nil), req.GetTaskPlanDigest()...), SortSpec: proto.Clone(plan.GetSortSpec()).(*datapb.SortSpec),
 	}
-	fragmentSeq := make(map[[2]int]int64)
+	var fragmentSeq int64
 	seenSources := make(map[int32]struct{}, len(plan.GetSources()))
 
 	for _, source := range plan.GetSources() {
@@ -216,13 +216,12 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 						continue
 					}
 					bucket := reshardBucket{vchannelOrdinal: channelOrdinal, partitionOrdinal: partitionOrdinal, data: bucketData}
-					key := [2]int{channelOrdinal, partitionOrdinal}
-					descriptor, err := writeReshardFragment(ctx, req, plan, bucket, fragmentSeq[key], bufferSize, sortFields, pluginContext)
+					descriptor, err := writeReshardFragment(ctx, req, plan, bucket, fragmentSeq, bufferSize, sortFields, pluginContext)
 					if err != nil {
 						reader.Close()
 						return nil, err
 					}
-					fragmentSeq[key]++
+					fragmentSeq++
 					manifest.Fragments = append(manifest.Fragments, descriptor)
 					manifest.TotalRows += descriptor.GetRows()
 					manifest.TotalLogicalBytes += descriptor.GetLogicalBytes()
