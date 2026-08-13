@@ -820,12 +820,18 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
+			return merr.Status(err), nil
+		}
 		return node.createImportV3WorkerTask(ctx, req.GetTaskId(), req.GetRunId(), func(runCtx context.Context, runID int64) (*importv3.Result, error) {
 			return node.executeReshardTask(runCtx, req, runID)
 		})
 	case taskcommon.ImportV3:
 		req := &datapb.ImportTaskV3Request{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.createImportV3WorkerTask(ctx, req.GetTaskId(), req.GetRunId(), func(runCtx context.Context, runID int64) (*importv3.Result, error) {

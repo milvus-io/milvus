@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
@@ -128,7 +129,11 @@ func (node *DataNode) executeReshardTask(ctx context.Context, req *datapb.Reshar
 	if err != nil {
 		return nil, err
 	}
-	return executeReshardPlan(ctx, cm, req, plan)
+	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), plan.GetCollectionId())
+	if err != nil {
+		return nil, err
+	}
+	return executeReshardPlan(ctx, cm, req, plan, pluginContext)
 }
 
 type reshardBucket struct {
@@ -137,7 +142,7 @@ type reshardBucket struct {
 	data             *storage.InsertData
 }
 
-func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datapb.ReshardTaskRequest, plan *datapb.ReshardTaskPlan) (*importv3.Result, error) {
+func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datapb.ReshardTaskRequest, plan *datapb.ReshardTaskPlan, pluginContext *indexcgopb.StoragePluginContext) (*importv3.Result, error) {
 	if plan.GetFormatVersion() == 0 || plan.GetSourceSchema() == nil || plan.GetTemporarySchema() == nil ||
 		len(plan.GetVchannels()) == 0 || len(plan.GetPartitionIds()) == 0 || len(plan.GetSources()) == 0 {
 		return nil, merr.WrapErrDataIntegrityMsg("invalid ReshardTask plan")
@@ -212,7 +217,7 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 					}
 					bucket := reshardBucket{vchannelOrdinal: channelOrdinal, partitionOrdinal: partitionOrdinal, data: bucketData}
 					key := [2]int{channelOrdinal, partitionOrdinal}
-					descriptor, err := writeReshardFragment(ctx, req, plan, bucket, fragmentSeq[key], bufferSize, sortFields)
+					descriptor, err := writeReshardFragment(ctx, req, plan, bucket, fragmentSeq[key], bufferSize, sortFields, pluginContext)
 					if err != nil {
 						reader.Close()
 						return nil, err
@@ -284,7 +289,7 @@ func normalizeReshardBatch(source *datapb.SourceFileSpec, schema *schemapb.Colle
 	return importv2.AppendPreallocatedSystemFields(schema, data, rowNum, source.GetFile().GetPreAllocatedAutoIds(), idOffset)
 }
 
-func writeReshardFragment(ctx context.Context, req *datapb.ReshardTaskRequest, plan *datapb.ReshardTaskPlan, bucket reshardBucket, seq, bufferSize int64, sortFields []int64) (*datapb.FragmentDescriptor, error) {
+func writeReshardFragment(ctx context.Context, req *datapb.ReshardTaskRequest, plan *datapb.ReshardTaskPlan, bucket reshardBucket, seq, bufferSize int64, sortFields []int64, pluginContext *indexcgopb.StoragePluginContext) (*datapb.FragmentDescriptor, error) {
 	fragmentPath := path.Join(req.GetOutputPrefix(), "fragments", strconv.Itoa(bucket.vchannelOrdinal), strconv.FormatInt(plan.GetPartitionIds()[bucket.partitionOrdinal], 10), fmt.Sprintf("%d_%d.parquet", req.GetRunId(), seq))
 	fields := typeutil.GetAllFieldSchemas(plan.GetTemporarySchema())
 	columns := make([]int, len(fields))
@@ -292,7 +297,7 @@ func writeReshardFragment(ctx context.Context, req *datapb.ReshardTaskRequest, p
 	for index, field := range fields {
 		columns[index], fieldIDs[index] = index, field.GetFieldID()
 	}
-	writer, err := storage.NewPackedRecordWriter(req.GetStorageConfig().GetBucketName(), []string{fragmentPath}, plan.GetTemporarySchema(), bufferSize, packed.DefaultMultiPartUploadSize, []storagecommon.ColumnGroup{{GroupID: 0, Columns: columns, Fields: fieldIDs}}, req.GetStorageConfig(), (*indexcgopb.StoragePluginContext)(nil))
+	writer, err := storage.NewPackedRecordWriter(req.GetStorageConfig().GetBucketName(), []string{fragmentPath}, plan.GetTemporarySchema(), bufferSize, packed.DefaultMultiPartUploadSize, []storagecommon.ColumnGroup{{GroupID: 0, Columns: columns, Fields: fieldIDs}}, req.GetStorageConfig(), pluginContext)
 	if err != nil {
 		return nil, err
 	}
