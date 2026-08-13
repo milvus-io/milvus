@@ -95,6 +95,39 @@ func TestManifestIndexFileKeysRejectPathTraversal(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestResolveManifestIndexFilePathInfos(t *testing.T) {
+	const (
+		segmentID = int64(3)
+		fieldID   = int64(100)
+		indexID   = int64(101)
+	)
+	manifestIndex := packed.ManifestIndexInfo{
+		IndexName:             "vector_hnsw",
+		IndexType:             "HNSW",
+		Path:                  "index_v1/1/2/3/102/4",
+		FieldID:               fieldID,
+		IndexID:               indexID,
+		BuildID:               102,
+		IndexVersion:          4,
+		NumRows:               1000,
+		SerializedSize:        2000,
+		MemSize:               3000,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		IndexFileKeys:         []string{"0"},
+	}
+
+	active := &model.Index{IndexID: indexID, FieldID: fieldID}
+	dropped := &model.Index{IndexID: indexID + 1, FieldID: fieldID, IsDeleted: true}
+	infos := resolveManifestIndexFilePathInfos(context.Background(), segmentID, "manifest",
+		[]packed.ManifestIndexInfo{manifestIndex}, []*model.Index{active, dropped})
+	require.Len(t, infos, 1)
+	require.Equal(t, []string{"index_v1/1/2/3/102/4/0"}, infos[0].GetIndexFilePaths())
+
+	infos = resolveManifestIndexFilePathInfos(context.Background(), segmentID, "manifest",
+		[]packed.ManifestIndexInfo{manifestIndex}, []*model.Index{{IndexID: indexID, FieldID: fieldID, IsDeleted: true}})
+	require.Empty(t, infos)
+}
+
 func TestServerGetIndexInfosManifestFallback(t *testing.T) {
 	const (
 		collectionID = int64(1)
@@ -188,7 +221,8 @@ func TestServerGetIndexInfosManifestFallback(t *testing.T) {
 	manifestIndex2.IndexID = indexID2
 	manifestIndex2.BuildID = buildID2
 
-	t.Run("falls back to manifest when etcd index file keys are absent", func(t *testing.T) {
+	t.Run("falls back to manifest when etcd segment indexes are absent", func(t *testing.T) {
+		server.meta.indexMeta.segmentIndexes.Remove(segmentID)
 		manifestReadCount := 0
 		patch := mockey.Mock(packed.GetManifestIndexInfos).To(
 			func(_ string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
@@ -203,6 +237,7 @@ func TestServerGetIndexInfosManifestFallback(t *testing.T) {
 		info := resp.GetSegmentInfo()[segmentID]
 		require.True(t, info.GetEnableIndex())
 		require.Len(t, info.GetIndexInfos(), 2)
+		server.meta.indexMeta.segmentIndexes.Insert(segmentID, segmentIndexes)
 	})
 
 	t.Run("uses etcd index file keys without reading manifest", func(t *testing.T) {

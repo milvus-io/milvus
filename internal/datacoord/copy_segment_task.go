@@ -19,6 +19,8 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -31,11 +33,15 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -600,6 +606,12 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	sources := make([]*datapb.CopySegmentSource, 0, len(idMappings))
 	targets := make([]*datapb.CopySegmentTarget, 0, len(idMappings))
 	var sourceSchema *schemapb.CollectionSchema
+	activeIndexIDs := make(map[int64]struct{}, len(snapshotData.Indexes))
+	for _, index := range snapshotData.Indexes {
+		if index != nil {
+			activeIndexIDs[index.GetIndexID()] = struct{}{}
+		}
+	}
 	if snapshotData.Collection != nil {
 		sourceSchema = snapshotData.Collection.GetSchema()
 	}
@@ -633,6 +645,22 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			StorageVersion:       sourceSegDesc.GetStorageVersion(),    // storage version for binlog format decision
 			IsExternalCollection: isExternalCollection,
 		}
+		if source.GetStorageVersion() >= storage.StorageV3 && len(source.GetIndexFiles()) == 0 && source.GetManifestPath() != "" {
+			manifestIndexes, err := packed.GetManifestIndexInfos(source.GetManifestPath(), createStorageConfig())
+			if err != nil {
+				return nil, merr.Wrap(err, "failed to load source index metadata from manifest")
+			}
+			for _, manifestIndex := range manifestIndexes {
+				if _, ok := activeIndexIDs[manifestIndex.IndexID]; !ok {
+					continue
+				}
+				info, ok := manifestIndexFilePathInfo(source.GetSegmentId(), manifestIndex)
+				if !ok {
+					return nil, merr.WrapErrServiceInternalMsg("invalid source index metadata in manifest for segment %d", source.GetSegmentId())
+				}
+				source.IndexFiles = append(source.IndexFiles, info)
+			}
+		}
 		sources = append(sources, source)
 
 		// Collect all unique source build IDs from index files and allocate new ones
@@ -649,7 +677,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			}
 			return nil
 		}
-		for _, indexFile := range sourceSegDesc.GetIndexFiles() {
+		for _, indexFile := range source.GetIndexFiles() {
 			if err := allocNewBuildID(indexFile.GetBuildID()); err != nil {
 				return nil, err
 			}
@@ -749,15 +777,22 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 	case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
 		// Update binlog information for all segments
 		for _, result := range resp.GetSegmentResults() {
+			manifestPath := result.GetManifestPath()
+			var err error
+			if manifestPath != "" {
+				manifestPath, err = publishCopiedIndexesToManifest(ctx, result, task, meta)
+				if err != nil {
+					return err
+				}
+			}
 			// Update binlog info and segment state to Flushed
 			// For StorageV3+ segments, also update manifest_path
-			var err error
 			op1 := UpdateBinlogsOperator(result.GetSegmentId(), result.GetBinlogs(),
 				result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
 			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
 			op3 := UpdateIsImporting(result.GetSegmentId(), false)
 			operators := []UpdateOperator{op1, op2, op3}
-			if manifestPath := result.GetManifestPath(); manifestPath != "" {
+			if manifestPath != "" {
 				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
 			}
 			err = meta.UpdateSegmentsInfo(ctx, operators...)
@@ -828,6 +863,81 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			UpdateCopyTaskReason(resp.GetReason()))
 	}
 	return nil
+}
+
+func publishCopiedIndexesToManifest(ctx context.Context, result *datapb.CopySegmentResult,
+	task CopySegmentTask, meta *meta) (string, error) {
+	manifestPath := result.GetManifestPath()
+	if manifestPath == "" || len(result.GetIndexInfos()) == 0 {
+		return manifestPath, nil
+	}
+	targetIndexes := meta.indexMeta.GetIndexesForCollection(task.GetCollectionId(), "")
+	nameToID := make(map[string]int64, len(targetIndexes))
+	nameToField := make(map[string]int64, len(targetIndexes))
+	for _, idx := range targetIndexes {
+		if idx != nil && !idx.IsDeleted {
+			nameToID[idx.IndexName] = idx.IndexID
+			nameToField[idx.IndexName] = idx.FieldID
+		}
+	}
+	basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return "", merr.Wrap(err, "failed to parse target manifest path")
+	}
+	var partitionID int64
+	for _, mapping := range task.GetIdMappings() {
+		if mapping.GetTargetSegmentId() == result.GetSegmentId() {
+			partitionID = mapping.GetPartitionId()
+			break
+		}
+	}
+	fieldName := func(fieldID int64) string {
+		if coll := meta.GetCollection(task.GetCollectionId()); coll != nil && coll.Schema != nil {
+			for _, field := range coll.Schema.GetFields() {
+				if field.GetFieldID() == fieldID {
+					return field.GetName()
+				}
+			}
+		}
+		return strconv.FormatInt(fieldID, 10)
+	}
+	storageConfig := createStorageConfig()
+	manifestIndexes := make([]packed.ManifestIndexInfo, 0, len(result.GetIndexInfos()))
+	for _, info := range result.GetIndexInfos() {
+		indexID, ok := nameToID[info.GetIndexName()]
+		if !ok {
+			continue
+		}
+		fieldID := nameToField[info.GetIndexName()]
+		prefix := metautil.NewIndexPathBuilder(storageConfig.GetRootPath(), info.GetIndexStorePathVersion(),
+			task.GetCollectionId(), partitionID, result.GetSegmentId(), info.GetBuildId(), info.GetVersion()).BuildPrefix()
+		relPath, err := filepath.Rel(filepath.Join(basePath, "_index"), prefix)
+		if err != nil {
+			return "", merr.Wrap(err, "failed to derive manifest index path")
+		}
+		params := meta.indexMeta.GetIndexParams(task.GetCollectionId(), indexID)
+		properties := common.KeyValuePairs(params).ToMap()
+		for key, value := range common.KeyValuePairs(meta.indexMeta.GetTypeParams(task.GetCollectionId(), indexID)).ToMap() {
+			properties[key] = value
+		}
+		indexType := GetIndexType(params)
+		properties[common.IndexTypeKey] = indexType
+		manifestIndexes = append(manifestIndexes, packed.ManifestIndexInfo{
+			ColumnName: fieldName(fieldID), IndexName: info.GetIndexName(), IndexType: indexType,
+			Path: relPath, FieldID: fieldID, IndexID: indexID, BuildID: info.GetBuildId(),
+			IndexVersion: info.GetVersion(), NumRows: result.GetImportedRows(), SerializedSize: int64(info.GetIndexSize()),
+			MemSize: int64(info.GetIndexSize()), CurrentIndexVersion: info.GetCurrentIndexVersion(),
+			CurrentScalarIndexVersion: info.GetCurrentScalarIndexVersion(), IndexStorePathVersion: info.GetIndexStorePathVersion(),
+			IndexFileKeys: info.GetIndexFilePaths(), Properties: properties,
+		})
+	}
+	if len(manifestIndexes) > 0 {
+		manifestPath, err = packed.AddIndexInfosToManifest(manifestPath, storageConfig, manifestIndexes)
+		if err != nil {
+			return "", merr.Wrap(err, "failed to publish copied index info to manifest")
+		}
+	}
+	return manifestPath, nil
 }
 
 // ===========================================================================================

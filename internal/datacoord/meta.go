@@ -1815,6 +1815,35 @@ func UpdateManifestPathForIndex(segmentID int64, manifestPath string) UpdateOper
 	}
 }
 
+// UpdateManifestPathForGC advances a segment to a newer revision on the same
+// manifest base path. GC uses it after transactionally removing index metadata:
+// unlike index publication, the transaction may have rebased on a newer
+// revision while waiting for the manifest lock, so the revision need not be
+// exactly current+1.
+func UpdateManifestPathForGC(segmentID int64, manifestPath string) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			return modPack.fail(merr.WrapErrSegmentNotFound(segmentID))
+		}
+		currentBase, currentVersion, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
+		if err != nil {
+			return modPack.fail(merr.Wrap(err, "failed to parse current manifest path"))
+		}
+		incomingBase, incomingVersion, err := packed.UnmarshalManifestPath(manifestPath)
+		if err != nil {
+			return modPack.fail(merr.Wrap(err, "failed to parse GC manifest path"))
+		}
+		if incomingBase != currentBase || incomingVersion <= currentVersion {
+			return modPack.fail(merr.WrapErrServiceInternalMsg(
+				"invalid GC manifest update for segment %d: current=%s incoming=%s",
+				segmentID, segment.GetManifestPath(), manifestPath))
+		}
+		segment.ManifestPath = manifestPath
+		return true
+	}
+}
+
 func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)

@@ -2812,7 +2812,7 @@ func TestGarbageCollector_DroppedSegmentIndexHelpers(t *testing.T) {
 		cli: storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test")),
 	})
 
-	segIndexes, indexFiles, blocked := gc.getDroppedSegmentIndexFiles(segment.ID)
+	segIndexes, indexFiles, blocked := gc.getDroppedSegmentIndexFiles(context.Background(), segment.ID)
 	require.False(t, blocked)
 	require.Len(t, segIndexes, 1)
 	assert.Equal(t, segIdx.BuildID, segIndexes[0].BuildID)
@@ -2825,6 +2825,30 @@ func TestGarbageCollector_DroppedSegmentIndexHelpers(t *testing.T) {
 	assert.NoError(t, gc.removeDroppedSegmentIndexMeta(ctx, nil))
 	require.NoError(t, gc.removeDroppedSegmentIndexMeta(ctx, segIndexes))
 	assert.Empty(t, m.indexMeta.GetAllSegmentIndexes(segment.ID))
+}
+
+func TestGarbageCollector_getDroppedSegmentIndexFiles_ManifestOnly(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 10, CollectionID: 1, PartitionID: 2, StorageVersion: storage.StorageV3,
+		ManifestPath: packed.MarshalManifestPath("files/insert_log/1/2/10", 1),
+	})
+	m.segments.SetSegment(segment.GetID(), segment)
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: storage.NewLocalChunkManager(objectstorage.RootPath("root"))})
+	manifestIndex := packed.ManifestIndexInfo{
+		Path: "index_v1/1/2/10/20/1", ColumnName: "vec", IndexName: "vec_idx", IndexType: "HNSW",
+		FieldID: 100, IndexID: 200, BuildID: 20, IndexVersion: 1, NumRows: 1,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		IndexFileKeys:         []string{"index.bin"},
+	}
+	patch := mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{manifestIndex}, nil).Build()
+	defer patch.UnPatch()
+
+	segIndexes, files, blocked := gc.getDroppedSegmentIndexFiles(context.Background(), segment.GetID())
+	assert.Empty(t, segIndexes)
+	assert.False(t, blocked)
+	assert.Contains(t, files, "index_v1/1/2/10/20/1/index.bin")
 }
 
 func TestGarbageCollector_getDroppedSegmentIndexFiles_BlockedReturnsNilFiles(t *testing.T) {
@@ -2840,7 +2864,7 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_BlockedReturnsNilFiles(t *
 		}).Build()
 	defer mockIsBlocked.UnPatch()
 
-	segIndexes, indexFiles, blocked := gc.getDroppedSegmentIndexFiles(segment.ID)
+	segIndexes, indexFiles, blocked := gc.getDroppedSegmentIndexFiles(context.Background(), segment.ID)
 	assert.True(t, blocked)
 	assert.Nil(t, indexFiles)
 	assert.Len(t, segIndexes, 1)
@@ -2908,7 +2932,7 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_EdgeCases(t *testing.T) {
 		gc := newGarbageCollector(m, newMockHandler(), GcOption{
 			cli: storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test")),
 		})
-		segIndexes, indexFiles, blocked := gc.getDroppedSegmentIndexFiles(9999)
+		segIndexes, indexFiles, blocked := gc.getDroppedSegmentIndexFiles(context.Background(), 9999)
 		assert.False(t, blocked)
 		assert.Nil(t, segIndexes)
 		assert.Nil(t, indexFiles)
@@ -2922,7 +2946,7 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_EdgeCases(t *testing.T) {
 		gc := newGarbageCollector(m, newMockHandler(), GcOption{
 			cli: storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test")),
 		})
-		segIndexes, indexFiles, blocked := gc.getDroppedSegmentIndexFiles(segment.ID)
+		segIndexes, indexFiles, blocked := gc.getDroppedSegmentIndexFiles(context.Background(), segment.ID)
 		assert.False(t, blocked)
 		require.Len(t, segIndexes, 1)
 		assert.Equal(t, segIdx.BuildID, segIndexes[0].BuildID)
@@ -2938,7 +2962,7 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_EdgeCases(t *testing.T) {
 		mockIsBlocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
 		defer mockIsBlocked.UnPatch()
 
-		segIndexes, indexFiles, blocked := gc.getDroppedSegmentIndexFiles(segment.ID)
+		segIndexes, indexFiles, blocked := gc.getDroppedSegmentIndexFiles(context.Background(), segment.ID)
 		assert.False(t, blocked)
 		require.Len(t, segIndexes, 1)
 		assert.NotEmpty(t, indexFiles)

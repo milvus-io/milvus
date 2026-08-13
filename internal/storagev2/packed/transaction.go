@@ -74,6 +74,19 @@ func AddIndexInfoToManifest(
 	storageConfig *indexpb.StorageConfig,
 	index ManifestIndexInfo,
 ) (string, error) {
+	return AddIndexInfosToManifest(manifestPath, storageConfig, []ManifestIndexInfo{index})
+}
+
+// AddIndexInfosToManifest records multiple completed index artifacts in one
+// manifest transaction and returns a single new manifest revision.
+func AddIndexInfosToManifest(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	indexes []ManifestIndexInfo,
+) (string, error) {
+	if len(indexes) == 0 {
+		return manifestPath, nil
+	}
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to parse manifest path")
@@ -114,88 +127,185 @@ func AddIndexInfoToManifest(
 	}
 	defer C.loon_transaction_destroy(transactionHandle)
 
-	cColumnName := C.CString(index.ColumnName)
-	defer C.free(unsafe.Pointer(cColumnName))
-	cIndexName := C.CString(index.IndexName)
-	defer C.free(unsafe.Pointer(cIndexName))
-	cIndexType := C.CString(index.IndexType)
-	defer C.free(unsafe.Pointer(cIndexType))
-	cPath := C.CString(index.Path)
-	defer C.free(unsafe.Pointer(cPath))
-	cIndexFileKeys := make([]*C.char, 0, len(index.IndexFileKeys))
-	for _, key := range index.IndexFileKeys {
-		cIndexFileKeys = append(cIndexFileKeys, C.CString(key))
-	}
-	defer func() {
-		for _, key := range cIndexFileKeys {
-			C.free(unsafe.Pointer(key))
+	for _, index := range indexes {
+		cColumnName := C.CString(index.ColumnName)
+		defer C.free(unsafe.Pointer(cColumnName))
+		cIndexName := C.CString(index.IndexName)
+		defer C.free(unsafe.Pointer(cIndexName))
+		cIndexType := C.CString(index.IndexType)
+		defer C.free(unsafe.Pointer(cIndexType))
+		cPath := C.CString(index.Path)
+		defer C.free(unsafe.Pointer(cPath))
+		cIndexFileKeys := make([]*C.char, 0, len(index.IndexFileKeys))
+		for _, key := range index.IndexFileKeys {
+			cIndexFileKeys = append(cIndexFileKeys, C.CString(key))
 		}
-	}()
+		defer func() {
+			for _, key := range cIndexFileKeys {
+				C.free(unsafe.Pointer(key))
+			}
+		}()
 
-	var cIndexFileKeysPtr **C.char
-	if len(cIndexFileKeys) > 0 {
-		arraySize := C.size_t(len(cIndexFileKeys)) * C.size_t(unsafe.Sizeof(uintptr(0)))
-		cIndexFileKeysPtr = (**C.char)(C.malloc(arraySize))
-		defer C.free(unsafe.Pointer(cIndexFileKeysPtr))
-		copy(unsafe.Slice(cIndexFileKeysPtr, len(cIndexFileKeys)), cIndexFileKeys)
-	}
-
-	propertyNames := make([]string, 0, len(index.Properties))
-	for key := range index.Properties {
-		propertyNames = append(propertyNames, key)
-	}
-	sort.Strings(propertyNames)
-
-	cPropertyKeys := make([]*C.char, 0, len(propertyNames))
-	cPropertyValues := make([]*C.char, 0, len(propertyNames))
-	for _, key := range propertyNames {
-		cPropertyKeys = append(cPropertyKeys, C.CString(key))
-		cPropertyValues = append(cPropertyValues, C.CString(index.Properties[key]))
-	}
-	defer func() {
-		for _, key := range cPropertyKeys {
-			C.free(unsafe.Pointer(key))
+		var cIndexFileKeysPtr **C.char
+		if len(cIndexFileKeys) > 0 {
+			arraySize := C.size_t(len(cIndexFileKeys)) * C.size_t(unsafe.Sizeof(uintptr(0)))
+			cIndexFileKeysPtr = (**C.char)(C.malloc(arraySize))
+			defer C.free(unsafe.Pointer(cIndexFileKeysPtr))
+			copy(unsafe.Slice(cIndexFileKeysPtr, len(cIndexFileKeys)), cIndexFileKeys)
 		}
-		for _, value := range cPropertyValues {
-			C.free(unsafe.Pointer(value))
+
+		propertyNames := make([]string, 0, len(index.Properties))
+		for key := range index.Properties {
+			propertyNames = append(propertyNames, key)
 		}
-	}()
+		sort.Strings(propertyNames)
 
-	var cPropertyKeysPtr, cPropertyValuesPtr **C.char
-	if len(cPropertyKeys) > 0 {
-		arraySize := C.size_t(len(cPropertyKeys)) * C.size_t(unsafe.Sizeof(uintptr(0)))
-		cPropertyKeysPtr = (**C.char)(C.malloc(arraySize))
-		cPropertyValuesPtr = (**C.char)(C.malloc(arraySize))
-		defer C.free(unsafe.Pointer(cPropertyKeysPtr))
-		defer C.free(unsafe.Pointer(cPropertyValuesPtr))
-		copy(unsafe.Slice(cPropertyKeysPtr, len(cPropertyKeys)), cPropertyKeys)
-		copy(unsafe.Slice(cPropertyValuesPtr, len(cPropertyValues)), cPropertyValues)
-	}
-	cIndex := C.LoonIndexInfo{
-		column_name:                  cColumnName,
-		index_name:                   cIndexName,
-		index_type:                   cIndexType,
-		path:                         cPath,
-		field_id:                     C.int64_t(index.FieldID),
-		index_id:                     C.int64_t(index.IndexID),
-		build_id:                     C.int64_t(index.BuildID),
-		index_version:                C.int64_t(index.IndexVersion),
-		num_rows:                     C.int64_t(index.NumRows),
-		serialized_size:              C.int64_t(index.SerializedSize),
-		mem_size:                     C.int64_t(index.MemSize),
-		current_index_version:        C.int32_t(index.CurrentIndexVersion),
-		current_scalar_index_version: C.int32_t(index.CurrentScalarIndexVersion),
-		index_store_path_version:     C.int32_t(index.IndexStorePathVersion),
-		index_file_keys:              cIndexFileKeysPtr,
-		num_index_file_keys:          C.uint32_t(len(cIndexFileKeys)),
-		property_keys:                cPropertyKeysPtr,
-		property_values:              cPropertyValuesPtr,
-		num_properties:               C.uint32_t(len(cPropertyKeys)),
-	}
-	if err := HandleLoonFFIResult(C.loon_transaction_add_index_info(transactionHandle, &cIndex)); err != nil {
-		return "", merr.WrapErrStorage(err, "failed to add index info to manifest")
+		cPropertyKeys := make([]*C.char, 0, len(propertyNames))
+		cPropertyValues := make([]*C.char, 0, len(propertyNames))
+		for _, key := range propertyNames {
+			cPropertyKeys = append(cPropertyKeys, C.CString(key))
+			cPropertyValues = append(cPropertyValues, C.CString(index.Properties[key]))
+		}
+		defer func() {
+			for _, key := range cPropertyKeys {
+				C.free(unsafe.Pointer(key))
+			}
+			for _, value := range cPropertyValues {
+				C.free(unsafe.Pointer(value))
+			}
+		}()
+
+		var cPropertyKeysPtr, cPropertyValuesPtr **C.char
+		if len(cPropertyKeys) > 0 {
+			arraySize := C.size_t(len(cPropertyKeys)) * C.size_t(unsafe.Sizeof(uintptr(0)))
+			cPropertyKeysPtr = (**C.char)(C.malloc(arraySize))
+			cPropertyValuesPtr = (**C.char)(C.malloc(arraySize))
+			defer C.free(unsafe.Pointer(cPropertyKeysPtr))
+			defer C.free(unsafe.Pointer(cPropertyValuesPtr))
+			copy(unsafe.Slice(cPropertyKeysPtr, len(cPropertyKeys)), cPropertyKeys)
+			copy(unsafe.Slice(cPropertyValuesPtr, len(cPropertyValues)), cPropertyValues)
+		}
+		cIndex := C.LoonIndexInfo{
+			column_name:                  cColumnName,
+			index_name:                   cIndexName,
+			index_type:                   cIndexType,
+			path:                         cPath,
+			field_id:                     C.int64_t(index.FieldID),
+			index_id:                     C.int64_t(index.IndexID),
+			build_id:                     C.int64_t(index.BuildID),
+			index_version:                C.int64_t(index.IndexVersion),
+			num_rows:                     C.int64_t(index.NumRows),
+			serialized_size:              C.int64_t(index.SerializedSize),
+			mem_size:                     C.int64_t(index.MemSize),
+			current_index_version:        C.int32_t(index.CurrentIndexVersion),
+			current_scalar_index_version: C.int32_t(index.CurrentScalarIndexVersion),
+			index_store_path_version:     C.int32_t(index.IndexStorePathVersion),
+			index_file_keys:              cIndexFileKeysPtr,
+			num_index_file_keys:          C.uint32_t(len(cIndexFileKeys)),
+			property_keys:                cPropertyKeysPtr,
+			property_values:              cPropertyValuesPtr,
+			num_properties:               C.uint32_t(len(cPropertyKeys)),
+		}
+		if err := HandleLoonFFIResult(C.loon_transaction_add_index_info(transactionHandle, &cIndex)); err != nil {
+			return "", merr.WrapErrStorage(err, "failed to add index info to manifest")
+		}
 	}
 
+	var commitVersion C.int64_t
+	if err := HandleLoonFFIResult(C.loon_transaction_commit(transactionHandle, &commitVersion)); err != nil {
+		return "", merr.WrapErrStorage(err, "failed to commit index manifest transaction")
+	}
+	return MarshalManifestPath(basePath, int64(commitVersion)), nil
+}
+
+// RemoveIndexInfoFromManifest removes one completed index's metadata from a
+// StorageV3 segment manifest in one transaction. The index artifacts are not
+// touched; callers must delete them only after publishing the returned
+// manifest path to metadata.
+func RemoveIndexInfoFromManifest(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	index ManifestIndexInfo,
+) (string, error) {
+	return RemoveIndexInfosFromManifest(manifestPath, storageConfig, []ManifestIndexInfo{index})
+}
+
+// RemoveIndexInfosFromManifest removes multiple completed indexes' metadata
+// from a StorageV3 segment manifest in one transaction.
+func RemoveIndexInfosFromManifest(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	indexes []ManifestIndexInfo,
+) (string, error) {
+	if len(indexes) == 0 {
+		return manifestPath, nil
+	}
+	basePath, _, err := UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return "", merr.WrapErrStorage(err, "failed to parse manifest path")
+	}
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return "", merr.Wrap(err, "failed to create properties")
+	}
+	defer C.loon_properties_free(cProperties)
+
+	indexManifestLocks.Lock(basePath)
+	defer indexManifestLocks.Unlock(basePath)
+	version, err := getLatestManifestVersion(basePath, cProperties)
+	if err != nil {
+		return "", merr.Wrap(err, "failed to read latest manifest version")
+	}
+	latestManifestPath := MarshalManifestPath(basePath, version)
+	latestIndexes, err := GetManifestIndexInfos(latestManifestPath, storageConfig)
+	if err != nil {
+		return "", merr.Wrap(err, "failed to validate latest manifest index metadata")
+	}
+	matchedIndexes := make([]ManifestIndexInfo, 0, len(indexes))
+	for _, requested := range indexes {
+		matchingKeys, matchingIdentity := 0, false
+		for _, existing := range latestIndexes {
+			if existing.ColumnName != requested.ColumnName || existing.IndexType != requested.IndexType {
+				continue
+			}
+			matchingKeys++
+			if existing.IndexID == requested.IndexID && existing.BuildID == requested.BuildID {
+				matchingIdentity = true
+			}
+		}
+		if matchingKeys == 0 {
+			continue
+		}
+		if matchingKeys != 1 || !matchingIdentity {
+			return "", merr.WrapErrServiceInternalMsg(
+				"manifest index changed while removing %s/%s", requested.ColumnName, requested.IndexType)
+		}
+		matchedIndexes = append(matchedIndexes, requested)
+	}
+	if len(matchedIndexes) == 0 {
+		return latestManifestPath, nil
+	}
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+	var transactionHandle C.LoonTransactionHandle
+	if err := HandleLoonFFIResult(C.loon_transaction_begin(
+		cBasePath, cProperties, C.int64_t(version), C.LOON_TRANSACTION_RESOLVE_FAIL, getRetryLimit(), &transactionHandle,
+	)); err != nil {
+		return "", merr.WrapErrStorage(err, "failed to begin index manifest transaction")
+	}
+	defer C.loon_transaction_destroy(transactionHandle)
+
+	for _, index := range matchedIndexes {
+		cColumnName := C.CString(index.ColumnName)
+		cIndexType := C.CString(index.IndexType)
+		if err := HandleLoonFFIResult(C.loon_transaction_drop_index(transactionHandle, cColumnName, cIndexType)); err != nil {
+			C.free(unsafe.Pointer(cColumnName))
+			C.free(unsafe.Pointer(cIndexType))
+			return "", merr.WrapErrStorage(err, "failed to remove index info from manifest")
+		}
+		C.free(unsafe.Pointer(cColumnName))
+		C.free(unsafe.Pointer(cIndexType))
+	}
 	var commitVersion C.int64_t
 	if err := HandleLoonFFIResult(C.loon_transaction_commit(transactionHandle, &commitVersion)); err != nil {
 		return "", merr.WrapErrStorage(err, "failed to commit index manifest transaction")

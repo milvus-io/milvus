@@ -152,3 +152,51 @@ func manifestIndexParams(manifestIndex packed.ManifestIndexInfo) []*commonpb.Key
 	}
 	return params
 }
+
+// resolveManifestIndexFilePathInfos returns manifest-backed index artifacts
+// that still belong to active collection index definitions. SegmentIndex
+// metadata may be absent for StorageV3, so the collection-level index
+// definitions are the source of truth for filtering dropped indexes.
+func resolveManifestIndexFilePathInfos(
+	ctx context.Context,
+	segmentID int64,
+	manifestPath string,
+	manifestIndexes []packed.ManifestIndexInfo,
+	activeIndexes []*model.Index,
+) []*indexpb.IndexFilePathInfo {
+	activeByID := make(map[int64]*model.Index, len(activeIndexes))
+	for _, index := range activeIndexes {
+		if index == nil || index.IsDeleted {
+			continue
+		}
+		activeByID[index.IndexID] = index
+	}
+
+	ret := make([]*indexpb.IndexFilePathInfo, 0, len(manifestIndexes))
+	seen := make(map[int64]struct{}, len(manifestIndexes))
+	for _, manifestIndex := range manifestIndexes {
+		index, ok := activeByID[manifestIndex.IndexID]
+		if !ok || manifestIndex.FieldID != index.FieldID {
+			continue
+		}
+		if _, ok := seen[manifestIndex.IndexID]; ok {
+			mlog.Warn(ctx, "multiple manifest indexes match one active index",
+				mlog.FieldSegmentID(segmentID),
+				mlog.FieldIndexID(manifestIndex.IndexID),
+				mlog.String("manifestPath", manifestPath))
+			continue
+		}
+
+		info, ok := manifestIndexFilePathInfo(segmentID, manifestIndex)
+		if !ok {
+			mlog.Warn(ctx, "invalid manifest index metadata for active index",
+				mlog.FieldSegmentID(segmentID),
+				mlog.FieldIndexID(manifestIndex.IndexID),
+				mlog.String("manifestPath", manifestPath))
+			continue
+		}
+		seen[manifestIndex.IndexID] = struct{}{}
+		ret = append(ret, info)
+	}
+	return ret
+}

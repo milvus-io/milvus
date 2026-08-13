@@ -893,33 +893,26 @@ func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStat
 
 func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*indexpb.IndexFilePathInfo {
 	segIdxes := h.s.meta.indexMeta.getSegmentIndexes(collectionID, segID)
-	indexesFiles := make([]*indexpb.IndexFilePathInfo, 0)
-	needsManifestFallback := false
-	for _, segIdx := range segIdxes {
-		if segIdx.IndexState == commonpb.IndexState_Finished && len(segIdx.IndexFileKeys) == 0 {
-			needsManifestFallback = true
-			break
+	if len(segIdxes) == 0 {
+		manifestIndexes, manifestPath := h.s.getManifestIndexesForSegment(h.s.ctx, segID)
+		if manifestPath == "" {
+			return nil
 		}
+		activeIndexes := h.s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
+		return resolveManifestIndexFilePathInfos(h.s.ctx, segID, manifestPath, manifestIndexes, activeIndexes)
 	}
+	return uncompressIndexFilesFromSegmentIndexes(h, segID, segIdxes)
+}
 
-	var manifestIndexes []packed.ManifestIndexInfo
-	var manifestPath string
-	if needsManifestFallback {
-		manifestIndexes, manifestPath = h.s.getManifestIndexesForSegment(h.s.ctx, segID)
-	}
+// uncompressIndexFilesFromSegmentIndexes projects the legacy SegmentIndex
+// metadata into full object-storage paths. This path remains for V1/V2 and
+// for the compatibility period while StorageV3 still has SegmentIndex rows.
+func uncompressIndexFilesFromSegmentIndexes(h *ServerHandler, segID int64, segIdxes map[UniqueID]*model.SegmentIndex) []*indexpb.IndexFilePathInfo {
+	indexesFiles := make([]*indexpb.IndexFilePathInfo, 0)
 	for _, segIdx := range segIdxes {
 		if segIdx.IndexState == commonpb.IndexState_Finished {
 			fieldID := h.s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
 			indexName := h.s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
-
-			// SegmentIndex is the normal in-memory/etcd handoff source. Only
-			// consult the manifest if its artifact file list has been removed.
-			if len(segIdx.IndexFileKeys) == 0 {
-				if manifestInfo, ok := resolveManifestIndexFilePathInfo(h.s.ctx, manifestPath, manifestIndexes, segIdx, fieldID); ok {
-					indexesFiles = append(indexesFiles, manifestInfo)
-				}
-				continue
-			}
 
 			builder := metautil.NewIndexPathBuilder(h.s.meta.chunkManager.RootPath(),
 				segIdx.IndexStorePathVersion, segIdx.CollectionID,

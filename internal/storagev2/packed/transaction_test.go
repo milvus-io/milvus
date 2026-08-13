@@ -118,6 +118,12 @@ func TestManifestIndexRoundtrip(t *testing.T) {
 	indexes, err = GetManifestIndexInfos(updatedManifestPath, storageConfig)
 	require.NoError(t, err)
 	require.Len(t, indexes, 2)
+	removedManifestPath, err := RemoveIndexInfoFromManifest(updatedManifestPath, storageConfig, index)
+	require.NoError(t, err)
+	indexes, err = GetManifestIndexInfos(removedManifestPath, storageConfig)
+	require.NoError(t, err)
+	require.Len(t, indexes, 1)
+	assert.Equal(t, secondIndex.IndexID, indexes[0].IndexID)
 }
 
 // TestManifestIndexNormalPathReadback exercises the complete index artifact

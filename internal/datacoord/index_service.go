@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -1075,74 +1074,65 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 			EnableIndex:  false,
 			IndexInfos:   make([]*indexpb.IndexFilePathInfo, 0),
 		}
-		if len(segIdxes) != 0 {
-			needsManifestFallback := false
-			for _, segIdx := range segIdxes {
-				if segIdx.IndexState == commonpb.IndexState_Finished && len(segIdx.IndexFileKeys) == 0 {
-					needsManifestFallback = true
-					break
-				}
+		if len(segIdxes) == 0 {
+			manifestIndexes, manifestPath := s.getManifestIndexesForSegment(ctx, segID)
+			if manifestPath != "" {
+				activeIndexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), "")
+				ret.SegmentInfo[segID].IndexInfos = resolveManifestIndexFilePathInfos(ctx, segID, manifestPath, manifestIndexes, activeIndexes)
 			}
-
-			var manifestIndexes []packed.ManifestIndexInfo
-			var manifestPath string
-			if needsManifestFallback {
-				manifestIndexes, manifestPath = s.getManifestIndexesForSegment(ctx, segID)
-			}
-			for _, segIdx := range segIdxes {
-				if segIdx.IndexState == commonpb.IndexState_Finished {
-					fieldID := s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
-					// SegmentIndex is the normal in-memory/etcd handoff source. Only
-					// consult the manifest if its artifact file list has been removed.
-					if len(segIdx.IndexFileKeys) == 0 {
-						if manifestInfo, ok := resolveManifestIndexFilePathInfo(ctx, manifestPath, manifestIndexes, segIdx, fieldID); ok {
-							ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos, manifestInfo)
-						}
-						continue
-					}
-
-					builder := metautil.NewIndexPathBuilder(s.meta.chunkManager.RootPath(),
-						segIdx.IndexStorePathVersion, segIdx.CollectionID,
-						segIdx.PartitionID, segIdx.SegmentID,
-						segIdx.BuildID, segIdx.IndexVersion)
-					indexFilePaths := builder.BuildFilePaths(segIdx.IndexFileKeys)
-					indexParams := s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
-					indexParams = append(indexParams, s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
-					// respect segment-based index type
-					for _, param := range indexParams {
-						if param.Key == common.IndexTypeKey && segIdx.IndexType != "" && segIdx.IndexType != param.Value {
-							param.Value = segIdx.IndexType
-							break
-						}
-					}
-					indexName := s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
-					if segIdx.IndexType != "" && segIdx.IndexType != indexName {
-						indexName = segIdx.IndexType
-					}
-					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
-						&indexpb.IndexFilePathInfo{
-							SegmentID:                 segID,
-							FieldID:                   fieldID,
-							IndexID:                   segIdx.IndexID,
-							BuildID:                   segIdx.BuildID,
-							IndexName:                 indexName,
-							IndexParams:               indexParams,
-							IndexFilePaths:            indexFilePaths,
-							SerializedSize:            segIdx.IndexSerializedSize,
-							MemSize:                   segIdx.IndexMemSize,
-							IndexVersion:              segIdx.IndexVersion,
-							NumRows:                   segIdx.NumRows,
-							CurrentIndexVersion:       segIdx.CurrentIndexVersion,
-							CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
-							IndexStorePathVersion:     segIdx.IndexStorePathVersion,
-						})
-				}
-			}
+		} else {
+			ret.SegmentInfo[segID].IndexInfos = getIndexFilePathInfosFromSegmentIndexes(s.meta, segID, segIdxes)
 		}
 		ret.SegmentInfo[segID].EnableIndex = len(ret.SegmentInfo[segID].IndexInfos) > 0
 	}
 
 	return ret, nil
+}
+
+// getIndexFilePathInfosFromSegmentIndexes projects legacy SegmentIndex
+// metadata into full object-storage paths. This path remains for V1/V2 and
+// for the compatibility period while StorageV3 still has SegmentIndex rows.
+func getIndexFilePathInfosFromSegmentIndexes(meta *meta, segID int64, segIdxes map[UniqueID]*model.SegmentIndex) []*indexpb.IndexFilePathInfo {
+	infos := make([]*indexpb.IndexFilePathInfo, 0, len(segIdxes))
+	for _, segIdx := range segIdxes {
+		if segIdx.IndexState != commonpb.IndexState_Finished {
+			continue
+		}
+		fieldID := meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
+		builder := metautil.NewIndexPathBuilder(meta.chunkManager.RootPath(),
+			segIdx.IndexStorePathVersion, segIdx.CollectionID,
+			segIdx.PartitionID, segIdx.SegmentID,
+			segIdx.BuildID, segIdx.IndexVersion)
+		indexParams := meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
+		indexParams = append(indexParams, meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
+		for _, param := range indexParams {
+			if param.Key == common.IndexTypeKey && segIdx.IndexType != "" && segIdx.IndexType != param.Value {
+				param.Value = segIdx.IndexType
+				break
+			}
+		}
+		indexName := meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
+		if segIdx.IndexType != "" && segIdx.IndexType != indexName {
+			indexName = segIdx.IndexType
+		}
+		infos = append(infos, &indexpb.IndexFilePathInfo{
+			SegmentID:                 segID,
+			FieldID:                   fieldID,
+			IndexID:                   segIdx.IndexID,
+			BuildID:                   segIdx.BuildID,
+			IndexName:                 indexName,
+			IndexParams:               indexParams,
+			IndexFilePaths:            builder.BuildFilePaths(segIdx.IndexFileKeys),
+			SerializedSize:            segIdx.IndexSerializedSize,
+			MemSize:                   segIdx.IndexMemSize,
+			IndexVersion:              segIdx.IndexVersion,
+			NumRows:                   segIdx.NumRows,
+			CurrentIndexVersion:       segIdx.CurrentIndexVersion,
+			CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
+			IndexStorePathVersion:     segIdx.IndexStorePathVersion,
+		})
+	}
+	return infos
 }
 
 // ListIndexes returns all indexes created on provided collection.
