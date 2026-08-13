@@ -141,9 +141,9 @@ type baseTask struct {
 func newBaseTask(ctx context.Context, timeout time.Duration, source Source, collectionID typeutil.UniqueID, replica *meta.Replica, shard string, taskTag string) *baseTask {
 	var cancel context.CancelFunc
 	if timeout > 0 {
-		// The deadline bounds every action RPC of this task (executor uses
-		// task.Context()) and propagates through gRPC to the serving node,
-		// so a stuck server-side operation cannot pin the scheduler slot forever.
+		// The deadline bounds the action RPCs issued with task.Context() and
+		// propagates through gRPC to the serving node, so a stuck server-side
+		// operation cannot pin the scheduler slot forever.
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 	} else {
 		ctx, cancel = context.WithCancel(ctx)
@@ -266,6 +266,9 @@ func (task *baseTask) Fail(err error) {
 		}
 		task.err = err
 		close(task.doneCh)
+		if task.span != nil {
+			task.span.End()
+		}
 	}
 }
 
