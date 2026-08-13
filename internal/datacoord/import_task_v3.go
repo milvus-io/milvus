@@ -158,12 +158,22 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) 
 func (t *reshardTask) QueryTaskOnWorker(cluster session.Cluster) {
 	p := t.task.Load()
 	resp, err := cluster.QueryReshard(t.GetNodeID(), &datapb.QueryReshardTaskRequest{JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId()})
-	if err != nil || resp.GetState() == datapb.ReshardTask_Retry {
+	if err != nil {
 		if isImportOwnershipLost(err) {
 			_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending), UpdateNodeID(NullNodeID))
+		} else if isImportTerminalError(err) {
+			t.fail(err.Error(), importFailureCode(err))
 		} else {
 			_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		}
+		return
+	}
+	if resp.GetState() == datapb.ReshardTask_Retry {
+		if isImportTerminalFailureCode(resp.GetFailureCode()) {
+			t.fail(resp.GetReason(), resp.GetFailureCode())
+			return
+		}
+		_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		return
 	}
 	if resp.GetState() == datapb.ReshardTask_Failed {
@@ -171,11 +181,29 @@ func (t *reshardTask) QueryTaskOnWorker(cluster session.Cluster) {
 		return
 	}
 	if resp.GetState() == datapb.ReshardTask_Completed {
-		// Result acceptance is intentionally marker-last. Until the DataCoord
-		// manifest reader is wired, fail explicitly instead of marking a task
-		// complete from an unverified worker response.
-		t.fail("reshard result acceptance is not wired", merr.Code(merr.ErrImportSysFailed))
+		if t.GetState() != datapb.ImportTaskStateV2_InProgress {
+			return
+		}
+		if err := t.acceptResult(resp.GetResultRef(), resp.GetResultDigest()); err != nil {
+			t.fail(err.Error(), merr.Code(err))
+			return
+		}
+		if err := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateV3Result(resp.GetResultRef(), resp.GetResultDigest()), UpdateState(datapb.ImportTaskStateV2_Completed)); err != nil {
+			mlog.Warn(context.TODO(), "persist accepted reshard result marker failed", WrapTaskLog(t, mlog.Err(err))...)
+		}
 	}
+}
+
+func (t *reshardTask) acceptResult(ref string, digest []byte) error {
+	if t.meta == nil || t.meta.chunkManager == nil {
+		return merr.WrapErrImportSysFailedMsg("reshard result storage is unavailable")
+	}
+	p := t.task.Load()
+	manifest, err := loadReshardResultManifest(context.TODO(), t.meta.chunkManager, ref, p.GetOutputPrefix(), digest)
+	if err != nil {
+		return err
+	}
+	return validateReshardManifest(manifest, p.GetJobId(), p.GetTaskId(), p.GetRunId(), p.GetTaskPlanDigest())
 }
 
 func (t *reshardTask) DropTaskOnWorker(cluster session.Cluster) {
@@ -191,7 +219,7 @@ func (t *reshardTask) DropTaskOnWorker(cluster session.Cluster) {
 
 func (t *reshardTask) fail(reason string, code int32) {
 	_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason), updateV3FailureCode(code))
-	_ = t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason))
+	_ = t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason), UpdateJobFailureCode(code))
 }
 func (t *reshardTask) Clone() ImportTask {
 	c := newReshardTask(proto.Clone(t.task.Load()).(*datapb.ReshardTask), t.importMeta, t.meta)
@@ -269,12 +297,22 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 func (t *importTaskV3) QueryTaskOnWorker(cluster session.Cluster) {
 	p := t.task.Load()
 	resp, err := cluster.QueryImportV3(t.GetNodeID(), &datapb.QueryImportTaskV3Request{JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId()})
-	if err != nil || resp.GetState() == datapb.ImportTaskV3_Retry {
+	if err != nil {
 		if isImportOwnershipLost(err) {
 			_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending), UpdateNodeID(NullNodeID))
+		} else if isImportTerminalError(err) {
+			t.fail(err.Error(), importFailureCode(err))
 		} else {
 			_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		}
+		return
+	}
+	if resp.GetState() == datapb.ImportTaskV3_Retry {
+		if isImportTerminalFailureCode(resp.GetFailureCode()) {
+			t.fail(resp.GetReason(), resp.GetFailureCode())
+			return
+		}
+		_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskV3_Failed {
@@ -282,8 +320,32 @@ func (t *importTaskV3) QueryTaskOnWorker(cluster session.Cluster) {
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskV3_Completed {
-		t.fail("import v3 result acceptance is not wired", merr.Code(merr.ErrImportSysFailed))
+		if t.GetState() != datapb.ImportTaskStateV2_InProgress {
+			return
+		}
+		if err := t.acceptResult(resp.GetResultRef(), resp.GetResultDigest()); err != nil {
+			t.fail(err.Error(), merr.Code(err))
+			return
+		}
+		if err := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateV3Result(resp.GetResultRef(), resp.GetResultDigest()), UpdateState(datapb.ImportTaskStateV2_Completed)); err != nil {
+			mlog.Warn(context.TODO(), "persist accepted import v3 result marker failed", WrapTaskLog(t, mlog.Err(err))...)
+		}
 	}
+}
+
+func (t *importTaskV3) acceptResult(ref string, digest []byte) error {
+	if t.meta == nil || t.meta.chunkManager == nil {
+		return merr.WrapErrImportSysFailedMsg("import v3 result storage is unavailable")
+	}
+	p := t.task.Load()
+	manifest, err := loadImportResultManifestV3(context.TODO(), t.meta.chunkManager, ref, p.GetOutputPrefix(), digest)
+	if err != nil {
+		return err
+	}
+	if err := validateImportResultManifest(manifest, p.GetJobId(), p.GetTaskId(), p.GetRunId(), p.GetPlanningGeneration(), p.GetTaskPlanDigest(), p.GetOutputSegmentIds()); err != nil {
+		return err
+	}
+	return applyImportResultManifest(context.TODO(), t.meta, p.GetCollectionId(), manifest)
 }
 
 func (t *importTaskV3) DropTaskOnWorker(cluster session.Cluster) {
@@ -294,11 +356,18 @@ func (t *importTaskV3) DropTaskOnWorker(cluster session.Cluster) {
 			return
 		}
 	}
+	if t.meta != nil && len(p.GetOutputSegmentIds()) > 0 {
+		zeroOnly := t.GetState() == datapb.ImportTaskStateV2_Completed
+		if err := t.meta.UpdateSegmentsInfo(context.TODO(), dropImportV3Skeletons(p.GetOutputSegmentIds(), zeroOnly)); err != nil {
+			mlog.Warn(context.TODO(), "drop import v3 skeletons failed", WrapTaskLog(t, mlog.Err(err))...)
+			return
+		}
+	}
 	_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateNodeID(NullNodeID))
 }
 func (t *importTaskV3) fail(reason string, code int32) {
 	_ = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason), updateV3FailureCode(code))
-	_ = t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason))
+	_ = t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason), UpdateJobFailureCode(code))
 }
 func (t *importTaskV3) Clone() ImportTask {
 	c := newImportTaskV3(proto.Clone(t.task.Load()).(*datapb.ImportTaskV3), t.importMeta, t.meta)

@@ -142,6 +142,21 @@ func updateV3FailureCode(code int32) UpdateAction {
 	}
 }
 
+func UpdateV3Result(ref string, digest []byte) UpdateAction {
+	return func(t ImportTask) {
+		switch t.GetType() {
+		case ReshardTaskType:
+			task := t.(*reshardTask).task.Load()
+			task.ResultRef = ref
+			task.ResultDigest = append([]byte(nil), digest...)
+		case ImportTaskV3Type:
+			task := t.(*importTaskV3).task.Load()
+			task.ResultRef = ref
+			task.ResultDigest = append([]byte(nil), digest...)
+		}
+	}
+}
+
 func UpdateFileStats(fileStats []*datapb.ImportFileStats) UpdateAction {
 	return func(t ImportTask) {
 		if task, ok := t.(*preImportTask); ok {

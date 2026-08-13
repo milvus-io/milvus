@@ -101,6 +101,12 @@ func UpdateJobCompleteTime(completeTime string) UpdateJobAction {
 	}
 }
 
+func UpdateJobFailureCode(code int32) UpdateJobAction {
+	return func(job ImportJob) {
+		job.(*importJob).FailureCode = code
+	}
+}
+
 type ImportJob interface {
 	GetJobID() int64
 	GetCollectionID() int64

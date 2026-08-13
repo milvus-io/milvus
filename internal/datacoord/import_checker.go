@@ -265,6 +265,7 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 		if updateErr := c.importMeta.UpdateJob(c.ctx, job.GetJobID(),
 			UpdateJobState(internalpb.ImportJobState_Failed),
 			UpdateJobReason(err.Error()),
+			UpdateJobFailureCode(merr.Code(err)),
 		); updateErr != nil {
 			log.Warn(c.ctx, "failed to reject import v3 job without planning", mlog.Err(updateErr))
 		}

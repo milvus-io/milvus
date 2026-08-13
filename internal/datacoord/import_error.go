@@ -42,3 +42,12 @@ func importFailureCode(err error) int32 {
 	}
 	return merr.Code(err)
 }
+
+func isImportTerminalFailureCode(code int32) bool {
+	switch code {
+	case merr.Code(merr.ErrImportFailed), merr.Code(merr.ErrDataIntegrity), merr.Code(merr.ErrImportSysFailed):
+		return true
+	default:
+		return false
+	}
+}
