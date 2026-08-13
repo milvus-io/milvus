@@ -76,6 +76,13 @@ text match, fuzzy BM25, prefix, wildcard, and other term-based text features
 should share that index instead of maintaining feature-specific files and
 execution paths.
 
+From the user's perspective, fuzzy BM25 is still an ordinary BM25 search. The
+user does not select a separate fuzzy search type. A BM25 search becomes fuzzy
+when its search parameters set `fuzzy_max_edit_distance` to a value greater
+than zero; the Proxy then carries the fuzzy options to the Delegator, which
+performs term expansion before building the BM25 IDF vector. When the value is
+zero or the option is omitted, the existing exact BM25 path is used.
+
 ---
 
 ## 2. Background
@@ -335,6 +342,53 @@ enable_match or Match Index enabled
   -> build FST + postings once
   -> text_match, text_match_fuzzy, fuzzy BM25, prefix, wildcard share it
 ```
+
+### 7.1 User-facing query semantics
+
+The field property and the query parameter have separate responsibilities:
+
+- `enable_fuzzy_bm25=true` is a schema-time capability switch. It causes the
+  analyzer terms for the BM25 input field to be preserved and the Segment FST
+  to be built during write, flush, load, and compaction.
+- `fuzzy_max_edit_distance` is a search-time option. It controls the maximum
+  edit distance used for fuzzy term expansion and must be in `[0, 2]`. Only a
+  value greater than zero enables fuzzy BM25.
+- `fuzzy_max_expansions` is an optional search-time limit. It defaults to `50`
+  and must be in `[1, 1024]` when supplied.
+
+The ordinary BM25 user flow is therefore:
+
+```text
+create schema field with enable_fuzzy_bm25=true
+  -> insert and build the Segment FST
+  -> call the normal BM25 search API
+     with fuzzy_max_edit_distance=1
+     [and optionally fuzzy_max_expansions=100]
+  -> fuzzy BM25 term expansion + regular BM25 scoring
+```
+
+Examples:
+
+```text
+# Exact BM25 (default behavior)
+search_params = {"anns_field": "sparse_bm25"}
+
+# Fuzzy BM25 with edit distance 1
+search_params = {
+    "anns_field": "sparse_bm25",
+    "fuzzy_max_edit_distance": 1,
+    "fuzzy_max_expansions": 50,
+}
+```
+
+Setting only `fuzzy_max_expansions` is invalid because the edit-distance
+parameter is the switch that defines fuzzy behavior. Setting
+`fuzzy_max_edit_distance=0` is valid but is semantically equivalent to exact
+BM25: the Proxy does not attach fuzzy options and the request follows the same
+path as a request that omits the parameter. The BM25 input field must have
+`enable_fuzzy_bm25=true` before a query with a positive edit distance is
+accepted; enabling the option at query time cannot create missing Segment FST
+data for existing segments.
 
 ---
 
