@@ -6062,6 +6062,37 @@ func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
 	}
 }
 
+func TestGetImportSegmentIDsByVchannel_V3OnlyAcceptedCompletedOutputs(t *testing.T) {
+	ctx := context.Background()
+	const jobID int64 = 3003
+
+	completed := newImportTaskV3(&datapb.ImportTaskV3{
+		JobId: jobID, TaskId: 41, State: datapb.ImportTaskV3_Completed,
+		OutputSegmentIds: []int64{101, 102, 103, 104},
+	}, nil, nil)
+	running := newImportTaskV3(&datapb.ImportTaskV3{
+		JobId: jobID, TaskId: 42, State: datapb.ImportTaskV3_Running,
+		OutputSegmentIds: []int64{105},
+	}, nil, nil)
+	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().GetTaskBy(mock.Anything, mock.Anything, mock.Anything).
+		Return([]ImportTask{completed, running})
+
+	segments := NewSegmentsInfo()
+	for _, segment := range []*datapb.SegmentInfo{
+		{ID: 101, InsertChannel: "vchan-0", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: true},
+		{ID: 102, InsertChannel: "vchan-0", State: commonpb.SegmentState_Importing, NumOfRows: 0, IsImporting: true},
+		{ID: 103, InsertChannel: "vchan-1", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: true},
+		{ID: 104, InsertChannel: "vchan-0", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: false},
+		{ID: 105, InsertChannel: "vchan-0", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: true},
+	} {
+		segments.SetSegment(segment.GetID(), &SegmentInfo{SegmentInfo: segment})
+	}
+
+	server := &Server{importMeta: importMetaMock, meta: &meta{segments: segments}}
+	assert.Equal(t, []int64{101}, server.getImportSegmentIDsByVchannel(ctx, jobID, "vchan-0"))
+}
+
 func TestHandleCommitVchannelRPC_RejectsCommitTimestampBelowBinlogTimestamp(t *testing.T) {
 	ctx := context.Background()
 

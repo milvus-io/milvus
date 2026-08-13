@@ -3227,27 +3227,40 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	return merr.Success(), nil
 }
 
-// getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments) belonging to
-// the given import job that are assigned to the given vchannel.
+// getImportSegmentIDsByVchannel returns the accepted import segments assigned
+// to one vchannel. V2 preserves its legacy original/sorted candidate set. V3
+// only admits the current Completed task outputs that have been materialized as
+// non-empty Flushed segments; zero-row or unaccepted skeletons never cross the
+// CommitImport fence.
 // This must be called BEFORE acquiring importMeta's mutex (i.e., before HandleCommitVchannel).
 func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) []int64 {
-	tasks := s.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks := s.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType, ImportTaskV3Type))
 	var segIDs []int64
 	for _, task := range tasks {
-		it, ok := task.(*importTask)
-		if !ok {
+		var candidates []int64
+		switch it := task.(type) {
+		case *importTask:
+			candidates = make([]int64, 0, len(it.GetSegmentIDs())+len(it.GetSortedSegmentIDs()))
+			candidates = append(candidates, it.GetSegmentIDs()...)
+			candidates = append(candidates, it.GetSortedSegmentIDs()...)
+		case *importTaskV3:
+			if it.GetState() != datapb.ImportTaskStateV2_Completed {
+				continue
+			}
+			candidates = append(candidates, it.task.Load().GetOutputSegmentIds()...)
+		default:
 			continue
 		}
-		// Collect all candidate segment IDs from this task (safe copies).
-		candidates := make([]int64, 0, len(it.GetSegmentIDs())+len(it.GetSortedSegmentIDs()))
-		candidates = append(candidates, it.GetSegmentIDs()...)
-		candidates = append(candidates, it.GetSortedSegmentIDs()...)
 		for _, segID := range candidates {
 			seg := s.meta.GetSegment(ctx, segID)
 			if seg == nil {
 				continue
 			}
 			if seg.GetInsertChannel() != vchannel {
+				continue
+			}
+			if task.GetType() == ImportTaskV3Type &&
+				(seg.GetState() != commonpb.SegmentState_Flushed || seg.GetNumOfRows() == 0 || !seg.GetIsImporting()) {
 				continue
 			}
 			segIDs = append(segIDs, segID)
