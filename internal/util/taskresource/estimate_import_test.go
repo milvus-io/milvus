@@ -143,7 +143,7 @@ func TestEstimateImportExactValueForCommonCase(t *testing.T) {
 	// perFile = 16MiB base * 2 vchannels * 1 partition = 32MiB.
 	got := EstimateImport(ImportInput{FileNum: 4, VChannelNum: 2, PartitionNum: 1})
 
-	assert.Equal(t, int64(128*mib), got.Memory)
+	assert.Equal(t, 128*mib, got.Memory)
 	assert.Equal(t, 2.0, got.CPU)
 }
 
@@ -163,7 +163,7 @@ func TestEstimateImportL0UsesDeleteBufferExactValue(t *testing.T) {
 
 	deleteBuffer := pt.DataNodeCfg.ImportDeleteBufferSize.GetAsInt64()
 	assert.Equal(t, deleteBuffer*8, got.Memory)
-	assert.Equal(t, int64(128*mib), got.Memory)
+	assert.Equal(t, 128*mib, got.Memory)
 }
 
 func TestEstimatePreImportExactValue(t *testing.T) {
@@ -181,7 +181,7 @@ func TestEstimatePreImportExactValue(t *testing.T) {
 
 	baseBuffer := pt.DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
 	assert.Equal(t, baseBuffer*8, got.Memory)
-	assert.Equal(t, int64(128*mib), got.Memory)
+	assert.Equal(t, 128*mib, got.Memory)
 }
 
 // A zero VChannelNum/PartitionNum must be floored to 1, not treated as a
@@ -205,7 +205,7 @@ func TestEstimateImportZeroFanoutFloorsToOne(t *testing.T) {
 	one := EstimateImport(ImportInput{FileNum: 8, VChannelNum: 1, PartitionNum: 1})
 
 	assert.Equal(t, one.Memory, zero.Memory)
-	assert.Equal(t, int64(128*mib), zero.Memory)
+	assert.Equal(t, 128*mib, zero.Memory)
 }
 
 // MaxFileMemorySize must cap the per-file buffer before it is multiplied by
@@ -229,7 +229,7 @@ func TestEstimateImportCapsAtMaxFileMemorySize(t *testing.T) {
 		MaxFileMemorySize: 20 * mib,
 	})
 
-	assert.Equal(t, int64(80*mib), got.Memory)
+	assert.Equal(t, 80*mib, got.Memory)
 	assert.Equal(t, 2.0, got.CPU)
 }
 

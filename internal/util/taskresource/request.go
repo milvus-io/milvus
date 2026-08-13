@@ -21,7 +21,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -268,7 +267,7 @@ func RequirementForStats(req *workerpb.CreateStatsRequest) Requirement {
 		})
 		touched = sumFieldBinlogMemoryForFieldSet(req.GetInsertLogs(), ids)
 	default:
-		// An unrecognised or future sub-job (including the None value) has
+		// An unrecognized or future sub-job (including the None value) has
 		// no known field subset to isolate, so it charges the whole segment
 		// rather than guessing: under-provisioning is the direction that
 		// causes OOM.

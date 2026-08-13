@@ -23,7 +23,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -239,7 +238,7 @@ func TestRequirementForIndexUnmatchedFieldStillCharged(t *testing.T) {
 	assert.Greater(t, got.Memory, int64(0))
 }
 
-// An index request with no recognised index_type key must still fall back
+// An index request with no recognized index_type key must still fall back
 // to the configured default factor rather than treating the field as free.
 // Dim/NumRows are large enough that the default factor (1.5) and, say, an
 // accidental HNSW factor (2.0) would produce visibly different un-floored
@@ -323,7 +322,7 @@ func TestRequirementForStatsJSONKeyIndexJobChargesOnlyJSONField(t *testing.T) {
 }
 
 // IsFunctionOutput must be set on the output field for
-// typeutil.IsBM25FunctionOutputField to recognise it -- a schema missing that
+// typeutil.IsBM25FunctionOutputField to recognize it -- a schema missing that
 // flag (as a real DataCoord-populated schema never would) makes the matcher
 // return false for every field, which would zero the touched set entirely.
 func TestRequirementForStatsBM25JobChargesOnlyFunctionOutputField(t *testing.T) {
@@ -401,7 +400,7 @@ func TestRequirementForStatsSortRoutesToSortCompactionNotTextIndex(t *testing.T)
 	assert.NotEqual(t, wrongIfTreatedAsText, got)
 }
 
-// An unrecognised/future sub-job (or the zero value) has no known field
+// An unrecognized/future sub-job (or the zero value) has no known field
 // subset, so it must charge conservatively for the whole segment rather
 // than guessing -- under-charging is the dangerous direction. Each field is
 // individually small but their sum clears the 64MiB floor, so a bug that
