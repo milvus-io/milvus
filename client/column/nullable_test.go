@@ -387,7 +387,7 @@ func (s *NullableScalarSuite) TestBasic() {
 		s.NoError(err)
 		fd := column.FieldData()
 		s.EqualValues(entity.FieldTypeText, fd.GetType())
-		s.Equal(validData, fd.GetValidData())
+		s.Equal(validData, getFieldDataValidData(fd))
 		s.Equal(sparseData, fd.GetScalars().GetStringData().GetData())
 
 		result, err := FieldDataColumn(fd, 0, -1)
