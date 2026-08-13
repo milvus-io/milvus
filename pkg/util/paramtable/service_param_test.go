@@ -568,12 +568,19 @@ func TestServiceParamValidateMessageSizeReserve(t *testing.T) {
 
 	t.Run("reserve at or above kafka.producer.message.max.bytes panics", func(t *testing.T) {
 		bt := NewBaseTable(SkipRemote(true))
-		// Kafka's default is 10 MiB; a reserve that size or larger is invalid
-		// against it even though pulsar.maxMessageSize (2 MiB default) is left
-		// untouched -- both backends have to be checked, not just Pulsar's own.
+		// Pulsar's own limit is raised above the reserve so the Pulsar bound
+		// passes and only the Kafka bound (default 10 MiB) can fire -- with
+		// Pulsar left at its 2 MiB default, a 10 MiB reserve would trip the
+		// Pulsar check first and this subtest would never reach the branch it
+		// exists to pin.
+		assert.NoError(t, bt.Save("pulsar.maxMessageSize", "20971520"))
 		assert.NoError(t, bt.Save("pulsar.messageReserveSize", "10485760"))
-		var SParams ServiceParam
-		assert.Panics(t, func() { SParams.init(bt) })
+		assert.PanicsWithValue(t,
+			"pulsar.messageReserveSize (10485760) must be smaller than kafka.producer.message.max.bytes (10485760)",
+			func() {
+				var SParams ServiceParam
+				SParams.init(bt)
+			})
 	})
 
 	t.Run("default configuration does not panic", func(t *testing.T) {
