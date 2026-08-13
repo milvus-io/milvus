@@ -230,6 +230,18 @@ message PlanningSnapshot {
   int32 merge_fan_in_cap = 11;
   int64 total_rows = 12;
   int64 total_logical_bytes = 13;
+  // Frozen schemas make the snapshot self-contained for worker recovery. The
+  // target schema is the collection schema used by the final writer; the
+  // temporary schema is the normalized fragment schema used by fragment
+  // readers. Workers must never fetch the live collection schema while a V3
+  // task is running because an AlterCollection can otherwise change the
+  // projection after planning.
+  schema.CollectionSchema target_schema = 14;
+  schema.CollectionSchema temporary_schema = 15;
+  // Import data timestamp is frozen at planning and is used by the worker for
+  // timestamp materialization and TTL filtering. It is intentionally part of
+  // the snapshot rather than read from current job metadata during recovery.
+  uint64 data_ts = 16;
 }
 
 message ImportTaskPlan {
