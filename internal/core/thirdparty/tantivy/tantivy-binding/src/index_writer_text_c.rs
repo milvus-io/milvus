@@ -45,10 +45,13 @@ pub extern "C" fn tantivy_create_text_writer(
         tantivy_index_version,
     ) {
         Ok(wrapper) => RustResult::from_ptr(create_binding(wrapper)),
-        Err(err) => RustResult::from_error(format!(
-            "create tokenizer failed with error: {} param: {}",
-            err.to_string(),
-            params,
-        )),
+        Err(err) => RustResult::from_binding_error_msg(
+            &err,
+            format!(
+                "create tokenizer failed with error: {} param: {}",
+                err.to_string(),
+                params,
+            ),
+        ),
     }
 }
