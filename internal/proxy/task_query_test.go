@@ -44,6 +44,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestQueryTaskAppliesFixedSnapshotTimestamp(t *testing.T) {
+	const snapshotTS = uint64(100)
+	task := &queryTask{
+		RetrieveRequest:        &internalpb.RetrieveRequest{MvccTimestamp: 200},
+		fixedSnapshotTimestamp: snapshotTS,
+	}
+
+	guaranteeTS := task.applyFixedSnapshotTimestamp(300)
+	require.Equal(t, snapshotTS, guaranteeTS)
+	require.Equal(t, snapshotTS, task.GetMvccTimestamp())
+}
+
 func TestQueryTask_all(t *testing.T) {
 	var (
 		err error
