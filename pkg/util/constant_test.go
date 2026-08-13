@@ -37,3 +37,9 @@ func TestGetReplicateConfigurationPrivilege(t *testing.T) {
 	}
 	assert.True(t, found, "PrivilegeGetReplicateConfiguration should be in ClusterReadOnlyPrivileges")
 }
+
+func TestObsoleteExprPrivilegeNameIsReservedButNotDefined(t *testing.T) {
+	assert.False(t, IsPrivilegeNameDefined(ObsoletePrivilegeExprForAPI))
+	assert.True(t, IsReservedPrivilegeName(ObsoletePrivilegeExprForAPI))
+	assert.Empty(t, PrivilegeNameForMetastore(ObsoletePrivilegeExprForAPI))
+}

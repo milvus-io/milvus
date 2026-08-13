@@ -4303,6 +4303,23 @@ func TestRBACReadSkipsObsoleteExprPrivilege(t *testing.T) {
 	})
 }
 
+func TestRestoreRBACSkipsObsoleteExprPrivilege(t *testing.T) {
+	ctx := context.Background()
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	err := c.RestoreRBAC(ctx, util.DefaultTenant, &milvuspb.RBACMeta{
+		Grants: []*milvuspb.GrantEntity{
+			{
+				Grantor: &milvuspb.GrantorEntity{
+					Privilege: &milvuspb.PrivilegeEntity{Name: util.ObsoletePrivilegeExprForAPI},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+}
+
 func TestCatalog_FileResource(t *testing.T) {
 	ctx := context.Background()
 	mockErr := errors.New("mock error")

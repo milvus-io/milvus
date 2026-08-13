@@ -59,7 +59,13 @@ const (
 
 	PrivilegeWord      = "Privilege"
 	PrivilegeGroupWord = "PrivilegeGroup"
-	AnyWord            = "*"
+	// ObsoletePrivilegeExpr is kept for compatibility with RBAC metadata written
+	// before the diagnostic expression executor was removed. It is not a
+	// grantable privilege, but its API name remains reserved and legacy grants
+	// are ignored during restore.
+	ObsoletePrivilegeExpr       = "PrivilegeExpr"
+	ObsoletePrivilegeExprForAPI = "Expr"
+	AnyWord                     = "*"
 
 	IdentifierKey = "identifier"
 
@@ -517,6 +523,10 @@ func isPrivilegeNameForMetastoreDefined(name string) bool {
 // check if the name is defined by built in privileges or privilege groups in system
 func IsPrivilegeNameDefined(name string) bool {
 	return PrivilegeNameForMetastore(name) != ""
+}
+
+func IsReservedPrivilegeName(name string) bool {
+	return IsPrivilegeNameDefined(name) || name == ObsoletePrivilegeExprForAPI
 }
 
 func IsBuiltinPrivilegeGroup(name string) bool {

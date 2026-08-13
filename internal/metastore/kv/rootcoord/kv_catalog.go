@@ -39,8 +39,8 @@ import (
 // prefix/file_resource/resource_id             -> Resource
 
 const (
-	obsoleteExprPrivilege       = "PrivilegeExpr"
-	obsoleteExprPrivilegeForAPI = "Expr"
+	obsoleteExprPrivilege       = util.ObsoletePrivilegeExpr
+	obsoleteExprPrivilegeForAPI = util.ObsoletePrivilegeExprForAPI
 )
 
 type Catalog struct {
@@ -2159,6 +2159,9 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 
 	for _, grant := range meta.GetGrants() {
 		privName := grant.GetGrantor().GetPrivilege().GetName()
+		if privName == obsoleteExprPrivilegeForAPI {
+			continue
+		}
 		switch {
 		case util.IsAnyWord(privName):
 		case util.IsPrivilegeNameDefined(privName):
