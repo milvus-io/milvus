@@ -121,6 +121,13 @@ type ImportJob interface {
 	GetAutoCommit() bool
 	GetTR() *timerecord.TimeRecorder
 	GetDataTs() uint64
+	GetImportTaskVersion() int32
+	GetFailureCode() int32
+	GetPlanningGeneration() int64
+	GetPlanningSnapshotRef() string
+	GetPlanningSnapshotDigest() []byte
+	GetImportPlanIndexRef() string
+	GetImportPlanIndexDigest() []byte
 	Clone() ImportJob
 }
 
