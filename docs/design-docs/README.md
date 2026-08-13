@@ -11,7 +11,7 @@ compatibility impact, and verification plan before or alongside implementation.
 - [`assets/`](assets/) contains images shared by Design Docs.
 
 User guides, current subsystem references, and executable experiments do not
-belong under `design_docs/`. Put user documentation under `docs/user_guides/`
-until it is published in `milvus-docs`, current subsystem documentation under
-`docs/agent_guides/`, and executable experiments with the implementation,
-tests, or benchmark suite they validate.
+belong under `design_docs/`. Maintain user documentation in
+[`milvus-io/milvus-docs`](https://github.com/milvus-io/milvus-docs), current
+subsystem documentation under `docs/agent_guides/`, and executable experiments
+with the implementation, tests, or benchmark suite they validate.

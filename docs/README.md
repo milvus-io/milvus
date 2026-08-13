@@ -11,7 +11,6 @@ tree. Public product documentation belongs in the
 | [`agent_guides/`](agent_guides/) | Code-backed subsystem architecture, invariants, and debugging guidance | Current |
 | [`dev/`](dev/) | Contributor-facing engineering rules and development procedures | Current |
 | [`design-docs/`](design-docs/) | Design records and their supporting assets | Current and historical |
-| [`user_guides/`](user_guides/) | User documentation awaiting publication in `milvus-docs` | Temporary |
 | [`archive/`](archive/) | Superseded documentation retained for historical context | Historical, non-normative |
 
 Documentation that belongs to one component may remain next to that component.
