@@ -100,15 +100,44 @@ type StatsInput struct {
 }
 
 // EstimateStats returns the peak footprint of one stats sub-job.
+//
+// It is valid for the three sub-job types DataCoord actually submits today
+// (internal/datacoord/stats_inspector.go): StatsSubJob_TextIndexJob,
+// StatsSubJob_BM25Job, and StatsSubJob_JsonKeyIndexJob.
+// StatsSubJob_Sort is out of scope by design: sort is no longer run as a
+// stats sub-job, it is CompactionType_SortCompaction, estimated by
+// EstimateCompaction (estimate_compaction.go) instead.
 func EstimateStats(in StatsInput) Requirement {
 	cfg := &paramtable.Get().DataCoordCfg
 
-	factor := cfg.ResourceTextIndexFactor.GetAsFloat()
-	if in.SubJobType == indexpb.StatsSubJob_JsonKeyIndexJob {
-		factor = cfg.ResourceJSONKeyIndexFactor.GetAsFloat()
+	textFactor := cfg.ResourceTextIndexFactor.GetAsFloat()
+	jsonKeyFactor := cfg.ResourceJSONKeyIndexFactor.GetAsFloat()
+
+	var factor float64
+	switch in.SubJobType {
+	case indexpb.StatsSubJob_TextIndexJob, indexpb.StatsSubJob_BM25Job:
+		factor = textFactor
+	case indexpb.StatsSubJob_JsonKeyIndexJob:
+		factor = jsonKeyFactor
+	default:
+		// Only Text/BM25/JsonKey are submitted today; Sort is deliberately
+		// excluded here because it is estimated as a compaction
+		// (CompactionType_SortCompaction) via EstimateCompaction, not as a
+		// stats job. An unrecognised or future sub-job (including the Sort
+		// and None enum values, which have no submitter on this branch)
+		// deliberately errs high rather than silently falling through to
+		// whichever factor happened to be declared first: under-provisioning
+		// is the direction that causes OOM.
+		factor = textFactor
+		if jsonKeyFactor > factor {
+			factor = jsonKeyFactor
+		}
 	}
 
 	mem := int64(float64(in.FieldMemorySize) * factor)
+	// CPU is a flat charge, not yet read from config: EstimateStats and
+	// EstimateAnalyze do not have a dedicated CPU config key in the current
+	// config table (see the field/key/default table for this task).
 	return Requirement{CPU: 1.0, Memory: atLeast(mem, 64*mib)}
 }
 
@@ -122,5 +151,6 @@ func EstimateAnalyze(totalMemorySize int64) Requirement {
 	if maxMem := cfg.ResourceAnalyzeMaxMemory.GetAsInt64(); mem > maxMem {
 		mem = maxMem
 	}
+	// CPU is a flat charge, not yet read from config; see EstimateStats.
 	return Requirement{CPU: 1.0, Memory: atLeast(mem, 64*mib)}
 }
