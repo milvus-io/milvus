@@ -53,6 +53,7 @@ type CollectionManager interface {
 	// version. The manager derives the logical schema version from schema.Version
 	// when a schema payload is present.
 	UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error
+	ValidateSchemaBarrier(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error
 }
 
 type collectionManager struct {
@@ -72,6 +73,14 @@ type collectionSchemaUpdatePlan struct {
 	// independent counter after the Go-side freshness check accepts an update.
 	segcoreSchemaVersion uint64
 }
+
+type SchemaBarrierRelation int
+
+const (
+	SchemaBarrierStale SchemaBarrierRelation = iota
+	SchemaBarrierCurrent
+	SchemaBarrierNewer
+)
 
 func NewCollectionManager() *collectionManager {
 	return &collectionManager{
@@ -184,6 +193,41 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 	//   properties-only schema snapshots such as ttl_field changes.
 	_, _, err := collection.applySchemaUpdate(schema, logicalSchemaVersion, schemaBarrierTs)
 	return err
+}
+
+func (m *collectionManager) ValidateSchemaBarrier(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+	collection := m.Get(collectionID)
+	if collection == nil {
+		return nil
+	}
+	return ValidateCollectionSchemaBarrier(collection, collectionID, schema, schemaBarrierTs)
+}
+
+// ValidateCollectionSchemaBarrier validates a topology request against one
+// concrete Collection snapshot. Callers may hold the collection's schema
+// transition read lock across their commit/publish boundary to make the check
+// atomic with concurrent UpdateSchema.
+func ValidateCollectionSchemaBarrier(collection *Collection, collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+	if CompareCollectionSchemaBarrier(collection, schema, schemaBarrierTs) == SchemaBarrierStale {
+		return merr.WrapErrCollectionSchemaVersionNotReady(collectionID, 0, 1)
+	}
+	return nil
+}
+
+func CompareCollectionSchemaBarrier(collection *Collection, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) SchemaBarrierRelation {
+	if collection == nil {
+		return SchemaBarrierNewer
+	}
+	_, currentVersion, currentBarrierTs := collection.SchemaSnapshot()
+	incomingVersion := getUpdateSchemaVersion(schema, schemaBarrierTs)
+	if incomingVersion < currentVersion ||
+		(incomingVersion == currentVersion && schemaBarrierTs < currentBarrierTs) {
+		return SchemaBarrierStale
+	}
+	if incomingVersion == currentVersion && schemaBarrierTs == currentBarrierTs {
+		return SchemaBarrierCurrent
+	}
+	return SchemaBarrierNewer
 }
 
 // ShouldUpdateCollectionSchema reports whether an UpdateSchema payload would
@@ -439,6 +483,10 @@ func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *se
 	c.lockSchemaTransitionForUpdate()
 	defer c.unlockSchemaTransitionForUpdate()
 
+	if CompareCollectionSchemaBarrier(c, schema, schemaBarrierTs) == SchemaBarrierStale {
+		return collectionSchemaUpdatePlan{}, false, merr.WrapErrCollectionSchemaVersionNotReady(c.ID(), 0, 1)
+	}
+
 	plan, shouldUpdate, err := c.applySchemaUpdateLocked(schema, logicalSchemaVersion, schemaBarrierTs)
 	if err != nil {
 		return collectionSchemaUpdatePlan{}, false, err
@@ -473,6 +521,14 @@ func (c *Collection) lockSchemaTransitionForUpdate() {
 
 func (c *Collection) unlockSchemaTransitionForUpdate() {
 	c.schemaTransitionMu.Unlock()
+}
+
+// WithSchemaBarrierFence serializes a receiver-side freshness check and its
+// topology publication boundary with UpdateSchema.
+func (c *Collection) WithSchemaBarrierFence(fn func() error) error {
+	c.schemaTransitionMu.RLock()
+	defer c.schemaTransitionMu.RUnlock()
+	return fn()
 }
 
 // WithInsertSchemaTransition keeps payload conversion and growing writes in

@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
@@ -399,6 +400,28 @@ func (bm *broadcastTaskManager) GetPendingSchemaFileResources() map[int64][]int6
 		}
 	}
 	return result
+}
+
+func (bm *broadcastTaskManager) GetPendingSchemaInstallCollectionIDs() []int64 {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	collectionIDs := typeutil.NewUniqueSet()
+	for _, task := range bm.tasks {
+		state := task.State()
+		if (state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING &&
+			state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK &&
+			state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED) ||
+			task.msg.MessageTypeWithVersion() != message.MessageTypeAlterCollectionV2 {
+			continue
+		}
+		alterMsg, err := message.AsMutableAlterCollectionMessageV2(task.msg)
+		if err != nil || !messageutil.IsSchemaChange(alterMsg.Header()) {
+			continue
+		}
+		collectionIDs.Insert(alterMsg.Header().GetCollectionId())
+	}
+	return collectionIDs.Collect()
 }
 
 func appendPendingFileResourceIDs(result map[int64][]int64, collectionID int64, ids []int64) {

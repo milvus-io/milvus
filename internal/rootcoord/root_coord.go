@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/rootcoord/telemetry"
 	"github.com/milvus-io/milvus/internal/rootcoord/tombstone"
+	"github.com/milvus-io/milvus/internal/schemaevolution"
 	"github.com/milvus-io/milvus/internal/storage"
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -154,10 +155,12 @@ type Core struct {
 	idAllocator  allocator.Interface
 	tsoAllocator tso2.Allocator
 
-	mixCoord       types.MixCoord
-	streamingCoord *streamingcoord.Server
-	quotaCenter    *QuotaCenter
-	keyManager     *KeyManager
+	mixCoord                     types.MixCoord
+	schemaInstallGate            schemaevolution.InstallGate
+	schemaInstallVersionProvider schemaevolution.SessionProvider
+	streamingCoord               *streamingcoord.Server
+	quotaCenter                  *QuotaCenter
+	keyManager                   *KeyManager
 
 	stateCode atomic.Int32
 	initOnce  sync.Once
@@ -370,6 +373,10 @@ func (c *Core) SetMixCoord(s types.MixCoord) error {
 	return nil
 }
 
+func (c *Core) SetSchemaInstallGate(gate schemaevolution.InstallGate) {
+	c.schemaInstallGate = gate
+}
+
 // Register register rootcoord at etcd
 func (c *Core) Register() error {
 	return nil
@@ -391,6 +398,7 @@ func (c *Core) SetTiKVClient(client *txnkv.Client) {
 
 func (c *Core) SetSession(session sessionutil.SessionInterface) error {
 	c.session = session
+	c.schemaInstallVersionProvider = session
 	if c.session == nil {
 		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
 	}
@@ -596,7 +604,17 @@ func (c *Core) Init() error {
 			c.meta.RecoverFileResourceRefCnt(pending)
 			mlog.Info(context.TODO(), "recovered file resource refCnt from pending broadcast tasks", mlog.Int("count", len(pending)))
 		}
-		RegisterDDLCallbacks(c)
+		if c.schemaInstallGate != nil {
+			for _, collectionID := range broadcast.GetPendingSchemaInstallCollectionIDs() {
+				if err := c.schemaInstallGate.PrepareSchemaInstall(c.ctx, collectionID); err != nil {
+					initError = merr.Wrapf(err, "failed to recover schema install gate for collection %d", collectionID)
+					return
+				}
+			}
+		}
+		if initError == nil {
+			RegisterDDLCallbacks(c)
+		}
 	})
 	mlog.Info(context.TODO(), "RootCoord init successfully")
 	return initError

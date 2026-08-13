@@ -1375,6 +1375,49 @@ func (s *DelegatorDataSuite) TestSyncCollectionMetaWithoutIndexInfoUpdatesDelega
 	s.Equal(uint64(100), s.delegator.schemaBarrierTs)
 }
 
+func (s *DelegatorDataSuite) TestLoadSegmentsCleansWorkerWhenSchemaAdvancesBeforePublish() {
+	currentSchema := proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema)
+	currentSchema.Version = 1
+	requestSchema := proto.Clone(currentSchema).(*schemapb.CollectionSchema)
+	requestSchema.Version = 2
+	targetSchema := proto.Clone(requestSchema).(*schemapb.CollectionSchema)
+	targetSchema.Version = 3
+
+	worker := cluster.NewMockWorker(s.T())
+	worker.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+		RunAndReturn(func(context.Context, *querypb.LoadSegmentsRequest) error {
+			s.Require().NoError(s.manager.Collection.UpdateSchema(s.collectionID, targetSchema, 300))
+			return nil
+		}).Once()
+	worker.EXPECT().ReleaseSegments(mock.Anything, mock.MatchedBy(func(req *querypb.ReleaseSegmentsRequest) bool {
+		return req.GetCollectionID() == s.collectionID &&
+			req.GetNodeID() == int64(1) &&
+			lo.Contains(req.GetSegmentIDs(), int64(100))
+	})).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
+
+	err := s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Schema:       requestSchema,
+		LoadMeta:     &querypb.LoadMetaInfo{SchemaBarrierTs: 200},
+		LoadScope:    querypb.LoadScope_Full,
+		Infos: []*querypb.SegmentLoadInfo{{
+			SegmentID:     100,
+			CollectionID:  s.collectionID,
+			PartitionID:   500,
+			StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+			DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+			Level:         datapb.SegmentLevel_L1,
+			InsertChannel: s.vchannelName,
+		}},
+	})
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+	sealed, _ := s.delegator.GetSegmentInfo(false)
+	s.Empty(sealed)
+}
+
 func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 	defer func() {
 		s.workerManager.ExpectedCalls = nil

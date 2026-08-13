@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/schemaevolution"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -97,6 +98,9 @@ type TargetObserver struct {
 	loadedDispatcher *taskDispatcher[int64]
 
 	keylocks *lock.KeyLock[int64]
+	// installGate covers the direct SyncDistribution path in this observer,
+	// which intentionally bypasses the task scheduler.
+	installGate *schemaevolution.GateManager
 
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -109,7 +113,12 @@ func NewTargetObserver(
 	broker meta.Broker,
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager,
+	installGates ...*schemaevolution.GateManager,
 ) *TargetObserver {
+	var installGate *schemaevolution.GateManager
+	if len(installGates) > 0 {
+		installGate = installGates[0]
+	}
 	result := &TargetObserver{
 		meta:                 meta,
 		targetMgr:            targetMgr,
@@ -122,6 +131,7 @@ func NewTargetObserver(
 		readyNotifiers:       make(map[int64][]chan struct{}),
 		initChan:             make(chan initRequest),
 		keylocks:             lock.NewKeyLock[int64](),
+		installGate:          installGate,
 	}
 
 	result.loadingDispatcher = newTaskDispatcher(result.check)
@@ -307,6 +317,13 @@ func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 	if ob.meta.GetCollection(ctx, collectionID) == nil {
 		return
 	}
+	if ob.installGate != nil {
+		release, err := ob.installGate.Acquire(ctx, collectionID)
+		if err != nil {
+			return
+		}
+		defer release()
+	}
 
 	if ob.shouldUpdateCurrentTarget(ctx, collectionID) {
 		ob.updateCurrentTarget(ctx, collectionID)
@@ -328,6 +345,13 @@ func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 }
 
 func (ob *TargetObserver) init(ctx context.Context, collectionID int64) {
+	if ob.installGate != nil {
+		release, err := ob.installGate.Acquire(ctx, collectionID)
+		if err != nil {
+			return
+		}
+		defer release()
+	}
 	// pull next target first if not exist
 	if !ob.targetMgr.IsNextTargetExist(ctx, collectionID) {
 		ob.updateNextTarget(ctx, collectionID)
@@ -527,6 +551,16 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collectionID int64, collReadyDelegatorList []*meta.DmChannel, newVersion int64) bool {
 	if len(collReadyDelegatorList) == 0 {
 		return true
+	}
+	if ob.installGate != nil {
+		release, err := ob.installGate.Acquire(ctx, collectionID)
+		if err != nil {
+			mlog.Debug(ctx, "skip target sync while schema installation is in progress",
+				mlog.FieldCollectionID(collectionID),
+				mlog.Err(err))
+			return false
+		}
+		defer release()
 	}
 
 	collectionInfo, err := ob.broker.DescribeCollection(ctx, collectionID)

@@ -177,7 +177,7 @@ func (suite *DistControllerTestSuite) TestSyncAll() {
 	calledSet.Remove(1)
 	calledSet.Remove(2)
 
-	suite.controller.SyncAll(context.TODO())
+	suite.NoError(suite.controller.SyncAll(context.TODO()))
 	suite.Eventually(
 		func() bool {
 			return calledSet.Contain(1) && calledSet.Contain(2)
@@ -185,6 +185,19 @@ func (suite *DistControllerTestSuite) TestSyncAll() {
 		5*time.Second,
 		500*time.Millisecond,
 	)
+}
+
+func (suite *DistControllerTestSuite) TestSyncAllFailure() {
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:  1,
+		Address: "localhost",
+	}))
+	suite.controller.StartDistInstance(context.TODO(), 1)
+	suite.mockCluster.EXPECT().GetDataDistribution(mock.Anything, int64(1), mock.Anything).
+		Return(nil, context.DeadlineExceeded).Maybe()
+	suite.mockScheduler.EXPECT().Dispatch(mock.Anything).Maybe()
+
+	suite.ErrorIs(suite.controller.SyncAll(context.TODO()), context.DeadlineExceeded)
 }
 
 func TestDistControllerSuite(t *testing.T) {

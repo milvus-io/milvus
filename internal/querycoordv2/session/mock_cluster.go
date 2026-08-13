@@ -868,6 +868,66 @@ func (_c *MockCluster_UnsubDmChannel_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// UpdateSchema provides a mock function with given fields: ctx, nodeID, req
+func (_m *MockCluster) UpdateSchema(ctx context.Context, nodeID int64, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, nodeID, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateSchema")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.UpdateSchemaRequest) (*commonpb.Status, error)); ok {
+		return rf(ctx, nodeID, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.UpdateSchemaRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, nodeID, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, *querypb.UpdateSchemaRequest) error); ok {
+		r1 = rf(ctx, nodeID, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_UpdateSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateSchema'
+type MockCluster_UpdateSchema_Call struct {
+	*mock.Call
+}
+
+// UpdateSchema is a helper method to define mock.On call
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *querypb.UpdateSchemaRequest
+func (_e *MockCluster_Expecter) UpdateSchema(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_UpdateSchema_Call {
+	return &MockCluster_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", ctx, nodeID, req)}
+}
+
+func (_c *MockCluster_UpdateSchema_Call) Run(run func(ctx context.Context, nodeID int64, req *querypb.UpdateSchemaRequest)) *MockCluster_UpdateSchema_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(*querypb.UpdateSchemaRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_UpdateSchema_Call) Return(_a0 *commonpb.Status, _a1 error) *MockCluster_UpdateSchema_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_UpdateSchema_Call) RunAndReturn(run func(context.Context, int64, *querypb.UpdateSchemaRequest) (*commonpb.Status, error)) *MockCluster_UpdateSchema_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ValidateAnalyzer provides a mock function with given fields: ctx, nodeID, req
 func (_m *MockCluster) ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	ret := _m.Called(ctx, nodeID, req)
