@@ -5791,6 +5791,10 @@ type dataCoordConfig struct {
 	ResourceJSONKeyIndexFactor      ParamItem `refreshable:"true"`
 	ResourceAnalyzeFactor           ParamItem `refreshable:"true"`
 	ResourceAnalyzeMaxMemory        ParamItem `refreshable:"true"`
+
+	ResourceCopySegmentMemory     ParamItem `refreshable:"true"`
+	ResourceRefreshExternalMemory ParamItem `refreshable:"true"`
+	ResourceImportCPUPerFile      ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -7617,6 +7621,33 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 		Export:       true,
 	}
 	p.ResourceAnalyzeMaxMemory.Init(base.mgr)
+
+	p.ResourceCopySegmentMemory = ParamItem{
+		Key:          "dataCoord.resource.copySegmentMemory",
+		Version:      "3.0.0",
+		DefaultValue: "67108864",
+		Doc:          "flat memory in bytes charged for a copy-segment task; the copy is a server-side object-store operation, so no segment bytes pass through this process",
+		Export:       true,
+	}
+	p.ResourceCopySegmentMemory.Init(base.mgr)
+
+	p.ResourceRefreshExternalMemory = ParamItem{
+		Key:          "dataCoord.resource.refreshExternalMemory",
+		Version:      "3.0.0",
+		DefaultValue: "67108864",
+		Doc:          "flat memory in bytes charged for a refresh-external-collection task",
+		Export:       true,
+	}
+	p.ResourceRefreshExternalMemory.Init(base.mgr)
+
+	p.ResourceImportCPUPerFile = ParamItem{
+		Key:          "dataCoord.resource.importCPUPerFile",
+		Version:      "3.0.0",
+		DefaultValue: "0.5",
+		Doc:          "CPU cores charged per concurrently in-flight import file",
+		Export:       true,
+	}
+	p.ResourceImportCPUPerFile.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
