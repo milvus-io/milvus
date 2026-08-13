@@ -134,24 +134,29 @@ func (s *scheduler) scheduleTasks() {
 			continue
 		}
 
-		fs := task.Execute()
-
 		wg.Add(1)
-		go func(taskID int64, fs []*conc.Future[any]) {
+		go func(task Task, taskID int64) {
 			defer wg.Done()
 			// The reservation covers the whole task, not just its dispatch:
 			// Execute only submits the task's files to the pool, and each of
 			// them holds a read buffer until it is done. Waiting per task
 			// rather than for the batch also keeps one slow task from holding
 			// everyone else's budget.
+			//
+			// Execute runs under this defer rather than in the loop above so
+			// that a panic inside it cannot unwind the scheduler with the
+			// reservation still on the ledger -- that would shrink the node
+			// permanently, and take the tick goroutine that would have retried
+			// with it. Admission stays serialized regardless: Acquire is still
+			// what the loop waits on.
 			defer resource.GetGuard().Release(taskID)
 
-			if err := conc.AwaitAll(fs...); err != nil {
+			if err := conc.AwaitAll(task.Execute()...); err != nil {
 				return
 			}
 			s.manager.Update(taskID, UpdateState(datapb.ImportTaskStateV2_Completed))
 			mlog.Info(context.TODO(), "preimport/import done", mlog.FieldTaskID(taskID))
-		}(taskID, fs)
+		}(task, taskID)
 	}
 	wg.Wait()
 
@@ -171,17 +176,4 @@ func (s *scheduler) Close() {
 	s.closeOnce.Do(func() {
 		s.cancel()
 	})
-}
-
-func tryFreeFutures(futures map[int64][]*conc.Future[any]) {
-	for k, fs := range futures {
-		fs = lo.Filter(fs, func(f *conc.Future[any], _ int) bool {
-			if f.Done() {
-				_, err := f.Await()
-				return err != nil
-			}
-			return true
-		})
-		futures[k] = fs
-	}
 }

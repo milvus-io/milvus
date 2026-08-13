@@ -134,7 +134,7 @@ func (g *guard) setCapacityForTest(c taskresource.Capacity) {
 // nodeCapacityLocked is capacity BEFORE the non-task reduction. Oversizedness
 // is a property of the machine, not of a transient memory reading: judging it
 // against the reduced budget would let a passing spike in non-task memory flip
-// an ordinary task into exclusive mode and serialise the whole node.
+// an ordinary task into exclusive mode and serialize the whole node.
 func (g *guard) nodeCapacityLocked() taskresource.Capacity {
 	if g.capacityOverride != nil {
 		return *g.capacityOverride
