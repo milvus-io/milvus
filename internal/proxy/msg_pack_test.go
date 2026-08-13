@@ -64,10 +64,10 @@ func TestMessageBodyLimit(t *testing.T) {
 }
 
 // The body budget now tracks the active WAL's own broker limit instead of
-// always Pulsar's, so a message packed for Kafka stays under Kafka's limit
-// even when it differs from Pulsar's -- in either direction. RocksMQ and
-// Woodpecker have no broker limit of their own, so they keep using the
-// Pulsar-shaped default as a general-purpose packing threshold.
+// always Pulsar's, so a message packed for Kafka or Woodpecker stays under
+// that backend's own limit even when it differs from Pulsar's -- in either
+// direction. RocksMQ has no per-entry limit of its own, so it keeps using
+// the Pulsar-shaped default as a general-purpose packing threshold.
 func TestMessageBodyLimitIsWALSpecific(t *testing.T) {
 	paramtable.Init()
 	defer Params.Reset(Params.PulsarCfg.MaxMessageSize.Key)
@@ -88,17 +88,27 @@ func TestMessageBodyLimitIsWALSpecific(t *testing.T) {
 		assert.Equal(t, 10485760-4096, messageBodyLimit(message.WALNameKafka))
 	})
 
-	for _, walName := range []message.WALName{message.WALNameRocksmq, message.WALNameWoodpecker} {
-		t.Run(walName.String()+" uses the pulsar-shaped default", func(t *testing.T) {
-			assert.Equal(t, 2097152-4096, messageBodyLimit(walName))
-		})
-	}
+	t.Run("woodpecker uses its own limit", func(t *testing.T) {
+		require.NoError(t, Params.Save(Params.WoodpeckerCfg.MaxMessageSize.Key, "524288"))
+		defer Params.Reset(Params.WoodpeckerCfg.MaxMessageSize.Key)
+		assert.Equal(t, 524288-4096, messageBodyLimit(message.WALNameWoodpecker))
+	})
+
+	t.Run("woodpecker default limit is 10 MiB", func(t *testing.T) {
+		assert.Equal(t, 10485760-4096, messageBodyLimit(message.WALNameWoodpecker))
+	})
+
+	t.Run("rocksmq uses the pulsar-shaped default", func(t *testing.T) {
+		assert.Equal(t, 2097152-4096, messageBodyLimit(message.WALNameRocksmq))
+	})
 }
 
 // A row that does not fit under the plaintext body budget is still emitted on
 // its own -- there is nothing left to split -- as long as the active WAL has no
-// hard limit of its own that it would breach. RocksMQ's page size and
-// Woodpecker's batch size are not per-entry limits.
+// hard limit of its own that it would breach. RocksMQ's page size is not a
+// per-entry limit, so it is the one backend this still applies to; Pulsar,
+// Kafka, and Woodpecker each enforce their own cap and are covered by the
+// rejection tests below.
 func TestSplitInsertRowsByMessageSizeSingleOversizedRow(t *testing.T) {
 	// One byte above the default reserve, so the plaintext body budget is 1 byte.
 	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "4097"))
@@ -107,13 +117,9 @@ func TestSplitInsertRowsByMessageSizeSingleOversizedRow(t *testing.T) {
 	defer Params.Reset(Params.PulsarCfg.MessageReserveSize.Key)
 
 	insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
-	for _, walName := range []message.WALName{message.WALNameRocksmq, message.WALNameWoodpecker} {
-		t.Run(walName.String(), func(t *testing.T) {
-			selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0}, walName)
-			assert.NoError(t, err)
-			assert.Equal(t, [][]int{{0}}, selections)
-		})
-	}
+	selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0}, message.WALNameRocksmq)
+	assert.NoError(t, err)
+	assert.Equal(t, [][]int{{0}}, selections)
 }
 
 // The same row is refused when the WAL would reject the message on the wire:
@@ -223,14 +229,29 @@ func TestSplitInsertRowsByMessageSizeUsesWALSpecificLimit(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	})
 
-	for _, walName := range []message.WALName{message.WALNameRocksmq, message.WALNameWoodpecker} {
-		t.Run(walName.String()+" has no single message limit", func(t *testing.T) {
-			insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 8192))
-			selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0}, walName)
-			assert.NoError(t, err)
-			assert.Equal(t, [][]int{{0}}, selections)
-		})
-	}
+	t.Run("woodpecker refuses a row above its own limit", func(t *testing.T) {
+		assert.NoError(t, Params.Save(Params.WoodpeckerCfg.MaxMessageSize.Key, "512"))
+		defer Params.Reset(Params.WoodpeckerCfg.MaxMessageSize.Key)
+
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 8192))
+		selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0}, message.WALNameWoodpecker)
+		assert.Nil(t, selections)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	})
+
+	t.Run("woodpecker allows a row above the pulsar limit but under its own", func(t *testing.T) {
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 8192))
+		selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0}, message.WALNameWoodpecker)
+		assert.NoError(t, err)
+		assert.Equal(t, [][]int{{0}}, selections)
+	})
+
+	t.Run("rocksmq has no single message limit", func(t *testing.T) {
+		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 8192))
+		selections, err := splitInsertRowsByMessageSize(insertMsg, []int{0}, message.WALNameRocksmq)
+		assert.NoError(t, err)
+		assert.Equal(t, [][]int{{0}}, selections)
+	})
 }
 
 func TestSplitInsertRowsByMessageSizeSplitsMultipleRows(t *testing.T) {

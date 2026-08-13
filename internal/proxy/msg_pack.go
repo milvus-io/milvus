@@ -34,16 +34,13 @@ func getActiveWALName() message.WALName {
 }
 
 // activeWALMessageSize reports the message-size limit the split budget should
-// be computed against for walName. Pulsar and Kafka each report their own
-// broker limit. RocksMQ's page size and Woodpecker's batch size are not
-// per-entry limits, so they have nothing backend-specific to budget against;
-// the Pulsar-shaped packing threshold is a reasonable general-purpose default
-// for them, same as before either backend had its own hard limit checked.
+// be computed against for walName. Pulsar, Kafka, and Woodpecker each have
+// their own hard cap on one message; paramtable owns the name-to-limit
+// mapping so every consumer budgets against the same value. RocksMQ has no
+// per-entry limit of its own and budgets against the Pulsar-shaped default,
+// same as before any backend had its own hard limit checked.
 func activeWALMessageSize(walName message.WALName) int {
-	if walName == message.WALNameKafka {
-		return Params.KafkaCfg.ProducerMessageMaxBytes.GetAsInt()
-	}
-	return Params.PulsarCfg.MaxMessageSize.GetAsInt()
+	return Params.WALMaxMessageSize(walName.String())
 }
 
 // messageBodyLimit budgets a plaintext message body inside the active WAL
@@ -68,11 +65,11 @@ func messageBodyLimit(walName message.WALName) int {
 }
 
 // walHasSingleMessageLimit reports whether the active WAL backend enforces a
-// hard limit on one message at all. RocksMQ's page size and Woodpecker's
-// batch size are not per-entry limits, so they report false.
+// hard limit on one message at all. Pulsar, Kafka, and Woodpecker each do;
+// RocksMQ's page size is not a per-entry limit, so it reports false.
 func walHasSingleMessageLimit(walName message.WALName) bool {
 	switch walName {
-	case message.WALNamePulsar, message.WALNameKafka:
+	case message.WALNamePulsar, message.WALNameKafka, message.WALNameWoodpecker:
 		return activeWALMessageSize(walName) > 0
 	default:
 		return false
