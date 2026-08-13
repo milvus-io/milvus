@@ -8,6 +8,34 @@
 
 ## 1. Summary
 
+Fuzzy BM25 search is a typo-tolerant form of BM25 full-text search. Instead of
+requiring every analyzed query token to exactly equal a term in the target
+documents, it expands a query token to indexed terms within a configured edit
+distance, then uses the expanded terms in the normal BM25 TF/IDF scoring path.
+For a query term `a[1..m]` and a dictionary term `b[1..n]`, the standard edit
+distance recurrence is:
+
+```text
+D(i, 0) = i
+D(0, j) = j
+
+D(i, j) = min(
+    D(i - 1, j)     + 1,                         // deletion
+    D(i, j - 1)     + 1,                         // insertion
+    D(i - 1, j - 1) + [a[i] != b[j]]              // substitution / match
+)
+```
+
+`D(m, n)` is the minimum number of insertions, deletions, and substitutions
+needed to transform one term into the other. The initial fuzzy search
+semantics also allow an adjacent transposition to count as one edit, matching
+the existing fuzzy text-match behavior. A dictionary term is a candidate when
+its distance from the query term is no greater than `max_edit_distance`.
+
+The feature is useful for queries containing typographical errors, such as
+matching `milvuz` with the indexed term `milvus`, while retaining BM25
+relevance ranking instead of returning only a Boolean match.
+
 This document proposes a three-phase design for fuzzy BM25 search in Milvus.
 The first phase establishes a segment-level Text Term Index foundation: terms
 produced by the analyzer are preserved through WAL and immutable FST fragments
@@ -15,6 +43,22 @@ across flush, compaction, load, and recovery, and QueryNode Workers expose a
 common term-expansion interface.
 Fuzzy BM25 then expands query tokens on the Workers before the Delegator builds
 the BM25 IDF vector.
+
+FST is required because the existing BM25 write path hashes analyzed terms to
+`uint32` values and does not retain a query-time enumerable string vocabulary.
+The segment FST preserves the analyzer output in lexical order and allows a
+fuzzy automaton to enumerate candidate terms efficiently before those terms
+are hashed and scored.
+
+Milvus already has a fuzzy-match feature based on a Tantivy text index. That
+path performs segment-local fuzzy term expansion and posting lookup, whereas
+fuzzy BM25 must merge terms across target segments before constructing one
+common IDF vector. The two paths therefore use separate FST/index artifacts in
+the first implementation and cannot yet share the same resource directly.
+This separation is transitional: the long-term direction is one shared Text
+Term Index containing both enumerable FST data and postings, so exact match,
+fuzzy match, fuzzy BM25, prefix, wildcard, and other term-based features can
+reuse the same segment resources.
 
 The second phase adds a Global FST on the Streaming Query Node (SN) as an exact
 acceleration layer. The Global FST supplies the vocabulary for covered
@@ -1023,26 +1067,7 @@ FST fragments make the analyzed vocabulary explicit and reproducible.
 
 ---
 
-## 17. Open decisions
-
-The architecture does not depend on the following details, but they must be
-finalized before implementation:
-
-1. Public fuzzy BM25 request syntax and the complete option set.
-2. Exact fuzzy boost and query-TF aggregation semantics.
-3. Scope and ordering semantics of `max_expansions` for multi-token and multi-NQ
-   requests.
-4. FST format, fragment metadata, and compression/checksum details.
-5. Whether the first implementation extends `InsertRequest` or introduces a new
-   versioned Insert body.
-6. Coordinator and object-storage protocol for Global FST build/publication.
-7. Online enable/backfill and disable semantics.
-8. The milestone at which the lightweight fuzzy-BM25 FST is consolidated with
-   the existing Tantivy `TextMatchIndex` files.
-
----
-
-## 18. Related code and documents
+## 17. Related code and documents
 
 - `docs/design-docs/design_docs/20260702-text_match_fuzzy.md`
 - `internal/streamingnode/server/wal/interceptors/shard/function_materializer.go`
