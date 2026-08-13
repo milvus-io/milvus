@@ -80,8 +80,7 @@ func TestFreezeAboveHighWatermarkBlocksAdmission(t *testing.T) {
 	used.set(900) // 0.9 > 0.85
 	g.sampleOnce()
 
-	ok, avail, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 1})
-	require.NoError(t, err)
+	ok, avail := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 1})
 	assert.False(t, ok, "no admission while frozen, however much ledger room remains")
 	assert.True(t, g.Snapshot().Frozen)
 	require.Positive(t, avail.Memory,
@@ -94,8 +93,7 @@ func TestFreezeAboveHighWatermarkBlocksAdmission(t *testing.T) {
 	g.sampleOnce()
 	require.False(t, g.Snapshot().Frozen)
 
-	ok, _, err = g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 1})
-	require.NoError(t, err)
+	ok, _ = g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 1})
 	assert.True(t, ok, "thawing must admit the request the freeze was refusing")
 }
 
@@ -295,8 +293,7 @@ func TestNonTaskMemoryExcludesLedger(t *testing.T) {
 	used := stubUsedMemory(t)
 	used.set(300)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 250})
-	require.NoError(t, err)
+	mustAcquire(t, g, 1, taskcommon.Index, taskresource.Requirement{Memory: 250})
 
 	g.sampleOnce()
 	// 300 observed - 250 already accounted for by the ledger = 50 outside it.
@@ -325,8 +322,7 @@ func TestObservationBelowTheLedgerCarriesNoInformation(t *testing.T) {
 	require.Equal(t, int64(400), g.Snapshot().NonTask)
 
 	// Now the node takes on work the tasks have not grown into.
-	_, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 500})
-	require.NoError(t, err)
+	mustAcquire(t, g, 1, taskcommon.Index, taskresource.Requirement{Memory: 500})
 	used.set(450) // below the 500 committed
 
 	// However many such samples arrive, none of them is evidence.
@@ -359,8 +355,7 @@ func TestNegativeFloorCannotCreateBudget(t *testing.T) {
 	defer mkTotal.UnPatch()
 	used := stubUsedMemory(t)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 100})
-	require.NoError(t, err)
+	mustAcquire(t, g, 1, taskcommon.Index, taskresource.Requirement{Memory: 100})
 
 	used.set(500) // 500 - 100 committed = 400 outside the ledger
 	g.sampleOnce()
@@ -439,8 +434,7 @@ func TestLoweredNonTaskMemoryWakesBlockedWaiters(t *testing.T) {
 	used := stubUsedMemory(t)
 	used.set(600)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 300})
-	require.NoError(t, err)
+	mustAcquire(t, g, 1, taskcommon.Compaction, taskresource.Requirement{Memory: 300})
 
 	g.sampleOnce() // 600 observed - 300 in the ledger = 300 outside it
 	require.False(t, g.Snapshot().Frozen)

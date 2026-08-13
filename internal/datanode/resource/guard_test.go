@@ -41,6 +41,15 @@ func newTestGuard(t *testing.T, cpu float64, memBytes int64) *guard {
 	return g
 }
 
+// mustAcquire admits a task a test is setting up, and fails the test if the
+// guard refuses it -- a setup step that silently did not happen would leave the
+// assertions that follow measuring nothing.
+func mustAcquire(t *testing.T, g *guard, taskID int64, taskType taskcommon.Type, req taskresource.Requirement) {
+	t.Helper()
+	ok, _ := g.TryAcquire(taskID, taskType, req)
+	require.True(t, ok, "setup: task %d should have been admitted", taskID)
+}
+
 // This is the core property: admission consults the ledger only. Three tasks
 // each estimated at 30 units must fill a 100 unit budget even though none of
 // them has touched a byte of memory yet -- exactly the situation in issue
@@ -70,13 +79,11 @@ func TestAcquireChargesCommitmentNotObservation(t *testing.T) {
 	defer mk.UnPatch()
 
 	for i := int64(1); i <= 3; i++ {
-		ok, _, err := g.TryAcquire(i, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 30})
-		require.NoError(t, err)
+		ok, _ := g.TryAcquire(i, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 30})
 		require.True(t, ok, "task %d should be admitted", i)
 	}
 
-	ok, _, err := g.TryAcquire(4, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 30})
-	require.NoError(t, err)
+	ok, _ := g.TryAcquire(4, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 30})
 	assert.False(t, ok, "the fourth task must queue: 90+30 > 100")
 
 	// Blocking admission must not consult observed memory either.
@@ -96,25 +103,22 @@ func TestAcquireChargesCommitmentNotObservation(t *testing.T) {
 func TestReleaseReturnsBudget(t *testing.T) {
 	g := newTestGuard(t, 100, 100)
 
-	ok, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 80})
-	require.NoError(t, err)
+	ok, _ := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 80})
 	require.True(t, ok)
 
-	ok, _, _ = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 80})
+	ok, _ = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 80})
 	require.False(t, ok)
 
 	g.Release(1)
 
-	ok, _, err = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 80})
-	require.NoError(t, err)
+	ok, _ = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 80})
 	assert.True(t, ok)
 }
 
 func TestReleaseIsIdempotent(t *testing.T) {
 	g := newTestGuard(t, 100, 100)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 40})
-	require.NoError(t, err)
+	mustAcquire(t, g, 1, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 40})
 
 	g.Release(1)
 	g.Release(1)
@@ -127,46 +131,34 @@ func TestReleaseIsIdempotent(t *testing.T) {
 	assert.Equal(t, float64(0), snap.Reserved.CPU, "double release must not create budget")
 
 	// The budget must not have grown: a full-node task still fits exactly once.
-	ok, _, err := g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 100})
-	require.NoError(t, err)
+	ok, _ := g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 100})
 	require.True(t, ok)
-	ok, _, err = g.TryAcquire(3, taskcommon.Index, taskresource.Requirement{Memory: 1})
-	require.NoError(t, err)
+	ok, _ = g.TryAcquire(3, taskcommon.Index, taskresource.Requirement{Memory: 1})
 	assert.False(t, ok, "releasing three times must not have widened the budget")
 }
 
-// A task larger than the node can never be satisfied. Blocking on it would
-// deadlock the queue forever, so it must fail immediately and let the caller
-// report it upward.
-func TestOversizedTaskFailsImmediately(t *testing.T) {
+// A request beyond the node in the CPU dimension is oversized too: the node is
+// two-dimensional, and either dimension alone makes a task unable to share it.
+func TestOversizednessIsJudgedOnBothDimensions(t *testing.T) {
 	g := newTestGuard(t, 8, 100)
 
-	ok, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 500})
-	assert.False(t, ok)
-	assert.ErrorIs(t, err, ErrResourceExhausted)
+	ok, _ := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 10})
+	require.True(t, ok)
 
-	// A CPU request beyond the node is equally impossible.
-	ok, _, err = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 16, Memory: 1})
-	assert.False(t, ok)
-	assert.ErrorIs(t, err, ErrResourceExhausted)
+	// Memory fits easily; the core count does not.
+	ok, _ = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 16, Memory: 1})
+	assert.False(t, ok, "a task beyond the node's cores must wait for it to drain")
 
-	// The deadline is generous on purpose: if Acquire ever queued an impossible
-	// request it would sit here and come back with a deadline error instead of
-	// ErrResourceExhausted, which is the failure this asserts against.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	start := time.Now()
-	err = g.Acquire(ctx, 3, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 500})
-	assert.ErrorIs(t, err, ErrResourceExhausted, "Acquire must not block on an impossible request")
-	assert.Less(t, time.Since(start), 500*time.Millisecond, "Acquire waited on an unsatisfiable request")
-	assert.Zero(t, g.waiterCount(), "an impossible request must not be queued")
+	g.Release(1)
+	ok, _ = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 16, Memory: 1})
+	require.True(t, ok)
+	assert.Equal(t, int64(2), g.Snapshot().ExclusiveTaskID, "and then runs alone")
 }
 
 func TestAcquireBlocksUntilRelease(t *testing.T) {
 	g := newTestGuard(t, 100, 100)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 80})
-	require.NoError(t, err)
+	mustAcquire(t, g, 1, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 80})
 
 	done := make(chan error, 1)
 	go func() {
@@ -193,15 +185,13 @@ func TestAcquireBlocksUntilRelease(t *testing.T) {
 func TestAcquireRespectsContextCancellation(t *testing.T) {
 	g := newTestGuard(t, 100, 100)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 90})
-	require.NoError(t, err)
+	mustAcquire(t, g, 1, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 90})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err = g.Acquire(ctx, 2, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 90})
-	assert.Error(t, err)
-	assert.NotErrorIs(t, err, ErrResourceExhausted)
+	err := g.Acquire(ctx, 2, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 90})
+	assert.ErrorIs(t, err, context.DeadlineExceeded, "ctx is the only error Acquire can return")
 
 	// Giving up must not leave a phantom reservation or a stale waiter behind.
 	assert.Equal(t, int64(90), g.Snapshot().Reserved.Memory)
@@ -213,8 +203,7 @@ func TestAcquireRespectsContextCancellation(t *testing.T) {
 func TestAcquireSucceedsImmediatelyWhenBudgetIsFree(t *testing.T) {
 	g := newTestGuard(t, 100, 100)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 80})
-	require.NoError(t, err)
+	mustAcquire(t, g, 1, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 80})
 	require.Zero(t, g.waiterCount())
 
 	// No waiter exists yet, so this wakes nobody -- the budget is simply free by
@@ -236,8 +225,7 @@ func TestGivingUpWakesTheWaitersItWasBlocking(t *testing.T) {
 	pt.Save(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key, "true")
 	defer pt.Reset(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 60})
-	require.NoError(t, err)
+	mustAcquire(t, g, 1, taskcommon.Compaction, taskresource.Requirement{Memory: 60})
 
 	// The head waits for more than is left, and will give up on its own.
 	go func() {
@@ -275,8 +263,7 @@ func TestHeadOfLineReservationPreventsStarvation(t *testing.T) {
 	pt.Save(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key, "true")
 	defer pt.Reset(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 60})
-	require.NoError(t, err)
+	mustAcquire(t, g, 1, taskcommon.Compaction, taskresource.Requirement{Memory: 60})
 
 	// A large task starts waiting.
 	waiting := make(chan error, 1)
@@ -288,8 +275,7 @@ func TestHeadOfLineReservationPreventsStarvation(t *testing.T) {
 	require.Eventually(t, func() bool { return g.waiterCount() == 1 }, time.Second, 10*time.Millisecond)
 
 	// A small task arrives while the large one waits; it must not jump ahead.
-	ok, _, err := g.TryAcquire(3, taskcommon.Index, taskresource.Requirement{Memory: 30})
-	require.NoError(t, err)
+	ok, _ := g.TryAcquire(3, taskcommon.Index, taskresource.Requirement{Memory: 30})
 	assert.False(t, ok, "small task must not consume budget reserved for the waiting large task")
 
 	g.Release(1)
@@ -305,8 +291,7 @@ func TestHeadOfLineReservationCanBeDisabled(t *testing.T) {
 	pt.Save(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key, "false")
 	defer pt.Reset(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 60})
-	require.NoError(t, err)
+	mustAcquire(t, g, 1, taskcommon.Compaction, taskresource.Requirement{Memory: 60})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -316,8 +301,7 @@ func TestHeadOfLineReservationCanBeDisabled(t *testing.T) {
 	}()
 	require.Eventually(t, func() bool { return g.waiterCount() == 1 }, time.Second, 10*time.Millisecond)
 
-	ok, _, err := g.TryAcquire(3, taskcommon.Index, taskresource.Requirement{Memory: 30})
-	require.NoError(t, err)
+	ok, _ := g.TryAcquire(3, taskcommon.Index, taskresource.Requirement{Memory: 30})
 	assert.True(t, ok, "with the reservation off the small task starves the large one")
 
 	<-waiting
@@ -329,8 +313,7 @@ func TestTryAcquireIsIdempotentForLiveTask(t *testing.T) {
 	g := newTestGuard(t, 100, 100)
 
 	for i := 0; i < 3; i++ {
-		ok, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 40})
-		require.NoError(t, err)
+		ok, _ := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 40})
 		require.True(t, ok)
 	}
 
@@ -344,8 +327,7 @@ func TestTryAcquireIsIdempotentForLiveTask(t *testing.T) {
 	// which is also what proves Release dropped the ledger entry rather than
 	// merely zeroing the balance -- a surviving entry would make every future
 	// admission of this id free, and the node oversubscribed.
-	ok, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 40})
-	require.NoError(t, err)
+	ok, _ := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 40})
 	require.True(t, ok)
 	assert.Equal(t, int64(40), g.Snapshot().Reserved.Memory, "a re-admitted task must be charged again")
 }
@@ -358,8 +340,8 @@ func TestConcurrentAcquireReleaseKeepsLedgerConsistent(t *testing.T) {
 		wg.Add(1)
 		go func(id int64) {
 			defer wg.Done()
-			ok, _, err := g.TryAcquire(id, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 1000})
-			if err == nil && ok {
+			ok, _ := g.TryAcquire(id, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 1000})
+			if ok {
 				g.Release(id)
 			}
 		}(int64(i))
@@ -405,8 +387,7 @@ func TestConcurrentContendedLedgerNeverOversubscribes(t *testing.T) {
 		go func(id int64) {
 			defer wg.Done()
 			for round := 0; round < 20; round++ {
-				ok, _, err := g.TryAcquire(id, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 1000})
-				assert.NoError(t, err)
+				ok, _ := g.TryAcquire(id, taskcommon.Compaction, taskresource.Requirement{CPU: 1, Memory: 1000})
 				if ok {
 					admitted.Add(1)
 					g.Release(id)
@@ -429,8 +410,7 @@ func TestConcurrentContendedLedgerNeverOversubscribes(t *testing.T) {
 func TestSnapshotReportsTotals(t *testing.T) {
 	g := newTestGuard(t, 8, 1000)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 2, Memory: 300})
-	require.NoError(t, err)
+	mustAcquire(t, g, 1, taskcommon.Index, taskresource.Requirement{CPU: 2, Memory: 300})
 
 	snap := g.Snapshot()
 	assert.Equal(t, int64(1000), snap.Total.Memory)
@@ -465,9 +445,15 @@ func TestNonTaskMemoryShrinksTheBudget(t *testing.T) {
 
 	assert.Equal(t, int64(600), g.Snapshot().Total.Memory)
 
-	ok, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 700})
-	assert.False(t, ok)
-	assert.ErrorIs(t, err, ErrResourceExhausted, "700 no longer fits the node once 400 is spoken for")
+	// 700 fits the node but not what is left of it, so it waits. The node is
+	// empty here, which is what makes this discriminating: were oversizedness
+	// judged against the reduced budget instead of the node's capacity, this
+	// request would be admitted for *exclusive* execution, and a passing spike
+	// in non-task memory would serialise the whole node.
+	ok, _ := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 700})
+	assert.False(t, ok, "700 no longer fits once 400 is spoken for")
+	assert.Zero(t, g.Snapshot().ExclusiveTaskID,
+		"a task that fits the node must never be treated as oversized, however tight the budget")
 
 	// More non-task memory than the node has must floor the budget at zero, not
 	// wrap negative and let everything in.
@@ -478,17 +464,16 @@ func TestNonTaskMemoryShrinksTheBudget(t *testing.T) {
 }
 
 // While frozen, nothing new is admitted, but this is "not right now" rather
-// than "never": the error must stay nil so callers keep retrying.
-func TestFrozenGuardRefusesAdmissionWithoutError(t *testing.T) {
+// than "never": the very same request goes through once the freeze lifts.
+func TestFrozenGuardRefusesAdmissionTemporarily(t *testing.T) {
 	g := newTestGuard(t, 8, 1000)
 
 	g.mu.Lock()
 	g.frozen = true
 	g.mu.Unlock()
 
-	ok, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 10})
+	ok, _ := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 10})
 	assert.False(t, ok)
-	assert.NoError(t, err, "a freeze is temporary; it must not look like exhaustion")
 	assert.True(t, g.Snapshot().Frozen)
 	assert.Equal(t, int64(0), g.Snapshot().Reserved.Memory, "a frozen guard must not charge anything")
 
@@ -496,8 +481,7 @@ func TestFrozenGuardRefusesAdmissionWithoutError(t *testing.T) {
 	g.frozen = false
 	g.mu.Unlock()
 
-	ok, _, err = g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 10})
-	require.NoError(t, err)
+	ok, _ = g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 10})
 	assert.True(t, ok, "thawing must let the same task in")
 }
 
@@ -510,8 +494,7 @@ func TestTryAcquireReportsRemainingHeadroom(t *testing.T) {
 
 	// Admitted: the headroom reported must already exclude this task's charge,
 	// so it agrees with a Snapshot taken straight afterwards.
-	ok, avail, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 2, Memory: 300})
-	require.NoError(t, err)
+	ok, avail := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 2, Memory: 300})
 	require.True(t, ok)
 	assert.Equal(t, float64(6), avail.CPU, "admitted: headroom must be net of the charge just made")
 	assert.Equal(t, int64(700), avail.Memory, "admitted: headroom must be net of the charge just made")
@@ -522,23 +505,20 @@ func TestTryAcquireReportsRemainingHeadroom(t *testing.T) {
 
 	// Short: nothing was charged, so the headroom is unchanged and shows the
 	// caller it was 200 bytes short of the 900 it asked for.
-	ok, avail, err = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 900})
-	require.NoError(t, err)
+	ok, avail = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 900})
 	require.False(t, ok)
 	assert.Equal(t, float64(6), avail.CPU)
 	assert.Equal(t, int64(700), avail.Memory)
 
-	// Exhausted: the headroom still describes the node, which is what makes the
-	// "impossible" verdict legible in a log line.
-	ok, avail, err = g.TryAcquire(3, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 5000})
-	require.ErrorIs(t, err, ErrResourceExhausted)
+	// Oversized, so it waits for the node to drain: the headroom still describes
+	// the node, which is what makes the refusal legible in a log line.
+	ok, avail = g.TryAcquire(3, taskcommon.Index, taskresource.Requirement{CPU: 1, Memory: 5000})
 	require.False(t, ok)
 	assert.Equal(t, float64(6), avail.CPU)
 	assert.Equal(t, int64(700), avail.Memory)
 
 	// Re-requesting a live id reports headroom too, without charging again.
-	ok, avail, err = g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 2, Memory: 300})
-	require.NoError(t, err)
+	ok, avail = g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 2, Memory: 300})
 	require.True(t, ok)
 	assert.Equal(t, float64(6), avail.CPU)
 	assert.Equal(t, int64(700), avail.Memory)
@@ -550,28 +530,24 @@ func TestTryAcquireReportsRemainingHeadroom(t *testing.T) {
 func TestHeadroomGoesNegativeWhenOverCommitted(t *testing.T) {
 	g := newTestGuard(t, 8, 1000)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{CPU: 2, Memory: 300})
-	require.NoError(t, err)
+	mustAcquire(t, g, 1, taskcommon.Index, taskresource.Requirement{CPU: 2, Memory: 300})
 
 	g.mu.Lock()
 	g.nonTask = 900 // budget drops to 100, but 300 is already committed
 	g.mu.Unlock()
 
-	_, avail, err := g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{Memory: 10})
-	require.NoError(t, err)
+	_, avail := g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{Memory: 10})
 	assert.Equal(t, int64(-200), avail.Memory, "over-commitment must be reported, not clamped")
 }
 
 // A running task holds its charge; a budget that shrinks under it does not
-// un-admit it. Re-requesting must still say "you have it" rather than
-// ErrResourceExhausted -- "impossible on this node, forever" is a verdict for
-// work that has not started, and a running task acting on it would abort while
-// still holding a reservation.
+// un-admit it. Re-requesting must still say "you have it" rather than sending
+// it to the queue: a running task told to wait would hold a reservation while
+// waiting for one, blocking everyone behind it as head of the line.
 func TestShrunkBudgetDoesNotEvictALiveReservation(t *testing.T) {
 	g := newTestGuard(t, 8, 1000)
 
-	ok, _, err := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 800})
-	require.NoError(t, err)
+	ok, _ := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 800})
 	require.True(t, ok)
 
 	// The node shrinks under the running task -- exactly what Task 6 does when
@@ -580,9 +556,8 @@ func TestShrunkBudgetDoesNotEvictALiveReservation(t *testing.T) {
 	g.nonTask = 700 // budget is now 300, less than the 800 already committed
 	g.mu.Unlock()
 
-	ok, _, err = g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 800})
-	require.NoError(t, err, "a live reservation must not be reported as impossible")
-	assert.True(t, ok)
+	ok, _ = g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 800})
+	assert.True(t, ok, "a live reservation must not be sent back to the queue")
 	assert.Equal(t, int64(800), g.Snapshot().Reserved.Memory, "and must not be charged twice")
 
 	// The blocking form must not queue it either.
@@ -590,10 +565,9 @@ func TestShrunkBudgetDoesNotEvictALiveReservation(t *testing.T) {
 	defer cancel()
 	require.NoError(t, g.Acquire(ctx, 1, taskcommon.Compaction, taskresource.Requirement{Memory: 800}))
 
-	// A *new* task of the same size is still correctly impossible.
-	ok, _, err = g.TryAcquire(2, taskcommon.Compaction, taskresource.Requirement{Memory: 800})
+	// A *new* task of the same size still has to wait for the budget it needs.
+	ok, _ = g.TryAcquire(2, taskcommon.Compaction, taskresource.Requirement{Memory: 800})
 	assert.False(t, ok)
-	assert.ErrorIs(t, err, ErrResourceExhausted)
 }
 
 // A freeze stops new charges; it does not un-admit work that is already
@@ -603,16 +577,14 @@ func TestShrunkBudgetDoesNotEvictALiveReservation(t *testing.T) {
 func TestFrozenGuardStillHonoursExistingReservations(t *testing.T) {
 	g := newTestGuard(t, 8, 1000)
 
-	ok, _, err := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 100})
-	require.NoError(t, err)
+	ok, _ := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 100})
 	require.True(t, ok)
 
 	g.mu.Lock()
 	g.frozen = true
 	g.mu.Unlock()
 
-	ok, _, err = g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 100})
-	require.NoError(t, err)
+	ok, _ = g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 100})
 	assert.True(t, ok, "a live reservation must survive a freeze")
 	assert.Equal(t, int64(100), g.Snapshot().Reserved.Memory, "and must not be charged twice")
 
@@ -623,14 +595,13 @@ func TestFrozenGuardStillHonoursExistingReservations(t *testing.T) {
 		"a task that already holds its reservation must not wait for one")
 }
 
-// A queued request can become impossible while it waits, if the budget shrinks
-// under it. It must then be told so rather than waiting out its deadline for
-// something that can no longer happen.
-func TestQueuedRequestFailsOnceItNoLongerFitsTheNode(t *testing.T) {
+// A queued request can outgrow the node while it waits, if the node shrinks
+// under it. That does not fail it: it simply stops waiting for a gap and starts
+// waiting for the node to drain, and then runs alone.
+func TestQueuedRequestTurnsExclusiveWhenItOutgrowsTheNode(t *testing.T) {
 	g := newTestGuard(t, 100, 100)
 
-	_, _, err := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 60})
-	require.NoError(t, err)
+	mustAcquire(t, g, 1, taskcommon.Compaction, taskresource.Requirement{Memory: 60})
 
 	done := make(chan error, 1)
 	go func() {
@@ -646,10 +617,127 @@ func TestQueuedRequestFailsOnceItNoLongerFitsTheNode(t *testing.T) {
 
 	select {
 	case err := <-done:
-		assert.ErrorIs(t, err, ErrResourceExhausted)
+		require.NoError(t, err, "a request larger than the node waits; it is never refused")
 	case <-time.After(3 * time.Second):
-		t.Fatal("a queued request that became impossible kept waiting")
+		t.Fatal("a queued request that outgrew the node never ran")
 	}
+	assert.Equal(t, int64(2), g.Snapshot().ExclusiveTaskID, "and it holds the node alone")
+}
+
+// An oversized task is never refused outright. The coordinator deliberately
+// places it on the emptiest worker; the worker's job is to run it alone, not
+// to reject it.
+func TestOversizedTaskWaitsInsteadOfFailing(t *testing.T) {
+	g := newTestGuard(t, 8, 100)
+
+	// Something else already holds part of the node.
+	ok, _ := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 10})
+	require.True(t, ok)
+
+	// Larger than the whole node.
+	ok, _ = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{Memory: 500})
+	assert.False(t, ok, "oversized task must wait, not be admitted")
+
+	// Draining the node lets it in.
+	g.Release(1)
+	ok, _ = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{Memory: 500})
+	assert.True(t, ok, "oversized task runs once the node is empty")
+}
+
+func TestOversizedTaskExcludesEveryoneElse(t *testing.T) {
+	g := newTestGuard(t, 8, 100)
+
+	ok, _ := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 500})
+	require.True(t, ok, "empty node admits the oversized task")
+	assert.Equal(t, int64(1), g.Snapshot().ExclusiveTaskID)
+
+	// Even a one-byte task must not join it.
+	ok, _ = g.TryAcquire(2, taskcommon.Compaction, taskresource.Requirement{Memory: 1})
+	assert.False(t, ok, "nothing shares the node with an oversized task")
+
+	g.Release(1)
+	assert.Equal(t, int64(0), g.Snapshot().ExclusiveTaskID)
+
+	ok, _ = g.TryAcquire(2, taskcommon.Compaction, taskresource.Requirement{Memory: 1})
+	assert.True(t, ok, "normal admission resumes once it finishes")
+}
+
+// Exclusivity is a promise made at admission, and the node growing underneath
+// does not release the guard from it. Node capacity is not constant: the memory
+// and CPU ratios are runtime config, so a task admitted as oversized can find
+// itself fitting comfortably a moment later. It still owns the node until it
+// releases -- otherwise it would end up sharing after all, which is precisely
+// the concurrency that issue #52180 was about.
+func TestGrowingTheNodeDoesNotBreakExclusivity(t *testing.T) {
+	g := newTestGuard(t, 8, 100)
+
+	ok, _ := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 500})
+	require.True(t, ok)
+	require.Equal(t, int64(1), g.Snapshot().ExclusiveTaskID)
+
+	// The node is now far bigger than the reservation it is holding.
+	g.setCapacityForTest(taskresource.Capacity{CPU: 8, Memory: 10000})
+
+	ok, _ = g.TryAcquire(2, taskcommon.Compaction, taskresource.Requirement{Memory: 1})
+	assert.False(t, ok, "a task admitted exclusively keeps the node to itself until it releases")
+	assert.Equal(t, int64(1), g.Snapshot().ExclusiveTaskID)
+
+	g.Release(1)
+	ok, _ = g.TryAcquire(2, taskcommon.Compaction, taskresource.Requirement{Memory: 1})
+	assert.True(t, ok)
+}
+
+// Without this, turning the head-of-line knob off would starve oversized
+// tasks forever: they can never be admitted by luck, only by draining.
+func TestOversizedHeadDrainsTheNodeEvenWithHeadOfLineDisabled(t *testing.T) {
+	g := newTestGuard(t, 8, 100)
+	pt := paramtable.Get()
+	pt.Save(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key, "false")
+	defer pt.Reset(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key)
+
+	ok, _ := g.TryAcquire(1, taskcommon.Compaction, taskresource.Requirement{Memory: 60})
+	require.True(t, ok)
+
+	waiting := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		waiting <- g.Acquire(ctx, 2, taskcommon.Index, taskresource.Requirement{Memory: 500})
+	}()
+	require.Eventually(t, func() bool { return g.waiterCount() == 1 }, time.Second, 10*time.Millisecond)
+
+	// A small task must not slip in ahead of the waiting oversized task.
+	ok, _ = g.TryAcquire(3, taskcommon.Compaction, taskresource.Requirement{Memory: 5})
+	assert.False(t, ok, "oversized head holds the line regardless of the knob")
+
+	g.Release(1)
+	require.NoError(t, <-waiting)
+}
+
+func TestAcquireNeverFailsOnAnOversizedRequest(t *testing.T) {
+	g := newTestGuard(t, 8, 100)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// No error, and it is admitted, because the node is empty.
+	require.NoError(t, g.Acquire(ctx, 1, taskcommon.Index, taskresource.Requirement{Memory: 5000}))
+	assert.Equal(t, int64(1), g.Snapshot().ExclusiveTaskID)
+}
+
+func TestTwoOversizedTasksRunOneAfterTheOther(t *testing.T) {
+	g := newTestGuard(t, 8, 100)
+
+	ok, _ := g.TryAcquire(1, taskcommon.Index, taskresource.Requirement{Memory: 500})
+	require.True(t, ok)
+
+	ok, _ = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{Memory: 600})
+	assert.False(t, ok, "the second oversized task waits for the first")
+
+	g.Release(1)
+	ok, _ = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{Memory: 600})
+	assert.True(t, ok)
+	assert.Equal(t, int64(2), g.Snapshot().ExclusiveTaskID)
 }
 
 func TestGetGuardIsProcessWideSingleton(t *testing.T) {
