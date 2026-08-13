@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -161,7 +162,7 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply entry %T", action.Entry)
 		}
 	}
-	if containsSegmentIndexUpdate(actions) {
+	if containsSegmentIndexUpdate(actions) || b.HasPredicates() {
 		return txn.CommitWithoutFallback(ctx, kc.MetaKv, b)
 	}
 	return txn.Commit(ctx, kc.MetaKv, b)
@@ -204,6 +205,14 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 			b.Remove(k)
 		}
 	case metastore.ActionUpdate:
+		if e.ExpectedSegment != nil {
+			expected, _, _, _, _ := CloneSegmentWithExcludeBinlogs(e.ExpectedSegment)
+			key, value, err := buildSegmentKv(expected)
+			if err != nil {
+				return err
+			}
+			b.Predicate(predicates.ValueEqual(key, value))
+		}
 		if e.AlterEncoding {
 			// Legacy AlterSegments encoding. A nil binlog increment persists no
 			// new binlog KVs (the segment is being retired, not extended); for a

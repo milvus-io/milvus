@@ -1486,13 +1486,17 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 					continue
 				}
 				var matched *packed.ManifestIndexInfo
-				matchingKeyCount := 0
 				for i := range manifestIndexes {
 					if manifestIndexes[i].IndexID == segIdx.IndexID && manifestIndexes[i].BuildID == segIdx.BuildID {
 						matched = &manifestIndexes[i]
 					}
-					if matched != nil && manifestIndexes[i].ColumnName == matched.ColumnName && manifestIndexes[i].IndexType == matched.IndexType {
-						matchingKeyCount++
+				}
+				matchingKeyCount := 0
+				if matched != nil {
+					for _, manifestIndex := range manifestIndexes {
+						if manifestIndex.ColumnName == matched.ColumnName && manifestIndex.IndexType == matched.IndexType {
+							matchingKeyCount++
+						}
 					}
 				}
 				if matched != nil && matchingKeyCount != 1 {
@@ -1501,7 +1505,12 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 						mlog.Int("matchingIndexes", matchingKeyCount))
 					continue
 				}
-				if matched != nil {
+				if matched == nil {
+					// The entry was removed by an earlier GC attempt. Keep using the
+					// legacy SegmentIndex file list for idempotent artifact cleanup.
+					log.Info(ctx, "segment index already absent from manifest, continue cleanup",
+						mlog.FieldIndexID(segIdx.IndexID), mlog.FieldBuildID(segIdx.BuildID))
+				} else {
 					manifestFileInfo, ok := manifestIndexFilePathInfo(segIdx.SegmentID, *matched)
 					if !ok {
 						log.Warn(ctx, "invalid manifest index metadata, wait to retry")

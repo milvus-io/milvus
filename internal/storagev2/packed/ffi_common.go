@@ -36,6 +36,10 @@ import (
 // errors propagate immediately as retry.Unrecoverable.
 var ErrLoonTransient = errors.New("loon FFI transient error")
 
+// ErrManifestRevisionStale indicates that a manifest mutation was built from
+// a revision older than the currently published revision.
+var ErrManifestRevisionStale = errors.New("manifest revision is stale")
+
 // Property keys exported by milvus-storage/ffi_c.h.
 var (
 	PropertyFSAddress             = C.GoString(C.loon_properties_fs_address)

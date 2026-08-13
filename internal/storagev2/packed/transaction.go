@@ -65,10 +65,8 @@ type ManifestIndexInfo struct {
 }
 
 // AddIndexInfoToManifest records a completed index artifact in a segment
-// manifest. Index tasks for different fields of the same sealed segment can
-// finish concurrently, so serialize updates for a manifest base path and
-// re-read the latest revision before publishing. The fail resolver then keeps
-// an index from being published after an external concurrent update.
+// manifest. The supplied manifest path identifies the source revision; this
+// operation never implicitly rebases onto a newer revision.
 func AddIndexInfoToManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
@@ -101,15 +99,6 @@ func AddIndexInfosToManifest(
 	indexManifestLocks.Lock(basePath)
 	defer indexManifestLocks.Unlock(basePath)
 
-	// A previous index task may have committed a newer revision from the same
-	// source manifest while this task was waiting for the per-segment lock.
-	// Rebase this metadata-only update on that revision before opening the
-	// fail-resolved transaction.
-	version, err = getLatestManifestVersion(basePath, cProperties)
-	if err != nil {
-		return "", merr.Wrap(err, "failed to read latest manifest version")
-	}
-
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 
@@ -118,8 +107,8 @@ func AddIndexInfosToManifest(
 		cBasePath,
 		cProperties,
 		C.int64_t(version),
-		C.int32_t(C.LOON_TRANSACTION_RESOLVE_FAIL),
-		C.uint32_t(1),
+		C.int32_t(C.LOON_TRANSACTION_RESOLVE_OVERWRITE),
+		getRetryLimit(),
 		&transactionHandle,
 	)
 	if err := HandleLoonFFIResult(result); err != nil {
@@ -240,7 +229,7 @@ func RemoveIndexInfosFromManifest(
 	if len(indexes) == 0 {
 		return manifestPath, nil
 	}
-	basePath, _, err := UnmarshalManifestPath(manifestPath)
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
@@ -252,19 +241,14 @@ func RemoveIndexInfosFromManifest(
 
 	indexManifestLocks.Lock(basePath)
 	defer indexManifestLocks.Unlock(basePath)
-	version, err := getLatestManifestVersion(basePath, cProperties)
+	sourceIndexes, err := GetManifestIndexInfos(manifestPath, storageConfig)
 	if err != nil {
-		return "", merr.Wrap(err, "failed to read latest manifest version")
-	}
-	latestManifestPath := MarshalManifestPath(basePath, version)
-	latestIndexes, err := GetManifestIndexInfos(latestManifestPath, storageConfig)
-	if err != nil {
-		return "", merr.Wrap(err, "failed to validate latest manifest index metadata")
+		return "", merr.Wrap(err, "failed to validate source manifest index metadata")
 	}
 	matchedIndexes := make([]ManifestIndexInfo, 0, len(indexes))
 	for _, requested := range indexes {
 		matchingKeys, matchingIdentity := 0, false
-		for _, existing := range latestIndexes {
+		for _, existing := range sourceIndexes {
 			if existing.ColumnName != requested.ColumnName || existing.IndexType != requested.IndexType {
 				continue
 			}
@@ -283,13 +267,13 @@ func RemoveIndexInfosFromManifest(
 		matchedIndexes = append(matchedIndexes, requested)
 	}
 	if len(matchedIndexes) == 0 {
-		return latestManifestPath, nil
+		return manifestPath, nil
 	}
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 	var transactionHandle C.LoonTransactionHandle
 	if err := HandleLoonFFIResult(C.loon_transaction_begin(
-		cBasePath, cProperties, C.int64_t(version), C.LOON_TRANSACTION_RESOLVE_FAIL, getRetryLimit(), &transactionHandle,
+		cBasePath, cProperties, C.int64_t(version), C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit(), &transactionHandle,
 	)); err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin index manifest transaction")
 	}
@@ -311,30 +295,6 @@ func RemoveIndexInfosFromManifest(
 		return "", merr.WrapErrStorage(err, "failed to commit index manifest transaction")
 	}
 	return MarshalManifestPath(basePath, int64(commitVersion)), nil
-}
-
-func getLatestManifestVersion(basePath string, properties *C.LoonProperties) (int64, error) {
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
-	var transactionHandle C.LoonTransactionHandle
-	if err := HandleLoonFFIResult(C.loon_transaction_begin(
-		cBasePath,
-		properties,
-		C.int64_t(-1),
-		C.int32_t(C.LOON_TRANSACTION_RESOLVE_FAIL),
-		C.uint32_t(1),
-		&transactionHandle,
-	)); err != nil {
-		return 0, merr.WrapErrStorage(err, "failed to open latest manifest transaction")
-	}
-	defer C.loon_transaction_destroy(transactionHandle)
-
-	var version C.int64_t
-	if err := HandleLoonFFIResult(C.loon_transaction_get_read_version(transactionHandle, &version)); err != nil {
-		return 0, merr.WrapErrStorage(err, "failed to get latest manifest version")
-	}
-	return int64(version), nil
 }
 
 // getRetryLimit returns the configured manifest transaction retry limit.

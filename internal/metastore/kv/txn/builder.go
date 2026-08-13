@@ -23,6 +23,8 @@
 // batches and applies the commit ops as the final guarded txn.
 package txn
 
+import "github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+
 // opKind identifies the kind of a single recorded operation.
 type opKind int
 
@@ -44,8 +46,16 @@ type op struct {
 // Order across Save/Remove/RemovePrefix calls is preserved, since it matters
 // for the non-atomic fallback path (see Commit).
 type Builder struct {
-	ops []op
+	ops   []op
+	preds []predicates.Predicate
 }
+
+// Predicate adds a compare guard to the composite transaction.
+func (b *Builder) Predicate(pred predicates.Predicate) {
+	b.preds = append(b.preds, pred)
+}
+
+func (b *Builder) HasPredicates() bool { return len(b.preds) > 0 }
 
 // New returns an empty Builder.
 func New() *Builder {

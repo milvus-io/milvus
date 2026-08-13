@@ -5137,6 +5137,22 @@ func TestUpdateManifestVersion(t *testing.T) {
 	})
 }
 
+func TestUpdateManifestPathForGCRejectsRevisionJump(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+
+	basePath := "/data/segments/1"
+	current := packed.MarshalManifestPath(basePath, 3)
+	meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 1, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3, ManifestPath: current,
+	}})
+
+	err = meta.UpdateSegmentsInfo(context.Background(), UpdateManifestPathForGC(1, packed.MarshalManifestPath(basePath, 5)))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errIndexManifestPublicationStale)
+	assert.Equal(t, current, meta.GetSegment(context.Background(), 1).GetManifestPath())
+}
+
 func TestUpdateSegmentColumnGroupsOperator(t *testing.T) {
 	// Helper: build a segment with two pre-existing column groups, where the
 	// first group owns top-level fieldID=100 and child_fields=[200,201], and

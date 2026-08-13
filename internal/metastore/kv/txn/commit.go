@@ -108,9 +108,9 @@ func commitAtomic(ctx context.Context, txn kv.TxnKV, b *Builder) error {
 		return merr.WrapErrParameterInvalidMsg("composite update cannot mix exact and prefix removals in one atomic transaction")
 	}
 	if len(prefixRemovals) > 0 {
-		return txn.MultiSaveAndRemoveWithPrefix(ctx, saves, prefixRemovals)
+		return txn.MultiSaveAndRemoveWithPrefix(ctx, saves, prefixRemovals, b.preds...)
 	}
-	return txn.MultiSaveAndRemove(ctx, saves, removals)
+	return txn.MultiSaveAndRemove(ctx, saves, removals, b.preds...)
 }
 
 // commitFallback flushes non-commit ops in recorded order, chunked by limit,
@@ -156,7 +156,7 @@ func commitFallback(ctx context.Context, txn kv.TxnKV, limit int, b *Builder) er
 		return nil
 	}
 
-	return txn.MultiSaveAndRemove(ctx, commitSaves, commitRemovals)
+	return txn.MultiSaveAndRemove(ctx, commitSaves, commitRemovals, b.preds...)
 }
 
 // flushNonCommitOps applies non-commit ops in recorded order. It groups
