@@ -207,6 +207,11 @@ func newTask(cancelStage fakeTaskState, reterror map[fakeTaskState]error, expect
 
 func TestIndexTaskScheduler(t *testing.T) {
 	paramtable.Init()
+	// Every task below is admitted through the guard. Route that at a double:
+	// the process-wide guard freezes admission from the host's live memory
+	// reading, and a frozen Acquire parks on the task's context -- which for
+	// these doubles only advances as stages run, so the wait would never end.
+	useRecordingGuard(t)
 
 	scheduler := NewTaskScheduler(context.TODO())
 	scheduler.Start()
@@ -278,6 +283,7 @@ func newSchedulerIndexBuildTask(t *testing.T, manager *TaskManager, buildID int6
 
 func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
 	paramtable.Init()
+	useRecordingGuard(t)
 
 	t.Run("success records execution cost", func(t *testing.T) {
 		manager := NewTaskManager(context.Background())

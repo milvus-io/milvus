@@ -838,3 +838,30 @@ func TestExecutorAdmission(t *testing.T) {
 		assert.Greater(t, acquires[0].Req.Memory, int64(0))
 	})
 }
+
+// TestCompactorGetPlanReturnsItsOwnPlan pins the wiring every compactor needs
+// for admission. A GetPlan that returned nil would not fail loudly: pricing
+// would quietly fall back to the coordinator's legacy slot, which is the very
+// number this node stopped trusting.
+func TestCompactorGetPlanReturnsItsOwnPlan(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+
+	plan := planWithBinlogs(7)
+	compactors := map[string]Compactor{
+		"mix":               &mixCompactionTask{plan: plan},
+		"sort":              &sortCompactionTask{plan: plan},
+		"clustering":        &clusteringCompactionTask{plan: plan},
+		"bumpSchemaVersion": &bumpSchemaVersionCompactionTask{plan: plan},
+		"levelZero":         &LevelZeroCompactionTask{plan: plan},
+		"namespace":         &NamespaceCompactor{mixCompactionTask: &mixCompactionTask{plan: plan}},
+	}
+
+	for name, task := range compactors {
+		t.Run(name, func(t *testing.T) {
+			assert.Same(t, plan, task.GetPlan())
+			// And the plan actually reaches pricing, rather than the legacy
+			// slot fallback taking over.
+			assert.Equal(t, taskresource.RequirementForCompaction(plan), taskRequirement(task))
+		})
+	}
+}

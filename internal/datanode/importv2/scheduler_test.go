@@ -84,6 +84,7 @@ type SchedulerSuite struct {
 	syncMgr   *syncmgr.MockSyncManager
 	manager   TaskManager
 	scheduler *scheduler
+	guardMock *mockey.Mocker
 }
 
 func (s *SchedulerSuite) SetupSuite() {
@@ -125,10 +126,16 @@ func (s *SchedulerSuite) SetupTest() {
 	s.manager = NewTaskManager()
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
 	s.scheduler = NewScheduler(s.manager).(*scheduler)
+
+	// Admission goes through a double rather than the process-wide guard: that
+	// one freezes on the host's live memory reading, which would make these
+	// tests pass or hang depending on what else the machine is doing.
+	s.guardMock = mockey.Mock(resource.GetGuard).Return(resource.NewRecordingGuard()).Build()
 }
 
 func (s *SchedulerSuite) TearDownTest() {
 	s.scheduler.Close()
+	s.guardMock.UnPatch()
 }
 
 func (s *SchedulerSuite) TestScheduler_Slots() {
@@ -704,6 +711,10 @@ func TestImportSchedulerAdmission(t *testing.T) {
 			{L0PreImportTaskType, taskcommon.PreImport},
 			{L0ImportTaskType, taskcommon.Import},
 			{CopySegmentTaskType, taskcommon.CopySegment},
+			// A kind this package does not know about must not be silently
+			// filed under an existing family: the ledger's logs and metrics
+			// would then attribute it to work it is not.
+			{TaskType(99), taskcommon.TypeNone},
 		}
 		for _, c := range cases {
 			assert.Equal(t, c.expected, ledgerTaskType(c.taskType), c.taskType.String())
@@ -751,6 +762,35 @@ func TestImportTaskResourceRequirements(t *testing.T) {
 			PartitionNum:      1,
 			MaxFileMemorySize: 2 << 30,
 		}).Memory)
+	})
+
+	t.Run("l0 preimport charges a delete buffer per file", func(t *testing.T) {
+		task := &L0PreImportTask{
+			PreImportTask: &datapb.PreImportTask{
+				FileStats: []*datapb.ImportFileStats{{}, {}},
+			},
+		}
+		expected := taskresource.EstimateImport(taskresource.ImportInput{
+			IsL0:        true,
+			IsPreImport: true,
+			FileNum:     2,
+		})
+		assert.Equal(t, expected, task.GetResourceRequirement())
+		assert.Greater(t, expected.Memory, int64(0))
+	})
+
+	t.Run("l0 import charges a delete buffer per file", func(t *testing.T) {
+		task := &L0ImportTask{
+			req: &datapb.ImportRequest{
+				Files: []*internalpb.ImportFile{{}, {}, {}},
+			},
+		}
+		expected := taskresource.EstimateImport(taskresource.ImportInput{
+			IsL0:    true,
+			FileNum: 3,
+		})
+		assert.Equal(t, expected, task.GetResourceRequirement())
+		assert.Greater(t, expected.Memory, int64(0))
 	})
 
 	t.Run("copy segment charges no segment bytes", func(t *testing.T) {

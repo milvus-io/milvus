@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/index"
+	"github.com/milvus-io/milvus/internal/datanode/resource"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
@@ -306,6 +307,7 @@ type IndexServiceSuite struct {
 	node          *DataNode
 	storageConfig *indexpb.StorageConfig
 	cm            storage.ChunkManager
+	guardMock     *mockey.Mocker
 }
 
 func TestIndexServiceSuite(t *testing.T) {
@@ -313,6 +315,16 @@ func TestIndexServiceSuite(t *testing.T) {
 }
 
 func (s *IndexServiceSuite) SetupTest() {
+	// Index, stats and analyze jobs are admitted through the resource guard.
+	// Route that at a double: the process-wide guard freezes admission from the
+	// host's live memory reading, so these end-to-end jobs would otherwise pass
+	// or time out depending on the machine's load. SetupTest runs once per
+	// test while the patch is torn down once per suite, and mockey panics on a
+	// second patch of a function it already holds, so install it only once.
+	if s.guardMock == nil {
+		s.guardMock = mockey.Mock(resource.GetGuard).Return(resource.NewRecordingGuard()).Build()
+	}
+
 	streamingutil.SetStreamingServiceEnabled()
 	s.collID = 1
 	s.partID = 2
@@ -378,6 +390,11 @@ func (s *IndexServiceSuite) SetupTest() {
 }
 
 func (s *IndexServiceSuite) TearDownSuite() {
+	if s.guardMock != nil {
+		s.guardMock.UnPatch()
+		s.guardMock = nil
+	}
+
 	err := s.cm.RemoveWithPrefix(context.Background(), "index-service-ut")
 	s.NoError(err)
 	paramtable.Get().MinioCfg.RootPath.SwapTempValue("files")
