@@ -19,9 +19,9 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | DropSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
-| Import | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
-| CommitImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
-| RollbackImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
+| Import | Broadcast: job data VChannels | No | SharedDBName + ExclusiveCollectionName |
+| CommitImport | Broadcast: job data VChannels | No | SharedDBName + ExclusiveCollectionName |
+| RollbackImport | Broadcast: job data VChannels | No | SharedDBName + ExclusiveCollectionName |
 | Insert | Single VChannel | No | — |
 | Delete | Single VChannel | No | — |
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
@@ -40,6 +40,8 @@ lock shape:
 - `DataCoord.broadcastImport` starts its broadcaster through
   `startBroadcastWithCollectionID`, which acquires
   `SharedDBName(database) + ExclusiveCollectionName(database, collection)`.
+  Its target list is the job's data VChannels; the current producer does not
+  append the control channel.
 - `broadcastCommitImportMessage` and `broadcastRollbackImportMessage` use the
   same helper and therefore the same two keys. Their WAL target is every data
   VChannel in the job; the control channel is not a substitute for these
