@@ -13,11 +13,13 @@ import (
 	"path"
 	"sort"
 	"strconv"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -33,22 +35,24 @@ func importV3Digest(data []byte) []byte {
 	return []byte(fmt.Sprintf("crc64-ecma:%016x", v))
 }
 
-func writeImportV3Proto(ctx context.Context, cm storage.ChunkManager, ref string, msg proto.Message) ([]byte, error) {
+func writeImportV3Proto(ctx context.Context, cm storage.ChunkManager, prefix, name string, msg proto.Message) (string, []byte, error) {
 	payload, err := (proto.MarshalOptions{Deterministic: true}).Marshal(msg)
 	if err != nil {
-		return nil, merr.WrapErrSerializationFailed(err, "marshal import v3 object")
+		return "", nil, merr.WrapErrSerializationFailed(err, "marshal import v3 object")
 	}
 	digest := importV3Digest(payload)
+	digestToken := strings.TrimPrefix(string(digest), "crc64-ecma:")
+	ref := path.Join(prefix, name+"_"+digestToken+".pb")
 	if existing, err := cm.Read(ctx, ref); err == nil {
 		if !bytes.Equal(existing, payload) {
-			return nil, merr.WrapErrDataIntegrityMsg("import v3 object already exists with different content: %s", ref)
+			return "", nil, merr.WrapErrDataIntegrityMsg("import v3 object already exists with different content: %s", ref)
 		}
-		return digest, nil
+		return ref, digest, nil
 	}
 	if err := cm.Write(ctx, ref, payload); err != nil {
-		return nil, merr.Wrap(err, "write import v3 object")
+		return "", nil, merr.Wrap(err, "write import v3 object")
 	}
-	return digest, nil
+	return ref, digest, nil
 }
 
 func importV3SourceFormat(file *internalpb.ImportFile) datapb.ImportSourceFormat {
@@ -90,15 +94,15 @@ func (c *importChecker) createV3ReshardTasks(job ImportJob) error {
 			FormatVersion: 1,
 			JobId:         job.GetJobID(), TaskId: taskID, CollectionId: job.GetCollectionID(),
 			SourceSchema:               proto.Clone(job.GetSchema()).(*schemapb.CollectionSchema),
-			TemporarySchema:            typeutil.AppendSystemFields(job.GetSchema()),
+			TemporarySchema:            buildImportV3TemporarySchema(job.GetSchema(), importutilv2.IsBackup(job.GetOptions())),
 			Vchannels:                  append([]string(nil), job.GetVchannels()...),
 			PartitionIds:               append([]int64(nil), job.GetPartitionIDs()...),
 			SortSpec:                   v3DefaultSortSpec(job.GetSchema()),
 			FragmentTargetLogicalBytes: 128 * 1024 * 1024,
 			Sources:                    []*datapb.SourceFileSpec{{SourceOrdinal: 0, File: proto.Clone(file).(*internalpb.ImportFile), Format: importV3SourceFormat(file), IsBackup: importutilv2.IsBackup(job.GetOptions())}},
 		}
-		ref := path.Join(importV3Root, strconv.FormatInt(job.GetJobID(), 10), "reshard", strconv.FormatInt(taskID, 10), "plan.pb")
-		digest, err := writeImportV3Proto(c.ctx, c.meta.chunkManager, ref, plan)
+		prefix := path.Join(importV3Root, strconv.FormatInt(job.GetJobID(), 10), "reshard", strconv.FormatInt(taskID, 10))
+		ref, digest, err := writeImportV3Proto(c.ctx, c.meta.chunkManager, prefix, "plan", plan)
 		if err != nil {
 			return err
 		}
@@ -216,10 +220,19 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 		snapshot.TotalRows += f.ref.GetRows()
 		snapshot.TotalLogicalBytes += f.ref.GetLogicalBytes()
 	}
-	snapshot.WriterSpecs = []*datapb.WriterSpec{{FormatVersion: 1, TargetStorageVersion: importStorageVersion(false), TargetSchemaVersion: job.GetSchema().GetVersion()}}
+	ttl, ttlErr := common.GetCollectionTTL(job.GetSchema().GetProperties())
+	if ttlErr != nil {
+		return ttlErr
+	}
+	snapshot.WriterSpecs = []*datapb.WriterSpec{{FormatVersion: 1, TargetStorageVersion: importStorageVersion(false), TargetSchemaVersion: job.GetSchema().GetVersion(), CollectionTtlNanos: ttl.Nanoseconds(), PkStatsCapacity: 1, BloomFilterType: Params.CommonCfg.BloomFilterType.GetValue(), MaxBloomFalsePositive: Params.CommonCfg.MaxBloomFalsePositive.GetAsFloat()}}
+	columnGroups := storagecommon.SplitColumns(typeutil.GetAllFieldSchemas(frozenSchema), map[int64]storagecommon.ColumnStats{}, storagecommon.DefaultPolicies()...)
+	snapshot.WriterSpecs[0].ColumnGroups = make([]*datapb.ColumnGroupSpec, 0, len(columnGroups))
+	for _, group := range columnGroups {
+		snapshot.WriterSpecs[0].ColumnGroups = append(snapshot.WriterSpecs[0].ColumnGroups, &datapb.ColumnGroupSpec{GroupId: group.GroupID, FieldIds: append([]int64(nil), group.Fields...), Format: group.Format})
+	}
 	snapshot.SchemaDigest = importV3Digest(mustMarshalProto(job.GetSchema()))
-	snapshotRef := path.Join(importV3Root, strconv.FormatInt(job.GetJobID(), 10), "planning", strconv.FormatInt(gen, 10), "snapshot.pb")
-	snapshotDigest, err := writeImportV3Proto(c.ctx, c.meta.chunkManager, snapshotRef, snapshot)
+	planningPrefix := path.Join(importV3Root, strconv.FormatInt(job.GetJobID(), 10), "planning", strconv.FormatInt(gen, 10))
+	snapshotRef, snapshotDigest, err := writeImportV3Proto(c.ctx, c.meta.chunkManager, planningPrefix, "snapshot", snapshot)
 	if err != nil {
 		return err
 	}
@@ -281,8 +294,7 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 			return err
 		}
 		plan := &datapb.ImportTaskPlan{FormatVersion: 1, JobId: job.GetJobID(), TaskId: taskID, PlanningGeneration: gen, PlanningSnapshotDigest: snapshotDigest, SortSpec: proto.Clone(snapshot.GetSortSpec()).(*datapb.SortSpec), SegmentPlans: segments, MergeFanIn: int32(snapshot.GetMergeFanInCap()), RequiredLogIds: required, TaskSlot: 1, PlanningSnapshotRef: snapshotRef}
-		planRef := path.Join(importV3Root, strconv.FormatInt(job.GetJobID(), 10), "planning", strconv.FormatInt(gen, 10), "tasks", strconv.FormatInt(taskID, 10)+".pb")
-		planDigest, err := writeImportV3Proto(c.ctx, c.meta.chunkManager, planRef, plan)
+		planRef, planDigest, err := writeImportV3Proto(c.ctx, c.meta.chunkManager, path.Join(planningPrefix, "tasks"), strconv.FormatInt(taskID, 10), plan)
 		if err != nil {
 			return err
 		}
@@ -292,8 +304,7 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 			return err
 		}
 	}
-	indexRef := path.Join(importV3Root, strconv.FormatInt(job.GetJobID(), 10), "planning", strconv.FormatInt(gen, 10), "index.pb")
-	indexDigest, err := writeImportV3Proto(c.ctx, c.meta.chunkManager, indexRef, planIndex)
+	indexRef, indexDigest, err := writeImportV3Proto(c.ctx, c.meta.chunkManager, planningPrefix, "index", planIndex)
 	if err != nil {
 		return err
 	}
