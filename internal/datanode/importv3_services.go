@@ -8,13 +8,28 @@ package datanode
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"hash/crc64"
+	"io"
+	"path"
+	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/importv3"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -109,10 +124,295 @@ func (node *DataNode) executeReshardTask(ctx context.Context, req *datapb.Reshar
 	if plan.GetTaskId() != req.GetTaskId() || plan.GetJobId() != req.GetJobId() {
 		return nil, merr.WrapErrDataIntegrityMsg("ReshardTask plan identity mismatch")
 	}
-	// The executor is intentionally strict: a valid plan that cannot yet be
-	// transformed into immutable fragments must fail with a typed protocol
-	// error, never report an empty successful manifest.
-	return nil, merr.WrapErrImportSysFailedMsg("ReshardTask fragment executor is unavailable for plan %d", plan.GetTaskId())
+	cm, err := node.storageFactory.NewChunkManager(ctx, req.GetStorageConfig())
+	if err != nil {
+		return nil, err
+	}
+	return executeReshardPlan(ctx, cm, req, plan)
+}
+
+type reshardBucket struct {
+	vchannelOrdinal  int
+	partitionOrdinal int
+	data             *storage.InsertData
+}
+
+func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datapb.ReshardTaskRequest, plan *datapb.ReshardTaskPlan) (*importv3.Result, error) {
+	if plan.GetFormatVersion() == 0 || plan.GetSourceSchema() == nil || plan.GetTemporarySchema() == nil ||
+		len(plan.GetVchannels()) == 0 || len(plan.GetPartitionIds()) == 0 || len(plan.GetSources()) == 0 {
+		return nil, merr.WrapErrDataIntegrityMsg("invalid ReshardTask plan")
+	}
+	sortFields, err := importv3.SortFields(plan.GetSortSpec(), plan.GetTemporarySchema())
+	if err != nil {
+		return nil, err
+	}
+	bufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
+	maxFileSize := int64(paramtable.Get().DataNodeCfg.MaxImportFileSizeInGB.GetAsFloat() * 1024 * 1024 * 1024)
+	manifest := &datapb.ReshardManifest{
+		FormatVersion: 1, JobId: plan.GetJobId(), TaskId: plan.GetTaskId(), RunId: req.GetRunId(),
+		TaskPlanDigest: append([]byte(nil), req.GetTaskPlanDigest()...), SortSpec: proto.Clone(plan.GetSortSpec()).(*datapb.SortSpec),
+	}
+	fragmentSeq := make(map[[2]int]int64)
+	seenSources := make(map[int32]struct{}, len(plan.GetSources()))
+
+	for _, source := range plan.GetSources() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if source == nil || source.GetFile() == nil {
+			return nil, merr.WrapErrDataIntegrityMsg("nil ReshardTask source")
+		}
+		if _, ok := seenSources[source.GetSourceOrdinal()]; ok {
+			return nil, merr.WrapErrDataIntegrityMsg("duplicate source ordinal %d", source.GetSourceOrdinal())
+		}
+		seenSources[source.GetSourceOrdinal()] = struct{}{}
+		reader, err := newReshardSourceReader(ctx, cm, plan.GetSourceSchema(), source, bufferSize, req.GetStorageConfig())
+		if err != nil {
+			return nil, err
+		}
+		size, err := reader.Size()
+		if err != nil {
+			reader.Close()
+			return nil, merr.Wrapf(err, "get import source %d size", source.GetSourceOrdinal())
+		}
+		if size > maxFileSize {
+			reader.Close()
+			return nil, merr.WrapErrParameterInvalidMsg("import file size (%d bytes) exceeds the maximum allowed size (%d bytes)", size, maxFileSize)
+		}
+
+		var actualRows int64
+		var idOffset int64
+		for {
+			batch, readErr := reader.Read()
+			if readErr == io.EOF {
+				break
+			}
+			if readErr != nil {
+				reader.Close()
+				return nil, merr.Wrapf(readErr, "read import source %d", source.GetSourceOrdinal())
+			}
+			rowNum, _ := importv2.GetInsertDataRowCount(batch, plan.GetSourceSchema())
+			if err := normalizeReshardBatch(source, plan.GetSourceSchema(), batch, rowNum, &idOffset); err != nil {
+				reader.Close()
+				return nil, err
+			}
+			if rowNum == 0 {
+				continue
+			}
+			actualRows += int64(rowNum)
+			hashed, err := importv2.HashDataBySchema(plan.GetTemporarySchema(), plan.GetVchannels(), plan.GetPartitionIds(), batch)
+			if err != nil {
+				reader.Close()
+				return nil, err
+			}
+			for channelOrdinal := range hashed {
+				for partitionOrdinal, bucketData := range hashed[channelOrdinal] {
+					if bucketData.GetRowNum() == 0 {
+						continue
+					}
+					bucket := reshardBucket{vchannelOrdinal: channelOrdinal, partitionOrdinal: partitionOrdinal, data: bucketData}
+					key := [2]int{channelOrdinal, partitionOrdinal}
+					descriptor, err := writeReshardFragment(ctx, req, plan, bucket, fragmentSeq[key], bufferSize, sortFields)
+					if err != nil {
+						reader.Close()
+						return nil, err
+					}
+					fragmentSeq[key]++
+					manifest.Fragments = append(manifest.Fragments, descriptor)
+					manifest.TotalRows += descriptor.GetRows()
+					manifest.TotalLogicalBytes += descriptor.GetLogicalBytes()
+					manifest.TotalPhysicalBytes += descriptor.GetPhysicalBytes()
+				}
+			}
+		}
+		reader.Close()
+		manifest.Sources = append(manifest.Sources, &datapb.SourceCoverage{
+			SourceOrdinal: source.GetSourceOrdinal(), FileId: source.GetFile().GetId(), ActualRows: actualRows, ReachedEof: true,
+		})
+	}
+	return publishReshardManifest(ctx, cm, req, manifest)
+}
+
+func newReshardSourceReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, source *datapb.SourceFileSpec, bufferSize int64, storageConfig *indexpb.StorageConfig) (importutilv2.Reader, error) {
+	if source == nil || source.GetFile() == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("nil ReshardTask source")
+	}
+	options := make(importutilv2.Options, 0, 6)
+	appendOption := func(key, value string) {
+		options = append(options, &commonpb.KeyValuePair{Key: key, Value: value})
+	}
+	readerOptions := source.GetReaderOptions()
+	if source.GetFormat() == datapb.ImportSourceFormat_IMPORT_SOURCE_FORMAT_CSV {
+		if readerOptions.GetCsvSeparator() != "" {
+			appendOption(importutilv2.CSVSep, readerOptions.GetCsvSeparator())
+		}
+		if readerOptions.GetCsvNullKey() != "" {
+			appendOption(importutilv2.CSVNullKey, readerOptions.GetCsvNullKey())
+		}
+	}
+	if source.GetIsBackup() {
+		appendOption(importutilv2.BackupFlag, "true")
+		appendOption(importutilv2.StartTs, strconv.FormatUint(readerOptions.GetBackupStartTs(), 10))
+		appendOption(importutilv2.EndTs, strconv.FormatUint(readerOptions.GetBackupEndTs(), 10))
+		appendOption(importutilv2.StorageVersion, strconv.FormatInt(readerOptions.GetSourceStorageVersion(), 10))
+	}
+	// TODO(import-v3): backup currently goes through the legacy prefix reader.
+	// The plan already contains explicit expanded objects; switch this call to
+	// the explicit-object reader when that small binlog adapter lands.
+	return importutilv2.NewReader(ctx, cm, schema, source.GetFile(), options, int(bufferSize), storageConfig)
+}
+
+func normalizeReshardBatch(source *datapb.SourceFileSpec, schema *schemapb.CollectionSchema, data *storage.InsertData, rowNum int, idOffset *int64) error {
+	if data == nil {
+		return merr.WrapErrDataIntegrityMsg("source reader returned nil data")
+	}
+	if err := importv2.CheckRowsEqual(schema, data); err != nil {
+		return err
+	}
+	if err := importv2.CheckStructArrayConsistency(schema, data); err != nil {
+		return err
+	}
+	if err := importv2.AppendNullableDefaultFieldsData(schema, data, rowNum); err != nil {
+		return err
+	}
+	if err := importv2.FillDynamicData(schema, data, rowNum); err != nil {
+		return err
+	}
+	if source.GetIsBackup() {
+		return nil
+	}
+	return importv2.AppendPreallocatedSystemFields(schema, data, rowNum, source.GetFile().GetPreAllocatedAutoIds(), idOffset)
+}
+
+func writeReshardFragment(ctx context.Context, req *datapb.ReshardTaskRequest, plan *datapb.ReshardTaskPlan, bucket reshardBucket, seq, bufferSize int64, sortFields []int64) (*datapb.FragmentDescriptor, error) {
+	fragmentPath := path.Join(req.GetOutputPrefix(), "fragments", strconv.Itoa(bucket.vchannelOrdinal), strconv.FormatInt(plan.GetPartitionIds()[bucket.partitionOrdinal], 10), fmt.Sprintf("%d_%d.parquet", req.GetRunId(), seq))
+	fields := typeutil.GetAllFieldSchemas(plan.GetTemporarySchema())
+	columns := make([]int, len(fields))
+	fieldIDs := make([]int64, len(fields))
+	for index, field := range fields {
+		columns[index], fieldIDs[index] = index, field.GetFieldID()
+	}
+	writer, err := storage.NewPackedRecordWriter(req.GetStorageConfig().GetBucketName(), []string{fragmentPath}, plan.GetTemporarySchema(), bufferSize, packed.DefaultMultiPartUploadSize, []storagecommon.ColumnGroup{{GroupID: 0, Columns: columns, Fields: fieldIDs}}, req.GetStorageConfig(), (*indexcgopb.StoragePluginContext)(nil))
+	if err != nil {
+		return nil, err
+	}
+	reader, err := storage.NewInsertDataRecordReader(bucket.data, plan.GetTemporarySchema())
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	rows, _, err := storage.Sort(uint64(bufferSize), plan.GetTemporarySchema(), []storage.RecordReader{reader}, writer, func(storage.Record, int, int) bool { return true }, sortFields)
+	if err != nil {
+		_ = writer.Close()
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	if int64(rows) != int64(bucket.data.GetRowNum()) || writer.GetWrittenRowNum() != int64(rows) {
+		return nil, merr.WrapErrDataIntegrityMsg("fragment row count mismatch: input=%d sorted=%d written=%d", bucket.data.GetRowNum(), rows, writer.GetWrittenRowNum())
+	}
+	first, last, err := reshardSortKeyBounds(bucket.data, plan.GetSortSpec())
+	if err != nil {
+		return nil, err
+	}
+	logicalBytes := int64(writer.GetWrittenUncompressed())
+	physicalBytes := int64(writer.GetColumnGroupWrittenCompressed(0))
+	stats := make([]*datapb.ColumnSizeStat, 0, len(fields))
+	for _, field := range fields {
+		fd := bucket.data.Data[field.GetFieldID()]
+		var size int64
+		for row := 0; row < fd.RowNum(); row++ {
+			size += int64(fd.GetRowSize(row))
+		}
+		stats = append(stats, &datapb.ColumnSizeStat{FieldId: field.GetFieldID(), Rows: int64(fd.RowNum()), LogicalBytes: size})
+	}
+	// The descriptor is published only after Close succeeds.  A future version
+	// can add content-checksum validation here without changing manifest-last.
+	return &datapb.FragmentDescriptor{
+		VchannelOrdinal: int32(bucket.vchannelOrdinal), Vchannel: plan.GetVchannels()[bucket.vchannelOrdinal],
+		PartitionId: plan.GetPartitionIds()[bucket.partitionOrdinal], PartitionOrdinal: int32(bucket.partitionOrdinal), FragmentSeq: seq,
+		Path: writer.GetWrittenPaths(0), Rows: int64(rows), LogicalBytes: logicalBytes, EstimatedFinalBytes: logicalBytes,
+		PhysicalBytes: physicalBytes, FirstSortKey: first, LastSortKey: last, Format: storage.ImportFragmentFormatParquet, ColumnSizeStats: stats,
+	}, nil
+}
+
+func reshardSortKeyBounds(data *storage.InsertData, spec *datapb.SortSpec) (*datapb.SortKey, *datapb.SortKey, error) {
+	if data.GetRowNum() == 0 {
+		return nil, nil, merr.WrapErrDataIntegrityMsg("cannot compute sort key bounds for empty fragment")
+	}
+	keyAt := func(row int) (*datapb.SortKey, error) {
+		key := &datapb.SortKey{Components: make([]*datapb.SortKeyComponent, 0, len(spec.GetFields()))}
+		for _, field := range spec.GetFields() {
+			fieldData := data.Data[field.GetFieldId()]
+			if fieldData == nil {
+				return nil, merr.WrapErrDataIntegrityMsg("sort key field %d is missing from fragment", field.GetFieldId())
+			}
+			value := fieldData.GetRow(row)
+			switch field.GetKeyType() {
+			case datapb.SortKeyType_SORT_KEY_TYPE_INT64:
+				intValue, ok := value.(int64)
+				if !ok {
+					return nil, merr.WrapErrDataIntegrityMsg("sort key field %d does not contain int64", field.GetFieldId())
+				}
+				key.Components = append(key.Components, &datapb.SortKeyComponent{KeyType: field.GetKeyType(), Int64Value: intValue})
+			case datapb.SortKeyType_SORT_KEY_TYPE_STRING:
+				stringValue, ok := value.(string)
+				if !ok {
+					return nil, merr.WrapErrDataIntegrityMsg("sort key field %d does not contain string", field.GetFieldId())
+				}
+				key.Components = append(key.Components, &datapb.SortKeyComponent{KeyType: field.GetKeyType(), StringValue: []byte(stringValue)})
+			default:
+				return nil, merr.WrapErrDataIntegrityMsg("unsupported sort key type %s", field.GetKeyType())
+			}
+		}
+		return key, nil
+	}
+	less := func(left, right *datapb.SortKey) bool {
+		for index, l := range left.GetComponents() {
+			r := right.GetComponents()[index]
+			if l.GetKeyType() == datapb.SortKeyType_SORT_KEY_TYPE_INT64 {
+				if l.GetInt64Value() != r.GetInt64Value() {
+					return l.GetInt64Value() < r.GetInt64Value()
+				}
+			} else if cmp := bytes.Compare(l.GetStringValue(), r.GetStringValue()); cmp != 0 {
+				return cmp < 0
+			}
+		}
+		return false
+	}
+	first, err := keyAt(0)
+	if err != nil {
+		return nil, nil, err
+	}
+	last := proto.Clone(first).(*datapb.SortKey)
+	for row := 1; row < data.GetRowNum(); row++ {
+		key, err := keyAt(row)
+		if err != nil {
+			return nil, nil, err
+		}
+		if less(key, first) {
+			first = key
+		}
+		if less(last, key) {
+			last = key
+		}
+	}
+	return first, last, nil
+}
+
+func publishReshardManifest(ctx context.Context, cm storage.ChunkManager, req *datapb.ReshardTaskRequest, manifest *datapb.ReshardManifest) (*importv3.Result, error) {
+	payload, err := proto.MarshalOptions{Deterministic: true}.Marshal(manifest)
+	if err != nil {
+		return nil, merr.WrapErrSerializationFailed(err, "marshal ReshardManifest")
+	}
+	digestValue := crc64.Checksum(payload, crc64.MakeTable(crc64.ECMA))
+	digest := []byte(fmt.Sprintf("crc64-ecma:%016x", digestValue))
+	ref := path.Join(req.GetOutputPrefix(), "manifests", fmt.Sprintf("%d_%016x.pb", req.GetRunId(), digestValue))
+	if err := cm.Write(ctx, ref, payload); err != nil {
+		return nil, merr.Wrap(err, "write ReshardManifest")
+	}
+	return &importv3.Result{Ref: ref, Digest: digest, Rows: manifest.GetTotalRows(), Bytes: manifest.GetTotalPhysicalBytes()}, nil
 }
 
 func (node *DataNode) executeImportTaskV3(ctx context.Context, req *datapb.ImportTaskV3Request, runID int64) (*importv3.Result, error) {
