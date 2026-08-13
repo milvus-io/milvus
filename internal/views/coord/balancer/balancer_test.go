@@ -71,13 +71,12 @@ func TestBalancer_ReconcileDirtyShardAppliesPrepare(t *testing.T) {
 	assert.NotEmpty(t, stats.Segments)
 }
 
-func TestBalancer_ReconcileDirtyCollectionExpandsTrackedShards(t *testing.T) {
+func TestBalancer_ReconcileDirtyCollectionCreatesDataViewShards(t *testing.T) {
 	const collID, replicaID int64 = 1, 10
 	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
 
 	store := storeWithConfig(t, collID, replicaID, []int64{100}, []int64{1})
 	reg := emptyRegistry(t)
-	reg.Ensure(shardID)
 	builder := NewSnapshotBuilder(
 		store,
 		reg,
@@ -101,7 +100,9 @@ func TestBalancer_ReconcileDirtyCollectionExpandsTrackedShards(t *testing.T) {
 	b.Trigger(TriggerScope{DirtyCollections: []int64{collID}})
 	require.NoError(t, b.Reconcile(context.Background()))
 
-	stats := reg.Get(shardID).Stats()
+	mgr := reg.Get(shardID)
+	require.NotNil(t, mgr)
+	stats := mgr.Stats()
 	assert.NotNil(t, stats.PreparingVersion)
 }
 

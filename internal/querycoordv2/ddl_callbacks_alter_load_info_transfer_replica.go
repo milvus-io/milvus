@@ -76,10 +76,10 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForTransferReplica(ctx cont
 	replicaNumbers[req.GetTargetResourceGroup()] += int(req.NumReplica)
 
 	alterLoadConfigReq := &job.AlterLoadConfigRequest{
-		Meta:              s.meta,
-		CollectionInfo:    coll,
-		BroadcastChannels: collectionLoadConfigBroadcastChannels(coll),
-		Current:           currentLoadConfig,
+		Meta:           s.meta,
+		CollectionInfo: coll,
+		ControlChannel: loadConfigBroadcastChannel(),
+		Current:        currentLoadConfig,
 		Expected: job.ExpectedLoadConfig{
 			ExpectedPartitionIDs:             currentLoadConfig.GetPartitionIDs(),
 			ExpectedReplicaNumber:            replicaNumbers,

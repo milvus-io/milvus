@@ -33,7 +33,7 @@ import (
 )
 
 type AlterLoadConfigRequest struct {
- BroadcastChannels []string
+ ControlChannel string
 	Meta           *meta.Meta
 	CollectionInfo *milvuspb.DescribeCollectionResponse
 	Expected       ExpectedLoadConfig
@@ -201,7 +201,7 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 	return message.NewAlterLoadConfigMessageBuilderV2().
 		WithHeader(header).
 		WithBody(&messagespb.AlterLoadConfigMessageBody{}).
-		WithBroadcast(req.BroadcastChannels, message.OptBuildBroadcastAckSyncUp()).
+		WithBroadcast([]string{req.ControlChannel}).
 		MustBuildBroadcast(), nil
 }
 
