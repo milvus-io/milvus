@@ -886,6 +886,21 @@ func AllocAutoID(allocFunc func(uint32) (int64, int64, error), rowNum uint32, cl
 	return idStart | int64(reversed), idEnd | int64(reversed), nil
 }
 
+// AllocAutoIDN is the int64 counterpart of AllocAutoID. Import range
+// reservation uses it after splitting work into allocator-sized batches while
+// keeping every file's range contiguous.
+func AllocAutoIDN(allocFunc func(int64) (int64, int64, error), n int64, clusterID uint64) (int64, int64, error) {
+	if n <= 0 {
+		return 0, 0, nil
+	}
+	idStart, idEnd, err := allocFunc(n)
+	if err != nil {
+		return 0, 0, err
+	}
+	reversed := bits.Reverse64(clusterID) >> 1
+	return idStart | int64(reversed), idEnd | int64(reversed), nil
+}
+
 func GetCollectionAllowInsertNonBM25FunctionOutputs(kvs []*commonpb.KeyValuePair) bool {
 	for _, kv := range kvs {
 		if kv.Key == CollectionAllowInsertNonBM25FunctionOutputs {

@@ -181,8 +181,9 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 			return err
 		}
 		defer reader.Close()
+		var fileIDOffset int64
 		start := time.Now()
-		err = t.importFile(reader)
+		err = t.importFile(reader, file.GetPreAllocatedAutoIds(), &fileIDOffset)
 		if err != nil {
 			mlog.Warn(t.ctx, "do import failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
@@ -212,7 +213,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	return futures
 }
 
-func (t *ImportTask) importFile(reader importutilv2.Reader) error {
+func (t *ImportTask) importFile(reader importutilv2.Reader, fileIDRange *commonpb.IDRange, fileIDOffset *int64) error {
 	syncFutures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
@@ -234,7 +235,11 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		if err != nil {
 			return err
 		}
-		err = AppendSystemFieldsData(t, data, rowNum)
+		if fileIDRange != nil && fileIDRange.GetEnd() > fileIDRange.GetBegin() {
+			err = AppendPreallocatedSystemFields(t.GetSchema(), data, rowNum, fileIDRange, fileIDOffset)
+		} else {
+			err = AppendSystemFieldsData(t, data, rowNum)
+		}
 		if err != nil {
 			return err
 		}
