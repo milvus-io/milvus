@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -211,6 +213,29 @@ func TestWithContext(t *testing.T) {
 
 	session = GetTxnSessionFromContext(ctx)
 	assert.NotNil(t, session)
+}
+
+func TestTxnSessionRejectCommitAdmission(t *testing.T) {
+	metrics := metricsutil.NewTxnMetrics("p1")
+	defer metrics.Close()
+	session := newTxnSession("v1", message.TxnContext{TxnID: 1, Keepalive: time.Second}, 10, metrics.BeginTxn())
+	cleanupCalled := atomic.NewInt32(0)
+	session.RegisterCleanup(func() {
+		cleanupCalled.Inc()
+	}, 0)
+
+	err := session.RequestCommitAndWait(context.Background(), 11)
+	require.NoError(t, err)
+
+	session.RejectCommit()
+	require.Equal(t, message.TxnStateRollbacked, session.State())
+	require.Equal(t, int32(1), cleanupCalled.Load())
+	require.NotPanics(t, func() {
+		session.Cleanup()
+		session.Cleanup()
+		session.Cleanup()
+	})
+	require.Equal(t, int32(1), cleanupCalled.Load())
 }
 
 func TestRollbackAllInFlightTransactions(t *testing.T) {

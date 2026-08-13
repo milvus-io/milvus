@@ -154,7 +154,7 @@ func TestSplitInsertRowsByMessageSizeRejectsOversizedMessage(t *testing.T) {
 	t.Run("built messages are refused too", func(t *testing.T) {
 		insertMsg := newVarCharInsertMsgForPackTest(strings.Repeat("x", 1024))
 		msgs, err := genInsertMessagesByPartition(0, 1, "test_partition", []int{0}, "test_channel",
-			insertMsg, nil, 7, message.WALNamePulsar)
+			insertMsg, nil, 7, nil, message.WALNamePulsar)
 		assert.Nil(t, msgs)
 		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	})
@@ -285,7 +285,7 @@ func TestGenInsertMessagesByPartitionKafkaBodyStaysUnderKafkaLimit(t *testing.T)
 	kafkaLimit := int(Params.KafkaCfg.ProducerMessageMaxBytes.GetAsInt32())
 
 	kafkaMsgs, err := genInsertMessagesByPartition(0, 1, "test_partition", []int{0, 1, 2}, "test_channel",
-		insertMsg, nil, 7, message.WALNameKafka)
+		insertMsg, nil, 7, nil, message.WALNameKafka)
 	require.NoError(t, err)
 	require.Greater(t, len(kafkaMsgs), 1, "packing against pulsar's much larger budget would wrongly keep this to one message")
 	for _, msg := range kafkaMsgs {
@@ -295,7 +295,7 @@ func TestGenInsertMessagesByPartitionKafkaBodyStaysUnderKafkaLimit(t *testing.T)
 
 	// Pulsar's own budget is unaffected: the same rows still fit in one message.
 	pulsarMsgs, err := genInsertMessagesByPartition(0, 1, "test_partition", []int{0, 1, 2}, "test_channel",
-		insertMsg, nil, 7, message.WALNamePulsar)
+		insertMsg, nil, 7, nil, message.WALNamePulsar)
 	require.NoError(t, err)
 	require.Len(t, pulsarMsgs, 1)
 }
@@ -592,7 +592,7 @@ func TestGenInsertMessagesByPartitionSplitsByPlaintextBodyLimit(t *testing.T) {
 	partitionName := strings.Repeat("partition", 16)
 	channelName := strings.Repeat("channel", 16)
 
-	twoRows, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1}, channelName, source, nil, 7, message.WALNameRocksmq)
+	twoRows, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1}, channelName, source, nil, 7, nil, message.WALNameRocksmq)
 	require.NoError(t, err)
 	require.Len(t, twoRows, 1)
 	twoRowRecord := twoRows[0].IntoMessageProto()
@@ -601,7 +601,7 @@ func TestGenInsertMessagesByPartitionSplitsByPlaintextBodyLimit(t *testing.T) {
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(len(twoRowRecord.GetPayload())-1)))
 	bodyLimit := messageBodyLimit(message.WALNameRocksmq)
 
-	msgs, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1, 2}, channelName, source, nil, 7, message.WALNameRocksmq)
+	msgs, err := genInsertMessagesByPartition(200, 300, partitionName, []int{0, 1, 2}, channelName, source, nil, 7, nil, message.WALNameRocksmq)
 	require.NoError(t, err)
 	require.Len(t, msgs, 3, "each row must land in its own message under this body limit")
 	for _, msg := range msgs {
@@ -681,7 +681,7 @@ func TestGenInsertMessagesByPartitionSmallScalars(t *testing.T) {
 		},
 	}
 
-	msgs, err := genInsertMessagesByPartition(200, 300, "partition", selection, "vchannel", source, nil, 7, message.WALNameRocksmq)
+	msgs, err := genInsertMessagesByPartition(200, 300, "partition", selection, "vchannel", source, nil, 7, nil, message.WALNameRocksmq)
 	require.NoError(t, err)
 	require.Greater(t, len(msgs), 1)
 	require.Less(t, len(msgs), rows/2, "splitting must not degenerate into one WAL message per row")
@@ -741,7 +741,7 @@ func TestGenInsertMessagesByPartitionEncodesSelectionView(t *testing.T) {
 	}
 
 	selection := []int{1, 3}
-	msgs, err := genInsertMessagesByPartition(0, 200, "target-partition", selection, "vchannel", source, nil, 7, message.WALNameRocksmq)
+	msgs, err := genInsertMessagesByPartition(0, 200, "target-partition", selection, "vchannel", source, nil, 7, nil, message.WALNameRocksmq)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
 	builtPayload := append([]byte(nil), msgs[0].Payload()...)
@@ -762,7 +762,9 @@ func TestGenInsertMessagesByPartitionEncodesSelectionView(t *testing.T) {
 	assert.Equal(t, []int64{11, 13}, body.GetRowIDs())
 	assert.Equal(t, []uint64{21, 23}, body.GetTimestamps())
 	assert.Equal(t, []int64{101, 103}, body.GetFieldsData()[0].GetScalars().GetLongData().GetData())
-	assert.Equal(t, []bool{false, true}, body.GetFieldsData()[1].GetValidData())
+	// #52203 moved row validity to the field-specific location; the encoder
+	// writes it there, matching AppendFieldData.
+	assert.Equal(t, []bool{false, true}, body.GetFieldsData()[1].GetVectors().GetValidData())
 	assert.Equal(t, []float32{6, 7}, body.GetFieldsData()[1].GetVectors().GetFloatVector().GetData())
 
 	// The view encoder must not mutate or compact the source request.
@@ -773,14 +775,14 @@ func TestGenInsertMessagesByPartitionEncodesSelectionView(t *testing.T) {
 	// compact-vector prefix state at each later selection boundary; advancing it
 	// incorrectly would return the wrong physical vector row.
 	assert.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "4097"))
-	msgs, err = genInsertMessagesByPartition(0, 200, "target-partition", []int{0, 1, 2, 3}, "vchannel", source, nil, 7, message.WALNameRocksmq)
+	msgs, err = genInsertMessagesByPartition(0, 200, "target-partition", []int{0, 1, 2, 3}, "vchannel", source, nil, 7, nil, message.WALNameRocksmq)
 	assert.NoError(t, err)
 	require.Len(t, msgs, 4)
 	expectedVectors := [][]float32{{0, 1}, nil, {4, 5}, {6, 7}}
 	for i, msg := range msgs {
 		body := message.MustAsMutableInsertMessageV1(msg).MustBody()
 		assert.Equal(t, []int64{int64(10 + i)}, body.GetRowIDs())
-		assert.Equal(t, []bool{source.GetFieldsData()[1].GetValidData()[i]}, body.GetFieldsData()[1].GetValidData())
+		assert.Equal(t, []bool{source.GetFieldsData()[1].GetValidData()[i]}, body.GetFieldsData()[1].GetVectors().GetValidData())
 		assert.Equal(t, expectedVectors[i], body.GetFieldsData()[1].GetVectors().GetFloatVector().GetData())
 	}
 

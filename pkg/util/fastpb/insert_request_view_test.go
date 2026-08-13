@@ -393,46 +393,59 @@ func TestInsertRequestViewEncoder_ArrayCellValidDataFallback(t *testing.T) {
 		"VectorField.ValidData must survive the cell, not be silently dropped")
 }
 
-// TestInsertRequestViewEncoder_TopLevelValidDataFailsClosed covers the same
-// new ScalarField/VectorField.ValidData proto fields as the cell-level test
-// above, but on a top-level FieldData.Scalars/Vectors column instead of an
-// ArrayArray/VectorArray cell. Unlike a cell, a top-level column is columnar
-// across every row and gets row-selected and can be split across several WAL
-// messages; a whole-object protobuf fallback (the cell's fix) would silently
-// re-emit every row into each split message instead of only the rows selected
-// for it, which is a worse bug than the one being fixed. Until row-selected
-// support for this field lands, the encoder must fail closed with an error
-// instead of silently dropping the nullability -- covered here for both the
-// scalar and the vector oneof.
-func TestInsertRequestViewEncoder_TopLevelValidDataFailsClosed(t *testing.T) {
+// TestInsertRequestViewEncoder_TopLevelFieldSpecificValidData covers the
+// field-specific ScalarField.ValidData (field 17) / VectorField.ValidData
+// (field 9) location that #52203 moved top-level row nullability to, with the
+// legacy FieldData.ValidData left empty. The encoder must resolve validity
+// with the same precedence as typeutil.GetFieldDataValidData and re-emit it at
+// the field-specific location the AppendFieldData oracle now writes,
+// row-selected like every other column. The vector payload is compacted: only
+// non-null rows carry vector data.
+func TestInsertRequestViewEncoder_TopLevelFieldSpecificValidData(t *testing.T) {
 	source := &msgpb.InsertRequest{
-		NumRows:    2,
-		RowIDs:     []int64{1, 2},
-		Timestamps: []uint64{10, 20},
+		NumRows:    3,
+		RowIDs:     []int64{1, 2, 3},
+		Timestamps: []uint64{10, 20, 30},
 		FieldsData: []*schemapb.FieldData{
-			scalarField(1, schemapb.DataType_Int64, &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}),
+			scalarField(1, schemapb.DataType_Int64, &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}),
+			vectorField(2, schemapb.DataType_FloatVector, 2,
+				&schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 5, 6}}}, nil),
 		},
 	}
-	source.FieldsData[0].GetScalars().ValidData = []bool{true, false}
+	source.FieldsData[0].GetScalars().ValidData = []bool{true, false, true}
+	// Compacted vector payload: rows 0 and 2 are valid and own the two vectors.
+	source.FieldsData[1].GetVectors().ValidData = []bool{true, false, true}
 
-	_, err := NewInsertRequestViewEncoder(insertViewTemplate(), source, []int{0, 1})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	rows := []int{0, 1, 2}
+	expected := materializeWithAppendFieldData(insertViewTemplate(), source, rows)
 
-	vectorSource := &msgpb.InsertRequest{
-		NumRows:    1,
-		RowIDs:     []int64{1},
-		Timestamps: []uint64{10},
-		FieldsData: []*schemapb.FieldData{
-			vectorField(1, schemapb.DataType_FloatVector, 2,
-				&schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}}, nil),
-		},
-	}
-	vectorSource.FieldsData[0].GetVectors().ValidData = []bool{true}
+	encoder, err := NewInsertRequestViewEncoder(insertViewTemplate(), source, rows)
+	require.NoError(t, err)
+	size, err := encoder.EncodedSize()
+	require.NoError(t, err)
+	actualBytes := make([]byte, size)
+	_, err = encoder.MarshalTo(actualBytes)
+	require.NoError(t, err)
+	assert.Equal(t, proto.Size(expected), len(actualBytes))
 
-	_, err = NewInsertRequestViewEncoder(insertViewTemplate(), vectorSource, []int{0})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	decoded := &msgpb.InsertRequest{}
+	require.NoError(t, proto.Unmarshal(actualBytes, decoded))
+	assert.True(t, proto.Equal(expected, decoded))
+	assert.Empty(t, decoded.GetFieldsData()[0].GetValidData(),
+		"legacy FieldData.ValidData must stay empty; validity lives at the field-specific location")
+	assert.Equal(t, []bool{true, false, true},
+		decoded.GetFieldsData()[0].GetScalars().GetValidData(),
+		"ScalarField.ValidData must survive at the field-specific location")
+	assert.Equal(t, []bool{true, false, true},
+		decoded.GetFieldsData()[1].GetVectors().GetValidData(),
+		"VectorField.ValidData must survive at the field-specific location")
+
+	// Row selection with nulls: keep rows 1 (null) and 2 (valid).
+	subRows := []int{1, 2}
+	subExpected := materializeWithAppendFieldData(insertViewTemplate(), source, subRows)
+	subDecoded := encodeAndDecodeInsertView(t, insertViewTemplate(), source, subRows)
+	assert.True(t, proto.Equal(subExpected, subDecoded))
+	assert.Equal(t, []bool{false, true}, subDecoded.GetFieldsData()[1].GetVectors().GetValidData())
 }
 
 func TestInsertRequestViewEncoder_ExtendedScalarOneofs(t *testing.T) {
@@ -867,7 +880,7 @@ func TestInsertRequestViewEncoder_AllNullHighDimVectorDoesNotMaterialize(t *test
 	assert.Less(t, size, 1<<20, "all-null vector payload must not scale with dim*rowCount")
 
 	decoded := encodeAndDecodeInsertView(t, insertViewTemplate(), source, rows)
-	require.Len(t, decoded.GetFieldsData()[0].GetValidData(), rowCount)
+	require.Len(t, decoded.GetFieldsData()[0].GetVectors().GetValidData(), rowCount)
 	assert.Nil(t, decoded.GetFieldsData()[0].GetVectors().GetFloatVector())
 }
 

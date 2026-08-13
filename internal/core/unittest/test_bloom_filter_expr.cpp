@@ -684,9 +684,10 @@ class BloomFilterExprEvalTest : public ::testing::Test {
             for (const auto& s : rows) {
                 jd->Add(std::string(s));
             }
-            fd.mutable_valid_data()->Clear();
+            auto* valid_data = fd.mutable_scalars()->mutable_valid_data();
+            valid_data->Clear();
             for (bool v : valid) {
-                fd.mutable_valid_data()->Add(v);
+                valid_data->Add(v);
             }
         }
         ASSERT_TRUE(found) << "json field not present in generated dataset";

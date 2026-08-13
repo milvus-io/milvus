@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	streamingutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
@@ -185,6 +186,14 @@ func splitInsertRowsByMessageSize(insertMsg *msgstream.InsertMsg, rowOffsets []i
 // genInsertMessagesByPartition builds V1 WAL insert messages directly from
 // borrowed row selections. The selected rows are encoded into the final
 // protobuf payload without first materializing a second InsertRequest.
+//
+// partialUpdateCAS, when non-nil, is attached to every produced message. Its
+// metadata rides in the message properties, outside the plaintext body the
+// packing budget measures, and can be large enough to push a fully built
+// message past the WAL limit on its own -- so, matching the semantics #52374
+// introduced, each built message carrying CAS is re-validated against the
+// backend's raw limit and its rows are split in half and repacked when the
+// final envelope crosses it. A single row that still cannot fit is rejected.
 func genInsertMessagesByPartition(
 	segmentID UniqueID,
 	partitionID UniqueID,
@@ -194,6 +203,7 @@ func genInsertMessagesByPartition(
 	insertMsg *msgstream.InsertMsg,
 	ez *message.CipherConfig,
 	schemaVersion int32,
+	partialUpdateCAS *messagespb.PartialUpdateCAS,
 	walName message.WALName,
 ) ([]message.MutableMessage, error) {
 	template := &msgpb.InsertRequest{
@@ -211,12 +221,25 @@ func genInsertMessagesByPartition(
 		ShardName:      channelName,
 		Version:        msgpb.InsertDataVersion_ColumnBased,
 	}
+	if partialUpdateCAS != nil {
+		// Written into the template before the encoder plans any sizes: the
+		// CAS metadata rides in Base.Properties inside the encoded body, the
+		// same place AddPartialUpdateCAS stores it in a materialized body.
+		if err := message.EncodePartialUpdateCASIntoInsertTemplate(partialUpdateCAS, template); err != nil {
+			return nil, err
+		}
+	}
+	maxMessageSize := activeWALMessageSize(walName)
 	messages := make([]message.MutableMessage, 0, 1)
+	// Row selections whose built message came out over the limit once CAS
+	// metadata was attached; copied out of the borrowed selection and repacked
+	// in halves after the visit completes.
+	var casOversized [][]int
 	err := visitInsertRowsByMessageSize(template, insertMsg, rowOffsets, walName, func(rows []int, encoder *fastpb.InsertRequestViewEncoder) error {
 		// BuildMutable consumes the borrowed encoder synchronously. Once it
 		// returns, the message owns only the final payload and the splitter may
 		// safely reuse the cursor scratch for the next view.
-		newMsg, err := message.NewInsertMessageBuilderV1().
+		builder := message.NewInsertMessageBuilderV1().
 			WithVChannel(channelName).
 			WithHeader(&message.InsertMessageHeader{
 				CollectionId: insertMsg.CollectionID,
@@ -229,17 +252,40 @@ func genInsertMessagesByPartition(
 				},
 				SchemaVersion: &schemaVersion,
 			}).
-			WithBodyEncoder(encoder).
+			WithBodyEncoder(encoder)
+		if partialUpdateCAS != nil {
+			if err := builder.MarkPartialUpdateCASForBodyEncoder(); err != nil {
+				return err
+			}
+		}
+		newMsg, err := builder.
 			WithCipher(ez).
 			BuildMutable()
 		if err != nil {
 			return err
+		}
+		if partialUpdateCAS != nil && newMsg.EstimateSize() > maxMessageSize {
+			if len(rows) == 1 {
+				return merr.WrapErrParameterTooLarge("single partial update row exceeds max message size")
+			}
+			middle := len(rows) / 2
+			casOversized = append(casOversized,
+				append([]int(nil), rows[:middle]...),
+				append([]int(nil), rows[middle:]...))
+			return nil
 		}
 		messages = append(messages, newMsg)
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	for _, half := range casOversized {
+		msgs, err := genInsertMessagesByPartition(segmentID, partitionID, partitionName, half, channelName, insertMsg, ez, schemaVersion, partialUpdateCAS, walName)
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, msgs...)
 	}
 	return messages, nil
 }

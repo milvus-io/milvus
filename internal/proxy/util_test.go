@@ -2138,7 +2138,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -2182,7 +2182,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -2223,7 +2223,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -2268,7 +2268,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -2319,7 +2319,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -2360,7 +2360,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NoError(t, nil, err)
 
 		// autoid==false
@@ -2399,11 +2399,11 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err = checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		_, _, err = checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NoError(t, nil, err)
 	})
 
-	t.Run("will generate new pk when autoid == true", func(t *testing.T) {
+	t.Run("handle autoid primary key modes", func(t *testing.T) {
 		// autoid==true
 		task := insertTask{
 			schema: &schemapb.CollectionSchema{
@@ -2450,10 +2450,16 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		ids, oldIDs, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{2}, task.insertMsg.FieldsData[0].GetScalars().GetLongData().GetData())
+		assert.Equal(t, []int64{2}, ids.GetIntId().GetData())
+		assert.Equal(t, []int64{2}, oldIDs.GetIntId().GetData())
+
+		_, _, err = checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
 		newPK := task.insertMsg.FieldsData[0].GetScalars().GetLongData().GetData()
 		assert.Equal(t, newPK, task.insertMsg.RowIDs)
-		assert.NoError(t, nil, err)
+		assert.NoError(t, err)
 	})
 }
 
@@ -6268,9 +6274,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataCopied(t *testing.T) {
 									FieldName: subFieldName,
 									FieldId:   201,
 									Type:      schemapb.DataType_Array,
-									ValidData: validData,
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: validData,
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -6299,7 +6305,8 @@ func TestCheckAndFlattenStructFieldData_ValidDataCopied(t *testing.T) {
 	for _, fd := range insertMsg.GetFieldsData() {
 		if fd.FieldName == transformedName {
 			found = true
-			assert.Equal(t, validData, fd.GetValidData(), "ValidData should be preserved in flattened sub-field")
+			assert.Equal(t, validData, typeutil.GetFieldDataValidData(fd), "ValidData should be preserved in flattened sub-field")
+			assert.Nil(t, fd.GetValidData(), "flattened sub-field should use only field-specific ValidData")
 			break
 		}
 	}
@@ -6463,9 +6470,9 @@ func TestCheckAndFlattenStructFieldData_RequiredMissingButNullablePresent(t *tes
 									FieldName: "sub_b",
 									FieldId:   301,
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{true, false},
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: []bool{true, false},
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -6548,16 +6555,18 @@ func TestCheckAndFlattenStructFieldData_AllNullWithInitializedVectorsOneof(t *te
 									FieldName: "tag",
 									FieldId:   201,
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{false, false},
+									Field: &schemapb.FieldData_Scalars{
+										Scalars: &schemapb.ScalarField{ValidData: []bool{false, false}},
+									},
 								},
 								{
 									FieldName: "vec",
 									FieldId:   202,
 									Type:      schemapb.DataType_ArrayOfVector,
-									ValidData: []bool{false, false},
 									Field: &schemapb.FieldData_Vectors{
 										Vectors: &schemapb.VectorField{
-											Dim: 4,
+											ValidData: []bool{false, false},
+											Dim:       4,
 										},
 									},
 								},
@@ -6819,9 +6828,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataMaskMismatch(t *testing.T) {
 								{
 									FieldName: "a",
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{true, false},
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: []bool{true, false},
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -6837,9 +6846,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataMaskMismatch(t *testing.T) {
 								{
 									FieldName: "b",
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{false, true},
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: []bool{false, true},
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -6908,9 +6917,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataNilVsNonNil(t *testing.T) {
 								{
 									FieldName: "a",
 									Type:      schemapb.DataType_Array,
-									ValidData: nil, // no ValidData
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: nil, // no ValidData
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -6926,9 +6935,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataNilVsNonNil(t *testing.T) {
 								{
 									FieldName: "b",
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{true, false}, // has ValidData
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: []bool{true, false}, // has ValidData
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -6998,8 +7007,10 @@ func TestCheckAndFlattenStructFieldData_ValidDataWithoutPayload(t *testing.T) {
 									FieldName: "a",
 									FieldId:   201,
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{true, false}, // claims row 0 is valid
-									// but no Field/payload
+									Field: &schemapb.FieldData_Scalars{
+										// Claims row 0 is valid, but provides no payload.
+										Scalars: &schemapb.ScalarField{ValidData: []bool{true, false}},
+									},
 								},
 							},
 						},
@@ -7110,7 +7121,7 @@ func TestFailMetricLabel(t *testing.T) {
 func TestResolveTimezone(t *testing.T) {
 	ctx := context.Background()
 	colInfoWithTz := &collectionInfo{
-		properties: []*commonpb.KeyValuePair{
+		Properties: []*commonpb.KeyValuePair{
 			{Key: common.TimezoneKey, Value: "America/New_York"},
 		},
 	}

@@ -13,9 +13,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -267,8 +269,9 @@ type snapshotMeta struct {
 	loaderCancel context.CancelFunc
 	loaderWg     sync.WaitGroup
 
-	reader *SnapshotReader // Reads complete snapshot data from S3
-	writer *SnapshotWriter // Writes complete snapshot data to S3
+	chunkManager storage.ChunkManager
+	reader       *snapshotstorage.SnapshotReader // Reads complete snapshot data from S3
+	writer       *snapshotstorage.SnapshotWriter // Writes complete snapshot data to S3
 }
 
 // newSnapshotMeta creates a new snapshot metadata manager and initializes it from catalog.
@@ -307,8 +310,9 @@ func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, ch
 		pinID2SnapshotID:             typeutil.NewConcurrentMap[int64, UniqueID](),
 		loaderCtx:                    loaderCtx,
 		loaderCancel:                 loaderCancel,
-		reader:                       NewSnapshotReader(chunkManager),
-		writer:                       NewSnapshotWriter(chunkManager),
+		chunkManager:                 chunkManager,
+		reader:                       snapshotstorage.NewSnapshotReader(chunkManager),
+		writer:                       snapshotstorage.NewSnapshotWriter(chunkManager),
 	}
 
 	// Reload all snapshots from catalog to populate in-memory cache
@@ -531,9 +535,9 @@ func (sm *snapshotMeta) Close() {
 //
 // Returns:
 //   - error: Error if any phase fails
-func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData) error {
+func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *snapshotstorage.SnapshotData) error {
 	// Step 1: Extract segment IDs and build IDs for reference tracking
-	// Also populate SnapshotData fields so they are persisted to S3 metadata.json.
+	// Also populate snapshotstorage.SnapshotData fields so they are persisted to S3 metadata.json.
 	// Without this, after restart the RefIndex loaded from S3 would have nil segmentIDs,
 	// causing GC to skip snapshot protection and delete referenced files.
 	segmentIDs := make([]int64, 0, len(snapshot.Segments))
@@ -897,7 +901,7 @@ func (sm *snapshotMeta) GetSnapshot(ctx context.Context, collectionID int64, sna
 // This is a heavyweight operation that:
 //  1. Looks up snapshot metadata in memory cache
 //  2. Reads complete snapshot data from S3 (segments, indexes, schema)
-//  3. Returns the full SnapshotData structure
+//  3. Returns the full snapshotstorage.SnapshotData structure
 //
 // Use this when you need the complete snapshot data for operations like restore.
 // For just metadata, use GetSnapshot instead to avoid the S3 read cost.
@@ -913,10 +917,10 @@ func (sm *snapshotMeta) GetSnapshot(ctx context.Context, collectionID int64, sna
 //   - includeSegments: If true, reads segment manifest files from S3; if false, only reads metadata.json
 //
 // Returns:
-//   - *SnapshotData: Snapshot data (segments only populated when includeSegments=true;
+//   - *snapshotstorage.SnapshotData: Snapshot data (segments only populated when includeSegments=true;
 //     SegmentIDs always populated for new format snapshots)
 //   - error: Error if snapshot not found or S3 read fails
-func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64, snapshotName string, includeSegments bool) (*SnapshotData, error) {
+func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64, snapshotName string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
 	// Step 1: Get snapshot metadata from memory to find S3 location
 	snapshotInfo, err := sm.getSnapshotByName(ctx, collectionID, snapshotName)
 	if err != nil {
@@ -927,7 +931,7 @@ func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64
 	mlog.Info(context.TODO(), "got snapshot from memory before ReadSnapshot",
 		mlog.String("name", snapshotInfo.GetName()),
 		mlog.Int64("id", snapshotInfo.GetId()),
-		mlog.String("s3_location_from_memory", snapshotInfo.GetS3Location()))
+		mlog.String("s3_location_from_memory", snapshotstorage.RedactSnapshotObjectPath(snapshotInfo.GetS3Location())))
 
 	// Step 2: Read snapshot data from S3 using the known metadata path directly
 	snapshotData, err := sm.reader.ReadSnapshot(ctx, snapshotInfo.GetS3Location(), includeSegments)
@@ -939,6 +943,57 @@ func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64
 	// Step 3: Merge S3 location from memory into returned data
 	snapshotData.SnapshotInfo.S3Location = snapshotInfo.S3Location
 
+	return snapshotData, nil
+}
+
+func (sm *snapshotMeta) ReadExternalSnapshotDataWithChunkManager(
+	ctx context.Context,
+	cm storage.ChunkManager,
+	snapshotS3Location string,
+	includeSegments bool,
+) (*snapshotstorage.SnapshotData, error) {
+	logger := mlog.With(mlog.String("snapshotS3Location", snapshotstorage.RedactSnapshotObjectPath(snapshotS3Location)))
+
+	if cm == nil {
+		return nil, merr.WrapErrServiceInternalMsg("chunk manager cannot be nil")
+	}
+	if err := snapshotstorage.ValidateSnapshotObjectPathForBucket(cm, "snapshot_s3_location", snapshotS3Location, ""); err != nil {
+		return nil, err
+	}
+	snapshotData, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, snapshotS3Location, includeSegments)
+	if err != nil {
+		logger.Error(ctx, "failed to read external snapshot data from S3", mlog.Err(err))
+		return nil, err
+	}
+	if err := snapshotstorage.ValidateSnapshotMetadataLocation(snapshotS3Location, snapshotData.SnapshotInfo); err != nil {
+		return nil, err
+	}
+	snapshotData.SnapshotInfo.S3Location = snapshotS3Location
+	return snapshotData, nil
+}
+
+func (sm *snapshotMeta) ReadAndValidateExternalSnapshotDataWithChunkManager(
+	ctx context.Context,
+	cm storage.ChunkManager,
+	snapshotS3Location string,
+	includeSegments bool,
+	storageConfig *indexpb.StorageConfig,
+) (*snapshotstorage.SnapshotData, error) {
+	snapshotData, err := sm.ReadExternalSnapshotDataWithChunkManager(ctx, cm, snapshotS3Location, includeSegments)
+	if err != nil {
+		return nil, err
+	}
+	if includeSegments {
+		if err := snapshotstorage.ValidateExternalSnapshotDataFiles(
+			ctx,
+			cm,
+			snapshotS3Location,
+			snapshotData,
+			storageConfig,
+		); err != nil {
+			return nil, merr.Wrap(err, "invalid external snapshot data files")
+		}
+	}
 	return snapshotData, nil
 }
 

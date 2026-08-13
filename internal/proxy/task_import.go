@@ -221,7 +221,7 @@ func (it *importTask) Execute(ctx context.Context) error {
 	}
 
 	importReq := &internalpb.ImportRequestInternal{
-		DbID:           dbInfo.dbID,
+		DbID:           dbInfo.DBID,
 		CollectionID:   it.collectionID,
 		CollectionName: it.req.GetCollectionName(),
 		PartitionIDs:   it.partitionIDs,

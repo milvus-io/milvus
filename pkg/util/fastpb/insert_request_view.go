@@ -202,7 +202,7 @@ func (c *InsertRequestViewCursor) NextEncoder(template *msgpb.InsertRequest, row
 		for fieldIndex := range c.sizeState.fields {
 			if c.sizeState.fields[fieldIndex].compactVector {
 				nextIndex := c.rowFieldDataIndices[fieldIndex]
-				if c.source.GetFieldsData()[fieldIndex].GetValidData()[row] {
+				if c.sizeState.fields[fieldIndex].validData[row] {
 					nextIndex++
 				}
 				c.nextFieldDataIndices[fieldIndex] = nextIndex
@@ -253,7 +253,7 @@ func (c *InsertRequestViewCursor) resolveRowFieldDataIndices(scanRow, row int) e
 			c.rowFieldDataIndices[fieldIndex] = int64(row)
 			continue
 		}
-		valid := state.field.GetValidData()
+		valid := state.validData
 		if row >= len(valid) {
 			return insertViewInternal("row offset %d exceeds ValidData length %d for field %q (%d)", row, len(valid), state.field.GetFieldName(), state.field.GetFieldId())
 		}
@@ -498,71 +498,84 @@ func (e *InsertRequestViewEncoder) appendFieldData(w *insertViewWriter, fieldInd
 	if field.GetIsDynamic() {
 		w.varintField(6, 1)
 	}
-	if len(field.GetValidData()) > 0 && len(e.rows) > 0 {
-		valid := field.GetValidData()
-		validSize, err := w.plannedInt()
-		if err != nil {
-			return err
-		}
-		if err := w.message(7, validSize, func() error {
-			for _, row := range e.rows {
-				if valid[row] {
-					w.varint(1)
-				} else {
-					w.varint(0)
-				}
-			}
-			return w.err
-		}); err != nil {
-			return err
-		}
-	}
 	return w.err
 }
 
+// appendFieldValidData writes the row-selected validity mask into the nested
+// ScalarField (field 17) / VectorField (field 9) message, the field-specific
+// location #52203 moved it to. It must run after every oneof value write so
+// the planned-slot consumption order matches appendPlan.
+func (e *InsertRequestViewEncoder) appendFieldValidData(w *insertViewWriter, fieldIndex int, fieldNumber protowire.Number) error {
+	if fieldIndex < 0 || fieldIndex >= len(e.fieldSizeStates) {
+		return insertViewInternal("validity payload field index %d is out of range", fieldIndex)
+	}
+	valid := e.fieldSizeStates[fieldIndex].validData
+	if len(valid) == 0 || len(e.rows) == 0 {
+		return w.err
+	}
+	validSize, err := w.plannedInt()
+	if err != nil {
+		return err
+	}
+	return w.message(fieldNumber, validSize, func() error {
+		for _, row := range e.rows {
+			if valid[row] {
+				w.varint(1)
+			} else {
+				w.varint(0)
+			}
+		}
+		return w.err
+	})
+}
+
 func (e *InsertRequestViewEncoder) appendScalarField(w *insertViewWriter, fieldIndex int, field *schemapb.ScalarField) error {
+	var err error
 	switch value := field.Data.(type) {
 	case nil:
-		return nil
 	case *schemapb.ScalarField_BoolData:
-		return e.appendBoolArray(w, 1, value.BoolData)
+		err = e.appendBoolArray(w, 1, value.BoolData)
 	case *schemapb.ScalarField_IntData:
-		return e.appendInt32Array(w, 2, value.IntData, "int scalar")
+		err = e.appendInt32Array(w, 2, value.IntData, "int scalar")
 	case *schemapb.ScalarField_LongData:
-		return e.appendInt64Array(w, 3, value.LongData, "long scalar")
+		err = e.appendInt64Array(w, 3, value.LongData, "long scalar")
 	case *schemapb.ScalarField_FloatData:
-		return e.appendFloat32Array(w, 4, value.FloatData)
+		err = e.appendFloat32Array(w, 4, value.FloatData)
 	case *schemapb.ScalarField_DoubleData:
-		return e.appendFloat64Array(w, 5, value.DoubleData)
+		err = e.appendFloat64Array(w, 5, value.DoubleData)
 	case *schemapb.ScalarField_StringData:
-		return e.appendStringArray(w, 6, value.StringData, "string scalar")
+		err = e.appendStringArray(w, 6, value.StringData, "string scalar")
 	// These cold oneofs are declared by the current schema but are not handled
 	// by the old row-at-a-time AppendFieldData oracle. Encoding them here is a
 	// forward-safe row selection; the differential test covers the old oracle's
 	// real support set separately.
 	case *schemapb.ScalarField_BytesData:
-		return e.appendBytesArray(w, 7, value.BytesData, "bytes scalar")
+		err = e.appendBytesArray(w, 7, value.BytesData, "bytes scalar")
 	case *schemapb.ScalarField_ArrayData:
-		return e.appendArrayArray(w, fieldIndex, 8, value.ArrayData)
+		err = e.appendArrayArray(w, fieldIndex, 8, value.ArrayData)
 	case *schemapb.ScalarField_JsonData:
-		return e.appendRawBytesRows(w, 9, value.JsonData.GetData(), "JSON scalar", value.JsonData == nil)
+		err = e.appendRawBytesRows(w, 9, value.JsonData.GetData(), "JSON scalar", value.JsonData == nil)
 	case *schemapb.ScalarField_GeometryData:
-		return e.appendRawBytesRows(w, 10, value.GeometryData.GetData(), "geometry scalar", value.GeometryData == nil)
+		err = e.appendRawBytesRows(w, 10, value.GeometryData.GetData(), "geometry scalar", value.GeometryData == nil)
 	case *schemapb.ScalarField_TimestamptzData:
-		return e.appendInt64Values(w, 11, value.TimestamptzData.GetData(), "timestamptz scalar", value.TimestamptzData == nil)
+		err = e.appendInt64Values(w, 11, value.TimestamptzData.GetData(), "timestamptz scalar", value.TimestamptzData == nil)
 	case *schemapb.ScalarField_GeometryWktData:
-		return e.appendStringValues(w, 12, value.GeometryWktData.GetData(), "geometry WKT scalar", value.GeometryWktData == nil)
+		err = e.appendStringValues(w, 12, value.GeometryWktData.GetData(), "geometry WKT scalar", value.GeometryWktData == nil)
 	case *schemapb.ScalarField_MolData:
-		return e.appendRawBytesRows(w, 13, value.MolData.GetData(), "molecular scalar", value.MolData == nil)
+		err = e.appendRawBytesRows(w, 13, value.MolData.GetData(), "molecular scalar", value.MolData == nil)
 	case *schemapb.ScalarField_MolSmilesData:
-		return e.appendStringValues(w, 14, value.MolSmilesData.GetData(), "molecular SMILES scalar", value.MolSmilesData == nil)
+		err = e.appendStringValues(w, 14, value.MolSmilesData.GetData(), "molecular SMILES scalar", value.MolSmilesData == nil)
 	case *schemapb.ScalarField_DateData:
-		return e.appendInt32Values(w, 15, value.DateData.GetData(), "date scalar", value.DateData == nil)
+		err = e.appendInt32Values(w, 15, value.DateData.GetData(), "date scalar", value.DateData == nil)
 	case *schemapb.ScalarField_TimeData:
-		return e.appendInt64Values(w, 16, value.TimeData.GetData(), "time scalar", value.TimeData == nil)
+		err = e.appendInt64Values(w, 16, value.TimeData.GetData(), "time scalar", value.TimeData == nil)
 	default:
 		return insertViewInternal("unsupported ScalarField oneof %T", value)
 	}
+	if err != nil {
+		return err
+	}
+	return e.appendFieldValidData(w, fieldIndex, 17)
 }
 
 func (e *InsertRequestViewEncoder) appendBoolArray(w *insertViewWriter, fieldNumber protowire.Number, values *schemapb.BoolArray) error {
@@ -814,27 +827,32 @@ func appendArrayCell(w *insertViewWriter, cell *schemapb.ScalarField, payload in
 }
 
 func (e *InsertRequestViewEncoder) appendVectorField(w *insertViewWriter, fieldIndex int, field *schemapb.FieldData, vector *schemapb.VectorField) error {
+	var err error
 	switch value := vector.Data.(type) {
 	case nil:
 		w.proto3Varint(1, uint64(vector.GetDim()))
-		return w.err
+		err = w.err
 	case *schemapb.VectorField_BinaryVector:
-		return e.appendDenseBytesVector(w, fieldIndex, field, vector.GetDim(), 3, value.BinaryVector, 8, "binary vector")
+		err = e.appendDenseBytesVector(w, fieldIndex, field, vector.GetDim(), 3, value.BinaryVector, 8, "binary vector")
 	case *schemapb.VectorField_FloatVector:
-		return e.appendFloatVector(w, fieldIndex, field, vector.GetDim(), value.FloatVector)
+		err = e.appendFloatVector(w, fieldIndex, field, vector.GetDim(), value.FloatVector)
 	case *schemapb.VectorField_Float16Vector:
-		return e.appendDenseBytesVector(w, fieldIndex, field, vector.GetDim(), 4, value.Float16Vector, 2, "float16 vector")
+		err = e.appendDenseBytesVector(w, fieldIndex, field, vector.GetDim(), 4, value.Float16Vector, 2, "float16 vector")
 	case *schemapb.VectorField_Bfloat16Vector:
-		return e.appendDenseBytesVector(w, fieldIndex, field, vector.GetDim(), 5, value.Bfloat16Vector, 2, "bfloat16 vector")
+		err = e.appendDenseBytesVector(w, fieldIndex, field, vector.GetDim(), 5, value.Bfloat16Vector, 2, "bfloat16 vector")
 	case *schemapb.VectorField_SparseFloatVector:
-		return e.appendSparseVector(w, fieldIndex, field, vector, value.SparseFloatVector)
+		err = e.appendSparseVector(w, fieldIndex, field, vector, value.SparseFloatVector)
 	case *schemapb.VectorField_Int8Vector:
-		return e.appendDenseBytesVector(w, fieldIndex, field, vector.GetDim(), 7, value.Int8Vector, 1, "int8 vector")
+		err = e.appendDenseBytesVector(w, fieldIndex, field, vector.GetDim(), 7, value.Int8Vector, 1, "int8 vector")
 	case *schemapb.VectorField_VectorArray:
-		return e.appendVectorArray(w, fieldIndex, vector, value.VectorArray)
+		err = e.appendVectorArray(w, fieldIndex, vector, value.VectorArray)
 	default:
 		return insertViewInternal("field %q (%d) has unsupported VectorField oneof %T", field.GetFieldName(), field.GetFieldId(), value)
 	}
+	if err != nil {
+		return err
+	}
+	return e.appendFieldValidData(w, fieldIndex, 9)
 }
 
 // appendDenseBytesVector handles byte-backed dense vectors. unit denotes bytes
@@ -1041,7 +1059,7 @@ func appendVectorArrayCell(w *insertViewWriter, cell *schemapb.VectorField, payl
 // helper is used only for the regular vector oneofs whose null payload is
 // compacted according to ValidData.
 func (e *InsertRequestViewEncoder) countSelectedVectorRows(fieldIndex int, field *schemapb.FieldData, visit func(dataIndex int) error) (int, error) {
-	valid := field.GetValidData()
+	valid := insertFieldValidData(field)
 	if len(valid) == 0 {
 		for _, row := range e.rows {
 			if err := visit(row); err != nil {

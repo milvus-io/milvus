@@ -67,6 +67,20 @@ type insertFieldSizeState struct {
 	payloadStride    int
 	compactVector    bool
 	arrayOrdinal     int
+	validData        []bool
+}
+
+// insertFieldValidData resolves the row-validity mask with the same precedence
+// typeutil.GetFieldDataValidData uses: the legacy FieldData location first,
+// else the field-specific ScalarField/VectorField location #52203 moved it to.
+func insertFieldValidData(field *schemapb.FieldData) []bool {
+	if legacy := field.GetValidData(); len(legacy) > 0 {
+		return legacy
+	}
+	if scalars := field.GetScalars(); scalars != nil {
+		return scalars.GetValidData()
+	}
+	return field.GetVectors().GetValidData()
 }
 
 type insertFieldRowDelta struct {
@@ -744,6 +758,7 @@ func (s *insertFieldSizeState) reset(field *schemapb.FieldData) error {
 		return err
 	}
 	s.metadataSize = metadataSize
+	s.validData = insertFieldValidData(field)
 	switch value := field.Field.(type) {
 	case nil:
 		s.class = insertFieldPlanNone
@@ -762,7 +777,7 @@ func (s *insertFieldSizeState) reset(field *schemapb.FieldData) error {
 		if err := s.resetVector(value.Vectors); err != nil {
 			return err
 		}
-		s.compactVector = len(field.GetValidData()) > 0 && (s.valuePlan == insertFieldValueVectorDenseBytes ||
+		s.compactVector = len(s.validData) > 0 && (s.valuePlan == insertFieldValueVectorDenseBytes ||
 			s.valuePlan == insertFieldValueVectorFloat || s.valuePlan == insertFieldValueVectorSparse)
 		return nil
 	case *schemapb.FieldData_StructArrays:
@@ -773,18 +788,6 @@ func (s *insertFieldSizeState) reset(field *schemapb.FieldData) error {
 }
 
 func (s *insertFieldSizeState) resetScalar(scalar *schemapb.ScalarField) error {
-	// ValidData (field 17) is element-level nullability on a single top-level
-	// column, holding one bit per row across the whole field. The arithmetic
-	// path only ever writes the oneof value array, so a column carrying it
-	// would silently lose that data. Unlike a per-row array/vector cell, this
-	// field is columnar and gets row-selected and split across WAL messages;
-	// a whole-object protobuf fallback (as cells use) would re-emit every row
-	// into each split message instead of just the rows selected for it. Fail
-	// closed until this earns real row-selected support instead of silently
-	// dropping the nullability.
-	if len(scalar.GetValidData()) != 0 {
-		return insertViewInternal("scalar field %q (%d) carries element-level ValidData, which the arithmetic insert encoder does not yet support", s.field.GetFieldName(), s.field.GetFieldId())
-	}
 	switch value := scalar.Data.(type) {
 	case nil:
 		s.valuePlan = insertFieldValueScalarEmpty
@@ -876,12 +879,6 @@ func (s *insertFieldSizeState) resetScalar(scalar *schemapb.ScalarField) error {
 }
 
 func (s *insertFieldSizeState) resetVector(vector *schemapb.VectorField) error {
-	// ValidData (field 9) is the same element-level nullability as ScalarField
-	// above, on a top-level vector column. Same reasoning: fail closed rather
-	// than silently drop it or unsafely fall back across split messages.
-	if len(vector.GetValidData()) != 0 {
-		return insertViewInternal("vector field %q (%d) carries element-level ValidData, which the arithmetic insert encoder does not yet support", s.field.GetFieldName(), s.field.GetFieldId())
-	}
 	switch value := vector.Data.(type) {
 	case nil:
 		s.valuePlan = insertFieldValueVectorEmpty
@@ -942,7 +939,7 @@ func (s *insertFieldSizeState) resetVector(vector *schemapb.VectorField) error {
 
 func (s *insertFieldSizeState) previewRow(row, dataIndex int, delta *insertFieldRowDelta) error {
 	*delta = insertFieldRowDelta{}
-	valid := s.field.GetValidData()
+	valid := s.validData
 	if len(valid) > 0 && row >= len(valid) {
 		return insertViewInternal("row offset %d exceeds ValidData length %d for field %q (%d)", row, len(valid), s.field.GetFieldName(), s.field.GetFieldId())
 	}
@@ -1133,7 +1130,7 @@ func (s *insertFieldSizeState) aggregateSimplePayload(rows []int) (int, int, int
 }
 
 func (s *insertFieldSizeState) validateSelectedValidData(rows []int) error {
-	valid := s.field.GetValidData()
+	valid := s.validData
 	if len(valid) == 0 {
 		return nil
 	}
@@ -1178,7 +1175,7 @@ func (s *insertFieldSizeState) aggregateRepeatedScalarPayload(rows []int) (int, 
 }
 
 func (s *insertFieldSizeState) repeatedScalarWireStats(rows []int) (int, int, error) {
-	valid := s.field.GetValidData()
+	valid := s.validData
 	for _, row := range rows {
 		if len(valid) > 0 && (row < 0 || row >= len(valid)) {
 			return 0, 0, insertViewInternal("row offset %d exceeds ValidData length %d for field %q (%d)", row, len(valid), s.field.GetFieldName(), s.field.GetFieldId())
@@ -1253,7 +1250,7 @@ func (s *insertFieldSizeState) aggregatePackedScalarPayload(rows []int) (int, er
 	if _, err := s.packedScalarPayloadUpperBound(len(rows)); err != nil {
 		return 0, err
 	}
-	valid := s.field.GetValidData()
+	valid := s.validData
 	if len(valid) > 0 && len(rows) > 0 && rows[len(rows)-1] >= len(valid) {
 		for _, row := range rows {
 			if row >= len(valid) {
@@ -1488,6 +1485,16 @@ func (s *insertFieldSizeState) computedSize(delta *insertFieldRowDelta, rowCount
 		if err != nil {
 			return insertFieldComputedSize{}, err
 		}
+		if len(s.validData) > 0 && rowCount > 0 {
+			validWireSize, err := insertBytesFieldSize(17, rowCount)
+			if err != nil {
+				return insertFieldComputedSize{}, err
+			}
+			scalarSize, err = checkedAddSize(scalarSize, validWireSize, "ScalarField size")
+			if err != nil {
+				return insertFieldComputedSize{}, err
+			}
+		}
 		computed.nestedSize = scalarSize
 		scalarWireSize, err := insertBytesFieldSize(3, scalarSize)
 		if err != nil {
@@ -1502,22 +1509,22 @@ func (s *insertFieldSizeState) computedSize(delta *insertFieldRowDelta, rowCount
 		if err != nil {
 			return insertFieldComputedSize{}, err
 		}
+		if len(s.validData) > 0 && rowCount > 0 {
+			validWireSize, err := insertBytesFieldSize(9, rowCount)
+			if err != nil {
+				return insertFieldComputedSize{}, err
+			}
+			vectorSize, err = checkedAddSize(vectorSize, validWireSize, "VectorField size")
+			if err != nil {
+				return insertFieldComputedSize{}, err
+			}
+		}
 		computed.nestedSize = vectorSize
 		vectorWireSize, err := insertBytesFieldSize(4, vectorSize)
 		if err != nil {
 			return insertFieldComputedSize{}, err
 		}
 		fieldSize, err = checkedAddSize(fieldSize, vectorWireSize, "FieldData size")
-		if err != nil {
-			return insertFieldComputedSize{}, err
-		}
-	}
-	if len(s.field.GetValidData()) > 0 && rowCount > 0 {
-		validWireSize, err := insertBytesFieldSize(7, rowCount)
-		if err != nil {
-			return insertFieldComputedSize{}, err
-		}
-		fieldSize, err = checkedAddSize(fieldSize, validWireSize, "FieldData size")
 		if err != nil {
 			return insertFieldComputedSize{}, err
 		}
@@ -1561,6 +1568,9 @@ func (s *insertFieldSizeState) directWireSize(delta *insertFieldRowDelta, rowCou
 		default:
 			return 0, false, nil
 		}
+		if len(s.validData) > 0 && rowCount > 0 {
+			scalarSize += directBytesFieldSize(17, uint64(rowCount))
+		}
 		fieldSize += directBytesFieldSize(3, scalarSize)
 	case insertFieldPlanVector:
 		vector := s.field.GetVectors()
@@ -1596,12 +1606,12 @@ func (s *insertFieldSizeState) directWireSize(delta *insertFieldRowDelta, rowCou
 		default:
 			return 0, false, nil
 		}
+		if len(s.validData) > 0 && rowCount > 0 {
+			vectorSize += directBytesFieldSize(9, uint64(rowCount))
+		}
 		fieldSize += directBytesFieldSize(4, vectorSize)
 	default:
 		return 0, false, nil
-	}
-	if len(s.field.GetValidData()) > 0 && rowCount > 0 {
-		fieldSize += directBytesFieldSize(7, uint64(rowCount))
 	}
 	fieldWireSize := directBytesFieldSize(13, fieldSize)
 	if fieldWireSize > uint64(math.MaxInt) {
@@ -1723,7 +1733,9 @@ func (s *insertFieldSizeState) appendPlan(plan []int, computed insertFieldComput
 			plan = append(plan, computed.payloadSize)
 		}
 	}
-	if len(s.field.GetValidData()) > 0 && rowCount > 0 {
+	// Validity now lives inside the nested ScalarField/VectorField message
+	// (#52203), so the slot only exists when the writer enters that message.
+	if (s.class == insertFieldPlanScalar || s.class == insertFieldPlanVector) && len(s.validData) > 0 && rowCount > 0 {
 		plan = append(plan, rowCount)
 	}
 	return plan

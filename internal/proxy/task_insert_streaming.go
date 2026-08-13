@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -63,9 +64,9 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	// start to repack insert data
 	var msgs []message.MutableMessage
 	if it.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion)
+		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil)
 	}
 	if err != nil {
 		mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
@@ -93,6 +94,7 @@ func repackInsertDataForStreamingService(
 	result *milvuspb.MutationResult,
 	ez *message.CipherConfig,
 	schemaVersion int32,
+	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 	walName := getActiveWALName()
@@ -108,8 +110,13 @@ func repackInsertDataForStreamingService(
 	}
 
 	for channel, rowOffsets := range channel2RowOffsets {
+		partialUpdateCAS, err := getPartialUpdateCASForStreamingService(partialUpdateCASGroups, channel)
+		if err != nil {
+			return nil, err
+		}
+
 		// segment id is assigned at streaming node.
-		msgs, err := genInsertMessagesByPartition(0, partitionID, partitionName, rowOffsets, channel, insertMsg, ez, schemaVersion, walName)
+		msgs, err := genInsertMessagesByPartition(0, partitionID, partitionName, rowOffsets, channel, insertMsg, ez, schemaVersion, partialUpdateCAS, walName)
 		if err != nil {
 			return nil, err
 		}
@@ -127,6 +134,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 	ez *message.CipherConfig,
 	schema *schemapb.CollectionSchema,
 	schemaVersion int32,
+	partialUpdateCASGroups map[string]*messagespb.PartialUpdateCAS,
 ) ([]message.MutableMessage, error) {
 	messages := make([]message.MutableMessage, 0)
 	walName := getActiveWALName()
@@ -171,6 +179,11 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 		return nil, err
 	}
 	for channel, rowOffsets := range channel2RowOffsets {
+		partialUpdateCAS, err := getPartialUpdateCASForStreamingService(partialUpdateCASGroups, channel)
+		if err != nil {
+			return nil, err
+		}
+
 		partition2RowOffsets := make(map[string][]int)
 		for _, idx := range rowOffsets {
 			partitionName := partitionNames[hashValues[idx]]
@@ -181,7 +194,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 		}
 
 		for partitionName, rowOffsets := range partition2RowOffsets {
-			msgs, err := genInsertMessagesByPartition(0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg, ez, schemaVersion, walName)
+			msgs, err := genInsertMessagesByPartition(0, partitionIDs[partitionName], partitionName, rowOffsets, channel, insertMsg, ez, schemaVersion, partialUpdateCAS, walName)
 			if err != nil {
 				return nil, err
 			}
@@ -189,4 +202,21 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 		}
 	}
 	return messages, nil
+}
+
+func getPartialUpdateCASForStreamingService(
+	groups map[string]*messagespb.PartialUpdateCAS,
+	channel string,
+) (*messagespb.PartialUpdateCAS, error) {
+	if groups == nil {
+		return nil, nil
+	}
+	meta, ok := groups[channel]
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("partial update insert has no CAS metadata for vchannel %s", channel)
+	}
+	if meta == nil {
+		return nil, merr.WrapErrServiceInternalMsg("partial update insert has nil CAS metadata for vchannel %s", channel)
+	}
+	return meta, nil
 }

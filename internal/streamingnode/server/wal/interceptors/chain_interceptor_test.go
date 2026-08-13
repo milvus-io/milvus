@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -87,60 +87,72 @@ func TestChainReady(t *testing.T) {
 	}
 }
 
-func testChainInterceptor(t *testing.T, count int, named bool) {
-	type record struct {
-		before bool
-		after  bool
-		closed bool
-	}
+type chainInterceptorRecord struct {
+	before bool
+	after  bool
+	closed bool
+}
 
-	appendInterceptorRecords := make([]record, 0, count)
+type chainInterceptorStub struct {
+	record *chainInterceptorRecord
+	delay  time.Duration
+}
+
+func (s *chainInterceptorStub) DoAppend(
+	ctx context.Context,
+	msg message.MutableMessage,
+	appendOp interceptors.Append,
+) (message.MessageID, error) {
+	s.record.before = true
+	if s.delay > 0 {
+		time.Sleep(s.delay)
+	}
+	msgID, err := appendOp(ctx, msg)
+	s.record.after = true
+	if s.delay > 0 {
+		time.Sleep(s.delay)
+	}
+	return msgID, err
+}
+
+func (s *chainInterceptorStub) Close() {
+	s.record.closed = true
+}
+
+type namedChainInterceptorStub struct {
+	*chainInterceptorStub
+	name string
+}
+
+func (s *namedChainInterceptorStub) Name() string {
+	return s.name
+}
+
+func testChainInterceptor(t *testing.T, count int, named bool) {
+	appendInterceptorRecords := make([]chainInterceptorRecord, count)
 	ips := make([]interceptors.Interceptor, 0, count)
 	for i := 0; i < count; i++ {
-		j := i
-		appendInterceptorRecords = append(appendInterceptorRecords, record{})
-
-		if !named {
-			interceptor := mock_interceptors.NewMockInterceptor(t)
-
-			interceptor.EXPECT().DoAppend(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-				func(ctx context.Context, mm message.MutableMessage, f func(context.Context, message.MutableMessage) (message.MessageID, error)) (message.MessageID, error) {
-					appendInterceptorRecords[j].before = true
-					msgID, err := f(ctx, mm)
-					appendInterceptorRecords[j].after = true
-					return msgID, err
-				})
-			interceptor.EXPECT().Close().Run(func() {
-				appendInterceptorRecords[j].closed = true
+		interceptor := &chainInterceptorStub{record: &appendInterceptorRecords[i]}
+		if named {
+			interceptor.delay = time.Microsecond
+			ips = append(ips, &namedChainInterceptorStub{
+				chainInterceptorStub: interceptor,
+				name:                 fmt.Sprintf("interceptor-%d", i),
 			})
-			ips = append(ips, interceptor)
-		} else {
-			interceptor := mock_interceptors.NewMockInterceptorWithMetrics(t)
-			interceptor.EXPECT().DoAppend(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-				func(ctx context.Context, mm message.MutableMessage, f func(context.Context, message.MutableMessage) (message.MessageID, error)) (message.MessageID, error) {
-					appendInterceptorRecords[j].before = true
-					// time.Sleep(time.Duration(j) * 10 * time.Millisecond)
-					msgID, err := f(ctx, mm)
-					appendInterceptorRecords[j].after = true
-					// time.Sleep(time.Duration(j) * 20 * time.Millisecond)
-					return msgID, err
-				})
-			interceptor.EXPECT().Name().Return(fmt.Sprintf("interceptor-%d", j))
-			interceptor.EXPECT().Close().Run(func() {
-				appendInterceptorRecords[j].closed = true
-			})
-			ips = append(ips, interceptor)
+			continue
 		}
+		ips = append(ips, interceptor)
 	}
 	interceptor := interceptors.NewChainedInterceptor(ips...)
 
 	// fast return
 	<-interceptor.Ready()
 
-	msg := mock_message.NewMockMutableMessage(t)
-	msg.EXPECT().MessageType().Return(message.MessageTypeDelete).Maybe()
-	msg.EXPECT().EstimateSize().Return(1).Maybe()
-	msg.EXPECT().TxnContext().Return(nil).Maybe()
+	msg := message.NewDeleteMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&messagespb.DeleteMessageHeader{CollectionId: 1, Rows: 1}).
+		WithBody(&msgpb.DeleteRequest{}).
+		MustBuildMutable()
 	mw := metricsutil.NewWriteMetrics(types.PChannelInfo{}, message.WALNameRocksmq)
 	m := mw.StartAppend(msg)
 	ctx := utility.WithAppendMetricsContext(context.Background(), m)

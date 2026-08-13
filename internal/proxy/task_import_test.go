@@ -82,7 +82,7 @@ func (s *ImportTaskSuite) TestExecute_ImportV2RPCFailsReturnsError() {
 	// Mock globalMetaCache.GetDatabaseInfo to succeed
 	mockCache := NewMockCache(s.T())
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-		dbID: 1,
+		DBID: 1,
 	}, nil)
 
 	oldCache := globalMetaCache
@@ -126,7 +126,7 @@ func (s *ImportTaskSuite) TestExecute_ImportV2ReturnsErrorStatusReturnsError() {
 	// Mock globalMetaCache.GetDatabaseInfo to succeed
 	mockCache := NewMockCache(s.T())
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-		dbID: 1,
+		DBID: 1,
 	}, nil)
 
 	oldCache := globalMetaCache
@@ -172,7 +172,7 @@ func (s *ImportTaskSuite) TestExecute_SuccessSetsJobID() {
 	// Mock globalMetaCache.GetDatabaseInfo to succeed
 	mockCache := NewMockCache(s.T())
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-		dbID: 1,
+		DBID: 1,
 	}, nil)
 
 	oldCache := globalMetaCache
@@ -220,7 +220,7 @@ func (s *ImportTaskSuite) TestExecute_PassesCorrectRequestParameters() {
 	// Mock globalMetaCache.GetDatabaseInfo to succeed
 	mockCache := NewMockCache(s.T())
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-		dbID: 42,
+		DBID: 42,
 	}, nil)
 
 	oldCache := globalMetaCache
@@ -360,7 +360,7 @@ func (s *ImportTaskSuite) TestExecute_DataTimestampIsAlwaysZero() {
 
 	mockCache := NewMockCache(s.T())
 	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-		dbID: 1,
+		DBID: 1,
 	}, nil)
 
 	oldCache := globalMetaCache

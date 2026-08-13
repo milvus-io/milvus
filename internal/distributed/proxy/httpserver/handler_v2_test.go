@@ -2763,6 +2763,7 @@ type externalCollectionRESTProxy struct {
 	progressReq                *milvuspb.GetRefreshExternalCollectionProgressRequest
 	restoreReq                 *milvuspb.RestoreExternalSnapshotRequest
 	exportReq                  *milvuspb.ExportSnapshotRequest
+	getExportSnapshotStateReq  *milvuspb.GetExportSnapshotStateRequest
 	getRestoreSnapshotStateReq *milvuspb.GetRestoreSnapshotStateRequest
 	listRestoreSnapshotJobsReq *milvuspb.ListRestoreSnapshotJobsRequest
 }
@@ -2853,8 +2854,27 @@ func (m *externalCollectionRESTProxy) RestoreExternalSnapshot(ctx context.Contex
 func (m *externalCollectionRESTProxy) ExportSnapshot(ctx context.Context, request *milvuspb.ExportSnapshotRequest) (*milvuspb.ExportSnapshotResponse, error) {
 	m.exportReq = request
 	return &milvuspb.ExportSnapshotResponse{
-		Status:              merr.Success(),
-		SnapshotMetadataUri: request.GetTargetS3Path() + "/snapshots/100/metadata/1.json",
+		Status: merr.Success(),
+		JobId:  3001,
+	}, nil
+}
+
+func (m *externalCollectionRESTProxy) GetExportSnapshotState(ctx context.Context, request *milvuspb.GetExportSnapshotStateRequest) (*milvuspb.GetExportSnapshotStateResponse, error) {
+	m.getExportSnapshotStateReq = request
+	return &milvuspb.GetExportSnapshotStateResponse{
+		Status: merr.Success(),
+		Info: &milvuspb.ExportSnapshotInfo{
+			JobId:               request.GetJobId(),
+			SnapshotName:        "snapshot_1",
+			DbName:              "default",
+			CollectionName:      "source_books",
+			State:               milvuspb.ExportSnapshotState_ExportSnapshotCompleted,
+			Progress:            100,
+			TotalFiles:          10,
+			CopiedFiles:         10,
+			TotalBytes:          4096,
+			SnapshotMetadataUri: "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json",
+		},
 	}, nil
 }
 
@@ -3130,6 +3150,25 @@ func TestExportSnapshotRESTV2(t *testing.T) {
 	assert.Equal(t, "snapshot_1", proxy.exportReq.GetName())
 	assert.Equal(t, "s3://foreign-bucket/export-root", proxy.exportReq.GetTargetS3Path())
 	assert.Equal(t, `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`, proxy.exportReq.GetExternalSpec())
+	assert.Contains(t, w.Body.String(), `"jobId":3001`)
+}
+
+func TestGetExportSnapshotStateRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := &externalCollectionRESTProxy{}
+	testEngine := initHTTPServerV2(proxy, false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotJobCategory, DescribeExportAction), bytes.NewReader([]byte(`{"jobId":"3001"}`)))
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(3001), proxy.getExportSnapshotStateReq.GetJobId())
+	assert.Contains(t, w.Body.String(), `"state":"ExportSnapshotCompleted"`)
+	assert.Contains(t, w.Body.String(), `"progress":100`)
+	assert.Contains(t, w.Body.String(), `"totalBytes":4096`)
 	assert.Contains(t, w.Body.String(), `"snapshotMetadataURI":"s3://foreign-bucket/export-root/snapshots/100/metadata/1.json"`)
 }
 

@@ -53,6 +53,8 @@ func TestEquiv_InsertRequest(t *testing.T) {
 		NumRows:         3,
 		SchemaTimestamp: 123456,
 		Namespace:       &ns,
+		RlsPrincipal:    "principal-a",
+		SkipRls:         true,
 		FieldsData: []*schemapb.FieldData{
 			{Type: schemapb.DataType_VarChar, FieldName: "title", FieldId: 101, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"x", "y", "z"}}}}}},
 			{Type: schemapb.DataType_FloatVector, FieldName: "emb", FieldId: 102, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}}}}},
@@ -132,6 +134,8 @@ func randInsertRequest(r *rand.Rand) *milvuspb.InsertRequest {
 		CollectionName: randString(r),
 		PartitionName:  randString(r),
 		NumRows:        uint32(rows),
+		RlsPrincipal:   randString(r),
+		SkipRls:        r.Intn(2) == 0,
 	}
 	for i := 0; i < r.Intn(3); i++ {
 		ir.FieldsData = append(ir.FieldsData, randFieldData(r, rows))
@@ -195,6 +199,8 @@ func TestEquiv_UpsertRequest(t *testing.T) {
 		FieldOps: []*schemapb.FieldPartialUpdateOp{ // field 11 (message) → folded
 			{FieldName: "title"},
 		},
+		RlsPrincipal: "principal", // field 12 (bytes)  → folded to official merge
+		SkipRls:      true,        // field 13 (varint) → folded to official merge
 		FieldsData: []*schemapb.FieldData{
 			{Type: schemapb.DataType_VarChar, FieldName: "title", FieldId: 101, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"x", "y", "z"}}}}}},
 			{Type: schemapb.DataType_FloatVector, FieldName: "emb", FieldId: 102, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}}}}},
@@ -241,6 +247,8 @@ func randUpsertRequest(r *rand.Rand) *milvuspb.UpsertRequest {
 		PartitionName:  randString(r),
 		NumRows:        uint32(rows),
 		PartialUpdate:  r.Intn(2) == 0, // exercise the field-9 fold path
+		RlsPrincipal:   randString(r),
+		SkipRls:        r.Intn(2) == 0,
 	}
 	for i := 0; i < r.Intn(3); i++ {
 		ur.FieldsData = append(ur.FieldsData, randFieldData(r, rows))
