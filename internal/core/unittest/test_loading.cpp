@@ -36,6 +36,13 @@ EstimateLoadIndexResourceChecked(CLoadIndexInfo c_load_index_info) {
     auto status = EstimateLoadIndexResource(c_load_index_info, &request);
     EXPECT_EQ(status.error_code, milvus::ErrorCode::Success)
         << (status.error_msg ? status.error_msg : "");
+    // FailureCStatus strdups error_msg (success carries a literal ""); free
+    // it so a failing estimation does not double as an LSan kill of the
+    // whole test binary.
+    if (status.error_code != milvus::ErrorCode::Success &&
+        status.error_msg != nullptr) {
+        free(const_cast<char*>(status.error_msg));
+    }
     return request;
 }
 
