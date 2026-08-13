@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -108,6 +109,21 @@ func (t *ImportTask) GetSchema() *schemapb.CollectionSchema {
 
 func (t *ImportTask) GetSlots() int64 {
 	return t.req.GetTaskSlot()
+}
+
+// GetResourceRequirement prices a real import: one read buffer per file in
+// flight, each sized by the vchannel x partition fan-out and capped by the
+// largest file the task will actually read.
+func (t *ImportTask) GetResourceRequirement() taskresource.Requirement {
+	maxFileSize := lo.MaxBy(t.GetFileStats(), func(a, b *datapb.ImportFileStats) bool {
+		return a.GetTotalMemorySize() > b.GetTotalMemorySize()
+	}).GetTotalMemorySize()
+	return taskresource.EstimateImport(taskresource.ImportInput{
+		FileNum:           len(t.GetFileStats()),
+		VChannelNum:       len(t.GetVchannels()),
+		PartitionNum:      len(t.GetPartitionIDs()),
+		MaxFileMemorySize: maxFileSize,
+	})
 }
 
 func (t *ImportTask) GetBufferSize() int64 {
