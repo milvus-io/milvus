@@ -79,8 +79,13 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
         auto data = dataset.get_col<float>(fakevec_id);
         auto buf_size = chunk_bitset_size + 4 * data.size();
 
-        char* buf = new char[buf_size];
-        defer.AddDefer([buf]() { delete[] buf; });
+        char* buf = reinterpret_cast<char*>(mmap(nullptr,
+                                                 buf_size,
+                                                 PROT_READ | PROT_WRITE,
+                                                 MAP_PRIVATE | MAP_ANON,
+                                                 -1,
+                                                 0));
+        ASSERT_NE(buf, MAP_FAILED);
         memcpy(buf + chunk_bitset_size, data.data(), 4 * data.size());
 
         auto chunk = std::make_shared<FixedWidthChunk>(
