@@ -123,7 +123,7 @@ func EstimateStats(in StatsInput) Requirement {
 		// Only Text/BM25/JsonKey are submitted today; Sort is deliberately
 		// excluded here because it is estimated as a compaction
 		// (CompactionType_SortCompaction) via EstimateCompaction, not as a
-		// stats job. An unrecognised or future sub-job (including the Sort
+		// stats job. An unrecognized or future sub-job (including the Sort
 		// and None enum values, which have no submitter on this branch)
 		// deliberately errs high rather than silently falling through to
 		// whichever factor happened to be declared first: under-provisioning
