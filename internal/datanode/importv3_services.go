@@ -657,8 +657,8 @@ func buildImportV3WriterOptions(storageConfig *indexpb.StorageConfig, collection
 	if spec.GetPkStatsCapacity() <= 0 {
 		return nil, merr.WrapErrDataIntegrityMsg("ImportTaskV3 WriterSpec PK stats capacity must be positive")
 	}
-	if segment.GetPlannedRows() <= 0 || segment.GetPlannedRows() > spec.GetPkStatsCapacity() {
-		return nil, merr.WrapErrDataIntegrityMsg("ImportTaskV3 planned rows exceed WriterSpec PK stats capacity: rows=%d capacity=%d", segment.GetPlannedRows(), spec.GetPkStatsCapacity())
+	if segment.GetPlannedRows() <= 0 {
+		return nil, merr.WrapErrDataIntegrityMsg("ImportTaskV3 planned rows must be positive")
 	}
 	if spec.GetWriterFormat() == "" {
 		return nil, merr.WrapErrDataIntegrityMsg("ImportTaskV3 WriterSpec writer format is empty")
