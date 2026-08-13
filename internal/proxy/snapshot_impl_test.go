@@ -23,6 +23,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -491,8 +492,8 @@ func TestExportSnapshotTask_Execute_ForwardsForeignStorageFields(t *testing.T) {
 		func(ctx context.Context, req *datapb.ExportSnapshotRequest, opts ...grpc.CallOption) (*datapb.ExportSnapshotResponse, error) {
 			gotReq = req
 			return &datapb.ExportSnapshotResponse{
-				Status:              merr.Success(),
-				SnapshotMetadataUri: req.GetTargetS3Path() + "/snapshots/100/metadata/1.json",
+				Status: merr.Success(),
+				JobId:  9001,
 			}, nil
 		},
 	).Build()
@@ -502,9 +503,84 @@ func TestExportSnapshotTask_Execute_ForwardsForeignStorageFields(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.True(t, merr.Ok(resp.GetStatus()))
+	assert.Equal(t, int64(9001), resp.GetJobId())
 	if assert.NotNil(t, gotReq) {
 		assert.Equal(t, externalSpec, gotReq.GetExternalSpec())
 	}
+}
+
+func TestProxy_GetExportSnapshotState(t *testing.T) {
+	proxy := &Proxy{mixCoord: NewMixCoordMock()}
+	mockGetState := mockey.Mock((*MixCoordMock).GetExportSnapshotState).To(
+		func(context.Context, *datapb.GetExportSnapshotStateRequest, ...grpc.CallOption) (*datapb.GetExportSnapshotStateResponse, error) {
+			return &datapb.GetExportSnapshotStateResponse{
+				Status: merr.Success(),
+				Info: &datapb.ExportSnapshotJobInfo{
+					JobId:               9001,
+					SnapshotName:        "snapshot-1",
+					DbName:              "default",
+					CollectionName:      "collection-1",
+					State:               datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted,
+					Progress:            100,
+					TotalFiles:          10,
+					CopiedFiles:         10,
+					TotalBytes:          4096,
+					SnapshotMetadataUri: "s3://bucket/export-root/snapshots/100/metadata/1.json",
+				},
+			}, nil
+		}).Build()
+	defer mockGetState.UnPatch()
+
+	resp, err := proxy.GetExportSnapshotState(context.Background(), &milvuspb.GetExportSnapshotStateRequest{JobId: 9001})
+
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	require.NotNil(t, resp.GetInfo())
+	assert.Equal(t, int64(9001), resp.GetInfo().GetJobId())
+	assert.Equal(t, milvuspb.ExportSnapshotState_ExportSnapshotCompleted, resp.GetInfo().GetState())
+	assert.Equal(t, int32(100), resp.GetInfo().GetProgress())
+	assert.Equal(t, int64(4096), resp.GetInfo().GetTotalBytes())
+	assert.Equal(t, "s3://bucket/export-root/snapshots/100/metadata/1.json", resp.GetInfo().GetSnapshotMetadataUri())
+
+	invalid, err := proxy.GetExportSnapshotState(context.Background(), &milvuspb.GetExportSnapshotStateRequest{})
+	require.NoError(t, err)
+	assert.Error(t, merr.Error(invalid.GetStatus()))
+}
+
+func TestExportSnapshotJobInfoToPublic(t *testing.T) {
+	assert.Nil(t, exportSnapshotJobInfoToPublic(nil))
+	assert.Equal(t,
+		milvuspb.ExportSnapshotState_ExportSnapshotNone,
+		exportSnapshotJobStateToPublic(datapb.ExportSnapshotJobState(100)),
+	)
+
+	info := exportSnapshotJobInfoToPublic(&datapb.ExportSnapshotJobInfo{
+		JobId:               9001,
+		State:               datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing,
+		Progress:            99,
+		SnapshotMetadataUri: "s3://bucket/export-root/snapshots/100/metadata/1.json",
+	})
+	require.NotNil(t, info)
+	assert.Equal(t, milvuspb.ExportSnapshotState_ExportSnapshotExecuting, info.GetState())
+	assert.Equal(t, int32(99), info.GetProgress())
+	assert.Empty(t, info.GetSnapshotMetadataUri())
+
+	assert.Equal(t,
+		milvuspb.ExportSnapshotState_ExportSnapshotPending,
+		exportSnapshotJobStateToPublic(datapb.ExportSnapshotJobState_ExportSnapshotJobPending),
+	)
+	assert.Equal(t,
+		milvuspb.ExportSnapshotState_ExportSnapshotExecuting,
+		exportSnapshotJobStateToPublic(datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting),
+	)
+	assert.Equal(t,
+		milvuspb.ExportSnapshotState_ExportSnapshotCompleted,
+		exportSnapshotJobStateToPublic(datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted),
+	)
+	assert.Equal(t,
+		milvuspb.ExportSnapshotState_ExportSnapshotFailed,
+		exportSnapshotJobStateToPublic(datapb.ExportSnapshotJobState_ExportSnapshotJobFailed),
+	)
 }
 
 func TestRestoreExternalSnapshotTask_Execute_ForwardsForeignStorageFields(t *testing.T) {
@@ -567,6 +643,12 @@ func TestSnapshotRequestOption_RBACGuardrails(t *testing.T) {
 	assert.Equal(t, commonpb.ObjectType_Global, exportOpt.GetObjectType())
 	assert.Equal(t, "PrivilegeExportSnapshot", exportOpt.GetObjectPrivilege().String())
 	assert.Equal(t, int32(-1), exportOpt.GetObjectNameIndex())
+
+	exportStateOpt, err := funcutil.GetPrivilegeExtObj(&milvuspb.GetExportSnapshotStateRequest{})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ObjectType_Global, exportStateOpt.GetObjectType())
+	assert.Equal(t, "PrivilegeExportSnapshot", exportStateOpt.GetObjectPrivilege().String())
+	assert.Equal(t, int32(-1), exportStateOpt.GetObjectNameIndex())
 
 	restoreOpt, err := funcutil.GetPrivilegeExtObj(&milvuspb.RestoreExternalSnapshotRequest{})
 	assert.NoError(t, err)

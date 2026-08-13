@@ -112,6 +112,7 @@ service DataCoord {
   rpc DescribeSnapshot(DescribeSnapshotRequest) returns(DescribeSnapshotResponse){}
   rpc RestoreSnapshot(RestoreSnapshotRequest) returns(RestoreSnapshotResponse){}
   rpc ExportSnapshot(ExportSnapshotRequest) returns(ExportSnapshotResponse){}
+  rpc GetExportSnapshotState(GetExportSnapshotStateRequest) returns(GetExportSnapshotStateResponse){}
   rpc GetRestoreSnapshotState(GetRestoreSnapshotStateRequest) returns(GetRestoreSnapshotStateResponse){}
   rpc ListRestoreSnapshotJobs(ListRestoreSnapshotJobsRequest) returns(ListRestoreSnapshotJobsResponse){}
   rpc PinSnapshotData(PinSnapshotDataRequest) returns(PinSnapshotDataResponse){}
@@ -1182,6 +1183,9 @@ message CopySegmentSource {
   // When set, DataNode rewrites this prefix to the target root path before
   // replacing collection/partition/segment IDs.
   string source_root_path = 14;
+
+  // Snapshot-declared row count, used when StorageV3 omits legacy PB binlogs.
+  int64 num_of_rows = 16;
 }
 
 message CopySegmentTarget {
@@ -1375,6 +1379,7 @@ message CopySegmentJob {
   bool external = 19;
   string snapshot_s3_location = 20;
   string external_spec = 21;
+  string snapshot_fingerprint = 22;
 }
 
 message ImportJob {
@@ -1466,6 +1471,7 @@ message QuerySlotRequest {}
 message QuerySlotResponse {
   common.Status status = 1;
   int64 available_slots = 2;
+  string version = 3; // Milvus build version reported by the worker
 }
 
 enum CompactionTaskState {
@@ -1713,7 +1719,8 @@ message ExportSnapshotRequest {
 
 message ExportSnapshotResponse {
   common.Status status = 1;
-  string snapshot_metadata_uri = 2;
+  string snapshot_metadata_uri = 2 [deprecated = true];
+  int64 job_id = 3;
 }
 
 message SegmentDescription {
@@ -1770,11 +1777,11 @@ message SnapshotInfo {
   repeated msg.MsgPosition channel_seek_positions = 13;
 }
 
-// StorageV2SegmentManifest maps a segment ID to its StorageV2 manifest file path.
-// StorageV2 is Milvus's newer storage format that uses Lance/Arrow for better performance.
+// StorageV2SegmentManifest maps a segment ID to its plain manifest object path.
+// Unlike StorageV3, this path is not a packed manifest descriptor.
 message StorageV2SegmentManifest {
   int64 segment_id = 1;
-  string manifest = 2;
+  string manifest = 2; // Plain StorageV2 manifest object path.
 }
 
 enum SnapshotLayout {
@@ -1955,7 +1962,6 @@ message ExternalCollectionRefreshTaskResult {
   repeated int64 kept_segments = 5;
   repeated SegmentInfo updated_segments = 6;
 }
-
 message ColumnGroupStatistics {
   int64 group_id = 1;
   repeated int64 field_ids = 2;
@@ -1964,4 +1970,66 @@ message ColumnGroupStatistics {
 
 message LoadResourceStatistics {
   repeated ColumnGroupStatistics column_groups = 1;
+}
+
+enum ExportSnapshotJobState {
+  ExportSnapshotJobNone = 0;
+  ExportSnapshotJobPending = 1;
+  ExportSnapshotJobExecuting = 2;
+  ExportSnapshotJobCompleted = 3;
+  ExportSnapshotJobFailed = 4;
+  ExportSnapshotJobPublishing = 5;
+}
+
+// ExportSnapshotJob is the constant-size durable record owned by DataCoord.
+// external_spec is retained only while the job is non-terminal.
+message ExportSnapshotJob {
+  int64 job_id = 1;
+  string snapshot_name = 2;
+  int64 collection_id = 3;
+  string db_name = 4;
+  string collection_name = 5;
+  string target_s3_path = 6;
+  string external_spec = 7;
+  ExportSnapshotJobState state = 8;
+  int32 progress = 9;
+  string reason = 10;
+  uint64 start_time = 11;
+  uint64 end_time = 12;
+  uint64 deadline_time = 13;
+  int64 total_files = 14;
+  int64 copied_files = 15;
+  int64 copy_cursor = 16;
+  int32 plan_version = 17;
+  string plan_fingerprint = 18;
+  string snapshot_fingerprint = 19;
+  string snapshot_metadata_uri = 20;
+  int64 pin_id = 21;
+  int64 total_bytes = 22;
+}
+
+message ExportSnapshotJobInfo {
+  int64 job_id = 1;
+  string snapshot_name = 2;
+  string db_name = 3;
+  string collection_name = 4;
+  ExportSnapshotJobState state = 5;
+  int32 progress = 6;
+  string reason = 7;
+  uint64 start_time = 8;
+  uint64 time_cost = 9;
+  int64 total_files = 10;
+  int64 copied_files = 11;
+  string snapshot_metadata_uri = 12;
+  int64 total_bytes = 13;
+}
+
+message GetExportSnapshotStateRequest {
+  common.MsgBase base = 1;
+  int64 job_id = 2;
+}
+
+message GetExportSnapshotStateResponse {
+  common.Status status = 1;
+  ExportSnapshotJobInfo info = 2;
 }

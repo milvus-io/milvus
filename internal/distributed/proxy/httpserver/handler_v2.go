@@ -172,6 +172,7 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/jobs/import/abort":                 "AbortImport",
 	"/v2/vectordb/jobs/snapshot/restore_external":    "RestoreExternalSnapshot",
 	"/v2/vectordb/jobs/snapshot/export":              "ExportSnapshot",
+	"/v2/vectordb/jobs/snapshot/export/describe":     "GetExportSnapshotState",
 	"/v2/vectordb/jobs/snapshot/describe":            "GetRestoreSnapshotState",
 	"/v2/vectordb/jobs/snapshot/list":                "ListRestoreSnapshotJobs",
 	"/v2/vectordb/jobs/external_collection/refresh":  "RefreshExternalCollection",
@@ -338,6 +339,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(ImportJobCategory+AbortAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.abortImportJob))))
 	router.POST(SnapshotJobCategory+RestoreExternalAction, timeoutMiddleware(wrapperPost(func() any { return &RestoreExternalSnapshotReq{} }, wrapperTraceLog(h.restoreExternalSnapshot))))
 	router.POST(SnapshotJobCategory+ExportAction, timeoutMiddleware(wrapperPost(func() any { return &ExportSnapshotReq{} }, wrapperTraceLog(h.exportSnapshot))))
+	router.POST(SnapshotJobCategory+DescribeExportAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getExportSnapshotState))))
 	router.POST(SnapshotJobCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.getRestoreSnapshotState))))
 	router.POST(SnapshotJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.listRestoreSnapshotJobs))))
 	router.POST(ExternalCollectionJobCategory+RefreshAction, timeoutMiddleware(wrapperPost(func() any { return &RefreshExternalCollectionReq{} }, wrapperTraceLog(h.refreshExternalCollection))))
@@ -4034,7 +4036,53 @@ func (h *HandlersV2) exportSnapshot(ctx context.Context, c *gin.Context, anyReq 
 	if err == nil {
 		HTTPReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode: merr.Code(nil),
-			HTTPReturnData: gin.H{"snapshotMetadataURI": resp.(*milvuspb.ExportSnapshotResponse).GetSnapshotMetadataUri()},
+			HTTPReturnData: gin.H{"jobId": resp.(*milvuspb.ExportSnapshotResponse).GetJobId()},
+		})
+	}
+	return resp, err
+}
+
+func exportSnapshotJobToREST(info *milvuspb.ExportSnapshotInfo) gin.H {
+	if info == nil {
+		return gin.H{}
+	}
+	return gin.H{
+		"jobId":               info.GetJobId(),
+		"snapshotName":        info.GetSnapshotName(),
+		"dbName":              info.GetDbName(),
+		"collectionName":      info.GetCollectionName(),
+		"state":               info.GetState().String(),
+		"progress":            info.GetProgress(),
+		"reason":              info.GetReason(),
+		"startTime":           info.GetStartTime(),
+		"timeCost":            info.GetTimeCost(),
+		"totalFiles":          info.GetTotalFiles(),
+		"copiedFiles":         info.GetCopiedFiles(),
+		"totalBytes":          info.GetTotalBytes(),
+		"snapshotMetadataURI": info.GetSnapshotMetadataUri(),
+	}
+}
+
+func (h *HandlersV2) getExportSnapshotState(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*JobIDReq)
+	jobID, err := strconv.ParseInt(httpReq.GetJobID(), 10, 64)
+	if err != nil {
+		paramErr := merr.WrapErrParameterInvalid("int64 jobId", httpReq.GetJobID(), err.Error())
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
+		return nil, paramErr
+	}
+	req := &milvuspb.GetExportSnapshotStateRequest{
+		Base:  commonpbutil.NewMsgBase(),
+		JobId: jobID,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/GetExportSnapshotState", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.GetExportSnapshotState(reqCtx, req.(*milvuspb.GetExportSnapshotStateRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: exportSnapshotJobToREST(resp.(*milvuspb.GetExportSnapshotStateResponse).GetInfo()),
 		})
 	}
 	return resp, err
