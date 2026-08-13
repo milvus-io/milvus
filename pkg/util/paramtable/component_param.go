@@ -7704,7 +7704,6 @@ type dataNodeConfig struct {
 	ResourceHighWatermark       ParamItem `refreshable:"true"`
 	ResourceLowWatermark        ParamItem `refreshable:"true"`
 	ResourceNonTaskMemoryFloor  ParamItem `refreshable:"true"`
-	ResourceNonTaskWindow       ParamItem `refreshable:"true"`
 	ResourceSlowGrowPeriods     ParamItem `refreshable:"true"`
 	ResourceLegacyMemoryPerSlot ParamItem `refreshable:"true"`
 	ResourceHeadOfLineReserve   ParamItem `refreshable:"true"`
@@ -8350,21 +8349,13 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 	}
 	p.ResourceNonTaskMemoryFloor.Init(base.mgr)
 
-	p.ResourceNonTaskWindow = ParamItem{
-		Key:          "dataNode.resource.nonTaskWindowSeconds",
-		Version:      "3.0.0",
-		DefaultValue: "600",
-		Doc:          "sliding window length used to take the peak of non-task memory",
-		Export:       true,
-	}
-	p.ResourceNonTaskWindow.Init(base.mgr)
-
 	p.ResourceSlowGrowPeriods = ParamItem{
 		Key:          "dataNode.resource.slowGrowPeriods",
 		Version:      "3.0.0",
 		DefaultValue: "5",
-		Doc:          "consecutive samples required before the budget is allowed to grow",
-		Export:       true,
+		Doc: "consecutive lower samples required before the non-task memory reservation is allowed to shrink, " +
+			"i.e. before the task budget grows; samples are taken every 3s, so this is that many 3s periods",
+		Export: true,
 	}
 	p.ResourceSlowGrowPeriods.Init(base.mgr)
 

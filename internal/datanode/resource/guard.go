@@ -81,8 +81,13 @@ type guard struct {
 
 	waiters []*waiter
 
-	frozen  bool
-	nonTask int64
+	// frozen and nonTask are driven by the watermark loop; see watermark.go.
+	// nonTaskPeak is the reservation currently in force and lowSampleCount how
+	// many consecutive samples have come in under it.
+	frozen         bool
+	nonTask        int64
+	nonTaskPeak    int64
+	lowSampleCount int
 }
 
 var (
@@ -333,8 +338,3 @@ func (g *guard) waiterCount() int {
 	defer g.mu.Unlock()
 	return len(g.waiters)
 }
-
-// startWatermarkLoop is a placeholder. Task 6 replaces it with the real
-// sampling loop in watermark.go, which is what will drive the frozen and
-// nonTask fields this file already reads.
-func (g *guard) startWatermarkLoop(ctx context.Context) {}
