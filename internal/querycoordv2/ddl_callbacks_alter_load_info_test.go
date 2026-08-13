@@ -145,7 +145,7 @@ func TestLoadCallbacksRecordDemandAfterBroadcast(t *testing.T) {
 }
 
 func buildAlterLoadConfigBroadcastResult(collectionID int64, vchannels ...string) message.BroadcastResultAlterLoadConfigMessageV2 {
- if len(vchannels)==0 { vchannels=[]string{"v0", "v1"} }
+ if len(vchannels)==0 { vchannels=[]string{funcutil.GetControlChannel("test")} }
 	broadcastMsg := message.NewAlterLoadConfigMessageBuilderV2().
 		WithHeader(&messagespb.AlterLoadConfigMessageHeader{
 			CollectionId: collectionID,
@@ -197,7 +197,5 @@ func TestAlterLoadConfigV2AckCallbackUpdatesQViewsRuntime(t *testing.T) {
 	require.NoError(t, s.alterLoadConfigV2AckCallback(ctx, buildAlterLoadConfigBroadcastResult(100)))
 
 	assert.Contains(t, runtime.loadConfigStore.Snapshot().ConfigsMap(), int64(100))
-	assert.NotNil(t, runtime.shardViewRegistry.Get(qviews.ShardID{ReplicaID: 1000, VChannel: "v0"}))
-	assert.NotNil(t, runtime.shardViewRegistry.Get(qviews.ShardID{ReplicaID: 1000, VChannel: "v1"}))
 	assert.Equal(t, []balancer.TriggerScope{{DirtyCollections: []int64{100}}}, fakeBalancer.triggers)
 }

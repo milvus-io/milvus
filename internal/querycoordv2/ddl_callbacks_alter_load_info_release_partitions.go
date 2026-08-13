@@ -66,16 +66,16 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 				CollectionId: coll.CollectionID,
 			}).
 			WithBody(&message.DropLoadConfigMessageBody{}).
-			WithBroadcast(collectionLoadConfigBroadcastChannels(coll), message.OptBuildBroadcastAckSyncUp()).
+			WithBroadcast([]string{loadConfigBroadcastChannel()}).
 			MustBuildBroadcast()
 		collectionReleased = true
 	} else {
 		// only some partitions are released, alter the load config.
 		alterLoadConfigReq := &job.AlterLoadConfigRequest{
-			Meta:              s.meta,
-			CollectionInfo:    coll,
-			BroadcastChannels: collectionLoadConfigBroadcastChannels(coll),
-			Current:           s.getCurrentLoadConfig(ctx, req.GetCollectionID()),
+			Meta:           s.meta,
+			CollectionInfo: coll,
+			ControlChannel: loadConfigBroadcastChannel(),
+			Current:        s.getCurrentLoadConfig(ctx, req.GetCollectionID()),
 			Expected: job.ExpectedLoadConfig{
 				ExpectedPartitionIDs:             partitionIDsSet.Collect(),
 				ExpectedReplicaNumber:            currentLoadConfig.GetReplicaNumber(),

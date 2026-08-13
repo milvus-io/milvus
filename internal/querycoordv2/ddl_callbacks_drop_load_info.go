@@ -52,7 +52,7 @@ func (s *Server) broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx con
 			CollectionId: coll.GetCollectionID(),
 		}).
 		WithBody(&message.DropLoadConfigMessageBody{}).
-		WithBroadcast(collectionLoadConfigBroadcastChannels(coll), message.OptBuildBroadcastAckSyncUp()).
+		WithBroadcast([]string{loadConfigBroadcastChannel()}).
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)

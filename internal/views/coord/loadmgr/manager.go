@@ -11,11 +11,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
-// ShardEnsurer creates the actual shard view manager for a replica+vchannel
-// pair. It is injected so loadmgr does not depend on the concrete coordview
-// registry package.
-type ShardEnsurer func(qviews.ShardID)
-
 // DirtyCollectionNotifier is called after desired load state changes. The
 // outer Balancer adapter can translate this into TriggerScope{DirtyCollections}.
 type DirtyCollectionNotifier func(collectionID int64)
@@ -28,9 +23,8 @@ type ShardAssignmentNotifier func()
 // CollectionLoadManager is the Coord-side facade over desired load config
 // lifecycle.
 type CollectionLoadManager struct {
-	store       *LoadConfigStore
-	ensureShard ShardEnsurer
-	notify      DirtyCollectionNotifier
+	store  *LoadConfigStore
+	notify DirtyCollectionNotifier
 
 	mu                      sync.RWMutex
 	discoverableShards      map[qviews.ShardID]discoverableShard
@@ -46,20 +40,18 @@ type discoverableShard struct {
 
 func NewCollectionLoadManager(
 	store *LoadConfigStore,
-	ensureShard ShardEnsurer,
 	notify DirtyCollectionNotifier,
 ) *CollectionLoadManager {
 	return &CollectionLoadManager{
 		store:              store,
-		ensureShard:        ensureShard,
 		notify:             notify,
 		discoverableShards: make(map[qviews.ShardID]discoverableShard),
 	}
 }
 
 // UpdateLoadConfig applies an AlterLoadConfig WAL ack to desired state and
-// notifies the reconciler. The ack result already contains every vchannel that
-// received the broadcast, so no extra collection-shard provider is needed.
+// notifies the reconciler. The Balancer expands collection shards from the
+// latest DataView and creates shard managers when it applies the plan.
 func (m *CollectionLoadManager) UpdateLoadConfig(
 	ctx context.Context,
 	result message.BroadcastResultAlterLoadConfigMessageV2,
@@ -72,7 +64,6 @@ func (m *CollectionLoadManager) UpdateLoadConfig(
 	if err := m.store.Put(ctx, cfg); err != nil {
 		return err
 	}
-	m.ensureConfiguredShards(cfg, result.GetVChannelsWithoutControlChannel())
 	m.notifyCollection(cfg.CollectionID)
 	return nil
 }
@@ -188,20 +179,6 @@ func (m *CollectionLoadManager) notifyShardAssignmentsChanged() {
 	m.mu.RUnlock()
 	if notifier != nil {
 		notifier()
-	}
-}
-
-func (m *CollectionLoadManager) ensureConfiguredShards(cfg *LoadConfig, vchannels []string) {
-	if m.ensureShard == nil {
-		return
-	}
-	for _, replica := range cfg.Replicas {
-		for _, vchannel := range vchannels {
-			m.ensureShard(qviews.ShardID{
-				ReplicaID: replica.ReplicaID,
-				VChannel:  vchannel,
-			})
-		}
 	}
 }
 

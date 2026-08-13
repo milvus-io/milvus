@@ -42,7 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestLoadCollectionBroadcastsLoadConfigToCollectionVChannels(t *testing.T) {
+func TestLoadCollectionBroadcastsLoadConfigToControlChannel(t *testing.T) {
 	ctx := context.Background()
 	server, catalog, broker := newLoadConfigQViewsServer(t)
 	collectionID := int64(100)
@@ -63,16 +63,13 @@ func TestLoadCollectionBroadcastsLoadConfigToCollectionVChannels(t *testing.T) {
 		CollectionID: collectionID,
 	}))
 	require.NotNil(t, captured)
-	assert.ElementsMatch(t,
-		[]string{streaming.WAL().ControlChannel(), "v0", "v1"},
-		captured.BroadcastHeader().VChannels,
-	)
-	assert.True(t, captured.BroadcastHeader().AckSyncUp)
+	assert.Equal(t, []string{streaming.WAL().ControlChannel()}, captured.BroadcastHeader().VChannels)
+	assert.False(t, captured.BroadcastHeader().AckSyncUp)
 	assert.Empty(t, server.meta.GetAll(ctx))
 	catalog.AssertNotCalled(t, "SaveCollection", mock.Anything, mock.Anything)
 }
 
-func TestLoadPartitionsBroadcastsLoadConfigToCollectionVChannels(t *testing.T) {
+func TestLoadPartitionsBroadcastsLoadConfigToControlChannel(t *testing.T) {
 	ctx := context.Background()
 	server, _, broker := newLoadConfigQViewsServer(t)
 	collectionID := int64(100)
@@ -92,11 +89,8 @@ func TestLoadPartitionsBroadcastsLoadConfigToCollectionVChannels(t *testing.T) {
 		PartitionIDs: []int64{10},
 	}))
 	require.NotNil(t, captured)
-	assert.ElementsMatch(t,
-		[]string{streaming.WAL().ControlChannel(), "v0", "v1"},
-		captured.BroadcastHeader().VChannels,
-	)
-	assert.True(t, captured.BroadcastHeader().AckSyncUp)
+	assert.Equal(t, []string{streaming.WAL().ControlChannel()}, captured.BroadcastHeader().VChannels)
+	assert.False(t, captured.BroadcastHeader().AckSyncUp)
 }
 
 func TestReleaseCollectionUsesQViewsLoadConfigAsLoadedSource(t *testing.T) {
@@ -127,14 +121,11 @@ func TestReleaseCollectionUsesQViewsLoadConfigAsLoadedSource(t *testing.T) {
 		CollectionID: collectionID,
 	}))
 	require.NotNil(t, captured)
-	assert.ElementsMatch(t,
-		[]string{streaming.WAL().ControlChannel(), "v0", "v1"},
-		captured.BroadcastHeader().VChannels,
-	)
-	assert.True(t, captured.BroadcastHeader().AckSyncUp)
+	assert.Equal(t, []string{streaming.WAL().ControlChannel()}, captured.BroadcastHeader().VChannels)
+	assert.False(t, captured.BroadcastHeader().AckSyncUp)
 }
 
-func TestReleasePartitionsDropLoadConfigBroadcastsToCollectionVChannels(t *testing.T) {
+func TestReleasePartitionsDropLoadConfigBroadcastsToControlChannel(t *testing.T) {
 	ctx := context.Background()
 	server, catalog, broker := newLoadConfigQViewsServer(t)
 	collectionID := int64(100)
@@ -170,11 +161,8 @@ func TestReleasePartitionsDropLoadConfigBroadcastsToCollectionVChannels(t *testi
 	require.NoError(t, err)
 	require.True(t, collectionReleased)
 	require.NotNil(t, captured)
-	assert.ElementsMatch(t,
-		[]string{streaming.WAL().ControlChannel(), "v0", "v1"},
-		captured.BroadcastHeader().VChannels,
-	)
-	assert.True(t, captured.BroadcastHeader().AckSyncUp)
+	assert.Equal(t, []string{streaming.WAL().ControlChannel()}, captured.BroadcastHeader().VChannels)
+	assert.False(t, captured.BroadcastHeader().AckSyncUp)
 }
 
 func newLoadConfigQViewsServer(t *testing.T) (*Server, *metastoremocks.QueryCoordCatalog, *meta.MockBroker) {

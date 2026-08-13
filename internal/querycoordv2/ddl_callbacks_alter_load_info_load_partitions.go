@@ -88,7 +88,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 		partitionIDsSet.Insert(partition)
 	}
 	alterLoadConfigReq := &job.AlterLoadConfigRequest{
- BroadcastChannels: collectionLoadConfigBroadcastChannels(coll),
+ ControlChannel: loadConfigBroadcastChannel(),
 		Meta:           s.meta,
 		CollectionInfo: coll,
 		Current:        currentLoadConfig,
