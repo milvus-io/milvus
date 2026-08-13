@@ -18,8 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"math"
-	"sort"
 	"strconv"
 	"time"
 
@@ -58,7 +56,7 @@ type Handler interface {
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 	GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView
 	ListLoadedSegments(ctx context.Context) ([]int64, error)
-	GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error)
+	GenSnapshot(ctx context.Context, collectionID UniqueID, boundary *SnapshotBoundary) (*snapshotstorage.SnapshotData, error)
 	GetDeltaLogFromCompactTo(ctx context.Context, segmentID UniqueID) ([]*datapb.FieldBinlog, error)
 }
 
@@ -619,37 +617,14 @@ func (h *ServerHandler) ListLoadedSegments(ctx context.Context) ([]int64, error)
 	return h.s.listLoadedSegments(ctx)
 }
 
-// GetSnapshotSeekPositions returns every channel seek position used to create a snapshot.
-// The returned min timestamp is kept as SnapshotInfo.create_ts for compatibility.
-// Note: if channel has tt lag, the snapshot ts also has tt lag.
-func (h *ServerHandler) GetSnapshotSeekPositions(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-	channels, err := h.s.getChannelsByCollectionID(ctx, collectionID)
-	if err != nil {
-		return nil, 0, err
+// segmentHasSnapshotData reports whether a segment holds anything a snapshot
+// would capture. Membership and the wait that precedes it share this definition,
+// so the snapshot cannot end up blocked on a segment it would not have taken.
+func segmentHasSnapshotData(info *SegmentInfo) (bool, error) {
+	if len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0 {
+		return true, nil
 	}
-	if len(channels) == 0 {
-		return nil, 0, merr.WrapErrServiceInternal("no channel found for snapshot")
-	}
-
-	positions := make([]*msgpb.MsgPosition, 0, len(channels))
-	minTs := uint64(math.MaxUint64)
-	for _, channel := range channels {
-		seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
-		if seekPosition == nil {
-			return nil, 0, merr.WrapErrServiceInternal("no valid channel seek position for snapshot")
-		}
-		cloned := proto.Clone(seekPosition).(*msgpb.MsgPosition)
-		cloned.ChannelName = channel.GetName()
-		if cloned.GetTimestamp() < minTs {
-			minTs = cloned.GetTimestamp()
-		}
-		positions = append(positions, cloned)
-	}
-
-	sort.Slice(positions, func(i, j int) bool {
-		return positions[i].GetChannelName() < positions[j].GetChannelName()
-	})
-	return positions, minTs, nil
+	return hasCommittedManifest(info)
 }
 
 // hasCommittedManifest reports whether a Storage V3 manifest references
@@ -722,7 +697,16 @@ func hasCommittedManifest(info *SegmentInfo) (bool, error) {
 // - Creating backup snapshots for disaster recovery
 // - Point-in-time restore for data rollback
 // - Collection cloning to different database/cluster
-func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error) {
+func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, boundary *SnapshotBoundary) (*snapshotstorage.SnapshotData, error) {
+	// The boundary is the CreateSnapshot message's own position on each vchannel,
+	// carried here from the broadcast result. There is deliberately no fallback to
+	// deriving one from channel checkpoints: that would move the cut to wherever
+	// persistence happens to have reached, which is both later than the snapshot
+	// and still drifting, and it is what let unsorted segments in.
+	if boundary == nil {
+		return nil, merr.WrapErrServiceInternal("snapshot boundary is required")
+	}
+
 	// get coll info
 	resp, err := h.s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
@@ -740,18 +724,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 		partitionMapping[name] = partitionIDs[idx]
 	}
 
-	// generate snapshot seek positions with current partition ids
-	channelSeekPositions, snapshotTs, err := h.GetSnapshotSeekPositions(ctx, collectionID, partitionIDs...)
-	if err != nil {
-		return nil, err
-	}
-	channelSeekTs := make(map[string]uint64, len(channelSeekPositions))
-	for _, position := range channelSeekPositions {
-		if position.GetChannelName() == "" {
-			return nil, merr.WrapErrServiceInternal("empty snapshot channel seek position")
-		}
-		channelSeekTs[position.GetChannelName()] = position.GetTimestamp()
-	}
+	channelSeekPositions, snapshotTs := boundary.SeekPositions, boundary.SnapshotTs
 
 	indexes := h.s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
 	indexInfos := lo.FilterMap(indexes, func(index *model.Index, _ int) (*indexpb.IndexInfo, bool) {
@@ -773,18 +746,15 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	}))
 	segments := make([]*SegmentInfo, 0, len(candidateSegments))
 	for _, info := range candidateSegments {
-		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
-		if !segmentHasData {
-			segmentHasData, err = hasCommittedManifest(info)
-			if err != nil {
-				return nil, err
-			}
+		segmentHasData, err := segmentHasSnapshotData(info)
+		if err != nil {
+			return nil, err
 		}
 		if !segmentHasData {
 			continue
 		}
 
-		seekTs, ok := channelSeekTs[info.GetInsertChannel()]
+		seekTs, ok := boundary.SeekTs(info.GetInsertChannel())
 		if !ok {
 			return nil, merr.WrapErrServiceInternalMsg(
 				"missing snapshot channel seek position for segment channel %s",
@@ -826,6 +796,19 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			return
 		}
 		segInfo.Deltalogs = append(segInfo.GetDeltalogs(), deltalogs...)
+
+		// A segment's deltalogs keep accumulating after the boundary, so what is
+		// attached at capture time includes deletes issued after the snapshot. Left
+		// in, the snapshot would carry inserts as of the boundary but deletes as of
+		// capture, and restore would be missing rows that were alive at the point
+		// the snapshot claims to describe.
+		seekTs, ok := boundary.SeekTs(segInfo.GetInsertChannel())
+		if !ok {
+			// Membership was already decided with this channel above, so a miss here
+			// is impossible; drop nothing rather than guess.
+			return
+		}
+		segInfo.Deltalogs = filterDeltalogsBefore(segInfo.GetDeltalogs(), seekTs)
 	})
 
 	segDescList := lo.Map(segmentInfos, func(segInfo *datapb.SegmentInfo, _ int) *datapb.SegmentDescription {

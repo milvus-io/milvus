@@ -122,6 +122,35 @@ func NewManualFlushMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, e
 	}, nil
 }
 
+// CreateSnapshotMessageBody carries a snapshot's boundary into the flow graph.
+// A snapshot seals the collection's growing data at its own position, so on the
+// data path it is a flush signal: the shard interceptor fences segment
+// allocation, and this is what makes the write buffer actually seal, the same
+// two halves ManualFlush and FlushAll rely on.
+type CreateSnapshotMessageBody struct {
+	*tsMsgImpl
+	CreateSnapshotMessage message.ImmutableCreateSnapshotMessageV2
+}
+
+func NewCreateSnapshotMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	createSnapshotMsg, err := message.AsImmutableCreateSnapshotMessageV2(msg)
+	if err != nil {
+		return nil, err
+	}
+	return &CreateSnapshotMessageBody{
+		tsMsgImpl: &tsMsgImpl{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: msg.TimeTick(),
+				EndTimestamp:   msg.TimeTick(),
+			},
+			ts:      msg.TimeTick(),
+			sz:      msg.EstimateSize(),
+			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
+		},
+		CreateSnapshotMessage: createSnapshotMsg,
+	}, nil
+}
+
 type FlushAllMessageBody struct {
 	*tsMsgImpl
 	FlushAllMessage message.ImmutableFlushAllMessageV2

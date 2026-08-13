@@ -2276,8 +2276,27 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		return merr.Status(err), nil
 	}
 
-	// Broadcast CreateSnapshot message via DDL framework
-	// Snapshot ID is allocated in the callback
+	// Broadcast CreateSnapshot message via DDL framework.
+	// Snapshot ID is allocated in the callback.
+	//
+	// The message goes to the collection's data vchannels, not only the control
+	// channel, because it is the snapshot's boundary: the shard interceptor seals
+	// every growing segment at the message's position, so "written before the
+	// snapshot" becomes a property of whole segments rather than a guess from
+	// channel checkpoints. A control-channel-only message has no position in the
+	// data WAL and therefore no ordering against inserts at all, which is why the
+	// snapshot could not define its own cut before.
+	//
+	// TODO(rolling upgrade): a streamingnode that predates
+	// shardInterceptor.handleCreateSnapshot does not recognize this message type,
+	// and the interceptor's fallback is a plain append -- so it declares the
+	// boundary without sealing anything, and a growing segment ends up spanning
+	// it. The snapshot then captures a segment holding rows from both sides,
+	// silently. header.FlushedSegmentIds cannot be used to detect this, since it
+	// is legitimately empty when the collection had no growing segment. Until
+	// this is handled, the upgrade window is not safe for snapshot creation.
+	channels := []string{streaming.WAL().ControlChannel()}
+	channels = append(channels, coll.VChannelNames...)
 	if _, err := broadcaster.Broadcast(ctx, message.NewCreateSnapshotMessageBuilderV2().
 		WithHeader(&message.CreateSnapshotMessageHeader{
 			CollectionId:                req.GetCollectionId(),
@@ -2286,7 +2305,7 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 			CompactionProtectionSeconds: req.GetCompactionProtectionSeconds(),
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithBroadcast(channels).
 		WithUnreplicable().
 		MustBuildBroadcast(),
 	); err != nil {

@@ -41,6 +41,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -76,6 +77,38 @@ type restoreWALAccesserTarget struct {
 	streaming.WALAccesser
 }
 
+// emptySnapshotTestMeta is the minimum meta CreateSnapshot needs. Its wait asks
+// two things: whether the channel checkpoint has reached the boundary, and
+// whether any segment inside the boundary still owes a sort. A checkpoint past
+// the boundary plus an empty segment set is the "nothing to wait for" case these
+// fixtures want; leaving the checkpoint unset would instead park them in the
+// completeness gate.
+func emptySnapshotTestMeta() *meta {
+	m := &meta{ctx: context.Background(), segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
+	m.channelCPs.checkpoints[testCreateSnapshotChannel] = &msgpb.MsgPosition{
+		ChannelName: testCreateSnapshotChannel,
+		Timestamp:   testCreateSnapshotBoundaryTs + 1,
+	}
+	return m
+}
+
+// testCreateSnapshotBoundary is the boundary a CreateSnapshot message would have
+// cut. These fixtures hold no segments, so any well-formed boundary works; it
+// only has to be non-nil, since GenSnapshot now refuses to invent one.
+const (
+	testCreateSnapshotChannel    = "by-dev-rootcoord-dml_0_100v0"
+	testCreateSnapshotBoundaryTs = uint64(1000)
+)
+
+func testCreateSnapshotBoundary() *SnapshotBoundary {
+	return &SnapshotBoundary{
+		SeekPositions: []*msgpb.MsgPosition{
+			{ChannelName: testCreateSnapshotChannel, Timestamp: testCreateSnapshotBoundaryTs},
+		},
+		SnapshotTs: testCreateSnapshotBoundaryTs,
+	}
+}
+
 // --- Test CreateSnapshot ---
 
 func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
@@ -97,7 +130,7 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 			{SegmentId: 1, NumOfRows: 100},
 		},
 	}
-	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(snapshotData, nil).Once()
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(snapshotData, nil).Once()
 
 	// Mock snapshotMeta methods using mockey
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
@@ -118,7 +151,7 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 	// the unconditional SetSnapshotPending / ClearSnapshotPending calls (required for
 	// GenSnapshot → SaveSnapshot atomicity) don't panic on uninitialized maps.
 	sm := NewSnapshotManager(
-		nil,                             // meta
+		emptySnapshotTestMeta(),         // meta
 		createTestSnapshotMetaLoaded(t), // snapshotMeta
 		nil,                             // copySegmentMeta
 		mockAllocator,
@@ -129,7 +162,7 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "test description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "test description", 0, testCreateSnapshotBoundary())
 
 	// Verify
 	assert.NoError(t, err)
@@ -153,7 +186,7 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 			{SegmentId: 1, NumOfRows: 100},
 		},
 	}
-	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(snapshotData, nil).Once()
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(snapshotData, nil).Once()
 
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 		return nil, errors.New("not found")
@@ -170,7 +203,7 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		snapshotMetaInstance,
 		nil,
 		mockAllocator,
@@ -180,7 +213,7 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 		nil, // indexEngineVersionManager
 	)
 
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "protected_snap", "with protection", 3600)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "protected_snap", "with protection", 3600, testCreateSnapshotBoundary())
 
 	// Verify snapshot pending intent is cleared after CreateSnapshot completes
 	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
@@ -198,7 +231,7 @@ func TestSnapshotManager_CreateSnapshot_DuplicateName(t *testing.T) {
 	defer mockGetSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -209,7 +242,7 @@ func TestSnapshotManager_CreateSnapshot_DuplicateName(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "existing_snapshot", "description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "existing_snapshot", "description", 0, testCreateSnapshotBoundary())
 
 	// Verify
 	assert.Error(t, err)
@@ -233,7 +266,7 @@ func TestSnapshotManager_CreateSnapshot_AllocatorError(t *testing.T) {
 	defer mockGetSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		createTestSnapshotMetaLoaded(t),
 		nil,
 		mockAllocator,
@@ -244,7 +277,7 @@ func TestSnapshotManager_CreateSnapshot_AllocatorError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, testCreateSnapshotBoundary())
 
 	// Verify
 	assert.Error(t, err)
@@ -262,7 +295,7 @@ func TestSnapshotManager_CreateSnapshot_GenSnapshotError(t *testing.T) {
 	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(1001), nil).Once()
 
 	expectedErr := errors.New("gen snapshot error")
-	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(nil, expectedErr).Once()
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(nil, expectedErr).Once()
 
 	// Mock snapshotMeta.GetSnapshot to return not found
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
@@ -271,7 +304,7 @@ func TestSnapshotManager_CreateSnapshot_GenSnapshotError(t *testing.T) {
 	defer mockGetSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		createTestSnapshotMetaLoaded(t),
 		nil,
 		mockAllocator,
@@ -282,7 +315,7 @@ func TestSnapshotManager_CreateSnapshot_GenSnapshotError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, testCreateSnapshotBoundary())
 
 	// Verify
 	assert.Error(t, err)
@@ -302,7 +335,7 @@ func TestSnapshotManager_CreateSnapshot_SaveError(t *testing.T) {
 	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{CollectionId: 100},
 	}
-	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(snapshotData, nil).Once()
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(snapshotData, nil).Once()
 
 	// Mock snapshotMeta methods
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
@@ -317,7 +350,7 @@ func TestSnapshotManager_CreateSnapshot_SaveError(t *testing.T) {
 	defer mockSaveSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		createTestSnapshotMetaLoaded(t),
 		nil,
 		mockAllocator,
@@ -328,7 +361,7 @@ func TestSnapshotManager_CreateSnapshot_SaveError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, testCreateSnapshotBoundary())
 
 	// Verify
 	assert.Error(t, err)
@@ -345,7 +378,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnGenSnapshotError(
 	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(1001), nil).Once()
 
 	expectedErr := errors.New("gen snapshot error")
-	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(nil, expectedErr).Once()
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(nil, expectedErr).Once()
 
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 		return nil, errors.New("not found")
@@ -355,7 +388,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnGenSnapshotError(
 	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		snapshotMetaInstance,
 		nil,
 		mockAllocator,
@@ -365,7 +398,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnGenSnapshotError(
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary())
 	assert.Error(t, err)
 
 	// Verify snapshot pending intent is cleared even on error
@@ -383,7 +416,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *test
 	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{CollectionId: 100},
 	}
-	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(snapshotData, nil).Once()
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(snapshotData, nil).Once()
 
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 		return nil, errors.New("not found")
@@ -401,7 +434,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *test
 	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		snapshotMetaInstance,
 		nil,
 		mockAllocator,
@@ -411,7 +444,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *test
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary())
 	assert.Error(t, err)
 
 	// Verify snapshot pending intent is cleared after save failure
@@ -436,7 +469,7 @@ func TestSnapshotManager_CreateSnapshot_PendingHeldEvenWithoutLongTermProtection
 		SnapshotInfo: &datapb.SnapshotInfo{CollectionId: 100},
 		Segments:     []*datapb.SegmentDescription{{SegmentId: 1}},
 	}
-	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(snapshotData, nil).Once()
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(snapshotData, nil).Once()
 
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 		return nil, errors.New("not found")
@@ -456,7 +489,7 @@ func TestSnapshotManager_CreateSnapshot_PendingHeldEvenWithoutLongTermProtection
 	defer mockSaveSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		snapshotMetaInstance,
 		nil,
 		mockAllocator,
@@ -466,7 +499,7 @@ func TestSnapshotManager_CreateSnapshot_PendingHeldEvenWithoutLongTermProtection
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 0) // compactionProtectionSeconds = 0
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 0, testCreateSnapshotBoundary()) // compactionProtectionSeconds = 0
 	assert.NoError(t, err)
 
 	// After CreateSnapshot returns, the deferred ClearSnapshotPending must have run.
@@ -489,7 +522,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnAllocError(t *tes
 	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		snapshotMetaInstance,
 		nil,
 		mockAllocator,
@@ -499,7 +532,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnAllocError(t *tes
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary())
 	assert.Error(t, err)
 
 	// Verify snapshot pending intent is cleared after alloc failure
@@ -524,7 +557,7 @@ func TestSnapshotManager_DropSnapshot_Success(t *testing.T) {
 	defer mockDropSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -551,7 +584,7 @@ func TestSnapshotManager_DropSnapshot_NotFound_Idempotent(t *testing.T) {
 	defer mockGetSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -584,7 +617,7 @@ func TestSnapshotManager_DropSnapshot_Error(t *testing.T) {
 	defer mockDropSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -620,7 +653,7 @@ func TestSnapshotManager_GetSnapshot_Success(t *testing.T) {
 	defer mockGetSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -648,7 +681,7 @@ func TestSnapshotManager_GetSnapshot_NotFound(t *testing.T) {
 	defer mockGetSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -691,7 +724,7 @@ func TestSnapshotManager_DescribeSnapshot_Success(t *testing.T) {
 	defer mockReadSnapshotData.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -719,7 +752,7 @@ func TestSnapshotManager_DescribeSnapshot_NotFound(t *testing.T) {
 	defer mockReadSnapshotData.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -753,7 +786,7 @@ func TestSnapshotManager_ListSnapshots_Success(t *testing.T) {
 	defer mockListSnapshots.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -781,7 +814,7 @@ func TestSnapshotManager_ListSnapshots_Error(t *testing.T) {
 	defer mockListSnapshots.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -829,7 +862,7 @@ func TestSnapshotManager_GetRestoreState_Success(t *testing.T) {
 	defer mockGetJob.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		nil,
 		&copySegmentMeta{},
 		nil,
@@ -860,7 +893,7 @@ func TestSnapshotManager_GetRestoreState_NotFound(t *testing.T) {
 	defer mockGetJob.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		nil,
 		&copySegmentMeta{},
 		nil,
@@ -2193,7 +2226,7 @@ func TestNewSnapshotManager(t *testing.T) {
 	}
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		nil,
 		nil,
 		mockAllocator,
@@ -2219,7 +2252,7 @@ func TestSnapshotManager_RestoreIndexes_FMINDEXNilVersionManager(t *testing.T) {
 	).Once()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		nil,
 		nil,
 		mockAllocator,
@@ -3173,7 +3206,7 @@ func TestSnapshotManager_DropSnapshotsByCollection_Success(t *testing.T) {
 	defer mockDrop.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -3195,7 +3228,7 @@ func TestSnapshotManager_DropSnapshotsByCollection_Error(t *testing.T) {
 	defer mockDrop.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -3218,7 +3251,7 @@ func TestSnapshotManager_DropSnapshotsByCollection_NoSnapshots(t *testing.T) {
 	defer mockDrop.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,

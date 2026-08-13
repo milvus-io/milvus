@@ -2699,8 +2699,9 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 	// L0 compaction only appends deltalogs to L1/L2 targets without touching L1/L2 binlogs.
 	// So L0 delete compaction is outside the protection's concern and must not be blocked.
 	if t.GetType() != datapb.CompactionType_Level0DeleteCompaction {
-		// Check if compaction is blocked for this collection (snapshot pending or RefIndex not loaded).
-		if m.isCollectionCompactionBlocked(t.GetCollectionID()) {
+		// Check if compaction is blocked for this collection (snapshot pending or
+		// staging, or RefIndex not loaded).
+		if m.isCompactionBlockedForType(t.GetCollectionID(), t.GetType()) {
 			mlog.Info(m.ctx, "compaction rejected: collection has pending snapshot or unloaded RefIndex",
 				mlog.Int64("planID", t.GetPlanID()),
 				mlog.String("type", t.GetType().String()),
@@ -3073,6 +3074,34 @@ func (m *meta) isCollectionCompactionBlocked(collectionID int64) bool {
 		return false
 	}
 	return m.snapshotMeta.IsCollectionCompactionBlocked(collectionID)
+}
+
+// isCompactionBlockedForType answers the same question per compaction type.
+// A staging snapshot only blocks compactions that can move a segment boundary,
+// because that is the only thing that can put rows from after the snapshot into
+// a segment the snapshot claims.
+func (m *meta) isCompactionBlockedForType(collectionID int64, compactionType datapb.CompactionType) bool {
+	if m.snapshotMeta == nil {
+		return false
+	}
+	if changesSegmentBoundary(compactionType) {
+		return m.snapshotMeta.IsCollectionCompactionBlocked(collectionID)
+	}
+	return m.snapshotMeta.IsCollectionCompactionBlockedIgnoringStaging(collectionID)
+}
+
+// changesSegmentBoundary reports whether a compaction can produce a segment
+// spanning rows that its inputs did not span together, i.e. whether it can merge
+// across a snapshot boundary.
+//
+// Only the N:M types can. Sort and schema bump rewrite one segment into one
+// segment, so their output covers exactly their input; L0 delete appends delete
+// logs and creates no L1/L2 segment at all. Import is not listed because an
+// import segment sits at a single point on the timeline -- its CommitTimestamp
+// serves as both its start and its end -- so it has no width to span with.
+func changesSegmentBoundary(compactionType datapb.CompactionType) bool {
+	return compactionType == datapb.CompactionType_MixCompaction ||
+		compactionType == datapb.CompactionType_ClusteringCompaction
 }
 
 // GetCompactableSegmentGroupByCollection returns sealed segments grouped by collection.

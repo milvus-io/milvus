@@ -116,9 +116,9 @@ func (_c *NMockHandler_FinishDropChannel_Call) RunAndReturn(run func(string, int
 	return _c
 }
 
-// GenSnapshot provides a mock function with given fields: ctx, collectionID
-func (_m *NMockHandler) GenSnapshot(ctx context.Context, collectionID int64) (*storage.SnapshotData, error) {
-	ret := _m.Called(ctx, collectionID)
+// GenSnapshot provides a mock function with given fields: ctx, collectionID, boundary
+func (_m *NMockHandler) GenSnapshot(ctx context.Context, collectionID int64, boundary *SnapshotBoundary) (*storage.SnapshotData, error) {
+	ret := _m.Called(ctx, collectionID, boundary)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GenSnapshot")
@@ -126,19 +126,19 @@ func (_m *NMockHandler) GenSnapshot(ctx context.Context, collectionID int64) (*s
 
 	var r0 *storage.SnapshotData
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64) (*storage.SnapshotData, error)); ok {
-		return rf(ctx, collectionID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *SnapshotBoundary) (*storage.SnapshotData, error)); ok {
+		return rf(ctx, collectionID, boundary)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64) *storage.SnapshotData); ok {
-		r0 = rf(ctx, collectionID)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *SnapshotBoundary) *storage.SnapshotData); ok {
+		r0 = rf(ctx, collectionID, boundary)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*storage.SnapshotData)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
-		r1 = rf(ctx, collectionID)
+	if rf, ok := ret.Get(1).(func(context.Context, int64, *SnapshotBoundary) error); ok {
+		r1 = rf(ctx, collectionID, boundary)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -154,13 +154,14 @@ type NMockHandler_GenSnapshot_Call struct {
 // GenSnapshot is a helper method to define mock.On call
 //   - ctx context.Context
 //   - collectionID int64
-func (_e *NMockHandler_Expecter) GenSnapshot(ctx interface{}, collectionID interface{}) *NMockHandler_GenSnapshot_Call {
-	return &NMockHandler_GenSnapshot_Call{Call: _e.mock.On("GenSnapshot", ctx, collectionID)}
+//   - boundary *SnapshotBoundary
+func (_e *NMockHandler_Expecter) GenSnapshot(ctx interface{}, collectionID interface{}, boundary interface{}) *NMockHandler_GenSnapshot_Call {
+	return &NMockHandler_GenSnapshot_Call{Call: _e.mock.On("GenSnapshot", ctx, collectionID, boundary)}
 }
 
-func (_c *NMockHandler_GenSnapshot_Call) Run(run func(ctx context.Context, collectionID int64)) *NMockHandler_GenSnapshot_Call {
+func (_c *NMockHandler_GenSnapshot_Call) Run(run func(ctx context.Context, collectionID int64, boundary *SnapshotBoundary)) *NMockHandler_GenSnapshot_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64))
+		run(args[0].(context.Context), args[1].(int64), args[2].(*SnapshotBoundary))
 	})
 	return _c
 }
@@ -170,7 +171,7 @@ func (_c *NMockHandler_GenSnapshot_Call) Return(_a0 *storage.SnapshotData, _a1 e
 	return _c
 }
 
-func (_c *NMockHandler_GenSnapshot_Call) RunAndReturn(run func(context.Context, int64) (*storage.SnapshotData, error)) *NMockHandler_GenSnapshot_Call {
+func (_c *NMockHandler_GenSnapshot_Call) RunAndReturn(run func(context.Context, int64, *SnapshotBoundary) (*storage.SnapshotData, error)) *NMockHandler_GenSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }

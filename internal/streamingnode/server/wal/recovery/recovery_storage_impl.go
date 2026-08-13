@@ -371,6 +371,9 @@ func (r *recoveryStorageImpl) handleMessage(ctx context.Context, msg message.Imm
 	case message.MessageTypeSchemaChange:
 		immutableMsg := message.MustAsImmutableSchemaChangeMessageV2(msg)
 		r.handleSchemaChange(ctx, immutableMsg)
+	case message.MessageTypeCreateSnapshot:
+		immutableMsg := message.MustAsImmutableCreateSnapshotMessageV2(msg)
+		r.handleCreateSnapshot(ctx, immutableMsg)
 	case message.MessageTypeAlterCollection:
 		immutableMsg := message.MustAsImmutableAlterCollectionMessageV2(msg)
 		r.handleAlterCollection(ctx, immutableMsg)
@@ -473,6 +476,28 @@ func (r *recoveryStorageImpl) handleManualFlush(ctx context.Context, msg message
 	segments := make(map[int64]struct{}, len(msg.Header().SegmentIds))
 	for _, segmentID := range msg.Header().SegmentIds {
 		segments[segmentID] = struct{}{}
+	}
+	r.flushSegments(ctx, msg, segments)
+}
+
+// handleCreateSnapshot handles the create snapshot message.
+//
+// The snapshot fences and flushes the collection's growing segments at its own
+// position (see shardInterceptor.handleCreateSnapshot), so recovery has to
+// replay that flush. Skipping it would leave a replayed segment growing across a
+// boundary the snapshot has already committed to, and the segment would then
+// hold rows from both sides of a snapshot that claims to end at it.
+func (r *recoveryStorageImpl) handleCreateSnapshot(ctx context.Context, msg message.ImmutableCreateSnapshotMessageV2) {
+	// The fence seals every growing segment of the collection at this position
+	// (partitionManager.FlushAndFenceSegmentUntil takes all of them, with no
+	// further condition), so the set is recoverable from the state replay has
+	// already rebuilt -- the message does not have to carry it.
+	collectionID := msg.Header().GetCollectionId()
+	segments := make(map[int64]struct{})
+	for segmentID, segment := range r.segments {
+		if segment.meta.GetCollectionId() == collectionID && segment.IsGrowing() {
+			segments[segmentID] = struct{}{}
+		}
 	}
 	r.flushSegments(ctx, msg, segments)
 }

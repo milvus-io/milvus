@@ -123,6 +123,15 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeFlushAll: {
 		ExclusiveRequired: true,
 	},
+	// CreateSnapshot seals every growing segment of its collection at its own
+	// position, the same way ManualFlush and SchemaChange do, so it has to be
+	// exclusive on its data vchannels: an insert appended concurrently with the
+	// fence could land on either side of a boundary that the snapshot has already
+	// declared, and the snapshot would then either miss data written before it or
+	// capture data written after it.
+	MessageTypeCreateSnapshot: {
+		ExclusiveRequired: true,
+	},
 	MessageTypeAlterWAL: {
 		ExclusiveRequired: true,
 	},

@@ -121,7 +121,7 @@ type SnapshotManager interface {
 	// Returns:
 	//   - snapshotID: Allocated snapshot ID (0 on error)
 	//   - error: If name already exists, allocation fails, or save fails
-	CreateSnapshot(ctx context.Context, collectionID int64, name, description string, compactionProtectionSeconds int64) (int64, error)
+	CreateSnapshot(ctx context.Context, collectionID int64, name, description string, compactionProtectionSeconds int64, boundary *SnapshotBoundary) (int64, error)
 
 	// DropSnapshot deletes an existing snapshot by name within a collection.
 	// It removes the snapshot from memory cache, etcd, and S3 storage.
@@ -437,6 +437,7 @@ func (sm *snapshotManager) CreateSnapshot(
 	collectionID int64,
 	name, description string,
 	compactionProtectionSeconds int64,
+	boundary *SnapshotBoundary,
 ) (int64, error) {
 	// Lock to prevent TOCTOU race on snapshot name uniqueness check
 	sm.createSnapshotMu.Lock()
@@ -451,14 +452,44 @@ func (sm *snapshotManager) CreateSnapshot(
 		return 0, merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", name)
 	}
 
+	// Freeze segment boundaries before anything else. The boundary was cut when
+	// the CreateSnapshot message was appended; from here until the segment list is
+	// captured, a compaction that merges across it would produce a segment that
+	// looks like it belongs to the snapshot while carrying rows written after it.
+	// Sort compaction is deliberately still allowed -- it is what the wait below
+	// is waiting for, and it rewrites one segment into one segment, so it cannot
+	// move a boundary.
+	sm.snapshotMeta.SetSnapshotStaging(collectionID)
+	defer sm.snapshotMeta.ClearSnapshotStaging(collectionID)
+
+	// Every segment the snapshot will reference has to carry its sorted form
+	// first. A flushed segment that still owes a sort is published
+	// Flushed+IsInvisible and is served from the growing path, so its manifest is
+	// not what a reader sees -- and once backfill has added a column, the unsorted
+	// manifest does not even have that column. Capturing it would put a segment in
+	// the snapshot whose contents disagree with the collection.
+	//
+	// This runs before SetSnapshotPending, and the order is not cosmetic: pending
+	// blocks sort compaction too, so waiting under it would be waiting for tasks
+	// this call has itself forbidden.
+	if err := sm.waitForSortedBoundary(ctx, collectionID, boundary); err != nil {
+		return 0, err
+	}
+
 	// Block compaction commit for this collection during snapshot creation.
 	// This MUST be unconditional (not gated on compactionProtectionSeconds): even when
 	// the user requests zero long-term protection, the snapshot must still be atomic
 	// within the GenSnapshot → SaveSnapshot window, otherwise concurrent compaction
 	// could drop segments that the in-flight snapshot is about to reference, leaving
 	// the freshly-created snapshot immediately broken.
+	//
+	// Pending goes on before staging comes off, so there is no instant in which
+	// sort may commit while the segment list is being captured: a sorted
+	// replacement landing in that gap would swap out a segment the snapshot has
+	// already decided to reference.
 	sm.snapshotMeta.SetSnapshotPending(collectionID)
 	defer sm.snapshotMeta.ClearSnapshotPending(collectionID)
+	sm.snapshotMeta.ClearSnapshotStaging(collectionID)
 
 	// Allocate snapshot ID
 	snapshotID, err := sm.allocator.AllocID(ctx)
@@ -467,8 +498,8 @@ func (sm *snapshotManager) CreateSnapshot(
 		return 0, err
 	}
 
-	// Generate snapshot data
-	snapshotData, err := sm.handler.GenSnapshot(ctx, collectionID)
+	// Generate snapshot data at the boundary the CreateSnapshot message cut.
+	snapshotData, err := sm.handler.GenSnapshot(ctx, collectionID, boundary)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to generate snapshot", mlog.Err(err))
 		return 0, err
@@ -492,6 +523,156 @@ func (sm *snapshotManager) CreateSnapshot(
 
 	mlog.Info(context.TODO(), "snapshot created successfully", mlog.Int64("snapshotID", snapshotID))
 	return snapshotID, nil
+}
+
+// snapshotSortWaitPollInterval is how often the wait re-checks the boundary.
+// Sort completion is reported through meta rather than a signal we can wait on,
+// so this polls.
+const snapshotSortWaitPollInterval = time.Second
+
+// channelsBehindBoundary returns the boundary's channels whose checkpoint has not
+// reached it yet.
+//
+// A channel checkpoint is DataCoord's own statement that everything before that
+// position is persisted and accounted for. Until it passes the boundary, the
+// segment set inside the boundary is not merely unsorted, it is incomplete:
+// DataCoord may not have been told about a segment the fence sealed -- growing
+// segments are not visible here as soon as they are on the streaming node, which
+// is the same gap GetFlushState documents. Asking "is everything sorted" against
+// a set that is still filling in answers about the wrong set.
+//
+// This is also why the check is a timestamp rather than a segment list: a list
+// cannot express "and nothing else has arrived yet".
+func (sm *snapshotManager) channelsBehindBoundary(boundary *SnapshotBoundary) []string {
+	behind := make([]string, 0, len(boundary.SeekPositions))
+	for _, position := range boundary.SeekPositions {
+		checkpoint := sm.meta.GetChannelCheckpoint(position.GetChannelName())
+		if checkpoint == nil || checkpoint.GetTimestamp() < position.GetTimestamp() {
+			behind = append(behind, position.GetChannelName())
+		}
+	}
+	return behind
+}
+
+// segmentsAwaitingSort returns the segments inside the boundary that the snapshot
+// is not yet allowed to capture.
+//
+// A segment qualifies while it is either still on its way to Flushed or flushed
+// but unsorted. The first half matters because the fence is asynchronous: the
+// broadcast acks once the message is appended, but the write buffer seals and
+// reports to DataCoord afterwards, so at this point the segments the snapshot
+// just fenced are typically still Growing here. Waiting only on Flushed would
+// find an empty set and capture the boundary before its own data arrived.
+//
+// The predicate deliberately differs from canTriggerSortCompaction in one way:
+// it does not exclude segments that are already compacting. A segment with a
+// sort task in flight has not been sorted yet, and the point of the wait is to
+// stay until it has. It also needs no segment-id bookkeeping -- a sort replaces
+// its input with a new id, and the replacement leaves this set on its own
+// because it is sorted, while the input leaves it because it is Dropped.
+func (sm *snapshotManager) segmentsAwaitingSort(ctx context.Context, collectionID int64, boundary *SnapshotBoundary) ([]int64, error) {
+	candidates := sm.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return info.GetState() == commonpb.SegmentState_Flushed &&
+			info.GetLevel() != datapb.SegmentLevel_L0 &&
+			!info.GetIsSorted() &&
+			!info.GetIsSortedByNamespace() &&
+			!info.GetIsImporting()
+	}))
+
+	awaiting := make([]int64, 0, len(candidates))
+	for _, info := range candidates {
+		seekTs, ok := boundary.SeekTs(info.GetInsertChannel())
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"missing snapshot channel seek position for segment channel %s", info.GetInsertChannel())
+		}
+		// Same comparison GenSnapshot uses to decide membership. The two must not
+		// drift: waiting on a set that is not the set being captured guarantees
+		// nothing about what ends up in the snapshot.
+		if segmentEffectiveTs(info.SegmentInfo) >= seekTs {
+			continue
+		}
+		// And the same emptiness test. A segment with nothing in it is not captured
+		// either way, so blocking on one that never gets data would hang the
+		// snapshot on a segment it does not want.
+		hasData, err := segmentHasSnapshotData(info)
+		if err != nil {
+			return nil, err
+		}
+		if hasData {
+			awaiting = append(awaiting, info.GetID())
+		}
+	}
+	return awaiting, nil
+}
+
+// waitForSortedBoundary blocks until every segment inside the boundary has been
+// sorted.
+//
+// The set is closed: the CreateSnapshot message fenced its collection's growing
+// segments at this boundary, so anything flushed afterwards starts after it and
+// can never enter. The wait therefore terminates on its own as sort compaction
+// drains it -- it is not racing ingestion.
+//
+// It is bounded anyway. This runs in a DDL ack callback whose context has no
+// deadline, and the callback holds the collection's resource-key lock, so an
+// unbounded wait here would block the collection's other DDL indefinitely. Past
+// the cap it gives the lock back by returning an error; the ack scheduler
+// retries with backoff, which is the same waiting done in a way that lets other
+// work through. The message is already in the WAL, so the snapshot is created
+// eventually either way -- there is no "give up" at this layer.
+func (sm *snapshotManager) waitForSortedBoundary(ctx context.Context, collectionID int64, boundary *SnapshotBoundary) error {
+	// The budget is a deadline, so express it as one: the same select then covers
+	// both running out of budget and DataCoord shutting down, and both want the
+	// same thing -- give the lock back and let the scheduler come again.
+	waitCtx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.SnapshotSortWaitTimeout.GetAsDuration(time.Second))
+	defer cancel()
+
+	ticker := time.NewTicker(snapshotSortWaitPollInterval)
+	defer ticker.Stop()
+
+	start := time.Now()
+	for {
+		// Completeness before cleanliness. Until every channel checkpoint has
+		// passed the boundary, the segments inside it are still arriving, and
+		// asking whether they are all sorted answers about a set that is not yet
+		// the one being captured -- typically an empty one, which reads as "done".
+		behind := sm.channelsBehindBoundary(boundary)
+		var awaiting []int64
+		if len(behind) == 0 {
+			var err error
+			if awaiting, err = sm.segmentsAwaitingSort(ctx, collectionID, boundary); err != nil {
+				return err
+			}
+			if len(awaiting) == 0 {
+				mlog.Info(ctx, "snapshot boundary complete and fully sorted",
+					mlog.FieldCollectionID(collectionID),
+					mlog.Uint64("snapshotTs", boundary.SnapshotTs),
+					mlog.Duration("waited", time.Since(start)))
+				return nil
+			}
+		}
+
+		select {
+		case <-waitCtx.Done():
+			// Info, not Warn: the snapshot is yielding its lock, not failing.
+			mlog.Info(ctx, "snapshot still waiting for its boundary, releasing for retry",
+				mlog.FieldCollectionID(collectionID),
+				mlog.Uint64("snapshotTs", boundary.SnapshotTs),
+				mlog.Duration("waited", time.Since(start)),
+				mlog.Strings("channelsBehindBoundary", behind),
+				mlog.Int64s("awaitingSort", awaiting))
+			return merr.WrapErrServiceUnavailableMsg(
+				"snapshot for collection %d is waiting for %d channel(s) to reach its boundary and %d segment(s) to finish sort compaction",
+				collectionID, len(behind), len(awaiting))
+		case <-ticker.C:
+			mlog.RatedInfo(ctx, 0.1, "snapshot waiting for its boundary",
+				mlog.FieldCollectionID(collectionID),
+				mlog.Duration("waited", time.Since(start)),
+				mlog.Strings("channelsBehindBoundary", behind),
+				mlog.Int64s("awaitingSort", awaiting))
+		}
+	}
 }
 
 // DropSnapshot deletes an existing snapshot by name.
