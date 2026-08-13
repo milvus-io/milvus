@@ -34,9 +34,10 @@ import (
 
 // WorkerSlots represents the slot information for a worker node
 type WorkerSlots struct {
-	NodeID         int64
-	AvailableSlots int64
-	Version        string
+	NodeID               int64
+	AvailableSlots       int64
+	Version              string
+	MaxImportTaskVersion uint32
 }
 
 // Cluster defines the interface for tasks
@@ -205,9 +206,10 @@ func (c *cluster) QuerySlot() map[int64]*WorkerSlots {
 			mu.Lock()
 			defer mu.Unlock()
 			availableNodeSlots[nodeID] = &WorkerSlots{
-				NodeID:         nodeID,
-				AvailableSlots: resp.GetAvailableSlots(),
-				Version:        resp.GetVersion(),
+				NodeID:               nodeID,
+				AvailableSlots:       resp.GetAvailableSlots(),
+				Version:              resp.GetVersion(),
+				MaxImportTaskVersion: resp.GetMaxImportTaskVersion(),
 			}
 		}()
 	}

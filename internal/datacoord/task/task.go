@@ -53,6 +53,12 @@ type ExactSlotAdmission interface {
 	RequireExactSlotAdmission() bool
 }
 
+// ImportTaskVersionConstraint is implemented by the new import tasks. It uses
+// the explicit QuerySlot capability instead of guessing from build versions.
+type ImportTaskVersionConstraint interface {
+	MinimumImportTaskVersion() uint32
+}
+
 func WrapTaskLog(task Task, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.Int64("ID", task.GetTaskID()),

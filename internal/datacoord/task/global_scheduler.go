@@ -224,7 +224,7 @@ func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*
 // across all tasks in a scheduling round so later picks observe the decremented
 // slots.
 func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
-	return s.pickNodeWithMinimumVersionAndAdmission(slotHeap, taskSlot, semver.Version{}, false)
+	return s.pickNodeWithConstraints(slotHeap, taskSlot, semver.Version{}, 0, false)
 }
 
 func (s *globalTaskScheduler) pickNodeWithMinimumVersion(
@@ -232,13 +232,14 @@ func (s *globalTaskScheduler) pickNodeWithMinimumVersion(
 	taskSlot int64,
 	minimumVersion semver.Version,
 ) int64 {
-	return s.pickNodeWithMinimumVersionAndAdmission(slotHeap, taskSlot, minimumVersion, false)
+	return s.pickNodeWithConstraints(slotHeap, taskSlot, minimumVersion, 0, false)
 }
 
-func (s *globalTaskScheduler) pickNodeWithMinimumVersionAndAdmission(
+func (s *globalTaskScheduler) pickNodeWithConstraints(
 	slotHeap typeutil.Heap[*nodeSlotEntry],
 	taskSlot int64,
 	minimumVersion semver.Version,
+	minimumImportTaskVersion uint32,
 	exactAdmission bool,
 ) int64 {
 	if slotHeap.Len() == 0 {
@@ -255,6 +256,10 @@ func (s *globalTaskScheduler) pickNodeWithMinimumVersionAndAdmission(
 	for slotHeap.Len() > 0 {
 		entry := slotHeap.Pop()
 		if !workerSupportsMinimumVersion(entry.slots.Version, minimumVersion) {
+			skipped = append(skipped, entry)
+			continue
+		}
+		if entry.slots.MaxImportTaskVersion < minimumImportTaskVersion {
 			skipped = append(skipped, entry)
 			continue
 		}
@@ -347,13 +352,17 @@ func (s *globalTaskScheduler) schedule() {
 		}
 		taskSlot := task.GetTaskSlot()
 		minimumVersion, versionConstrained := minimumWorkerVersion(task)
+		minimumImportTaskVersion := uint32(0)
+		if constraint, ok := task.(ImportTaskVersionConstraint); ok {
+			minimumImportTaskVersion = constraint.MinimumImportTaskVersion()
+		}
 		exactAdmission := false
 		if admission, ok := task.(ExactSlotAdmission); ok {
 			exactAdmission = admission.RequireExactSlotAdmission()
 		}
-		nodeID := s.pickNodeWithMinimumVersionAndAdmission(slotHeap, taskSlot, minimumVersion, exactAdmission)
+		nodeID := s.pickNodeWithConstraints(slotHeap, taskSlot, minimumVersion, minimumImportTaskVersion, exactAdmission)
 		if nodeID == NullNodeID {
-			if versionConstrained {
+			if versionConstrained || minimumImportTaskVersion > 0 {
 				delayed = append(delayed, task)
 				continue
 			}
