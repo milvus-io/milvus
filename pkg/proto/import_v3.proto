@@ -246,6 +246,9 @@ message PlanningSnapshot {
   // repeated in the worker request only as an assertion; the snapshot remains
   // the recovery source of truth.
   int64 collection_id = 17;
+  // The primary cluster identity used by function execution. CDC consumers
+  // must use this frozen value rather than their local cluster configuration.
+  string cluster_id = 18;
 }
 
 message ImportTaskPlan {
