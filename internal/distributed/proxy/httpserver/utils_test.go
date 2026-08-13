@@ -17,6 +17,7 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -3111,7 +3112,7 @@ func TestBuildQueryResps(t *testing.T) {
 
 	_, err := buildQueryResp(int64(0), outputFields, newFieldData([]*schemapb.FieldData{}, 1000), generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true, nil)
 	assert.Contains(t, err.Error(), "the type(1000) of field(wrong-field-type) is not supported, use other sdk please")
-	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
+	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
 
 	res, err := buildQueryResp(int64(0), outputFields, []*schemapb.FieldData{}, generateIDs(schemapb.DataType_Int64, 3), DefaultScores, true, nil)
 	assert.Equal(t, 3, len(res))
@@ -3482,48 +3483,52 @@ func TestBuildSearchAggregationResp(t *testing.T) {
 		},
 	}
 
-	resp, err := buildSearchAggregationResp(results, false, generateCollectionSchema(schemapb.DataType_Int64, false, true))
+	resp, err := buildSearchAggregationResp(context.Background(), results, false, generateCollectionSchema(schemapb.DataType_Int64, false, true))
 	require.NoError(t, err)
-	require.Len(t, resp, 1)
-	buckets := resp[0]["buckets"].([]gin.H)
-	require.Len(t, buckets, 1)
-	bucket := buckets[0]
-	require.Equal(t, "3", bucket["count"])
+	var encoded bytes.Buffer
+	require.NoError(t, resp.WriteJSON(context.Background(), &encoded))
+	require.True(t, gjson.ValidBytes(encoded.Bytes()))
+	require.Equal(t, "3", gjson.GetBytes(encoded.Bytes(), "0.buckets.0.count").String())
+	require.Equal(t, "brand", gjson.GetBytes(encoded.Bytes(), "0.buckets.0.key.0.fieldName").String())
+	require.Equal(t, "101", gjson.GetBytes(encoded.Bytes(), "0.buckets.0.key.0.fieldId").String())
+	require.Equal(t, "acme", gjson.GetBytes(encoded.Bytes(), "0.buckets.0.key.0.value").String())
+	require.Equal(t, "9", gjson.GetBytes(encoded.Bytes(), "0.buckets.0.key.1.value").String())
+	require.Equal(t, 12.5, gjson.GetBytes(encoded.Bytes(), "0.buckets.0.metrics.avg_price").Float())
+	require.Equal(t, "7", gjson.GetBytes(encoded.Bytes(), "0.buckets.0.metrics.stock").String())
+	require.Equal(t, "1001", gjson.GetBytes(encoded.Bytes(), "0.buckets.0.hits.0.book_id").String())
+	require.InDelta(t, 0.8, gjson.GetBytes(encoded.Bytes(), "0.buckets.0.hits.0.distance").Float(), 0.0001)
+	require.Equal(t, "99", gjson.GetBytes(encoded.Bytes(), "0.buckets.0.hits.0.price").String())
+	require.Equal(t, "item", gjson.GetBytes(encoded.Bytes(), "0.buckets.0.hits.0.title").String())
+	require.Equal(t, "1", gjson.GetBytes(encoded.Bytes(), "0.buckets.0.subGroups.0.count").String())
 
-	keys := bucket["key"].([]gin.H)
-	require.Equal(t, "brand", keys[0]["fieldName"])
-	require.Equal(t, "101", keys[0]["fieldId"])
-	require.Equal(t, "acme", keys[0]["value"])
-	require.Equal(t, "9", keys[1]["value"])
-
-	metrics := bucket["metrics"].(gin.H)
-	require.Equal(t, 12.5, metrics["avg_price"])
-	require.Equal(t, "7", metrics["stock"])
-
-	hits := bucket["hits"].([]gin.H)
-	require.Equal(t, "1001", hits[0][FieldBookID])
-	require.Equal(t, float32(0.8), hits[0][HTTPReturnDistance])
-	require.Equal(t, "99", hits[0]["price"])
-	require.Equal(t, "item", hits[0]["title"])
-
-	subGroups := bucket["subGroups"].([]gin.H)
-	require.Equal(t, "1", subGroups[0]["count"])
-
-	_, err = buildSearchAggregationResp(&schemapb.SearchResultData{NumQueries: 1, AggBuckets: results.GetAggBuckets()}, true, nil)
+	_, err = buildSearchAggregationResp(context.Background(), &schemapb.SearchResultData{NumQueries: 1, AggBuckets: results.GetAggBuckets()}, true, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing agg_topks")
 
-	_, err = buildSearchAggregationResp(&schemapb.SearchResultData{AggTopks: []int64{1}, AggBuckets: results.GetAggBuckets()}, true, nil)
+	_, err = buildSearchAggregationResp(context.Background(), &schemapb.SearchResultData{AggTopks: []int64{1}, AggBuckets: results.GetAggBuckets()}, true, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing nq")
 
-	_, err = buildSearchAggregationResp(&schemapb.SearchResultData{NumQueries: 2, AggTopks: []int64{1}, AggBuckets: results.GetAggBuckets()}, true, nil)
+	_, err = buildSearchAggregationResp(context.Background(), &schemapb.SearchResultData{NumQueries: 2, AggTopks: []int64{1}, AggBuckets: results.GetAggBuckets()}, true, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not match nq")
 
-	_, err = buildSearchAggregationResp(&schemapb.SearchResultData{NumQueries: 1, AggTopks: []int64{2}, AggBuckets: results.GetAggBuckets()}, true, nil)
+	_, err = buildSearchAggregationResp(context.Background(), &schemapb.SearchResultData{NumQueries: 1, AggTopks: []int64{2}, AggBuckets: results.GetAggBuckets()}, true, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not match bucket count")
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = buildSearchAggregationResp(canceledCtx, results, true, nil)
+	require.ErrorIs(t, err, context.Canceled)
+
+	invalidMetric := proto.Clone(results).(*schemapb.SearchResultData)
+	invalidMetric.AggBuckets[0].Metrics["avg_price"] = &schemapb.MetricValue{
+		Value: &schemapb.MetricValue_DoubleVal{DoubleVal: math.NaN()},
+	}
+	_, err = buildSearchAggregationResp(context.Background(), invalidMetric, true, nil)
+	require.Error(t, err)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
 func TestGenFunctionSchem(t *testing.T) {
@@ -4958,7 +4963,7 @@ func TestStructArrayHelperValueConversions(t *testing.T) {
 			count, err := vectorFieldElemCount(test.vector, test.elementType, test.dim)
 			require.NoError(t, err)
 			assert.Equal(t, test.count, count)
-			values, err := vectorFieldToInterfaces(test.vector, test.elementType, test.dim)
+			values, err := vectorFieldToInterfaces(context.Background(), test.vector, test.elementType, test.dim)
 			require.NoError(t, err)
 			assert.Len(t, values, test.count)
 		})
@@ -4968,10 +4973,68 @@ func TestStructArrayHelperValueConversions(t *testing.T) {
 	assert.Error(t, err)
 	_, err = vectorFieldElemCount(&schemapb.VectorField{}, schemapb.DataType_JSON, 1)
 	assert.Error(t, err)
-	_, err = vectorFieldToInterfaces(&schemapb.VectorField{}, schemapb.DataType_FloatVector, 0)
+	_, err = vectorFieldToInterfaces(context.Background(), &schemapb.VectorField{}, schemapb.DataType_FloatVector, 0)
 	assert.Error(t, err)
-	_, err = vectorFieldToInterfaces(&schemapb.VectorField{}, schemapb.DataType_JSON, 1)
+	_, err = vectorFieldToInterfaces(context.Background(), &schemapb.VectorField{}, schemapb.DataType_JSON, 1)
 	assert.Error(t, err)
+}
+
+func TestVectorFieldToInterfacesStopsOnCancellation(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		vector      *schemapb.VectorField
+		dim         int64
+	}{
+		{
+			name:        "float",
+			elementType: schemapb.DataType_FloatVector,
+			vector: &schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: make([]float32, 8)},
+			}},
+			dim: 2,
+		},
+		{
+			name:        "float16",
+			elementType: schemapb.DataType_Float16Vector,
+			vector: &schemapb.VectorField{Data: &schemapb.VectorField_Float16Vector{
+				Float16Vector: make([]byte, 16),
+			}},
+			dim: 2,
+		},
+		{
+			name:        "bfloat16",
+			elementType: schemapb.DataType_BFloat16Vector,
+			vector: &schemapb.VectorField{Data: &schemapb.VectorField_Bfloat16Vector{
+				Bfloat16Vector: make([]byte, 16),
+			}},
+			dim: 2,
+		},
+		{
+			name:        "binary",
+			elementType: schemapb.DataType_BinaryVector,
+			vector: &schemapb.VectorField{Data: &schemapb.VectorField_BinaryVector{
+				BinaryVector: make([]byte, 8),
+			}},
+			dim: 16,
+		},
+		{
+			name:        "int8",
+			elementType: schemapb.DataType_Int8Vector,
+			vector: &schemapb.VectorField{Data: &schemapb.VectorField_Int8Vector{
+				Int8Vector: make([]byte, 8),
+			}},
+			dim: 2,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := newCancelAfterErrChecksContext(2)
+			_, err := vectorFieldToInterfaces(ctx, test.vector, test.elementType, test.dim)
+			require.ErrorIs(t, err, context.Canceled)
+		})
+	}
 }
 
 func TestStructArrayCheckAndSetPartialUpdate(t *testing.T) {

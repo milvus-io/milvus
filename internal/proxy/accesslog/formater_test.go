@@ -19,9 +19,11 @@ package accesslog
 import (
 	"context"
 	"net"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/suite"
 	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc"
@@ -187,6 +189,17 @@ func (s *LogFormatterSuite) TestFormatMethodResult() {
 		i.SetResult(s.resps[id], s.errs[id])
 		fs = formatter.Format(i)
 		s.False(strings.Contains(fs, info.Unknown))
+	}
+}
+
+func (s *LogFormatterSuite) TestFormatPrefixOverlappingMetrics() {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set(info.ContextStreamTermination, "failed")
+	ctx.Set(info.ContextStreamTerminationCause, "idle_timeout")
+
+	for range 100 {
+		formatter := NewFormatter("$stream_termination|$stream_termination_cause")
+		s.Equal("failed|idle_timeout\n", formatter.Format(info.NewRestfulInfo(ctx)))
 	}
 }
 

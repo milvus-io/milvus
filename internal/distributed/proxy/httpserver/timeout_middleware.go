@@ -27,10 +27,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/render"
 
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -40,6 +43,8 @@ import (
 type BufferPool struct {
 	pool sync.Pool
 }
+
+const maxPooledResponseBufferCapacity = 1024 * 1024
 
 // Get returns a buffer from the buffer pool.
 // If the pool is empty, a new buffer is created and returned.
@@ -53,7 +58,15 @@ func (p *BufferPool) Get() *bytes.Buffer {
 
 // Put adds a buffer back to the pool.
 func (p *BufferPool) Put(buf *bytes.Buffer) {
+	if !isReusableResponseBuffer(buf) {
+		return
+	}
+	buf.Reset()
 	p.pool.Put(buf)
+}
+
+func isReusableResponseBuffer(buf *bytes.Buffer) bool {
+	return buf != nil && buf.Cap() <= maxPooledResponseBufferCapacity
 }
 
 // Timeout struct
@@ -63,6 +76,103 @@ type Timeout struct {
 
 const timeoutRecorderNoWritten = -1
 
+var errStreamIdleTimeout = errors.Wrap(context.DeadlineExceeded, "stream idle timeout")
+
+const (
+	streamTerminationFailed              = "failed"
+	streamTerminationCauseIdleTimeout    = "idle_timeout"
+	streamTerminationCauseRequestTimeout = "request_timeout"
+	streamTerminationCauseClientCancel   = "client_cancel"
+	streamTerminationCauseTransportError = "transport_error"
+	streamTerminationCauseRenderError    = "render_error"
+)
+
+type streamIdleTimeoutContextKey struct{}
+
+type streamIdleController struct {
+	ctx      context.Context
+	timeout  time.Duration
+	cancel   context.CancelCauseFunc
+	mu       sync.Mutex
+	timer    *time.Timer
+	deadline time.Time
+	stopped  bool
+}
+
+func withStreamIdleTimeout(ctx context.Context, timeout time.Duration) (context.Context, *streamIdleController) {
+	ctx = renderContext(ctx)
+	if timeout <= 0 {
+		return ctx, nil
+	}
+	streamCtx, cancel := context.WithCancelCause(ctx)
+	controller := &streamIdleController{
+		ctx:     streamCtx,
+		timeout: timeout,
+		cancel:  cancel,
+	}
+	return context.WithValue(streamCtx, streamIdleTimeoutContextKey{}, controller), controller
+}
+
+func streamIdleControllerFromContext(ctx context.Context) *streamIdleController {
+	controller, _ := renderContext(ctx).Value(streamIdleTimeoutContextKey{}).(*streamIdleController)
+	return controller
+}
+
+func (c *streamIdleController) arm() time.Time {
+	if c == nil {
+		return time.Time{}
+	}
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stopped || c.ctx.Err() != nil {
+		return time.Time{}
+	}
+	c.deadline = now.Add(c.timeout)
+	if c.timer == nil {
+		c.timer = time.AfterFunc(c.timeout, c.expire)
+		return c.deadline
+	}
+	c.timer.Reset(c.timeout)
+	return c.deadline
+}
+
+func (c *streamIdleController) expire() {
+	c.mu.Lock()
+	if c.stopped || c.ctx.Err() != nil {
+		c.stopped = true
+		c.mu.Unlock()
+		return
+	}
+	if remaining := time.Until(c.deadline); remaining > 0 {
+		c.timer.Reset(remaining)
+		c.mu.Unlock()
+		return
+	}
+	c.stopped = true
+	c.cancel(errStreamIdleTimeout)
+	c.mu.Unlock()
+}
+
+func (c *streamIdleController) stop() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stopped {
+		return
+	}
+	c.stopped = true
+	if c.timer != nil {
+		c.timer.Stop()
+	}
+}
+
+func responseContextError(ctx context.Context) error {
+	return context.Cause(renderContext(ctx))
+}
+
 type timeoutResponseRecorder struct {
 	body        *bytes.Buffer
 	headers     http.Header
@@ -71,6 +181,39 @@ type timeoutResponseRecorder struct {
 	status      int
 	size        int
 	closeNotify chan bool
+	render      render.Render
+}
+
+type timeoutResponseCommit struct {
+	body    *bytes.Buffer
+	headers http.Header
+	status  int
+	written bool
+	render  render.Render
+}
+
+type deferredRenderError struct {
+	cause error
+}
+
+func (err *deferredRenderError) Error() string {
+	return err.cause.Error()
+}
+
+func (err *deferredRenderError) Unwrap() error {
+	return err.cause
+}
+
+type responseTransportError struct {
+	cause error
+}
+
+func (err *responseTransportError) Error() string {
+	return err.cause.Error()
+}
+
+func (err *responseTransportError) Unwrap() error {
+	return err.cause
 }
 
 func newTimeoutResponseRecorder(buf *bytes.Buffer) *timeoutResponseRecorder {
@@ -93,6 +236,9 @@ func (w *timeoutResponseRecorder) Write(data []byte) (int, error) {
 	if w.closed || w.body == nil {
 		return 0, merr.WrapErrServiceInternalMsg("response writer closed")
 	}
+	if w.render != nil {
+		return 0, merr.WrapErrServiceInternalMsg("response renderer already deferred")
+	}
 	if !w.written() {
 		w.size = 0
 	}
@@ -106,6 +252,9 @@ func (w *timeoutResponseRecorder) WriteString(s string) (int, error) {
 	defer w.mu.Unlock()
 	if w.closed || w.body == nil {
 		return 0, merr.WrapErrServiceInternalMsg("response writer closed")
+	}
+	if w.render != nil {
+		return 0, merr.WrapErrServiceInternalMsg("response renderer already deferred")
 	}
 	if !w.written() {
 		w.size = 0
@@ -170,25 +319,286 @@ func (w *timeoutResponseRecorder) Pusher() http.Pusher {
 	return nil
 }
 
-func (w *timeoutResponseRecorder) CommitTo(realWriter gin.ResponseWriter) error {
+func (w *timeoutResponseRecorder) DeferRender(responseRender render.Render) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed || w.body == nil {
 		return merr.WrapErrServiceInternalMsg("response writer closed")
 	}
+	if responseRender == nil {
+		return merr.WrapErrServiceInternalMsg("response renderer is nil")
+	}
+	if w.render != nil || w.body.Len() != 0 {
+		return merr.WrapErrServiceInternalMsg("response body already configured")
+	}
+	w.render = responseRender
+	if !w.written() {
+		w.size = 0
+	}
+	return nil
+}
+
+type requestDeadlineWriter struct {
+	http.ResponseWriter
+	ctx                context.Context
+	controller         *http.ResponseController
+	flushController    *http.ResponseController
+	serverWriteTimeout time.Duration
+	prepared           bool
+	writeDeadlineSet   bool
+	stopWriteInterrupt func() bool
+	writeMu            sync.Mutex
+	writeActive        bool
+}
+
+type serverWriteTimeoutContextKey struct{}
+
+func serverWriteTimeoutMiddleware(writeTimeout time.Duration) gin.HandlerFunc {
+	return func(gCtx *gin.Context) {
+		ctx := withServerWriteTimeout(gCtx.Request.Context(), writeTimeout)
+		gCtx.Request = gCtx.Request.WithContext(ctx)
+		gCtx.Next()
+	}
+}
+
+func withServerWriteTimeout(ctx context.Context, writeTimeout time.Duration) context.Context {
+	return context.WithValue(renderContext(ctx), serverWriteTimeoutContextKey{}, writeTimeout)
+}
+
+func serverWriteTimeoutFromContext(ctx context.Context) time.Duration {
+	writeTimeout, _ := renderContext(ctx).Value(serverWriteTimeoutContextKey{}).(time.Duration)
+	return writeTimeout
+}
+
+func newRequestDeadlineWriter(ctx context.Context, writer http.ResponseWriter) *requestDeadlineWriter {
+	if deadlineWriter, ok := writer.(*requestDeadlineWriter); ok {
+		return deadlineWriter
+	}
+	ctx = renderContext(ctx)
+	flushWriter := writer
+	if _, ok := writer.(gin.ResponseWriter); ok {
+		if unwrapper, ok := writer.(interface{ Unwrap() http.ResponseWriter }); ok {
+			if unwrapped := unwrapper.Unwrap(); unwrapped != nil {
+				flushWriter = unwrapped
+			}
+		}
+	}
+	return &requestDeadlineWriter{
+		ResponseWriter:     writer,
+		ctx:                ctx,
+		controller:         http.NewResponseController(writer),
+		flushController:    http.NewResponseController(flushWriter),
+		serverWriteTimeout: serverWriteTimeoutFromContext(ctx),
+	}
+}
+
+func (w *requestDeadlineWriter) prepare() error {
+	if err := responseContextError(w.ctx); err != nil {
+		return err
+	}
+	if w.prepared {
+		return nil
+	}
+	w.prepared = true
+	if w.ctx.Done() != nil {
+		w.stopWriteInterrupt = context.AfterFunc(w.ctx, func() {
+			w.interruptActiveWrite()
+		})
+	}
+	// Preserve a positive startup WriteTimeout as net/http-owned. Otherwise keep
+	// the transport deadline untouched until the first output operation succeeds,
+	// so an unwritten request-timeout response remains writable. The cancellation
+	// callback still interrupts an active output operation in either mode.
+	return responseContextError(w.ctx)
+}
+
+func (w *requestDeadlineWriter) stopDeadlineInterrupt() {
+	if w.stopWriteInterrupt == nil {
+		return
+	}
+	w.stopWriteInterrupt()
+	w.stopWriteInterrupt = nil
+}
+
+func (w *requestDeadlineWriter) beginWrite() error {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+	if err := responseContextError(w.ctx); err != nil {
+		return err
+	}
+	w.writeActive = true
+	return nil
+}
+
+func (w *requestDeadlineWriter) endWrite() error {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+	w.writeActive = false
+	if w.serverWriteTimeout > 0 || w.writeDeadlineSet {
+		return nil
+	}
+	deadline, ok := w.ctx.Deadline()
+	if !ok {
+		return nil
+	}
+	w.writeDeadlineSet = true
+	// Leave the request deadline in place until net/http finishes the response.
+	// The server performs its final buffered flush after the handler returns and
+	// then clears the HTTP/1 connection deadline or closes the HTTP/2 stream. Keep
+	// the cancellation callback armed so a shorter rolling stream-idle timeout or
+	// client cancellation can still interrupt a later active output operation.
+	if err := w.controller.SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
+	}
+	return nil
+}
+
+func (w *requestDeadlineWriter) setStreamIdleDeadline(deadline time.Time) error {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+
+	ctxErr := responseContextError(w.ctx)
+	if w.serverWriteTimeout > 0 {
+		return ctxErr
+	}
+	if ctxErr != nil {
+		deadline = time.Now()
+	} else if deadline.IsZero() {
+		return nil
+	}
+	if requestDeadline, ok := w.ctx.Deadline(); ok && requestDeadline.Before(deadline) {
+		deadline = requestDeadline
+	}
+	w.writeDeadlineSet = true
+	setErr := w.controller.SetWriteDeadline(deadline)
+	if ctxErr != nil {
+		return ctxErr
+	}
+	if setErr != nil && !errors.Is(setErr, http.ErrNotSupported) {
+		return &responseTransportError{cause: setErr}
+	}
+	return nil
+}
+
+func (w *requestDeadlineWriter) interruptActiveWrite() {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+	if responseContextError(w.ctx) != nil && w.writeActive {
+		_ = w.controller.SetWriteDeadline(time.Now())
+	}
+}
+
+func (w *requestDeadlineWriter) runOutput(operation func() error) (err error) {
+	if err := w.prepare(); err != nil {
+		return err
+	}
+	if err := w.beginWrite(); err != nil {
+		return err
+	}
+	defer func() {
+		deadlineErr := w.endWrite()
+		if ctxErr := responseContextError(w.ctx); ctxErr != nil {
+			err = ctxErr
+		} else if err == nil && deadlineErr != nil {
+			err = &responseTransportError{cause: deadlineErr}
+		}
+	}()
+	if err := operation(); err != nil {
+		return &responseTransportError{cause: err}
+	}
+	return nil
+}
+
+func (w *requestDeadlineWriter) Write(data []byte) (int, error) {
+	var n int
+	err := w.runOutput(func() error {
+		var err error
+		n, err = w.ResponseWriter.Write(data)
+		return err
+	})
+	return n, err
+}
+
+func (w *requestDeadlineWriter) FlushError() error {
+	flushUnsupported := false
+	err := w.runOutput(func() error {
+		if writer, ok := w.ResponseWriter.(interface{ WriteHeaderNow() }); ok {
+			writer.WriteHeaderNow()
+		}
+		err := w.flushController.Flush()
+		flushUnsupported = errors.Is(err, http.ErrNotSupported)
+		return err
+	})
+	if flushUnsupported {
+		return nil
+	}
+	return err
+}
+
+func (w *requestDeadlineWriter) writeHeaderNow() error {
+	return w.runOutput(func() error {
+		if writer, ok := w.ResponseWriter.(interface{ WriteHeaderNow() }); ok {
+			writer.WriteHeaderNow()
+		}
+		return nil
+	})
+}
+
+func (w *requestDeadlineWriter) Flush() {
+	_ = w.FlushError()
+}
+
+func (w *requestDeadlineWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+func (w *timeoutResponseRecorder) CommitTo(ctx context.Context, realWriter gin.ResponseWriter) error {
+	ctx = renderContext(ctx)
+	if err := responseContextError(ctx); err != nil {
+		return err
+	}
+	w.mu.Lock()
+	if w.closed || w.body == nil {
+		w.mu.Unlock()
+		return merr.WrapErrServiceInternalMsg("response writer closed")
+	}
+	commit := timeoutResponseCommit{
+		body:    w.body,
+		headers: w.headers.Clone(),
+		status:  w.status,
+		written: w.written(),
+		render:  w.render,
+	}
+	// Detach recorder-owned state before any network I/O. Late handler writes
+	// must fail immediately instead of blocking behind a slow client, and the
+	// middleware remains the sole owner of the real response writer.
+	w.body = nil
+	w.render = nil
+	w.closed = true
+	w.mu.Unlock()
 
 	dst := realWriter.Header()
-	for k, vv := range w.headers {
+	for k, vv := range commit.headers {
 		dst[k] = append([]string(nil), vv...)
 	}
-	realWriter.WriteHeader(w.status)
-	if w.body.Len() == 0 {
-		if w.written() || w.status != http.StatusOK {
-			realWriter.WriteHeaderNow()
+	realWriter.WriteHeader(commit.status)
+	deadlineWriter := newRequestDeadlineWriter(ctx, realWriter)
+	defer deadlineWriter.stopDeadlineInterrupt()
+	if commit.render != nil {
+		if err := commit.render.Render(deadlineWriter); err != nil {
+			return &deferredRenderError{cause: err}
 		}
 		return nil
 	}
-	_, err := realWriter.Write(w.body.Bytes())
+	if commit.body.Len() == 0 {
+		if commit.written || commit.status != http.StatusOK {
+			if err := deadlineWriter.writeHeaderNow(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	_, err := deadlineWriter.Write(commit.body.Bytes())
 	return err
 }
 
@@ -199,6 +609,7 @@ func (w *timeoutResponseRecorder) Close() {
 		w.body.Reset()
 		w.body = nil
 	}
+	w.render = nil
 	w.closed = true
 }
 
@@ -232,6 +643,62 @@ func propagateTimeoutContextKeys(dst *gin.Context, src *gin.Context) {
 	}
 }
 
+func writeRequestTimeout(gCtx *gin.Context, realWriter gin.ResponseWriter) {
+	gCtx.Abort()
+	gCtx.Set(HTTPReturnCode, merr.TimeoutCode)
+	gCtx.Set(HTTPReturnMessage, "request timeout")
+
+	realWriter.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if traceID, ok := getTraceID(gCtx); ok {
+		setTraceIDHeaderTo(realWriter.Header(), traceID)
+	}
+	realWriter.WriteHeader(http.StatusRequestTimeout)
+	body, _ := json.Marshal(gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
+	realWriter.Write(body)
+}
+
+func streamTerminationCause(err error) string {
+	if errors.Is(err, errStreamIdleTimeout) {
+		return streamTerminationCauseIdleTimeout
+	}
+	var transportErr *responseTransportError
+	if errors.As(err, &transportErr) {
+		return streamTerminationCauseTransportError
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return streamTerminationCauseRequestTimeout
+	case errors.Is(err, context.Canceled):
+		return streamTerminationCauseClientCancel
+	}
+	var renderErr *deferredRenderError
+	if errors.As(err, &renderErr) {
+		return streamTerminationCauseRenderError
+	}
+	return streamTerminationCauseTransportError
+}
+
+func recordPostCommitStreamFailure(gCtx *gin.Context, err error) string {
+	cause := streamTerminationCause(err)
+	gCtx.Set(ContextStreamTermination, streamTerminationFailed)
+	gCtx.Set(ContextStreamTerminationCause, cause)
+	path := gCtx.FullPath()
+	if path == "" {
+		path = "unknown"
+	}
+	metrics.RestfulStreamDeliveryFailure.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		path,
+		cause,
+	).Inc()
+	return cause
+}
+
+func isDeferredStreamFailure(err error) bool {
+	var renderErr *deferredRenderError
+	return errors.As(err, &renderErr)
+}
+
 func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	timeoutHandler := &Timeout{
 		handler: handler,
@@ -239,6 +706,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	bufPool := &BufferPool{}
 	return func(gCtx *gin.Context) {
 		timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
+		streamIdleTimeout := paramtable.Get().HTTPCfg.StreamIdleTimeout.GetAsDurationByParse()
 		requestTimeout := gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout)
 		if requestTimeout != "" {
 			timeoutSecond, err := strconv.ParseInt(requestTimeout, 10, 64)
@@ -257,7 +725,9 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 		}
 		topCtx, cancel := context.WithTimeout(gCtx.Request.Context(), timeout)
 		defer cancel()
-		req := gCtx.Request.WithContext(topCtx)
+		requestCtx, idleController := withStreamIdleTimeout(topCtx, streamIdleTimeout)
+		defer idleController.stop()
+		req := gCtx.Request.WithContext(requestCtx)
 		gCtx.Request = req
 
 		finish := make(chan struct{}, 1)
@@ -297,30 +767,42 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 				gCtx.Abort()
 			}
 			gCtx.Next()
-			if err := recorder.CommitTo(realWriter); err != nil {
-				mlog.Warn(context.TODO(), "failed to write response body", mlog.Err(err))
-				recorder.Close()
-				bufPool.Put(buffer)
+			commitErr := func() error {
+				defer bufPool.Put(buffer)
+				defer recorder.Close()
+				return recorder.CommitTo(requestCtx, realWriter)
+			}()
+			if commitErr != nil {
+				committed := realWriter.Written()
+				if !committed {
+					if errors.Is(commitErr, context.DeadlineExceeded) {
+						writeRequestTimeout(gCtx, realWriter)
+						return
+					}
+					var renderErr *deferredRenderError
+					if errors.As(commitErr, &renderErr) && !errors.Is(commitErr, context.Canceled) {
+						returnInvalidSearchResult(gCtx, renderErr.cause)
+						return
+					}
+				}
+				if committed && isDeferredStreamFailure(commitErr) {
+					cause := recordPostCommitStreamFailure(gCtx, commitErr)
+					mlog.Warn(gCtx.Request.Context(), "failed to write response body",
+						mlog.Err(commitErr),
+						mlog.String(ContextStreamTermination, streamTerminationFailed),
+						mlog.String(ContextStreamTerminationCause, cause),
+					)
+					return
+				}
+				mlog.Warn(gCtx.Request.Context(), "failed to write response body", mlog.Err(commitErr))
 				return
 			}
-			recorder.Close()
-			bufPool.Put(buffer)
 
 		case <-timer.C:
 			cancel()
-			gCtx.Abort()
-			gCtx.Set(HTTPReturnCode, merr.TimeoutCode)
-			gCtx.Set(HTTPReturnMessage, "request timeout")
 			recorder.CloseForTimeout()
 			bufPool.Put(buffer)
-
-			realWriter.Header().Set("Content-Type", "application/json; charset=utf-8")
-			if traceID, ok := getTraceID(gCtx); ok {
-				setTraceIDHeaderTo(realWriter.Header(), traceID)
-			}
-			realWriter.WriteHeader(http.StatusRequestTimeout)
-			body, _ := json.Marshal(gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
-			realWriter.Write(body)
+			writeRequestTimeout(gCtx, realWriter)
 		}
 	}
 }

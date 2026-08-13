@@ -221,17 +221,18 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		ginHandler.Use(authenticate)
 	}
+	Params := &proxy.Params.HTTPCfg
+	writeTimeout := Params.WriteTimeout.GetAsDurationByParse()
 	app := ginHandler.Group("/v1")
 	httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
 	appV2 := ginHandler.Group("/v2/vectordb")
-	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
+	httpserver.NewHandlersV2(s.proxy, writeTimeout).RegisterRoutesToV2(appV2)
 	http2Server := &http2.Server{}
-	Params := &proxy.Params.HTTPCfg
 	s.httpServer = &http.Server{
 		Handler:           h2c.NewHandler(s.httpHandler(ginHandler), http2Server),
 		ReadHeaderTimeout: Params.ReadHeaderTimeout.GetAsDurationByParse(),
 		ReadTimeout:       Params.ReadTimeout.GetAsDurationByParse(),
-		WriteTimeout:      Params.WriteTimeout.GetAsDurationByParse(),
+		WriteTimeout:      writeTimeout,
 		IdleTimeout:       Params.IdleTimeout.GetAsDurationByParse(),
 		MaxHeaderBytes:    Params.MaxHeaderBytes.GetAsInt(),
 	}

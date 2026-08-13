@@ -117,8 +117,20 @@ func (s *RestfulAccessInfoSuite) TestStatus() {
 
 	s.info.params.StatusCode = http.StatusOK
 	s.ctx.Set(ContextReturnCode, merr.Code(nil))
+	s.ctx.Set(ContextStreamTermination, "failed")
+	s.ctx.Set(ContextStreamTerminationCause, "transport_error")
 	result = Get(s.info, "$method_status")
 	s.Equal("Successful", result[0])
+}
+
+func (s *RestfulAccessInfoSuite) TestStreamTermination() {
+	s.Equal("", Get(s.info, "$stream_termination")[0])
+	s.Equal("", Get(s.info, "$stream_termination_cause")[0])
+
+	s.ctx.Set(ContextStreamTermination, "failed")
+	s.ctx.Set(ContextStreamTerminationCause, "idle_timeout")
+	s.Equal("failed", Get(s.info, "$stream_termination")[0])
+	s.Equal("idle_timeout", Get(s.info, "$stream_termination_cause")[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestErrorCode() {

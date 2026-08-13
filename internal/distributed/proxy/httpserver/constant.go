@@ -104,6 +104,8 @@ const (
 const (
 	ContextRequest                = "request"
 	ContextResponse               = "response"
+	ContextStreamTermination      = "stream_termination"
+	ContextStreamTerminationCause = "stream_termination_cause"
 	ContextUsername               = "username"
 	ContextToken                  = "token"
 	VectorCollectionsPath         = "/vector/collections"

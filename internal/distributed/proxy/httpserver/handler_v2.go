@@ -62,14 +62,16 @@ import (
 )
 
 type HandlersV2 struct {
-	proxy     types.ProxyComponent
-	checkAuth bool
+	proxy              types.ProxyComponent
+	checkAuth          bool
+	serverWriteTimeout time.Duration
 }
 
-func NewHandlersV2(proxyClient types.ProxyComponent) *HandlersV2 {
+func NewHandlersV2(proxyClient types.ProxyComponent, serverWriteTimeout time.Duration) *HandlersV2 {
 	return &HandlersV2{
-		proxy:     proxyClient,
-		checkAuth: proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool(),
+		proxy:              proxyClient,
+		checkAuth:          proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool(),
+		serverWriteTimeout: serverWriteTimeout,
 	}
 }
 
@@ -197,6 +199,7 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 }
 
 func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
+	router.Use(serverWriteTimeoutMiddleware(h.serverWriteTimeout))
 	router.POST(CollectionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.listCollections))))
 	router.POST(CollectionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.hasCollection))))
 	// todo review the return data
@@ -1418,6 +1421,17 @@ func matchCountRule(outputs []string) bool {
 	return len(outputs) == 1 && strings.ToLower(strings.TrimSpace(outputs[0])) == "count(*)"
 }
 
+func isRequestContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func returnInvalidSearchResult(c *gin.Context, err error) {
+	HTTPReturn(c, http.StatusOK, gin.H{
+		HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
+		HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
+	})
+}
+
 func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*QueryReqV2)
 	req := &milvuspb.QueryRequest{
@@ -1475,30 +1489,39 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
-		if err != nil {
-			mlog.Warn(ctx, "high level restful api, fail to deal with query result", mlog.Any("response", resp), mlog.Err(err))
-			HTTPReturn(c, http.StatusOK, gin.H{
-				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
-			})
+		outputData, buildErr := newQueryResponseRowsWithContext(ctx, int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		if buildErr != nil {
+			err = buildErr
+			if isRequestContextError(buildErr) {
+				return resp, err
+			}
+			queryResp.Status = merr.Status(merr.ErrInvalidSearchResult)
+			mlog.Warn(ctx, "high level restful api, fail to deal with query result",
+				mlog.Int32("code", queryResp.GetStatus().GetCode()),
+				mlog.Int("fieldCount", len(queryResp.GetFieldsData())),
+				mlog.Int("outputFieldCount", len(queryResp.GetOutputFields())),
+				mlog.Err(buildErr))
+			returnInvalidSearchResult(c, buildErr)
 		} else {
 			scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(queryResp.GetStatus())
+			respBody := gin.H{
+				HTTPReturnCode: merr.Code(nil),
+				HTTPReturnData: outputData,
+				HTTPReturnCost: proxy.GetCostValue(queryResp.GetStatus()),
+			}
 			if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
-				HTTPReturnStream(c, http.StatusOK, gin.H{
-					HTTPReturnCode:               merr.Code(nil),
-					HTTPReturnData:               outputData,
-					HTTPReturnCost:               proxy.GetCostValue(queryResp.GetStatus()),
-					HTTPReturnScannedRemoteBytes: scannedRemoteBytes,
-					HTTPReturnScannedTotalBytes:  scannedTotalBytes,
-					HTTPReturnCacheHitRatio:      cacheHitRatio,
-				})
-			} else {
-				HTTPReturnStream(c, http.StatusOK, gin.H{
-					HTTPReturnCode: merr.Code(nil),
-					HTTPReturnData: outputData,
-					HTTPReturnCost: proxy.GetCostValue(queryResp.GetStatus()),
-				})
+				respBody[HTTPReturnScannedRemoteBytes] = scannedRemoteBytes
+				respBody[HTTPReturnScannedTotalBytes] = scannedTotalBytes
+				respBody[HTTPReturnCacheHitRatio] = cacheHitRatio
+			}
+			if renderErr := HTTPReturnStream(c, http.StatusOK, respBody); renderErr != nil {
+				err = renderErr
+				if isRequestContextError(renderErr) {
+					return resp, err
+				}
+				queryResp.Status = merr.Status(merr.ErrInvalidSearchResult)
+				mlog.Warn(ctx, "high level restful api, fail to render query result", mlog.Err(renderErr))
+				returnInvalidSearchResult(c, renderErr)
 			}
 		}
 	}
@@ -1544,30 +1567,39 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
-		if err != nil {
-			mlog.Warn(ctx, "high level restful api, fail to deal with get result", mlog.Any("response", resp), mlog.Err(err))
-			HTTPReturn(c, http.StatusOK, gin.H{
-				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
-			})
+		outputData, buildErr := newQueryResponseRowsWithContext(ctx, int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		if buildErr != nil {
+			err = buildErr
+			if isRequestContextError(buildErr) {
+				return resp, err
+			}
+			queryResp.Status = merr.Status(merr.ErrInvalidSearchResult)
+			mlog.Warn(ctx, "high level restful api, fail to deal with get result",
+				mlog.Int32("code", queryResp.GetStatus().GetCode()),
+				mlog.Int("fieldCount", len(queryResp.GetFieldsData())),
+				mlog.Int("outputFieldCount", len(queryResp.GetOutputFields())),
+				mlog.Err(buildErr))
+			returnInvalidSearchResult(c, buildErr)
 		} else {
 			scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(queryResp.GetStatus())
+			respBody := gin.H{
+				HTTPReturnCode: merr.Code(nil),
+				HTTPReturnData: outputData,
+				HTTPReturnCost: proxy.GetCostValue(queryResp.GetStatus()),
+			}
 			if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
-				HTTPReturnStream(c, http.StatusOK, gin.H{
-					HTTPReturnCode:               merr.Code(nil),
-					HTTPReturnData:               outputData,
-					HTTPReturnCost:               proxy.GetCostValue(queryResp.GetStatus()),
-					HTTPReturnScannedRemoteBytes: scannedRemoteBytes,
-					HTTPReturnScannedTotalBytes:  scannedTotalBytes,
-					HTTPReturnCacheHitRatio:      cacheHitRatio,
-				})
-			} else {
-				HTTPReturnStream(c, http.StatusOK, gin.H{
-					HTTPReturnCode: merr.Code(nil),
-					HTTPReturnData: outputData,
-					HTTPReturnCost: proxy.GetCostValue(queryResp.GetStatus()),
-				})
+				respBody[HTTPReturnScannedRemoteBytes] = scannedRemoteBytes
+				respBody[HTTPReturnScannedTotalBytes] = scannedTotalBytes
+				respBody[HTTPReturnCacheHitRatio] = cacheHitRatio
+			}
+			if renderErr := HTTPReturnStream(c, http.StatusOK, respBody); renderErr != nil {
+				err = renderErr
+				if isRequestContextError(renderErr) {
+					return resp, err
+				}
+				queryResp.Status = merr.Status(merr.ErrInvalidSearchResult)
+				mlog.Warn(ctx, "high level restful api, fail to render get result", mlog.Err(renderErr))
+				returnInvalidSearchResult(c, renderErr)
 			}
 		}
 	}
@@ -2175,13 +2207,20 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(searchResp.GetStatus())
 		if hasSearchAggregationResult(searchResp.Results) {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildSearchAggregationResp(searchResp.Results, allowJS, collSchema)
-			if err != nil {
-				mlog.Warn(ctx, "high level restful api, fail to deal with search aggregation result", mlog.Any("result", searchResp.Results), mlog.Err(err))
-				HTTPReturn(c, http.StatusOK, gin.H{
-					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
-				})
+			outputData, buildErr := buildSearchAggregationResp(ctx, searchResp.Results, allowJS, collSchema)
+			if buildErr != nil {
+				err = buildErr
+				if isRequestContextError(buildErr) {
+					return resp, err
+				}
+				searchResp.Status = merr.Status(merr.ErrInvalidSearchResult)
+				mlog.Warn(ctx, "high level restful api, fail to deal with search aggregation result",
+					mlog.Int32("code", searchResp.GetStatus().GetCode()),
+					mlog.Int64("nq", searchResp.GetResults().GetNumQueries()),
+					mlog.Int("bucketCount", len(searchResp.GetResults().GetAggBuckets())),
+					mlog.Int("aggTopkCount", len(searchResp.GetResults().GetAggTopks())),
+					mlog.Err(buildErr))
+				returnInvalidSearchResult(c, buildErr)
 			} else {
 				respBody := gin.H{
 					HTTPReturnCode:     merr.Code(nil),
@@ -2197,60 +2236,58 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 					respBody[HTTPReturnScannedTotalBytes] = scannedTotalBytes
 					respBody[HTTPReturnCacheHitRatio] = cacheHitRatio
 				}
-				HTTPReturnStream(c, http.StatusOK, respBody)
+				if renderErr := HTTPReturnStream(c, http.StatusOK, respBody); renderErr != nil {
+					err = renderErr
+					if isRequestContextError(renderErr) {
+						return resp, err
+					}
+					searchResp.Status = merr.Status(merr.ErrInvalidSearchResult)
+					mlog.Warn(ctx, "high level restful api, fail to render search aggregation result", mlog.Err(renderErr))
+					returnInvalidSearchResult(c, renderErr)
+				}
 			}
 		} else if searchResp.Results.TopK == int64(0) {
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
-			if err != nil {
-				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
-				HTTPReturn(c, http.StatusOK, gin.H{
-					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
-				})
+			outputData, buildErr := newQueryResponseRowsWithContext(ctx, 0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			if buildErr != nil {
+				err = buildErr
+				if isRequestContextError(buildErr) {
+					return resp, err
+				}
+				searchResp.Status = merr.Status(merr.ErrInvalidSearchResult)
+				mlog.Warn(ctx, "high level restful api, fail to deal with search result",
+					mlog.Int32("code", searchResp.GetStatus().GetCode()),
+					mlog.Int64("nq", searchResp.GetResults().GetNumQueries()),
+					mlog.Int("fieldCount", len(searchResp.GetResults().GetFieldsData())),
+					mlog.Int("idCount", len(searchResp.GetResults().GetIds().GetIntId().GetData())+len(searchResp.GetResults().GetIds().GetStrId().GetData())),
+					mlog.Int("scoreCount", len(searchResp.GetResults().GetScores())),
+					mlog.Err(buildErr))
+				returnInvalidSearchResult(c, buildErr)
 			} else {
+				respBody := gin.H{
+					HTTPReturnCode:  merr.Code(nil),
+					HTTPReturnData:  outputData,
+					HTTPReturnCost:  cost,
+					HTTPReturnTopks: searchResp.Results.Topks,
+				}
 				if len(searchResp.Results.Recalls) > 0 {
-					if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
-						HTTPReturnStream(c, http.StatusOK, gin.H{
-							HTTPReturnCode:               merr.Code(nil),
-							HTTPReturnData:               outputData,
-							HTTPReturnCost:               cost,
-							HTTPReturnRecalls:            searchResp.Results.Recalls,
-							HTTPReturnTopks:              searchResp.Results.Topks,
-							HTTPReturnScannedRemoteBytes: scannedRemoteBytes,
-							HTTPReturnScannedTotalBytes:  scannedTotalBytes,
-							HTTPReturnCacheHitRatio:      cacheHitRatio,
-						})
-					} else {
-						HTTPReturnStream(c, http.StatusOK, gin.H{
-							HTTPReturnCode:    merr.Code(nil),
-							HTTPReturnData:    outputData,
-							HTTPReturnCost:    cost,
-							HTTPReturnRecalls: searchResp.Results.Recalls,
-							HTTPReturnTopks:   searchResp.Results.Topks,
-						})
+					respBody[HTTPReturnRecalls] = searchResp.Results.Recalls
+				}
+				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
+					respBody[HTTPReturnScannedRemoteBytes] = scannedRemoteBytes
+					respBody[HTTPReturnScannedTotalBytes] = scannedTotalBytes
+					respBody[HTTPReturnCacheHitRatio] = cacheHitRatio
+				}
+				if renderErr := HTTPReturnStream(c, http.StatusOK, respBody); renderErr != nil {
+					err = renderErr
+					if isRequestContextError(renderErr) {
+						return resp, err
 					}
-				} else {
-					if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
-						HTTPReturnStream(c, http.StatusOK, gin.H{
-							HTTPReturnCode:               merr.Code(nil),
-							HTTPReturnData:               outputData,
-							HTTPReturnCost:               cost,
-							HTTPReturnTopks:              searchResp.Results.Topks,
-							HTTPReturnScannedRemoteBytes: scannedRemoteBytes,
-							HTTPReturnScannedTotalBytes:  scannedTotalBytes,
-							HTTPReturnCacheHitRatio:      cacheHitRatio,
-						})
-					} else {
-						HTTPReturnStream(c, http.StatusOK, gin.H{
-							HTTPReturnCode:  merr.Code(nil),
-							HTTPReturnData:  outputData,
-							HTTPReturnCost:  cost,
-							HTTPReturnTopks: searchResp.Results.Topks,
-						})
-					}
+					searchResp.Status = merr.Status(merr.ErrInvalidSearchResult)
+					mlog.Warn(ctx, "high level restful api, fail to render search result", mlog.Err(renderErr))
+					returnInvalidSearchResult(c, renderErr)
 				}
 			}
 		}
@@ -2382,18 +2419,41 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
-			if err != nil {
-				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
-				HTTPReturn(c, http.StatusOK, gin.H{
-					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
-					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
-				})
+			outputData, buildErr := newQueryResponseRowsWithContext(ctx, 0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			if buildErr != nil {
+				err = buildErr
+				if isRequestContextError(buildErr) {
+					return resp, err
+				}
+				searchResp.Status = merr.Status(merr.ErrInvalidSearchResult)
+				mlog.Warn(ctx, "high level restful api, fail to deal with search result",
+					mlog.Int32("code", searchResp.GetStatus().GetCode()),
+					mlog.Int64("nq", searchResp.GetResults().GetNumQueries()),
+					mlog.Int("fieldCount", len(searchResp.GetResults().GetFieldsData())),
+					mlog.Int("idCount", len(searchResp.GetResults().GetIds().GetIntId().GetData())+len(searchResp.GetResults().GetIds().GetStrId().GetData())),
+					mlog.Int("scoreCount", len(searchResp.GetResults().GetScores())),
+					mlog.Err(buildErr))
+				returnInvalidSearchResult(c, buildErr)
 			} else {
+				respBody := gin.H{
+					HTTPReturnCode:  merr.Code(nil),
+					HTTPReturnData:  outputData,
+					HTTPReturnCost:  cost,
+					HTTPReturnTopks: searchResp.Results.Topks,
+				}
 				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
-					HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost, HTTPReturnTopks: searchResp.Results.Topks, HTTPReturnScannedRemoteBytes: scannedRemoteBytes, HTTPReturnScannedTotalBytes: scannedTotalBytes, HTTPReturnCacheHitRatio: cacheHitRatio})
-				} else {
-					HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost, HTTPReturnTopks: searchResp.Results.Topks})
+					respBody[HTTPReturnScannedRemoteBytes] = scannedRemoteBytes
+					respBody[HTTPReturnScannedTotalBytes] = scannedTotalBytes
+					respBody[HTTPReturnCacheHitRatio] = cacheHitRatio
+				}
+				if renderErr := HTTPReturnStream(c, http.StatusOK, respBody); renderErr != nil {
+					err = renderErr
+					if isRequestContextError(renderErr) {
+						return resp, err
+					}
+					searchResp.Status = merr.Status(merr.ErrInvalidSearchResult)
+					mlog.Warn(ctx, "high level restful api, fail to render hybrid search result", mlog.Err(renderErr))
+					returnInvalidSearchResult(c, renderErr)
 				}
 			}
 		}

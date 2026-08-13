@@ -310,6 +310,15 @@ var (
 			Help:      "count of bytes sent back to sdk",
 		}, []string{nodeIDLabelName, pathLabelName})
 
+	// RestfulStreamDeliveryFailure records failures detected after a REST stream response is committed.
+	RestfulStreamDeliveryFailure = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "restful_api_stream_delivery_failure_count",
+			Help:      "count of detected REST stream delivery failures after response commit",
+		}, []string{nodeIDLabelName, pathLabelName, causeLabelName})
+
 	// ProxyReportValue records value about the request
 	ProxyReportValue = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -536,6 +545,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(RestfulReceiveBytes)
 	registry.MustRegister(RestfulSendBytes)
+	registry.MustRegister(RestfulStreamDeliveryFailure)
 
 	registry.MustRegister(ProxyLimiterRate)
 	registry.MustRegister(ProxyHookFunc)

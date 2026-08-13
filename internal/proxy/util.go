@@ -1547,6 +1547,9 @@ func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int
 }
 
 func recallCal[T string | int64](results []T, gts []T) float32 {
+	if len(results) == 0 {
+		return 0
+	}
 	hit := 0
 	total := 0
 	for _, r := range results {

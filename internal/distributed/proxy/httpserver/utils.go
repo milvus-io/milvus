@@ -69,15 +69,21 @@ func HTTPReturn(c *gin.Context, code int, result gin.H) {
 	c.JSON(code, result)
 }
 
-// HTTPReturnStream uses custom jsonRender that encodes JSON data directly into the response writer.
-// Timeout-wrapped REST routes still buffer encoded bytes before committing them to the client.
-func HTTPReturnStream(c *gin.Context, code int, result gin.H) {
+// HTTPReturnStream uses custom jsonRender to stream row-based JSON data directly
+// into the response writer. Timeout-wrapped routes defer the renderer until the
+// handler wins timeout arbitration, then render into the real writer.
+func HTTPReturnStream(c *gin.Context, code int, result gin.H) error {
 	c.Set(HTTPReturnCode, result[HTTPReturnCode])
 	if errorMsg, ok := result[HTTPReturnMessage]; ok {
 		c.Set(HTTPReturnMessage, errorMsg)
 	}
 	setTraceIDHeader(c)
-	c.Render(code, jsonRender{Data: result})
+	previousErrors := len(c.Errors)
+	c.Render(code, jsonRender{Context: c.Request.Context(), Data: result})
+	if len(c.Errors) > previousErrors {
+		return c.Errors.Last().Err
+	}
+	return nil
 }
 
 func HTTPAbortReturn(c *gin.Context, code int, result gin.H) {
@@ -2345,6 +2351,7 @@ func buildStructArrayFieldDataInternal(structSchema *schemapb.StructArrayFieldSc
 }
 
 type structArrayRowAccessor struct {
+	ctx          context.Context
 	fieldData    *schemapb.FieldData
 	subFields    []*schemapb.FieldData
 	subAccessors []*fieldDataRowAccessor
@@ -2352,8 +2359,14 @@ type structArrayRowAccessor struct {
 }
 
 func newStructArrayRowAccessor(fd *schemapb.FieldData, schema *schemapb.CollectionSchema) (*structArrayRowAccessor, error) {
+	return newStructArrayRowAccessorWithContext(context.Background(), fd, schema)
+}
+
+func newStructArrayRowAccessorWithContext(ctx context.Context, fd *schemapb.FieldData, schema *schemapb.CollectionSchema) (*structArrayRowAccessor, error) {
+	ctx = renderContext(ctx)
 	subs := fd.GetStructArrays().GetFields()
 	accessor := &structArrayRowAccessor{
+		ctx:       ctx,
 		fieldData: fd,
 		subFields: subs,
 	}
@@ -2363,15 +2376,18 @@ func newStructArrayRowAccessor(fd *schemapb.FieldData, schema *schemapb.Collecti
 
 	expectedValidData := subs[0].GetValidData()
 	accessor.subAccessors = make([]*fieldDataRowAccessor, 0, len(subs))
-	for _, sub := range subs {
+	for subIndex, sub := range subs {
+		if err := checkResponseContext(ctx, int64(subIndex)); err != nil {
+			return nil, err
+		}
 		if !slices.Equal(expectedValidData, sub.GetValidData()) {
 			return nil, merr.WrapErrServiceInternalMsg(
 				"struct array field %s sub-field %s has inconsistent valid data",
 				fd.GetFieldName(), sub.GetFieldName())
 		}
-		subAccessor, err := newFieldDataRowAccessor(sub)
+		subAccessor, err := newFieldDataRowAccessorWithContext(ctx, sub)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternalErr(err,
+			return nil, merr.Wrapf(err,
 				"invalid struct array field %s sub-field %s", fd.GetFieldName(), sub.GetFieldName())
 		}
 		accessor.subAccessors = append(accessor.subAccessors, subAccessor)
@@ -2386,6 +2402,9 @@ func newStructArrayRowAccessor(fd *schemapb.FieldData, schema *schemapb.Collecti
 }
 
 func (accessor *structArrayRowAccessor) row(rowIdx int) ([]map[string]interface{}, error) {
+	if err := accessor.ctx.Err(); err != nil {
+		return nil, err
+	}
 	fd := accessor.fieldData
 	subs := accessor.subFields
 	if len(subs) == 0 {
@@ -2394,9 +2413,12 @@ func (accessor *structArrayRowAccessor) row(rowIdx int) ([]map[string]interface{
 	rowIndices := make([]int, len(subs))
 	rowValid := true
 	for idx, sub := range subs {
+		if err := checkResponseContext(accessor.ctx, int64(idx)); err != nil {
+			return nil, err
+		}
 		dataIdx, valid, err := accessor.subAccessors[idx].rowIndex(int64(rowIdx))
 		if err != nil {
-			return nil, merr.WrapErrServiceInternalErr(err,
+			return nil, merr.Wrapf(err,
 				"read struct array field %s sub-field %s", fd.GetFieldName(), sub.GetFieldName())
 		}
 		if idx == 0 {
@@ -2418,53 +2440,136 @@ func (accessor *structArrayRowAccessor) row(rowIdx int) ([]map[string]interface{
 	}
 	out := make([]map[string]interface{}, elemCount)
 	for i := 0; i < elemCount; i++ {
+		if err := checkResponseContext(accessor.ctx, int64(i)); err != nil {
+			return nil, err
+		}
 		out[i] = make(map[string]interface{}, len(subs))
 	}
 	for subIdx, sub := range subs {
+		if err := checkResponseContext(accessor.ctx, int64(subIdx)); err != nil {
+			return nil, err
+		}
 		dataIdx := rowIndices[subIdx]
 		short := structFieldShortName(sub.GetFieldName())
 		switch sub.GetType() {
 		case schemapb.DataType_Array:
 			rowData := sub.GetScalars().GetArrayData().GetData()
 			if dataIdx >= len(rowData) {
-				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, dataIdx)
+				return nil, merr.WrapErrServiceInternalMsg("struct sub-field %s missing row %d", short, dataIdx)
 			}
 			values := scalarArrayToInterfaces(rowData[dataIdx])
 			if len(values) != elemCount {
-				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s element count mismatch: expect %d got %d",
+				return nil, merr.WrapErrServiceInternalMsg("struct sub-field %s element count mismatch: expect %d got %d",
 					short, elemCount, len(values))
 			}
 			for i, v := range values {
+				if err := checkResponseContext(accessor.ctx, int64(i)); err != nil {
+					return nil, err
+				}
 				out[i][short] = v
 			}
 		case schemapb.DataType_ArrayOfVector:
 			va := sub.GetVectors().GetVectorArray()
 			if va == nil {
-				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s has no vector array", short)
+				return nil, merr.WrapErrServiceInternalMsg("struct sub-field %s has no vector array", short)
 			}
 			if dataIdx >= len(va.GetData()) {
-				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, dataIdx)
+				return nil, merr.WrapErrServiceInternalMsg("struct sub-field %s missing row %d", short, dataIdx)
 			}
 			dim, ok := accessor.subDims[short]
 			if !ok || dim <= 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("schema missing dim for struct sub-field %s", short)
+				return nil, merr.WrapErrServiceInternalMsg("schema missing dim for struct sub-field %s", short)
 			}
-			values, err := vectorFieldToInterfaces(va.GetData()[dataIdx], va.GetElementType(), dim)
+			values, err := vectorFieldToInterfaces(accessor.ctx, va.GetData()[dataIdx], va.GetElementType(), dim)
 			if err != nil {
 				return nil, err
 			}
 			if len(values) != elemCount {
-				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s vector element count mismatch: expect %d got %d",
+				return nil, merr.WrapErrServiceInternalMsg("struct sub-field %s vector element count mismatch: expect %d got %d",
 					short, elemCount, len(values))
 			}
 			for i, v := range values {
+				if err := checkResponseContext(accessor.ctx, int64(i)); err != nil {
+					return nil, err
+				}
 				out[i][short] = v
 			}
 		default:
-			return nil, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field type %s", sub.GetType())
+			return nil, merr.WrapErrServiceInternalMsg("unsupported struct sub-field type %s", sub.GetType())
 		}
 	}
 	return out, nil
+}
+
+func (accessor *structArrayRowAccessor) validateRow(rowIdx int, responseRowIdx int64) error {
+	if err := accessor.ctx.Err(); err != nil {
+		return err
+	}
+	fd := accessor.fieldData
+	subs := accessor.subFields
+	if len(subs) == 0 {
+		return nil
+	}
+
+	rowValid := true
+	elemCount := -1
+	for subIdx, sub := range subs {
+		if err := checkResponseContext(accessor.ctx, int64(subIdx)); err != nil {
+			return err
+		}
+		dataIdx, valid, err := accessor.subAccessors[subIdx].rowIndex(int64(rowIdx))
+		if err != nil {
+			return merr.Wrapf(err,
+				"read struct array field %s sub-field %s", fd.GetFieldName(), sub.GetFieldName())
+		}
+		if subIdx == 0 {
+			rowValid = valid
+		} else if valid != rowValid {
+			return merr.WrapErrServiceInternalMsg(
+				"struct array field %s sub-field %s has inconsistent null state at row %d",
+				fd.GetFieldName(), sub.GetFieldName(), rowIdx)
+		}
+		if !valid {
+			continue
+		}
+
+		count, err := structSubElemCount(sub, int(dataIdx), accessor.subDims)
+		if err != nil {
+			return err
+		}
+		short := structFieldShortName(sub.GetFieldName())
+		if elemCount < 0 {
+			elemCount = count
+		} else if count != elemCount {
+			return merr.WrapErrServiceInternalMsg(
+				"struct sub-field %s element count mismatch: expect %d got %d",
+				short, elemCount, count)
+		}
+
+		switch sub.GetType() {
+		case schemapb.DataType_Array:
+			scalar := sub.GetScalars().GetArrayData().GetData()[dataIdx]
+			switch scalar.GetData().(type) {
+			case *schemapb.ScalarField_FloatData:
+				if err := validateFiniteJSONValue(accessor.ctx, fieldDataName(fd), responseRowIdx, scalar.GetFloatData().GetData()); err != nil {
+					return err
+				}
+			case *schemapb.ScalarField_DoubleData:
+				if err := validateFiniteJSONValue(accessor.ctx, fieldDataName(fd), responseRowIdx, scalar.GetDoubleData().GetData()); err != nil {
+					return err
+				}
+			}
+		case schemapb.DataType_ArrayOfVector:
+			vectorArray := sub.GetVectors().GetVectorArray()
+			if vectorArray.GetElementType() == schemapb.DataType_FloatVector {
+				vector := vectorArray.GetData()[dataIdx].GetFloatVector().GetData()
+				if err := validateFiniteJSONValue(accessor.ctx, fieldDataName(fd), responseRowIdx, vector); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func structArraySubDims(fieldName string, schema *schemapb.CollectionSchema) (map[string]int64, error) {
@@ -2479,7 +2584,10 @@ func structArraySubDims(fieldName string, schema *schemapb.CollectionSchema) (ma
 			}
 			dim, err := getDim(sub)
 			if err != nil {
-				return nil, merr.WrapErrParameterInvalidErr(err, "schema sub-field %s has no dim", sub.GetName())
+				// getDim normally validates request-provided schema. Here the
+				// schema came from Milvus metadata, so a malformed dimension is
+				// deliberately translated to an internal-result error.
+				return nil, merr.WrapErrServiceInternalErr(err, "schema sub-field %s has no dim", sub.GetName())
 			}
 			subDims[subShortName(sub)] = dim
 		}
@@ -2493,22 +2601,41 @@ func structSubElemCount(sub *schemapb.FieldData, rowIdx int, subDims map[string]
 	case schemapb.DataType_Array:
 		rowData := sub.GetScalars().GetArrayData().GetData()
 		if rowIdx >= len(rowData) {
-			return 0, merr.WrapErrParameterInvalidMsg("struct sub-field %s row %d out of range", sub.GetFieldName(), rowIdx)
+			return 0, merr.WrapErrServiceInternalMsg("struct sub-field %s row %d out of range", sub.GetFieldName(), rowIdx)
 		}
-		return len(scalarArrayToInterfaces(rowData[rowIdx])), nil
+		return scalarFieldElemCount(rowData[rowIdx]), nil
 	case schemapb.DataType_ArrayOfVector:
 		va := sub.GetVectors().GetVectorArray()
 		if va == nil || rowIdx >= len(va.GetData()) {
-			return 0, merr.WrapErrParameterInvalidMsg("struct sub-field %s row %d out of range", sub.GetFieldName(), rowIdx)
+			return 0, merr.WrapErrServiceInternalMsg("struct sub-field %s row %d out of range", sub.GetFieldName(), rowIdx)
 		}
 		short := structFieldShortName(sub.GetFieldName())
 		dim, ok := subDims[short]
 		if !ok || dim <= 0 {
-			return 0, merr.WrapErrParameterInvalidMsg("schema missing dim for struct sub-field %s", short)
+			return 0, merr.WrapErrServiceInternalMsg("schema missing dim for struct sub-field %s", short)
 		}
 		return vectorFieldElemCount(va.GetData()[rowIdx], va.GetElementType(), dim)
 	default:
-		return 0, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field type %s", sub.GetType())
+		return 0, merr.WrapErrServiceInternalMsg("unsupported struct sub-field type %s", sub.GetType())
+	}
+}
+
+func scalarFieldElemCount(sf *schemapb.ScalarField) int {
+	switch sf.GetData().(type) {
+	case *schemapb.ScalarField_BoolData:
+		return len(sf.GetBoolData().GetData())
+	case *schemapb.ScalarField_IntData:
+		return len(sf.GetIntData().GetData())
+	case *schemapb.ScalarField_LongData:
+		return len(sf.GetLongData().GetData())
+	case *schemapb.ScalarField_FloatData:
+		return len(sf.GetFloatData().GetData())
+	case *schemapb.ScalarField_DoubleData:
+		return len(sf.GetDoubleData().GetData())
+	case *schemapb.ScalarField_StringData:
+		return len(sf.GetStringData().GetData())
+	default:
+		return 0
 	}
 }
 
@@ -2562,71 +2689,95 @@ func scalarArrayToInterfaces(sf *schemapb.ScalarField) []interface{} {
 }
 
 func vectorFieldElemCount(vf *schemapb.VectorField, elemType schemapb.DataType, dim int64) (int, error) {
-	if dim <= 0 {
-		return 0, merr.WrapErrParameterInvalidMsg("invalid dim %d", dim)
+	width, err := vectorFieldElementWidth(elemType, dim)
+	if err != nil {
+		return 0, err
 	}
+	var dataLength int
 	switch elemType {
 	case schemapb.DataType_FloatVector:
-		return len(vf.GetFloatVector().GetData()) / int(dim), nil
+		dataLength = len(vf.GetFloatVector().GetData())
 	case schemapb.DataType_Float16Vector:
-		return len(vf.GetFloat16Vector()) / int(dim*2), nil
+		dataLength = len(vf.GetFloat16Vector())
 	case schemapb.DataType_BFloat16Vector:
-		return len(vf.GetBfloat16Vector()) / int(dim*2), nil
+		dataLength = len(vf.GetBfloat16Vector())
 	case schemapb.DataType_BinaryVector:
-		return len(vf.GetBinaryVector()) / int(dim/8), nil
+		dataLength = len(vf.GetBinaryVector())
 	case schemapb.DataType_Int8Vector:
-		return len(vf.GetInt8Vector()) / int(dim), nil
-	default:
-		return 0, merr.WrapErrParameterInvalidMsg("unsupported vector element type %s", elemType)
+		dataLength = len(vf.GetInt8Vector())
 	}
+	if int64(dataLength)%width != 0 {
+		return 0, merr.WrapErrServiceInternalMsg(
+			"struct vector payload length %d is not divisible by row width %d for type %s",
+			dataLength, width, elemType)
+	}
+	return int(int64(dataLength) / width), nil
 }
 
-func vectorFieldToInterfaces(vf *schemapb.VectorField, elemType schemapb.DataType, dim int64) ([]interface{}, error) {
-	if dim <= 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("invalid dim %d", dim)
+func vectorFieldToInterfaces(ctx context.Context, vf *schemapb.VectorField, elemType schemapb.DataType, dim int64) ([]interface{}, error) {
+	ctx = renderContext(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	count, err := vectorFieldElemCount(vf, elemType, dim)
+	if err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return []interface{}{}, nil
 	}
 	switch elemType {
 	case schemapb.DataType_FloatVector:
 		buf := vf.GetFloatVector().GetData()
-		count := len(buf) / int(dim)
 		out := make([]interface{}, count)
 		for i := 0; i < count; i++ {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			out[i] = buf[i*int(dim) : (i+1)*int(dim)]
 		}
 		return out, nil
 	case schemapb.DataType_Float16Vector:
 		buf := vf.GetFloat16Vector()
 		step := int(dim * 2)
-		count := len(buf) / step
 		out := make([]interface{}, count)
 		for i := 0; i < count; i++ {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			out[i] = base64.StdEncoding.EncodeToString(buf[i*step : (i+1)*step])
 		}
 		return out, nil
 	case schemapb.DataType_BFloat16Vector:
 		buf := vf.GetBfloat16Vector()
 		step := int(dim * 2)
-		count := len(buf) / step
 		out := make([]interface{}, count)
 		for i := 0; i < count; i++ {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			out[i] = base64.StdEncoding.EncodeToString(buf[i*step : (i+1)*step])
 		}
 		return out, nil
 	case schemapb.DataType_BinaryVector:
 		buf := vf.GetBinaryVector()
 		step := int(dim / 8)
-		count := len(buf) / step
 		out := make([]interface{}, count)
 		for i := 0; i < count; i++ {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			out[i] = base64.StdEncoding.EncodeToString(buf[i*step : (i+1)*step])
 		}
 		return out, nil
 	case schemapb.DataType_Int8Vector:
 		buf := vf.GetInt8Vector()
 		step := int(dim)
-		count := len(buf) / step
 		out := make([]interface{}, count)
 		for i := 0; i < count; i++ {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			seg := buf[i*step : (i+1)*step]
 			row := make([]int8, step)
 			for j, b := range seg {
@@ -2636,7 +2787,29 @@ func vectorFieldToInterfaces(vf *schemapb.VectorField, elemType schemapb.DataTyp
 		}
 		return out, nil
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg("unsupported vector element type %s", elemType)
+		return nil, merr.WrapErrServiceInternalMsg("unsupported vector element type %s", elemType)
+	}
+}
+
+func vectorFieldElementWidth(elemType schemapb.DataType, dim int64) (int64, error) {
+	if dim <= 0 {
+		return 0, merr.WrapErrServiceInternalMsg("invalid struct vector dimension %d for type %s", dim, elemType)
+	}
+	switch elemType {
+	case schemapb.DataType_FloatVector, schemapb.DataType_Int8Vector:
+		return dim, nil
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		if dim > math.MaxInt64/2 {
+			return 0, merr.WrapErrServiceInternalMsg("struct vector dimension %d overflows row width for type %s", dim, elemType)
+		}
+		return dim * 2, nil
+	case schemapb.DataType_BinaryVector:
+		if dim%8 != 0 {
+			return 0, merr.WrapErrServiceInternalMsg("binary struct vector dimension %d is not divisible by 8", dim)
+		}
+		return dim / 8, nil
+	default:
+		return 0, merr.WrapErrServiceInternalMsg("unsupported vector element type %s", elemType)
 	}
 }
 
@@ -3485,6 +3658,36 @@ func vectors2PlaceholderGroupBytes(vectors [][]float32) []byte {
 }
 
 // --------------------- get/query/search response --------------------- //
+const responseContextCheckInterval int64 = 256
+
+func checkResponseContext(ctx context.Context, index int64) error {
+	if index%responseContextCheckInterval != 0 {
+		return nil
+	}
+	return renderContext(ctx).Err()
+}
+
+func sparseFloatBytesToMapWithContext(ctx context.Context, contents []byte) (map[uint32]float32, error) {
+	elemCount := len(contents) / 8
+	if err := renderContext(ctx).Err(); err != nil {
+		return nil, err
+	}
+	values := make(map[uint32]float32, elemCount)
+	for elemIndex := 0; elemIndex < elemCount; elemIndex++ {
+		if err := checkResponseContext(ctx, int64(elemIndex)); err != nil {
+			return nil, err
+		}
+		offset := elemIndex * 8
+		index := common.Endian.Uint32(contents[offset : offset+4])
+		value := math.Float32frombits(common.Endian.Uint32(contents[offset+4 : offset+8]))
+		values[index] = value
+	}
+	if err := renderContext(ctx).Err(); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
 func genDynamicFields(fields []string, list []*schemapb.FieldData) []string {
 	nonDynamicFieldNames := make(map[string]struct{})
 	for _, field := range list {
@@ -3542,27 +3745,27 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 		dim := fieldData.GetVectors().GetDim()
 		bytesPerRow := dim / 8
 		if bytesPerRow <= 0 {
-			return 0, merr.WrapErrParameterInvalidMsg("invalid binary vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrServiceInternalMsg("invalid binary vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetBinaryVector())) / bytesPerRow, nil
 	case schemapb.DataType_FloatVector:
 		dim := fieldData.GetVectors().GetDim()
 		if dim <= 0 {
-			return 0, merr.WrapErrParameterInvalidMsg("invalid float vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrServiceInternalMsg("invalid float vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetFloatVector().GetData())) / dim, nil
 	case schemapb.DataType_Float16Vector:
 		dim := fieldData.GetVectors().GetDim()
 		bytesPerRow := dim * 2
 		if bytesPerRow <= 0 {
-			return 0, merr.WrapErrParameterInvalidMsg("invalid float16 vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrServiceInternalMsg("invalid float16 vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetFloat16Vector())) / bytesPerRow, nil
 	case schemapb.DataType_BFloat16Vector:
 		dim := fieldData.GetVectors().GetDim()
 		bytesPerRow := dim * 2
 		if bytesPerRow <= 0 {
-			return 0, merr.WrapErrParameterInvalidMsg("invalid bfloat16 vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrServiceInternalMsg("invalid bfloat16 vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetBfloat16Vector())) / bytesPerRow, nil
 	case schemapb.DataType_SparseFloatVector:
@@ -3570,7 +3773,7 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 	case schemapb.DataType_Int8Vector:
 		dim := fieldData.GetVectors().GetDim()
 		if dim <= 0 {
-			return 0, merr.WrapErrParameterInvalidMsg("invalid int8 vector dimension %d for field %s", dim, fieldData.GetFieldName())
+			return 0, merr.WrapErrServiceInternalMsg("invalid int8 vector dimension %d for field %s", dim, fieldData.GetFieldName())
 		}
 		return int64(len(fieldData.GetVectors().GetInt8Vector())) / dim, nil
 	case schemapb.DataType_ArrayOfStruct:
@@ -3587,10 +3790,10 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 		case schemapb.DataType_ArrayOfVector:
 			return int64(len(subs[0].GetVectors().GetVectorArray().GetData())), nil
 		default:
-			return 0, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field type %s for field %s", subs[0].GetType(), fieldData.GetFieldName())
+			return 0, merr.WrapErrServiceInternalMsg("unsupported struct sub-field type %s for field %s", subs[0].GetType(), fieldData.GetFieldName())
 		}
 	default:
-		return 0, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", fieldData.GetType(), fieldData.GetFieldName())
+		return 0, merr.WrapErrServiceInternalMsg("the type(%v) of field(%v) is not supported, use other sdk please", fieldData.GetType(), fieldData.GetFieldName())
 	}
 }
 
@@ -3601,6 +3804,11 @@ type fieldDataRowAccessor struct {
 }
 
 func newFieldDataRowAccessor(fieldData *schemapb.FieldData) (*fieldDataRowAccessor, error) {
+	return newFieldDataRowAccessorWithContext(context.Background(), fieldData)
+}
+
+func newFieldDataRowAccessorWithContext(ctx context.Context, fieldData *schemapb.FieldData) (*fieldDataRowAccessor, error) {
+	ctx = renderContext(ctx)
 	accessor := &fieldDataRowAccessor{
 		fieldData: fieldData,
 		validData: fieldData.GetValidData(),
@@ -3613,6 +3821,9 @@ func newFieldDataRowAccessor(fieldData *schemapb.FieldData) (*fieldDataRowAccess
 	compactIndices := make([]int64, len(accessor.validData))
 	validCount := int64(0)
 	for i, valid := range accessor.validData {
+		if err := checkResponseContext(ctx, int64(i)); err != nil {
+			return nil, err
+		}
 		if valid {
 			compactIndices[i] = validCount
 			validCount++
@@ -3620,14 +3831,23 @@ func newFieldDataRowAccessor(fieldData *schemapb.FieldData) (*fieldDataRowAccess
 			compactIndices[i] = -1
 		}
 	}
-	if isNullableVector {
-		if err := funcutil.ValidateNullableVectorFieldDataCompact(fieldData, uint64(len(accessor.validData)), true); err != nil {
-			return nil, err
-		}
-		accessor.compactIndices = compactIndices
-		return accessor, nil
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	if validCount == 0 {
+	if isNullableVector {
+		physicalRows, err := funcutil.GetVectorFieldPhysicalRows(fieldData.GetFieldName(), fieldData.GetType(), fieldData.GetVectors())
+		if err != nil {
+			// The shared utility classifies malformed caller-provided FieldData
+			// as an input error. Query response FieldData is produced inside
+			// Milvus, so this violation is deliberately system-blame.
+			return nil, merr.WrapErrServiceInternalErr(err,
+				"query response nullable vector field %s has invalid compact data", fieldData.GetFieldName())
+		}
+		if physicalRows != uint64(validCount) {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"query response nullable vector field %s has %d valid rows, but compact physical payload rows is %d",
+				fieldData.GetFieldName(), validCount, physicalRows)
+		}
 		accessor.compactIndices = compactIndices
 		return accessor, nil
 	}
@@ -3640,7 +3860,7 @@ func newFieldDataRowAccessor(fieldData *schemapb.FieldData) (*fieldDataRowAccess
 		return accessor, nil
 	}
 	if valueCount != validCount {
-		return nil, merr.WrapErrParameterInvalidMsg("field %s has %d valid rows, but data length is %d", fieldData.GetFieldName(), validCount, valueCount)
+		return nil, merr.WrapErrServiceInternalMsg("field %s has %d valid rows, but data length is %d", fieldData.GetFieldName(), validCount, valueCount)
 	}
 	accessor.compactIndices = compactIndices
 	return accessor, nil
@@ -3650,8 +3870,8 @@ func (accessor *fieldDataRowAccessor) rowIndex(rowIdx int64) (int64, bool, error
 	if len(accessor.validData) == 0 {
 		return rowIdx, true, nil
 	}
-	if rowIdx >= int64(len(accessor.validData)) {
-		return 0, false, merr.WrapErrParameterInvalidMsg("row index %d out of range for field %s valid data length %d", rowIdx, accessor.fieldData.GetFieldName(), len(accessor.validData))
+	if rowIdx < 0 || rowIdx >= int64(len(accessor.validData)) {
+		return 0, false, merr.WrapErrServiceInternalMsg("row index %d out of range for field %s valid data length %d", rowIdx, accessor.fieldData.GetFieldName(), len(accessor.validData))
 	}
 	if !accessor.validData[rowIdx] {
 		return 0, false, nil
@@ -3662,266 +3882,912 @@ func (accessor *fieldDataRowAccessor) rowIndex(rowIdx int64) (int64, bool, error
 	return rowIdx, true, nil
 }
 
-//nolint:gosec // G602: slice indices are bounded by rowsNum which is derived from the data length
-func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
-	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
-) ([]map[string]interface{}, error) {
-	nativeJSON := paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool()
-	jsonFieldNames := make(map[string]struct{})
-	jsonAllValid := true
+type queryResponseRows struct {
+	ctx                  context.Context
+	rowsNum              int64
+	fieldDataList        []*schemapb.FieldData
+	fieldDataAccessors   []*fieldDataRowAccessor
+	structArrayAccessors []*structArrayRowAccessor
+	dynamicOutputFields  []string
+	ids                  *schemapb.IDs
+	scores               []float32
+	enableInt64          bool
+	nativeJSON           bool
+	pkFieldName          string
+}
 
+func queryResponseIDCount(ids *schemapb.IDs) (int64, error) {
+	if ids == nil {
+		return 0, nil
+	}
+	switch ids.GetIdField().(type) {
+	case nil:
+		return 0, nil
+	case *schemapb.IDs_IntId:
+		return int64(len(ids.GetIntId().GetData())), nil
+	case *schemapb.IDs_StrId:
+		return int64(len(ids.GetStrId().GetData())), nil
+	default:
+		return 0, merr.WrapErrServiceInternalMsg("query response primary key has unsupported ID type")
+	}
+}
+
+func newQueryResponseRows(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
+	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
+) (*queryResponseRows, error) {
+	return newQueryResponseRowsWithContext(context.Background(), rowsNum, needFields, fieldDataList, ids, scores, enableInt64, collectionSchema)
+}
+
+func newQueryResponseRowsWithContext(ctx context.Context, rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
+	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
+) (*queryResponseRows, error) {
+	return newQueryResponseRowsWithMode(ctx, rowsNum, needFields, fieldDataList, ids, scores, enableInt64, collectionSchema, true)
+}
+
+func newQueryResponseRowsWithMode(ctx context.Context, rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
+	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema, strictInferredRowCount bool,
+) (*queryResponseRows, error) {
+	ctx = renderContext(ctx)
 	columnNum := len(fieldDataList)
-	if rowsNum == int64(0) { // always
-		if columnNum > 0 {
+	for fieldIndex, fieldData := range fieldDataList {
+		if err := checkResponseContext(ctx, int64(fieldIndex)); err != nil {
+			return nil, err
+		}
+		if fieldData == nil {
+			return nil, merr.WrapErrServiceInternalMsg("query response field at index %d is nil", fieldIndex)
+		}
+	}
+	inferredRowCount := rowsNum == 0
+	strictRowCount := inferredRowCount && strictInferredRowCount
+	if inferredRowCount {
+		if strictInferredRowCount && ids != nil {
+			var err error
+			rowsNum, err = queryResponseIDCount(ids)
+			if err != nil {
+				return nil, err
+			}
+		} else if columnNum > 0 {
 			var err error
 			rowsNum, err = fieldDataRowCount(fieldDataList[0])
 			if err != nil {
 				return nil, err
 			}
 		} else if ids != nil {
-			switch ids.GetIdField().(type) {
-			case *schemapb.IDs_IntId:
-				int64Pks := ids.GetIntId().GetData()
-				rowsNum = int64(len(int64Pks))
-			case *schemapb.IDs_StrId:
-				stringPks := ids.GetStrId().GetData()
-				rowsNum = int64(len(stringPks))
-			default:
-				return nil, merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please")
-			}
-		}
-	}
-	if rowsNum == int64(0) {
-		return []map[string]interface{}{}, nil
-	}
-	fieldDataAccessors := make([]*fieldDataRowAccessor, 0, columnNum)
-	structArrayAccessors := make([]*structArrayRowAccessor, columnNum)
-	for idx, fieldData := range fieldDataList {
-		accessor, err := newFieldDataRowAccessor(fieldData)
-		if err != nil {
-			return nil, err
-		}
-		fieldDataAccessors = append(fieldDataAccessors, accessor)
-		if fieldData.GetType() == schemapb.DataType_ArrayOfStruct {
-			structAccessor, err := newStructArrayRowAccessor(fieldData, collectionSchema)
+			var err error
+			rowsNum, err = queryResponseIDCount(ids)
 			if err != nil {
 				return nil, err
 			}
-			structArrayAccessors[idx] = structAccessor
 		}
 	}
-	queryResp := make([]map[string]interface{}, 0, rowsNum)
-	dynamicOutputFields := genDynamicFields(needFields, fieldDataList)
+	if rowsNum < 0 {
+		return nil, merr.WrapErrServiceInternalMsg("query response row count cannot be negative: %d", rowsNum)
+	}
 
-	pkFieldName := DefaultPrimaryFieldName
+	rows := &queryResponseRows{
+		ctx:                  ctx,
+		rowsNum:              rowsNum,
+		fieldDataList:        fieldDataList,
+		fieldDataAccessors:   make([]*fieldDataRowAccessor, 0, columnNum),
+		structArrayAccessors: make([]*structArrayRowAccessor, columnNum),
+		dynamicOutputFields:  genDynamicFields(needFields, fieldDataList),
+		ids:                  ids,
+		scores:               scores,
+		enableInt64:          enableInt64,
+		nativeJSON:           paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool(),
+		pkFieldName:          DefaultPrimaryFieldName,
+	}
+	if rowsNum == 0 && !strictInferredRowCount {
+		return rows, nil
+	}
+
+	for idx, fieldData := range fieldDataList {
+		if err := checkResponseContext(ctx, int64(idx)); err != nil {
+			return nil, err
+		}
+		accessor, err := newFieldDataRowAccessorWithContext(ctx, fieldData)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateQueryResponseFieldRows(ctx, fieldData, rowsNum, strictRowCount); err != nil {
+			return nil, err
+		}
+		rows.fieldDataAccessors = append(rows.fieldDataAccessors, accessor)
+		if fieldData.GetType() == schemapb.DataType_ArrayOfStruct {
+			structAccessor, err := newStructArrayRowAccessorWithContext(ctx, fieldData, collectionSchema)
+			if err != nil {
+				return nil, err
+			}
+			if err := validateStructArraySubFieldRows(ctx, fieldData, rowsNum, strictRowCount); err != nil {
+				return nil, err
+			}
+			rows.structArrayAccessors[idx] = structAccessor
+		}
+	}
+
 	if collectionSchema != nil {
 		fieldsSchema := collectionSchema.GetFields()
-		for _, field := range fieldsSchema {
+		for fieldIndex, field := range fieldsSchema {
+			if err := checkResponseContext(ctx, int64(fieldIndex)); err != nil {
+				return nil, err
+			}
 			if field.GetIsPrimaryKey() {
-				pkFieldName = field.GetName()
+				rows.pkFieldName = field.GetName()
 				break
 			}
 		}
 	}
-	for i := int64(0); i < rowsNum; i++ {
-		row := map[string]interface{}{}
-		if columnNum > 0 {
-			for j := 0; j < columnNum; j++ {
-				fieldData := fieldDataList[j]
-				dataIdx, valid, err := fieldDataAccessors[j].rowIndex(i)
+	if err := rows.validateIDs(strictRowCount); err != nil {
+		return nil, err
+	}
+	if err := rows.validateDynamicJSON(); err != nil {
+		return nil, err
+	}
+	if err := rows.prepareNativeJSON(); err != nil {
+		return nil, err
+	}
+	if err := rows.validateStructArrays(); err != nil {
+		return nil, err
+	}
+	if err := rows.validateJSONValues(); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func validateStructArraySubFieldRows(ctx context.Context, fieldData *schemapb.FieldData, rowsNum int64, strictRowCount bool) error {
+	for subIndex, subField := range fieldData.GetStructArrays().GetFields() {
+		if err := checkResponseContext(ctx, int64(subIndex)); err != nil {
+			return err
+		}
+		logicalRows, err := fieldDataRowCount(subField)
+		if err != nil {
+			return merr.Wrapf(err, "read struct array field %s sub-field %s row count",
+				fieldData.GetFieldName(), subField.GetFieldName())
+		}
+		if strictRowCount && logicalRows != rowsNum {
+			return merr.WrapErrServiceInternalMsg(
+				"query response struct array field %s sub-field %s contains %d logical rows, expected exactly %d",
+				fieldData.GetFieldName(), subField.GetFieldName(), logicalRows, rowsNum,
+			)
+		}
+		if !strictRowCount && logicalRows < rowsNum {
+			return merr.WrapErrServiceInternalMsg(
+				"query response struct array field %s sub-field %s contains %d logical rows, expected at least %d",
+				fieldData.GetFieldName(), subField.GetFieldName(), logicalRows, rowsNum,
+			)
+		}
+	}
+	return nil
+}
+
+func validateQueryResponseFieldRows(ctx context.Context, fieldData *schemapb.FieldData, rowsNum int64, strictRowCount bool) error {
+	logicalRows, err := fieldDataRowCount(fieldData)
+	if err != nil {
+		return err
+	}
+	if strictRowCount && logicalRows != rowsNum {
+		return merr.WrapErrServiceInternalMsg(
+			"query response field %s contains %d logical rows, expected exactly %d",
+			fieldData.GetFieldName(), logicalRows, rowsNum,
+		)
+	}
+	if !strictRowCount && logicalRows < rowsNum {
+		return merr.WrapErrServiceInternalMsg(
+			"query response field %s contains %d logical rows, expected at least %d",
+			fieldData.GetFieldName(), logicalRows, rowsNum,
+		)
+	}
+
+	var width int64
+	var dataLength int64
+	switch fieldData.GetType() {
+	case schemapb.DataType_BinaryVector:
+		dim := fieldData.GetVectors().GetDim()
+		if dim <= 0 || dim%8 != 0 {
+			return merr.WrapErrServiceInternalMsg("query response binary vector field %s has invalid dimension %d", fieldData.GetFieldName(), dim)
+		}
+		width = dim / 8
+		dataLength = int64(len(fieldData.GetVectors().GetBinaryVector()))
+	case schemapb.DataType_FloatVector:
+		dim := fieldData.GetVectors().GetDim()
+		if dim <= 0 {
+			return merr.WrapErrServiceInternalMsg("query response float vector field %s has invalid dimension %d", fieldData.GetFieldName(), dim)
+		}
+		width = dim
+		dataLength = int64(len(fieldData.GetVectors().GetFloatVector().GetData()))
+	case schemapb.DataType_Float16Vector:
+		dim := fieldData.GetVectors().GetDim()
+		if dim <= 0 || dim > math.MaxInt64/2 {
+			return merr.WrapErrServiceInternalMsg("query response float16 vector field %s has invalid dimension %d", fieldData.GetFieldName(), dim)
+		}
+		width = dim * 2
+		dataLength = int64(len(fieldData.GetVectors().GetFloat16Vector()))
+	case schemapb.DataType_BFloat16Vector:
+		dim := fieldData.GetVectors().GetDim()
+		if dim <= 0 || dim > math.MaxInt64/2 {
+			return merr.WrapErrServiceInternalMsg("query response bfloat16 vector field %s has invalid dimension %d", fieldData.GetFieldName(), dim)
+		}
+		width = dim * 2
+		dataLength = int64(len(fieldData.GetVectors().GetBfloat16Vector()))
+	case schemapb.DataType_Int8Vector:
+		dim := fieldData.GetVectors().GetDim()
+		if dim <= 0 {
+			return merr.WrapErrServiceInternalMsg("query response int8 vector field %s has invalid dimension %d", fieldData.GetFieldName(), dim)
+		}
+		width = dim
+		dataLength = int64(len(fieldData.GetVectors().GetInt8Vector()))
+	case schemapb.DataType_SparseFloatVector:
+		for rowIndex, contents := range fieldData.GetVectors().GetSparseFloatVector().GetContents() {
+			if err := checkResponseContext(ctx, int64(rowIndex)); err != nil {
+				return err
+			}
+			if len(contents)%8 != 0 {
+				return merr.WrapErrServiceInternalMsg(
+					"query response sparse vector field %s row %d byte length %d is not divisible by 8",
+					fieldData.GetFieldName(), rowIndex, len(contents))
+			}
+		}
+	}
+	if width > 0 && dataLength%width != 0 {
+		return merr.WrapErrServiceInternalMsg(
+			"query response vector field %s data length %d is not divisible by row width %d",
+			fieldData.GetFieldName(), dataLength, width,
+		)
+	}
+	return nil
+}
+
+func (rows *queryResponseRows) Len() int64 {
+	return rows.rowsNum
+}
+
+func (rows *queryResponseRows) validateIDs(strictRowCount bool) error {
+	if err := rows.ctx.Err(); err != nil {
+		return err
+	}
+	if rows.ids == nil {
+		return nil
+	}
+	idCount, err := queryResponseIDCount(rows.ids)
+	if err != nil {
+		return err
+	}
+	if strictRowCount && idCount != rows.rowsNum {
+		return merr.WrapErrServiceInternalMsg("query response contains %d IDs, expected exactly %d", idCount, rows.rowsNum)
+	}
+	if !strictRowCount && idCount < rows.rowsNum {
+		return merr.WrapErrServiceInternalMsg("query response contains %d IDs, expected at least %d", idCount, rows.rowsNum)
+	}
+	return nil
+}
+
+func (rows *queryResponseRows) validateDynamicJSON() error {
+	for fieldIndex, fieldData := range rows.fieldDataList {
+		if err := checkResponseContext(rows.ctx, int64(fieldIndex)); err != nil {
+			return err
+		}
+		if fieldData.GetType() != schemapb.DataType_JSON || !fieldData.GetIsDynamic() {
+			continue
+		}
+		jsonRows := fieldData.GetScalars().GetJsonData().GetData()
+		for rowIndex := int64(0); rowIndex < rows.rowsNum; rowIndex++ {
+			if err := checkResponseContext(rows.ctx, rowIndex); err != nil {
+				return err
+			}
+			dataIndex, valid, err := rows.fieldDataAccessors[fieldIndex].rowIndex(rowIndex)
+			if err != nil {
+				return err
+			}
+			if !valid {
+				continue
+			}
+			raw := jsonRows[dataIndex]
+			validJSON, err := validDynamicJSONObject(rows.ctx, raw)
+			if err != nil {
+				return err
+			}
+			if !validJSON {
+				// Dynamic JSON in a query response is internal component output,
+				// not the original REST request payload.
+				return merr.WrapErrServiceInternalMsg(
+					"query response dynamic field %s row %d must contain a valid, REST-encodable JSON object",
+					fieldData.GetFieldName(), rowIndex)
+			}
+		}
+	}
+	return nil
+}
+
+func (rows *queryResponseRows) prepareNativeJSON() error {
+	if !rows.nativeJSON {
+		return nil
+	}
+	for fieldIndex, fieldData := range rows.fieldDataList {
+		if err := checkResponseContext(rows.ctx, int64(fieldIndex)); err != nil {
+			return err
+		}
+		if fieldData.GetType() != schemapb.DataType_JSON || fieldData.GetIsDynamic() {
+			continue
+		}
+		jsonRows := fieldData.GetScalars().GetJsonData().GetData()
+		for rowIndex := int64(0); rowIndex < rows.rowsNum; rowIndex++ {
+			if err := checkResponseContext(rows.ctx, rowIndex); err != nil {
+				return err
+			}
+			dataIndex, valid, err := rows.fieldDataAccessors[fieldIndex].rowIndex(rowIndex)
+			if err != nil {
+				return err
+			}
+			if !valid {
+				continue
+			}
+			raw := jsonRows[dataIndex]
+			if json.Valid(raw) && utf8.Valid(raw) {
+				continue
+			}
+			rows.nativeJSON = false
+			mlog.Warn(rows.ctx,
+				"a JSON field holds bytes that are not a JSON document, returning JSON fields as strings for this response",
+				mlog.Int64("rows", rows.rowsNum))
+			return nil
+		}
+	}
+	return nil
+}
+
+// Sonic's encoder uses a 4096-entry stack, and nested map[string]interface{}
+// objects consume about two entries per level. Dynamic JSON's top-level object
+// is flattened into the response row, so 2046 is the last worst-case depth
+// encodable by Sonic v1.15.2 after accounting for the row map itself.
+const maxDynamicJSONValueNestingDepth = 2046
+
+// Bound the amount of JSON the tokenizer can process between request-context
+// checks. Decoder.Token keeps a non-recursive parser stack and visits each byte
+// once, avoiding gjson.ForEach's repeated scans of nested raw subtrees.
+const dynamicJSONContextCheckBytes = 4 * 1024
+
+type dynamicJSONContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+	err    error
+}
+
+func (reader *dynamicJSONContextReader) Read(buffer []byte) (int, error) {
+	if err := reader.ctx.Err(); err != nil {
+		reader.err = err
+		return 0, err
+	}
+	if len(buffer) > dynamicJSONContextCheckBytes {
+		buffer = buffer[:dynamicJSONContextCheckBytes]
+	}
+	return reader.reader.Read(buffer)
+}
+
+func validDynamicJSONObject(ctx context.Context, raw []byte) (bool, error) {
+	ctx = renderContext(ctx)
+	reader := &dynamicJSONContextReader{ctx: ctx, reader: bytes.NewReader(raw)}
+	decoder := gojson.NewDecoder(reader)
+	decoder.UseNumber()
+
+	first, err := decoder.Token()
+	if err != nil {
+		if reader.err != nil {
+			return false, reader.err
+		}
+		return false, nil
+	}
+	// Preserve the previous json.Unmarshal behavior: a dynamic field may be
+	// null, in which case it contributes no keys to the REST row.
+	if first == nil {
+		_, err = decoder.Token()
+		if reader.err != nil {
+			return false, reader.err
+		}
+		return err == io.EOF, nil
+	}
+
+	delim, ok := first.(gojson.Delim)
+	if !ok || delim != '{' {
+		return false, nil
+	}
+	containerDepth := 1
+	for containerDepth > 0 {
+		token, err := decoder.Token()
+		if err != nil {
+			if reader.err != nil {
+				return false, reader.err
+			}
+			return false, nil
+		}
+		switch value := token.(type) {
+		case gojson.Delim:
+			switch value {
+			case '{', '[':
+				containerDepth++
+				if containerDepth > maxDynamicJSONValueNestingDepth+1 {
+					return false, nil
+				}
+			case '}', ']':
+				containerDepth--
+			}
+		case gojson.Number:
+			number, err := value.Float64()
+			if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
+				return false, nil
+			}
+		}
+	}
+
+	_, err = decoder.Token()
+	if reader.err != nil {
+		return false, reader.err
+	}
+	if err != io.EOF {
+		return false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (rows *queryResponseRows) validateStructArrays() error {
+	for fieldIndex, accessor := range rows.structArrayAccessors {
+		if err := checkResponseContext(rows.ctx, int64(fieldIndex)); err != nil {
+			return err
+		}
+		if accessor == nil {
+			continue
+		}
+		for rowIndex := int64(0); rowIndex < rows.rowsNum; rowIndex++ {
+			if err := checkResponseContext(rows.ctx, rowIndex); err != nil {
+				return err
+			}
+			dataIndex, valid, err := rows.fieldDataAccessors[fieldIndex].rowIndex(rowIndex)
+			if err != nil {
+				return err
+			}
+			if !valid {
+				continue
+			}
+			if err := accessor.validateRow(int(dataIndex), rowIndex); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func fieldDataName(fieldData *schemapb.FieldData) string {
+	if fieldData.GetFieldName() == "" {
+		return fieldData.GetType().String()
+	}
+	return fieldData.GetFieldName()
+}
+
+func (rows *queryResponseRows) validateJSONValues() error {
+	for fieldIndex, fieldData := range rows.fieldDataList {
+		if err := checkResponseContext(rows.ctx, int64(fieldIndex)); err != nil {
+			return err
+		}
+		switch fieldData.GetType() {
+		case schemapb.DataType_Float,
+			schemapb.DataType_Double,
+			schemapb.DataType_FloatVector,
+			schemapb.DataType_SparseFloatVector,
+			schemapb.DataType_Array:
+		default:
+			continue
+		}
+		for rowIndex := int64(0); rowIndex < rows.rowsNum; rowIndex++ {
+			if err := checkResponseContext(rows.ctx, rowIndex); err != nil {
+				return err
+			}
+			dataIndex, valid, err := rows.fieldDataAccessors[fieldIndex].rowIndex(rowIndex)
+			if err != nil {
+				return err
+			}
+			if !valid {
+				continue
+			}
+			if err := validateQueryResponseFieldValue(rows.ctx, fieldData, dataIndex, rowIndex); err != nil {
+				return err
+			}
+		}
+	}
+
+	for rowIndex := int64(0); rowIndex < rows.rowsNum && rowIndex < int64(len(rows.scores)); rowIndex++ {
+		if err := checkResponseContext(rows.ctx, rowIndex); err != nil {
+			return err
+		}
+		if !isFiniteFloat32(rows.scores[rowIndex]) {
+			return merr.WrapErrServiceInternalMsg("query response score at row %d is not finite", rowIndex)
+		}
+	}
+	return nil
+}
+
+func validateQueryResponseFieldValue(ctx context.Context, fieldData *schemapb.FieldData, dataIndex, rowIndex int64) error {
+	fieldName := fieldDataName(fieldData)
+	switch fieldData.GetType() {
+	case schemapb.DataType_Float:
+		return validateFiniteJSONValue(ctx, fieldName, rowIndex, fieldData.GetScalars().GetFloatData().GetData()[dataIndex])
+	case schemapb.DataType_Double:
+		return validateFiniteJSONValue(ctx, fieldName, rowIndex, fieldData.GetScalars().GetDoubleData().GetData()[dataIndex])
+	case schemapb.DataType_FloatVector:
+		dim := fieldData.GetVectors().GetDim()
+		data := fieldData.GetVectors().GetFloatVector().GetData()
+		start, end, err := queryResponseSliceBounds(fieldName, rowIndex, dataIndex, dim, int64(len(data)))
+		if err != nil {
+			return err
+		}
+		return validateFiniteJSONValue(ctx, fieldName, rowIndex, data[start:end])
+	case schemapb.DataType_SparseFloatVector:
+		contents := fieldData.GetVectors().GetSparseFloatVector().GetContents()[dataIndex]
+		if len(contents)%8 != 0 {
+			return merr.WrapErrServiceInternalMsg(
+				"query response sparse vector field %s row %d byte length %d is not divisible by 8",
+				fieldName, rowIndex, len(contents))
+		}
+		for offset := 4; offset < len(contents); offset += 8 {
+			if err := checkResponseContext(ctx, int64(offset/8)); err != nil {
+				return err
+			}
+			value := math.Float32frombits(common.Endian.Uint32(contents[offset : offset+4]))
+			if !isFiniteFloat32(value) {
+				return merr.WrapErrServiceInternalMsg("query response field %s row %d contains a non-finite value", fieldName, rowIndex)
+			}
+		}
+	case schemapb.DataType_Array:
+		return validateFiniteJSONValue(ctx, fieldName, rowIndex, fieldData.GetScalars().GetArrayData().GetData()[dataIndex])
+	}
+	return nil
+}
+
+func queryResponseSliceBounds(fieldName string, rowIndex, dataIndex, width, dataLength int64) (int64, int64, error) {
+	if dataIndex < 0 || width <= 0 || dataIndex > math.MaxInt64/width {
+		return 0, 0, merr.WrapErrServiceInternalMsg(
+			"query response field %s row %d has invalid physical index %d or width %d",
+			fieldName, rowIndex, dataIndex, width)
+	}
+	start := dataIndex * width
+	end := start + width
+	if end < start || end > dataLength {
+		return 0, 0, merr.WrapErrServiceInternalMsg(
+			"query response field %s row %d requires data range [%d,%d), length %d",
+			fieldName, rowIndex, start, end, dataLength)
+	}
+	return start, end, nil
+}
+
+func validateFiniteJSONValue(ctx context.Context, fieldName string, rowIndex int64, value interface{}) error {
+	if err := renderContext(ctx).Err(); err != nil {
+		return err
+	}
+	switch data := value.(type) {
+	case float32:
+		if !isFiniteFloat32(data) {
+			return merr.WrapErrServiceInternalMsg("query response field %s row %d contains a non-finite value", fieldName, rowIndex)
+		}
+	case float64:
+		if math.IsNaN(data) || math.IsInf(data, 0) {
+			return merr.WrapErrServiceInternalMsg("query response field %s row %d contains a non-finite value", fieldName, rowIndex)
+		}
+	case []float32:
+		for index, item := range data {
+			if err := checkResponseContext(ctx, int64(index)); err != nil {
+				return err
+			}
+			if !isFiniteFloat32(item) {
+				return merr.WrapErrServiceInternalMsg("query response field %s row %d contains a non-finite value", fieldName, rowIndex)
+			}
+		}
+	case []float64:
+		for index, item := range data {
+			if err := checkResponseContext(ctx, int64(index)); err != nil {
+				return err
+			}
+			if math.IsNaN(item) || math.IsInf(item, 0) {
+				return merr.WrapErrServiceInternalMsg("query response field %s row %d contains a non-finite value", fieldName, rowIndex)
+			}
+		}
+	case map[uint32]float32:
+		itemIndex := int64(0)
+		for _, item := range data {
+			if err := checkResponseContext(ctx, itemIndex); err != nil {
+				return err
+			}
+			if !isFiniteFloat32(item) {
+				return merr.WrapErrServiceInternalMsg("query response field %s row %d contains a non-finite value", fieldName, rowIndex)
+			}
+			itemIndex++
+		}
+	case map[string]interface{}:
+		itemIndex := int64(0)
+		for _, item := range data {
+			if err := checkResponseContext(ctx, itemIndex); err != nil {
+				return err
+			}
+			if err := validateFiniteJSONValue(ctx, fieldName, rowIndex, item); err != nil {
+				return err
+			}
+			itemIndex++
+		}
+	case []interface{}:
+		for index, item := range data {
+			if err := checkResponseContext(ctx, int64(index)); err != nil {
+				return err
+			}
+			if err := validateFiniteJSONValue(ctx, fieldName, rowIndex, item); err != nil {
+				return err
+			}
+		}
+	case []map[string]interface{}:
+		for index, item := range data {
+			if err := checkResponseContext(ctx, int64(index)); err != nil {
+				return err
+			}
+			if err := validateFiniteJSONValue(ctx, fieldName, rowIndex, item); err != nil {
+				return err
+			}
+		}
+	case *schemapb.ScalarField:
+		if data == nil {
+			return nil
+		}
+		switch data.GetData().(type) {
+		case *schemapb.ScalarField_FloatData:
+			return validateFiniteJSONValue(ctx, fieldName, rowIndex, data.GetFloatData().GetData())
+		case *schemapb.ScalarField_DoubleData:
+			return validateFiniteJSONValue(ctx, fieldName, rowIndex, data.GetDoubleData().GetData())
+		case *schemapb.ScalarField_ArrayData:
+			for index, nested := range data.GetArrayData().GetData() {
+				if err := checkResponseContext(ctx, int64(index)); err != nil {
+					return err
+				}
+				if err := validateFiniteJSONValue(ctx, fieldName, rowIndex, nested); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func isFiniteFloat32(value float32) bool {
+	return !math.IsNaN(float64(value)) && !math.IsInf(float64(value), 0)
+}
+
+//nolint:gosec // G602: slice indices are validated when queryResponseRows is constructed.
+func (rows *queryResponseRows) Row(i int64) (map[string]interface{}, error) {
+	if err := rows.ctx.Err(); err != nil {
+		return nil, err
+	}
+	if i < 0 || i >= rows.rowsNum {
+		return nil, merr.WrapErrServiceInternalMsg("query response row index %d out of range [0,%d)", i, rows.rowsNum)
+	}
+	row := map[string]interface{}{}
+	if len(rows.fieldDataList) > 0 {
+		for j, fieldData := range rows.fieldDataList {
+			if err := checkResponseContext(rows.ctx, int64(j)); err != nil {
+				return nil, err
+			}
+			dataIdx, valid, err := rows.fieldDataAccessors[j].rowIndex(i)
+			if err != nil {
+				return nil, err
+			}
+			if !valid {
+				if !fieldData.GetIsDynamic() {
+					row[fieldData.GetFieldName()] = nil
+				}
+				continue
+			}
+			switch fieldData.GetType() {
+			case schemapb.DataType_Bool:
+				row[fieldData.GetFieldName()] = fieldData.GetScalars().GetBoolData().GetData()[dataIdx]
+			case schemapb.DataType_Int8:
+				row[fieldData.GetFieldName()] = int8(fieldData.GetScalars().GetIntData().GetData()[dataIdx])
+			case schemapb.DataType_Int16:
+				row[fieldData.GetFieldName()] = int16(fieldData.GetScalars().GetIntData().GetData()[dataIdx])
+			case schemapb.DataType_Int32:
+				row[fieldData.GetFieldName()] = fieldData.GetScalars().GetIntData().GetData()[dataIdx]
+			case schemapb.DataType_Int64:
+				if rows.enableInt64 {
+					row[fieldData.GetFieldName()] = fieldData.GetScalars().GetLongData().GetData()[dataIdx]
+				} else {
+					row[fieldData.GetFieldName()] = strconv.FormatInt(fieldData.GetScalars().GetLongData().GetData()[dataIdx], 10)
+				}
+			case schemapb.DataType_Float:
+				row[fieldData.GetFieldName()] = fieldData.GetScalars().GetFloatData().GetData()[dataIdx]
+			case schemapb.DataType_Double:
+				row[fieldData.GetFieldName()] = fieldData.GetScalars().GetDoubleData().GetData()[dataIdx]
+			case schemapb.DataType_Timestamptz:
+				if fieldData.GetScalars().GetTimestamptzData() != nil {
+					row[fieldData.FieldName] = fieldData.GetScalars().GetTimestamptzData().GetData()[dataIdx]
+				} else {
+					row[fieldData.FieldName] = fieldData.GetScalars().GetStringData().GetData()[dataIdx]
+				}
+			case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
+				row[fieldData.GetFieldName()] = fieldData.GetScalars().GetStringData().GetData()[dataIdx]
+			case schemapb.DataType_BinaryVector:
+				row[fieldData.GetFieldName()] = fieldData.GetVectors().GetBinaryVector()[dataIdx*(fieldData.GetVectors().GetDim()/8) : (dataIdx+1)*(fieldData.GetVectors().GetDim()/8)]
+			case schemapb.DataType_FloatVector:
+				row[fieldData.GetFieldName()] = fieldData.GetVectors().GetFloatVector().GetData()[dataIdx*fieldData.GetVectors().GetDim() : (dataIdx+1)*fieldData.GetVectors().GetDim()]
+			case schemapb.DataType_Float16Vector:
+				row[fieldData.GetFieldName()] = fieldData.GetVectors().GetFloat16Vector()[dataIdx*(fieldData.GetVectors().GetDim()*2) : (dataIdx+1)*(fieldData.GetVectors().GetDim()*2)]
+			case schemapb.DataType_BFloat16Vector:
+				row[fieldData.GetFieldName()] = fieldData.GetVectors().GetBfloat16Vector()[dataIdx*(fieldData.GetVectors().GetDim()*2) : (dataIdx+1)*(fieldData.GetVectors().GetDim()*2)]
+			case schemapb.DataType_SparseFloatVector:
+				value, err := sparseFloatBytesToMapWithContext(rows.ctx, fieldData.GetVectors().GetSparseFloatVector().Contents[dataIdx])
 				if err != nil {
 					return nil, err
 				}
-				if !valid {
-					if !fieldData.GetIsDynamic() {
-						row[fieldData.GetFieldName()] = nil
-					}
-					continue
-				}
-				switch fieldDataList[j].GetType() {
-				case schemapb.DataType_Bool:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetBoolData().GetData()[dataIdx]
-				case schemapb.DataType_Int8:
-					row[fieldDataList[j].GetFieldName()] = int8(fieldDataList[j].GetScalars().GetIntData().GetData()[dataIdx])
-				case schemapb.DataType_Int16:
-					row[fieldDataList[j].GetFieldName()] = int16(fieldDataList[j].GetScalars().GetIntData().GetData()[dataIdx])
-				case schemapb.DataType_Int32:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetIntData().GetData()[dataIdx]
-				case schemapb.DataType_Int64:
-					if enableInt64 {
-						row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetLongData().GetData()[dataIdx]
+				row[fieldData.GetFieldName()] = value
+			case schemapb.DataType_Int8Vector:
+				row[fieldData.GetFieldName()] = fieldData.GetVectors().GetInt8Vector()[dataIdx*fieldData.GetVectors().GetDim() : (dataIdx+1)*fieldData.GetVectors().GetDim()]
+			case schemapb.DataType_Array:
+				row[fieldData.GetFieldName()] = fieldData.GetScalars().GetArrayData().GetData()[dataIdx]
+			case schemapb.DataType_JSON:
+				data, ok := fieldData.GetScalars().GetData().(*schemapb.ScalarField_JsonData)
+				if ok && !fieldData.GetIsDynamic() {
+					raw := data.JsonData.GetData()[dataIdx]
+					if rows.nativeJSON {
+						row[fieldData.GetFieldName()] = json.RawMessage(raw)
 					} else {
-						row[fieldDataList[j].GetFieldName()] = strconv.FormatInt(fieldDataList[j].GetScalars().GetLongData().GetData()[dataIdx], 10)
+						row[fieldData.GetFieldName()] = string(raw)
 					}
-				case schemapb.DataType_Float:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetFloatData().GetData()[dataIdx]
-				case schemapb.DataType_Double:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetDoubleData().GetData()[dataIdx]
-				case schemapb.DataType_Timestamptz:
-					if fieldDataList[j].GetScalars().GetTimestamptzData() != nil {
-						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetTimestamptzData().GetData()[dataIdx]
-					} else {
-						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
-					}
-				case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetStringData().GetData()[dataIdx]
-				case schemapb.DataType_BinaryVector:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBinaryVector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()/8) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()/8)]
-				case schemapb.DataType_FloatVector:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetFloatVector().GetData()[dataIdx*fieldDataList[j].GetVectors().GetDim() : (dataIdx+1)*fieldDataList[j].GetVectors().GetDim()]
-				case schemapb.DataType_Float16Vector:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetFloat16Vector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()*2) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
-				case schemapb.DataType_BFloat16Vector:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBfloat16Vector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()*2) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
-				case schemapb.DataType_SparseFloatVector:
-					row[fieldDataList[j].GetFieldName()] = typeutil.SparseFloatBytesToMap(fieldDataList[j].GetVectors().GetSparseFloatVector().Contents[dataIdx])
-				case schemapb.DataType_Int8Vector:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetInt8Vector()[dataIdx*fieldDataList[j].GetVectors().GetDim() : (dataIdx+1)*fieldDataList[j].GetVectors().GetDim()]
-				case schemapb.DataType_Array:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetArrayData().GetData()[dataIdx]
-				case schemapb.DataType_JSON:
-					data, ok := fieldDataList[j].GetScalars().GetData().(*schemapb.ScalarField_JsonData)
-					if ok && !fieldDataList[j].GetIsDynamic() {
-						// A JSON field reads back as a string by default, which
-						// is why the same value in a dynamic field reads back as a
-						// document. proxy.http.nativeJSONResponse returns the
-						// document instead; jsonFieldsToStrings below undoes it for
-						// the whole response if any row turns out not to hold one.
-						raw := data.JsonData.GetData()[dataIdx]
-						if nativeJSON {
-							row[fieldDataList[j].GetFieldName()] = json.RawMessage(raw)
-							jsonFieldNames[fieldDataList[j].GetFieldName()] = struct{}{}
-							// json.Valid accepts invalid UTF-8, which the encoder
-							// would replace with U+FFFD without saying so
-							if !json.Valid(raw) || !utf8.Valid(raw) {
-								jsonAllValid = false
-							}
-						} else {
-							row[fieldDataList[j].GetFieldName()] = string(raw)
-						}
-					} else {
-						var dataMap map[string]interface{}
-
-						// Decode with UseNumber so numeric dynamic-field values are kept as
-						// json.Number instead of float64. float64 only has a 53-bit mantissa,
-						// so integers larger than 2^53 (e.g. 9223372036854775807) silently lose
-						// precision when round-tripped through the REST response. json.Number
-						// preserves the exact digits and serializes back as the same integer.
-						raw := fieldDataList[j].GetScalars().GetJsonData().Data[dataIdx]
-
-						// A Decoder reads one value and ignores whatever follows
-						// it, where the Unmarshal this replaced rejected trailing
-						// content. A second Decode on the same decoder restores
-						// that in the same pass: only whitespace to the end
-						// answers io.EOF, anything else answers a value or an
-						// error. An earlier version ran json.Valid first, which
-						// read every row twice; the ways to avoid the second
-						// call are all closed -- Token is not in sonic's
-						// Decoder, which this build uses everywhere, More
-						// answers false at a closing bracket because it exists
-						// to iterate inside one, and Buffered only exposes the
-						// window the decoder happened to pre-read, so a second
-						// document past four kilobytes of padding sat outside
-						// it and was silently dropped.
-						decoder := json.NewDecoder(bytes.NewReader(raw))
-						decoder.UseNumber()
-						err := decoder.Decode(&dataMap)
-						if err == nil {
-							var trailing interface{}
-							if trailingErr := decoder.Decode(&trailing); trailingErr != io.EOF {
-								err = merr.WrapErrParameterInvalidMsg(
-									"dynamic field does not hold a single JSON document")
-							}
-						}
-						if err != nil {
-							mlog.Error(context.TODO(),
-								fmt.Sprintf("[BuildQueryResp] Unmarshal error %s", err.Error()))
-							return nil, err
-						}
-
-						if containsString(dynamicOutputFields, fieldDataList[j].GetFieldName()) {
-							for key, value := range dataMap {
-								row[key] = value
-							}
-						} else {
-							for _, dynamicField := range dynamicOutputFields {
-								if _, ok := dataMap[dynamicField]; ok {
-									row[dynamicField] = dataMap[dynamicField]
-								}
-							}
-						}
-					}
-				case schemapb.DataType_Geometry:
-					if fieldDataList[j].GetScalars().GetGeometryData() != nil {
-						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryData().GetData()[dataIdx]
-					} else {
-						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryWktData().Data[dataIdx]
-					}
-				case schemapb.DataType_ArrayOfStruct:
-					structRow, err := structArrayAccessors[j].row(int(dataIdx))
-					if err != nil {
-						return nil, err
-					}
-					row[fieldDataList[j].GetFieldName()] = structRow
-				default:
-					row[fieldDataList[j].GetFieldName()] = ""
-				}
-			}
-		}
-		if ids != nil {
-			switch ids.GetIdField().(type) {
-			case *schemapb.IDs_IntId:
-				int64Pks := ids.GetIntId().GetData()
-				if enableInt64 {
-					row[pkFieldName] = int64Pks[i]
 				} else {
-					row[pkFieldName] = strconv.FormatInt(int64Pks[i], 10)
+					var dataMap map[string]interface{}
+					raw := fieldData.GetScalars().GetJsonData().Data[dataIdx]
+					decoder := json.NewDecoder(bytes.NewReader(raw))
+					decoder.UseNumber()
+					if err := decoder.Decode(&dataMap); err != nil {
+						return nil, merr.WrapErrServiceInternalErr(err,
+							"query response dynamic field %s row %d could not be decoded",
+							fieldData.GetFieldName(), i)
+					}
+
+					if containsString(rows.dynamicOutputFields, fieldData.GetFieldName()) {
+						dynamicIndex := int64(0)
+						for key, value := range dataMap {
+							if err := checkResponseContext(rows.ctx, dynamicIndex); err != nil {
+								return nil, err
+							}
+							row[key] = value
+							dynamicIndex++
+						}
+					} else {
+						for dynamicIndex, dynamicField := range rows.dynamicOutputFields {
+							if err := checkResponseContext(rows.ctx, int64(dynamicIndex)); err != nil {
+								return nil, err
+							}
+							if _, ok := dataMap[dynamicField]; ok {
+								row[dynamicField] = dataMap[dynamicField]
+							}
+						}
+					}
 				}
-			case *schemapb.IDs_StrId:
-				stringPks := ids.GetStrId().GetData()
-				row[pkFieldName] = stringPks[i]
+			case schemapb.DataType_Geometry:
+				if fieldData.GetScalars().GetGeometryData() != nil {
+					row[fieldData.FieldName] = fieldData.GetScalars().GetGeometryData().GetData()[dataIdx]
+				} else {
+					row[fieldData.FieldName] = fieldData.GetScalars().GetGeometryWktData().Data[dataIdx]
+				}
+			case schemapb.DataType_ArrayOfStruct:
+				structRow, err := rows.structArrayAccessors[j].row(int(dataIdx))
+				if err != nil {
+					return nil, err
+				}
+				row[fieldData.GetFieldName()] = structRow
 			default:
-				return nil, merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please")
+				row[fieldData.GetFieldName()] = ""
 			}
 		}
-		if scores != nil && int64(len(scores)) > i {
-			row[HTTPReturnDistance] = scores[i] // only 8 decimal places
+	}
+	if err := rows.ctx.Err(); err != nil {
+		return nil, err
+	}
+	if rows.ids != nil {
+		switch rows.ids.GetIdField().(type) {
+		case *schemapb.IDs_IntId:
+			int64Pks := rows.ids.GetIntId().GetData()
+			if rows.enableInt64 {
+				row[rows.pkFieldName] = int64Pks[i]
+			} else {
+				row[rows.pkFieldName] = strconv.FormatInt(int64Pks[i], 10)
+			}
+		case *schemapb.IDs_StrId:
+			stringPks := rows.ids.GetStrId().GetData()
+			row[rows.pkFieldName] = stringPks[i]
+		default:
+			return nil, merr.WrapErrServiceInternalMsg("query response primary key has unsupported ID type")
+		}
+	}
+	if rows.scores != nil && int64(len(rows.scores)) > i {
+		row[HTTPReturnDistance] = rows.scores[i] // only 8 decimal places
+	}
+	return row, nil
+}
+
+func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
+	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
+) ([]map[string]interface{}, error) {
+	rows, err := newQueryResponseRowsWithMode(context.Background(), rowsNum, needFields, fieldDataList, ids, scores, enableInt64, collectionSchema, false)
+	if err != nil {
+		return nil, err
+	}
+	queryResp := make([]map[string]interface{}, 0, rows.Len())
+	for rowIndex := int64(0); rowIndex < rows.Len(); rowIndex++ {
+		row, err := rows.Row(rowIndex)
+		if err != nil {
+			return nil, err
 		}
 		queryResp = append(queryResp, row)
 	}
-
-	if nativeJSON && !jsonAllValid {
-		// Rows written before the insert path was fixed can hold bytes that are
-		// not a JSON document. Embedding one of those natively makes the whole
-		// response fail to marshal, so a single legacy row would break every
-		// query that selects it. Degrade the whole response instead of part of
-		// it: a caller can handle "always a document" or "always a string", but
-		// not one field that is sometimes each.
-		mlog.Warn(context.TODO(),
-			"a JSON field holds bytes that are not a JSON document, returning JSON fields as strings for this response",
-			mlog.Int("rows", len(queryResp)))
-		jsonFieldsToStrings(queryResp, jsonFieldNames)
-	}
-
 	return queryResp, nil
-}
-
-// jsonFieldsToStrings turns the named fields back into their textual form.
-func jsonFieldsToStrings(rows []map[string]interface{}, fields map[string]struct{}) {
-	for _, row := range rows {
-		for name := range fields {
-			if raw, ok := row[name].(json.RawMessage); ok {
-				row[name] = string(raw)
-			}
-		}
-	}
 }
 
 func hasSearchAggregationResult(results *schemapb.SearchResultData) bool {
 	return results != nil && (len(results.GetAggTopks()) > 0 || len(results.GetAggBuckets()) > 0)
 }
 
-func buildSearchAggregationResp(results *schemapb.SearchResultData, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) ([]gin.H, error) {
+type searchAggregationJSONSource struct {
+	aggTopks []int64
+	buckets  [][]byte
+}
+
+func (source *searchAggregationJSONSource) WriteJSON(ctx context.Context, w io.Writer) error {
+	ctx = renderContext(ctx)
+	if _, err := io.WriteString(w, "["); err != nil {
+		return err
+	}
+	offset := 0
+	for queryIndex, topk := range source.aggTopks {
+		if err := checkResponseContext(ctx, int64(queryIndex)); err != nil {
+			return err
+		}
+		if queryIndex > 0 {
+			if _, err := io.WriteString(w, ","); err != nil {
+				return err
+			}
+		}
+		if _, err := io.WriteString(w, `{"buckets":[`); err != nil {
+			return err
+		}
+		for bucketIndex := int64(0); bucketIndex < topk; bucketIndex++ {
+			if err := checkResponseContext(ctx, bucketIndex); err != nil {
+				return err
+			}
+			if offset >= len(source.buckets) {
+				return merr.WrapErrServiceInternalMsg("search aggregation JSON source exhausted at query %d bucket %d", queryIndex, bucketIndex)
+			}
+			if bucketIndex > 0 {
+				if _, err := io.WriteString(w, ","); err != nil {
+					return err
+				}
+			}
+			if _, err := w.Write(source.buckets[offset]); err != nil {
+				return err
+			}
+			offset++
+		}
+		if _, err := io.WriteString(w, "]}"); err != nil {
+			return err
+		}
+	}
+	if offset != len(source.buckets) {
+		return merr.WrapErrServiceInternalMsg("search aggregation JSON source contains %d unused buckets", len(source.buckets)-offset)
+	}
+	_, err := io.WriteString(w, "]")
+	return err
+}
+
+func buildSearchAggregationResp(ctx context.Context, results *schemapb.SearchResultData, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) (*searchAggregationJSONSource, error) {
+	ctx = renderContext(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if results == nil {
 		// The aggregation payload is produced by the server-side reduce, never
 		// by the request: a malformed shape is an internal contract violation.
@@ -3940,9 +4806,15 @@ func buildSearchAggregationResp(results *schemapb.SearchResultData, enableInt64 
 	}
 
 	total := int64(0)
-	for _, topk := range aggTopks {
+	for queryIndex, topk := range aggTopks {
+		if err := checkResponseContext(ctx, int64(queryIndex)); err != nil {
+			return nil, err
+		}
 		if topk < 0 {
 			return nil, merr.WrapErrServiceInternalMsg("search_aggregation agg_topks cannot contain negative values")
+		}
+		if topk > math.MaxInt64-total {
+			return nil, merr.WrapErrServiceInternalMsg("search_aggregation agg_topks sum overflows int64")
 		}
 		total += topk
 	}
@@ -3950,37 +4822,59 @@ func buildSearchAggregationResp(results *schemapb.SearchResultData, enableInt64 
 		return nil, merr.WrapErrServiceInternalMsg("search_aggregation agg_topks sum %d does not match bucket count %d", total, len(pbBuckets))
 	}
 
-	output := make([]gin.H, 0, len(aggTopks))
-	offset := 0
-	for _, topk := range aggTopks {
-		buckets := make([]gin.H, 0, int(topk))
-		for i := int64(0); i < topk; i++ {
-			bucket, err := buildAggBucketResp(pbBuckets[offset], enableInt64, collectionSchema)
-			if err != nil {
-				return nil, err
-			}
-			buckets = append(buckets, bucket)
-			offset++
+	encodedBuckets := make([][]byte, 0, len(pbBuckets))
+	for bucketIndex, pbBucket := range pbBuckets {
+		if err := checkResponseContext(ctx, int64(bucketIndex)); err != nil {
+			return nil, err
 		}
-		output = append(output, gin.H{"buckets": buckets})
+		bucket, err := buildAggBucketResp(ctx, pbBucket, enableInt64, collectionSchema)
+		if err != nil {
+			return nil, err
+		}
+		encoded, err := json.Marshal(bucket)
+		if err != nil {
+			return nil, merr.WrapErrServiceInternalErr(err, "encode search aggregation bucket %d", bucketIndex)
+		}
+		encodedBuckets = append(encodedBuckets, encoded)
 	}
-	return output, nil
+	return &searchAggregationJSONSource{
+		aggTopks: append([]int64(nil), aggTopks...),
+		buckets:  encodedBuckets,
+	}, nil
 }
 
-func buildAggBucketResp(pb *schemapb.AggBucket, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) (gin.H, error) {
+func buildAggBucketResp(ctx context.Context, pb *schemapb.AggBucket, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) (gin.H, error) {
+	if err := renderContext(ctx).Err(); err != nil {
+		return nil, err
+	}
 	if pb == nil {
 		return nil, merr.WrapErrServiceInternalMsg("search_aggregation bucket is nil")
 	}
+	keys, err := buildAggBucketKeyResp(ctx, pb.GetKey(), enableInt64)
+	if err != nil {
+		return nil, err
+	}
+	metricsResp, err := buildAggMetricsResp(ctx, pb.GetMetrics(), enableInt64)
+	if err != nil {
+		return nil, err
+	}
+	hits, err := buildAggHitsResp(ctx, pb.GetHits(), enableInt64, collectionSchema)
+	if err != nil {
+		return nil, err
+	}
 	bucket := gin.H{
-		"key":       buildAggBucketKeyResp(pb.GetKey(), enableInt64),
+		"key":       keys,
 		"count":     formatRESTInt64(pb.GetCount(), enableInt64),
-		"metrics":   buildAggMetricsResp(pb.GetMetrics(), enableInt64),
-		"hits":      buildAggHitsResp(pb.GetHits(), enableInt64, collectionSchema),
+		"metrics":   metricsResp,
+		"hits":      hits,
 		"subGroups": []gin.H{},
 	}
 	subGroups := make([]gin.H, 0, len(pb.GetSubGroups()))
-	for _, sub := range pb.GetSubGroups() {
-		subGroup, err := buildAggBucketResp(sub, enableInt64, collectionSchema)
+	for subIndex, sub := range pb.GetSubGroups() {
+		if err := checkResponseContext(ctx, int64(subIndex)); err != nil {
+			return nil, err
+		}
+		subGroup, err := buildAggBucketResp(ctx, sub, enableInt64, collectionSchema)
 		if err != nil {
 			return nil, err
 		}
@@ -3990,9 +4884,12 @@ func buildAggBucketResp(pb *schemapb.AggBucket, enableInt64 bool, collectionSche
 	return bucket, nil
 }
 
-func buildAggBucketKeyResp(keys []*schemapb.BucketKeyEntry, enableInt64 bool) []gin.H {
+func buildAggBucketKeyResp(ctx context.Context, keys []*schemapb.BucketKeyEntry, enableInt64 bool) ([]gin.H, error) {
 	resp := make([]gin.H, 0, len(keys))
-	for _, key := range keys {
+	for keyIndex, key := range keys {
+		if err := checkResponseContext(ctx, int64(keyIndex)); err != nil {
+			return nil, err
+		}
 		if key == nil {
 			resp = append(resp, gin.H{})
 			continue
@@ -4007,21 +4904,29 @@ func buildAggBucketKeyResp(keys []*schemapb.BucketKeyEntry, enableInt64 bool) []
 			"value":     bucketKeyEntryValueToRESTAny(key, enableInt64),
 		})
 	}
-	return resp
+	return resp, nil
 }
 
-func buildAggMetricsResp(metrics map[string]*schemapb.MetricValue, enableInt64 bool) gin.H {
+func buildAggMetricsResp(ctx context.Context, metrics map[string]*schemapb.MetricValue, enableInt64 bool) (gin.H, error) {
 	resp := make(gin.H, len(metrics))
+	metricIndex := int64(0)
 	for alias, metric := range metrics {
+		if err := checkResponseContext(ctx, metricIndex); err != nil {
+			return nil, err
+		}
 		resp[alias] = metricValueToRESTAny(metric, enableInt64)
+		metricIndex++
 	}
-	return resp
+	return resp, nil
 }
 
-func buildAggHitsResp(hits []*schemapb.AggHit, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) []gin.H {
+func buildAggHitsResp(ctx context.Context, hits []*schemapb.AggHit, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) ([]gin.H, error) {
 	resp := make([]gin.H, 0, len(hits))
 	pkFieldName := getRESTPrimaryFieldName(collectionSchema)
-	for _, hit := range hits {
+	for hitIndex, hit := range hits {
+		if err := checkResponseContext(ctx, int64(hitIndex)); err != nil {
+			return nil, err
+		}
 		if hit == nil {
 			resp = append(resp, gin.H{})
 			continue
@@ -4030,7 +4935,10 @@ func buildAggHitsResp(hits []*schemapb.AggHit, enableInt64 bool, collectionSchem
 			pkFieldName:        aggHitPKToRESTAny(hit, enableInt64),
 			HTTPReturnDistance: hit.GetScore(),
 		}
-		for _, field := range hit.GetFields() {
+		for fieldIndex, field := range hit.GetFields() {
+			if err := checkResponseContext(ctx, int64(fieldIndex)); err != nil {
+				return nil, err
+			}
 			if field == nil {
 				continue
 			}
@@ -4042,7 +4950,7 @@ func buildAggHitsResp(hits []*schemapb.AggHit, enableInt64 bool, collectionSchem
 		}
 		resp = append(resp, row)
 	}
-	return resp
+	return resp, nil
 }
 
 func getRESTPrimaryFieldName(collectionSchema *schemapb.CollectionSchema) string {
