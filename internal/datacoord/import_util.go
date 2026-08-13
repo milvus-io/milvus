@@ -360,6 +360,19 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 		return fileStat.GetImportFile()
 	})
+	for _, fileStat := range task.GetFileStats() {
+		file := fileStat.GetImportFile()
+		rangeSpec := file.GetPreAllocatedAutoIds()
+		if rangeSpec == nil {
+			continue
+		}
+		reserved := rangeSpec.GetEnd() - rangeSpec.GetBegin()
+		if reserved > 0 && fileStat.GetTotalRows() > reserved {
+			return nil, merr.WrapErrDataIntegrityMsg(
+				"pre-allocated AutoID range exhausted before import, paths=%v rows=%d reserved=%d",
+				file.GetPaths(), fileStat.GetTotalRows(), reserved)
+		}
+	}
 
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
 	storageVersion := importStorageVersion(isL0Import)

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // importV1AckCallback handles the ack callback for import messages.
@@ -199,6 +200,19 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// Validate the request before broadcasting
 	if err := s.validateImportRequest(ctx, msgFiles, options); err != nil {
 		return merr.Wrap(err, "failed to validate import request")
+	}
+
+	// Freeze one literal AutoID range per ordinary source file before the WAL
+	// message is published. Backup/L0 imports keep their existing behavior.
+	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(schema); pkErr == nil &&
+		pkField.GetAutoID() && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
+		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, files,
+			s.allocator.AllocN, Params.CommonCfg.ClusterID.GetAsUint64()); err != nil {
+			return merr.Wrap(err, "failed to assign per-file PK ranges")
+		}
+		for i := range files {
+			msgFiles[i].PreAllocatedAutoIds = files[i].GetPreAllocatedAutoIds()
+		}
 	}
 
 	// Get database name from collection metadata via broker
