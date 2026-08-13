@@ -1,6 +1,7 @@
 package message
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
