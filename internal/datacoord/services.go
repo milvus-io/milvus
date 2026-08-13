@@ -3234,7 +3234,8 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 // CommitImport fence.
 // This must be called BEFORE acquiring importMeta's mutex (i.e., before HandleCommitVchannel).
 func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) []int64 {
-	tasks := s.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType, ImportTaskV3Type))
+	tasks := s.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks = append(tasks, s.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskV3Type))...)
 	var segIDs []int64
 	for _, task := range tasks {
 		var candidates []int64
