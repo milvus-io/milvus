@@ -93,6 +93,42 @@ func TestEstimateL0CompactionUsesDeleteBytesNotRowCount(t *testing.T) {
 	assert.Greater(t, many.Memory, few.Memory)
 }
 
+func TestEstimateL0CompactionSentinelBatchSizeFallsBackPositive(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+
+	// deleteBytes is chosen large enough that neither case below is masked by
+	// the atLeast(mem, binlogChunkBytes()) floor (default 64MiB): both must
+	// exceed it purely from deleteBytes, so the allowance term's sign and
+	// magnitude are visible in the final Memory value, not hidden by the floor.
+	const deleteBytes = 100 * mib
+
+	// L0CompactionMaxBatchSize's default is -1 ("no limit" sentinel, a segment
+	// count). Without the <=0 guard, the term would be -1*mib and this
+	// assertion would see deleteBytes-mib instead of deleteBytes+32*mib.
+	pt.Save(pt.DataNodeCfg.L0CompactionMaxBatchSize.Key, "-1")
+	sentinel := EstimateCompaction(CompactionInput{
+		Type:                  datapb.CompactionType_Level0DeleteCompaction,
+		MaxSegmentDeleteBytes: deleteBytes,
+	})
+	pt.Reset(pt.DataNodeCfg.L0CompactionMaxBatchSize.Key)
+
+	assert.Equal(t, deleteBytes+defaultL0BatchSize*mib, sentinel.Memory)
+	assert.Greater(t, sentinel.Memory, deleteBytes, "fallback allowance must be a positive contribution")
+
+	// A real, positive configured batch count must dominate the sentinel
+	// fallback, not be silently equal to or smaller than it.
+	pt.Save(pt.DataNodeCfg.L0CompactionMaxBatchSize.Key, "100")
+	defer pt.Reset(pt.DataNodeCfg.L0CompactionMaxBatchSize.Key)
+	configured := EstimateCompaction(CompactionInput{
+		Type:                  datapb.CompactionType_Level0DeleteCompaction,
+		MaxSegmentDeleteBytes: deleteBytes,
+	})
+
+	assert.Equal(t, deleteBytes+100*mib, configured.Memory)
+	assert.Greater(t, configured.Memory, sentinel.Memory)
+}
+
 func TestEstimateCompactionAlwaysPositive(t *testing.T) {
 	paramtable.Init()
 
