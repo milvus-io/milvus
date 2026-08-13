@@ -1985,13 +1985,48 @@ IterateFieldDataFromManifest(
             chunks_result.ok(),
             "Failed to read chunks: " + chunks_result.status().ToString());
         auto batches = chunks_result.ValueOrDie();
+
+        // Compute the intra-chunk offset for the first batch.
+        // The first chunk returned starts at a global row index equal to
+        // sum(chunk_rows[0..first_chunk_index-1]).  The requested range
+        // starts at signed_offset, so we must skip the leading rows in
+        // the first batch that precede the requested range.
+        int64_t first_chunk_global_start = 0;
+        for (int64_t ci = 0; ci < static_cast<int64_t>(chunk_indices[0]);
+             ci++) {
+            first_chunk_global_start += chunk_rows[ci];
+        }
+        int64_t skip_in_first = signed_offset - first_chunk_global_start;
+        AssertInfo(skip_in_first >= 0,
+                   "skip_in_first must be non-negative, got: " +
+                       std::to_string(skip_in_first));
+
         int64_t consumed_rows = 0;
         for (size_t i = 0; i < batches.size(); i++) {
             batch = batches[i];
-            auto num_rows = batch->num_rows();
+            int64_t num_rows = batch->num_rows();
             if (num_rows == 0) {
                 continue;
             }
+
+            // Slice the first batch to skip rows before the requested
+            // offset, and slice any batch that would exceed effective_rows.
+            int64_t slice_offset = 0;
+            int64_t slice_length = num_rows;
+            if (i == 0 && skip_in_first > 0) {
+                slice_offset = skip_in_first;
+                slice_length -= skip_in_first;
+            }
+            int64_t remaining = effective_rows - consumed_rows;
+            if (slice_length > remaining) {
+                slice_length = remaining;
+            }
+
+            if (slice_offset != 0 || slice_length != num_rows) {
+                batch = batch->Slice(slice_offset, slice_length);
+                num_rows = batch->num_rows();
+            }
+
             auto raw_column = batch->GetColumnByName(column_name);
             if (is_external) {
                 raw_column =
