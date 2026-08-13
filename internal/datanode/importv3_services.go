@@ -582,7 +582,8 @@ func executeImportPlan(ctx context.Context, cm storage.ChunkManager, req *datapb
 		if err != nil {
 			return nil, err
 		}
-		segmentResult := &datapb.SegmentResult{LogicalSegmentOrdinal: ordinal, PhysicalSegmentId: physicalSegmentID, VchannelOrdinal: segment.GetVchannelOrdinal(), Vchannel: segment.GetVchannel(), PartitionOrdinal: segment.GetPartitionOrdinal(), PartitionId: segment.GetPartitionId(), Rows: rows, Materialized: rows > 0, IsSorted: true, StorageVersion: writerSpec.GetTargetStorageVersion(), SchemaVersion: int32(writerSpec.GetTargetSchemaVersion())}
+		isNamespaceSorted := targetSchema.GetEnableNamespace()
+		segmentResult := &datapb.SegmentResult{LogicalSegmentOrdinal: ordinal, PhysicalSegmentId: physicalSegmentID, VchannelOrdinal: segment.GetVchannelOrdinal(), Vchannel: segment.GetVchannel(), PartitionOrdinal: segment.GetPartitionOrdinal(), PartitionId: segment.GetPartitionId(), Rows: rows, Materialized: rows > 0, IsSorted: !isNamespaceSorted, IsSortedByNamespace: isNamespaceSorted, StorageVersion: writerSpec.GetTargetStorageVersion(), SchemaVersion: int32(writerSpec.GetTargetSchemaVersion())}
 		if writer != nil {
 			fieldBinlogs, statsLog, bm25Logs, manifestPath, expiration := writer.GetLogs()
 			segmentResult.InsertLogs = storage.SortFieldBinlogs(fieldBinlogs)
