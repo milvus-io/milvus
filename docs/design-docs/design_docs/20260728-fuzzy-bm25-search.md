@@ -633,16 +633,15 @@ existing search subtask organization and `SearchSegments` calls.
 
 Exact mode is fail-closed:
 
-- a required Worker expansion failure fails the query or restarts the complete
-  expansion on a newly pinned lexical snapshot;
+- a Worker expansion failure follows the existing Search partial-result policy;
+  otherwise the query fails or restarts expansion on a newly pinned lexical
+  snapshot;
 - a missing dictionary generation is not treated as an empty vocabulary;
 - a distribution change after pinning does not alter the in-flight query;
 - partial expansion results must not be combined with full-target IDF stats.
 
-If existing partial-search behavior selects a reduced readable target, fuzzy
-expansion, DF/IDF, and `SearchSegments` must all use that same reduced target.
-An expansion RPC failure after the target is pinned must not independently drop
-another segment and continue.
+When partial results are accepted, successful expansion segments become the
+authoritative reduced target shared by lexical preparation and search dispatch.
 
 ---
 
@@ -963,7 +962,8 @@ Delegator path.
 - All target segments receive byte-identical query vectors.
 - Partition-scoped search filters Global FST terms using target-bound DF.
 - Hash collisions are aggregated consistently with current BM25 semantics.
-- Expansion failure cannot silently produce partial vocabulary in exact mode.
+- An accepted partial expansion and the final search use the same reduced
+  target.
 - Distribution or dictionary generation changes during a query do not mix
   snapshots.
 
