@@ -51,6 +51,17 @@ func ttlRecord(expirationMicros ...int64) storage.Record {
 	return storage.NewSimpleArrowRecord(record, map[int64]int{101: 0})
 }
 
+func ttlRecordWithTimestamp(timestamp uint64) storage.Record {
+	builder := array.NewInt64Builder(memory.DefaultAllocator)
+	builder.Append(int64(timestamp))
+	column := builder.NewArray()
+	builder.Release()
+	record := array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "ts", Type: arrow.PrimitiveTypes.Int64}}, nil),
+		[]arrow.Array{column}, 1)
+	column.Release()
+	return storage.NewSimpleArrowRecord(record, map[int64]int{common.TimeStampField: 0})
+}
+
 func TestTTLOnlyPredicateUsesOneClockPerBatch(t *testing.T) {
 	now := time.Unix(2_000_000_000, 0)
 	clockCalls := 0
@@ -81,4 +92,15 @@ func TestTTLOnlyPredicateUsesDataTSWithoutDeletes(t *testing.T) {
 	record := ttlRecord(-1)
 	defer record.Release()
 	require.False(t, predicate(record, 0, 0), "the row is expired by collection TTL")
+}
+
+func TestTTLOnlyPredicateKeepsBackupTimestamp(t *testing.T) {
+	now := time.Unix(2_000_000_000, 0)
+	dataTS := tsoutil.ComposeTSByTime(now)
+	sourceTS := tsoutil.ComposeTSByTime(now.Add(-2 * time.Hour))
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: common.TimeStampField, Name: "ts", DataType: schemapb.DataType_Int64}}}
+	predicate := newTTLOnlyPredicate(schema, int64(time.Hour), dataTS, func() time.Time { return now })
+	record := ttlRecordWithTimestamp(sourceTS)
+	defer record.Release()
+	require.False(t, predicate(record, 0, 0), "backup rows use their source timestamp for collection TTL")
 }

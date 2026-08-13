@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // SourceFromFragment adapts the stable FragmentRef protocol to the generic
@@ -129,6 +130,13 @@ func newTTLOnlyPredicate(
 	now func() time.Time,
 ) func(storage.Record, int, int) bool {
 	ttlFieldID := ttlField(schema)
+	hasTimestamp := false
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		if field.GetFieldID() == common.TimeStampField {
+			hasTimestamp = true
+			break
+		}
+	}
 	type batchState struct {
 		record storage.Record
 		filter compaction.EntityFilter
@@ -149,8 +157,14 @@ func newTTLOnlyPredicate(
 				expirationMicros = column.Value(row)
 			}
 		}
+		rowTS := dataTS
+		if hasTimestamp {
+			if column, ok := record.Column(common.TimeStampField).(*array.Int64); ok && column.IsValid(row) {
+				rowTS = uint64(column.Value(row))
+			}
+		}
 		// PK is irrelevant because the delete map is deliberately empty.
-		return !state.filter.Filtered(nil, dataTS, expirationMicros)
+		return !state.filter.Filtered(nil, rowTS, expirationMicros)
 	}
 }
 
