@@ -152,7 +152,7 @@ func (t *searchTask) CanSkipAllocTimestamp() bool {
 				mlog.String("collectionName", t.request.GetCollectionName()), mlog.Err(err))
 			return false
 		}
-		consistencyLevel = collectionInfo.consistencyLevel
+		consistencyLevel = collectionInfo.ConsistencyLevel
 	}
 	return consistencyLevel != commonpb.ConsistencyLevel_Strong
 }
@@ -190,8 +190,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			mlog.String("collectionName", collectionName), mlog.Int64("collectionID", t.CollectionID), mlog.Err(err2))
 		return err2
 	}
-	t.largeTopKEnabled = collectionInfo.queryMode == common.QueryModeLargeTopK
-	t.partitionKeyIsolation = collectionInfo.partitionKeyIsolation
+	t.largeTopKEnabled = collectionInfo.QueryMode == common.QueryModeLargeTopK
+	t.partitionKeyIsolation = collectionInfo.PartitionKeyIsolation
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
@@ -299,7 +299,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
 	if useDefaultConsistency {
-		consistencyLevel = collectionInfo.consistencyLevel
+		consistencyLevel = collectionInfo.ConsistencyLevel
 		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 	} else {
 		consistencyLevel = t.request.GetConsistencyLevel()
@@ -318,8 +318,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
 	// this make query view updated happens before new read request happens
 	// see also schema change design
-	if collectionInfo.updateTimestamp > guaranteeTs {
-		guaranteeTs = collectionInfo.updateTimestamp
+	if collectionInfo.UpdateTimestamp > guaranteeTs {
+		guaranteeTs = collectionInfo.UpdateTimestamp
 	}
 
 	t.GuaranteeTimestamp = guaranteeTs
@@ -342,13 +342,13 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		t.Username = username
 	}
 
-	if collectionInfo.collectionTTL != 0 {
+	if collectionInfo.CollectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
-		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
+		expireTime := physicalTime.Add(-time.Duration(collectionInfo.CollectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.CollectionTTL)
 		}
 	}
 
@@ -1180,7 +1180,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	}
 
 	start := time.Now()
-	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
+	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.SchemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
 	if planErr != nil {
 		mlog.Warn(t.ctx, "failed to create query plan", mlog.Err(planErr),
 			mlog.String("dsl", dsl), // may be very large if large term passed.

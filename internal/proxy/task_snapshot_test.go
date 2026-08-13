@@ -559,7 +559,7 @@ func TestListSnapshotsTask_PreExecute_Success(t *testing.T) {
 
 	// Initialize globalMetaCache
 	globalMetaCache = &MetaCache{}
-	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{dbID: 1}, nil).Build()
+	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{DBID: 1}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
@@ -1018,7 +1018,7 @@ func TestListSnapshotsTask_PreExecute_EmptyCollectionName(t *testing.T) {
 	}
 
 	globalMetaCache = &MetaCache{}
-	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{dbID: 1}, nil).Build()
+	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{DBID: 1}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
 
 	err := task.PreExecute(context.Background())
@@ -1050,8 +1050,8 @@ func TestResolveCollectionNames_Success(t *testing.T) {
 	globalMetaCache = &MetaCache{}
 	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).
 		Return(&collectionInfo{
-			dbName: "test_db",
-			schema: &schemaInfo{
+			DBName: "test_db",
+			Schema: &schemaInfo{
 				CollectionSchema: &schemapb.CollectionSchema{
 					Name: "test_collection",
 				},
@@ -1183,7 +1183,7 @@ func TestListSnapshotsTask_PreExecute_GetCollectionIDError(t *testing.T) {
 
 	globalMetaCache = &MetaCache{}
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
-		Return(&databaseInfo{dbID: 1}, nil).Build()
+		Return(&databaseInfo{DBID: 1}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).
 		Return(int64(0), errors.New("collection not found")).Build()
@@ -1254,8 +1254,8 @@ func TestGetRestoreSnapshotStateTask_Execute_Success(t *testing.T) {
 	globalMetaCache = &MetaCache{}
 	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).
 		Return(&collectionInfo{
-			dbName: "test_db",
-			schema: &schemaInfo{
+			DBName: "test_db",
+			Schema: &schemaInfo{
 				CollectionSchema: &schemapb.CollectionSchema{
 					Name: "test_collection",
 				},
@@ -1397,7 +1397,7 @@ func TestListRestoreSnapshotJobsTask_PreExecute_CollectionNameError(t *testing.T
 
 	globalMetaCache = &MetaCache{}
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
-		Return(&databaseInfo{dbID: 1}, nil).Build()
+		Return(&databaseInfo{DBID: 1}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).
 		Return(int64(0), errors.New("collection not found")).Build()
@@ -1419,7 +1419,7 @@ func TestListRestoreSnapshotJobsTask_PreExecute_BothDbAndCollectionSuccess(t *te
 
 	globalMetaCache = &MetaCache{}
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
-		Return(&databaseInfo{dbID: 5}, nil).Build()
+		Return(&databaseInfo{DBID: 5}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).
 		Return(int64(200), nil).Build()
@@ -1441,7 +1441,7 @@ func TestListRestoreSnapshotJobsTask_PreExecute_OnlyDbName(t *testing.T) {
 
 	globalMetaCache = &MetaCache{}
 	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).
-		Return(&databaseInfo{dbID: 5}, nil).Build()
+		Return(&databaseInfo{DBID: 5}, nil).Build()
 	defer mockGetDBInfo.UnPatch()
 
 	err := task.PreExecute(context.Background())
@@ -1505,15 +1505,15 @@ func TestListRestoreSnapshotJobsTask_Execute_Success(t *testing.T) {
 			switch collectionID {
 			case 100:
 				return &collectionInfo{
-					dbName: "db1",
-					schema: &schemaInfo{
+					DBName: "db1",
+					Schema: &schemaInfo{
 						CollectionSchema: &schemapb.CollectionSchema{Name: "coll1"},
 					},
 				}, nil
 			case 200:
 				return &collectionInfo{
-					dbName: "db2",
-					schema: &schemaInfo{
+					DBName: "db2",
+					Schema: &schemaInfo{
 						CollectionSchema: &schemapb.CollectionSchema{Name: "coll2"},
 					},
 				}, nil
