@@ -1207,7 +1207,7 @@ func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo)
 
 	// Validate field existence using schemaHelper
 	for _, fieldData := range columns {
-		_, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
+		_, err := schema.SchemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
 		if err != nil {
 			return merr.WrapErrParameterInvalidMsg("fieldName %v not exist in collection schema", fieldData.FieldName)
 		}
@@ -1237,7 +1237,7 @@ func validateAndNormalizeFieldDataValidData(fields []*schemapb.FieldData) error 
 func fillFieldPropertiesOnly(columns []*schemapb.FieldData, schema *schemaInfo) error {
 	for _, fieldData := range columns {
 		// Use schemaHelper to get field schema, automatically handles dynamic fields
-		fieldSchema, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
+		fieldSchema, err := schema.SchemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
 		if err != nil {
 			return merr.WrapErrParameterInvalidMsg("fieldName %v not exist in collection schema", fieldData.FieldName)
 		}
@@ -1742,10 +1742,10 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 			} else {
 				if schema.EnableDynamicField {
 					dynamicNestedPath := outputFieldName
-					err := planparserv2.ParseIdentifier(schema.schemaHelper, outputFieldName, func(expr *planpb.Expr) error {
+					err := planparserv2.ParseIdentifier(schema.SchemaHelper, outputFieldName, func(expr *planpb.Expr) error {
 						columnInfo := expr.GetColumnExpr().GetInfo()
 						// there must be no error here
-						dynamicField, _ := schema.schemaHelper.GetDynamicField()
+						dynamicField, _ := schema.SchemaHelper.GetDynamicField()
 						// only $meta["xxx"] is allowed for now
 						if dynamicField.GetFieldID() != columnInfo.GetFieldId() {
 							return merr.WrapErrParameterInvalidMsg("not support getting subkeys of json field yet")
@@ -2405,7 +2405,13 @@ func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msg
 	return nil
 }
 
-func checkUpsertPrimaryFieldData(ctx context.Context, allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, *schemapb.IDs, error) {
+func checkUpsertPrimaryFieldData(
+	ctx context.Context,
+	allFields []*schemapb.FieldSchema,
+	schema *schemapb.CollectionSchema,
+	insertMsg *msgstream.InsertMsg,
+	preserveAutoIDPrimaryKey bool,
+) (*schemapb.IDs, *schemapb.IDs, error) {
 	log := mlog.With(mlog.String("collectionName", insertMsg.CollectionName))
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
@@ -2434,9 +2440,8 @@ func checkUpsertPrimaryFieldData(ctx context.Context, allFields []*schemapb.Fiel
 	for i, field := range insertMsg.GetFieldsData() {
 		if field.FieldId == primaryFieldID || field.FieldName == primaryFieldName {
 			primaryFieldData = field
-			if primaryFieldSchema.AutoID {
-				// use the passed pk as new pk when autoID == false
-				// automatic generate pk as new pk wehen autoID == true
+			if primaryFieldSchema.AutoID && !preserveAutoIDPrimaryKey {
+				// Normal AutoID upsert deletes the supplied PK and inserts a new PK.
 				newPrimaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 				if err != nil {
 					log.Info(ctx, "generate new primary field data failed when upsert", mlog.Err(err))
@@ -2459,7 +2464,7 @@ func checkUpsertPrimaryFieldData(ctx context.Context, allFields []*schemapb.Fiel
 		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
 		return nil, nil, err
 	}
-	if !primaryFieldSchema.GetAutoID() {
+	if !primaryFieldSchema.GetAutoID() || preserveAutoIDPrimaryKey {
 		return ids, ids, nil
 	}
 	newIDs, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
@@ -3138,7 +3143,7 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 			}
 			collToPartIDs[collectionID] = []int64{}
 		}
-		return db.dbID, collToPartIDs, internalpb.RateType_DDLFlush, 1, nil
+		return db.DBID, collToPartIDs, internalpb.RateType_DDLFlush, 1, nil
 	case *milvuspb.ManualCompactionRequest:
 		// Use the db the request actually targets (normalized by
 		// DatabaseInterceptor), consistent with the sibling cases, so quota is
@@ -3147,7 +3152,7 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		if err != nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, err
 		}
-		return dbInfo.dbID, map[int64][]int64{
+		return dbInfo.DBID, map[int64][]int64{
 			r.GetCollectionID(): {},
 		}, internalpb.RateType_DDLCompaction, 1, nil
 	case *milvuspb.ListFileResourcesRequest:
@@ -3363,7 +3368,7 @@ func reconstructStructFieldDataForSearch(results *milvuspb.SearchResults, schema
 }
 
 func getColTimezone(colInfo *collectionInfo) string {
-	timezone, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, colInfo.properties)
+	timezone, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, colInfo.Properties)
 	if timezone == "" {
 		timezone = common.DefaultTimezone
 	}

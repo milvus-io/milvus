@@ -331,7 +331,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
-			CollectionID: info.collID,
+			CollectionID: info.CollID,
 			PartitionIDs: searchPartitionIDs,
 		})
 		if err != nil {
@@ -357,7 +357,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		CollectionID: info.collID,
+		CollectionID: info.CollID,
 	})
 	if err != nil {
 		return nil, nil, merr.Wrapf(err, "showPartitions failed, collection = %d, partitionIDs = %v", collectionID, searchPartitionIDs)

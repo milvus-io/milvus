@@ -4511,7 +4511,7 @@ func TestProxy_Import(t *testing.T) {
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
-			dbID: 1,
+			DBID: 1,
 		}, nil)
 		globalMetaCache = mc
 

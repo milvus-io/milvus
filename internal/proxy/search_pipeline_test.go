@@ -2263,7 +2263,7 @@ func (s *SearchPipelineSuite) TestSearchPipeline() {
 					{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 				},
 			},
-			pkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -2320,7 +2320,7 @@ func (s *SearchPipelineSuite) TestSearchPipelineWithRequery() {
 					{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 				},
 			},
-			pkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -2401,7 +2401,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
 		},
 		schema: &schemaInfo{
 			CollectionSchema: schema,
-			pkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -2474,7 +2474,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 		},
 		schema: &schemaInfo{
 			CollectionSchema: schema,
-			pkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -3003,7 +3003,7 @@ func getHybridSearchTask(collName string, data [][]string, outputFields []string
 		},
 		schema: &schemaInfo{
 			CollectionSchema: schema,
-			pkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		mixCoord: nil,
 		tr:       timerecord.NewTimeRecorder("test-search"),
@@ -6682,7 +6682,7 @@ func (s *SearchPipelineSuite) TestNewSearchPipelineWithOrderBy() {
 					{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 				},
 			},
-			pkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -6716,7 +6716,7 @@ func (s *SearchPipelineSuite) TestNewRequeryOperator_WithHighlightDynamicFields(
 				{FieldID: 101, Name: "title", DataType: schemapb.DataType_VarChar},
 			},
 		},
-		pkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		PkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 	}
 
 	// Mock highlighter with dynamic field names
@@ -6767,7 +6767,7 @@ func (s *SearchPipelineSuite) TestNewRequeryOperatorIncludesOrderByOutputFieldNa
 				{FieldID: 103, Name: "price", DataType: schemapb.DataType_Int64},
 			},
 		},
-		pkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		PkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 	}
 	task := &searchTask{
 		ctx:            context.Background(),
@@ -6801,7 +6801,7 @@ func (s *SearchPipelineSuite) TestNewRequeryOperator_WithoutHighlighter() {
 				{FieldID: 101, Name: "title", DataType: schemapb.DataType_VarChar},
 			},
 		},
-		pkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		PkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 	}
 
 	task := &searchTask{
@@ -6844,7 +6844,7 @@ func (s *SearchPipelineSuite) TestNewBuiltInPipelineWithAggCtx() {
 		aggCtx:        aggCtx,
 		schema: &schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField}},
-			pkField:          pkField,
+			PkField:          pkField,
 		},
 		queryInfos: []*planpb.QueryInfo{{}},
 	}
@@ -6864,7 +6864,7 @@ func (s *SearchPipelineSuite) TestNewSearchPipelineWithAggCtxSkipsEndNode() {
 		aggCtx:        aggCtx,
 		schema: &schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField}},
-			pkField:          pkField,
+			PkField:          pkField,
 		},
 		queryInfos:  []*planpb.QueryInfo{{}},
 		highlighter: nil,
@@ -6933,7 +6933,7 @@ func (s *SearchPipelineSuite) TestNewRequeryOperator_WithHighlighterNoDynamicFie
 				{FieldID: 101, Name: "title", DataType: schemapb.DataType_VarChar},
 			},
 		},
-		pkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		PkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 	}
 
 	// Mock highlighter with empty dynamic field names
