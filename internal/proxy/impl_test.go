@@ -2430,6 +2430,93 @@ func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
 	})
 }
 
+func TestHandleIfSearchByPK_ReordersNullableVectorResultByInputIDs(t *testing.T) {
+	mockey.PatchConvey("TestHandleIfSearchByPK_ReordersNullableVectorResultByInputIDs", t, func() {
+		paramtable.Init()
+
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{
+					FieldID:  101,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					Nullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+					},
+				},
+			},
+		}
+
+		cache := NewMockCache(t)
+		cache.EXPECT().
+			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(schema)}, nil)
+
+		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+			require.NotNil(t, qt)
+			return &milvuspb.QueryResults{
+				Status: merr.Success(),
+				FieldsData: []*schemapb.FieldData{
+					{
+						FieldName: "id",
+						FieldId:   100,
+						Type:      schemapb.DataType_Int64,
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{Data: []int64{1, 3, 0, 4}},
+								},
+							},
+						},
+					},
+					{
+						FieldName: "vec",
+						FieldId:   101,
+						Type:      schemapb.DataType_FloatVector,
+						Field: &schemapb.FieldData_Vectors{
+							Vectors: &schemapb.VectorField{
+								Dim: 2,
+								Data: &schemapb.VectorField_FloatVector{
+									FloatVector: &schemapb.FloatArray{Data: []float32{1, 1, 3, 3}},
+								},
+							},
+						},
+						ValidData: []bool{true, true, false, false},
+					},
+				},
+			}, segcore.StorageCost{}, nil
+		}).Build()
+
+		node := &Proxy{metaCache: cache}
+		req := &milvuspb.SearchRequest{
+			DbName:         "default",
+			CollectionName: "test_collection",
+			SearchInput: &milvuspb.SearchRequest_Ids{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1, 4, 3}}},
+				},
+			},
+			SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "vec"}},
+		}
+
+		validData, err := node.handleIfSearchByPK(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Equal(t, []bool{false, true, false, true}, validData)
+		assert.Equal(t, int64(2), req.GetNq())
+
+		var phg commonpb.PlaceholderGroup
+		err = proto.Unmarshal(req.GetPlaceholderGroup(), &phg)
+		require.NoError(t, err)
+		require.Len(t, phg.GetPlaceholders(), 1)
+		require.Len(t, phg.GetPlaceholders()[0].GetValues(), 2)
+		assert.Equal(t, []byte{0, 0, 128, 63, 0, 0, 128, 63}, phg.GetPlaceholders()[0].GetValues()[0])
+		assert.Equal(t, []byte{0, 0, 64, 64, 0, 0, 64, 64}, phg.GetPlaceholders()[0].GetValues()[1])
+	})
+}
+
 func TestProxy_ManualCompaction_ExternalCollection(t *testing.T) {
 	cache := &MetaCache{}
 

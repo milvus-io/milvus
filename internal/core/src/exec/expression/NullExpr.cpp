@@ -165,7 +165,7 @@ PhyNullExpr::MoveCursor() {
 bool
 PhyNullExpr::CanExecuteAllAtOnce() const {
     if (IsOrdinaryVectorDataType(expr_->column_.data_type_)) {
-        return true;
+        return false;
     }
     return SegmentExpr::CanExecuteAllAtOnce();
 }
