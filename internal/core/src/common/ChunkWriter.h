@@ -302,7 +302,7 @@ class ArrayChunkWriter : public ChunkWriterBase {
 
 class ColumnarArrayChunkWriter final : public ChunkWriterBase {
  public:
-    ColumnarArrayChunkWriter(proto::schema::TypeSchema type, bool nullable);
+    explicit ColumnarArrayChunkWriter(proto::schema::TypeSchema type);
 
     ~ColumnarArrayChunkWriter() override;
 

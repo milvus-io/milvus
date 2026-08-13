@@ -876,8 +876,7 @@ class ConcurrentVector<ArrayValue>
  private:
     void
     set_mmap_proto_rows(ssize_t element_offset,
-                        std::span<const ScalarFieldProto* const> rows,
-                        bool nullable);
+                        std::span<const ScalarFieldProto* const> rows);
 
     std::once_flag array_type_once_;
     std::shared_ptr<const proto::schema::TypeSchema> array_type_;

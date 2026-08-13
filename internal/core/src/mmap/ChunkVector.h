@@ -315,8 +315,7 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     copy_array_rows_to_chunk(int64_t chunk_id,
                              size_t offset,
                              std::span<const ScalarFieldProto* const> rows,
-                             const proto::schema::TypeSchema& type,
-                             bool nullable) {
+                             const proto::schema::TypeSchema& type) {
         static_assert(std::is_same_v<Type, ArrayValue> && IsMmap,
                       "copy_array_rows_to_chunk is only available for mmap "
                       "ArrayValue chunks");
@@ -326,7 +325,7 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
                    "nested ARRAY chunk index {} out of range {}",
                    chunk_id,
                    counter);
-        (*vec_)[chunk_id].set_rows(rows, offset, type, nullable);
+        (*vec_)[chunk_id].set_rows(rows, offset, type);
     }
 
     ChunkViewType<Type>

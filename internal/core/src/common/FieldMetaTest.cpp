@@ -128,6 +128,43 @@ TEST(FieldMetaTest, NestedArrayRoundTrip) {
     EXPECT_EQ(serialized.SerializeAsString(), proto.SerializeAsString());
 }
 
+TEST(FieldMetaTest, NestedArrayRootNullableIsNormalizedIntoTypeSchema) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(204);
+    proto.set_name("nullable_nested_array");
+    proto.set_data_type(milvus::proto::schema::DataType::Array);
+    proto.set_element_type(milvus::proto::schema::DataType::Array);
+    proto.set_nullable(true);
+    auto* child = proto.mutable_type_schema()->mutable_array_element();
+    child->mutable_array_element()->set_leaf_type(
+        milvus::proto::schema::DataType::Int32);
+
+    auto field = FieldMeta::ParseFrom(proto);
+    EXPECT_TRUE(field.is_nullable());
+    EXPECT_TRUE(field.get_array_type_schema().nullable());
+
+    auto serialized = field.ToProto();
+    EXPECT_TRUE(serialized.nullable());
+    EXPECT_TRUE(serialized.type_schema().nullable());
+}
+
+TEST(FieldMetaTest, NestedArrayRootNullableComesFromTypeSchema) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(205);
+    proto.set_name("type_schema_nullable_nested_array");
+    proto.set_data_type(milvus::proto::schema::DataType::Array);
+    proto.set_element_type(milvus::proto::schema::DataType::Array);
+    auto* type = proto.mutable_type_schema();
+    type->set_nullable(true);
+    type->mutable_array_element()->mutable_array_element()->set_leaf_type(
+        milvus::proto::schema::DataType::Int32);
+
+    auto field = FieldMeta::ParseFrom(proto);
+    EXPECT_TRUE(field.is_nullable());
+    EXPECT_TRUE(field.get_array_type_schema().nullable());
+    EXPECT_TRUE(field.ToProto().nullable());
+}
+
 TEST(FieldMetaTest, RejectTypeSchemaOnlyNestedArray) {
     milvus::proto::schema::FieldSchema proto;
     proto.set_fieldid(203);

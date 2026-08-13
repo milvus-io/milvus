@@ -214,15 +214,12 @@ ConcurrentVector<ArrayValue>::set_data_raw(ssize_t element_offset,
 
     set_mmap_proto_rows(
         element_offset,
-        std::span<const ScalarFieldProto* const>(rows.data(), rows.size()),
-        field_meta.is_nullable());
+        std::span<const ScalarFieldProto* const>(rows.data(), rows.size()));
 }
 
 void
 ConcurrentVector<ArrayValue>::set_mmap_proto_rows(
-    ssize_t element_offset,
-    std::span<const ScalarFieldProto* const> rows,
-    bool nullable) {
+    ssize_t element_offset, std::span<const ScalarFieldProto* const> rows) {
     if (rows.empty()) {
         return;
     }
@@ -260,8 +257,7 @@ ConcurrentVector<ArrayValue>::set_mmap_proto_rows(
             chunk_id,
             static_cast<size_t>(chunk_offset),
             rows.subspan(source_offset, static_cast<size_t>(copy_count)),
-            *array_type_,
-            nullable);
+            *array_type_);
         current_offset += copy_count;
         source_offset += static_cast<size_t>(copy_count);
     }

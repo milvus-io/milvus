@@ -59,15 +59,17 @@ namespace milvus {
 namespace {
 
 proto::schema::TypeSchema
-LeafArrayType(proto::schema::DataType leaf_type) {
+LeafArrayType(proto::schema::DataType leaf_type, bool nullable = false) {
     proto::schema::TypeSchema type;
+    type.set_nullable(nullable);
     type.mutable_array_element()->set_leaf_type(leaf_type);
     return type;
 }
 
 proto::schema::TypeSchema
-NestedArrayType(proto::schema::TypeSchema child) {
+NestedArrayType(proto::schema::TypeSchema child, bool nullable = false) {
     proto::schema::TypeSchema type;
+    type.set_nullable(nullable);
     *type.mutable_array_element() = std::move(child);
     return type;
 }
@@ -235,7 +237,8 @@ StorageV3NestedArraySchema(bool enable_mmap) {
     nested->set_data_type(proto::schema::DataType::Array);
     nested->set_element_type(proto::schema::DataType::Array);
     nested->set_nullable(false);
-    auto type = NestedArrayType(LeafArrayType(proto::schema::DataType::String));
+    auto type =
+        NestedArrayType(LeafArrayType(proto::schema::DataType::String, true));
     *nested->mutable_type_schema() = type;
 
     auto* mmap = nested->add_type_params();
@@ -490,7 +493,8 @@ TEST(ArrayValue, NestedArrayRawDataSizeIncludesLeafAndOffsets) {
 }
 
 TEST(ArrayValue, NestedStringArrayUsesRecursiveNodes) {
-    auto type = NestedArrayType(LeafArrayType(proto::schema::DataType::String));
+    auto type =
+        NestedArrayType(LeafArrayType(proto::schema::DataType::String, true));
     auto row = NestedArrayRow(proto::schema::DataType::String,
                               {StringArrayRow({"a", "bb"}),
                                StringArrayRow({}),
@@ -520,7 +524,7 @@ TEST(ArrayValue, NestedStringArrayUsesRecursiveNodes) {
 TEST(ArrayValue, RootNullRoundTripsWithoutMaterializingRootOffsets) {
     ScalarFieldProto row;
     auto array = ArrayValue::FromProto(
-        row, LeafArrayType(proto::schema::DataType::Int32));
+        row, LeafArrayType(proto::schema::DataType::Int32, true));
 
     ASSERT_TRUE(array.is_null());
     ASSERT_EQ(array.size(), 0);
@@ -531,8 +535,8 @@ TEST(ArrayValue, RootNullRoundTripsWithoutMaterializingRootOffsets) {
 }
 
 TEST(ArrayValue, NullAndEmptyArraysRemainDistinctAtEveryLevel) {
-    auto type = NestedArrayType(
-        NestedArrayType(LeafArrayType(proto::schema::DataType::Int32)));
+    auto type = NestedArrayType(NestedArrayType(
+        LeafArrayType(proto::schema::DataType::Int32, true), true));
     auto row = NestedArrayRow(
         proto::schema::DataType::Array,
         {NestedArrayRow(
@@ -650,10 +654,14 @@ TEST(ArrayValue, RecursiveSchemaSelectsStorageFieldData) {
     auto field_meta = FieldMeta::ParseFrom(schema_proto);
     ASSERT_TRUE(field_meta.is_nested_array());
     ASSERT_EQ(field_meta.get_element_type(), DataType::ARRAY);
+    auto normalized_type = type;
+    normalized_type.set_nullable(true);
     ASSERT_TRUE(google::protobuf::util::MessageDifferencer::Equals(
-        type, field_meta.get_array_type_schema()));
+        normalized_type, field_meta.get_array_type_schema()));
+    auto normalized_schema = schema_proto;
+    normalized_schema.mutable_type_schema()->set_nullable(true);
     ASSERT_TRUE(google::protobuf::util::MessageDifferencer::Equals(
-        schema_proto, field_meta.ToProto()));
+        normalized_schema, field_meta.ToProto()));
 
     auto mismatched_data_type = schema_proto;
     mismatched_data_type.set_data_type(proto::schema::DataType::Int64);
@@ -696,7 +704,7 @@ TEST(ArrayValue, RecursiveSchemaSelectsStorageFieldData) {
     ASSERT_TRUE(builder.Finish(&arrow_array).ok());
 
     auto field_data = storage::CreateFieldData(
-        DataType::ARRAY, DataType::NONE, true, 1, 0, type);
+        DataType::ARRAY, DataType::NONE, true, 1, 0, normalized_type);
     auto nested_field_data =
         std::dynamic_pointer_cast<FieldData<ArrayValue>>(field_data);
     ASSERT_NE(nested_field_data, nullptr);
@@ -715,7 +723,8 @@ TEST(ArrayValue, RecursiveSchemaSelectsStorageFieldData) {
 }
 
 TEST(ArrayValue, NullableBackfillSharesNullStorage) {
-    auto type = NestedArrayType(LeafArrayType(proto::schema::DataType::Int32));
+    auto type =
+        NestedArrayType(LeafArrayType(proto::schema::DataType::Int32), true);
     auto field_data = storage::CreateFieldData(
         DataType::ARRAY, DataType::NONE, true, 1, 0, type);
 
@@ -826,7 +835,8 @@ TEST(ArrayValue, GrowingMmapBuildsColumnarBlocksDirectlyFromDataArray) {
 }
 
 TEST(ArrayValue, GrowingMmapBuildsColumnarBlocksFromFieldDataValues) {
-    auto type = NestedArrayType(LeafArrayType(proto::schema::DataType::Int32));
+    auto type =
+        NestedArrayType(LeafArrayType(proto::schema::DataType::Int32), true);
 
     auto row0 = NestedArrayRow(proto::schema::DataType::Int32,
                                {IntArrayRow({1}), IntArrayRow({2, 3})});
@@ -917,7 +927,8 @@ TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {
 }
 
 TEST(ColumnarArrayChunk, WriterAndChunkShareOneContiguousBuffer) {
-    auto type = NestedArrayType(LeafArrayType(proto::schema::DataType::String));
+    auto type = NestedArrayType(
+        LeafArrayType(proto::schema::DataType::String, true), true);
     auto row0 = NestedArrayRow(proto::schema::DataType::String,
                                {StringArrayRow({"a", "bb"}),
                                 ScalarFieldProto{},
@@ -935,7 +946,7 @@ TEST(ColumnarArrayChunk, WriterAndChunkShareOneContiguousBuffer) {
     std::shared_ptr<arrow::Array> arrow_array;
     ASSERT_TRUE(builder.Finish(&arrow_array).ok());
 
-    ColumnarArrayChunkWriter writer(type, true);
+    ColumnarArrayChunkWriter writer(type);
     arrow::ArrayVector arrays{arrow_array};
     const auto [size, row_count] = writer.calculate_size(arrays);
     const auto aligned_size = (size + ChunkTarget::ALIGNED_SIZE - 1) &
@@ -945,7 +956,11 @@ TEST(ColumnarArrayChunk, WriterAndChunkShareOneContiguousBuffer) {
     auto* data = target->release();
     auto guard = std::make_shared<ChunkMmapGuard>(data, size, "");
     ColumnarArrayChunk array_chunk(
-        row_count, data, size, type, true, std::move(guard));
+        row_count,
+        data,
+        size,
+        std::make_shared<const proto::schema::TypeSchema>(type),
+        std::move(guard));
 
     ASSERT_EQ(array_chunk.row_count(), 3);
     ASSERT_TRUE(array_chunk.is_valid(0));
@@ -1091,7 +1106,7 @@ TEST(ColumnarArrayChunk, RejectsMalformedSchema) {
     std::shared_ptr<arrow::Array> null_array;
     ASSERT_TRUE(null_builder.Finish(&null_array).ok());
     ColumnarArrayChunkWriter non_nullable_writer(
-        LeafArrayType(proto::schema::DataType::Int32), false);
+        LeafArrayType(proto::schema::DataType::Int32));
     ASSERT_ANY_THROW(
         non_nullable_writer.calculate_size(arrow::ArrayVector{null_array}));
 
@@ -1100,9 +1115,16 @@ TEST(ColumnarArrayChunk, RejectsMalformedSchema) {
     std::shared_ptr<arrow::Array> empty_payload_array;
     ASSERT_TRUE(empty_payload_builder.Finish(&empty_payload_array).ok());
     ColumnarArrayChunkWriter nullable_writer(
-        LeafArrayType(proto::schema::DataType::Int32), true);
+        LeafArrayType(proto::schema::DataType::Int32, true));
     ASSERT_ANY_THROW(nullable_writer.calculate_size(
         arrow::ArrayVector{empty_payload_array}));
+
+    auto type_with_non_nullable_child =
+        NestedArrayType(LeafArrayType(proto::schema::DataType::Int32), true);
+    auto row_with_null_child =
+        NestedArrayRow(proto::schema::DataType::Int32, {ScalarFieldProto{}});
+    ASSERT_ANY_THROW(ArrayValue::FromProto(row_with_null_child,
+                                           type_with_non_nullable_child));
 }
 
 }  // namespace

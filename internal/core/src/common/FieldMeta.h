@@ -134,6 +134,14 @@ class FieldMeta {
                 type_ == DataType::ARRAY && element_type_ == DataType::ARRAY,
                 "type_schema is only supported for nested ARRAY "
                 "FieldMeta");
+
+            // Temporary compatibility for schemas that still carry root
+            // nullability in FieldSchema.nullable. Runtime nested ARRAY code
+            // reads nullability uniformly from each TypeSchema node.
+            if (nullable_) {
+                type_schema_->set_nullable(true);
+            }
+            nullable_ = type_schema_->nullable();
         }
     }
 

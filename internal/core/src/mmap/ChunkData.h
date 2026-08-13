@@ -21,7 +21,7 @@
 #include <vector>
 
 #include "common/Array.h"
-#include "common/ArrayChunkBuilder.h"
+#include "common/ColumnarArrayChunkBuilder.h"
 #include "common/ArrayValue.h"
 #include "common/FastMem.h"
 #include "common/Utils.h"
@@ -152,8 +152,7 @@ struct VariableLengthChunk<ArrayValue> {
     void
     set_rows(std::span<const ScalarFieldProto* const> rows,
              size_t begin,
-             const proto::schema::TypeSchema& type,
-             bool nullable) {
+             const proto::schema::TypeSchema& type) {
         AssertInfo(begin <= size_ && rows.size() <= size_ - begin,
                    "failed to set nested ARRAY chunk with length {} from "
                    "begin {}, chunk size={}",
@@ -165,7 +164,7 @@ struct VariableLengthChunk<ArrayValue> {
         }
 
         auto chunk = CreateMmapColumnarArrayChunkFromProtoRows(
-            rows, type, nullable, mmap_descriptor_);
+            rows, type, mmap_descriptor_);
         blocks_.push_back(chunk);
         for (size_t i = 0; i < rows.size(); ++i) {
             data_[begin + i] = chunk->View(i);

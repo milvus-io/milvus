@@ -29,17 +29,17 @@ namespace milvus {
 class ArrayValue;
 class ColumnarArrayChunk;
 
-// Builds one immutable recursive ARRAY block directly in growing mmap
+// Builds one immutable columnar recursive ARRAY block directly in growing mmap
 // storage. The returned Chunk tree is a read-only view over the allocation;
 // the descriptor must outlive the returned Chunk.
 std::shared_ptr<const ColumnarArrayChunk>
 CreateMmapColumnarArrayChunkFromProtoRows(
     std::span<const ScalarFieldProto* const> rows,
     const proto::schema::TypeSchema& type,
-    bool nullable,
     const storage::MmapChunkDescriptorPtr& mmap_descriptor);
 
-// Builds one recursive ARRAY block from existing heap-backed ArrayValues.
+// Builds one columnar recursive ARRAY block from existing heap-backed
+// ArrayValues.
 // An empty valid_data span means all rows are valid; otherwise it contains one
 // byte per row.
 std::shared_ptr<const ColumnarArrayChunk>

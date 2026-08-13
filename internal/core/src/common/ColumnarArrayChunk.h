@@ -44,7 +44,7 @@ class ArrayValueView;
 namespace array_detail {
 
 std::shared_ptr<const Chunk>
-CreateColumnarArrayChild(
+CreateColumnarArrayChildChunk(
     const std::shared_ptr<const proto::schema::TypeSchema>& array_type,
     ArrayOffset row_count,
     char* data,
@@ -55,24 +55,43 @@ CreateColumnarArrayChild(
 
 // A read-only view over one recursively serialized Array column chunk.
 //
-// Root layout:
-//   [validity bitmap, when nullable][alignment padding]
-//   [offsets: row_count + 1][child node][MMAP_ARRAY_PADDING]
-//
-// Nested Array node layout:
-//   [validity bitmap][alignment padding][offsets: row_count + 1][child node]
+// Physical layout:
+//   Array node:
+//     [validity bitmap, when this node's TypeSchema is nullable]
+//     [alignment padding, when needed][offsets: row_count + 1][child node]
+//   Complete root block:
+//     [Array node][MMAP_ARRAY_PADDING]
 //
 // Bitmap bits follow the Chunk convention: 1 means valid and 0 means null.
 // Null and empty Arrays have the same repeated offset; the bitmap distinguishes
 // them. The terminal array offset is the child row count. The child node
 // describes its own physical representation: another Array node, a
 // fixed-width payload, or a StringChunk-compatible [byte offsets][chars]
-// payload.
+// payload. Each node's TypeSchema supplies its child type and nullability.
+//
+// Construction flow (implemented in ColumnarArrayChunkBuilder.cpp):
+//   1. Sealed, growing mmap, and single-row ArrayValue inputs are normalized
+//      into a temporary ColumnarArrayBuildNode tree. BuildNodeFromProtoRows
+//      and BuildNodeFromViews recursively build one node per Array level. Each
+//      node records its offsets and validity bitmap, while the leaf node
+//      collects the flattened scalar payload.
+//   2. The builder calculates the serialized size and writes the tree into one
+//      contiguous target buffer. A complete column block serializes the root
+//      node, including its recursively serialized child, and appends trailing
+//      padding. A single-row ArrayValue stores its root length directly and
+//      serializes only the child.
+//   3. ColumnarArrayChunk::InitializeNodeView reads the current node's offsets,
+//      then CreateColumnarArrayChildChunk recursively creates non-owning child
+//      Chunk views over the same buffer.
+//
+// The returned chunk does not own its bytes. Its mmap descriptor (or the
+// owning ArrayValueStorage in the single-row heap path) must outlive the chunk
+// and all ArrayValueViews derived from it.
 class ColumnarArrayChunk final : public Chunk {
     friend class ArrayValue;
     friend class ArrayValueView;
     friend std::shared_ptr<const Chunk>
-    array_detail::CreateColumnarArrayChild(
+    array_detail::CreateColumnarArrayChildChunk(
         const std::shared_ptr<const proto::schema::TypeSchema>& array_type,
         ArrayOffset row_count,
         char* data,
@@ -82,43 +101,20 @@ class ColumnarArrayChunk final : public Chunk {
  public:
     using Ptr = std::shared_ptr<const ColumnarArrayChunk>;
 
-    ColumnarArrayChunk(
-        int64_t row_nums,
-        char* data,
-        uint64_t size,
-        proto::schema::TypeSchema type,
-        bool nullable,
-        std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard = nullptr)
-        : ColumnarArrayChunk(row_nums,
-                             data,
-                             size,
-                             std::make_shared<const proto::schema::TypeSchema>(
-                                 std::move(type)),
-                             nullable,
-                             std::move(chunk_mmap_guard)) {
-    }
-
+    // Construct a view over a complete root block, whose serialized bytes end
+    // with MMAP_ARRAY_PADDING.
     ColumnarArrayChunk(
         int64_t row_nums,
         char* data,
         uint64_t size,
         std::shared_ptr<const proto::schema::TypeSchema> type,
-        bool nullable,
         std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard = nullptr)
-        : Chunk(row_nums, data, size, nullable, std::move(chunk_mmap_guard)),
-          type_(std::move(type)) {
-        AssertInfo(type_ != nullptr,
-                   "ColumnarArrayChunk type must not be null");
-        ValidateArrayType(*type_);
-        const auto root_data_offset = RootDataOffset(row_nums, nullable);
-        AssertInfo(size >= root_data_offset + MMAP_ARRAY_PADDING,
-                   "columnar array chunk size {} is too small for root "
-                   "offset {} and padding {}",
-                   size,
-                   root_data_offset,
-                   MMAP_ARRAY_PADDING);
-        InitializeNode(data_ + root_data_offset,
-                       size - root_data_offset - MMAP_ARRAY_PADDING);
+        : ColumnarArrayChunk(row_nums,
+                             data,
+                             size,
+                             std::move(type),
+                             std::move(chunk_mmap_guard),
+                             MMAP_ARRAY_PADDING) {
     }
 
     size_t
@@ -199,8 +195,7 @@ class ColumnarArrayChunk final : public Chunk {
     }
 
     static size_t
-    RootDataOffset(int64_t row_nums, bool nullable) {
-        AssertInfo(row_nums >= 0, "array row count must not be negative");
+    NodeDataOffset(int64_t row_nums, bool nullable) {
         if (!nullable) {
             return 0;
         }
@@ -210,25 +205,37 @@ class ColumnarArrayChunk final : public Chunk {
     }
 
  private:
-    struct NestedNodeTag {};
+    // A complete column block includes trailing padding, whether its backing
+    // storage is memory or mmap. A child node occupies only its recursive node
+    // bytes, so the child Chunk's logical size excludes that block-level
+    // padding.
+    static constexpr uint64_t kNoTrailingPadding = 0;
 
-    ColumnarArrayChunk(NestedNodeTag,
-                       int64_t row_nums,
+    ColumnarArrayChunk(int64_t row_nums,
                        char* data,
                        uint64_t size,
                        std::shared_ptr<const proto::schema::TypeSchema> type,
-                       std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
-        : Chunk(row_nums, data, size, true, std::move(chunk_mmap_guard)),
+                       std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard,
+                       uint64_t trailing_padding)
+        : Chunk(row_nums,
+                data,
+                size,
+                type != nullptr && type->nullable(),
+                std::move(chunk_mmap_guard)),
           type_(std::move(type)) {
         AssertInfo(type_ != nullptr,
-                   "nested ColumnarArrayChunk type must not be null");
-        const auto node_data_offset = RootDataOffset(row_nums, true);
-        AssertInfo(size >= node_data_offset,
-                   "nested columnar array chunk size {} is too small for "
-                   "node offset {}",
+                   "ColumnarArrayChunk type must not be null");
+        ValidateArrayType(*type_);
+        const auto node_data_offset =
+            NodeDataOffset(row_nums, type_->nullable());
+        AssertInfo(size >= node_data_offset + trailing_padding,
+                   "columnar array chunk size {} is too small for node "
+                   "offset {} and trailing padding {}",
                    size,
-                   node_data_offset);
-        InitializeNode(data_ + node_data_offset, size_ - node_data_offset);
+                   node_data_offset,
+                   trailing_padding);
+        InitializeNodeView(data_ + node_data_offset,
+                           size_ - node_data_offset - trailing_padding);
     }
 
     template <typename>
@@ -368,7 +375,7 @@ class ColumnarArrayChunk final : public Chunk {
     }
 
     void
-    InitializeNode(char* node_data, uint64_t node_size) {
+    InitializeNodeView(char* node_data, uint64_t node_size) {
         AssertInfo(node_data != nullptr,
                    "ColumnarArrayChunk data must not be null");
         AssertInfo(
@@ -396,7 +403,7 @@ class ColumnarArrayChunk final : public Chunk {
         const auto child_rows = offsets_.back();
         auto* child_data = node_data + offsets_bytes;
         const auto child_size = node_size - offsets_bytes;
-        child_ = array_detail::CreateColumnarArrayChild(
+        child_ = array_detail::CreateColumnarArrayChildChunk(
             type_, child_rows, child_data, child_size, chunk_mmap_guard_);
     }
 
@@ -570,7 +577,7 @@ class ColumnarArrayChunk final : public Chunk {
 namespace array_detail {
 
 inline std::shared_ptr<const Chunk>
-CreateColumnarArrayChild(
+CreateColumnarArrayChildChunk(
     const std::shared_ptr<const proto::schema::TypeSchema>& array_type,
     ArrayOffset row_count,
     char* data,
@@ -586,12 +593,12 @@ CreateColumnarArrayChild(
         auto child_type = std::shared_ptr<const proto::schema::TypeSchema>(
             array_type, &array_type->array_element());
         return std::shared_ptr<const ColumnarArrayChunk>(
-            new ColumnarArrayChunk(ColumnarArrayChunk::NestedNodeTag{},
-                                   static_cast<int64_t>(row_count),
+            new ColumnarArrayChunk(static_cast<int64_t>(row_count),
                                    data,
                                    size,
                                    std::move(child_type),
-                                   chunk_mmap_guard));
+                                   chunk_mmap_guard,
+                                   ColumnarArrayChunk::kNoTrailingPadding));
     }
 
     const auto element_type = ColumnarArrayChunk::GetElementType(*array_type);
