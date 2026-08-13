@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
+	"github.com/milvus-io/milvus/internal/datanode/resource"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -732,6 +733,51 @@ func (node *DataNode) DropCopySegment(ctx context.Context, req *datapb.DropCopyS
 	return merr.Success(), nil
 }
 
+// legacyAvailableSlots folds the guard's two-dimensional state into the
+// scalar an old DataCoord still reads.
+//
+// It takes the worse of the two utilisations on purpose: the folded value
+// must be conservative, so an old coordinator sees the node as full earlier
+// than it truly is, never later. legacyTotal is left at whatever
+// CalculateNodeSlots reports so the old coordinator's own arithmetic keeps
+// its established meaning.
+//
+// Two states read as a full node (0) regardless of the utilisation
+// arithmetic:
+//   - Frozen: the watermark loop has stopped admission outright.
+//   - ExclusiveTaskID != 0: an oversized task is running alone and nothing
+//     else will be admitted until it finishes. The ordinary formula usually
+//     already lands on zero here too, because Reserved equals that one
+//     task's requirement and it does not fit in Total in whichever dimension
+//     made it oversized -- but node capacity is runtime config and can grow
+//     while the task holds the node, which can pull the ratio back under 1.
+//     Checking the flag directly keeps the scalar correct regardless of that
+//     race.
+func legacyAvailableSlots(snap resource.Snapshot, legacyTotal int64) int64 {
+	if snap.Frozen || snap.ExclusiveTaskID != 0 {
+		return 0
+	}
+
+	utilisation := 0.0
+	if snap.Total.CPU > 0 {
+		utilisation = snap.Reserved.CPU / snap.Total.CPU
+	}
+	if snap.Total.Memory > 0 {
+		if memUtil := float64(snap.Reserved.Memory) / float64(snap.Total.Memory); memUtil > utilisation {
+			utilisation = memUtil
+		}
+	}
+	if utilisation > 1 {
+		utilisation = 1
+	}
+
+	available := int64(float64(legacyTotal) * (1 - utilisation))
+	if available < 0 {
+		available = 0
+	}
+	return available
+}
+
 func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest) (*datapb.QuerySlotResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &datapb.QuerySlotResponse{
@@ -739,35 +785,38 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		}, nil
 	}
 
-	var (
-		totalSlots     = index.CalculateNodeSlots()
-		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
-		compactionUsed = node.compactionExecutor.Slots()
-		importUsed     = node.importScheduler.Slots()
-	)
+	snap := resource.GetGuard().Snapshot()
+	legacyTotal := index.CalculateNodeSlots()
+	available := legacyAvailableSlots(snap, legacyTotal)
 
-	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed
-	if availableSlots < 0 {
-		availableSlots = 0
+	// A sustained watermark freeze can leave tasks parked in Acquire
+	// indefinitely (Acquire only returns on ctx cancellation), reporting
+	// nothing to DataCoord. The log line makes that state unmistakable so an
+	// operator does not mistake it for "genuinely busy": both otherwise read
+	// as availableSlots=0.
+	if snap.Frozen {
+		mlog.Warn(ctx, "query slots done: node frozen by memory watermark, reporting zero available slots",
+			mlog.Int64("legacyTotalSlots", legacyTotal),
+			mlog.Int64("reservedMemoryMiB", snap.Reserved.Memory>>20),
+			mlog.Int64("budgetMemoryMiB", snap.Total.Memory>>20),
+			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20))
+	} else {
+		mlog.Info(ctx, "query slots done",
+			mlog.Int64("legacyTotalSlots", legacyTotal),
+			mlog.Int64("legacyAvailableSlots", available),
+			mlog.Float64("reservedCPU", snap.Reserved.CPU),
+			mlog.Int64("reservedMemoryMiB", snap.Reserved.Memory>>20),
+			mlog.Int64("budgetMemoryMiB", snap.Total.Memory>>20),
+			mlog.Int64("nonTaskMemoryMiB", snap.NonTask>>20),
+			mlog.Int64("exclusiveTaskID", snap.ExclusiveTaskID))
 	}
 
-	mlog.Info(ctx, "query slots done",
-		mlog.Int64("totalSlots", totalSlots),
-		mlog.Int64("availableSlots", availableSlots),
-		mlog.Int64("indexStatsUsed", indexStatsUsed),
-		mlog.Int64("compactionUsed", compactionUsed),
-		mlog.Int64("importUsed", importUsed),
-	)
-
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(float64(totalSlots))
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(float64(indexStatsUsed))
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsed").Set(float64(compactionUsed))
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(float64(importUsed))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(available))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(float64(legacyTotal))
 
 	return &datapb.QuerySlotResponse{
 		Status:         merr.Success(),
-		AvailableSlots: availableSlots,
+		AvailableSlots: available,
 	}, nil
 }
 
