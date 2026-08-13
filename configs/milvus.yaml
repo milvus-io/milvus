@@ -313,6 +313,10 @@ pulsar:
 #     tlsKey:  # path to client's private key (PEM) used for authentication
 #     tlsCaCert:  # file or directory path to CA certificate(s) for verifying the broker's key
 #     tlsKeyPassword:  # private key passphrase for use with ssl.key.location and set_ssl_cert(), if any
+#   producer:
+#     message:
+#       max:
+#         bytes: 10485760 # Maximum size of a Kafka producer message in bytes. Requires a restart to take effect.
 #   readTimeout: 10
 #   queuedmaxkbytes: 100000
 
