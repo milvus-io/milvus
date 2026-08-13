@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -151,6 +153,18 @@ func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 	mlog.Info(ctx, "IndexBuilderTask Enqueue", mlog.FieldBuildID(it.req.GetBuildID()),
 		mlog.FieldSegmentID(it.req.GetSegmentID()))
 	return nil
+}
+
+func (it *indexBuildTask) GetTaskID() int64 {
+	return it.req.GetBuildID()
+}
+
+func (it *indexBuildTask) GetTaskType() taskcommon.Type {
+	return taskcommon.Index
+}
+
+func (it *indexBuildTask) GetResourceRequirement() taskresource.Requirement {
+	return taskresource.RequirementForIndex(it.req)
 }
 
 func (it *indexBuildTask) GetSlot() int64 {

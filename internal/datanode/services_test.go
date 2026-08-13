@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
+	"github.com/milvus-io/milvus/internal/datanode/resource"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -222,6 +223,12 @@ func (s *DataNodeServicesSuite) TestGetComponentStates() {
 
 func (s *DataNodeServicesSuite) TestGetCompactionState() {
 	s.Run("success", func() {
+		// The executor admits each task through the node's resource guard before
+		// running it. Route that at a double so this test does not depend on how
+		// much memory the host happens to have free.
+		mk := mockey.Mock(resource.GetGuard).Return(resource.NewRecordingGuard()).Build()
+		defer mk.UnPatch()
+
 		const (
 			collection = int64(100)
 			channel    = "ch-0"
@@ -238,6 +245,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			PlanID: 1,
 			State:  datapb.CompactionTaskState_completed,
 		}, nil)
+		mockC.EXPECT().GetPlan().Return(nil)
 		s.node.compactionExecutor.Enqueue(mockC)
 
 		mockC2 := compactor.NewMockCompactor(s.T())
@@ -251,6 +259,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			PlanID: 2,
 			State:  datapb.CompactionTaskState_failed,
 		}, nil)
+		mockC2.EXPECT().GetPlan().Return(nil)
 		s.node.compactionExecutor.Enqueue(mockC2)
 
 		s.Eventually(func() bool {
