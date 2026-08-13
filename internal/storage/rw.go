@@ -555,6 +555,11 @@ func NewDeltalogReader(
 		}
 		return &IterativeRecordReader{
 			iterate: func() (RecordReader, error) {
+				// The per-file FFI read below cannot be interrupted; honor
+				// cancellation at the file boundary at least.
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				if pathPos >= len(paths) {
 					return nil, io.EOF
 				}
