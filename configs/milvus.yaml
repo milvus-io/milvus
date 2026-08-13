@@ -325,7 +325,7 @@ pulsar:
 #   producer:
 #     message:
 #       max:
-#         bytes: 10485760 # Maximum size of a Kafka producer message in bytes. Requires a restart to take effect.
+#         bytes: 10485760 # Maximum size of a Kafka producer message in bytes. Requires a restart to take effect. Must be larger than pulsar.messageReserveSize when Kafka is the active WAL -- Milvus refuses to start otherwise.
 #   readTimeout: 10
 #   queuedmaxkbytes: 100000
 
