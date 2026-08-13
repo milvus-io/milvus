@@ -1,4 +1,4 @@
-# Text Term Index Foundation and Fuzzy BM25 Search
+# Segment FST Foundation and Fuzzy BM25 Search
 
 **Author:** zhicheng
 **Date:** 2026-07-28
@@ -37,8 +37,8 @@ matching `milvuz` with the indexed term `milvus`, while retaining BM25
 relevance ranking instead of returning only a Boolean match.
 
 This document proposes a three-phase design for fuzzy BM25 search in Milvus.
-The first phase establishes a segment-level Text Term Index foundation: terms
-produced by the analyzer are preserved through WAL and immutable FST fragments
+The first phase establishes a segment-level FST foundation: terms produced by
+the analyzer are preserved through WAL and immutable FST fragments
 across flush, compaction, load, and recovery, and QueryNode Workers expose a
 sealed-segment term-expansion interface. The Delegator maintains and queries
 the growing-segment dictionary locally. Fuzzy BM25 merges local growing
@@ -56,24 +56,25 @@ path performs segment-local fuzzy term expansion and posting lookup, whereas
 fuzzy BM25 must merge terms across target segments before constructing one
 common IDF vector. The two paths therefore use separate FST/index artifacts in
 the first implementation and cannot yet share the same resource directly.
-This separation is transitional: the long-term direction is one shared Text
-Term Index containing both enumerable FST data and postings, so exact match,
-fuzzy match, fuzzy BM25, prefix, wildcard, and other term-based features can
-reuse the same segment resources.
+This separation is transitional: the long-term direction is one shared Segment
+Text Index containing the Segment FST and postings, so exact match, fuzzy match,
+fuzzy BM25, prefix, wildcard, and other term-based features can reuse the same
+segment resources.
 
-The second phase adds a Global FST on the Streaming Query Node (SN) as an exact
-acceleration layer. The Global FST supplies the vocabulary for covered sealed
-segments, while the Delegator requests only uncovered sealed dictionaries from
-Workers and continues to expand growing terms locally. The third phase allows
-users to explicitly skip the uncovered sealed-segment RPC and trade freshness
-for latency.
+The second phase adds a Global BM25 FST on the Streaming Query Node (SN) as an
+exact acceleration layer. The Global BM25 FST supplies the vocabulary for
+covered sealed segments, while the Delegator requests only uncovered sealed
+dictionaries from Workers and continues to expand growing terms locally. The
+third phase allows users to explicitly skip the uncovered sealed-segment RPC
+and trade freshness for latency.
 
 The initial field-level switch, `enable_fuzzy_bm25`, is intentionally
 transitional. The long-term direction is for `enable_match`, or a dedicated
-Match Index definition, to build one complete Milvus Text Term Index containing
-the enumerable FST and postings. Exact text match, fuzzy text match, fuzzy
-BM25, prefix, wildcard, and other term-based text features should share that
-index instead of maintaining feature-specific files and execution paths.
+Match Index definition, to build one complete Milvus Segment Text Index
+containing the enumerable Segment FST and postings. Exact text match, fuzzy
+text match, fuzzy BM25, prefix, wildcard, and other term-based text features
+should share that index instead of maintaining feature-specific files and
+execution paths.
 
 ---
 
@@ -135,9 +136,9 @@ match, prefix, wildcard, regexp/automaton intersection, term enumeration, and
 term-to-posting lookup. Durable sealed-segment dictionaries therefore stay
 with the Workers that own those segments. Growing segments are different: they
 are already maintained locally by the Delegator, so their mutable dictionaries
-remain there and do not require a Worker expansion service. A Global FST is an
-additional unioned vocabulary for cross-segment query rewriting; it does not
-replace either ownership path.
+remain there and do not require a Worker expansion service. A Global BM25 FST
+is an additional unioned vocabulary for cross-segment query rewriting; it does
+not replace either ownership path.
 
 ### 2.3 Flushed-but-unsorted segments
 
@@ -167,10 +168,11 @@ This behavior is important for the term dictionary design:
    re-analyzing all raw text during every recovery.
 4. Use FST itself as both the durable enumerable vocabulary and the query
    artifact, avoiding a duplicate term-enum file.
-5. Provide exact fuzzy BM25 in Phase 1, exact Global FST acceleration in Phase
-   2, and an explicit approximate low-RPC mode in Phase 3.
-6. Define artifacts and interfaces that can evolve into one shared Milvus Text
-   Term Index rather than a permanent fuzzy-BM25-only index.
+5. Provide exact fuzzy BM25 in Phase 1, exact Global BM25 FST acceleration in
+   Phase 2, and an explicit approximate low-RPC mode in Phase 3.
+6. Define artifacts and interfaces through which the Segment FST can later
+   become part of one shared Milvus Segment Text Index, rather than remain a
+   permanent fuzzy-BM25-only artifact.
 
 ## 4. Non-goals
 
@@ -186,82 +188,86 @@ This behavior is important for the term dictionary design:
 
 ---
 
-## 5. Terminology
+## 5. Core concepts
 
-### 5.1 FST fragment
+### 5.1 Fuzzy
 
-An immutable FST containing the sorted, deduplicated analyzer output terms
-newly covered by one sync for one segment and field. An FST is losslessly
-enumerable in lexical order, so it serves both as the durable vocabulary and
-as the query artifact. Compaction, migration, and Global FST generation iterate
-input FSTs directly; no parallel term-enum file is stored.
-
-### 5.2 Term expansion sources
-
-The runtime sources used to enumerate terms that satisfy a query automaton are
-split by segment ownership:
+Fuzzy is a term-expansion operation based on edit distance. It rewrites each
+analyzed query term into indexed terms accepted by the fuzzy automaton:
 
 ```text
-DelegatorGrowingDictionary
-  |- immutable FST-fragment base
-  `- MutableTrieDictionary       later WAL delta
-
-WorkerSealedDictionary
-  |- CompositeFSTDictionary      sealed FST fragments
-  `- PersistentFSTDictionary     compacted sealed segment
+query term + max_edit_distance + term vocabulary
+  -> expanded candidate terms
 ```
 
-The two sources share the same expansion semantics, but only the sealed source
-is exposed through the Worker interface and RPC.
+Fuzzy does not introduce a new scoring model. `text_match_fuzzy` uses the
+expanded terms for Boolean posting lookup, while fuzzy BM25 hashes the expanded
+terms and sends them through the existing BM25 TF/IDF scoring path.
 
-### 5.3 Text Term Index
+### 5.2 Segment FST
 
-The long-term, complete segment text-index artifact:
+The Segment FST is the field-level, enumerable term vocabulary associated with
+one segment. It is the source used by fuzzy expansion and other automaton-based
+term operations. Its runtime form follows segment ownership:
 
 ```text
-Text Term Index
-  |- FST                         enumerable term navigation
+growing segment on Delegator
+  -> committed FST-fragment base + mutable Trie delta
+
+sealed segment on Worker
+  -> composite FST fragments or one compacted persistent FST
+```
+
+An FST fragment is the immutable, sorted, deduplicated set of analyzer terms
+newly covered by one sync. FSTs are losslessly enumerable, so no parallel
+term-enum file is required.
+
+The Segment FST is the artifact delivered in this design. In the longer term,
+it will be one component of a complete Segment Text Index:
+
+```text
+Segment Text Index (future shared artifact)
+  |- Segment FST                 term enumeration and navigation
   `- postings                    term-to-row/doc location
 ```
 
-Phase 1 builds only the term-dictionary subset when `enable_fuzzy_bm25=true`.
-The target architecture is for fields controlled by `enable_match` or a Match
-Index definition to build the complete artifact and share it across text
-features.
+Phase 1 builds and serves only the Segment FST for `enable_fuzzy_bm25`. The
+current Tantivy fuzzy-match path already has its own FST and postings, but it
+cannot yet share that artifact with fuzzy BM25. The long-term goal is for
+`enable_match` or a Match Index definition to build one complete Segment Text
+Index that reuses the Segment FST for both paths.
 
-### 5.4 Dictionary identity and generation
+### 5.3 Global BM25 FST
 
-A dictionary is identified by at least:
+The Global BM25 FST is a field-level union of stable sealed-segment
+vocabularies, loaded with the Delegator. It exists specifically to reduce the
+sealed Worker RPC fan-out required to build one cross-segment BM25 query
+rewrite:
 
 ```text
-(collection, vchannel, segment, field, dictionary generation)
+fuzzy BM25 vocabulary
+  = local growing Segment FST vocabulary
+    UNION Global BM25 FST vocabulary for covered sealed segments
+    UNION Worker Segment FST vocabulary for uncovered sealed segments
 ```
 
-The dictionary is field-scoped because all analyzer output for a BM25 field is
-hashed into the same sparse-vector and posting space. A multi-analyzer selects
-one analyzer per row; it does not create separate logical fields or posting
-spaces. Therefore terms emitted by every selected analyzer are unioned into
-the same field vocabulary. A segment ID alone is not sufficient because
-compaction, schema change, or index rebuild can publish a new dictionary for
-the same logical data frontier.
+The Global BM25 FST contains no postings and does not replace the Segment FST
+or the future Segment Text Index. It is an acceleration and query-rewrite
+artifact whose coverage must be explicitly bound to sealed-segment dictionary
+generations.
 
-### 5.5 Lexical snapshot
-
-A query-scoped snapshot binding the following state:
-
-- the readable segment distribution;
-- the segment dictionary generations;
-- the BM25 statistics used for DF, IDF, and average document length;
-- the Global FST generation and its coverage, if used.
-
-Expansion, IDF construction, and segment search must all use the same lexical
-snapshot.
+As a consistency requirement across Segment FSTs and the Global BM25 FST, a
+query pins a lexical snapshot containing the readable segment distribution,
+dictionary generations, BM25 statistics, and Global BM25 FST coverage.
+Expansion, DF/IDF construction, and final segment search use that same
+snapshot. All analyzer output for one BM25 field, including different
+multi-analyzer row selections, belongs to one field vocabulary.
 
 ---
 
 ## 6. Three-phase delivery
 
-### Phase 1: Segment Text Term Index foundation and exact fuzzy BM25
+### Phase 1: Segment FST foundation and exact fuzzy BM25
 
 - Add the temporary field switch `enable_fuzzy_bm25`.
 - Preserve message-level deduplicated terms in Insert WAL messages.
@@ -275,19 +281,20 @@ snapshot.
 - Merge local growing terms and sealed Worker terms, then build a target-bound
   IDF vector on the Delegator.
 
-### Phase 2: Global FST exact acceleration
+### Phase 2: Global BM25 FST exact acceleration
 
-- Compact segment FSTs into a Global FST.
-- Load the Global FST on the SN with the Delegator.
-- Treat the Global FST as a compacted base vocabulary and segment dictionaries
-  as an uncovered delta.
-- Use the Global FST for covered segments and RPC only for uncovered segments.
+- Compact segment FSTs into a Global BM25 FST.
+- Load the Global BM25 FST on the SN with the Delegator.
+- Treat the Global BM25 FST as a compacted base vocabulary and Segment FSTs as
+  an uncovered delta.
+- Use the Global BM25 FST for covered segments and RPC only for uncovered
+  segments.
 - Preserve exact results; if every target segment is covered, expansion needs
   no Worker RPC.
 
 ### Phase 3: User-controlled approximate expansion
 
-- Add an explicit query mode that uses only the Global FST.
+- Add an explicit query mode that uses only the Global BM25 FST.
 - Skip uncovered-segment expansion RPC when requested by the user.
 - Expose coverage and dictionary lag so the accuracy/latency trade-off is
   observable.
@@ -317,9 +324,9 @@ Validation rules:
    analysis selects the requested analyzer only to produce source terms; fuzzy
    expansion searches the complete field vocabulary.
 
-`enable_fuzzy_bm25` is not intended to become the permanent owner of text
-index construction. It exists so fuzzy BM25 can be delivered before the
-complete Text Term Index is shared with `text_match_fuzzy`.
+`enable_fuzzy_bm25` is not intended to become the permanent owner of text index
+construction. It exists so fuzzy BM25 can be delivered before the complete
+Segment Text Index is shared with `text_match_fuzzy`.
 
 The expected future rule is:
 
@@ -508,11 +515,11 @@ zero and no postings in the BM25 sparse index. Phase 1 filters target-DF-zero
 terms before applying candidate limits. A future compaction can optionally
 rebuild the enum from live rows to reclaim stale vocabulary.
 
-For a future complete Text Term Index, sort compaction should build the FST and
-postings together. The existing Tantivy `TextMatchIndex` already builds this
-kind of full segment-local structure for `enable_match` fields; the long-term
-implementation should expose or evolve that artifact rather than permanently
-building a second FST for fuzzy BM25.
+For a future complete Segment Text Index, sort compaction should build the
+Segment FST and postings together. The existing Tantivy `TextMatchIndex`
+already builds this kind of full segment-local structure for `enable_match`
+fields; the long-term implementation should expose or evolve that artifact
+rather than permanently building a second FST for fuzzy BM25.
 
 ### 8.6 Loading and recovery
 
@@ -630,8 +637,8 @@ Before hashing, the Delegator performs the global rewrite in this order:
 7. build the IDF vector from the same pinned target statistics.
 
 Filtering DF-zero candidates before `max_expansions` is necessary because stale
-terms from deletes, TTL, or a broad Global FST must not consume the expansion
-budget and suppress live terms.
+terms from deletes, TTL, or a broad Global BM25 FST must not consume the
+expansion budget and suppress live terms.
 
 An initial deterministic rewrite can order candidates by:
 
@@ -662,10 +669,10 @@ LookupDFAt(lexical_snapshot, field, term_hashes)
 
 or a single immutable lexical-snapshot object that provides both operations.
 
-This is especially important for partition-scoped search and Global FST use. A
-Global FST can contain terms from segments outside the requested partitions.
-Only DF computed over the actual pinned target can remove those terms before
-they consume `max_expansions`.
+This is especially important for partition-scoped search and Global BM25 FST
+use. A Global BM25 FST can contain terms from segments outside the requested
+partitions. Only DF computed over the actual pinned target can remove those
+terms before they consume `max_expansions`.
 
 ### 8.11 Search dispatch
 
@@ -703,7 +710,7 @@ authoritative reduced target shared by lexical preparation and search dispatch.
 
 ---
 
-## 9. Phase 2: Global FST for exact acceleration
+## 9. Phase 2: Global BM25 FST for exact acceleration
 
 ### 9.1 Motivation
 
@@ -711,39 +718,40 @@ Phase 1 is exact but adds a pre-search RPC to every Worker that owns a target
 segment. Large collections may contain enough segments that expansion latency
 and RPC fan-out become significant.
 
-A Global FST reduces this cost by materializing a union of stable segment
-vocabularies close to the Delegator on the SN.
+A Global BM25 FST reduces this cost by materializing a union of stable Segment
+FST vocabularies close to the Delegator on the SN.
 
-### 9.2 Global FST is a base, not a replacement
+### 9.2 Global BM25 FST is a base, not a replacement
 
-The Global FST represents a compacted base vocabulary:
+The Global BM25 FST represents a compacted base vocabulary:
 
 ```text
 exact target vocabulary
     = local growing dictionary vocabulary
       UNION
-      Global FST vocabulary for covered sealed segments
+      Global BM25 FST vocabulary for covered sealed segments
       UNION
-      Worker dictionaries for uncovered sealed segments
+      Worker Segment FSTs for uncovered sealed segments
 ```
 
 It does not contain postings and cannot execute segment-local filters. Workers
-continue to load their segment dictionaries and future complete Text Term
-Indexes.
+continue to load their Segment FSTs. A future complete Segment Text Index will
+include those Segment FSTs together with postings.
 
 ### 9.3 Building and publishing
 
 A background global-dictionary compaction job opens iterators over consolidated
 segment FSTs and performs a streaming k-way union. It publishes:
 
-- one Global FST per `(collection/vchannel, field)`;
+- one Global BM25 FST per `(collection/vchannel, field)`;
 - a generation ID and format version;
 - a coverage manifest;
 - checksum, term count, and build timestamp.
 
-The Global FST is loaded or mmapped on the SN that hosts the shard Delegator.
-Generation publication is atomic: a Delegator sees either the old complete
-generation or the new complete generation, never a partially uploaded set.
+The Global BM25 FST is loaded or mmapped on the SN that hosts the shard
+Delegator. Generation publication is atomic: a Delegator sees either the old
+complete generation or the new complete generation, never a partially
+uploaded set.
 
 ### 9.4 Coverage manifest
 
@@ -768,14 +776,14 @@ under an explicit coordinator rule.
 The checkpoint remains useful as a fast eligibility hint, but segment end
 timestamp alone is not the correctness proof.
 
-### 9.5 Exact search with Global FST
+### 9.5 Exact search with Global BM25 FST
 
-The Delegator expands growing targets locally, pins the Global FST generation
-with the lexical snapshot, and partitions the sealed target:
+The Delegator expands growing targets locally, pins the Global BM25 FST
+generation with the lexical snapshot, and partitions the sealed target:
 
 ```text
 growing target segments           -> local Delegator dictionary
-covered sealed target segments    -> Global FST
+covered sealed target segments    -> Global BM25 FST
 uncovered sealed target segments  -> batched Worker ExpandTerms RPC
 ```
 
@@ -784,7 +792,7 @@ The query flow becomes:
 ```text
 analyze source terms
   -> expand local growing segments
-  -> expand once against pinned Global FST
+  -> expand once against pinned Global BM25 FST
   -> expand uncovered sealed segments on Workers
   -> union candidates
   -> target DF filter
@@ -793,24 +801,24 @@ analyze source terms
 ```
 
 If all sealed target dictionary generations are covered, exact expansion uses
-zero Worker RPCs; growing expansion remains local. If no compatible Global FST
-is loaded, exact mode falls back to local growing expansion plus the Phase 1
-all-sealed-Worker path.
+zero Worker RPCs; growing expansion remains local. If no compatible Global
+BM25 FST is loaded, exact mode falls back to local growing expansion plus the
+Phase 1 all-sealed-Worker path.
 
-Terms for deleted or no-longer-targeted segments can remain in the Global FST.
-The target-DF-zero filter removes them before candidate limiting. Therefore the
-Global FST can be maintained as a monotonic vocabulary union initially, which
-simplifies publication and compaction.
+Terms for deleted or no-longer-targeted segments can remain in the Global BM25
+FST. The target-DF-zero filter removes them before candidate limiting.
+Therefore the Global BM25 FST can be maintained as a monotonic vocabulary union
+initially, which simplifies publication and compaction.
 
 ### 9.6 Global and segment generation changes
 
-An in-flight query keeps its pinned Global FST and distribution generations.
-New segment loads, compactions, and Global FST publications affect later
-queries only.
+An in-flight query keeps its pinned Global BM25 FST and distribution
+generations. New segment loads, compactions, and Global BM25 FST publications
+affect later queries only.
 
 If a target transition introduces a sealed segment generation not covered by
-the pinned Global FST, exact mode includes that segment in the Worker RPC
-delta. A newer Global FST must not be substituted midway through the query
+the pinned Global BM25 FST, exact mode includes that segment in the Worker RPC
+delta. A newer Global BM25 FST must not be substituted midway through the query
 because its coverage may describe a different target.
 
 ---
@@ -826,28 +834,30 @@ fuzzy_expansion_mode = exact | global_only
 ### 10.1 `exact`
 
 - Default mode.
-- Use the Global FST for covered segments.
+- Use the Global BM25 FST for covered segments.
 - Expand growing targets locally and RPC to Workers for every uncovered sealed
   target segment.
 - Fall back to local growing expansion plus the Phase 1 all-sealed-Worker path
-  if no compatible Global FST exists.
+  if no compatible Global BM25 FST exists.
 - Fail rather than silently lose vocabulary when a required RPC cannot be
   completed.
 
 ### 10.2 `global_only`
 
-- Use the local growing dictionary and the pinned Global FST.
+- Use the local growing Segment FST and the pinned Global BM25 FST.
 - Do not request uncovered sealed-segment dictionaries.
-- Reject the query when it has sealed targets but no compatible Global FST.
-- May miss terms introduced after the Global FST coverage frontier.
+- Reject the query when it has sealed targets but no compatible Global BM25
+  FST.
+- May miss terms introduced after the Global BM25 FST coverage frontier.
 - Can change recall, the expansion set, and BM25 ranking.
 
 This mode is useful when a large, mature collection has a sufficiently complete
-Global FST and the user prefers predictable low RPC latency over the freshest
-possible vocabulary.
+Global BM25 FST and the user prefers predictable low RPC latency over the
+freshest possible vocabulary.
 
-The response or query metrics should expose the used Global FST generation,
-coverage ratio, and lag so that approximate behavior is diagnosable.
+The response or query metrics should expose the used Global BM25 FST
+generation, coverage ratio, and lag so that approximate behavior is
+diagnosable.
 
 ---
 
@@ -873,7 +883,7 @@ The implementation is expected to require changes in the following areas.
 - FST fragment entries with checkpoint coverage.
 - Consolidated FST entries with dictionary generation.
 - Field-level FST encoding version.
-- Global FST coverage manifest and generation.
+- Global BM25 FST coverage manifest and generation.
 
 ### QueryNode RPC
 
@@ -885,8 +895,8 @@ The implementation is expected to require changes in the following areas.
 - Analyze fuzzy BM25 queries before hashing.
 - Pin a lexical snapshot.
 - Maintain and expand the growing dictionary locally.
-- Merge growing, Global FST, and sealed Worker candidates and perform a
-  deterministic global rewrite.
+- Merge growing Segment FST, Global BM25 FST, and sealed Worker candidates and
+  perform a deterministic global rewrite.
 - Add target-bound DF and IDF operations.
 
 ### Worker segment runtime
@@ -909,12 +919,13 @@ The implementation is expected to require changes in the following areas.
 4. **Generation invariant**: every expansion source is validated against the
    dictionary generation pinned by the query.
 5. **Snapshot invariant**: segment distribution, term expansion, DF/IDF stats,
-   and Global FST coverage describe one lexical snapshot.
+   and Global BM25 FST coverage describe one lexical snapshot.
 6. **Global vector invariant**: every target segment receives the same final
    BM25 query vector.
 7. **Exact-mode invariant**: every growing target's vocabulary is represented
    by the Delegator's local dictionary, and every sealed target's vocabulary is
-   represented by either the pinned Global FST or a successful Worker response.
+   represented by either the pinned Global BM25 FST or a successful Worker
+   response.
 8. **Rewrite invariant**: DF-zero terms are removed before `max_expansions`.
 9. **Field vocabulary invariant**: all terms that contribute to one BM25 input
    field, including terms from different multi-analyzer row selections, are
@@ -931,7 +942,7 @@ Account separately for:
 - growing Trie memory;
 - persistent FST mmap or resident memory;
 - FST-fragment mmap/resident memory and optional local merged-FST cache;
-- loaded Global FST memory/mmap;
+- loaded Global BM25 FST memory/mmap;
 - FST fragment object count and bytes.
 
 Locally merged FST caches should use the existing segment lifecycle and resource
@@ -948,9 +959,9 @@ Recommended metrics include:
 - expansion candidate count before and after deduplication, DF filtering, and
   `max_expansions`;
 - expansion RPC fan-out, latency, bytes, and failure count;
-- percentage of target segments covered by the Global FST;
+- percentage of target segments covered by the Global BM25 FST;
 - queries requiring zero, partial, or full expansion RPC;
-- Global FST generation age and checkpoint lag;
+- Global BM25 FST generation age and checkpoint lag;
 - `global_only` query count and observed uncovered-target ratio.
 
 Tracing should make the following stages visible under the search trace:
@@ -987,11 +998,11 @@ required before the feature can be enabled in a mixed-version cluster.
 
 ### 14.3 Existing `enable_match` fields
 
-The first implementation may build a lightweight fuzzy-BM25 dictionary beside
+The first implementation may build a lightweight fuzzy-BM25 Segment FST beside
 the current Tantivy text index, but this duplication must be treated as
-transitional. The next consolidation step should make the Tantivy/Milvus Text
-Term Index export FST enumeration and expansion interfaces required by the
-Delegator path.
+transitional. The next consolidation step should make the Tantivy/Milvus
+Segment Text Index export the Segment FST enumeration and expansion interfaces
+required by the Delegator path.
 
 ---
 
@@ -1027,14 +1038,14 @@ Delegator path.
 - Candidate union is independent of sealed Worker placement and combines the
   Delegator's local growing expansion.
 - All target segments receive byte-identical query vectors.
-- Partition-scoped search filters Global FST terms using target-bound DF.
+- Partition-scoped search filters Global BM25 FST terms using target-bound DF.
 - Hash collisions are aggregated consistently with current BM25 semantics.
 - An accepted partial expansion and the final search use the same reduced
   target.
 - Distribution or dictionary generation changes during a query do not mix
   snapshots.
 
-### Global FST
+### Global BM25 FST
 
 - Local growing plus covered and uncovered sealed expansion equals all-segment
   expansion.
@@ -1049,7 +1060,7 @@ Delegator path.
 - Trie memory under high-cardinality text.
 - FST build, load, and mmap latency.
 - Expansion latency versus edit distance and vocabulary size.
-- RPC fan-out reduction from Global FST coverage.
+- RPC fan-out reduction from Global BM25 FST coverage.
 - Candidate explosion and `max_expansions` effectiveness.
 
 ---
@@ -1060,8 +1071,8 @@ Delegator path.
 
 This avoids sealed expansion RPCs but duplicates all Worker dictionaries on
 the SN, increases memory and load traffic, and separates the dictionary from
-the segment-local features that also need it. It does not scale as the common
-Text Term Index grows to include postings.
+the segment-local features that also need it. It does not scale as the future
+Segment Text Index grows to include postings.
 
 ### Build one global FST only
 
@@ -1075,7 +1086,7 @@ The FST is already a losslessly enumerable, lexically ordered representation
 of the term set. Persisting a parallel term-enum file duplicates storage,
 object count, checkpoint metadata, compaction inputs, and failure handling
 without adding information. Direct FST iteration is sufficient for recovery,
-segment compaction, and Global FST construction.
+segment compaction, and Global BM25 FST construction.
 
 ### Expand independently inside every BM25 segment search
 
