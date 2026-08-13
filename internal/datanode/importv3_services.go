@@ -799,7 +799,7 @@ func (w *importV3FinalWriter) Write(record storage.Record) error {
 	}
 	data, err := storage.RecordToInsertData(record, w.targetSchema, required)
 	if err != nil {
-		return merr.Wrap(err, "convert ImportTaskV3 merged record")
+		return merr.WrapErrDataIntegrity(err, "convert ImportTaskV3 merged record")
 	}
 	rows := data.GetRowNum()
 	if rows == 0 {
