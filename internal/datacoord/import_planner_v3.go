@@ -225,7 +225,7 @@ func (c *importChecker) planV3Job(job ImportJob) error {
 		return ttlErr
 	}
 	snapshot.WriterSpecs = []*datapb.WriterSpec{{FormatVersion: 1, TargetStorageVersion: importStorageVersion(false), TargetSchemaVersion: job.GetSchema().GetVersion(), CollectionTtlNanos: ttl.Nanoseconds(), PkStatsCapacity: 1, BloomFilterType: Params.CommonCfg.BloomFilterType.GetValue(), MaxBloomFalsePositive: Params.CommonCfg.MaxBloomFalsePositive.GetAsFloat()}}
-	columnGroups := storagecommon.SplitColumns(typeutil.GetAllFieldSchemas(frozenSchema), map[int64]storagecommon.ColumnStats{}, storagecommon.DefaultPolicies()...)
+	columnGroups := storagecommon.SplitColumns(typeutil.GetAllFieldSchemas(targetSchema), map[int64]storagecommon.ColumnStats{}, storagecommon.DefaultPolicies()...)
 	snapshot.WriterSpecs[0].ColumnGroups = make([]*datapb.ColumnGroupSpec, 0, len(columnGroups))
 	for _, group := range columnGroups {
 		snapshot.WriterSpecs[0].ColumnGroups = append(snapshot.WriterSpecs[0].ColumnGroups, &datapb.ColumnGroupSpec{GroupId: group.GroupID, FieldIds: append([]int64(nil), group.Fields...), Format: group.Format})
