@@ -111,33 +111,74 @@ func (g *guard) updateFrozenLocked(used, total uint64) {
 func (g *guard) updateNonTaskLocked(used uint64) {
 	cfg := &paramtable.Get().DataNodeCfg
 
+	if int64(used) <= g.reserved.Memory {
+		// Observation below commitment carries no information about non-task
+		// memory. It says the admitted tasks have not grown into their estimates
+		// yet, and nothing whatever about what else is resident. Reporting it as
+		// "there is no non-task memory" would be the opposite of what the reading
+		// means, and after a run of such samples the reservation would decay away
+		// -- the one path by which a low reading could widen the budget. A sample
+		// that is not evidence must not count towards sustained evidence either,
+		// so the low run is left untouched as well.
+		return
+	}
+
 	sample := int64(used) - g.reserved.Memory
 	if sample < 0 {
-		// The ledger has committed more than the process has actually touched,
-		// which is the normal state for freshly admitted tasks. That headroom is
-		// already spoken for, so none of it may be reported as non-task memory.
-		// A negative reservation would be *added* to the budget by budgetLocked,
-		// so this clamp comes before the floor rather than relying on the floor
-		// being configured non-negative.
+		// Belt and braces. The guard above already makes this unreachable, but a
+		// negative reservation would be *added* to the budget by budgetLocked, so
+		// the invariant should not rest on a single branch elsewhere.
 		sample = 0
 	}
 	if floor := cfg.ResourceNonTaskMemoryFloor.GetAsInt64(); sample < floor {
 		sample = floor
 	}
 
+	before := g.nonTask
 	if sample >= g.nonTaskPeak {
 		// Tightening takes effect at once.
 		g.nonTaskPeak = sample
-		g.lowSampleCount = 0
+		g.resetLowRunLocked()
 	} else {
 		// Relaxing requires sustained evidence: slowGrowPeriods consecutive lower
 		// samples. One low reading usually means the admitted tasks have not
 		// grown into their estimates yet.
 		g.lowSampleCount++
+		if sample > g.lowRunMax {
+			g.lowRunMax = sample
+		}
 		if g.lowSampleCount >= cfg.ResourceSlowGrowPeriods.GetAsInt() {
-			g.nonTaskPeak = sample
-			g.lowSampleCount = 0
+			// The whole run backs the figure handed back, not just its last
+			// sample. The counter decides *when* the reservation may relax; the
+			// run's maximum decides *how far*. Committing the final sample would
+			// let one outlier give back budget that no other sample in the run
+			// supports, applying "sustained evidence" to the timing while leaving
+			// the magnitude to a single reading.
+			g.nonTaskPeak = g.lowRunMax
+			g.resetLowRunLocked()
 		}
 	}
 	g.nonTask = g.nonTaskPeak
+
+	// A node that has quietly stopped admitting because this reservation ate the
+	// budget must leave a trace, at the same levels the freeze transitions use:
+	// growing is the conservative direction and warns, relaxing is informational.
+	switch {
+	case g.nonTask > before:
+		mlog.Warn(context.TODO(), "non-task memory reservation grew, task budget tightened",
+			mlog.Int64("before", before), mlog.Int64("after", g.nonTask),
+			mlog.Int64("observed", int64(used)), mlog.Int64("reserved", g.reserved.Memory))
+	case g.nonTask < before:
+		mlog.Info(context.TODO(), "non-task memory reservation shrank, task budget relaxed",
+			mlog.Int64("before", before), mlog.Int64("after", g.nonTask),
+			mlog.Int64("observed", int64(used)), mlog.Int64("reserved", g.reserved.Memory))
+	}
+}
+
+// resetLowRunLocked starts a fresh run of low samples. Both halves of the run
+// have to go together: a counter kept across a rise would relax early, and a
+// maximum kept across one would relax to a figure the new run never observed.
+func (g *guard) resetLowRunLocked() {
+	g.lowSampleCount = 0
+	g.lowRunMax = 0
 }
