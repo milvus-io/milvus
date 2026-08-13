@@ -881,6 +881,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(64*1024*1024), params.StreamingCfg.WALWriteAheadBufferCapacity.GetAsSize())
 		assert.Equal(t, 128, params.StreamingCfg.WALReadAheadBufferLength.GetAsInt())
 		assert.Equal(t, 1*time.Second, params.StreamingCfg.LoggingAppendSlowThreshold.GetAsDurationByParse())
+		assert.Equal(t, int64(640000000), params.StreamingCfg.PartialUpdateVersionIndexMaxBytes.GetAsSize())
 		assert.Equal(t, 3*time.Second, params.StreamingCfg.WALRecoveryGracefulCloseTimeout.GetAsDurationByParse())
 		assert.Equal(t, 24*time.Hour, params.StreamingCfg.WALRecoverySchemaExpirationTolerance.GetAsDurationByParse())
 		assert.Equal(t, 100, params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt())

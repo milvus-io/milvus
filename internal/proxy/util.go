@@ -2382,7 +2382,13 @@ func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msg
 	return nil
 }
 
-func checkUpsertPrimaryFieldData(ctx context.Context, allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, *schemapb.IDs, error) {
+func checkUpsertPrimaryFieldData(
+	ctx context.Context,
+	allFields []*schemapb.FieldSchema,
+	schema *schemapb.CollectionSchema,
+	insertMsg *msgstream.InsertMsg,
+	preserveAutoIDPrimaryKey bool,
+) (*schemapb.IDs, *schemapb.IDs, error) {
 	log := mlog.With(mlog.String("collectionName", insertMsg.CollectionName))
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
@@ -2411,9 +2417,8 @@ func checkUpsertPrimaryFieldData(ctx context.Context, allFields []*schemapb.Fiel
 	for i, field := range insertMsg.GetFieldsData() {
 		if field.FieldId == primaryFieldID || field.FieldName == primaryFieldName {
 			primaryFieldData = field
-			if primaryFieldSchema.AutoID {
-				// use the passed pk as new pk when autoID == false
-				// automatic generate pk as new pk wehen autoID == true
+			if primaryFieldSchema.AutoID && !preserveAutoIDPrimaryKey {
+				// Normal AutoID upsert deletes the supplied PK and inserts a new PK.
 				newPrimaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
 				if err != nil {
 					log.Info(ctx, "generate new primary field data failed when upsert", mlog.Err(err))
@@ -2436,7 +2441,7 @@ func checkUpsertPrimaryFieldData(ctx context.Context, allFields []*schemapb.Fiel
 		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
 		return nil, nil, err
 	}
-	if !primaryFieldSchema.GetAutoID() {
+	if !primaryFieldSchema.GetAutoID() || preserveAutoIDPrimaryKey {
 		return ids, ids, nil
 	}
 	newIDs, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
