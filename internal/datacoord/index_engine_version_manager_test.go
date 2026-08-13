@@ -676,6 +676,10 @@ func Test_IndexEngineVersionManager_ResolveVecIndexVersion(t *testing.T) {
 
 func Test_IndexEngineVersionManager_ResolveScalarIndexVersion(t *testing.T) {
 	paramtable.Init()
+	t.Cleanup(func() {
+		Params.Reset(Params.DataCoordCfg.TargetScalarIndexVersion.Key)
+		Params.Reset(Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.Key)
+	})
 
 	t.Run("no target override", func(t *testing.T) {
 		m := newIndexEngineVersionManager()

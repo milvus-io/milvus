@@ -23,13 +23,16 @@ import (
 	"math/rand"
 	"os"
 	"path"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
@@ -40,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	basekv "github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -47,6 +51,66 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+type snapshotExportJobMetaKV struct {
+	basekv.MetaKv
+
+	mu        sync.Mutex
+	values    map[string]string
+	saveErr   error
+	walkErr   error
+	removeErr error
+}
+
+func newSnapshotExportJobMetaKV() *snapshotExportJobMetaKV {
+	return &snapshotExportJobMetaKV{values: make(map[string]string)}
+}
+
+func (m *snapshotExportJobMetaKV) Save(_ context.Context, key, value string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	m.values[key] = value
+	return nil
+}
+
+func (m *snapshotExportJobMetaKV) WalkWithPrefix(
+	_ context.Context,
+	prefix string,
+	_ int,
+	fn func([]byte, []byte) error,
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.walkErr != nil {
+		return m.walkErr
+	}
+	keys := make([]string, 0, len(m.values))
+	for key := range m.values {
+		if strings.HasPrefix(key, prefix) {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if err := fn([]byte(key), []byte(m.values[key])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *snapshotExportJobMetaKV) Remove(_ context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.removeErr != nil {
+		return m.removeErr
+	}
+	delete(m.values, key)
+	return nil
+}
 
 var (
 	logID        = int64(99)
@@ -1954,6 +2018,72 @@ func TestCatalog_CopySegmentJob(t *testing.T) {
 
 		err = kc.DropCopySegmentJob(context.Background(), job.GetJobId())
 		assert.Error(t, err)
+	})
+}
+
+func TestCatalog_ExportSnapshotJob(t *testing.T) {
+	ctx := context.Background()
+	metaKV := newSnapshotExportJobMetaKV()
+	catalog := &Catalog{MetaKv: metaKV, paginationSize: 16}
+	job := &datapb.ExportSnapshotJob{
+		JobId:          9001,
+		SnapshotName:   "snapshot-1",
+		CollectionId:   100,
+		CollectionName: "collection-1",
+		State:          datapb.ExportSnapshotJobState_ExportSnapshotJobPending,
+	}
+
+	t.Run("empty catalog", func(t *testing.T) {
+		jobs, err := catalog.ListExportSnapshotJobs(ctx)
+		require.NoError(t, err)
+		assert.Empty(t, jobs)
+	})
+
+	t.Run("save overwrite list and drop", func(t *testing.T) {
+		require.NoError(t, catalog.SaveExportSnapshotJob(ctx, job))
+		updated := proto.Clone(job).(*datapb.ExportSnapshotJob)
+		updated.State = datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting
+		updated.Progress = 35
+		require.NoError(t, catalog.SaveExportSnapshotJob(ctx, updated))
+
+		jobs, err := catalog.ListExportSnapshotJobs(ctx)
+		require.NoError(t, err)
+		require.Len(t, jobs, 1)
+		assert.True(t, proto.Equal(updated, jobs[0]))
+
+		require.NoError(t, catalog.DropExportSnapshotJob(ctx, job.GetJobId()))
+		jobs, err = catalog.ListExportSnapshotJobs(ctx)
+		require.NoError(t, err)
+		assert.Empty(t, jobs)
+	})
+
+	t.Run("malformed record", func(t *testing.T) {
+		metaKV.mu.Lock()
+		metaKV.values[buildExportSnapshotJobKey(9002)] = "not-a-protobuf"
+		metaKV.mu.Unlock()
+		jobs, err := catalog.ListExportSnapshotJobs(ctx)
+		require.Error(t, err)
+		assert.Nil(t, jobs)
+		metaKV.mu.Lock()
+		delete(metaKV.values, buildExportSnapshotJobKey(9002))
+		metaKV.mu.Unlock()
+	})
+
+	t.Run("storage errors", func(t *testing.T) {
+		storageErr := errors.New("storage unavailable")
+		metaKV.saveErr = storageErr
+		require.ErrorIs(t, catalog.SaveExportSnapshotJob(ctx, job), storageErr)
+		metaKV.saveErr = nil
+
+		metaKV.walkErr = storageErr
+		jobs, err := catalog.ListExportSnapshotJobs(ctx)
+		require.ErrorIs(t, err, storageErr)
+		assert.Nil(t, jobs)
+		metaKV.walkErr = nil
+
+		metaKV.removeErr = storageErr
+		require.ErrorIs(t, catalog.DropExportSnapshotJob(ctx, job.GetJobId()), storageErr)
+		metaKV.removeErr = nil
 	})
 }
 

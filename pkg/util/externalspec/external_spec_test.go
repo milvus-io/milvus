@@ -326,12 +326,14 @@ func TestRedactExternalSpec(t *testing.T) {
 	})
 
 	t.Run("secrets_masked", func(t *testing.T) {
-		out := RedactExternalSpec(`{"format":"parquet","extfs":{"access_key_id":"AKIA","access_key_value":"SEC","region":"us"}}`)
+		out := RedactExternalSpec(`{"format":"parquet","extfs":{"access_key_id":"AKIA","access_key_value":"SEC","credential_json":"{\"private_key\":\"SECRET\"}","region":"us"}}`)
 		assert.Contains(t, out, `"access_key_id":"***"`)
 		assert.Contains(t, out, `"access_key_value":"***"`)
+		assert.Contains(t, out, `"credential_json":"***"`)
 		assert.Contains(t, out, `"region":"us"`)
 		assert.NotContains(t, out, "AKIA")
 		assert.NotContains(t, out, "SEC")
+		assert.NotContains(t, out, "private_key")
 	})
 
 	t.Run("empty_secret_values_untouched", func(t *testing.T) {

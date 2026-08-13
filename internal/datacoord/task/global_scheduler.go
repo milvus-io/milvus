@@ -18,8 +18,11 @@ package task
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/blang/semver/v4"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -221,30 +224,86 @@ func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*
 // across all tasks in a scheduling round so later picks observe the decremented
 // slots.
 func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
+	return s.pickNodeWithMinimumVersion(slotHeap, taskSlot, semver.Version{})
+}
+
+func (s *globalTaskScheduler) pickNodeWithMinimumVersion(
+	slotHeap typeutil.Heap[*nodeSlotEntry],
+	taskSlot int64,
+	minimumVersion semver.Version,
+) int64 {
 	if slotHeap.Len() == 0 {
 		return NullNodeID
 	}
-	// Pop the most-available node, mutate its slots, then push it back. An element
-	// must not be mutated while it stays in the heap, or the heap order breaks.
-	entry := slotHeap.Pop()
-	if taskSlot <= 0 {
+
+	skipped := make([]*nodeSlotEntry, 0)
+	defer func() {
+		for _, entry := range skipped {
+			slotHeap.Push(entry)
+		}
+	}()
+
+	for slotHeap.Len() > 0 {
+		entry := slotHeap.Pop()
+		if !workerSupportsMinimumVersion(entry.slots.Version, minimumVersion) {
+			skipped = append(skipped, entry)
+			continue
+		}
+		// Pop the most-available node, mutate its slots, then push it back. An element
+		// must not be mutated while it stays in the heap, or the heap order breaks.
+		if taskSlot <= 0 {
+			slotHeap.Push(entry)
+			return entry.nodeID
+		}
+		if entry.slots.AvailableSlots <= 0 {
+			// The most-available compatible node has no slot, so neither does any
+			// other compatible node.
+			slotHeap.Push(entry)
+			return NullNodeID
+		}
+		if entry.slots.AvailableSlots >= taskSlot {
+			entry.slots.AvailableSlots -= taskSlot
+		} else {
+			// No compatible node can fully satisfy the request; assign to the
+			// most-available compatible node on a best-effort basis.
+			entry.slots.AvailableSlots = 0
+		}
 		slotHeap.Push(entry)
 		return entry.nodeID
 	}
-	if entry.slots.AvailableSlots <= 0 {
-		// The most-available node has no slot, so neither does any other node.
-		slotHeap.Push(entry)
-		return NullNodeID
+	return NullNodeID
+}
+
+func workerSupportsMinimumVersion(workerVersion string, minimumVersion semver.Version) bool {
+	if minimumVersion.Equals(semver.Version{}) {
+		return true
 	}
-	if entry.slots.AvailableSlots >= taskSlot {
-		entry.slots.AvailableSlots -= taskSlot
-	} else {
-		// No node can fully satisfy the request; assign to the most-available
-		// node on a best-effort basis and drain its slots.
-		entry.slots.AvailableSlots = 0
+	workerVersion = strings.TrimSpace(workerVersion)
+	if workerVersion == "" {
+		return false
 	}
-	slotHeap.Push(entry)
-	return entry.nodeID
+
+	version, err := semver.ParseTolerant(workerVersion)
+	if err != nil {
+		// Development builds report branch-date-commit strings. A non-empty
+		// version still proves the worker understands the version response field;
+		// old DataNodes decode this new field as empty.
+		return true
+	}
+	version.Pre = nil
+	version.Build = nil
+	minimumVersion.Pre = nil
+	minimumVersion.Build = nil
+	return version.GTE(minimumVersion)
+}
+
+func minimumWorkerVersion(task Task) (semver.Version, bool) {
+	constraint, ok := task.(WorkerVersionConstraint)
+	if !ok {
+		return semver.Version{}, false
+	}
+	minimumVersion := constraint.MinimumWorkerVersion()
+	return minimumVersion, !minimumVersion.Equals(semver.Version{})
 }
 
 func (s *globalTaskScheduler) schedule() {
@@ -273,8 +332,13 @@ func (s *globalTaskScheduler) schedule() {
 			continue
 		}
 		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(slotHeap, taskSlot)
+		minimumVersion, versionConstrained := minimumWorkerVersion(task)
+		nodeID := s.pickNodeWithMinimumVersion(slotHeap, taskSlot, minimumVersion)
 		if nodeID == NullNodeID {
+			if versionConstrained {
+				delayed = append(delayed, task)
+				continue
+			}
 			s.pendingTasks.Push(task)
 			break
 		}

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -2007,7 +2008,7 @@ func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 
 			gc.ackSignal(signal)
 			// Compute paths from collection_id + snapshot_id
-			manifestDir, metadataPath := GetSnapshotPaths(
+			manifestDir, metadataPath := snapshotstorage.GetSnapshotPaths(
 				gc.option.cli.RootPath(),
 				snapshot.GetCollectionId(),
 				snapshot.GetId(),
@@ -2066,7 +2067,7 @@ func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 			gc.ackSignal(signal)
 
 			// Compute paths from collection_id + snapshot_id
-			manifestDir, metadataPath := GetSnapshotPaths(
+			manifestDir, metadataPath := snapshotstorage.GetSnapshotPaths(
 				gc.option.cli.RootPath(),
 				snapshot.GetCollectionId(),
 				snapshot.GetId(),
