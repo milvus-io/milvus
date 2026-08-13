@@ -1410,7 +1410,7 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     }
 }
 
-PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
 SegmentGrowingImpl::chunk_string_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1420,7 +1420,7 @@ SegmentGrowingImpl::chunk_string_view_impl(
               "chunk string view impl not implement for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
 SegmentGrowingImpl::chunk_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1430,7 +1430,7 @@ SegmentGrowingImpl::chunk_array_view_impl(
               "chunk array view impl not implement for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
 SegmentGrowingImpl::chunk_vector_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1487,10 +1487,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
 
     std::vector<VectorArrayView> views;
     views.reserve(len);
-    FixedVector<bool> valid_data;
-    if (field_meta.is_nullable()) {
-        valid_data.reserve(len);
-    }
+    const bool nullable = field_meta.is_nullable();
 
     // One batch conversion for the whole contiguous range instead of a
     // logical->physical search (plus a validity lock) per row: the
@@ -1507,33 +1504,47 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
         logical_offsets.data(), len, row_valid.get(), physical_offsets);
 
     size_t next_physical = 0;
-    for (int64_t i = 0; i < len; ++i) {
-        if (field_meta.is_nullable()) {
-            valid_data.push_back(row_valid[i]);
-        }
-        if (!row_valid[i]) {
-            AssertInfo(field_meta.is_nullable(),
-                       "Cannot find VECTOR_ARRAY data at segment offset {}",
-                       logical_offsets[i]);
-            views.emplace_back();
-            continue;
-        }
+    auto append_valid_view = [&](int64_t logical_offset) {
         auto vector_array = vector_data->get_physical_element(
             physical_offsets[next_physical++]);
         AssertInfo(vector_array != nullptr,
                    "Cannot find VECTOR_ARRAY data at segment offset {}",
-                   logical_offsets[i]);
+                   logical_offset);
         views.emplace_back(const_cast<char*>(vector_array->data()),
                            vector_array->dim(),
                            vector_array->length(),
                            vector_array->byte_size(),
                            vector_array->get_element_type());
+    };
+
+    if (nullable) {
+        auto valid_data = std::make_shared<FixedVector<bool>>();
+        valid_data->reserve(len);
+        for (int64_t i = 0; i < len; ++i) {
+            valid_data->push_back(row_valid[i]);
+            if (!row_valid[i]) {
+                views.emplace_back();
+                continue;
+            }
+            append_valid_view(logical_offsets[i]);
+        }
+        std::pair<std::vector<VectorArrayView>, ValidityView> content{
+            std::move(views), ValidityView::FromExpanded(valid_data->data())};
+        return PinWrapper<
+            std::pair<std::vector<VectorArrayView>, ValidityView>>(
+            std::move(valid_data), std::move(content));
     }
 
-    std::pair<std::vector<VectorArrayView>, FixedVector<bool>> content{
-        std::move(views), std::move(valid_data)};
-    return PinWrapper<
-        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>(
+    AssertInfo(physical_offsets.size() == static_cast<size_t>(len),
+               "Cannot find VECTOR_ARRAY data in segment offset range [{}, {})",
+               logical_start,
+               logical_start + len);
+    for (int64_t i = 0; i < len; ++i) {
+        append_valid_view(logical_offsets[i]);
+    }
+    std::pair<std::vector<VectorArrayView>, ValidityView> content{
+        std::move(views), ValidityView{}};
+    return PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>(
         std::move(content));
 }
 
