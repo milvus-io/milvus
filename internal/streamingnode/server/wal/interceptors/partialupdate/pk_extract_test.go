@@ -6,7 +6,6 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -178,33 +177,6 @@ func TestExtractPKsFromInsert(t *testing.T) {
 		_, err := extractPKsFromInsert(corruptMessageBody(newInsertMessage(nil)), 100)
 		requireUnrecoverable(t, err)
 	})
-}
-
-func TestExtractPKsFromInsertSkipsVectorPayload(t *testing.T) {
-	pkField := protowire.AppendTag(nil, fieldDataFieldIDField, protowire.VarintType)
-	pkField = protowire.AppendVarint(pkField, 100)
-	longArray := protowire.AppendTag(nil, longArrayDataField, protowire.BytesType)
-	packedPKs := protowire.AppendVarint(nil, 10)
-	packedPKs = protowire.AppendVarint(packedPKs, 20)
-	longArray = protowire.AppendBytes(longArray, packedPKs)
-	scalars := protowire.AppendTag(nil, scalarLongDataField, protowire.BytesType)
-	scalars = protowire.AppendBytes(scalars, longArray)
-	pkField = protowire.AppendTag(pkField, fieldDataScalarsField, protowire.BytesType)
-	pkField = protowire.AppendBytes(pkField, scalars)
-
-	vectorField := protowire.AppendTag(nil, fieldDataFieldIDField, protowire.VarintType)
-	vectorField = protowire.AppendVarint(vectorField, 101)
-	vectorField = protowire.AppendTag(vectorField, 4, protowire.BytesType)
-	vectorField = protowire.AppendBytes(vectorField, []byte{0xff})
-
-	payload := protowire.AppendTag(nil, insertFieldsDataFieldNumber, protowire.BytesType)
-	payload = protowire.AppendBytes(payload, pkField)
-	payload = protowire.AppendTag(payload, insertFieldsDataFieldNumber, protowire.BytesType)
-	payload = protowire.AppendBytes(payload, vectorField)
-
-	pks, err := scanInsertPKs(payload, 100, false)
-	require.NoError(t, err)
-	require.Equal(t, []int64{10, 20}, pks.int64Values)
 }
 
 func TestExtractPKsFromCASInsert(t *testing.T) {

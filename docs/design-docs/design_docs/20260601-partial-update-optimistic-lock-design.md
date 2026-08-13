@@ -309,8 +309,8 @@ For every CAS Insert, StreamingNode:
 1. reads `collection_id` and `schema_version` from the Insert header;
 2. requires `schema_version` to be explicitly present;
 3. resolves the immutable PK descriptor through ShardManager;
-4. selectively scans the encoded Insert body for the descriptor's PK field and
-   CAS metadata, without unmarshalling unrelated vector fields;
+4. decodes the complete Insert body with the generated protobuf codec and
+   extracts the descriptor's PK field and CAS metadata;
 5. verifies that all CAS chunks in the transaction use the same proof,
    collection, and schema version.
 
@@ -321,9 +321,12 @@ The message builder writes metadata into the Insert body before encryption and
 before `BuildMutable()`. When cluster encryption is enabled, the proof is
 inside the same encrypted boundary as the DML payload.
 
-Insert and Delete tracking use selective wire parsing and typed Int64/VarChar
-PK slices on the append path. If an encrypted payload cannot be decrypted, the
-current append returns an error; the StreamingNode process does not panic.
+Insert and Delete tracking decode complete DML bodies and keep extracted PKs in
+typed Int64/VarChar slices. This intentionally accepts the CPU, allocation, GC,
+and append-latency cost of decoding unrelated fields, including vectors, to
+keep protobuf wire compatibility owned by generated code instead of a custom
+parser. If an encrypted payload cannot be decrypted, the current append returns
+an error; the StreamingNode process does not panic.
 
 The empty outer `_puc` marker only selects the transaction and lock paths.
 After packing, Proxy verifies that:
@@ -613,8 +616,8 @@ receive an error after one or more vchannel transactions have committed.
 The design adds the following costs:
 
 - one query per partial-update attempt;
-- selective PK extraction and recent-version publication for ordinary
-  Insert/Delete;
+- complete protobuf decoding, PK extraction, and recent-version publication
+  for ordinary Insert/Delete;
 - an expiration-heap update for tracked PKs;
 - serialization of CAS commits on the same vchannel;
 - a vchannel write lock held through CommitTxn WAL append;
