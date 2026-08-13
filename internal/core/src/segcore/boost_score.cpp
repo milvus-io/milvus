@@ -24,6 +24,7 @@
 #include <memory>
 #include <vector>
 
+#include "common/CGoCatch.h"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -274,9 +275,8 @@ ComputeScorerScoresOnOffsetChunks(CSegmentInterface c_segment,
                                             output_score_chunks,
                                             output_has_score_chunks);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CFuture*
@@ -360,6 +360,22 @@ AsyncComputeScorerScoresOnOffsetChunks(CSegmentInterface c_segment,
                           "AsyncComputeScorerScoresOnOffsetChunks preflight "
                           "failed: {}",
                           error_msg);
+                return nullptr;
+            });
+        return static_cast<CFuture*>(static_cast<void*>(
+            static_cast<milvus::futures::IFuture*>(future.release())));
+    } catch (...) {
+        // A non-std exception (folly's own) would otherwise escape this
+        // extern-C entry and terminate the process; mirror the error-future
+        // construction above so the caller still gets a destroyable future.
+        auto future = milvus::futures::Future<bool>::async(
+            milvus::futures::getSearchCPUExecutor(),
+            milvus::futures::ExecutePriority::HIGH,
+            [](folly::CancellationToken cancel_token) -> bool* {
+                (void)cancel_token;
+                ThrowInfo(milvus::UnexpectedError,
+                          "AsyncComputeScorerScoresOnOffsetChunks preflight "
+                          "failed: unknown exception");
                 return nullptr;
             });
         return static_cast<CFuture*>(static_cast<void*>(

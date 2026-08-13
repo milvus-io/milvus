@@ -234,6 +234,19 @@ impl RustResult {
         }
     }
 
+    /// Keep the producer's discriminant while replacing the message with a
+    /// contextual one. from_error(format!(...)) drops the code to Internal,
+    /// which is exactly how a user-supplied bad analyzer_params was reaching
+    /// the C++ side as UnexpectedError(2001) instead of InvalidParameter.
+    pub fn from_binding_error_msg(error: &TantivyBindingError, msg: String) -> Self {
+        RustResult {
+            success: false,
+            value: Value::None(()),
+            error: create_string(&msg),
+            error_code: error.code(),
+        }
+    }
+
     pub fn from_binding_error(error: &TantivyBindingError) -> Self {
         RustResult {
             success: false,

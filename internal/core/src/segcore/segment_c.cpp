@@ -732,7 +732,26 @@ HasRawData(CSegmentInterface c_segment, int64_t field_id) {
 
     auto segment =
         reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-    return segment->HasRawData(field_id);
+    try {
+        return segment->HasRawData(field_id);
+    } catch (const std::exception& e) {
+        // Returning through a plain bool leaves no channel for an error, and
+        // the impls AssertInfo-throw on a field the published schema has not
+        // caught up with yet (normal schema-evolution timing, no malformed
+        // data needed) as well as on not-ready indexes. "No raw data" is the
+        // safe answer -- the caller just loads the field data -- and it must
+        // not terminate the process.
+        LOG_WARN("HasRawData({}) failed, reporting no raw data: {}",
+                 field_id,
+                 e.what());
+        return false;
+    } catch (...) {
+        LOG_WARN(
+            "HasRawData({}) failed with an unknown exception, reporting "
+            "no raw data",
+            field_id);
+        return false;
+    }
 }
 
 bool
@@ -797,10 +816,14 @@ Delete(CSegmentInterface c_segment,
     SCOPE_CGO_CALL_METRIC();
 
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
-    auto pks = std::make_unique<milvus::proto::schema::IDs>();
-    auto suc = pks->ParseFromArray(ids, ids_size);
-    AssertInfo(suc, "failed to parse pks from ids");
     try {
+        // Parse inside the try: a malformed IDs blob makes AssertInfo throw a
+        // SegcoreError, and it would leave this CStatus-returning function as a
+        // live exception across the C ABI (Insert and LoadDeletedRecord already
+        // parse inside theirs).
+        auto pks = std::make_unique<milvus::proto::schema::IDs>();
+        auto suc = pks->ParseFromArray(ids, ids_size);
+        AssertInfo(suc, "failed to parse pks from ids");
         auto res = segment->Delete(size, pks.get(), timestamps);
         return milvus::SuccessCStatus();
     }
@@ -1773,9 +1796,8 @@ GetGrowingSegmentMaterializedFieldIDs(CSegmentInterface c_segment,
             *count = static_cast<int64_t>(ids.size());
         }
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -1923,9 +1945,8 @@ GetGrowingSegmentPrimaryKeys(CSegmentInterface c_segment,
                                 growing_segment->get_segment_id()));
         }
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus

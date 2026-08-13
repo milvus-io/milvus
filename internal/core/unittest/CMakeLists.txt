@@ -80,6 +80,7 @@ set(MILVUS_TEST_FILES
         test_knowhere_status_mapping.cpp
         test_storage_error_code.cpp
         test_loon_ffi_error_passthrough.cpp
+        test_cabi_exception_containment.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
