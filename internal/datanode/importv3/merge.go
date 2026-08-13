@@ -52,6 +52,7 @@ type MergeExecutor struct {
 	Schema       *schemapb.CollectionSchema
 	SortFields   []int64
 	Predicate    func(storage.Record, int, int) bool
+	FinalWriter  func(storage.RecordWriter) storage.RecordWriter
 	Intermediate IntermediateWriterFactory
 }
 
@@ -136,13 +137,20 @@ func (e *MergeExecutor) Execute(
 		predicate = func(storage.Record, int, int) bool { return true }
 	}
 	lazyWriter := &lazyRecordWriter{ctx: ctx, factory: finalWriterFactory}
-	rows, err := storage.MergeSort(e.BatchSize, e.Schema, readers, lazyWriter,
+	var output storage.RecordWriter = lazyWriter
+	if e.FinalWriter != nil {
+		output = e.FinalWriter(output)
+		if output == nil {
+			return 0, merr.WrapErrImportSysFailedMsg("import merge final writer adapter returned nil")
+		}
+	}
+	rows, err := storage.MergeSort(e.BatchSize, e.Schema, readers, output,
 		predicate, e.SortFields)
 	if err != nil {
-		_ = lazyWriter.Close()
+		_ = output.Close()
 		return 0, err
 	}
-	if err := lazyWriter.Close(); err != nil {
+	if err := output.Close(); err != nil {
 		return 0, err
 	}
 	return int64(rows), nil
