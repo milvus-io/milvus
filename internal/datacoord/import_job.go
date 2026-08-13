@@ -107,6 +107,17 @@ func UpdateJobFailureCode(code int32) UpdateJobAction {
 	}
 }
 
+func UpdateJobPlanning(generation int64, snapshotRef string, snapshotDigest []byte, indexRef string, indexDigest []byte) UpdateJobAction {
+	return func(job ImportJob) {
+		internal := job.(*importJob).ImportJob
+		internal.PlanningGeneration = generation
+		internal.PlanningSnapshotRef = snapshotRef
+		internal.PlanningSnapshotDigest = append([]byte(nil), snapshotDigest...)
+		internal.ImportPlanIndexRef = indexRef
+		internal.ImportPlanIndexDigest = append([]byte(nil), indexDigest...)
+	}
+}
+
 type ImportJob interface {
 	GetJobID() int64
 	GetCollectionID() int64

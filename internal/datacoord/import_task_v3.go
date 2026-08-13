@@ -279,11 +279,17 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		t.fail("import v3 task has no persisted plan or run", merr.Code(merr.ErrImportSysFailed))
 		return
 	}
+	job := t.importMeta.GetJob(context.TODO(), p.GetJobId())
+	if job == nil || job.GetPlanningSnapshotRef() == "" || len(job.GetPlanningSnapshotDigest()) == 0 {
+		t.fail("import v3 task has no persisted planning snapshot", merr.Code(merr.ErrImportSysFailed))
+		return
+	}
 	err := cluster.CreateImportV3(nodeID, &datapb.ImportTaskV3Request{
 		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(), TaskPlanRef: p.GetTaskPlanRef(),
 		TaskPlanDigest: p.GetTaskPlanDigest(), OutputPrefix: p.GetOutputPrefix(), OutputSegmentIds: p.GetOutputSegmentIds(),
 		LogIdRange: p.GetLogIdRange(), TaskSlot: p.GetTaskSlot(), PlanningGeneration: p.GetPlanningGeneration(),
-		StorageConfig: createStorageConfig(), PlanningSnapshotRef: "", PlanningSnapshotDigest: nil,
+		StorageConfig: createStorageConfig(), MergeFanIn: int32(Params.DataCoordCfg.ImportMaxMergeFanIn.GetAsInt()),
+		PlanningSnapshotRef: job.GetPlanningSnapshotRef(), PlanningSnapshotDigest: job.GetPlanningSnapshotDigest(),
 	}, t.GetCollectionID())
 	if err != nil {
 		mlog.Warn(context.TODO(), "create import v3 task failed", WrapTaskLog(t, mlog.Err(err))...)

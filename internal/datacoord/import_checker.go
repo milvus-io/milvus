@@ -258,16 +258,8 @@ func (c *importChecker) getLackFilesForImports(job ImportJob) []*datapb.ImportFi
 func (c *importChecker) checkPendingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
 	if job.GetImportTaskVersion() == msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3 {
-		// V3 must never fall through to the legacy PreImportTask path. Planning
-		// is an all-or-nothing persisted protocol; until a valid task plan can be
-		// built, fail explicitly instead of fabricating an empty V2/V3 task.
-		err := merr.WrapErrImportSysFailedMsg("import v3 planning is unavailable")
-		if updateErr := c.importMeta.UpdateJob(c.ctx, job.GetJobID(),
-			UpdateJobState(internalpb.ImportJobState_Failed),
-			UpdateJobReason(err.Error()),
-			UpdateJobFailureCode(merr.Code(err)),
-		); updateErr != nil {
-			log.Warn(c.ctx, "failed to reject import v3 job without planning", mlog.Err(updateErr))
+		if err := c.createV3ReshardTasks(job); err != nil {
+			log.Warn(c.ctx, "create import v3 reshard tasks failed", mlog.Err(err))
 		}
 		return
 	}
@@ -303,6 +295,12 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 
 func (c *importChecker) checkPreImportingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
+	if job.GetImportTaskVersion() == msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3 {
+		if err := c.planV3Job(job); err != nil {
+			log.Warn(c.ctx, "plan import v3 job failed", mlog.Err(err))
+		}
+		return
+	}
 
 	preimports := c.importMeta.GetTaskBy(c.ctx, WithType(PreImportTaskType), WithJob(job.GetJobID()))
 	totalRows := int64(0)
@@ -375,6 +373,25 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 
 func (c *importChecker) checkImportingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
+	if job.GetImportTaskVersion() == msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3 {
+		tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskV3Type), WithJob(job.GetJobID()))
+		if len(tasks) == 0 {
+			return
+		}
+		for _, task := range tasks {
+			if task.GetState() != datapb.ImportTaskStateV2_Completed {
+				return
+			}
+		}
+		if err := publishImportV3Segments(c.ctx, c.meta, tasks); err != nil {
+			log.Warn(c.ctx, "publish import v3 segments failed", mlog.Err(err))
+			return
+		}
+		if err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_IndexBuilding)); err != nil {
+			log.Warn(c.ctx, "advance import v3 job to IndexBuilding failed", mlog.Err(err))
+		}
+		return
+	}
 	tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()), WithRequestSource())
 	for _, t := range tasks {
 		if t.GetState() != datapb.ImportTaskStateV2_Completed {
@@ -389,6 +406,25 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 	importDuration := job.GetTR().RecordSpan()
 	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageImport).Observe(float64(importDuration.Milliseconds()))
 	log.Info(c.ctx, "import job import done", mlog.Duration("jobTimeCost/import", importDuration))
+}
+
+func publishImportV3Segments(ctx context.Context, meta *meta, tasks []ImportTask) error {
+	segmentIDs := make([]int64, 0)
+	for _, generic := range tasks {
+		task, ok := generic.(*importTaskV3)
+		if !ok {
+			continue
+		}
+		segmentIDs = append(segmentIDs, task.task.Load().GetOutputSegmentIds()...)
+	}
+	if len(segmentIDs) == 0 {
+		return nil
+	}
+	operators := make([]UpdateOperator, 0, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		operators = append(operators, SetSegmentIsInvisible(segmentID, false))
+	}
+	return meta.UpdateSegmentsInfo(ctx, operators...)
 }
 
 func (c *importChecker) checkSortingJob(job ImportJob) {
@@ -466,6 +502,27 @@ func (c *importChecker) checkSortingJob(job ImportJob) {
 
 func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
+	if job.GetImportTaskVersion() == msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3 {
+		tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskV3Type), WithJob(job.GetJobID()))
+		segmentIDs := lo.FlatMap(tasks, func(task ImportTask, _ int) []int64 {
+			return append([]int64(nil), task.(*importTaskV3).task.Load().GetOutputSegmentIds()...)
+		})
+		healthySegments := c.meta.GetSegments(segmentIDs, isSegmentHealthy)
+		unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
+		if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 {
+			for _, segmentID := range unindexed {
+				select {
+				case getBuildIndexChSingleton() <- segmentID:
+				default:
+				}
+			}
+			return
+		}
+		if err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Uncommitted)); err != nil {
+			log.Warn(c.ctx, "advance import v3 job to Uncommitted failed", mlog.Err(err))
+		}
+		return
+	}
 	tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()))
 	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSegmentIDs()
