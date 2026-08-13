@@ -90,6 +90,61 @@ func (k *KeyLock[K]) Lock(key K) {
 	})
 }
 
+// LockCtx acquires a write lock for a given key, giving up if ctx is done
+// before the lock is acquired. It returns nil once the lock is held (the caller
+// must Unlock exactly as with Lock), or ctx.Err() if the context ended first —
+// in which case the lock is NOT held and must NOT be unlocked.
+//
+// Implementation note: the per-key primitive is a sync.RWMutex, shared with
+// Lock/RLock/TryLock, and sync.RWMutex has no cancellable acquire. Replacing it
+// with a channel- or semaphore-based mutex would have to reimplement RWMutex
+// read/write semantics for every existing caller and would slow down the hot
+// uncontended path, so instead:
+//
+//   - uncontended callers take the plain TryLock fast path and never allocate a
+//     goroutine or a channel;
+//   - a contended caller hands the blocking acquire to a goroutine and races it
+//     against ctx.Done(). The handoff channel is unbuffered, so the acquisition
+//     is transferred to the caller only if the caller is still waiting; if the
+//     caller gave up, the goroutine unlocks immediately.
+//
+// That keeps the refcount bookkeeping exactly the one of Lock/Unlock: the
+// abandoned waiter's goroutine still owns a reference until it releases, so the
+// key entry is never deleted while its mutex is held, and it never "steals" the
+// lock — it releases as soon as it gets it. The goroutine outlives the
+// cancelled call only for as long as the current holder keeps the lock.
+func (k *KeyLock[K]) LockCtx(ctx context.Context, key K) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Fast path: no contention, no goroutine.
+	if k.TryLock(key) {
+		return nil
+	}
+
+	acquired := make(chan struct{})
+	abandoned := make(chan struct{})
+	go func() {
+		k.Lock(key)
+		select {
+		case acquired <- struct{}{}:
+			// handed over to the caller, which now owns the unlock
+		case <-abandoned:
+			// the caller gave up; release right away so the lock is not held
+			// by nobody and the key entry can be reclaimed
+			k.Unlock(key)
+		}
+	}()
+
+	select {
+	case <-acquired:
+		return nil
+	case <-ctx.Done():
+		close(abandoned)
+		return ctx.Err()
+	}
+}
+
 // TryLock attempts to acquire a write lock for a given key without blocking.
 func (k *KeyLock[K]) TryLock(key K) bool {
 	return k.tryLockInternal(key, func(mutex *sync.RWMutex) bool {

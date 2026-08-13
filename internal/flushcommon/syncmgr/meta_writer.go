@@ -319,7 +319,7 @@ func insertBinlogTimestampRange(inserts map[int64]*datapb.FieldBinlog) (uint64, 
 
 func (b *brokerMetaWriter) DropChannel(ctx context.Context, channelName string) error {
 	err := retry.Handle(ctx, func() (bool, error) {
-		status, err := b.broker.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
+		status, err := b.broker.DropVirtualChannel(ctx, &datapb.DropVirtualChannelRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithSourceID(b.serverID),
 			),

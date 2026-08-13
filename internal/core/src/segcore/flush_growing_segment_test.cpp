@@ -121,6 +121,76 @@ class FlushGrowingSegmentTest : public ::testing::Test {
         return field_datas;
     }
 
+    // Insert rows carrying only the pk column, with explicit row ids and
+    // timestamps, the way one insert request stamps all of its rows.
+    void
+    InsertPkRows(SegmentGrowing* segment,
+                 const SchemaPtr& schema,
+                 FieldId pk_fid,
+                 const std::vector<int64_t>& row_ids,
+                 const std::vector<Timestamp>& timestamps,
+                 const std::vector<int64_t>& pks) {
+        auto n = static_cast<int64_t>(pks.size());
+        ASSERT_EQ(static_cast<int64_t>(row_ids.size()), n);
+        ASSERT_EQ(static_cast<int64_t>(timestamps.size()), n);
+        auto insert_data = std::make_unique<InsertRecordProto>();
+        insert_data->set_num_rows(n);
+        insert_data->mutable_fields_data()->AddAllocated(
+            CreateDataArrayFrom(pks.data(), nullptr, n, (*schema)[pk_fid])
+                .release());
+        segment->PreInsert(n);
+        segment->Insert(
+            0, n, row_ids.data(), timestamps.data(), insert_data.get());
+    }
+
+    // Flush (start_ts, end_ts] of the segment into its own fresh path under
+    // path_prefix and return the pk values of the rows the flush actually
+    // wrote, in row order. An empty window must commit nothing.
+    std::vector<int64_t>
+    FlushWindowPks(SegmentGrowing* segment,
+                   const std::string& schema_blob,
+                   FieldId pk_fid,
+                   const std::string& path_prefix,
+                   uint64_t start_ts,
+                   uint64_t end_ts) {
+        CFlushConfig config{};
+        SetFlushSchema(config, schema_blob);
+        std::string segment_path = test_dir_ + "/" + path_prefix + "_" +
+                                   std::to_string(flush_window_id_++);
+        config.segment_path = segment_path.c_str();
+        config.read_version = -1;
+        config.retry_limit = 3;
+
+        CFlushResult result{};
+        auto status = FlushGrowingSegmentData(
+            segment, start_ts, end_ts, &config, &result);
+        EXPECT_EQ(status.error_code, Success)
+            << (status.error_msg ? status.error_msg : "");
+        if (status.error_code != Success) {
+            free(const_cast<char*>(status.error_msg));
+            return {};
+        }
+        std::vector<int64_t> flushed_pks;
+        if (result.num_rows > 0) {
+            auto field_datas = ReadFlushedFieldData(
+                segment_path, result, pk_fid, DataType::INT64, false, 0);
+            for (const auto& fd : field_datas) {
+                for (int64_t r = 0; r < fd->get_num_rows(); ++r) {
+                    flushed_pks.push_back(
+                        *static_cast<const int64_t*>(fd->RawValue(r)));
+                }
+            }
+            EXPECT_EQ(static_cast<int64_t>(flushed_pks.size()),
+                      result.num_rows);
+        } else {
+            EXPECT_EQ(result.manifest_path, nullptr);
+        }
+        FreeFlushResult(&result);
+        return flushed_pks;
+    }
+
+    int flush_window_id_ = 0;
+
     void
     AssertManifestHasColumn(const std::string& segment_path,
                             int64_t version,
@@ -376,7 +446,7 @@ TEST_F(FlushGrowingSegmentTest, BasicFlushScalarFields) {
 
     // generate and insert data
     int N = 100;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -448,7 +518,7 @@ TEST_F(FlushGrowingSegmentTest, FlushAllowsStaleReadVersionOverwrite) {
     ASSERT_NE(segment, nullptr);
 
     int N = 100;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -517,7 +587,7 @@ TEST_F(FlushGrowingSegmentTest, FlushUsesWriterFormatFromConfig) {
     ASSERT_NE(segment, nullptr);
 
     int N = 10;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -559,7 +629,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithVectorFields) {
 
     // generate and insert data
     int N = 50;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -603,7 +673,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithStringFields) {
 
     // generate and insert data
     int N = 30;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -647,7 +717,7 @@ TEST_F(FlushGrowingSegmentTest, FlushPartialRange) {
 
     // generate and insert data
     int N = 100;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -696,7 +766,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithTextColumnConfig) {
 
     // generate and insert data
     int N = 20;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -747,7 +817,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithNullableFields) {
 
     // generate and insert data
     int N = 50;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -800,7 +870,7 @@ TEST_F(FlushGrowingSegmentTest, FlushOrdinaryFieldSemanticsRoundTrip) {
 
     constexpr int N = 3;
     std::vector<int64_t> row_ids = {10, 11, 12};
-    std::vector<Timestamp> timestamps = {100, 101, 102};
+    std::vector<Timestamp> timestamps = {1, 2, 3};
     std::vector<int64_t> pks = {1000, 1001, 1002};
     std::vector<std::string> nullable_strings = {"alpha", "", "gamma"};
     bool nullable_string_valid[N] = {true, false, true};
@@ -950,7 +1020,7 @@ TEST_F(FlushGrowingSegmentTest, FlushTimestamptzPartialRangeRoundTrip) {
 
     constexpr int N = 5;
     std::vector<int64_t> row_ids = {0, 1, 2, 3, 4};
-    std::vector<Timestamp> timestamps = {100, 101, 102, 103, 104};
+    std::vector<Timestamp> timestamps = {1, 2, 3, 4, 5};
     std::vector<int64_t> pks = {10, 11, 12, 13, 14};
     std::vector<int64_t> event_times = {1700000000000,
                                         1700000001000,
@@ -1023,7 +1093,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableScalarTypesPartialRangeRoundTrip) {
 
     constexpr int N = 5;
     std::vector<int64_t> row_ids = {0, 1, 2, 3, 4};
-    std::vector<Timestamp> timestamps = {100, 101, 102, 103, 104};
+    std::vector<Timestamp> timestamps = {1, 2, 3, 4, 5};
     std::vector<int64_t> pks = {10, 11, 12, 13, 14};
     bool bool_values[N] = {true, false, true, false, true};
     std::vector<int8_t> int8_values = {-2, -1, 0, 1, 2};
@@ -1160,7 +1230,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayRoundTrip) {
 
     constexpr int N = 4;
     constexpr int array_len = 3;
-    auto dataset = DataGen(schema, N, 42, 0, 1, array_len);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1, 1, array_len);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -1219,7 +1289,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableVectorArrayRoundTrip) {
 
     constexpr int N = 4;
     std::vector<int64_t> row_ids = {10, 11, 12, 13};
-    std::vector<Timestamp> timestamps = {100, 101, 102, 103};
+    std::vector<Timestamp> timestamps = {1, 2, 3, 4};
     std::vector<int64_t> pks = {1000, 1001, 1002, 1003};
     std::vector<VectorFieldProto> vec_arrays(N);
 
@@ -1325,7 +1395,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayElementTypesRoundTrip) {
 
         constexpr int N = 4;
         constexpr int array_len = 3;
-        auto dataset = DataGen(schema, N, 42, 0, 1, array_len);
+        auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1, 1, array_len);
         segment->PreInsert(N);
         segment->Insert(0,
                         N,
@@ -1387,7 +1457,7 @@ TEST_F(FlushGrowingSegmentTest, FlushStringAndTextRoundTrip) {
 
     constexpr int N = 3;
     std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<Timestamp> timestamps = {1, 2, 3};
     std::vector<int64_t> pks = {100, 101, 102};
     std::vector<std::string> strings = {"plain-string", "", "tail-string"};
     bool string_valid[N] = {true, false, true};
@@ -1470,7 +1540,7 @@ TEST_F(FlushGrowingSegmentTest, FlushArrayElementTypesRoundTrip) {
 
     constexpr int N = 3;
     std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<Timestamp> timestamps = {1, 2, 3};
     std::vector<int64_t> pks = {100, 101, 102};
     std::vector<ScalarFieldProto> bool_arrays(N);
     bool_arrays[0].mutable_bool_data()->add_data(true);
@@ -1627,7 +1697,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFloatVectorKeepsCompactMapping) {
 
     constexpr int N = 3;
     std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<Timestamp> timestamps = {1, 2, 3};
     std::vector<int64_t> pks = {100, 101, 102};
     bool valid_data[N] = {false, true, true};
     std::vector<float> compact_vectors = {1.0F, 2.0F, 3.0F, 4.0F};
@@ -1683,7 +1753,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFloatVectorKeepsCompactMapping) {
     FreeFlushResult(&result);
 }
 
-TEST_F(FlushGrowingSegmentTest, FlushRejectsEndOffsetBeyondRowCount) {
+TEST_F(FlushGrowingSegmentTest, FlushRejectsInvertedTimestampRange) {
     auto schema = std::make_shared<Schema>();
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     auto vec_fid =
@@ -1694,7 +1764,7 @@ TEST_F(FlushGrowingSegmentTest, FlushRejectsEndOffsetBeyondRowCount) {
     ASSERT_NE(segment, nullptr);
 
     constexpr int N = 3;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     auto offset = segment->PreInsert(N);
     segment->Insert(offset,
                     N,
@@ -1703,22 +1773,249 @@ TEST_F(FlushGrowingSegmentTest, FlushRejectsEndOffsetBeyondRowCount) {
                     dataset.raw_);
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
-    std::string segment_path = test_dir_ + "/segment_offset_out_of_range";
+    std::string segment_path = test_dir_ + "/segment_inverted_range";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+
+    // An inverted timestamp range (start_ts > end_ts) is the one rejected
+    // shape; the raw-fence check fires before any resolution happens.
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), N + 1, N, &config, &result);
+
+    EXPECT_NE(status.error_code, Success);
+    ASSERT_NE(status.error_msg, nullptr);
+    EXPECT_NE(std::string(status.error_msg).find("invalid flush range"),
+              std::string::npos);
+    free(const_cast<char*>(status.error_msg));
+
+    FreeFlushResult(&result);
+}
+
+// A fence past all the data is legal: it resolves to the acknowledged row
+// count and simply covers everything the segment has.
+TEST_F(FlushGrowingSegmentTest, FlushFenceBeyondDataCoversAllRows) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto vec_fid =
+        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, 2, "L2");
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 3;
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
+    auto offset = segment->PreInsert(N);
+    segment->Insert(offset,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
+    std::string segment_path = test_dir_ + "/segment_fence_beyond_data";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+
+    // end_ts far beyond the max row timestamp (N) covers all N rows.
+    CFlushResult result{};
+    auto status = FlushGrowingSegmentData(
+        segment.get(), 0, MAX_TIMESTAMP, &config, &result);
+
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_EQ(result.num_rows, N);
+    ASSERT_NE(result.manifest_path, nullptr);
+
+    FreeFlushResult(&result);
+}
+
+// The fences are timestamps resolved through get_active_count (an upper_bound
+// over the timestamp column), so the flush range is (start_ts, end_ts]:
+// start-exclusive, end-inclusive. The older partial-range tests all use
+// ts == offset + 1, which makes an inclusive/exclusive flip or an off-by-one
+// in the resolution invisible. Here the ts<->offset mapping is deliberately
+// non-trivial — grouped, duplicated timestamps, the way one insert request
+// stamps all of its rows — and every window is verified by the pk VALUES of
+// the rows the flush actually wrote, not by counts.
+TEST_F(FlushGrowingSegmentTest, FlushFenceSemanticsWithGroupedTimestamps) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 9;
+    std::vector<int64_t> row_ids = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+    std::vector<Timestamp> timestamps = {
+        100, 100, 100, 200, 200, 300, 300, 300, 400};
+    std::vector<int64_t> pks = {
+        1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008};
+
+    InsertPkRows(segment.get(), schema, pk_fid, row_ids, timestamps, pks);
+
+    auto schema_blob = SerializeSchemaBlob(schema);
+    // Flush (start_ts, end_ts] into its own path and return the pk values of
+    // the rows the flush actually wrote, in row order.
+    auto flush_window = [&](uint64_t start_ts,
+                            uint64_t end_ts) -> std::vector<int64_t> {
+        return FlushWindowPks(segment.get(),
+                              schema_blob,
+                              pk_fid,
+                              "fence_window",
+                              start_ts,
+                              end_ts);
+    };
+
+    using PkVec = std::vector<int64_t>;
+
+    // End-inclusive: a fence AT a group's timestamp takes the whole group.
+    auto w1 = flush_window(0, 100);
+    EXPECT_EQ(w1, (PkVec{1000, 1001, 1002}));
+
+    // Start-exclusive: the group whose ts equals start_ts is not re-taken;
+    // end-inclusive again for all three rows of the ts=300 group.
+    auto w2 = flush_window(100, 300);
+    EXPECT_EQ(w2, (PkVec{1003, 1004, 1005, 1006, 1007}));
+
+    auto w3 = flush_window(300, 400);
+    EXPECT_EQ(w3, (PkVec{1008}));
+
+    // Adjacent fences partition the segment: disjoint and complete coverage,
+    // verified by content.
+    PkVec covered;
+    covered.insert(covered.end(), w1.begin(), w1.end());
+    covered.insert(covered.end(), w2.begin(), w2.end());
+    covered.insert(covered.end(), w3.begin(), w3.end());
+    EXPECT_EQ(covered, pks);
+
+    // A fence landing between groups resolves to the group boundary below
+    // it: a timestamp group is never split across a fence.
+    EXPECT_EQ(flush_window(0, 150), (PkVec{1000, 1001, 1002}));
+    EXPECT_EQ(flush_window(100, 250), (PkVec{1003, 1004}));
+    EXPECT_EQ(flush_window(250, 300), (PkVec{1005, 1006, 1007}));
+
+    // Off-by-one probes around the first group: ts=99 takes nothing, ts=101
+    // takes exactly the ts=100 group.
+    EXPECT_EQ(flush_window(0, 99), (PkVec{}));
+    EXPECT_EQ(flush_window(0, 101), (PkVec{1000, 1001, 1002}));
+
+    // Everything already covered: start-exclusive means no duplication.
+    EXPECT_EQ(flush_window(400, MAX_TIMESTAMP), (PkVec{}));
+}
+
+// GetGrowingSegmentPrimaryKeys documents that over the same fence range it
+// returns exactly the keys of the rows FlushGrowingSegmentData writes. Verify
+// the agreement by VALUE for two different fence windows: the pk list the
+// reader returns must equal the pk column of the rows the flush persisted.
+TEST_F(FlushGrowingSegmentTest, PrimaryKeysAgreeWithFlushedRowsPerFenceWindow) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 6;
+    std::vector<int64_t> row_ids = {0, 1, 2, 3, 4, 5};
+    std::vector<Timestamp> timestamps = {100, 100, 200, 200, 200, 300};
+    std::vector<int64_t> pks = {10, 11, 12, 13, 14, 15};
+
+    InsertPkRows(segment.get(), schema, pk_fid, row_ids, timestamps, pks);
+
+    auto schema_blob = SerializeSchemaBlob(schema);
+
+    auto read_pks = [&](uint64_t start_ts,
+                        uint64_t end_ts) -> std::vector<int64_t> {
+        CPrimaryKeysResult pk_result{};
+        auto status = GetGrowingSegmentPrimaryKeys(
+            segment.get(), start_ts, end_ts, &pk_result);
+        EXPECT_EQ(status.error_code, Success)
+            << (status.error_msg ? status.error_msg : "");
+        if (status.error_code != Success) {
+            free(const_cast<char*>(status.error_msg));
+            return {};
+        }
+        EXPECT_EQ(pk_result.pk_field_id, pk_fid.get());
+        EXPECT_EQ(pk_result.pk_data_type,
+                  static_cast<int64_t>(DataType::INT64));
+        std::vector<int64_t> values;
+        if (pk_result.num_primary_keys > 0) {
+            EXPECT_NE(pk_result.int64_primary_keys, nullptr);
+            values.assign(
+                pk_result.int64_primary_keys,
+                pk_result.int64_primary_keys + pk_result.num_primary_keys);
+        }
+        FreePrimaryKeysResult(&pk_result);
+        return values;
+    };
+
+    auto flush_pks = [&](uint64_t start_ts,
+                         uint64_t end_ts) -> std::vector<int64_t> {
+        return FlushWindowPks(segment.get(),
+                              schema_blob,
+                              pk_fid,
+                              "pk_agreement",
+                              start_ts,
+                              end_ts);
+    };
+
+    // Window 1: (0, 200] — first two timestamp groups.
+    auto keys_w1 = read_pks(0, 200);
+    auto flushed_w1 = flush_pks(0, 200);
+    EXPECT_EQ(keys_w1, (std::vector<int64_t>{10, 11, 12, 13, 14}));
+    EXPECT_EQ(keys_w1, flushed_w1);
+
+    // Window 2: (200, 300] — the last group only.
+    auto keys_w2 = read_pks(200, 300);
+    auto flushed_w2 = flush_pks(200, 300);
+    EXPECT_EQ(keys_w2, (std::vector<int64_t>{15}));
+    EXPECT_EQ(keys_w2, flushed_w2);
+
+    // A mid-group fence resolves identically for both APIs.
+    auto keys_w3 = read_pks(100, 250);
+    auto flushed_w3 = flush_pks(100, 250);
+    EXPECT_EQ(keys_w3, (std::vector<int64_t>{12, 13, 14}));
+    EXPECT_EQ(keys_w3, flushed_w3);
+}
+
+// A growing segment with zero rows ever inserted: both C APIs must succeed
+// with an empty result, and the primary-key reader must still describe the
+// key type (pk_field_id / pk_data_type) so the caller can decode it.
+TEST_F(FlushGrowingSegmentTest, FlushAndPrimaryKeysOnTrulyEmptySegment) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
+    std::string segment_path = test_dir_ + "/segment_truly_empty";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
     config.retry_limit = 3;
 
     CFlushResult result{};
-    auto status =
-        FlushGrowingSegmentData(segment.get(), 0, N + 1, &config, &result);
-
-    EXPECT_NE(status.error_code, Success);
-    ASSERT_NE(status.error_msg, nullptr);
-    EXPECT_NE(std::string(status.error_msg).find("exceeds growing segment"),
-              std::string::npos);
-    free(const_cast<char*>(status.error_msg));
-
+    auto status = FlushGrowingSegmentData(
+        segment.get(), 0, MAX_TIMESTAMP, &config, &result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_EQ(result.num_rows, 0);
+    EXPECT_EQ(result.manifest_path, nullptr);
     FreeFlushResult(&result);
+
+    CPrimaryKeysResult pk_result{};
+    status = GetGrowingSegmentPrimaryKeys(
+        segment.get(), 0, MAX_TIMESTAMP, &pk_result);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_EQ(pk_result.num_primary_keys, 0);
+    EXPECT_EQ(pk_result.int64_primary_keys, nullptr);
+    EXPECT_EQ(pk_result.pk_field_id, pk_fid.get());
+    EXPECT_EQ(pk_result.pk_data_type, static_cast<int64_t>(DataType::INT64));
+    FreePrimaryKeysResult(&pk_result);
 }
 
 TEST_F(FlushGrowingSegmentTest, FlushFloatVectorFromIndexAfterChunksCleared) {
@@ -1758,7 +2055,7 @@ TEST_F(FlushGrowingSegmentTest, FlushFloatVectorFromIndexAfterChunksCleared) {
     auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
 
-    auto dataset = DataGen(schema, row_count);
+    auto dataset = DataGen(schema, row_count, 42, /*ts_offset=*/1);
     auto offset = segment->PreInsert(row_count);
     segment->Insert(offset,
                     row_count,
@@ -1845,7 +2142,7 @@ TEST_F(FlushGrowingSegmentTest,
     compact_vectors.reserve(row_count * dim);
     for (int64_t i = 0; i < row_count; i++) {
         row_ids[i] = i;
-        timestamps[i] = 1000 + i;
+        timestamps[i] = i + 1;
         pks[i] = 10000 + i;
         valid[i] = i % 7 != 0;
         if (valid[i]) {
@@ -1949,7 +2246,7 @@ TEST_F(FlushGrowingSegmentTest,
     int64_t expected_num_token = 0;
     for (int64_t i = 0; i < row_count; i++) {
         row_ids[i] = i;
-        timestamps[i] = 1000 + i;
+        timestamps[i] = i + 1;
         pks[i] = 10000 + i;
         sparse_vectors[i] = knowhere::sparse::SparseRow<SparseValueType>(2);
         auto common_token = static_cast<uint32_t>(10 + i % 3);
@@ -2038,7 +2335,7 @@ TEST_F(FlushGrowingSegmentTest, FlushPrimaryKeyStatsManifestAndCompound) {
     ASSERT_NE(segment, nullptr);
 
     constexpr int N = 4;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     auto offset = segment->PreInsert(N);
     segment->Insert(offset,
                     N,
@@ -2128,7 +2425,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableInt8VectorKeepsCompactMapping) {
 
     constexpr int N = 3;
     std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<Timestamp> timestamps = {1, 2, 3};
     std::vector<int64_t> pks = {100, 101, 102};
     bool valid_data[N] = {true, false, true};
     std::vector<int8> compact_vectors = {1, 2, 3, 4, 5, 6, 7, 8};
@@ -2212,7 +2509,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFixedWidthVectorTypesRoundTrip) {
 
         constexpr int N = 3;
         std::vector<int64_t> row_ids = {0, 1, 2};
-        std::vector<Timestamp> timestamps = {10, 11, 12};
+        std::vector<Timestamp> timestamps = {1, 2, 3};
         std::vector<int64_t> pks = {100, 101, 102};
         bool valid_data[N] = {true, false, true};
 
@@ -2339,7 +2636,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableSparseVectorKeepsCompactMapping) {
 
     constexpr int N = 3;
     std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<Timestamp> timestamps = {1, 2, 3};
     std::vector<int64_t> pks = {100, 101, 102};
     bool valid_data[N] = {false, true, true};
     auto sparse_vectors = GenerateRandomSparseFloatVector(2, 16, 0.5);
@@ -2412,7 +2709,7 @@ TEST_F(FlushGrowingSegmentTest, FlushBM25StatsRangeAndCompoundManifest) {
 
     constexpr int N = 4;
     std::vector<int64_t> row_ids = {0, 1, 2, 3};
-    std::vector<Timestamp> timestamps = {10, 11, 12, 13};
+    std::vector<Timestamp> timestamps = {1, 2, 3, 4};
     std::vector<int64_t> pks = {100, 101, 102, 103};
     auto sparse_vectors =
         std::make_unique<knowhere::sparse::SparseRow<SparseValueType>[]>(N);
@@ -2552,7 +2849,7 @@ TEST_F(FlushGrowingSegmentTest, FlushEmptyRange) {
 
     // generate and insert data
     int N = 50;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -2570,16 +2867,16 @@ TEST_F(FlushGrowingSegmentTest, FlushEmptyRange) {
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
 
-    // flush empty range (start == end)
+    // An empty fence range (start_ts == end_ts) is a legal no-op: the
+    // contract is success with zero rows and no manifest committed.
     CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 10, 10, &config, &result);
 
-    // should fail or return 0 rows
-    if (status.error_code == Success) {
-        EXPECT_EQ(result.num_rows, 0);
-        FreeFlushResult(&result);
-    }
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_EQ(result.num_rows, 0);
+    EXPECT_EQ(result.manifest_path, nullptr);
+    FreeFlushResult(&result);
 }
 
 // test flush with large data spanning multiple chunks
@@ -2598,7 +2895,7 @@ TEST_F(FlushGrowingSegmentTest, FlushLargeDataMultipleChunks) {
     // generate and insert large data that spans multiple chunks
     // default chunk size is typically 32K rows
     int N = 50000;  // should span multiple chunks
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -2646,7 +2943,7 @@ TEST_F(FlushGrowingSegmentTest, FlushMultipleTextColumns) {
 
     // generate and insert data
     int N = 20;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -2699,7 +2996,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithBoolField) {
 
     // generate and insert data
     int N = 50;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -2747,7 +3044,7 @@ TEST_F(FlushGrowingSegmentTest, FlushAllNumericTypes) {
 
     // generate and insert data
     int N = 50;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -2791,7 +3088,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
         ASSERT_NE(segment, nullptr);
 
         int N = 30;
-        auto dataset = DataGen(schema, N);
+        auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
         segment->PreInsert(N);
         segment->Insert(0,
                         N,
@@ -2830,7 +3127,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
         ASSERT_NE(segment, nullptr);
 
         int N = 30;
-        auto dataset = DataGen(schema, N);
+        auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
         segment->PreInsert(N);
         segment->Insert(0,
                         N,
@@ -2869,7 +3166,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
         ASSERT_NE(segment, nullptr);
 
         int N = 30;
-        auto dataset = DataGen(schema, N);
+        auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
         segment->PreInsert(N);
         segment->Insert(0,
                         N,
@@ -2929,13 +3226,27 @@ TEST_F(FlushGrowingSegmentTest, FlushSealedSegmentFails) {
     config.text_lob_paths = nullptr;
     config.num_text_columns = 0;
 
-    // flush should fail for sealed segment
+    // flush must reject a non-growing segment with the specific error
     CFlushResult result{};
     auto status =
         FlushGrowingSegmentData(segment.get(), 0, 10, &config, &result);
 
     EXPECT_NE(status.error_code, Success);
+    ASSERT_NE(status.error_msg, nullptr);
+    EXPECT_NE(std::string(status.error_msg).find("not a growing segment"),
+              std::string::npos);
     free(const_cast<char*>(status.error_msg));
+    FreeFlushResult(&result);
+
+    // the primary-key reader rejects a sealed segment the same way
+    CPrimaryKeysResult pk_result{};
+    status = GetGrowingSegmentPrimaryKeys(segment.get(), 0, 10, &pk_result);
+    EXPECT_NE(status.error_code, Success);
+    ASSERT_NE(status.error_msg, nullptr);
+    EXPECT_NE(std::string(status.error_msg).find("not a growing segment"),
+              std::string::npos);
+    free(const_cast<char*>(status.error_msg));
+    FreePrimaryKeysResult(&pk_result);
 }
 
 // Nullable embedding list with a null row, a valid-but-empty row, and a row
@@ -2960,7 +3271,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableEmbListMixedRows) {
         expected_target.mutable_float_vector()->add_data(1.0f + d);
     }
 
-    auto dataset = DataGen(schema, N, 42, 0, 1, 1);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1, 1, 1);
     for (int i = 0; i < dataset.raw_->fields_data_size(); ++i) {
         auto* field_data = dataset.raw_->mutable_fields_data(i);
         if (field_data->field_id() != vec_fid.get()) {
@@ -3071,7 +3382,7 @@ TEST_F(FlushGrowingSegmentTest,
     // > 2x the default 8192-row batch limit, so the reader must produce
     // several batches and their delivery order becomes observable.
     const int N = 20000;
-    auto dataset = DataGen(schema, N);
+    auto dataset = DataGen(schema, N, 42, /*ts_offset=*/1);
     segment->PreInsert(N);
     segment->Insert(0,
                     N,

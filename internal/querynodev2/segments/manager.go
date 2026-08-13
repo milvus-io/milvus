@@ -116,12 +116,6 @@ type SegmentManager interface {
 	RemoveBy(ctx context.Context, filters ...SegmentFilter) (int, int)
 	Clear(ctx context.Context)
 
-	// ReleaseDetached completes the release of a segment previously taken out of
-	// the active maps via DetachStreaming. It runs the same bookkeeping as the
-	// normal release path (release callback, segment teardown, metric Dec and
-	// clearing the on-releasing set).
-	ReleaseDetached(ctx context.Context, segment Segment)
-
 	// Deprecated: quick fix critical issue: #30857
 	// TODO: All Segment assigned to querynode should be managed by SegmentManager, including loading or releasing to perform a transaction.
 	Exist(segmentID typeutil.UniqueID, typ SegmentType) bool
@@ -683,37 +677,6 @@ func (mgr *segmentManager) Remove(ctx context.Context, segmentID typeutil.Unique
 	}
 
 	return removeGrowing, removeSealed
-}
-
-// DetachStreaming removes the given growing segment from the active maps
-// WITHOUT releasing it. The segment is staged into the on-releasing set so
-// Exist() keeps reporting it while growing-source flush handoff keeps the
-// segment alive. The owner MUST call ReleaseDetached once it is done,
-// otherwise the on-releasing set entry, the segment gauge and the release
-// callback are never reconciled.
-func (mgr *segmentManager) DetachStreaming(ctx context.Context, segmentID typeutil.UniqueID) int {
-	removeGrowing := 0
-	if mgr.removeSegmentWithType(SegmentTypeGrowing, segmentID) != nil {
-		removeGrowing = 1
-	}
-	mlog.Info(ctx, "detached segment from active segment manager",
-		mlog.Int64("segmentID", segmentID),
-		mlog.Int("growingCount", removeGrowing))
-	return removeGrowing
-}
-
-// ReleaseDetached completes the release of a segment previously taken out of the
-// active maps via DetachStreaming. DetachStreaming deliberately skips release()
-// so an out-of-band owner (growing-source flush handoff) can keep the segment
-// alive; that owner MUST call ReleaseDetached when it is done. Otherwise the
-// on-releasing set entry, the segment gauge (QueryNodeNumSegments) and the
-// release callback are never reconciled, and Exist() would keep returning true
-// for the segmentID.
-func (mgr *segmentManager) ReleaseDetached(ctx context.Context, segment Segment) {
-	if segment == nil {
-		return
-	}
-	mgr.release(ctx, segment)
 }
 
 func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID typeutil.UniqueID) Segment {

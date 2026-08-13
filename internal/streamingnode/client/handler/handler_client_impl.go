@@ -150,7 +150,39 @@ func (hc *handlerClientImpl) GetSalvageCheckpoint(ctx context.Context, pchannel 
 }
 
 // PrepareReleaseManualFlushIfLocal appends a normal ManualFlush and prepares local growing-source retention if the WAL is local.
-func (hc *handlerClientImpl) PrepareReleaseManualFlushIfLocal(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error) {
+func (hc *handlerClientImpl) PrepareReleaseManualFlushIfLocal(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) error {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return ErrClientClosed
+	}
+	defer hc.lifetime.Done()
+
+	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	assign := hc.watcher.Get(ctx, pchannel)
+	for assign == nil {
+		if err := hc.watcher.Watch(ctx, pchannel, nil); err != nil {
+			return err
+		}
+		assign = hc.watcher.Get(ctx, pchannel)
+	}
+
+	w, err := registry.GetLocalAvailableWAL(assign.Channel)
+	if err != nil {
+		return err
+	}
+	if w.Channel().AccessMode != types.AccessModeRW {
+		return ErrReadOnlyWAL
+	}
+
+	preparer, err := registry.GetLocalReleaseManualFlushPreparer()
+	if err != nil {
+		return err
+	}
+	return preparer.PrepareReleaseManualFlush(ctx, assign.Channel, collectionID, vchannel, releaseSegmentIDs)
+}
+
+// PrepareReleaseSegmentsIfLocal reports whether the local write buffer still owes a
+// growing-source flush for the given segments, nudging those flushes forward when it does.
+func (hc *handlerClientImpl) PrepareReleaseSegmentsIfLocal(ctx context.Context, collectionID int64, vchannel string, segmentIDs []int64) (bool, error) {
 	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return false, ErrClientClosed
 	}
@@ -177,7 +209,7 @@ func (hc *handlerClientImpl) PrepareReleaseManualFlushIfLocal(ctx context.Contex
 	if err != nil {
 		return false, err
 	}
-	return preparer.PrepareReleaseManualFlush(ctx, assign.Channel, collectionID, vchannel, releaseSegmentIDs)
+	return preparer.PrepareReleaseSegments(ctx, assign.Channel, collectionID, vchannel, segmentIDs)
 }
 
 // GetWALMetricsIfLocal gets the metrics of the local wal.

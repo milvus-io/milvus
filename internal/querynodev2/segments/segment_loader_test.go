@@ -216,7 +216,12 @@ func TestLoadDeltalogsExternalRealPKManifestRejectsTargetDeltas(t *testing.T) {
 
 func (suite *SegmentLoaderSuite) SetupSuite() {
 	paramtable.Init()
-	suite.rootPath = suite.T().Name()
+	// TempDir, not the test name: rootPath is handed to InitLocalChunkManager and
+	// InitLocalArrowFileSystem, which are PROCESS-GLOBAL. A repo-relative value
+	// makes every native write in this package — including other suites' — land
+	// in the source tree, and the native writer is not covered by the chunk
+	// manager teardown.
+	suite.rootPath = suite.T().TempDir()
 	suite.collectionID = rand.Int63()
 	suite.partitionID = rand.Int63()
 	suite.segmentID = rand.Int63()
@@ -1537,7 +1542,12 @@ type SegmentLoaderDetailSuite struct {
 
 func (suite *SegmentLoaderDetailSuite) SetupSuite() {
 	paramtable.Init()
-	suite.rootPath = suite.T().Name()
+	// TempDir, not the test name: rootPath is handed to InitLocalChunkManager and
+	// InitLocalArrowFileSystem, which are PROCESS-GLOBAL. A repo-relative value
+	// makes every native write in this package — including other suites' — land
+	// in the source tree, and the native writer is not covered by the chunk
+	// manager teardown.
+	suite.rootPath = suite.T().TempDir()
 	suite.collectionID = rand.Int63()
 	suite.partitionID = rand.Int63()
 	suite.segmentID = rand.Int63()

@@ -178,9 +178,16 @@ func (ls *LoadStateLock) BlockUntilDataLoadedOrReleased() {
 	}, func() {})
 }
 
-// waitUntilCanReleaseData waits until segment is release data able.
+// canReleaseData reports whether the segment's DATA may be torn down.
+//
+// refCnt is part of the condition for the same reason it is in canReleaseAll:
+// a pin means someone holds a pointer into this segment's data (a search, or a
+// growing-source flush reading rows), and freeing it underneath them is a
+// use-after-free. The state alone does not say that — LoadStateDataLoaded is
+// exactly the state a pinned reader runs in.
 func (ls *LoadStateLock) canReleaseData(state loadStateEnum) bool {
-	return state == LoadStateDataLoaded || state == LoadStateOnlyMeta || state == LoadStateReleased
+	return (state == LoadStateDataLoaded || state == LoadStateOnlyMeta || state == LoadStateReleased) &&
+		ls.refCnt.Load() == 0
 }
 
 // waitUntilCanReleaseAll waits until segment is releasable.
@@ -188,6 +195,18 @@ func (ls *LoadStateLock) canReleaseAll(state loadStateEnum) bool {
 	return (state == LoadStateDataLoaded || state == LoadStateOnlyMeta || state == LoadStateReleased) && ls.refCnt.Load() == 0
 }
 
+// waitOrPanic blocks until ready(state) holds and then runs then() with the
+// state lock still held.
+//
+// The wait is deliberately unbounded. An earlier version gave up after
+// MaxWLockConditionalWaitTime and let the caller proceed with a nil guard, but
+// LocalSegment.Release reads a nil guard as "already released": it returns
+// early, so C.DeleteSegment never runs, the PK candidate is never refunded and
+// the binlog size is never subtracted — while segmentManager.release goes on
+// to decrement the segment counters. That is an unbounded, alert-less C++
+// memory leak that reports success. Blocking here instead keeps the leak from
+// happening at all and leaves the stuck reader visible in goroutine dumps and
+// in the watchdog log below.
 func (ls *LoadStateLock) waitOrPanic(ready func(state loadStateEnum) bool, then func()) {
 	maxWaitTime := paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.GetAsDuration(time.Second)
 	// Watchdog only: the wait below is deliberately unbounded so that then() always

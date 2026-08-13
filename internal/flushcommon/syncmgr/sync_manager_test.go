@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -23,7 +24,9 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -133,8 +136,212 @@ func (s *SyncManagerSuite) TestClose() {
 	s.NoError(err)
 
 	f, err := manager.SyncData(context.Background(), nil)
-	s.Error(err)
+	s.ErrorIs(err, context.Canceled)
 	s.Nil(f)
+}
+
+func (s *SyncManagerSuite) TestCloseCancellationDoesNotInvokeHandleError() {
+	manager := NewSyncManager(s.chunkManager)
+	started := make(chan struct{})
+	var handleErrors atomic.Int32
+	task := &reorderTestTask{
+		segmentID: s.segmentID,
+		prepare: func(ctx context.Context) error {
+			close(started)
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		commit: func(context.Context) error {
+			s.T().Error("canceled task must not reach Commit")
+			return nil
+		},
+		handleErr: func(error) {
+			handleErrors.Add(1)
+		},
+	}
+
+	future, err := manager.SyncData(context.Background(), task)
+	s.NoError(err)
+	s.NotNil(future)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		s.T().Fatal("sync task did not start Prepare")
+	}
+
+	s.NoError(manager.Close())
+	_, err = future.Await()
+	s.ErrorIs(err, context.Canceled)
+	s.Zero(handleErrors.Load(), "graceful shutdown cancellation must not be reported as a task failure")
+	s.Zero(manager.(*syncManager).tasks.Len())
+}
+
+func (s *SyncManagerSuite) TestReservedAdmissionDoesNotSecondAcquireAndDefersRelease() {
+	manager := NewSyncManager(s.chunkManager)
+	syncMgr := manager.(*syncManager)
+	syncMgr.admission.SetCapacity(1)
+	nodeID := paramtable.GetStringNodeID()
+	pendingBefore := testutil.ToFloat64(metrics.WALFlusherSyncDispatcherPendingTasks.WithLabelValues(nodeID))
+	totalBefore := testutil.ToFloat64(metrics.WALFlusherSyncDispatcherTaskTotal.WithLabelValues(nodeID))
+
+	admission, err := syncMgr.ReserveSyncTask(context.Background())
+	s.Require().NoError(err)
+	s.Equal(1, syncMgr.admission.Current())
+	s.Equal(pendingBefore, testutil.ToFloat64(metrics.WALFlusherSyncDispatcherPendingTasks.WithLabelValues(nodeID)))
+	s.Equal(totalBefore, testutil.ToFloat64(metrics.WALFlusherSyncDispatcherTaskTotal.WithLabelValues(nodeID)))
+
+	releasePrepare := make(chan struct{})
+	task := &reorderTestTask{
+		segmentID: s.segmentID,
+		prepare: func(ctx context.Context) error {
+			select {
+			case <-releasePrepare:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
+		commit: func(context.Context) error { return nil },
+	}
+	type submitResult struct {
+		future *conc.Future[struct{}]
+		err    error
+	}
+	submitted := make(chan submitResult, 1)
+	go func() {
+		future, err := admission.Submit(context.Background(), task)
+		submitted <- submitResult{future: future, err: err}
+	}()
+
+	var result submitResult
+	select {
+	case result = <-submitted:
+		s.NoError(result.err)
+		s.NotNil(result.future)
+	case <-time.After(time.Second):
+		s.FailNow("reserved submission attempted to acquire a second admission slot")
+	}
+	s.Equal(1, syncMgr.admission.Current())
+	s.Equal(pendingBefore+1, testutil.ToFloat64(metrics.WALFlusherSyncDispatcherPendingTasks.WithLabelValues(nodeID)))
+	s.Equal(totalBefore+1, testutil.ToFloat64(metrics.WALFlusherSyncDispatcherTaskTotal.WithLabelValues(nodeID)))
+	admission.Release()
+	admission.Release()
+	s.Equal(1, syncMgr.admission.Current(), "Release must wait until the in-flight attempt finishes callbacks")
+
+	close(releasePrepare)
+	_, err = result.future.Await()
+	s.NoError(err)
+	s.Eventually(func() bool { return syncMgr.admission.Current() == 0 }, time.Second, time.Millisecond)
+	s.Equal(pendingBefore, testutil.ToFloat64(metrics.WALFlusherSyncDispatcherPendingTasks.WithLabelValues(nodeID)))
+	s.NoError(manager.Close())
+}
+
+func (s *SyncManagerSuite) TestReservedAdmissionIsReusableAcrossAttempts() {
+	manager := NewSyncManager(s.chunkManager)
+	syncMgr := manager.(*syncManager)
+	syncMgr.admission.SetCapacity(1)
+
+	admission, err := syncMgr.ReserveSyncTask(context.Background())
+	s.Require().NoError(err)
+	releaseFirst := make(chan struct{})
+	first, err := admission.Submit(context.Background(), &reorderTestTask{
+		segmentID: s.segmentID,
+		prepare: func(context.Context) error {
+			<-releaseFirst
+			return nil
+		},
+		commit: func(context.Context) error { return nil },
+	})
+	s.Require().NoError(err)
+
+	concurrent, err := admission.Submit(context.Background(), &reorderTestTask{
+		segmentID: s.segmentID + 1,
+		prepare:   func(context.Context) error { return nil },
+		commit:    func(context.Context) error { return nil },
+	})
+	s.Error(err)
+	s.Nil(concurrent)
+	close(releaseFirst)
+	_, err = first.Await()
+	s.NoError(err)
+	s.Equal(1, syncMgr.admission.Current(), "completed attempt must retain the payload lease")
+
+	second, err := admission.Submit(context.Background(), &reorderTestTask{
+		segmentID: s.segmentID,
+		prepare:   func(context.Context) error { return nil },
+		commit:    func(context.Context) error { return nil },
+	})
+	s.Require().NoError(err)
+	_, err = second.Await()
+	s.NoError(err)
+	s.Equal(1, syncMgr.admission.Current())
+	admission.Release()
+	s.Zero(syncMgr.admission.Current())
+	s.NoError(manager.Close())
+}
+
+func (s *SyncManagerSuite) TestUnusedReservedAdmissionReleaseIsIdempotent() {
+	manager := NewSyncManager(s.chunkManager)
+	syncMgr := manager.(*syncManager)
+	syncMgr.admission.SetCapacity(1)
+
+	admission, err := syncMgr.ReserveSyncTask(context.Background())
+	s.Require().NoError(err)
+	s.Equal(1, syncMgr.admission.Current())
+	admission.Release()
+	s.Zero(syncMgr.admission.Current())
+	s.NotPanics(admission.Release)
+	s.Zero(syncMgr.admission.Current())
+
+	future, err := admission.Submit(context.Background(), &reorderTestTask{
+		segmentID: s.segmentID,
+		prepare:   func(context.Context) error { return nil },
+		commit:    func(context.Context) error { return nil },
+	})
+	s.Error(err)
+	s.Nil(future)
+	s.Zero(syncMgr.Pending())
+	s.Zero(syncMgr.admission.Current())
+	s.NoError(manager.Close())
+}
+
+func (s *SyncManagerSuite) TestReservedAdmissionRejectedAfterCloseReleasesSlot() {
+	manager := NewSyncManager(s.chunkManager)
+	syncMgr := manager.(*syncManager)
+	syncMgr.admission.SetCapacity(1)
+
+	admission, err := syncMgr.ReserveSyncTask(context.Background())
+	s.Require().NoError(err)
+	s.Equal(1, syncMgr.admission.Current())
+	s.NoError(manager.Close())
+
+	future, err := admission.Submit(context.Background(), &reorderTestTask{
+		segmentID: s.segmentID,
+		prepare:   func(context.Context) error { return nil },
+		commit:    func(context.Context) error { return nil },
+	})
+	s.ErrorIs(err, context.Canceled)
+	s.Nil(future)
+	s.Zero(syncMgr.Pending())
+	s.Equal(1, syncMgr.admission.Current(), "pre-accept rejection leaves the payload lease with its owner")
+	s.NotPanics(func() {
+		admission.Release()
+		admission.Release()
+	})
+	s.Zero(syncMgr.admission.Current())
+}
+
+func (s *SyncManagerSuite) TestReserveAdmissionAfterCloseAlwaysRejectsWithoutLeak() {
+	manager := NewSyncManager(s.chunkManager)
+	syncMgr := manager.(*syncManager)
+	s.NoError(manager.Close())
+
+	for range 100 {
+		admission, err := syncMgr.ReserveSyncTask(context.Background())
+		s.ErrorIs(err, context.Canceled)
+		s.Nil(admission)
+		s.Zero(syncMgr.admission.Current())
+	}
 }
 
 func (s *SyncManagerSuite) TestCompacted() {
@@ -168,8 +375,10 @@ func (s *SyncManagerSuite) TestResizePool() {
 	syncMgr, ok := manager.(*syncManager)
 	s.Require().True(ok)
 
-	cap := syncMgr.workerPool.Cap()
+	cap := syncMgr.preparePool.Cap()
 	s.NotZero(cap)
+	admissionCap := syncMgr.admission.Cap()
+	s.Equal(dispatcherAdmissionCapacity(cap), admissionCap)
 
 	params := paramtable.Get()
 	configKey := params.DataNodeCfg.MaxParallelSyncMgrTasksPerCPUCore.Key
@@ -181,21 +390,24 @@ func (s *SyncManagerSuite) TestResizePool() {
 		HasUpdated: true,
 	})
 
-	s.Equal(cap, syncMgr.workerPool.Cap())
+	s.Equal(cap, syncMgr.preparePool.Cap())
+	s.Equal(admissionCap, syncMgr.admission.Cap())
 
 	syncMgr.resizeHandler(&config.Event{
 		Key:        configKey,
 		Value:      "-1",
 		HasUpdated: true,
 	})
-	s.Equal(cap, syncMgr.workerPool.Cap())
+	s.Equal(cap, syncMgr.preparePool.Cap())
+	s.Equal(admissionCap, syncMgr.admission.Cap())
 
 	syncMgr.resizeHandler(&config.Event{
 		Key:        configKey,
 		Value:      strconv.FormatInt(int64(oldValue*2), 10),
 		HasUpdated: true,
 	})
-	s.Equal(cap*2, syncMgr.workerPool.Cap())
+	s.Equal(cap*2, syncMgr.preparePool.Cap())
+	s.Equal(dispatcherAdmissionCapacity(cap*2), syncMgr.admission.Cap())
 }
 
 func (s *SyncManagerSuite) TestUnexpectedError() {
@@ -204,8 +416,11 @@ func (s *SyncManagerSuite) TestUnexpectedError() {
 	task := NewMockTask(s.T())
 	task.EXPECT().SegmentID().Return(1000)
 	task.EXPECT().Checkpoint().Return(&msgpb.MsgPosition{})
-	task.EXPECT().Run(mock.Anything).Return(merr.WrapErrServiceInternal("mocked")).Once()
+	task.EXPECT().Prepare(mock.Anything).Return(merr.WrapErrServiceInternal("mocked")).Once()
 	task.EXPECT().HandleError(mock.Anything)
+	// SyncData injects the chunk manager through the Task interface now, rather
+	// than type-switching to the two concrete task types.
+	task.EXPECT().SetChunkManager(mock.Anything).Return()
 
 	f, _ := manager.SyncData(context.Background(), task)
 	_, err := f.Await()
@@ -218,8 +433,9 @@ func (s *SyncManagerSuite) TestTargetUpdateSameID() {
 	task := NewMockTask(s.T())
 	task.EXPECT().SegmentID().Return(1000)
 	task.EXPECT().Checkpoint().Return(&msgpb.MsgPosition{})
-	task.EXPECT().Run(mock.Anything).Return(errors.New("mock err")).Once()
+	task.EXPECT().Prepare(mock.Anything).Return(errors.New("mock err")).Once()
 	task.EXPECT().HandleError(mock.Anything)
+	task.EXPECT().SetChunkManager(mock.Anything).Return()
 
 	f, _ := manager.SyncData(context.Background(), task)
 	_, err := f.Await()
@@ -254,7 +470,7 @@ func (s *SyncManagerSuite) TestSyncManager_TaskStatsJSON() {
 	syncMgr.taskStats.Add("12345-1000", task1)
 	syncMgr.taskStats.Add("67890-3000", task2)
 
-	expectedTasks := []SyncTask{*task1, *task2}
+	expectedTasks := []*SyncTask{task1, task2}
 	expectedJSON, err := json.Marshal(expectedTasks)
 	s.NoError(err)
 

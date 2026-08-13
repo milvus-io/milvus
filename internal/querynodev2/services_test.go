@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
@@ -566,6 +567,316 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Failed() {
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
 
+// stubGrowingSourceProvider marks a channel as growing-source enabled in the
+// registry without providing usable sources.
+type stubGrowingSourceProvider struct{}
+
+func (stubGrowingSourceProvider) GetGrowingFlushSource(int64, *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
+	return nil, syncmgr.GrowingSourceUnavailable
+}
+
+// newServiceSuiteWAL mirrors the suite-level WAL mock from TestQueryNodeService,
+// with a configurable PrepareReleaseManualFlushIfLocal error.
+func newServiceSuiteWAL(t *testing.T, prepareErr error) *mock_streaming.MockWALAccesser {
+	wal := mock_streaming.NewMockWALAccesser(t)
+	local := mock_streaming.NewMockLocal(t)
+	local.EXPECT().GetLatestMVCCTimestampIfLocal(mock.Anything, mock.Anything).Return(0, nil).Maybe()
+	local.EXPECT().PrepareReleaseManualFlushIfLocal(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(prepareErr).Maybe()
+	local.EXPECT().PrepareReleaseSegmentsIfLocal(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
+	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(&types.StreamingNodeMetrics{}, nil).Maybe()
+	wal.EXPECT().Local().Return(local).Maybe()
+	scanner := mock_streaming.NewMockScanner(t)
+	scanner.EXPECT().Done().Return(make(chan struct{})).Maybe()
+	scanner.EXPECT().Error().Return(nil).Maybe()
+	scanner.EXPECT().Close().Return().Maybe()
+	wal.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner).Maybe()
+	return wal
+}
+
+// A transiently-unavailable prepare with growing-source segments present must
+// fail the unsubscribe so the coordinator retries it. Skipping the drain and
+// removing the segments would strand any in-flight growing-source flush: the
+// segments are the only copy of the unflushed rows, and the channel checkpoint
+// stays pinned behind the flush that can no longer complete.
+// Regression: WatchDmChannels and UnsubDmChannel must be mutually exclusive
+// per channel. The fast-reject sets are one-directional (watch checks
+// unsubscribing, unsub checks nothing), so without the lock an unsub could
+// remove and close the delegator a concurrent watch had just inserted — and
+// the watch would then activate a provider whose delegator is already dead,
+// re-registering it with a fresh token that reopens the release admission
+// fence.
+func (suite *ServiceSuite) TestUnsubDmChannelSerializedPerChannel() {
+	ctx := context.Background()
+	const channel = "serialize_test_dml_0_100v0"
+
+	// A concurrent channel operation (e.g. a watch mid-flight) holds the lock.
+	suite.node.channelOpLock.Lock(channel)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		suite.node.UnsubDmChannel(ctx, &querypb.UnsubDmChannelRequest{
+			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_ReleaseCollection, TargetID: suite.node.session.ServerID},
+			NodeID:       suite.node.session.ServerID,
+			CollectionID: suite.collectionID,
+			ChannelName:  channel,
+		})
+	}()
+
+	select {
+	case <-done:
+		suite.FailNow("UnsubDmChannel completed while another channel operation held the lock")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	suite.node.channelOpLock.Unlock(channel)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		suite.FailNow("UnsubDmChannel did not proceed after the lock was released")
+	}
+}
+
+// The other direction of the same mutual exclusion: WatchDmChannels must also
+// queue behind a channel operation holding the lock (services.go takes it before
+// touching node.delegators), and proceed once it is released.
+func (suite *ServiceSuite) TestWatchDmChannelSerializedPerChannel() {
+	ctx := context.Background()
+	const channel = "serialize_watch_test_dml_0_100v0"
+
+	// A delegator is already registered for the channel, so once the watch gets
+	// the lock it returns "already subscribed" without building anything.
+	sd := delegator.NewMockShardDelegator(suite.T())
+	suite.node.delegators.Insert(channel, sd)
+	defer suite.node.delegators.GetAndRemove(channel)
+
+	// A concurrent channel operation (e.g. an unsub mid-drain) holds the lock.
+	suite.node.channelOpLock.Lock(channel)
+	locked := true
+	defer func() {
+		if locked {
+			suite.node.channelOpLock.Unlock(channel)
+		}
+	}()
+
+	done := make(chan struct{})
+	var status *commonpb.Status
+	var watchErr error
+	go func() {
+		defer close(done)
+		status, watchErr = suite.node.WatchDmChannels(ctx, &querypb.WatchDmChannelsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_WatchDmChannels,
+				MsgID:    rand.Int63(),
+				TargetID: suite.node.session.ServerID,
+			},
+			CollectionID:  suite.collectionID,
+			Infos:         []*datapb.VchannelInfo{{CollectionID: suite.collectionID, ChannelName: channel}},
+			IndexInfoList: []*indexpb.IndexInfo{{}},
+		})
+	}()
+
+	select {
+	case <-done:
+		suite.FailNow("WatchDmChannels completed while another channel operation held the lock")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	suite.node.channelOpLock.Unlock(channel)
+	locked = false
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		suite.FailNow("WatchDmChannels did not proceed after the lock was released")
+	}
+	suite.NoError(merr.CheckRPCCall(status, watchErr))
+}
+
+// A caller queued on the channel operation lock must abandon the queue when its
+// own request context ends, instead of acquiring later and doing the work past
+// its deadline (while pinning the lifetime reference QueryNode.Stop() waits on).
+func (suite *ServiceSuite) TestUnsubDmChannelGivesUpOnContextDone() {
+	const channel = "ctx_unsub_test_dml_0_100v0"
+
+	// A concurrent channel operation holds the lock for the whole test.
+	suite.node.channelOpLock.Lock(channel)
+	defer suite.node.channelOpLock.Unlock(channel)
+
+	// If the unsub ever got past the lock it would remove this delegator.
+	sd := delegator.NewMockShardDelegator(suite.T())
+	suite.node.delegators.Insert(channel, sd)
+	defer suite.node.delegators.GetAndRemove(channel)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	var status *commonpb.Status
+	var unsubErr error
+	go func() {
+		defer close(done)
+		status, unsubErr = suite.node.UnsubDmChannel(ctx, &querypb.UnsubDmChannelRequest{
+			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_ReleaseCollection, TargetID: suite.node.session.ServerID},
+			NodeID:       suite.node.session.ServerID,
+			CollectionID: suite.collectionID,
+			ChannelName:  channel,
+		})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		suite.FailNow("UnsubDmChannel blocked on the channel lock past its context deadline")
+	}
+
+	suite.NoError(unsubErr)
+	err := merr.Error(status)
+	suite.Error(err)
+	// The cause (this request's expired deadline) survives into the status as
+	// the timeout code — not a fabricated ServiceUnavailable. The coordinator
+	// retry does not read this code: the channel checker regenerates the unsub
+	// from the dist-vs-target diff regardless of why this attempt failed.
+	suite.EqualValues(merr.TimeoutCode, status.GetCode())
+
+	// And it must not have done any of the work.
+	_, ok := suite.node.delegators.Get(channel)
+	suite.True(ok, "UnsubDmChannel removed the delegator despite failing on the lock")
+	suite.False(suite.node.unsubscribingChannels.Contain(channel))
+}
+
+// Same for the watch direction.
+func (suite *ServiceSuite) TestWatchDmChannelGivesUpOnContextDone() {
+	const channel = "ctx_watch_test_dml_0_100v0"
+
+	suite.node.channelOpLock.Lock(channel)
+	defer suite.node.channelOpLock.Unlock(channel)
+
+	// Already cancelled: the watch must reject without ever queueing.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan struct{})
+	var status *commonpb.Status
+	var watchErr error
+	go func() {
+		defer close(done)
+		status, watchErr = suite.node.WatchDmChannels(ctx, &querypb.WatchDmChannelsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_WatchDmChannels,
+				MsgID:    rand.Int63(),
+				TargetID: suite.node.session.ServerID,
+			},
+			CollectionID:  suite.collectionID,
+			Infos:         []*datapb.VchannelInfo{{CollectionID: suite.collectionID, ChannelName: channel}},
+			IndexInfoList: []*indexpb.IndexInfo{{}},
+		})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		suite.FailNow("WatchDmChannels blocked on the channel lock despite a cancelled context")
+	}
+
+	suite.NoError(watchErr)
+	err := merr.Error(status)
+	suite.Error(err)
+	// Cancellation survives into the status as the canceled code; the checker
+	// re-issues the watch on its next round, independent of this code.
+	suite.EqualValues(merr.CanceledCode, status.GetCode())
+
+	// It must not have built anything.
+	_, ok := suite.node.delegators.Get(channel)
+	suite.False(ok, "WatchDmChannels created a delegator despite failing on the lock")
+	suite.False(suite.node.subscribingChannels.Contain(channel))
+}
+
+func (suite *ServiceSuite) TestUnsubDmChannels_TransientPrepareFailureWithGrowingSource() {
+	ctx := context.Background()
+	suite.TestWatchDmChannelsInt64()
+
+	// A real growing segment on the channel.
+	collection := suite.node.manager.Collection.Get(suite.collectionID)
+	suite.Require().NotNil(collection)
+	segment, err := segments.NewSegment(ctx, collection, suite.node.manager.Segment,
+		segments.SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
+			SegmentID:     999001,
+			PartitionID:   suite.partitionIDs[0],
+			CollectionID:  suite.collectionID,
+			InsertChannel: suite.vchannel,
+			Level:         datapb.SegmentLevel_Legacy,
+		})
+	suite.Require().NoError(err)
+	suite.node.manager.Segment.Put(ctx, segments.SegmentTypeGrowing, segment)
+
+	// The channel uses growing-source flush (a provider is registered), and the
+	// prepare RPC fails transiently.
+	registration := syncmgr.DefaultGrowingSourceRegistry().Register(suite.vchannel, stubGrowingSourceProvider{})
+	defer syncmgr.DefaultGrowingSourceRegistry().Unregister(registration)
+	streaming.SetWALForTest(newServiceSuiteWAL(suite.T(), merr.WrapErrServiceUnavailable("wal transiently unavailable")))
+	defer streaming.SetWALForTest(newServiceSuiteWAL(suite.T(), nil))
+
+	req := &querypb.UnsubDmChannelRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_UnsubDmChannel,
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		NodeID:       suite.node.session.ServerID,
+		CollectionID: suite.collectionID,
+		ChannelName:  suite.vchannel,
+	}
+
+	status, err := suite.node.UnsubDmChannel(ctx, req)
+	suite.NoError(err)
+	suite.False(merr.Ok(status), "transient prepare failure with growing-source segments must fail the unsubscribe")
+	suite.NotNil(suite.node.manager.Segment.GetGrowing(999001), "growing segment must survive the failed unsubscribe")
+
+	// Without a growing-source provider the same failure is skippable: the
+	// channel cannot owe a growing-source flush, so unsubscribe proceeds.
+	syncmgr.DefaultGrowingSourceRegistry().Unregister(registration)
+	status, err = suite.node.UnsubDmChannel(ctx, req)
+	suite.NoError(merr.CheckRPCCall(status, err))
+	suite.Nil(suite.node.manager.Segment.GetGrowing(999001))
+}
+
+// The transient-prepare guard must NOT depend on the local growing-segment
+// snapshot. delegator.GetGrowingFlushSource returns GrowingSourcePending for a
+// segment the QueryNode has not materialized yet, and the write buffer treats
+// Pending as a sticky "choose growing source" — so the write buffer can already
+// own growing-source progress for a segment localGrowingSegmentIDs cannot see.
+// With an empty snapshot and a registered provider, a transient prepare failure
+// must still fail the unsubscribe.
+func (suite *ServiceSuite) TestUnsubDmChannels_TransientPrepareFailureWithoutLocalGrowingSegments() {
+	ctx := context.Background()
+	suite.TestWatchDmChannelsInt64()
+
+	// No growing segment materialized on this node for the channel.
+	suite.Require().Empty(suite.node.localGrowingSegmentIDs(suite.vchannel, nil))
+
+	registration := syncmgr.DefaultGrowingSourceRegistry().Register(suite.vchannel, stubGrowingSourceProvider{})
+	defer syncmgr.DefaultGrowingSourceRegistry().Unregister(registration)
+	streaming.SetWALForTest(newServiceSuiteWAL(suite.T(), merr.WrapErrServiceUnavailable("wal transiently unavailable")))
+	defer streaming.SetWALForTest(newServiceSuiteWAL(suite.T(), nil))
+
+	req := &querypb.UnsubDmChannelRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_UnsubDmChannel,
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		NodeID:       suite.node.session.ServerID,
+		CollectionID: suite.collectionID,
+		ChannelName:  suite.vchannel,
+	}
+
+	status, err := suite.node.UnsubDmChannel(ctx, req)
+	suite.NoError(err)
+	suite.False(merr.Ok(status), "a transient prepare failure on a growing-source channel must fail the unsubscribe even with no local growing segment")
+	_, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.True(ok, "the delegator must survive the failed unsubscribe")
+}
+
 func TestIsReleaseManualFlushPrepareUnavailable(t *testing.T) {
 	tests := []struct {
 		name string
@@ -639,6 +950,128 @@ func TestIsReleaseManualFlushPrepareUnavailable(t *testing.T) {
 			assert.Equal(t, tt.want, isReleaseManualFlushPrepareUnavailable(tt.err))
 		})
 	}
+}
+
+// Structural means "no LOCAL write buffer can be left owing a growing-source
+// flush for this channel". Transient unavailability (service unavailable,
+// client closed, read-only WAL) must stay false: the local write buffer may be
+// alive with a flush in flight, and skipping the drain would strand it.
+//
+// No nil case: the helper is only reachable behind err != nil in
+// UnsubDmChannel (a nil error would panic in AsStreamingError's nil receiver).
+func TestIsReleaseManualFlushPrepareStructurallyUnavailable(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "no streaming node deployed",
+			err:  registry.ErrNoStreamingNodeDeployed,
+			want: true,
+		},
+		{
+			name: "no release manual flush preparer",
+			err:  registry.ErrNoReleaseManualFlushPreparer,
+			want: true,
+		},
+		{
+			name: "channel not available",
+			err:  merr.WrapErrChannelNotAvailable("vchannel", "no local growing-source release handoff provider"),
+			want: true,
+		},
+		{
+			name: "streaming on shutdown",
+			err:  streamingstatus.NewOnShutdownError("wal is on shutdown"),
+			want: true,
+		},
+		{
+			name: "local wal channel not exist",
+			err:  streamingstatus.NewChannelNotExist("pchannel"),
+			want: true,
+		},
+		{
+			name: "local wal channel term unmatched",
+			err:  streamingstatus.NewUnmatchedChannelTerm("pchannel", 1, 2),
+			want: true,
+		},
+		{
+			name: "service unavailable is transient, not structural",
+			err:  merr.WrapErrServiceUnavailable("streaming WAL is not initialized"),
+			want: false,
+		},
+		{
+			name: "handler client closed is transient, not structural",
+			err:  handler.ErrClientClosed,
+			want: false,
+		},
+		{
+			name: "read only local wal is transient, not structural",
+			err:  handler.ErrReadOnlyWAL,
+			want: false,
+		},
+		{
+			name: "generic prepare failure",
+			err:  errors.New("prepare failed"),
+			want: false,
+		},
+		{
+			name: "streaming inner failure",
+			err:  streamingstatus.NewInner("prepare failed"),
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isReleaseManualFlushPrepareStructurallyUnavailable(tt.err))
+		})
+	}
+}
+
+// A STRUCTURALLY-unavailable prepare must let the unsubscribe proceed even when
+// a growing-source provider is still registered for the channel: no local write
+// buffer can be left owing a growing-source flush, so there is nothing the
+// fail-for-retry branch would protect.
+func (suite *ServiceSuite) TestUnsubDmChannels_StructuralPrepareFailureWithGrowingSource() {
+	ctx := context.Background()
+	suite.TestWatchDmChannelsInt64()
+
+	// A real growing segment on the channel.
+	collection := suite.node.manager.Collection.Get(suite.collectionID)
+	suite.Require().NotNil(collection)
+	segment, err := segments.NewSegment(ctx, collection, suite.node.manager.Segment,
+		segments.SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
+			SegmentID:     999002,
+			PartitionID:   suite.partitionIDs[0],
+			CollectionID:  suite.collectionID,
+			InsertChannel: suite.vchannel,
+			Level:         datapb.SegmentLevel_Legacy,
+		})
+	suite.Require().NoError(err)
+	suite.node.manager.Segment.Put(ctx, segments.SegmentTypeGrowing, segment)
+
+	// A provider is registered, but the prepare fails STRUCTURALLY: the channel's
+	// write buffer is not (and cannot be) in this process.
+	registration := syncmgr.DefaultGrowingSourceRegistry().Register(suite.vchannel, stubGrowingSourceProvider{})
+	defer syncmgr.DefaultGrowingSourceRegistry().Unregister(registration)
+	streaming.SetWALForTest(newServiceSuiteWAL(suite.T(), registry.ErrNoStreamingNodeDeployed))
+	defer streaming.SetWALForTest(newServiceSuiteWAL(suite.T(), nil))
+
+	req := &querypb.UnsubDmChannelRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_UnsubDmChannel,
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		NodeID:       suite.node.session.ServerID,
+		CollectionID: suite.collectionID,
+		ChannelName:  suite.vchannel,
+	}
+
+	status, err := suite.node.UnsubDmChannel(ctx, req)
+	suite.NoError(merr.CheckRPCCall(status, err), "structural prepare failure must not block the unsubscribe")
+	suite.Nil(suite.node.manager.Segment.GetGrowing(999002), "growing segments are dropped once the unsubscribe proceeds")
 }
 
 func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema,
@@ -3022,7 +3455,7 @@ func TestQueryNodeService(t *testing.T) {
 	wal := mock_streaming.NewMockWALAccesser(t)
 	local := mock_streaming.NewMockLocal(t)
 	local.EXPECT().GetLatestMVCCTimestampIfLocal(mock.Anything, mock.Anything).Return(0, nil).Maybe()
-	local.EXPECT().PrepareReleaseManualFlushIfLocal(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
+	local.EXPECT().PrepareReleaseManualFlushIfLocal(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(&types.StreamingNodeMetrics{}, nil).Maybe()
 	wal.EXPECT().Local().Return(local).Maybe()
 	scanner := mock_streaming.NewMockScanner(t)

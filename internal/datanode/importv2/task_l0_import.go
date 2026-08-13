@@ -79,6 +79,9 @@ func NewL0ImportTask(req *datapb.ImportRequest,
 		cm:           cm,
 	}
 	task.metaCaches = NewMetaCache(req)
+	// L0 imports always use the storage-v2 writer, regardless of the request's
+	// storage version or loon setting.
+	initImportSegments(task.metaCaches, req, storage.StorageV2, false)
 	return task
 }
 
@@ -116,7 +119,9 @@ func (t *L0ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {
 }
 
 func (t *L0ImportTask) Clone() Task {
-	ctx, cancel := context.WithCancel(t.ctx)
+	// Share ctx/cancel across clones instead of deriving a child context; see
+	// ImportTask.Clone for the full rationale.
+	ctx, cancel := t.ctx, t.cancel
 	infos := make(map[int64]*datapb.ImportSegmentInfo)
 	for id, info := range t.segmentsInfo {
 		infos[id] = typeutil.Clone(info)
@@ -155,7 +160,7 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 					reason = fmt.Sprintf("error: %v, file: %s", err, t.req.GetFiles()[0].String())
 				}
 				mlog.Warn(t.ctx, "l0 import task execute failed", WrapLogFields(t, mlog.Any("file", t.req.GetFiles()), mlog.String("err", reason))...)
-				t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+				t.manager.Update(t.GetTaskID(), UpdateReason(reason))
 			}
 		}()
 
@@ -199,8 +204,16 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 	return futures
 }
 
-func (t *L0ImportTask) importL0(reader binlog.L0Reader) error {
+func (t *L0ImportTask) importL0(reader binlog.L0Reader) (retErr error) {
 	syncFutures := make([]*conc.Future[struct{}], 0)
+	// Same ownership rule as ImportTask.importFile: callbacks settle resources,
+	// while this function fences completion on every exit path.
+	defer func() {
+		waitErr := conc.BlockOnAll(syncFutures...)
+		if retErr == nil {
+			retErr = waitErr
+		}
+	}()
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
 		data, err := reader.Read()
@@ -215,13 +228,14 @@ func (t *L0ImportTask) importL0(reader binlog.L0Reader) error {
 			return err
 		}
 		fs, sts, err := t.syncDelete(delData)
+		syncFutures = append(syncFutures, fs...)
+		syncTasks = append(syncTasks, sts...)
 		if err != nil {
 			return err
 		}
-		syncFutures = append(syncFutures, fs...)
-		syncTasks = append(syncTasks, sts...)
 	}
-	err := conc.AwaitAll(syncFutures...)
+	err := conc.BlockOnAll(syncFutures...)
+	syncFutures = nil
 	if err != nil {
 		return err
 	}
@@ -248,18 +262,17 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 		partitionID := t.GetPartitionIDs()[0]
 		segmentID, err := PickSegment(t.req.GetRequestSegments(), channel, partitionID)
 		if err != nil {
-			return nil, nil, err
+			return futures, syncTasks, err
 		}
-		syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
+		syncTask, err := NewSyncTask(t.allocator, t.metaCaches,
 			segmentID, partitionID, t.GetCollectionID(), channel, nil, data,
-			nil, storage.StorageV2, false, t.req.GetStorageConfig())
+			nil, t.req.GetStorageConfig())
 		if err != nil {
-			return nil, nil, err
+			return futures, syncTasks, err
 		}
-		future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm)
+		future, err := submitSyncTask(t.ctx, t.syncMgr, t.cm, syncTask, "failed to sync l0 delete data", WrapLogFields(t))
 		if err != nil {
-			mlog.Error(t.ctx, "failed to sync l0 delete data", WrapLogFields(t, mlog.Err(err))...)
-			return nil, nil, err
+			return futures, syncTasks, err
 		}
 		futures = append(futures, future)
 		syncTasks = append(syncTasks, syncTask)

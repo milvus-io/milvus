@@ -1,16 +1,17 @@
 package syncmgr
 
 import (
+	"time"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 func NewSyncTask() *SyncTask {
-	return new(SyncTask)
+	return &SyncTask{ioRetry: defaultIORetryPolicy()}
 }
 
 func (t *SyncTask) WithSyncPack(pack *SyncPack) *SyncTask {
@@ -38,6 +39,10 @@ func (t *SyncTask) WithChunkManager(cm storage.ChunkManager) *SyncTask {
 	t.chunkManager = cm
 	return t
 }
+
+func (t *SyncTask) SetChunkManager(cm storage.ChunkManager) { t.chunkManager = cm }
+
+func (t *SyncTask) SetDrop() { t.pack.isDrop = true }
 
 func (t *SyncTask) WithStorageConfig(storageConfig *indexpb.StorageConfig) *SyncTask {
 	t.storageConfig = storageConfig
@@ -69,12 +74,37 @@ func (t *SyncTask) WithMetaWriter(metaWriter MetaWriter) *SyncTask {
 	return t
 }
 
-func (t *SyncTask) WithWriteRetryOptions(opts ...retry.Option) *SyncTask {
-	t.writeRetryOpts = opts
+func (t *SyncTask) WithFailureCallback(callback func(error)) *SyncTask {
+	t.failureCallback = callback
 	return t
 }
 
-func (t *SyncTask) WithFailureCallback(callback func(error)) *SyncTask {
-	t.failureCallback = callback
+// WithPayloadAccounting tracks the in-memory row payload until ReleaseData is
+// actually called. The callback runs exactly once, including terminal discard
+// paths (Abandon) that never reach Prepare.
+func (t *SyncTask) WithPayloadAccounting(insertBytes, deleteBytes int64, onRelease func(int64)) *SyncTask {
+	t.payload = &syncTaskPayloadAccounting{onRelease: onRelease}
+	t.payload.insertBytes.Store(insertBytes)
+	t.payload.deleteBytes.Store(deleteBytes)
+	return t
+}
+
+// WithIORetryPolicy sets this task's budget AND backoff for the retries inside
+// the object storage and meta writers. attempts of 0 means unlimited.
+//
+// Both halves are per-caller for the same reason: a caller whose own failure
+// recovery is expensive (import re-reads and re-parses the whole file) is
+// better off retrying more times and waiting longer between them, while the
+// flush path — which re-drives the task from its own queue — must not hold a
+// queue slot and its payload for either. See DefaultIORetryAttempts.
+//
+// A non-positive interval is replaced by the default rather than honored; with
+// attempts=0 a zero sleep is an unbounded zero-delay loop.
+func (t *SyncTask) WithIORetryPolicy(attempts uint, initialInterval, maxInterval time.Duration) *SyncTask {
+	t.ioRetry = ioRetryPolicy{
+		attempts:        attempts,
+		initialInterval: initialInterval,
+		maxInterval:     maxInterval,
+	}.normalized()
 	return t
 }

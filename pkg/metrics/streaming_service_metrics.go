@@ -524,18 +524,42 @@ var (
 
 	WALFlusherSyncDispatcherTaskTotal = newWALCounterVec(prometheus.CounterOpts{
 		Name: "flusher_sync_dispatcher_task_total",
-		Help: "Total number of sync tasks submitted to the dispatcher",
+		Help: "Total number of sync tasks admitted by the dispatcher",
 	})
 
 	WALFlusherSyncDispatcherQueueDuration = newWALHistogramVec(prometheus.HistogramOpts{
 		Name:    "flusher_sync_dispatcher_queue_duration_seconds",
-		Help:    "Time a sync task spends waiting in the per-key queue before execution starts",
+		Help:    "Total dispatcher queue time for a sync task: waiting for Prepare plus waiting for Commit; excludes admission and phase execution",
+		Buckets: prometheus.ExponentialBucketsRange(0.001, 60, 15),
+	})
+
+	WALFlusherSyncDispatcherPrepareQueueDuration = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "flusher_sync_dispatcher_prepare_queue_duration_seconds",
+		Help:    "Time an admitted sync task waits for Prepare to start",
+		Buckets: prometheus.ExponentialBucketsRange(0.001, 60, 15),
+	})
+
+	WALFlusherSyncDispatcherPrepareDuration = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "flusher_sync_dispatcher_prepare_duration_seconds",
+		Help:    "Time a sync task spends executing Prepare (payload serialization and storage write)",
 		Buckets: prometheus.ExponentialBucketsRange(0.001, 60, 15),
 	})
 
 	WALFlusherSyncDispatcherExecuteDuration = newWALHistogramVec(prometheus.HistogramOpts{
 		Name:    "flusher_sync_dispatcher_execute_duration_seconds",
-		Help:    "Time a sync task spends executing (including S3 upload and callbacks)",
+		Help:    "Total time a sync task spends in Prepare, Commit, and completion callbacks; excludes admission and queueing",
+		Buckets: prometheus.ExponentialBucketsRange(0.001, 60, 15),
+	})
+
+	WALFlusherSyncDispatcherCommitWaitDuration = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "flusher_sync_dispatcher_commit_wait_duration_seconds",
+		Help:    "Time between a sync task's successful Prepare returning and its Commit starting, or the task aborting before Commit (earlier commits of the key, their callbacks, and commit pool queueing)",
+		Buckets: prometheus.ExponentialBucketsRange(0.001, 60, 15),
+	})
+
+	WALFlusherSyncDispatcherCommitDuration = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "flusher_sync_dispatcher_commit_duration_seconds",
+		Help:    "Time a sync task spends executing its complete Commit phase, including metadata publication and source finalization when applicable",
 		Buckets: prometheus.ExponentialBucketsRange(0.001, 60, 15),
 	})
 
@@ -708,11 +732,6 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALDelegatorEmptyTimeTickFilteredTotal)
 	registry.MustRegister(WALDelegatorTsafeTimeTickUnfilteredTotal)
 	registry.MustRegister(WALFlusherEmptyTimeTickFilteredTotal)
-	registry.MustRegister(WALFlusherSyncDispatcherPendingTasks)
-	registry.MustRegister(WALFlusherSyncDispatcherTaskTotal)
-	registry.MustRegister(WALFlusherSyncDispatcherQueueDuration)
-	registry.MustRegister(WALFlusherSyncDispatcherExecuteDuration)
-
 	registry.MustRegister(WALRateLimitControllerState)
 	registry.MustRegister(WALRateLimitState)
 	registry.MustRegister(WALRateLimitConfigRecoveryHWM)

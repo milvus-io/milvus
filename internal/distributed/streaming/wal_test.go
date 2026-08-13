@@ -147,6 +147,16 @@ func TestWAL(t *testing.T) {
 
 	w.Local().GetLatestMVCCTimestampIfLocal(ctx, vChannel1)
 	w.Local().GetMetricsIfLocal(ctx)
+	// The lifetime gate of the Local() wrappers: after Close every call must
+	// fail fast with ErrWALAccesserClosed instead of reaching the handler
+	// (the handler mock has no expectation for these methods, so a
+	// delegation here fails the test).
+	assert.ErrorIs(t,
+		w.Local().PrepareReleaseManualFlushIfLocal(ctx, 100, vChannel1, []int64{1001}),
+		ErrWALAccesserClosed)
+	pending, err := w.Local().PrepareReleaseSegmentsIfLocal(ctx, 100, vChannel1, []int64{1001})
+	assert.ErrorIs(t, err, ErrWALAccesserClosed)
+	assert.False(t, pending)
 
 	resp = w.AppendMessages(ctx, newInsertMessage(vChannel1))
 	assert.Error(t, resp.UnwrapFirstError())
@@ -194,18 +204,18 @@ func TestReleaseTimeout(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
-func TestWALAccesserPrepareReleaseManualFlushIfLocal(t *testing.T) {
+func TestWALAccesserPrepareReleaseSegmentsIfLocal(t *testing.T) {
 	ctx := context.Background()
 	w, _, _, handler := createMockWAL(t)
 	defer w.Close()
 
 	handler.EXPECT().
-		PrepareReleaseManualFlushIfLocal(mock.Anything, int64(100), vChannel1, []int64{1001}).
+		PrepareReleaseSegmentsIfLocal(mock.Anything, int64(100), vChannel1, []int64{1001}).
 		Return(true, nil)
 
-	prepared, err := w.Local().PrepareReleaseManualFlushIfLocal(ctx, 100, vChannel1, []int64{1001})
+	pending, err := w.Local().PrepareReleaseSegmentsIfLocal(ctx, 100, vChannel1, []int64{1001})
 	assert.NoError(t, err)
-	assert.True(t, prepared)
+	assert.True(t, pending)
 }
 
 type resolvePChannelInfoTestClient struct {

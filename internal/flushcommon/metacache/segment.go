@@ -36,20 +36,39 @@ type SegmentInfo struct {
 	checkpoint       *msgpb.MsgPosition
 	startPosRecorded bool
 	flushedRows      int64
-	bufferRows       int64
-	syncingRows      int64
-	bfs              pkoracle.PkStat
-	bm25stats        *SegmentBM25Stats
-	stats            *SegmentStats
-	level            datapb.SegmentLevel
-	syncingTasks     int32
-	storageVersion   int64
-	binlogs          []*datapb.FieldBinlog
-	statslogs        []*datapb.FieldBinlog
-	deltalogs        []*datapb.FieldBinlog
-	bm25logs         []*datapb.FieldBinlog
-	currentSplit     []storagecommon.ColumnGroup
-	manifestPath     string
+	// lastFlushPosition is the WAL position this segment was last flushed
+	// through. It is the lower fence of the next growing-source flush, and it
+	// has to be a POSITION rather than a row count: after a restart the growing
+	// segment is rebuilt by a WAL replay and its row offsets start over, so a
+	// count kept here would have no common origin with it. Restored from the
+	// segment's persisted DML position on recovery.
+	lastFlushPosition *msgpb.MsgPosition
+	// pendingFlushCheckpoint is the WAL position a replay has to resume from in
+	// order to regenerate this segment's OUTSTANDING flush obligation, i.e. the
+	// seal message (ManualFlush/Flush fence) that moved it out of Growing. It is
+	// set when the segment is sealed and lives exactly as long as the obligation:
+	// the segment leaves the metacache when the flush (or drop) commits, so there
+	// is nothing to unregister and nothing to leak.
+	//
+	// It is deliberately set-if-nil: a second seal of an already sealed segment
+	// must never push the pin forward, because the FIRST fence is the one whose
+	// redelivery recovery depends on. Not persisted - after a restart the fence
+	// is either already committed or redelivered by the replay.
+	pendingFlushCheckpoint *msgpb.MsgPosition
+	bufferRows             int64
+	syncingRows            int64
+	bfs                    pkoracle.PkStat
+	bm25stats              *SegmentBM25Stats
+	stats                  *SegmentStats
+	level                  datapb.SegmentLevel
+	syncingTasks           int32
+	storageVersion         int64
+	binlogs                []*datapb.FieldBinlog
+	statslogs              []*datapb.FieldBinlog
+	deltalogs              []*datapb.FieldBinlog
+	bm25logs               []*datapb.FieldBinlog
+	currentSplit           []storagecommon.ColumnGroup
+	manifestPath           string
 
 	// flushSourceMode is process-local runtime state; not persisted.
 	// See FlushSourceMode docs for lifecycle semantics.
@@ -77,6 +96,19 @@ func (s *SegmentInfo) NumOfRows() int64 {
 // FlushedRows return flushed rows number.
 func (s *SegmentInfo) FlushedRows() int64 {
 	return s.flushedRows
+}
+
+// LastFlushPosition returns the WAL position this segment was last flushed
+// through, or nil if it has never been flushed.
+func (s *SegmentInfo) LastFlushPosition() *msgpb.MsgPosition {
+	return s.lastFlushPosition
+}
+
+// PendingFlushCheckpoint returns the WAL position whose replay regenerates this
+// segment's outstanding flush obligation, or nil if the segment does not owe a
+// flush that was pinned at seal time.
+func (s *SegmentInfo) PendingFlushCheckpoint() *msgpb.MsgPosition {
+	return s.pendingFlushCheckpoint
 }
 
 func (s *SegmentInfo) StartPosition() *msgpb.MsgPosition {
@@ -152,28 +184,32 @@ func (s *SegmentInfo) FlushSourceMode() FlushSourceMode {
 
 func (s *SegmentInfo) Clone() *SegmentInfo {
 	return &SegmentInfo{
-		segmentID:        s.segmentID,
-		partitionID:      s.partitionID,
-		state:            s.state,
-		startPosition:    s.startPosition,
-		checkpoint:       s.checkpoint,
-		startPosRecorded: s.startPosRecorded,
-		flushedRows:      s.flushedRows,
-		bufferRows:       s.bufferRows,
-		syncingRows:      s.syncingRows,
-		bfs:              s.bfs,
-		level:            s.level,
-		syncingTasks:     s.syncingTasks,
-		bm25stats:        s.bm25stats,
-		stats:            s.stats,
-		storageVersion:   s.storageVersion,
-		binlogs:          s.binlogs,
-		statslogs:        s.statslogs,
-		deltalogs:        s.deltalogs,
-		bm25logs:         s.bm25logs,
-		currentSplit:     s.currentSplit,
-		manifestPath:     s.manifestPath,
-		flushSourceMode:  s.flushSourceMode,
+		segmentID:         s.segmentID,
+		partitionID:       s.partitionID,
+		state:             s.state,
+		startPosition:     s.startPosition,
+		checkpoint:        s.checkpoint,
+		startPosRecorded:  s.startPosRecorded,
+		flushedRows:       s.flushedRows,
+		lastFlushPosition: s.lastFlushPosition,
+		// Carried by the clone: metacache is copy-on-write, so dropping this here
+		// would silently release the checkpoint pin on the next segment update.
+		pendingFlushCheckpoint: s.pendingFlushCheckpoint,
+		bufferRows:             s.bufferRows,
+		syncingRows:            s.syncingRows,
+		bfs:                    s.bfs,
+		level:                  s.level,
+		syncingTasks:           s.syncingTasks,
+		bm25stats:              s.bm25stats,
+		stats:                  s.stats,
+		storageVersion:         s.storageVersion,
+		binlogs:                s.binlogs,
+		statslogs:              s.statslogs,
+		deltalogs:              s.deltalogs,
+		bm25logs:               s.bm25logs,
+		currentSplit:           s.currentSplit,
+		manifestPath:           s.manifestPath,
+		flushSourceMode:        s.flushSourceMode,
 	}
 }
 
@@ -200,23 +236,27 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 		mlog.Info(context.TODO(), "recover split info", mlog.FieldSegmentID(info.GetID()), mlog.Stringers("columnGroup", currentSplit))
 	}
 	return &SegmentInfo{
-		segmentID:        info.GetID(),
-		partitionID:      info.GetPartitionID(),
-		state:            info.GetState(),
-		flushedRows:      info.GetNumOfRows(),
-		startPosition:    info.GetStartPosition(),
-		checkpoint:       info.GetDmlPosition(),
-		startPosRecorded: true,
-		level:            level,
-		bfs:              bfs,
-		bm25stats:        bm25Stats,
-		stats:            stats,
-		storageVersion:   info.GetStorageVersion(),
-		binlogs:          info.GetBinlogs(),
-		statslogs:        info.GetStatslogs(),
-		deltalogs:        info.GetDeltalogs(),
-		bm25logs:         info.GetBm25Statslogs(),
-		currentSplit:     currentSplit,
-		manifestPath:     info.GetManifestPath(),
+		segmentID:     info.GetID(),
+		partitionID:   info.GetPartitionID(),
+		state:         info.GetState(),
+		flushedRows:   info.GetNumOfRows(),
+		startPosition: info.GetStartPosition(),
+		checkpoint:    info.GetDmlPosition(),
+		// The DML position IS what the last successful flush persisted for this
+		// segment (SaveBinlogPaths CheckPoints[].Position), so it is the fence
+		// the next growing-source flush must resume from.
+		lastFlushPosition: info.GetDmlPosition(),
+		startPosRecorded:  true,
+		level:             level,
+		bfs:               bfs,
+		bm25stats:         bm25Stats,
+		stats:             stats,
+		storageVersion:    info.GetStorageVersion(),
+		binlogs:           info.GetBinlogs(),
+		statslogs:         info.GetStatslogs(),
+		deltalogs:         info.GetDeltalogs(),
+		bm25logs:          info.GetBm25Statslogs(),
+		currentSplit:      currentSplit,
+		manifestPath:      info.GetManifestPath(),
 	}
 }

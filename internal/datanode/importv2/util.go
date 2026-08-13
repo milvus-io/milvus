@@ -41,10 +41,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -52,39 +52,18 @@ func WrapTaskNotFoundError(taskID int64) error {
 	return merr.WrapErrImportSysFailedMsg("cannot find import task with id %d", taskID)
 }
 
-func NewSyncTask(ctx context.Context,
-	allocator allocator.Interface,
+func NewSyncTask(allocator allocator.Interface,
 	metaCaches map[string]metacache.MetaCache,
-	ts uint64,
 	segmentID, partitionID, collectionID int64, vchannel string,
 	insertData *storage.InsertData,
 	deleteData *storage.DeleteData,
 	bm25Stats map[int64]*storage.BM25Stats,
-	storageVersion int64,
-	useLoonFFI bool,
 	storageConfig *indexpb.StorageConfig,
-) (syncmgr.Task, error) {
+) (*syncmgr.SyncTask, error) {
 	metaCache := metaCaches[vchannel]
-	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
-		segment := &datapb.SegmentInfo{
-			ID:             segmentID,
-			State:          commonpb.SegmentState_Importing,
-			CollectionID:   collectionID,
-			PartitionID:    partitionID,
-			InsertChannel:  vchannel,
-			StorageVersion: storageVersion,
-		}
-		// init first manifest path
-		if useLoonFFI {
-			k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-			basePath := path.Join(storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
-			// ManifestEarliest for first write
-			segment.ManifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
-		}
-		metaCache.AddSegment(segment, func(info *datapb.SegmentInfo) pkoracle.PkStat {
-			bfs := pkoracle.NewBloomFilterSet()
-			return bfs
-		}, metacache.NewBM25StatsFactory)
+	segmentInfo, ok := metaCache.GetSegmentByID(segmentID)
+	if !ok {
+		return nil, merr.WrapErrSegmentNotFound(segmentID, "import segment was not initialized before sync task construction")
 	}
 
 	segmentLevel := datapb.SegmentLevel_L1
@@ -106,29 +85,135 @@ func NewSyncTask(ctx context.Context,
 		syncPack.WithBM25Stats(bm25Stats)
 	}
 
+	// Import raises BOTH halves of the writer's retry policy because its own
+	// recovery is expensive: a failure here fails the whole ImportTask and
+	// DataCoord re-reads and re-parses the entire file. It retries more times
+	// (maxWriteRetryAttempts, 0 = unlimited) and waits longer between them
+	// (writeRetryInitialInterval..writeRetryMaxInterval), which is what keeps a
+	// sustained object-storage throttle from turning into a re-parse. The flush
+	// path, which re-drives a failed task from its own queue, keeps the short
+	// defaults instead.
 	task := syncmgr.NewSyncTask().
 		WithAllocator(allocator).
 		WithMetaCache(metaCache).
 		WithSchema(metaCache.GetSchema(0)). // TODO specify import schema if needed
 		WithSyncPack(syncPack).
 		WithStorageConfig(storageConfig).
-		WithWriteRetryOptions(newWriteRetryOptions()...)
+		WithIORetryPolicy(importWriteRetryPolicy())
+
+	// Freeze the physical layout at construction, exactly like the write buffer
+	// does. Import builds tasks outside that serialized owner, and two files can
+	// target the same segment with layouts derived from different batch statistics.
+	if err := task.ResolveAndFreezeColumnGroups(segmentInfo); err != nil {
+		return nil, err
+	}
 	return task, nil
 }
 
-// newWriteRetryOptions builds the retry options for import writes. The options are
-// order-sensitive: retry.Sleep raises maxSleepTime to 2*initial, so MaxSleepTime must
-// be applied last. The paramtable formatters guarantee both intervals are positive,
-// which keeps retry.Do from degenerating into a zero-delay loop under attempts=0.
-func newWriteRetryOptions() []retry.Option {
+// importWriteRetryPolicy is the import write-retry budget and backoff, all three
+// values configurable at runtime:
+//
+//	dataNode.import.maxWriteRetryAttempts     0 = unlimited, preserved on purpose
+//	dataNode.import.writeRetryInitialInterval seconds, first backoff
+//	dataNode.import.writeRetryMaxInterval     seconds, backoff cap
+//
+// The paramtable formatters guarantee both intervals are positive, which keeps
+// retry.Do from degenerating into a zero-delay loop under attempts=0.
+func importWriteRetryPolicy() (attempts uint, initialInterval, maxInterval time.Duration) {
 	params := &paramtable.Get().DataNodeCfg
-	initialInterval := time.Duration(params.ImportWriteRetryInitialInterval.GetAsInt()) * time.Second
-	maxInterval := time.Duration(params.ImportWriteRetryMaxInterval.GetAsInt()) * time.Second
-	return []retry.Option{
-		retry.Attempts(params.ImportMaxWriteRetryAttempts.GetAsUint()), // 0 = unlimited, preserved on purpose
-		retry.Sleep(initialInterval),
-		retry.MaxSleepTime(maxInterval),
+	return params.ImportMaxWriteRetryAttempts.GetAsUint(),
+		time.Duration(params.ImportWriteRetryInitialInterval.GetAsInt()) * time.Second,
+		time.Duration(params.ImportWriteRetryMaxInterval.GetAsInt()) * time.Second
+}
+
+// initImportSegments creates every request segment before file workers start.
+// NewSyncTask must never lazily initialize a segment: two files can target the
+// same segment, and a check-then-AddSegment race would replace the winner's
+// manifest, statistics, row count, and column layout with a fresh SegmentInfo.
+func initImportSegments(
+	metaCaches map[string]metacache.MetaCache,
+	req *datapb.ImportRequest,
+	storageVersion int64,
+	useLoonFFI bool,
+) {
+	for _, requestSegment := range req.GetRequestSegments() {
+		metaCache, ok := metaCaches[requestSegment.GetVchannel()]
+		if !ok {
+			continue
+		}
+		segmentID := requestSegment.GetSegmentID()
+		if _, ok := metaCache.GetSegmentByID(segmentID); ok {
+			// Preserve metadata if initialization is ever called on a populated
+			// cache; AddSegment replaces an existing entry with the same ID.
+			continue
+		}
+
+		segment := &datapb.SegmentInfo{
+			ID:             segmentID,
+			State:          commonpb.SegmentState_Importing,
+			CollectionID:   req.GetCollectionID(),
+			PartitionID:    requestSegment.GetPartitionID(),
+			InsertChannel:  requestSegment.GetVchannel(),
+			StorageVersion: storageVersion,
+		}
+		if useLoonFFI {
+			key := metautil.JoinIDPath(req.GetCollectionID(), requestSegment.GetPartitionID(), segmentID)
+			basePath := path.Join(req.GetStorageConfig().GetRootPath(), common.SegmentInsertLogPath, key)
+			segment.ManifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
+		}
+		metaCache.AddSegment(segment, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
+		}, metacache.NewBM25StatsFactory)
 	}
+}
+
+// releaseOnDone is the completion callback that settles a submitted task: it
+// releases the row payload and, for storage v3, the prepared native handle whose
+// C memory only Abandon frees.
+//
+// Import needs this because it has no owner for its tasks — the flush path has
+// the write buffer, which calls Abandon once it knows a task will never run
+// again. Two things make it necessary even though a dropped task is unreachable
+// Go memory: the FFI output is C memory the GC never touches, and the sync
+// manager keeps every submitted task in a 64-entry / 15-minute diagnostic LRU,
+// which pins the whole row payload for that long. Abandon is idempotent and a
+// task that got through Commit already released both — Prepare frees the
+// payload, Commit destroys the handle — so the success path pays nothing.
+//
+// The dispatcher funnels EVERY submitted task through exactly one finish() —
+// committed, aborted with its key, or refused because the dispatcher is already
+// closed — and runs the callbacks there, after the task has stopped running and
+// before its Future is published. So this fires exactly once per task, never
+// while a writer still holds the payload, and always before the caller's Await
+// returns. A task that never reached the dispatcher gets no callback, and its
+// caller calls Abandon directly.
+func releaseOnDone(task *syncmgr.SyncTask) func(error) error {
+	return func(err error) error {
+		task.Abandon()
+		return err
+	}
+}
+
+// submitSyncTask hands syncTask to the sync manager with releaseOnDone as its
+// completion callback. If the dispatcher refuses the submission (an error
+// return), the task never reached it and releaseOnDone will never fire — this
+// is the one task the import path must settle by hand, so the refusal path
+// calls Abandon synchronously before returning the error.
+func submitSyncTask(
+	ctx context.Context,
+	syncMgr syncmgr.SyncManager,
+	cm storage.ChunkManager,
+	syncTask *syncmgr.SyncTask,
+	refusalLogMsg string,
+	logFields []mlog.Field,
+) (*conc.Future[struct{}], error) {
+	future, err := syncMgr.SyncDataWithChunkManager(ctx, syncTask, cm, releaseOnDone(syncTask))
+	if err != nil {
+		mlog.Error(ctx, refusalLogMsg, append(logFields, mlog.Err(err))...)
+		syncTask.Abandon()
+		return nil, err
+	}
+	return future, nil
 }
 
 func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache.MetaCache) (*datapb.ImportSegmentInfo, error) {

@@ -19,7 +19,16 @@ var (
 
 // ReleaseManualFlushPreparer prepares process-local release handoff.
 type ReleaseManualFlushPreparer interface {
-	PrepareReleaseManualFlush(ctx context.Context, pchannel types.PChannelInfo, collectionID int64, vchannel string, releaseSegmentIDs []int64) (prepared bool, err error)
+	PrepareReleaseManualFlush(ctx context.Context, pchannel types.PChannelInfo, collectionID int64, vchannel string, releaseSegmentIDs []int64) error
+
+	// PrepareReleaseSegments reports whether the LOCAL write buffer still owes a
+	// growing-source flush for the given segments, and nudges those flushes
+	// forward when it does. It never blocks on the drain.
+	//
+	// Returns true when at least one of the given segments still owes a flush, in
+	// which case the caller must NOT drop the segments yet — they hold the only
+	// copy of the unflushed rows.
+	PrepareReleaseSegments(ctx context.Context, pchannel types.PChannelInfo, collectionID int64, vchannel string, segmentIDs []int64) (bool, error)
 }
 
 // RegisterLocalReleaseManualFlushPreparer registers the process-local release handoff preparer.

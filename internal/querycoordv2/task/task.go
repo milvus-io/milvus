@@ -138,8 +138,19 @@ type baseTask struct {
 	startTs atomic.Time
 }
 
-func newBaseTask(ctx context.Context, source Source, collectionID typeutil.UniqueID, replica *meta.Replica, shard string, taskTag string) *baseTask {
-	ctx, cancel := context.WithCancel(ctx)
+func newBaseTask(ctx context.Context, timeout time.Duration, source Source, collectionID typeutil.UniqueID, replica *meta.Replica, shard string, taskTag string) *baseTask {
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		// The task context bounds every action RPC issued for this task
+		// (executor uses task.Context()), so the deadline propagates through
+		// gRPC to the serving node and cancels server-side work — e.g. an
+		// UnsubDmChannel growing-flush drain stuck on storage failures would
+		// otherwise hold the node's channelOpLock and this scheduler slot
+		// forever.
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
 	ctx, span := otel.Tracer(typeutil.QueryCoordRole).Start(ctx, taskTag)
 	startTs := atomic.Time{}
 	startTs.Store(time.Now())
@@ -361,7 +372,10 @@ func NewSegmentTask(ctx context.Context,
 		}
 	}
 
-	base := newBaseTask(ctx, source, collectionID, replica, shard, fmt.Sprintf("SegmentTask-%s-%d", actions[0].Type().String(), segmentID))
+	// Segment-task timeout is deliberately not enforced on the task context:
+	// large segment loads can legitimately exceed it, and enforcement here has
+	// never been active. Only channel tasks are bounded (see NewChannelTask).
+	base := newBaseTask(ctx, 0, source, collectionID, replica, shard, fmt.Sprintf("SegmentTask-%s-%d", actions[0].Type().String(), segmentID))
 	base.actions = actions
 	return &SegmentTask{
 		baseTask:      base,
@@ -434,7 +448,7 @@ func NewChannelTask(ctx context.Context,
 		}
 	}
 
-	base := newBaseTask(ctx, source, collectionID, replica, channel, fmt.Sprintf("ChannelTask-%s-%s", actions[0].Type().String(), channel))
+	base := newBaseTask(ctx, timeout, source, collectionID, replica, channel, fmt.Sprintf("ChannelTask-%s-%s", actions[0].Type().String(), channel))
 	base.actions = actions
 	return &ChannelTask{
 		baseTask: base,
@@ -477,7 +491,7 @@ func NewLeaderSegmentTask(ctx context.Context,
 	action *LeaderAction,
 ) *LeaderTask {
 	segmentID := action.SegmentID()
-	base := newBaseTask(ctx, source, collectionID, replica, action.Shard, fmt.Sprintf("LeaderSegmentTask-%s-%d", action.Type().String(), segmentID))
+	base := newBaseTask(ctx, 0, source, collectionID, replica, action.Shard, fmt.Sprintf("LeaderSegmentTask-%s-%d", action.Type().String(), segmentID))
 	base.actions = []Action{action}
 	return &LeaderTask{
 		baseTask:  base,
@@ -494,7 +508,7 @@ func NewLeaderPartStatsTask(ctx context.Context,
 	leaderID int64,
 	action *LeaderAction,
 ) *LeaderTask {
-	base := newBaseTask(ctx, source, collectionID, replica, action.Shard, fmt.Sprintf("LeaderPartitionStatsTask-%s", action.Type().String()))
+	base := newBaseTask(ctx, 0, source, collectionID, replica, action.Shard, fmt.Sprintf("LeaderPartitionStatsTask-%s", action.Type().String()))
 	base.actions = []Action{action}
 	return &LeaderTask{
 		baseTask:  base,

@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"path"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"golang.org/x/time/rate"
@@ -32,8 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -41,11 +39,19 @@ const (
 	nonFlushTS uint64 = 0
 )
 
-const defaultGrowingSourceRetryInterval = 100 * time.Millisecond
+// DataNodeFlowGraphBufferDataSize is collection-scoped while write buffers are
+// channel-scoped. Serialize Add/Sub/Delete so one channel cannot delete the
+// series between another channel's update and observation. A zero-valued
+// series is deleted here, at the point the aggregate actually reaches zero;
+// DataSyncService cleanup runs before RemoveChannel on the streaming path and
+// therefore cannot safely own this collector's lifecycle.
+var flowGraphBufferMetricMu sync.Mutex
 
-const growingSourceSyncFailureWarnThreshold = 600
-
-var errGrowingSourceUnavailable = errors.New("growing source is unavailable")
+// growingFlushCancelGrace bounds how long a canceled wait keeps waiting for an
+// in-flight growing-source flush. Whatever is cancellable unwinds within it; an
+// already-started native flush cannot be preempted at all, so waiting longer
+// only turns a timeout into a hang.
+const growingFlushCancelGrace = 30 * time.Second
 
 // WriteBuffer is the interface for channel write buffer.
 // It provides abstraction for channel write buffer and pk bloom filter & L0 delta logic.
@@ -72,15 +78,27 @@ type WriteBuffer interface {
 	GetCheckpoint() *msgpb.MsgPosition
 	// MemorySize returns the size in bytes currently used by this write buffer.
 	MemorySize() int64
+
+	// EvictableMemorySize is the subset of MemorySize the watchdog can actually
+	// reclaim; see the implementation for why they differ.
+	EvictableMemorySize() int64
 	// EvictBuffer evicts buffer to sync manager which match provided sync policies.
 	EvictBuffer(policies ...SyncPolicy)
 	// AllowGrowingSourceFlush returns true if this write buffer may try growing-source flush.
 	AllowGrowingSourceFlush() bool
-	// GetGrowingFlushProgress returns growing-source progress for the given
-	// segments after this write buffer has processed up to fenceTs. If segmentIDs
-	// is empty, all tracked growing-source segments are returned. Otherwise,
-	// tracked growing-source segments are added to the requested segmentIDs.
-	GetGrowingFlushProgress(ctx context.Context, segmentIDs []int64, fenceTs uint64) ([]GrowingFlushSegmentProgress, error)
+	// GetGrowingFlushProgress reports growing-source progress as of right now.
+	// If segmentIDs is empty, all tracked growing-source segments are returned;
+	// otherwise tracked growing-source segments are added to the requested ones.
+	GetGrowingFlushProgress(ctx context.Context, segmentIDs []int64) ([]GrowingFlushSegmentProgress, error)
+	// FenceGrowingSourceAdmission stops new segments on this channel from being
+	// admitted to growing-source mode. The release path calls it before
+	// appending its ManualFlush; see the implementation for why that order is
+	// load-bearing.
+	FenceGrowingSourceAdmission()
+	// WaitGrowingFlushDrained blocks until no segment on this channel still owes
+	// a growing-source flush. The release path must not drop growing segments
+	// before it returns — see the implementation for why.
+	WaitGrowingFlushDrained(ctx context.Context, segmentIDs []int64) error
 	// Close is the method to close and sink current buffer data.
 	Close(ctx context.Context, drop bool)
 }
@@ -94,156 +112,12 @@ type CreateGrowingSegmentInfo struct {
 }
 
 type GrowingFlushSegmentProgress struct {
-	SegmentID          int64
-	TargetOffset       int64
+	SegmentID int64
+	// FlushThroughTs is the WAL position this segment still has to be flushed
+	// through, as a timestamp. Zero means nothing is outstanding.
+	FlushThroughTs     uint64
 	NeedReleaseHandoff bool
 	SourceMode         metacache.FlushSourceMode
-}
-
-type checkpointCandidate struct {
-	segmentID int64
-	position  *msgpb.MsgPosition
-	source    string
-}
-
-type checkpointCandidates struct {
-	candidates *typeutil.ConcurrentMap[string, *checkpointCandidate]
-}
-
-type growingSourceProgress struct {
-	segmentID           int64
-	targetOffset        int64
-	syncingOffset       int64
-	syncing             bool
-	pendingFlush        bool
-	pendingCommitted    *growingSourcePendingCommittedFlush
-	nonRetryableFailure bool
-	batches             []growingSourceProgressBatch
-	failureCount        int64
-	lastFailure         string
-}
-
-type growingSourcePendingCommittedFlush struct {
-	targetOffset  int64
-	manifestPath  string
-	bm25Stats     map[int64]*storage.BM25Stats
-	insertBinlogs map[int64]*datapb.FieldBinlog
-	pkStats       *storage.PrimaryKeyStats
-}
-
-// growingFlushSourceDecision is the in-memory result of decideGrowingFlushSource.
-// sourceType reuses metacache.FlushSourceMode so that the writeBuffer and
-// the metacache share a single concept of which subsystem owns the segment's
-// payload at flush time. sourceType is always FlushSourceWriteBuffer or
-// FlushSourceGrowing here (never Unknown).
-type growingFlushSourceDecision struct {
-	sourceType  metacache.FlushSourceMode
-	sourceState syncmgr.GrowingSourceState
-}
-
-type growingSourceProgressBatch struct {
-	startPosition *msgpb.MsgPosition
-	endPosition   *msgpb.MsgPosition
-	endOffset     int64
-	rowNum        int64
-}
-
-func (p *growingSourceProgress) firstUncommittedPosition() *msgpb.MsgPosition {
-	if len(p.batches) == 0 {
-		return nil
-	}
-	return p.batches[0].startPosition
-}
-
-func (p *growingSourceProgress) checkpointFor(offset int64) *msgpb.MsgPosition {
-	var checkpoint *msgpb.MsgPosition
-	for _, batch := range p.batches {
-		if batch.endOffset <= offset {
-			checkpoint = batch.endPosition
-			continue
-		}
-		break
-	}
-	return checkpoint
-}
-
-func (p *growingSourceProgress) ack(offset int64) {
-	keepIdx := 0
-	for keepIdx < len(p.batches) && p.batches[keepIdx].endOffset <= offset {
-		keepIdx++
-	}
-	p.batches = p.batches[keepIdx:]
-	if p.pendingCommitted != nil && offset >= p.pendingCommitted.targetOffset {
-		p.pendingCommitted = nil
-	}
-	p.syncing = false
-	p.syncingOffset = 0
-	p.failureCount = 0
-	p.lastFailure = ""
-}
-
-func (p *growingSourceProgress) failSync(err error) {
-	p.syncing = false
-	p.syncingOffset = 0
-	p.failureCount++
-	if err != nil {
-		p.lastFailure = err.Error()
-	}
-}
-
-func (p *growingSourceProgress) markNonRetryableFailure() {
-	p.nonRetryableFailure = true
-}
-
-func isGrowingSourceLayoutMismatch(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "Column count mismatch") ||
-		strings.Contains(msg, "Column group size mismatch")
-}
-
-func cloneBM25StatsMap(stats map[int64]*storage.BM25Stats) map[int64]*storage.BM25Stats {
-	if len(stats) == 0 {
-		return nil
-	}
-	cloned := make(map[int64]*storage.BM25Stats, len(stats))
-	for fieldID, stat := range stats {
-		if stat != nil {
-			cloned[fieldID] = stat.Clone()
-		}
-	}
-	return cloned
-}
-
-func getCandidatesKey(segmentID int64, timestamp uint64) string {
-	return fmt.Sprintf("%d-%d", segmentID, timestamp)
-}
-
-func newCheckpointCandiates() *checkpointCandidates {
-	return &checkpointCandidates{
-		candidates: typeutil.NewConcurrentMap[string, *checkpointCandidate](), // segmentID-ts
-	}
-}
-
-func (c *checkpointCandidates) Remove(segmentID int64, timestamp uint64) {
-	c.candidates.Remove(getCandidatesKey(segmentID, timestamp))
-}
-
-func (c *checkpointCandidates) Add(segmentID int64, position *msgpb.MsgPosition, source string) {
-	c.candidates.Insert(getCandidatesKey(segmentID, position.GetTimestamp()), &checkpointCandidate{segmentID, position, source})
-}
-
-func (c *checkpointCandidates) GetEarliestWithDefault(def *checkpointCandidate) *checkpointCandidate {
-	result := def
-	c.candidates.Range(func(_ string, candidate *checkpointCandidate) bool {
-		if result == nil || candidate.position.GetTimestamp() < result.position.GetTimestamp() {
-			result = candidate
-		}
-		return true
-	})
-	return result
 }
 
 func NewWriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, opts ...WriteBufferOption) (WriteBuffer, error) {
@@ -268,16 +142,48 @@ type writeBufferBase struct {
 	mut     sync.RWMutex
 	buffers map[int64]*segmentBuffer // segmentID => segmentBuffer
 
-	syncPolicies   []SyncPolicy
-	syncCheckpoint *checkpointCandidates
-	syncMgr        syncmgr.SyncManager
+	syncPolicies []SyncPolicy
+	syncMgr      syncmgr.SyncManager
 
 	checkpoint     *msgpb.MsgPosition
-	processedTs    uint64
 	flushTimestamp *atomic.Uint64
+	syncCtx        context.Context
+	syncCancel     context.CancelFunc
 
-	errHandler           func(err error)
-	taskObserverCallback func(t syncmgr.Task, err error) // execute when a sync task finished, should be concurrent safe.
+	// metricBytes is what this write buffer has added to the collection-level
+	// DataNodeFlowGraphBufferDataSize gauge and not yet taken back; settled once
+	// on close. See addBufferMetric.
+	// metricMu, not atomics: the settled check and the adjustment it guards must
+	// be ONE step. A payload-release callback that passed an atomic check and
+	// then resumed after settleBufferMetric had already published would emit the
+	// very late Sub this mechanism exists to prevent. Leaf lock — nothing is
+	// acquired while holding it.
+	metricMu      sync.Mutex
+	metricBytes   int64
+	metricSettled bool
+
+	// l0Segments / l0partition map a partition to its current L0 segment and
+	// back. Task construction rotates the mapping before yielding the segment's
+	// payload, so later deletes cannot join an L0 segment already being flushed.
+	l0Segments  map[int64]int64
+	l0partition map[int64]int64
+
+	// growingSettled is closed and replaced every time a growing-source sync
+	// stops being in flight. It is the growing counterpart of
+	// writeBufferSyncEntry.done: without it, waiting for growing syncs to settle
+	// could only be done by polling. Guarded by mut.
+	growingSettled chan struct{}
+
+	// errHandler is fatal: it is used for sync tasks whose payload was yielded
+	// out of the buffer and that have no re-submit path, so the only safe
+	// recovery is process restart plus WAL replay from the (unadvanced)
+	// checkpoint.
+	errHandler func(err error)
+	// growingSourceErrHandler is non-fatal: growing-source syncs read from the
+	// segcore growing segment and are re-submitted by
+	// armRefRetryLocked, so a failed attempt loses nothing.
+	growingSourceErrHandler func(err error)
+	taskObserverCallback    func(t syncmgr.Task, err error) // execute when a sync task finished, should be concurrent safe.
 
 	// Channel-level admission flag for trying growing-source flush. Actual segment
 	// source selection remains sticky in metacache.
@@ -285,20 +191,30 @@ type writeBufferBase struct {
 
 	growingSourceResolver GrowingSourceResolver
 
-	// growingSourceProgress tracks per-segment progress for segments backed by
-	// an external growing source (FlushSourceGrowing). The sticky source
-	// decision itself lives in metacache.SegmentInfo.flushSourceMode
-	growingSourceProgress       map[int64]*growingSourceProgress
-	growingSourceRetryInterval  time.Duration
-	growingSourceRetryScheduled bool
-	growingSourceRetryTimer     *time.Timer
-	flushSourceModeNotifier     FlushSourceModeNotifier
-	closed                      bool
+	// The per-segment growing ledger lives on the segment's refPayload inside
+	// wb.buffers (see payload_ref.go); the sticky source decision itself lives
+	// in metacache.SegmentInfo.flushSourceMode.
+	growingSourceFailureMetricSettled bool
+
+	// growingSourceAdmissionFence blocks NEW segments from choosing
+	// FlushSourceGrowing once a release handoff has been prepared for this
+	// channel. It records the highest provider registration token observed at
+	// fence time; admission reopens only when a provider with a newer token
+	// registers, i.e. the channel has been re-subscribed locally. Guarded by
+	// mut. See decideGrowingFlushSource for why this must exist.
+	growingSourceAdmissionFence uint64
+	flushRetryInterval          time.Duration
+
+	// writeBufferSyncQueues preserves task construction order per segment. The
+	// sync manager owns concurrent Prepare and FIFO Commit/ACK; this queue owns
+	// admission (the reorder window) and whole-task retry.
+	writeBufferSyncQueues   map[int64]*writeBufferSyncQueue
+	flushSourceModeNotifier FlushSourceModeNotifier
+	dropping                bool
+	closed                  bool
 
 	// pre build logger
-	logger                   *mlog.Logger
-	cpRatedLogger            *mlog.Logger
-	growingSourceRatedLogger *mlog.Logger
+	logger *mlog.Logger
 }
 
 func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (*writeBufferBase, error) {
@@ -311,56 +227,67 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 	if err != nil {
 		return nil, err
 	}
+	syncCtx, syncCancel := context.WithCancel(context.Background())
 
 	allowGrowingSourceFlush := typeutil.AllowGrowingSourceFlush(schema,
 		paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
 		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool())
-	growingSourceResolver := option.growingSourceResolver
-	if growingSourceResolver == nil {
-		// No custom resolver means use the process-local growing source registry.
-		// If registry lookup misses, growing-source data falls back to WriteBuffer.
-		growingSourceResolver = func(segmentID int64, targetOffset int64, endPos *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
-			return syncmgr.DefaultGrowingSourceRegistry().Resolve(channel, segmentID, targetOffset, endPos)
-		}
+	// Segment resolution and the admission fence's registration tokens go
+	// through ONE resolver — see GrowingSourceResolver for why the two must
+	// agree on the authority.
+	var growingSourceResolver GrowingSourceResolver = registryGrowingSourceResolver{channel: channel}
+	if option.growingSourceResolver != nil {
+		growingSourceResolver = option.growingSourceResolver
 	}
-	growingSourceRetryInterval := option.growingSourceRetryInterval
-	if growingSourceRetryInterval == 0 {
-		growingSourceRetryInterval = defaultGrowingSourceRetryInterval
-	}
-
 	wb := &writeBufferBase{
-		channelName:                channel,
-		collectionID:               metacache.Collection(),
-		estSizePerRecord:           estSize,
-		syncMgr:                    syncMgr,
-		metaWriter:                 option.metaWriter,
-		allocator:                  option.idAllocator,
-		buffers:                    make(map[int64]*segmentBuffer),
-		metaCache:                  metacache,
-		syncCheckpoint:             newCheckpointCandiates(),
-		syncPolicies:               option.syncPolicies,
-		flushTimestamp:             flushTs,
-		errHandler:                 option.errorHandler,
-		taskObserverCallback:       option.taskObserverCallback,
-		allowGrowingSourceFlush:    allowGrowingSourceFlush,
-		growingSourceResolver:      growingSourceResolver,
-		growingSourceProgress:      make(map[int64]*growingSourceProgress),
-		growingSourceRetryInterval: growingSourceRetryInterval,
-		flushSourceModeNotifier:    option.flushSourceModeNotifier,
+		channelName:             channel,
+		collectionID:            metacache.Collection(),
+		estSizePerRecord:        estSize,
+		syncMgr:                 syncMgr,
+		metaWriter:              option.metaWriter,
+		allocator:               option.idAllocator,
+		buffers:                 make(map[int64]*segmentBuffer),
+		metaCache:               metacache,
+		syncPolicies:            option.syncPolicies,
+		flushTimestamp:          flushTs,
+		syncCtx:                 syncCtx,
+		syncCancel:              syncCancel,
+		errHandler:              option.errorHandler,
+		growingSourceErrHandler: option.growingSourceErrorHandler,
+		taskObserverCallback:    option.taskObserverCallback,
+		allowGrowingSourceFlush: allowGrowingSourceFlush,
+		growingSourceResolver:   growingSourceResolver,
+		growingSettled:          make(chan struct{}),
+		l0Segments:              make(map[int64]int64),
+		l0partition:             make(map[int64]int64),
+		flushRetryInterval:      option.flushRetryInterval,
+		writeBufferSyncQueues:   make(map[int64]*writeBufferSyncQueue),
+		flushSourceModeNotifier: option.flushSourceModeNotifier,
 	}
 
 	wb.logger = mlog.With(mlog.Int64("collectionID", wb.collectionID),
 		mlog.String("channel", wb.channelName))
-	wb.cpRatedLogger = wb.logger
-	wb.growingSourceRatedLogger = wb.logger
+	if wb.errHandler == nil {
+		wb.errHandler = func(err error) {
+			panic(err)
+		}
+	}
+
+	// A nil handler would silently drop failure reporting for a path that is
+	// expected to fail and retry, so never leave it unset even when the option
+	// struct was built directly (tests, embedded callers). Rate-limited on
+	// purpose: retries run as often as dataNode.flushRetryInterval allows (3s by
+	// default, configurable down to the 100ms ticker floor), so an unrated warn here turns one
+	// stuck segment into a log flood. The per-failure counter and the escalating
+	// summary live in observeGrowingSourceSyncFailureLocked.
+	if wb.growingSourceErrHandler == nil {
+		wb.growingSourceErrHandler = func(err error) {
+			wb.logger.RatedWarn(wb.syncCtx, rate.Limit(1),
+				"growing-source sync failed, will retry", mlog.Err(err))
+		}
+	}
 
 	return wb, nil
-}
-
-func (wb *writeBufferBase) updateProcessedTsLocked(ts uint64) {
-	if ts > wb.processedTs {
-		wb.processedTs = ts
-	}
 }
 
 func (wb *writeBufferBase) HasSegment(segmentID int64) bool {
@@ -383,16 +310,19 @@ func (wb *writeBufferBase) SealAllSegments(ctx context.Context) {
 	defer wb.mut.Unlock()
 
 	// mark all segments sealed if they were growing
-	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
+	//
+	// FlushAll and AlterWAL come through here, and they are fences exactly like a
+	// targeted ManualFlush: pin the checkpoint for the same reason and with the
+	// same lifecycle (see sealActionLocked).
+	// The Sealed state (plus the fence pin sealActionLocked installs) IS the
+	// flush debt, for growing-backed segments exactly like owned ones.
+	wb.metaCache.UpdateSegments(wb.sealActionLocked(),
 		metacache.WithSegmentState(commonpb.SegmentState_Growing))
-	for _, progress := range wb.growingSourceProgress {
-		progress.pendingFlush = true
-	}
 }
 
 func (wb *writeBufferBase) DropPartitions(partitionIDs []int64) {
-	wb.mut.RLock()
-	defer wb.mut.RUnlock()
+	wb.mut.Lock()
+	defer wb.mut.Unlock()
 
 	wb.dropPartitions(partitionIDs)
 }
@@ -402,122 +332,38 @@ func (wb *writeBufferBase) SetFlushTimestamp(flushTs uint64) {
 	defer wb.mut.Unlock()
 
 	wb.flushTimestamp.Store(flushTs)
-	wb.updateProcessedTsLocked(flushTs)
 }
 
 func (wb *writeBufferBase) GetFlushTimestamp() uint64 {
 	return wb.flushTimestamp.Load()
 }
 
-func (wb *writeBufferBase) AllowGrowingSourceFlush() bool {
-	return wb.allowGrowingSourceFlush
-}
+// writeBufferWaitInterval is how often a wait on buffer state re-checks it.
+// There is nothing to subscribe to: the state these waits watch is advanced by
+// timeticks and sync callbacks that hold mut, and waking them individually
+// would put the waiters on the critical path of every buffer mutation.
+const writeBufferWaitInterval = 10 * time.Millisecond
 
-func (wb *writeBufferBase) CheckReleaseManualFlushNeed(segmentIDs []int64) bool {
-	if len(segmentIDs) == 0 {
-		return false
-	}
-
-	wb.mut.RLock()
-	defer wb.mut.RUnlock()
-
-	for _, segmentID := range segmentIDs {
-		segment, ok := wb.metaCache.GetSegmentByID(segmentID)
-		if !ok {
-			return true
-		}
-
-		switch segment.FlushSourceMode() {
-		case metacache.FlushSourceWriteBuffer:
-			continue
-		case metacache.FlushSourceGrowing:
-			if segment.State() == commonpb.SegmentState_Flushed {
-				continue
-			}
-			return true
-		default:
-			return true
-		}
-	}
-	return false
-}
-
-func (wb *writeBufferBase) GetGrowingFlushProgress(ctx context.Context, segmentIDs []int64, fenceTs uint64) ([]GrowingFlushSegmentProgress, error) {
-	if err := wb.waitProcessed(ctx, fenceTs); err != nil {
-		return nil, err
-	}
-
-	wb.mut.RLock()
-	if len(segmentIDs) == 0 {
-		segmentIDs = lo.Keys(wb.growingSourceProgress)
-	} else {
-		segmentIDs = lo.Uniq(append(segmentIDs, lo.Keys(wb.growingSourceProgress)...))
-	}
-
-	progresses := make([]GrowingFlushSegmentProgress, 0, len(segmentIDs))
-	releaseSegments := make([]syncmgr.GrowingSourceReleaseHandoffSegment, 0, len(segmentIDs))
-	for _, segmentID := range segmentIDs {
-		progress := GrowingFlushSegmentProgress{
-			SegmentID:  segmentID,
-			SourceMode: metacache.FlushSourceUnknown,
-		}
-		if segment, ok := wb.metaCache.GetSegmentByID(segmentID); ok {
-			progress.SourceMode = segment.FlushSourceMode()
-		}
-		if growingProgress, ok := wb.growingSourceProgress[segmentID]; ok {
-			progress.TargetOffset = growingProgress.targetOffset
-			progress.NeedReleaseHandoff = wb.growingProgressRequiresHandoff(segmentID, growingProgress)
-			progress.SourceMode = metacache.FlushSourceGrowing
-		}
-		if progress.NeedReleaseHandoff {
-			releaseSegments = append(releaseSegments, syncmgr.GrowingSourceReleaseHandoffSegment{
-				SegmentID:    segmentID,
-				TargetOffset: progress.TargetOffset,
-			})
-		}
-		progresses = append(progresses, progress)
-	}
-	wb.mut.RUnlock()
-
-	if len(releaseSegments) > 0 {
-		if err := syncmgr.DefaultGrowingSourceRegistry().PrepareGrowingSourceReleaseHandoff(ctx, wb.channelName, fenceTs, releaseSegments); err != nil {
-			return nil, err
-		}
-	}
-	return progresses, nil
-}
-
-func (wb *writeBufferBase) growingProgressRequiresHandoff(segmentID int64, progress *growingSourceProgress) bool {
-	if progress == nil {
-		return false
-	}
-	if len(progress.batches) > 0 {
-		return true
-	}
-	segment, ok := wb.metaCache.GetSegmentByID(segmentID)
-	if !ok {
-		return false
-	}
-	return segment.FlushSourceMode() == metacache.FlushSourceGrowing &&
-		segment.State() != commonpb.SegmentState_Flushed
-}
-
-func (wb *writeBufferBase) waitProcessed(ctx context.Context, fenceTs uint64) error {
-	if fenceTs == 0 {
-		return nil
-	}
-	ticker := time.NewTicker(10 * time.Millisecond)
+// waitFor re-evaluates check on a fixed tick until it reports done or fails.
+//
+// check runs under mut.RLock and is handed wb.closed, because "the buffer is
+// going away" means different things to different waiters: for some it is the
+// failure they were guarding against, for others it is a legitimate way to stop
+// waiting. Deciding that belongs to the caller.
+//
+// check runs with mut held, so it must not re-acquire mut, block, await a
+// future, or reserve admission. Reading the metacache is allowed — that is the
+// same lock order (mut -> metacache) the rest of this package already takes,
+// and WaitGrowingFlushDrained relies on it.
+func (wb *writeBufferBase) waitFor(ctx context.Context, check func(closed bool) (bool, error)) error {
+	ticker := time.NewTicker(writeBufferWaitInterval)
 	defer ticker.Stop()
 	for {
 		wb.mut.RLock()
-		processed := wb.processedTs
-		closed := wb.closed
+		done, err := check(wb.closed)
 		wb.mut.RUnlock()
-		if processed >= fenceTs {
-			return nil
-		}
-		if closed {
-			return merr.WrapErrChannelNotFound(wb.channelName)
+		if err != nil || done {
+			return err
 		}
 		select {
 		case <-ctx.Done():
@@ -531,11 +377,217 @@ func (wb *writeBufferBase) MemorySize() int64 {
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 
+	return wb.totalBufferedMemorySizeLocked() + wb.totalWriteBufferPayloadMemorySizeLocked()
+}
+
+// addBufferMetric moves this write buffer's contribution to the collection-level
+// buffered-size gauge and remembers the running total, so close can settle back
+// exactly what this buffer put there.
+//
+// Every Add and every Sub goes through here. The gauge is keyed by
+// (nodeID, collectionID) with no channel label, so a write buffer may only ever
+// adjust it by its own deltas — never assign it an absolute value.
+func (wb *writeBufferBase) addBufferMetric(delta int64) {
+	if delta == 0 {
+		return
+	}
+	wb.metricMu.Lock()
+	defer wb.metricMu.Unlock()
+	if wb.metricSettled {
+		return
+	}
+	wb.metricBytes += delta
+	wb.adjustBufferMetric(delta)
+}
+
+func (wb *writeBufferBase) adjustBufferMetric(delta int64) {
+	nodeID := paramtable.GetStringNodeID()
+	collectionID := fmt.Sprint(wb.collectionID)
+
+	flowGraphBufferMetricMu.Lock()
+	defer flowGraphBufferMetricMu.Unlock()
+
+	gauge := metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(nodeID, collectionID)
+	gauge.Add(float64(delta))
+	metric := &dto.Metric{}
+	if err := gauge.Write(metric); err == nil && metric.GetGauge().GetValue() == 0 {
+		metrics.DataNodeFlowGraphBufferDataSize.DeleteLabelValues(nodeID, collectionID)
+	}
+}
+
+// settleBufferMetric returns this write buffer's whole contribution to the gauge
+// and stops it from accounting again.
+//
+// It must run on every close path, and everything after it is deliberately
+// dropped rather than subtracted: the shutdown wait is BOUNDED, so a task may
+// release its payload after this write buffer has returned its whole
+// contribution and the collection aggregate has reached zero. A late Sub would
+// recreate that series from zero as a negative value.
+func (wb *writeBufferBase) settleBufferMetric() {
+	wb.metricMu.Lock()
+	defer wb.metricMu.Unlock()
+	if wb.metricSettled {
+		return
+	}
+	wb.metricSettled = true
+	if wb.metricBytes != 0 {
+		wb.adjustBufferMetric(-wb.metricBytes)
+		wb.metricBytes = 0
+	}
+}
+
+func (wb *writeBufferBase) totalBufferedMemorySizeLocked() int64 {
 	var size int64
 	for _, segBuf := range wb.buffers {
 		size += segBuf.MemorySize()
 	}
 	return size
+}
+
+func (wb *writeBufferBase) totalWriteBufferPayloadMemorySizeLocked() int64 {
+	var size int64
+	for _, queue := range wb.writeBufferSyncQueues {
+		for _, entry := range queue.entries {
+			// A growing task reports 0: its rows stay in segcore.
+			size += entry.task.PayloadBytes()
+		}
+	}
+	return size
+}
+
+// EvictableMemorySize is the buffered subset the memory watchdog can actually
+// reclaim. Payload already yielded to a task is resident memory too, but it is
+// not evictable: its segment already has an owner, and picking it would only
+// spin. Same for a segment whose queue is full or barred — see
+// writeBufferSyncBlockedLocked.
+func (wb *writeBufferBase) EvictableMemorySize() int64 {
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
+
+	var size int64
+	for segmentID, buffer := range wb.buffers {
+		if wb.writeBufferSyncBlockedLocked(segmentID) {
+			continue
+		}
+		if p, ok := buffer.payload.(*refPayload); ok && p.syncing {
+			continue
+		}
+		size += buffer.MemorySize()
+	}
+	return size
+}
+
+// backpressureWaiterLocked returns a channel to wait on when this channel is
+// holding more data for a segment than one flush is supposed to carry, counting
+// both what is still buffered and what a task already took but has not written
+// yet. Retained payload is the signal that matters: it only grows while flushes
+// are failing, which is exactly when ingestion must slow down.
+//
+// The wait is on payload release, not on task completion. A task releases its
+// payload as soon as object storage accepts it, while completion also waits for
+// metadata — and, when a flush keeps failing, may not happen for a long time.
+func (wb *writeBufferBase) backpressureWaiterLocked() <-chan struct{} {
+	insertLimit := paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt64()
+	deleteLimit := paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()
+	for segmentID, queue := range wb.writeBufferSyncQueues {
+		var insertBytes, deleteBytes int64
+		var waiter *writeBufferSyncEntry
+		for _, entry := range queue.entries {
+			// Growing tasks hold no payload (they report 0): their rows stay in
+			// segcore and never count against the flush budget.
+			task := entry.task
+			insertBytes += task.InsertPayloadBytes()
+			deleteBytes += task.DeletePayloadBytes()
+			if waiter == nil && task.PayloadBytes() > 0 && entry.payloadReleased != nil {
+				waiter = entry
+			}
+		}
+		if buffer := wb.buffers[segmentID]; buffer != nil {
+			if buffer.payload != nil {
+				insertBytes += buffer.payload.UnflushedBytes()
+			}
+			if buffer.deltaBuffer != nil {
+				deleteBytes += buffer.deltaBuffer.size
+			}
+		}
+		insertFull := insertBytes > 0 && insertLimit != noLimit && insertBytes >= insertLimit
+		deleteFull := deleteBytes > 0 && deleteLimit != noLimit && deleteBytes >= deleteLimit
+		if insertFull || deleteFull {
+			if waiter != nil {
+				return waiter.payloadReleased
+			}
+			// No retained payload, but the segment is over budget with a
+			// flush-impaired queue: a Commit/meta phase stuck in retry holds
+			// no payload, and the buffer is excluded from EvictableMemorySize
+			// (force-syncing a blocked segment would violate ordering), so
+			// without waiting on task COMPLETION here the buffered tail grows
+			// without ANY bound. Gated on everFailed so a healthy pipeline
+			// that is merely over budget mid-commit is not penalized. The
+			// bufferManager retry ticker keeps re-driving the stuck task
+			// while ingestion waits on it.
+			if len(queue.entries) > 0 && queue.entries[0].everFailed {
+				return queue.entries[0].done
+			}
+		}
+	}
+	return nil
+}
+
+// waitFlushCapacity slows ingestion while a segment is over its flush budget.
+// The triggering batch is submitted before this wait, so a batch larger than
+// the budget still makes progress and releases its own payload.
+//
+// The wait is BOUNDED. The flowgraph delivers BufferData and an eventual
+// DropChannel on ONE goroutine, so an unbounded wait here can deadlock a drop:
+// the DropChannel that would cancel this context is queued behind the very call
+// that is waiting. After the bound, proceed anyway — the memory watchdog in
+// bufferManager still force-syncs and evicts, and a wedged flowgraph would take
+// the channel down with it.
+func (wb *writeBufferBase) waitFlushCapacity() error {
+	// Fast path first: this runs on the flowgraph goroutine for every msgpack,
+	// including the pure-timetick ones, and a healthy channel never waits. Do
+	// not pay for a timer and a ticker before knowing there is anything to wait
+	// for.
+	waiter, err := wb.backpressureWaiter()
+	if err != nil || waiter == nil {
+		return err
+	}
+
+	bound := time.NewTimer(
+		paramtable.Get().DataNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
+	defer bound.Stop()
+	// This is the flowgraph goroutine — the same one that delivers the
+	// timeticks driveRetries rides on. While it is parked here the flush this
+	// wait depends on is re-driven by the bufferManager retry ticker, which
+	// runs on its own goroutine and reaches this buffer through the manager
+	// map for as long as the channel is registered.
+	for {
+		select {
+		case <-waiter:
+		case <-bound.C:
+			wb.logger.Warn(wb.syncCtx, "flush backpressure wait exceeded its bound; "+
+				"proceeding so a pending DropChannel on this flowgraph goroutine "+
+				"cannot deadlock behind this wait")
+			return nil
+		case <-wb.syncCtx.Done():
+			return merr.WrapErrChannelNotFound(wb.channelName)
+		}
+
+		if waiter, err = wb.backpressureWaiter(); err != nil || waiter == nil {
+			return err
+		}
+	}
+}
+
+// backpressureWaiter reports what this channel has to wait on before it may
+// buffer more data. A nil channel and a nil error mean it may proceed now.
+func (wb *writeBufferBase) backpressureWaiter() (<-chan struct{}, error) {
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
+	if wb.closed || wb.dropping {
+		return nil, merr.WrapErrChannelNotFound(wb.channelName)
+	}
+	return wb.backpressureWaiterLocked(), nil
 }
 
 func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
@@ -552,321 +604,124 @@ func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
 
 	ts := wb.checkpoint.GetTimestamp()
 	segmentIDs := wb.getSegmentsToSync(ts, policies...)
-	var syncTasks []syncmgr.Task
 	if len(segmentIDs) > 0 {
 		logger.Info(context.TODO(), "evict buffer find segments to sync", mlog.Int64s("segmentIDs", segmentIDs))
-		syncTasks = wb.getSyncTasksLocked(context.Background(), segmentIDs)
 	}
 
 	wb.mut.Unlock()
 
-	if len(syncTasks) > 0 {
-		futures := wb.submitSyncTasks(context.Background(), syncTasks)
+	if len(segmentIDs) > 0 {
+		futures := wb.syncSegments(wb.syncCtx, segmentIDs)
 		if len(futures) > 0 {
 			conc.AwaitAll(futures...)
 		}
 	}
 }
 
+// GetCheckpoint returns the position the channel checkpoint may not pass — the
+// minimum over two candidate classes, both DERIVED on every call (from the
+// segment buffers' replay origins and from the metacache seal pins), never
+// registered: the old syncCheckpoint registry (Add/AddUnique/RemoveUnique keys)
+// is gone, its role absorbed by the payload floor lists (owned) and ledger
+// batches (ref).
+//
+// One pass, no candidate slice: this runs on every checkpoint report, so it
+// tracks the running minimum (plus the segment/source it came from, for
+// logging only) in locals.
 func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
-	logger := wb.cpRatedLogger
+	logger := wb.logger
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 
-	candidates := lo.MapToSlice(wb.buffers, func(_ int64, buf *segmentBuffer) *checkpointCandidate {
-		return &checkpointCandidate{buf.segmentID, buf.EarliestPosition(), "segment buffer"}
-	})
-	candidates = lo.Filter(candidates, func(candidate *checkpointCandidate, _ int) bool {
-		return candidate.position != nil
-	})
-	for _, progress := range wb.growingSourceProgress {
-		if position := progress.firstUncommittedPosition(); position != nil {
-			candidates = append(candidates, &checkpointCandidate{
-				segmentID: progress.segmentID,
-				position:  position,
-				source:    "growing-source progress",
-			})
+	var (
+		minPos    *msgpb.MsgPosition
+		minSegID  int64
+		minSource string
+	)
+	consider := func(segmentID int64, position *msgpb.MsgPosition, source string) {
+		if position == nil {
+			return
+		}
+		if minPos == nil || position.GetTimestamp() < minPos.GetTimestamp() {
+			minPos, minSegID, minSource = position, segmentID, source
 		}
 	}
 
-	checkpoint := wb.syncCheckpoint.GetEarliestWithDefault(lo.MinBy(candidates, func(a, b *checkpointCandidate) bool {
-		return a.position.GetTimestamp() < b.position.GetTimestamp()
-	}))
+	for _, buf := range wb.buffers {
+		consider(buf.segmentID, buf.EarliestPosition(), "segment buffer")
+	}
 
-	if checkpoint == nil {
+	// Segments that owe a flush pin the fence that sealed them. This candidate
+	// class is DERIVED from metacache state, not from a registration: it exists
+	// from the seal itself (before any sync task is built, when the buffer is
+	// empty and no other candidate covers the segment) and it vanishes when the
+	// segment leaves the metacache on flush/drop commit, so there is nothing to
+	// unregister and nothing to leak. See sealActionLocked.
+	for _, segment := range wb.metaCache.GetSegmentsBy(metacache.WithSegmentState(pendingFlushStates...)) {
+		consider(segment.SegmentID(), pendingFlushFence(segment), "pending flush fence")
+	}
+
+	if minPos == nil {
 		// all buffer are empty
 		logger.RatedDebug(context.TODO(), rate.Limit(60), "checkpoint from latest consumed msg", mlog.Uint64("cpTimestamp", wb.checkpoint.GetTimestamp()))
 		return wb.checkpoint
 	}
 
 	logger.RatedDebug(context.TODO(), rate.Limit(20), "checkpoint evaluated",
-		mlog.String("cpSource", checkpoint.source),
-		mlog.FieldSegmentID(checkpoint.segmentID),
-		mlog.Uint64("cpTimestamp", checkpoint.position.GetTimestamp()))
-	return checkpoint.position
+		mlog.String("cpSource", minSource),
+		mlog.FieldSegmentID(minSegID),
+		mlog.Uint64("cpTimestamp", minPos.GetTimestamp()))
+	return minPos
+}
+
+// pendingFlushStates are the states in which a segment still owes the flush its
+// seal fence asked for, and therefore still has to pin the channel checkpoint.
+// Dropped is NOT one of them: a dropped segment owes no flush, and its
+// metadata-only drop task deliberately pins nothing — drop authority is
+// coordinator meta, which converges with zero DataNode drop-ack (see the
+// pinning comment in getWriteBufferSyncTask).
+var pendingFlushStates = []commonpb.SegmentState{
+	commonpb.SegmentState_Sealed,
+	commonpb.SegmentState_Flushing,
+}
+
+// pendingFlushState is the single spelling of "state is in the Sealed+Flushing
+// subset" — a segment in it still owes the flush its seal fence asked for.
+func pendingFlushState(state commonpb.SegmentState) bool {
+	return lo.Contains(pendingFlushStates, state)
+}
+
+// terminalSegmentState reports whether state IS a terminal flush/drop debt:
+// pending-flush (Sealed/Flushing) or Dropped. Only the terminal task's commit
+// removes the segment or its buffer.
+func terminalSegmentState(state commonpb.SegmentState) bool {
+	return pendingFlushState(state) || state == commonpb.SegmentState_Dropped
+}
+
+// pendingFlushFence returns the position that a replay must resume from to
+// regenerate this segment's outstanding flush obligation, or nil when the
+// segment owes nothing (never sealed by a pinning path, or no longer owing).
+func pendingFlushFence(segment *metacache.SegmentInfo) *msgpb.MsgPosition {
+	if segment == nil {
+		return nil
+	}
+	if !pendingFlushState(segment.State()) {
+		return nil
+	}
+	return segment.PendingFlushCheckpoint()
 }
 
 func (wb *writeBufferBase) hasWriteBufferInsertPayload(segmentID int64) bool {
 	buffer, ok := wb.buffers[segmentID]
-	return ok && buffer.insertBuffer != nil && !buffer.insertBuffer.IsEmpty()
-}
-
-func (wb *writeBufferBase) hasGrowingSourceProgress(segmentID int64) bool {
-	_, ok := wb.growingSourceProgress[segmentID]
-	return ok
-}
-
-func (wb *writeBufferBase) decideGrowingFlushSource(segmentID int64, targetOffset int64, endPos *msgpb.MsgPosition) growingFlushSourceDecision {
-	// 1. Honor the sticky decision recorded in metacache. Once the first
-	//    insert for a segment commits a source choice, every subsequent call
-	//    must return the same kind so that progress / payload tracking stays
-	//    consistent for the segment's lifetime.
-	if seg, ok := wb.metaCache.GetSegmentByID(segmentID); ok {
-		if seg.GetStorageVersion() != storage.StorageV3 {
-			return growingFlushSourceDecision{sourceType: metacache.FlushSourceWriteBuffer}
-		}
-		switch seg.FlushSourceMode() {
-		case metacache.FlushSourceGrowing:
-			state := wb.getGrowingSourceState(segmentID, targetOffset, endPos)
-			return growingFlushSourceDecision{
-				sourceType:  metacache.FlushSourceGrowing,
-				sourceState: state,
-			}
-		case metacache.FlushSourceWriteBuffer:
-			return growingFlushSourceDecision{sourceType: metacache.FlushSourceWriteBuffer}
-		}
+	if !ok || buffer.payload == nil {
+		return false
 	}
-
-	// 2. Fallback for the brief window where in-memory bookkeeping has been
-	//    populated but the metacache sticky bit hasn't been set yet (e.g. on
-	//    re-entry after a partial state).
-	if wb.hasGrowingSourceProgress(segmentID) {
-		state := wb.getGrowingSourceState(segmentID, targetOffset, endPos)
-		return growingFlushSourceDecision{
-			sourceType:  metacache.FlushSourceGrowing,
-			sourceState: state,
-		}
+	// Ref payloads account ledger rows, but those rows live in segcore — only
+	// OWNED resident rows make a segment a write-buffer-payload segment.
+	if _, ref := buffer.payload.(*refPayload); ref {
+		return false
 	}
-
-	if wb.hasWriteBufferInsertPayload(segmentID) {
-		return growingFlushSourceDecision{sourceType: metacache.FlushSourceWriteBuffer}
-	}
-
-	state := wb.getGrowingSourceState(segmentID, targetOffset, endPos)
-	if state == syncmgr.GrowingSourceUsable || state == syncmgr.GrowingSourcePending {
-		return growingFlushSourceDecision{
-			sourceType:  metacache.FlushSourceGrowing,
-			sourceState: state,
-		}
-	}
-	wb.warnGrowingSourceFallback(segmentID, targetOffset, endPos)
-	return growingFlushSourceDecision{sourceType: metacache.FlushSourceWriteBuffer}
-}
-
-func (wb *writeBufferBase) getGrowingSource(segmentID int64, targetOffset int64, endPos *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
-	if wb.growingSourceResolver == nil {
-		return nil, syncmgr.GrowingSourceUnavailable
-	}
-	return wb.growingSourceResolver(segmentID, targetOffset, endPos)
-}
-
-func (wb *writeBufferBase) getGrowingSourceState(segmentID int64, targetOffset int64, endPos *msgpb.MsgPosition) syncmgr.GrowingSourceState {
-	source, state := wb.getGrowingSource(segmentID, targetOffset, endPos)
-	if source != nil {
-		source.Release()
-	}
-	return state
-}
-
-func (wb *writeBufferBase) warnGrowingSourceFallback(segmentID int64, targetOffset int64, endPos *msgpb.MsgPosition) {
-	if !wb.allowGrowingSourceFlush {
-		return
-	}
-	wb.growingSourceRatedLogger.RatedWarn(context.TODO(), rate.Limit(1), "growing-source source is unavailable, fallback to WriteBuffer",
-		mlog.Int64("segmentID", segmentID),
-		mlog.Int64("targetOffset", targetOffset),
-		mlog.Any("endPosition", endPos),
-	)
-}
-
-func (wb *writeBufferBase) growingSourceProgressSyncable(segmentID int64, progress *growingSourceProgress, rollbackFlushing bool, markSealedFlushing bool) (bool, bool) {
-	if progress.nonRetryableFailure {
-		return false, false
-	}
-	if progress.syncing {
-		if segment, ok := wb.metaCache.GetSegmentByID(segmentID); ok &&
-			(segment.State() == commonpb.SegmentState_Sealed || segment.State() == commonpb.SegmentState_Flushing) {
-			progress.pendingFlush = true
-		}
-		return false, false
-	}
-	if progress.pendingCommitted != nil {
-		if markSealedFlushing {
-			if segment, ok := wb.metaCache.GetSegmentByID(segmentID); ok && segment.State() == commonpb.SegmentState_Sealed {
-				wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Flushing), metacache.WithSegmentIDs(segmentID))
-			}
-		}
-		return true, false
-	}
-	if len(progress.batches) == 0 && !progress.pendingFlush {
-		return false, false
-	}
-	if len(progress.batches) == 0 {
-		segment, ok := wb.metaCache.GetSegmentByID(segmentID)
-		if !ok || (segment.State() != commonpb.SegmentState_Sealed && segment.State() != commonpb.SegmentState_Flushing) {
-			return false, false
-		}
-	}
-	checkpoint := wb.checkpoint
-	if len(progress.batches) > 0 {
-		checkpoint = progress.batches[len(progress.batches)-1].endPosition
-	}
-	if checkpoint == nil {
-		return false, false
-	}
-	state := wb.getGrowingSourceState(segmentID, progress.targetOffset, checkpoint)
-	if state == syncmgr.GrowingSourceUsable {
-		if markSealedFlushing {
-			if segment, ok := wb.metaCache.GetSegmentByID(segmentID); ok && segment.State() == commonpb.SegmentState_Sealed {
-				wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Flushing), metacache.WithSegmentIDs(segmentID))
-			}
-		}
-		return true, false
-	}
-
-	// GetSealedSegmentsPolicy moves Sealed -> Flushing before returning the
-	// candidate. If the growing source is only pending, roll it back so the
-	// sealed segment can be selected again when the source catches up.
-	if rollbackFlushing {
-		if segment, ok := wb.metaCache.GetSegmentByID(segmentID); ok && segment.State() == commonpb.SegmentState_Flushing {
-			wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed), metacache.WithSegmentIDs(segmentID))
-		}
-	}
-	return false, true
-}
-
-func (wb *writeBufferBase) scheduleGrowingSourceRetryLocked() {
-	if wb.closed || wb.growingSourceRetryScheduled || wb.growingSourceRetryInterval < 0 || len(wb.growingSourceProgress) == 0 {
-		return
-	}
-	wb.growingSourceRetryScheduled = true
-	interval := wb.growingSourceRetryInterval
-	wb.growingSourceRetryTimer = time.AfterFunc(interval, wb.retryGrowingSourceProgress)
-}
-
-func (wb *writeBufferBase) retryGrowingSourceProgress() {
-	wb.mut.Lock()
-	wb.growingSourceRetryScheduled = false
-	wb.growingSourceRetryTimer = nil
-	if wb.closed || wb.checkpoint == nil || len(wb.growingSourceProgress) == 0 {
-		wb.mut.Unlock()
-		return
-	}
-
-	segmentIDs, retryNeeded := wb.getGrowingSourceSegmentsToRetry()
-	if retryNeeded {
-		wb.scheduleGrowingSourceRetryLocked()
-	}
-
-	var syncTasks []syncmgr.Task
-	if len(segmentIDs) > 0 {
-		wb.logger.Info(context.TODO(), "retry growing-source source sync", mlog.Int64s("segmentIDs", segmentIDs))
-		syncTasks = wb.getSyncTasksLocked(context.Background(), segmentIDs)
-	}
-	wb.mut.Unlock()
-
-	if len(syncTasks) > 0 {
-		futures := wb.submitSyncTasks(context.Background(), syncTasks)
-		if len(futures) > 0 {
-			conc.AwaitAll(futures...)
-		}
-	}
-}
-
-// getGrowingSourceSegmentsToRetry returns syncable growing-source progress segments. If a
-// sealed segment becomes usable during retry, it is moved to Flushing before
-// sync so GrowingSourceSyncTask commits it as a flushed segment.
-// **NOTE** shall be invoked within mutex protection
-func (wb *writeBufferBase) getGrowingSourceSegmentsToRetry() ([]int64, bool) {
-	segments := make([]int64, 0, len(wb.growingSourceProgress))
-	retryNeeded := false
-	for segmentID, progress := range wb.growingSourceProgress {
-		syncable, retry := wb.growingSourceProgressSyncable(segmentID, progress, false, true)
-		retryNeeded = retryNeeded || retry
-		if syncable {
-			segments = append(segments, segmentID)
-		}
-	}
-	return segments, retryNeeded
-}
-
-func (wb *writeBufferBase) recordGrowingSourceProgress(inData *InsertData, startPos, endPos *msgpb.MsgPosition, schemaVersion int32, targetOffset int64) error {
-	err := wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
-		PartitionID:   inData.partitionID,
-		SegmentID:     inData.segmentID,
-		StartPos:      startPos,
-		SchemaVersion: schemaVersion,
-	})
-	if err != nil {
-		return err
-	}
-	segment, ok := wb.metaCache.GetSegmentByID(inData.segmentID)
-	if !ok {
-		return merr.WrapErrSegmentNotFound(inData.segmentID)
-	}
-	if segment.GetStorageVersion() != storage.StorageV3 {
-		return merr.WrapErrServiceInternalMsg("growing-source flush requires StorageV3 segment, segmentID=%d storageVersion=%d",
-			inData.segmentID, segment.GetStorageVersion())
-	}
-	progress, ok := wb.growingSourceProgress[inData.segmentID]
-	if !ok {
-		progress = &growingSourceProgress{
-			segmentID:    inData.segmentID,
-			targetOffset: targetOffset - inData.rowNum,
-		}
-		wb.growingSourceProgress[inData.segmentID] = progress
-	}
-	progress.targetOffset += inData.rowNum
-	progress.batches = append(progress.batches, growingSourceProgressBatch{
-		startPosition: startPos,
-		endPosition:   endPos,
-		endOffset:     progress.targetOffset,
-		rowNum:        inData.rowNum,
-	})
-	// SetFlushSourceMode is sticky: only the first call commits the choice,
-	// so we can include it unconditionally here without overriding a prior
-	// FlushSourceWriteBuffer decision.
-	wb.metaCache.UpdateSegments(metacache.SegmentActions(
-		metacache.SetStartPositionIfNil(startPos),
-		metacache.SetFlushSourceMode(metacache.FlushSourceGrowing),
-		wb.updateGrowingSourceBufferedRows(progress),
-	), metacache.WithSegmentIDs(inData.segmentID))
-	wb.notifyFlushSourceMode(inData.segmentID)
-	return nil
-}
-
-func (wb *writeBufferBase) growingSourceTargetOffset(segmentID int64, rows int64) int64 {
-	return wb.growingSourceBaseOffset(segmentID) + rows
-}
-
-func (wb *writeBufferBase) growingSourceBaseOffset(segmentID int64) int64 {
-	if progress, ok := wb.growingSourceProgress[segmentID]; ok {
-		return progress.targetOffset
-	}
-	if segment, ok := wb.metaCache.GetSegmentByID(segmentID); ok {
-		return segment.NumOfRows()
-	}
-	return 0
-}
-
-func (wb *writeBufferBase) updateGrowingSourceBufferedRows(progress *growingSourceProgress) metacache.SegmentAction {
-	return func(info *metacache.SegmentInfo) {
-		bufferedRows := progress.targetOffset - info.FlushedRows() - info.SyncingRows()
-		if bufferedRows < 0 {
-			bufferedRows = 0
-		}
-		metacache.UpdateBufferedRows(bufferedRows)(info)
-	}
+	return buffer.payload.UnflushedRows() != 0 || buffer.payload.UnflushedBytes() != 0
 }
 
 func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
@@ -895,31 +750,48 @@ func (wb *writeBufferBase) sealSegments(ctx context.Context, segmentIDs []int64)
 			continue
 		}
 		existingIDs = append(existingIDs, segmentID)
-		if progress, ok := wb.growingSourceProgress[segmentID]; ok {
-			progress.pendingFlush = true
-		}
 	}
 	// mark segment flushing if segment was growing
 	if len(existingIDs) > 0 {
-		wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
+		wb.metaCache.UpdateSegments(wb.sealActionLocked(),
 			metacache.WithSegmentIDs(existingIDs...),
 			metacache.WithSegmentState(commonpb.SegmentState_Growing))
 	}
 	return nil
 }
 
-func (wb *writeBufferBase) sealAllSegments(ctx context.Context) error {
-	allSegmentIds := wb.metaCache.GetSegmentIDsBy()
-	mlog.Info(ctx, "seal all segments", mlog.Int64s("segmentIDs", allSegmentIds))
-	// mark segment flushing if segment was growing
-	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
-		metacache.WithSegmentIDs(allSegmentIds...),
-		metacache.WithSegmentState(commonpb.SegmentState_Growing))
-	return nil
+// sealActionLocked marks a growing segment sealed AND pins the channel
+// checkpoint at the position whose replay redelivers the fence that sealed it.
+//
+// The pin has to exist from HERE, not from the moment the resulting sync task is
+// built. A segment whose write buffer was already drained by an earlier periodic
+// flush owes a metadata-only flush: there is no buffer to pin the checkpoint, no
+// growing-source progress, and no sync entry yet. Without this, GetCheckpoint
+// could report (and the reporter persist) a position past the fence; a crash
+// there replays from beyond the ManualFlush, the fence is never redelivered, and
+// the segment stays Growing until DataCoord's idle seal.
+//
+// The pin is DERIVED, not registered: GetCheckpoint reads it back off the
+// metacache segment, which is removed when the flush (or drop) commits. There is
+// no key for any path to forget to release.
+//
+// Combined into one action under the Growing filter on purpose: only the segment
+// that actually transitions Growing -> Sealed here gets pinned, so a re-seal of
+// an already sealed segment cannot move its pin (the action is set-if-nil as
+// well, so both layers agree that the earliest fence wins).
+//
+// Caller must hold wb.mut, which is also what makes wb.checkpoint the position
+// of the pack that carries this seal.
+func (wb *writeBufferBase) sealActionLocked() metacache.SegmentAction {
+	return metacache.MergeSegmentAction(
+		metacache.UpdateState(commonpb.SegmentState_Sealed),
+		metacache.SetPendingFlushCheckpointIfNil(typeutil.Clone(wb.checkpoint)),
+	)
 }
 
 func (wb *writeBufferBase) dropPartitions(partitionIDs []int64) {
-	// mark segment dropped if partition was dropped
+	// mark segment dropped if partition was dropped. The Dropped state IS the
+	// drop debt for both payload modes.
 	segIDs := wb.metaCache.GetSegmentIDsBy(metacache.WithPartitionIDs(partitionIDs))
 	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Dropped),
 		metacache.WithSegmentIDs(segIDs...),
@@ -927,10 +799,168 @@ func (wb *writeBufferBase) dropPartitions(partitionIDs []int64) {
 }
 
 func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) []*conc.Future[struct{}] {
+	result := make([]*conc.Future[struct{}], 0, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		futures, stop := wb.syncSegment(ctx, segmentID)
+		result = append(result, futures...)
+		if stop {
+			break
+		}
+	}
+	return result
+}
+
+// buildSyncSubmissionsWithAdmission owns the reserve → build-under-lock →
+// submit scaffold shared by syncSegment and submitDropSegment.
+//
+// It reserves an admission slot BEFORE taking wb.mut — admission may block
+// while completion callbacks need wb.mut to finish older tasks and return
+// their own slots — then runs buildLocked under wb.mut with the slot held, and
+// submits whatever buildLocked produced after releasing the lock.
+//
+// buildLocked returns the submissions to submit and whether slot ownership was
+// transferred (attached to a write-buffer entry, or left on a submission whose
+// completion callback releases it). Unless transferred, the slot is released
+// here — the single deferred Release below is the only release site on every
+// path through this helper, so each caller keeps exactly one release per path.
+//
+// A reserve error or timeout is reported to the caller untouched (no slot is
+// held on either): the periodic path keeps the payload buffered for a later
+// round, while the drop path escalates.
+func (wb *writeBufferBase) buildSyncSubmissionsWithAdmission(
+	ctx context.Context,
+	buildLocked func(admission syncmgr.SyncTaskAdmission) (submissions []syncTaskSubmission, transferred bool, err error),
+) (futures []*conc.Future[struct{}], timedOut bool, err error) {
+	admission, timedOut, err := wb.reserveSyncTask(ctx)
+	if err != nil || timedOut {
+		return nil, timedOut, err
+	}
+	admissionTransferred := false
+	if admission != nil {
+		defer func() {
+			if !admissionTransferred {
+				admission.Release()
+			}
+		}()
+	}
+
 	wb.mut.Lock()
-	syncTasks := wb.getSyncTasksLocked(ctx, segmentIDs)
+	submissions, transferred, err := buildLocked(admission)
+	admissionTransferred = transferred
 	wb.mut.Unlock()
-	return wb.submitSyncTasks(ctx, syncTasks)
+	if err != nil || len(submissions) == 0 {
+		return nil, false, err
+	}
+	return wb.submitSyncTaskSubmissions(ctx, submissions), false, nil
+}
+
+func (wb *writeBufferBase) syncSegment(ctx context.Context, segmentID int64) ([]*conc.Future[struct{}], bool) {
+	// Recheck lifecycle and task eligibility after admission. A task that owns
+	// yielded data is then submitted before moving to the next segment.
+	stopped := false
+	futures, timedOut, err := wb.buildSyncSubmissionsWithAdmission(ctx,
+		func(admission syncmgr.SyncTaskAdmission) ([]syncTaskSubmission, bool, error) {
+			if wb.closed || wb.dropping {
+				stopped = true
+				return nil, false, nil
+			}
+			tasks := wb.getSyncTasksLocked(ctx, []int64{segmentID})
+			transferred := false
+			if admission != nil && len(tasks) > 0 {
+				entry := wb.writeBufferSyncEntryLocked(tasks[0])
+				if entry == nil {
+					return nil, false, merr.WrapErrServiceInternalMsg(
+						"sync task for segment %d has no write-buffer owner", segmentID)
+				}
+				// An owned entry retains the slot across retries; a growing
+				// entry's completion callback releases it per attempt.
+				entry.admission = admission
+				transferred = true
+			}
+			submissions := make([]syncTaskSubmission, 0, len(tasks))
+			for i, task := range tasks {
+				submission := syncTaskSubmission{task: task}
+				if i == 0 {
+					submission.admission = admission
+				}
+				submissions = append(submissions, submission)
+			}
+			return submissions, transferred, nil
+		})
+	if err != nil {
+		return []*conc.Future[struct{}]{completedSyncFuture(err)}, true
+	}
+	if timedOut {
+		wb.logger.Warn(ctx, "sync task admission wait exceeded its bound; keep payload buffered for a later policy round",
+			mlog.FieldSegmentID(segmentID))
+		return nil, true
+	}
+	if stopped {
+		return nil, true
+	}
+	return futures, false
+}
+
+// submitDropSegment builds the final task for one drained segment. Drop has
+// already blocked normal submissions and waited for any existing owner, so the
+// regular per-segment gate remains the only synchronization needed here.
+func (wb *writeBufferBase) submitDropSegment(ctx context.Context, segmentID int64) ([]*conc.Future[struct{}], *writeBufferSyncEntry, error) {
+	closed := false
+	var writeBufferEntry *writeBufferSyncEntry
+	futures, timedOut, err := wb.buildSyncSubmissionsWithAdmission(ctx,
+		func(admission syncmgr.SyncTaskAdmission) ([]syncTaskSubmission, bool, error) {
+			if wb.closed {
+				closed = true
+				return nil, false, nil
+			}
+			if _, ok := wb.refPayloadLocked(segmentID); ok {
+				// The drop debt is the metacache Dropped state; record it so the
+				// ref task builder freezes the drop flag and syncDropSegment's
+				// re-drive loop can read the same debt back.
+				wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Dropped),
+					metacache.WithSegmentIDs(segmentID))
+			}
+			task, err := wb.getSyncTask(ctx, segmentID)
+			if err != nil {
+				if errors.Is(err, errGrowingSourceUnavailable) {
+					wb.noteGrowingSourceCandidateFailed(segmentID)
+				}
+				return nil, false, err
+			}
+			if task == nil {
+				return nil, false, merr.WrapErrServiceInternalMsg("segment %d still has an outstanding sync owner", segmentID)
+			}
+			if _, growing := task.(*syncmgr.GrowingSourceSyncTask); !growing {
+				task.SetDrop()
+			}
+			entry := wb.writeBufferSyncEntryLocked(task)
+			if entry == nil {
+				return nil, false, merr.WrapErrServiceInternalMsg(
+					"drop sync task for segment %d has no write-buffer owner", segmentID)
+			}
+			entry.admission = admission
+			// Only the owned path hands its queue entry back to the caller to
+			// wait on; the growing path's caller waits on the future instead
+			// (its owesDrop loop re-drives until the drop settles).
+			if _, owned := task.(*syncmgr.SyncTask); owned {
+				writeBufferEntry = entry
+			}
+			return []syncTaskSubmission{{
+				task:      task,
+				admission: admission,
+			}}, admission != nil, nil
+		})
+	if err != nil {
+		return nil, nil, err
+	}
+	if timedOut {
+		return nil, nil, merr.WrapErrServiceInternalMsg(
+			"sync task admission wait exceeded its bound while dropping segment %d", segmentID)
+	}
+	if closed {
+		return nil, nil, nil
+	}
+	return futures, writeBufferEntry, nil
 }
 
 // getSyncTasksLocked builds sync tasks and moves payload out of the write buffer.
@@ -941,10 +971,16 @@ func (wb *writeBufferBase) getSyncTasksLocked(ctx context.Context, segmentIDs []
 		syncTask, err := wb.getSyncTask(ctx, segmentID)
 		if err != nil {
 			if errors.Is(err, merr.ErrSegmentNotFound) {
+				if _, ok := wb.refPayloadLocked(segmentID); ok {
+					mlog.Fatal(ctx, "growing-source ledger outlived its metacache segment; refusing to discard checkpointed data",
+						mlog.FieldSegmentID(segmentID),
+						mlog.FieldVChannel(wb.channelName),
+						mlog.Err(err))
+				}
 				mlog.Warn(ctx, "segment not found in meta", mlog.FieldSegmentID(segmentID))
 				continue
-			} else if errors.Is(err, errGrowingSourceUnavailable) && wb.hasGrowingSourceProgress(segmentID) {
-				wb.rollbackGrowingSourceSyncCandidate(segmentID)
+			} else if errors.Is(err, errGrowingSourceUnavailable) {
+				wb.noteGrowingSourceCandidateFailed(segmentID)
 				mlog.Warn(ctx, "growing source unavailable when building sync task, retry later",
 					mlog.Int64("segmentID", segmentID),
 					mlog.String("channel", wb.channelName),
@@ -954,98 +990,9 @@ func (wb *writeBufferBase) getSyncTasksLocked(ctx context.Context, segmentIDs []
 				mlog.Fatal(ctx, "failed to get sync task", mlog.FieldSegmentID(segmentID), mlog.Err(err))
 			}
 		}
-		result = append(result, syncTask)
-	}
-	return result
-}
-
-func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []syncmgr.Task) []*conc.Future[struct{}] {
-	result := make([]*conc.Future[struct{}], 0, len(syncTasks))
-	for _, syncTask := range syncTasks {
-		future, err := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
-			if wb.taskObserverCallback != nil {
-				wb.taskObserverCallback(syncTask, err)
-			}
-
-			var resyncGrowingSourceSegmentID int64
-			if growingSourceTask, ok := syncTask.(*syncmgr.GrowingSourceSyncTask); ok {
-				wb.mut.Lock()
-				if progress, exists := wb.growingSourceProgress[growingSourceTask.SegmentID()]; exists {
-					if err != nil {
-						if growingSourceTask.HasCommittedFlush() && growingSourceTask.CommittedManifestPath() != "" {
-							progress.pendingCommitted = &growingSourcePendingCommittedFlush{
-								targetOffset:  growingSourceTask.TargetOffset(),
-								manifestPath:  growingSourceTask.CommittedManifestPath(),
-								bm25Stats:     cloneBM25StatsMap(growingSourceTask.CommittedBM25Stats()),
-								insertBinlogs: growingSourceTask.CommittedInsertBinlogs(),
-								pkStats:       growingSourceTask.CommittedPKStats(),
-							}
-						}
-						progress.failSync(err)
-						wb.rollbackGrowingSourceSyncTaskLocked(growingSourceTask)
-						wb.observeGrowingSourceSyncFailureLocked(growingSourceTask.SegmentID(), progress)
-						if isGrowingSourceLayoutMismatch(err) {
-							progress.markNonRetryableFailure()
-							mlog.Error(ctx, "growing-source source sync failed with non-retryable layout mismatch",
-								mlog.Int64("segmentID", growingSourceTask.SegmentID()),
-								mlog.Int64("targetOffset", progress.targetOffset),
-								mlog.String("lastFailure", progress.lastFailure))
-						} else {
-							wb.scheduleGrowingSourceRetryLocked()
-						}
-					} else {
-						if growingSourceTask.IsFlush() {
-							progress.pendingFlush = false
-						}
-						progress.ack(growingSourceTask.TargetOffset())
-						wb.resetGrowingSourceSyncFailureMetric(growingSourceTask.SegmentID())
-						if progress.pendingFlush && len(progress.batches) == 0 {
-							segment, ok := wb.metaCache.GetSegmentByID(growingSourceTask.SegmentID())
-							if !ok {
-								delete(wb.growingSourceProgress, growingSourceTask.SegmentID())
-							} else {
-								if segment.State() == commonpb.SegmentState_Sealed {
-									wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Flushing), metacache.WithSegmentIDs(growingSourceTask.SegmentID()))
-								}
-								resyncGrowingSourceSegmentID = growingSourceTask.SegmentID()
-							}
-						} else if len(progress.batches) == 0 {
-							segment, ok := wb.metaCache.GetSegmentByID(growingSourceTask.SegmentID())
-							if growingSourceTask.IsFlush() || !ok ||
-								segment.State() == commonpb.SegmentState_Flushed ||
-								segment.State() == commonpb.SegmentState_Dropped {
-								delete(wb.growingSourceProgress, growingSourceTask.SegmentID())
-							}
-						}
-					}
-				}
-				wb.mut.Unlock()
-			}
-			if resyncGrowingSourceSegmentID != 0 {
-				wb.syncSegments(context.Background(), []int64{resyncGrowingSourceSegmentID})
-			}
-
-			if err != nil {
-				return err
-			}
-
-			if syncTask.StartPosition() != nil {
-				wb.syncCheckpoint.Remove(syncTask.SegmentID(), syncTask.StartPosition().GetTimestamp())
-			}
-
-			if syncTask.IsFlush() {
-				wb.metaCache.RemoveSegments(metacache.WithSegmentIDs(syncTask.SegmentID()))
-				mlog.Info(ctx, "flushed segment removed", mlog.FieldSegmentID(syncTask.SegmentID()), mlog.String("channel", syncTask.ChannelName()))
-			}
-			return nil
-		})
-		if err != nil {
-			if growingSourceTask, ok := syncTask.(*syncmgr.GrowingSourceSyncTask); ok {
-				growingSourceTask.ReleaseSource()
-			}
-			mlog.Fatal(ctx, "failed to sync data", mlog.Int64("segmentID", syncTask.SegmentID()), mlog.Err(err))
+		if syncTask != nil {
+			result = append(result, syncTask)
 		}
-		result = append(result, future)
 	}
 	return result
 }
@@ -1053,132 +1000,57 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 // getSegmentsToSync applies all policies to get segments list to sync.
 // **NOTE** shall be invoked within mutex protection
 func (wb *writeBufferBase) getSegmentsToSync(ts typeutil.Timestamp, policies ...SyncPolicy) []int64 {
-	buffers := lo.Values(wb.buffers)
-	segments := typeutil.NewSet[int64]()
+	// Empty buffers are invisible to policies. Buffers now persist across flush
+	// rounds (their in-flight floors must stay reachable for GetCheckpoint), so
+	// without this filter an empty segment with a flush in flight would be
+	// re-selected by buffer-shape policies and produce no-op tasks; segments
+	// that owe a flush without data are selected by the metacache-driven
+	// Sealed/Dropped policies, exactly as before. Growing-backed (ref) buffers
+	// enter the same policy input: their IsFull carries the growing trigger,
+	// their MinTimestamp the staleness trigger.
+	buffers := lo.Filter(lo.Values(wb.buffers), func(buffer *segmentBuffer, _ int) bool {
+		return buffer != nil && !buffer.IsEmpty()
+	})
+	// Order-preserving dedup, not a Set: GetSealedSegmentsPolicy returns already
+	// claimed (Flushing) segments before merely due (Sealed) ones, and that
+	// order is the point — a claimed flush is finished before a new one starts.
+	seen := typeutil.NewSet[int64]()
+	var segments []int64
+	add := func(ids ...int64) {
+		for _, id := range ids {
+			if !seen.Contain(id) {
+				seen.Insert(id)
+				segments = append(segments, id)
+			}
+		}
+	}
 	for _, policy := range policies {
 		result := policy.SelectSegments(buffers, ts)
 		if len(result) > 0 {
 			mlog.Info(context.TODO(), "SyncPolicy selects segments", mlog.Int64s("segmentIDs", result), mlog.String("reason", policy.Reason()))
-			segments.Insert(result...)
+			add(result...)
 		}
 	}
-	for segmentID, progress := range wb.growingSourceProgress {
-		if len(policies) == 0 || wb.growingSourceProgressSelectedByPolicy(ts, segmentID, progress) {
-			segments.Insert(segmentID)
-		}
-	}
-
-	return lo.Filter(segments.Collect(), func(segmentID int64, _ int) bool {
-		progress, ok := wb.growingSourceProgress[segmentID]
+	return lo.Filter(segments, func(segmentID int64, _ int) bool {
+		payload, ok := wb.refPayloadLocked(segmentID)
 		if !ok {
-			return true
+			return !wb.deferWriteBufferSyncLocked(segmentID)
 		}
-		syncable, retry := wb.growingSourceProgressSyncable(segmentID, progress, segments.Contain(segmentID), false)
-		if retry {
-			wb.scheduleGrowingSourceRetryLocked()
+		// An outstanding rate limit binds here too. Policy selection runs on every
+		// timetick, so without this a segment whose source just came back Pending
+		// would be re-probed (and its task rebuilt) immediately, ignoring the
+		// interval the retry drive honors. The debt lives on the same per-segment
+		// queue intent the owned path uses.
+		queue := wb.writeBufferSyncQueues[segmentID]
+		if queue != nil && queue.intent.owes && !queue.intent.due(time.Now(), wb.retryInterval()) {
+			return false
+		}
+		syncable := wb.refPayloadSyncableLocked(segmentID, payload)
+		if syncable && queue != nil && queue.intent.owes {
+			queue.intent.attempted(time.Now())
 		}
 		return syncable
 	})
-}
-
-func (wb *writeBufferBase) growingSourceProgressSelectedByPolicy(ts typeutil.Timestamp, segmentID int64, progress *growingSourceProgress) bool {
-	if progress == nil {
-		return false
-	}
-	if progress.nonRetryableFailure {
-		return false
-	}
-	if progress.pendingFlush {
-		return true
-	}
-	segment, ok := wb.metaCache.GetSegmentByID(segmentID)
-	if ok {
-		switch segment.State() {
-		case commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushing, commonpb.SegmentState_Dropped:
-			return true
-		}
-		if wb.growingSourceProgressFull(segment, progress) {
-			return true
-		}
-	}
-	startPos := progress.firstUncommittedPosition()
-	if startPos == nil {
-		return false
-	}
-	staleDuration := paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)
-	current := tsoutil.PhysicalTime(ts)
-	start := tsoutil.PhysicalTime(startPos.GetTimestamp())
-	return current.Sub(start) > staleDuration
-}
-
-func (wb *writeBufferBase) growingSourceProgressFull(segment *metacache.SegmentInfo, progress *growingSourceProgress) bool {
-	if segment == nil || progress == nil {
-		return false
-	}
-	rows := progress.targetOffset - segment.FlushedRows() - segment.SyncingRows()
-	if rows <= 0 {
-		return false
-	}
-	if wb.estSizePerRecord <= 0 {
-		return false
-	}
-	thresholdRows := int64(wb.getEstBatchSize())
-	if thresholdRows <= 0 {
-		return true
-	}
-	return rows >= thresholdRows
-}
-
-func (wb *writeBufferBase) rollbackGrowingSourceSyncCandidate(segmentID int64) {
-	if progress, ok := wb.growingSourceProgress[segmentID]; ok {
-		progress.failSync(errGrowingSourceUnavailable)
-		wb.observeGrowingSourceSyncFailureLocked(segmentID, progress)
-		wb.scheduleGrowingSourceRetryLocked()
-	}
-	if segment, ok := wb.metaCache.GetSegmentByID(segmentID); ok && segment.State() == commonpb.SegmentState_Flushing {
-		wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed), metacache.WithSegmentIDs(segmentID))
-	}
-}
-
-func (wb *writeBufferBase) rollbackGrowingSourceSyncTaskLocked(task *syncmgr.GrowingSourceSyncTask) {
-	if task.BatchRows() > 0 {
-		wb.metaCache.UpdateSegments(metacache.AbortSyncing(task.BatchRows()), metacache.WithSegmentIDs(task.SegmentID()))
-	}
-	if task.StartPosition() != nil {
-		wb.syncCheckpoint.Remove(task.SegmentID(), task.StartPosition().GetTimestamp())
-	}
-}
-
-func (wb *writeBufferBase) observeGrowingSourceSyncFailureLocked(segmentID int64, progress *growingSourceProgress) {
-	metrics.DataNodeGrowingSourceSyncFailureCount.WithLabelValues(
-		paramtable.GetStringNodeID(),
-		fmt.Sprint(wb.collectionID),
-		wb.channelName,
-	).Set(float64(progress.failureCount))
-
-	if progress.failureCount < growingSourceSyncFailureWarnThreshold ||
-		progress.failureCount%growingSourceSyncFailureWarnThreshold != 0 {
-		return
-	}
-
-	wb.growingSourceRatedLogger.RatedWarn(context.TODO(), rate.Limit(1), "growing-source source sync keeps failing",
-		mlog.Int64("segmentID", segmentID),
-		mlog.Int64("failureCount", progress.failureCount),
-		mlog.Int64("targetOffset", progress.targetOffset),
-		mlog.String("lastFailure", progress.lastFailure),
-	)
-}
-
-func (wb *writeBufferBase) resetGrowingSourceSyncFailureMetric(segmentID int64) {
-	metrics.DataNodeGrowingSourceSyncFailureCount.WithLabelValues(
-		paramtable.GetStringNodeID(),
-		fmt.Sprint(wb.collectionID),
-		wb.channelName,
-	).Set(0)
-	if progress, ok := wb.growingSourceProgress[segmentID]; ok {
-		progress.failureCount = 0
-		progress.lastFailure = ""
-	}
 }
 
 func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64, timetick uint64) *segmentBuffer {
@@ -1217,21 +1089,6 @@ func (wb *writeBufferBase) notifyFlushSourceMode(segmentID int64) {
 	}
 }
 
-func (wb *writeBufferBase) yieldBuffer(segmentID int64) ([]*storage.InsertData, map[int64]*storage.BM25Stats, *storage.DeleteData, *schemapb.CollectionSchema, *TimeRange, *msgpb.MsgPosition) {
-	buffer, ok := wb.buffers[segmentID]
-	if !ok {
-		return nil, nil, nil, nil, nil, nil
-	}
-
-	// remove buffer and move it to sync manager
-	delete(wb.buffers, segmentID)
-	start := buffer.EarliestPosition()
-	timeRange := buffer.GetTimeRange()
-	insert, bm25, delta, schema := buffer.Yield()
-
-	return insert, bm25, delta, schema, timeRange, start
-}
-
 type InsertData struct {
 	segmentID   int64
 	partitionID int64
@@ -1243,9 +1100,6 @@ type InsertData struct {
 
 	tsField []*storage.Int64FieldData
 	rowNum  int64
-
-	intPKTs map[int64]int64
-	strPKTs map[string]int64
 }
 
 func NewInsertData(segmentID, partitionID int64, cap int, pkType schemapb.DataType) *InsertData {
@@ -1256,14 +1110,6 @@ func NewInsertData(segmentID, partitionID int64, cap int, pkType schemapb.DataTy
 		pkField:     make([]storage.FieldData, 0, cap),
 		pkType:      pkType,
 	}
-
-	switch pkType {
-	case schemapb.DataType_Int64:
-		data.intPKTs = make(map[int64]int64)
-	case schemapb.DataType_VarChar:
-		data.strPKTs = make(map[string]int64)
-	}
-
 	return data
 }
 
@@ -1272,26 +1118,6 @@ func (id *InsertData) Append(data *storage.InsertData, pkFieldData storage.Field
 	id.pkField = append(id.pkField, pkFieldData)
 	id.tsField = append(id.tsField, tsFieldData)
 	id.rowNum += int64(data.GetRowNum())
-
-	timestamps := tsFieldData.GetDataRows().([]int64)
-	switch id.pkType {
-	case schemapb.DataType_Int64:
-		pks := pkFieldData.GetDataRows().([]int64)
-		for idx, pk := range pks {
-			ts, ok := id.intPKTs[pk]
-			if !ok || timestamps[idx] < ts {
-				id.intPKTs[pk] = timestamps[idx]
-			}
-		}
-	case schemapb.DataType_VarChar:
-		pks := pkFieldData.GetDataRows().([]string)
-		for idx, pk := range pks {
-			ts, ok := id.strPKTs[pk]
-			if !ok || timestamps[idx] < ts {
-				id.strPKTs[pk] = timestamps[idx]
-			}
-		}
-	}
 }
 
 func (id *InsertData) GetSegmentID() int64 {
@@ -1304,45 +1130,6 @@ func (id *InsertData) SetBM25Stats(bm25Stats map[int64]*storage.BM25Stats) {
 
 func (id *InsertData) GetDatas() []*storage.InsertData {
 	return id.data
-}
-
-func (id *InsertData) pkExists(pk storage.PrimaryKey, ts uint64) bool {
-	var ok bool
-	var minTs int64
-	switch pk.Type() {
-	case schemapb.DataType_Int64:
-		minTs, ok = id.intPKTs[pk.GetValue().(int64)]
-	case schemapb.DataType_VarChar:
-		minTs, ok = id.strPKTs[pk.GetValue().(string)]
-	}
-
-	return ok && ts > uint64(minTs)
-}
-
-func (id *InsertData) batchPkExists(pks []storage.PrimaryKey, tss []uint64, hits []bool) []bool {
-	if len(pks) == 0 {
-		return nil
-	}
-
-	pkType := pks[0].Type()
-	switch pkType {
-	case schemapb.DataType_Int64:
-		for i := range pks {
-			if !hits[i] {
-				minTs, ok := id.intPKTs[pks[i].GetValue().(int64)]
-				hits[i] = ok && tss[i] > uint64(minTs)
-			}
-		}
-	case schemapb.DataType_VarChar:
-		for i := range pks {
-			if !hits[i] {
-				minTs, ok := id.strPKTs[pks[i].GetValue().(string)]
-				hits[i] = ok && tss[i] > uint64(minTs)
-			}
-		}
-	}
-
-	return hits
 }
 
 func (wb *writeBufferBase) CreateNewGrowingSegment(info CreateGrowingSegmentInfo) error {
@@ -1413,193 +1200,161 @@ func (wb *writeBufferBase) newGrowingSegmentManifestPath(partitionID int64, segm
 }
 
 // bufferDelete buffers DeleteMsg into DeleteData.
-func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKey, tss []typeutil.Timestamp, startPos, endPos *msgpb.MsgPosition) {
+func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKey, tss []typeutil.Timestamp, startPos, endPos *msgpb.MsgPosition) int64 {
 	segBuf := wb.getOrCreateBuffer(segmentID, tss[0])
 	bufSize := segBuf.deltaBuffer.Buffer(pks, tss, startPos, endPos)
-	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(wb.collectionID)).Add(float64(bufSize))
+	wb.addBufferMetric(bufSize)
+	return bufSize
 }
 
 func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (syncmgr.Task, error) {
+	if payload, ok := wb.refPayloadLocked(segmentID); ok && payload.syncing {
+		// Growing-source and write-buffer tasks share one segment-level gate.
+		// The dispatcher would serialize the two tasks, but it cannot prevent the
+		// second one from being built against counters the first has not
+		// committed yet. Nothing to record: the metacache Sealed/Flushing/Dropped
+		// state IS the debt, and the completion callback re-drives from it.
+		return nil, nil
+	}
 	segmentInfo, ok := wb.metaCache.GetSegmentByID(segmentID) // wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(segmentID))
 	if !ok {
 		mlog.Warn(ctx, "segment info not found in meta cache", mlog.FieldSegmentID(segmentID))
 		return nil, merr.WrapErrSegmentNotFound(segmentID)
 	}
-	if progress, ok := wb.growingSourceProgress[segmentID]; ok && !wb.hasWriteBufferInsertPayload(segmentID) {
-		return wb.getGrowingSourceSyncTask(ctx, segmentInfo, progress)
+	if wb.deferWriteBufferSyncLocked(segmentID) {
+		return nil, nil
 	}
-	var batchSize int64
-	var totalMemSize float64 = 0
-	var tsFrom, tsTo uint64
-
-	insert, bm25, delta, schema, timeRange, startPos := wb.yieldBuffer(segmentID)
-	if timeRange != nil {
-		tsFrom, tsTo = timeRange.timestampMin, timeRange.timestampMax
+	// Claim the flush. This is the point where its content is fixed: the seal
+	// arrived in-band on this same flowgraph goroutine (DDNode -> WriteNode), so
+	// every row of a Sealed segment is already buffered and no further row can
+	// be assigned to it. Whatever this task takes IS the segment's tail.
+	//
+	// The claim is one-way. A task that fails to build or to commit leaves the
+	// segment in Flushing, which GetSealedSegmentsPolicy selects, so the retry
+	// resumes THIS flush rather than deciding a new one.
+	if segmentInfo.State() == commonpb.SegmentState_Sealed {
+		wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Flushing),
+			metacache.WithSegmentIDs(segmentID))
+		// Re-read: metacache is copy-on-write, so the snapshot above still says
+		// Sealed, and both task builders derive WithFlush from this state.
+		if segmentInfo, ok = wb.metaCache.GetSegmentByID(segmentID); !ok {
+			mlog.Warn(ctx, "segment vanished while claiming its flush", mlog.FieldSegmentID(segmentID))
+			return nil, merr.WrapErrSegmentNotFound(segmentID)
+		}
 	}
-
-	if startPos != nil {
-		wb.syncCheckpoint.Add(segmentID, startPos, "syncing task")
-	}
-
-	actions := []metacache.SegmentAction{}
-
-	for _, chunk := range insert {
-		batchSize += int64(chunk.GetRowNum())
-		totalMemSize += float64(chunk.GetMemorySize())
-	}
-
-	if delta != nil {
-		totalMemSize += float64(delta.Size())
-	}
-
-	actions = append(actions, metacache.StartSyncing(batchSize))
-	wb.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(segmentID))
-
-	pack := &syncmgr.SyncPack{}
-	pack.WithInsertData(insert).
-		WithDeleteData(delta).
-		WithCollectionID(wb.collectionID).
-		WithPartitionID(segmentInfo.PartitionID()).
-		WithChannelName(wb.channelName).
-		WithSegmentID(segmentID).
-		WithStartPosition(startPos).
-		WithTimeRange(tsFrom, tsTo).
-		WithLevel(segmentInfo.Level()).
-		WithDataSource(metrics.StreamingDataSourceLabel).
-		WithCheckpoint(wb.checkpoint).
-		WithBatchRows(batchSize).
-		WithErrorHandler(wb.errHandler)
-
-	if len(bm25) != 0 {
-		pack.WithBM25Stats(bm25)
+	buffer := wb.buffers[segmentID]
+	if buffer == nil {
+		if segmentInfo.FlushSourceMode() == metacache.FlushSourceGrowing {
+			// A growing-mode segment without a buffer (recovered sticky decision,
+			// e.g. after WAL replay): create its ref buffer so the uniform
+			// payload path below serves it; the normal insert path creates the
+			// buffer at first insert.
+			var err error
+			buffer, err = wb.getOrCreateGrowingSegmentBufferLocked(segmentID)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
-	if segmentInfo.State() == commonpb.SegmentState_Flushing ||
-		segmentInfo.Level() == datapb.SegmentLevel_L0 { // Level zero segment will always be sync as flushed
-		pack.WithFlush()
+	// ONE snapshot, ONE branch: the payload fixes the attempt's content, and
+	// the presence of a growing side selects the task builder. The snapshot may
+	// fail only for ref payloads (source Unavailable/Pending) — a retryable
+	// debt the callers classify via errGrowingSourceUnavailable.
+	var input *flushInput
+	if buffer != nil {
+		var err error
+		input, err = buffer.payload.Snapshot(ctx, wb.checkpoint.GetTimestamp())
+		if err != nil {
+			return nil, err
+		}
 	}
-
-	if segmentInfo.State() == commonpb.SegmentState_Dropped {
-		pack.WithDrop()
+	if input != nil && input.growing != nil {
+		return wb.getGrowingSourceSyncTask(ctx, segmentInfo, buffer, input)
 	}
-
-	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(wb.collectionID)).Sub(totalMemSize)
-
-	task := syncmgr.NewSyncTask().
-		WithAllocator(wb.allocator).
-		WithMetaWriter(wb.metaWriter).
-		WithMetaCache(wb.metaCache).
-		WithSchema(schema).
-		WithSyncPack(pack).
-		WithStorageConfig(packed.CreateStorageConfig()).
-		// The flush write path must keep retrying: aborting surfaces the error
-		// to SyncTask.HandleError, whose default callback panics the datanode.
-		// retry.Do short-circuits InputError-typed errors unless an explicit
-		// RetryErr predicate is supplied, so AttemptAlways alone is not enough.
-		WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),
-			retry.RetryErr(func(error) bool { return true }))
-	return task, nil
+	return wb.getWriteBufferSyncTask(ctx, segmentInfo, buffer, input)
 }
 
-func (wb *writeBufferBase) getGrowingSourceSyncTask(ctx context.Context, segmentInfo *metacache.SegmentInfo, progress *growingSourceProgress) (syncmgr.Task, error) {
-	if segmentInfo.GetStorageVersion() != storage.StorageV3 {
-		return nil, merr.WrapErrServiceInternalMsg("growing-source sync requires StorageV3 segment, segmentID=%d storageVersion=%d",
-			segmentInfo.SegmentID(), segmentInfo.GetStorageVersion())
+// getOrCreateGrowingSegmentBufferLocked wires a segment into growing-source
+// (ref) mode: a segmentBuffer whose payload is a refPayload ledger, seeded
+// from the last durable flush position. Caller must hold wb.mut and have
+// decided FlushSourceGrowing.
+func (wb *writeBufferBase) getOrCreateGrowingSegmentBufferLocked(segmentID int64) (*segmentBuffer, error) {
+	if buffer, ok := wb.buffers[segmentID]; ok {
+		return buffer, nil
 	}
-	targetOffset := progress.targetOffset
-	pendingCommitted := progress.pendingCommitted
-	if pendingCommitted != nil {
-		targetOffset = pendingCommitted.targetOffset
+	segment, ok := wb.metaCache.GetSegmentByID(segmentID)
+	if !ok {
+		return nil, merr.WrapErrSegmentNotFound(segmentID)
 	}
-	checkpoint := progress.checkpointFor(targetOffset)
-	startPos := progress.firstUncommittedPosition()
-	if checkpoint == nil {
-		checkpoint = startPos
+	if segment.GetStorageVersion() != storage.StorageV3 {
+		return nil, merr.WrapErrServiceInternalMsg("growing-source flush requires StorageV3 segment, segmentID=%d storageVersion=%d",
+			segmentID, segment.GetStorageVersion())
 	}
-	if checkpoint == nil {
-		checkpoint = wb.checkpoint
+	payload := newRefPayload(wb, segmentID)
+	// Where this segment was last flushed to. On a fresh segment it is zero; on
+	// one recovered mid-flush it comes from the position the last successful
+	// flush persisted.
+	lastFlushedPosition := segment.LastFlushPosition()
+	if lastFlushedPosition != nil {
+		payload.lastFlushedPosition = typeutil.Clone(lastFlushedPosition)
 	}
-	schemaTimestamp := uint64(0)
-	if startPos != nil {
-		schemaTimestamp = startPos.GetTimestamp()
+	payload.lastFlushedTs = lastFlushedPosition.GetTimestamp()
+	buffer := newSegmentBufferWithPayload(segmentID, payload)
+	wb.buffers[segmentID] = buffer
+	return buffer, nil
+}
+
+// bufferInsert buffers one segment's insert pack through its payload. The
+// payload implementation — owned Go memory vs a growing-source ledger — is
+// chosen once, at buffer creation, by the same sticky decision as before
+// (decideGrowingFlushSource); after that both modes take the identical path.
+func (wb *writeBufferBase) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error {
+	if err := wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+		PartitionID:   inData.partitionID,
+		SegmentID:     inData.segmentID,
+		StartPos:      startPos,
+		SchemaVersion: schemaVersion,
+	}); err != nil {
+		return err
 	}
-	var source syncmgr.GrowingFlushSource
-	if pendingCommitted == nil {
-		var state syncmgr.GrowingSourceState
-		source, state = wb.getGrowingSource(progress.segmentID, targetOffset, checkpoint)
-		if state != syncmgr.GrowingSourceUsable {
-			if source != nil {
-				source.Release()
+	buffer := wb.buffers[inData.segmentID]
+	if buffer == nil {
+		if wb.allowGrowingSourceFlush &&
+			wb.decideGrowingFlushSource(inData.segmentID, endPos) == metacache.FlushSourceGrowing {
+			var err error
+			if buffer, err = wb.getOrCreateGrowingSegmentBufferLocked(inData.segmentID); err != nil {
+				return err
 			}
-			return nil, errors.Wrapf(errGrowingSourceUnavailable, "segment %d state %d", progress.segmentID, state)
+		} else {
+			buffer = wb.getOrCreateBuffer(inData.segmentID, startPos.GetTimestamp())
 		}
+	}
+
+	added, err := buffer.payload.Buffer(inData, startPos, endPos)
+	if err != nil {
+		return err
+	}
+
+	if _, ref := buffer.payload.(*refPayload); ref {
+		// SetFlushSourceMode is sticky: only the first call commits the choice,
+		// so we can include it unconditionally here without overriding a prior
+		// FlushSourceWriteBuffer decision.
+		wb.metaCache.UpdateSegments(metacache.MergeSegmentAction(
+			metacache.SetStartPositionIfNil(startPos),
+			metacache.SetFlushSourceMode(metacache.FlushSourceGrowing),
+			metacache.UpdateBufferedRows(buffer.payload.UnflushedRows()),
+		), metacache.WithSegmentIDs(inData.segmentID))
+		wb.notifyFlushSourceMode(inData.segmentID)
 	} else {
-		var state syncmgr.GrowingSourceState
-		source, state = wb.getGrowingSource(progress.segmentID, targetOffset, checkpoint)
-		if state != syncmgr.GrowingSourceUsable {
-			if source != nil {
-				source.Release()
-				source = nil
-			}
-			wb.logger.Warn(ctx, "growing source unavailable during committed flush ack retry; retrying SaveBinlogPaths without re-flush",
-				mlog.Int64("segmentID", progress.segmentID),
-				mlog.Int64("targetOffset", targetOffset),
-				mlog.Int("state", int(state)))
-		}
+		wb.metaCache.UpdateSegments(metacache.MergeSegmentAction(
+			metacache.UpdateBufferedRows(buffer.payload.UnflushedRows()),
+			metacache.SetStartPositionIfNil(startPos),
+		), metacache.WithSegmentIDs(inData.segmentID))
 	}
 
-	batchSize := targetOffset - segmentInfo.FlushedRows() - segmentInfo.SyncingRows()
-	buildTask := func(batchRows int64) *syncmgr.GrowingSourceSyncTask {
-		task := syncmgr.NewGrowingSourceSyncTask().
-			WithCollectionID(wb.collectionID).
-			WithPartitionID(segmentInfo.PartitionID()).
-			WithSegmentID(progress.segmentID).
-			WithChannelName(wb.channelName).
-			WithStartPosition(startPos).
-			WithCheckpoint(checkpoint).
-			WithBatchRows(batchRows).
-			WithTargetOffset(targetOffset).
-			WithLevel(segmentInfo.Level()).
-			WithMetaCache(wb.metaCache).
-			WithMetaWriter(wb.metaWriter).
-			WithSchema(wb.metaCache.GetSchema(schemaTimestamp)).
-			WithAllocator(wb.allocator).
-			WithStorageConfig(packed.CreateStorageConfig()).
-			WithFailureCallback(wb.errHandler).
-			// Same as above: keep the critical write path retrying despite the
-			// retry.Do InputError short-circuit.
-			WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),
-				retry.RetryErr(func(error) bool { return true }))
-		if source != nil {
-			task.WithSource(source)
-		}
-		if pendingCommitted != nil {
-			task.WithCommittedFlush(pendingCommitted.manifestPath, cloneBM25StatsMap(pendingCommitted.bm25Stats), pendingCommitted.insertBinlogs)
-			task.WithCommittedPKStats(pendingCommitted.pkStats)
-		}
-		if segmentInfo.State() == commonpb.SegmentState_Flushing {
-			task.WithFlush()
-		}
-		if segmentInfo.State() == commonpb.SegmentState_Dropped {
-			task.WithDrop()
-		}
-		return task
-	}
-
-	if batchSize <= 0 {
-		progress.syncing = true
-		progress.syncingOffset = targetOffset
-		return buildTask(0), nil
-	}
-
-	if startPos != nil {
-		wb.syncCheckpoint.Add(progress.segmentID, startPos, "growing source syncing task")
-	}
-	progress.syncing = true
-	progress.syncingOffset = targetOffset
-	wb.metaCache.UpdateSegments(metacache.StartSyncing(batchSize), metacache.WithSegmentIDs(progress.segmentID))
-
-	return buildTask(batchSize), nil
+	wb.addBufferMetric(added)
+	return nil
 }
 
 // getEstBatchSize returns the batch size based on estimated size per record and FlushBufferSize configuration value.
@@ -1608,95 +1363,196 @@ func (wb *writeBufferBase) getEstBatchSize() uint {
 	return uint(sizeLimit / int64(wb.estSizePerRecord))
 }
 
-func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
-	// sink all data and call Drop for meta writer
-	wb.mut.Lock()
-	wb.closed = true
-	wb.growingSourceRetryScheduled = false
-	if wb.growingSourceRetryTimer != nil {
-		wb.growingSourceRetryTimer.Stop()
-		wb.growingSourceRetryTimer = nil
+func (wb *writeBufferBase) waitDropRetry(ctx context.Context) error {
+	interval := wb.retryInterval()
+	if interval < 0 {
+		interval = 0
 	}
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// syncDropSegment uses the same task construction, write path, retry
+// classification, and per-segment ownership as normal syncing. Drop only adds
+// the final task flag and waits synchronously so DropChannel cannot overtake an
+// unfinished retry.
+func (wb *writeBufferBase) syncDropSegment(ctx context.Context, cancel context.CancelFunc, segmentID int64) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		futures, writeBufferEntry, err := wb.submitDropSegment(ctx, segmentID)
+		if err != nil {
+			if errors.Is(err, errGrowingSourceUnavailable) {
+				if err := wb.waitDropRetry(ctx); err != nil {
+					return err
+				}
+				continue
+			}
+			return err
+		}
+
+		if writeBufferEntry != nil {
+			return wb.waitSyncsSettled(ctx, cancel, []*writeBufferSyncEntry{writeBufferEntry})
+		}
+		if len(futures) == 0 {
+			return nil
+		}
+
+		err = conc.BlockOnAll(futures...)
+		if err == nil {
+			// Drop debt is the metacache Dropped state plus a still-live ref
+			// buffer: the drop task's commit deletes the buffer, so a surviving
+			// one means the drop has not settled (e.g. a frozen-manifest replay
+			// committed first) and must be re-driven.
+			wb.mut.RLock()
+			payload, ok := wb.refPayloadLocked(segmentID)
+			dropPending := ok && payload.owesDropLocked()
+			wb.mut.RUnlock()
+			if dropPending {
+				continue
+			}
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if syncmgr.ClassifySyncError(ctx, err) == syncmgr.SyncTerminal {
+			return err
+		}
+		if err := wb.waitDropRetry(ctx); err != nil {
+			return err
+		}
+	}
+}
+
+// abortDrop closes every local ownership path before Close propagates a Drop
+// failure. Data was not committed, so the channel checkpoint must stay pinned for
+// WAL replay. The write buffer has already been removed from its manager and
+// cannot safely accept more work after this point.
+func (wb *writeBufferBase) abortDrop(cancel context.CancelFunc) {
+	cancel()
+	wb.syncCancel()
+	wb.mut.Lock()
+	// First parked sweep: entries already waiting for a retry re-drive would
+	// otherwise burn the whole grace below for nothing (their done never
+	// closes) and leak their payload after it.
+	parked := wb.takeParkedWriteBufferSyncsLocked()
+	waiters := wb.allWriteBufferSyncEntriesLocked()
+	wb.mut.Unlock()
+	wb.abandonParkedWriteBufferSyncs(parked, context.Canceled)
+	// Already canceled, so this enters waitSyncsSettled's bounded branch
+	// immediately: completion callbacks stay the owner of payload and queue
+	// cleanup for anything the grace leaves behind.
+	abortCtx, abortCancel := context.WithCancel(context.Background())
+	abortCancel()
+	_ = wb.waitSyncsSettled(abortCtx, nil, waiters)
+
+	wb.mut.Lock()
+	// buffers (owned and ref payloads alike) are deliberately NOT cleared. They
+	// are one of the two candidate sources GetCheckpoint pins on (the other is
+	// the metacache seal pin); with both empty it falls back to wb.checkpoint —
+	// the latest CONSUMED position — which is past data this abort just declared
+	// un-committed. Clearing them contradicted the guarantee stated above, and
+	// only stayed harmless because the caller had already removed this buffer
+	// from the manager and was about to re-panic. Neither is enforced here.
+	//
+	// Nothing is leaked by keeping them: the whole write buffer is unreachable
+	// after this and dies with its maps. The gauge is a separate concern and is
+	// settled explicitly.
+	wb.settleGrowingSourceFailureMetricLocked()
+	wb.settleBufferMetric()
+	wb.closed = true
+	wb.dropping = false
+	// Second parked sweep, in the same critical section that publishes closed:
+	// an in-flight callback racing the first sweep may have parked its entry
+	// for a retry that will now never come. Any callback after this section
+	// sees closed and goes terminal on its own.
+	parked = wb.takeParkedWriteBufferSyncsLocked()
+	wb.mut.Unlock()
+	wb.abandonParkedWriteBufferSyncs(parked, context.Canceled)
+}
+
+func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
+	wb.mut.Lock()
 	if !drop {
+		wb.closed = true
+		wb.syncCancel()
+		// Entries parked for a retry re-drive have no driver once closed is
+		// set; release them now or their payload is retained forever.
+		parked := wb.takeParkedWriteBufferSyncsLocked()
+		waiters := wb.allWriteBufferSyncEntriesLocked()
 		wb.mut.Unlock()
+		wb.abandonParkedWriteBufferSyncs(parked, context.Canceled)
+		_ = wb.waitSyncsSettled(ctx, nil, waiters)
+		// After the bounded wait, fence metric ownership before late callbacks
+		// can publish against a channel that no longer exists.
+		wb.mut.Lock()
+		wb.settleGrowingSourceFailureMetricLocked()
+		wb.mut.Unlock()
+		wb.settleBufferMetric()
 		return
 	}
-
-	var syncTasks []syncmgr.Task
-	segmentIDs := typeutil.NewSet[int64]()
-	for id := range wb.buffers {
-		segmentIDs.Insert(id)
-	}
-	for id := range wb.growingSourceProgress {
-		segmentIDs.Insert(id)
-	}
-	for _, id := range segmentIDs.Collect() {
-		syncTask, err := wb.getSyncTask(ctx, id)
-		if err != nil {
-			if wb.hasGrowingSourceProgress(id) {
-				mlog.Warn(ctx, "skip growing source sync while dropping write buffer",
-					mlog.Int64("segmentID", id),
-					mlog.String("channel", wb.channelName),
-					mlog.Err(err))
-				delete(wb.growingSourceProgress, id)
-				// flushSourceMode lives on metacache.SegmentInfo and is
-				// reclaimed when the segment is removed from metacache by
-				// the drop path (no manual cleanup needed here).
-			}
-			continue
-		}
-		switch t := syncTask.(type) {
-		case *syncmgr.SyncTask:
-			t.WithDrop()
-		case *syncmgr.GrowingSourceSyncTask:
-			t.WithDrop()
-		}
-		syncTasks = append(syncTasks, syncTask)
-	}
+	dropCtx, dropCancel := context.WithCancel(ctx)
+	defer dropCancel()
+	wb.dropping = true
+	writeBufferWaiters := wb.allWriteBufferSyncEntriesLocked()
 	wb.mut.Unlock()
+	defer func() {
+		if panicValue := recover(); panicValue != nil {
+			wb.mut.RLock()
+			closed := wb.closed
+			wb.mut.RUnlock()
+			if !closed {
+				wb.abortDrop(dropCancel)
+			}
+			panic(panicValue)
+		}
+	}()
 
-	futures := wb.submitDropSyncTasks(ctx, syncTasks)
-	err := conc.AwaitAll(futures...)
-	if err != nil {
-		mlog.Error(ctx, "failed to sink write buffer data", mlog.Err(err))
-		// TODO change to remove channel in the future
+	// Existing logical tasks own older batches and must reach terminal success
+	// before any buffered tail can be turned into the final drop task.
+	if err := wb.waitSyncsSettled(dropCtx, dropCancel, writeBufferWaiters); err != nil {
+		mlog.Error(ctx, "failed to drain outstanding sync tasks while dropping write buffer", mlog.Err(err))
 		panic(err)
 	}
-	err = wb.metaWriter.DropChannel(ctx, wb.channelName)
+
+	wb.mut.Lock()
+	dropSegmentIDs := lo.Keys(wb.buffers)
+	wb.mut.Unlock()
+
+	for _, id := range dropSegmentIDs {
+		if err := wb.syncDropSegment(dropCtx, dropCancel, id); err != nil {
+			mlog.Error(ctx, "failed to sync final drop segment",
+				mlog.Int64("segmentID", id),
+				mlog.String("channel", wb.channelName),
+				mlog.Err(err))
+			panic(err)
+		}
+	}
+	if err := dropCtx.Err(); err != nil {
+		mlog.Error(ctx, "drop context canceled before channel metadata commit", mlog.Err(err))
+		panic(err)
+	}
+	err := wb.metaWriter.DropChannel(dropCtx, wb.channelName)
 	if err != nil {
 		mlog.Error(ctx, "failed to drop channel", mlog.Err(err))
 		// TODO change to remove channel in the future
 		panic(err)
 	}
-}
-
-func (wb *writeBufferBase) submitDropSyncTasks(ctx context.Context, syncTasks []syncmgr.Task) []*conc.Future[struct{}] {
-	futures := make([]*conc.Future[struct{}], 0, len(syncTasks))
-	for _, syncTask := range syncTasks {
-		f, err := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
-			if wb.taskObserverCallback != nil {
-				wb.taskObserverCallback(syncTask, err)
-			}
-
-			if err != nil {
-				return err
-			}
-			if syncTask.StartPosition() != nil {
-				wb.mut.Lock()
-				wb.syncCheckpoint.Remove(syncTask.SegmentID(), syncTask.StartPosition().GetTimestamp())
-				wb.mut.Unlock()
-			}
-			return nil
-		})
-		if err != nil {
-			if growingSourceTask, ok := syncTask.(*syncmgr.GrowingSourceSyncTask); ok {
-				growingSourceTask.ReleaseSource()
-			}
-			mlog.Fatal(ctx, "failed to sync segment", mlog.Int64("segmentID", syncTask.SegmentID()), mlog.Err(err))
-		}
-		futures = append(futures, f)
-	}
-	return futures
+	wb.mut.Lock()
+	wb.closed = true
+	wb.dropping = false
+	wb.syncCancel()
+	wb.settleGrowingSourceFailureMetricLocked()
+	wb.settleBufferMetric()
+	wb.mut.Unlock()
 }
 
 // prepareInsert transfers InsertMsg into organized InsertData grouped by segmentID
@@ -1717,12 +1573,6 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 			partitionID: segmentPartition[segment],
 			data:        make([]*storage.InsertData, 0, len(msgs)),
 			pkField:     make([]storage.FieldData, 0, len(msgs)),
-		}
-		switch pkField.GetDataType() {
-		case schemapb.DataType_Int64:
-			inData.intPKTs = make(map[int64]int64)
-		case schemapb.DataType_VarChar:
-			inData.strPKTs = make(map[string]int64)
 		}
 
 		for _, msg := range msgs {
@@ -1755,27 +1605,6 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 			}
 			if tsFieldData.RowNum() != data.GetRowNum() {
 				return nil, merr.WrapErrServiceInternal("timestamp column row num not match")
-			}
-
-			timestamps := tsFieldData.GetDataRows().([]int64)
-
-			switch pkField.GetDataType() {
-			case schemapb.DataType_Int64:
-				pks := pkFieldData.GetDataRows().([]int64)
-				for idx, pk := range pks {
-					ts, ok := inData.intPKTs[pk]
-					if !ok || timestamps[idx] < ts {
-						inData.intPKTs[pk] = timestamps[idx]
-					}
-				}
-			case schemapb.DataType_VarChar:
-				pks := pkFieldData.GetDataRows().([]string)
-				for idx, pk := range pks {
-					ts, ok := inData.strPKTs[pk]
-					if !ok || timestamps[idx] < ts {
-						inData.strPKTs[pk] = timestamps[idx]
-					}
-				}
 			}
 
 			inData.data = append(inData.data, data)

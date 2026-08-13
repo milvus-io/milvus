@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
+	"github.com/milvus-io/milvus/internal/querynodev2/growingflush"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -1219,6 +1220,17 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error {
 	log := sd.getLogger(ctx)
 
+	// Guarded for the same reason the helper RPCs are: this path now makes a
+	// blocking cross-process call (the growing-source debt check below), so
+	// without the guard Close() can finish lifetime.Wait() and run Deactivate()
+	// and distribution.Close() while a release is still parked in that RPC —
+	// which then resumes against a closed distribution.
+	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
+		log.Warn(ctx, "delegator is not serviceable, skip release segments", mlog.Err(err))
+		return merr.WrapErrServiceUnavailable("delegator", "not serviceable")
+	}
+	defer sd.lifetime.Done()
+
 	targetNodeID := req.GetNodeID()
 	level0Segments := typeutil.NewSet(lo.Map(sd.deleteBuffer.ListL0(), func(segment segments.Segment, _ int) int64 {
 		return segment.ID()
@@ -1237,6 +1249,34 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		mlog.FieldNodeID(req.GetNodeID()),
 		mlog.String("scope", req.GetScope().String()),
 		mlog.Bool("force", force))
+
+	// Refuse the release BEFORE anything is torn down while the local write
+	// buffer still owes a growing-source flush for these growing segments. It has
+	// to happen here, ahead of RemoveDistributions/AddExcludedSegments: excluding
+	// a segment stops the growing segment from ingesting further rows while the
+	// write buffer still expects to pull them from it, which is worse than the
+	// removal itself. force releases skip the worker call entirely (no segment is
+	// dropped), so they need no guard.
+	if !force && req.GetScope() != querypb.DataScope_Historical {
+		// The requested ids are passed to the debt check DIRECTLY, deliberately
+		// NOT intersected with the local segment manager. A segment can owe a
+		// growing-source flush before this node materializes it: the provider
+		// answers GrowingSourcePending for a not-yet-materialized segment and the
+		// write buffer treats Pending as "choose growing source" — stickily — so
+		// the DataNode may already own ref-payload debt for a segment the manager
+		// does not see. Narrowing to materialized growing segments would turn
+		// exactly that case into an empty list, let the release proceed, and the
+		// AddExcludedSegments below would block the segment from ever
+		// materializing — the debt could never settle. Over-asking is safe: the
+		// DataNode preparer narrows to segments with real ref-payload debt
+		// (NeedReleaseHandoff ∧ requested), and CheckReleaseDebt dedups/filters
+		// non-positive ids itself.
+		if err := growingflush.CheckReleaseDebt(ctx, sd.collectionID, sd.vchannelName, req.GetSegmentIDs()); err != nil {
+			log.Warn(ctx, "delegator refuses to release growing segments with outstanding growing-source flush",
+				mlog.Err(err))
+			return err
+		}
+	}
 
 	log.Info(ctx, "delegator start to release segments")
 	// alter distribution first
@@ -1298,15 +1338,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		sd.growingSegmentLock.Unlock()
 	}
 
-	if releaseErr != nil {
-		return releaseErr
-	}
-	if len(growing) > 0 && sd.growingSourceProvider != nil {
-		for _, entry := range growing {
-			sd.growingSourceProvider.ClearReleasePrepared(entry.SegmentID)
-		}
-	}
-	return nil
+	return releaseErr
 }
 
 func (sd *shardDelegator) SyncTargetVersion(action *querypb.SyncAction, partitions []int64) {

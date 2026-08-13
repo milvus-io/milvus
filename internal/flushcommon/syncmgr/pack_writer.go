@@ -40,11 +40,12 @@ type PackWriter interface {
 }
 
 type BulkPackWriter struct {
-	metaCache      metacache.MetaCache
-	schema         *schemapb.CollectionSchema
-	chunkManager   storage.ChunkManager
-	allocator      allocator.Interface
-	writeRetryOpts []retry.Option
+	ioRetry ioRetryPolicy
+
+	metaCache    metacache.MetaCache
+	schema       *schemapb.CollectionSchema
+	chunkManager storage.ChunkManager
+	allocator    allocator.Interface
 
 	// prefetched log ids
 	sizeWritten int64
@@ -53,15 +54,16 @@ type BulkPackWriter struct {
 func NewBulkPackWriter(metaCache metacache.MetaCache,
 	schema *schemapb.CollectionSchema,
 	chunkManager storage.ChunkManager,
-	allocator allocator.Interface, writeRetryOpts ...retry.Option,
-) (*BulkPackWriter, error) {
+	allocator allocator.Interface,
+	ioRetry ioRetryPolicy,
+) *BulkPackWriter {
 	return &BulkPackWriter{
-		metaCache:      metaCache,
-		schema:         schema,
-		chunkManager:   chunkManager,
-		allocator:      allocator,
-		writeRetryOpts: writeRetryOpts,
-	}, nil
+		ioRetry:      ioRetry,
+		metaCache:    metaCache,
+		schema:       schema,
+		chunkManager: chunkManager,
+		allocator:    allocator,
+	}
 }
 
 func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
@@ -95,17 +97,14 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 }
 
 func (bw *BulkPackWriter) writeBlob(ctx context.Context, key string, blob []byte) error {
-	return retry.Handle(ctx, func() (bool, error) {
-		err := bw.chunkManager.Write(ctx, key, blob)
-		if err == nil {
-			return false, nil
+	return retry.Do(ctx, func() error {
+		if err := bw.chunkManager.Write(ctx, key, blob); err != nil {
+			// ToMilvusIoError is what makes this error classifiable, both by the
+			// bounded retry here and by the pipeline that may re-run the task.
+			return storage.ToMilvusIoError(key, err)
 		}
-		err = storage.ToMilvusIoError(key, err)
-		if merr.IsNonRetryableErr(err) {
-			return false, err
-		}
-		return true, err
-	}, bw.writeRetryOpts...)
+		return nil
+	}, ioRetryOptions(ctx, bw.ioRetry)...)
 }
 
 func (bw *BulkPackWriter) writeLog(ctx context.Context, blob *storage.Blob,
@@ -176,8 +175,7 @@ func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[i
 		return nil, err
 	}
 
-	actions := []metacache.SegmentAction{metacache.RollStats(singlePKStats)}
-	bw.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(pack.segmentID))
+	pack.preparedPKStats = singlePKStats
 
 	pkFieldID := serializer.pkField.GetFieldID()
 	binlogs := make([]*datapb.Binlog, 0)
@@ -193,7 +191,7 @@ func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[i
 	}
 
 	if pack.isFlush && pack.level != datapb.SegmentLevel_L0 {
-		mergedStatsBlob, err := serializer.serializeMergedPkStats(pack)
+		mergedStatsBlob, err := serializer.serializeMergedPkStatsWith(pack, singlePKStats)
 		if err != nil {
 			return nil, err
 		}
@@ -247,13 +245,19 @@ func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (
 		}
 	}
 
-	actions := []metacache.SegmentAction{metacache.MergeBm25Stats(pack.bm25Stats)}
-	bw.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(pack.segmentID))
-
 	if pack.isFlush {
 		if pack.level != datapb.SegmentLevel_L0 {
 			if hasBM25Function(bw.schema) {
-				mergedBM25Blob, err := serializer.serializeMergedBM25Stats(pack)
+				segment, ok := bw.metaCache.GetSegmentByID(pack.segmentID)
+				if !ok {
+					return nil, merr.WrapErrSegmentNotFound(pack.segmentID)
+				}
+				combined := metacache.NewEmptySegmentBM25Stats()
+				if prior := segment.GetBM25Stats(); prior != nil {
+					combined = prior.Clone()
+				}
+				combined.Merge(pack.bm25Stats)
+				mergedBM25Blob, err := serializer.serializeMergedBM25StatsFrom(combined)
 				if err != nil {
 					return nil, err
 				}

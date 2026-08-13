@@ -341,9 +341,9 @@ func (_c *MockSegment_ExistIndex_Call) RunAndReturn(run func(int64) bool) *MockS
 	return _c
 }
 
-// FlushData provides a mock function with given fields: ctx, startOffset, endOffset, config
-func (_m *MockSegment) FlushData(ctx context.Context, startOffset int64, endOffset int64, config *FlushConfig) (*FlushResult, error) {
-	ret := _m.Called(ctx, startOffset, endOffset, config)
+// FlushData provides a mock function with given fields: ctx, startTs, endTs, config
+func (_m *MockSegment) FlushData(ctx context.Context, startTs uint64, endTs uint64, config *FlushConfig) (*FlushResult, error) {
+	ret := _m.Called(ctx, startTs, endTs, config)
 
 	if len(ret) == 0 {
 		panic("no return value specified for FlushData")
@@ -351,19 +351,19 @@ func (_m *MockSegment) FlushData(ctx context.Context, startOffset int64, endOffs
 
 	var r0 *FlushResult
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, *FlushConfig) (*FlushResult, error)); ok {
-		return rf(ctx, startOffset, endOffset, config)
+	if rf, ok := ret.Get(0).(func(context.Context, uint64, uint64, *FlushConfig) (*FlushResult, error)); ok {
+		return rf(ctx, startTs, endTs, config)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, *FlushConfig) *FlushResult); ok {
-		r0 = rf(ctx, startOffset, endOffset, config)
+	if rf, ok := ret.Get(0).(func(context.Context, uint64, uint64, *FlushConfig) *FlushResult); ok {
+		r0 = rf(ctx, startTs, endTs, config)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*FlushResult)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64, int64, *FlushConfig) error); ok {
-		r1 = rf(ctx, startOffset, endOffset, config)
+	if rf, ok := ret.Get(1).(func(context.Context, uint64, uint64, *FlushConfig) error); ok {
+		r1 = rf(ctx, startTs, endTs, config)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -378,16 +378,16 @@ type MockSegment_FlushData_Call struct {
 
 // FlushData is a helper method to define mock.On call
 //   - ctx context.Context
-//   - startOffset int64
-//   - endOffset int64
+//   - startTs uint64
+//   - endTs uint64
 //   - config *FlushConfig
-func (_e *MockSegment_Expecter) FlushData(ctx interface{}, startOffset interface{}, endOffset interface{}, config interface{}) *MockSegment_FlushData_Call {
-	return &MockSegment_FlushData_Call{Call: _e.mock.On("FlushData", ctx, startOffset, endOffset, config)}
+func (_e *MockSegment_Expecter) FlushData(ctx interface{}, startTs interface{}, endTs interface{}, config interface{}) *MockSegment_FlushData_Call {
+	return &MockSegment_FlushData_Call{Call: _e.mock.On("FlushData", ctx, startTs, endTs, config)}
 }
 
-func (_c *MockSegment_FlushData_Call) Run(run func(ctx context.Context, startOffset int64, endOffset int64, config *FlushConfig)) *MockSegment_FlushData_Call {
+func (_c *MockSegment_FlushData_Call) Run(run func(ctx context.Context, startTs uint64, endTs uint64, config *FlushConfig)) *MockSegment_FlushData_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(*FlushConfig))
+		run(args[0].(context.Context), args[1].(uint64), args[2].(uint64), args[3].(*FlushConfig))
 	})
 	return _c
 }
@@ -397,7 +397,7 @@ func (_c *MockSegment_FlushData_Call) Return(_a0 *FlushResult, _a1 error) *MockS
 	return _c
 }
 
-func (_c *MockSegment_FlushData_Call) RunAndReturn(run func(context.Context, int64, int64, *FlushConfig) (*FlushResult, error)) *MockSegment_FlushData_Call {
+func (_c *MockSegment_FlushData_Call) RunAndReturn(run func(context.Context, uint64, uint64, *FlushConfig) (*FlushResult, error)) *MockSegment_FlushData_Call {
 	_c.Call.Return(run)
 	return _c
 }

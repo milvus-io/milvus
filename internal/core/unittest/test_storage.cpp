@@ -307,8 +307,8 @@ TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
     config.num_text_columns = 1;
 
     CFlushResult result{};
-    auto status =
-        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+    auto status = FlushGrowingSegmentData(
+        segment.get(), 0, milvus::MAX_TIMESTAMP, &config, &result);
 
     ASSERT_EQ(status.error_code, Success) << status.error_msg;
     ASSERT_EQ(result.num_rows, N);
@@ -554,8 +554,8 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsNonMaterializedFunctionOutput) {
     config.num_column_groups = 1;
 
     CFlushResult result{};
-    auto status =
-        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+    auto status = FlushGrowingSegmentData(
+        segment.get(), 0, milvus::MAX_TIMESTAMP, &config, &result);
 
     ASSERT_EQ(status.error_code, Success) << status.error_msg;
     ASSERT_EQ(result.num_rows, N);
@@ -643,8 +643,8 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsFieldAbsentFromSegmentSchema) {
     config.schema_length = static_cast<int64_t>(schema_blob.size());
 
     CFlushResult result{};
-    auto status =
-        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+    auto status = FlushGrowingSegmentData(
+        segment.get(), 0, milvus::MAX_TIMESTAMP, &config, &result);
 
     ASSERT_EQ(status.error_code, Success) << status.error_msg;
     ASSERT_EQ(result.num_rows, N);
@@ -727,8 +727,8 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsEmptyFunctionOutputColumn) {
     config.schema_length = static_cast<int64_t>(schema_blob.size());
 
     CFlushResult result{};
-    auto status =
-        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+    auto status = FlushGrowingSegmentData(
+        segment.get(), 0, milvus::MAX_TIMESTAMP, &config, &result);
 
     ASSERT_EQ(status.error_code, Success) << status.error_msg;
     ASSERT_EQ(result.num_rows, N);
@@ -818,8 +818,8 @@ TEST_F(StorageTest, LoadGrowingSegmentSkipsDroppedFieldColumnGroup) {
     config.schema_based_pattern = "0|1|100,101";
 
     CFlushResult result{};
-    auto status =
-        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+    auto status = FlushGrowingSegmentData(
+        segment.get(), 0, milvus::MAX_TIMESTAMP, &config, &result);
 
     ASSERT_EQ(status.error_code, Success) << status.error_msg;
     ASSERT_EQ(result.num_rows, N);
@@ -1379,4 +1379,56 @@ TEST(MinioChecksumConfig, NeedChecksumOverrideDispatch) {
     EXPECT_FALSE(Mgr::NeedChecksumOverride("aws"));
     EXPECT_FALSE(Mgr::NeedChecksumOverride(""));
     EXPECT_FALSE(Mgr::NeedChecksumOverride("unknown"));
+}
+
+// NOTE: the fence-partition semantics of FlushGrowingSegmentData (adjacent
+// fences partition the rows exactly; groups never split; start-exclusive /
+// end-inclusive) are covered by value — not just by row count — in
+// segcore/flush_growing_segment_test.cpp (FlushFenceSemanticsWithGroupedTimestamps).
+
+// An empty range is an ordinary outcome once the fences are timestamps, so the
+// primary-key reader must still describe the key type. Returning with
+// pk_data_type at its zero value makes the Go side decode a valid empty result
+// as DataType_None and reject it as unsupported.
+TEST_F(StorageTest, GetGrowingSegmentPrimaryKeysDescribesTypeOnEmptyRange) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 2;
+    std::vector<int64_t> row_ids = {0, 1};
+    std::vector<Timestamp> timestamps = {100, 100};
+    std::vector<int64_t> pks = {7, 8};
+
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    insert_data->set_num_rows(N);
+    insert_data->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
+            .release());
+    segment->PreInsert(N);
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+
+    CPrimaryKeysResult empty{};
+    auto status = GetGrowingSegmentPrimaryKeys(segment.get(), 100, 100, &empty);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(0, empty.num_primary_keys);
+    ASSERT_EQ(pk_fid.get(), empty.pk_field_id);
+    ASSERT_EQ(static_cast<int64_t>(DataType::INT64), empty.pk_data_type);
+    FreePrimaryKeysResult(&empty);
+
+    // The same range that the flush would write returns exactly those keys.
+    CPrimaryKeysResult filled{};
+    status = GetGrowingSegmentPrimaryKeys(segment.get(), 0, 100, &filled);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(N, filled.num_primary_keys);
+    FreePrimaryKeysResult(&filled);
+
+    // An inverted range is rejected outright.
+    CPrimaryKeysResult inverted{};
+    status = GetGrowingSegmentPrimaryKeys(segment.get(), 200, 100, &inverted);
+    ASSERT_NE(status.error_code, Success);
+    FreePrimaryKeysResult(&inverted);
 }

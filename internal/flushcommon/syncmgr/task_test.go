@@ -20,12 +20,16 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -95,7 +99,12 @@ func (s *SyncTaskSuite) SetupSuite() {
 	}
 }
 
+// Each test gets a fresh segment ID: a segment's manifest base path is derived
+// from it, and the flush commit now refuses to write onto a base path that
+// already carries versions it did not read.
 func (s *SyncTaskSuite) SetupTest() {
+	s.segmentID = rand.Int63n(1000000) + 100000
+
 	s.allocator = allocator.NewMockGIDAllocator()
 	s.allocator.AllocF = func(count uint32) (int64, int64, error) {
 		return time.Now().Unix(), int64(count), nil
@@ -272,7 +281,7 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 				Timestamp:   100,
 			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-		err := task.Run(ctx)
+		err := runTaskForTest(ctx, task)
 		s.NoError(err)
 		s.True(isDataReleased(task)) // data should be released after task finished
 	})
@@ -288,7 +297,7 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 				}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
 
-		err := task.Run(ctx)
+		err := runTaskForTest(ctx, task)
 		s.NoError(err)
 		s.True(isDataReleased(task)) // data should be released after task finished
 	})
@@ -304,7 +313,7 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 					Timestamp:   100,
 				}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
-		err := task.Run(ctx)
+		err := runTaskForTest(ctx, task)
 		s.NoError(err)
 		s.True(isDataReleased(task)) // data should be released after task finished
 	})
@@ -320,7 +329,7 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 				Timestamp:   100,
 			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
-		err := task.Run(ctx)
+		err := runTaskForTest(ctx, task)
 		s.NoError(err)
 		s.True(isDataReleased(task)) // data should be released after task finished
 	})
@@ -351,7 +360,7 @@ func (s *SyncTaskSuite) TestRunStorageV3WithFlush() {
 			}))
 	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
 
-	err := task.Run(ctx)
+	err := runTaskForTest(ctx, task)
 	s.NoError(err)
 
 	// Verify that the binlogs were properly captured
@@ -388,7 +397,7 @@ func (s *SyncTaskSuite) TestRunStorageV3ManifestPathUpdated() {
 			}))
 	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
 
-	err := task.Run(ctx)
+	err := runTaskForTest(ctx, task)
 	s.NoError(err)
 
 	// Verify manifest path was updated after write (version should be incremented)
@@ -421,7 +430,7 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
 
-		err := task.Run(ctx)
+		err := runTaskForTest(ctx, task)
 		s.NoError(err)
 	})
 
@@ -442,7 +451,7 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
 
-		err := task.Run(ctx)
+		err := runTaskForTest(ctx, task)
 		s.NoError(err)
 	})
 }
@@ -452,15 +461,31 @@ func (s *SyncTaskSuite) TestRunError() {
 	defer cancel()
 	s.Run("segment_not_found", func() {
 		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(nil, false)
-		flag := false
-		handler := func(_ error) { flag = true }
-		// segment not found should be ignored.
-		task := s.getSuiteSyncTask(new(SyncPack)).WithFailureCallback(handler)
+		// A segment only leaves the metacache after its last task committed, so a
+		// running task that cannot find its segment never wrote its payload.
+		// Reporting success here would let the write buffer advance the channel
+		// checkpoint past rows that exist nowhere.
+		task := s.getSuiteSyncTask(new(SyncPack))
 
-		err := task.Run(ctx)
+		err := runTaskForTest(ctx, task)
 
-		s.NoError(err)
-		s.False(flag)
+		s.Error(err)
+		s.ErrorIs(err, merr.ErrSegmentNotFound)
+	})
+
+	s.metacache.ExpectedCalls = nil
+
+	s.Run("segment_not_found_on_drop", func() {
+		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(nil, false)
+		// Drop is not an exception: dropChannel drains all outstanding tasks
+		// before building the final drop task, so a drop task finding its
+		// segment gone is the same invariant violation as any other task.
+		task := s.getSuiteSyncTask(new(SyncPack).WithDrop())
+
+		err := runTaskForTest(ctx, task)
+
+		s.Error(err)
+		s.ErrorIs(err, merr.ErrSegmentNotFound)
 	})
 
 	s.metacache.ExpectedCalls = nil
@@ -472,35 +497,108 @@ func (s *SyncTaskSuite) TestRunError() {
 	s.metacache.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
 	s.Run("metawrite_fail", func() {
-		s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(errors.New("mocked"))
+		metaErr := errors.New("mocked")
+		s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(metaErr).Once()
+		s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Once()
+		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
 
+		var payloadReleases atomic.Int32
 		task := s.getSuiteSyncTask(new(SyncPack).
+			WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).
 			WithCheckpoint(&msgpb.MsgPosition{
 				ChannelName: s.channelName,
 				MsgID:       []byte{1, 2, 3, 4},
 				Timestamp:   100,
-			}))
-		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1, retry.Attempts(1)))
+			})).WithPayloadAccounting(100, 0, func(int64) {
+			payloadReleases.Add(1)
+		})
+		// The meta writer owns the whole RPC retry budget now — Commit no
+		// longer wraps it in a second loop. Two attempts: first fails,
+		// second succeeds, all inside one writeMeta call.
+		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1, retry.Attempts(2)))
+		s.NotEmpty(task.pack.insertData)
+		s.EqualValues(100, task.PayloadBytes())
+		writeCallCount := func() int {
+			count := 0
+			for _, call := range s.chunkManager.Calls {
+				if call.Method == "Write" {
+					count++
+				}
+			}
+			return count
+		}
 
-		err := task.Run(ctx)
-		s.Error(err)
+		err := task.Prepare(ctx)
+		s.NoError(err)
+		s.True(task.dataWritten)
+		s.Empty(task.pack.insertData, "metadata retry must not retain the row payload")
+		s.Zero(task.PayloadBytes())
+		s.EqualValues(1, payloadReleases.Load())
+		firstWriteCalls := writeCallCount()
+		s.Positive(firstWriteCalls)
+
+		err = task.Commit(ctx)
+		s.NoError(err)
+		s.Empty(task.pack.insertData)
+		s.Equal(firstWriteCalls, writeCallCount(), "metadata retry must not rewrite object-storage payloads")
+		s.EqualValues(1, payloadReleases.Load())
 	})
 
 	s.Run("chunk_manager_save_fail", func() {
 		flag := false
+		var payloadReleases atomic.Int32
 		handler := func(_ error) { flag = true }
 		s.chunkManager.ExpectedCalls = nil
 		s.chunkManager.EXPECT().RootPath().Return("files")
 		s.chunkManager.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(merr.WrapErrIoPermissionDenied("mocked-key", errors.New("mocked")))
 		task := s.getSuiteSyncTask(new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})).
 			WithFailureCallback(handler).
-			WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second))
+			WithPayloadAccounting(100, 0, func(int64) { payloadReleases.Add(1) })
 
-		err := task.Run(ctx)
+		err := runTaskForTest(ctx, task)
 
 		s.Error(err)
-		s.True(flag)
+		s.False(flag, "SyncManager owns the single HandleError call")
+		s.EqualValues(100, task.PayloadBytes())
+		s.Zero(payloadReleases.Load())
+		task.Abandon()
+		s.Zero(task.PayloadBytes())
+		s.EqualValues(1, payloadReleases.Load())
 	})
+}
+
+func (s *SyncTaskSuite) TestPayloadAccountingReleaseIsExactOnce() {
+	pack := new(SyncPack).
+		WithInsertData([]*storage.InsertData{{}}).
+		WithDeleteData(&storage.DeleteData{})
+	var releaseCount atomic.Int32
+	var releasedBytes atomic.Int64
+	task := NewSyncTask().
+		WithSyncPack(pack).
+		WithPayloadAccounting(60, 40, func(released int64) {
+			releaseCount.Add(1)
+			releasedBytes.Add(released)
+		})
+
+	s.EqualValues(100, task.PayloadBytes())
+	s.EqualValues(60, task.InsertPayloadBytes())
+	s.EqualValues(40, task.DeletePayloadBytes())
+
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			task.Abandon()
+		}()
+	}
+	wg.Wait()
+
+	s.Zero(task.PayloadBytes())
+	s.Empty(pack.insertData)
+	s.Nil(pack.deltaData)
+	s.EqualValues(1, releaseCount.Load())
+	s.EqualValues(100, releasedBytes.Load())
 }
 
 func (s *SyncTaskSuite) TestSyncTask_MarshalJSON() {
@@ -535,4 +633,110 @@ func (s *SyncTaskSuite) TestSyncTask_MarshalJSON() {
 
 func TestSyncTask(t *testing.T) {
 	suite.Run(t, new(SyncTaskSuite))
+}
+
+// TestBM25StatsSurvivePrepareAndMergeAtCommit is the regression test for the
+// bm25 lifetime bug: Prepare releases the row payload as soon as object
+// storage accepts it, and that release must NOT take pack.bm25Stats with it —
+// Commit is where the batch's stats are merged into the metacache, and a
+// flush later serializes the compound BM25 blob from exactly that accumulated
+// state. Losing the merge silently corrupts IDF scoring on V1/V2.
+func (s *SyncTaskSuite) TestBM25StatsSurvivePrepareAndMergeAtCommit() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
+	seg := s.createSegment(storage.StorageV1)
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return()
+
+	bm25 := storage.NewBM25Stats()
+	bm25.Append(map[uint32]float32{1: 1, 2: 1, 3: 1})
+	task := s.getSuiteSyncTask(
+		new(SyncPack).
+			WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).
+			WithBM25Stats(map[int64]*storage.BM25Stats{101: bm25}).
+			WithCheckpoint(&msgpb.MsgPosition{
+				ChannelName: s.channelName,
+				MsgID:       []byte{1, 2, 3, 4},
+				Timestamp:   100,
+			}))
+	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
+
+	s.Require().NoError(task.Prepare(ctx))
+	s.Nil(task.pack.insertData, "row payload is released by Prepare")
+	s.NotNil(task.pack.bm25Stats, "bm25 stats must survive the payload release until Commit")
+
+	s.Require().NoError(task.Commit(ctx))
+	merged := seg.GetBM25Stats()
+	s.Require().NotNil(merged, "Commit must merge the batch stats into the metacache")
+	s.Nil(task.pack.bm25Stats, "the additive merge must run at most once")
+}
+
+// TestCommitMetaRetryBudgetIsSingleLayer pins the PRODUCTION retry wiring for
+// SaveBinlogPaths: BrokerMetaWriter is constructed exactly like
+// data_sync_service.go does — no retry options, so retry.Handle uses the
+// framework default budget — and SyncTask.Commit must invoke it WITHOUT a
+// second retry wrapper. The regression this guards against multiplied the two
+// budgets into ~30 RPCs and minutes of wall time per failure, all while the
+// task held its segment's Commit FIFO slot in the dispatcher.
+func (s *SyncTaskSuite) TestCommitMetaRetryBudgetIsSingleLayer() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var calls int32
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).RunAndReturn(
+		func(context.Context, *datapb.SaveBinlogPathsRequest) error {
+			atomic.AddInt32(&calls, 1)
+			return merr.WrapErrServiceInternalMsg("datacoord unavailable")
+		})
+
+	seg := s.createSegment(storage.StorageV1)
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true).Maybe()
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
+
+	// Collapse the retry backoff so the full default budget runs instantly.
+	patched := mockey.Mock(time.After).To(func(time.Duration) <-chan time.Time {
+		ch := make(chan time.Time, 1)
+		ch <- time.Time{}
+		return ch
+	}).Build()
+	defer patched.UnPatch()
+
+	task := s.getSuiteSyncTask(new(SyncPack).WithCheckpoint(&msgpb.MsgPosition{
+		ChannelName: s.channelName,
+		MsgID:       []byte{1, 2, 3, 4},
+		Timestamp:   100,
+	}))
+	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)) // production wiring: no retry opts
+
+	s.Require().NoError(task.Prepare(ctx))
+	s.Require().Error(task.Commit(ctx))
+	s.EqualValues(10, atomic.LoadInt32(&calls),
+		"exactly the meta writer's own default budget — no outer multiplier")
+}
+
+// TestSyncTaskCommitGuardRails covers the two refusal paths at the top of
+// Commit: a task whose Prepare never ran has nothing to publish, and a V3 task
+// that lost its prepared manifest handle must fail loudly instead of reporting
+// an empty manifest path as success.
+func TestSyncTaskCommitGuardRails(t *testing.T) {
+	t.Run("commit_before_prepare", func(t *testing.T) {
+		task := NewSyncTask()
+		err := task.Commit(context.Background())
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.ErrorContains(t, err, "commit before prepare")
+	})
+
+	t.Run("v3_lost_manifest_handle", func(t *testing.T) {
+		task := NewSyncTask()
+		task.dataWritten = true
+		task.v3Prepared = true // preparedV3 == nil, manifestPath == ""
+		err := task.Commit(context.Background())
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.ErrorContains(t, err, "lost its prepared manifest handle")
+	})
 }

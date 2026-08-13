@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 func TestBulkPackWriter_Write(t *testing.T) {
@@ -94,6 +93,7 @@ func TestBulkPackWriter_Write(t *testing.T) {
 	}
 
 	bw := &BulkPackWriter{
+		ioRetry:      defaultIORetryPolicy(),
 		metaCache:    mc,
 		schema:       schema,
 		chunkManager: cm,
@@ -203,14 +203,16 @@ func TestBulkPackWriter_WriteDelta_RetryTransientWriteFailure(t *testing.T) {
 		deletes.Append(pk, ts)
 	}
 
+	// The real production budget: a zero value here would mean unlimited retries
+	// and the test would pass even if the budget were broken.
 	bw := &BulkPackWriter{
-		schema:         schema,
-		chunkManager:   cm,
-		allocator:      allocator.NewLocalAllocator(10000, 100000),
-		writeRetryOpts: []retry.Option{retry.AttemptAlways(), retry.Sleep(time.Millisecond), retry.MaxSleepTime(time.Millisecond)},
+		ioRetry:      defaultIORetryPolicy(),
+		schema:       schema,
+		chunkManager: cm,
+		allocator:    allocator.NewLocalAllocator(10000, 100000),
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	got, err := bw.writeDelta(ctx, new(SyncPack).
 		WithCollectionID(collectionID).
@@ -221,6 +223,39 @@ func TestBulkPackWriter_WriteDelta_RetryTransientWriteFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 2, callCount)
 	require.Equal(t, int64(10), got.GetBinlogs()[0].GetEntriesNum())
+}
+
+// TestBulkPackWriter_WriteLog_ExhaustsTransientRetryBudget proves the writer's
+// inner retry is a bounded BUDGET, not a loop: a persistently-transient write
+// error stops after exactly DefaultIORetryAttempts attempts and hands the error
+// back to the layer that owns whole-task retry.
+func TestBulkPackWriter_WriteLog_ExhaustsTransientRetryBudget(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("files").Maybe()
+	callCount := 0
+	cm.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, key string, data []byte) error {
+			callCount++
+			return errors.New("transient object storage timeout")
+		})
+
+	bw := &BulkPackWriter{
+		ioRetry:      defaultIORetryPolicy(),
+		chunkManager: cm,
+	}
+
+	// The timeout only bounds a broken (unlimited) retry loop; a correct budget
+	// finishes in well under a second.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	blob := &storage.Blob{Value: []byte("data"), RowNum: 1}
+	_, err := bw.writeLog(ctx, blob, "insert_log", "1/2/3/100/1", nil)
+	require.Error(t, err)
+	require.Equal(t, int(DefaultIORetryAttempts), callCount,
+		"a persistently-transient error must consume exactly the configured attempt budget")
 }
 
 func TestValidateStorageV1InsertWritableSchema(t *testing.T) {
@@ -357,12 +392,14 @@ func TestBulkPackWriter_WriteLog_NonRetryableError(t *testing.T) {
 		},
 	}
 
+	// The real production budget: with the zero value (unlimited) this test
+	// could not distinguish "not retried" from "retried forever".
 	bw := &BulkPackWriter{
-		metaCache:      mc,
-		schema:         schema,
-		chunkManager:   cm,
-		allocator:      allocator.NewLocalAllocator(10000, 100000),
-		writeRetryOpts: []retry.Option{retry.AttemptAlways(), retry.MaxSleepTime(10 * time.Second)},
+		ioRetry:      defaultIORetryPolicy(),
+		metaCache:    mc,
+		schema:       schema,
+		chunkManager: cm,
+		allocator:    allocator.NewLocalAllocator(10000, 100000),
 	}
 
 	// Use a timeout context so the test doesn't hang if retry loop is infinite

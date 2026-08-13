@@ -85,6 +85,7 @@ func NewImportTask(req *datapb.ImportRequest,
 		cm:           cm,
 	}
 	task.metaCaches = NewMetaCache(req)
+	initImportSegments(task.metaCaches, req, req.GetStorageVersion(), req.GetUseLoonFfi())
 	return task
 }
 
@@ -141,7 +142,13 @@ func (t *ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {
 }
 
 func (t *ImportTask) Clone() Task {
-	ctx, cancel := context.WithCancel(t.ctx)
+	// Share ctx/cancel across clones instead of deriving a child context. The
+	// manager replaces its stored task with a Clone on every Update, while the
+	// workers keep the instance captured at Execute time — a child context on
+	// the clone meant Remove() cancelled only the clone's subtree and the
+	// workers never saw it, so a dropped task kept reading, writing and
+	// retrying (with unlimited default retries) forever.
+	ctx, cancel := t.ctx, t.cancel
 	infos := make(map[int64]*datapb.ImportSegmentInfo)
 	for id, info := range t.segmentsInfo {
 		infos[id] = typeutil.Clone(info)
@@ -177,7 +184,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		if err != nil {
 			mlog.Warn(t.ctx, "new reader failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
-			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+			t.manager.Update(t.GetTaskID(), UpdateReason(reason))
 			return err
 		}
 		defer reader.Close()
@@ -186,7 +193,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		if err != nil {
 			mlog.Warn(t.ctx, "do import failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
-			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+			t.manager.Update(t.GetTaskID(), UpdateReason(reason))
 			return err
 		}
 		mlog.Info(t.ctx, "import file done", WrapLogFields(t, mlog.Strings("files", file.GetPaths()),
@@ -212,8 +219,17 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	return futures
 }
 
-func (t *ImportTask) importFile(reader importutilv2.Reader) error {
+func (t *ImportTask) importFile(reader importutilv2.Reader) (retErr error) {
 	syncFutures := make([]*conc.Future[struct{}], 0)
+	// releaseOnDone owns resource cleanup, but this function still owns the
+	// completion fence: its caller must not release the file memory budget or
+	// publish a final task state while one of its submitted syncs is still live.
+	defer func() {
+		waitErr := conc.BlockOnAll(syncFutures...)
+		if retErr == nil {
+			retErr = waitErr
+		}
+	}()
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
 		data, err := reader.Read()
@@ -258,13 +274,18 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 			return err
 		}
 		fs, sts, err := t.sync(hashedData)
+		// Accumulate before the error check: sync returns the tasks it managed
+		// to build even when a later one fails, and they are already submitted.
+		syncFutures = append(syncFutures, fs...)
+		syncTasks = append(syncTasks, sts...)
 		if err != nil {
 			return err
 		}
-		syncFutures = append(syncFutures, fs...)
-		syncTasks = append(syncTasks, sts...)
 	}
-	err := conc.AwaitAll(syncFutures...)
+	err := conc.BlockOnAll(syncFutures...)
+	// The deferred fence covers early returns. Avoid waiting the same futures a
+	// second time after the normal read-to-EOF path has already drained them.
+	syncFutures = nil
 	if err != nil {
 		return err
 	}
@@ -292,7 +313,7 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 			partitionID := t.GetPartitionIDs()[partitionIdx]
 			segmentID, err := PickSegment(t.req.GetRequestSegments(), channel, partitionID)
 			if err != nil {
-				return nil, nil, err
+				return futures, syncTasks, err
 			}
 			bm25Stats := make(map[int64]*storage.BM25Stats)
 			for _, fn := range t.req.GetSchema().GetFunctions() {
@@ -303,16 +324,15 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 					bm25Stats[outputSparseFieldId].AppendFieldData(data.Data[outputSparseFieldId].(*storage.SparseFloatVectorFieldData))
 				}
 			}
-			syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
+			syncTask, err := NewSyncTask(t.allocator, t.metaCaches,
 				segmentID, partitionID, t.GetCollectionID(), channel, data, nil,
-				bm25Stats, t.req.GetStorageVersion(), t.req.GetUseLoonFfi(), t.req.GetStorageConfig())
+				bm25Stats, t.req.GetStorageConfig())
 			if err != nil {
-				return nil, nil, err
+				return futures, syncTasks, err
 			}
-			future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm)
+			future, err := submitSyncTask(t.ctx, t.syncMgr, t.cm, syncTask, "sync data failed", WrapLogFields(t))
 			if err != nil {
-				mlog.Error(context.TODO(), "sync data failed", WrapLogFields(t, mlog.Err(err))...)
-				return nil, nil, err
+				return futures, syncTasks, err
 			}
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)
