@@ -110,7 +110,7 @@ func createTextIndex(ctx context.Context,
 	eg, egCtx := errgroup.WithContext(ctx)
 
 	var analyzerExtraInfo string
-	if len(plan.GetFileResources()) > 0 {
+	if len(plan.GetFileResources()) > 0 && fileresource.GlobalFileManager.Mode() == fileresource.RefMode {
 		err := fileresource.GlobalFileManager.Download(ctx, cm, plan.GetFileResources()...)
 		if err != nil {
 			return nil, err
