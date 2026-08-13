@@ -1403,6 +1403,15 @@ message ImportJob {
   uint64 data_ts = 18;
   repeated string committed_vchannels = 19;
   bool            auto_commit         = 20;
+  // V3 execution version. Zero is legacy/unknown and is interpreted as V2
+  // until the external msg.ImportTaskVersion contract is available.
+  int32 import_task_version = 21;
+  int32 failure_code = 22;
+  int64 planning_generation = 23;
+  string planning_snapshot_ref = 24;
+  bytes planning_snapshot_digest = 25;
+  string import_plan_index_ref = 26;
+  bytes import_plan_index_digest = 27;
 }
 
 enum ImportTaskStateV2 {
@@ -1446,6 +1455,171 @@ message ImportTaskV2 {
   ImportTaskSourceV2 source = 12;
 }
 
+// V3 tasks intentionally keep run_id on the task rather than introducing a
+// separate attempt/run catalog level. State names are deliberately simple so
+// V2 and V3 recovery can share the same scheduler vocabulary.
+message ReshardTask {
+  enum State {
+    None = 0;
+    Pending = 1;
+    Running = 2;
+    Retry = 3;
+    Completed = 4;
+    Failed = 5;
+  }
+
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 collection_id = 3;
+  State state = 4;
+  string reason = 5;
+  string task_plan_ref = 6;
+  bytes task_plan_digest = 7;
+  int64 run_id = 8;
+  int64 node_id = 9;
+  string output_prefix = 10;
+  string result_ref = 11;
+  bytes result_digest = 12;
+  int64 task_slot = 13;
+  int32 failure_code = 14;
+}
+
+message ImportTaskV3 {
+  enum State {
+    None = 0;
+    Pending = 1;
+    Running = 2;
+    Retry = 3;
+    Completed = 4;
+    Failed = 5;
+  }
+
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 collection_id = 3;
+  State state = 4;
+  string reason = 5;
+  string task_plan_ref = 6;
+  bytes task_plan_digest = 7;
+  int64 run_id = 8;
+  int64 node_id = 9;
+  string output_prefix = 10;
+  repeated int64 output_segment_ids = 11;
+  IDRange log_id_range = 12;
+  int64 planning_generation = 13;
+  string result_ref = 14;
+  bytes result_digest = 15;
+  int64 task_slot = 16;
+  int32 failure_code = 17;
+}
+
+message ReshardTaskRequest {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+  string task_plan_ref = 4;
+  bytes task_plan_digest = 5;
+  string output_prefix = 6;
+  int64 task_slot = 7;
+  index.StorageConfig storage_config = 8;
+  repeated common.KeyValuePair plugin_context = 9;
+}
+
+message ImportTaskV3Request {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+  string task_plan_ref = 4;
+  bytes task_plan_digest = 5;
+  string output_prefix = 6;
+  repeated int64 output_segment_ids = 7;
+  IDRange log_id_range = 8;
+  int64 task_slot = 9;
+  int32 merge_fan_in = 10;
+  int64 planning_generation = 11;
+  index.StorageConfig storage_config = 12;
+  repeated common.KeyValuePair plugin_context = 13;
+  string planning_snapshot_ref = 14;
+  bytes planning_snapshot_digest = 15;
+}
+
+message ImportResultManifest {
+  uint32 format_version = 1;
+  int64 job_id = 2;
+  int64 task_id = 3;
+  int64 run_id = 4;
+  bytes task_plan_digest = 5;
+  int64 planning_generation = 6;
+  repeated SegmentResult segments = 7;
+  int64 total_rows = 8;
+  int64 total_physical_bytes = 9;
+}
+
+message SegmentResult {
+  int64 logical_segment_ordinal = 1;
+  int64 physical_segment_id = 2;
+  int32 vchannel_ordinal = 3;
+  string vchannel = 4;
+  int32 partition_ordinal = 5;
+  int64 partition_id = 6;
+  int64 rows = 7;
+  uint64 min_timestamp = 8;
+  uint64 max_timestamp = 9;
+  repeated FieldBinlog insert_logs = 10;
+  FieldBinlog pk_stats_log = 11;
+  repeated FieldBinlog bm25_logs = 12;
+  map<int64, TextIndexStats> text_stats_logs = 13;
+  string manifest_path = 14;
+  Statistics statistics = 15;
+  repeated int64 expiration_quantiles = 16;
+  bool is_sorted = 17;
+  bool is_sorted_by_namespace = 18;
+  int64 storage_version = 19;
+  int32 schema_version = 20;
+  int64 physical_bytes = 21;
+  bool materialized = 22;
+}
+
+message QueryReshardTaskRequest {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+}
+
+message QueryReshardTaskResponse {
+  common.Status status = 1;
+  ReshardTask.State state = 2;
+  string reason = 3;
+  string result_ref = 4;
+  bytes result_digest = 5;
+}
+
+message DropReshardTaskRequest {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+}
+
+message QueryImportTaskV3Request {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+}
+
+message QueryImportTaskV3Response {
+  common.Status status = 1;
+  ImportTaskV3.State state = 2;
+  string reason = 3;
+  string result_ref = 4;
+  bytes result_digest = 5;
+}
+
+message DropImportTaskV3Request {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+}
+
 enum GcCommand {
   _ = 0;
   Pause = 1;
@@ -1472,6 +1646,8 @@ message QuerySlotResponse {
   common.Status status = 1;
   int64 available_slots = 2;
   string version = 3; // Milvus build version reported by the worker
+  // 0/2 means the worker can only run V2 import tasks; 3 enables V3.
+  uint32 max_import_task_version = 4;
 }
 
 enum CompactionTaskState {

@@ -393,12 +393,18 @@ enum ImportJobState {
   Sorting = 7;
   Uncommitted = 8;
   Committing  = 9;
+  Planning = 10;
 }
 
 message ImportFile {
   int64 id = 1;
   // A singular row-based file or multiple column-based files.
   repeated string paths = 2;
+  // Primary-allocated autoID range [begin, end) for this file. This mirrors
+  // msg.ImportFile.pre_allocated_auto_ids without introducing a second range
+  // shape in the internal request/catalog path. Unset means legacy, non-autoID,
+  // backup, or L0 import.
+  common.IDRange pre_allocated_auto_ids = 3;
 }
 
 message ImportRequestInternal {

@@ -67,8 +67,9 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 		Schema:         body.GetSchema(),
 		Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
 			return &internalpb.ImportFile{
-				Id:    file.GetId(),
-				Paths: file.GetPaths(),
+				Id:                  file.GetId(),
+				Paths:               file.GetPaths(),
+				PreAllocatedAutoIds: file.GetPreAllocatedAutoIds(),
 			}
 		}),
 		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
@@ -181,8 +182,9 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// Convert files to msgpb format for validation
 	msgFiles := lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
 		return &msgpb.ImportFile{
-			Id:    file.GetId(),
-			Paths: file.GetPaths(),
+			Id:                  file.GetId(),
+			Paths:               file.GetPaths(),
+			PreAllocatedAutoIds: file.GetPreAllocatedAutoIds(),
 		}
 	})
 

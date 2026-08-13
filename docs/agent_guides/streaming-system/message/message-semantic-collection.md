@@ -16,10 +16,12 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | AlterIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | CreateSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
-| DropSnapshot | Broadcast: CChannel | No | ExclusiveSnapshotName |
+| DropSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
-| Import | Broadcast: VChannels (no CChannel) | No | — |
+| Import | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
+| CommitImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
+| RollbackImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | Insert | Single VChannel | No | — |
 | Delete | Single VChannel | No | — |
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
@@ -28,7 +30,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | AlterLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
-| RefreshExternalCollection | Broadcast: CChannel | No | — |
+| RefreshExternalCollection | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 
 ## Message Descriptions
 
@@ -39,7 +41,12 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **CreatePartition** / **DropPartition**: Creates or drops a partition. DropPartition implicitly flushes the partition's growing segments.
 - **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only.
 - **CreateSnapshot** / **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
-- **Import**: Initiates a bulk import job for a collection.
+- **Import**: Initiates a bulk import job for a collection. Old Proxies may send
+  the legacy Import broadcast RPC, but StreamingCoord forwards it to
+  `DataCoord.ImportV2`; DataCoord then creates the local broadcast with the same
+  collection ResourceKeys as the current direct path.
+- **CommitImport** / **RollbackImport**: Completes or aborts a bulk import job.
+  Both use the collection-scoped durable broadcast path.
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
 - **ManualFlush**: Seals all growing segments for a collection on a VChannel.

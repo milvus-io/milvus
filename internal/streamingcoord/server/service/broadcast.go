@@ -93,8 +93,9 @@ func (s *broadcastServceImpl) forwardImportToDataCoord(ctx context.Context, msg 
 	// Convert msgpb.ImportFile to internalpb.ImportFile
 	files := lo.Map(body.GetFiles(), func(f *msgpb.ImportFile, _ int) *internalpb.ImportFile {
 		return &internalpb.ImportFile{
-			Id:    f.GetId(),
-			Paths: f.GetPaths(),
+			Id:                  f.GetId(),
+			Paths:               f.GetPaths(),
+			PreAllocatedAutoIds: f.GetPreAllocatedAutoIds(),
 		}
 	})
 

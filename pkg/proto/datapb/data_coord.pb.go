@@ -929,6 +929,122 @@ func (ExportSnapshotJobState) EnumDescriptor() ([]byte, []int) {
 	return file_data_coord_proto_rawDescGZIP(), []int{15}
 }
 
+type ReshardTask_State int32
+
+const (
+	ReshardTask_None      ReshardTask_State = 0
+	ReshardTask_Pending   ReshardTask_State = 1
+	ReshardTask_Running   ReshardTask_State = 2
+	ReshardTask_Retry     ReshardTask_State = 3
+	ReshardTask_Completed ReshardTask_State = 4
+	ReshardTask_Failed    ReshardTask_State = 5
+)
+
+// Enum value maps for ReshardTask_State.
+var (
+	ReshardTask_State_name = map[int32]string{
+		0: "None",
+		1: "Pending",
+		2: "Running",
+		3: "Retry",
+		4: "Completed",
+		5: "Failed",
+	}
+	ReshardTask_State_value = map[string]int32{
+		"None":      0,
+		"Pending":   1,
+		"Running":   2,
+		"Retry":     3,
+		"Completed": 4,
+		"Failed":    5,
+	}
+)
+
+func (x ReshardTask_State) Enum() *ReshardTask_State {
+	p := new(ReshardTask_State)
+	*p = x
+	return p
+}
+
+func (x ReshardTask_State) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReshardTask_State) Descriptor() protoreflect.EnumDescriptor {
+	return file_data_coord_proto_enumTypes[16].Descriptor()
+}
+
+func (ReshardTask_State) Type() protoreflect.EnumType {
+	return &file_data_coord_proto_enumTypes[16]
+}
+
+func (x ReshardTask_State) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReshardTask_State.Descriptor instead.
+func (ReshardTask_State) EnumDescriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{112, 0}
+}
+
+type ImportTaskV3_State int32
+
+const (
+	ImportTaskV3_None      ImportTaskV3_State = 0
+	ImportTaskV3_Pending   ImportTaskV3_State = 1
+	ImportTaskV3_Running   ImportTaskV3_State = 2
+	ImportTaskV3_Retry     ImportTaskV3_State = 3
+	ImportTaskV3_Completed ImportTaskV3_State = 4
+	ImportTaskV3_Failed    ImportTaskV3_State = 5
+)
+
+// Enum value maps for ImportTaskV3_State.
+var (
+	ImportTaskV3_State_name = map[int32]string{
+		0: "None",
+		1: "Pending",
+		2: "Running",
+		3: "Retry",
+		4: "Completed",
+		5: "Failed",
+	}
+	ImportTaskV3_State_value = map[string]int32{
+		"None":      0,
+		"Pending":   1,
+		"Running":   2,
+		"Retry":     3,
+		"Completed": 4,
+		"Failed":    5,
+	}
+)
+
+func (x ImportTaskV3_State) Enum() *ImportTaskV3_State {
+	p := new(ImportTaskV3_State)
+	*p = x
+	return p
+}
+
+func (x ImportTaskV3_State) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ImportTaskV3_State) Descriptor() protoreflect.EnumDescriptor {
+	return file_data_coord_proto_enumTypes[17].Descriptor()
+}
+
+func (ImportTaskV3_State) Type() protoreflect.EnumType {
+	return &file_data_coord_proto_enumTypes[17]
+}
+
+func (x ImportTaskV3_State) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ImportTaskV3_State.Descriptor instead.
+func (ImportTaskV3_State) EnumDescriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{113, 0}
+}
+
 // TODO: import google/protobuf/empty.proto
 type Empty struct {
 	state         protoimpl.MessageState
@@ -10187,6 +10303,15 @@ type ImportJob struct {
 	DataTs             uint64                     `protobuf:"varint,18,opt,name=data_ts,json=dataTs,proto3" json:"data_ts,omitempty"`
 	CommittedVchannels []string                   `protobuf:"bytes,19,rep,name=committed_vchannels,json=committedVchannels,proto3" json:"committed_vchannels,omitempty"`
 	AutoCommit         bool                       `protobuf:"varint,20,opt,name=auto_commit,json=autoCommit,proto3" json:"auto_commit,omitempty"`
+	// V3 execution version. Zero is legacy/unknown and is interpreted as V2
+	// until the external msg.ImportTaskVersion contract is available.
+	ImportTaskVersion      int32  `protobuf:"varint,21,opt,name=import_task_version,json=importTaskVersion,proto3" json:"import_task_version,omitempty"`
+	FailureCode            int32  `protobuf:"varint,22,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
+	PlanningGeneration     int64  `protobuf:"varint,23,opt,name=planning_generation,json=planningGeneration,proto3" json:"planning_generation,omitempty"`
+	PlanningSnapshotRef    string `protobuf:"bytes,24,opt,name=planning_snapshot_ref,json=planningSnapshotRef,proto3" json:"planning_snapshot_ref,omitempty"`
+	PlanningSnapshotDigest []byte `protobuf:"bytes,25,opt,name=planning_snapshot_digest,json=planningSnapshotDigest,proto3" json:"planning_snapshot_digest,omitempty"`
+	ImportPlanIndexRef     string `protobuf:"bytes,26,opt,name=import_plan_index_ref,json=importPlanIndexRef,proto3" json:"import_plan_index_ref,omitempty"`
+	ImportPlanIndexDigest  []byte `protobuf:"bytes,27,opt,name=import_plan_index_digest,json=importPlanIndexDigest,proto3" json:"import_plan_index_digest,omitempty"`
 }
 
 func (x *ImportJob) Reset() {
@@ -10359,6 +10484,55 @@ func (x *ImportJob) GetAutoCommit() bool {
 		return x.AutoCommit
 	}
 	return false
+}
+
+func (x *ImportJob) GetImportTaskVersion() int32 {
+	if x != nil {
+		return x.ImportTaskVersion
+	}
+	return 0
+}
+
+func (x *ImportJob) GetFailureCode() int32 {
+	if x != nil {
+		return x.FailureCode
+	}
+	return 0
+}
+
+func (x *ImportJob) GetPlanningGeneration() int64 {
+	if x != nil {
+		return x.PlanningGeneration
+	}
+	return 0
+}
+
+func (x *ImportJob) GetPlanningSnapshotRef() string {
+	if x != nil {
+		return x.PlanningSnapshotRef
+	}
+	return ""
+}
+
+func (x *ImportJob) GetPlanningSnapshotDigest() []byte {
+	if x != nil {
+		return x.PlanningSnapshotDigest
+	}
+	return nil
+}
+
+func (x *ImportJob) GetImportPlanIndexRef() string {
+	if x != nil {
+		return x.ImportPlanIndexRef
+	}
+	return ""
+}
+
+func (x *ImportJob) GetImportPlanIndexDigest() []byte {
+	if x != nil {
+		return x.ImportPlanIndexDigest
+	}
+	return nil
 }
 
 type PreImportTask struct {
@@ -10607,6 +10781,1341 @@ func (x *ImportTaskV2) GetSource() ImportTaskSourceV2 {
 	return ImportTaskSourceV2_Request
 }
 
+// V3 tasks intentionally keep run_id on the task rather than introducing a
+// separate attempt/run catalog level. State names are deliberately simple so
+// V2 and V3 recovery can share the same scheduler vocabulary.
+type ReshardTask struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	JobId          int64             `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	TaskId         int64             `protobuf:"varint,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	CollectionId   int64             `protobuf:"varint,3,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
+	State          ReshardTask_State `protobuf:"varint,4,opt,name=state,proto3,enum=milvus.proto.data.ReshardTask_State" json:"state,omitempty"`
+	Reason         string            `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
+	TaskPlanRef    string            `protobuf:"bytes,6,opt,name=task_plan_ref,json=taskPlanRef,proto3" json:"task_plan_ref,omitempty"`
+	TaskPlanDigest []byte            `protobuf:"bytes,7,opt,name=task_plan_digest,json=taskPlanDigest,proto3" json:"task_plan_digest,omitempty"`
+	RunId          int64             `protobuf:"varint,8,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	NodeId         int64             `protobuf:"varint,9,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	OutputPrefix   string            `protobuf:"bytes,10,opt,name=output_prefix,json=outputPrefix,proto3" json:"output_prefix,omitempty"`
+	ResultRef      string            `protobuf:"bytes,11,opt,name=result_ref,json=resultRef,proto3" json:"result_ref,omitempty"`
+	ResultDigest   []byte            `protobuf:"bytes,12,opt,name=result_digest,json=resultDigest,proto3" json:"result_digest,omitempty"`
+	TaskSlot       int64             `protobuf:"varint,13,opt,name=task_slot,json=taskSlot,proto3" json:"task_slot,omitempty"`
+	FailureCode    int32             `protobuf:"varint,14,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
+}
+
+func (x *ReshardTask) Reset() {
+	*x = ReshardTask{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[112]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ReshardTask) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReshardTask) ProtoMessage() {}
+
+func (x *ReshardTask) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[112]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReshardTask.ProtoReflect.Descriptor instead.
+func (*ReshardTask) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{112}
+}
+
+func (x *ReshardTask) GetJobId() int64 {
+	if x != nil {
+		return x.JobId
+	}
+	return 0
+}
+
+func (x *ReshardTask) GetTaskId() int64 {
+	if x != nil {
+		return x.TaskId
+	}
+	return 0
+}
+
+func (x *ReshardTask) GetCollectionId() int64 {
+	if x != nil {
+		return x.CollectionId
+	}
+	return 0
+}
+
+func (x *ReshardTask) GetState() ReshardTask_State {
+	if x != nil {
+		return x.State
+	}
+	return ReshardTask_None
+}
+
+func (x *ReshardTask) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *ReshardTask) GetTaskPlanRef() string {
+	if x != nil {
+		return x.TaskPlanRef
+	}
+	return ""
+}
+
+func (x *ReshardTask) GetTaskPlanDigest() []byte {
+	if x != nil {
+		return x.TaskPlanDigest
+	}
+	return nil
+}
+
+func (x *ReshardTask) GetRunId() int64 {
+	if x != nil {
+		return x.RunId
+	}
+	return 0
+}
+
+func (x *ReshardTask) GetNodeId() int64 {
+	if x != nil {
+		return x.NodeId
+	}
+	return 0
+}
+
+func (x *ReshardTask) GetOutputPrefix() string {
+	if x != nil {
+		return x.OutputPrefix
+	}
+	return ""
+}
+
+func (x *ReshardTask) GetResultRef() string {
+	if x != nil {
+		return x.ResultRef
+	}
+	return ""
+}
+
+func (x *ReshardTask) GetResultDigest() []byte {
+	if x != nil {
+		return x.ResultDigest
+	}
+	return nil
+}
+
+func (x *ReshardTask) GetTaskSlot() int64 {
+	if x != nil {
+		return x.TaskSlot
+	}
+	return 0
+}
+
+func (x *ReshardTask) GetFailureCode() int32 {
+	if x != nil {
+		return x.FailureCode
+	}
+	return 0
+}
+
+type ImportTaskV3 struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	JobId              int64              `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	TaskId             int64              `protobuf:"varint,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	CollectionId       int64              `protobuf:"varint,3,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
+	State              ImportTaskV3_State `protobuf:"varint,4,opt,name=state,proto3,enum=milvus.proto.data.ImportTaskV3_State" json:"state,omitempty"`
+	Reason             string             `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
+	TaskPlanRef        string             `protobuf:"bytes,6,opt,name=task_plan_ref,json=taskPlanRef,proto3" json:"task_plan_ref,omitempty"`
+	TaskPlanDigest     []byte             `protobuf:"bytes,7,opt,name=task_plan_digest,json=taskPlanDigest,proto3" json:"task_plan_digest,omitempty"`
+	RunId              int64              `protobuf:"varint,8,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	NodeId             int64              `protobuf:"varint,9,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	OutputPrefix       string             `protobuf:"bytes,10,opt,name=output_prefix,json=outputPrefix,proto3" json:"output_prefix,omitempty"`
+	OutputSegmentIds   []int64            `protobuf:"varint,11,rep,packed,name=output_segment_ids,json=outputSegmentIds,proto3" json:"output_segment_ids,omitempty"`
+	LogIdRange         *IDRange           `protobuf:"bytes,12,opt,name=log_id_range,json=logIdRange,proto3" json:"log_id_range,omitempty"`
+	PlanningGeneration int64              `protobuf:"varint,13,opt,name=planning_generation,json=planningGeneration,proto3" json:"planning_generation,omitempty"`
+	ResultRef          string             `protobuf:"bytes,14,opt,name=result_ref,json=resultRef,proto3" json:"result_ref,omitempty"`
+	ResultDigest       []byte             `protobuf:"bytes,15,opt,name=result_digest,json=resultDigest,proto3" json:"result_digest,omitempty"`
+	TaskSlot           int64              `protobuf:"varint,16,opt,name=task_slot,json=taskSlot,proto3" json:"task_slot,omitempty"`
+	FailureCode        int32              `protobuf:"varint,17,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
+}
+
+func (x *ImportTaskV3) Reset() {
+	*x = ImportTaskV3{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[113]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ImportTaskV3) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ImportTaskV3) ProtoMessage() {}
+
+func (x *ImportTaskV3) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[113]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ImportTaskV3.ProtoReflect.Descriptor instead.
+func (*ImportTaskV3) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{113}
+}
+
+func (x *ImportTaskV3) GetJobId() int64 {
+	if x != nil {
+		return x.JobId
+	}
+	return 0
+}
+
+func (x *ImportTaskV3) GetTaskId() int64 {
+	if x != nil {
+		return x.TaskId
+	}
+	return 0
+}
+
+func (x *ImportTaskV3) GetCollectionId() int64 {
+	if x != nil {
+		return x.CollectionId
+	}
+	return 0
+}
+
+func (x *ImportTaskV3) GetState() ImportTaskV3_State {
+	if x != nil {
+		return x.State
+	}
+	return ImportTaskV3_None
+}
+
+func (x *ImportTaskV3) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *ImportTaskV3) GetTaskPlanRef() string {
+	if x != nil {
+		return x.TaskPlanRef
+	}
+	return ""
+}
+
+func (x *ImportTaskV3) GetTaskPlanDigest() []byte {
+	if x != nil {
+		return x.TaskPlanDigest
+	}
+	return nil
+}
+
+func (x *ImportTaskV3) GetRunId() int64 {
+	if x != nil {
+		return x.RunId
+	}
+	return 0
+}
+
+func (x *ImportTaskV3) GetNodeId() int64 {
+	if x != nil {
+		return x.NodeId
+	}
+	return 0
+}
+
+func (x *ImportTaskV3) GetOutputPrefix() string {
+	if x != nil {
+		return x.OutputPrefix
+	}
+	return ""
+}
+
+func (x *ImportTaskV3) GetOutputSegmentIds() []int64 {
+	if x != nil {
+		return x.OutputSegmentIds
+	}
+	return nil
+}
+
+func (x *ImportTaskV3) GetLogIdRange() *IDRange {
+	if x != nil {
+		return x.LogIdRange
+	}
+	return nil
+}
+
+func (x *ImportTaskV3) GetPlanningGeneration() int64 {
+	if x != nil {
+		return x.PlanningGeneration
+	}
+	return 0
+}
+
+func (x *ImportTaskV3) GetResultRef() string {
+	if x != nil {
+		return x.ResultRef
+	}
+	return ""
+}
+
+func (x *ImportTaskV3) GetResultDigest() []byte {
+	if x != nil {
+		return x.ResultDigest
+	}
+	return nil
+}
+
+func (x *ImportTaskV3) GetTaskSlot() int64 {
+	if x != nil {
+		return x.TaskSlot
+	}
+	return 0
+}
+
+func (x *ImportTaskV3) GetFailureCode() int32 {
+	if x != nil {
+		return x.FailureCode
+	}
+	return 0
+}
+
+type ReshardTaskRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	JobId          int64                    `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	TaskId         int64                    `protobuf:"varint,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	RunId          int64                    `protobuf:"varint,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	TaskPlanRef    string                   `protobuf:"bytes,4,opt,name=task_plan_ref,json=taskPlanRef,proto3" json:"task_plan_ref,omitempty"`
+	TaskPlanDigest []byte                   `protobuf:"bytes,5,opt,name=task_plan_digest,json=taskPlanDigest,proto3" json:"task_plan_digest,omitempty"`
+	OutputPrefix   string                   `protobuf:"bytes,6,opt,name=output_prefix,json=outputPrefix,proto3" json:"output_prefix,omitempty"`
+	TaskSlot       int64                    `protobuf:"varint,7,opt,name=task_slot,json=taskSlot,proto3" json:"task_slot,omitempty"`
+	StorageConfig  *indexpb.StorageConfig   `protobuf:"bytes,8,opt,name=storage_config,json=storageConfig,proto3" json:"storage_config,omitempty"`
+	PluginContext  []*commonpb.KeyValuePair `protobuf:"bytes,9,rep,name=plugin_context,json=pluginContext,proto3" json:"plugin_context,omitempty"`
+}
+
+func (x *ReshardTaskRequest) Reset() {
+	*x = ReshardTaskRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[114]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ReshardTaskRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReshardTaskRequest) ProtoMessage() {}
+
+func (x *ReshardTaskRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[114]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReshardTaskRequest.ProtoReflect.Descriptor instead.
+func (*ReshardTaskRequest) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{114}
+}
+
+func (x *ReshardTaskRequest) GetJobId() int64 {
+	if x != nil {
+		return x.JobId
+	}
+	return 0
+}
+
+func (x *ReshardTaskRequest) GetTaskId() int64 {
+	if x != nil {
+		return x.TaskId
+	}
+	return 0
+}
+
+func (x *ReshardTaskRequest) GetRunId() int64 {
+	if x != nil {
+		return x.RunId
+	}
+	return 0
+}
+
+func (x *ReshardTaskRequest) GetTaskPlanRef() string {
+	if x != nil {
+		return x.TaskPlanRef
+	}
+	return ""
+}
+
+func (x *ReshardTaskRequest) GetTaskPlanDigest() []byte {
+	if x != nil {
+		return x.TaskPlanDigest
+	}
+	return nil
+}
+
+func (x *ReshardTaskRequest) GetOutputPrefix() string {
+	if x != nil {
+		return x.OutputPrefix
+	}
+	return ""
+}
+
+func (x *ReshardTaskRequest) GetTaskSlot() int64 {
+	if x != nil {
+		return x.TaskSlot
+	}
+	return 0
+}
+
+func (x *ReshardTaskRequest) GetStorageConfig() *indexpb.StorageConfig {
+	if x != nil {
+		return x.StorageConfig
+	}
+	return nil
+}
+
+func (x *ReshardTaskRequest) GetPluginContext() []*commonpb.KeyValuePair {
+	if x != nil {
+		return x.PluginContext
+	}
+	return nil
+}
+
+type ImportTaskV3Request struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	JobId                  int64                    `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	TaskId                 int64                    `protobuf:"varint,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	RunId                  int64                    `protobuf:"varint,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	TaskPlanRef            string                   `protobuf:"bytes,4,opt,name=task_plan_ref,json=taskPlanRef,proto3" json:"task_plan_ref,omitempty"`
+	TaskPlanDigest         []byte                   `protobuf:"bytes,5,opt,name=task_plan_digest,json=taskPlanDigest,proto3" json:"task_plan_digest,omitempty"`
+	OutputPrefix           string                   `protobuf:"bytes,6,opt,name=output_prefix,json=outputPrefix,proto3" json:"output_prefix,omitempty"`
+	OutputSegmentIds       []int64                  `protobuf:"varint,7,rep,packed,name=output_segment_ids,json=outputSegmentIds,proto3" json:"output_segment_ids,omitempty"`
+	LogIdRange             *IDRange                 `protobuf:"bytes,8,opt,name=log_id_range,json=logIdRange,proto3" json:"log_id_range,omitempty"`
+	TaskSlot               int64                    `protobuf:"varint,9,opt,name=task_slot,json=taskSlot,proto3" json:"task_slot,omitempty"`
+	MergeFanIn             int32                    `protobuf:"varint,10,opt,name=merge_fan_in,json=mergeFanIn,proto3" json:"merge_fan_in,omitempty"`
+	PlanningGeneration     int64                    `protobuf:"varint,11,opt,name=planning_generation,json=planningGeneration,proto3" json:"planning_generation,omitempty"`
+	StorageConfig          *indexpb.StorageConfig   `protobuf:"bytes,12,opt,name=storage_config,json=storageConfig,proto3" json:"storage_config,omitempty"`
+	PluginContext          []*commonpb.KeyValuePair `protobuf:"bytes,13,rep,name=plugin_context,json=pluginContext,proto3" json:"plugin_context,omitempty"`
+	PlanningSnapshotRef    string                   `protobuf:"bytes,14,opt,name=planning_snapshot_ref,json=planningSnapshotRef,proto3" json:"planning_snapshot_ref,omitempty"`
+	PlanningSnapshotDigest []byte                   `protobuf:"bytes,15,opt,name=planning_snapshot_digest,json=planningSnapshotDigest,proto3" json:"planning_snapshot_digest,omitempty"`
+}
+
+func (x *ImportTaskV3Request) Reset() {
+	*x = ImportTaskV3Request{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[115]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ImportTaskV3Request) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ImportTaskV3Request) ProtoMessage() {}
+
+func (x *ImportTaskV3Request) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[115]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ImportTaskV3Request.ProtoReflect.Descriptor instead.
+func (*ImportTaskV3Request) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{115}
+}
+
+func (x *ImportTaskV3Request) GetJobId() int64 {
+	if x != nil {
+		return x.JobId
+	}
+	return 0
+}
+
+func (x *ImportTaskV3Request) GetTaskId() int64 {
+	if x != nil {
+		return x.TaskId
+	}
+	return 0
+}
+
+func (x *ImportTaskV3Request) GetRunId() int64 {
+	if x != nil {
+		return x.RunId
+	}
+	return 0
+}
+
+func (x *ImportTaskV3Request) GetTaskPlanRef() string {
+	if x != nil {
+		return x.TaskPlanRef
+	}
+	return ""
+}
+
+func (x *ImportTaskV3Request) GetTaskPlanDigest() []byte {
+	if x != nil {
+		return x.TaskPlanDigest
+	}
+	return nil
+}
+
+func (x *ImportTaskV3Request) GetOutputPrefix() string {
+	if x != nil {
+		return x.OutputPrefix
+	}
+	return ""
+}
+
+func (x *ImportTaskV3Request) GetOutputSegmentIds() []int64 {
+	if x != nil {
+		return x.OutputSegmentIds
+	}
+	return nil
+}
+
+func (x *ImportTaskV3Request) GetLogIdRange() *IDRange {
+	if x != nil {
+		return x.LogIdRange
+	}
+	return nil
+}
+
+func (x *ImportTaskV3Request) GetTaskSlot() int64 {
+	if x != nil {
+		return x.TaskSlot
+	}
+	return 0
+}
+
+func (x *ImportTaskV3Request) GetMergeFanIn() int32 {
+	if x != nil {
+		return x.MergeFanIn
+	}
+	return 0
+}
+
+func (x *ImportTaskV3Request) GetPlanningGeneration() int64 {
+	if x != nil {
+		return x.PlanningGeneration
+	}
+	return 0
+}
+
+func (x *ImportTaskV3Request) GetStorageConfig() *indexpb.StorageConfig {
+	if x != nil {
+		return x.StorageConfig
+	}
+	return nil
+}
+
+func (x *ImportTaskV3Request) GetPluginContext() []*commonpb.KeyValuePair {
+	if x != nil {
+		return x.PluginContext
+	}
+	return nil
+}
+
+func (x *ImportTaskV3Request) GetPlanningSnapshotRef() string {
+	if x != nil {
+		return x.PlanningSnapshotRef
+	}
+	return ""
+}
+
+func (x *ImportTaskV3Request) GetPlanningSnapshotDigest() []byte {
+	if x != nil {
+		return x.PlanningSnapshotDigest
+	}
+	return nil
+}
+
+type ImportResultManifest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	FormatVersion      uint32           `protobuf:"varint,1,opt,name=format_version,json=formatVersion,proto3" json:"format_version,omitempty"`
+	JobId              int64            `protobuf:"varint,2,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	TaskId             int64            `protobuf:"varint,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	RunId              int64            `protobuf:"varint,4,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	TaskPlanDigest     []byte           `protobuf:"bytes,5,opt,name=task_plan_digest,json=taskPlanDigest,proto3" json:"task_plan_digest,omitempty"`
+	PlanningGeneration int64            `protobuf:"varint,6,opt,name=planning_generation,json=planningGeneration,proto3" json:"planning_generation,omitempty"`
+	Segments           []*SegmentResult `protobuf:"bytes,7,rep,name=segments,proto3" json:"segments,omitempty"`
+	TotalRows          int64            `protobuf:"varint,8,opt,name=total_rows,json=totalRows,proto3" json:"total_rows,omitempty"`
+	TotalPhysicalBytes int64            `protobuf:"varint,9,opt,name=total_physical_bytes,json=totalPhysicalBytes,proto3" json:"total_physical_bytes,omitempty"`
+}
+
+func (x *ImportResultManifest) Reset() {
+	*x = ImportResultManifest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[116]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ImportResultManifest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ImportResultManifest) ProtoMessage() {}
+
+func (x *ImportResultManifest) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[116]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ImportResultManifest.ProtoReflect.Descriptor instead.
+func (*ImportResultManifest) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{116}
+}
+
+func (x *ImportResultManifest) GetFormatVersion() uint32 {
+	if x != nil {
+		return x.FormatVersion
+	}
+	return 0
+}
+
+func (x *ImportResultManifest) GetJobId() int64 {
+	if x != nil {
+		return x.JobId
+	}
+	return 0
+}
+
+func (x *ImportResultManifest) GetTaskId() int64 {
+	if x != nil {
+		return x.TaskId
+	}
+	return 0
+}
+
+func (x *ImportResultManifest) GetRunId() int64 {
+	if x != nil {
+		return x.RunId
+	}
+	return 0
+}
+
+func (x *ImportResultManifest) GetTaskPlanDigest() []byte {
+	if x != nil {
+		return x.TaskPlanDigest
+	}
+	return nil
+}
+
+func (x *ImportResultManifest) GetPlanningGeneration() int64 {
+	if x != nil {
+		return x.PlanningGeneration
+	}
+	return 0
+}
+
+func (x *ImportResultManifest) GetSegments() []*SegmentResult {
+	if x != nil {
+		return x.Segments
+	}
+	return nil
+}
+
+func (x *ImportResultManifest) GetTotalRows() int64 {
+	if x != nil {
+		return x.TotalRows
+	}
+	return 0
+}
+
+func (x *ImportResultManifest) GetTotalPhysicalBytes() int64 {
+	if x != nil {
+		return x.TotalPhysicalBytes
+	}
+	return 0
+}
+
+type SegmentResult struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	LogicalSegmentOrdinal int64                     `protobuf:"varint,1,opt,name=logical_segment_ordinal,json=logicalSegmentOrdinal,proto3" json:"logical_segment_ordinal,omitempty"`
+	PhysicalSegmentId     int64                     `protobuf:"varint,2,opt,name=physical_segment_id,json=physicalSegmentId,proto3" json:"physical_segment_id,omitempty"`
+	VchannelOrdinal       int32                     `protobuf:"varint,3,opt,name=vchannel_ordinal,json=vchannelOrdinal,proto3" json:"vchannel_ordinal,omitempty"`
+	Vchannel              string                    `protobuf:"bytes,4,opt,name=vchannel,proto3" json:"vchannel,omitempty"`
+	PartitionOrdinal      int32                     `protobuf:"varint,5,opt,name=partition_ordinal,json=partitionOrdinal,proto3" json:"partition_ordinal,omitempty"`
+	PartitionId           int64                     `protobuf:"varint,6,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`
+	Rows                  int64                     `protobuf:"varint,7,opt,name=rows,proto3" json:"rows,omitempty"`
+	MinTimestamp          uint64                    `protobuf:"varint,8,opt,name=min_timestamp,json=minTimestamp,proto3" json:"min_timestamp,omitempty"`
+	MaxTimestamp          uint64                    `protobuf:"varint,9,opt,name=max_timestamp,json=maxTimestamp,proto3" json:"max_timestamp,omitempty"`
+	InsertLogs            []*FieldBinlog            `protobuf:"bytes,10,rep,name=insert_logs,json=insertLogs,proto3" json:"insert_logs,omitempty"`
+	PkStatsLog            *FieldBinlog              `protobuf:"bytes,11,opt,name=pk_stats_log,json=pkStatsLog,proto3" json:"pk_stats_log,omitempty"`
+	Bm25Logs              []*FieldBinlog            `protobuf:"bytes,12,rep,name=bm25_logs,json=bm25Logs,proto3" json:"bm25_logs,omitempty"`
+	TextStatsLogs         map[int64]*TextIndexStats `protobuf:"bytes,13,rep,name=text_stats_logs,json=textStatsLogs,proto3" json:"text_stats_logs,omitempty" protobuf_key:"varint,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	ManifestPath          string                    `protobuf:"bytes,14,opt,name=manifest_path,json=manifestPath,proto3" json:"manifest_path,omitempty"`
+	Statistics            *Statistics               `protobuf:"bytes,15,opt,name=statistics,proto3" json:"statistics,omitempty"`
+	ExpirationQuantiles   []int64                   `protobuf:"varint,16,rep,packed,name=expiration_quantiles,json=expirationQuantiles,proto3" json:"expiration_quantiles,omitempty"`
+	IsSorted              bool                      `protobuf:"varint,17,opt,name=is_sorted,json=isSorted,proto3" json:"is_sorted,omitempty"`
+	IsSortedByNamespace   bool                      `protobuf:"varint,18,opt,name=is_sorted_by_namespace,json=isSortedByNamespace,proto3" json:"is_sorted_by_namespace,omitempty"`
+	StorageVersion        int64                     `protobuf:"varint,19,opt,name=storage_version,json=storageVersion,proto3" json:"storage_version,omitempty"`
+	SchemaVersion         int32                     `protobuf:"varint,20,opt,name=schema_version,json=schemaVersion,proto3" json:"schema_version,omitempty"`
+	PhysicalBytes         int64                     `protobuf:"varint,21,opt,name=physical_bytes,json=physicalBytes,proto3" json:"physical_bytes,omitempty"`
+	Materialized          bool                      `protobuf:"varint,22,opt,name=materialized,proto3" json:"materialized,omitempty"`
+}
+
+func (x *SegmentResult) Reset() {
+	*x = SegmentResult{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[117]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SegmentResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SegmentResult) ProtoMessage() {}
+
+func (x *SegmentResult) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[117]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SegmentResult.ProtoReflect.Descriptor instead.
+func (*SegmentResult) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{117}
+}
+
+func (x *SegmentResult) GetLogicalSegmentOrdinal() int64 {
+	if x != nil {
+		return x.LogicalSegmentOrdinal
+	}
+	return 0
+}
+
+func (x *SegmentResult) GetPhysicalSegmentId() int64 {
+	if x != nil {
+		return x.PhysicalSegmentId
+	}
+	return 0
+}
+
+func (x *SegmentResult) GetVchannelOrdinal() int32 {
+	if x != nil {
+		return x.VchannelOrdinal
+	}
+	return 0
+}
+
+func (x *SegmentResult) GetVchannel() string {
+	if x != nil {
+		return x.Vchannel
+	}
+	return ""
+}
+
+func (x *SegmentResult) GetPartitionOrdinal() int32 {
+	if x != nil {
+		return x.PartitionOrdinal
+	}
+	return 0
+}
+
+func (x *SegmentResult) GetPartitionId() int64 {
+	if x != nil {
+		return x.PartitionId
+	}
+	return 0
+}
+
+func (x *SegmentResult) GetRows() int64 {
+	if x != nil {
+		return x.Rows
+	}
+	return 0
+}
+
+func (x *SegmentResult) GetMinTimestamp() uint64 {
+	if x != nil {
+		return x.MinTimestamp
+	}
+	return 0
+}
+
+func (x *SegmentResult) GetMaxTimestamp() uint64 {
+	if x != nil {
+		return x.MaxTimestamp
+	}
+	return 0
+}
+
+func (x *SegmentResult) GetInsertLogs() []*FieldBinlog {
+	if x != nil {
+		return x.InsertLogs
+	}
+	return nil
+}
+
+func (x *SegmentResult) GetPkStatsLog() *FieldBinlog {
+	if x != nil {
+		return x.PkStatsLog
+	}
+	return nil
+}
+
+func (x *SegmentResult) GetBm25Logs() []*FieldBinlog {
+	if x != nil {
+		return x.Bm25Logs
+	}
+	return nil
+}
+
+func (x *SegmentResult) GetTextStatsLogs() map[int64]*TextIndexStats {
+	if x != nil {
+		return x.TextStatsLogs
+	}
+	return nil
+}
+
+func (x *SegmentResult) GetManifestPath() string {
+	if x != nil {
+		return x.ManifestPath
+	}
+	return ""
+}
+
+func (x *SegmentResult) GetStatistics() *Statistics {
+	if x != nil {
+		return x.Statistics
+	}
+	return nil
+}
+
+func (x *SegmentResult) GetExpirationQuantiles() []int64 {
+	if x != nil {
+		return x.ExpirationQuantiles
+	}
+	return nil
+}
+
+func (x *SegmentResult) GetIsSorted() bool {
+	if x != nil {
+		return x.IsSorted
+	}
+	return false
+}
+
+func (x *SegmentResult) GetIsSortedByNamespace() bool {
+	if x != nil {
+		return x.IsSortedByNamespace
+	}
+	return false
+}
+
+func (x *SegmentResult) GetStorageVersion() int64 {
+	if x != nil {
+		return x.StorageVersion
+	}
+	return 0
+}
+
+func (x *SegmentResult) GetSchemaVersion() int32 {
+	if x != nil {
+		return x.SchemaVersion
+	}
+	return 0
+}
+
+func (x *SegmentResult) GetPhysicalBytes() int64 {
+	if x != nil {
+		return x.PhysicalBytes
+	}
+	return 0
+}
+
+func (x *SegmentResult) GetMaterialized() bool {
+	if x != nil {
+		return x.Materialized
+	}
+	return false
+}
+
+type QueryReshardTaskRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	JobId  int64 `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	TaskId int64 `protobuf:"varint,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	RunId  int64 `protobuf:"varint,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+}
+
+func (x *QueryReshardTaskRequest) Reset() {
+	*x = QueryReshardTaskRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[118]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *QueryReshardTaskRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryReshardTaskRequest) ProtoMessage() {}
+
+func (x *QueryReshardTaskRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[118]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryReshardTaskRequest.ProtoReflect.Descriptor instead.
+func (*QueryReshardTaskRequest) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{118}
+}
+
+func (x *QueryReshardTaskRequest) GetJobId() int64 {
+	if x != nil {
+		return x.JobId
+	}
+	return 0
+}
+
+func (x *QueryReshardTaskRequest) GetTaskId() int64 {
+	if x != nil {
+		return x.TaskId
+	}
+	return 0
+}
+
+func (x *QueryReshardTaskRequest) GetRunId() int64 {
+	if x != nil {
+		return x.RunId
+	}
+	return 0
+}
+
+type QueryReshardTaskResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Status       *commonpb.Status  `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	State        ReshardTask_State `protobuf:"varint,2,opt,name=state,proto3,enum=milvus.proto.data.ReshardTask_State" json:"state,omitempty"`
+	Reason       string            `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	ResultRef    string            `protobuf:"bytes,4,opt,name=result_ref,json=resultRef,proto3" json:"result_ref,omitempty"`
+	ResultDigest []byte            `protobuf:"bytes,5,opt,name=result_digest,json=resultDigest,proto3" json:"result_digest,omitempty"`
+}
+
+func (x *QueryReshardTaskResponse) Reset() {
+	*x = QueryReshardTaskResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[119]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *QueryReshardTaskResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryReshardTaskResponse) ProtoMessage() {}
+
+func (x *QueryReshardTaskResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[119]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryReshardTaskResponse.ProtoReflect.Descriptor instead.
+func (*QueryReshardTaskResponse) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{119}
+}
+
+func (x *QueryReshardTaskResponse) GetStatus() *commonpb.Status {
+	if x != nil {
+		return x.Status
+	}
+	return nil
+}
+
+func (x *QueryReshardTaskResponse) GetState() ReshardTask_State {
+	if x != nil {
+		return x.State
+	}
+	return ReshardTask_None
+}
+
+func (x *QueryReshardTaskResponse) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *QueryReshardTaskResponse) GetResultRef() string {
+	if x != nil {
+		return x.ResultRef
+	}
+	return ""
+}
+
+func (x *QueryReshardTaskResponse) GetResultDigest() []byte {
+	if x != nil {
+		return x.ResultDigest
+	}
+	return nil
+}
+
+type DropReshardTaskRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	JobId  int64 `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	TaskId int64 `protobuf:"varint,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	RunId  int64 `protobuf:"varint,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+}
+
+func (x *DropReshardTaskRequest) Reset() {
+	*x = DropReshardTaskRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[120]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *DropReshardTaskRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DropReshardTaskRequest) ProtoMessage() {}
+
+func (x *DropReshardTaskRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[120]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DropReshardTaskRequest.ProtoReflect.Descriptor instead.
+func (*DropReshardTaskRequest) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{120}
+}
+
+func (x *DropReshardTaskRequest) GetJobId() int64 {
+	if x != nil {
+		return x.JobId
+	}
+	return 0
+}
+
+func (x *DropReshardTaskRequest) GetTaskId() int64 {
+	if x != nil {
+		return x.TaskId
+	}
+	return 0
+}
+
+func (x *DropReshardTaskRequest) GetRunId() int64 {
+	if x != nil {
+		return x.RunId
+	}
+	return 0
+}
+
+type QueryImportTaskV3Request struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	JobId  int64 `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	TaskId int64 `protobuf:"varint,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	RunId  int64 `protobuf:"varint,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+}
+
+func (x *QueryImportTaskV3Request) Reset() {
+	*x = QueryImportTaskV3Request{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[121]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *QueryImportTaskV3Request) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryImportTaskV3Request) ProtoMessage() {}
+
+func (x *QueryImportTaskV3Request) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[121]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryImportTaskV3Request.ProtoReflect.Descriptor instead.
+func (*QueryImportTaskV3Request) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{121}
+}
+
+func (x *QueryImportTaskV3Request) GetJobId() int64 {
+	if x != nil {
+		return x.JobId
+	}
+	return 0
+}
+
+func (x *QueryImportTaskV3Request) GetTaskId() int64 {
+	if x != nil {
+		return x.TaskId
+	}
+	return 0
+}
+
+func (x *QueryImportTaskV3Request) GetRunId() int64 {
+	if x != nil {
+		return x.RunId
+	}
+	return 0
+}
+
+type QueryImportTaskV3Response struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Status       *commonpb.Status   `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	State        ImportTaskV3_State `protobuf:"varint,2,opt,name=state,proto3,enum=milvus.proto.data.ImportTaskV3_State" json:"state,omitempty"`
+	Reason       string             `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	ResultRef    string             `protobuf:"bytes,4,opt,name=result_ref,json=resultRef,proto3" json:"result_ref,omitempty"`
+	ResultDigest []byte             `protobuf:"bytes,5,opt,name=result_digest,json=resultDigest,proto3" json:"result_digest,omitempty"`
+}
+
+func (x *QueryImportTaskV3Response) Reset() {
+	*x = QueryImportTaskV3Response{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[122]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *QueryImportTaskV3Response) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryImportTaskV3Response) ProtoMessage() {}
+
+func (x *QueryImportTaskV3Response) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[122]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryImportTaskV3Response.ProtoReflect.Descriptor instead.
+func (*QueryImportTaskV3Response) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{122}
+}
+
+func (x *QueryImportTaskV3Response) GetStatus() *commonpb.Status {
+	if x != nil {
+		return x.Status
+	}
+	return nil
+}
+
+func (x *QueryImportTaskV3Response) GetState() ImportTaskV3_State {
+	if x != nil {
+		return x.State
+	}
+	return ImportTaskV3_None
+}
+
+func (x *QueryImportTaskV3Response) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *QueryImportTaskV3Response) GetResultRef() string {
+	if x != nil {
+		return x.ResultRef
+	}
+	return ""
+}
+
+func (x *QueryImportTaskV3Response) GetResultDigest() []byte {
+	if x != nil {
+		return x.ResultDigest
+	}
+	return nil
+}
+
+type DropImportTaskV3Request struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	JobId  int64 `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	TaskId int64 `protobuf:"varint,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	RunId  int64 `protobuf:"varint,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+}
+
+func (x *DropImportTaskV3Request) Reset() {
+	*x = DropImportTaskV3Request{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_data_coord_proto_msgTypes[123]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *DropImportTaskV3Request) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DropImportTaskV3Request) ProtoMessage() {}
+
+func (x *DropImportTaskV3Request) ProtoReflect() protoreflect.Message {
+	mi := &file_data_coord_proto_msgTypes[123]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DropImportTaskV3Request.ProtoReflect.Descriptor instead.
+func (*DropImportTaskV3Request) Descriptor() ([]byte, []int) {
+	return file_data_coord_proto_rawDescGZIP(), []int{123}
+}
+
+func (x *DropImportTaskV3Request) GetJobId() int64 {
+	if x != nil {
+		return x.JobId
+	}
+	return 0
+}
+
+func (x *DropImportTaskV3Request) GetTaskId() int64 {
+	if x != nil {
+		return x.TaskId
+	}
+	return 0
+}
+
+func (x *DropImportTaskV3Request) GetRunId() int64 {
+	if x != nil {
+		return x.RunId
+	}
+	return 0
+}
+
 type GcControlRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -10620,7 +12129,7 @@ type GcControlRequest struct {
 func (x *GcControlRequest) Reset() {
 	*x = GcControlRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[112]
+		mi := &file_data_coord_proto_msgTypes[124]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -10633,7 +12142,7 @@ func (x *GcControlRequest) String() string {
 func (*GcControlRequest) ProtoMessage() {}
 
 func (x *GcControlRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[112]
+	mi := &file_data_coord_proto_msgTypes[124]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10646,7 +12155,7 @@ func (x *GcControlRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GcControlRequest.ProtoReflect.Descriptor instead.
 func (*GcControlRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{112}
+	return file_data_coord_proto_rawDescGZIP(), []int{124}
 }
 
 func (x *GcControlRequest) GetBase() *commonpb.MsgBase {
@@ -10685,7 +12194,7 @@ type GetGcStatusResponse struct {
 func (x *GetGcStatusResponse) Reset() {
 	*x = GetGcStatusResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[113]
+		mi := &file_data_coord_proto_msgTypes[125]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -10698,7 +12207,7 @@ func (x *GetGcStatusResponse) String() string {
 func (*GetGcStatusResponse) ProtoMessage() {}
 
 func (x *GetGcStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[113]
+	mi := &file_data_coord_proto_msgTypes[125]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10711,7 +12220,7 @@ func (x *GetGcStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetGcStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetGcStatusResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{113}
+	return file_data_coord_proto_rawDescGZIP(), []int{125}
 }
 
 func (x *GetGcStatusResponse) GetIsPaused() bool {
@@ -10737,7 +12246,7 @@ type QuerySlotRequest struct {
 func (x *QuerySlotRequest) Reset() {
 	*x = QuerySlotRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[114]
+		mi := &file_data_coord_proto_msgTypes[126]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -10750,7 +12259,7 @@ func (x *QuerySlotRequest) String() string {
 func (*QuerySlotRequest) ProtoMessage() {}
 
 func (x *QuerySlotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[114]
+	mi := &file_data_coord_proto_msgTypes[126]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10763,7 +12272,7 @@ func (x *QuerySlotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QuerySlotRequest.ProtoReflect.Descriptor instead.
 func (*QuerySlotRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{114}
+	return file_data_coord_proto_rawDescGZIP(), []int{126}
 }
 
 type QuerySlotResponse struct {
@@ -10774,12 +12283,14 @@ type QuerySlotResponse struct {
 	Status         *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	AvailableSlots int64            `protobuf:"varint,2,opt,name=available_slots,json=availableSlots,proto3" json:"available_slots,omitempty"`
 	Version        string           `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"` // Milvus build version reported by the worker
+	// 0/2 means the worker can only run V2 import tasks; 3 enables V3.
+	MaxImportTaskVersion uint32 `protobuf:"varint,4,opt,name=max_import_task_version,json=maxImportTaskVersion,proto3" json:"max_import_task_version,omitempty"`
 }
 
 func (x *QuerySlotResponse) Reset() {
 	*x = QuerySlotResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[115]
+		mi := &file_data_coord_proto_msgTypes[127]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -10792,7 +12303,7 @@ func (x *QuerySlotResponse) String() string {
 func (*QuerySlotResponse) ProtoMessage() {}
 
 func (x *QuerySlotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[115]
+	mi := &file_data_coord_proto_msgTypes[127]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10805,7 +12316,7 @@ func (x *QuerySlotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QuerySlotResponse.ProtoReflect.Descriptor instead.
 func (*QuerySlotResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{115}
+	return file_data_coord_proto_rawDescGZIP(), []int{127}
 }
 
 func (x *QuerySlotResponse) GetStatus() *commonpb.Status {
@@ -10829,6 +12340,13 @@ func (x *QuerySlotResponse) GetVersion() string {
 	return ""
 }
 
+func (x *QuerySlotResponse) GetMaxImportTaskVersion() uint32 {
+	if x != nil {
+		return x.MaxImportTaskVersion
+	}
+	return 0
+}
+
 type CompactionTarget struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -10848,7 +12366,7 @@ type CompactionTarget struct {
 func (x *CompactionTarget) Reset() {
 	*x = CompactionTarget{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[116]
+		mi := &file_data_coord_proto_msgTypes[128]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -10861,7 +12379,7 @@ func (x *CompactionTarget) String() string {
 func (*CompactionTarget) ProtoMessage() {}
 
 func (x *CompactionTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[116]
+	mi := &file_data_coord_proto_msgTypes[128]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10874,7 +12392,7 @@ func (x *CompactionTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactionTarget.ProtoReflect.Descriptor instead.
 func (*CompactionTarget) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{116}
+	return file_data_coord_proto_rawDescGZIP(), []int{128}
 }
 
 func (x *CompactionTarget) GetTargetID() int64 {
@@ -10981,7 +12499,7 @@ type CompactionTask struct {
 func (x *CompactionTask) Reset() {
 	*x = CompactionTask{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[117]
+		mi := &file_data_coord_proto_msgTypes[129]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -10994,7 +12512,7 @@ func (x *CompactionTask) String() string {
 func (*CompactionTask) ProtoMessage() {}
 
 func (x *CompactionTask) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[117]
+	mi := &file_data_coord_proto_msgTypes[129]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11007,7 +12525,7 @@ func (x *CompactionTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactionTask.ProtoReflect.Descriptor instead.
 func (*CompactionTask) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{117}
+	return file_data_coord_proto_rawDescGZIP(), []int{129}
 }
 
 func (x *CompactionTask) GetPlanID() int64 {
@@ -11238,7 +12756,7 @@ type PartitionStatsInfo struct {
 func (x *PartitionStatsInfo) Reset() {
 	*x = PartitionStatsInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[118]
+		mi := &file_data_coord_proto_msgTypes[130]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -11251,7 +12769,7 @@ func (x *PartitionStatsInfo) String() string {
 func (*PartitionStatsInfo) ProtoMessage() {}
 
 func (x *PartitionStatsInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[118]
+	mi := &file_data_coord_proto_msgTypes[130]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11264,7 +12782,7 @@ func (x *PartitionStatsInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartitionStatsInfo.ProtoReflect.Descriptor instead.
 func (*PartitionStatsInfo) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{118}
+	return file_data_coord_proto_rawDescGZIP(), []int{130}
 }
 
 func (x *PartitionStatsInfo) GetCollectionID() int64 {
@@ -11327,7 +12845,7 @@ type DropCompactionPlanRequest struct {
 func (x *DropCompactionPlanRequest) Reset() {
 	*x = DropCompactionPlanRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[119]
+		mi := &file_data_coord_proto_msgTypes[131]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -11340,7 +12858,7 @@ func (x *DropCompactionPlanRequest) String() string {
 func (*DropCompactionPlanRequest) ProtoMessage() {}
 
 func (x *DropCompactionPlanRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[119]
+	mi := &file_data_coord_proto_msgTypes[131]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11353,7 +12871,7 @@ func (x *DropCompactionPlanRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DropCompactionPlanRequest.ProtoReflect.Descriptor instead.
 func (*DropCompactionPlanRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{119}
+	return file_data_coord_proto_rawDescGZIP(), []int{131}
 }
 
 func (x *DropCompactionPlanRequest) GetPlanID() int64 {
@@ -11389,7 +12907,7 @@ type RefreshExternalCollectionTaskRequest struct {
 func (x *RefreshExternalCollectionTaskRequest) Reset() {
 	*x = RefreshExternalCollectionTaskRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[120]
+		mi := &file_data_coord_proto_msgTypes[132]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -11402,7 +12920,7 @@ func (x *RefreshExternalCollectionTaskRequest) String() string {
 func (*RefreshExternalCollectionTaskRequest) ProtoMessage() {}
 
 func (x *RefreshExternalCollectionTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[120]
+	mi := &file_data_coord_proto_msgTypes[132]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11415,7 +12933,7 @@ func (x *RefreshExternalCollectionTaskRequest) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use RefreshExternalCollectionTaskRequest.ProtoReflect.Descriptor instead.
 func (*RefreshExternalCollectionTaskRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{120}
+	return file_data_coord_proto_rawDescGZIP(), []int{132}
 }
 
 func (x *RefreshExternalCollectionTaskRequest) GetBase() *commonpb.MsgBase {
@@ -11545,7 +13063,7 @@ type RefreshExternalCollectionTaskResponse struct {
 func (x *RefreshExternalCollectionTaskResponse) Reset() {
 	*x = RefreshExternalCollectionTaskResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[121]
+		mi := &file_data_coord_proto_msgTypes[133]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -11558,7 +13076,7 @@ func (x *RefreshExternalCollectionTaskResponse) String() string {
 func (*RefreshExternalCollectionTaskResponse) ProtoMessage() {}
 
 func (x *RefreshExternalCollectionTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[121]
+	mi := &file_data_coord_proto_msgTypes[133]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11571,7 +13089,7 @@ func (x *RefreshExternalCollectionTaskResponse) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use RefreshExternalCollectionTaskResponse.ProtoReflect.Descriptor instead.
 func (*RefreshExternalCollectionTaskResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{121}
+	return file_data_coord_proto_rawDescGZIP(), []int{133}
 }
 
 func (x *RefreshExternalCollectionTaskResponse) GetStatus() *commonpb.Status {
@@ -11624,7 +13142,7 @@ type RefreshExternalCollectionRequest struct {
 func (x *RefreshExternalCollectionRequest) Reset() {
 	*x = RefreshExternalCollectionRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[122]
+		mi := &file_data_coord_proto_msgTypes[134]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -11637,7 +13155,7 @@ func (x *RefreshExternalCollectionRequest) String() string {
 func (*RefreshExternalCollectionRequest) ProtoMessage() {}
 
 func (x *RefreshExternalCollectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[122]
+	mi := &file_data_coord_proto_msgTypes[134]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11650,7 +13168,7 @@ func (x *RefreshExternalCollectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RefreshExternalCollectionRequest.ProtoReflect.Descriptor instead.
 func (*RefreshExternalCollectionRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{122}
+	return file_data_coord_proto_rawDescGZIP(), []int{134}
 }
 
 func (x *RefreshExternalCollectionRequest) GetBase() *commonpb.MsgBase {
@@ -11700,7 +13218,7 @@ type RefreshExternalCollectionResponse struct {
 func (x *RefreshExternalCollectionResponse) Reset() {
 	*x = RefreshExternalCollectionResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[123]
+		mi := &file_data_coord_proto_msgTypes[135]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -11713,7 +13231,7 @@ func (x *RefreshExternalCollectionResponse) String() string {
 func (*RefreshExternalCollectionResponse) ProtoMessage() {}
 
 func (x *RefreshExternalCollectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[123]
+	mi := &file_data_coord_proto_msgTypes[135]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11726,7 +13244,7 @@ func (x *RefreshExternalCollectionResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use RefreshExternalCollectionResponse.ProtoReflect.Descriptor instead.
 func (*RefreshExternalCollectionResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{123}
+	return file_data_coord_proto_rawDescGZIP(), []int{135}
 }
 
 func (x *RefreshExternalCollectionResponse) GetStatus() *commonpb.Status {
@@ -11755,7 +13273,7 @@ type GetRefreshExternalCollectionProgressRequest struct {
 func (x *GetRefreshExternalCollectionProgressRequest) Reset() {
 	*x = GetRefreshExternalCollectionProgressRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[124]
+		mi := &file_data_coord_proto_msgTypes[136]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -11768,7 +13286,7 @@ func (x *GetRefreshExternalCollectionProgressRequest) String() string {
 func (*GetRefreshExternalCollectionProgressRequest) ProtoMessage() {}
 
 func (x *GetRefreshExternalCollectionProgressRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[124]
+	mi := &file_data_coord_proto_msgTypes[136]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11781,7 +13299,7 @@ func (x *GetRefreshExternalCollectionProgressRequest) ProtoReflect() protoreflec
 
 // Deprecated: Use GetRefreshExternalCollectionProgressRequest.ProtoReflect.Descriptor instead.
 func (*GetRefreshExternalCollectionProgressRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{124}
+	return file_data_coord_proto_rawDescGZIP(), []int{136}
 }
 
 func (x *GetRefreshExternalCollectionProgressRequest) GetBase() *commonpb.MsgBase {
@@ -11821,7 +13339,7 @@ type ExternalCollectionRefreshJob struct {
 func (x *ExternalCollectionRefreshJob) Reset() {
 	*x = ExternalCollectionRefreshJob{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[125]
+		mi := &file_data_coord_proto_msgTypes[137]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -11834,7 +13352,7 @@ func (x *ExternalCollectionRefreshJob) String() string {
 func (*ExternalCollectionRefreshJob) ProtoMessage() {}
 
 func (x *ExternalCollectionRefreshJob) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[125]
+	mi := &file_data_coord_proto_msgTypes[137]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11847,7 +13365,7 @@ func (x *ExternalCollectionRefreshJob) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExternalCollectionRefreshJob.ProtoReflect.Descriptor instead.
 func (*ExternalCollectionRefreshJob) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{125}
+	return file_data_coord_proto_rawDescGZIP(), []int{137}
 }
 
 func (x *ExternalCollectionRefreshJob) GetJobId() int64 {
@@ -11942,7 +13460,7 @@ type ExternalFileInfo struct {
 func (x *ExternalFileInfo) Reset() {
 	*x = ExternalFileInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[126]
+		mi := &file_data_coord_proto_msgTypes[138]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -11955,7 +13473,7 @@ func (x *ExternalFileInfo) String() string {
 func (*ExternalFileInfo) ProtoMessage() {}
 
 func (x *ExternalFileInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[126]
+	mi := &file_data_coord_proto_msgTypes[138]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11968,7 +13486,7 @@ func (x *ExternalFileInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExternalFileInfo.ProtoReflect.Descriptor instead.
 func (*ExternalFileInfo) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{126}
+	return file_data_coord_proto_rawDescGZIP(), []int{138}
 }
 
 func (x *ExternalFileInfo) GetFilePath() string {
@@ -12023,7 +13541,7 @@ type ExternalCollectionRefreshTask struct {
 func (x *ExternalCollectionRefreshTask) Reset() {
 	*x = ExternalCollectionRefreshTask{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[127]
+		mi := &file_data_coord_proto_msgTypes[139]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -12036,7 +13554,7 @@ func (x *ExternalCollectionRefreshTask) String() string {
 func (*ExternalCollectionRefreshTask) ProtoMessage() {}
 
 func (x *ExternalCollectionRefreshTask) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[127]
+	mi := &file_data_coord_proto_msgTypes[139]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12049,7 +13567,7 @@ func (x *ExternalCollectionRefreshTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExternalCollectionRefreshTask.ProtoReflect.Descriptor instead.
 func (*ExternalCollectionRefreshTask) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{127}
+	return file_data_coord_proto_rawDescGZIP(), []int{139}
 }
 
 func (x *ExternalCollectionRefreshTask) GetTaskId() int64 {
@@ -12211,7 +13729,7 @@ type GetRefreshExternalCollectionProgressResponse struct {
 func (x *GetRefreshExternalCollectionProgressResponse) Reset() {
 	*x = GetRefreshExternalCollectionProgressResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[128]
+		mi := &file_data_coord_proto_msgTypes[140]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -12224,7 +13742,7 @@ func (x *GetRefreshExternalCollectionProgressResponse) String() string {
 func (*GetRefreshExternalCollectionProgressResponse) ProtoMessage() {}
 
 func (x *GetRefreshExternalCollectionProgressResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[128]
+	mi := &file_data_coord_proto_msgTypes[140]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12237,7 +13755,7 @@ func (x *GetRefreshExternalCollectionProgressResponse) ProtoReflect() protorefle
 
 // Deprecated: Use GetRefreshExternalCollectionProgressResponse.ProtoReflect.Descriptor instead.
 func (*GetRefreshExternalCollectionProgressResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{128}
+	return file_data_coord_proto_rawDescGZIP(), []int{140}
 }
 
 func (x *GetRefreshExternalCollectionProgressResponse) GetStatus() *commonpb.Status {
@@ -12266,7 +13784,7 @@ type ListRefreshExternalCollectionJobsRequest struct {
 func (x *ListRefreshExternalCollectionJobsRequest) Reset() {
 	*x = ListRefreshExternalCollectionJobsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[129]
+		mi := &file_data_coord_proto_msgTypes[141]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -12279,7 +13797,7 @@ func (x *ListRefreshExternalCollectionJobsRequest) String() string {
 func (*ListRefreshExternalCollectionJobsRequest) ProtoMessage() {}
 
 func (x *ListRefreshExternalCollectionJobsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[129]
+	mi := &file_data_coord_proto_msgTypes[141]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12292,7 +13810,7 @@ func (x *ListRefreshExternalCollectionJobsRequest) ProtoReflect() protoreflect.M
 
 // Deprecated: Use ListRefreshExternalCollectionJobsRequest.ProtoReflect.Descriptor instead.
 func (*ListRefreshExternalCollectionJobsRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{129}
+	return file_data_coord_proto_rawDescGZIP(), []int{141}
 }
 
 func (x *ListRefreshExternalCollectionJobsRequest) GetBase() *commonpb.MsgBase {
@@ -12321,7 +13839,7 @@ type ListRefreshExternalCollectionJobsResponse struct {
 func (x *ListRefreshExternalCollectionJobsResponse) Reset() {
 	*x = ListRefreshExternalCollectionJobsResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[130]
+		mi := &file_data_coord_proto_msgTypes[142]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -12334,7 +13852,7 @@ func (x *ListRefreshExternalCollectionJobsResponse) String() string {
 func (*ListRefreshExternalCollectionJobsResponse) ProtoMessage() {}
 
 func (x *ListRefreshExternalCollectionJobsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[130]
+	mi := &file_data_coord_proto_msgTypes[142]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12347,7 +13865,7 @@ func (x *ListRefreshExternalCollectionJobsResponse) ProtoReflect() protoreflect.
 
 // Deprecated: Use ListRefreshExternalCollectionJobsResponse.ProtoReflect.Descriptor instead.
 func (*ListRefreshExternalCollectionJobsResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{130}
+	return file_data_coord_proto_rawDescGZIP(), []int{142}
 }
 
 func (x *ListRefreshExternalCollectionJobsResponse) GetStatus() *commonpb.Status {
@@ -12379,7 +13897,7 @@ type CreateSnapshotRequest struct {
 func (x *CreateSnapshotRequest) Reset() {
 	*x = CreateSnapshotRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[131]
+		mi := &file_data_coord_proto_msgTypes[143]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -12392,7 +13910,7 @@ func (x *CreateSnapshotRequest) String() string {
 func (*CreateSnapshotRequest) ProtoMessage() {}
 
 func (x *CreateSnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[131]
+	mi := &file_data_coord_proto_msgTypes[143]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12405,7 +13923,7 @@ func (x *CreateSnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateSnapshotRequest.ProtoReflect.Descriptor instead.
 func (*CreateSnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{131}
+	return file_data_coord_proto_rawDescGZIP(), []int{143}
 }
 
 func (x *CreateSnapshotRequest) GetBase() *commonpb.MsgBase {
@@ -12456,7 +13974,7 @@ type DropSnapshotRequest struct {
 func (x *DropSnapshotRequest) Reset() {
 	*x = DropSnapshotRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[132]
+		mi := &file_data_coord_proto_msgTypes[144]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -12469,7 +13987,7 @@ func (x *DropSnapshotRequest) String() string {
 func (*DropSnapshotRequest) ProtoMessage() {}
 
 func (x *DropSnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[132]
+	mi := &file_data_coord_proto_msgTypes[144]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12482,7 +14000,7 @@ func (x *DropSnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DropSnapshotRequest.ProtoReflect.Descriptor instead.
 func (*DropSnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{132}
+	return file_data_coord_proto_rawDescGZIP(), []int{144}
 }
 
 func (x *DropSnapshotRequest) GetBase() *commonpb.MsgBase {
@@ -12520,7 +14038,7 @@ type ListSnapshotsRequest struct {
 func (x *ListSnapshotsRequest) Reset() {
 	*x = ListSnapshotsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[133]
+		mi := &file_data_coord_proto_msgTypes[145]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -12533,7 +14051,7 @@ func (x *ListSnapshotsRequest) String() string {
 func (*ListSnapshotsRequest) ProtoMessage() {}
 
 func (x *ListSnapshotsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[133]
+	mi := &file_data_coord_proto_msgTypes[145]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12546,7 +14064,7 @@ func (x *ListSnapshotsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSnapshotsRequest.ProtoReflect.Descriptor instead.
 func (*ListSnapshotsRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{133}
+	return file_data_coord_proto_rawDescGZIP(), []int{145}
 }
 
 func (x *ListSnapshotsRequest) GetBase() *commonpb.MsgBase {
@@ -12591,7 +14109,7 @@ type ListSnapshotsResponse struct {
 func (x *ListSnapshotsResponse) Reset() {
 	*x = ListSnapshotsResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[134]
+		mi := &file_data_coord_proto_msgTypes[146]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -12604,7 +14122,7 @@ func (x *ListSnapshotsResponse) String() string {
 func (*ListSnapshotsResponse) ProtoMessage() {}
 
 func (x *ListSnapshotsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[134]
+	mi := &file_data_coord_proto_msgTypes[146]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12617,7 +14135,7 @@ func (x *ListSnapshotsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSnapshotsResponse.ProtoReflect.Descriptor instead.
 func (*ListSnapshotsResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{134}
+	return file_data_coord_proto_rawDescGZIP(), []int{146}
 }
 
 func (x *ListSnapshotsResponse) GetStatus() *commonpb.Status {
@@ -12649,7 +14167,7 @@ type ExportSnapshotRequest struct {
 func (x *ExportSnapshotRequest) Reset() {
 	*x = ExportSnapshotRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[135]
+		mi := &file_data_coord_proto_msgTypes[147]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -12662,7 +14180,7 @@ func (x *ExportSnapshotRequest) String() string {
 func (*ExportSnapshotRequest) ProtoMessage() {}
 
 func (x *ExportSnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[135]
+	mi := &file_data_coord_proto_msgTypes[147]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12675,7 +14193,7 @@ func (x *ExportSnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportSnapshotRequest.ProtoReflect.Descriptor instead.
 func (*ExportSnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{135}
+	return file_data_coord_proto_rawDescGZIP(), []int{147}
 }
 
 func (x *ExportSnapshotRequest) GetBase() *commonpb.MsgBase {
@@ -12727,7 +14245,7 @@ type ExportSnapshotResponse struct {
 func (x *ExportSnapshotResponse) Reset() {
 	*x = ExportSnapshotResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[136]
+		mi := &file_data_coord_proto_msgTypes[148]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -12740,7 +14258,7 @@ func (x *ExportSnapshotResponse) String() string {
 func (*ExportSnapshotResponse) ProtoMessage() {}
 
 func (x *ExportSnapshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[136]
+	mi := &file_data_coord_proto_msgTypes[148]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12753,7 +14271,7 @@ func (x *ExportSnapshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportSnapshotResponse.ProtoReflect.Descriptor instead.
 func (*ExportSnapshotResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{136}
+	return file_data_coord_proto_rawDescGZIP(), []int{148}
 }
 
 func (x *ExportSnapshotResponse) GetStatus() *commonpb.Status {
@@ -12809,7 +14327,7 @@ type SegmentDescription struct {
 func (x *SegmentDescription) Reset() {
 	*x = SegmentDescription{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[137]
+		mi := &file_data_coord_proto_msgTypes[149]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -12822,7 +14340,7 @@ func (x *SegmentDescription) String() string {
 func (*SegmentDescription) ProtoMessage() {}
 
 func (x *SegmentDescription) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[137]
+	mi := &file_data_coord_proto_msgTypes[149]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12835,7 +14353,7 @@ func (x *SegmentDescription) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SegmentDescription.ProtoReflect.Descriptor instead.
 func (*SegmentDescription) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{137}
+	return file_data_coord_proto_rawDescGZIP(), []int{149}
 }
 
 func (x *SegmentDescription) GetSegmentId() int64 {
@@ -12981,7 +14499,7 @@ type CollectionDescription struct {
 func (x *CollectionDescription) Reset() {
 	*x = CollectionDescription{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[138]
+		mi := &file_data_coord_proto_msgTypes[150]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -12994,7 +14512,7 @@ func (x *CollectionDescription) String() string {
 func (*CollectionDescription) ProtoMessage() {}
 
 func (x *CollectionDescription) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[138]
+	mi := &file_data_coord_proto_msgTypes[150]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13007,7 +14525,7 @@ func (x *CollectionDescription) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectionDescription.ProtoReflect.Descriptor instead.
 func (*CollectionDescription) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{138}
+	return file_data_coord_proto_rawDescGZIP(), []int{150}
 }
 
 func (x *CollectionDescription) GetSchema() *schemapb.CollectionSchema {
@@ -13086,7 +14604,7 @@ type SnapshotInfo struct {
 func (x *SnapshotInfo) Reset() {
 	*x = SnapshotInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[139]
+		mi := &file_data_coord_proto_msgTypes[151]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -13099,7 +14617,7 @@ func (x *SnapshotInfo) String() string {
 func (*SnapshotInfo) ProtoMessage() {}
 
 func (x *SnapshotInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[139]
+	mi := &file_data_coord_proto_msgTypes[151]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13112,7 +14630,7 @@ func (x *SnapshotInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SnapshotInfo.ProtoReflect.Descriptor instead.
 func (*SnapshotInfo) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{139}
+	return file_data_coord_proto_rawDescGZIP(), []int{151}
 }
 
 func (x *SnapshotInfo) GetName() string {
@@ -13220,7 +14738,7 @@ type StorageV2SegmentManifest struct {
 func (x *StorageV2SegmentManifest) Reset() {
 	*x = StorageV2SegmentManifest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[140]
+		mi := &file_data_coord_proto_msgTypes[152]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -13233,7 +14751,7 @@ func (x *StorageV2SegmentManifest) String() string {
 func (*StorageV2SegmentManifest) ProtoMessage() {}
 
 func (x *StorageV2SegmentManifest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[140]
+	mi := &file_data_coord_proto_msgTypes[152]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13246,7 +14764,7 @@ func (x *StorageV2SegmentManifest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StorageV2SegmentManifest.ProtoReflect.Descriptor instead.
 func (*StorageV2SegmentManifest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{140}
+	return file_data_coord_proto_rawDescGZIP(), []int{152}
 }
 
 func (x *StorageV2SegmentManifest) GetSegmentId() int64 {
@@ -13290,7 +14808,7 @@ type SnapshotMetadata struct {
 func (x *SnapshotMetadata) Reset() {
 	*x = SnapshotMetadata{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[141]
+		mi := &file_data_coord_proto_msgTypes[153]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -13303,7 +14821,7 @@ func (x *SnapshotMetadata) String() string {
 func (*SnapshotMetadata) ProtoMessage() {}
 
 func (x *SnapshotMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[141]
+	mi := &file_data_coord_proto_msgTypes[153]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13316,7 +14834,7 @@ func (x *SnapshotMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SnapshotMetadata.ProtoReflect.Descriptor instead.
 func (*SnapshotMetadata) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{141}
+	return file_data_coord_proto_rawDescGZIP(), []int{153}
 }
 
 func (x *SnapshotMetadata) GetFormatVersion() int32 {
@@ -13401,7 +14919,7 @@ type RestoreSnapshotInfo struct {
 func (x *RestoreSnapshotInfo) Reset() {
 	*x = RestoreSnapshotInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[142]
+		mi := &file_data_coord_proto_msgTypes[154]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -13414,7 +14932,7 @@ func (x *RestoreSnapshotInfo) String() string {
 func (*RestoreSnapshotInfo) ProtoMessage() {}
 
 func (x *RestoreSnapshotInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[142]
+	mi := &file_data_coord_proto_msgTypes[154]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13427,7 +14945,7 @@ func (x *RestoreSnapshotInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreSnapshotInfo.ProtoReflect.Descriptor instead.
 func (*RestoreSnapshotInfo) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{142}
+	return file_data_coord_proto_rawDescGZIP(), []int{154}
 }
 
 func (x *RestoreSnapshotInfo) GetJobId() int64 {
@@ -13507,7 +15025,7 @@ type DescribeSnapshotRequest struct {
 func (x *DescribeSnapshotRequest) Reset() {
 	*x = DescribeSnapshotRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[143]
+		mi := &file_data_coord_proto_msgTypes[155]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -13520,7 +15038,7 @@ func (x *DescribeSnapshotRequest) String() string {
 func (*DescribeSnapshotRequest) ProtoMessage() {}
 
 func (x *DescribeSnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[143]
+	mi := &file_data_coord_proto_msgTypes[155]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13533,7 +15051,7 @@ func (x *DescribeSnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DescribeSnapshotRequest.ProtoReflect.Descriptor instead.
 func (*DescribeSnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{143}
+	return file_data_coord_proto_rawDescGZIP(), []int{155}
 }
 
 func (x *DescribeSnapshotRequest) GetBase() *commonpb.MsgBase {
@@ -13579,7 +15097,7 @@ type DescribeSnapshotResponse struct {
 func (x *DescribeSnapshotResponse) Reset() {
 	*x = DescribeSnapshotResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[144]
+		mi := &file_data_coord_proto_msgTypes[156]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -13592,7 +15110,7 @@ func (x *DescribeSnapshotResponse) String() string {
 func (*DescribeSnapshotResponse) ProtoMessage() {}
 
 func (x *DescribeSnapshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[144]
+	mi := &file_data_coord_proto_msgTypes[156]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13605,7 +15123,7 @@ func (x *DescribeSnapshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DescribeSnapshotResponse.ProtoReflect.Descriptor instead.
 func (*DescribeSnapshotResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{144}
+	return file_data_coord_proto_rawDescGZIP(), []int{156}
 }
 
 func (x *DescribeSnapshotResponse) GetStatus() *commonpb.Status {
@@ -13656,7 +15174,7 @@ type RestoreSnapshotRequest struct {
 func (x *RestoreSnapshotRequest) Reset() {
 	*x = RestoreSnapshotRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[145]
+		mi := &file_data_coord_proto_msgTypes[157]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -13669,7 +15187,7 @@ func (x *RestoreSnapshotRequest) String() string {
 func (*RestoreSnapshotRequest) ProtoMessage() {}
 
 func (x *RestoreSnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[145]
+	mi := &file_data_coord_proto_msgTypes[157]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13682,7 +15200,7 @@ func (x *RestoreSnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreSnapshotRequest.ProtoReflect.Descriptor instead.
 func (*RestoreSnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{145}
+	return file_data_coord_proto_rawDescGZIP(), []int{157}
 }
 
 func (x *RestoreSnapshotRequest) GetBase() *commonpb.MsgBase {
@@ -13754,7 +15272,7 @@ type RestoreSnapshotResponse struct {
 func (x *RestoreSnapshotResponse) Reset() {
 	*x = RestoreSnapshotResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[146]
+		mi := &file_data_coord_proto_msgTypes[158]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -13767,7 +15285,7 @@ func (x *RestoreSnapshotResponse) String() string {
 func (*RestoreSnapshotResponse) ProtoMessage() {}
 
 func (x *RestoreSnapshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[146]
+	mi := &file_data_coord_proto_msgTypes[158]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13780,7 +15298,7 @@ func (x *RestoreSnapshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreSnapshotResponse.ProtoReflect.Descriptor instead.
 func (*RestoreSnapshotResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{146}
+	return file_data_coord_proto_rawDescGZIP(), []int{158}
 }
 
 func (x *RestoreSnapshotResponse) GetStatus() *commonpb.Status {
@@ -13816,7 +15334,7 @@ type GetRestoreSnapshotStateRequest struct {
 func (x *GetRestoreSnapshotStateRequest) Reset() {
 	*x = GetRestoreSnapshotStateRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[147]
+		mi := &file_data_coord_proto_msgTypes[159]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -13829,7 +15347,7 @@ func (x *GetRestoreSnapshotStateRequest) String() string {
 func (*GetRestoreSnapshotStateRequest) ProtoMessage() {}
 
 func (x *GetRestoreSnapshotStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[147]
+	mi := &file_data_coord_proto_msgTypes[159]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13842,7 +15360,7 @@ func (x *GetRestoreSnapshotStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRestoreSnapshotStateRequest.ProtoReflect.Descriptor instead.
 func (*GetRestoreSnapshotStateRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{147}
+	return file_data_coord_proto_rawDescGZIP(), []int{159}
 }
 
 func (x *GetRestoreSnapshotStateRequest) GetBase() *commonpb.MsgBase {
@@ -13871,7 +15389,7 @@ type GetRestoreSnapshotStateResponse struct {
 func (x *GetRestoreSnapshotStateResponse) Reset() {
 	*x = GetRestoreSnapshotStateResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[148]
+		mi := &file_data_coord_proto_msgTypes[160]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -13884,7 +15402,7 @@ func (x *GetRestoreSnapshotStateResponse) String() string {
 func (*GetRestoreSnapshotStateResponse) ProtoMessage() {}
 
 func (x *GetRestoreSnapshotStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[148]
+	mi := &file_data_coord_proto_msgTypes[160]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13897,7 +15415,7 @@ func (x *GetRestoreSnapshotStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRestoreSnapshotStateResponse.ProtoReflect.Descriptor instead.
 func (*GetRestoreSnapshotStateResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{148}
+	return file_data_coord_proto_rawDescGZIP(), []int{160}
 }
 
 func (x *GetRestoreSnapshotStateResponse) GetStatus() *commonpb.Status {
@@ -13927,7 +15445,7 @@ type ListRestoreSnapshotJobsRequest struct {
 func (x *ListRestoreSnapshotJobsRequest) Reset() {
 	*x = ListRestoreSnapshotJobsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[149]
+		mi := &file_data_coord_proto_msgTypes[161]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -13940,7 +15458,7 @@ func (x *ListRestoreSnapshotJobsRequest) String() string {
 func (*ListRestoreSnapshotJobsRequest) ProtoMessage() {}
 
 func (x *ListRestoreSnapshotJobsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[149]
+	mi := &file_data_coord_proto_msgTypes[161]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13953,7 +15471,7 @@ func (x *ListRestoreSnapshotJobsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRestoreSnapshotJobsRequest.ProtoReflect.Descriptor instead.
 func (*ListRestoreSnapshotJobsRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{149}
+	return file_data_coord_proto_rawDescGZIP(), []int{161}
 }
 
 func (x *ListRestoreSnapshotJobsRequest) GetBase() *commonpb.MsgBase {
@@ -13989,7 +15507,7 @@ type ListRestoreSnapshotJobsResponse struct {
 func (x *ListRestoreSnapshotJobsResponse) Reset() {
 	*x = ListRestoreSnapshotJobsResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[150]
+		mi := &file_data_coord_proto_msgTypes[162]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14002,7 +15520,7 @@ func (x *ListRestoreSnapshotJobsResponse) String() string {
 func (*ListRestoreSnapshotJobsResponse) ProtoMessage() {}
 
 func (x *ListRestoreSnapshotJobsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[150]
+	mi := &file_data_coord_proto_msgTypes[162]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14015,7 +15533,7 @@ func (x *ListRestoreSnapshotJobsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRestoreSnapshotJobsResponse.ProtoReflect.Descriptor instead.
 func (*ListRestoreSnapshotJobsResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{150}
+	return file_data_coord_proto_rawDescGZIP(), []int{162}
 }
 
 func (x *ListRestoreSnapshotJobsResponse) GetStatus() *commonpb.Status {
@@ -14045,7 +15563,7 @@ type BatchUpdateManifestRequest struct {
 func (x *BatchUpdateManifestRequest) Reset() {
 	*x = BatchUpdateManifestRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[151]
+		mi := &file_data_coord_proto_msgTypes[163]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14058,7 +15576,7 @@ func (x *BatchUpdateManifestRequest) String() string {
 func (*BatchUpdateManifestRequest) ProtoMessage() {}
 
 func (x *BatchUpdateManifestRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[151]
+	mi := &file_data_coord_proto_msgTypes[163]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14071,7 +15589,7 @@ func (x *BatchUpdateManifestRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchUpdateManifestRequest.ProtoReflect.Descriptor instead.
 func (*BatchUpdateManifestRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{151}
+	return file_data_coord_proto_rawDescGZIP(), []int{163}
 }
 
 func (x *BatchUpdateManifestRequest) GetBase() *commonpb.MsgBase {
@@ -14107,7 +15625,7 @@ type BatchUpdateManifestItem struct {
 func (x *BatchUpdateManifestItem) Reset() {
 	*x = BatchUpdateManifestItem{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[152]
+		mi := &file_data_coord_proto_msgTypes[164]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14120,7 +15638,7 @@ func (x *BatchUpdateManifestItem) String() string {
 func (*BatchUpdateManifestItem) ProtoMessage() {}
 
 func (x *BatchUpdateManifestItem) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[152]
+	mi := &file_data_coord_proto_msgTypes[164]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14133,7 +15651,7 @@ func (x *BatchUpdateManifestItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchUpdateManifestItem.ProtoReflect.Descriptor instead.
 func (*BatchUpdateManifestItem) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{152}
+	return file_data_coord_proto_rawDescGZIP(), []int{164}
 }
 
 func (x *BatchUpdateManifestItem) GetSegmentId() int64 {
@@ -14171,7 +15689,7 @@ type CommitBackfillResultRequest struct {
 func (x *CommitBackfillResultRequest) Reset() {
 	*x = CommitBackfillResultRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[153]
+		mi := &file_data_coord_proto_msgTypes[165]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14184,7 +15702,7 @@ func (x *CommitBackfillResultRequest) String() string {
 func (*CommitBackfillResultRequest) ProtoMessage() {}
 
 func (x *CommitBackfillResultRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[153]
+	mi := &file_data_coord_proto_msgTypes[165]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14197,7 +15715,7 @@ func (x *CommitBackfillResultRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommitBackfillResultRequest.ProtoReflect.Descriptor instead.
 func (*CommitBackfillResultRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{153}
+	return file_data_coord_proto_rawDescGZIP(), []int{165}
 }
 
 func (x *CommitBackfillResultRequest) GetBase() *commonpb.MsgBase {
@@ -14228,7 +15746,7 @@ type CommitBackfillResultSegmentStatus struct {
 func (x *CommitBackfillResultSegmentStatus) Reset() {
 	*x = CommitBackfillResultSegmentStatus{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[154]
+		mi := &file_data_coord_proto_msgTypes[166]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14241,7 +15759,7 @@ func (x *CommitBackfillResultSegmentStatus) String() string {
 func (*CommitBackfillResultSegmentStatus) ProtoMessage() {}
 
 func (x *CommitBackfillResultSegmentStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[154]
+	mi := &file_data_coord_proto_msgTypes[166]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14254,7 +15772,7 @@ func (x *CommitBackfillResultSegmentStatus) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use CommitBackfillResultSegmentStatus.ProtoReflect.Descriptor instead.
 func (*CommitBackfillResultSegmentStatus) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{154}
+	return file_data_coord_proto_rawDescGZIP(), []int{166}
 }
 
 func (x *CommitBackfillResultSegmentStatus) GetSegmentId() int64 {
@@ -14300,7 +15818,7 @@ type CommitBackfillResultResponse struct {
 func (x *CommitBackfillResultResponse) Reset() {
 	*x = CommitBackfillResultResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[155]
+		mi := &file_data_coord_proto_msgTypes[167]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14313,7 +15831,7 @@ func (x *CommitBackfillResultResponse) String() string {
 func (*CommitBackfillResultResponse) ProtoMessage() {}
 
 func (x *CommitBackfillResultResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[155]
+	mi := &file_data_coord_proto_msgTypes[167]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14326,7 +15844,7 @@ func (x *CommitBackfillResultResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommitBackfillResultResponse.ProtoReflect.Descriptor instead.
 func (*CommitBackfillResultResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{155}
+	return file_data_coord_proto_rawDescGZIP(), []int{167}
 }
 
 func (x *CommitBackfillResultResponse) GetStatus() *commonpb.Status {
@@ -14378,7 +15896,7 @@ type PinSnapshotDataRequest struct {
 func (x *PinSnapshotDataRequest) Reset() {
 	*x = PinSnapshotDataRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[156]
+		mi := &file_data_coord_proto_msgTypes[168]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14391,7 +15909,7 @@ func (x *PinSnapshotDataRequest) String() string {
 func (*PinSnapshotDataRequest) ProtoMessage() {}
 
 func (x *PinSnapshotDataRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[156]
+	mi := &file_data_coord_proto_msgTypes[168]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14404,7 +15922,7 @@ func (x *PinSnapshotDataRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PinSnapshotDataRequest.ProtoReflect.Descriptor instead.
 func (*PinSnapshotDataRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{156}
+	return file_data_coord_proto_rawDescGZIP(), []int{168}
 }
 
 func (x *PinSnapshotDataRequest) GetBase() *commonpb.MsgBase {
@@ -14447,7 +15965,7 @@ type PinSnapshotDataResponse struct {
 func (x *PinSnapshotDataResponse) Reset() {
 	*x = PinSnapshotDataResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[157]
+		mi := &file_data_coord_proto_msgTypes[169]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14460,7 +15978,7 @@ func (x *PinSnapshotDataResponse) String() string {
 func (*PinSnapshotDataResponse) ProtoMessage() {}
 
 func (x *PinSnapshotDataResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[157]
+	mi := &file_data_coord_proto_msgTypes[169]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14473,7 +15991,7 @@ func (x *PinSnapshotDataResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PinSnapshotDataResponse.ProtoReflect.Descriptor instead.
 func (*PinSnapshotDataResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{157}
+	return file_data_coord_proto_rawDescGZIP(), []int{169}
 }
 
 func (x *PinSnapshotDataResponse) GetStatus() *commonpb.Status {
@@ -14502,7 +16020,7 @@ type UnpinSnapshotDataRequest struct {
 func (x *UnpinSnapshotDataRequest) Reset() {
 	*x = UnpinSnapshotDataRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[158]
+		mi := &file_data_coord_proto_msgTypes[170]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14515,7 +16033,7 @@ func (x *UnpinSnapshotDataRequest) String() string {
 func (*UnpinSnapshotDataRequest) ProtoMessage() {}
 
 func (x *UnpinSnapshotDataRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[158]
+	mi := &file_data_coord_proto_msgTypes[170]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14528,7 +16046,7 @@ func (x *UnpinSnapshotDataRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnpinSnapshotDataRequest.ProtoReflect.Descriptor instead.
 func (*UnpinSnapshotDataRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{158}
+	return file_data_coord_proto_rawDescGZIP(), []int{170}
 }
 
 func (x *UnpinSnapshotDataRequest) GetBase() *commonpb.MsgBase {
@@ -14557,7 +16075,7 @@ type CommitImportRequest struct {
 func (x *CommitImportRequest) Reset() {
 	*x = CommitImportRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[159]
+		mi := &file_data_coord_proto_msgTypes[171]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14570,7 +16088,7 @@ func (x *CommitImportRequest) String() string {
 func (*CommitImportRequest) ProtoMessage() {}
 
 func (x *CommitImportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[159]
+	mi := &file_data_coord_proto_msgTypes[171]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14583,7 +16101,7 @@ func (x *CommitImportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommitImportRequest.ProtoReflect.Descriptor instead.
 func (*CommitImportRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{159}
+	return file_data_coord_proto_rawDescGZIP(), []int{171}
 }
 
 func (x *CommitImportRequest) GetBase() *commonpb.MsgBase {
@@ -14612,7 +16130,7 @@ type AbortImportRequest struct {
 func (x *AbortImportRequest) Reset() {
 	*x = AbortImportRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[160]
+		mi := &file_data_coord_proto_msgTypes[172]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14625,7 +16143,7 @@ func (x *AbortImportRequest) String() string {
 func (*AbortImportRequest) ProtoMessage() {}
 
 func (x *AbortImportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[160]
+	mi := &file_data_coord_proto_msgTypes[172]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14638,7 +16156,7 @@ func (x *AbortImportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AbortImportRequest.ProtoReflect.Descriptor instead.
 func (*AbortImportRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{160}
+	return file_data_coord_proto_rawDescGZIP(), []int{172}
 }
 
 func (x *AbortImportRequest) GetBase() *commonpb.MsgBase {
@@ -14671,7 +16189,7 @@ type HandleCommitVchannelRequest struct {
 func (x *HandleCommitVchannelRequest) Reset() {
 	*x = HandleCommitVchannelRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[161]
+		mi := &file_data_coord_proto_msgTypes[173]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14684,7 +16202,7 @@ func (x *HandleCommitVchannelRequest) String() string {
 func (*HandleCommitVchannelRequest) ProtoMessage() {}
 
 func (x *HandleCommitVchannelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[161]
+	mi := &file_data_coord_proto_msgTypes[173]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14697,7 +16215,7 @@ func (x *HandleCommitVchannelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandleCommitVchannelRequest.ProtoReflect.Descriptor instead.
 func (*HandleCommitVchannelRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{161}
+	return file_data_coord_proto_rawDescGZIP(), []int{173}
 }
 
 func (x *HandleCommitVchannelRequest) GetBase() *commonpb.MsgBase {
@@ -14746,7 +16264,7 @@ type ExternalCollectionRefreshTaskResult struct {
 func (x *ExternalCollectionRefreshTaskResult) Reset() {
 	*x = ExternalCollectionRefreshTaskResult{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[162]
+		mi := &file_data_coord_proto_msgTypes[174]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14759,7 +16277,7 @@ func (x *ExternalCollectionRefreshTaskResult) String() string {
 func (*ExternalCollectionRefreshTaskResult) ProtoMessage() {}
 
 func (x *ExternalCollectionRefreshTaskResult) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[162]
+	mi := &file_data_coord_proto_msgTypes[174]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14772,7 +16290,7 @@ func (x *ExternalCollectionRefreshTaskResult) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ExternalCollectionRefreshTaskResult.ProtoReflect.Descriptor instead.
 func (*ExternalCollectionRefreshTaskResult) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{162}
+	return file_data_coord_proto_rawDescGZIP(), []int{174}
 }
 
 func (x *ExternalCollectionRefreshTaskResult) GetCollectionId() int64 {
@@ -14830,7 +16348,7 @@ type ColumnGroupStatistics struct {
 func (x *ColumnGroupStatistics) Reset() {
 	*x = ColumnGroupStatistics{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[163]
+		mi := &file_data_coord_proto_msgTypes[175]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14843,7 +16361,7 @@ func (x *ColumnGroupStatistics) String() string {
 func (*ColumnGroupStatistics) ProtoMessage() {}
 
 func (x *ColumnGroupStatistics) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[163]
+	mi := &file_data_coord_proto_msgTypes[175]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14856,7 +16374,7 @@ func (x *ColumnGroupStatistics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ColumnGroupStatistics.ProtoReflect.Descriptor instead.
 func (*ColumnGroupStatistics) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{163}
+	return file_data_coord_proto_rawDescGZIP(), []int{175}
 }
 
 func (x *ColumnGroupStatistics) GetGroupId() int64 {
@@ -14891,7 +16409,7 @@ type LoadResourceStatistics struct {
 func (x *LoadResourceStatistics) Reset() {
 	*x = LoadResourceStatistics{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[164]
+		mi := &file_data_coord_proto_msgTypes[176]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14904,7 +16422,7 @@ func (x *LoadResourceStatistics) String() string {
 func (*LoadResourceStatistics) ProtoMessage() {}
 
 func (x *LoadResourceStatistics) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[164]
+	mi := &file_data_coord_proto_msgTypes[176]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14917,7 +16435,7 @@ func (x *LoadResourceStatistics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadResourceStatistics.ProtoReflect.Descriptor instead.
 func (*LoadResourceStatistics) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{164}
+	return file_data_coord_proto_rawDescGZIP(), []int{176}
 }
 
 func (x *LoadResourceStatistics) GetColumnGroups() []*ColumnGroupStatistics {
@@ -14961,7 +16479,7 @@ type ExportSnapshotJob struct {
 func (x *ExportSnapshotJob) Reset() {
 	*x = ExportSnapshotJob{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[165]
+		mi := &file_data_coord_proto_msgTypes[177]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -14974,7 +16492,7 @@ func (x *ExportSnapshotJob) String() string {
 func (*ExportSnapshotJob) ProtoMessage() {}
 
 func (x *ExportSnapshotJob) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[165]
+	mi := &file_data_coord_proto_msgTypes[177]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14987,7 +16505,7 @@ func (x *ExportSnapshotJob) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportSnapshotJob.ProtoReflect.Descriptor instead.
 func (*ExportSnapshotJob) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{165}
+	return file_data_coord_proto_rawDescGZIP(), []int{177}
 }
 
 func (x *ExportSnapshotJob) GetJobId() int64 {
@@ -15167,7 +16685,7 @@ type ExportSnapshotJobInfo struct {
 func (x *ExportSnapshotJobInfo) Reset() {
 	*x = ExportSnapshotJobInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[166]
+		mi := &file_data_coord_proto_msgTypes[178]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -15180,7 +16698,7 @@ func (x *ExportSnapshotJobInfo) String() string {
 func (*ExportSnapshotJobInfo) ProtoMessage() {}
 
 func (x *ExportSnapshotJobInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[166]
+	mi := &file_data_coord_proto_msgTypes[178]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15193,7 +16711,7 @@ func (x *ExportSnapshotJobInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportSnapshotJobInfo.ProtoReflect.Descriptor instead.
 func (*ExportSnapshotJobInfo) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{166}
+	return file_data_coord_proto_rawDescGZIP(), []int{178}
 }
 
 func (x *ExportSnapshotJobInfo) GetJobId() int64 {
@@ -15299,7 +16817,7 @@ type GetExportSnapshotStateRequest struct {
 func (x *GetExportSnapshotStateRequest) Reset() {
 	*x = GetExportSnapshotStateRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[167]
+		mi := &file_data_coord_proto_msgTypes[179]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -15312,7 +16830,7 @@ func (x *GetExportSnapshotStateRequest) String() string {
 func (*GetExportSnapshotStateRequest) ProtoMessage() {}
 
 func (x *GetExportSnapshotStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[167]
+	mi := &file_data_coord_proto_msgTypes[179]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15325,7 +16843,7 @@ func (x *GetExportSnapshotStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetExportSnapshotStateRequest.ProtoReflect.Descriptor instead.
 func (*GetExportSnapshotStateRequest) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{167}
+	return file_data_coord_proto_rawDescGZIP(), []int{179}
 }
 
 func (x *GetExportSnapshotStateRequest) GetBase() *commonpb.MsgBase {
@@ -15354,7 +16872,7 @@ type GetExportSnapshotStateResponse struct {
 func (x *GetExportSnapshotStateResponse) Reset() {
 	*x = GetExportSnapshotStateResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_data_coord_proto_msgTypes[168]
+		mi := &file_data_coord_proto_msgTypes[180]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -15367,7 +16885,7 @@ func (x *GetExportSnapshotStateResponse) String() string {
 func (*GetExportSnapshotStateResponse) ProtoMessage() {}
 
 func (x *GetExportSnapshotStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_data_coord_proto_msgTypes[168]
+	mi := &file_data_coord_proto_msgTypes[180]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15380,7 +16898,7 @@ func (x *GetExportSnapshotStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetExportSnapshotStateResponse.ProtoReflect.Descriptor instead.
 func (*GetExportSnapshotStateResponse) Descriptor() ([]byte, []int) {
-	return file_data_coord_proto_rawDescGZIP(), []int{168}
+	return file_data_coord_proto_rawDescGZIP(), []int{180}
 }
 
 func (x *GetExportSnapshotStateResponse) GetStatus() *commonpb.Status {
@@ -17410,7 +18928,7 @@ var file_data_coord_proto_rawDesc = []byte{
 	0x65, 0x72, 0x6e, 0x61, 0x6c, 0x53, 0x70, 0x65, 0x63, 0x12, 0x31, 0x0a, 0x14, 0x73, 0x6e, 0x61,
 	0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x66, 0x69, 0x6e, 0x67, 0x65, 0x72, 0x70, 0x72, 0x69, 0x6e,
 	0x74, 0x18, 0x16, 0x20, 0x01, 0x28, 0x09, 0x52, 0x13, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f,
-	0x74, 0x46, 0x69, 0x6e, 0x67, 0x65, 0x72, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x22, 0x94, 0x06, 0x0a,
+	0x74, 0x46, 0x69, 0x6e, 0x67, 0x65, 0x72, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x22, 0xf2, 0x08, 0x0a,
 	0x09, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x4a, 0x6f, 0x62, 0x12, 0x14, 0x0a, 0x05, 0x6a, 0x6f,
 	0x62, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x44,
 	0x12, 0x12, 0x0a, 0x04, 0x64, 0x62, 0x49, 0x44, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x04,
@@ -17460,87 +18978,408 @@ var file_data_coord_proto_rawDesc = []byte{
 	0x63, 0x6f, 0x6d, 0x6d, 0x69, 0x74, 0x74, 0x65, 0x64, 0x56, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65,
 	0x6c, 0x73, 0x12, 0x1f, 0x0a, 0x0b, 0x61, 0x75, 0x74, 0x6f, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x69,
 	0x74, 0x18, 0x14, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0a, 0x61, 0x75, 0x74, 0x6f, 0x43, 0x6f, 0x6d,
-	0x6d, 0x69, 0x74, 0x22, 0xd8, 0x02, 0x0a, 0x0d, 0x50, 0x72, 0x65, 0x49, 0x6d, 0x70, 0x6f, 0x72,
-	0x74, 0x54, 0x61, 0x73, 0x6b, 0x12, 0x14, 0x0a, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x44, 0x18, 0x01,
-	0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x44, 0x12, 0x16, 0x0a, 0x06, 0x74,
-	0x61, 0x73, 0x6b, 0x49, 0x44, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x06, 0x74, 0x61, 0x73,
-	0x6b, 0x49, 0x44, 0x12, 0x22, 0x0a, 0x0c, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f,
-	0x6e, 0x49, 0x44, 0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0c, 0x63, 0x6f, 0x6c, 0x6c, 0x65,
-	0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x12, 0x16, 0x0a, 0x06, 0x6e, 0x6f, 0x64, 0x65, 0x49,
-	0x44, 0x18, 0x06, 0x20, 0x01, 0x28, 0x03, 0x52, 0x06, 0x6e, 0x6f, 0x64, 0x65, 0x49, 0x44, 0x12,
-	0x3a, 0x0a, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x18, 0x07, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x24,
-	0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61,
-	0x74, 0x61, 0x2e, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x53, 0x74, 0x61,
-	0x74, 0x65, 0x56, 0x32, 0x52, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x12, 0x16, 0x0a, 0x06, 0x72,
-	0x65, 0x61, 0x73, 0x6f, 0x6e, 0x18, 0x08, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x72, 0x65, 0x61,
-	0x73, 0x6f, 0x6e, 0x12, 0x41, 0x0a, 0x0a, 0x66, 0x69, 0x6c, 0x65, 0x5f, 0x73, 0x74, 0x61, 0x74,
-	0x73, 0x18, 0x0a, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x22, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
-	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x49, 0x6d, 0x70, 0x6f,
-	0x72, 0x74, 0x46, 0x69, 0x6c, 0x65, 0x53, 0x74, 0x61, 0x74, 0x73, 0x52, 0x09, 0x66, 0x69, 0x6c,
-	0x65, 0x53, 0x74, 0x61, 0x74, 0x73, 0x12, 0x21, 0x0a, 0x0c, 0x63, 0x72, 0x65, 0x61, 0x74, 0x65,
-	0x64, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x18, 0x0b, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x63, 0x72,
-	0x65, 0x61, 0x74, 0x65, 0x64, 0x54, 0x69, 0x6d, 0x65, 0x12, 0x23, 0x0a, 0x0d, 0x63, 0x6f, 0x6d,
-	0x70, 0x6c, 0x65, 0x74, 0x65, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x18, 0x0c, 0x20, 0x01, 0x28, 0x09,
-	0x52, 0x0c, 0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x54, 0x69, 0x6d, 0x65, 0x22, 0xe3,
-	0x03, 0x0a, 0x0c, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x56, 0x32, 0x12,
-	0x14, 0x0a, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05,
-	0x6a, 0x6f, 0x62, 0x49, 0x44, 0x12, 0x16, 0x0a, 0x06, 0x74, 0x61, 0x73, 0x6b, 0x49, 0x44, 0x18,
-	0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x06, 0x74, 0x61, 0x73, 0x6b, 0x49, 0x44, 0x12, 0x22, 0x0a,
-	0x0c, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x18, 0x03, 0x20,
-	0x01, 0x28, 0x03, 0x52, 0x0c, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49,
-	0x44, 0x12, 0x1e, 0x0a, 0x0a, 0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x44, 0x73, 0x18,
-	0x04, 0x20, 0x03, 0x28, 0x03, 0x52, 0x0a, 0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x44,
-	0x73, 0x12, 0x16, 0x0a, 0x06, 0x6e, 0x6f, 0x64, 0x65, 0x49, 0x44, 0x18, 0x05, 0x20, 0x01, 0x28,
-	0x03, 0x52, 0x06, 0x6e, 0x6f, 0x64, 0x65, 0x49, 0x44, 0x12, 0x3a, 0x0a, 0x05, 0x73, 0x74, 0x61,
-	0x74, 0x65, 0x18, 0x06, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
-	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x49, 0x6d, 0x70,
-	0x6f, 0x72, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x53, 0x74, 0x61, 0x74, 0x65, 0x56, 0x32, 0x52, 0x05,
-	0x73, 0x74, 0x61, 0x74, 0x65, 0x12, 0x16, 0x0a, 0x06, 0x72, 0x65, 0x61, 0x73, 0x6f, 0x6e, 0x18,
-	0x07, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x72, 0x65, 0x61, 0x73, 0x6f, 0x6e, 0x12, 0x23, 0x0a,
-	0x0d, 0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x18, 0x08,
-	0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x54, 0x69,
-	0x6d, 0x65, 0x12, 0x41, 0x0a, 0x0a, 0x66, 0x69, 0x6c, 0x65, 0x5f, 0x73, 0x74, 0x61, 0x74, 0x73,
-	0x18, 0x09, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x22, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
-	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x49, 0x6d, 0x70, 0x6f, 0x72,
-	0x74, 0x46, 0x69, 0x6c, 0x65, 0x53, 0x74, 0x61, 0x74, 0x73, 0x52, 0x09, 0x66, 0x69, 0x6c, 0x65,
-	0x53, 0x74, 0x61, 0x74, 0x73, 0x12, 0x2b, 0x0a, 0x11, 0x73, 0x6f, 0x72, 0x74, 0x65, 0x64, 0x5f,
-	0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x44, 0x73, 0x18, 0x0a, 0x20, 0x03, 0x28, 0x03,
-	0x52, 0x10, 0x73, 0x6f, 0x72, 0x74, 0x65, 0x64, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49,
-	0x44, 0x73, 0x12, 0x21, 0x0a, 0x0c, 0x63, 0x72, 0x65, 0x61, 0x74, 0x65, 0x64, 0x5f, 0x74, 0x69,
-	0x6d, 0x65, 0x18, 0x0b, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x63, 0x72, 0x65, 0x61, 0x74, 0x65,
-	0x64, 0x54, 0x69, 0x6d, 0x65, 0x12, 0x3d, 0x0a, 0x06, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x18,
-	0x0c, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x25, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74,
-	0x54, 0x61, 0x73, 0x6b, 0x53, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x56, 0x32, 0x52, 0x06, 0x73, 0x6f,
-	0x75, 0x72, 0x63, 0x65, 0x22, 0xb7, 0x01, 0x0a, 0x10, 0x47, 0x63, 0x43, 0x6f, 0x6e, 0x74, 0x72,
-	0x6f, 0x6c, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61, 0x73,
-	0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
-	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4d, 0x73,
-	0x67, 0x42, 0x61, 0x73, 0x65, 0x52, 0x04, 0x62, 0x61, 0x73, 0x65, 0x12, 0x36, 0x0a, 0x07, 0x63,
-	0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x1c, 0x2e, 0x6d,
+	0x6d, 0x69, 0x74, 0x12, 0x2e, 0x0a, 0x13, 0x69, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x5f, 0x74, 0x61,
+	0x73, 0x6b, 0x5f, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x15, 0x20, 0x01, 0x28, 0x05,
+	0x52, 0x11, 0x69, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x56, 0x65, 0x72, 0x73,
+	0x69, 0x6f, 0x6e, 0x12, 0x21, 0x0a, 0x0c, 0x66, 0x61, 0x69, 0x6c, 0x75, 0x72, 0x65, 0x5f, 0x63,
+	0x6f, 0x64, 0x65, 0x18, 0x16, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0b, 0x66, 0x61, 0x69, 0x6c, 0x75,
+	0x72, 0x65, 0x43, 0x6f, 0x64, 0x65, 0x12, 0x2f, 0x0a, 0x13, 0x70, 0x6c, 0x61, 0x6e, 0x6e, 0x69,
+	0x6e, 0x67, 0x5f, 0x67, 0x65, 0x6e, 0x65, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x17, 0x20,
+	0x01, 0x28, 0x03, 0x52, 0x12, 0x70, 0x6c, 0x61, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x47, 0x65, 0x6e,
+	0x65, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x32, 0x0a, 0x15, 0x70, 0x6c, 0x61, 0x6e, 0x6e,
+	0x69, 0x6e, 0x67, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x72, 0x65, 0x66,
+	0x18, 0x18, 0x20, 0x01, 0x28, 0x09, 0x52, 0x13, 0x70, 0x6c, 0x61, 0x6e, 0x6e, 0x69, 0x6e, 0x67,
+	0x53, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x52, 0x65, 0x66, 0x12, 0x38, 0x0a, 0x18, 0x70,
+	0x6c, 0x61, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74,
+	0x5f, 0x64, 0x69, 0x67, 0x65, 0x73, 0x74, 0x18, 0x19, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x16, 0x70,
+	0x6c, 0x61, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x53, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x44,
+	0x69, 0x67, 0x65, 0x73, 0x74, 0x12, 0x31, 0x0a, 0x15, 0x69, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x5f,
+	0x70, 0x6c, 0x61, 0x6e, 0x5f, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x5f, 0x72, 0x65, 0x66, 0x18, 0x1a,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x12, 0x69, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x50, 0x6c, 0x61, 0x6e,
+	0x49, 0x6e, 0x64, 0x65, 0x78, 0x52, 0x65, 0x66, 0x12, 0x37, 0x0a, 0x18, 0x69, 0x6d, 0x70, 0x6f,
+	0x72, 0x74, 0x5f, 0x70, 0x6c, 0x61, 0x6e, 0x5f, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x5f, 0x64, 0x69,
+	0x67, 0x65, 0x73, 0x74, 0x18, 0x1b, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x15, 0x69, 0x6d, 0x70, 0x6f,
+	0x72, 0x74, 0x50, 0x6c, 0x61, 0x6e, 0x49, 0x6e, 0x64, 0x65, 0x78, 0x44, 0x69, 0x67, 0x65, 0x73,
+	0x74, 0x22, 0xd8, 0x02, 0x0a, 0x0d, 0x50, 0x72, 0x65, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x54,
+	0x61, 0x73, 0x6b, 0x12, 0x14, 0x0a, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01,
+	0x28, 0x03, 0x52, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x44, 0x12, 0x16, 0x0a, 0x06, 0x74, 0x61, 0x73,
+	0x6b, 0x49, 0x44, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x06, 0x74, 0x61, 0x73, 0x6b, 0x49,
+	0x44, 0x12, 0x22, 0x0a, 0x0c, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49,
+	0x44, 0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0c, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74,
+	0x69, 0x6f, 0x6e, 0x49, 0x44, 0x12, 0x16, 0x0a, 0x06, 0x6e, 0x6f, 0x64, 0x65, 0x49, 0x44, 0x18,
+	0x06, 0x20, 0x01, 0x28, 0x03, 0x52, 0x06, 0x6e, 0x6f, 0x64, 0x65, 0x49, 0x44, 0x12, 0x3a, 0x0a,
+	0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x18, 0x07, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x24, 0x2e, 0x6d,
 	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61,
-	0x2e, 0x47, 0x63, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x52, 0x07, 0x63, 0x6f, 0x6d, 0x6d,
-	0x61, 0x6e, 0x64, 0x12, 0x39, 0x0a, 0x06, 0x70, 0x61, 0x72, 0x61, 0x6d, 0x73, 0x18, 0x03, 0x20,
-	0x03, 0x28, 0x0b, 0x32, 0x21, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4b, 0x65, 0x79, 0x56, 0x61, 0x6c,
-	0x75, 0x65, 0x50, 0x61, 0x69, 0x72, 0x52, 0x06, 0x70, 0x61, 0x72, 0x61, 0x6d, 0x73, 0x22, 0x68,
-	0x0a, 0x13, 0x47, 0x65, 0x74, 0x47, 0x63, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x65, 0x73,
-	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x1b, 0x0a, 0x09, 0x69, 0x73, 0x5f, 0x70, 0x61, 0x75, 0x73,
-	0x65, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x08, 0x69, 0x73, 0x50, 0x61, 0x75, 0x73,
-	0x65, 0x64, 0x12, 0x34, 0x0a, 0x16, 0x74, 0x69, 0x6d, 0x65, 0x5f, 0x72, 0x65, 0x6d, 0x61, 0x69,
-	0x6e, 0x69, 0x6e, 0x67, 0x5f, 0x73, 0x65, 0x63, 0x6f, 0x6e, 0x64, 0x73, 0x18, 0x02, 0x20, 0x01,
-	0x28, 0x05, 0x52, 0x14, 0x74, 0x69, 0x6d, 0x65, 0x52, 0x65, 0x6d, 0x61, 0x69, 0x6e, 0x69, 0x6e,
-	0x67, 0x53, 0x65, 0x63, 0x6f, 0x6e, 0x64, 0x73, 0x22, 0x12, 0x0a, 0x10, 0x51, 0x75, 0x65, 0x72,
-	0x79, 0x53, 0x6c, 0x6f, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22, 0x8b, 0x01, 0x0a,
-	0x11, 0x51, 0x75, 0x65, 0x72, 0x79, 0x53, 0x6c, 0x6f, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
-	0x73, 0x65, 0x12, 0x33, 0x0a, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x18, 0x01, 0x20, 0x01,
-	0x28, 0x0b, 0x32, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52,
-	0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x12, 0x27, 0x0a, 0x0f, 0x61, 0x76, 0x61, 0x69, 0x6c,
-	0x61, 0x62, 0x6c, 0x65, 0x5f, 0x73, 0x6c, 0x6f, 0x74, 0x73, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03,
-	0x52, 0x0e, 0x61, 0x76, 0x61, 0x69, 0x6c, 0x61, 0x62, 0x6c, 0x65, 0x53, 0x6c, 0x6f, 0x74, 0x73,
-	0x12, 0x18, 0x0a, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x03, 0x20, 0x01, 0x28,
-	0x09, 0x52, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x22, 0xe4, 0x03, 0x0a, 0x10, 0x43,
+	0x2e, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x53, 0x74, 0x61, 0x74, 0x65,
+	0x56, 0x32, 0x52, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x12, 0x16, 0x0a, 0x06, 0x72, 0x65, 0x61,
+	0x73, 0x6f, 0x6e, 0x18, 0x08, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x72, 0x65, 0x61, 0x73, 0x6f,
+	0x6e, 0x12, 0x41, 0x0a, 0x0a, 0x66, 0x69, 0x6c, 0x65, 0x5f, 0x73, 0x74, 0x61, 0x74, 0x73, 0x18,
+	0x0a, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x22, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74,
+	0x46, 0x69, 0x6c, 0x65, 0x53, 0x74, 0x61, 0x74, 0x73, 0x52, 0x09, 0x66, 0x69, 0x6c, 0x65, 0x53,
+	0x74, 0x61, 0x74, 0x73, 0x12, 0x21, 0x0a, 0x0c, 0x63, 0x72, 0x65, 0x61, 0x74, 0x65, 0x64, 0x5f,
+	0x74, 0x69, 0x6d, 0x65, 0x18, 0x0b, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x63, 0x72, 0x65, 0x61,
+	0x74, 0x65, 0x64, 0x54, 0x69, 0x6d, 0x65, 0x12, 0x23, 0x0a, 0x0d, 0x63, 0x6f, 0x6d, 0x70, 0x6c,
+	0x65, 0x74, 0x65, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x18, 0x0c, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c,
+	0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x54, 0x69, 0x6d, 0x65, 0x22, 0xe3, 0x03, 0x0a,
+	0x0c, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x56, 0x32, 0x12, 0x14, 0x0a,
+	0x05, 0x6a, 0x6f, 0x62, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x6a, 0x6f,
+	0x62, 0x49, 0x44, 0x12, 0x16, 0x0a, 0x06, 0x74, 0x61, 0x73, 0x6b, 0x49, 0x44, 0x18, 0x02, 0x20,
+	0x01, 0x28, 0x03, 0x52, 0x06, 0x74, 0x61, 0x73, 0x6b, 0x49, 0x44, 0x12, 0x22, 0x0a, 0x0c, 0x63,
+	0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x18, 0x03, 0x20, 0x01, 0x28,
+	0x03, 0x52, 0x0c, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x12,
+	0x1e, 0x0a, 0x0a, 0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x44, 0x73, 0x18, 0x04, 0x20,
+	0x03, 0x28, 0x03, 0x52, 0x0a, 0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x44, 0x73, 0x12,
+	0x16, 0x0a, 0x06, 0x6e, 0x6f, 0x64, 0x65, 0x49, 0x44, 0x18, 0x05, 0x20, 0x01, 0x28, 0x03, 0x52,
+	0x06, 0x6e, 0x6f, 0x64, 0x65, 0x49, 0x44, 0x12, 0x3a, 0x0a, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65,
+	0x18, 0x06, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x49, 0x6d, 0x70, 0x6f, 0x72,
+	0x74, 0x54, 0x61, 0x73, 0x6b, 0x53, 0x74, 0x61, 0x74, 0x65, 0x56, 0x32, 0x52, 0x05, 0x73, 0x74,
+	0x61, 0x74, 0x65, 0x12, 0x16, 0x0a, 0x06, 0x72, 0x65, 0x61, 0x73, 0x6f, 0x6e, 0x18, 0x07, 0x20,
+	0x01, 0x28, 0x09, 0x52, 0x06, 0x72, 0x65, 0x61, 0x73, 0x6f, 0x6e, 0x12, 0x23, 0x0a, 0x0d, 0x63,
+	0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x18, 0x08, 0x20, 0x01,
+	0x28, 0x09, 0x52, 0x0c, 0x63, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x54, 0x69, 0x6d, 0x65,
+	0x12, 0x41, 0x0a, 0x0a, 0x66, 0x69, 0x6c, 0x65, 0x5f, 0x73, 0x74, 0x61, 0x74, 0x73, 0x18, 0x09,
+	0x20, 0x03, 0x28, 0x0b, 0x32, 0x22, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x46,
+	0x69, 0x6c, 0x65, 0x53, 0x74, 0x61, 0x74, 0x73, 0x52, 0x09, 0x66, 0x69, 0x6c, 0x65, 0x53, 0x74,
+	0x61, 0x74, 0x73, 0x12, 0x2b, 0x0a, 0x11, 0x73, 0x6f, 0x72, 0x74, 0x65, 0x64, 0x5f, 0x73, 0x65,
+	0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x44, 0x73, 0x18, 0x0a, 0x20, 0x03, 0x28, 0x03, 0x52, 0x10,
+	0x73, 0x6f, 0x72, 0x74, 0x65, 0x64, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x44, 0x73,
+	0x12, 0x21, 0x0a, 0x0c, 0x63, 0x72, 0x65, 0x61, 0x74, 0x65, 0x64, 0x5f, 0x74, 0x69, 0x6d, 0x65,
+	0x18, 0x0b, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x63, 0x72, 0x65, 0x61, 0x74, 0x65, 0x64, 0x54,
+	0x69, 0x6d, 0x65, 0x12, 0x3d, 0x0a, 0x06, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x18, 0x0c, 0x20,
+	0x01, 0x28, 0x0e, 0x32, 0x25, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x54, 0x61,
+	0x73, 0x6b, 0x53, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x56, 0x32, 0x52, 0x06, 0x73, 0x6f, 0x75, 0x72,
+	0x63, 0x65, 0x22, 0xb0, 0x04, 0x0a, 0x0b, 0x52, 0x65, 0x73, 0x68, 0x61, 0x72, 0x64, 0x54, 0x61,
+	0x73, 0x6b, 0x12, 0x15, 0x0a, 0x06, 0x6a, 0x6f, 0x62, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01,
+	0x28, 0x03, 0x52, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x64, 0x12, 0x17, 0x0a, 0x07, 0x74, 0x61, 0x73,
+	0x6b, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x06, 0x74, 0x61, 0x73, 0x6b,
+	0x49, 0x64, 0x12, 0x23, 0x0a, 0x0d, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e,
+	0x5f, 0x69, 0x64, 0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0c, 0x63, 0x6f, 0x6c, 0x6c, 0x65,
+	0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x64, 0x12, 0x3a, 0x0a, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65,
+	0x18, 0x04, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x52, 0x65, 0x73, 0x68, 0x61,
+	0x72, 0x64, 0x54, 0x61, 0x73, 0x6b, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x65, 0x52, 0x05, 0x73, 0x74,
+	0x61, 0x74, 0x65, 0x12, 0x16, 0x0a, 0x06, 0x72, 0x65, 0x61, 0x73, 0x6f, 0x6e, 0x18, 0x05, 0x20,
+	0x01, 0x28, 0x09, 0x52, 0x06, 0x72, 0x65, 0x61, 0x73, 0x6f, 0x6e, 0x12, 0x22, 0x0a, 0x0d, 0x74,
+	0x61, 0x73, 0x6b, 0x5f, 0x70, 0x6c, 0x61, 0x6e, 0x5f, 0x72, 0x65, 0x66, 0x18, 0x06, 0x20, 0x01,
+	0x28, 0x09, 0x52, 0x0b, 0x74, 0x61, 0x73, 0x6b, 0x50, 0x6c, 0x61, 0x6e, 0x52, 0x65, 0x66, 0x12,
+	0x28, 0x0a, 0x10, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x70, 0x6c, 0x61, 0x6e, 0x5f, 0x64, 0x69, 0x67,
+	0x65, 0x73, 0x74, 0x18, 0x07, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x0e, 0x74, 0x61, 0x73, 0x6b, 0x50,
+	0x6c, 0x61, 0x6e, 0x44, 0x69, 0x67, 0x65, 0x73, 0x74, 0x12, 0x15, 0x0a, 0x06, 0x72, 0x75, 0x6e,
+	0x5f, 0x69, 0x64, 0x18, 0x08, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x72, 0x75, 0x6e, 0x49, 0x64,
+	0x12, 0x17, 0x0a, 0x07, 0x6e, 0x6f, 0x64, 0x65, 0x5f, 0x69, 0x64, 0x18, 0x09, 0x20, 0x01, 0x28,
+	0x03, 0x52, 0x06, 0x6e, 0x6f, 0x64, 0x65, 0x49, 0x64, 0x12, 0x23, 0x0a, 0x0d, 0x6f, 0x75, 0x74,
+	0x70, 0x75, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x66, 0x69, 0x78, 0x18, 0x0a, 0x20, 0x01, 0x28, 0x09,
+	0x52, 0x0c, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x50, 0x72, 0x65, 0x66, 0x69, 0x78, 0x12, 0x1d,
+	0x0a, 0x0a, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x5f, 0x72, 0x65, 0x66, 0x18, 0x0b, 0x20, 0x01,
+	0x28, 0x09, 0x52, 0x09, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x52, 0x65, 0x66, 0x12, 0x23, 0x0a,
+	0x0d, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x5f, 0x64, 0x69, 0x67, 0x65, 0x73, 0x74, 0x18, 0x0c,
+	0x20, 0x01, 0x28, 0x0c, 0x52, 0x0c, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x44, 0x69, 0x67, 0x65,
+	0x73, 0x74, 0x12, 0x1b, 0x0a, 0x09, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x73, 0x6c, 0x6f, 0x74, 0x18,
+	0x0d, 0x20, 0x01, 0x28, 0x03, 0x52, 0x08, 0x74, 0x61, 0x73, 0x6b, 0x53, 0x6c, 0x6f, 0x74, 0x12,
+	0x21, 0x0a, 0x0c, 0x66, 0x61, 0x69, 0x6c, 0x75, 0x72, 0x65, 0x5f, 0x63, 0x6f, 0x64, 0x65, 0x18,
+	0x0e, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0b, 0x66, 0x61, 0x69, 0x6c, 0x75, 0x72, 0x65, 0x43, 0x6f,
+	0x64, 0x65, 0x22, 0x51, 0x0a, 0x05, 0x53, 0x74, 0x61, 0x74, 0x65, 0x12, 0x08, 0x0a, 0x04, 0x4e,
+	0x6f, 0x6e, 0x65, 0x10, 0x00, 0x12, 0x0b, 0x0a, 0x07, 0x50, 0x65, 0x6e, 0x64, 0x69, 0x6e, 0x67,
+	0x10, 0x01, 0x12, 0x0b, 0x0a, 0x07, 0x52, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x10, 0x02, 0x12,
+	0x09, 0x0a, 0x05, 0x52, 0x65, 0x74, 0x72, 0x79, 0x10, 0x03, 0x12, 0x0d, 0x0a, 0x09, 0x43, 0x6f,
+	0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x64, 0x10, 0x04, 0x12, 0x0a, 0x0a, 0x06, 0x46, 0x61, 0x69,
+	0x6c, 0x65, 0x64, 0x10, 0x05, 0x22, 0xcf, 0x05, 0x0a, 0x0c, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74,
+	0x54, 0x61, 0x73, 0x6b, 0x56, 0x33, 0x12, 0x15, 0x0a, 0x06, 0x6a, 0x6f, 0x62, 0x5f, 0x69, 0x64,
+	0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x64, 0x12, 0x17, 0x0a,
+	0x07, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x06,
+	0x74, 0x61, 0x73, 0x6b, 0x49, 0x64, 0x12, 0x23, 0x0a, 0x0d, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63,
+	0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x69, 0x64, 0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0c, 0x63,
+	0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x64, 0x12, 0x3b, 0x0a, 0x05, 0x73,
+	0x74, 0x61, 0x74, 0x65, 0x18, 0x04, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x25, 0x2e, 0x6d, 0x69, 0x6c,
+	0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x49,
+	0x6d, 0x70, 0x6f, 0x72, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x56, 0x33, 0x2e, 0x53, 0x74, 0x61, 0x74,
+	0x65, 0x52, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x12, 0x16, 0x0a, 0x06, 0x72, 0x65, 0x61, 0x73,
+	0x6f, 0x6e, 0x18, 0x05, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x72, 0x65, 0x61, 0x73, 0x6f, 0x6e,
+	0x12, 0x22, 0x0a, 0x0d, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x70, 0x6c, 0x61, 0x6e, 0x5f, 0x72, 0x65,
+	0x66, 0x18, 0x06, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x74, 0x61, 0x73, 0x6b, 0x50, 0x6c, 0x61,
+	0x6e, 0x52, 0x65, 0x66, 0x12, 0x28, 0x0a, 0x10, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x70, 0x6c, 0x61,
+	0x6e, 0x5f, 0x64, 0x69, 0x67, 0x65, 0x73, 0x74, 0x18, 0x07, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x0e,
+	0x74, 0x61, 0x73, 0x6b, 0x50, 0x6c, 0x61, 0x6e, 0x44, 0x69, 0x67, 0x65, 0x73, 0x74, 0x12, 0x15,
+	0x0a, 0x06, 0x72, 0x75, 0x6e, 0x5f, 0x69, 0x64, 0x18, 0x08, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05,
+	0x72, 0x75, 0x6e, 0x49, 0x64, 0x12, 0x17, 0x0a, 0x07, 0x6e, 0x6f, 0x64, 0x65, 0x5f, 0x69, 0x64,
+	0x18, 0x09, 0x20, 0x01, 0x28, 0x03, 0x52, 0x06, 0x6e, 0x6f, 0x64, 0x65, 0x49, 0x64, 0x12, 0x23,
+	0x0a, 0x0d, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x66, 0x69, 0x78, 0x18,
+	0x0a, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x50, 0x72, 0x65,
+	0x66, 0x69, 0x78, 0x12, 0x2c, 0x0a, 0x12, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x5f, 0x73, 0x65,
+	0x67, 0x6d, 0x65, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x73, 0x18, 0x0b, 0x20, 0x03, 0x28, 0x03, 0x52,
+	0x10, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x64,
+	0x73, 0x12, 0x3c, 0x0a, 0x0c, 0x6c, 0x6f, 0x67, 0x5f, 0x69, 0x64, 0x5f, 0x72, 0x61, 0x6e, 0x67,
+	0x65, 0x18, 0x0c, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x49, 0x44, 0x52, 0x61,
+	0x6e, 0x67, 0x65, 0x52, 0x0a, 0x6c, 0x6f, 0x67, 0x49, 0x64, 0x52, 0x61, 0x6e, 0x67, 0x65, 0x12,
+	0x2f, 0x0a, 0x13, 0x70, 0x6c, 0x61, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x5f, 0x67, 0x65, 0x6e, 0x65,
+	0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x0d, 0x20, 0x01, 0x28, 0x03, 0x52, 0x12, 0x70, 0x6c,
+	0x61, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x47, 0x65, 0x6e, 0x65, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e,
+	0x12, 0x1d, 0x0a, 0x0a, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x5f, 0x72, 0x65, 0x66, 0x18, 0x0e,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x52, 0x65, 0x66, 0x12,
+	0x23, 0x0a, 0x0d, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x5f, 0x64, 0x69, 0x67, 0x65, 0x73, 0x74,
+	0x18, 0x0f, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x0c, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x44, 0x69,
+	0x67, 0x65, 0x73, 0x74, 0x12, 0x1b, 0x0a, 0x09, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x73, 0x6c, 0x6f,
+	0x74, 0x18, 0x10, 0x20, 0x01, 0x28, 0x03, 0x52, 0x08, 0x74, 0x61, 0x73, 0x6b, 0x53, 0x6c, 0x6f,
+	0x74, 0x12, 0x21, 0x0a, 0x0c, 0x66, 0x61, 0x69, 0x6c, 0x75, 0x72, 0x65, 0x5f, 0x63, 0x6f, 0x64,
+	0x65, 0x18, 0x11, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0b, 0x66, 0x61, 0x69, 0x6c, 0x75, 0x72, 0x65,
+	0x43, 0x6f, 0x64, 0x65, 0x22, 0x51, 0x0a, 0x05, 0x53, 0x74, 0x61, 0x74, 0x65, 0x12, 0x08, 0x0a,
+	0x04, 0x4e, 0x6f, 0x6e, 0x65, 0x10, 0x00, 0x12, 0x0b, 0x0a, 0x07, 0x50, 0x65, 0x6e, 0x64, 0x69,
+	0x6e, 0x67, 0x10, 0x01, 0x12, 0x0b, 0x0a, 0x07, 0x52, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x10,
+	0x02, 0x12, 0x09, 0x0a, 0x05, 0x52, 0x65, 0x74, 0x72, 0x79, 0x10, 0x03, 0x12, 0x0d, 0x0a, 0x09,
+	0x43, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x64, 0x10, 0x04, 0x12, 0x0a, 0x0a, 0x06, 0x46,
+	0x61, 0x69, 0x6c, 0x65, 0x64, 0x10, 0x05, 0x22, 0xff, 0x02, 0x0a, 0x12, 0x52, 0x65, 0x73, 0x68,
+	0x61, 0x72, 0x64, 0x54, 0x61, 0x73, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x15,
+	0x0a, 0x06, 0x6a, 0x6f, 0x62, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05,
+	0x6a, 0x6f, 0x62, 0x49, 0x64, 0x12, 0x17, 0x0a, 0x07, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x69, 0x64,
+	0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x06, 0x74, 0x61, 0x73, 0x6b, 0x49, 0x64, 0x12, 0x15,
+	0x0a, 0x06, 0x72, 0x75, 0x6e, 0x5f, 0x69, 0x64, 0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05,
+	0x72, 0x75, 0x6e, 0x49, 0x64, 0x12, 0x22, 0x0a, 0x0d, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x70, 0x6c,
+	0x61, 0x6e, 0x5f, 0x72, 0x65, 0x66, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x74, 0x61,
+	0x73, 0x6b, 0x50, 0x6c, 0x61, 0x6e, 0x52, 0x65, 0x66, 0x12, 0x28, 0x0a, 0x10, 0x74, 0x61, 0x73,
+	0x6b, 0x5f, 0x70, 0x6c, 0x61, 0x6e, 0x5f, 0x64, 0x69, 0x67, 0x65, 0x73, 0x74, 0x18, 0x05, 0x20,
+	0x01, 0x28, 0x0c, 0x52, 0x0e, 0x74, 0x61, 0x73, 0x6b, 0x50, 0x6c, 0x61, 0x6e, 0x44, 0x69, 0x67,
+	0x65, 0x73, 0x74, 0x12, 0x23, 0x0a, 0x0d, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x5f, 0x70, 0x72,
+	0x65, 0x66, 0x69, 0x78, 0x18, 0x06, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x6f, 0x75, 0x74, 0x70,
+	0x75, 0x74, 0x50, 0x72, 0x65, 0x66, 0x69, 0x78, 0x12, 0x1b, 0x0a, 0x09, 0x74, 0x61, 0x73, 0x6b,
+	0x5f, 0x73, 0x6c, 0x6f, 0x74, 0x18, 0x07, 0x20, 0x01, 0x28, 0x03, 0x52, 0x08, 0x74, 0x61, 0x73,
+	0x6b, 0x53, 0x6c, 0x6f, 0x74, 0x12, 0x48, 0x0a, 0x0e, 0x73, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65,
+	0x5f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x18, 0x08, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x21, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x64,
+	0x65, 0x78, 0x2e, 0x53, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67,
+	0x52, 0x0d, 0x73, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x12,
+	0x48, 0x0a, 0x0e, 0x70, 0x6c, 0x75, 0x67, 0x69, 0x6e, 0x5f, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x78,
+	0x74, 0x18, 0x09, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x21, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4b, 0x65,
+	0x79, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x50, 0x61, 0x69, 0x72, 0x52, 0x0d, 0x70, 0x6c, 0x75, 0x67,
+	0x69, 0x6e, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x22, 0xad, 0x05, 0x0a, 0x13, 0x49, 0x6d,
+	0x70, 0x6f, 0x72, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x56, 0x33, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
+	0x74, 0x12, 0x15, 0x0a, 0x06, 0x6a, 0x6f, 0x62, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x03, 0x52, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x64, 0x12, 0x17, 0x0a, 0x07, 0x74, 0x61, 0x73, 0x6b,
+	0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x06, 0x74, 0x61, 0x73, 0x6b, 0x49,
+	0x64, 0x12, 0x15, 0x0a, 0x06, 0x72, 0x75, 0x6e, 0x5f, 0x69, 0x64, 0x18, 0x03, 0x20, 0x01, 0x28,
+	0x03, 0x52, 0x05, 0x72, 0x75, 0x6e, 0x49, 0x64, 0x12, 0x22, 0x0a, 0x0d, 0x74, 0x61, 0x73, 0x6b,
+	0x5f, 0x70, 0x6c, 0x61, 0x6e, 0x5f, 0x72, 0x65, 0x66, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x52,
+	0x0b, 0x74, 0x61, 0x73, 0x6b, 0x50, 0x6c, 0x61, 0x6e, 0x52, 0x65, 0x66, 0x12, 0x28, 0x0a, 0x10,
+	0x74, 0x61, 0x73, 0x6b, 0x5f, 0x70, 0x6c, 0x61, 0x6e, 0x5f, 0x64, 0x69, 0x67, 0x65, 0x73, 0x74,
+	0x18, 0x05, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x0e, 0x74, 0x61, 0x73, 0x6b, 0x50, 0x6c, 0x61, 0x6e,
+	0x44, 0x69, 0x67, 0x65, 0x73, 0x74, 0x12, 0x23, 0x0a, 0x0d, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74,
+	0x5f, 0x70, 0x72, 0x65, 0x66, 0x69, 0x78, 0x18, 0x06, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x6f,
+	0x75, 0x74, 0x70, 0x75, 0x74, 0x50, 0x72, 0x65, 0x66, 0x69, 0x78, 0x12, 0x2c, 0x0a, 0x12, 0x6f,
+	0x75, 0x74, 0x70, 0x75, 0x74, 0x5f, 0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x5f, 0x69, 0x64,
+	0x73, 0x18, 0x07, 0x20, 0x03, 0x28, 0x03, 0x52, 0x10, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x53,
+	0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x64, 0x73, 0x12, 0x3c, 0x0a, 0x0c, 0x6c, 0x6f, 0x67,
+	0x5f, 0x69, 0x64, 0x5f, 0x72, 0x61, 0x6e, 0x67, 0x65, 0x18, 0x08, 0x20, 0x01, 0x28, 0x0b, 0x32,
+	0x1a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64,
+	0x61, 0x74, 0x61, 0x2e, 0x49, 0x44, 0x52, 0x61, 0x6e, 0x67, 0x65, 0x52, 0x0a, 0x6c, 0x6f, 0x67,
+	0x49, 0x64, 0x52, 0x61, 0x6e, 0x67, 0x65, 0x12, 0x1b, 0x0a, 0x09, 0x74, 0x61, 0x73, 0x6b, 0x5f,
+	0x73, 0x6c, 0x6f, 0x74, 0x18, 0x09, 0x20, 0x01, 0x28, 0x03, 0x52, 0x08, 0x74, 0x61, 0x73, 0x6b,
+	0x53, 0x6c, 0x6f, 0x74, 0x12, 0x20, 0x0a, 0x0c, 0x6d, 0x65, 0x72, 0x67, 0x65, 0x5f, 0x66, 0x61,
+	0x6e, 0x5f, 0x69, 0x6e, 0x18, 0x0a, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0a, 0x6d, 0x65, 0x72, 0x67,
+	0x65, 0x46, 0x61, 0x6e, 0x49, 0x6e, 0x12, 0x2f, 0x0a, 0x13, 0x70, 0x6c, 0x61, 0x6e, 0x6e, 0x69,
+	0x6e, 0x67, 0x5f, 0x67, 0x65, 0x6e, 0x65, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x0b, 0x20,
+	0x01, 0x28, 0x03, 0x52, 0x12, 0x70, 0x6c, 0x61, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x47, 0x65, 0x6e,
+	0x65, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x48, 0x0a, 0x0e, 0x73, 0x74, 0x6f, 0x72, 0x61,
+	0x67, 0x65, 0x5f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x18, 0x0c, 0x20, 0x01, 0x28, 0x0b, 0x32,
+	0x21, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69,
+	0x6e, 0x64, 0x65, 0x78, 0x2e, 0x53, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x43, 0x6f, 0x6e, 0x66,
+	0x69, 0x67, 0x52, 0x0d, 0x73, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x43, 0x6f, 0x6e, 0x66, 0x69,
+	0x67, 0x12, 0x48, 0x0a, 0x0e, 0x70, 0x6c, 0x75, 0x67, 0x69, 0x6e, 0x5f, 0x63, 0x6f, 0x6e, 0x74,
+	0x65, 0x78, 0x74, 0x18, 0x0d, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x21, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
+	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e,
+	0x4b, 0x65, 0x79, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x50, 0x61, 0x69, 0x72, 0x52, 0x0d, 0x70, 0x6c,
+	0x75, 0x67, 0x69, 0x6e, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x12, 0x32, 0x0a, 0x15, 0x70,
+	0x6c, 0x61, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74,
+	0x5f, 0x72, 0x65, 0x66, 0x18, 0x0e, 0x20, 0x01, 0x28, 0x09, 0x52, 0x13, 0x70, 0x6c, 0x61, 0x6e,
+	0x6e, 0x69, 0x6e, 0x67, 0x53, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x52, 0x65, 0x66, 0x12,
+	0x38, 0x0a, 0x18, 0x70, 0x6c, 0x61, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x5f, 0x73, 0x6e, 0x61, 0x70,
+	0x73, 0x68, 0x6f, 0x74, 0x5f, 0x64, 0x69, 0x67, 0x65, 0x73, 0x74, 0x18, 0x0f, 0x20, 0x01, 0x28,
+	0x0c, 0x52, 0x16, 0x70, 0x6c, 0x61, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x53, 0x6e, 0x61, 0x70, 0x73,
+	0x68, 0x6f, 0x74, 0x44, 0x69, 0x67, 0x65, 0x73, 0x74, 0x22, 0xee, 0x02, 0x0a, 0x14, 0x49, 0x6d,
+	0x70, 0x6f, 0x72, 0x74, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x4d, 0x61, 0x6e, 0x69, 0x66, 0x65,
+	0x73, 0x74, 0x12, 0x25, 0x0a, 0x0e, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x5f, 0x76, 0x65, 0x72,
+	0x73, 0x69, 0x6f, 0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0d, 0x52, 0x0d, 0x66, 0x6f, 0x72, 0x6d,
+	0x61, 0x74, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x15, 0x0a, 0x06, 0x6a, 0x6f, 0x62,
+	0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x64,
+	0x12, 0x17, 0x0a, 0x07, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x69, 0x64, 0x18, 0x03, 0x20, 0x01, 0x28,
+	0x03, 0x52, 0x06, 0x74, 0x61, 0x73, 0x6b, 0x49, 0x64, 0x12, 0x15, 0x0a, 0x06, 0x72, 0x75, 0x6e,
+	0x5f, 0x69, 0x64, 0x18, 0x04, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x72, 0x75, 0x6e, 0x49, 0x64,
+	0x12, 0x28, 0x0a, 0x10, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x70, 0x6c, 0x61, 0x6e, 0x5f, 0x64, 0x69,
+	0x67, 0x65, 0x73, 0x74, 0x18, 0x05, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x0e, 0x74, 0x61, 0x73, 0x6b,
+	0x50, 0x6c, 0x61, 0x6e, 0x44, 0x69, 0x67, 0x65, 0x73, 0x74, 0x12, 0x2f, 0x0a, 0x13, 0x70, 0x6c,
+	0x61, 0x6e, 0x6e, 0x69, 0x6e, 0x67, 0x5f, 0x67, 0x65, 0x6e, 0x65, 0x72, 0x61, 0x74, 0x69, 0x6f,
+	0x6e, 0x18, 0x06, 0x20, 0x01, 0x28, 0x03, 0x52, 0x12, 0x70, 0x6c, 0x61, 0x6e, 0x6e, 0x69, 0x6e,
+	0x67, 0x47, 0x65, 0x6e, 0x65, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x3c, 0x0a, 0x08, 0x73,
+	0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x18, 0x07, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x20, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61, 0x74,
+	0x61, 0x2e, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x52,
+	0x08, 0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x12, 0x1d, 0x0a, 0x0a, 0x74, 0x6f, 0x74,
+	0x61, 0x6c, 0x5f, 0x72, 0x6f, 0x77, 0x73, 0x18, 0x08, 0x20, 0x01, 0x28, 0x03, 0x52, 0x09, 0x74,
+	0x6f, 0x74, 0x61, 0x6c, 0x52, 0x6f, 0x77, 0x73, 0x12, 0x30, 0x0a, 0x14, 0x74, 0x6f, 0x74, 0x61,
+	0x6c, 0x5f, 0x70, 0x68, 0x79, 0x73, 0x69, 0x63, 0x61, 0x6c, 0x5f, 0x62, 0x79, 0x74, 0x65, 0x73,
+	0x18, 0x09, 0x20, 0x01, 0x28, 0x03, 0x52, 0x12, 0x74, 0x6f, 0x74, 0x61, 0x6c, 0x50, 0x68, 0x79,
+	0x73, 0x69, 0x63, 0x61, 0x6c, 0x42, 0x79, 0x74, 0x65, 0x73, 0x22, 0xf2, 0x08, 0x0a, 0x0d, 0x53,
+	0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x12, 0x36, 0x0a, 0x17,
+	0x6c, 0x6f, 0x67, 0x69, 0x63, 0x61, 0x6c, 0x5f, 0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x5f,
+	0x6f, 0x72, 0x64, 0x69, 0x6e, 0x61, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x15, 0x6c,
+	0x6f, 0x67, 0x69, 0x63, 0x61, 0x6c, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x4f, 0x72, 0x64,
+	0x69, 0x6e, 0x61, 0x6c, 0x12, 0x2e, 0x0a, 0x13, 0x70, 0x68, 0x79, 0x73, 0x69, 0x63, 0x61, 0x6c,
+	0x5f, 0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28,
+	0x03, 0x52, 0x11, 0x70, 0x68, 0x79, 0x73, 0x69, 0x63, 0x61, 0x6c, 0x53, 0x65, 0x67, 0x6d, 0x65,
+	0x6e, 0x74, 0x49, 0x64, 0x12, 0x29, 0x0a, 0x10, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c,
+	0x5f, 0x6f, 0x72, 0x64, 0x69, 0x6e, 0x61, 0x6c, 0x18, 0x03, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0f,
+	0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x4f, 0x72, 0x64, 0x69, 0x6e, 0x61, 0x6c, 0x12,
+	0x1a, 0x0a, 0x08, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x18, 0x04, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x08, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x12, 0x2b, 0x0a, 0x11, 0x70,
+	0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x6f, 0x72, 0x64, 0x69, 0x6e, 0x61, 0x6c,
+	0x18, 0x05, 0x20, 0x01, 0x28, 0x05, 0x52, 0x10, 0x70, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f,
+	0x6e, 0x4f, 0x72, 0x64, 0x69, 0x6e, 0x61, 0x6c, 0x12, 0x21, 0x0a, 0x0c, 0x70, 0x61, 0x72, 0x74,
+	0x69, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x69, 0x64, 0x18, 0x06, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0b,
+	0x70, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x64, 0x12, 0x12, 0x0a, 0x04, 0x72,
+	0x6f, 0x77, 0x73, 0x18, 0x07, 0x20, 0x01, 0x28, 0x03, 0x52, 0x04, 0x72, 0x6f, 0x77, 0x73, 0x12,
+	0x23, 0x0a, 0x0d, 0x6d, 0x69, 0x6e, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70,
+	0x18, 0x08, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x6d, 0x69, 0x6e, 0x54, 0x69, 0x6d, 0x65, 0x73,
+	0x74, 0x61, 0x6d, 0x70, 0x12, 0x23, 0x0a, 0x0d, 0x6d, 0x61, 0x78, 0x5f, 0x74, 0x69, 0x6d, 0x65,
+	0x73, 0x74, 0x61, 0x6d, 0x70, 0x18, 0x09, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x6d, 0x61, 0x78,
+	0x54, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70, 0x12, 0x3f, 0x0a, 0x0b, 0x69, 0x6e, 0x73,
+	0x65, 0x72, 0x74, 0x5f, 0x6c, 0x6f, 0x67, 0x73, 0x18, 0x0a, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x1e,
+	0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61,
+	0x74, 0x61, 0x2e, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x42, 0x69, 0x6e, 0x6c, 0x6f, 0x67, 0x52, 0x0a,
+	0x69, 0x6e, 0x73, 0x65, 0x72, 0x74, 0x4c, 0x6f, 0x67, 0x73, 0x12, 0x40, 0x0a, 0x0c, 0x70, 0x6b,
+	0x5f, 0x73, 0x74, 0x61, 0x74, 0x73, 0x5f, 0x6c, 0x6f, 0x67, 0x18, 0x0b, 0x20, 0x01, 0x28, 0x0b,
+	0x32, 0x1e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x64, 0x61, 0x74, 0x61, 0x2e, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x42, 0x69, 0x6e, 0x6c, 0x6f, 0x67,
+	0x52, 0x0a, 0x70, 0x6b, 0x53, 0x74, 0x61, 0x74, 0x73, 0x4c, 0x6f, 0x67, 0x12, 0x3b, 0x0a, 0x09,
+	0x62, 0x6d, 0x32, 0x35, 0x5f, 0x6c, 0x6f, 0x67, 0x73, 0x18, 0x0c, 0x20, 0x03, 0x28, 0x0b, 0x32,
+	0x1e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64,
+	0x61, 0x74, 0x61, 0x2e, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x42, 0x69, 0x6e, 0x6c, 0x6f, 0x67, 0x52,
+	0x08, 0x62, 0x6d, 0x32, 0x35, 0x4c, 0x6f, 0x67, 0x73, 0x12, 0x5b, 0x0a, 0x0f, 0x74, 0x65, 0x78,
+	0x74, 0x5f, 0x73, 0x74, 0x61, 0x74, 0x73, 0x5f, 0x6c, 0x6f, 0x67, 0x73, 0x18, 0x0d, 0x20, 0x03,
+	0x28, 0x0b, 0x32, 0x33, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x52, 0x65,
+	0x73, 0x75, 0x6c, 0x74, 0x2e, 0x54, 0x65, 0x78, 0x74, 0x53, 0x74, 0x61, 0x74, 0x73, 0x4c, 0x6f,
+	0x67, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x52, 0x0d, 0x74, 0x65, 0x78, 0x74, 0x53, 0x74, 0x61,
+	0x74, 0x73, 0x4c, 0x6f, 0x67, 0x73, 0x12, 0x23, 0x0a, 0x0d, 0x6d, 0x61, 0x6e, 0x69, 0x66, 0x65,
+	0x73, 0x74, 0x5f, 0x70, 0x61, 0x74, 0x68, 0x18, 0x0e, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x6d,
+	0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74, 0x50, 0x61, 0x74, 0x68, 0x12, 0x3d, 0x0a, 0x0a, 0x73,
+	0x74, 0x61, 0x74, 0x69, 0x73, 0x74, 0x69, 0x63, 0x73, 0x18, 0x0f, 0x20, 0x01, 0x28, 0x0b, 0x32,
+	0x1d, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64,
+	0x61, 0x74, 0x61, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x69, 0x73, 0x74, 0x69, 0x63, 0x73, 0x52, 0x0a,
+	0x73, 0x74, 0x61, 0x74, 0x69, 0x73, 0x74, 0x69, 0x63, 0x73, 0x12, 0x31, 0x0a, 0x14, 0x65, 0x78,
+	0x70, 0x69, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x71, 0x75, 0x61, 0x6e, 0x74, 0x69, 0x6c,
+	0x65, 0x73, 0x18, 0x10, 0x20, 0x03, 0x28, 0x03, 0x52, 0x13, 0x65, 0x78, 0x70, 0x69, 0x72, 0x61,
+	0x74, 0x69, 0x6f, 0x6e, 0x51, 0x75, 0x61, 0x6e, 0x74, 0x69, 0x6c, 0x65, 0x73, 0x12, 0x1b, 0x0a,
+	0x09, 0x69, 0x73, 0x5f, 0x73, 0x6f, 0x72, 0x74, 0x65, 0x64, 0x18, 0x11, 0x20, 0x01, 0x28, 0x08,
+	0x52, 0x08, 0x69, 0x73, 0x53, 0x6f, 0x72, 0x74, 0x65, 0x64, 0x12, 0x33, 0x0a, 0x16, 0x69, 0x73,
+	0x5f, 0x73, 0x6f, 0x72, 0x74, 0x65, 0x64, 0x5f, 0x62, 0x79, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x73,
+	0x70, 0x61, 0x63, 0x65, 0x18, 0x12, 0x20, 0x01, 0x28, 0x08, 0x52, 0x13, 0x69, 0x73, 0x53, 0x6f,
+	0x72, 0x74, 0x65, 0x64, 0x42, 0x79, 0x4e, 0x61, 0x6d, 0x65, 0x73, 0x70, 0x61, 0x63, 0x65, 0x12,
+	0x27, 0x0a, 0x0f, 0x73, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x5f, 0x76, 0x65, 0x72, 0x73, 0x69,
+	0x6f, 0x6e, 0x18, 0x13, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0e, 0x73, 0x74, 0x6f, 0x72, 0x61, 0x67,
+	0x65, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x25, 0x0a, 0x0e, 0x73, 0x63, 0x68, 0x65,
+	0x6d, 0x61, 0x5f, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x14, 0x20, 0x01, 0x28, 0x05,
+	0x52, 0x0d, 0x73, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12,
+	0x25, 0x0a, 0x0e, 0x70, 0x68, 0x79, 0x73, 0x69, 0x63, 0x61, 0x6c, 0x5f, 0x62, 0x79, 0x74, 0x65,
+	0x73, 0x18, 0x15, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0d, 0x70, 0x68, 0x79, 0x73, 0x69, 0x63, 0x61,
+	0x6c, 0x42, 0x79, 0x74, 0x65, 0x73, 0x12, 0x22, 0x0a, 0x0c, 0x6d, 0x61, 0x74, 0x65, 0x72, 0x69,
+	0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64, 0x18, 0x16, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0c, 0x6d, 0x61,
+	0x74, 0x65, 0x72, 0x69, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64, 0x1a, 0x63, 0x0a, 0x12, 0x54, 0x65,
+	0x78, 0x74, 0x53, 0x74, 0x61, 0x74, 0x73, 0x4c, 0x6f, 0x67, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79,
+	0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x03, 0x6b,
+	0x65, 0x79, 0x12, 0x37, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28,
+	0x0b, 0x32, 0x21, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x54, 0x65, 0x78, 0x74, 0x49, 0x6e, 0x64, 0x65, 0x78, 0x53,
+	0x74, 0x61, 0x74, 0x73, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22,
+	0x60, 0x0a, 0x17, 0x51, 0x75, 0x65, 0x72, 0x79, 0x52, 0x65, 0x73, 0x68, 0x61, 0x72, 0x64, 0x54,
+	0x61, 0x73, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x15, 0x0a, 0x06, 0x6a, 0x6f,
+	0x62, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x6a, 0x6f, 0x62, 0x49,
+	0x64, 0x12, 0x17, 0x0a, 0x07, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01,
+	0x28, 0x03, 0x52, 0x06, 0x74, 0x61, 0x73, 0x6b, 0x49, 0x64, 0x12, 0x15, 0x0a, 0x06, 0x72, 0x75,
+	0x6e, 0x5f, 0x69, 0x64, 0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x72, 0x75, 0x6e, 0x49,
+	0x64, 0x22, 0xe7, 0x01, 0x0a, 0x18, 0x51, 0x75, 0x65, 0x72, 0x79, 0x52, 0x65, 0x73, 0x68, 0x61,
+	0x72, 0x64, 0x54, 0x61, 0x73, 0x6b, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x33,
+	0x0a, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1b,
+	0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f,
+	0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x06, 0x73, 0x74, 0x61,
+	0x74, 0x75, 0x73, 0x12, 0x3a, 0x0a, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x18, 0x02, 0x20, 0x01,
+	0x28, 0x0e, 0x32, 0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x52, 0x65, 0x73, 0x68, 0x61, 0x72, 0x64, 0x54, 0x61,
+	0x73, 0x6b, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x65, 0x52, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x12,
+	0x16, 0x0a, 0x06, 0x72, 0x65, 0x61, 0x73, 0x6f, 0x6e, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52,
+	0x06, 0x72, 0x65, 0x61, 0x73, 0x6f, 0x6e, 0x12, 0x1d, 0x0a, 0x0a, 0x72, 0x65, 0x73, 0x75, 0x6c,
+	0x74, 0x5f, 0x72, 0x65, 0x66, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x72, 0x65, 0x73,
+	0x75, 0x6c, 0x74, 0x52, 0x65, 0x66, 0x12, 0x23, 0x0a, 0x0d, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74,
+	0x5f, 0x64, 0x69, 0x67, 0x65, 0x73, 0x74, 0x18, 0x05, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x0c, 0x72,
+	0x65, 0x73, 0x75, 0x6c, 0x74, 0x44, 0x69, 0x67, 0x65, 0x73, 0x74, 0x22, 0x5f, 0x0a, 0x16, 0x44,
+	0x72, 0x6f, 0x70, 0x52, 0x65, 0x73, 0x68, 0x61, 0x72, 0x64, 0x54, 0x61, 0x73, 0x6b, 0x52, 0x65,
+	0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x15, 0x0a, 0x06, 0x6a, 0x6f, 0x62, 0x5f, 0x69, 0x64, 0x18,
+	0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x64, 0x12, 0x17, 0x0a, 0x07,
+	0x74, 0x61, 0x73, 0x6b, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x06, 0x74,
+	0x61, 0x73, 0x6b, 0x49, 0x64, 0x12, 0x15, 0x0a, 0x06, 0x72, 0x75, 0x6e, 0x5f, 0x69, 0x64, 0x18,
+	0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x72, 0x75, 0x6e, 0x49, 0x64, 0x22, 0x61, 0x0a, 0x18,
+	0x51, 0x75, 0x65, 0x72, 0x79, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x56,
+	0x33, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x15, 0x0a, 0x06, 0x6a, 0x6f, 0x62, 0x5f,
+	0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x64, 0x12,
+	0x17, 0x0a, 0x07, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03,
+	0x52, 0x06, 0x74, 0x61, 0x73, 0x6b, 0x49, 0x64, 0x12, 0x15, 0x0a, 0x06, 0x72, 0x75, 0x6e, 0x5f,
+	0x69, 0x64, 0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x72, 0x75, 0x6e, 0x49, 0x64, 0x22,
+	0xe9, 0x01, 0x0a, 0x19, 0x51, 0x75, 0x65, 0x72, 0x79, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x54,
+	0x61, 0x73, 0x6b, 0x56, 0x33, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x33, 0x0a,
+	0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1b, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d,
+	0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x06, 0x73, 0x74, 0x61, 0x74,
+	0x75, 0x73, 0x12, 0x3b, 0x0a, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28,
+	0x0e, 0x32, 0x25, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x54, 0x61, 0x73, 0x6b,
+	0x56, 0x33, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x65, 0x52, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x12,
+	0x16, 0x0a, 0x06, 0x72, 0x65, 0x61, 0x73, 0x6f, 0x6e, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52,
+	0x06, 0x72, 0x65, 0x61, 0x73, 0x6f, 0x6e, 0x12, 0x1d, 0x0a, 0x0a, 0x72, 0x65, 0x73, 0x75, 0x6c,
+	0x74, 0x5f, 0x72, 0x65, 0x66, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x72, 0x65, 0x73,
+	0x75, 0x6c, 0x74, 0x52, 0x65, 0x66, 0x12, 0x23, 0x0a, 0x0d, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74,
+	0x5f, 0x64, 0x69, 0x67, 0x65, 0x73, 0x74, 0x18, 0x05, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x0c, 0x72,
+	0x65, 0x73, 0x75, 0x6c, 0x74, 0x44, 0x69, 0x67, 0x65, 0x73, 0x74, 0x22, 0x60, 0x0a, 0x17, 0x44,
+	0x72, 0x6f, 0x70, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x56, 0x33, 0x52,
+	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x15, 0x0a, 0x06, 0x6a, 0x6f, 0x62, 0x5f, 0x69, 0x64,
+	0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x64, 0x12, 0x17, 0x0a,
+	0x07, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x06,
+	0x74, 0x61, 0x73, 0x6b, 0x49, 0x64, 0x12, 0x15, 0x0a, 0x06, 0x72, 0x75, 0x6e, 0x5f, 0x69, 0x64,
+	0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x72, 0x75, 0x6e, 0x49, 0x64, 0x22, 0xb7, 0x01,
+	0x0a, 0x10, 0x47, 0x63, 0x43, 0x6f, 0x6e, 0x74, 0x72, 0x6f, 0x6c, 0x52, 0x65, 0x71, 0x75, 0x65,
+	0x73, 0x74, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61, 0x73, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b,
+	0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4d, 0x73, 0x67, 0x42, 0x61, 0x73, 0x65, 0x52, 0x04,
+	0x62, 0x61, 0x73, 0x65, 0x12, 0x36, 0x0a, 0x07, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x18,
+	0x02, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x47, 0x63, 0x43, 0x6f, 0x6d, 0x6d,
+	0x61, 0x6e, 0x64, 0x52, 0x07, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x12, 0x39, 0x0a, 0x06,
+	0x70, 0x61, 0x72, 0x61, 0x6d, 0x73, 0x18, 0x03, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x21, 0x2e, 0x6d,
+	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d,
+	0x6f, 0x6e, 0x2e, 0x4b, 0x65, 0x79, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x50, 0x61, 0x69, 0x72, 0x52,
+	0x06, 0x70, 0x61, 0x72, 0x61, 0x6d, 0x73, 0x22, 0x68, 0x0a, 0x13, 0x47, 0x65, 0x74, 0x47, 0x63,
+	0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x1b,
+	0x0a, 0x09, 0x69, 0x73, 0x5f, 0x70, 0x61, 0x75, 0x73, 0x65, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x08, 0x52, 0x08, 0x69, 0x73, 0x50, 0x61, 0x75, 0x73, 0x65, 0x64, 0x12, 0x34, 0x0a, 0x16, 0x74,
+	0x69, 0x6d, 0x65, 0x5f, 0x72, 0x65, 0x6d, 0x61, 0x69, 0x6e, 0x69, 0x6e, 0x67, 0x5f, 0x73, 0x65,
+	0x63, 0x6f, 0x6e, 0x64, 0x73, 0x18, 0x02, 0x20, 0x01, 0x28, 0x05, 0x52, 0x14, 0x74, 0x69, 0x6d,
+	0x65, 0x52, 0x65, 0x6d, 0x61, 0x69, 0x6e, 0x69, 0x6e, 0x67, 0x53, 0x65, 0x63, 0x6f, 0x6e, 0x64,
+	0x73, 0x22, 0x12, 0x0a, 0x10, 0x51, 0x75, 0x65, 0x72, 0x79, 0x53, 0x6c, 0x6f, 0x74, 0x52, 0x65,
+	0x71, 0x75, 0x65, 0x73, 0x74, 0x22, 0xc2, 0x01, 0x0a, 0x11, 0x51, 0x75, 0x65, 0x72, 0x79, 0x53,
+	0x6c, 0x6f, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x33, 0x0a, 0x06, 0x73,
+	0x74, 0x61, 0x74, 0x75, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1b, 0x2e, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f,
+	0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73,
+	0x12, 0x27, 0x0a, 0x0f, 0x61, 0x76, 0x61, 0x69, 0x6c, 0x61, 0x62, 0x6c, 0x65, 0x5f, 0x73, 0x6c,
+	0x6f, 0x74, 0x73, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0e, 0x61, 0x76, 0x61, 0x69, 0x6c,
+	0x61, 0x62, 0x6c, 0x65, 0x53, 0x6c, 0x6f, 0x74, 0x73, 0x12, 0x18, 0x0a, 0x07, 0x76, 0x65, 0x72,
+	0x73, 0x69, 0x6f, 0x6e, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x76, 0x65, 0x72, 0x73,
+	0x69, 0x6f, 0x6e, 0x12, 0x35, 0x0a, 0x17, 0x6d, 0x61, 0x78, 0x5f, 0x69, 0x6d, 0x70, 0x6f, 0x72,
+	0x74, 0x5f, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x04,
+	0x20, 0x01, 0x28, 0x0d, 0x52, 0x14, 0x6d, 0x61, 0x78, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x54,
+	0x61, 0x73, 0x6b, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x22, 0xe4, 0x03, 0x0a, 0x10, 0x43,
 	0x6f, 0x6d, 0x70, 0x61, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x54, 0x61, 0x72, 0x67, 0x65, 0x74, 0x12,
 	0x1a, 0x0a, 0x08, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28,
 	0x03, 0x52, 0x08, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x49, 0x44, 0x12, 0x22, 0x0a, 0x0c, 0x63,
@@ -19214,8 +21053,8 @@ func file_data_coord_proto_rawDescGZIP() []byte {
 	return file_data_coord_proto_rawDescData
 }
 
-var file_data_coord_proto_enumTypes = make([]protoimpl.EnumInfo, 16)
-var file_data_coord_proto_msgTypes = make([]protoimpl.MessageInfo, 196)
+var file_data_coord_proto_enumTypes = make([]protoimpl.EnumInfo, 18)
+var file_data_coord_proto_msgTypes = make([]protoimpl.MessageInfo, 209)
 var file_data_coord_proto_goTypes = []interface{}{
 	(SegmentType)(0),                                     // 0: milvus.proto.data.SegmentType
 	(SegmentLevel)(0),                                    // 1: milvus.proto.data.SegmentLevel
@@ -19233,797 +21072,831 @@ var file_data_coord_proto_goTypes = []interface{}{
 	(TargetIntent)(0),                                    // 13: milvus.proto.data.TargetIntent
 	(SnapshotLayout)(0),                                  // 14: milvus.proto.data.SnapshotLayout
 	(ExportSnapshotJobState)(0),                          // 15: milvus.proto.data.ExportSnapshotJobState
-	(*Empty)(nil),                                        // 16: milvus.proto.data.Empty
-	(*FlushRequest)(nil),                                 // 17: milvus.proto.data.FlushRequest
-	(*FlushResponse)(nil),                                // 18: milvus.proto.data.FlushResponse
-	(*FlushResult)(nil),                                  // 19: milvus.proto.data.FlushResult
-	(*FlushAllRequest)(nil),                              // 20: milvus.proto.data.FlushAllRequest
-	(*FlushAllTarget)(nil),                               // 21: milvus.proto.data.FlushAllTarget
-	(*FlushAllResponse)(nil),                             // 22: milvus.proto.data.FlushAllResponse
-	(*FlushChannelsRequest)(nil),                         // 23: milvus.proto.data.FlushChannelsRequest
-	(*SegmentIDRequest)(nil),                             // 24: milvus.proto.data.SegmentIDRequest
-	(*AllocSegmentRequest)(nil),                          // 25: milvus.proto.data.AllocSegmentRequest
-	(*AllocSegmentResponse)(nil),                         // 26: milvus.proto.data.AllocSegmentResponse
-	(*AssignSegmentIDRequest)(nil),                       // 27: milvus.proto.data.AssignSegmentIDRequest
-	(*SegmentIDAssignment)(nil),                          // 28: milvus.proto.data.SegmentIDAssignment
-	(*AssignSegmentIDResponse)(nil),                      // 29: milvus.proto.data.AssignSegmentIDResponse
-	(*GetSegmentStatesRequest)(nil),                      // 30: milvus.proto.data.GetSegmentStatesRequest
-	(*SegmentStateInfo)(nil),                             // 31: milvus.proto.data.SegmentStateInfo
-	(*GetSegmentStatesResponse)(nil),                     // 32: milvus.proto.data.GetSegmentStatesResponse
-	(*GetSegmentInfoRequest)(nil),                        // 33: milvus.proto.data.GetSegmentInfoRequest
-	(*GetSegmentInfoResponse)(nil),                       // 34: milvus.proto.data.GetSegmentInfoResponse
-	(*GetInsertBinlogPathsRequest)(nil),                  // 35: milvus.proto.data.GetInsertBinlogPathsRequest
-	(*GetInsertBinlogPathsResponse)(nil),                 // 36: milvus.proto.data.GetInsertBinlogPathsResponse
-	(*GetCollectionStatisticsRequest)(nil),               // 37: milvus.proto.data.GetCollectionStatisticsRequest
-	(*GetCollectionStatisticsResponse)(nil),              // 38: milvus.proto.data.GetCollectionStatisticsResponse
-	(*GetPartitionStatisticsRequest)(nil),                // 39: milvus.proto.data.GetPartitionStatisticsRequest
-	(*GetPartitionStatisticsResponse)(nil),               // 40: milvus.proto.data.GetPartitionStatisticsResponse
-	(*GetSegmentInfoChannelRequest)(nil),                 // 41: milvus.proto.data.GetSegmentInfoChannelRequest
-	(*VchannelInfo)(nil),                                 // 42: milvus.proto.data.VchannelInfo
-	(*WatchDmChannelsRequest)(nil),                       // 43: milvus.proto.data.WatchDmChannelsRequest
-	(*FlushSegmentsRequest)(nil),                         // 44: milvus.proto.data.FlushSegmentsRequest
-	(*SegmentMsg)(nil),                                   // 45: milvus.proto.data.SegmentMsg
-	(*SegmentInfo)(nil),                                  // 46: milvus.proto.data.SegmentInfo
-	(*Statistics)(nil),                                   // 47: milvus.proto.data.Statistics
-	(*SegmentStartPosition)(nil),                         // 48: milvus.proto.data.SegmentStartPosition
-	(*SaveBinlogPathsRequest)(nil),                       // 49: milvus.proto.data.SaveBinlogPathsRequest
-	(*CheckPoint)(nil),                                   // 50: milvus.proto.data.CheckPoint
-	(*DeltaLogInfo)(nil),                                 // 51: milvus.proto.data.DeltaLogInfo
-	(*ChannelStatus)(nil),                                // 52: milvus.proto.data.ChannelStatus
-	(*DataNodeInfo)(nil),                                 // 53: milvus.proto.data.DataNodeInfo
-	(*SegmentBinlogs)(nil),                               // 54: milvus.proto.data.SegmentBinlogs
-	(*FieldBinlog)(nil),                                  // 55: milvus.proto.data.FieldBinlog
-	(*TextIndexStats)(nil),                               // 56: milvus.proto.data.TextIndexStats
-	(*JsonKeyStats)(nil),                                 // 57: milvus.proto.data.JsonKeyStats
-	(*Binlog)(nil),                                       // 58: milvus.proto.data.Binlog
-	(*GetRecoveryInfoResponse)(nil),                      // 59: milvus.proto.data.GetRecoveryInfoResponse
-	(*GetRecoveryInfoRequest)(nil),                       // 60: milvus.proto.data.GetRecoveryInfoRequest
-	(*GetRecoveryInfoResponseV2)(nil),                    // 61: milvus.proto.data.GetRecoveryInfoResponseV2
-	(*GetRecoveryInfoRequestV2)(nil),                     // 62: milvus.proto.data.GetRecoveryInfoRequestV2
-	(*GetChannelRecoveryInfoRequest)(nil),                // 63: milvus.proto.data.GetChannelRecoveryInfoRequest
-	(*GetChannelRecoveryInfoResponse)(nil),               // 64: milvus.proto.data.GetChannelRecoveryInfoResponse
-	(*SegmentNotCreatedByStreaming)(nil),                 // 65: milvus.proto.data.SegmentNotCreatedByStreaming
-	(*GetSegmentsByStatesRequest)(nil),                   // 66: milvus.proto.data.GetSegmentsByStatesRequest
-	(*GetSegmentsByStatesResponse)(nil),                  // 67: milvus.proto.data.GetSegmentsByStatesResponse
-	(*GetFlushedSegmentsRequest)(nil),                    // 68: milvus.proto.data.GetFlushedSegmentsRequest
-	(*GetFlushedSegmentsResponse)(nil),                   // 69: milvus.proto.data.GetFlushedSegmentsResponse
-	(*SegmentFlushCompletedMsg)(nil),                     // 70: milvus.proto.data.SegmentFlushCompletedMsg
-	(*ChannelWatchInfo)(nil),                             // 71: milvus.proto.data.ChannelWatchInfo
-	(*CompactionStateRequest)(nil),                       // 72: milvus.proto.data.CompactionStateRequest
-	(*SyncSegmentInfo)(nil),                              // 73: milvus.proto.data.SyncSegmentInfo
-	(*SyncSegmentsRequest)(nil),                          // 74: milvus.proto.data.SyncSegmentsRequest
-	(*CompactionSegmentBinlogs)(nil),                     // 75: milvus.proto.data.CompactionSegmentBinlogs
-	(*CompactionPlan)(nil),                               // 76: milvus.proto.data.CompactionPlan
-	(*CompactionSegment)(nil),                            // 77: milvus.proto.data.CompactionSegment
-	(*CompactionPlanResult)(nil),                         // 78: milvus.proto.data.CompactionPlanResult
-	(*CompactionStateResponse)(nil),                      // 79: milvus.proto.data.CompactionStateResponse
-	(*SegmentFieldBinlogMeta)(nil),                       // 80: milvus.proto.data.SegmentFieldBinlogMeta
-	(*WatchChannelsRequest)(nil),                         // 81: milvus.proto.data.WatchChannelsRequest
-	(*WatchChannelsResponse)(nil),                        // 82: milvus.proto.data.WatchChannelsResponse
-	(*SetSegmentStateRequest)(nil),                       // 83: milvus.proto.data.SetSegmentStateRequest
-	(*SetSegmentStateResponse)(nil),                      // 84: milvus.proto.data.SetSegmentStateResponse
-	(*DropVirtualChannelRequest)(nil),                    // 85: milvus.proto.data.DropVirtualChannelRequest
-	(*DropVirtualChannelSegment)(nil),                    // 86: milvus.proto.data.DropVirtualChannelSegment
-	(*DropVirtualChannelResponse)(nil),                   // 87: milvus.proto.data.DropVirtualChannelResponse
-	(*UpdateSegmentStatisticsRequest)(nil),               // 88: milvus.proto.data.UpdateSegmentStatisticsRequest
-	(*UpdateChannelCheckpointRequest)(nil),               // 89: milvus.proto.data.UpdateChannelCheckpointRequest
-	(*ResendSegmentStatsRequest)(nil),                    // 90: milvus.proto.data.ResendSegmentStatsRequest
-	(*ResendSegmentStatsResponse)(nil),                   // 91: milvus.proto.data.ResendSegmentStatsResponse
-	(*MarkSegmentsDroppedRequest)(nil),                   // 92: milvus.proto.data.MarkSegmentsDroppedRequest
-	(*SegmentReferenceLock)(nil),                         // 93: milvus.proto.data.SegmentReferenceLock
-	(*AlterCollectionRequest)(nil),                       // 94: milvus.proto.data.AlterCollectionRequest
-	(*AddCollectionFieldRequest)(nil),                    // 95: milvus.proto.data.AddCollectionFieldRequest
-	(*GcConfirmRequest)(nil),                             // 96: milvus.proto.data.GcConfirmRequest
-	(*GcConfirmResponse)(nil),                            // 97: milvus.proto.data.GcConfirmResponse
-	(*ReportDataNodeTtMsgsRequest)(nil),                  // 98: milvus.proto.data.ReportDataNodeTtMsgsRequest
-	(*GetFlushStateRequest)(nil),                         // 99: milvus.proto.data.GetFlushStateRequest
-	(*ChannelOperationsRequest)(nil),                     // 100: milvus.proto.data.ChannelOperationsRequest
-	(*ChannelOperationProgressResponse)(nil),             // 101: milvus.proto.data.ChannelOperationProgressResponse
-	(*PreImportRequest)(nil),                             // 102: milvus.proto.data.PreImportRequest
-	(*IDRange)(nil),                                      // 103: milvus.proto.data.IDRange
-	(*ImportRequestSegment)(nil),                         // 104: milvus.proto.data.ImportRequestSegment
-	(*ImportRequest)(nil),                                // 105: milvus.proto.data.ImportRequest
-	(*QueryPreImportRequest)(nil),                        // 106: milvus.proto.data.QueryPreImportRequest
-	(*PartitionImportStats)(nil),                         // 107: milvus.proto.data.PartitionImportStats
-	(*ImportFileStats)(nil),                              // 108: milvus.proto.data.ImportFileStats
-	(*QueryPreImportResponse)(nil),                       // 109: milvus.proto.data.QueryPreImportResponse
-	(*QueryImportRequest)(nil),                           // 110: milvus.proto.data.QueryImportRequest
-	(*ImportSegmentInfo)(nil),                            // 111: milvus.proto.data.ImportSegmentInfo
-	(*QueryImportResponse)(nil),                          // 112: milvus.proto.data.QueryImportResponse
-	(*DropImportRequest)(nil),                            // 113: milvus.proto.data.DropImportRequest
-	(*CopySegmentSource)(nil),                            // 114: milvus.proto.data.CopySegmentSource
-	(*CopySegmentTarget)(nil),                            // 115: milvus.proto.data.CopySegmentTarget
-	(*CopySegmentRequest)(nil),                           // 116: milvus.proto.data.CopySegmentRequest
-	(*QueryCopySegmentRequest)(nil),                      // 117: milvus.proto.data.QueryCopySegmentRequest
-	(*QueryCopySegmentResponse)(nil),                     // 118: milvus.proto.data.QueryCopySegmentResponse
-	(*DropCopySegmentRequest)(nil),                       // 119: milvus.proto.data.DropCopySegmentRequest
-	(*VectorScalarIndexInfo)(nil),                        // 120: milvus.proto.data.VectorScalarIndexInfo
-	(*CopySegmentResult)(nil),                            // 121: milvus.proto.data.CopySegmentResult
-	(*CopySegmentTask)(nil),                              // 122: milvus.proto.data.CopySegmentTask
-	(*CopySegmentIDMapping)(nil),                         // 123: milvus.proto.data.CopySegmentIDMapping
-	(*CopySegmentJob)(nil),                               // 124: milvus.proto.data.CopySegmentJob
-	(*ImportJob)(nil),                                    // 125: milvus.proto.data.ImportJob
-	(*PreImportTask)(nil),                                // 126: milvus.proto.data.PreImportTask
-	(*ImportTaskV2)(nil),                                 // 127: milvus.proto.data.ImportTaskV2
-	(*GcControlRequest)(nil),                             // 128: milvus.proto.data.GcControlRequest
-	(*GetGcStatusResponse)(nil),                          // 129: milvus.proto.data.GetGcStatusResponse
-	(*QuerySlotRequest)(nil),                             // 130: milvus.proto.data.QuerySlotRequest
-	(*QuerySlotResponse)(nil),                            // 131: milvus.proto.data.QuerySlotResponse
-	(*CompactionTarget)(nil),                             // 132: milvus.proto.data.CompactionTarget
-	(*CompactionTask)(nil),                               // 133: milvus.proto.data.CompactionTask
-	(*PartitionStatsInfo)(nil),                           // 134: milvus.proto.data.PartitionStatsInfo
-	(*DropCompactionPlanRequest)(nil),                    // 135: milvus.proto.data.DropCompactionPlanRequest
-	(*RefreshExternalCollectionTaskRequest)(nil),         // 136: milvus.proto.data.RefreshExternalCollectionTaskRequest
-	(*RefreshExternalCollectionTaskResponse)(nil),        // 137: milvus.proto.data.RefreshExternalCollectionTaskResponse
-	(*RefreshExternalCollectionRequest)(nil),             // 138: milvus.proto.data.RefreshExternalCollectionRequest
-	(*RefreshExternalCollectionResponse)(nil),            // 139: milvus.proto.data.RefreshExternalCollectionResponse
-	(*GetRefreshExternalCollectionProgressRequest)(nil),  // 140: milvus.proto.data.GetRefreshExternalCollectionProgressRequest
-	(*ExternalCollectionRefreshJob)(nil),                 // 141: milvus.proto.data.ExternalCollectionRefreshJob
-	(*ExternalFileInfo)(nil),                             // 142: milvus.proto.data.ExternalFileInfo
-	(*ExternalCollectionRefreshTask)(nil),                // 143: milvus.proto.data.ExternalCollectionRefreshTask
-	(*GetRefreshExternalCollectionProgressResponse)(nil), // 144: milvus.proto.data.GetRefreshExternalCollectionProgressResponse
-	(*ListRefreshExternalCollectionJobsRequest)(nil),     // 145: milvus.proto.data.ListRefreshExternalCollectionJobsRequest
-	(*ListRefreshExternalCollectionJobsResponse)(nil),    // 146: milvus.proto.data.ListRefreshExternalCollectionJobsResponse
-	(*CreateSnapshotRequest)(nil),                        // 147: milvus.proto.data.CreateSnapshotRequest
-	(*DropSnapshotRequest)(nil),                          // 148: milvus.proto.data.DropSnapshotRequest
-	(*ListSnapshotsRequest)(nil),                         // 149: milvus.proto.data.ListSnapshotsRequest
-	(*ListSnapshotsResponse)(nil),                        // 150: milvus.proto.data.ListSnapshotsResponse
-	(*ExportSnapshotRequest)(nil),                        // 151: milvus.proto.data.ExportSnapshotRequest
-	(*ExportSnapshotResponse)(nil),                       // 152: milvus.proto.data.ExportSnapshotResponse
-	(*SegmentDescription)(nil),                           // 153: milvus.proto.data.SegmentDescription
-	(*CollectionDescription)(nil),                        // 154: milvus.proto.data.CollectionDescription
-	(*SnapshotInfo)(nil),                                 // 155: milvus.proto.data.SnapshotInfo
-	(*StorageV2SegmentManifest)(nil),                     // 156: milvus.proto.data.StorageV2SegmentManifest
-	(*SnapshotMetadata)(nil),                             // 157: milvus.proto.data.SnapshotMetadata
-	(*RestoreSnapshotInfo)(nil),                          // 158: milvus.proto.data.RestoreSnapshotInfo
-	(*DescribeSnapshotRequest)(nil),                      // 159: milvus.proto.data.DescribeSnapshotRequest
-	(*DescribeSnapshotResponse)(nil),                     // 160: milvus.proto.data.DescribeSnapshotResponse
-	(*RestoreSnapshotRequest)(nil),                       // 161: milvus.proto.data.RestoreSnapshotRequest
-	(*RestoreSnapshotResponse)(nil),                      // 162: milvus.proto.data.RestoreSnapshotResponse
-	(*GetRestoreSnapshotStateRequest)(nil),               // 163: milvus.proto.data.GetRestoreSnapshotStateRequest
-	(*GetRestoreSnapshotStateResponse)(nil),              // 164: milvus.proto.data.GetRestoreSnapshotStateResponse
-	(*ListRestoreSnapshotJobsRequest)(nil),               // 165: milvus.proto.data.ListRestoreSnapshotJobsRequest
-	(*ListRestoreSnapshotJobsResponse)(nil),              // 166: milvus.proto.data.ListRestoreSnapshotJobsResponse
-	(*BatchUpdateManifestRequest)(nil),                   // 167: milvus.proto.data.BatchUpdateManifestRequest
-	(*BatchUpdateManifestItem)(nil),                      // 168: milvus.proto.data.BatchUpdateManifestItem
-	(*CommitBackfillResultRequest)(nil),                  // 169: milvus.proto.data.CommitBackfillResultRequest
-	(*CommitBackfillResultSegmentStatus)(nil),            // 170: milvus.proto.data.CommitBackfillResultSegmentStatus
-	(*CommitBackfillResultResponse)(nil),                 // 171: milvus.proto.data.CommitBackfillResultResponse
-	(*PinSnapshotDataRequest)(nil),                       // 172: milvus.proto.data.PinSnapshotDataRequest
-	(*PinSnapshotDataResponse)(nil),                      // 173: milvus.proto.data.PinSnapshotDataResponse
-	(*UnpinSnapshotDataRequest)(nil),                     // 174: milvus.proto.data.UnpinSnapshotDataRequest
-	(*CommitImportRequest)(nil),                          // 175: milvus.proto.data.CommitImportRequest
-	(*AbortImportRequest)(nil),                           // 176: milvus.proto.data.AbortImportRequest
-	(*HandleCommitVchannelRequest)(nil),                  // 177: milvus.proto.data.HandleCommitVchannelRequest
-	(*ExternalCollectionRefreshTaskResult)(nil),          // 178: milvus.proto.data.ExternalCollectionRefreshTaskResult
-	(*ColumnGroupStatistics)(nil),                        // 179: milvus.proto.data.ColumnGroupStatistics
-	(*LoadResourceStatistics)(nil),                       // 180: milvus.proto.data.LoadResourceStatistics
-	(*ExportSnapshotJob)(nil),                            // 181: milvus.proto.data.ExportSnapshotJob
-	(*ExportSnapshotJobInfo)(nil),                        // 182: milvus.proto.data.ExportSnapshotJobInfo
-	(*GetExportSnapshotStateRequest)(nil),                // 183: milvus.proto.data.GetExportSnapshotStateRequest
-	(*GetExportSnapshotStateResponse)(nil),               // 184: milvus.proto.data.GetExportSnapshotStateResponse
-	nil,                                                  // 185: milvus.proto.data.FlushResponse.ChannelCpsEntry
-	nil,                                                  // 186: milvus.proto.data.FlushResult.ChannelCpsEntry
-	nil,                                                  // 187: milvus.proto.data.FlushAllResponse.FlushAllMsgsEntry
-	nil,                                                  // 188: milvus.proto.data.GetSegmentInfoResponse.ChannelCheckpointEntry
-	nil,                                                  // 189: milvus.proto.data.VchannelInfo.PartitionStatsVersionsEntry
-	nil,                                                  // 190: milvus.proto.data.SegmentInfo.TextStatsLogsEntry
-	nil,                                                  // 191: milvus.proto.data.SegmentInfo.JsonKeyStatsEntry
-	nil,                                                  // 192: milvus.proto.data.Statistics.NullCountsEntry
-	nil,                                                  // 193: milvus.proto.data.SegmentBinlogs.TextStatsLogsEntry
-	nil,                                                  // 194: milvus.proto.data.Binlog.FieldNullCountsEntry
-	nil,                                                  // 195: milvus.proto.data.SyncSegmentsRequest.SegmentInfosEntry
-	nil,                                                  // 196: milvus.proto.data.CompactionSegment.TextStatsLogsEntry
-	nil,                                                  // 197: milvus.proto.data.WatchChannelsRequest.ChannelWalNamesEntry
-	nil,                                                  // 198: milvus.proto.data.PartitionImportStats.PartitionRowsEntry
-	nil,                                                  // 199: milvus.proto.data.PartitionImportStats.PartitionDataSizeEntry
-	nil,                                                  // 200: milvus.proto.data.ImportFileStats.HashedStatsEntry
-	nil,                                                  // 201: milvus.proto.data.CopySegmentSource.TextIndexFilesEntry
-	nil,                                                  // 202: milvus.proto.data.CopySegmentSource.JsonKeyIndexFilesEntry
-	nil,                                                  // 203: milvus.proto.data.CopySegmentTarget.NewBuildIdsEntry
-	nil,                                                  // 204: milvus.proto.data.CopySegmentResult.IndexInfosEntry
-	nil,                                                  // 205: milvus.proto.data.CopySegmentResult.TextIndexInfosEntry
-	nil,                                                  // 206: milvus.proto.data.CopySegmentResult.JsonKeyIndexInfosEntry
-	nil,                                                  // 207: milvus.proto.data.CompactionTarget.PropertiesEntry
-	nil,                                                  // 208: milvus.proto.data.SegmentDescription.TextIndexFilesEntry
-	nil,                                                  // 209: milvus.proto.data.SegmentDescription.JsonKeyIndexFilesEntry
-	nil,                                                  // 210: milvus.proto.data.CollectionDescription.PartitionsEntry
-	nil,                                                  // 211: milvus.proto.data.SnapshotInfo.PinExpireAtMsEntry
-	(*commonpb.MsgBase)(nil),                             // 212: milvus.proto.common.MsgBase
-	(*commonpb.Status)(nil),                              // 213: milvus.proto.common.Status
-	(*milvuspb.ClusterInfo)(nil),                         // 214: milvus.proto.milvus.ClusterInfo
-	(commonpb.SegmentState)(0),                           // 215: milvus.proto.common.SegmentState
-	(*msgpb.MsgPosition)(nil),                            // 216: milvus.proto.msg.MsgPosition
-	(*internalpb.StringList)(nil),                        // 217: milvus.proto.internal.StringList
-	(*commonpb.KeyValuePair)(nil),                        // 218: milvus.proto.common.KeyValuePair
-	(*schemapb.CollectionSchema)(nil),                    // 219: milvus.proto.schema.CollectionSchema
-	(*internalpb.FileResourceInfo)(nil),                  // 220: milvus.proto.internal.FileResourceInfo
-	(*schemapb.FunctionSchema)(nil),                      // 221: milvus.proto.schema.FunctionSchema
-	(*commonpb.KeyDataPair)(nil),                         // 222: milvus.proto.common.KeyDataPair
-	(*commonpb.SegmentStats)(nil),                        // 223: milvus.proto.common.SegmentStats
-	(*schemapb.FieldSchema)(nil),                         // 224: milvus.proto.schema.FieldSchema
-	(*msgpb.DataNodeTtMsg)(nil),                          // 225: milvus.proto.msg.DataNodeTtMsg
-	(*internalpb.ImportFile)(nil),                        // 226: milvus.proto.internal.ImportFile
-	(*indexpb.StorageConfig)(nil),                        // 227: milvus.proto.index.StorageConfig
-	(*indexpb.IndexFilePathInfo)(nil),                    // 228: milvus.proto.index.IndexFilePathInfo
-	(indexpb.IndexStorePathVersion)(0),                   // 229: milvus.proto.index.IndexStorePathVersion
-	(internalpb.ImportJobState)(0),                       // 230: milvus.proto.internal.ImportJobState
-	(indexpb.JobState)(0),                                // 231: milvus.proto.index.JobState
-	(commonpb.ConsistencyLevel)(0),                       // 232: milvus.proto.common.ConsistencyLevel
-	(*indexpb.IndexInfo)(nil),                            // 233: milvus.proto.index.IndexInfo
-	(*commonpb.ImmutableMessage)(nil),                    // 234: milvus.proto.common.ImmutableMessage
-	(commonpb.WALName)(0),                                // 235: milvus.proto.common.WALName
-	(*milvuspb.GetFlushAllStateRequest)(nil),             // 236: milvus.proto.milvus.GetFlushAllStateRequest
-	(*internalpb.ShowConfigurationsRequest)(nil),         // 237: milvus.proto.internal.ShowConfigurationsRequest
-	(*milvuspb.GetMetricsRequest)(nil),                   // 238: milvus.proto.milvus.GetMetricsRequest
-	(*milvuspb.ManualCompactionRequest)(nil),             // 239: milvus.proto.milvus.ManualCompactionRequest
-	(*milvuspb.GetCompactionStateRequest)(nil),           // 240: milvus.proto.milvus.GetCompactionStateRequest
-	(*milvuspb.GetCompactionPlansRequest)(nil),           // 241: milvus.proto.milvus.GetCompactionPlansRequest
-	(*milvuspb.CheckHealthRequest)(nil),                  // 242: milvus.proto.milvus.CheckHealthRequest
-	(*indexpb.CreateIndexRequest)(nil),                   // 243: milvus.proto.index.CreateIndexRequest
-	(*indexpb.AlterIndexRequest)(nil),                    // 244: milvus.proto.index.AlterIndexRequest
-	(*indexpb.GetIndexStateRequest)(nil),                 // 245: milvus.proto.index.GetIndexStateRequest
-	(*indexpb.GetSegmentIndexStateRequest)(nil),          // 246: milvus.proto.index.GetSegmentIndexStateRequest
-	(*indexpb.GetIndexInfoRequest)(nil),                  // 247: milvus.proto.index.GetIndexInfoRequest
-	(*indexpb.DropIndexRequest)(nil),                     // 248: milvus.proto.index.DropIndexRequest
-	(*indexpb.DescribeIndexRequest)(nil),                 // 249: milvus.proto.index.DescribeIndexRequest
-	(*indexpb.GetIndexStatisticsRequest)(nil),            // 250: milvus.proto.index.GetIndexStatisticsRequest
-	(*indexpb.GetIndexBuildProgressRequest)(nil),         // 251: milvus.proto.index.GetIndexBuildProgressRequest
-	(*indexpb.ListIndexesRequest)(nil),                   // 252: milvus.proto.index.ListIndexesRequest
-	(*internalpb.ImportRequestInternal)(nil),             // 253: milvus.proto.internal.ImportRequestInternal
-	(*internalpb.GetImportProgressRequest)(nil),          // 254: milvus.proto.internal.GetImportProgressRequest
-	(*internalpb.ListImportsRequestInternal)(nil),        // 255: milvus.proto.internal.ListImportsRequestInternal
-	(*milvuspb.GetComponentStatesRequest)(nil),           // 256: milvus.proto.milvus.GetComponentStatesRequest
-	(*internalpb.GetStatisticsChannelRequest)(nil),       // 257: milvus.proto.internal.GetStatisticsChannelRequest
-	(*internalpb.SyncFileResourceRequest)(nil),           // 258: milvus.proto.internal.SyncFileResourceRequest
-	(*milvuspb.StringResponse)(nil),                      // 259: milvus.proto.milvus.StringResponse
-	(*milvuspb.GetFlushAllStateResponse)(nil),            // 260: milvus.proto.milvus.GetFlushAllStateResponse
-	(*internalpb.ShowConfigurationsResponse)(nil),        // 261: milvus.proto.internal.ShowConfigurationsResponse
-	(*milvuspb.GetMetricsResponse)(nil),                  // 262: milvus.proto.milvus.GetMetricsResponse
-	(*milvuspb.ManualCompactionResponse)(nil),            // 263: milvus.proto.milvus.ManualCompactionResponse
-	(*milvuspb.GetCompactionStateResponse)(nil),          // 264: milvus.proto.milvus.GetCompactionStateResponse
-	(*milvuspb.GetCompactionPlansResponse)(nil),          // 265: milvus.proto.milvus.GetCompactionPlansResponse
-	(*milvuspb.GetFlushStateResponse)(nil),               // 266: milvus.proto.milvus.GetFlushStateResponse
-	(*milvuspb.CheckHealthResponse)(nil),                 // 267: milvus.proto.milvus.CheckHealthResponse
-	(*indexpb.GetIndexStateResponse)(nil),                // 268: milvus.proto.index.GetIndexStateResponse
-	(*indexpb.GetSegmentIndexStateResponse)(nil),         // 269: milvus.proto.index.GetSegmentIndexStateResponse
-	(*indexpb.GetIndexInfoResponse)(nil),                 // 270: milvus.proto.index.GetIndexInfoResponse
-	(*indexpb.DescribeIndexResponse)(nil),                // 271: milvus.proto.index.DescribeIndexResponse
-	(*indexpb.GetIndexStatisticsResponse)(nil),           // 272: milvus.proto.index.GetIndexStatisticsResponse
-	(*indexpb.GetIndexBuildProgressResponse)(nil),        // 273: milvus.proto.index.GetIndexBuildProgressResponse
-	(*indexpb.ListIndexesResponse)(nil),                  // 274: milvus.proto.index.ListIndexesResponse
-	(*internalpb.ImportResponse)(nil),                    // 275: milvus.proto.internal.ImportResponse
-	(*internalpb.GetImportProgressResponse)(nil),         // 276: milvus.proto.internal.GetImportProgressResponse
-	(*internalpb.ListImportsResponse)(nil),               // 277: milvus.proto.internal.ListImportsResponse
-	(*milvuspb.ComponentStates)(nil),                     // 278: milvus.proto.milvus.ComponentStates
+	(ReshardTask_State)(0),                               // 16: milvus.proto.data.ReshardTask.State
+	(ImportTaskV3_State)(0),                              // 17: milvus.proto.data.ImportTaskV3.State
+	(*Empty)(nil),                                        // 18: milvus.proto.data.Empty
+	(*FlushRequest)(nil),                                 // 19: milvus.proto.data.FlushRequest
+	(*FlushResponse)(nil),                                // 20: milvus.proto.data.FlushResponse
+	(*FlushResult)(nil),                                  // 21: milvus.proto.data.FlushResult
+	(*FlushAllRequest)(nil),                              // 22: milvus.proto.data.FlushAllRequest
+	(*FlushAllTarget)(nil),                               // 23: milvus.proto.data.FlushAllTarget
+	(*FlushAllResponse)(nil),                             // 24: milvus.proto.data.FlushAllResponse
+	(*FlushChannelsRequest)(nil),                         // 25: milvus.proto.data.FlushChannelsRequest
+	(*SegmentIDRequest)(nil),                             // 26: milvus.proto.data.SegmentIDRequest
+	(*AllocSegmentRequest)(nil),                          // 27: milvus.proto.data.AllocSegmentRequest
+	(*AllocSegmentResponse)(nil),                         // 28: milvus.proto.data.AllocSegmentResponse
+	(*AssignSegmentIDRequest)(nil),                       // 29: milvus.proto.data.AssignSegmentIDRequest
+	(*SegmentIDAssignment)(nil),                          // 30: milvus.proto.data.SegmentIDAssignment
+	(*AssignSegmentIDResponse)(nil),                      // 31: milvus.proto.data.AssignSegmentIDResponse
+	(*GetSegmentStatesRequest)(nil),                      // 32: milvus.proto.data.GetSegmentStatesRequest
+	(*SegmentStateInfo)(nil),                             // 33: milvus.proto.data.SegmentStateInfo
+	(*GetSegmentStatesResponse)(nil),                     // 34: milvus.proto.data.GetSegmentStatesResponse
+	(*GetSegmentInfoRequest)(nil),                        // 35: milvus.proto.data.GetSegmentInfoRequest
+	(*GetSegmentInfoResponse)(nil),                       // 36: milvus.proto.data.GetSegmentInfoResponse
+	(*GetInsertBinlogPathsRequest)(nil),                  // 37: milvus.proto.data.GetInsertBinlogPathsRequest
+	(*GetInsertBinlogPathsResponse)(nil),                 // 38: milvus.proto.data.GetInsertBinlogPathsResponse
+	(*GetCollectionStatisticsRequest)(nil),               // 39: milvus.proto.data.GetCollectionStatisticsRequest
+	(*GetCollectionStatisticsResponse)(nil),              // 40: milvus.proto.data.GetCollectionStatisticsResponse
+	(*GetPartitionStatisticsRequest)(nil),                // 41: milvus.proto.data.GetPartitionStatisticsRequest
+	(*GetPartitionStatisticsResponse)(nil),               // 42: milvus.proto.data.GetPartitionStatisticsResponse
+	(*GetSegmentInfoChannelRequest)(nil),                 // 43: milvus.proto.data.GetSegmentInfoChannelRequest
+	(*VchannelInfo)(nil),                                 // 44: milvus.proto.data.VchannelInfo
+	(*WatchDmChannelsRequest)(nil),                       // 45: milvus.proto.data.WatchDmChannelsRequest
+	(*FlushSegmentsRequest)(nil),                         // 46: milvus.proto.data.FlushSegmentsRequest
+	(*SegmentMsg)(nil),                                   // 47: milvus.proto.data.SegmentMsg
+	(*SegmentInfo)(nil),                                  // 48: milvus.proto.data.SegmentInfo
+	(*Statistics)(nil),                                   // 49: milvus.proto.data.Statistics
+	(*SegmentStartPosition)(nil),                         // 50: milvus.proto.data.SegmentStartPosition
+	(*SaveBinlogPathsRequest)(nil),                       // 51: milvus.proto.data.SaveBinlogPathsRequest
+	(*CheckPoint)(nil),                                   // 52: milvus.proto.data.CheckPoint
+	(*DeltaLogInfo)(nil),                                 // 53: milvus.proto.data.DeltaLogInfo
+	(*ChannelStatus)(nil),                                // 54: milvus.proto.data.ChannelStatus
+	(*DataNodeInfo)(nil),                                 // 55: milvus.proto.data.DataNodeInfo
+	(*SegmentBinlogs)(nil),                               // 56: milvus.proto.data.SegmentBinlogs
+	(*FieldBinlog)(nil),                                  // 57: milvus.proto.data.FieldBinlog
+	(*TextIndexStats)(nil),                               // 58: milvus.proto.data.TextIndexStats
+	(*JsonKeyStats)(nil),                                 // 59: milvus.proto.data.JsonKeyStats
+	(*Binlog)(nil),                                       // 60: milvus.proto.data.Binlog
+	(*GetRecoveryInfoResponse)(nil),                      // 61: milvus.proto.data.GetRecoveryInfoResponse
+	(*GetRecoveryInfoRequest)(nil),                       // 62: milvus.proto.data.GetRecoveryInfoRequest
+	(*GetRecoveryInfoResponseV2)(nil),                    // 63: milvus.proto.data.GetRecoveryInfoResponseV2
+	(*GetRecoveryInfoRequestV2)(nil),                     // 64: milvus.proto.data.GetRecoveryInfoRequestV2
+	(*GetChannelRecoveryInfoRequest)(nil),                // 65: milvus.proto.data.GetChannelRecoveryInfoRequest
+	(*GetChannelRecoveryInfoResponse)(nil),               // 66: milvus.proto.data.GetChannelRecoveryInfoResponse
+	(*SegmentNotCreatedByStreaming)(nil),                 // 67: milvus.proto.data.SegmentNotCreatedByStreaming
+	(*GetSegmentsByStatesRequest)(nil),                   // 68: milvus.proto.data.GetSegmentsByStatesRequest
+	(*GetSegmentsByStatesResponse)(nil),                  // 69: milvus.proto.data.GetSegmentsByStatesResponse
+	(*GetFlushedSegmentsRequest)(nil),                    // 70: milvus.proto.data.GetFlushedSegmentsRequest
+	(*GetFlushedSegmentsResponse)(nil),                   // 71: milvus.proto.data.GetFlushedSegmentsResponse
+	(*SegmentFlushCompletedMsg)(nil),                     // 72: milvus.proto.data.SegmentFlushCompletedMsg
+	(*ChannelWatchInfo)(nil),                             // 73: milvus.proto.data.ChannelWatchInfo
+	(*CompactionStateRequest)(nil),                       // 74: milvus.proto.data.CompactionStateRequest
+	(*SyncSegmentInfo)(nil),                              // 75: milvus.proto.data.SyncSegmentInfo
+	(*SyncSegmentsRequest)(nil),                          // 76: milvus.proto.data.SyncSegmentsRequest
+	(*CompactionSegmentBinlogs)(nil),                     // 77: milvus.proto.data.CompactionSegmentBinlogs
+	(*CompactionPlan)(nil),                               // 78: milvus.proto.data.CompactionPlan
+	(*CompactionSegment)(nil),                            // 79: milvus.proto.data.CompactionSegment
+	(*CompactionPlanResult)(nil),                         // 80: milvus.proto.data.CompactionPlanResult
+	(*CompactionStateResponse)(nil),                      // 81: milvus.proto.data.CompactionStateResponse
+	(*SegmentFieldBinlogMeta)(nil),                       // 82: milvus.proto.data.SegmentFieldBinlogMeta
+	(*WatchChannelsRequest)(nil),                         // 83: milvus.proto.data.WatchChannelsRequest
+	(*WatchChannelsResponse)(nil),                        // 84: milvus.proto.data.WatchChannelsResponse
+	(*SetSegmentStateRequest)(nil),                       // 85: milvus.proto.data.SetSegmentStateRequest
+	(*SetSegmentStateResponse)(nil),                      // 86: milvus.proto.data.SetSegmentStateResponse
+	(*DropVirtualChannelRequest)(nil),                    // 87: milvus.proto.data.DropVirtualChannelRequest
+	(*DropVirtualChannelSegment)(nil),                    // 88: milvus.proto.data.DropVirtualChannelSegment
+	(*DropVirtualChannelResponse)(nil),                   // 89: milvus.proto.data.DropVirtualChannelResponse
+	(*UpdateSegmentStatisticsRequest)(nil),               // 90: milvus.proto.data.UpdateSegmentStatisticsRequest
+	(*UpdateChannelCheckpointRequest)(nil),               // 91: milvus.proto.data.UpdateChannelCheckpointRequest
+	(*ResendSegmentStatsRequest)(nil),                    // 92: milvus.proto.data.ResendSegmentStatsRequest
+	(*ResendSegmentStatsResponse)(nil),                   // 93: milvus.proto.data.ResendSegmentStatsResponse
+	(*MarkSegmentsDroppedRequest)(nil),                   // 94: milvus.proto.data.MarkSegmentsDroppedRequest
+	(*SegmentReferenceLock)(nil),                         // 95: milvus.proto.data.SegmentReferenceLock
+	(*AlterCollectionRequest)(nil),                       // 96: milvus.proto.data.AlterCollectionRequest
+	(*AddCollectionFieldRequest)(nil),                    // 97: milvus.proto.data.AddCollectionFieldRequest
+	(*GcConfirmRequest)(nil),                             // 98: milvus.proto.data.GcConfirmRequest
+	(*GcConfirmResponse)(nil),                            // 99: milvus.proto.data.GcConfirmResponse
+	(*ReportDataNodeTtMsgsRequest)(nil),                  // 100: milvus.proto.data.ReportDataNodeTtMsgsRequest
+	(*GetFlushStateRequest)(nil),                         // 101: milvus.proto.data.GetFlushStateRequest
+	(*ChannelOperationsRequest)(nil),                     // 102: milvus.proto.data.ChannelOperationsRequest
+	(*ChannelOperationProgressResponse)(nil),             // 103: milvus.proto.data.ChannelOperationProgressResponse
+	(*PreImportRequest)(nil),                             // 104: milvus.proto.data.PreImportRequest
+	(*IDRange)(nil),                                      // 105: milvus.proto.data.IDRange
+	(*ImportRequestSegment)(nil),                         // 106: milvus.proto.data.ImportRequestSegment
+	(*ImportRequest)(nil),                                // 107: milvus.proto.data.ImportRequest
+	(*QueryPreImportRequest)(nil),                        // 108: milvus.proto.data.QueryPreImportRequest
+	(*PartitionImportStats)(nil),                         // 109: milvus.proto.data.PartitionImportStats
+	(*ImportFileStats)(nil),                              // 110: milvus.proto.data.ImportFileStats
+	(*QueryPreImportResponse)(nil),                       // 111: milvus.proto.data.QueryPreImportResponse
+	(*QueryImportRequest)(nil),                           // 112: milvus.proto.data.QueryImportRequest
+	(*ImportSegmentInfo)(nil),                            // 113: milvus.proto.data.ImportSegmentInfo
+	(*QueryImportResponse)(nil),                          // 114: milvus.proto.data.QueryImportResponse
+	(*DropImportRequest)(nil),                            // 115: milvus.proto.data.DropImportRequest
+	(*CopySegmentSource)(nil),                            // 116: milvus.proto.data.CopySegmentSource
+	(*CopySegmentTarget)(nil),                            // 117: milvus.proto.data.CopySegmentTarget
+	(*CopySegmentRequest)(nil),                           // 118: milvus.proto.data.CopySegmentRequest
+	(*QueryCopySegmentRequest)(nil),                      // 119: milvus.proto.data.QueryCopySegmentRequest
+	(*QueryCopySegmentResponse)(nil),                     // 120: milvus.proto.data.QueryCopySegmentResponse
+	(*DropCopySegmentRequest)(nil),                       // 121: milvus.proto.data.DropCopySegmentRequest
+	(*VectorScalarIndexInfo)(nil),                        // 122: milvus.proto.data.VectorScalarIndexInfo
+	(*CopySegmentResult)(nil),                            // 123: milvus.proto.data.CopySegmentResult
+	(*CopySegmentTask)(nil),                              // 124: milvus.proto.data.CopySegmentTask
+	(*CopySegmentIDMapping)(nil),                         // 125: milvus.proto.data.CopySegmentIDMapping
+	(*CopySegmentJob)(nil),                               // 126: milvus.proto.data.CopySegmentJob
+	(*ImportJob)(nil),                                    // 127: milvus.proto.data.ImportJob
+	(*PreImportTask)(nil),                                // 128: milvus.proto.data.PreImportTask
+	(*ImportTaskV2)(nil),                                 // 129: milvus.proto.data.ImportTaskV2
+	(*ReshardTask)(nil),                                  // 130: milvus.proto.data.ReshardTask
+	(*ImportTaskV3)(nil),                                 // 131: milvus.proto.data.ImportTaskV3
+	(*ReshardTaskRequest)(nil),                           // 132: milvus.proto.data.ReshardTaskRequest
+	(*ImportTaskV3Request)(nil),                          // 133: milvus.proto.data.ImportTaskV3Request
+	(*ImportResultManifest)(nil),                         // 134: milvus.proto.data.ImportResultManifest
+	(*SegmentResult)(nil),                                // 135: milvus.proto.data.SegmentResult
+	(*QueryReshardTaskRequest)(nil),                      // 136: milvus.proto.data.QueryReshardTaskRequest
+	(*QueryReshardTaskResponse)(nil),                     // 137: milvus.proto.data.QueryReshardTaskResponse
+	(*DropReshardTaskRequest)(nil),                       // 138: milvus.proto.data.DropReshardTaskRequest
+	(*QueryImportTaskV3Request)(nil),                     // 139: milvus.proto.data.QueryImportTaskV3Request
+	(*QueryImportTaskV3Response)(nil),                    // 140: milvus.proto.data.QueryImportTaskV3Response
+	(*DropImportTaskV3Request)(nil),                      // 141: milvus.proto.data.DropImportTaskV3Request
+	(*GcControlRequest)(nil),                             // 142: milvus.proto.data.GcControlRequest
+	(*GetGcStatusResponse)(nil),                          // 143: milvus.proto.data.GetGcStatusResponse
+	(*QuerySlotRequest)(nil),                             // 144: milvus.proto.data.QuerySlotRequest
+	(*QuerySlotResponse)(nil),                            // 145: milvus.proto.data.QuerySlotResponse
+	(*CompactionTarget)(nil),                             // 146: milvus.proto.data.CompactionTarget
+	(*CompactionTask)(nil),                               // 147: milvus.proto.data.CompactionTask
+	(*PartitionStatsInfo)(nil),                           // 148: milvus.proto.data.PartitionStatsInfo
+	(*DropCompactionPlanRequest)(nil),                    // 149: milvus.proto.data.DropCompactionPlanRequest
+	(*RefreshExternalCollectionTaskRequest)(nil),         // 150: milvus.proto.data.RefreshExternalCollectionTaskRequest
+	(*RefreshExternalCollectionTaskResponse)(nil),        // 151: milvus.proto.data.RefreshExternalCollectionTaskResponse
+	(*RefreshExternalCollectionRequest)(nil),             // 152: milvus.proto.data.RefreshExternalCollectionRequest
+	(*RefreshExternalCollectionResponse)(nil),            // 153: milvus.proto.data.RefreshExternalCollectionResponse
+	(*GetRefreshExternalCollectionProgressRequest)(nil),  // 154: milvus.proto.data.GetRefreshExternalCollectionProgressRequest
+	(*ExternalCollectionRefreshJob)(nil),                 // 155: milvus.proto.data.ExternalCollectionRefreshJob
+	(*ExternalFileInfo)(nil),                             // 156: milvus.proto.data.ExternalFileInfo
+	(*ExternalCollectionRefreshTask)(nil),                // 157: milvus.proto.data.ExternalCollectionRefreshTask
+	(*GetRefreshExternalCollectionProgressResponse)(nil), // 158: milvus.proto.data.GetRefreshExternalCollectionProgressResponse
+	(*ListRefreshExternalCollectionJobsRequest)(nil),     // 159: milvus.proto.data.ListRefreshExternalCollectionJobsRequest
+	(*ListRefreshExternalCollectionJobsResponse)(nil),    // 160: milvus.proto.data.ListRefreshExternalCollectionJobsResponse
+	(*CreateSnapshotRequest)(nil),                        // 161: milvus.proto.data.CreateSnapshotRequest
+	(*DropSnapshotRequest)(nil),                          // 162: milvus.proto.data.DropSnapshotRequest
+	(*ListSnapshotsRequest)(nil),                         // 163: milvus.proto.data.ListSnapshotsRequest
+	(*ListSnapshotsResponse)(nil),                        // 164: milvus.proto.data.ListSnapshotsResponse
+	(*ExportSnapshotRequest)(nil),                        // 165: milvus.proto.data.ExportSnapshotRequest
+	(*ExportSnapshotResponse)(nil),                       // 166: milvus.proto.data.ExportSnapshotResponse
+	(*SegmentDescription)(nil),                           // 167: milvus.proto.data.SegmentDescription
+	(*CollectionDescription)(nil),                        // 168: milvus.proto.data.CollectionDescription
+	(*SnapshotInfo)(nil),                                 // 169: milvus.proto.data.SnapshotInfo
+	(*StorageV2SegmentManifest)(nil),                     // 170: milvus.proto.data.StorageV2SegmentManifest
+	(*SnapshotMetadata)(nil),                             // 171: milvus.proto.data.SnapshotMetadata
+	(*RestoreSnapshotInfo)(nil),                          // 172: milvus.proto.data.RestoreSnapshotInfo
+	(*DescribeSnapshotRequest)(nil),                      // 173: milvus.proto.data.DescribeSnapshotRequest
+	(*DescribeSnapshotResponse)(nil),                     // 174: milvus.proto.data.DescribeSnapshotResponse
+	(*RestoreSnapshotRequest)(nil),                       // 175: milvus.proto.data.RestoreSnapshotRequest
+	(*RestoreSnapshotResponse)(nil),                      // 176: milvus.proto.data.RestoreSnapshotResponse
+	(*GetRestoreSnapshotStateRequest)(nil),               // 177: milvus.proto.data.GetRestoreSnapshotStateRequest
+	(*GetRestoreSnapshotStateResponse)(nil),              // 178: milvus.proto.data.GetRestoreSnapshotStateResponse
+	(*ListRestoreSnapshotJobsRequest)(nil),               // 179: milvus.proto.data.ListRestoreSnapshotJobsRequest
+	(*ListRestoreSnapshotJobsResponse)(nil),              // 180: milvus.proto.data.ListRestoreSnapshotJobsResponse
+	(*BatchUpdateManifestRequest)(nil),                   // 181: milvus.proto.data.BatchUpdateManifestRequest
+	(*BatchUpdateManifestItem)(nil),                      // 182: milvus.proto.data.BatchUpdateManifestItem
+	(*CommitBackfillResultRequest)(nil),                  // 183: milvus.proto.data.CommitBackfillResultRequest
+	(*CommitBackfillResultSegmentStatus)(nil),            // 184: milvus.proto.data.CommitBackfillResultSegmentStatus
+	(*CommitBackfillResultResponse)(nil),                 // 185: milvus.proto.data.CommitBackfillResultResponse
+	(*PinSnapshotDataRequest)(nil),                       // 186: milvus.proto.data.PinSnapshotDataRequest
+	(*PinSnapshotDataResponse)(nil),                      // 187: milvus.proto.data.PinSnapshotDataResponse
+	(*UnpinSnapshotDataRequest)(nil),                     // 188: milvus.proto.data.UnpinSnapshotDataRequest
+	(*CommitImportRequest)(nil),                          // 189: milvus.proto.data.CommitImportRequest
+	(*AbortImportRequest)(nil),                           // 190: milvus.proto.data.AbortImportRequest
+	(*HandleCommitVchannelRequest)(nil),                  // 191: milvus.proto.data.HandleCommitVchannelRequest
+	(*ExternalCollectionRefreshTaskResult)(nil),          // 192: milvus.proto.data.ExternalCollectionRefreshTaskResult
+	(*ColumnGroupStatistics)(nil),                        // 193: milvus.proto.data.ColumnGroupStatistics
+	(*LoadResourceStatistics)(nil),                       // 194: milvus.proto.data.LoadResourceStatistics
+	(*ExportSnapshotJob)(nil),                            // 195: milvus.proto.data.ExportSnapshotJob
+	(*ExportSnapshotJobInfo)(nil),                        // 196: milvus.proto.data.ExportSnapshotJobInfo
+	(*GetExportSnapshotStateRequest)(nil),                // 197: milvus.proto.data.GetExportSnapshotStateRequest
+	(*GetExportSnapshotStateResponse)(nil),               // 198: milvus.proto.data.GetExportSnapshotStateResponse
+	nil,                                                  // 199: milvus.proto.data.FlushResponse.ChannelCpsEntry
+	nil,                                                  // 200: milvus.proto.data.FlushResult.ChannelCpsEntry
+	nil,                                                  // 201: milvus.proto.data.FlushAllResponse.FlushAllMsgsEntry
+	nil,                                                  // 202: milvus.proto.data.GetSegmentInfoResponse.ChannelCheckpointEntry
+	nil,                                                  // 203: milvus.proto.data.VchannelInfo.PartitionStatsVersionsEntry
+	nil,                                                  // 204: milvus.proto.data.SegmentInfo.TextStatsLogsEntry
+	nil,                                                  // 205: milvus.proto.data.SegmentInfo.JsonKeyStatsEntry
+	nil,                                                  // 206: milvus.proto.data.Statistics.NullCountsEntry
+	nil,                                                  // 207: milvus.proto.data.SegmentBinlogs.TextStatsLogsEntry
+	nil,                                                  // 208: milvus.proto.data.Binlog.FieldNullCountsEntry
+	nil,                                                  // 209: milvus.proto.data.SyncSegmentsRequest.SegmentInfosEntry
+	nil,                                                  // 210: milvus.proto.data.CompactionSegment.TextStatsLogsEntry
+	nil,                                                  // 211: milvus.proto.data.WatchChannelsRequest.ChannelWalNamesEntry
+	nil,                                                  // 212: milvus.proto.data.PartitionImportStats.PartitionRowsEntry
+	nil,                                                  // 213: milvus.proto.data.PartitionImportStats.PartitionDataSizeEntry
+	nil,                                                  // 214: milvus.proto.data.ImportFileStats.HashedStatsEntry
+	nil,                                                  // 215: milvus.proto.data.CopySegmentSource.TextIndexFilesEntry
+	nil,                                                  // 216: milvus.proto.data.CopySegmentSource.JsonKeyIndexFilesEntry
+	nil,                                                  // 217: milvus.proto.data.CopySegmentTarget.NewBuildIdsEntry
+	nil,                                                  // 218: milvus.proto.data.CopySegmentResult.IndexInfosEntry
+	nil,                                                  // 219: milvus.proto.data.CopySegmentResult.TextIndexInfosEntry
+	nil,                                                  // 220: milvus.proto.data.CopySegmentResult.JsonKeyIndexInfosEntry
+	nil,                                                  // 221: milvus.proto.data.SegmentResult.TextStatsLogsEntry
+	nil,                                                  // 222: milvus.proto.data.CompactionTarget.PropertiesEntry
+	nil,                                                  // 223: milvus.proto.data.SegmentDescription.TextIndexFilesEntry
+	nil,                                                  // 224: milvus.proto.data.SegmentDescription.JsonKeyIndexFilesEntry
+	nil,                                                  // 225: milvus.proto.data.CollectionDescription.PartitionsEntry
+	nil,                                                  // 226: milvus.proto.data.SnapshotInfo.PinExpireAtMsEntry
+	(*commonpb.MsgBase)(nil),                             // 227: milvus.proto.common.MsgBase
+	(*commonpb.Status)(nil),                              // 228: milvus.proto.common.Status
+	(*milvuspb.ClusterInfo)(nil),                         // 229: milvus.proto.milvus.ClusterInfo
+	(commonpb.SegmentState)(0),                           // 230: milvus.proto.common.SegmentState
+	(*msgpb.MsgPosition)(nil),                            // 231: milvus.proto.msg.MsgPosition
+	(*internalpb.StringList)(nil),                        // 232: milvus.proto.internal.StringList
+	(*commonpb.KeyValuePair)(nil),                        // 233: milvus.proto.common.KeyValuePair
+	(*schemapb.CollectionSchema)(nil),                    // 234: milvus.proto.schema.CollectionSchema
+	(*internalpb.FileResourceInfo)(nil),                  // 235: milvus.proto.internal.FileResourceInfo
+	(*schemapb.FunctionSchema)(nil),                      // 236: milvus.proto.schema.FunctionSchema
+	(*commonpb.KeyDataPair)(nil),                         // 237: milvus.proto.common.KeyDataPair
+	(*commonpb.SegmentStats)(nil),                        // 238: milvus.proto.common.SegmentStats
+	(*schemapb.FieldSchema)(nil),                         // 239: milvus.proto.schema.FieldSchema
+	(*msgpb.DataNodeTtMsg)(nil),                          // 240: milvus.proto.msg.DataNodeTtMsg
+	(*internalpb.ImportFile)(nil),                        // 241: milvus.proto.internal.ImportFile
+	(*indexpb.StorageConfig)(nil),                        // 242: milvus.proto.index.StorageConfig
+	(*indexpb.IndexFilePathInfo)(nil),                    // 243: milvus.proto.index.IndexFilePathInfo
+	(indexpb.IndexStorePathVersion)(0),                   // 244: milvus.proto.index.IndexStorePathVersion
+	(internalpb.ImportJobState)(0),                       // 245: milvus.proto.internal.ImportJobState
+	(indexpb.JobState)(0),                                // 246: milvus.proto.index.JobState
+	(commonpb.ConsistencyLevel)(0),                       // 247: milvus.proto.common.ConsistencyLevel
+	(*indexpb.IndexInfo)(nil),                            // 248: milvus.proto.index.IndexInfo
+	(*commonpb.ImmutableMessage)(nil),                    // 249: milvus.proto.common.ImmutableMessage
+	(commonpb.WALName)(0),                                // 250: milvus.proto.common.WALName
+	(*milvuspb.GetFlushAllStateRequest)(nil),             // 251: milvus.proto.milvus.GetFlushAllStateRequest
+	(*internalpb.ShowConfigurationsRequest)(nil),         // 252: milvus.proto.internal.ShowConfigurationsRequest
+	(*milvuspb.GetMetricsRequest)(nil),                   // 253: milvus.proto.milvus.GetMetricsRequest
+	(*milvuspb.ManualCompactionRequest)(nil),             // 254: milvus.proto.milvus.ManualCompactionRequest
+	(*milvuspb.GetCompactionStateRequest)(nil),           // 255: milvus.proto.milvus.GetCompactionStateRequest
+	(*milvuspb.GetCompactionPlansRequest)(nil),           // 256: milvus.proto.milvus.GetCompactionPlansRequest
+	(*milvuspb.CheckHealthRequest)(nil),                  // 257: milvus.proto.milvus.CheckHealthRequest
+	(*indexpb.CreateIndexRequest)(nil),                   // 258: milvus.proto.index.CreateIndexRequest
+	(*indexpb.AlterIndexRequest)(nil),                    // 259: milvus.proto.index.AlterIndexRequest
+	(*indexpb.GetIndexStateRequest)(nil),                 // 260: milvus.proto.index.GetIndexStateRequest
+	(*indexpb.GetSegmentIndexStateRequest)(nil),          // 261: milvus.proto.index.GetSegmentIndexStateRequest
+	(*indexpb.GetIndexInfoRequest)(nil),                  // 262: milvus.proto.index.GetIndexInfoRequest
+	(*indexpb.DropIndexRequest)(nil),                     // 263: milvus.proto.index.DropIndexRequest
+	(*indexpb.DescribeIndexRequest)(nil),                 // 264: milvus.proto.index.DescribeIndexRequest
+	(*indexpb.GetIndexStatisticsRequest)(nil),            // 265: milvus.proto.index.GetIndexStatisticsRequest
+	(*indexpb.GetIndexBuildProgressRequest)(nil),         // 266: milvus.proto.index.GetIndexBuildProgressRequest
+	(*indexpb.ListIndexesRequest)(nil),                   // 267: milvus.proto.index.ListIndexesRequest
+	(*internalpb.ImportRequestInternal)(nil),             // 268: milvus.proto.internal.ImportRequestInternal
+	(*internalpb.GetImportProgressRequest)(nil),          // 269: milvus.proto.internal.GetImportProgressRequest
+	(*internalpb.ListImportsRequestInternal)(nil),        // 270: milvus.proto.internal.ListImportsRequestInternal
+	(*milvuspb.GetComponentStatesRequest)(nil),           // 271: milvus.proto.milvus.GetComponentStatesRequest
+	(*internalpb.GetStatisticsChannelRequest)(nil),       // 272: milvus.proto.internal.GetStatisticsChannelRequest
+	(*internalpb.SyncFileResourceRequest)(nil),           // 273: milvus.proto.internal.SyncFileResourceRequest
+	(*milvuspb.StringResponse)(nil),                      // 274: milvus.proto.milvus.StringResponse
+	(*milvuspb.GetFlushAllStateResponse)(nil),            // 275: milvus.proto.milvus.GetFlushAllStateResponse
+	(*internalpb.ShowConfigurationsResponse)(nil),        // 276: milvus.proto.internal.ShowConfigurationsResponse
+	(*milvuspb.GetMetricsResponse)(nil),                  // 277: milvus.proto.milvus.GetMetricsResponse
+	(*milvuspb.ManualCompactionResponse)(nil),            // 278: milvus.proto.milvus.ManualCompactionResponse
+	(*milvuspb.GetCompactionStateResponse)(nil),          // 279: milvus.proto.milvus.GetCompactionStateResponse
+	(*milvuspb.GetCompactionPlansResponse)(nil),          // 280: milvus.proto.milvus.GetCompactionPlansResponse
+	(*milvuspb.GetFlushStateResponse)(nil),               // 281: milvus.proto.milvus.GetFlushStateResponse
+	(*milvuspb.CheckHealthResponse)(nil),                 // 282: milvus.proto.milvus.CheckHealthResponse
+	(*indexpb.GetIndexStateResponse)(nil),                // 283: milvus.proto.index.GetIndexStateResponse
+	(*indexpb.GetSegmentIndexStateResponse)(nil),         // 284: milvus.proto.index.GetSegmentIndexStateResponse
+	(*indexpb.GetIndexInfoResponse)(nil),                 // 285: milvus.proto.index.GetIndexInfoResponse
+	(*indexpb.DescribeIndexResponse)(nil),                // 286: milvus.proto.index.DescribeIndexResponse
+	(*indexpb.GetIndexStatisticsResponse)(nil),           // 287: milvus.proto.index.GetIndexStatisticsResponse
+	(*indexpb.GetIndexBuildProgressResponse)(nil),        // 288: milvus.proto.index.GetIndexBuildProgressResponse
+	(*indexpb.ListIndexesResponse)(nil),                  // 289: milvus.proto.index.ListIndexesResponse
+	(*internalpb.ImportResponse)(nil),                    // 290: milvus.proto.internal.ImportResponse
+	(*internalpb.GetImportProgressResponse)(nil),         // 291: milvus.proto.internal.GetImportProgressResponse
+	(*internalpb.ListImportsResponse)(nil),               // 292: milvus.proto.internal.ListImportsResponse
+	(*milvuspb.ComponentStates)(nil),                     // 293: milvus.proto.milvus.ComponentStates
 }
 var file_data_coord_proto_depIdxs = []int32{
-	212, // 0: milvus.proto.data.FlushRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 1: milvus.proto.data.FlushResponse.status:type_name -> milvus.proto.common.Status
-	185, // 2: milvus.proto.data.FlushResponse.channel_cps:type_name -> milvus.proto.data.FlushResponse.ChannelCpsEntry
-	186, // 3: milvus.proto.data.FlushResult.channel_cps:type_name -> milvus.proto.data.FlushResult.ChannelCpsEntry
-	212, // 4: milvus.proto.data.FlushAllRequest.base:type_name -> milvus.proto.common.MsgBase
-	21,  // 5: milvus.proto.data.FlushAllRequest.flush_targets:type_name -> milvus.proto.data.FlushAllTarget
-	213, // 6: milvus.proto.data.FlushAllResponse.status:type_name -> milvus.proto.common.Status
-	19,  // 7: milvus.proto.data.FlushAllResponse.flush_results:type_name -> milvus.proto.data.FlushResult
-	187, // 8: milvus.proto.data.FlushAllResponse.flush_all_msgs:type_name -> milvus.proto.data.FlushAllResponse.FlushAllMsgsEntry
-	214, // 9: milvus.proto.data.FlushAllResponse.cluster_info:type_name -> milvus.proto.milvus.ClusterInfo
-	212, // 10: milvus.proto.data.FlushChannelsRequest.base:type_name -> milvus.proto.common.MsgBase
+	227, // 0: milvus.proto.data.FlushRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 1: milvus.proto.data.FlushResponse.status:type_name -> milvus.proto.common.Status
+	199, // 2: milvus.proto.data.FlushResponse.channel_cps:type_name -> milvus.proto.data.FlushResponse.ChannelCpsEntry
+	200, // 3: milvus.proto.data.FlushResult.channel_cps:type_name -> milvus.proto.data.FlushResult.ChannelCpsEntry
+	227, // 4: milvus.proto.data.FlushAllRequest.base:type_name -> milvus.proto.common.MsgBase
+	23,  // 5: milvus.proto.data.FlushAllRequest.flush_targets:type_name -> milvus.proto.data.FlushAllTarget
+	228, // 6: milvus.proto.data.FlushAllResponse.status:type_name -> milvus.proto.common.Status
+	21,  // 7: milvus.proto.data.FlushAllResponse.flush_results:type_name -> milvus.proto.data.FlushResult
+	201, // 8: milvus.proto.data.FlushAllResponse.flush_all_msgs:type_name -> milvus.proto.data.FlushAllResponse.FlushAllMsgsEntry
+	229, // 9: milvus.proto.data.FlushAllResponse.cluster_info:type_name -> milvus.proto.milvus.ClusterInfo
+	227, // 10: milvus.proto.data.FlushChannelsRequest.base:type_name -> milvus.proto.common.MsgBase
 	1,   // 11: milvus.proto.data.SegmentIDRequest.level:type_name -> milvus.proto.data.SegmentLevel
-	46,  // 12: milvus.proto.data.AllocSegmentResponse.segment_info:type_name -> milvus.proto.data.SegmentInfo
-	213, // 13: milvus.proto.data.AllocSegmentResponse.status:type_name -> milvus.proto.common.Status
-	24,  // 14: milvus.proto.data.AssignSegmentIDRequest.segmentIDRequests:type_name -> milvus.proto.data.SegmentIDRequest
-	213, // 15: milvus.proto.data.SegmentIDAssignment.status:type_name -> milvus.proto.common.Status
-	28,  // 16: milvus.proto.data.AssignSegmentIDResponse.segIDAssignments:type_name -> milvus.proto.data.SegmentIDAssignment
-	213, // 17: milvus.proto.data.AssignSegmentIDResponse.status:type_name -> milvus.proto.common.Status
-	212, // 18: milvus.proto.data.GetSegmentStatesRequest.base:type_name -> milvus.proto.common.MsgBase
-	215, // 19: milvus.proto.data.SegmentStateInfo.state:type_name -> milvus.proto.common.SegmentState
-	216, // 20: milvus.proto.data.SegmentStateInfo.start_position:type_name -> milvus.proto.msg.MsgPosition
-	216, // 21: milvus.proto.data.SegmentStateInfo.end_position:type_name -> milvus.proto.msg.MsgPosition
-	213, // 22: milvus.proto.data.SegmentStateInfo.status:type_name -> milvus.proto.common.Status
-	213, // 23: milvus.proto.data.GetSegmentStatesResponse.status:type_name -> milvus.proto.common.Status
-	31,  // 24: milvus.proto.data.GetSegmentStatesResponse.states:type_name -> milvus.proto.data.SegmentStateInfo
-	212, // 25: milvus.proto.data.GetSegmentInfoRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 26: milvus.proto.data.GetSegmentInfoResponse.status:type_name -> milvus.proto.common.Status
-	46,  // 27: milvus.proto.data.GetSegmentInfoResponse.infos:type_name -> milvus.proto.data.SegmentInfo
-	188, // 28: milvus.proto.data.GetSegmentInfoResponse.channel_checkpoint:type_name -> milvus.proto.data.GetSegmentInfoResponse.ChannelCheckpointEntry
-	212, // 29: milvus.proto.data.GetInsertBinlogPathsRequest.base:type_name -> milvus.proto.common.MsgBase
-	217, // 30: milvus.proto.data.GetInsertBinlogPathsResponse.paths:type_name -> milvus.proto.internal.StringList
-	213, // 31: milvus.proto.data.GetInsertBinlogPathsResponse.status:type_name -> milvus.proto.common.Status
-	212, // 32: milvus.proto.data.GetCollectionStatisticsRequest.base:type_name -> milvus.proto.common.MsgBase
-	218, // 33: milvus.proto.data.GetCollectionStatisticsResponse.stats:type_name -> milvus.proto.common.KeyValuePair
-	213, // 34: milvus.proto.data.GetCollectionStatisticsResponse.status:type_name -> milvus.proto.common.Status
-	212, // 35: milvus.proto.data.GetPartitionStatisticsRequest.base:type_name -> milvus.proto.common.MsgBase
-	218, // 36: milvus.proto.data.GetPartitionStatisticsResponse.stats:type_name -> milvus.proto.common.KeyValuePair
-	213, // 37: milvus.proto.data.GetPartitionStatisticsResponse.status:type_name -> milvus.proto.common.Status
-	216, // 38: milvus.proto.data.VchannelInfo.seek_position:type_name -> milvus.proto.msg.MsgPosition
-	46,  // 39: milvus.proto.data.VchannelInfo.unflushedSegments:type_name -> milvus.proto.data.SegmentInfo
-	46,  // 40: milvus.proto.data.VchannelInfo.flushedSegments:type_name -> milvus.proto.data.SegmentInfo
-	46,  // 41: milvus.proto.data.VchannelInfo.dropped_segments:type_name -> milvus.proto.data.SegmentInfo
-	46,  // 42: milvus.proto.data.VchannelInfo.indexed_segments:type_name -> milvus.proto.data.SegmentInfo
-	189, // 43: milvus.proto.data.VchannelInfo.partition_stats_versions:type_name -> milvus.proto.data.VchannelInfo.PartitionStatsVersionsEntry
-	216, // 44: milvus.proto.data.VchannelInfo.delete_checkpoint:type_name -> milvus.proto.msg.MsgPosition
-	212, // 45: milvus.proto.data.WatchDmChannelsRequest.base:type_name -> milvus.proto.common.MsgBase
-	42,  // 46: milvus.proto.data.WatchDmChannelsRequest.vchannels:type_name -> milvus.proto.data.VchannelInfo
-	212, // 47: milvus.proto.data.FlushSegmentsRequest.base:type_name -> milvus.proto.common.MsgBase
-	212, // 48: milvus.proto.data.SegmentMsg.base:type_name -> milvus.proto.common.MsgBase
-	46,  // 49: milvus.proto.data.SegmentMsg.segment:type_name -> milvus.proto.data.SegmentInfo
-	215, // 50: milvus.proto.data.SegmentInfo.state:type_name -> milvus.proto.common.SegmentState
-	216, // 51: milvus.proto.data.SegmentInfo.start_position:type_name -> milvus.proto.msg.MsgPosition
-	216, // 52: milvus.proto.data.SegmentInfo.dml_position:type_name -> milvus.proto.msg.MsgPosition
-	55,  // 53: milvus.proto.data.SegmentInfo.binlogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 54: milvus.proto.data.SegmentInfo.statslogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 55: milvus.proto.data.SegmentInfo.deltalogs:type_name -> milvus.proto.data.FieldBinlog
+	48,  // 12: milvus.proto.data.AllocSegmentResponse.segment_info:type_name -> milvus.proto.data.SegmentInfo
+	228, // 13: milvus.proto.data.AllocSegmentResponse.status:type_name -> milvus.proto.common.Status
+	26,  // 14: milvus.proto.data.AssignSegmentIDRequest.segmentIDRequests:type_name -> milvus.proto.data.SegmentIDRequest
+	228, // 15: milvus.proto.data.SegmentIDAssignment.status:type_name -> milvus.proto.common.Status
+	30,  // 16: milvus.proto.data.AssignSegmentIDResponse.segIDAssignments:type_name -> milvus.proto.data.SegmentIDAssignment
+	228, // 17: milvus.proto.data.AssignSegmentIDResponse.status:type_name -> milvus.proto.common.Status
+	227, // 18: milvus.proto.data.GetSegmentStatesRequest.base:type_name -> milvus.proto.common.MsgBase
+	230, // 19: milvus.proto.data.SegmentStateInfo.state:type_name -> milvus.proto.common.SegmentState
+	231, // 20: milvus.proto.data.SegmentStateInfo.start_position:type_name -> milvus.proto.msg.MsgPosition
+	231, // 21: milvus.proto.data.SegmentStateInfo.end_position:type_name -> milvus.proto.msg.MsgPosition
+	228, // 22: milvus.proto.data.SegmentStateInfo.status:type_name -> milvus.proto.common.Status
+	228, // 23: milvus.proto.data.GetSegmentStatesResponse.status:type_name -> milvus.proto.common.Status
+	33,  // 24: milvus.proto.data.GetSegmentStatesResponse.states:type_name -> milvus.proto.data.SegmentStateInfo
+	227, // 25: milvus.proto.data.GetSegmentInfoRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 26: milvus.proto.data.GetSegmentInfoResponse.status:type_name -> milvus.proto.common.Status
+	48,  // 27: milvus.proto.data.GetSegmentInfoResponse.infos:type_name -> milvus.proto.data.SegmentInfo
+	202, // 28: milvus.proto.data.GetSegmentInfoResponse.channel_checkpoint:type_name -> milvus.proto.data.GetSegmentInfoResponse.ChannelCheckpointEntry
+	227, // 29: milvus.proto.data.GetInsertBinlogPathsRequest.base:type_name -> milvus.proto.common.MsgBase
+	232, // 30: milvus.proto.data.GetInsertBinlogPathsResponse.paths:type_name -> milvus.proto.internal.StringList
+	228, // 31: milvus.proto.data.GetInsertBinlogPathsResponse.status:type_name -> milvus.proto.common.Status
+	227, // 32: milvus.proto.data.GetCollectionStatisticsRequest.base:type_name -> milvus.proto.common.MsgBase
+	233, // 33: milvus.proto.data.GetCollectionStatisticsResponse.stats:type_name -> milvus.proto.common.KeyValuePair
+	228, // 34: milvus.proto.data.GetCollectionStatisticsResponse.status:type_name -> milvus.proto.common.Status
+	227, // 35: milvus.proto.data.GetPartitionStatisticsRequest.base:type_name -> milvus.proto.common.MsgBase
+	233, // 36: milvus.proto.data.GetPartitionStatisticsResponse.stats:type_name -> milvus.proto.common.KeyValuePair
+	228, // 37: milvus.proto.data.GetPartitionStatisticsResponse.status:type_name -> milvus.proto.common.Status
+	231, // 38: milvus.proto.data.VchannelInfo.seek_position:type_name -> milvus.proto.msg.MsgPosition
+	48,  // 39: milvus.proto.data.VchannelInfo.unflushedSegments:type_name -> milvus.proto.data.SegmentInfo
+	48,  // 40: milvus.proto.data.VchannelInfo.flushedSegments:type_name -> milvus.proto.data.SegmentInfo
+	48,  // 41: milvus.proto.data.VchannelInfo.dropped_segments:type_name -> milvus.proto.data.SegmentInfo
+	48,  // 42: milvus.proto.data.VchannelInfo.indexed_segments:type_name -> milvus.proto.data.SegmentInfo
+	203, // 43: milvus.proto.data.VchannelInfo.partition_stats_versions:type_name -> milvus.proto.data.VchannelInfo.PartitionStatsVersionsEntry
+	231, // 44: milvus.proto.data.VchannelInfo.delete_checkpoint:type_name -> milvus.proto.msg.MsgPosition
+	227, // 45: milvus.proto.data.WatchDmChannelsRequest.base:type_name -> milvus.proto.common.MsgBase
+	44,  // 46: milvus.proto.data.WatchDmChannelsRequest.vchannels:type_name -> milvus.proto.data.VchannelInfo
+	227, // 47: milvus.proto.data.FlushSegmentsRequest.base:type_name -> milvus.proto.common.MsgBase
+	227, // 48: milvus.proto.data.SegmentMsg.base:type_name -> milvus.proto.common.MsgBase
+	48,  // 49: milvus.proto.data.SegmentMsg.segment:type_name -> milvus.proto.data.SegmentInfo
+	230, // 50: milvus.proto.data.SegmentInfo.state:type_name -> milvus.proto.common.SegmentState
+	231, // 51: milvus.proto.data.SegmentInfo.start_position:type_name -> milvus.proto.msg.MsgPosition
+	231, // 52: milvus.proto.data.SegmentInfo.dml_position:type_name -> milvus.proto.msg.MsgPosition
+	57,  // 53: milvus.proto.data.SegmentInfo.binlogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 54: milvus.proto.data.SegmentInfo.statslogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 55: milvus.proto.data.SegmentInfo.deltalogs:type_name -> milvus.proto.data.FieldBinlog
 	1,   // 56: milvus.proto.data.SegmentInfo.level:type_name -> milvus.proto.data.SegmentLevel
 	1,   // 57: milvus.proto.data.SegmentInfo.last_level:type_name -> milvus.proto.data.SegmentLevel
-	190, // 58: milvus.proto.data.SegmentInfo.textStatsLogs:type_name -> milvus.proto.data.SegmentInfo.TextStatsLogsEntry
-	55,  // 59: milvus.proto.data.SegmentInfo.bm25statslogs:type_name -> milvus.proto.data.FieldBinlog
-	191, // 60: milvus.proto.data.SegmentInfo.jsonKeyStats:type_name -> milvus.proto.data.SegmentInfo.JsonKeyStatsEntry
-	47,  // 61: milvus.proto.data.SegmentInfo.stats:type_name -> milvus.proto.data.Statistics
-	192, // 62: milvus.proto.data.Statistics.null_counts:type_name -> milvus.proto.data.Statistics.NullCountsEntry
-	180, // 63: milvus.proto.data.Statistics.load_resource:type_name -> milvus.proto.data.LoadResourceStatistics
-	216, // 64: milvus.proto.data.SegmentStartPosition.start_position:type_name -> milvus.proto.msg.MsgPosition
-	212, // 65: milvus.proto.data.SaveBinlogPathsRequest.base:type_name -> milvus.proto.common.MsgBase
-	55,  // 66: milvus.proto.data.SaveBinlogPathsRequest.field2BinlogPaths:type_name -> milvus.proto.data.FieldBinlog
-	50,  // 67: milvus.proto.data.SaveBinlogPathsRequest.checkPoints:type_name -> milvus.proto.data.CheckPoint
-	48,  // 68: milvus.proto.data.SaveBinlogPathsRequest.start_positions:type_name -> milvus.proto.data.SegmentStartPosition
-	55,  // 69: milvus.proto.data.SaveBinlogPathsRequest.field2StatslogPaths:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 70: milvus.proto.data.SaveBinlogPathsRequest.deltalogs:type_name -> milvus.proto.data.FieldBinlog
+	204, // 58: milvus.proto.data.SegmentInfo.textStatsLogs:type_name -> milvus.proto.data.SegmentInfo.TextStatsLogsEntry
+	57,  // 59: milvus.proto.data.SegmentInfo.bm25statslogs:type_name -> milvus.proto.data.FieldBinlog
+	205, // 60: milvus.proto.data.SegmentInfo.jsonKeyStats:type_name -> milvus.proto.data.SegmentInfo.JsonKeyStatsEntry
+	49,  // 61: milvus.proto.data.SegmentInfo.stats:type_name -> milvus.proto.data.Statistics
+	206, // 62: milvus.proto.data.Statistics.null_counts:type_name -> milvus.proto.data.Statistics.NullCountsEntry
+	194, // 63: milvus.proto.data.Statistics.load_resource:type_name -> milvus.proto.data.LoadResourceStatistics
+	231, // 64: milvus.proto.data.SegmentStartPosition.start_position:type_name -> milvus.proto.msg.MsgPosition
+	227, // 65: milvus.proto.data.SaveBinlogPathsRequest.base:type_name -> milvus.proto.common.MsgBase
+	57,  // 66: milvus.proto.data.SaveBinlogPathsRequest.field2BinlogPaths:type_name -> milvus.proto.data.FieldBinlog
+	52,  // 67: milvus.proto.data.SaveBinlogPathsRequest.checkPoints:type_name -> milvus.proto.data.CheckPoint
+	50,  // 68: milvus.proto.data.SaveBinlogPathsRequest.start_positions:type_name -> milvus.proto.data.SegmentStartPosition
+	57,  // 69: milvus.proto.data.SaveBinlogPathsRequest.field2StatslogPaths:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 70: milvus.proto.data.SaveBinlogPathsRequest.deltalogs:type_name -> milvus.proto.data.FieldBinlog
 	1,   // 71: milvus.proto.data.SaveBinlogPathsRequest.seg_level:type_name -> milvus.proto.data.SegmentLevel
-	55,  // 72: milvus.proto.data.SaveBinlogPathsRequest.field2Bm25logPaths:type_name -> milvus.proto.data.FieldBinlog
-	47,  // 73: milvus.proto.data.SaveBinlogPathsRequest.stats:type_name -> milvus.proto.data.Statistics
-	216, // 74: milvus.proto.data.CheckPoint.position:type_name -> milvus.proto.msg.MsgPosition
+	57,  // 72: milvus.proto.data.SaveBinlogPathsRequest.field2Bm25logPaths:type_name -> milvus.proto.data.FieldBinlog
+	49,  // 73: milvus.proto.data.SaveBinlogPathsRequest.stats:type_name -> milvus.proto.data.Statistics
+	231, // 74: milvus.proto.data.CheckPoint.position:type_name -> milvus.proto.msg.MsgPosition
 	2,   // 75: milvus.proto.data.ChannelStatus.state:type_name -> milvus.proto.data.ChannelWatchState
-	52,  // 76: milvus.proto.data.DataNodeInfo.channels:type_name -> milvus.proto.data.ChannelStatus
-	55,  // 77: milvus.proto.data.SegmentBinlogs.fieldBinlogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 78: milvus.proto.data.SegmentBinlogs.statslogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 79: milvus.proto.data.SegmentBinlogs.deltalogs:type_name -> milvus.proto.data.FieldBinlog
-	193, // 80: milvus.proto.data.SegmentBinlogs.textStatsLogs:type_name -> milvus.proto.data.SegmentBinlogs.TextStatsLogsEntry
-	58,  // 81: milvus.proto.data.FieldBinlog.binlogs:type_name -> milvus.proto.data.Binlog
-	194, // 82: milvus.proto.data.Binlog.field_null_counts:type_name -> milvus.proto.data.Binlog.FieldNullCountsEntry
-	213, // 83: milvus.proto.data.GetRecoveryInfoResponse.status:type_name -> milvus.proto.common.Status
-	42,  // 84: milvus.proto.data.GetRecoveryInfoResponse.channels:type_name -> milvus.proto.data.VchannelInfo
-	54,  // 85: milvus.proto.data.GetRecoveryInfoResponse.binlogs:type_name -> milvus.proto.data.SegmentBinlogs
-	212, // 86: milvus.proto.data.GetRecoveryInfoRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 87: milvus.proto.data.GetRecoveryInfoResponseV2.status:type_name -> milvus.proto.common.Status
-	42,  // 88: milvus.proto.data.GetRecoveryInfoResponseV2.channels:type_name -> milvus.proto.data.VchannelInfo
-	46,  // 89: milvus.proto.data.GetRecoveryInfoResponseV2.segments:type_name -> milvus.proto.data.SegmentInfo
-	212, // 90: milvus.proto.data.GetRecoveryInfoRequestV2.base:type_name -> milvus.proto.common.MsgBase
-	212, // 91: milvus.proto.data.GetChannelRecoveryInfoRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 92: milvus.proto.data.GetChannelRecoveryInfoResponse.status:type_name -> milvus.proto.common.Status
-	42,  // 93: milvus.proto.data.GetChannelRecoveryInfoResponse.info:type_name -> milvus.proto.data.VchannelInfo
-	219, // 94: milvus.proto.data.GetChannelRecoveryInfoResponse.schema:type_name -> milvus.proto.schema.CollectionSchema
-	65,  // 95: milvus.proto.data.GetChannelRecoveryInfoResponse.segments_not_created_by_streaming:type_name -> milvus.proto.data.SegmentNotCreatedByStreaming
-	212, // 96: milvus.proto.data.GetSegmentsByStatesRequest.base:type_name -> milvus.proto.common.MsgBase
-	215, // 97: milvus.proto.data.GetSegmentsByStatesRequest.states:type_name -> milvus.proto.common.SegmentState
-	213, // 98: milvus.proto.data.GetSegmentsByStatesResponse.status:type_name -> milvus.proto.common.Status
-	212, // 99: milvus.proto.data.GetFlushedSegmentsRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 100: milvus.proto.data.GetFlushedSegmentsResponse.status:type_name -> milvus.proto.common.Status
-	212, // 101: milvus.proto.data.SegmentFlushCompletedMsg.base:type_name -> milvus.proto.common.MsgBase
-	46,  // 102: milvus.proto.data.SegmentFlushCompletedMsg.segment:type_name -> milvus.proto.data.SegmentInfo
-	42,  // 103: milvus.proto.data.ChannelWatchInfo.vchan:type_name -> milvus.proto.data.VchannelInfo
+	54,  // 76: milvus.proto.data.DataNodeInfo.channels:type_name -> milvus.proto.data.ChannelStatus
+	57,  // 77: milvus.proto.data.SegmentBinlogs.fieldBinlogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 78: milvus.proto.data.SegmentBinlogs.statslogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 79: milvus.proto.data.SegmentBinlogs.deltalogs:type_name -> milvus.proto.data.FieldBinlog
+	207, // 80: milvus.proto.data.SegmentBinlogs.textStatsLogs:type_name -> milvus.proto.data.SegmentBinlogs.TextStatsLogsEntry
+	60,  // 81: milvus.proto.data.FieldBinlog.binlogs:type_name -> milvus.proto.data.Binlog
+	208, // 82: milvus.proto.data.Binlog.field_null_counts:type_name -> milvus.proto.data.Binlog.FieldNullCountsEntry
+	228, // 83: milvus.proto.data.GetRecoveryInfoResponse.status:type_name -> milvus.proto.common.Status
+	44,  // 84: milvus.proto.data.GetRecoveryInfoResponse.channels:type_name -> milvus.proto.data.VchannelInfo
+	56,  // 85: milvus.proto.data.GetRecoveryInfoResponse.binlogs:type_name -> milvus.proto.data.SegmentBinlogs
+	227, // 86: milvus.proto.data.GetRecoveryInfoRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 87: milvus.proto.data.GetRecoveryInfoResponseV2.status:type_name -> milvus.proto.common.Status
+	44,  // 88: milvus.proto.data.GetRecoveryInfoResponseV2.channels:type_name -> milvus.proto.data.VchannelInfo
+	48,  // 89: milvus.proto.data.GetRecoveryInfoResponseV2.segments:type_name -> milvus.proto.data.SegmentInfo
+	227, // 90: milvus.proto.data.GetRecoveryInfoRequestV2.base:type_name -> milvus.proto.common.MsgBase
+	227, // 91: milvus.proto.data.GetChannelRecoveryInfoRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 92: milvus.proto.data.GetChannelRecoveryInfoResponse.status:type_name -> milvus.proto.common.Status
+	44,  // 93: milvus.proto.data.GetChannelRecoveryInfoResponse.info:type_name -> milvus.proto.data.VchannelInfo
+	234, // 94: milvus.proto.data.GetChannelRecoveryInfoResponse.schema:type_name -> milvus.proto.schema.CollectionSchema
+	67,  // 95: milvus.proto.data.GetChannelRecoveryInfoResponse.segments_not_created_by_streaming:type_name -> milvus.proto.data.SegmentNotCreatedByStreaming
+	227, // 96: milvus.proto.data.GetSegmentsByStatesRequest.base:type_name -> milvus.proto.common.MsgBase
+	230, // 97: milvus.proto.data.GetSegmentsByStatesRequest.states:type_name -> milvus.proto.common.SegmentState
+	228, // 98: milvus.proto.data.GetSegmentsByStatesResponse.status:type_name -> milvus.proto.common.Status
+	227, // 99: milvus.proto.data.GetFlushedSegmentsRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 100: milvus.proto.data.GetFlushedSegmentsResponse.status:type_name -> milvus.proto.common.Status
+	227, // 101: milvus.proto.data.SegmentFlushCompletedMsg.base:type_name -> milvus.proto.common.MsgBase
+	48,  // 102: milvus.proto.data.SegmentFlushCompletedMsg.segment:type_name -> milvus.proto.data.SegmentInfo
+	44,  // 103: milvus.proto.data.ChannelWatchInfo.vchan:type_name -> milvus.proto.data.VchannelInfo
 	2,   // 104: milvus.proto.data.ChannelWatchInfo.state:type_name -> milvus.proto.data.ChannelWatchState
-	219, // 105: milvus.proto.data.ChannelWatchInfo.schema:type_name -> milvus.proto.schema.CollectionSchema
-	218, // 106: milvus.proto.data.ChannelWatchInfo.dbProperties:type_name -> milvus.proto.common.KeyValuePair
-	212, // 107: milvus.proto.data.CompactionStateRequest.base:type_name -> milvus.proto.common.MsgBase
-	55,  // 108: milvus.proto.data.SyncSegmentInfo.pk_stats_log:type_name -> milvus.proto.data.FieldBinlog
-	215, // 109: milvus.proto.data.SyncSegmentInfo.state:type_name -> milvus.proto.common.SegmentState
+	234, // 105: milvus.proto.data.ChannelWatchInfo.schema:type_name -> milvus.proto.schema.CollectionSchema
+	233, // 106: milvus.proto.data.ChannelWatchInfo.dbProperties:type_name -> milvus.proto.common.KeyValuePair
+	227, // 107: milvus.proto.data.CompactionStateRequest.base:type_name -> milvus.proto.common.MsgBase
+	57,  // 108: milvus.proto.data.SyncSegmentInfo.pk_stats_log:type_name -> milvus.proto.data.FieldBinlog
+	230, // 109: milvus.proto.data.SyncSegmentInfo.state:type_name -> milvus.proto.common.SegmentState
 	1,   // 110: milvus.proto.data.SyncSegmentInfo.level:type_name -> milvus.proto.data.SegmentLevel
-	55,  // 111: milvus.proto.data.SyncSegmentsRequest.stats_logs:type_name -> milvus.proto.data.FieldBinlog
-	195, // 112: milvus.proto.data.SyncSegmentsRequest.segment_infos:type_name -> milvus.proto.data.SyncSegmentsRequest.SegmentInfosEntry
-	55,  // 113: milvus.proto.data.CompactionSegmentBinlogs.fieldBinlogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 114: milvus.proto.data.CompactionSegmentBinlogs.field2StatslogPaths:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 115: milvus.proto.data.CompactionSegmentBinlogs.deltalogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 111: milvus.proto.data.SyncSegmentsRequest.stats_logs:type_name -> milvus.proto.data.FieldBinlog
+	209, // 112: milvus.proto.data.SyncSegmentsRequest.segment_infos:type_name -> milvus.proto.data.SyncSegmentsRequest.SegmentInfosEntry
+	57,  // 113: milvus.proto.data.CompactionSegmentBinlogs.fieldBinlogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 114: milvus.proto.data.CompactionSegmentBinlogs.field2StatslogPaths:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 115: milvus.proto.data.CompactionSegmentBinlogs.deltalogs:type_name -> milvus.proto.data.FieldBinlog
 	1,   // 116: milvus.proto.data.CompactionSegmentBinlogs.level:type_name -> milvus.proto.data.SegmentLevel
-	75,  // 117: milvus.proto.data.CompactionPlan.segmentBinlogs:type_name -> milvus.proto.data.CompactionSegmentBinlogs
+	77,  // 117: milvus.proto.data.CompactionPlan.segmentBinlogs:type_name -> milvus.proto.data.CompactionSegmentBinlogs
 	3,   // 118: milvus.proto.data.CompactionPlan.type:type_name -> milvus.proto.data.CompactionType
-	219, // 119: milvus.proto.data.CompactionPlan.schema:type_name -> milvus.proto.schema.CollectionSchema
-	103, // 120: milvus.proto.data.CompactionPlan.pre_allocated_segmentIDs:type_name -> milvus.proto.data.IDRange
-	103, // 121: milvus.proto.data.CompactionPlan.pre_allocated_logIDs:type_name -> milvus.proto.data.IDRange
-	218, // 122: milvus.proto.data.CompactionPlan.plugin_context:type_name -> milvus.proto.common.KeyValuePair
-	220, // 123: milvus.proto.data.CompactionPlan.file_resources:type_name -> milvus.proto.internal.FileResourceInfo
-	221, // 124: milvus.proto.data.CompactionPlan.functions:type_name -> milvus.proto.schema.FunctionSchema
-	55,  // 125: milvus.proto.data.CompactionSegment.insert_logs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 126: milvus.proto.data.CompactionSegment.field2StatslogPaths:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 127: milvus.proto.data.CompactionSegment.deltalogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 128: milvus.proto.data.CompactionSegment.bm25logs:type_name -> milvus.proto.data.FieldBinlog
-	196, // 129: milvus.proto.data.CompactionSegment.text_stats_logs:type_name -> milvus.proto.data.CompactionSegment.TextStatsLogsEntry
-	47,  // 130: milvus.proto.data.CompactionSegment.stats:type_name -> milvus.proto.data.Statistics
+	234, // 119: milvus.proto.data.CompactionPlan.schema:type_name -> milvus.proto.schema.CollectionSchema
+	105, // 120: milvus.proto.data.CompactionPlan.pre_allocated_segmentIDs:type_name -> milvus.proto.data.IDRange
+	105, // 121: milvus.proto.data.CompactionPlan.pre_allocated_logIDs:type_name -> milvus.proto.data.IDRange
+	233, // 122: milvus.proto.data.CompactionPlan.plugin_context:type_name -> milvus.proto.common.KeyValuePair
+	235, // 123: milvus.proto.data.CompactionPlan.file_resources:type_name -> milvus.proto.internal.FileResourceInfo
+	236, // 124: milvus.proto.data.CompactionPlan.functions:type_name -> milvus.proto.schema.FunctionSchema
+	57,  // 125: milvus.proto.data.CompactionSegment.insert_logs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 126: milvus.proto.data.CompactionSegment.field2StatslogPaths:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 127: milvus.proto.data.CompactionSegment.deltalogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 128: milvus.proto.data.CompactionSegment.bm25logs:type_name -> milvus.proto.data.FieldBinlog
+	210, // 129: milvus.proto.data.CompactionSegment.text_stats_logs:type_name -> milvus.proto.data.CompactionSegment.TextStatsLogsEntry
+	49,  // 130: milvus.proto.data.CompactionSegment.stats:type_name -> milvus.proto.data.Statistics
 	11,  // 131: milvus.proto.data.CompactionPlanResult.state:type_name -> milvus.proto.data.CompactionTaskState
-	77,  // 132: milvus.proto.data.CompactionPlanResult.segments:type_name -> milvus.proto.data.CompactionSegment
+	79,  // 132: milvus.proto.data.CompactionPlanResult.segments:type_name -> milvus.proto.data.CompactionSegment
 	3,   // 133: milvus.proto.data.CompactionPlanResult.type:type_name -> milvus.proto.data.CompactionType
-	213, // 134: milvus.proto.data.CompactionStateResponse.status:type_name -> milvus.proto.common.Status
-	78,  // 135: milvus.proto.data.CompactionStateResponse.results:type_name -> milvus.proto.data.CompactionPlanResult
-	222, // 136: milvus.proto.data.WatchChannelsRequest.start_positions:type_name -> milvus.proto.common.KeyDataPair
-	219, // 137: milvus.proto.data.WatchChannelsRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
-	218, // 138: milvus.proto.data.WatchChannelsRequest.db_properties:type_name -> milvus.proto.common.KeyValuePair
-	197, // 139: milvus.proto.data.WatchChannelsRequest.channel_wal_names:type_name -> milvus.proto.data.WatchChannelsRequest.ChannelWalNamesEntry
-	213, // 140: milvus.proto.data.WatchChannelsResponse.status:type_name -> milvus.proto.common.Status
-	212, // 141: milvus.proto.data.SetSegmentStateRequest.base:type_name -> milvus.proto.common.MsgBase
-	215, // 142: milvus.proto.data.SetSegmentStateRequest.new_state:type_name -> milvus.proto.common.SegmentState
-	213, // 143: milvus.proto.data.SetSegmentStateResponse.status:type_name -> milvus.proto.common.Status
-	212, // 144: milvus.proto.data.DropVirtualChannelRequest.base:type_name -> milvus.proto.common.MsgBase
-	86,  // 145: milvus.proto.data.DropVirtualChannelRequest.segments:type_name -> milvus.proto.data.DropVirtualChannelSegment
-	55,  // 146: milvus.proto.data.DropVirtualChannelSegment.field2BinlogPaths:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 147: milvus.proto.data.DropVirtualChannelSegment.field2StatslogPaths:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 148: milvus.proto.data.DropVirtualChannelSegment.deltalogs:type_name -> milvus.proto.data.FieldBinlog
-	216, // 149: milvus.proto.data.DropVirtualChannelSegment.startPosition:type_name -> milvus.proto.msg.MsgPosition
-	216, // 150: milvus.proto.data.DropVirtualChannelSegment.checkPoint:type_name -> milvus.proto.msg.MsgPosition
-	213, // 151: milvus.proto.data.DropVirtualChannelResponse.status:type_name -> milvus.proto.common.Status
-	212, // 152: milvus.proto.data.UpdateSegmentStatisticsRequest.base:type_name -> milvus.proto.common.MsgBase
-	223, // 153: milvus.proto.data.UpdateSegmentStatisticsRequest.stats:type_name -> milvus.proto.common.SegmentStats
-	212, // 154: milvus.proto.data.UpdateChannelCheckpointRequest.base:type_name -> milvus.proto.common.MsgBase
-	216, // 155: milvus.proto.data.UpdateChannelCheckpointRequest.position:type_name -> milvus.proto.msg.MsgPosition
-	216, // 156: milvus.proto.data.UpdateChannelCheckpointRequest.channel_checkpoints:type_name -> milvus.proto.msg.MsgPosition
-	212, // 157: milvus.proto.data.ResendSegmentStatsRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 158: milvus.proto.data.ResendSegmentStatsResponse.status:type_name -> milvus.proto.common.Status
-	212, // 159: milvus.proto.data.MarkSegmentsDroppedRequest.base:type_name -> milvus.proto.common.MsgBase
-	219, // 160: milvus.proto.data.AlterCollectionRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
-	222, // 161: milvus.proto.data.AlterCollectionRequest.start_positions:type_name -> milvus.proto.common.KeyDataPair
-	218, // 162: milvus.proto.data.AlterCollectionRequest.properties:type_name -> milvus.proto.common.KeyValuePair
-	224, // 163: milvus.proto.data.AddCollectionFieldRequest.field_schema:type_name -> milvus.proto.schema.FieldSchema
-	219, // 164: milvus.proto.data.AddCollectionFieldRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
-	222, // 165: milvus.proto.data.AddCollectionFieldRequest.start_positions:type_name -> milvus.proto.common.KeyDataPair
-	218, // 166: milvus.proto.data.AddCollectionFieldRequest.properties:type_name -> milvus.proto.common.KeyValuePair
-	213, // 167: milvus.proto.data.GcConfirmResponse.status:type_name -> milvus.proto.common.Status
-	212, // 168: milvus.proto.data.ReportDataNodeTtMsgsRequest.base:type_name -> milvus.proto.common.MsgBase
-	225, // 169: milvus.proto.data.ReportDataNodeTtMsgsRequest.msgs:type_name -> milvus.proto.msg.DataNodeTtMsg
-	71,  // 170: milvus.proto.data.ChannelOperationsRequest.infos:type_name -> milvus.proto.data.ChannelWatchInfo
-	213, // 171: milvus.proto.data.ChannelOperationProgressResponse.status:type_name -> milvus.proto.common.Status
+	228, // 134: milvus.proto.data.CompactionStateResponse.status:type_name -> milvus.proto.common.Status
+	80,  // 135: milvus.proto.data.CompactionStateResponse.results:type_name -> milvus.proto.data.CompactionPlanResult
+	237, // 136: milvus.proto.data.WatchChannelsRequest.start_positions:type_name -> milvus.proto.common.KeyDataPair
+	234, // 137: milvus.proto.data.WatchChannelsRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
+	233, // 138: milvus.proto.data.WatchChannelsRequest.db_properties:type_name -> milvus.proto.common.KeyValuePair
+	211, // 139: milvus.proto.data.WatchChannelsRequest.channel_wal_names:type_name -> milvus.proto.data.WatchChannelsRequest.ChannelWalNamesEntry
+	228, // 140: milvus.proto.data.WatchChannelsResponse.status:type_name -> milvus.proto.common.Status
+	227, // 141: milvus.proto.data.SetSegmentStateRequest.base:type_name -> milvus.proto.common.MsgBase
+	230, // 142: milvus.proto.data.SetSegmentStateRequest.new_state:type_name -> milvus.proto.common.SegmentState
+	228, // 143: milvus.proto.data.SetSegmentStateResponse.status:type_name -> milvus.proto.common.Status
+	227, // 144: milvus.proto.data.DropVirtualChannelRequest.base:type_name -> milvus.proto.common.MsgBase
+	88,  // 145: milvus.proto.data.DropVirtualChannelRequest.segments:type_name -> milvus.proto.data.DropVirtualChannelSegment
+	57,  // 146: milvus.proto.data.DropVirtualChannelSegment.field2BinlogPaths:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 147: milvus.proto.data.DropVirtualChannelSegment.field2StatslogPaths:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 148: milvus.proto.data.DropVirtualChannelSegment.deltalogs:type_name -> milvus.proto.data.FieldBinlog
+	231, // 149: milvus.proto.data.DropVirtualChannelSegment.startPosition:type_name -> milvus.proto.msg.MsgPosition
+	231, // 150: milvus.proto.data.DropVirtualChannelSegment.checkPoint:type_name -> milvus.proto.msg.MsgPosition
+	228, // 151: milvus.proto.data.DropVirtualChannelResponse.status:type_name -> milvus.proto.common.Status
+	227, // 152: milvus.proto.data.UpdateSegmentStatisticsRequest.base:type_name -> milvus.proto.common.MsgBase
+	238, // 153: milvus.proto.data.UpdateSegmentStatisticsRequest.stats:type_name -> milvus.proto.common.SegmentStats
+	227, // 154: milvus.proto.data.UpdateChannelCheckpointRequest.base:type_name -> milvus.proto.common.MsgBase
+	231, // 155: milvus.proto.data.UpdateChannelCheckpointRequest.position:type_name -> milvus.proto.msg.MsgPosition
+	231, // 156: milvus.proto.data.UpdateChannelCheckpointRequest.channel_checkpoints:type_name -> milvus.proto.msg.MsgPosition
+	227, // 157: milvus.proto.data.ResendSegmentStatsRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 158: milvus.proto.data.ResendSegmentStatsResponse.status:type_name -> milvus.proto.common.Status
+	227, // 159: milvus.proto.data.MarkSegmentsDroppedRequest.base:type_name -> milvus.proto.common.MsgBase
+	234, // 160: milvus.proto.data.AlterCollectionRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
+	237, // 161: milvus.proto.data.AlterCollectionRequest.start_positions:type_name -> milvus.proto.common.KeyDataPair
+	233, // 162: milvus.proto.data.AlterCollectionRequest.properties:type_name -> milvus.proto.common.KeyValuePair
+	239, // 163: milvus.proto.data.AddCollectionFieldRequest.field_schema:type_name -> milvus.proto.schema.FieldSchema
+	234, // 164: milvus.proto.data.AddCollectionFieldRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
+	237, // 165: milvus.proto.data.AddCollectionFieldRequest.start_positions:type_name -> milvus.proto.common.KeyDataPair
+	233, // 166: milvus.proto.data.AddCollectionFieldRequest.properties:type_name -> milvus.proto.common.KeyValuePair
+	228, // 167: milvus.proto.data.GcConfirmResponse.status:type_name -> milvus.proto.common.Status
+	227, // 168: milvus.proto.data.ReportDataNodeTtMsgsRequest.base:type_name -> milvus.proto.common.MsgBase
+	240, // 169: milvus.proto.data.ReportDataNodeTtMsgsRequest.msgs:type_name -> milvus.proto.msg.DataNodeTtMsg
+	73,  // 170: milvus.proto.data.ChannelOperationsRequest.infos:type_name -> milvus.proto.data.ChannelWatchInfo
+	228, // 171: milvus.proto.data.ChannelOperationProgressResponse.status:type_name -> milvus.proto.common.Status
 	2,   // 172: milvus.proto.data.ChannelOperationProgressResponse.state:type_name -> milvus.proto.data.ChannelWatchState
-	219, // 173: milvus.proto.data.PreImportRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
-	226, // 174: milvus.proto.data.PreImportRequest.import_files:type_name -> milvus.proto.internal.ImportFile
-	218, // 175: milvus.proto.data.PreImportRequest.options:type_name -> milvus.proto.common.KeyValuePair
-	227, // 176: milvus.proto.data.PreImportRequest.storage_config:type_name -> milvus.proto.index.StorageConfig
-	218, // 177: milvus.proto.data.PreImportRequest.plugin_context:type_name -> milvus.proto.common.KeyValuePair
-	219, // 178: milvus.proto.data.ImportRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
-	226, // 179: milvus.proto.data.ImportRequest.files:type_name -> milvus.proto.internal.ImportFile
-	218, // 180: milvus.proto.data.ImportRequest.options:type_name -> milvus.proto.common.KeyValuePair
-	103, // 181: milvus.proto.data.ImportRequest.ID_range:type_name -> milvus.proto.data.IDRange
-	104, // 182: milvus.proto.data.ImportRequest.request_segments:type_name -> milvus.proto.data.ImportRequestSegment
-	227, // 183: milvus.proto.data.ImportRequest.storage_config:type_name -> milvus.proto.index.StorageConfig
-	218, // 184: milvus.proto.data.ImportRequest.plugin_context:type_name -> milvus.proto.common.KeyValuePair
-	198, // 185: milvus.proto.data.PartitionImportStats.partition_rows:type_name -> milvus.proto.data.PartitionImportStats.PartitionRowsEntry
-	199, // 186: milvus.proto.data.PartitionImportStats.partition_data_size:type_name -> milvus.proto.data.PartitionImportStats.PartitionDataSizeEntry
-	226, // 187: milvus.proto.data.ImportFileStats.import_file:type_name -> milvus.proto.internal.ImportFile
-	200, // 188: milvus.proto.data.ImportFileStats.hashed_stats:type_name -> milvus.proto.data.ImportFileStats.HashedStatsEntry
-	213, // 189: milvus.proto.data.QueryPreImportResponse.status:type_name -> milvus.proto.common.Status
+	234, // 173: milvus.proto.data.PreImportRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
+	241, // 174: milvus.proto.data.PreImportRequest.import_files:type_name -> milvus.proto.internal.ImportFile
+	233, // 175: milvus.proto.data.PreImportRequest.options:type_name -> milvus.proto.common.KeyValuePair
+	242, // 176: milvus.proto.data.PreImportRequest.storage_config:type_name -> milvus.proto.index.StorageConfig
+	233, // 177: milvus.proto.data.PreImportRequest.plugin_context:type_name -> milvus.proto.common.KeyValuePair
+	234, // 178: milvus.proto.data.ImportRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
+	241, // 179: milvus.proto.data.ImportRequest.files:type_name -> milvus.proto.internal.ImportFile
+	233, // 180: milvus.proto.data.ImportRequest.options:type_name -> milvus.proto.common.KeyValuePair
+	105, // 181: milvus.proto.data.ImportRequest.ID_range:type_name -> milvus.proto.data.IDRange
+	106, // 182: milvus.proto.data.ImportRequest.request_segments:type_name -> milvus.proto.data.ImportRequestSegment
+	242, // 183: milvus.proto.data.ImportRequest.storage_config:type_name -> milvus.proto.index.StorageConfig
+	233, // 184: milvus.proto.data.ImportRequest.plugin_context:type_name -> milvus.proto.common.KeyValuePair
+	212, // 185: milvus.proto.data.PartitionImportStats.partition_rows:type_name -> milvus.proto.data.PartitionImportStats.PartitionRowsEntry
+	213, // 186: milvus.proto.data.PartitionImportStats.partition_data_size:type_name -> milvus.proto.data.PartitionImportStats.PartitionDataSizeEntry
+	241, // 187: milvus.proto.data.ImportFileStats.import_file:type_name -> milvus.proto.internal.ImportFile
+	214, // 188: milvus.proto.data.ImportFileStats.hashed_stats:type_name -> milvus.proto.data.ImportFileStats.HashedStatsEntry
+	228, // 189: milvus.proto.data.QueryPreImportResponse.status:type_name -> milvus.proto.common.Status
 	8,   // 190: milvus.proto.data.QueryPreImportResponse.state:type_name -> milvus.proto.data.ImportTaskStateV2
-	108, // 191: milvus.proto.data.QueryPreImportResponse.file_stats:type_name -> milvus.proto.data.ImportFileStats
-	55,  // 192: milvus.proto.data.ImportSegmentInfo.binlogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 193: milvus.proto.data.ImportSegmentInfo.statslogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 194: milvus.proto.data.ImportSegmentInfo.deltalogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 195: milvus.proto.data.ImportSegmentInfo.bm25logs:type_name -> milvus.proto.data.FieldBinlog
-	47,  // 196: milvus.proto.data.ImportSegmentInfo.stats:type_name -> milvus.proto.data.Statistics
-	213, // 197: milvus.proto.data.QueryImportResponse.status:type_name -> milvus.proto.common.Status
+	110, // 191: milvus.proto.data.QueryPreImportResponse.file_stats:type_name -> milvus.proto.data.ImportFileStats
+	57,  // 192: milvus.proto.data.ImportSegmentInfo.binlogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 193: milvus.proto.data.ImportSegmentInfo.statslogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 194: milvus.proto.data.ImportSegmentInfo.deltalogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 195: milvus.proto.data.ImportSegmentInfo.bm25logs:type_name -> milvus.proto.data.FieldBinlog
+	49,  // 196: milvus.proto.data.ImportSegmentInfo.stats:type_name -> milvus.proto.data.Statistics
+	228, // 197: milvus.proto.data.QueryImportResponse.status:type_name -> milvus.proto.common.Status
 	8,   // 198: milvus.proto.data.QueryImportResponse.state:type_name -> milvus.proto.data.ImportTaskStateV2
-	111, // 199: milvus.proto.data.QueryImportResponse.import_segments_info:type_name -> milvus.proto.data.ImportSegmentInfo
-	55,  // 200: milvus.proto.data.CopySegmentSource.insert_binlogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 201: milvus.proto.data.CopySegmentSource.stats_binlogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 202: milvus.proto.data.CopySegmentSource.delta_binlogs:type_name -> milvus.proto.data.FieldBinlog
-	228, // 203: milvus.proto.data.CopySegmentSource.index_files:type_name -> milvus.proto.index.IndexFilePathInfo
-	55,  // 204: milvus.proto.data.CopySegmentSource.bm25_binlogs:type_name -> milvus.proto.data.FieldBinlog
-	201, // 205: milvus.proto.data.CopySegmentSource.text_index_files:type_name -> milvus.proto.data.CopySegmentSource.TextIndexFilesEntry
-	202, // 206: milvus.proto.data.CopySegmentSource.json_key_index_files:type_name -> milvus.proto.data.CopySegmentSource.JsonKeyIndexFilesEntry
-	203, // 207: milvus.proto.data.CopySegmentTarget.new_build_ids:type_name -> milvus.proto.data.CopySegmentTarget.NewBuildIdsEntry
-	114, // 208: milvus.proto.data.CopySegmentRequest.sources:type_name -> milvus.proto.data.CopySegmentSource
-	115, // 209: milvus.proto.data.CopySegmentRequest.targets:type_name -> milvus.proto.data.CopySegmentTarget
-	227, // 210: milvus.proto.data.CopySegmentRequest.storage_config:type_name -> milvus.proto.index.StorageConfig
-	213, // 211: milvus.proto.data.QueryCopySegmentResponse.status:type_name -> milvus.proto.common.Status
+	113, // 199: milvus.proto.data.QueryImportResponse.import_segments_info:type_name -> milvus.proto.data.ImportSegmentInfo
+	57,  // 200: milvus.proto.data.CopySegmentSource.insert_binlogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 201: milvus.proto.data.CopySegmentSource.stats_binlogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 202: milvus.proto.data.CopySegmentSource.delta_binlogs:type_name -> milvus.proto.data.FieldBinlog
+	243, // 203: milvus.proto.data.CopySegmentSource.index_files:type_name -> milvus.proto.index.IndexFilePathInfo
+	57,  // 204: milvus.proto.data.CopySegmentSource.bm25_binlogs:type_name -> milvus.proto.data.FieldBinlog
+	215, // 205: milvus.proto.data.CopySegmentSource.text_index_files:type_name -> milvus.proto.data.CopySegmentSource.TextIndexFilesEntry
+	216, // 206: milvus.proto.data.CopySegmentSource.json_key_index_files:type_name -> milvus.proto.data.CopySegmentSource.JsonKeyIndexFilesEntry
+	217, // 207: milvus.proto.data.CopySegmentTarget.new_build_ids:type_name -> milvus.proto.data.CopySegmentTarget.NewBuildIdsEntry
+	116, // 208: milvus.proto.data.CopySegmentRequest.sources:type_name -> milvus.proto.data.CopySegmentSource
+	117, // 209: milvus.proto.data.CopySegmentRequest.targets:type_name -> milvus.proto.data.CopySegmentTarget
+	242, // 210: milvus.proto.data.CopySegmentRequest.storage_config:type_name -> milvus.proto.index.StorageConfig
+	228, // 211: milvus.proto.data.QueryCopySegmentResponse.status:type_name -> milvus.proto.common.Status
 	5,   // 212: milvus.proto.data.QueryCopySegmentResponse.state:type_name -> milvus.proto.data.CopySegmentTaskState
-	121, // 213: milvus.proto.data.QueryCopySegmentResponse.segment_results:type_name -> milvus.proto.data.CopySegmentResult
-	229, // 214: milvus.proto.data.VectorScalarIndexInfo.index_store_path_version:type_name -> milvus.proto.index.IndexStorePathVersion
-	55,  // 215: milvus.proto.data.CopySegmentResult.binlogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 216: milvus.proto.data.CopySegmentResult.statslogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 217: milvus.proto.data.CopySegmentResult.deltalogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 218: milvus.proto.data.CopySegmentResult.bm25logs:type_name -> milvus.proto.data.FieldBinlog
-	204, // 219: milvus.proto.data.CopySegmentResult.index_infos:type_name -> milvus.proto.data.CopySegmentResult.IndexInfosEntry
-	205, // 220: milvus.proto.data.CopySegmentResult.text_index_infos:type_name -> milvus.proto.data.CopySegmentResult.TextIndexInfosEntry
-	206, // 221: milvus.proto.data.CopySegmentResult.json_key_index_infos:type_name -> milvus.proto.data.CopySegmentResult.JsonKeyIndexInfosEntry
+	123, // 213: milvus.proto.data.QueryCopySegmentResponse.segment_results:type_name -> milvus.proto.data.CopySegmentResult
+	244, // 214: milvus.proto.data.VectorScalarIndexInfo.index_store_path_version:type_name -> milvus.proto.index.IndexStorePathVersion
+	57,  // 215: milvus.proto.data.CopySegmentResult.binlogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 216: milvus.proto.data.CopySegmentResult.statslogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 217: milvus.proto.data.CopySegmentResult.deltalogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 218: milvus.proto.data.CopySegmentResult.bm25logs:type_name -> milvus.proto.data.FieldBinlog
+	218, // 219: milvus.proto.data.CopySegmentResult.index_infos:type_name -> milvus.proto.data.CopySegmentResult.IndexInfosEntry
+	219, // 220: milvus.proto.data.CopySegmentResult.text_index_infos:type_name -> milvus.proto.data.CopySegmentResult.TextIndexInfosEntry
+	220, // 221: milvus.proto.data.CopySegmentResult.json_key_index_infos:type_name -> milvus.proto.data.CopySegmentResult.JsonKeyIndexInfosEntry
 	5,   // 222: milvus.proto.data.CopySegmentTask.state:type_name -> milvus.proto.data.CopySegmentTaskState
-	123, // 223: milvus.proto.data.CopySegmentTask.id_mappings:type_name -> milvus.proto.data.CopySegmentIDMapping
+	125, // 223: milvus.proto.data.CopySegmentTask.id_mappings:type_name -> milvus.proto.data.CopySegmentIDMapping
 	4,   // 224: milvus.proto.data.CopySegmentJob.state:type_name -> milvus.proto.data.CopySegmentJobState
-	123, // 225: milvus.proto.data.CopySegmentJob.id_mappings:type_name -> milvus.proto.data.CopySegmentIDMapping
-	218, // 226: milvus.proto.data.CopySegmentJob.options:type_name -> milvus.proto.common.KeyValuePair
-	219, // 227: milvus.proto.data.ImportJob.schema:type_name -> milvus.proto.schema.CollectionSchema
-	230, // 228: milvus.proto.data.ImportJob.state:type_name -> milvus.proto.internal.ImportJobState
-	226, // 229: milvus.proto.data.ImportJob.files:type_name -> milvus.proto.internal.ImportFile
-	218, // 230: milvus.proto.data.ImportJob.options:type_name -> milvus.proto.common.KeyValuePair
+	125, // 225: milvus.proto.data.CopySegmentJob.id_mappings:type_name -> milvus.proto.data.CopySegmentIDMapping
+	233, // 226: milvus.proto.data.CopySegmentJob.options:type_name -> milvus.proto.common.KeyValuePair
+	234, // 227: milvus.proto.data.ImportJob.schema:type_name -> milvus.proto.schema.CollectionSchema
+	245, // 228: milvus.proto.data.ImportJob.state:type_name -> milvus.proto.internal.ImportJobState
+	241, // 229: milvus.proto.data.ImportJob.files:type_name -> milvus.proto.internal.ImportFile
+	233, // 230: milvus.proto.data.ImportJob.options:type_name -> milvus.proto.common.KeyValuePair
 	8,   // 231: milvus.proto.data.PreImportTask.state:type_name -> milvus.proto.data.ImportTaskStateV2
-	108, // 232: milvus.proto.data.PreImportTask.file_stats:type_name -> milvus.proto.data.ImportFileStats
+	110, // 232: milvus.proto.data.PreImportTask.file_stats:type_name -> milvus.proto.data.ImportFileStats
 	8,   // 233: milvus.proto.data.ImportTaskV2.state:type_name -> milvus.proto.data.ImportTaskStateV2
-	108, // 234: milvus.proto.data.ImportTaskV2.file_stats:type_name -> milvus.proto.data.ImportFileStats
+	110, // 234: milvus.proto.data.ImportTaskV2.file_stats:type_name -> milvus.proto.data.ImportFileStats
 	9,   // 235: milvus.proto.data.ImportTaskV2.source:type_name -> milvus.proto.data.ImportTaskSourceV2
-	212, // 236: milvus.proto.data.GcControlRequest.base:type_name -> milvus.proto.common.MsgBase
-	10,  // 237: milvus.proto.data.GcControlRequest.command:type_name -> milvus.proto.data.GcCommand
-	218, // 238: milvus.proto.data.GcControlRequest.params:type_name -> milvus.proto.common.KeyValuePair
-	213, // 239: milvus.proto.data.QuerySlotResponse.status:type_name -> milvus.proto.common.Status
-	13,  // 240: milvus.proto.data.CompactionTarget.intent:type_name -> milvus.proto.data.TargetIntent
-	207, // 241: milvus.proto.data.CompactionTarget.properties:type_name -> milvus.proto.data.CompactionTarget.PropertiesEntry
-	12,  // 242: milvus.proto.data.CompactionTarget.state:type_name -> milvus.proto.data.TargetState
-	3,   // 243: milvus.proto.data.CompactionTask.type:type_name -> milvus.proto.data.CompactionType
-	11,  // 244: milvus.proto.data.CompactionTask.state:type_name -> milvus.proto.data.CompactionTaskState
-	216, // 245: milvus.proto.data.CompactionTask.pos:type_name -> milvus.proto.msg.MsgPosition
-	219, // 246: milvus.proto.data.CompactionTask.schema:type_name -> milvus.proto.schema.CollectionSchema
-	224, // 247: milvus.proto.data.CompactionTask.clustering_key_field:type_name -> milvus.proto.schema.FieldSchema
-	103, // 248: milvus.proto.data.CompactionTask.pre_allocated_segmentIDs:type_name -> milvus.proto.data.IDRange
-	221, // 249: milvus.proto.data.CompactionTask.diff_functions:type_name -> milvus.proto.schema.FunctionSchema
-	212, // 250: milvus.proto.data.RefreshExternalCollectionTaskRequest.base:type_name -> milvus.proto.common.MsgBase
-	46,  // 251: milvus.proto.data.RefreshExternalCollectionTaskRequest.currentSegments:type_name -> milvus.proto.data.SegmentInfo
-	227, // 252: milvus.proto.data.RefreshExternalCollectionTaskRequest.storage_config:type_name -> milvus.proto.index.StorageConfig
-	219, // 253: milvus.proto.data.RefreshExternalCollectionTaskRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
-	103, // 254: milvus.proto.data.RefreshExternalCollectionTaskRequest.pre_allocated_segment_ids:type_name -> milvus.proto.data.IDRange
-	213, // 255: milvus.proto.data.RefreshExternalCollectionTaskResponse.status:type_name -> milvus.proto.common.Status
-	46,  // 256: milvus.proto.data.RefreshExternalCollectionTaskResponse.updatedSegments:type_name -> milvus.proto.data.SegmentInfo
-	231, // 257: milvus.proto.data.RefreshExternalCollectionTaskResponse.state:type_name -> milvus.proto.index.JobState
-	212, // 258: milvus.proto.data.RefreshExternalCollectionRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 259: milvus.proto.data.RefreshExternalCollectionResponse.status:type_name -> milvus.proto.common.Status
-	212, // 260: milvus.proto.data.GetRefreshExternalCollectionProgressRequest.base:type_name -> milvus.proto.common.MsgBase
-	231, // 261: milvus.proto.data.ExternalCollectionRefreshJob.state:type_name -> milvus.proto.index.JobState
-	231, // 262: milvus.proto.data.ExternalCollectionRefreshTask.state:type_name -> milvus.proto.index.JobState
-	46,  // 263: milvus.proto.data.ExternalCollectionRefreshTask.updated_segments:type_name -> milvus.proto.data.SegmentInfo
-	213, // 264: milvus.proto.data.GetRefreshExternalCollectionProgressResponse.status:type_name -> milvus.proto.common.Status
-	141, // 265: milvus.proto.data.GetRefreshExternalCollectionProgressResponse.job_info:type_name -> milvus.proto.data.ExternalCollectionRefreshJob
-	212, // 266: milvus.proto.data.ListRefreshExternalCollectionJobsRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 267: milvus.proto.data.ListRefreshExternalCollectionJobsResponse.status:type_name -> milvus.proto.common.Status
-	141, // 268: milvus.proto.data.ListRefreshExternalCollectionJobsResponse.jobs:type_name -> milvus.proto.data.ExternalCollectionRefreshJob
-	212, // 269: milvus.proto.data.CreateSnapshotRequest.base:type_name -> milvus.proto.common.MsgBase
-	212, // 270: milvus.proto.data.DropSnapshotRequest.base:type_name -> milvus.proto.common.MsgBase
-	212, // 271: milvus.proto.data.ListSnapshotsRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 272: milvus.proto.data.ListSnapshotsResponse.status:type_name -> milvus.proto.common.Status
-	212, // 273: milvus.proto.data.ExportSnapshotRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 274: milvus.proto.data.ExportSnapshotResponse.status:type_name -> milvus.proto.common.Status
-	1,   // 275: milvus.proto.data.SegmentDescription.segment_level:type_name -> milvus.proto.data.SegmentLevel
-	55,  // 276: milvus.proto.data.SegmentDescription.binlogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 277: milvus.proto.data.SegmentDescription.deltalogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 278: milvus.proto.data.SegmentDescription.statslogs:type_name -> milvus.proto.data.FieldBinlog
-	55,  // 279: milvus.proto.data.SegmentDescription.bm25_statslogs:type_name -> milvus.proto.data.FieldBinlog
-	208, // 280: milvus.proto.data.SegmentDescription.text_index_files:type_name -> milvus.proto.data.SegmentDescription.TextIndexFilesEntry
-	209, // 281: milvus.proto.data.SegmentDescription.json_key_index_files:type_name -> milvus.proto.data.SegmentDescription.JsonKeyIndexFilesEntry
-	228, // 282: milvus.proto.data.SegmentDescription.index_files:type_name -> milvus.proto.index.IndexFilePathInfo
-	216, // 283: milvus.proto.data.SegmentDescription.start_position:type_name -> milvus.proto.msg.MsgPosition
-	216, // 284: milvus.proto.data.SegmentDescription.dml_position:type_name -> milvus.proto.msg.MsgPosition
-	219, // 285: milvus.proto.data.CollectionDescription.schema:type_name -> milvus.proto.schema.CollectionSchema
-	232, // 286: milvus.proto.data.CollectionDescription.consistency_level:type_name -> milvus.proto.common.ConsistencyLevel
-	218, // 287: milvus.proto.data.CollectionDescription.properties:type_name -> milvus.proto.common.KeyValuePair
-	210, // 288: milvus.proto.data.CollectionDescription.partitions:type_name -> milvus.proto.data.CollectionDescription.PartitionsEntry
-	6,   // 289: milvus.proto.data.SnapshotInfo.state:type_name -> milvus.proto.data.SnapshotState
-	211, // 290: milvus.proto.data.SnapshotInfo.pin_expire_at_ms:type_name -> milvus.proto.data.SnapshotInfo.PinExpireAtMsEntry
-	216, // 291: milvus.proto.data.SnapshotInfo.channel_seek_positions:type_name -> milvus.proto.msg.MsgPosition
-	155, // 292: milvus.proto.data.SnapshotMetadata.snapshot_info:type_name -> milvus.proto.data.SnapshotInfo
-	154, // 293: milvus.proto.data.SnapshotMetadata.collection:type_name -> milvus.proto.data.CollectionDescription
-	233, // 294: milvus.proto.data.SnapshotMetadata.indexes:type_name -> milvus.proto.index.IndexInfo
-	156, // 295: milvus.proto.data.SnapshotMetadata.storagev2_manifest_list:type_name -> milvus.proto.data.StorageV2SegmentManifest
-	14,  // 296: milvus.proto.data.SnapshotMetadata.layout:type_name -> milvus.proto.data.SnapshotLayout
-	7,   // 297: milvus.proto.data.RestoreSnapshotInfo.state:type_name -> milvus.proto.data.RestoreSnapshotState
-	212, // 298: milvus.proto.data.DescribeSnapshotRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 299: milvus.proto.data.DescribeSnapshotResponse.status:type_name -> milvus.proto.common.Status
-	155, // 300: milvus.proto.data.DescribeSnapshotResponse.snapshot_info:type_name -> milvus.proto.data.SnapshotInfo
-	154, // 301: milvus.proto.data.DescribeSnapshotResponse.collection_info:type_name -> milvus.proto.data.CollectionDescription
-	233, // 302: milvus.proto.data.DescribeSnapshotResponse.index_infos:type_name -> milvus.proto.index.IndexInfo
-	212, // 303: milvus.proto.data.RestoreSnapshotRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 304: milvus.proto.data.RestoreSnapshotResponse.status:type_name -> milvus.proto.common.Status
-	212, // 305: milvus.proto.data.GetRestoreSnapshotStateRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 306: milvus.proto.data.GetRestoreSnapshotStateResponse.status:type_name -> milvus.proto.common.Status
-	158, // 307: milvus.proto.data.GetRestoreSnapshotStateResponse.info:type_name -> milvus.proto.data.RestoreSnapshotInfo
-	212, // 308: milvus.proto.data.ListRestoreSnapshotJobsRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 309: milvus.proto.data.ListRestoreSnapshotJobsResponse.status:type_name -> milvus.proto.common.Status
-	158, // 310: milvus.proto.data.ListRestoreSnapshotJobsResponse.jobs:type_name -> milvus.proto.data.RestoreSnapshotInfo
-	212, // 311: milvus.proto.data.BatchUpdateManifestRequest.base:type_name -> milvus.proto.common.MsgBase
-	168, // 312: milvus.proto.data.BatchUpdateManifestRequest.items:type_name -> milvus.proto.data.BatchUpdateManifestItem
-	212, // 313: milvus.proto.data.CommitBackfillResultRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 314: milvus.proto.data.CommitBackfillResultResponse.status:type_name -> milvus.proto.common.Status
-	170, // 315: milvus.proto.data.CommitBackfillResultResponse.segment_statuses:type_name -> milvus.proto.data.CommitBackfillResultSegmentStatus
-	212, // 316: milvus.proto.data.PinSnapshotDataRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 317: milvus.proto.data.PinSnapshotDataResponse.status:type_name -> milvus.proto.common.Status
-	212, // 318: milvus.proto.data.UnpinSnapshotDataRequest.base:type_name -> milvus.proto.common.MsgBase
-	212, // 319: milvus.proto.data.CommitImportRequest.base:type_name -> milvus.proto.common.MsgBase
-	212, // 320: milvus.proto.data.AbortImportRequest.base:type_name -> milvus.proto.common.MsgBase
-	212, // 321: milvus.proto.data.HandleCommitVchannelRequest.base:type_name -> milvus.proto.common.MsgBase
-	46,  // 322: milvus.proto.data.ExternalCollectionRefreshTaskResult.updated_segments:type_name -> milvus.proto.data.SegmentInfo
-	179, // 323: milvus.proto.data.LoadResourceStatistics.column_groups:type_name -> milvus.proto.data.ColumnGroupStatistics
-	15,  // 324: milvus.proto.data.ExportSnapshotJob.state:type_name -> milvus.proto.data.ExportSnapshotJobState
-	15,  // 325: milvus.proto.data.ExportSnapshotJobInfo.state:type_name -> milvus.proto.data.ExportSnapshotJobState
-	212, // 326: milvus.proto.data.GetExportSnapshotStateRequest.base:type_name -> milvus.proto.common.MsgBase
-	213, // 327: milvus.proto.data.GetExportSnapshotStateResponse.status:type_name -> milvus.proto.common.Status
-	182, // 328: milvus.proto.data.GetExportSnapshotStateResponse.info:type_name -> milvus.proto.data.ExportSnapshotJobInfo
-	216, // 329: milvus.proto.data.FlushResponse.ChannelCpsEntry.value:type_name -> milvus.proto.msg.MsgPosition
-	216, // 330: milvus.proto.data.FlushResult.ChannelCpsEntry.value:type_name -> milvus.proto.msg.MsgPosition
-	234, // 331: milvus.proto.data.FlushAllResponse.FlushAllMsgsEntry.value:type_name -> milvus.proto.common.ImmutableMessage
-	216, // 332: milvus.proto.data.GetSegmentInfoResponse.ChannelCheckpointEntry.value:type_name -> milvus.proto.msg.MsgPosition
-	56,  // 333: milvus.proto.data.SegmentInfo.TextStatsLogsEntry.value:type_name -> milvus.proto.data.TextIndexStats
-	57,  // 334: milvus.proto.data.SegmentInfo.JsonKeyStatsEntry.value:type_name -> milvus.proto.data.JsonKeyStats
-	56,  // 335: milvus.proto.data.SegmentBinlogs.TextStatsLogsEntry.value:type_name -> milvus.proto.data.TextIndexStats
-	73,  // 336: milvus.proto.data.SyncSegmentsRequest.SegmentInfosEntry.value:type_name -> milvus.proto.data.SyncSegmentInfo
-	56,  // 337: milvus.proto.data.CompactionSegment.TextStatsLogsEntry.value:type_name -> milvus.proto.data.TextIndexStats
-	235, // 338: milvus.proto.data.WatchChannelsRequest.ChannelWalNamesEntry.value:type_name -> milvus.proto.common.WALName
-	107, // 339: milvus.proto.data.ImportFileStats.HashedStatsEntry.value:type_name -> milvus.proto.data.PartitionImportStats
-	56,  // 340: milvus.proto.data.CopySegmentSource.TextIndexFilesEntry.value:type_name -> milvus.proto.data.TextIndexStats
-	57,  // 341: milvus.proto.data.CopySegmentSource.JsonKeyIndexFilesEntry.value:type_name -> milvus.proto.data.JsonKeyStats
-	120, // 342: milvus.proto.data.CopySegmentResult.IndexInfosEntry.value:type_name -> milvus.proto.data.VectorScalarIndexInfo
-	56,  // 343: milvus.proto.data.CopySegmentResult.TextIndexInfosEntry.value:type_name -> milvus.proto.data.TextIndexStats
-	57,  // 344: milvus.proto.data.CopySegmentResult.JsonKeyIndexInfosEntry.value:type_name -> milvus.proto.data.JsonKeyStats
-	56,  // 345: milvus.proto.data.SegmentDescription.TextIndexFilesEntry.value:type_name -> milvus.proto.data.TextIndexStats
-	57,  // 346: milvus.proto.data.SegmentDescription.JsonKeyIndexFilesEntry.value:type_name -> milvus.proto.data.JsonKeyStats
-	17,  // 347: milvus.proto.data.DataCoord.Flush:input_type -> milvus.proto.data.FlushRequest
-	20,  // 348: milvus.proto.data.DataCoord.FlushAll:input_type -> milvus.proto.data.FlushAllRequest
-	25,  // 349: milvus.proto.data.DataCoord.AllocSegment:input_type -> milvus.proto.data.AllocSegmentRequest
-	27,  // 350: milvus.proto.data.DataCoord.AssignSegmentID:input_type -> milvus.proto.data.AssignSegmentIDRequest
-	33,  // 351: milvus.proto.data.DataCoord.GetSegmentInfo:input_type -> milvus.proto.data.GetSegmentInfoRequest
-	30,  // 352: milvus.proto.data.DataCoord.GetSegmentStates:input_type -> milvus.proto.data.GetSegmentStatesRequest
-	35,  // 353: milvus.proto.data.DataCoord.GetInsertBinlogPaths:input_type -> milvus.proto.data.GetInsertBinlogPathsRequest
-	37,  // 354: milvus.proto.data.DataCoord.GetCollectionStatistics:input_type -> milvus.proto.data.GetCollectionStatisticsRequest
-	39,  // 355: milvus.proto.data.DataCoord.GetPartitionStatistics:input_type -> milvus.proto.data.GetPartitionStatisticsRequest
-	41,  // 356: milvus.proto.data.DataCoord.GetSegmentInfoChannel:input_type -> milvus.proto.data.GetSegmentInfoChannelRequest
-	49,  // 357: milvus.proto.data.DataCoord.SaveBinlogPaths:input_type -> milvus.proto.data.SaveBinlogPathsRequest
-	60,  // 358: milvus.proto.data.DataCoord.GetRecoveryInfo:input_type -> milvus.proto.data.GetRecoveryInfoRequest
-	62,  // 359: milvus.proto.data.DataCoord.GetRecoveryInfoV2:input_type -> milvus.proto.data.GetRecoveryInfoRequestV2
-	63,  // 360: milvus.proto.data.DataCoord.GetChannelRecoveryInfo:input_type -> milvus.proto.data.GetChannelRecoveryInfoRequest
-	68,  // 361: milvus.proto.data.DataCoord.GetFlushedSegments:input_type -> milvus.proto.data.GetFlushedSegmentsRequest
-	66,  // 362: milvus.proto.data.DataCoord.GetSegmentsByStates:input_type -> milvus.proto.data.GetSegmentsByStatesRequest
-	236, // 363: milvus.proto.data.DataCoord.GetFlushAllState:input_type -> milvus.proto.milvus.GetFlushAllStateRequest
-	237, // 364: milvus.proto.data.DataCoord.ShowConfigurations:input_type -> milvus.proto.internal.ShowConfigurationsRequest
-	238, // 365: milvus.proto.data.DataCoord.GetMetrics:input_type -> milvus.proto.milvus.GetMetricsRequest
-	239, // 366: milvus.proto.data.DataCoord.ManualCompaction:input_type -> milvus.proto.milvus.ManualCompactionRequest
-	240, // 367: milvus.proto.data.DataCoord.GetCompactionState:input_type -> milvus.proto.milvus.GetCompactionStateRequest
-	241, // 368: milvus.proto.data.DataCoord.GetCompactionStateWithPlans:input_type -> milvus.proto.milvus.GetCompactionPlansRequest
-	81,  // 369: milvus.proto.data.DataCoord.WatchChannels:input_type -> milvus.proto.data.WatchChannelsRequest
-	99,  // 370: milvus.proto.data.DataCoord.GetFlushState:input_type -> milvus.proto.data.GetFlushStateRequest
-	85,  // 371: milvus.proto.data.DataCoord.DropVirtualChannel:input_type -> milvus.proto.data.DropVirtualChannelRequest
-	83,  // 372: milvus.proto.data.DataCoord.SetSegmentState:input_type -> milvus.proto.data.SetSegmentStateRequest
-	88,  // 373: milvus.proto.data.DataCoord.UpdateSegmentStatistics:input_type -> milvus.proto.data.UpdateSegmentStatisticsRequest
-	89,  // 374: milvus.proto.data.DataCoord.UpdateChannelCheckpoint:input_type -> milvus.proto.data.UpdateChannelCheckpointRequest
-	92,  // 375: milvus.proto.data.DataCoord.MarkSegmentsDropped:input_type -> milvus.proto.data.MarkSegmentsDroppedRequest
-	94,  // 376: milvus.proto.data.DataCoord.BroadcastAlteredCollection:input_type -> milvus.proto.data.AlterCollectionRequest
-	242, // 377: milvus.proto.data.DataCoord.CheckHealth:input_type -> milvus.proto.milvus.CheckHealthRequest
-	243, // 378: milvus.proto.data.DataCoord.CreateIndex:input_type -> milvus.proto.index.CreateIndexRequest
-	244, // 379: milvus.proto.data.DataCoord.AlterIndex:input_type -> milvus.proto.index.AlterIndexRequest
-	245, // 380: milvus.proto.data.DataCoord.GetIndexState:input_type -> milvus.proto.index.GetIndexStateRequest
-	246, // 381: milvus.proto.data.DataCoord.GetSegmentIndexState:input_type -> milvus.proto.index.GetSegmentIndexStateRequest
-	247, // 382: milvus.proto.data.DataCoord.GetIndexInfos:input_type -> milvus.proto.index.GetIndexInfoRequest
-	248, // 383: milvus.proto.data.DataCoord.DropIndex:input_type -> milvus.proto.index.DropIndexRequest
-	249, // 384: milvus.proto.data.DataCoord.DescribeIndex:input_type -> milvus.proto.index.DescribeIndexRequest
-	250, // 385: milvus.proto.data.DataCoord.GetIndexStatistics:input_type -> milvus.proto.index.GetIndexStatisticsRequest
-	251, // 386: milvus.proto.data.DataCoord.GetIndexBuildProgress:input_type -> milvus.proto.index.GetIndexBuildProgressRequest
-	252, // 387: milvus.proto.data.DataCoord.ListIndexes:input_type -> milvus.proto.index.ListIndexesRequest
-	96,  // 388: milvus.proto.data.DataCoord.GcConfirm:input_type -> milvus.proto.data.GcConfirmRequest
-	98,  // 389: milvus.proto.data.DataCoord.ReportDataNodeTtMsgs:input_type -> milvus.proto.data.ReportDataNodeTtMsgsRequest
-	128, // 390: milvus.proto.data.DataCoord.GcControl:input_type -> milvus.proto.data.GcControlRequest
-	253, // 391: milvus.proto.data.DataCoord.ImportV2:input_type -> milvus.proto.internal.ImportRequestInternal
-	254, // 392: milvus.proto.data.DataCoord.GetImportProgress:input_type -> milvus.proto.internal.GetImportProgressRequest
-	255, // 393: milvus.proto.data.DataCoord.ListImports:input_type -> milvus.proto.internal.ListImportsRequestInternal
-	147, // 394: milvus.proto.data.DataCoord.CreateSnapshot:input_type -> milvus.proto.data.CreateSnapshotRequest
-	148, // 395: milvus.proto.data.DataCoord.DropSnapshot:input_type -> milvus.proto.data.DropSnapshotRequest
-	149, // 396: milvus.proto.data.DataCoord.ListSnapshots:input_type -> milvus.proto.data.ListSnapshotsRequest
-	159, // 397: milvus.proto.data.DataCoord.DescribeSnapshot:input_type -> milvus.proto.data.DescribeSnapshotRequest
-	161, // 398: milvus.proto.data.DataCoord.RestoreSnapshot:input_type -> milvus.proto.data.RestoreSnapshotRequest
-	151, // 399: milvus.proto.data.DataCoord.ExportSnapshot:input_type -> milvus.proto.data.ExportSnapshotRequest
-	183, // 400: milvus.proto.data.DataCoord.GetExportSnapshotState:input_type -> milvus.proto.data.GetExportSnapshotStateRequest
-	163, // 401: milvus.proto.data.DataCoord.GetRestoreSnapshotState:input_type -> milvus.proto.data.GetRestoreSnapshotStateRequest
-	165, // 402: milvus.proto.data.DataCoord.ListRestoreSnapshotJobs:input_type -> milvus.proto.data.ListRestoreSnapshotJobsRequest
-	172, // 403: milvus.proto.data.DataCoord.PinSnapshotData:input_type -> milvus.proto.data.PinSnapshotDataRequest
-	174, // 404: milvus.proto.data.DataCoord.UnpinSnapshotData:input_type -> milvus.proto.data.UnpinSnapshotDataRequest
-	167, // 405: milvus.proto.data.DataCoord.BatchUpdateManifest:input_type -> milvus.proto.data.BatchUpdateManifestRequest
-	169, // 406: milvus.proto.data.DataCoord.CommitBackfillResult:input_type -> milvus.proto.data.CommitBackfillResultRequest
-	138, // 407: milvus.proto.data.DataCoord.RefreshExternalCollection:input_type -> milvus.proto.data.RefreshExternalCollectionRequest
-	140, // 408: milvus.proto.data.DataCoord.GetRefreshExternalCollectionProgress:input_type -> milvus.proto.data.GetRefreshExternalCollectionProgressRequest
-	145, // 409: milvus.proto.data.DataCoord.ListRefreshExternalCollectionJobs:input_type -> milvus.proto.data.ListRefreshExternalCollectionJobsRequest
-	175, // 410: milvus.proto.data.DataCoord.CommitImport:input_type -> milvus.proto.data.CommitImportRequest
-	176, // 411: milvus.proto.data.DataCoord.AbortImport:input_type -> milvus.proto.data.AbortImportRequest
-	177, // 412: milvus.proto.data.DataCoord.HandleCommitVchannel:input_type -> milvus.proto.data.HandleCommitVchannelRequest
-	256, // 413: milvus.proto.data.DataNode.GetComponentStates:input_type -> milvus.proto.milvus.GetComponentStatesRequest
-	257, // 414: milvus.proto.data.DataNode.GetStatisticsChannel:input_type -> milvus.proto.internal.GetStatisticsChannelRequest
-	43,  // 415: milvus.proto.data.DataNode.WatchDmChannels:input_type -> milvus.proto.data.WatchDmChannelsRequest
-	44,  // 416: milvus.proto.data.DataNode.FlushSegments:input_type -> milvus.proto.data.FlushSegmentsRequest
-	237, // 417: milvus.proto.data.DataNode.ShowConfigurations:input_type -> milvus.proto.internal.ShowConfigurationsRequest
-	238, // 418: milvus.proto.data.DataNode.GetMetrics:input_type -> milvus.proto.milvus.GetMetricsRequest
-	76,  // 419: milvus.proto.data.DataNode.CompactionV2:input_type -> milvus.proto.data.CompactionPlan
-	72,  // 420: milvus.proto.data.DataNode.GetCompactionState:input_type -> milvus.proto.data.CompactionStateRequest
-	74,  // 421: milvus.proto.data.DataNode.SyncSegments:input_type -> milvus.proto.data.SyncSegmentsRequest
-	90,  // 422: milvus.proto.data.DataNode.ResendSegmentStats:input_type -> milvus.proto.data.ResendSegmentStatsRequest
-	23,  // 423: milvus.proto.data.DataNode.FlushChannels:input_type -> milvus.proto.data.FlushChannelsRequest
-	100, // 424: milvus.proto.data.DataNode.NotifyChannelOperation:input_type -> milvus.proto.data.ChannelOperationsRequest
-	71,  // 425: milvus.proto.data.DataNode.CheckChannelOperationProgress:input_type -> milvus.proto.data.ChannelWatchInfo
-	102, // 426: milvus.proto.data.DataNode.PreImport:input_type -> milvus.proto.data.PreImportRequest
-	105, // 427: milvus.proto.data.DataNode.ImportV2:input_type -> milvus.proto.data.ImportRequest
-	106, // 428: milvus.proto.data.DataNode.QueryPreImport:input_type -> milvus.proto.data.QueryPreImportRequest
-	110, // 429: milvus.proto.data.DataNode.QueryImport:input_type -> milvus.proto.data.QueryImportRequest
-	113, // 430: milvus.proto.data.DataNode.DropImport:input_type -> milvus.proto.data.DropImportRequest
-	130, // 431: milvus.proto.data.DataNode.QuerySlot:input_type -> milvus.proto.data.QuerySlotRequest
-	135, // 432: milvus.proto.data.DataNode.DropCompactionPlan:input_type -> milvus.proto.data.DropCompactionPlanRequest
-	258, // 433: milvus.proto.data.DataNode.SyncFileResource:input_type -> milvus.proto.internal.SyncFileResourceRequest
-	18,  // 434: milvus.proto.data.DataCoord.Flush:output_type -> milvus.proto.data.FlushResponse
-	22,  // 435: milvus.proto.data.DataCoord.FlushAll:output_type -> milvus.proto.data.FlushAllResponse
-	26,  // 436: milvus.proto.data.DataCoord.AllocSegment:output_type -> milvus.proto.data.AllocSegmentResponse
-	29,  // 437: milvus.proto.data.DataCoord.AssignSegmentID:output_type -> milvus.proto.data.AssignSegmentIDResponse
-	34,  // 438: milvus.proto.data.DataCoord.GetSegmentInfo:output_type -> milvus.proto.data.GetSegmentInfoResponse
-	32,  // 439: milvus.proto.data.DataCoord.GetSegmentStates:output_type -> milvus.proto.data.GetSegmentStatesResponse
-	36,  // 440: milvus.proto.data.DataCoord.GetInsertBinlogPaths:output_type -> milvus.proto.data.GetInsertBinlogPathsResponse
-	38,  // 441: milvus.proto.data.DataCoord.GetCollectionStatistics:output_type -> milvus.proto.data.GetCollectionStatisticsResponse
-	40,  // 442: milvus.proto.data.DataCoord.GetPartitionStatistics:output_type -> milvus.proto.data.GetPartitionStatisticsResponse
-	259, // 443: milvus.proto.data.DataCoord.GetSegmentInfoChannel:output_type -> milvus.proto.milvus.StringResponse
-	213, // 444: milvus.proto.data.DataCoord.SaveBinlogPaths:output_type -> milvus.proto.common.Status
-	59,  // 445: milvus.proto.data.DataCoord.GetRecoveryInfo:output_type -> milvus.proto.data.GetRecoveryInfoResponse
-	61,  // 446: milvus.proto.data.DataCoord.GetRecoveryInfoV2:output_type -> milvus.proto.data.GetRecoveryInfoResponseV2
-	64,  // 447: milvus.proto.data.DataCoord.GetChannelRecoveryInfo:output_type -> milvus.proto.data.GetChannelRecoveryInfoResponse
-	69,  // 448: milvus.proto.data.DataCoord.GetFlushedSegments:output_type -> milvus.proto.data.GetFlushedSegmentsResponse
-	67,  // 449: milvus.proto.data.DataCoord.GetSegmentsByStates:output_type -> milvus.proto.data.GetSegmentsByStatesResponse
-	260, // 450: milvus.proto.data.DataCoord.GetFlushAllState:output_type -> milvus.proto.milvus.GetFlushAllStateResponse
-	261, // 451: milvus.proto.data.DataCoord.ShowConfigurations:output_type -> milvus.proto.internal.ShowConfigurationsResponse
-	262, // 452: milvus.proto.data.DataCoord.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
-	263, // 453: milvus.proto.data.DataCoord.ManualCompaction:output_type -> milvus.proto.milvus.ManualCompactionResponse
-	264, // 454: milvus.proto.data.DataCoord.GetCompactionState:output_type -> milvus.proto.milvus.GetCompactionStateResponse
-	265, // 455: milvus.proto.data.DataCoord.GetCompactionStateWithPlans:output_type -> milvus.proto.milvus.GetCompactionPlansResponse
-	82,  // 456: milvus.proto.data.DataCoord.WatchChannels:output_type -> milvus.proto.data.WatchChannelsResponse
-	266, // 457: milvus.proto.data.DataCoord.GetFlushState:output_type -> milvus.proto.milvus.GetFlushStateResponse
-	87,  // 458: milvus.proto.data.DataCoord.DropVirtualChannel:output_type -> milvus.proto.data.DropVirtualChannelResponse
-	84,  // 459: milvus.proto.data.DataCoord.SetSegmentState:output_type -> milvus.proto.data.SetSegmentStateResponse
-	213, // 460: milvus.proto.data.DataCoord.UpdateSegmentStatistics:output_type -> milvus.proto.common.Status
-	213, // 461: milvus.proto.data.DataCoord.UpdateChannelCheckpoint:output_type -> milvus.proto.common.Status
-	213, // 462: milvus.proto.data.DataCoord.MarkSegmentsDropped:output_type -> milvus.proto.common.Status
-	213, // 463: milvus.proto.data.DataCoord.BroadcastAlteredCollection:output_type -> milvus.proto.common.Status
-	267, // 464: milvus.proto.data.DataCoord.CheckHealth:output_type -> milvus.proto.milvus.CheckHealthResponse
-	213, // 465: milvus.proto.data.DataCoord.CreateIndex:output_type -> milvus.proto.common.Status
-	213, // 466: milvus.proto.data.DataCoord.AlterIndex:output_type -> milvus.proto.common.Status
-	268, // 467: milvus.proto.data.DataCoord.GetIndexState:output_type -> milvus.proto.index.GetIndexStateResponse
-	269, // 468: milvus.proto.data.DataCoord.GetSegmentIndexState:output_type -> milvus.proto.index.GetSegmentIndexStateResponse
-	270, // 469: milvus.proto.data.DataCoord.GetIndexInfos:output_type -> milvus.proto.index.GetIndexInfoResponse
-	213, // 470: milvus.proto.data.DataCoord.DropIndex:output_type -> milvus.proto.common.Status
-	271, // 471: milvus.proto.data.DataCoord.DescribeIndex:output_type -> milvus.proto.index.DescribeIndexResponse
-	272, // 472: milvus.proto.data.DataCoord.GetIndexStatistics:output_type -> milvus.proto.index.GetIndexStatisticsResponse
-	273, // 473: milvus.proto.data.DataCoord.GetIndexBuildProgress:output_type -> milvus.proto.index.GetIndexBuildProgressResponse
-	274, // 474: milvus.proto.data.DataCoord.ListIndexes:output_type -> milvus.proto.index.ListIndexesResponse
-	97,  // 475: milvus.proto.data.DataCoord.GcConfirm:output_type -> milvus.proto.data.GcConfirmResponse
-	213, // 476: milvus.proto.data.DataCoord.ReportDataNodeTtMsgs:output_type -> milvus.proto.common.Status
-	213, // 477: milvus.proto.data.DataCoord.GcControl:output_type -> milvus.proto.common.Status
-	275, // 478: milvus.proto.data.DataCoord.ImportV2:output_type -> milvus.proto.internal.ImportResponse
-	276, // 479: milvus.proto.data.DataCoord.GetImportProgress:output_type -> milvus.proto.internal.GetImportProgressResponse
-	277, // 480: milvus.proto.data.DataCoord.ListImports:output_type -> milvus.proto.internal.ListImportsResponse
-	213, // 481: milvus.proto.data.DataCoord.CreateSnapshot:output_type -> milvus.proto.common.Status
-	213, // 482: milvus.proto.data.DataCoord.DropSnapshot:output_type -> milvus.proto.common.Status
-	150, // 483: milvus.proto.data.DataCoord.ListSnapshots:output_type -> milvus.proto.data.ListSnapshotsResponse
-	160, // 484: milvus.proto.data.DataCoord.DescribeSnapshot:output_type -> milvus.proto.data.DescribeSnapshotResponse
-	162, // 485: milvus.proto.data.DataCoord.RestoreSnapshot:output_type -> milvus.proto.data.RestoreSnapshotResponse
-	152, // 486: milvus.proto.data.DataCoord.ExportSnapshot:output_type -> milvus.proto.data.ExportSnapshotResponse
-	184, // 487: milvus.proto.data.DataCoord.GetExportSnapshotState:output_type -> milvus.proto.data.GetExportSnapshotStateResponse
-	164, // 488: milvus.proto.data.DataCoord.GetRestoreSnapshotState:output_type -> milvus.proto.data.GetRestoreSnapshotStateResponse
-	166, // 489: milvus.proto.data.DataCoord.ListRestoreSnapshotJobs:output_type -> milvus.proto.data.ListRestoreSnapshotJobsResponse
-	173, // 490: milvus.proto.data.DataCoord.PinSnapshotData:output_type -> milvus.proto.data.PinSnapshotDataResponse
-	213, // 491: milvus.proto.data.DataCoord.UnpinSnapshotData:output_type -> milvus.proto.common.Status
-	213, // 492: milvus.proto.data.DataCoord.BatchUpdateManifest:output_type -> milvus.proto.common.Status
-	171, // 493: milvus.proto.data.DataCoord.CommitBackfillResult:output_type -> milvus.proto.data.CommitBackfillResultResponse
-	139, // 494: milvus.proto.data.DataCoord.RefreshExternalCollection:output_type -> milvus.proto.data.RefreshExternalCollectionResponse
-	144, // 495: milvus.proto.data.DataCoord.GetRefreshExternalCollectionProgress:output_type -> milvus.proto.data.GetRefreshExternalCollectionProgressResponse
-	146, // 496: milvus.proto.data.DataCoord.ListRefreshExternalCollectionJobs:output_type -> milvus.proto.data.ListRefreshExternalCollectionJobsResponse
-	213, // 497: milvus.proto.data.DataCoord.CommitImport:output_type -> milvus.proto.common.Status
-	213, // 498: milvus.proto.data.DataCoord.AbortImport:output_type -> milvus.proto.common.Status
-	213, // 499: milvus.proto.data.DataCoord.HandleCommitVchannel:output_type -> milvus.proto.common.Status
-	278, // 500: milvus.proto.data.DataNode.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
-	259, // 501: milvus.proto.data.DataNode.GetStatisticsChannel:output_type -> milvus.proto.milvus.StringResponse
-	213, // 502: milvus.proto.data.DataNode.WatchDmChannels:output_type -> milvus.proto.common.Status
-	213, // 503: milvus.proto.data.DataNode.FlushSegments:output_type -> milvus.proto.common.Status
-	261, // 504: milvus.proto.data.DataNode.ShowConfigurations:output_type -> milvus.proto.internal.ShowConfigurationsResponse
-	262, // 505: milvus.proto.data.DataNode.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
-	213, // 506: milvus.proto.data.DataNode.CompactionV2:output_type -> milvus.proto.common.Status
-	79,  // 507: milvus.proto.data.DataNode.GetCompactionState:output_type -> milvus.proto.data.CompactionStateResponse
-	213, // 508: milvus.proto.data.DataNode.SyncSegments:output_type -> milvus.proto.common.Status
-	91,  // 509: milvus.proto.data.DataNode.ResendSegmentStats:output_type -> milvus.proto.data.ResendSegmentStatsResponse
-	213, // 510: milvus.proto.data.DataNode.FlushChannels:output_type -> milvus.proto.common.Status
-	213, // 511: milvus.proto.data.DataNode.NotifyChannelOperation:output_type -> milvus.proto.common.Status
-	101, // 512: milvus.proto.data.DataNode.CheckChannelOperationProgress:output_type -> milvus.proto.data.ChannelOperationProgressResponse
-	213, // 513: milvus.proto.data.DataNode.PreImport:output_type -> milvus.proto.common.Status
-	213, // 514: milvus.proto.data.DataNode.ImportV2:output_type -> milvus.proto.common.Status
-	109, // 515: milvus.proto.data.DataNode.QueryPreImport:output_type -> milvus.proto.data.QueryPreImportResponse
-	112, // 516: milvus.proto.data.DataNode.QueryImport:output_type -> milvus.proto.data.QueryImportResponse
-	213, // 517: milvus.proto.data.DataNode.DropImport:output_type -> milvus.proto.common.Status
-	131, // 518: milvus.proto.data.DataNode.QuerySlot:output_type -> milvus.proto.data.QuerySlotResponse
-	213, // 519: milvus.proto.data.DataNode.DropCompactionPlan:output_type -> milvus.proto.common.Status
-	213, // 520: milvus.proto.data.DataNode.SyncFileResource:output_type -> milvus.proto.common.Status
-	434, // [434:521] is the sub-list for method output_type
-	347, // [347:434] is the sub-list for method input_type
-	347, // [347:347] is the sub-list for extension type_name
-	347, // [347:347] is the sub-list for extension extendee
-	0,   // [0:347] is the sub-list for field type_name
+	16,  // 236: milvus.proto.data.ReshardTask.state:type_name -> milvus.proto.data.ReshardTask.State
+	17,  // 237: milvus.proto.data.ImportTaskV3.state:type_name -> milvus.proto.data.ImportTaskV3.State
+	105, // 238: milvus.proto.data.ImportTaskV3.log_id_range:type_name -> milvus.proto.data.IDRange
+	242, // 239: milvus.proto.data.ReshardTaskRequest.storage_config:type_name -> milvus.proto.index.StorageConfig
+	233, // 240: milvus.proto.data.ReshardTaskRequest.plugin_context:type_name -> milvus.proto.common.KeyValuePair
+	105, // 241: milvus.proto.data.ImportTaskV3Request.log_id_range:type_name -> milvus.proto.data.IDRange
+	242, // 242: milvus.proto.data.ImportTaskV3Request.storage_config:type_name -> milvus.proto.index.StorageConfig
+	233, // 243: milvus.proto.data.ImportTaskV3Request.plugin_context:type_name -> milvus.proto.common.KeyValuePair
+	135, // 244: milvus.proto.data.ImportResultManifest.segments:type_name -> milvus.proto.data.SegmentResult
+	57,  // 245: milvus.proto.data.SegmentResult.insert_logs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 246: milvus.proto.data.SegmentResult.pk_stats_log:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 247: milvus.proto.data.SegmentResult.bm25_logs:type_name -> milvus.proto.data.FieldBinlog
+	221, // 248: milvus.proto.data.SegmentResult.text_stats_logs:type_name -> milvus.proto.data.SegmentResult.TextStatsLogsEntry
+	49,  // 249: milvus.proto.data.SegmentResult.statistics:type_name -> milvus.proto.data.Statistics
+	228, // 250: milvus.proto.data.QueryReshardTaskResponse.status:type_name -> milvus.proto.common.Status
+	16,  // 251: milvus.proto.data.QueryReshardTaskResponse.state:type_name -> milvus.proto.data.ReshardTask.State
+	228, // 252: milvus.proto.data.QueryImportTaskV3Response.status:type_name -> milvus.proto.common.Status
+	17,  // 253: milvus.proto.data.QueryImportTaskV3Response.state:type_name -> milvus.proto.data.ImportTaskV3.State
+	227, // 254: milvus.proto.data.GcControlRequest.base:type_name -> milvus.proto.common.MsgBase
+	10,  // 255: milvus.proto.data.GcControlRequest.command:type_name -> milvus.proto.data.GcCommand
+	233, // 256: milvus.proto.data.GcControlRequest.params:type_name -> milvus.proto.common.KeyValuePair
+	228, // 257: milvus.proto.data.QuerySlotResponse.status:type_name -> milvus.proto.common.Status
+	13,  // 258: milvus.proto.data.CompactionTarget.intent:type_name -> milvus.proto.data.TargetIntent
+	222, // 259: milvus.proto.data.CompactionTarget.properties:type_name -> milvus.proto.data.CompactionTarget.PropertiesEntry
+	12,  // 260: milvus.proto.data.CompactionTarget.state:type_name -> milvus.proto.data.TargetState
+	3,   // 261: milvus.proto.data.CompactionTask.type:type_name -> milvus.proto.data.CompactionType
+	11,  // 262: milvus.proto.data.CompactionTask.state:type_name -> milvus.proto.data.CompactionTaskState
+	231, // 263: milvus.proto.data.CompactionTask.pos:type_name -> milvus.proto.msg.MsgPosition
+	234, // 264: milvus.proto.data.CompactionTask.schema:type_name -> milvus.proto.schema.CollectionSchema
+	239, // 265: milvus.proto.data.CompactionTask.clustering_key_field:type_name -> milvus.proto.schema.FieldSchema
+	105, // 266: milvus.proto.data.CompactionTask.pre_allocated_segmentIDs:type_name -> milvus.proto.data.IDRange
+	236, // 267: milvus.proto.data.CompactionTask.diff_functions:type_name -> milvus.proto.schema.FunctionSchema
+	227, // 268: milvus.proto.data.RefreshExternalCollectionTaskRequest.base:type_name -> milvus.proto.common.MsgBase
+	48,  // 269: milvus.proto.data.RefreshExternalCollectionTaskRequest.currentSegments:type_name -> milvus.proto.data.SegmentInfo
+	242, // 270: milvus.proto.data.RefreshExternalCollectionTaskRequest.storage_config:type_name -> milvus.proto.index.StorageConfig
+	234, // 271: milvus.proto.data.RefreshExternalCollectionTaskRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
+	105, // 272: milvus.proto.data.RefreshExternalCollectionTaskRequest.pre_allocated_segment_ids:type_name -> milvus.proto.data.IDRange
+	228, // 273: milvus.proto.data.RefreshExternalCollectionTaskResponse.status:type_name -> milvus.proto.common.Status
+	48,  // 274: milvus.proto.data.RefreshExternalCollectionTaskResponse.updatedSegments:type_name -> milvus.proto.data.SegmentInfo
+	246, // 275: milvus.proto.data.RefreshExternalCollectionTaskResponse.state:type_name -> milvus.proto.index.JobState
+	227, // 276: milvus.proto.data.RefreshExternalCollectionRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 277: milvus.proto.data.RefreshExternalCollectionResponse.status:type_name -> milvus.proto.common.Status
+	227, // 278: milvus.proto.data.GetRefreshExternalCollectionProgressRequest.base:type_name -> milvus.proto.common.MsgBase
+	246, // 279: milvus.proto.data.ExternalCollectionRefreshJob.state:type_name -> milvus.proto.index.JobState
+	246, // 280: milvus.proto.data.ExternalCollectionRefreshTask.state:type_name -> milvus.proto.index.JobState
+	48,  // 281: milvus.proto.data.ExternalCollectionRefreshTask.updated_segments:type_name -> milvus.proto.data.SegmentInfo
+	228, // 282: milvus.proto.data.GetRefreshExternalCollectionProgressResponse.status:type_name -> milvus.proto.common.Status
+	155, // 283: milvus.proto.data.GetRefreshExternalCollectionProgressResponse.job_info:type_name -> milvus.proto.data.ExternalCollectionRefreshJob
+	227, // 284: milvus.proto.data.ListRefreshExternalCollectionJobsRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 285: milvus.proto.data.ListRefreshExternalCollectionJobsResponse.status:type_name -> milvus.proto.common.Status
+	155, // 286: milvus.proto.data.ListRefreshExternalCollectionJobsResponse.jobs:type_name -> milvus.proto.data.ExternalCollectionRefreshJob
+	227, // 287: milvus.proto.data.CreateSnapshotRequest.base:type_name -> milvus.proto.common.MsgBase
+	227, // 288: milvus.proto.data.DropSnapshotRequest.base:type_name -> milvus.proto.common.MsgBase
+	227, // 289: milvus.proto.data.ListSnapshotsRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 290: milvus.proto.data.ListSnapshotsResponse.status:type_name -> milvus.proto.common.Status
+	227, // 291: milvus.proto.data.ExportSnapshotRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 292: milvus.proto.data.ExportSnapshotResponse.status:type_name -> milvus.proto.common.Status
+	1,   // 293: milvus.proto.data.SegmentDescription.segment_level:type_name -> milvus.proto.data.SegmentLevel
+	57,  // 294: milvus.proto.data.SegmentDescription.binlogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 295: milvus.proto.data.SegmentDescription.deltalogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 296: milvus.proto.data.SegmentDescription.statslogs:type_name -> milvus.proto.data.FieldBinlog
+	57,  // 297: milvus.proto.data.SegmentDescription.bm25_statslogs:type_name -> milvus.proto.data.FieldBinlog
+	223, // 298: milvus.proto.data.SegmentDescription.text_index_files:type_name -> milvus.proto.data.SegmentDescription.TextIndexFilesEntry
+	224, // 299: milvus.proto.data.SegmentDescription.json_key_index_files:type_name -> milvus.proto.data.SegmentDescription.JsonKeyIndexFilesEntry
+	243, // 300: milvus.proto.data.SegmentDescription.index_files:type_name -> milvus.proto.index.IndexFilePathInfo
+	231, // 301: milvus.proto.data.SegmentDescription.start_position:type_name -> milvus.proto.msg.MsgPosition
+	231, // 302: milvus.proto.data.SegmentDescription.dml_position:type_name -> milvus.proto.msg.MsgPosition
+	234, // 303: milvus.proto.data.CollectionDescription.schema:type_name -> milvus.proto.schema.CollectionSchema
+	247, // 304: milvus.proto.data.CollectionDescription.consistency_level:type_name -> milvus.proto.common.ConsistencyLevel
+	233, // 305: milvus.proto.data.CollectionDescription.properties:type_name -> milvus.proto.common.KeyValuePair
+	225, // 306: milvus.proto.data.CollectionDescription.partitions:type_name -> milvus.proto.data.CollectionDescription.PartitionsEntry
+	6,   // 307: milvus.proto.data.SnapshotInfo.state:type_name -> milvus.proto.data.SnapshotState
+	226, // 308: milvus.proto.data.SnapshotInfo.pin_expire_at_ms:type_name -> milvus.proto.data.SnapshotInfo.PinExpireAtMsEntry
+	231, // 309: milvus.proto.data.SnapshotInfo.channel_seek_positions:type_name -> milvus.proto.msg.MsgPosition
+	169, // 310: milvus.proto.data.SnapshotMetadata.snapshot_info:type_name -> milvus.proto.data.SnapshotInfo
+	168, // 311: milvus.proto.data.SnapshotMetadata.collection:type_name -> milvus.proto.data.CollectionDescription
+	248, // 312: milvus.proto.data.SnapshotMetadata.indexes:type_name -> milvus.proto.index.IndexInfo
+	170, // 313: milvus.proto.data.SnapshotMetadata.storagev2_manifest_list:type_name -> milvus.proto.data.StorageV2SegmentManifest
+	14,  // 314: milvus.proto.data.SnapshotMetadata.layout:type_name -> milvus.proto.data.SnapshotLayout
+	7,   // 315: milvus.proto.data.RestoreSnapshotInfo.state:type_name -> milvus.proto.data.RestoreSnapshotState
+	227, // 316: milvus.proto.data.DescribeSnapshotRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 317: milvus.proto.data.DescribeSnapshotResponse.status:type_name -> milvus.proto.common.Status
+	169, // 318: milvus.proto.data.DescribeSnapshotResponse.snapshot_info:type_name -> milvus.proto.data.SnapshotInfo
+	168, // 319: milvus.proto.data.DescribeSnapshotResponse.collection_info:type_name -> milvus.proto.data.CollectionDescription
+	248, // 320: milvus.proto.data.DescribeSnapshotResponse.index_infos:type_name -> milvus.proto.index.IndexInfo
+	227, // 321: milvus.proto.data.RestoreSnapshotRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 322: milvus.proto.data.RestoreSnapshotResponse.status:type_name -> milvus.proto.common.Status
+	227, // 323: milvus.proto.data.GetRestoreSnapshotStateRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 324: milvus.proto.data.GetRestoreSnapshotStateResponse.status:type_name -> milvus.proto.common.Status
+	172, // 325: milvus.proto.data.GetRestoreSnapshotStateResponse.info:type_name -> milvus.proto.data.RestoreSnapshotInfo
+	227, // 326: milvus.proto.data.ListRestoreSnapshotJobsRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 327: milvus.proto.data.ListRestoreSnapshotJobsResponse.status:type_name -> milvus.proto.common.Status
+	172, // 328: milvus.proto.data.ListRestoreSnapshotJobsResponse.jobs:type_name -> milvus.proto.data.RestoreSnapshotInfo
+	227, // 329: milvus.proto.data.BatchUpdateManifestRequest.base:type_name -> milvus.proto.common.MsgBase
+	182, // 330: milvus.proto.data.BatchUpdateManifestRequest.items:type_name -> milvus.proto.data.BatchUpdateManifestItem
+	227, // 331: milvus.proto.data.CommitBackfillResultRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 332: milvus.proto.data.CommitBackfillResultResponse.status:type_name -> milvus.proto.common.Status
+	184, // 333: milvus.proto.data.CommitBackfillResultResponse.segment_statuses:type_name -> milvus.proto.data.CommitBackfillResultSegmentStatus
+	227, // 334: milvus.proto.data.PinSnapshotDataRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 335: milvus.proto.data.PinSnapshotDataResponse.status:type_name -> milvus.proto.common.Status
+	227, // 336: milvus.proto.data.UnpinSnapshotDataRequest.base:type_name -> milvus.proto.common.MsgBase
+	227, // 337: milvus.proto.data.CommitImportRequest.base:type_name -> milvus.proto.common.MsgBase
+	227, // 338: milvus.proto.data.AbortImportRequest.base:type_name -> milvus.proto.common.MsgBase
+	227, // 339: milvus.proto.data.HandleCommitVchannelRequest.base:type_name -> milvus.proto.common.MsgBase
+	48,  // 340: milvus.proto.data.ExternalCollectionRefreshTaskResult.updated_segments:type_name -> milvus.proto.data.SegmentInfo
+	193, // 341: milvus.proto.data.LoadResourceStatistics.column_groups:type_name -> milvus.proto.data.ColumnGroupStatistics
+	15,  // 342: milvus.proto.data.ExportSnapshotJob.state:type_name -> milvus.proto.data.ExportSnapshotJobState
+	15,  // 343: milvus.proto.data.ExportSnapshotJobInfo.state:type_name -> milvus.proto.data.ExportSnapshotJobState
+	227, // 344: milvus.proto.data.GetExportSnapshotStateRequest.base:type_name -> milvus.proto.common.MsgBase
+	228, // 345: milvus.proto.data.GetExportSnapshotStateResponse.status:type_name -> milvus.proto.common.Status
+	196, // 346: milvus.proto.data.GetExportSnapshotStateResponse.info:type_name -> milvus.proto.data.ExportSnapshotJobInfo
+	231, // 347: milvus.proto.data.FlushResponse.ChannelCpsEntry.value:type_name -> milvus.proto.msg.MsgPosition
+	231, // 348: milvus.proto.data.FlushResult.ChannelCpsEntry.value:type_name -> milvus.proto.msg.MsgPosition
+	249, // 349: milvus.proto.data.FlushAllResponse.FlushAllMsgsEntry.value:type_name -> milvus.proto.common.ImmutableMessage
+	231, // 350: milvus.proto.data.GetSegmentInfoResponse.ChannelCheckpointEntry.value:type_name -> milvus.proto.msg.MsgPosition
+	58,  // 351: milvus.proto.data.SegmentInfo.TextStatsLogsEntry.value:type_name -> milvus.proto.data.TextIndexStats
+	59,  // 352: milvus.proto.data.SegmentInfo.JsonKeyStatsEntry.value:type_name -> milvus.proto.data.JsonKeyStats
+	58,  // 353: milvus.proto.data.SegmentBinlogs.TextStatsLogsEntry.value:type_name -> milvus.proto.data.TextIndexStats
+	75,  // 354: milvus.proto.data.SyncSegmentsRequest.SegmentInfosEntry.value:type_name -> milvus.proto.data.SyncSegmentInfo
+	58,  // 355: milvus.proto.data.CompactionSegment.TextStatsLogsEntry.value:type_name -> milvus.proto.data.TextIndexStats
+	250, // 356: milvus.proto.data.WatchChannelsRequest.ChannelWalNamesEntry.value:type_name -> milvus.proto.common.WALName
+	109, // 357: milvus.proto.data.ImportFileStats.HashedStatsEntry.value:type_name -> milvus.proto.data.PartitionImportStats
+	58,  // 358: milvus.proto.data.CopySegmentSource.TextIndexFilesEntry.value:type_name -> milvus.proto.data.TextIndexStats
+	59,  // 359: milvus.proto.data.CopySegmentSource.JsonKeyIndexFilesEntry.value:type_name -> milvus.proto.data.JsonKeyStats
+	122, // 360: milvus.proto.data.CopySegmentResult.IndexInfosEntry.value:type_name -> milvus.proto.data.VectorScalarIndexInfo
+	58,  // 361: milvus.proto.data.CopySegmentResult.TextIndexInfosEntry.value:type_name -> milvus.proto.data.TextIndexStats
+	59,  // 362: milvus.proto.data.CopySegmentResult.JsonKeyIndexInfosEntry.value:type_name -> milvus.proto.data.JsonKeyStats
+	58,  // 363: milvus.proto.data.SegmentResult.TextStatsLogsEntry.value:type_name -> milvus.proto.data.TextIndexStats
+	58,  // 364: milvus.proto.data.SegmentDescription.TextIndexFilesEntry.value:type_name -> milvus.proto.data.TextIndexStats
+	59,  // 365: milvus.proto.data.SegmentDescription.JsonKeyIndexFilesEntry.value:type_name -> milvus.proto.data.JsonKeyStats
+	19,  // 366: milvus.proto.data.DataCoord.Flush:input_type -> milvus.proto.data.FlushRequest
+	22,  // 367: milvus.proto.data.DataCoord.FlushAll:input_type -> milvus.proto.data.FlushAllRequest
+	27,  // 368: milvus.proto.data.DataCoord.AllocSegment:input_type -> milvus.proto.data.AllocSegmentRequest
+	29,  // 369: milvus.proto.data.DataCoord.AssignSegmentID:input_type -> milvus.proto.data.AssignSegmentIDRequest
+	35,  // 370: milvus.proto.data.DataCoord.GetSegmentInfo:input_type -> milvus.proto.data.GetSegmentInfoRequest
+	32,  // 371: milvus.proto.data.DataCoord.GetSegmentStates:input_type -> milvus.proto.data.GetSegmentStatesRequest
+	37,  // 372: milvus.proto.data.DataCoord.GetInsertBinlogPaths:input_type -> milvus.proto.data.GetInsertBinlogPathsRequest
+	39,  // 373: milvus.proto.data.DataCoord.GetCollectionStatistics:input_type -> milvus.proto.data.GetCollectionStatisticsRequest
+	41,  // 374: milvus.proto.data.DataCoord.GetPartitionStatistics:input_type -> milvus.proto.data.GetPartitionStatisticsRequest
+	43,  // 375: milvus.proto.data.DataCoord.GetSegmentInfoChannel:input_type -> milvus.proto.data.GetSegmentInfoChannelRequest
+	51,  // 376: milvus.proto.data.DataCoord.SaveBinlogPaths:input_type -> milvus.proto.data.SaveBinlogPathsRequest
+	62,  // 377: milvus.proto.data.DataCoord.GetRecoveryInfo:input_type -> milvus.proto.data.GetRecoveryInfoRequest
+	64,  // 378: milvus.proto.data.DataCoord.GetRecoveryInfoV2:input_type -> milvus.proto.data.GetRecoveryInfoRequestV2
+	65,  // 379: milvus.proto.data.DataCoord.GetChannelRecoveryInfo:input_type -> milvus.proto.data.GetChannelRecoveryInfoRequest
+	70,  // 380: milvus.proto.data.DataCoord.GetFlushedSegments:input_type -> milvus.proto.data.GetFlushedSegmentsRequest
+	68,  // 381: milvus.proto.data.DataCoord.GetSegmentsByStates:input_type -> milvus.proto.data.GetSegmentsByStatesRequest
+	251, // 382: milvus.proto.data.DataCoord.GetFlushAllState:input_type -> milvus.proto.milvus.GetFlushAllStateRequest
+	252, // 383: milvus.proto.data.DataCoord.ShowConfigurations:input_type -> milvus.proto.internal.ShowConfigurationsRequest
+	253, // 384: milvus.proto.data.DataCoord.GetMetrics:input_type -> milvus.proto.milvus.GetMetricsRequest
+	254, // 385: milvus.proto.data.DataCoord.ManualCompaction:input_type -> milvus.proto.milvus.ManualCompactionRequest
+	255, // 386: milvus.proto.data.DataCoord.GetCompactionState:input_type -> milvus.proto.milvus.GetCompactionStateRequest
+	256, // 387: milvus.proto.data.DataCoord.GetCompactionStateWithPlans:input_type -> milvus.proto.milvus.GetCompactionPlansRequest
+	83,  // 388: milvus.proto.data.DataCoord.WatchChannels:input_type -> milvus.proto.data.WatchChannelsRequest
+	101, // 389: milvus.proto.data.DataCoord.GetFlushState:input_type -> milvus.proto.data.GetFlushStateRequest
+	87,  // 390: milvus.proto.data.DataCoord.DropVirtualChannel:input_type -> milvus.proto.data.DropVirtualChannelRequest
+	85,  // 391: milvus.proto.data.DataCoord.SetSegmentState:input_type -> milvus.proto.data.SetSegmentStateRequest
+	90,  // 392: milvus.proto.data.DataCoord.UpdateSegmentStatistics:input_type -> milvus.proto.data.UpdateSegmentStatisticsRequest
+	91,  // 393: milvus.proto.data.DataCoord.UpdateChannelCheckpoint:input_type -> milvus.proto.data.UpdateChannelCheckpointRequest
+	94,  // 394: milvus.proto.data.DataCoord.MarkSegmentsDropped:input_type -> milvus.proto.data.MarkSegmentsDroppedRequest
+	96,  // 395: milvus.proto.data.DataCoord.BroadcastAlteredCollection:input_type -> milvus.proto.data.AlterCollectionRequest
+	257, // 396: milvus.proto.data.DataCoord.CheckHealth:input_type -> milvus.proto.milvus.CheckHealthRequest
+	258, // 397: milvus.proto.data.DataCoord.CreateIndex:input_type -> milvus.proto.index.CreateIndexRequest
+	259, // 398: milvus.proto.data.DataCoord.AlterIndex:input_type -> milvus.proto.index.AlterIndexRequest
+	260, // 399: milvus.proto.data.DataCoord.GetIndexState:input_type -> milvus.proto.index.GetIndexStateRequest
+	261, // 400: milvus.proto.data.DataCoord.GetSegmentIndexState:input_type -> milvus.proto.index.GetSegmentIndexStateRequest
+	262, // 401: milvus.proto.data.DataCoord.GetIndexInfos:input_type -> milvus.proto.index.GetIndexInfoRequest
+	263, // 402: milvus.proto.data.DataCoord.DropIndex:input_type -> milvus.proto.index.DropIndexRequest
+	264, // 403: milvus.proto.data.DataCoord.DescribeIndex:input_type -> milvus.proto.index.DescribeIndexRequest
+	265, // 404: milvus.proto.data.DataCoord.GetIndexStatistics:input_type -> milvus.proto.index.GetIndexStatisticsRequest
+	266, // 405: milvus.proto.data.DataCoord.GetIndexBuildProgress:input_type -> milvus.proto.index.GetIndexBuildProgressRequest
+	267, // 406: milvus.proto.data.DataCoord.ListIndexes:input_type -> milvus.proto.index.ListIndexesRequest
+	98,  // 407: milvus.proto.data.DataCoord.GcConfirm:input_type -> milvus.proto.data.GcConfirmRequest
+	100, // 408: milvus.proto.data.DataCoord.ReportDataNodeTtMsgs:input_type -> milvus.proto.data.ReportDataNodeTtMsgsRequest
+	142, // 409: milvus.proto.data.DataCoord.GcControl:input_type -> milvus.proto.data.GcControlRequest
+	268, // 410: milvus.proto.data.DataCoord.ImportV2:input_type -> milvus.proto.internal.ImportRequestInternal
+	269, // 411: milvus.proto.data.DataCoord.GetImportProgress:input_type -> milvus.proto.internal.GetImportProgressRequest
+	270, // 412: milvus.proto.data.DataCoord.ListImports:input_type -> milvus.proto.internal.ListImportsRequestInternal
+	161, // 413: milvus.proto.data.DataCoord.CreateSnapshot:input_type -> milvus.proto.data.CreateSnapshotRequest
+	162, // 414: milvus.proto.data.DataCoord.DropSnapshot:input_type -> milvus.proto.data.DropSnapshotRequest
+	163, // 415: milvus.proto.data.DataCoord.ListSnapshots:input_type -> milvus.proto.data.ListSnapshotsRequest
+	173, // 416: milvus.proto.data.DataCoord.DescribeSnapshot:input_type -> milvus.proto.data.DescribeSnapshotRequest
+	175, // 417: milvus.proto.data.DataCoord.RestoreSnapshot:input_type -> milvus.proto.data.RestoreSnapshotRequest
+	165, // 418: milvus.proto.data.DataCoord.ExportSnapshot:input_type -> milvus.proto.data.ExportSnapshotRequest
+	197, // 419: milvus.proto.data.DataCoord.GetExportSnapshotState:input_type -> milvus.proto.data.GetExportSnapshotStateRequest
+	177, // 420: milvus.proto.data.DataCoord.GetRestoreSnapshotState:input_type -> milvus.proto.data.GetRestoreSnapshotStateRequest
+	179, // 421: milvus.proto.data.DataCoord.ListRestoreSnapshotJobs:input_type -> milvus.proto.data.ListRestoreSnapshotJobsRequest
+	186, // 422: milvus.proto.data.DataCoord.PinSnapshotData:input_type -> milvus.proto.data.PinSnapshotDataRequest
+	188, // 423: milvus.proto.data.DataCoord.UnpinSnapshotData:input_type -> milvus.proto.data.UnpinSnapshotDataRequest
+	181, // 424: milvus.proto.data.DataCoord.BatchUpdateManifest:input_type -> milvus.proto.data.BatchUpdateManifestRequest
+	183, // 425: milvus.proto.data.DataCoord.CommitBackfillResult:input_type -> milvus.proto.data.CommitBackfillResultRequest
+	152, // 426: milvus.proto.data.DataCoord.RefreshExternalCollection:input_type -> milvus.proto.data.RefreshExternalCollectionRequest
+	154, // 427: milvus.proto.data.DataCoord.GetRefreshExternalCollectionProgress:input_type -> milvus.proto.data.GetRefreshExternalCollectionProgressRequest
+	159, // 428: milvus.proto.data.DataCoord.ListRefreshExternalCollectionJobs:input_type -> milvus.proto.data.ListRefreshExternalCollectionJobsRequest
+	189, // 429: milvus.proto.data.DataCoord.CommitImport:input_type -> milvus.proto.data.CommitImportRequest
+	190, // 430: milvus.proto.data.DataCoord.AbortImport:input_type -> milvus.proto.data.AbortImportRequest
+	191, // 431: milvus.proto.data.DataCoord.HandleCommitVchannel:input_type -> milvus.proto.data.HandleCommitVchannelRequest
+	271, // 432: milvus.proto.data.DataNode.GetComponentStates:input_type -> milvus.proto.milvus.GetComponentStatesRequest
+	272, // 433: milvus.proto.data.DataNode.GetStatisticsChannel:input_type -> milvus.proto.internal.GetStatisticsChannelRequest
+	45,  // 434: milvus.proto.data.DataNode.WatchDmChannels:input_type -> milvus.proto.data.WatchDmChannelsRequest
+	46,  // 435: milvus.proto.data.DataNode.FlushSegments:input_type -> milvus.proto.data.FlushSegmentsRequest
+	252, // 436: milvus.proto.data.DataNode.ShowConfigurations:input_type -> milvus.proto.internal.ShowConfigurationsRequest
+	253, // 437: milvus.proto.data.DataNode.GetMetrics:input_type -> milvus.proto.milvus.GetMetricsRequest
+	78,  // 438: milvus.proto.data.DataNode.CompactionV2:input_type -> milvus.proto.data.CompactionPlan
+	74,  // 439: milvus.proto.data.DataNode.GetCompactionState:input_type -> milvus.proto.data.CompactionStateRequest
+	76,  // 440: milvus.proto.data.DataNode.SyncSegments:input_type -> milvus.proto.data.SyncSegmentsRequest
+	92,  // 441: milvus.proto.data.DataNode.ResendSegmentStats:input_type -> milvus.proto.data.ResendSegmentStatsRequest
+	25,  // 442: milvus.proto.data.DataNode.FlushChannels:input_type -> milvus.proto.data.FlushChannelsRequest
+	102, // 443: milvus.proto.data.DataNode.NotifyChannelOperation:input_type -> milvus.proto.data.ChannelOperationsRequest
+	73,  // 444: milvus.proto.data.DataNode.CheckChannelOperationProgress:input_type -> milvus.proto.data.ChannelWatchInfo
+	104, // 445: milvus.proto.data.DataNode.PreImport:input_type -> milvus.proto.data.PreImportRequest
+	107, // 446: milvus.proto.data.DataNode.ImportV2:input_type -> milvus.proto.data.ImportRequest
+	108, // 447: milvus.proto.data.DataNode.QueryPreImport:input_type -> milvus.proto.data.QueryPreImportRequest
+	112, // 448: milvus.proto.data.DataNode.QueryImport:input_type -> milvus.proto.data.QueryImportRequest
+	115, // 449: milvus.proto.data.DataNode.DropImport:input_type -> milvus.proto.data.DropImportRequest
+	144, // 450: milvus.proto.data.DataNode.QuerySlot:input_type -> milvus.proto.data.QuerySlotRequest
+	149, // 451: milvus.proto.data.DataNode.DropCompactionPlan:input_type -> milvus.proto.data.DropCompactionPlanRequest
+	273, // 452: milvus.proto.data.DataNode.SyncFileResource:input_type -> milvus.proto.internal.SyncFileResourceRequest
+	20,  // 453: milvus.proto.data.DataCoord.Flush:output_type -> milvus.proto.data.FlushResponse
+	24,  // 454: milvus.proto.data.DataCoord.FlushAll:output_type -> milvus.proto.data.FlushAllResponse
+	28,  // 455: milvus.proto.data.DataCoord.AllocSegment:output_type -> milvus.proto.data.AllocSegmentResponse
+	31,  // 456: milvus.proto.data.DataCoord.AssignSegmentID:output_type -> milvus.proto.data.AssignSegmentIDResponse
+	36,  // 457: milvus.proto.data.DataCoord.GetSegmentInfo:output_type -> milvus.proto.data.GetSegmentInfoResponse
+	34,  // 458: milvus.proto.data.DataCoord.GetSegmentStates:output_type -> milvus.proto.data.GetSegmentStatesResponse
+	38,  // 459: milvus.proto.data.DataCoord.GetInsertBinlogPaths:output_type -> milvus.proto.data.GetInsertBinlogPathsResponse
+	40,  // 460: milvus.proto.data.DataCoord.GetCollectionStatistics:output_type -> milvus.proto.data.GetCollectionStatisticsResponse
+	42,  // 461: milvus.proto.data.DataCoord.GetPartitionStatistics:output_type -> milvus.proto.data.GetPartitionStatisticsResponse
+	274, // 462: milvus.proto.data.DataCoord.GetSegmentInfoChannel:output_type -> milvus.proto.milvus.StringResponse
+	228, // 463: milvus.proto.data.DataCoord.SaveBinlogPaths:output_type -> milvus.proto.common.Status
+	61,  // 464: milvus.proto.data.DataCoord.GetRecoveryInfo:output_type -> milvus.proto.data.GetRecoveryInfoResponse
+	63,  // 465: milvus.proto.data.DataCoord.GetRecoveryInfoV2:output_type -> milvus.proto.data.GetRecoveryInfoResponseV2
+	66,  // 466: milvus.proto.data.DataCoord.GetChannelRecoveryInfo:output_type -> milvus.proto.data.GetChannelRecoveryInfoResponse
+	71,  // 467: milvus.proto.data.DataCoord.GetFlushedSegments:output_type -> milvus.proto.data.GetFlushedSegmentsResponse
+	69,  // 468: milvus.proto.data.DataCoord.GetSegmentsByStates:output_type -> milvus.proto.data.GetSegmentsByStatesResponse
+	275, // 469: milvus.proto.data.DataCoord.GetFlushAllState:output_type -> milvus.proto.milvus.GetFlushAllStateResponse
+	276, // 470: milvus.proto.data.DataCoord.ShowConfigurations:output_type -> milvus.proto.internal.ShowConfigurationsResponse
+	277, // 471: milvus.proto.data.DataCoord.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
+	278, // 472: milvus.proto.data.DataCoord.ManualCompaction:output_type -> milvus.proto.milvus.ManualCompactionResponse
+	279, // 473: milvus.proto.data.DataCoord.GetCompactionState:output_type -> milvus.proto.milvus.GetCompactionStateResponse
+	280, // 474: milvus.proto.data.DataCoord.GetCompactionStateWithPlans:output_type -> milvus.proto.milvus.GetCompactionPlansResponse
+	84,  // 475: milvus.proto.data.DataCoord.WatchChannels:output_type -> milvus.proto.data.WatchChannelsResponse
+	281, // 476: milvus.proto.data.DataCoord.GetFlushState:output_type -> milvus.proto.milvus.GetFlushStateResponse
+	89,  // 477: milvus.proto.data.DataCoord.DropVirtualChannel:output_type -> milvus.proto.data.DropVirtualChannelResponse
+	86,  // 478: milvus.proto.data.DataCoord.SetSegmentState:output_type -> milvus.proto.data.SetSegmentStateResponse
+	228, // 479: milvus.proto.data.DataCoord.UpdateSegmentStatistics:output_type -> milvus.proto.common.Status
+	228, // 480: milvus.proto.data.DataCoord.UpdateChannelCheckpoint:output_type -> milvus.proto.common.Status
+	228, // 481: milvus.proto.data.DataCoord.MarkSegmentsDropped:output_type -> milvus.proto.common.Status
+	228, // 482: milvus.proto.data.DataCoord.BroadcastAlteredCollection:output_type -> milvus.proto.common.Status
+	282, // 483: milvus.proto.data.DataCoord.CheckHealth:output_type -> milvus.proto.milvus.CheckHealthResponse
+	228, // 484: milvus.proto.data.DataCoord.CreateIndex:output_type -> milvus.proto.common.Status
+	228, // 485: milvus.proto.data.DataCoord.AlterIndex:output_type -> milvus.proto.common.Status
+	283, // 486: milvus.proto.data.DataCoord.GetIndexState:output_type -> milvus.proto.index.GetIndexStateResponse
+	284, // 487: milvus.proto.data.DataCoord.GetSegmentIndexState:output_type -> milvus.proto.index.GetSegmentIndexStateResponse
+	285, // 488: milvus.proto.data.DataCoord.GetIndexInfos:output_type -> milvus.proto.index.GetIndexInfoResponse
+	228, // 489: milvus.proto.data.DataCoord.DropIndex:output_type -> milvus.proto.common.Status
+	286, // 490: milvus.proto.data.DataCoord.DescribeIndex:output_type -> milvus.proto.index.DescribeIndexResponse
+	287, // 491: milvus.proto.data.DataCoord.GetIndexStatistics:output_type -> milvus.proto.index.GetIndexStatisticsResponse
+	288, // 492: milvus.proto.data.DataCoord.GetIndexBuildProgress:output_type -> milvus.proto.index.GetIndexBuildProgressResponse
+	289, // 493: milvus.proto.data.DataCoord.ListIndexes:output_type -> milvus.proto.index.ListIndexesResponse
+	99,  // 494: milvus.proto.data.DataCoord.GcConfirm:output_type -> milvus.proto.data.GcConfirmResponse
+	228, // 495: milvus.proto.data.DataCoord.ReportDataNodeTtMsgs:output_type -> milvus.proto.common.Status
+	228, // 496: milvus.proto.data.DataCoord.GcControl:output_type -> milvus.proto.common.Status
+	290, // 497: milvus.proto.data.DataCoord.ImportV2:output_type -> milvus.proto.internal.ImportResponse
+	291, // 498: milvus.proto.data.DataCoord.GetImportProgress:output_type -> milvus.proto.internal.GetImportProgressResponse
+	292, // 499: milvus.proto.data.DataCoord.ListImports:output_type -> milvus.proto.internal.ListImportsResponse
+	228, // 500: milvus.proto.data.DataCoord.CreateSnapshot:output_type -> milvus.proto.common.Status
+	228, // 501: milvus.proto.data.DataCoord.DropSnapshot:output_type -> milvus.proto.common.Status
+	164, // 502: milvus.proto.data.DataCoord.ListSnapshots:output_type -> milvus.proto.data.ListSnapshotsResponse
+	174, // 503: milvus.proto.data.DataCoord.DescribeSnapshot:output_type -> milvus.proto.data.DescribeSnapshotResponse
+	176, // 504: milvus.proto.data.DataCoord.RestoreSnapshot:output_type -> milvus.proto.data.RestoreSnapshotResponse
+	166, // 505: milvus.proto.data.DataCoord.ExportSnapshot:output_type -> milvus.proto.data.ExportSnapshotResponse
+	198, // 506: milvus.proto.data.DataCoord.GetExportSnapshotState:output_type -> milvus.proto.data.GetExportSnapshotStateResponse
+	178, // 507: milvus.proto.data.DataCoord.GetRestoreSnapshotState:output_type -> milvus.proto.data.GetRestoreSnapshotStateResponse
+	180, // 508: milvus.proto.data.DataCoord.ListRestoreSnapshotJobs:output_type -> milvus.proto.data.ListRestoreSnapshotJobsResponse
+	187, // 509: milvus.proto.data.DataCoord.PinSnapshotData:output_type -> milvus.proto.data.PinSnapshotDataResponse
+	228, // 510: milvus.proto.data.DataCoord.UnpinSnapshotData:output_type -> milvus.proto.common.Status
+	228, // 511: milvus.proto.data.DataCoord.BatchUpdateManifest:output_type -> milvus.proto.common.Status
+	185, // 512: milvus.proto.data.DataCoord.CommitBackfillResult:output_type -> milvus.proto.data.CommitBackfillResultResponse
+	153, // 513: milvus.proto.data.DataCoord.RefreshExternalCollection:output_type -> milvus.proto.data.RefreshExternalCollectionResponse
+	158, // 514: milvus.proto.data.DataCoord.GetRefreshExternalCollectionProgress:output_type -> milvus.proto.data.GetRefreshExternalCollectionProgressResponse
+	160, // 515: milvus.proto.data.DataCoord.ListRefreshExternalCollectionJobs:output_type -> milvus.proto.data.ListRefreshExternalCollectionJobsResponse
+	228, // 516: milvus.proto.data.DataCoord.CommitImport:output_type -> milvus.proto.common.Status
+	228, // 517: milvus.proto.data.DataCoord.AbortImport:output_type -> milvus.proto.common.Status
+	228, // 518: milvus.proto.data.DataCoord.HandleCommitVchannel:output_type -> milvus.proto.common.Status
+	293, // 519: milvus.proto.data.DataNode.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
+	274, // 520: milvus.proto.data.DataNode.GetStatisticsChannel:output_type -> milvus.proto.milvus.StringResponse
+	228, // 521: milvus.proto.data.DataNode.WatchDmChannels:output_type -> milvus.proto.common.Status
+	228, // 522: milvus.proto.data.DataNode.FlushSegments:output_type -> milvus.proto.common.Status
+	276, // 523: milvus.proto.data.DataNode.ShowConfigurations:output_type -> milvus.proto.internal.ShowConfigurationsResponse
+	277, // 524: milvus.proto.data.DataNode.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
+	228, // 525: milvus.proto.data.DataNode.CompactionV2:output_type -> milvus.proto.common.Status
+	81,  // 526: milvus.proto.data.DataNode.GetCompactionState:output_type -> milvus.proto.data.CompactionStateResponse
+	228, // 527: milvus.proto.data.DataNode.SyncSegments:output_type -> milvus.proto.common.Status
+	93,  // 528: milvus.proto.data.DataNode.ResendSegmentStats:output_type -> milvus.proto.data.ResendSegmentStatsResponse
+	228, // 529: milvus.proto.data.DataNode.FlushChannels:output_type -> milvus.proto.common.Status
+	228, // 530: milvus.proto.data.DataNode.NotifyChannelOperation:output_type -> milvus.proto.common.Status
+	103, // 531: milvus.proto.data.DataNode.CheckChannelOperationProgress:output_type -> milvus.proto.data.ChannelOperationProgressResponse
+	228, // 532: milvus.proto.data.DataNode.PreImport:output_type -> milvus.proto.common.Status
+	228, // 533: milvus.proto.data.DataNode.ImportV2:output_type -> milvus.proto.common.Status
+	111, // 534: milvus.proto.data.DataNode.QueryPreImport:output_type -> milvus.proto.data.QueryPreImportResponse
+	114, // 535: milvus.proto.data.DataNode.QueryImport:output_type -> milvus.proto.data.QueryImportResponse
+	228, // 536: milvus.proto.data.DataNode.DropImport:output_type -> milvus.proto.common.Status
+	145, // 537: milvus.proto.data.DataNode.QuerySlot:output_type -> milvus.proto.data.QuerySlotResponse
+	228, // 538: milvus.proto.data.DataNode.DropCompactionPlan:output_type -> milvus.proto.common.Status
+	228, // 539: milvus.proto.data.DataNode.SyncFileResource:output_type -> milvus.proto.common.Status
+	453, // [453:540] is the sub-list for method output_type
+	366, // [366:453] is the sub-list for method input_type
+	366, // [366:366] is the sub-list for extension type_name
+	366, // [366:366] is the sub-list for extension extendee
+	0,   // [0:366] is the sub-list for field type_name
 }
 
 func init() { file_data_coord_proto_init() }
@@ -21377,7 +23250,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[112].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GcControlRequest); i {
+			switch v := v.(*ReshardTask); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21389,7 +23262,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[113].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetGcStatusResponse); i {
+			switch v := v.(*ImportTaskV3); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21401,7 +23274,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[114].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*QuerySlotRequest); i {
+			switch v := v.(*ReshardTaskRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21413,7 +23286,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[115].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*QuerySlotResponse); i {
+			switch v := v.(*ImportTaskV3Request); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21425,7 +23298,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[116].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CompactionTarget); i {
+			switch v := v.(*ImportResultManifest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21437,7 +23310,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[117].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CompactionTask); i {
+			switch v := v.(*SegmentResult); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21449,7 +23322,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[118].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PartitionStatsInfo); i {
+			switch v := v.(*QueryReshardTaskRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21461,7 +23334,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[119].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DropCompactionPlanRequest); i {
+			switch v := v.(*QueryReshardTaskResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21473,7 +23346,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[120].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RefreshExternalCollectionTaskRequest); i {
+			switch v := v.(*DropReshardTaskRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21485,7 +23358,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[121].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RefreshExternalCollectionTaskResponse); i {
+			switch v := v.(*QueryImportTaskV3Request); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21497,7 +23370,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[122].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RefreshExternalCollectionRequest); i {
+			switch v := v.(*QueryImportTaskV3Response); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21509,7 +23382,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[123].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RefreshExternalCollectionResponse); i {
+			switch v := v.(*DropImportTaskV3Request); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21521,7 +23394,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[124].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetRefreshExternalCollectionProgressRequest); i {
+			switch v := v.(*GcControlRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21533,7 +23406,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[125].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ExternalCollectionRefreshJob); i {
+			switch v := v.(*GetGcStatusResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21545,7 +23418,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[126].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ExternalFileInfo); i {
+			switch v := v.(*QuerySlotRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21557,7 +23430,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[127].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ExternalCollectionRefreshTask); i {
+			switch v := v.(*QuerySlotResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21569,7 +23442,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[128].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetRefreshExternalCollectionProgressResponse); i {
+			switch v := v.(*CompactionTarget); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21581,7 +23454,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[129].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListRefreshExternalCollectionJobsRequest); i {
+			switch v := v.(*CompactionTask); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21593,7 +23466,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[130].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListRefreshExternalCollectionJobsResponse); i {
+			switch v := v.(*PartitionStatsInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21605,7 +23478,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[131].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CreateSnapshotRequest); i {
+			switch v := v.(*DropCompactionPlanRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21617,7 +23490,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[132].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DropSnapshotRequest); i {
+			switch v := v.(*RefreshExternalCollectionTaskRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21629,7 +23502,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[133].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListSnapshotsRequest); i {
+			switch v := v.(*RefreshExternalCollectionTaskResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21641,7 +23514,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[134].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListSnapshotsResponse); i {
+			switch v := v.(*RefreshExternalCollectionRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21653,7 +23526,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[135].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ExportSnapshotRequest); i {
+			switch v := v.(*RefreshExternalCollectionResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21665,7 +23538,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[136].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ExportSnapshotResponse); i {
+			switch v := v.(*GetRefreshExternalCollectionProgressRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21677,7 +23550,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[137].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SegmentDescription); i {
+			switch v := v.(*ExternalCollectionRefreshJob); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21689,7 +23562,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[138].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CollectionDescription); i {
+			switch v := v.(*ExternalFileInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21701,7 +23574,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[139].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SnapshotInfo); i {
+			switch v := v.(*ExternalCollectionRefreshTask); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21713,7 +23586,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[140].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StorageV2SegmentManifest); i {
+			switch v := v.(*GetRefreshExternalCollectionProgressResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21725,7 +23598,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[141].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SnapshotMetadata); i {
+			switch v := v.(*ListRefreshExternalCollectionJobsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21737,7 +23610,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[142].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RestoreSnapshotInfo); i {
+			switch v := v.(*ListRefreshExternalCollectionJobsResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21749,7 +23622,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[143].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DescribeSnapshotRequest); i {
+			switch v := v.(*CreateSnapshotRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21761,7 +23634,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[144].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DescribeSnapshotResponse); i {
+			switch v := v.(*DropSnapshotRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21773,7 +23646,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[145].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RestoreSnapshotRequest); i {
+			switch v := v.(*ListSnapshotsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21785,7 +23658,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[146].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RestoreSnapshotResponse); i {
+			switch v := v.(*ListSnapshotsResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21797,7 +23670,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[147].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetRestoreSnapshotStateRequest); i {
+			switch v := v.(*ExportSnapshotRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21809,7 +23682,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[148].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetRestoreSnapshotStateResponse); i {
+			switch v := v.(*ExportSnapshotResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21821,7 +23694,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[149].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListRestoreSnapshotJobsRequest); i {
+			switch v := v.(*SegmentDescription); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21833,7 +23706,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[150].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListRestoreSnapshotJobsResponse); i {
+			switch v := v.(*CollectionDescription); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21845,7 +23718,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[151].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*BatchUpdateManifestRequest); i {
+			switch v := v.(*SnapshotInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21857,7 +23730,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[152].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*BatchUpdateManifestItem); i {
+			switch v := v.(*StorageV2SegmentManifest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21869,7 +23742,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[153].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CommitBackfillResultRequest); i {
+			switch v := v.(*SnapshotMetadata); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21881,7 +23754,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[154].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CommitBackfillResultSegmentStatus); i {
+			switch v := v.(*RestoreSnapshotInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21893,7 +23766,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[155].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CommitBackfillResultResponse); i {
+			switch v := v.(*DescribeSnapshotRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21905,7 +23778,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[156].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PinSnapshotDataRequest); i {
+			switch v := v.(*DescribeSnapshotResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21917,7 +23790,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[157].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PinSnapshotDataResponse); i {
+			switch v := v.(*RestoreSnapshotRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21929,7 +23802,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[158].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*UnpinSnapshotDataRequest); i {
+			switch v := v.(*RestoreSnapshotResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21941,7 +23814,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[159].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CommitImportRequest); i {
+			switch v := v.(*GetRestoreSnapshotStateRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21953,7 +23826,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[160].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*AbortImportRequest); i {
+			switch v := v.(*GetRestoreSnapshotStateResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21965,7 +23838,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[161].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*HandleCommitVchannelRequest); i {
+			switch v := v.(*ListRestoreSnapshotJobsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21977,7 +23850,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[162].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ExternalCollectionRefreshTaskResult); i {
+			switch v := v.(*ListRestoreSnapshotJobsResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -21989,7 +23862,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[163].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ColumnGroupStatistics); i {
+			switch v := v.(*BatchUpdateManifestRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -22001,7 +23874,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[164].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*LoadResourceStatistics); i {
+			switch v := v.(*BatchUpdateManifestItem); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -22013,7 +23886,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[165].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ExportSnapshotJob); i {
+			switch v := v.(*CommitBackfillResultRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -22025,7 +23898,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[166].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ExportSnapshotJobInfo); i {
+			switch v := v.(*CommitBackfillResultSegmentStatus); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -22037,7 +23910,7 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[167].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetExportSnapshotStateRequest); i {
+			switch v := v.(*CommitBackfillResultResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -22049,6 +23922,150 @@ func file_data_coord_proto_init() {
 			}
 		}
 		file_data_coord_proto_msgTypes[168].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*PinSnapshotDataRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[169].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*PinSnapshotDataResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[170].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*UnpinSnapshotDataRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[171].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*CommitImportRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[172].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*AbortImportRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[173].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*HandleCommitVchannelRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[174].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ExternalCollectionRefreshTaskResult); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[175].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ColumnGroupStatistics); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[176].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*LoadResourceStatistics); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[177].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ExportSnapshotJob); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[178].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ExportSnapshotJobInfo); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[179].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetExportSnapshotStateRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_data_coord_proto_msgTypes[180].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*GetExportSnapshotStateResponse); i {
 			case 0:
 				return &v.state
@@ -22066,8 +24083,8 @@ func file_data_coord_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_data_coord_proto_rawDesc,
-			NumEnums:      16,
-			NumMessages:   196,
+			NumEnums:      18,
+			NumMessages:   209,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

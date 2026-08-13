@@ -1,0 +1,263 @@
+syntax = "proto3";
+
+package milvus.proto.data;
+
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/datapb";
+
+// This file contains the V3 import control-plane contracts that do not depend
+// on data_coord.proto.  Keeping this dependency direction one-way is required
+// so plans/manifests can be reused by an eventual external fragment producer.
+import "internal.proto";
+import "schema.proto";
+
+enum ImportSourceFormat {
+  IMPORT_SOURCE_FORMAT_UNSPECIFIED = 0;
+  IMPORT_SOURCE_FORMAT_JSON = 1;
+  IMPORT_SOURCE_FORMAT_JSON_LINES = 2;
+  IMPORT_SOURCE_FORMAT_CSV = 3;
+  IMPORT_SOURCE_FORMAT_PARQUET = 4;
+  IMPORT_SOURCE_FORMAT_NUMPY = 5;
+  IMPORT_SOURCE_FORMAT_BACKUP_BINLOG = 6;
+}
+
+enum SortKeyType {
+  SORT_KEY_TYPE_UNSPECIFIED = 0;
+  SORT_KEY_TYPE_INT64 = 1;
+  SORT_KEY_TYPE_STRING = 2;
+}
+
+message SortFieldSpec {
+  int64 field_id = 1;
+  SortKeyType key_type = 2;
+}
+
+message SortSpec {
+  uint32 format_version = 1;
+  repeated SortFieldSpec fields = 2;
+}
+
+message SortKeyComponent {
+  SortKeyType key_type = 1;
+  sint64 int64_value = 2;
+  bytes string_value = 3;
+}
+
+message SortKey {
+  repeated SortKeyComponent components = 1;
+}
+
+message ReaderOptions {
+  string csv_separator = 1;
+  string csv_null_key = 2;
+  uint64 backup_start_ts = 3;
+  uint64 backup_end_ts = 4;
+  int64 source_storage_version = 5;
+}
+
+message ExpandedBinlogField {
+  int64 field_or_group_id = 1;
+  repeated string paths = 2;
+}
+
+message SourceFileSpec {
+  int32 source_ordinal = 1;
+  internal.ImportFile file = 2;
+  int64 estimated_source_bytes = 3;
+  ImportSourceFormat format = 4;
+  bool is_backup = 5;
+  repeated ExpandedBinlogField expanded_insert_fields = 6;
+  repeated string expanded_delta_objects = 7;
+  ReaderOptions reader_options = 8;
+}
+
+message ReshardTaskPlan {
+  uint32 format_version = 1;
+  int64 job_id = 2;
+  int64 task_id = 3;
+  int64 collection_id = 4;
+  schema.CollectionSchema source_schema = 5;
+  schema.CollectionSchema temporary_schema = 6;
+  repeated string vchannels = 7;
+  repeated int64 partition_ids = 8;
+  repeated SourceFileSpec sources = 9;
+  SortSpec sort_spec = 10;
+  int64 fragment_target_logical_bytes = 11;
+}
+
+message ColumnSizeStat {
+  int64 field_id = 1;
+  int64 rows = 2;
+  int64 logical_bytes = 3;
+}
+
+message SourceCoverage {
+  int32 source_ordinal = 1;
+  int64 file_id = 2;
+  int64 actual_rows = 3;
+  bool reached_eof = 4;
+}
+
+message FragmentDescriptor {
+  int32 vchannel_ordinal = 1;
+  string vchannel = 2;
+  int64 partition_id = 3;
+  int32 partition_ordinal = 4;
+  int64 fragment_seq = 5;
+  string path = 6;
+  int64 rows = 7;
+  int64 logical_bytes = 8;
+  int64 estimated_final_bytes = 9;
+  int64 physical_bytes = 10;
+  SortKey first_sort_key = 11;
+  SortKey last_sort_key = 12;
+  string format = 13;
+  repeated ColumnSizeStat column_size_stats = 14;
+}
+
+message ReshardManifest {
+  uint32 format_version = 1;
+  int64 job_id = 2;
+  int64 task_id = 3;
+  int64 run_id = 4;
+  bytes task_plan_digest = 5;
+  SortSpec sort_spec = 6;
+  repeated SourceCoverage sources = 7;
+  repeated FragmentDescriptor fragments = 8;
+  int64 total_rows = 9;
+  int64 total_logical_bytes = 10;
+  int64 total_physical_bytes = 11;
+}
+
+message FragmentRef {
+  int64 source_task_id = 1;
+  bytes source_manifest_digest = 2;
+  int32 vchannel_ordinal = 3;
+  string vchannel = 4;
+  int32 partition_ordinal = 5;
+  int64 partition_id = 6;
+  int64 fragment_seq = 7;
+  string path = 8;
+  int64 start_row = 9;
+  int64 end_row = 10;
+  int64 rows = 11;
+  int64 logical_bytes = 12;
+  int64 estimated_final_bytes = 13;
+  int64 physical_bytes = 14;
+  SortKey first_sort_key = 15;
+  SortKey last_sort_key = 16;
+  string format = 17;
+  repeated ColumnSizeStat column_size_stats = 18;
+}
+
+message ColumnGroupSpec {
+  int64 group_id = 1;
+  repeated int64 field_ids = 2;
+  string format = 3;
+}
+
+message TextColumnWriteSpec {
+  int64 field_id = 1;
+  int64 inline_threshold = 2;
+  int64 max_lob_file_bytes = 3;
+  int64 flush_threshold_bytes = 4;
+}
+
+message V2PackedIOConfig {
+  int64 buffer_size = 1;
+  int64 multipart_upload_size = 2;
+}
+
+message TextIndexSpec {
+  bool build_inline = 1;
+  int32 current_scalar_index_version = 2;
+  repeated internal.FileResourceInfo analyzer_file_resources = 3;
+}
+
+message WriterSpec {
+  uint32 format_version = 1;
+  int64 target_storage_version = 2;
+  int64 target_schema_version = 3;
+  bytes target_schema_digest = 4;
+  repeated ColumnGroupSpec column_groups = 5;
+  string writer_format = 6;
+  repeated TextColumnWriteSpec text_columns = 7;
+  V2PackedIOConfig v2_io = 8;
+  int64 collection_ttl_nanos = 9;
+  int64 pk_stats_capacity = 10;
+  repeated int64 bm25_output_field_ids = 11;
+  TextIndexSpec text_index = 12;
+  string bloom_filter_type = 13;
+  double max_bloom_false_positive = 14;
+}
+
+message SegmentPlan {
+  int64 logical_segment_ordinal = 1;
+  int32 vchannel_ordinal = 2;
+  string vchannel = 3;
+  int32 partition_ordinal = 4;
+  int64 partition_id = 5;
+  repeated FragmentRef fragments = 6;
+  int64 planned_rows = 7;
+  int64 planned_logical_bytes = 8;
+  int64 estimated_final_bytes = 9;
+  int32 writer_spec_index = 10;
+}
+
+message ImportTaskRange {
+  int64 task_id = 1;
+  int32 vchannel_ordinal = 2;
+  int32 first_partition_ordinal = 3;
+  int32 last_partition_ordinal = 4;
+  int32 first_segment_plan_index = 5;
+  int32 end_segment_plan_index = 6;
+  int32 merge_fan_in = 7;
+  int64 required_log_ids = 8;
+  bytes writer_specs_digest = 9;
+  int64 task_slot = 10;
+}
+
+message PlanningSnapshot {
+  uint32 format_version = 1;
+  int64 job_id = 2;
+  int64 generation = 3;
+  bytes schema_digest = 4;
+  SortSpec sort_spec = 5;
+  repeated WriterSpec writer_specs = 6;
+  repeated string reshard_manifest_refs = 7;
+  repeated bytes reshard_manifest_digests = 8;
+  repeated SegmentPlan segment_plans = 9;
+  repeated ImportTaskRange import_task_ranges = 10;
+  int32 merge_fan_in_cap = 11;
+  int64 total_rows = 12;
+  int64 total_logical_bytes = 13;
+}
+
+message ImportTaskPlan {
+  uint32 format_version = 1;
+  int64 job_id = 2;
+  int64 task_id = 3;
+  int64 planning_generation = 4;
+  bytes planning_snapshot_digest = 5;
+  SortSpec sort_spec = 6;
+  repeated SegmentPlan segment_plans = 7;
+  int32 merge_fan_in = 8;
+  int64 required_log_ids = 9;
+  bytes writer_specs_digest = 10;
+  int64 task_slot = 11;
+  string planning_snapshot_ref = 12;
+}
+
+message ImportPlanIndexEntry {
+  int64 task_id = 1;
+  string plan_ref = 2;
+  bytes plan_digest = 3;
+}
+
+message ImportPlanIndex {
+  uint32 format_version = 1;
+  int64 job_id = 2;
+  int64 planning_generation = 3;
+  string snapshot_ref = 4;
+  bytes snapshot_digest = 5;
+  repeated ImportPlanIndexEntry tasks = 6;
+}

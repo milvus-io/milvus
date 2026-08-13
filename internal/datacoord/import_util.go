@@ -763,7 +763,11 @@ func ValidateBinlogImportRequest(ctx context.Context, cm storage.ChunkManager,
 	reqFiles []*msgpb.ImportFile, options []*commonpb.KeyValuePair,
 ) error {
 	files := lo.Map(reqFiles, func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
-		return &internalpb.ImportFile{Id: file.GetId(), Paths: file.GetPaths()}
+		return &internalpb.ImportFile{
+			Id:                  file.GetId(),
+			Paths:               file.GetPaths(),
+			PreAllocatedAutoIds: file.GetPreAllocatedAutoIds(),
+		}
 	})
 	_, err := ListBinlogImportRequestFiles(ctx, cm, files, options)
 	return err
