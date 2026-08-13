@@ -1363,7 +1363,7 @@ func TestTextFieldDMLConversion(t *testing.T) {
 			require.NotNil(t, textFieldData)
 			assert.Equal(t, schemapb.DataType_Text, textFieldData.GetType())
 			assert.Equal(t, []string{"short text", longText}, textFieldData.GetScalars().GetStringData().GetData())
-			assert.Equal(t, []bool{true, false, true}, textFieldData.GetValidData())
+			assert.Equal(t, []bool{true, false, true}, typeutil.GetFieldDataValidData(textFieldData))
 		})
 	}
 }
