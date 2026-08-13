@@ -689,36 +689,51 @@ func TestGrowingTheNodeDoesNotBreakExclusivity(t *testing.T) {
 }
 
 // "Every previously admitted task has finished" is a statement about tasks, so
-// it has to be read off the ledger. Reading it off the reserved total instead
-// makes it a float equality test, and the float does not cooperate: CPU
-// requirements are fractional (estimate_import.go charges 0.1 per import), Sub
-// clamps only at negative, and three admissions of 0.1 followed by three
-// releases leave 2.78e-17 behind. That residue is never cleaned up, so from
-// then on every oversized task would be refused on a provably empty node --
-// permanent refusal reached through a different door than the one exclusive
-// execution closed.
-func TestFloatResidueMustNotHoldTheNodeShut(t *testing.T) {
+// both the oversized branch and Release read it off the ledger rather than off
+// the reserved total. This is the total's side of that: the dust Release leaves
+// behind must not survive an empty ledger. Nothing ever subtracts it again --
+// Sub clamps at negative and never snaps to zero, and CPU requirements are
+// fractional (estimate_import.go charges 0.1 per import) -- so from the moment
+// it appears, a task sized exactly to the budget is refused forever on a node
+// the ledger says is empty.
+//
+// The refusal needs the budget to be small enough for the residue to survive
+// the addition: at a CPU budget of 8 an ulp is 1.8e-15 and 8 + 2.8e-17 rounds
+// back to exactly 8, so the task still fits. The node is shrunk below that
+// threshold here to show the consequence rather than to argue it away -- the
+// dust is a random walk across a node's lifetime, and the exact-zero assertion
+// above it holds at every budget.
+func TestEmptyLedgerLeavesNoReservedResidue(t *testing.T) {
 	g := newTestGuard(t, 8, 100)
 
-	// All three are admitted before any is released: that is the order that
-	// leaves a residue, since a strict admit/release alternation cancels
-	// exactly.
 	for i := int64(1); i <= 3; i++ {
 		mustAcquire(t, g, i, taskcommon.Import, taskresource.Requirement{CPU: 0.1, Memory: 1})
 	}
+
+	// Anti-vacuity: subtraction alone really would leave something behind. This
+	// runs the same arithmetic Release runs, from the same starting value.
+	g.mu.Lock()
+	bySubtraction := g.reserved
+	g.mu.Unlock()
+	for i := 0; i < 3; i++ {
+		bySubtraction = bySubtraction.Sub(taskresource.Requirement{CPU: 0.1, Memory: 1})
+	}
+	require.Positive(t, bySubtraction.CPU,
+		"subtraction left no residue; this test would pass vacuously")
+
 	for i := int64(1); i <= 3; i++ {
 		g.Release(i)
 	}
 
-	// The residue this test is about must really be there, or it proves nothing.
-	require.Positive(t, g.Snapshot().Reserved.CPU,
-		"no float residue appeared; this test would pass vacuously")
-	g.mu.Lock()
-	require.Empty(t, g.ledger, "every task has finished")
-	g.mu.Unlock()
+	snap := g.Snapshot()
+	assert.Equal(t, float64(0), snap.Reserved.CPU, "an empty ledger means exactly zero reserved")
+	assert.Equal(t, int64(0), snap.Reserved.Memory)
 
-	ok, _ := g.TryAcquire(4, taskcommon.Index, taskresource.Requirement{Memory: 500})
-	assert.True(t, ok, "an empty node must admit the oversized task, whatever arithmetic dust is left")
+	// The consequence: on a budget fine enough to feel the dust, a task sized to
+	// the whole budget still fits.
+	g.setCapacityForTest(taskresource.Capacity{CPU: 0.1, Memory: 100})
+	ok, _ := g.TryAcquire(4, taskcommon.Compaction, taskresource.Requirement{CPU: 0.1, Memory: 1})
+	assert.True(t, ok, "a task sized exactly to the budget must fit an empty node")
 }
 
 // The other half of the same defect: a task charged nothing at all is still a
