@@ -33,7 +33,7 @@ const (
 	SubTypeKey      = "task_sub_type" // optional, only for Stats
 	SlotKey         = "task_slot"
 	NumRowsKey      = "num_row"      // optional, only for Index, Stats
-	TaskVersionKey  = "task_version" // optional, only for Index, Stats and Analyze
+	TaskVersionKey  = "task_version" // optional, also used as V3 import run_id
 	CollectionIDKey = "collection_id"
 
 	// result
@@ -69,7 +69,7 @@ func (p Properties) AppendTaskID(taskID int64) {
 
 func (p Properties) AppendType(t Type) {
 	switch t {
-	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment:
+	case PreImport, Import, Reshard, ImportV3, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment:
 		p[TypeKey] = t
 	default:
 		p[TypeKey] = TypeNone
@@ -117,7 +117,7 @@ func (p Properties) GetTaskType() (Type, error) {
 		return "", WrapErrTaskPropertyLack(TypeKey, p[TaskIDKey])
 	}
 	switch p[TypeKey] {
-	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment:
+	case PreImport, Import, Reshard, ImportV3, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment:
 		return p[TypeKey], nil
 	default:
 		// Task types are assigned by the coordinator; an unrecognized one means a

@@ -62,6 +62,13 @@ type Cluster interface {
 	// DropImport drops an import task
 	DropImport(nodeID int64, taskID int64) error
 
+	CreateReshard(nodeID int64, in *datapb.ReshardTaskRequest, collectionID int64) error
+	QueryReshard(nodeID int64, in *datapb.QueryReshardTaskRequest) (*datapb.QueryReshardTaskResponse, error)
+	DropReshard(nodeID int64, in *datapb.DropReshardTaskRequest) error
+	CreateImportV3(nodeID int64, in *datapb.ImportTaskV3Request, collectionID int64) error
+	QueryImportV3(nodeID int64, in *datapb.QueryImportTaskV3Request) (*datapb.QueryImportTaskV3Response, error)
+	DropImportV3(nodeID int64, in *datapb.DropImportTaskV3Request) error
+
 	// CreateIndex creates an index building task
 	CreateIndex(nodeID int64, in *workerpb.CreateJobRequest) error
 	// QueryIndex queries the status of index building tasks
@@ -399,6 +406,125 @@ func (c *cluster) DropImport(nodeID int64, taskID int64) error {
 	properties.AppendTaskID(taskID)
 	properties.AppendType(taskcommon.Import)
 	return c.dropTask(nodeID, properties)
+}
+
+func (c *cluster) createImportV3Task(nodeID int64, in proto.Message, taskID, runID, taskSlot, collectionID int64, taskType taskcommon.Type) error {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(taskID)
+	properties.AppendType(taskType)
+	properties.AppendTaskSlot(taskSlot)
+	properties.AppendTaskVersion(runID)
+	properties.AppendCollectionID(collectionID)
+	return c.createTask(nodeID, in, properties)
+}
+
+func (c *cluster) queryImportV3Task(nodeID, taskID, runID int64, taskType taskcommon.Type, result proto.Message) (taskcommon.State, string, error) {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(taskID)
+	properties.AppendType(taskType)
+	properties.AppendTaskVersion(runID)
+	resp, err := c.queryTask(nodeID, properties)
+	if err != nil {
+		return taskcommon.None, "", err
+	}
+	responseProperties := taskcommon.NewProperties(resp.GetProperties())
+	state, err := responseProperties.GetTaskState()
+	if err != nil {
+		return taskcommon.None, "", err
+	}
+	if len(resp.GetPayload()) > 0 {
+		if err := proto.Unmarshal(resp.GetPayload(), result); err != nil {
+			return taskcommon.None, "", err
+		}
+	}
+	return state, responseProperties.GetTaskReason(), nil
+}
+
+func (c *cluster) dropImportV3Task(nodeID, taskID, runID int64, taskType taskcommon.Type) error {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(taskID)
+	properties.AppendType(taskType)
+	properties.AppendTaskVersion(runID)
+	return c.dropTask(nodeID, properties)
+}
+
+func (c *cluster) CreateReshard(nodeID int64, in *datapb.ReshardTaskRequest, collectionID int64) error {
+	return c.createImportV3Task(nodeID, in, in.GetTaskId(), in.GetRunId(), in.GetTaskSlot(), collectionID, taskcommon.Reshard)
+}
+
+func (c *cluster) QueryReshard(nodeID int64, in *datapb.QueryReshardTaskRequest) (*datapb.QueryReshardTaskResponse, error) {
+	result := &datapb.QueryReshardTaskResponse{}
+	state, reason, err := c.queryImportV3Task(nodeID, in.GetTaskId(), in.GetRunId(), taskcommon.Reshard, result)
+	if err != nil {
+		return nil, err
+	}
+	if result.GetState() == datapb.ReshardTask_None {
+		result.State = reshardStateFromTaskCommon(state)
+		result.Reason = reason
+	}
+	return result, nil
+}
+
+func (c *cluster) DropReshard(nodeID int64, in *datapb.DropReshardTaskRequest) error {
+	return c.dropImportV3Task(nodeID, in.GetTaskId(), in.GetRunId(), taskcommon.Reshard)
+}
+
+func (c *cluster) CreateImportV3(nodeID int64, in *datapb.ImportTaskV3Request, collectionID int64) error {
+	return c.createImportV3Task(nodeID, in, in.GetTaskId(), in.GetRunId(), in.GetTaskSlot(), collectionID, taskcommon.ImportV3)
+}
+
+func (c *cluster) QueryImportV3(nodeID int64, in *datapb.QueryImportTaskV3Request) (*datapb.QueryImportTaskV3Response, error) {
+	result := &datapb.QueryImportTaskV3Response{}
+	state, reason, err := c.queryImportV3Task(nodeID, in.GetTaskId(), in.GetRunId(), taskcommon.ImportV3, result)
+	if err != nil {
+		return nil, err
+	}
+	if result.GetState() == datapb.ImportTaskV3_None {
+		result.State = importV3StateFromTaskCommon(state)
+		result.Reason = reason
+	}
+	return result, nil
+}
+
+func (c *cluster) DropImportV3(nodeID int64, in *datapb.DropImportTaskV3Request) error {
+	return c.dropImportV3Task(nodeID, in.GetTaskId(), in.GetRunId(), taskcommon.ImportV3)
+}
+
+func reshardStateFromTaskCommon(state taskcommon.State) datapb.ReshardTask_State {
+	switch state {
+	case taskcommon.Init:
+		return datapb.ReshardTask_Pending
+	case taskcommon.InProgress:
+		return datapb.ReshardTask_Running
+	case taskcommon.Retry:
+		return datapb.ReshardTask_Retry
+	case taskcommon.Finished:
+		return datapb.ReshardTask_Completed
+	case taskcommon.Failed:
+		return datapb.ReshardTask_Failed
+	default:
+		return datapb.ReshardTask_None
+	}
+}
+
+func importV3StateFromTaskCommon(state taskcommon.State) datapb.ImportTaskV3_State {
+	switch state {
+	case taskcommon.Init:
+		return datapb.ImportTaskV3_Pending
+	case taskcommon.InProgress:
+		return datapb.ImportTaskV3_Running
+	case taskcommon.Retry:
+		return datapb.ImportTaskV3_Retry
+	case taskcommon.Finished:
+		return datapb.ImportTaskV3_Completed
+	case taskcommon.Failed:
+		return datapb.ImportTaskV3_Failed
+	default:
+		return datapb.ImportTaskV3_None
+	}
 }
 
 func (c *cluster) CreateIndex(nodeID int64, in *workerpb.CreateJobRequest) error {

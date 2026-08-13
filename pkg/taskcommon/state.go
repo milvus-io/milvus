@@ -64,6 +64,40 @@ func ToImportState(s State) datapb.ImportTaskStateV2 {
 	return datapb.ImportTaskStateV2_None
 }
 
+func FromReshardState(s datapb.ReshardTask_State) State {
+	switch s {
+	case datapb.ReshardTask_Pending:
+		return Init
+	case datapb.ReshardTask_Running:
+		return InProgress
+	case datapb.ReshardTask_Retry:
+		return Retry
+	case datapb.ReshardTask_Completed:
+		return Finished
+	case datapb.ReshardTask_Failed:
+		return Failed
+	default:
+		return None
+	}
+}
+
+func FromImportV3State(s datapb.ImportTaskV3_State) State {
+	switch s {
+	case datapb.ImportTaskV3_Pending:
+		return Init
+	case datapb.ImportTaskV3_Running:
+		return InProgress
+	case datapb.ImportTaskV3_Retry:
+		return Retry
+	case datapb.ImportTaskV3_Completed:
+		return Finished
+	case datapb.ImportTaskV3_Failed:
+		return Failed
+	default:
+		return None
+	}
+}
+
 func FromCompactionState(s datapb.CompactionTaskState) State {
 	switch s {
 	case datapb.CompactionTaskState_pipelining:
