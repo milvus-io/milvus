@@ -355,6 +355,17 @@ func (s *statsInspectorSuite) TestSubmitStatsTask() {
 	s.NoError(err) // Duplicate tasks are handled as success
 }
 
+func (s *statsInspectorSuite) TestInvisibleSegmentDoesNotCreateStatsTask() {
+	segment := s.mt.segments.segments[20]
+	segment.IsInvisible = true
+
+	s.False(needDoTextIndex(segment, []int64{101}, false))
+	s.False(needDoJSONKeyIndex(segment, []int64{202}, false))
+	s.False(needDoBM25(segment, []int64{201}))
+	s.NoError(s.inspector.SubmitStatsTask(segment.GetID(), segment.GetID(), indexpb.StatsSubJob_TextIndexJob, true, nil))
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segment.GetID(), indexpb.StatsSubJob_TextIndexJob))
+}
+
 func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalCollection() {
 	segmentID := UniqueID(200)
 	s.putExternalSegment(segmentID, true, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/200", 1))

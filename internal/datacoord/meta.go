@@ -1828,15 +1828,23 @@ func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 	}
 }
 
+// maxSegmentTimestampTo returns the highest accepted insert timestamp for a
+// segment. Statistics is authoritative for manifest-backed V3 segments whose
+// FieldBinlog arrays are intentionally absent after restart; the array value is
+// retained as a compatibility fallback for old V2 metadata.
+func maxSegmentTimestampTo(segment *SegmentInfo) uint64 {
+	if segment == nil {
+		return 0
+	}
+	maxTsTo := maxBinlogTimestampTo(segment.GetBinlogs())
+	if stats := segment.EnsureStats(); stats != nil && stats.GetTimestampTo() > maxTsTo {
+		maxTsTo = stats.GetTimestampTo()
+	}
+	return maxTsTo
+}
+
 // maxBinlogTimestampTo returns the highest TimestampTo across a segment's insert
-// binlogs, or 0 when the arrays are absent.
-//
-// Absent is not the same as "no rows": a V3 (manifest-backed) segment never
-// persists these arrays -- buildAlterSegmentsKvs skips the per-FieldBinlog KVs
-// for it (kv_catalog.go:357) and the SegmentInfo is written without them -- so a
-// V3 segment reloaded after a DataCoord restart reports 0 here regardless of the
-// row timestamps it actually holds. Callers therefore get a bound that is safe
-// to compare against but that does not fire for reloaded V3 segments.
+// binlogs, or 0 when the arrays are absent. It is retained for legacy V2 callers.
 func maxBinlogTimestampTo(fieldBinlogs []*datapb.FieldBinlog) uint64 {
 	var maxTsTo uint64
 	for _, fb := range fieldBinlogs {
@@ -1853,8 +1861,9 @@ func maxBinlogTimestampTo(fieldBinlogs []*datapb.FieldBinlog) uint64 {
 // Non-zero marks it as committed at that transaction time, overriding
 // start_position.Timestamp for all temporal decisions.
 //
-// Invariant: a non-zero commit_timestamp MUST be >= max(binlog.TimestampTo)
-// across all binlogs on the segment. Row timestamps cannot exceed the commit
+// Invariant: a non-zero commit_timestamp MUST be >= the accepted segment
+// timestamp bound (Statistics.TimestampTo for V3, with the V2 binlog fallback).
+// Row timestamps cannot exceed the commit
 // time logically (the data did not "exist" until commit). Violating inputs
 // (e.g., CDC where source-cluster TSO > target-cluster TSO) are rejected at
 // this entry point rather than letting C++ segcore silently lower row
@@ -1869,9 +1878,9 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 			return false
 		}
 		if ts != 0 {
-			maxTsTo := maxBinlogTimestampTo(segment.GetBinlogs())
+			maxTsTo := maxSegmentTimestampTo(segment)
 			if ts < maxTsTo {
-				mlog.Error(modPack.meta.ctx, "meta update: update commit timestamp rejected - commit_ts < max(binlog.TimestampTo)",
+				mlog.Error(modPack.meta.ctx, "meta update: update commit timestamp rejected - commit_ts < segment timestamp bound",
 					mlog.Int64("segmentID", segmentID),
 					mlog.Uint64("commitTs", ts),
 					mlog.Uint64("maxBinlogTimestampTo", maxTsTo))

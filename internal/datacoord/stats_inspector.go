@@ -149,7 +149,7 @@ func (si *statsInspector) enableBM25() bool {
 }
 
 func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bool) bool {
-	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 {
+	if !isFlush(segment) || segment.GetIsInvisible() || segment.GetLevel() == datapb.SegmentLevel_L0 {
 		return false
 	}
 	if !allowUnsorted && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
@@ -168,7 +168,7 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bo
 }
 
 func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bool) bool {
-	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 {
+	if !isFlush(segment) || segment.GetIsInvisible() || segment.GetLevel() == datapb.SegmentLevel_L0 {
 		return false
 	}
 	if !allowUnsorted && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
@@ -196,6 +196,9 @@ func canBuildExternalJSONKeyIndex(segment *SegmentInfo) bool {
 }
 
 func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
+	if segment.GetIsInvisible() {
+		return false
+	}
 	// TODO: docking bm25 stats task
 	return false
 }
@@ -343,6 +346,15 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 	originSegment := si.mt.GetHealthySegment(si.ctx, originSegmentID)
 	if originSegment == nil {
 		return merr.WrapErrSegmentNotFound(originSegmentID)
+	}
+	// Selection helpers are intentionally duplicated by this final gate so a
+	// direct caller cannot publish stats work for an uncommitted producer output.
+	if originSegment.GetIsInvisible() {
+		mlog.Info(si.ctx, "skip submit stats task for invisible segment",
+			mlog.FieldCollectionID(originSegment.GetCollectionID()),
+			mlog.FieldSegmentID(originSegmentID),
+			mlog.String("subJobType", subJobType.String()))
+		return nil
 	}
 	if si.isExternalCollection(originSegment.GetCollectionID()) {
 		if subJobType == indexpb.StatsSubJob_JsonKeyIndexJob && !canBuildExternalJSONKeyIndex(originSegment) {

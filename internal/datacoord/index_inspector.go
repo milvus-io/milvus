@@ -107,7 +107,8 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 			mlog.Info(ctx, "receive create index notify", mlog.FieldCollectionID(collectionID))
 			isExternal := i.isExternalCollection(collectionID)
 			segments := i.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-				return isFlush(info) && (!enableSortCompaction() || info.GetIsSorted() || info.GetIsSortedByNamespace() || isExternal)
+				return isFlush(info) && !info.GetIsInvisible() &&
+					(!enableSortCompaction() || info.GetIsSorted() || info.GetIsSortedByNamespace() || isExternal)
 			}))
 			for _, segment := range segments {
 				if err := i.createIndexesForSegment(ctx, segment); err != nil {
@@ -131,7 +132,9 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 }
 
 func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentInfo {
-	flushedSegments := i.meta.SelectSegments(ctx, SegmentFilterFunc(isFlush))
+	flushedSegments := i.meta.SelectSegments(ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		return isFlush(segment) && !segment.GetIsInvisible()
+	}))
 
 	unindexedSegments := make([]*SegmentInfo, 0)
 	for _, segment := range flushedSegments {
@@ -143,6 +146,12 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentI
 }
 
 func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
+	// Invisible segments are not committed producer output yet. This final gate
+	// protects every trigger path, including direct segment notifications.
+	if segment.GetIsInvisible() {
+		mlog.Debug(ctx, "segment is invisible, skip create indexes", mlog.FieldSegmentID(segment.GetID()))
+		return nil
+	}
 	if enableSortCompaction() && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && !i.isExternalCollection(segment.CollectionID) {
 		mlog.Debug(ctx, "segment is not sorted by pk, skip create indexes", mlog.FieldSegmentID(segment.GetID()))
 		return nil

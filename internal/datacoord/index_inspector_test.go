@@ -263,6 +263,28 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 	assert.NoError(t, inspector.createIndexForSegment(ctx, segment, 5))
 }
 
+func TestIndexInspectorSkipsInvisibleSegment(t *testing.T) {
+	ctx := context.Background()
+	meta := &meta{
+		segments: NewSegmentsInfo(),
+		indexMeta: &indexMeta{
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		},
+	}
+	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 1, CollectionID: 2, State: commonpb.SegmentState_Flushed,
+		IsSorted: true, IsInvisible: true,
+	}}
+	meta.segments.SetSegment(segment.GetID(), segment)
+	meta.indexMeta.indexes[2] = map[UniqueID]*model.Index{3: {CollectionID: 2, IndexID: 3}}
+	inspector := &indexInspector{ctx: ctx, meta: meta}
+
+	assert.Empty(t, inspector.getUnIndexTaskSegments(ctx))
+	assert.NoError(t, inspector.createIndexesForSegment(ctx, segment))
+}
+
 func TestIndexInspector_isExternalCollection(t *testing.T) {
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)

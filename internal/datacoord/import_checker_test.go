@@ -394,6 +394,16 @@ func (s *ImportCheckerSuite) TestCheckTimeout() {
 	s.Equal("import timeout", job.GetReason())
 }
 
+func (s *ImportCheckerSuite) TestCheckTimeoutDoesNotFailCommittingJob() {
+	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_Committing))
+
+	s.checker.tryTimeoutJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(internalpb.ImportJobState_Committing, job.GetState())
+	s.Empty(job.GetReason())
+}
+
 func (s *ImportCheckerSuite) TestCheckFailure() {
 	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
@@ -834,6 +844,16 @@ func (s *ImportCheckerSuite) TestCheckCollection() {
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
 	s.Equal(internalpb.ImportJobState_Failed, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
+func (s *ImportCheckerSuite) TestCheckCollectionDoesNotFailCommittingJob() {
+	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_Committing))
+	broker := s.checker.broker.(*broker2.MockBroker)
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil)
+
+	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
+
+	s.Equal(internalpb.ImportJobState_Committing, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 }
 
 func TestImportChecker(t *testing.T) {
