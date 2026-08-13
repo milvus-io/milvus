@@ -10283,35 +10283,32 @@ type ImportJob struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	JobID              int64                      `protobuf:"varint,1,opt,name=jobID,proto3" json:"jobID,omitempty"`
-	DbID               int64                      `protobuf:"varint,2,opt,name=dbID,proto3" json:"dbID,omitempty"`
-	CollectionID       int64                      `protobuf:"varint,3,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
-	CollectionName     string                     `protobuf:"bytes,4,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	PartitionIDs       []int64                    `protobuf:"varint,5,rep,packed,name=partitionIDs,proto3" json:"partitionIDs,omitempty"`
-	Vchannels          []string                   `protobuf:"bytes,6,rep,name=vchannels,proto3" json:"vchannels,omitempty"`
-	Schema             *schemapb.CollectionSchema `protobuf:"bytes,7,opt,name=schema,proto3" json:"schema,omitempty"`
-	TimeoutTs          uint64                     `protobuf:"varint,8,opt,name=timeout_ts,json=timeoutTs,proto3" json:"timeout_ts,omitempty"`
-	CleanupTs          uint64                     `protobuf:"varint,9,opt,name=cleanup_ts,json=cleanupTs,proto3" json:"cleanup_ts,omitempty"`
-	RequestedDiskSize  int64                      `protobuf:"varint,10,opt,name=requestedDiskSize,proto3" json:"requestedDiskSize,omitempty"`
-	State              internalpb.ImportJobState  `protobuf:"varint,11,opt,name=state,proto3,enum=milvus.proto.internal.ImportJobState" json:"state,omitempty"`
-	Reason             string                     `protobuf:"bytes,12,opt,name=reason,proto3" json:"reason,omitempty"`
-	CompleteTime       string                     `protobuf:"bytes,13,opt,name=complete_time,json=completeTime,proto3" json:"complete_time,omitempty"`
-	Files              []*internalpb.ImportFile   `protobuf:"bytes,14,rep,name=files,proto3" json:"files,omitempty"`
-	Options            []*commonpb.KeyValuePair   `protobuf:"bytes,15,rep,name=options,proto3" json:"options,omitempty"`
-	CreateTime         string                     `protobuf:"bytes,16,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
-	ReadyVchannels     []string                   `protobuf:"bytes,17,rep,name=ready_vchannels,json=readyVchannels,proto3" json:"ready_vchannels,omitempty"`
-	DataTs             uint64                     `protobuf:"varint,18,opt,name=data_ts,json=dataTs,proto3" json:"data_ts,omitempty"`
-	CommittedVchannels []string                   `protobuf:"bytes,19,rep,name=committed_vchannels,json=committedVchannels,proto3" json:"committed_vchannels,omitempty"`
-	AutoCommit         bool                       `protobuf:"varint,20,opt,name=auto_commit,json=autoCommit,proto3" json:"auto_commit,omitempty"`
-	// V3 execution version. Zero is legacy/unknown and is interpreted as V2
-	// until the external msg.ImportTaskVersion contract is available.
-	ImportTaskVersion      int32  `protobuf:"varint,21,opt,name=import_task_version,json=importTaskVersion,proto3" json:"import_task_version,omitempty"`
-	FailureCode            int32  `protobuf:"varint,22,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
-	PlanningGeneration     int64  `protobuf:"varint,23,opt,name=planning_generation,json=planningGeneration,proto3" json:"planning_generation,omitempty"`
-	PlanningSnapshotRef    string `protobuf:"bytes,24,opt,name=planning_snapshot_ref,json=planningSnapshotRef,proto3" json:"planning_snapshot_ref,omitempty"`
-	PlanningSnapshotDigest []byte `protobuf:"bytes,25,opt,name=planning_snapshot_digest,json=planningSnapshotDigest,proto3" json:"planning_snapshot_digest,omitempty"`
-	ImportPlanIndexRef     string `protobuf:"bytes,26,opt,name=import_plan_index_ref,json=importPlanIndexRef,proto3" json:"import_plan_index_ref,omitempty"`
-	ImportPlanIndexDigest  []byte `protobuf:"bytes,27,opt,name=import_plan_index_digest,json=importPlanIndexDigest,proto3" json:"import_plan_index_digest,omitempty"`
+	JobID                  int64                      `protobuf:"varint,1,opt,name=jobID,proto3" json:"jobID,omitempty"`
+	DbID                   int64                      `protobuf:"varint,2,opt,name=dbID,proto3" json:"dbID,omitempty"`
+	CollectionID           int64                      `protobuf:"varint,3,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	CollectionName         string                     `protobuf:"bytes,4,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	PartitionIDs           []int64                    `protobuf:"varint,5,rep,packed,name=partitionIDs,proto3" json:"partitionIDs,omitempty"`
+	Vchannels              []string                   `protobuf:"bytes,6,rep,name=vchannels,proto3" json:"vchannels,omitempty"`
+	Schema                 *schemapb.CollectionSchema `protobuf:"bytes,7,opt,name=schema,proto3" json:"schema,omitempty"`
+	TimeoutTs              uint64                     `protobuf:"varint,8,opt,name=timeout_ts,json=timeoutTs,proto3" json:"timeout_ts,omitempty"`
+	CleanupTs              uint64                     `protobuf:"varint,9,opt,name=cleanup_ts,json=cleanupTs,proto3" json:"cleanup_ts,omitempty"`
+	RequestedDiskSize      int64                      `protobuf:"varint,10,opt,name=requestedDiskSize,proto3" json:"requestedDiskSize,omitempty"`
+	State                  internalpb.ImportJobState  `protobuf:"varint,11,opt,name=state,proto3,enum=milvus.proto.internal.ImportJobState" json:"state,omitempty"`
+	Reason                 string                     `protobuf:"bytes,12,opt,name=reason,proto3" json:"reason,omitempty"`
+	CompleteTime           string                     `protobuf:"bytes,13,opt,name=complete_time,json=completeTime,proto3" json:"complete_time,omitempty"`
+	Files                  []*internalpb.ImportFile   `protobuf:"bytes,14,rep,name=files,proto3" json:"files,omitempty"`
+	Options                []*commonpb.KeyValuePair   `protobuf:"bytes,15,rep,name=options,proto3" json:"options,omitempty"`
+	CreateTime             string                     `protobuf:"bytes,16,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
+	ReadyVchannels         []string                   `protobuf:"bytes,17,rep,name=ready_vchannels,json=readyVchannels,proto3" json:"ready_vchannels,omitempty"`
+	DataTs                 uint64                     `protobuf:"varint,18,opt,name=data_ts,json=dataTs,proto3" json:"data_ts,omitempty"`
+	CommittedVchannels     []string                   `protobuf:"bytes,19,rep,name=committed_vchannels,json=committedVchannels,proto3" json:"committed_vchannels,omitempty"`
+	AutoCommit             bool                       `protobuf:"varint,20,opt,name=auto_commit,json=autoCommit,proto3" json:"auto_commit,omitempty"`
+	FailureCode            int32                      `protobuf:"varint,22,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
+	PlanningGeneration     int64                      `protobuf:"varint,23,opt,name=planning_generation,json=planningGeneration,proto3" json:"planning_generation,omitempty"`
+	PlanningSnapshotRef    string                     `protobuf:"bytes,24,opt,name=planning_snapshot_ref,json=planningSnapshotRef,proto3" json:"planning_snapshot_ref,omitempty"`
+	PlanningSnapshotDigest []byte                     `protobuf:"bytes,25,opt,name=planning_snapshot_digest,json=planningSnapshotDigest,proto3" json:"planning_snapshot_digest,omitempty"`
+	ImportPlanIndexRef     string                     `protobuf:"bytes,26,opt,name=import_plan_index_ref,json=importPlanIndexRef,proto3" json:"import_plan_index_ref,omitempty"`
+	ImportPlanIndexDigest  []byte                     `protobuf:"bytes,27,opt,name=import_plan_index_digest,json=importPlanIndexDigest,proto3" json:"import_plan_index_digest,omitempty"`
 }
 
 func (x *ImportJob) Reset() {
@@ -10484,13 +10481,6 @@ func (x *ImportJob) GetAutoCommit() bool {
 		return x.AutoCommit
 	}
 	return false
-}
-
-func (x *ImportJob) GetImportTaskVersion() int32 {
-	if x != nil {
-		return x.ImportTaskVersion
-	}
-	return 0
 }
 
 func (x *ImportJob) GetFailureCode() int32 {
@@ -18928,7 +18918,7 @@ var file_data_coord_proto_rawDesc = []byte{
 	0x65, 0x72, 0x6e, 0x61, 0x6c, 0x53, 0x70, 0x65, 0x63, 0x12, 0x31, 0x0a, 0x14, 0x73, 0x6e, 0x61,
 	0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x66, 0x69, 0x6e, 0x67, 0x65, 0x72, 0x70, 0x72, 0x69, 0x6e,
 	0x74, 0x18, 0x16, 0x20, 0x01, 0x28, 0x09, 0x52, 0x13, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f,
-	0x74, 0x46, 0x69, 0x6e, 0x67, 0x65, 0x72, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x22, 0xf2, 0x08, 0x0a,
+	0x74, 0x46, 0x69, 0x6e, 0x67, 0x65, 0x72, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x22, 0xc2, 0x08, 0x0a,
 	0x09, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x4a, 0x6f, 0x62, 0x12, 0x14, 0x0a, 0x05, 0x6a, 0x6f,
 	0x62, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x44,
 	0x12, 0x12, 0x0a, 0x04, 0x64, 0x62, 0x49, 0x44, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x04,
@@ -18978,10 +18968,7 @@ var file_data_coord_proto_rawDesc = []byte{
 	0x63, 0x6f, 0x6d, 0x6d, 0x69, 0x74, 0x74, 0x65, 0x64, 0x56, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65,
 	0x6c, 0x73, 0x12, 0x1f, 0x0a, 0x0b, 0x61, 0x75, 0x74, 0x6f, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x69,
 	0x74, 0x18, 0x14, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0a, 0x61, 0x75, 0x74, 0x6f, 0x43, 0x6f, 0x6d,
-	0x6d, 0x69, 0x74, 0x12, 0x2e, 0x0a, 0x13, 0x69, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x5f, 0x74, 0x61,
-	0x73, 0x6b, 0x5f, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x15, 0x20, 0x01, 0x28, 0x05,
-	0x52, 0x11, 0x69, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x54, 0x61, 0x73, 0x6b, 0x56, 0x65, 0x72, 0x73,
-	0x69, 0x6f, 0x6e, 0x12, 0x21, 0x0a, 0x0c, 0x66, 0x61, 0x69, 0x6c, 0x75, 0x72, 0x65, 0x5f, 0x63,
+	0x6d, 0x69, 0x74, 0x12, 0x21, 0x0a, 0x0c, 0x66, 0x61, 0x69, 0x6c, 0x75, 0x72, 0x65, 0x5f, 0x63,
 	0x6f, 0x64, 0x65, 0x18, 0x16, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0b, 0x66, 0x61, 0x69, 0x6c, 0x75,
 	0x72, 0x65, 0x43, 0x6f, 0x64, 0x65, 0x12, 0x2f, 0x0a, 0x13, 0x70, 0x6c, 0x61, 0x6e, 0x6e, 0x69,
 	0x6e, 0x67, 0x5f, 0x67, 0x65, 0x6e, 0x65, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x17, 0x20,

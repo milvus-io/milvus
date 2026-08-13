@@ -1403,9 +1403,6 @@ message ImportJob {
   uint64 data_ts = 18;
   repeated string committed_vchannels = 19;
   bool            auto_commit         = 20;
-  // V3 execution version. Zero is legacy/unknown and is interpreted as V2
-  // until the external msg.ImportTaskVersion contract is available.
-  int32 import_task_version = 21;
   int32 failure_code = 22;
   int64 planning_generation = 23;
   string planning_snapshot_ref = 24;
