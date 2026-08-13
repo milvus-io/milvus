@@ -69,24 +69,19 @@ func (s *indexTaskSuite) SetupSuite() {
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.mt = &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				s.segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            s.segID,
-						CollectionID:  s.collID,
-						PartitionID:   s.partID,
-						InsertChannel: "ch1",
-						NumOfRows:     65535,
-						State:         commonpb.SegmentState_Flushed,
-						MaxRowNum:     65535,
-						Level:         datapb.SegmentLevel_L2,
-					},
-				},
-			},
-		},
+		segments:  NewSegmentsInfo(),
 		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 	}
+	s.mt.segments.SetSegment(s.segID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:            s.segID,
+		CollectionID:  s.collID,
+		PartitionID:   s.partID,
+		InsertChannel: "ch1",
+		NumOfRows:     65535,
+		State:         commonpb.SegmentState_Flushed,
+		MaxRowNum:     65535,
+		Level:         datapb.SegmentLevel_L2,
+	}})
 }
 
 func (s *indexTaskSuite) TestBasicTaskOperations() {
@@ -922,6 +917,7 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 		s.mt.segments.segments[s.segID].ManifestPath = current
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		s.mt.catalog = catalog
 		s.mt.indexMeta.catalog = catalog
 		result := &workerpb.IndexTaskInfo{BuildID: s.taskID, State: commonpb.IndexState_Finished, ManifestPath: incoming}
 		s.NoError(it.setJobInfo(result))
@@ -934,6 +930,7 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 		s.mt.segments.segments[s.segID].ManifestPath = current
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
+		s.mt.catalog = catalog
 		s.mt.indexMeta.catalog = catalog
 		it.SetState(indexpb.JobState_JobStateInProgress, "")
 		result := &workerpb.IndexTaskInfo{BuildID: s.taskID, State: commonpb.IndexState_Finished, ManifestPath: incoming}

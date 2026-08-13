@@ -18,6 +18,7 @@ package index
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -219,8 +220,9 @@ func (suite *IndexBuildTaskSuite) TestStorageV3PostExecutePublishesManifestIndex
 		indexID      = int64(1005)
 		indexVersion = int64(3)
 	)
-	sourceManifest := `{"base_path":"insert_log/1000/1001/1002","ver":7}`
-	publishedManifest := `{"base_path":"insert_log/1000/1001/1002","ver":8}`
+	segmentBasePath := filepath.Join(suite.rootPath, "insert_log/1000/1001/1002")
+	sourceManifest := packed.MarshalManifestPath(segmentBasePath, 7)
+	publishedManifest := packed.MarshalManifestPath(segmentBasePath, 8)
 	manager := NewTaskManager(ctx)
 	manager.LoadOrStoreIndexTask("cluster", buildID, &IndexTaskInfo{})
 	req := &workerpb.CreateJobRequest{
@@ -258,6 +260,18 @@ func (suite *IndexBuildTaskSuite) TestStorageV3PostExecutePublishesManifestIndex
 	suite.EqualValues(4, captured.CurrentIndexVersion)
 	suite.EqualValues(5, captured.CurrentScalarIndexVersion)
 	suite.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, captured.IndexStorePathVersion)
+	legacyIndexPrefix := metautil.NewIndexPathBuilder(
+		suite.rootPath,
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		suite.collectionID,
+		suite.partitionID,
+		suite.segmentID,
+		buildID,
+		indexVersion,
+	).BuildPrefix()
+	expectedManifestIndexPath, err := filepath.Rel(filepath.Join(segmentBasePath, "_index"), legacyIndexPrefix)
+	suite.Require().NoError(err)
+	suite.Equal(expectedManifestIndexPath, captured.Path)
 	suite.Equal([]string{"index.bin", "meta.json"}, captured.IndexFileKeys)
 	info := manager.GetIndexTaskInfo("cluster", buildID)
 	suite.Require().NotNil(info)

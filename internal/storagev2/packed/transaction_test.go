@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -56,13 +58,18 @@ func TestManifestIndexRoundtrip(t *testing.T) {
 		RootPath:    dir,
 		StorageType: "local",
 	}
-	basePath := filepath.Join(dir, "insert_log/1/2/3_index")
+	basePath := filepath.Join(dir, "insert_log/1/2/3")
 	manifestPath := createBaseManifest(t, basePath, storageConfig)
+	indexPrefix := filepath.Join(dir, "index_files/1/2/3/4")
+	manifestIndexPath, err := filepath.Rel(filepath.Join(basePath, "_index"), indexPrefix)
+	require.NoError(t, err)
 	index := ManifestIndexInfo{
-		ColumnName:                "pk",
-		IndexName:                 "pk_inverted",
-		IndexType:                 "INVERTED",
-		Path:                      filepath.Join(dir, "index_files/1/2/3/4"),
+		ColumnName: "pk",
+		IndexName:  "pk_inverted",
+		IndexType:  "INVERTED",
+		// Index paths are relative to the segment's _index directory. The FFI
+		// restores the legacy index prefix while reading the manifest.
+		Path:                      manifestIndexPath,
 		FieldID:                   100,
 		IndexID:                   101,
 		BuildID:                   4,
@@ -90,10 +97,148 @@ func TestManifestIndexRoundtrip(t *testing.T) {
 	indexes, err := GetManifestIndexInfos(newManifestPath, storageConfig)
 	require.NoError(t, err)
 	require.Len(t, indexes, 1)
-	assert.Equal(t, index, indexes[0])
+	expectedIndex := index
+	expectedIndex.Path = indexPrefix
+	assert.Equal(t, expectedIndex, indexes[0])
 
-	_, err = AddIndexInfoToManifest(manifestPath, storageConfig, index)
-	require.Error(t, err, "publishing from a stale manifest must fail")
+	// Another field's index may finish from the same source manifest. The
+	// overwrite resolver retries the index-only update on the latest revision
+	// so neither completed index is lost.
+	secondIndex := index
+	secondIndex.ColumnName = "vec"
+	secondIndex.IndexName = "vec_hnsw"
+	secondIndexPath := filepath.Join(dir, "index_files/1/2/3/5")
+	secondIndex.Path, err = filepath.Rel(filepath.Join(basePath, "_index"), secondIndexPath)
+	require.NoError(t, err)
+	secondIndex.FieldID = 101
+	secondIndex.IndexID = 102
+	secondIndex.BuildID = 5
+	updatedManifestPath, err := AddIndexInfoToManifest(manifestPath, storageConfig, secondIndex)
+	require.NoError(t, err, "index-only updates from the same source manifest should merge")
+	indexes, err = GetManifestIndexInfos(updatedManifestPath, storageConfig)
+	require.NoError(t, err)
+	require.Len(t, indexes, 2)
+}
+
+// TestManifestIndexNormalPathReadback exercises the complete index artifact
+// path contract: Milvus writes files to the normal legacy index prefix,
+// publishes that prefix relative to the segment _index directory, and reads
+// the same files back through the manifest API.
+func TestManifestIndexNormalPathReadback(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	basePath := filepath.Join(cfg.RootPath, "insert_log/10/20/30")
+	manifestPath := createBaseManifest(t, basePath, cfg)
+
+	const (
+		collectionID = int64(10)
+		partitionID  = int64(20)
+		segmentID    = int64(30)
+		buildID      = int64(40)
+		indexVersion = int64(5)
+	)
+	pathVersion := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
+	indexPrefix := metautil.NewIndexPathBuilder(
+		cfg.RootPath, pathVersion, collectionID, partitionID, segmentID, buildID, indexVersion,
+	).BuildPrefix()
+	fileContents := map[string][]byte{
+		"index.bin": []byte("normal-index-bytes"),
+		"meta.json": []byte(`{"dimension":128}`),
+	}
+	for fileKey, contents := range fileContents {
+		require.NoError(t, WriteFile(cfg, filepath.Join(indexPrefix, fileKey), contents))
+	}
+
+	manifestIndexPath, err := filepath.Rel(filepath.Join(basePath, "_index"), indexPrefix)
+	require.NoError(t, err)
+	newManifestPath, err := AddIndexInfoToManifest(manifestPath, cfg, ManifestIndexInfo{
+		ColumnName:            "vec",
+		IndexName:             "vec_hnsw",
+		IndexType:             "HNSW",
+		Path:                  manifestIndexPath,
+		FieldID:               100,
+		IndexID:               101,
+		BuildID:               buildID,
+		IndexVersion:          indexVersion,
+		NumRows:               2,
+		SerializedSize:        int64(len(fileContents["index.bin"])),
+		MemSize:               1024,
+		IndexStorePathVersion: pathVersion,
+		IndexFileKeys:         []string{"index.bin", "meta.json"},
+	})
+	require.NoError(t, err)
+
+	indexes, err := GetManifestIndexInfos(newManifestPath, cfg)
+	require.NoError(t, err)
+	require.Len(t, indexes, 1)
+	require.Equal(t, indexPrefix, indexes[0].Path)
+	for _, fileKey := range indexes[0].IndexFileKeys {
+		contents, readErr := ReadFile(cfg, filepath.Join(indexes[0].Path, fileKey))
+		require.NoError(t, readErr)
+		assert.Equal(t, fileContents[fileKey], contents)
+	}
+}
+
+// TestManifestIndexConcurrentPublication verifies that concurrently completed
+// indexes for different fields of one segment are both preserved. This mirrors
+// DataNode's parallel index-build workers sharing a StorageV3 manifest.
+func TestManifestIndexConcurrentPublication(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	basePath := filepath.Join(cfg.RootPath, "insert_log/10/20/31")
+	manifestPath := createBaseManifest(t, basePath, cfg)
+
+	newIndex := func(columnName string, fieldID, indexID, buildID int64) ManifestIndexInfo {
+		indexPrefix := filepath.Join(cfg.RootPath, "index_files/10/20/31", fmt.Sprintf("%d", buildID))
+		indexPath, err := filepath.Rel(filepath.Join(basePath, "_index"), indexPrefix)
+		require.NoError(t, err)
+		return ManifestIndexInfo{
+			ColumnName: columnName, IndexName: columnName + "_idx", IndexType: "INVERTED", Path: indexPath,
+			FieldID: fieldID, IndexID: indexID, BuildID: buildID, IndexVersion: 1, NumRows: 2,
+			IndexFileKeys: []string{"index.bin"},
+		}
+	}
+
+	indexesToPublish := []ManifestIndexInfo{
+		newIndex("field_a", 100, 101, 1),
+		newIndex("field_b", 200, 201, 2),
+	}
+	paths := make(chan string, len(indexesToPublish))
+	errs := make(chan error, len(indexesToPublish))
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for _, index := range indexesToPublish {
+		wg.Add(1)
+		go func(index ManifestIndexInfo) {
+			defer wg.Done()
+			<-start
+			path, err := AddIndexInfoToManifest(manifestPath, cfg, index)
+			if err != nil {
+				errs <- err
+				return
+			}
+			paths <- path
+		}(index)
+	}
+	close(start)
+	wg.Wait()
+	close(paths)
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	var latestPath string
+	var latestVersion int64
+	for path := range paths {
+		_, version, err := UnmarshalManifestPath(path)
+		require.NoError(t, err)
+		if version > latestVersion {
+			latestPath, latestVersion = path, version
+		}
+	}
+	indexes, err := GetManifestIndexInfos(latestPath, cfg)
+	require.NoError(t, err)
+	require.Len(t, indexes, 2)
+	assert.ElementsMatch(t, []int64{100, 200}, []int64{indexes[0].FieldID, indexes[1].FieldID})
 }
 
 // createBaseManifest creates a base manifest via FFIPackedWriter for delta log tests.

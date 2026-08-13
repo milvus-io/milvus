@@ -22,7 +22,7 @@ associating a completed build with newer segment data.
 ## Design
 
 ```
-DataNode upload index files
+DataNode uploads index files to the legacy index prefix
         |
         v
 publish IndexInfo against source manifest revision
@@ -47,10 +47,19 @@ relative index-file keys. `properties` is reserved for index-specific
 parameters such as metric type and Knowhere options. This preserves Milvus's
 multi-file index layout without encoding required load metadata as strings.
 
-Publication uses `LOON_TRANSACTION_RESOLVE_FAIL` with one attempt.  If the
-source manifest revision has advanced, publication fails rather than merging an
-index built from stale data into a newer revision.  The DataNode task becomes
-retryable, so the next build reads the current manifest.
+The manifest artifact path is intentionally distinct from the legacy etcd
+`SegmentIndex` path. DataNode calculates the legacy index prefix, then stores
+it in `LoonIndexInfo.path` relative to the segment's `_index` directory. The
+FFI restores the legacy index root when reading the manifest; DataCoord joins
+that root with each file key during manifest fallback. The legacy etcd handoff
+remains on its existing global `index_files`/`index_v1` hierarchy.
+
+Publication serializes index-only updates for each manifest base path. A task
+entering that critical section reads the latest revision, then commits with
+`LOON_TRANSACTION_RESOLVE_FAIL`; independent index tasks for different fields
+therefore retain all completed artifacts without silently merging an external
+concurrent update. Segment replacement changes the manifest base path and is
+rejected by DataCoord before it records completion.
 
 The transaction runs only after index bytes are uploaded.  A publication
 failure can therefore leave unreferenced uploaded files, but cannot expose an
@@ -75,7 +84,7 @@ different segment manifest base.
 ## Verification
 
 - StorageV3 manifest round-trip covers every typed index load field,
-  properties, version increment, and stale-manifest rejection.
+  properties, version increment, and concurrent index-only publication.
 - DataNode task-result projection preserves `manifest_path`.
 - DataCoord uses SegmentIndex metadata without manifest I/O and falls back to
   a matching typed manifest entry only when index_file_keys are absent.

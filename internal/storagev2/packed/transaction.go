@@ -31,9 +31,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+var indexManifestLocks = lock.NewKeyLock[string]()
 
 // ManifestIndexInfo identifies a completed index artifact registered in a
 // StorageV3 manifest. Path is the artifact root, IndexFileKeys are relative to
@@ -61,10 +64,11 @@ type ManifestIndexInfo struct {
 	Properties                map[string]string
 }
 
-// AddIndexInfoToManifest records a completed index artifact in the exact
-// manifest revision it was built from. It deliberately uses the fail resolver
-// with one attempt: if the source manifest advanced, the raw data could have
-// changed and the caller must rebuild instead of publishing a stale index.
+// AddIndexInfoToManifest records a completed index artifact in a segment
+// manifest. Index tasks for different fields of the same sealed segment can
+// finish concurrently, so serialize updates for a manifest base path and
+// re-read the latest revision before publishing. The fail resolver then keeps
+// an index from being published after an external concurrent update.
 func AddIndexInfoToManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
@@ -81,6 +85,18 @@ func AddIndexInfoToManifest(
 	}
 	defer C.loon_properties_free(cProperties)
 
+	indexManifestLocks.Lock(basePath)
+	defer indexManifestLocks.Unlock(basePath)
+
+	// A previous index task may have committed a newer revision from the same
+	// source manifest while this task was waiting for the per-segment lock.
+	// Rebase this metadata-only update on that revision before opening the
+	// fail-resolved transaction.
+	version, err = getLatestManifestVersion(basePath, cProperties)
+	if err != nil {
+		return "", merr.Wrap(err, "failed to read latest manifest version")
+	}
+
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 
@@ -89,7 +105,7 @@ func AddIndexInfoToManifest(
 		cBasePath,
 		cProperties,
 		C.int64_t(version),
-		C.int32_t(C.LOON_TRANSACTION_RESOLVE_FAIL), // Never publish an index built from stale data.
+		C.int32_t(C.LOON_TRANSACTION_RESOLVE_FAIL),
 		C.uint32_t(1),
 		&transactionHandle,
 	)
@@ -185,6 +201,30 @@ func AddIndexInfoToManifest(
 		return "", merr.WrapErrStorage(err, "failed to commit index manifest transaction")
 	}
 	return MarshalManifestPath(basePath, int64(commitVersion)), nil
+}
+
+func getLatestManifestVersion(basePath string, properties *C.LoonProperties) (int64, error) {
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+
+	var transactionHandle C.LoonTransactionHandle
+	if err := HandleLoonFFIResult(C.loon_transaction_begin(
+		cBasePath,
+		properties,
+		C.int64_t(-1),
+		C.int32_t(C.LOON_TRANSACTION_RESOLVE_FAIL),
+		C.uint32_t(1),
+		&transactionHandle,
+	)); err != nil {
+		return 0, merr.WrapErrStorage(err, "failed to open latest manifest transaction")
+	}
+	defer C.loon_transaction_destroy(transactionHandle)
+
+	var version C.int64_t
+	if err := HandleLoonFFIResult(C.loon_transaction_get_read_version(transactionHandle, &version)); err != nil {
+		return 0, merr.WrapErrStorage(err, "failed to get latest manifest version")
+	}
+	return int64(version), nil
 }
 
 // getRetryLimit returns the configured manifest transaction retry limit.

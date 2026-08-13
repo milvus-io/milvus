@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -407,6 +408,13 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		for key, value := range common.KeyValuePairs(it.req.GetIndexParams()).ToMap() {
 			indexProperties[key] = value
 		}
+		segmentBasePath, _, err := packed.UnmarshalManifestPath(it.req.GetManifest())
+		if err != nil {
+			return merr.WrapErrStorage(err, "failed to parse StorageV3 manifest path for index publication")
+		}
+		if segmentBasePath == "" {
+			return merr.WrapErrServiceInternalMsg("StorageV3 manifest path for index publication has an empty base_path")
+		}
 		indexPrefix := metautil.NewIndexPathBuilder(
 			it.req.GetStorageConfig().GetRootPath(),
 			it.req.GetIndexStorePathVersion(),
@@ -416,11 +424,17 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 			it.req.GetBuildID(),
 			it.req.GetIndexVersion(),
 		).BuildPrefix()
+		// Manifest Index.path follows the storage layout and is relative to the
+		// segment's _index directory, not the absolute legacy etcd index prefix.
+		manifestIndexPath, err := filepath.Rel(filepath.Join(segmentBasePath, "_index"), indexPrefix)
+		if err != nil {
+			return merr.WrapErrServiceInternalErr(err, "failed to derive relative manifest index path")
+		}
 		manifestPath, err = packed.AddIndexInfoToManifest(it.req.GetManifest(), it.req.GetStorageConfig(), packed.ManifestIndexInfo{
 			ColumnName:                it.req.GetField().GetName(),
 			IndexName:                 it.req.GetIndexName(),
 			IndexType:                 GetIndexType(it.req.GetIndexParams()),
-			Path:                      indexPrefix,
+			Path:                      manifestIndexPath,
 			FieldID:                   it.req.GetFieldID(),
 			IndexID:                   it.req.GetIndexID(),
 			BuildID:                   it.req.GetBuildID(),
@@ -440,7 +454,8 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		log.Info(ctx, "published index info to manifest",
 			mlog.String("sourceManifest", it.req.GetManifest()),
 			mlog.String("manifest", manifestPath),
-			mlog.String("indexPrefix", indexPrefix))
+			mlog.String("indexPrefix", indexPrefix),
+			mlog.String("manifestIndexPath", manifestIndexPath))
 	}
 
 	it.manager.StoreIndexFilesAndStatistic(
