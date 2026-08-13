@@ -109,7 +109,7 @@ func (s *importInspector) inspect() {
 				switch task.GetType() {
 				case PreImportTaskType:
 					s.processPendingPreImport(task)
-				case ImportTaskType:
+				case ImportTaskType, ReshardTaskType, ImportTaskV3Type:
 					s.processPendingImport(task)
 				}
 			case datapb.ImportTaskStateV2_Failed:

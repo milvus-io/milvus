@@ -27,11 +27,15 @@ type TaskType int
 const (
 	PreImportTaskType TaskType = 0
 	ImportTaskType    TaskType = 1
+	ReshardTaskType   TaskType = 2
+	ImportTaskV3Type  TaskType = 3
 )
 
 var ImportTaskTypeName = map[TaskType]string{
 	0: "PreImportTask",
 	1: "ImportTask",
+	2: "ReshardTask",
+	3: "ImportTaskV3",
 }
 
 func (t TaskType) String() string {
@@ -78,6 +82,10 @@ func UpdateState(state datapb.ImportTaskStateV2) UpdateAction {
 			t.(*preImportTask).task.Load().State = state
 		case ImportTaskType:
 			t.(*importTask).task.Load().State = state
+		case ReshardTaskType:
+			t.(*reshardTask).setState(state)
+		case ImportTaskV3Type:
+			t.(*importTaskV3).setState(state)
 		}
 	}
 }
@@ -89,6 +97,10 @@ func UpdateReason(reason string) UpdateAction {
 			t.(*preImportTask).task.Load().Reason = reason
 		case ImportTaskType:
 			t.(*importTask).task.Load().Reason = reason
+		case ReshardTaskType:
+			t.(*reshardTask).task.Load().Reason = reason
+		case ImportTaskV3Type:
+			t.(*importTaskV3).task.Load().Reason = reason
 		}
 	}
 }
@@ -111,6 +123,21 @@ func UpdateNodeID(nodeID int64) UpdateAction {
 			t.(*preImportTask).task.Load().NodeID = nodeID
 		case ImportTaskType:
 			t.(*importTask).task.Load().NodeID = nodeID
+		case ReshardTaskType:
+			t.(*reshardTask).task.Load().NodeId = nodeID
+		case ImportTaskV3Type:
+			t.(*importTaskV3).task.Load().NodeId = nodeID
+		}
+	}
+}
+
+func updateV3FailureCode(code int32) UpdateAction {
+	return func(t ImportTask) {
+		switch t.GetType() {
+		case ReshardTaskType:
+			t.(*reshardTask).task.Load().FailureCode = code
+		case ImportTaskV3Type:
+			t.(*importTaskV3).task.Load().FailureCode = code
 		}
 	}
 }

@@ -635,6 +635,11 @@ func GetTaskProgresses(ctx context.Context, jobID int64, importMeta ImportMeta, 
 	progresses := make([]*internalpb.ImportTaskProgress, 0)
 	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
 	for _, task := range tasks {
+		if task.GetType() != ImportTaskType {
+			// V3 task progress is exposed through the job state/reason until its
+			// dedicated result projection is added; never type-assert it as V2.
+			continue
+		}
 		totalRows := lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
 			return file.GetTotalRows()
 		})

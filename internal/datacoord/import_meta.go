@@ -115,6 +115,24 @@ func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog, allo
 
 	tasks := newImportTasks()
 	importMeta := &importMeta{}
+	if v3Catalog, ok := catalog.(metastore.ImportV3Catalog); ok {
+		restoredReshardTasks, err := v3Catalog.ListReshardTasks(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, task := range restoredReshardTasks {
+			t := newReshardTask(task, importMeta, meta)
+			tasks.add(t)
+		}
+		restoredImportTasksV3, err := v3Catalog.ListImportTasksV3(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, task := range restoredImportTasksV3 {
+			t := newImportTaskV3(task, importMeta, meta)
+			tasks.add(t)
+		}
+	}
 
 	for _, task := range restoredPreImportTasks {
 		t := &preImportTask{
@@ -252,6 +270,24 @@ func (m *importMeta) AddTask(ctx context.Context, task ImportTask) error {
 			return err
 		}
 		m.tasks.add(task)
+	case ReshardTaskType:
+		catalog, ok := m.catalog.(metastore.ImportV3Catalog)
+		if !ok {
+			return merr.WrapErrImportSysFailedMsg("import v3 catalog is unavailable")
+		}
+		if err := catalog.SaveReshardTask(ctx, task.(*reshardTask).task.Load()); err != nil {
+			return err
+		}
+		m.tasks.add(task)
+	case ImportTaskV3Type:
+		catalog, ok := m.catalog.(metastore.ImportV3Catalog)
+		if !ok {
+			return merr.WrapErrImportSysFailedMsg("import v3 catalog is unavailable")
+		}
+		if err := catalog.SaveImportTaskV3(ctx, task.(*importTaskV3).task.Load()); err != nil {
+			return err
+		}
+		m.tasks.add(task)
 	}
 	return nil
 }
@@ -279,6 +315,24 @@ func (m *importMeta) UpdateTask(ctx context.Context, taskID int64, actions ...Up
 			}
 			// update memory task
 			task.(*importTask).task.Store(updatedTask.(*importTask).task.Load())
+		case ReshardTaskType:
+			catalog, ok := m.catalog.(metastore.ImportV3Catalog)
+			if !ok {
+				return merr.WrapErrImportSysFailedMsg("import v3 catalog is unavailable")
+			}
+			if err := catalog.SaveReshardTask(ctx, updatedTask.(*reshardTask).task.Load()); err != nil {
+				return err
+			}
+			task.(*reshardTask).task.Store(updatedTask.(*reshardTask).task.Load())
+		case ImportTaskV3Type:
+			catalog, ok := m.catalog.(metastore.ImportV3Catalog)
+			if !ok {
+				return merr.WrapErrImportSysFailedMsg("import v3 catalog is unavailable")
+			}
+			if err := catalog.SaveImportTaskV3(ctx, updatedTask.(*importTaskV3).task.Load()); err != nil {
+				return err
+			}
+			task.(*importTaskV3).task.Store(updatedTask.(*importTaskV3).task.Load())
 		}
 	}
 
@@ -320,6 +374,22 @@ func (m *importMeta) RemoveTask(ctx context.Context, taskID int64) error {
 		case ImportTaskType:
 			err := m.catalog.DropImportTask(ctx, taskID)
 			if err != nil {
+				return err
+			}
+		case ReshardTaskType:
+			catalog, ok := m.catalog.(metastore.ImportV3Catalog)
+			if !ok {
+				return merr.WrapErrImportSysFailedMsg("import v3 catalog is unavailable")
+			}
+			if err := catalog.DropReshardTask(ctx, taskID); err != nil {
+				return err
+			}
+		case ImportTaskV3Type:
+			catalog, ok := m.catalog.(metastore.ImportV3Catalog)
+			if !ok {
+				return merr.WrapErrImportSysFailedMsg("import v3 catalog is unavailable")
+			}
+			if err := catalog.DropImportTaskV3(ctx, taskID); err != nil {
 				return err
 			}
 		}

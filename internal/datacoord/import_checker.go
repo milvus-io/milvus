@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -256,6 +257,19 @@ func (c *importChecker) getLackFilesForImports(job ImportJob) []*datapb.ImportFi
 
 func (c *importChecker) checkPendingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
+	if job.GetImportTaskVersion() == msgpb.ImportTaskVersion_IMPORT_TASK_VERSION_V3 {
+		// V3 must never fall through to the legacy PreImportTask path. Planning
+		// is an all-or-nothing persisted protocol; until a valid task plan can be
+		// built, fail explicitly instead of fabricating an empty V2/V3 task.
+		err := merr.WrapErrImportSysFailedMsg("import v3 planning is unavailable")
+		if updateErr := c.importMeta.UpdateJob(c.ctx, job.GetJobID(),
+			UpdateJobState(internalpb.ImportJobState_Failed),
+			UpdateJobReason(err.Error()),
+		); updateErr != nil {
+			log.Warn(c.ctx, "failed to reject import v3 job without planning", mlog.Err(updateErr))
+		}
+		return
+	}
 	lacks := c.getLackFilesForPreImports(job)
 	if len(lacks) == 0 {
 		return
