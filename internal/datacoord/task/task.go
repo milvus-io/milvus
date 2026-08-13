@@ -46,6 +46,13 @@ type WorkerVersionConstraint interface {
 	MinimumWorkerVersion() semver.Version
 }
 
+// ExactSlotAdmission is implemented by tasks whose working-set reservation is
+// a hard admission requirement. Legacy tasks intentionally do not implement it
+// and retain the historical best-effort fallback when a node has fewer slots.
+type ExactSlotAdmission interface {
+	RequireExactSlotAdmission() bool
+}
+
 func WrapTaskLog(task Task, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.Int64("ID", task.GetTaskID()),

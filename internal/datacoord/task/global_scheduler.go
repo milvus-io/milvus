@@ -224,13 +224,22 @@ func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*
 // across all tasks in a scheduling round so later picks observe the decremented
 // slots.
 func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
-	return s.pickNodeWithMinimumVersion(slotHeap, taskSlot, semver.Version{})
+	return s.pickNodeWithMinimumVersionAndAdmission(slotHeap, taskSlot, semver.Version{}, false)
 }
 
 func (s *globalTaskScheduler) pickNodeWithMinimumVersion(
 	slotHeap typeutil.Heap[*nodeSlotEntry],
 	taskSlot int64,
 	minimumVersion semver.Version,
+) int64 {
+	return s.pickNodeWithMinimumVersionAndAdmission(slotHeap, taskSlot, minimumVersion, false)
+}
+
+func (s *globalTaskScheduler) pickNodeWithMinimumVersionAndAdmission(
+	slotHeap typeutil.Heap[*nodeSlotEntry],
+	taskSlot int64,
+	minimumVersion semver.Version,
+	exactAdmission bool,
 ) int64 {
 	if slotHeap.Len() == 0 {
 		return NullNodeID
@@ -264,8 +273,13 @@ func (s *globalTaskScheduler) pickNodeWithMinimumVersion(
 		if entry.slots.AvailableSlots >= taskSlot {
 			entry.slots.AvailableSlots -= taskSlot
 		} else {
-			// No compatible node can fully satisfy the request; assign to the
-			// most-available compatible node on a best-effort basis.
+			if exactAdmission {
+				// V3 working-set slots are a hard reservation. Keep the task
+				// pending instead of allowing an over-commit that can OOM it.
+				slotHeap.Push(entry)
+				return NullNodeID
+			}
+			// Legacy tasks retain the historical best-effort fallback.
 			entry.slots.AvailableSlots = 0
 		}
 		slotHeap.Push(entry)
@@ -333,7 +347,11 @@ func (s *globalTaskScheduler) schedule() {
 		}
 		taskSlot := task.GetTaskSlot()
 		minimumVersion, versionConstrained := minimumWorkerVersion(task)
-		nodeID := s.pickNodeWithMinimumVersion(slotHeap, taskSlot, minimumVersion)
+		exactAdmission := false
+		if admission, ok := task.(ExactSlotAdmission); ok {
+			exactAdmission = admission.RequireExactSlotAdmission()
+		}
+		nodeID := s.pickNodeWithMinimumVersionAndAdmission(slotHeap, taskSlot, minimumVersion, exactAdmission)
 		if nodeID == NullNodeID {
 			if versionConstrained {
 				delayed = append(delayed, task)
