@@ -77,6 +77,9 @@ func validateImportResultManifest(manifest *datapb.ImportResultManifest, jobID, 
 	if len(planDigest) == 0 || !bytes.Equal(planDigest, manifest.GetTaskPlanDigest()) {
 		return merr.WrapErrDataIntegrityMsg("import result task plan digest mismatch")
 	}
+	if manifest.GetTotalRows() < 0 || manifest.GetTotalPhysicalBytes() < 0 {
+		return merr.WrapErrDataIntegrityMsg("import result totals must be non-negative")
+	}
 	if len(manifest.GetSegments()) != len(outputSegmentIDs) {
 		return merr.WrapErrDataIntegrityMsg("import result segment count mismatch: got=%d want=%d", len(manifest.GetSegments()), len(outputSegmentIDs))
 	}
@@ -91,12 +94,26 @@ func validateImportResultManifest(manifest *datapb.ImportResultManifest, jobID, 
 		}
 		seen[result.GetPhysicalSegmentId()] = struct{}{}
 		if result.GetRows() == 0 {
-			if result.GetMaterialized() || result.GetStatistics() != nil || len(result.GetInsertLogs()) > 0 || result.GetManifestPath() != "" {
+			// A zero-row plan is a placeholder only.  It must not carry any
+			// physical output or metadata that could make it look consumable to
+			// GC, index, stats, or commit code during marker-last recovery.
+			if result.GetMaterialized() || result.GetStatistics() != nil ||
+				len(result.GetInsertLogs()) > 0 || result.GetPkStatsLog() != nil ||
+				len(result.GetBm25Logs()) > 0 || len(result.GetTextStatsLogs()) > 0 ||
+				result.GetManifestPath() != "" || result.GetPhysicalBytes() != 0 ||
+				result.GetMinTimestamp() != 0 || result.GetMaxTimestamp() != 0 ||
+				len(result.GetExpirationQuantiles()) > 0 {
 				return merr.WrapErrDataIntegrityMsg("zero-row import segment %d must not be materialized", result.GetPhysicalSegmentId())
 			}
 		} else {
 			if !result.GetMaterialized() || result.GetStatistics() == nil {
 				return merr.WrapErrDataIntegrityMsg("non-empty import segment %d is not materialized", result.GetPhysicalSegmentId())
+			}
+			if result.GetMinTimestamp() > result.GetMaxTimestamp() {
+				return merr.WrapErrDataIntegrityMsg("segment %d timestamp range is reversed", result.GetPhysicalSegmentId())
+			}
+			if result.GetMinTimestamp() != result.GetStatistics().GetTimestampFrom() {
+				return merr.WrapErrDataIntegrityMsg("segment %d min timestamp does not match Statistics.TimestampFrom", result.GetPhysicalSegmentId())
 			}
 			if result.GetMaxTimestamp() != result.GetStatistics().GetTimestampTo() {
 				return merr.WrapErrDataIntegrityMsg("segment %d max timestamp does not match Statistics.TimestampTo", result.GetPhysicalSegmentId())
