@@ -1358,6 +1358,7 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 		})
 		task := NewLeaderSegmentTask(
 			ctx,
+			10*time.Second,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -1458,7 +1459,7 @@ func (suite *TaskSuite) TestCreateTaskBehavior() {
 	suite.Nil(segmentTask)
 
 	leaderAction := NewLeaderAction(1, 2, ActionTypeGrow, "fake-channel1", 100, 0)
-	leaderTask := NewLeaderSegmentTask(context.TODO(), WrapIDSource(0), 0, meta.NilReplica, 1, leaderAction)
+	leaderTask := NewLeaderSegmentTask(context.TODO(), 10*time.Second, WrapIDSource(0), 0, meta.NilReplica, 1, leaderAction)
 	suite.NotNil(leaderTask)
 }
 
@@ -1692,6 +1693,7 @@ func (suite *TaskSuite) TestLeaderTaskRemove() {
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
 		task := NewLeaderSegmentTask(
 			ctx,
+			10*time.Second,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -1754,6 +1756,7 @@ func (suite *TaskSuite) TestLeaderTaskUsesLeaderExecutor() {
 
 	task := NewLeaderSegmentTask(
 		ctx,
+		10*time.Second,
 		WrapIDSource(0),
 		suite.collection,
 		suite.replica,
@@ -2315,7 +2318,7 @@ func TestSegmentTaskDeltaDefensiveBranches(t *testing.T) {
 	delta.Sub(segmentTask)
 	assert.Empty(t, delta.records)
 
-	base := newBaseTask(context.Background(), WrapIDSource(0), 100, replica, "ch", "MalformedSegmentTask")
+	base := newBaseTask(context.Background(), 0, WrapIDSource(0), 100, replica, "ch", "MalformedSegmentTask")
 	base.SetID(2)
 	base.actions = []Action{NewChannelAction(1, ActionTypeGrow, "ch")}
 	malformedTask := &SegmentTask{baseTask: base, segmentID: 10}
@@ -2633,6 +2636,7 @@ func (suite *TaskSuite) TestLeaderTaskStaleByRONode() {
 		// After fix: checkStale uses leaderID (1, RW), task should NOT be stale
 		task := NewLeaderSegmentTask(
 			ctx,
+			10*time.Second,
 			WrapIDSource(0),
 			suite.collection,
 			replicaWithRONode,
@@ -2669,6 +2673,7 @@ func (suite *TaskSuite) TestLeaderTaskStaleByRONode() {
 		// Create task with original replica (all RW nodes)
 		task := NewLeaderSegmentTask(
 			ctx,
+			10*time.Second,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -2727,6 +2732,7 @@ func (suite *TaskSuite) TestLeaderTaskStaleByRONode() {
 		// Create LeaderAction with Reduce type
 		task := NewLeaderSegmentTask(
 			ctx,
+			10*time.Second,
 			WrapIDSource(0),
 			suite.collection,
 			replicaWithLeaderRO,
@@ -3177,7 +3183,7 @@ func (suite *TaskSuite) TestNodeTaskQueueLeaderActionDualNode() {
 	segmentID := int64(300)
 
 	action := NewLeaderAction(leaderID, workerID, ActionTypeGrow, "ch-0", segmentID, 1)
-	task := NewLeaderSegmentTask(suite.ctx, WrapIDSource(0), suite.collection, suite.replica, leaderID, action)
+	task := NewLeaderSegmentTask(suite.ctx, 10*time.Second, WrapIDSource(0), suite.collection, suite.replica, leaderID, action)
 	task.SetID(20)
 
 	queue.Add(task)
@@ -3263,4 +3269,56 @@ func (suite *TaskSuite) TestNodeTaskQueueRangeByNodePriority() {
 		return true
 	})
 	suite.Equal([]Priority{TaskPriorityHigh, TaskPriorityNormal, TaskPriorityLow}, visited)
+}
+
+func TestChannelTaskTimeoutBoundsTaskContext(t *testing.T) {
+	channelTask, err := NewChannelTask(
+		context.Background(),
+		50*time.Millisecond,
+		WrapIDSource(0),
+		1,
+		meta.NilReplica,
+		NewChannelAction(1, ActionTypeReduce, "test-channel"),
+	)
+	assert.NoError(t, err)
+	defer channelTask.Cancel(nil)
+
+	deadline, ok := channelTask.Context().Deadline()
+	assert.True(t, ok, "channel task context must carry the task timeout as a deadline")
+
+	select {
+	case <-channelTask.Context().Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("channel task context did not expire after the task timeout")
+	}
+	assert.ErrorIs(t, channelTask.Context().Err(), context.DeadlineExceeded)
+	assert.WithinDuration(t, time.Now(), deadline, 2*time.Second)
+
+	// Segment tasks are bounded by the same mechanism.
+	segmentTask, err := NewSegmentTask(
+		context.Background(),
+		50*time.Millisecond,
+		WrapIDSource(0),
+		1,
+		meta.NilReplica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(1, ActionTypeReduce, "test-channel", 2),
+	)
+	assert.NoError(t, err)
+	defer segmentTask.Cancel(nil)
+	_, ok = segmentTask.Context().Deadline()
+	assert.True(t, ok, "segment task context must carry the task timeout as a deadline")
+
+	leaderTask := NewLeaderSegmentTask(
+		context.Background(),
+		50*time.Millisecond,
+		WrapIDSource(0),
+		1,
+		meta.NilReplica,
+		1,
+		NewLeaderAction(1, 2, ActionTypeGrow, "test-channel", 3, 0),
+	)
+	defer leaderTask.Cancel(nil)
+	_, ok = leaderTask.Context().Deadline()
+	assert.True(t, ok, "leader task context must carry the task timeout as a deadline")
 }
