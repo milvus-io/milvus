@@ -39,7 +39,7 @@ RefineTypeToConfigStringForTest(knowhere::RefineType refine_type) {
 class ScopedSegcoreConfigRestore {
  public:
     explicit ScopedSegcoreConfigRestore(
-        SegcoreConfig& config = SegcoreConfig::default_config())
+        SegcoreConfig& config = SegcoreConfig::mutable_default_config())
         : config_(config),
           chunk_rows_(config.get_chunk_rows()),
           nlist_(config.get_nlist()),
@@ -107,7 +107,7 @@ struct InterimIndexConfigForTest {
 inline void
 ApplyInterimIndexConfigForTest(
     const InterimIndexConfigForTest& options,
-    SegcoreConfig& config = SegcoreConfig::default_config()) {
+    SegcoreConfig& config = SegcoreConfig::mutable_default_config()) {
     config.set_chunk_rows(options.chunk_rows);
     config.set_enable_interim_segment_index(
         options.enable_interim_segment_index);

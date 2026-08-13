@@ -205,7 +205,7 @@ TEST_P(GrowingIndexTest, Correctness) {
         {"dim", std::to_string(dim)}};
     FieldIndexMeta fieldIndexMeta(
         vec, std::move(index_params), std::move(type_params));
-    auto& config = SegcoreConfig::default_config();
+    auto& config = SegcoreConfig::mutable_default_config();
     ScopedSegcoreConfigRestore config_restore(config);
     InterimIndexConfigForTest interim_config;
     interim_config.chunk_rows = 1024;
@@ -464,7 +464,7 @@ class GrowingIndexRawOwnershipTest : public ::testing::Test {
     static constexpr int64_t dim = 4;
     static constexpr int64_t row_count = 100;
 
-    SegcoreConfig& config_ = SegcoreConfig::default_config();
+    SegcoreConfig& config_ = SegcoreConfig::mutable_default_config();
     ScopedSegcoreConfigRestore config_restore_{config_};
     SchemaPtr schema_;
     FieldId pk_;
@@ -661,7 +661,7 @@ TEST(GrowingIndexNullableVectorTest,
     FieldIndexMeta field_index_meta(
         vec, std::move(index_params), std::move(type_params));
 
-    auto& config = SegcoreConfig::default_config();
+    auto& config = SegcoreConfig::mutable_default_config();
     ScopedSegcoreConfigRestore config_restore(config);
     InterimIndexConfigForTest interim_config;
     interim_config.chunk_rows = 1024;
@@ -749,7 +749,7 @@ TEST(GrowingIndexNullableVectorTest,
 }
 
 TEST_P(GrowingIndexTest, MissIndexMeta) {
-    auto& config = SegcoreConfig::default_config();
+    auto& config = SegcoreConfig::mutable_default_config();
     ScopedSegcoreConfigRestore config_restore(config);
 
     auto dim = 4;
@@ -765,7 +765,7 @@ TEST_P(GrowingIndexTest, MissIndexMeta) {
 }
 
 TEST_P(GrowingIndexTest, GetVector) {
-    auto& config = SegcoreConfig::default_config();
+    auto& config = SegcoreConfig::mutable_default_config();
     ScopedSegcoreConfigRestore config_restore(config);
 
     auto dim = 4;

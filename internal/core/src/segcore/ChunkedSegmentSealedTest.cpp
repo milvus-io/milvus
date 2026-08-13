@@ -105,12 +105,12 @@ class ScopedRejectRemoteVectorOutput {
     explicit ScopedRejectRemoteVectorOutput(bool enabled)
         : old_value_(segcore::SegcoreConfig::default_config()
                          .get_reject_remote_vector_output()) {
-        segcore::SegcoreConfig::default_config()
+        segcore::SegcoreConfig::mutable_default_config()
             .set_reject_remote_vector_output(enabled);
     }
 
     ~ScopedRejectRemoteVectorOutput() {
-        segcore::SegcoreConfig::default_config()
+        segcore::SegcoreConfig::mutable_default_config()
             .set_reject_remote_vector_output(old_value_);
     }
 

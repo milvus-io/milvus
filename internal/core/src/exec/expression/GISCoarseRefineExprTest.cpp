@@ -68,10 +68,10 @@ RunFilter(const std::shared_ptr<Schema>& schema,
 // RAII guard so the global segcore flag is always restored, even on failure.
 struct GISSplitFusionGuard {
     explicit GISSplitFusionGuard(bool enable) {
-        SegcoreConfig::default_config().set_enable_gis_split_fusion(enable);
+        SegcoreConfig::mutable_default_config().set_enable_gis_split_fusion(enable);
     }
     ~GISSplitFusionGuard() {
-        SegcoreConfig::default_config().set_enable_gis_split_fusion(false);
+        SegcoreConfig::mutable_default_config().set_enable_gis_split_fusion(false);
     }
 };
 
@@ -106,10 +106,10 @@ struct GISGroupStateCapture {
 // (ChunkedSegmentSealedImpl::LoadFieldData).
 struct GeometryCacheGuard {
     explicit GeometryCacheGuard(bool enable) {
-        SegcoreConfig::default_config().set_enable_geometry_cache(enable);
+        SegcoreConfig::mutable_default_config().set_enable_geometry_cache(enable);
     }
     ~GeometryCacheGuard() {
-        SegcoreConfig::default_config().set_enable_geometry_cache(false);
+        SegcoreConfig::mutable_default_config().set_enable_geometry_cache(false);
     }
 };
 

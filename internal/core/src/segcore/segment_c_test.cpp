@@ -1871,7 +1871,7 @@ TEST(
     plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
     plan->field_ids_ = {i32_fid};
 
-    auto& segcore_config = milvus::segcore::SegcoreConfig::default_config();
+    auto& segcore_config = milvus::segcore::SegcoreConfig::mutable_default_config();
     auto previous_prefer_field_data =
         segcore_config.get_prefer_field_data_when_index_has_raw_data();
     segcore_config.set_prefer_field_data_when_index_has_raw_data(true);

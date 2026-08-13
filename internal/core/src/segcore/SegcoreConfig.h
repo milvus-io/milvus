@@ -22,8 +22,20 @@ namespace milvus::segcore {
 
 class SegcoreConfig {
  public:
-    static SegcoreConfig&
+    // Process-wide configuration. Read-only on purpose: every member below used
+    // to be `inline static`, which made `SegcoreConfig cfg; cfg.set_x(...)` on a
+    // *local* object silently write process-global state. Returning a const
+    // reference here turns every "I meant to change the global" site into a
+    // compile error, so the intent has to be spelled out.
+    static const SegcoreConfig&
     default_config() {
+        return mutable_default_config();
+    }
+
+    // The process-wide instance, writable. Only the init-time C API
+    // (segcore_init_c.cpp, driven once from InitQueryNode) should use this.
+    static SegcoreConfig&
+    mutable_default_config() {
         // TODO: remove this when go side is ready
         static SegcoreConfig config;
         return config;
@@ -247,33 +259,34 @@ class SegcoreConfig {
     }
 
  private:
+    // Read-only constant, no leak risk: keep it shared across instances.
     inline static const std::unordered_set<std::string>
         valid_dense_vector_index_type = {
             knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
             knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR,
     };
-    inline static bool storage_v3_enabled_ = false;
-    inline static bool enable_interim_segment_index_ = false;
-    inline static bool enable_growing_source_flush_ = false;
-    inline static int64_t chunk_rows_ = 32 * 1024;
-    inline static int64_t nlist_ = 100;
-    inline static int64_t nprobe_ = 4;
-    inline static int64_t sub_dim_ = 2;
-    inline static float refine_ratio_ = 3.0;
-    inline static float build_ratio_ = 0.1;
+    bool storage_v3_enabled_ = false;
+    bool enable_interim_segment_index_ = false;
+    bool enable_growing_source_flush_ = false;
+    int64_t chunk_rows_ = 32 * 1024;
+    int64_t nlist_ = 100;
+    int64_t nprobe_ = 4;
+    int64_t sub_dim_ = 2;
+    float refine_ratio_ = 3.0;
+    float build_ratio_ = 0.1;
     // FM-index guard threshold; overridden from queryNode.fmindexCostRatio.
-    inline static float fmindex_cost_ratio_ = 0.001f;
-    inline static std::string dense_index_type_ =
+    float fmindex_cost_ratio_ = 0.001f;
+    std::string dense_index_type_ =
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
-    inline static knowhere::RefineType refine_type_ =
+    knowhere::RefineType refine_type_ =
         knowhere::RefineType::DATA_VIEW;
-    inline static bool refine_with_quant_flag_ = false;
-    inline static bool enable_geometry_cache_ = false;
-    inline static bool enable_gis_split_fusion_ = false;
-    inline static bool prefer_field_data_when_index_has_raw_data_ = false;
-    inline static bool reject_remote_vector_output_ = false;
-    inline static float interim_index_mem_expansion_rate_ = 1.15f;
-    inline static int64_t max_group_by_groups_ = kDefaultMaxGroupByGroups;
+    bool refine_with_quant_flag_ = false;
+    bool enable_geometry_cache_ = false;
+    bool enable_gis_split_fusion_ = false;
+    bool prefer_field_data_when_index_has_raw_data_ = false;
+    bool reject_remote_vector_output_ = false;
+    float interim_index_mem_expansion_rate_ = 1.15f;
+    int64_t max_group_by_groups_ = kDefaultMaxGroupByGroups;
 };
 
 }  // namespace milvus::segcore
