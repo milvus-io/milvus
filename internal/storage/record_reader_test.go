@@ -159,6 +159,24 @@ func TestImportFragmentRecordReaderHonorsCancellation(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
+func TestNewInsertDataRecordReader(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+	}}}
+	data, err := NewInsertData(schema)
+	require.NoError(t, err)
+	require.NoError(t, data.Data[100].AppendDataRows([]int64{3, 1, 2}))
+
+	reader, err := NewInsertDataRecordReader(data, schema)
+	require.NoError(t, err)
+	record, err := reader.Next()
+	require.NoError(t, err)
+	require.Equal(t, []int64{3, 1, 2}, record.Column(100).(*array.Int64).Int64Values())
+	_, err = reader.Next()
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, reader.Close())
+}
+
 func TestCompositeBinlogRecordReaderOwnsCurrentRecord(t *testing.T) {
 	newCurrent := func(allocator *memory.CheckedAllocator) Record {
 		builder := array.NewInt64Builder(allocator)

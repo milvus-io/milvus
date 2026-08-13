@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -172,6 +173,36 @@ func Test_UnsetAutoID(t *testing.T) {
 			assert.False(t, schema.GetFields()[0].GetAutoID())
 		}
 	}
+}
+
+func TestAppendPreallocatedSystemFields(t *testing.T) {
+	t.Run("int64 auto id", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+			FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true,
+		}}}
+		data, err := storage.NewInsertData(schema)
+		require.NoError(t, err)
+		offset := int64(0)
+		require.NoError(t, AppendPreallocatedSystemFields(schema, data, 2, &commonpb.IDRange{Begin: 10, End: 13}, &offset))
+		require.Equal(t, []int64{10, 11}, data.Data[100].(*storage.Int64FieldData).Data)
+		require.Equal(t, []int64{10, 11}, data.Data[common.RowIDField].(*storage.Int64FieldData).Data)
+		require.Equal(t, int64(2), offset)
+		_, hasTimestamp := data.Data[common.TimeStampField]
+		require.False(t, hasTimestamp)
+	})
+
+	t.Run("varchar auto id and exhausted", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+			FieldID: 100, Name: "pk", DataType: schemapb.DataType_VarChar, IsPrimaryKey: true, AutoID: true,
+		}}}
+		data, err := storage.NewInsertData(schema)
+		require.NoError(t, err)
+		offset := int64(1)
+		require.NoError(t, AppendPreallocatedSystemFields(schema, data, 2, &commonpb.IDRange{Begin: 20, End: 24}, &offset))
+		require.Equal(t, []string{"21", "22"}, data.Data[100].(*storage.StringFieldData).Data)
+		err = AppendPreallocatedSystemFields(schema, data, 2, &commonpb.IDRange{Begin: 20, End: 24}, &offset)
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
 }
 
 func Test_PickSegment(t *testing.T) {
