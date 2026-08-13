@@ -929,6 +929,9 @@ dataCoord:
     jsonKeyIndexMemoryFactor: 2.0 # memory per byte of touched field for json-key-index stats sub-jobs
     analyzeMemoryFactor: 1.0 # memory per byte of input granted to the analyze (kmeans training) task
     analyzeMaxMemory: 4294967296 # upper bound in bytes of the analyze task memory grant
+    copySegmentMemory: 67108864 # flat memory in bytes charged for a copy-segment task
+    refreshExternalMemory: 67108864 # flat memory in bytes charged for a refresh-external-collection task
+    importCPUPerFile: 0.5 # CPU cores charged per concurrently in-flight import file
   jsonShreddingTriggerCount: 10 # jsonkey stats task count per trigger
   jsonShreddingTriggerInterval: 10 # jsonkey task interval per trigger
   jsonShreddingMaxColumns: 1024 # the max number of columns to shred
