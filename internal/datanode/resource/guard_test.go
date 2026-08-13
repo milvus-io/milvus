@@ -419,6 +419,7 @@ func TestSnapshotReportsTotals(t *testing.T) {
 	assert.Equal(t, float64(2), snap.Reserved.CPU)
 	assert.False(t, snap.Frozen)
 	assert.Equal(t, int64(0), snap.NonTask)
+	assert.Equal(t, int64(0), snap.ExclusiveTaskID, "an ordinary task does not take the node exclusively")
 }
 
 // Without an override the guard must fall back to the real node capacity, so
@@ -685,6 +686,178 @@ func TestGrowingTheNodeDoesNotBreakExclusivity(t *testing.T) {
 	g.Release(1)
 	ok, _ = g.TryAcquire(2, taskcommon.Compaction, taskresource.Requirement{Memory: 1})
 	assert.True(t, ok)
+}
+
+// "Every previously admitted task has finished" is a statement about tasks, so
+// it has to be read off the ledger. Reading it off the reserved total instead
+// makes it a float equality test, and the float does not cooperate: CPU
+// requirements are fractional (estimate_import.go charges 0.1 per import), Sub
+// clamps only at negative, and three admissions of 0.1 followed by three
+// releases leave 2.78e-17 behind. That residue is never cleaned up, so from
+// then on every oversized task would be refused on a provably empty node --
+// permanent refusal reached through a different door than the one exclusive
+// execution closed.
+func TestFloatResidueMustNotHoldTheNodeShut(t *testing.T) {
+	g := newTestGuard(t, 8, 100)
+
+	// All three are admitted before any is released: that is the order that
+	// leaves a residue, since a strict admit/release alternation cancels
+	// exactly.
+	for i := int64(1); i <= 3; i++ {
+		mustAcquire(t, g, i, taskcommon.Import, taskresource.Requirement{CPU: 0.1, Memory: 1})
+	}
+	for i := int64(1); i <= 3; i++ {
+		g.Release(i)
+	}
+
+	// The residue this test is about must really be there, or it proves nothing.
+	require.Positive(t, g.Snapshot().Reserved.CPU,
+		"no float residue appeared; this test would pass vacuously")
+	g.mu.Lock()
+	require.Empty(t, g.ledger, "every task has finished")
+	g.mu.Unlock()
+
+	ok, _ := g.TryAcquire(4, taskcommon.Index, taskresource.Requirement{Memory: 500})
+	assert.True(t, ok, "an empty node must admit the oversized task, whatever arithmetic dust is left")
+}
+
+// The other half of the same defect: a task charged nothing at all is still a
+// task on the node. Sizing it by the reserved total would make it invisible and
+// let it share the node with an oversized task.
+func TestOversizedTaskWaitsForAZeroCostTaskToo(t *testing.T) {
+	g := newTestGuard(t, 8, 100)
+
+	mustAcquire(t, g, 1, taskcommon.Compaction, taskresource.Requirement{})
+	require.Equal(t, int64(0), g.Snapshot().Reserved.Memory, "it is charged nothing")
+
+	ok, _ := g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{Memory: 500})
+	assert.False(t, ok, "nothing shares the node with an oversized task, not even a task charged nothing")
+
+	g.Release(1)
+	ok, _ = g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{Memory: 500})
+	assert.True(t, ok)
+}
+
+// Taking the whole node must not become a way to jump the queue. An ordinary
+// task is parked as head with the budget being held for it; an oversized
+// latecomer finds the node empty and must leave it alone, or the head waits out
+// the latecomer's entire runtime -- the starvation the head-of-line rule exists
+// to prevent, arriving through the exclusive path.
+func TestOversizedLatecomerDoesNotPreemptAnOrdinaryHead(t *testing.T) {
+	g := newTestGuard(t, 8, 100)
+	pt := paramtable.Get()
+	pt.Save(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key, "true")
+	defer pt.Reset(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key)
+
+	// The node is empty but its budget is not: 70 fits the node and not the
+	// budget, so the head stays parked without holding anything itself.
+	g.mu.Lock()
+	g.nonTask = 50
+	g.mu.Unlock()
+
+	waiting := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		waiting <- g.Acquire(ctx, 1, taskcommon.Compaction, taskresource.Requirement{Memory: 70})
+	}()
+	require.Eventually(t, func() bool { return g.waiterCount() == 1 }, time.Second, 5*time.Millisecond)
+	g.mu.Lock()
+	require.Empty(t, g.ledger, "the node really is empty; only the queue is not")
+	g.mu.Unlock()
+
+	ok, _ := g.TryAcquire(2, taskcommon.Index, taskresource.Requirement{Memory: 500})
+	assert.False(t, ok, "an oversized latecomer must not take the node from the head it is reserved for")
+	assert.Zero(t, g.Snapshot().ExclusiveTaskID)
+
+	// And the head still gets what it was held out for.
+	g.mu.Lock()
+	g.nonTask = 0
+	g.mu.Unlock()
+	g.wakeWaiters()
+	require.NoError(t, <-waiting)
+	assert.Equal(t, int64(70), g.Snapshot().Reserved.Memory)
+}
+
+// An oversized task holds the line from wherever it is queued, not only from
+// the front. Behind an ordinary head with the knob off it would otherwise be
+// starved by exactly the trickle the special case exists to stop: it can never
+// be admitted by a lucky gap, only by a drain the trickle prevents.
+func TestOversizedWaiterHoldsTheLineFromBehindTheHead(t *testing.T) {
+	g := newTestGuard(t, 8, 100)
+	pt := paramtable.Get()
+	pt.Save(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key, "false")
+	defer pt.Reset(pt.DataNodeCfg.ResourceHeadOfLineReserve.Key)
+
+	mustAcquire(t, g, 1, taskcommon.Compaction, taskresource.Requirement{Memory: 60})
+
+	ordinary := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		ordinary <- g.Acquire(ctx, 2, taskcommon.Compaction, taskresource.Requirement{Memory: 70})
+	}()
+	require.Eventually(t, func() bool { return g.waiterCount() == 1 }, time.Second, 5*time.Millisecond)
+
+	oversized := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		oversized <- g.Acquire(ctx, 3, taskcommon.Index, taskresource.Requirement{Memory: 500})
+	}()
+	require.Eventually(t, func() bool { return g.waiterCount() == 2 }, time.Second, 5*time.Millisecond)
+
+	// The trickle: it fits behind the running task, and the head is ordinary, so
+	// only the oversized task queued *second* can hold it back.
+	ok, _ := g.TryAcquire(4, taskcommon.Compaction, taskresource.Requirement{Memory: 5})
+	assert.False(t, ok, "an oversized waiter must hold the line from second place too")
+
+	// Both queued tasks still get through, in order.
+	g.Release(1)
+	require.NoError(t, <-ordinary)
+	g.Release(2)
+	require.NoError(t, <-oversized)
+	assert.Equal(t, int64(3), g.Snapshot().ExclusiveTaskID)
+}
+
+// Two oversized tasks racing through the blocking path is the interleaving this
+// design's new risk profile most deserves pinned: each can only run on a
+// drained node, and each drains the node for the other only by releasing. They
+// must not deadlock, and they must not overlap.
+func TestTwoOversizedTasksContendThroughAcquire(t *testing.T) {
+	g := newTestGuard(t, 8, 100)
+
+	start := make(chan struct{})
+	ran := make(chan int64, 2)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, id := range []int64{1, 2} {
+		wg.Add(1)
+		go func(id int64) {
+			defer wg.Done()
+			<-start
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := g.Acquire(ctx, id, taskcommon.Index, taskresource.Requirement{Memory: 500}); err != nil {
+				errs <- err
+				return
+			}
+			// Hold the node for a while and check throughout that it is really
+			// held alone.
+			for i := 0; i < 5; i++ {
+				assert.Equal(t, id, g.Snapshot().ExclusiveTaskID, "two oversized tasks overlapped")
+				time.Sleep(10 * time.Millisecond)
+			}
+			g.Release(id)
+			ran <- id
+		}(id)
+	}
+	close(start)
+	wg.Wait()
+
+	assert.Empty(t, errs, "neither task may be refused or time out")
+	assert.Len(t, ran, 2, "both oversized tasks must run, one after the other")
+	assert.Zero(t, g.Snapshot().ExclusiveTaskID)
 }
 
 // Without this, turning the head-of-line knob off would starve oversized
