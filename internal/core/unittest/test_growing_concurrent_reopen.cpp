@@ -19,6 +19,7 @@
 
 #include "common/OpContext.h"
 #include "common/Schema.h"
+#include "common/Utils.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 
@@ -175,9 +176,10 @@ TEST(GrowingConcurrentReopenTest,
         auto evolved = seg_impl->bulk_subscript(
             nullptr, evolved_fid, offsets.data(), offsets.size());
         ASSERT_NE(evolved, nullptr);
-        ASSERT_EQ(evolved->valid_data_size(), N);
+        const auto& valid_data = GetFieldDataRowValidData(*evolved);
+        ASSERT_EQ(valid_data.size(), N);
         for (int i = 0; i < N; ++i) {
-            EXPECT_FALSE(evolved->valid_data(i));
+            EXPECT_FALSE(valid_data[i]);
         }
     }
 

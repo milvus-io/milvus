@@ -339,7 +339,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				return err
 			}
 			for _, subField := range fieldData.GetStructArrays().GetFields() {
-				if len(subField.GetValidData()) != 0 && subFieldHasData(subField) {
+				if len(typeutil.GetFieldDataValidData(subField)) != 0 && subFieldHasData(subField) {
 					subFieldSchema, err := it.schema.SchemaHelper.GetFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
 					if err != nil {
 						log.Info(ctx, "get struct sub-field schema failed", mlog.Err(err))
@@ -371,18 +371,18 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		// For 2.5 collections where $meta is non-nullable with no default,
 		// ValidData must remain empty — CheckValidData expects len==0 for
 		// non-nullable fields.
-		if fieldData.GetIsDynamic() && len(fieldData.GetValidData()) == 0 &&
+		if fieldData.GetIsDynamic() && len(typeutil.GetFieldDataValidData(fieldData)) == 0 &&
 			(fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil) {
 			nRows := int(it.upsertMsg.InsertMsg.NRows())
 			validData := make([]bool, nRows)
 			for i := range validData {
 				validData[i] = true
 			}
-			fieldData.ValidData = validData
+			typeutil.SetFieldDataValidData(fieldData, validData)
 		}
 
 		// compatible with different nullable/default_value data format from sdk
-		if len(fieldData.GetValidData()) != 0 {
+		if len(typeutil.GetFieldDataValidData(fieldData)) != 0 {
 			var err error
 			if fieldSchema.GetDefaultValue() != nil {
 				err = FillWithDefaultValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
@@ -499,11 +499,12 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			// Note: For fields containing default values, default values need to be set according to valid data during insertion,
 			// but query results fields do not set valid data when returning default value fields,
 			// therefore valid data needs to be manually set to true.
-			if fieldSchema.GetDefaultValue() != nil && len(existField.GetValidData()) == 0 {
-				existField.ValidData = make([]bool, existIDsLen)
-				for i := range existField.ValidData {
-					existField.ValidData[i] = true
+			if fieldSchema.GetDefaultValue() != nil && len(typeutil.GetFieldDataValidData(existField)) == 0 {
+				validData := make([]bool, existIDsLen)
+				for i := range validData {
+					validData[i] = true
 				}
+				typeutil.SetFieldDataValidData(existField, validData)
 			}
 
 			isNullableVector := typeutil.IsCompactNullableVectorFieldData(existField)
@@ -520,11 +521,12 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				}
 				if isNullableVector {
 					// For nullable vector: only copy data for non-null rows
+					upsertValidData := typeutil.GetFieldDataValidData(upsertField)
 					upsertRowIndices := make([]int64, len(updateIdxInUpsert))
 					validDataIndices := make([]int64, 0, len(updateIdxInUpsert))
 					for i, upsertIdx := range updateIdxInUpsert {
 						upsertRowIndices[i] = int64(upsertIdx)
-						if upsertField.ValidData[upsertIdx] {
+						if upsertValidData[upsertIdx] {
 							validDataIndices = append(validDataIndices, upsertSrcIndices[i])
 						}
 					}
@@ -550,9 +552,10 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				}
 			} else {
 				if isNullableVector {
+					existValidData := typeutil.GetFieldDataValidData(existField)
 					validDataIndices := make([]int64, 0, len(existIndices))
 					for i, existIdx := range existIndices {
-						if existField.ValidData[int(existIdx)] {
+						if existValidData[int(existIdx)] {
 							validDataIndices = append(validDataIndices, existSrcIndices[i])
 						}
 					}
@@ -627,12 +630,13 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			}
 
 			if isNullableVector {
+				srcValidData := typeutil.GetFieldDataValidData(srcField)
 				rowIndices := make([]int64, len(insertIdxInUpsert))
 				validDataIndices := make([]int64, 0, len(insertIdxInUpsert))
 				for i, upsertIdx := range insertIdxInUpsert {
 					rowIndices[i] = int64(upsertIdx)
 					srcIdx := srcComputer.Compute(int64(upsertIdx))[0]
-					if srcField.ValidData[upsertIdx] {
+					if srcValidData[upsertIdx] {
 						validDataIndices = append(validDataIndices, srcIdx)
 					}
 				}
@@ -655,7 +659,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			}
 			continue
 		}
-		if len(fieldData.GetValidData()) > 0 {
+		if len(typeutil.GetFieldDataValidData(fieldData)) > 0 {
 			err := ToCompressedFormatNullable(fieldData)
 			if err != nil {
 				log.Info(ctx, "convert to compressed format nullable failed", mlog.Err(err))
@@ -668,19 +672,20 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 
 // ToCompressedFormatNullable converts nullable field data from full format to compressed format.
 func ToCompressedFormatNullable(field *schemapb.FieldData) error {
-	if getValidNumber(field.GetValidData()) == len(field.GetValidData()) {
+	validData := typeutil.GetFieldDataValidData(field)
+	if getValidNumber(validData) == len(validData) {
 		return nil
 	}
 	switch field.Field.(type) {
 	case *schemapb.FieldData_Scalars:
 		switch sd := field.GetScalars().GetData().(type) {
 		case *schemapb.ScalarField_BoolData:
-			validRowNum := getValidNumber(field.GetValidData())
+			validRowNum := getValidNumber(validData)
 			if validRowNum == 0 {
 				sd.BoolData.Data = make([]bool, 0)
 			} else {
 				ret := make([]bool, 0, validRowNum)
-				for i, valid := range field.GetValidData() {
+				for i, valid := range validData {
 					if valid {
 						ret = append(ret, sd.BoolData.Data[i])
 					}
@@ -689,12 +694,12 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_IntData:
-			validRowNum := getValidNumber(field.GetValidData())
+			validRowNum := getValidNumber(validData)
 			if validRowNum == 0 {
 				sd.IntData.Data = make([]int32, 0)
 			} else {
 				ret := make([]int32, 0, validRowNum)
-				for i, valid := range field.GetValidData() {
+				for i, valid := range validData {
 					if valid {
 						ret = append(ret, sd.IntData.Data[i])
 					}
@@ -703,12 +708,12 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_LongData:
-			validRowNum := getValidNumber(field.GetValidData())
+			validRowNum := getValidNumber(validData)
 			if validRowNum == 0 {
 				sd.LongData.Data = make([]int64, 0)
 			} else {
 				ret := make([]int64, 0, validRowNum)
-				for i, valid := range field.GetValidData() {
+				for i, valid := range validData {
 					if valid {
 						ret = append(ret, sd.LongData.Data[i])
 					}
@@ -717,12 +722,12 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_FloatData:
-			validRowNum := getValidNumber(field.GetValidData())
+			validRowNum := getValidNumber(validData)
 			if validRowNum == 0 {
 				sd.FloatData.Data = make([]float32, 0)
 			} else {
 				ret := make([]float32, 0, validRowNum)
-				for i, valid := range field.GetValidData() {
+				for i, valid := range validData {
 					if valid {
 						ret = append(ret, sd.FloatData.Data[i])
 					}
@@ -731,12 +736,12 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_DoubleData:
-			validRowNum := getValidNumber(field.GetValidData())
+			validRowNum := getValidNumber(validData)
 			if validRowNum == 0 {
 				sd.DoubleData.Data = make([]float64, 0)
 			} else {
 				ret := make([]float64, 0, validRowNum)
-				for i, valid := range field.GetValidData() {
+				for i, valid := range validData {
 					if valid {
 						ret = append(ret, sd.DoubleData.Data[i])
 					}
@@ -745,12 +750,12 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_StringData:
-			validRowNum := getValidNumber(field.GetValidData())
+			validRowNum := getValidNumber(validData)
 			if validRowNum == 0 {
 				sd.StringData.Data = make([]string, 0)
 			} else {
 				ret := make([]string, 0, validRowNum)
-				for i, valid := range field.GetValidData() {
+				for i, valid := range validData {
 					if valid {
 						ret = append(ret, sd.StringData.Data[i])
 					}
@@ -759,12 +764,12 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_JsonData:
-			validRowNum := getValidNumber(field.GetValidData())
+			validRowNum := getValidNumber(validData)
 			if validRowNum == 0 {
 				sd.JsonData.Data = make([][]byte, 0)
 			} else {
 				ret := make([][]byte, 0, validRowNum)
-				for i, valid := range field.GetValidData() {
+				for i, valid := range validData {
 					if valid {
 						ret = append(ret, sd.JsonData.Data[i])
 					}
@@ -773,12 +778,12 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_ArrayData:
-			validRowNum := getValidNumber(field.GetValidData())
+			validRowNum := getValidNumber(validData)
 			if validRowNum == 0 {
 				sd.ArrayData.Data = make([]*schemapb.ScalarField, 0)
 			} else {
 				ret := make([]*schemapb.ScalarField, 0, validRowNum)
-				for i, valid := range field.GetValidData() {
+				for i, valid := range validData {
 					if valid {
 						ret = append(ret, sd.ArrayData.Data[i])
 					}
@@ -786,12 +791,12 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 				sd.ArrayData.Data = ret
 			}
 		case *schemapb.ScalarField_TimestamptzData:
-			validRowNum := getValidNumber(field.GetValidData())
+			validRowNum := getValidNumber(validData)
 			if validRowNum == 0 {
 				sd.TimestamptzData.Data = make([]int64, 0)
 			} else {
 				ret := make([]int64, 0, validRowNum)
-				for i, valid := range field.GetValidData() {
+				for i, valid := range validData {
 					if valid {
 						ret = append(ret, sd.TimestamptzData.Data[i])
 					}
@@ -800,12 +805,12 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_GeometryWktData:
-			validRowNum := getValidNumber(field.GetValidData())
+			validRowNum := getValidNumber(validData)
 			if validRowNum == 0 {
 				sd.GeometryWktData.Data = make([]string, 0)
 			} else {
 				ret := make([]string, 0, validRowNum)
-				for i, valid := range field.GetValidData() {
+				for i, valid := range validData {
 					if valid {
 						ret = append(ret, sd.GeometryWktData.Data[i])
 					}
@@ -814,12 +819,12 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 			}
 
 		case *schemapb.ScalarField_GeometryData:
-			validRowNum := getValidNumber(field.GetValidData())
+			validRowNum := getValidNumber(validData)
 			if validRowNum == 0 {
 				sd.GeometryData.Data = make([][]byte, 0)
 			} else {
 				ret := make([][]byte, 0, validRowNum)
-				for i, valid := range field.GetValidData() {
+				for i, valid := range validData {
 					if valid {
 						ret = append(ret, sd.GeometryData.Data[i])
 					}
@@ -845,14 +850,18 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 // GenNullableFieldData generates all-null nullable field data.
 // Scalar fields use expanded zero values; vector fields use compact empty data.
 func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schemapb.FieldData, error) {
+	withValidData := func(fieldData *schemapb.FieldData) *schemapb.FieldData {
+		typeutil.SetFieldDataValidData(fieldData, make([]bool, upsertIDSize))
+		return fieldData
+	}
+
 	switch field.DataType {
 	case schemapb.DataType_Bool:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
-			ValidData: make([]bool, upsertIDSize),
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_BoolData{
@@ -862,15 +871,14 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Int32:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
-			ValidData: make([]bool, upsertIDSize),
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_IntData{
@@ -880,15 +888,14 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Int64:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
-			ValidData: make([]bool, upsertIDSize),
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_LongData{
@@ -898,15 +905,14 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Float:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
-			ValidData: make([]bool, upsertIDSize),
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_FloatData{
@@ -916,15 +922,14 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Double:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
-			ValidData: make([]bool, upsertIDSize),
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_DoubleData{
@@ -934,15 +939,14 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_VarChar:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
-			ValidData: make([]bool, upsertIDSize),
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
@@ -952,15 +956,14 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_JSON:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
-			ValidData: make([]bool, upsertIDSize),
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_JsonData{
@@ -970,15 +973,14 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Array:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
-			ValidData: make([]bool, upsertIDSize),
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_ArrayData{
@@ -989,15 +991,14 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Timestamptz:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
-			ValidData: make([]bool, upsertIDSize),
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_TimestamptzData{
@@ -1007,16 +1008,15 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	// the intput data of geometry field is in wkt format
 	case schemapb.DataType_Geometry:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
 			IsDynamic: field.IsDynamic,
-			ValidData: make([]bool, upsertIDSize),
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_GeometryWktData{
@@ -1026,7 +1026,7 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 					},
 				},
 			},
-		}, nil
+		}), nil
 
 	// Nullable vector types
 	case schemapb.DataType_FloatVector:
@@ -1034,105 +1034,99 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
-			ValidData: make([]bool, upsertIDSize), // all false = all null
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
+				Vectors: &schemapb.VectorField{ // all false = all null
 					Dim:  dim,
 					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{}}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Float16Vector:
 		dim, err := typeutil.GetDim(field)
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
-			ValidData: make([]bool, upsertIDSize), // all false = all null
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
+				Vectors: &schemapb.VectorField{ // all false = all null
 					Dim:  dim,
 					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_BFloat16Vector:
 		dim, err := typeutil.GetDim(field)
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
-			ValidData: make([]bool, upsertIDSize), // all false = all null
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
+				Vectors: &schemapb.VectorField{ // all false = all null
 					Dim:  dim,
 					Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_BinaryVector:
 		dim, err := typeutil.GetDim(field)
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
-			ValidData: make([]bool, upsertIDSize), // all false = all null
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
+				Vectors: &schemapb.VectorField{ // all false = all null
 					Dim:  dim,
 					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_SparseFloatVector:
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
-			ValidData: make([]bool, upsertIDSize), // all false = all null
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
+				Vectors: &schemapb.VectorField{ // all false = all null
 					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
 						Contents: [][]byte{},
 					}},
 				},
 			},
-		}, nil
+		}), nil
 
 	case schemapb.DataType_Int8Vector:
 		dim, err := typeutil.GetDim(field)
 		if err != nil {
 			return nil, err
 		}
-		return &schemapb.FieldData{
+		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
 			Type:      field.DataType,
-			ValidData: make([]bool, upsertIDSize), // all false = all null
 			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
+				Vectors: &schemapb.VectorField{ // all false = all null
 					Dim:  dim,
 					Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}},
 				},
 			},
-		}, nil
+		}), nil
 
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("undefined data type:%s", field.DataType.String())
@@ -1148,14 +1142,25 @@ func GenNullableStructArrayFieldData(structField *schemapb.StructArrayFieldSchem
 				fieldName = originalName
 			}
 		}
-		fields = append(fields, &schemapb.FieldData{
+		fieldData := &schemapb.FieldData{
 			FieldName: fieldName,
 			FieldId:   subField.GetFieldID(),
 			Type:      subField.GetDataType(),
-			// The source field is indexed by original upsert row IDs before
-			// appending the insert subset, so ValidData uses the same row domain.
-			ValidData: make([]bool, rowCount),
-		})
+		}
+		// The source field is indexed by original upsert row IDs before
+		// appending the insert subset, so ValidData uses the same row domain.
+		validData := make([]bool, rowCount)
+		if typeutil.IsVectorType(subField.GetDataType()) {
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{},
+			}
+		} else {
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{},
+			}
+		}
+		typeutil.SetFieldDataValidData(fieldData, validData)
+		fields = append(fields, fieldData)
 	}
 	return &schemapb.FieldData{
 		FieldId:   structField.GetFieldID(),
@@ -1174,11 +1179,11 @@ func ToCompressedFormatNullableStructField(fieldData *schemapb.FieldData) error 
 		return nil
 	}
 	for _, subField := range structArrays.GetFields() {
-		if len(subField.GetValidData()) == 0 {
+		validData := typeutil.GetFieldDataValidData(subField)
+		if len(validData) == 0 {
 			continue
 		}
 
-		validData := subField.GetValidData()
 		validRows := getValidNumber(validData)
 		if validRows == 0 && !subFieldHasData(subField) {
 			continue
@@ -1235,6 +1240,10 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 
 	seenSubFieldIDs := make(map[int64]struct{}, len(structArrays.GetFields()))
 	for _, subField := range structArrays.GetFields() {
+		if !typeutil.ValidateAndNormalizeFieldDataValidData(subField) {
+			return merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s' has different legacy and field-specific valid_data",
+				subField.GetFieldName(), fieldData.GetFieldName())
+		}
 		subFieldSchema, err := schemaHelper.GetFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
 		if err != nil {
 			return err
@@ -1248,9 +1257,10 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 			return merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s' expects type %s, got %s",
 				subField.GetFieldName(), fieldData.GetFieldName(), subFieldSchema.GetDataType().String(), subField.GetType().String())
 		}
-		if len(subField.GetValidData()) > 0 && len(subField.GetValidData()) != rowCount {
+		validData := typeutil.GetFieldDataValidData(subField)
+		if len(validData) > 0 && len(validData) != rowCount {
 			return merr.WrapErrParameterInvalidMsg("sub-field ValidData length mismatch in struct '%s': '%s' has %d, expected %d",
-				fieldData.GetFieldName(), subField.GetFieldName(), len(subField.GetValidData()), rowCount)
+				fieldData.GetFieldName(), subField.GetFieldName(), len(validData), rowCount)
 		}
 	}
 
@@ -1265,11 +1275,12 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 	// supported by this path.
 	if hasDataCount == 0 {
 		for _, subField := range structArrays.GetFields() {
-			if len(subField.GetValidData()) != 0 && len(subField.GetValidData()) != rowCount {
+			validData := typeutil.GetFieldDataValidData(subField)
+			if len(validData) != 0 && len(validData) != rowCount {
 				return merr.WrapErrParameterInvalidMsg("sub-field ValidData length mismatch in struct '%s': '%s' has %d, expected %d",
-					fieldData.GetFieldName(), subField.GetFieldName(), len(subField.GetValidData()), rowCount)
+					fieldData.GetFieldName(), subField.GetFieldName(), len(validData), rowCount)
 			}
-			for j, valid := range subField.GetValidData() {
+			for j, valid := range validData {
 				if valid {
 					return merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s' claims row %d is valid but no payload is provided",
 						subField.GetFieldName(), fieldData.GetFieldName(), j)
@@ -1287,22 +1298,23 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 	var refFieldName string
 	refInitialized := false
 	for _, subField := range structArrays.GetFields() {
+		validData := typeutil.GetFieldDataValidData(subField)
 		// Nullable is a property of the whole struct row. The sub-fields
 		// therefore must share the same null mask.
 		if structSchema.GetNullable() {
 			if !refInitialized {
-				refValidData = subField.GetValidData()
+				refValidData = validData
 				refFieldName = subField.GetFieldName()
 				refInitialized = true
 			} else {
-				if len(subField.GetValidData()) != len(refValidData) {
+				if len(validData) != len(refValidData) {
 					return merr.WrapErrParameterInvalidMsg("sub-field ValidData length mismatch in struct '%s': '%s' has %d, '%s' has %d",
-						fieldData.GetFieldName(), refFieldName, len(refValidData), subField.GetFieldName(), len(subField.GetValidData()))
+						fieldData.GetFieldName(), refFieldName, len(refValidData), subField.GetFieldName(), len(validData))
 				}
 				for j := range refValidData {
-					if subField.GetValidData()[j] != refValidData[j] {
+					if validData[j] != refValidData[j] {
 						return merr.WrapErrParameterInvalidMsg("sub-field ValidData mismatch in struct '%s' at row %d: '%s'=%v, '%s'=%v",
-							fieldData.GetFieldName(), j, refFieldName, refValidData[j], subField.GetFieldName(), subField.GetValidData()[j])
+							fieldData.GetFieldName(), j, refFieldName, refValidData[j], subField.GetFieldName(), validData[j])
 					}
 				}
 			}
@@ -1315,14 +1327,14 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("struct sub-field '%s' has invalid field data", subField.GetFieldName())
 		}
-		if len(subField.GetValidData()) == 0 {
+		if len(validData) == 0 {
 			if payloadRows != rowCount {
 				return merr.WrapErrParameterInvalidMsg("struct sub-field '%s' payload row count %d does not match logical rows %d",
 					subField.GetFieldName(), payloadRows, rowCount)
 			}
 			continue
 		}
-		validRows := getValidNumber(subField.GetValidData())
+		validRows := getValidNumber(validData)
 		if payloadRows != validRows {
 			return merr.WrapErrParameterInvalidMsg("nullable struct sub-field '%s' payload must be compact: payload row count %d does not match valid rows %d",
 				subField.GetFieldName(), payloadRows, validRows)
@@ -1564,6 +1576,9 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 			IdField: nil,
 		},
 		Timestamp: it.EndTs(),
+	}
+	if err := validateAndNormalizeFieldDataValidData(it.req.GetFieldsData()); err != nil {
+		return err
 	}
 
 	// check collection exists

@@ -27,6 +27,7 @@
 #include "common/OpContext.h"
 #include "common/PreparedGeometry.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "geos_c.h"
 #include "index/Index.h"
 #include "index/Meta.h"
@@ -528,7 +529,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                 auto geometry_array =
                     static_cast<const milvus::proto::schema::GeometryArray*>(
                         &data_array->scalars().geometry_data());
-                const auto& valid_data = data_array->valid_data();
+                const auto& valid_data = GetFieldDataRowValidData(*data_array);
 
                 GEOSContextHandle_t local_ctx = GetThreadLocalGEOSContext();
                 for (size_t i = 0; i < hit_offsets.size(); ++i) {

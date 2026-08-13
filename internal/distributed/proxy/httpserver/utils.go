@@ -2286,13 +2286,13 @@ func buildStructArrayFieldDataInternal(structSchema *schemapb.StructArrayFieldSc
 				Type:      schemapb.DataType_Array,
 				FieldName: short,
 				FieldId:   sub.GetFieldID(),
-				ValidData: validData,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_ArrayData{ArrayData: arrayArray},
 					},
 				},
 			})
+			typeutil.SetFieldDataValidData(subFieldData[len(subFieldData)-1], validData)
 		case schemapb.DataType_ArrayOfVector:
 			dim, err := getDim(sub)
 			if err != nil {
@@ -2320,7 +2320,6 @@ func buildStructArrayFieldDataInternal(structSchema *schemapb.StructArrayFieldSc
 				Type:      schemapb.DataType_ArrayOfVector,
 				FieldName: short,
 				FieldId:   sub.GetFieldID(),
-				ValidData: validData,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Dim: dim,
@@ -2330,6 +2329,7 @@ func buildStructArrayFieldDataInternal(structSchema *schemapb.StructArrayFieldSc
 					},
 				},
 			})
+			typeutil.SetFieldDataValidData(subFieldData[len(subFieldData)-1], validData)
 		default:
 			return nil, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field data type: %s", sub.GetDataType())
 		}
@@ -2361,10 +2361,10 @@ func newStructArrayRowAccessor(fd *schemapb.FieldData, schema *schemapb.Collecti
 		return accessor, nil
 	}
 
-	expectedValidData := subs[0].GetValidData()
+	expectedValidData := typeutil.GetFieldDataValidData(subs[0])
 	accessor.subAccessors = make([]*fieldDataRowAccessor, 0, len(subs))
 	for _, sub := range subs {
-		if !slices.Equal(expectedValidData, sub.GetValidData()) {
+		if !slices.Equal(expectedValidData, typeutil.GetFieldDataValidData(sub)) {
 			return nil, merr.WrapErrServiceInternalMsg(
 				"struct array field %s sub-field %s has inconsistent valid data",
 				fd.GetFieldName(), sub.GetFieldName())
@@ -3205,7 +3205,7 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 		default:
 			return nil, merr.WrapErrParameterInvalidMsg("the type(%v) of field(%v) is not supported, use other sdk please", colData.Type, name)
 		}
-		colData.ValidData = validDataMap[name]
+		typeutil.SetFieldDataValidData(colData, validDataMap[name])
 		columns = append(columns, colData)
 	}
 	if isDynamic {
@@ -3502,8 +3502,8 @@ func genDynamicFields(fields []string, list []*schemapb.FieldData) []string {
 }
 
 func fieldDataRowCount(fieldData *schemapb.FieldData) (int64, error) {
-	if len(fieldData.GetValidData()) > 0 {
-		return int64(len(fieldData.GetValidData())), nil
+	if validData := typeutil.GetFieldDataValidData(fieldData); len(validData) > 0 {
+		return int64(len(validData)), nil
 	}
 	return fieldDataValueCount(fieldData)
 }
@@ -3578,8 +3578,8 @@ func fieldDataValueCount(fieldData *schemapb.FieldData) (int64, error) {
 		if len(subs) == 0 {
 			return 0, nil
 		}
-		if len(subs[0].GetValidData()) > 0 {
-			return int64(len(subs[0].GetValidData())), nil
+		if validData := typeutil.GetFieldDataValidData(subs[0]); len(validData) > 0 {
+			return int64(len(validData)), nil
 		}
 		switch subs[0].GetType() {
 		case schemapb.DataType_Array:
@@ -3603,7 +3603,7 @@ type fieldDataRowAccessor struct {
 func newFieldDataRowAccessor(fieldData *schemapb.FieldData) (*fieldDataRowAccessor, error) {
 	accessor := &fieldDataRowAccessor{
 		fieldData: fieldData,
-		validData: fieldData.GetValidData(),
+		validData: typeutil.GetFieldDataValidData(fieldData),
 	}
 	if len(accessor.validData) == 0 {
 		return accessor, nil

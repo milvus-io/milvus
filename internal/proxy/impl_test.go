@@ -65,6 +65,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestProjectSearchResultValidDataForLegacy(t *testing.T) {
+	validData := []bool{true, false}
+	newField := func(name string) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			FieldName: name,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{ValidData: validData},
+			},
+		}
+	}
+	outputField := newField("output")
+	legacyGroupBy := newField("legacy_group_by")
+	groupBy := newField("group_by")
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			FieldsData:         []*schemapb.FieldData{outputField},
+			GroupByFieldValue:  legacyGroupBy,
+			GroupByFieldValues: []*schemapb.FieldData{groupBy},
+		},
+	}
+
+	projectSearchResultValidDataForLegacy(result)
+
+	for _, field := range []*schemapb.FieldData{outputField, legacyGroupBy, groupBy} {
+		assert.Equal(t, validData, field.GetValidData())
+		assert.Equal(t, validData, field.GetScalars().GetValidData())
+	}
+}
+
 func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 	paramtable.Init()
 	cache := globalMetaCache

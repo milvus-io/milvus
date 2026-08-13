@@ -81,7 +81,8 @@ class ThreadSafeValidData {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         if (field_meta.is_nullable()) {
             reserve_to(length_ + num_rows);
-            write_from(length_, num_rows, data->valid_data().data());
+            write_from(
+                length_, num_rows, GetFieldDataRowValidData(*data).data());
             length_ += num_rows;
         }
     }
@@ -110,7 +111,9 @@ class ThreadSafeValidData {
                        element_offset,
                        length_);
             reserve_to(end);
-            write_from(element_offset, num_rows, data->valid_data().data());
+            write_from(element_offset,
+                       num_rows,
+                       GetFieldDataRowValidData(*data).data());
             length_ = std::max(length_, end);
         }
     }

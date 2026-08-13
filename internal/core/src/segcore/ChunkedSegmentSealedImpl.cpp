@@ -5880,7 +5880,7 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
     }
 
     if (!field_meta.is_vector() && column->IsNullable()) {
-        auto dst = ret->mutable_valid_data()->mutable_data();
+        auto dst = MutableFieldDataRowValidData(ret.get())->mutable_data();
         column->BulkIsValid(
             op_ctx,
             [&](bool is_valid, size_t offset) { dst[offset] = is_valid; },
@@ -6277,7 +6277,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(
                field_id.get());
     auto ret = fill_with_empty(field_id, count);
     if (column->IsNullable()) {
-        auto dst = ret->mutable_valid_data()->mutable_data();
+        auto dst = MutableFieldDataRowValidData(ret.get())->mutable_data();
         column->BulkIsValid(
             op_ctx,
             [&](bool is_valid, size_t offset) { dst[offset] = is_valid; },
@@ -9408,7 +9408,7 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
 
     // Populate valid_data for nullable fields so clients can identify nulls.
     if (field_meta.is_nullable()) {
-        auto* vd = data_array->mutable_valid_data();
+        auto* vd = MutableFieldDataRowValidData(data_array.get());
         vd->Reserve(size);
         for (int64_t i = 0; i < size; i++) {
             vd->Add(arr->IsValid(result_mapping[i]));
