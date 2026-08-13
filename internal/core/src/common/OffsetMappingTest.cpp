@@ -788,6 +788,10 @@ TEST(OffsetMapping, AppendNoopOnNullOrZero) {
 }
 
 TEST(OffsetMapping, GrowingApplyValidDataByLogicalOffsetsHandlesBatchShapes) {
+    GrowingOffsetMapping disabled;
+    ExpectApplyValidDataByLogicalOffsets(
+        disabled, {-1, 0, 5}, {false, true, true});
+
     GrowingOffsetMapping mapping;
     auto b1 = ToBoolBytes(MakeValid({1, 0, 1, 1}));
     mapping.Append(reinterpret_cast<const bool*>(b1.data()), 4, 0, 0);

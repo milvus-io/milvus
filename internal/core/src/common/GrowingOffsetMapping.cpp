@@ -402,7 +402,9 @@ GrowingOffsetMapping::ApplyValidDataByLogicalOffsets(
     const auto counts = LoadCounts();
     if (counts.total == 0) {
         for (int64_t i = 0; i < count; ++i) {
-            valid_result[i] = false;
+            if (logical_offsets[i] < 0) {
+                valid_result[i] = false;
+            }
         }
         return;
     }

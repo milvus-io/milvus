@@ -1185,7 +1185,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
             },
         )
         # search by ids that belong to null vectors
-        ids_to_search = ["0", "2"]
+        ids_to_search = ["0", "4"]
         res = self.search(
             client,
             collection_name,
@@ -1198,7 +1198,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         for i in range(len(ids_to_search)):
             assert len(res[i]) == 0  # null vectors return empty results
         # search by ids have both not null and null vectors
-        ids_to_search = ["0", "1", "2", "3"]
+        ids_to_search = ["0", "1", "4", "3"]
         res = self.search(
             client,
             collection_name,
@@ -1209,10 +1209,10 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         )[0]
         assert len(res) == len(ids_to_search)
         for i in range(len(ids_to_search)):
-            if ids_to_search[i] in ["0", "2"]:
+            if ids_to_search[i] in ["0", "4"]:
                 assert len(res[i]) == 0
             else:
-                assert len(res[i]) == num_entities_with_not_null_vector  # only 5 non-null vectors exist
+                assert len(res[i]) == num_entities_with_not_null_vector  # only non-null vectors are candidates
 
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
