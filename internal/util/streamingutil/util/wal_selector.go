@@ -30,8 +30,21 @@ type walEnable struct {
 // WAL switch (mq.type updated in etcd) from every reader in this process.
 // Persisting the resolved name is handled by ProcessImmutableConfigs with a
 // renderer at coordinator startup instead.
+//
+// This is the once-per-process startup entry (coordinators through cmd/roles,
+// every streaming user through streaming.Init), so it is also where the
+// message reserve is fail-fast validated against the backend actually
+// selected -- and only that backend: kafka.brokerList and
+// woodpecker.meta.prefix have non-empty defaults, so backends the selector
+// never picks still look "enabled", and their limits must not be able to
+// fail a startup that does not use them. The validation deliberately does
+// NOT live in MustSelectWALName: that one runs on every write request
+// (getActiveWALName in the proxy), where a bad live config update must fall
+// back through normalizePulsarMessageReserve's runtime normalization instead
+// of panicking the request path.
 func InitAndSelectWALName() message.WALName {
 	walName := MustSelectWALName()
+	paramtable.Get().ValidateWALMessageSizeReserve(walName.String())
 	message.RegisterDefaultWALName(walName)
 	return walName
 }
@@ -40,19 +53,12 @@ func InitAndSelectWALName() message.WALName {
 func MustSelectWALName() message.WALName {
 	standalone := paramtable.GetRole() == typeutil.StandaloneRole
 	params := paramtable.Get()
-	walName := mustSelectWALName(standalone, params.MQCfg.Type.GetValue(), walEnable{
+	return mustSelectWALName(standalone, params.MQCfg.Type.GetValue(), walEnable{
 		params.RocksmqEnable(),
 		params.PulsarEnable(),
 		params.KafkaEnable(),
 		params.WoodpeckerEnable(),
 	})
-	// Validated here, against the backend actually selected, rather than at
-	// paramtable init against every enabled backend: kafka.brokerList and
-	// woodpecker.meta.prefix have non-empty defaults, so backends the
-	// selector never picks still look "enabled", and their limits must not
-	// be able to fail a startup that does not use them.
-	params.ValidateWALMessageSizeReserve(walName.String())
-	return walName
 }
 
 // mustSelectWALName select wal name.

@@ -27,6 +27,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -112,13 +114,13 @@ func walMessageSizeLimitKey(walName string) string {
 }
 
 // ValidateWALMessageSizeReserve guarantees pulsar.messageReserveSize fits
-// under walName's message-size limit, panicking otherwise. The WAL selector
-// calls this with the backend it actually selected, right after selecting it
-// -- which happens during process startup (cmd/roles resolves the WAL name
-// before serving), so a nonsensical combination still fails fast instead of
-// silently degrading the reserve to 0 the first time a message is packed
-// (see normalizePulsarMessageReserve's fallback for why that runtime path
-// exists at all).
+// under walName's message-size limit, panicking otherwise. It is called from
+// InitAndSelectWALName -- the once-per-process startup entry -- with the
+// backend the selector actually picked, so a nonsensical combination fails
+// fast at boot. It must NOT be called from the per-request WAL name lookup:
+// a bad combination reached through a live config update after startup has
+// to fall back through normalizePulsarMessageReserve's runtime normalization
+// instead of panicking the write path.
 //
 // Only the selected backend is ever validated. Enable flags cannot stand in
 // for selection here: kafka.brokerList and woodpecker.meta.prefix have
@@ -1290,10 +1292,20 @@ func normalizePulsarMessageReserve(maxMessageSize, messageReserveSize int) int {
 	if messageReserveSize >= 0 && messageReserveSize < maxMessageSize {
 		return messageReserveSize
 	}
+	// A combination that would have failed startup validation, reached
+	// through a live config update after startup. This runs on every packed
+	// message, so the warning is rate limited; the fallback keeps writes
+	// flowing at a sane budget instead of panicking the request path.
+	fallback := 0
 	if defaultPulsarMessageReserveSize < maxMessageSize {
-		return defaultPulsarMessageReserveSize
+		fallback = defaultPulsarMessageReserveSize
 	}
-	return 0
+	mlog.RatedWarn(context.TODO(), rate.Limit(0.1),
+		"pulsar.messageReserveSize does not fit under the active WAL message size limit, falling back",
+		mlog.Int("configuredReserve", messageReserveSize),
+		mlog.Int("maxMessageSize", maxMessageSize),
+		mlog.Int("effectiveReserve", fallback))
+	return fallback
 }
 
 func (p *PulsarConfig) Init(base *BaseTable) {
