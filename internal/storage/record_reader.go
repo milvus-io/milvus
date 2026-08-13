@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"io"
 	"strconv"
 
@@ -15,6 +16,72 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+const ImportFragmentFormatParquet = "parquet"
+
+// ImportFragmentReaderSpec is the storage-layer description of one immutable
+// Import V3 fragment.  The Import proto is deliberately not referenced here:
+// DataNode validates the wire FragmentRef and then passes only the fields the
+// packed reader needs.  This keeps storage reusable by internal and future
+// external fragment producers.
+type ImportFragmentReaderSpec struct {
+	Path     string
+	Format   string
+	StartRow int64
+	EndRow   int64
+	Rows     int64
+}
+
+// importFragmentRecordReader adds the Import contract that the packed FFI
+// reader itself cannot check: cancellation and an exact logical row count.
+// Sort-order validation remains in storage.MergeSort, at the point where the
+// keys are already decoded and compared.
+type importFragmentRecordReader struct {
+	ctx          context.Context
+	reader       RecordReader
+	expectedRows int64
+	readRows     int64
+	finished     bool
+}
+
+var _ RecordReader = (*importFragmentRecordReader)(nil)
+
+func (r *importFragmentRecordReader) Next() (Record, error) {
+	if err := r.ctx.Err(); err != nil {
+		return nil, err
+	}
+	if r.finished {
+		return nil, io.EOF
+	}
+	rec, err := r.reader.Next()
+	if err == io.EOF {
+		r.finished = true
+		if r.readRows != r.expectedRows {
+			return nil, merr.WrapErrDataIntegrityMsg(
+				"import fragment row count mismatch: expected=%d actual=%d", r.expectedRows, r.readRows)
+		}
+		return nil, io.EOF
+	}
+	if err != nil {
+		return nil, err
+	}
+	if rec == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("import fragment reader returned a nil record without EOF")
+	}
+	r.readRows += int64(rec.Len())
+	if r.readRows > r.expectedRows {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"import fragment row count exceeds manifest: expected=%d actual=%d", r.expectedRows, r.readRows)
+	}
+	return rec, nil
+}
+
+func (r *importFragmentRecordReader) Close() error {
+	if r == nil || r.reader == nil {
+		return nil
+	}
+	return r.reader.Close()
+}
 
 type RecordReader interface {
 	// Next returns a record borrowed from the reader and valid until the next
@@ -131,6 +198,68 @@ func newFFIPackedRecordReaderFromFragments(
 	return &ffiPackedRecordReader{
 		reader:    reader,
 		field2Col: field2Col,
+	}, nil
+}
+
+// NewImportFragmentRecordReader opens exactly one immutable packed fragment.
+// It performs only cheap descriptor validation before opening the object.  A
+// content checksum hook can be added here later; Import V3 intentionally does
+// not calculate SHA-256 in the first implementation.
+func NewImportFragmentRecordReader(
+	ctx context.Context,
+	spec ImportFragmentReaderSpec,
+	schema *schemapb.CollectionSchema,
+	option ...RwOption,
+) (RecordReader, error) {
+	if ctx == nil {
+		return nil, merr.WrapErrImportSysFailedMsg("import fragment reader context is nil")
+	}
+	if spec.Path == "" {
+		return nil, merr.WrapErrImportSysFailedMsg("import fragment path is empty")
+	}
+	if spec.Format != ImportFragmentFormatParquet {
+		return nil, merr.WrapErrImportSysFailedMsg("unsupported import fragment format %q", spec.Format)
+	}
+	if spec.StartRow < 0 || spec.EndRow <= spec.StartRow || spec.Rows <= 0 || spec.EndRow-spec.StartRow != spec.Rows {
+		return nil, merr.WrapErrImportSysFailedMsg(
+			"invalid import fragment range: start=%d end=%d rows=%d", spec.StartRow, spec.EndRow, spec.Rows)
+	}
+	if schema == nil {
+		return nil, merr.WrapErrImportSysFailedMsg("import fragment schema is nil")
+	}
+
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	// Import V3 fragments are always produced by the packed writer.  The
+	// storage version controls the final segment writer, not this temporary
+	// object reader, so validate only the fields needed by the FFI reader.
+	if rwOptions.storageConfig == nil {
+		return nil, merr.WrapErrImportSysFailedMsg("storage config is nil for import fragment reader")
+	}
+
+	reader, err := newFFIPackedRecordReaderFromFragments(
+		[]packed.Fragment{{
+			FilePath: spec.Path,
+			StartRow: spec.StartRow,
+			EndRow:   spec.EndRow,
+			RowCount: spec.Rows,
+		}},
+		spec.Format,
+		schema,
+		rwOptions.bufferSize,
+		rwOptions.storageConfig,
+		rwOptions.pluginContext,
+		rwOptions.externalReader,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &importFragmentRecordReader{
+		ctx:          ctx,
+		reader:       reader,
+		expectedRows: spec.Rows,
 	}, nil
 }
 

@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"io"
 	"testing"
 
@@ -29,6 +30,26 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
+
+type importFragmentTestReader struct {
+	records []Record
+	index   int
+	closed  bool
+}
+
+func (r *importFragmentTestReader) Next() (Record, error) {
+	if r.index >= len(r.records) {
+		return nil, io.EOF
+	}
+	record := r.records[r.index]
+	r.index++
+	return record, nil
+}
+
+func (r *importFragmentTestReader) Close() error {
+	r.closed = true
+	return nil
+}
 
 // exhaustedChunkReader is a minimal RecordReader that is already at EOF and
 // records whether it was closed. It stands in for a binlog chunk that opened
@@ -105,6 +126,37 @@ func TestPackedRecordReader_CloseNilReceiverDoesNotPanic(t *testing.T) {
 	assert.NotPanics(t, func() {
 		assert.NoError(t, rr.Close())
 	})
+}
+
+func TestImportFragmentRecordReaderChecksExactRows(t *testing.T) {
+	builder := array.NewInt64Builder(memory.DefaultAllocator)
+	builder.AppendValues([]int64{1, 2}, nil)
+	column := builder.NewArray()
+	builder.Release()
+	record := array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "100", Type: arrow.PrimitiveTypes.Int64}}, nil),
+		[]arrow.Array{column}, 2)
+	column.Release()
+	defer record.Release()
+
+	inner := &importFragmentTestReader{records: []Record{NewSimpleArrowRecord(record, map[int64]int{100: 0})}}
+	reader := &importFragmentRecordReader{ctx: context.Background(), reader: inner, expectedRows: 3}
+	got, err := reader.Next()
+	require.NoError(t, err)
+	require.Equal(t, 2, got.Len())
+	_, err = reader.Next()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "row count mismatch")
+	require.NoError(t, reader.Close())
+	require.True(t, inner.closed)
+}
+
+func TestImportFragmentRecordReaderHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	inner := &importFragmentTestReader{}
+	reader := &importFragmentRecordReader{ctx: ctx, reader: inner, expectedRows: 1}
+	_, err := reader.Next()
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 func TestCompositeBinlogRecordReaderOwnsCurrentRecord(t *testing.T) {
