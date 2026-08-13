@@ -127,6 +127,33 @@ class TestQueryAggregation(TestBase):
         assert [row["category"] for row in rows] == ["category_1", "category_3"]
         assert rows == expected
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_group_by_omits_group_key_from_output_fields(self):
+        """
+        target: verify REST query remaps grouped aggregate results without injecting omitted group keys
+        method: group by category while requesting only count(*) and sum(score) in outputFields
+        expected: each result contains exactly the requested aggregates and matches the category-group oracle order
+        """
+        rows = self._query(
+            {
+                "collectionName": self.collection_name,
+                "filter": SELECTIVE_FILTER,
+                "limit": 10,
+                "outputFields": ["count(*)", "sum(score)"],
+                "groupByFields": ["category"],
+                "orderByFields": ["category:asc"],
+            }
+        )
+        expected = sorted(
+            _expected_grouped_rows(
+                ["category"],
+                row_filter=lambda row: row["category"] in {"category_1", "category_3"} and 20 <= row["id"] < 90,
+            ),
+            key=lambda row: row["category"],
+        )
+        assert [set(row) for row in rows] == [{"count(*)", "sum(score)"}] * len(expected)
+        assert rows == [{key: row[key] for key in ("count(*)", "sum(score)")} for row in expected]
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_group_by_nullable_count_min_max_avg(self):
         """

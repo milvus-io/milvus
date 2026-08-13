@@ -72,6 +72,47 @@ class TestSearchOrderBy(TestBase):
         self._assert_id_distance_association(rows)
         return rows
 
+    def _create_tied_order_collection(self):
+        collection_name = gen_collection_name(prefix=f"{self.__class__.__name__}Tied")
+        collection_client, vector_client = self._class_scope_clients()
+        rows = [
+            {"id": 20, "price": 10, "vector": [1.0, 0.0]},
+            {"id": 30, "price": 10, "vector": [0.9, 0.0]},
+            {"id": 10, "price": 10, "vector": [0.8, 0.0]},
+            {"id": 40, "price": 20, "vector": [0.7, 0.0]},
+            {"id": 50, "price": 30, "vector": [0.6, 0.0]},
+        ]
+        rsp = collection_client.collection_create(
+            {
+                "collectionName": collection_name,
+                "schema": {
+                    "autoId": False,
+                    "enableDynamicField": False,
+                    "fields": [
+                        {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                        {"fieldName": "price", "dataType": "Int64"},
+                        {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
+                    ],
+                },
+                "indexParams": [
+                    {
+                        "fieldName": "vector",
+                        "indexName": "vector_index",
+                        "indexType": "FLAT",
+                        "metricType": "IP",
+                    }
+                ],
+            }
+        )
+        assert rsp["code"] == 0, rsp
+        rsp = vector_client.vector_insert({"collectionName": collection_name, "data": rows})
+        assert rsp["code"] == 0, rsp
+        assert rsp["data"]["insertCount"] == len(rows)
+        rsp = collection_client.flush(collection_name)
+        assert rsp["code"] == 0, rsp
+        collection_client.wait_load_completed(collection_name, timeout=60)
+        return collection_name
+
     @staticmethod
     def _assert_id_distance_association(rows):
         for row in rows:
@@ -148,6 +189,45 @@ class TestSearchOrderBy(TestBase):
         rows = self._search(limit=2, offset=1, orderByFields=["price:asc"])
         assert [row["id"] for row in rows] == [3, 1]
         assert [row["price"] for row in rows] == [20, 30]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_order_by_tied_keys_and_pagination(self):
+        """
+        target: verify explicit tie-break ordering and pagination across an equal-key block
+        method: use equal prices whose ANN and primary-key orders differ, then sort by price and id
+        expected: the full ordered result is stable and offset/limit returns the exact tied-block page
+        """
+        collection_name = self._create_tied_order_collection()
+        try:
+            payload = {
+                "collectionName": collection_name,
+                "data": [[1.0, 0.0]],
+                "annsField": "vector",
+                "outputFields": ["id", "price"],
+                "consistencyLevel": "Strong",
+                "limit": 4,
+                "orderByFields": ["price:asc", "id:asc"],
+            }
+            baseline_rsp = self.vector_client.vector_search(payload)
+            assert baseline_rsp["code"] == 0, baseline_rsp
+            baseline = baseline_rsp["data"]
+            assert [row["id"] for row in baseline] == [10, 20, 30, 40]
+            assert [row["price"] for row in baseline] == [10, 10, 10, 20]
+            assert [row["distance"] for row in baseline] == pytest.approx([0.8, 1.0, 0.9, 0.7])
+            assert len({row["id"] for row in baseline}) == len(baseline)
+            assert {row["id"] for row in baseline} == {10, 20, 30, 40}
+
+            page_payload = {**payload, "limit": 2, "offset": 2}
+            for _ in range(3):
+                page_rsp = self.vector_client.vector_search(page_payload)
+                assert page_rsp["code"] == 0, page_rsp
+                page = page_rsp["data"]
+                assert [row["id"] for row in page] == [30, 40]
+                assert [row["price"] for row in page] == [10, 20]
+                assert [row["distance"] for row in page] == pytest.approx([0.9, 0.7])
+                assert [row["id"] for row in page] == [row["id"] for row in baseline[2:4]]
+        finally:
+            self.collection_client.collection_drop({"collectionName": collection_name})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(

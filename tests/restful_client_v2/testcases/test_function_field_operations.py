@@ -1,5 +1,8 @@
+import time
+
 import pytest
 from base.testbase import TestBase
+from pymilvus import MilvusClient
 from utils.constant import CaseLabel
 from utils.utils import gen_collection_name
 
@@ -10,6 +13,12 @@ KEEP_FUNCTION_NAME = "bm25_keep_fn"
 KEEP_OUTPUT_FIELD_NAME = "sparse_keep"
 KEEP_INDEX_NAME = "sparse_keep_idx"
 BM25_FUNCTION_TYPE = 1
+MINHASH_FUNCTION_NAME = "minhash_fn"
+MINHASH_OUTPUT_FIELD_NAME = "minhash_signature"
+MINHASH_INDEX_NAME = "minhash_idx"
+MINHASH_FUNCTION_TYPE = 4
+MINHASH_NUM_HASHES = 16
+MINHASH_DIM = MINHASH_NUM_HASHES * 32
 
 
 def _function_field_payload(
@@ -38,6 +47,38 @@ def _function_field_payload(
             "metricType": "BM25",
             "indexType": "SPARSE_INVERTED_INDEX",
             "params": {},
+        },
+    }
+
+
+def _minhash_function_field_payload(
+    collection_name,
+    *,
+    function_name=MINHASH_FUNCTION_NAME,
+    output_field_name=MINHASH_OUTPUT_FIELD_NAME,
+    index_name=MINHASH_INDEX_NAME,
+    num_hashes=MINHASH_NUM_HASHES,
+):
+    return {
+        "collectionName": collection_name,
+        "function": {
+            "name": function_name,
+            "type": "MinHash",
+            "inputFieldNames": ["text"],
+            "outputFieldNames": [output_field_name],
+            "params": {"num_hashes": num_hashes, "shingle_size": 3},
+        },
+        "outputField": {
+            "fieldName": output_field_name,
+            "dataType": "BinaryVector",
+            "elementTypeParams": {"dim": f"{num_hashes * 32}"},
+        },
+        "indexParams": {
+            "fieldName": output_field_name,
+            "indexName": index_name,
+            "metricType": "MHJACCARD",
+            "indexType": "MINHASH_LSH",
+            "params": {"mh_lsh_band": 8},
         },
     }
 
@@ -99,13 +140,21 @@ class TestCollectionFunctionField(TestBase):
         )
         assert rsp["code"] == 0, rsp
 
+    def _wait_index_ready(self, collection_name, index_name, timeout=30):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            rsp = self.index_client.index_describe(collection_name=collection_name, index_name=index_name)
+            assert rsp["code"] == 0, rsp
+            assert len(rsp["data"]) == 1, rsp
+            index = rsp["data"][0]
+            if index["indexState"] == "Finished":
+                return index
+            time.sleep(1)
+        raise AssertionError(f"index {index_name} of collection {collection_name} not ready after {timeout}s")
+
     def _describe_index_state(self, collection_name, index_name):
-        rsp = self.index_client.index_describe(collection_name=collection_name, index_name=index_name)
-        assert rsp["code"] == 0, rsp
-        assert len(rsp["data"]) == 1, rsp
-        index = rsp["data"][0]
-        assert "fail" not in index["indexState"].lower(), rsp
-        assert index["failReason"] == "", rsp
+        index = self._wait_index_ready(collection_name, index_name)
+        assert index["failReason"] == "", index
         index_params = [(param["key"], param["value"]) for param in index["indexParams"]]
         index_param_keys = [key for key, _ in index_params]
         assert len(index_param_keys) == len(set(index_param_keys)), index
@@ -114,7 +163,23 @@ class TestCollectionFunctionField(TestBase):
             "indexName": index["indexName"],
             "metricType": index["metricType"],
             "indexType": index["indexType"],
+            "indexState": index["indexState"],
             "indexParams": sorted(index_params),
+        }
+
+    def _capture_sdk_function_binding(self, collection_name, function_name, output_field_name):
+        sdk_client = MilvusClient(uri=self.endpoint, token=self.api_key)
+        try:
+            sdk_desc = sdk_client.describe_collection(collection_name)
+        finally:
+            sdk_client.close()
+        sdk_fields = {field["name"]: field for field in sdk_desc["fields"]}
+        sdk_functions = {function["name"]: function for function in sdk_desc.get("functions", [])}
+        return {
+            "function_id": sdk_functions[function_name]["id"],
+            "input_field_ids": sdk_functions[function_name]["input_field_ids"],
+            "output_field_ids": sdk_functions[function_name]["output_field_ids"],
+            "output_field_id": sdk_fields[output_field_name]["field_id"],
         }
 
     def _assert_base_schema_state(self, collection_name):
@@ -122,9 +187,19 @@ class TestCollectionFunctionField(TestBase):
         assert desc["code"] == 0, desc
         raw_fields = desc["data"]["fields"]
         field_names = [field["name"] for field in raw_fields]
+        field_ids = [int(field["id"]) for field in raw_fields]
         assert field_names == ["id", "text", "dense"]
         assert len(field_names) == len(set(field_names)), desc
+        assert all(field_id > 0 for field_id in field_ids), desc
+        assert len(field_ids) == len(set(field_ids)), desc
         fields = {field["name"]: field for field in raw_fields}
+
+        raw_properties = desc["data"].get("properties", [])
+        property_keys = [prop["key"] for prop in raw_properties]
+        assert len(property_keys) == len(set(property_keys)), desc
+        properties = {prop["key"]: prop["value"] for prop in raw_properties}
+        assert "max_field_id" in properties, desc
+        assert int(properties["max_field_id"]) >= max(field_ids), desc
 
         raw_functions = desc["data"].get("functions", [])
         function_names = [function["name"] for function in raw_functions]
@@ -148,6 +223,7 @@ class TestCollectionFunctionField(TestBase):
             "fields": fields,
             "functions": functions,
             "indexes": {"dense_idx": dense_index},
+            "properties": properties,
         }
 
     def _assert_bm25_function_schema_state(
@@ -165,18 +241,31 @@ class TestCollectionFunctionField(TestBase):
         assert desc["code"] == 0, desc
         raw_fields = desc["data"]["fields"]
         field_names = [field["name"] for field in raw_fields]
+        field_ids = [int(field["id"]) for field in raw_fields]
         expected_output_fields_in_order = [output_field_name for _, output_field_name, _ in expected_bindings]
         assert field_names == ["id", "text", "dense", *expected_output_fields_in_order]
         assert len(field_names) == len(set(field_names)), desc
+        assert all(field_id > 0 for field_id in field_ids), desc
+        assert len(field_ids) == len(set(field_ids)), desc
         fields = {field["name"]: field for field in raw_fields}
         expected_output_fields = {output_field_name for _, output_field_name, _ in expected_bindings}
         assert set(fields) == {"id", "text", "dense"} | expected_output_fields
 
+        raw_properties = desc["data"].get("properties", [])
+        property_keys = [prop["key"] for prop in raw_properties]
+        assert len(property_keys) == len(set(property_keys)), desc
+        properties = {prop["key"]: prop["value"] for prop in raw_properties}
+        assert "max_field_id" in properties, desc
+        assert int(properties["max_field_id"]) == max(field_ids), desc
+
         raw_functions = desc["data"].get("functions", [])
         function_names = [function["name"] for function in raw_functions]
+        function_ids = [int(function["id"]) for function in raw_functions]
         expected_function_names_in_order = [function_name for function_name, _, _ in expected_bindings]
         assert function_names == expected_function_names_in_order
         assert len(function_names) == len(set(function_names)), desc
+        assert all(function_id > 0 for function_id in function_ids), desc
+        assert len(function_ids) == len(set(function_ids)), desc
         functions = {function["name"]: function for function in raw_functions}
         assert set(functions) == {function_name for function_name, _, _ in expected_bindings}
 
@@ -193,6 +282,7 @@ class TestCollectionFunctionField(TestBase):
         assert dense_index["indexType"] == "AUTOINDEX"
         index_metadata = {"dense_idx": dense_index}
         for function_name, output_field_name, index_name in expected_bindings:
+            assert int(fields[output_field_name]["id"]) > 0
             output_field = {key: value for key, value in fields[output_field_name].items() if key != "id"}
             assert output_field == {
                 "autoId": False,
@@ -206,6 +296,7 @@ class TestCollectionFunctionField(TestBase):
                 "type": "SparseFloatVector",
             }
 
+            assert int(functions[function_name]["id"]) > 0
             function = {key: value for key, value in functions[function_name].items() if key != "id"}
             assert function == {
                 "description": "",
@@ -234,6 +325,7 @@ class TestCollectionFunctionField(TestBase):
             "fields": fields,
             "functions": functions,
             "indexes": index_metadata,
+            "properties": properties,
         }
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -245,13 +337,34 @@ class TestCollectionFunctionField(TestBase):
         """
         collection_name = self._create_base_collection()
         before_state = self._assert_base_schema_state(collection_name)
+        before_max_field_id = int(before_state["properties"]["max_field_id"])
+        before_function_ids = {int(function["id"]) for function in before_state["functions"].values()}
 
         rsp = self.collection_client.add_function_field(_function_field_payload(collection_name))
         assert rsp["code"] == 0, rsp
 
         after_state = self._assert_bm25_function_schema_state(collection_name)
+        output_field_id = int(after_state["fields"][OUTPUT_FIELD_NAME]["id"])
+        function_id = int(after_state["functions"][FUNCTION_NAME]["id"])
+        assert output_field_id > before_max_field_id
+        assert int(after_state["properties"]["max_field_id"]) == output_field_id
+        assert function_id > 0
+        assert function_id not in before_function_ids
         assert {name: after_state["fields"][name] for name in before_state["fields"]} == before_state["fields"]
         assert after_state["indexes"]["dense_idx"] == before_state["indexes"]["dense_idx"]
+
+        sdk_client = MilvusClient(uri=self.endpoint, token=self.api_key)
+        try:
+            sdk_desc = sdk_client.describe_collection(collection_name)
+        finally:
+            sdk_client.close()
+        sdk_fields = {field["name"]: field for field in sdk_desc["fields"]}
+        sdk_functions = {function["name"]: function for function in sdk_desc.get("functions", [])}
+        assert sdk_fields[OUTPUT_FIELD_NAME]["field_id"] == output_field_id
+        assert sdk_fields[OUTPUT_FIELD_NAME]["is_function_output"] is True
+        assert sdk_functions[FUNCTION_NAME]["id"] == function_id
+        assert sdk_functions[FUNCTION_NAME]["input_field_ids"] == [sdk_fields["text"]["field_id"]]
+        assert sdk_functions[FUNCTION_NAME]["output_field_ids"] == [output_field_id]
 
     @pytest.mark.parametrize(
         "function_output,index_field,expected_message",
@@ -384,6 +497,7 @@ class TestCollectionFunctionField(TestBase):
                 (KEEP_FUNCTION_NAME, KEEP_OUTPUT_FIELD_NAME, KEEP_INDEX_NAME),
             ],
         )
+        before_binding = self._capture_sdk_function_binding(collection_name, KEEP_FUNCTION_NAME, KEEP_OUTPUT_FIELD_NAME)
 
         rsp = self.collection_client.drop_function_field(
             {"collectionName": collection_name, "functionName": FUNCTION_NAME}
@@ -400,8 +514,11 @@ class TestCollectionFunctionField(TestBase):
                 name: function for name, function in before_state["functions"].items() if name != FUNCTION_NAME
             },
             "indexes": {name: index for name, index in before_state["indexes"].items() if name != INDEX_NAME},
+            "properties": before_state["properties"],
         }
         assert after_state == expected_after_state
+        after_binding = self._capture_sdk_function_binding(collection_name, KEEP_FUNCTION_NAME, KEEP_OUTPUT_FIELD_NAME)
+        assert after_binding == before_binding
 
     @pytest.mark.parametrize(
         "function_name,expected_code,expected_message,seed_function",
@@ -451,12 +568,19 @@ class TestCollectionFunctionField(TestBase):
         collection_name = self._create_base_collection()
         base_state = self._assert_base_schema_state(collection_name)
         self._add_bm25_function_field(collection_name)
+        added_state = self._assert_bm25_function_schema_state(collection_name)
         payload = {"collectionName": collection_name, "functionName": FUNCTION_NAME}
 
         first = self.collection_client.drop_function_field(payload)
         assert first["code"] == 0, first
         after_first_state = self._assert_base_schema_state(collection_name)
-        assert after_first_state == base_state
+        expected_after_first_state = {
+            "fields": base_state["fields"],
+            "functions": base_state["functions"],
+            "indexes": base_state["indexes"],
+            "properties": added_state["properties"],
+        }
+        assert after_first_state == expected_after_first_state
 
         second = self.collection_client.drop_function_field(payload)
         assert second["code"] == 1100, second
@@ -496,6 +620,13 @@ class TestCollectionFunctionField(TestBase):
         assert set(fields) == {"id", "dense"}
         assert functions == {}
 
+        raw_properties = desc["data"].get("properties", [])
+        property_keys = [prop["key"] for prop in raw_properties]
+        assert len(property_keys) == len(set(property_keys)), desc
+        properties = {prop["key"]: prop["value"] for prop in raw_properties}
+        assert "max_field_id" in properties, desc
+        assert int(properties["max_field_id"]) >= max(int(field["id"]) for field in fields.values()), desc
+
         indexes = self.index_client.index_list(collection_name=collection_name)
         assert indexes["code"] == 0, indexes
         assert set(indexes["data"]) == {"dense_idx"}
@@ -503,10 +634,65 @@ class TestCollectionFunctionField(TestBase):
             "fields": fields,
             "functions": functions,
             "indexes": {"dense_idx": self._describe_index_state(collection_name, "dense_idx")},
+            "properties": properties,
         }
         expected_after_unblocked_state = {
             "fields": {name: field for name, field in before_unblocked_state["fields"].items() if name != "text"},
             "functions": before_unblocked_state["functions"],
             "indexes": before_unblocked_state["indexes"],
+            "properties": before_unblocked_state["properties"],
         }
         assert after_unblocked_state == expected_after_unblocked_state
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_add_and_drop_minhash_function_field(self):
+        """
+        target: verify REST add_function_field supports a positive MinHash binding path
+        method: add a MinHash function, BinaryVector output field, and MINHASH_LSH index in one request, then drop it
+        expected: describe endpoints expose exact BinaryVector, MINHASH_LSH, MHJACCARD, field/function ID binding,
+                 and the cascade drop restores the base schema state
+        """
+        collection_name = self._create_base_collection()
+        before_state = self._assert_base_schema_state(collection_name)
+
+        rsp = self.collection_client.add_function_field(_minhash_function_field_payload(collection_name))
+        assert rsp["code"] == 0, rsp
+
+        desc = self.collection_client.collection_describe(collection_name)
+        assert desc["code"] == 0, desc
+        fields = {field["name"]: field for field in desc["data"]["fields"]}
+        functions = {function["name"]: function for function in desc["data"].get("functions", [])}
+        assert fields[MINHASH_OUTPUT_FIELD_NAME]["type"] == "BinaryVector"
+        assert functions[MINHASH_FUNCTION_NAME]["type"] == MINHASH_FUNCTION_TYPE
+        assert functions[MINHASH_FUNCTION_NAME]["inputFieldNames"] == ["text"]
+        assert functions[MINHASH_FUNCTION_NAME]["outputFieldNames"] == [MINHASH_OUTPUT_FIELD_NAME]
+
+        output_field_id = int(fields[MINHASH_OUTPUT_FIELD_NAME]["id"])
+        function_id = int(functions[MINHASH_FUNCTION_NAME]["id"])
+        assert output_field_id > int(before_state["properties"]["max_field_id"])
+        assert function_id > 0
+
+        index_desc = self.index_client.index_describe(collection_name=collection_name, index_name=MINHASH_INDEX_NAME)
+        assert index_desc["code"] == 0, index_desc
+        assert len(index_desc["data"]) == 1, index_desc
+        index = index_desc["data"][0]
+        assert index["fieldName"] == MINHASH_OUTPUT_FIELD_NAME
+        assert index["indexName"] == MINHASH_INDEX_NAME
+        assert index["metricType"] == "MHJACCARD"
+        assert index["indexType"] == "MINHASH_LSH"
+
+        binding = self._capture_sdk_function_binding(collection_name, MINHASH_FUNCTION_NAME, MINHASH_OUTPUT_FIELD_NAME)
+        assert binding["output_field_id"] == output_field_id
+        assert binding["function_id"] == function_id
+        assert binding["input_field_ids"] == [int(fields["text"]["id"])]
+        assert binding["output_field_ids"] == [output_field_id]
+
+        rsp = self.collection_client.drop_function_field(
+            {"collectionName": collection_name, "functionName": MINHASH_FUNCTION_NAME}
+        )
+        assert rsp["code"] == 0, rsp
+        after_drop_state = self._assert_base_schema_state(collection_name)
+        assert after_drop_state["fields"] == before_state["fields"]
+        assert after_drop_state["functions"] == before_state["functions"]
+        assert after_drop_state["indexes"] == before_state["indexes"]
+        assert int(after_drop_state["properties"]["max_field_id"]) >= int(before_state["properties"]["max_field_id"])

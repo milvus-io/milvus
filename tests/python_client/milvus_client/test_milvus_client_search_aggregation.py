@@ -277,7 +277,13 @@ class TestSearchAggregation(TestMilvusClientV2Base):
                 search_aggregation=SearchAggregation(
                     fields=[self.brand_field],
                     size=bucket_size,
-                    metrics={"doc_count": {"count": "*"}},
+                    metrics={
+                        "doc_count": {"count": "*"},
+                        "score_sum": {"sum": "_score"},
+                        "score_avg": {"avg": "_score"},
+                        "score_min": {"min": "_score"},
+                        "score_max": {"max": "_score"},
+                    },
                     order=[{"_key": "asc"}],
                     top_hits=TopHits(size=top_hit_size, sort=[{"_score": "asc"}]),
                 ),
@@ -303,6 +309,11 @@ class TestSearchAggregation(TestMilvusClientV2Base):
                 )
                 assert [hit.fields for hit in bucket.hits] == [{self.brand_field: brand}] * top_hit_size
                 self._assert_scores_ascending(bucket.hits)
+                expected_scores = [score for _, score in expected_hits]
+                assert bucket.metrics["score_sum"] == pytest.approx(sum(expected_scores))
+                assert bucket.metrics["score_avg"] == pytest.approx(sum(expected_scores) / len(expected_scores))
+                assert bucket.metrics["score_min"] == pytest.approx(min(expected_scores))
+                assert bucket.metrics["score_max"] == pytest.approx(max(expected_scores))
 
             normalized_by_limit[limit] = self._normalize_brand_aggregation(buckets)
 

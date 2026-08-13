@@ -97,6 +97,10 @@ class TestSearchAggregation(TestBase):
                         "average_price": {"op": "avg", "fieldName": "price"},
                         "minimum_price": {"op": "min", "fieldName": "price"},
                         "maximum_price": {"op": "max", "fieldName": "price"},
+                        "score_sum": {"op": "sum", "fieldName": "_score"},
+                        "score_avg": {"op": "avg", "fieldName": "_score"},
+                        "score_min": {"op": "min", "fieldName": "_score"},
+                        "score_max": {"op": "max", "fieldName": "_score"},
                     },
                     "order": [{"key": "_key", "direction": "asc"}],
                     "topHits": {"size": retained_size, "sort": [{"fieldName": "price", "direction": "asc"}]},
@@ -124,6 +128,7 @@ class TestSearchAggregation(TestBase):
             category = self._bucket_key(bucket, "category")
             expected_rows = expected_by_category[category]
             expected_prices = [row["price"] for row in expected_rows]
+            expected_scores = [self._ip_score(row, query_vector) for row in expected_rows]
             metrics = bucket["metrics"]
             assert int(bucket["count"]) == len(expected_prices)
             assert int(metrics["item_count"]) == len(expected_prices)
@@ -131,6 +136,10 @@ class TestSearchAggregation(TestBase):
             assert metrics["average_price"] == pytest.approx(sum(expected_prices) / len(expected_prices))
             assert int(metrics["minimum_price"]) == min(expected_prices)
             assert int(metrics["maximum_price"]) == max(expected_prices)
+            assert metrics["score_sum"] == pytest.approx(sum(expected_scores))
+            assert metrics["score_avg"] == pytest.approx(sum(expected_scores) / len(expected_scores))
+            assert metrics["score_min"] == pytest.approx(min(expected_scores))
+            assert metrics["score_max"] == pytest.approx(max(expected_scores))
             expected_hits = sorted(expected_rows, key=lambda row: row["price"])
             assert [int(hit["id"]) for hit in bucket["hits"]] == [row["id"] for row in expected_hits]
             assert [int(hit["price"]) for hit in bucket["hits"]] == [row["price"] for row in expected_hits]
@@ -218,6 +227,7 @@ class TestSearchAggregation(TestBase):
             ("A", "Y", 10, [2], [10], [0.9]),
         ]
         assert all([key["fieldName"] for key in bucket["key"]] == ["category", "brand"] for bucket in buckets)
+        assert len(buckets) == len(expected)
         for bucket, (category, brand, total_price, hit_ids, hit_prices, hit_scores) in zip(buckets, expected):
             assert self._bucket_key(bucket, "category") == category
             assert self._bucket_key(bucket, "brand") == brand
