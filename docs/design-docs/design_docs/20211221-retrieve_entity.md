@@ -65,7 +65,7 @@ When the primary key does not exist in specified collection( and partitions), Mi
 
 Both bloomfilter files and statistical information files belong to Binlog files and follow the Binlog file format.
 
-https://github.com/milvus-io/milvus/blob/master/docs/developer_guides/chap08_binlog.md
+[Archived Milvus 2.0 Binlog guide](../../archive/milvus-2.0/developer_guides/chap08_binlog.md)
 
 Two new types of Binlog are added: BFBinlog and StatsBinlog.
 
