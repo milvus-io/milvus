@@ -32,6 +32,30 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
 | RefreshExternalCollection | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 
+## Import and external-refresh ResourceKey source of truth
+
+The entries above are the current source-code contract, not a proposed future
+lock shape:
+
+- `DataCoord.broadcastImport` starts its broadcaster through
+  `startBroadcastWithCollectionID`, which acquires
+  `SharedDBName(database) + ExclusiveCollectionName(database, collection)`.
+- `broadcastCommitImportMessage` and `broadcastRollbackImportMessage` use the
+  same helper and therefore the same two keys. Their WAL target is every data
+  VChannel in the job; the control channel is not a substitute for these
+  per-VChannel commit/rollback messages.
+- `RefreshExternalCollection` also uses `startBroadcastWithCollectionID` and
+  broadcasts on the control channel, but it still takes the same collection
+  keys. It does not use a cluster-wide key.
+- Snapshot operations are different: `DropSnapshot` takes the same DB and
+  collection keys plus `ExclusiveSnapshotName(collectionID, snapshotName)`.
+
+When changing any of these messages, update this table and the corresponding
+tests together. The implementation locations are
+`internal/datacoord/ddl_callbacks.go`, `internal/datacoord/ddl_callbacks_import.go`,
+and `internal/datacoord/services.go`; the lock implementation is in
+`internal/streamingcoord/server/broadcaster`.
+
 ## Message Descriptions
 
 - **CreateCollection**: Creates a new collection with its partitions and VChannels.
