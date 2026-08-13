@@ -60,20 +60,61 @@ class TestSnapshotOperations(TestBase):
         rsp = self.snapshot_client.snapshot_export(
             {
                 **snapshot_payload,
-                "targetS3Path": "s3://snapshot-export-test/export-root",
+                "targetS3Path": f"snapshot_export_{uuid4().hex}",
             }
         )
-        assert rsp["code"] != 0, rsp
-        assert "not implemented" in rsp["message"].lower(), rsp
+        assert rsp["code"] == 0, rsp
+        export_job_id = rsp["data"]["jobId"]
+        assert isinstance(export_job_id, (int, str)) and int(export_job_id) > 0, rsp
+        export_job_id = str(export_job_id)
+
+        deadline = time.time() + 180
+        while time.time() < deadline:
+            rsp = self.snapshot_client.get_export_snapshot_state(export_job_id)
+            assert rsp["code"] == 0, rsp
+            state = rsp["data"]["state"]
+            if state == "ExportSnapshotCompleted":
+                break
+            assert state != "ExportSnapshotFailed", rsp
+            time.sleep(2)
+        else:
+            pytest.fail(f"snapshot export did not complete: {rsp}")
+
+        assert str(rsp["data"]["jobId"]) == export_job_id, rsp
+        assert rsp["data"]["snapshotName"] == snapshot_name, rsp
+        assert rsp["data"]["collectionName"] == source_collection, rsp
+        assert int(rsp["data"]["totalBytes"]) > 0, rsp
+        snapshot_metadata_uri = rsp["data"]["snapshotMetadataURI"]
+        assert snapshot_metadata_uri, rsp
 
         rsp = self.snapshot_client.snapshot_restore_external(
             {
                 "targetCollectionName": external_target_collection,
-                "snapshotMetadataURI": "s3://snapshot-export-test/snapshots/metadata.json",
+                "snapshotMetadataURI": snapshot_metadata_uri,
             }
         )
-        assert rsp["code"] != 0, rsp
-        assert "not implemented" in rsp["message"].lower(), rsp
+        assert rsp["code"] == 0, rsp
+        external_restore_job_id = rsp["data"]["jobId"]
+        assert isinstance(external_restore_job_id, (int, str)) and int(external_restore_job_id) > 0, rsp
+        external_restore_job_id = str(external_restore_job_id)
+
+        deadline = time.time() + 180
+        while time.time() < deadline:
+            rsp = self.snapshot_client.get_restore_snapshot_state(external_restore_job_id)
+            assert rsp["code"] == 0, rsp
+            state = rsp["data"]["state"]
+            if state == "RestoreSnapshotCompleted":
+                break
+            assert state != "RestoreSnapshotFailed", rsp
+            time.sleep(2)
+        else:
+            pytest.fail(f"external snapshot restore did not complete: {rsp}")
+
+        assert str(rsp["data"]["jobId"]) == external_restore_job_id, rsp
+        assert rsp["data"]["collectionName"] == external_target_collection, rsp
+
+        rsp = self.collection_client.collection_has(collection_name=external_target_collection)
+        assert rsp["code"] == 0 and rsp["data"]["has"], rsp
 
         rsp = self.snapshot_client.snapshot_pin({**snapshot_payload, "ttlSeconds": 60})
         assert rsp["code"] == 0, rsp

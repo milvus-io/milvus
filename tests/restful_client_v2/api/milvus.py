@@ -1151,6 +1151,11 @@ class SnapshotClient(Requests):
         url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/export"
         return self.post(url, headers=self.update_headers(), data=payload).json()
 
+    def get_export_snapshot_state(self, job_id):
+        url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/export/describe"
+        payload = {"jobId": str(job_id)}
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
     def snapshot_restore_external(self, payload):
         url = f"{self.endpoint}/v2/vectordb/jobs/snapshot/restore_external"
         return self.post(url, headers=self.update_headers(), data=payload).json()
