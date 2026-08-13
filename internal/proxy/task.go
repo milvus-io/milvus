@@ -3248,7 +3248,7 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		Priority:       t.GetLoadPriority(),
 	}
 	log.Info(ctx, "send LoadCollectionRequest to query coordinator",
-		mlog.Any("schema", request.Schema),
+		mlog.FieldSchema(request.Schema),
 		mlog.Int32("priority", int32(request.GetPriority())))
 	t.result, err = t.mixCoord.LoadCollection(ctx, request)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
@@ -3520,7 +3520,7 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 		Priority:       t.GetLoadPriority(),
 	}
 	mlog.Info(context.TODO(), "send LoadPartitionRequest to query coordinator",
-		mlog.Any("schema", request.Schema),
+		mlog.FieldSchema(request.Schema),
 		mlog.Int32("priority", int32(request.GetPriority())))
 	t.result, err = t.mixCoord.LoadPartitions(ctx, request)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {

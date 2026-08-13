@@ -126,7 +126,8 @@ type Server struct {
 	copySegmentInspector CopySegmentInspector
 	copySegmentChecker   CopySegmentChecker
 
-	snapshotManager SnapshotManager
+	snapshotManager       SnapshotManager
+	snapshotExportManager *snapshotExportManager
 
 	compactionTrigger        trigger
 	compactionInspector      CompactionInspector
@@ -374,7 +375,7 @@ func (s *Server) initDataCoord() error {
 	mlog.Info(s.ctx, "init copy segment inspector and checker done")
 
 	// Initialize snapshot manager
-	s.snapshotManager = NewSnapshotManager(
+	snapshotManager := NewSnapshotManager(
 		s.meta,
 		s.meta.snapshotMeta,
 		s.copySegmentMeta,
@@ -384,6 +385,13 @@ func (s *Server) initDataCoord() error {
 		s.getChannelsByCollectionID,
 		s.indexEngineVersionManager,
 	)
+	s.snapshotManager = snapshotManager
+	snapshotExportMeta, err := newSnapshotExportMeta(s.ctx, s.meta.catalog)
+	if err != nil {
+		return err
+	}
+	s.snapshotExportManager = newSnapshotExportManager(s.ctx, snapshotExportMeta, snapshotManager)
+	snapshotManager.exportManager = s.snapshotExportManager
 	mlog.Info(s.ctx, "init snapshot manager done")
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
@@ -725,6 +733,9 @@ func (s *Server) startServerLoop() {
 
 	// Start external collection refresh manager (includes inspector and checker)
 	s.externalCollectionRefreshManager.Start()
+	if s.snapshotExportManager != nil {
+		s.snapshotExportManager.Start()
+	}
 
 	s.garbageCollector.start()
 }
@@ -1043,6 +1054,10 @@ func (s *Server) Stop() error {
 	mlog.Info(s.ctx, "datacoord server shutdown")
 	s.garbageCollector.close()
 	mlog.Info(s.ctx, "datacoord garbage collector stopped")
+	if s.snapshotExportManager != nil {
+		s.snapshotExportManager.Close()
+		mlog.Info(s.ctx, "datacoord snapshot export manager stopped")
+	}
 
 	if s.meta != nil {
 		s.meta.GetSnapshotMeta().Close()

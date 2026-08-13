@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -79,6 +80,7 @@ type Proxy struct {
 
 	address  string
 	mixCoord types.MixCoordClient
+	factory  dependency.Factory
 
 	simpleLimiter *SimpleLimiter
 
@@ -116,7 +118,7 @@ type Proxy struct {
 }
 
 // NewProxy returns a Proxy struct.
-func NewProxy(ctx context.Context, _ dependency.Factory) (*Proxy, error) {
+func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	n := 1024 // better to be configurable
@@ -126,6 +128,7 @@ func NewProxy(ctx context.Context, _ dependency.Factory) (*Proxy, error) {
 		cancel:         cancel,
 		searchResultCh: make(chan *internalpb.SearchResults, n),
 		// shardMgr:        mgr,
+		factory:       factory,
 		simpleLimiter: NewSimpleLimiter(Params.QuotaConfig.AllocWaitInterval.GetAsDuration(time.Millisecond), Params.QuotaConfig.AllocRetryTimes.GetAsUint()),
 		// lbPolicy:        lbPolicy,
 		resourceManager: resourceManager,
@@ -191,6 +194,21 @@ func (node *Proxy) Init() error {
 		return err
 	}
 	mlog.Info(node.ctx, "init session for Proxy done")
+
+	fileMode := fileresource.GetLocalMode()
+	if fileMode == fileresource.SyncMode {
+		if node.factory == nil {
+			return merr.WrapErrServiceInternalMsg("proxy dependency factory is nil")
+		}
+		node.factory.Init(paramtable.Get())
+		chunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
+		if err != nil {
+			return merr.Wrap(err, "initialize Proxy file resource storage")
+		}
+		fileresource.InitManager(chunkManager, fileMode)
+	} else {
+		fileresource.InitManager(nil, fileMode)
+	}
 
 	err := node.initRateCollector()
 	if err != nil {

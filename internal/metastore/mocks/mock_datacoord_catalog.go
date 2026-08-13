@@ -702,6 +702,53 @@ func (_c *DataCoordCatalog_DropCurrentPartitionStatsVersion_Call) RunAndReturn(r
 	return _c
 }
 
+// DropExportSnapshotJob provides a mock function with given fields: ctx, jobID
+func (_m *DataCoordCatalog) DropExportSnapshotJob(ctx context.Context, jobID int64) error {
+	ret := _m.Called(ctx, jobID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropExportSnapshotJob")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, jobID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropExportSnapshotJob_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropExportSnapshotJob'
+type DataCoordCatalog_DropExportSnapshotJob_Call struct {
+	*mock.Call
+}
+
+// DropExportSnapshotJob is a helper method to define mock.On call
+//   - ctx context.Context
+//   - jobID int64
+func (_e *DataCoordCatalog_Expecter) DropExportSnapshotJob(ctx interface{}, jobID interface{}) *DataCoordCatalog_DropExportSnapshotJob_Call {
+	return &DataCoordCatalog_DropExportSnapshotJob_Call{Call: _e.mock.On("DropExportSnapshotJob", ctx, jobID)}
+}
+
+func (_c *DataCoordCatalog_DropExportSnapshotJob_Call) Run(run func(ctx context.Context, jobID int64)) *DataCoordCatalog_DropExportSnapshotJob_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropExportSnapshotJob_Call) Return(_a0 error) *DataCoordCatalog_DropExportSnapshotJob_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropExportSnapshotJob_Call) RunAndReturn(run func(context.Context, int64) error) *DataCoordCatalog_DropExportSnapshotJob_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropImportJob provides a mock function with given fields: ctx, jobID
 func (_m *DataCoordCatalog) DropImportJob(ctx context.Context, jobID int64) error {
 	ret := _m.Called(ctx, jobID)
@@ -1534,6 +1581,64 @@ func (_c *DataCoordCatalog_ListCopySegmentTasks_Call) Return(_a0 []*datapb.CopyS
 }
 
 func (_c *DataCoordCatalog_ListCopySegmentTasks_Call) RunAndReturn(run func(context.Context) ([]*datapb.CopySegmentTask, error)) *DataCoordCatalog_ListCopySegmentTasks_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListExportSnapshotJobs provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListExportSnapshotJobs")
+	}
+
+	var r0 []*datapb.ExportSnapshotJob
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*datapb.ExportSnapshotJob, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*datapb.ExportSnapshotJob); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*datapb.ExportSnapshotJob)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ListExportSnapshotJobs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListExportSnapshotJobs'
+type DataCoordCatalog_ListExportSnapshotJobs_Call struct {
+	*mock.Call
+}
+
+// ListExportSnapshotJobs is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *DataCoordCatalog_Expecter) ListExportSnapshotJobs(ctx interface{}) *DataCoordCatalog_ListExportSnapshotJobs_Call {
+	return &DataCoordCatalog_ListExportSnapshotJobs_Call{Call: _e.mock.On("ListExportSnapshotJobs", ctx)}
+}
+
+func (_c *DataCoordCatalog_ListExportSnapshotJobs_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListExportSnapshotJobs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListExportSnapshotJobs_Call) Return(_a0 []*datapb.ExportSnapshotJob, _a1 error) *DataCoordCatalog_ListExportSnapshotJobs_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListExportSnapshotJobs_Call) RunAndReturn(run func(context.Context) ([]*datapb.ExportSnapshotJob, error)) *DataCoordCatalog_ListExportSnapshotJobs_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2758,6 +2863,53 @@ func (_c *DataCoordCatalog_SaveDroppedSegmentsInBatch_Call) Return(_a0 error) *D
 }
 
 func (_c *DataCoordCatalog_SaveDroppedSegmentsInBatch_Call) RunAndReturn(run func(context.Context, []*datapb.SegmentInfo) error) *DataCoordCatalog_SaveDroppedSegmentsInBatch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveExportSnapshotJob provides a mock function with given fields: ctx, job
+func (_m *DataCoordCatalog) SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error {
+	ret := _m.Called(ctx, job)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveExportSnapshotJob")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ExportSnapshotJob) error); ok {
+		r0 = rf(ctx, job)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_SaveExportSnapshotJob_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveExportSnapshotJob'
+type DataCoordCatalog_SaveExportSnapshotJob_Call struct {
+	*mock.Call
+}
+
+// SaveExportSnapshotJob is a helper method to define mock.On call
+//   - ctx context.Context
+//   - job *datapb.ExportSnapshotJob
+func (_e *DataCoordCatalog_Expecter) SaveExportSnapshotJob(ctx interface{}, job interface{}) *DataCoordCatalog_SaveExportSnapshotJob_Call {
+	return &DataCoordCatalog_SaveExportSnapshotJob_Call{Call: _e.mock.On("SaveExportSnapshotJob", ctx, job)}
+}
+
+func (_c *DataCoordCatalog_SaveExportSnapshotJob_Call) Run(run func(ctx context.Context, job *datapb.ExportSnapshotJob)) *DataCoordCatalog_SaveExportSnapshotJob_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.ExportSnapshotJob))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveExportSnapshotJob_Call) Return(_a0 error) *DataCoordCatalog_SaveExportSnapshotJob_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveExportSnapshotJob_Call) RunAndReturn(run func(context.Context, *datapb.ExportSnapshotJob) error) *DataCoordCatalog_SaveExportSnapshotJob_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -1918,7 +1918,7 @@ func (node *QueryNode) SyncFileResource(ctx context.Context, req *internalpb.Syn
 	}
 	defer node.lifetime.Done()
 
-	err := fileresource.Sync(req.GetVersion(), req.GetResources())
+	err := fileresource.Sync(context.TODO(), req.GetVersion(), req.GetResources())
 	if err != nil {
 		return merr.Status(err), nil
 	}

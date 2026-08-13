@@ -45,6 +45,10 @@ import (
 // Otherwise, WalkWithObjects will continue until reach the last object.
 type ChunkObjectWalkFunc func(chunkObjectInfo *ChunkObjectInfo) bool
 
+type CrossBucketCopier interface {
+	CopyCrossBucket(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) error
+}
+
 type ObjectStorage interface {
 	GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error)
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error
@@ -55,7 +59,7 @@ type ObjectStorage interface {
 	// 2. underlying walking failed or context canceled, WalkWithPrefix will stop and return a error.
 	WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) error
 	RemoveObject(ctx context.Context, bucketName, objectName string) error
-	CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error
+	CopyObjectCrossBucket(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error
 }
 
 // RemoteChunkManager is responsible for read and write data stored in mminio.
@@ -443,7 +447,7 @@ func ToMilvusIoError(fileName string, err error) error {
 }
 
 func (mcm *RemoteChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
-	err := mcm.copyObject(ctx, mcm.bucketName, srcFilePath, dstFilePath)
+	err := mcm.copyObject(ctx, mcm.bucketName, srcFilePath, mcm.bucketName, dstFilePath)
 	if err != nil {
 		mlog.Warn(ctx, "failed to copy object", mlog.String("bucket", mcm.bucketName), mlog.String("src", srcFilePath), mlog.String("dst", dstFilePath), mlog.Err(err))
 		return err
@@ -451,10 +455,24 @@ func (mcm *RemoteChunkManager) Copy(ctx context.Context, srcFilePath string, dst
 	return nil
 }
 
-func (mcm *RemoteChunkManager) copyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
+func (mcm *RemoteChunkManager) CopyCrossBucket(ctx context.Context, srcBucket, srcFilePath, dstBucket, dstFilePath string) error {
+	err := mcm.copyObject(ctx, srcBucket, srcFilePath, dstBucket, dstFilePath)
+	if err != nil {
+		mlog.Warn(ctx, "failed to copy object across buckets",
+			mlog.String("srcBucket", srcBucket),
+			mlog.String("dstBucket", dstBucket),
+			mlog.String("src", srcFilePath),
+			mlog.String("dst", dstFilePath),
+			mlog.Err(err))
+		return err
+	}
+	return nil
+}
+
+func (mcm *RemoteChunkManager) copyObject(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error {
 	start := timerecord.NewTimeRecorder("copyObject")
 
-	err := mcm.client.CopyObject(ctx, bucketName, srcObjectName, dstObjectName)
+	err := mcm.client.CopyObjectCrossBucket(ctx, srcBucket, srcObjectName, dstBucket, dstObjectName)
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataPutLabel, metrics.TotalLabel).Inc()
 	if err == nil {
 		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataPutLabel).

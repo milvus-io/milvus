@@ -18,11 +18,13 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
@@ -34,6 +36,13 @@ import (
 type AzureObjectStorage struct {
 	*service.Client
 }
+
+const (
+	azureCopyPollInterval = 200 * time.Millisecond
+	// Caller deadlines are honored. This default only applies when the caller
+	// passes a context without a deadline, so pending Azure copies cannot hang forever.
+	azureCopyDefaultTimeout = 24 * time.Hour
+)
 
 func newAzureObjectStorageWithConfig(ctx context.Context, c *objectstorage.Config) (*AzureObjectStorage, error) {
 	client, err := objectstorage.NewAzureObjectStorageClient(ctx, c)
@@ -195,15 +204,120 @@ func (AzureObjectStorage *AzureObjectStorage) RemoveObject(ctx context.Context, 
 	return mapObjectStorageError(objectName, err)
 }
 
-func (AzureObjectStorage *AzureObjectStorage) CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
-	containerClient := AzureObjectStorage.NewContainerClient(bucketName)
-	srcBlobClient := containerClient.NewBlockBlobClient(srcObjectName)
-	dstBlobClient := containerClient.NewBlockBlobClient(dstObjectName)
+func (AzureObjectStorage *AzureObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcContainer, srcObjectName, dstContainer, dstObjectName string) error {
+	srcURL := AzureObjectStorage.NewContainerClient(srcContainer).NewBlockBlobClient(srcObjectName).URL()
+	dstBlobClient := AzureObjectStorage.NewContainerClient(dstContainer).NewBlockBlobClient(dstObjectName)
+	return startOrResumeAzureCopy(ctx, dstBlobClient, srcURL, dstObjectName)
+}
 
-	// Get source blob URL
-	srcURL := srcBlobClient.URL()
+// startOrResumeAzureCopy starts one asynchronous Azure copy. If an SDK retry
+// observes the copy already in progress, polling resumes that operation rather
+// than issuing another non-idempotent start request.
+func startOrResumeAzureCopy(ctx context.Context, dstBlobClient *blockblob.Client, srcURL, dstObjectName string) error {
+	response, err := dstBlobClient.StartCopyFromURL(ctx, srcURL, &blob.StartCopyFromURLOptions{})
+	if err != nil {
+		if !bloberror.HasCode(err, bloberror.PendingCopyOperation) {
+			return mapObjectStorageError(dstObjectName, err)
+		}
+	}
 
-	// Start copy operation
-	_, err := dstBlobClient.StartCopyFromURL(ctx, srcURL, &blob.StartCopyFromURLOptions{})
-	return mapObjectStorageError(dstObjectName, err)
+	copyID := ""
+	if response.CopyID != nil {
+		copyID = *response.CopyID
+	}
+	return waitAzureCopyComplete(ctx, dstBlobClient, dstObjectName, srcURL, copyID)
+}
+
+func waitAzureCopyComplete(
+	ctx context.Context,
+	dstBlobClient *blockblob.Client,
+	dstObjectName string,
+	expectedSource string,
+	expectedCopyID string,
+) error {
+	if _, ok := ctx.Deadline(); !ok {
+		timeoutCtx, cancel := context.WithTimeout(ctx, azureCopyDefaultTimeout)
+		defer cancel()
+		ctx = timeoutCtx
+	}
+
+	ticker := time.NewTicker(azureCopyPollInterval)
+	defer ticker.Stop()
+	copyID := expectedCopyID
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		props, err := dstBlobClient.GetProperties(ctx, &blob.GetPropertiesOptions{})
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			mappedErr := mapObjectStorageError(dstObjectName, err)
+			if merr.IsNonRetryableErr(mappedErr) {
+				return mappedErr
+			}
+			// GetProperties is idempotent, so transient poll failures can be
+			// retried without replaying StartCopyFromURL.
+			if err := waitAzureCopyPoll(ctx, ticker); err != nil {
+				return err
+			}
+			continue
+		}
+		if expectedSource != "" {
+			if props.CopySource == nil || *props.CopySource != expectedSource {
+				actualSource := ""
+				if props.CopySource != nil {
+					actualSource = *props.CopySource
+				}
+				return merr.WrapErrIoFailedMsg(
+					"azure copy source mismatch for %s: expected %s, actual %s",
+					dstObjectName, expectedSource, actualSource)
+			}
+		}
+		if copyID == "" && props.CopyID != nil {
+			copyID = *props.CopyID
+		} else if copyID != "" && (props.CopyID == nil || *props.CopyID != copyID) {
+			actualCopyID := ""
+			if props.CopyID != nil {
+				actualCopyID = *props.CopyID
+			}
+			return merr.WrapErrIoFailedMsg(
+				"azure copy ID mismatch for %s: expected %s, actual %s",
+				dstObjectName, copyID, actualCopyID)
+		}
+		if props.CopyStatus == nil {
+			return merr.WrapErrIoFailedReason(fmt.Sprintf("azure copy status for %s is empty", dstObjectName))
+		}
+
+		switch *props.CopyStatus {
+		case blob.CopyStatusTypeSuccess:
+			return nil
+		case blob.CopyStatusTypeFailed, blob.CopyStatusTypeAborted:
+			statusDescription := ""
+			if props.CopyStatusDescription != nil {
+				statusDescription = *props.CopyStatusDescription
+			}
+			return merr.WrapErrIoFailedReason(
+				fmt.Sprintf("azure copy for %s finished with status %s: %s", dstObjectName, *props.CopyStatus, statusDescription))
+		case blob.CopyStatusTypePending:
+			if err := waitAzureCopyPoll(ctx, ticker); err != nil {
+				return err
+			}
+		default:
+			return merr.WrapErrIoFailedReason(
+				fmt.Sprintf("azure copy for %s returned unknown status %s", dstObjectName, *props.CopyStatus))
+		}
+	}
+}
+
+func waitAzureCopyPoll(ctx context.Context, ticker *time.Ticker) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-ticker.C:
+		return nil
+	}
 }

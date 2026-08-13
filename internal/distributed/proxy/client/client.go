@@ -254,3 +254,9 @@ func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 		return client.ClearReadTaskQueue(ctx, req)
 	})
 }
+
+func (c *Client) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*commonpb.Status, error) {
+		return client.SyncFileResource(ctx, req)
+	})
+}

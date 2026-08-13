@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -121,6 +122,24 @@ func (node *Proxy) GetStatisticsChannel(ctx context.Context, req *internalpb.Get
 		Status: merr.Success(),
 		Value:  "",
 	}, nil
+}
+
+func (node *Proxy) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	if err := fileresource.Sync(context.TODO(), req.GetVersion(), req.GetResources()); err != nil {
+		mlog.Warn(ctx, "sync file resource failed",
+			mlog.Uint64("version", req.GetVersion()),
+			mlog.Int("resourceCount", len(req.GetResources())),
+			mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	mlog.Info(ctx, "sync file resource completed",
+		mlog.Uint64("version", req.GetVersion()),
+		mlog.Int("resourceCount", len(req.GetResources())))
+	return merr.Success(), nil
 }
 
 // InvalidateCollectionMetaCache invalidate the meta cache of specific collection.
@@ -5680,7 +5699,7 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RestoreRBAC")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "RestoreRBAC", mlog.Any("req", req))
+	mlog.Debug(ctx, "RestoreRBAC", mlog.Any("req", redactRestoreRBACRequestForLog(req)))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -7333,8 +7352,8 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	if srcSet != specSet {
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrParameterInvalidMsg(
-				"external_source and external_spec must be both provided or both omitted on refresh (got source=%q, spec=%q)",
-				req.GetExternalSource(), req.GetExternalSpec())),
+				"external_source and external_spec must be both provided or both omitted on refresh (source_set=%t, spec_set=%t)",
+				srcSet, specSet)),
 		}, nil
 	}
 
