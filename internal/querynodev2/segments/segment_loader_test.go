@@ -1353,7 +1353,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsLegacyParentLoadsChildManifest
 	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
 		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			legacyReaderCalls.Inc()
-			return storage.NewLegacyDeltalogReader(&schemapb.FieldSchema{
+			return storage.NewLegacyDeltalogReader(context.Background(), &schemapb.FieldSchema{
 				FieldID:      0,
 				DataType:     pkType,
 				IsPrimaryKey: true,

@@ -1313,6 +1313,7 @@ func writeDeltalog(
 func readInt64Deltalog(t *testing.T, storageConfig *indexpb.StorageConfig, path string) ([]int64, []int64) {
 	t.Helper()
 	reader, err := storage.NewDeltalogReader(
+		context.Background(),
 		schemapb.DataType_Int64,
 		[]string{path},
 		storage.WithVersion(storage.StorageV3),
