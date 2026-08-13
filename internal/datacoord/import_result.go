@@ -3,6 +3,7 @@ package datacoord
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"hash/crc64"
 	"path"
 	"slices"
