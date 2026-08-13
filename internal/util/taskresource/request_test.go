@@ -174,31 +174,40 @@ func TestRequirementForIndexFallsBackToBinlogsForFieldsWithoutClosedForm(t *test
 // every branch, not just FloatVector: BinaryVector packs 8 dims/byte and
 // Float16Vector uses 2 bytes/dim. Wrong branches here would silently
 // under-size the requirement for these index builds.
+// Dim/NumRows are deliberately large enough here that the raw byte size
+// clears the 64MiB EstimateIndexBuild floor: at small sizes BinaryVector's
+// dim/8*rows and FloatVector's dim*rows*4 formulas both collapse to the same
+// floored 64MiB result and a wrong branch would go undetected.
 func TestRequirementForIndexClosedFormCoversBinaryAndFloat16(t *testing.T) {
 	paramtable.Init()
 
 	binaryReq := &workerpb.CreateJobRequest{
-		Dim:     2048,
-		NumRows: 1000,
+		Dim:     8192,
+		NumRows: 200_000,
 		Field:   &schemapb.FieldSchema{DataType: schemapb.DataType_BinaryVector},
 	}
 	gotBinary := RequirementForIndex(binaryReq)
-	wantBinary := EstimateIndexBuild(IndexInput{FieldMemorySize: 2048 / 8 * 1000})
+	wantBinary := EstimateIndexBuild(IndexInput{FieldMemorySize: 8192 / 8 * 200_000})
 	assert.Equal(t, wantBinary, gotBinary)
+	assert.Greater(t, gotBinary.Memory, int64(64)<<20, "must clear the floor to actually exercise the formula")
 
 	f16Req := &workerpb.CreateJobRequest{
-		Dim:     128,
-		NumRows: 1000,
+		Dim:     4096,
+		NumRows: 200_000,
 		Field:   &schemapb.FieldSchema{DataType: schemapb.DataType_Float16Vector},
 	}
 	gotF16 := RequirementForIndex(f16Req)
-	wantF16 := EstimateIndexBuild(IndexInput{FieldMemorySize: 128 * 1000 * 2})
+	wantF16 := EstimateIndexBuild(IndexInput{FieldMemorySize: 4096 * 200_000 * 2})
 	assert.Equal(t, wantF16, gotF16)
+	assert.Greater(t, gotF16.Memory, int64(64)<<20, "must clear the floor to actually exercise the formula")
 }
 
 // A pre-2.4 wire request never fills Field, only the legacy scalar FieldID
 // and FieldType; the field-size and field-lookup logic must fall back to
-// those, not just to Field.
+// those, not just to Field. The binlog size is large enough that a lookup
+// bug (falling back to fieldID 0, which matches nothing) produces a result
+// that clears the 64MiB floor differently from the correct one, instead of
+// both collapsing to the same floored value.
 func TestRequirementForIndexFallsBackToLegacyFieldIDAndFieldType(t *testing.T) {
 	paramtable.Init()
 
@@ -207,13 +216,14 @@ func TestRequirementForIndexFallsBackToLegacyFieldIDAndFieldType(t *testing.T) {
 		FieldID:     7,
 		FieldType:   schemapb.DataType_ArrayOfVector,
 		InsertLogs: []*datapb.FieldBinlog{
-			{FieldID: 7, Binlogs: []*datapb.Binlog{{MemorySize: 20 << 20}}},
+			{FieldID: 7, Binlogs: []*datapb.Binlog{{MemorySize: 150 << 20}}},
 		},
 	}
 
 	got := RequirementForIndex(req)
-	want := EstimateIndexBuild(IndexInput{IndexType: "INVERTED", FieldMemorySize: 20 << 20})
+	want := EstimateIndexBuild(IndexInput{IndexType: "INVERTED", FieldMemorySize: 150 << 20})
 	assert.Equal(t, want, got)
+	assert.Greater(t, got.Memory, int64(64)<<20, "must clear the floor: 0 (fieldID lookup miss) and 150MiB*0.8 both floor to the same value otherwise")
 }
 
 // A field with no closed form and no matching binlog at all must still be
@@ -231,19 +241,22 @@ func TestRequirementForIndexUnmatchedFieldStillCharged(t *testing.T) {
 
 // An index request with no recognised index_type key must still fall back
 // to the configured default factor rather than treating the field as free.
+// Dim/NumRows are large enough that the default factor (1.5) and, say, an
+// accidental HNSW factor (2.0) would produce visibly different un-floored
+// results, so this actually pins which factor got used.
 func TestRequirementForIndexMissingIndexTypeUsesDefaultFactor(t *testing.T) {
 	paramtable.Init()
 
 	req := &workerpb.CreateJobRequest{
-		Dim:     128,
-		NumRows: 1000,
+		Dim:     1024,
+		NumRows: 200_000,
 		Field:   &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector},
 	}
 
 	got := RequirementForIndex(req)
-	want := EstimateIndexBuild(IndexInput{IndexType: "", FieldMemorySize: 128 * 1000 * 4})
+	want := EstimateIndexBuild(IndexInput{IndexType: "", FieldMemorySize: 1024 * 200_000 * 4})
 	assert.Equal(t, want, got)
-	assert.Greater(t, got.Memory, int64(0))
+	assert.Greater(t, got.Memory, int64(64)<<20)
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +270,10 @@ func schemaWithFields(fields ...*schemapb.FieldSchema) *schemapb.CollectionSchem
 // Only the field(s) the sub-job actually touches should be charged: a
 // text-index job must not be charged for an unrelated field's binlogs even
 // though the coord's CreateStatsRequest carries the whole segment's insert
-// logs.
+// logs. The touched field's binlog is large enough (>32MiB, so that x2
+// textFactor clears the 64MiB EstimateStats floor) that summing the wrong
+// field(s) would produce a visibly different, non-floored result rather than
+// both landing on the same floored value.
 func TestRequirementForStatsTextIndexJobChargesOnlyMatchingField(t *testing.T) {
 	paramtable.Init()
 
@@ -274,14 +290,15 @@ func TestRequirementForStatsTextIndexJobChargesOnlyMatchingField(t *testing.T) {
 		SubJobType: indexpb.StatsSubJob_TextIndexJob,
 		Schema:     schemaWithFields(textField, plainField),
 		InsertLogs: []*datapb.FieldBinlog{
-			{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: 8 << 20}}},
-			{FieldID: 101, Binlogs: []*datapb.Binlog{{MemorySize: 500 << 20}}}, // must not be counted
+			{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: 100 << 20}}},
+			{FieldID: 101, Binlogs: []*datapb.Binlog{{MemorySize: 800 << 20}}}, // must not be counted
 		},
 	}
 
 	got := RequirementForStats(req)
-	want := EstimateStats(StatsInput{SubJobType: indexpb.StatsSubJob_TextIndexJob, FieldMemorySize: 8 << 20})
+	want := EstimateStats(StatsInput{SubJobType: indexpb.StatsSubJob_TextIndexJob, FieldMemorySize: 100 << 20})
 	assert.Equal(t, want, got)
+	assert.Greater(t, got.Memory, int64(64)<<20, "must clear the floor to actually exercise field selection")
 }
 
 func TestRequirementForStatsJSONKeyIndexJobChargesOnlyJSONField(t *testing.T) {
@@ -294,21 +311,31 @@ func TestRequirementForStatsJSONKeyIndexJobChargesOnlyJSONField(t *testing.T) {
 		SubJobType: indexpb.StatsSubJob_JsonKeyIndexJob,
 		Schema:     schemaWithFields(jsonField, intField),
 		InsertLogs: []*datapb.FieldBinlog{
-			{FieldID: 200, Binlogs: []*datapb.Binlog{{MemorySize: 4 << 20}}},
-			{FieldID: 201, Binlogs: []*datapb.Binlog{{MemorySize: 400 << 20}}}, // must not be counted
+			{FieldID: 200, Binlogs: []*datapb.Binlog{{MemorySize: 100 << 20}}},
+			{FieldID: 201, Binlogs: []*datapb.Binlog{{MemorySize: 800 << 20}}}, // must not be counted
 		},
 	}
 
 	got := RequirementForStats(req)
-	want := EstimateStats(StatsInput{SubJobType: indexpb.StatsSubJob_JsonKeyIndexJob, FieldMemorySize: 4 << 20})
+	want := EstimateStats(StatsInput{SubJobType: indexpb.StatsSubJob_JsonKeyIndexJob, FieldMemorySize: 100 << 20})
 	assert.Equal(t, want, got)
+	assert.Greater(t, got.Memory, int64(64)<<20, "must clear the floor to actually exercise field selection")
 }
 
+// IsFunctionOutput must be set on the output field for
+// typeutil.IsBM25FunctionOutputField to recognise it -- a schema missing that
+// flag (as a real DataCoord-populated schema never would) makes the matcher
+// return false for every field, which would zero the touched set entirely.
 func TestRequirementForStatsBM25JobChargesOnlyFunctionOutputField(t *testing.T) {
 	paramtable.Init()
 
 	inputField := &schemapb.FieldSchema{FieldID: 300, DataType: schemapb.DataType_VarChar}
-	outputField := &schemapb.FieldSchema{FieldID: 301, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}
+	outputField := &schemapb.FieldSchema{
+		FieldID:          301,
+		Name:             "sparse",
+		DataType:         schemapb.DataType_SparseFloatVector,
+		IsFunctionOutput: true,
+	}
 
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{inputField, outputField},
@@ -326,14 +353,15 @@ func TestRequirementForStatsBM25JobChargesOnlyFunctionOutputField(t *testing.T) 
 		SubJobType: indexpb.StatsSubJob_BM25Job,
 		Schema:     schema,
 		InsertLogs: []*datapb.FieldBinlog{
-			{FieldID: 300, Binlogs: []*datapb.Binlog{{MemorySize: 600 << 20}}}, // must not be counted
-			{FieldID: 301, Binlogs: []*datapb.Binlog{{MemorySize: 6 << 20}}},
+			{FieldID: 300, Binlogs: []*datapb.Binlog{{MemorySize: 800 << 20}}}, // must not be counted
+			{FieldID: 301, Binlogs: []*datapb.Binlog{{MemorySize: 100 << 20}}},
 		},
 	}
 
 	got := RequirementForStats(req)
-	want := EstimateStats(StatsInput{SubJobType: indexpb.StatsSubJob_BM25Job, FieldMemorySize: 6 << 20})
+	want := EstimateStats(StatsInput{SubJobType: indexpb.StatsSubJob_BM25Job, FieldMemorySize: 100 << 20})
 	assert.Equal(t, want, got)
+	assert.Greater(t, got.Memory, int64(64)<<20, "must clear the floor to actually exercise field selection")
 }
 
 // EstimateStats's contract (see estimate_index.go) is that Sort must never
@@ -375,42 +403,58 @@ func TestRequirementForStatsSortRoutesToSortCompactionNotTextIndex(t *testing.T)
 
 // An unrecognised/future sub-job (or the zero value) has no known field
 // subset, so it must charge conservatively for the whole segment rather
-// than guessing -- under-charging is the dangerous direction.
+// than guessing -- under-charging is the dangerous direction. Each field is
+// individually small but their sum clears the 64MiB floor, so a bug that
+// only counted one of the two fields (rather than the whole segment) would
+// produce a visibly different, non-floored result.
 func TestRequirementForStatsUnknownSubJobChargesWholeSegment(t *testing.T) {
 	paramtable.Init()
 
 	req := &workerpb.CreateStatsRequest{
 		SubJobType: indexpb.StatsSubJob_None,
 		InsertLogs: []*datapb.FieldBinlog{
-			{FieldID: 1, Binlogs: []*datapb.Binlog{{MemorySize: 3 << 20}}},
-			{FieldID: 2, Binlogs: []*datapb.Binlog{{MemorySize: 4 << 20}}},
+			{FieldID: 1, Binlogs: []*datapb.Binlog{{MemorySize: 60 << 20}}},
+			{FieldID: 2, Binlogs: []*datapb.Binlog{{MemorySize: 60 << 20}}},
 		},
 	}
 
 	got := RequirementForStats(req)
-	want := EstimateStats(StatsInput{SubJobType: indexpb.StatsSubJob_None, FieldMemorySize: 7 << 20})
+	want := EstimateStats(StatsInput{SubJobType: indexpb.StatsSubJob_None, FieldMemorySize: 120 << 20})
 	assert.Equal(t, want, got)
+	assert.Greater(t, got.Memory, int64(64)<<20, "must clear the floor to actually exercise summation")
+
+	// A bug that counted only one field would produce a different,
+	// non-floored number, not the same floored value.
+	onlyOneField := EstimateStats(StatsInput{SubJobType: indexpb.StatsSubJob_None, FieldMemorySize: 60 << 20})
+	assert.NotEqual(t, onlyOneField, got)
 }
 
 // ---------------------------------------------------------------------------
 // RequirementForAnalyze
 // ---------------------------------------------------------------------------
 
+// Dim/row counts are large enough that using only the first segment's rows
+// (a plausible "forgot to sum the map" bug) would clear the 64MiB
+// EstimateAnalyze floor at a visibly different value than summing both.
 func TestRequirementForAnalyzeSumsRowsAcrossSegments(t *testing.T) {
 	paramtable.Init()
 
 	req := &workerpb.AnalyzeRequest{
-		Dim:   128,
+		Dim:   2048,
 		Field: &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector},
 		SegmentStats: map[int64]*indexpb.SegmentStats{
-			10: {ID: 10, NumRows: 1000},
-			11: {ID: 11, NumRows: 2000},
+			10: {ID: 10, NumRows: 100_000},
+			11: {ID: 11, NumRows: 50_000},
 		},
 	}
 
 	got := RequirementForAnalyze(req)
-	want := EstimateAnalyze(int64(128) * 3000 * 4)
+	want := EstimateAnalyze(int64(2048) * 150_000 * 4)
 	assert.Equal(t, want, got)
+	assert.Greater(t, got.Memory, int64(64)<<20, "must clear the floor to actually exercise row summation")
+
+	onlyFirstSegment := EstimateAnalyze(int64(2048) * 100_000 * 4)
+	assert.NotEqual(t, onlyFirstSegment, got)
 }
 
 // Case D equivalent for analyze: a request with no segments/dim must still
