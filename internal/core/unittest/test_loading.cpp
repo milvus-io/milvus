@@ -28,6 +28,17 @@
 #include "segcore/load_index_c.h"
 #include "storage/EntryStreamUtils.h"
 
+// EstimateLoadIndexResource now reports failure through a CStatus instead of
+// returning a zero estimate; unwrap it for the happy-path tests below.
+static LoadResourceRequest
+EstimateLoadIndexResourceChecked(CLoadIndexInfo c_load_index_info) {
+    LoadResourceRequest request{};
+    auto status = EstimateLoadIndexResource(c_load_index_info, &request);
+    EXPECT_EQ(status.error_code, milvus::ErrorCode::Success)
+        << (status.error_msg ? status.error_msg : "");
+    return request;
+}
+
 using Param =
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>;
 
@@ -330,7 +341,8 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     loadIndexInfo.index_size = 1024 * 1024 * 1024;  // 1G index size
     loadIndexInfo.num_rows = 0;
 
-    LoadResourceRequest request = EstimateLoadIndexResource(&loadIndexInfo);
+    LoadResourceRequest request =
+        EstimateLoadIndexResourceChecked(&loadIndexInfo);
     ASSERT_EQ(request.has_raw_data, expected.has_raw_data);
     ASSERT_EQ(request.final_memory_cost, expected.final_memory_cost);
     ASSERT_EQ(request.final_disk_cost, expected.final_disk_cost);
@@ -411,11 +423,11 @@ TEST(IndexLoadTest, DiskAnnIdMapMmapEstimateChargesDiskCost) {
     };
 
     auto baseline_info = make_load_info();
-    auto baseline = EstimateLoadIndexResource(&baseline_info);
+    auto baseline = EstimateLoadIndexResourceChecked(&baseline_info);
 
     auto i2o_info = make_load_info();
     i2o_info.index_params[milvus::index::ENABLE_MMAP_I2O_MAP] = "true";
-    auto i2o = EstimateLoadIndexResource(&i2o_info);
+    auto i2o = EstimateLoadIndexResourceChecked(&i2o_info);
     ASSERT_EQ(i2o.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(i2o.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(i2o.final_memory_cost, baseline.final_memory_cost);
@@ -423,7 +435,7 @@ TEST(IndexLoadTest, DiskAnnIdMapMmapEstimateChargesDiskCost) {
 
     auto o2i_info = make_load_info();
     o2i_info.index_params[milvus::index::ENABLE_MMAP_O2I_MAP] = "true";
-    auto o2i = EstimateLoadIndexResource(&o2i_info);
+    auto o2i = EstimateLoadIndexResourceChecked(&o2i_info);
     ASSERT_EQ(o2i.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(o2i.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(o2i.final_memory_cost, baseline.final_memory_cost);
@@ -432,7 +444,7 @@ TEST(IndexLoadTest, DiskAnnIdMapMmapEstimateChargesDiskCost) {
     auto both_info = make_load_info();
     both_info.index_params[milvus::index::ENABLE_MMAP_I2O_MAP] = "true";
     both_info.index_params[milvus::index::ENABLE_MMAP_O2I_MAP] = "true";
-    auto both = EstimateLoadIndexResource(&both_info);
+    auto both = EstimateLoadIndexResourceChecked(&both_info);
     ASSERT_EQ(both.final_disk_cost, baseline.final_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(both.max_disk_cost, baseline.max_disk_cost + kIdMapMmapBytes);
     ASSERT_EQ(both.final_memory_cost, baseline.final_memory_cost);
@@ -466,7 +478,7 @@ TEST(IndexLoadTest, SegmentAdmissionEstimateDoesNotOpenScalarV3File) {
     loadIndexInfo.schema.set_fieldid(loadIndexInfo.field_id);
     loadIndexInfo.schema.set_data_type(milvus::proto::schema::DataType::Int64);
 
-    auto request = EstimateLoadIndexResource(&loadIndexInfo);
+    auto request = EstimateLoadIndexResourceChecked(&loadIndexInfo);
 
     EXPECT_EQ(request.final_memory_cost, kIndexSize);
     EXPECT_EQ(request.final_disk_cost, 0);
@@ -504,7 +516,7 @@ TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
     loadIndexInfo.index_size = kIndexSize;
     loadIndexInfo.num_rows = kNumRows;
 
-    auto request = EstimateLoadIndexResource(&loadIndexInfo);
+    auto request = EstimateLoadIndexResourceChecked(&loadIndexInfo);
     auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
         kIndexSize,
         milvus::storage::EntryStreamTransientBytes(
@@ -549,7 +561,7 @@ TEST(IndexLoadTest, ScalarSortMemoryEstimateReservesLegacyAux) {
     loadIndexInfo.index_size = kIndexSize;
     loadIndexInfo.num_rows = kNumRows;
 
-    auto request = EstimateLoadIndexResource(&loadIndexInfo);
+    auto request = EstimateLoadIndexResourceChecked(&loadIndexInfo);
     auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
         kIndexSize,
         milvus::storage::EntryStreamTransientBytes(
@@ -595,7 +607,7 @@ TEST(IndexLoadTest, MarisaMmapEstimateReservesLegacyCsrFallback) {
     loadIndexInfo.index_size = kIndexSize;
     loadIndexInfo.num_rows = kNumRows;
 
-    auto request = EstimateLoadIndexResource(&loadIndexInfo);
+    auto request = EstimateLoadIndexResourceChecked(&loadIndexInfo);
     auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
         kIndexSize,
         milvus::storage::EntryStreamTransientBytes(

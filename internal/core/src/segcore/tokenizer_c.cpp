@@ -56,10 +56,18 @@ free_tokenizer(CTokenizer tokenizer) {
     delete impl;
 }
 
-CTokenStream
-create_token_stream(CTokenizer tokenizer, const char* text, uint32_t text_len) {
-    auto impl = reinterpret_cast<milvus::tantivy::Tokenizer*>(tokenizer);
-    return impl->CreateTokenStream(std::string(text, text_len)).release();
+CStatus
+create_token_stream(CTokenizer tokenizer,
+                    const char* text,
+                    uint32_t text_len,
+                    CTokenStream* token_stream) {
+    try {
+        auto impl = reinterpret_cast<milvus::tantivy::Tokenizer*>(tokenizer);
+        *token_stream =
+            impl->CreateTokenStream(std::string(text, text_len)).release();
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CValidateResult

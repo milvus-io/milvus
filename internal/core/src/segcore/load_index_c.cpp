@@ -95,8 +95,9 @@ DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info) {
     delete info;
 }
 
-LoadResourceRequest
-EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
+CStatus
+EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info,
+                          LoadResourceRequest* c_load_resource_request) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -126,13 +127,13 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
                 load_index_info->enable_mmap,
                 load_index_info->num_rows,
                 load_index_info->dim);
-        return request;
+        *c_load_resource_request = request;
+        return milvus::SuccessCStatus();
     }
-    // ThrowInfo here would rethrow straight through cgo (this function has no
-    // CStatus channel) and terminate the process; log loudly and fall back to
-    // a zero estimate instead.
-    CGO_CATCH_AND_LOG("EstimateLoadIndexResource")
-    return LoadResourceRequest{0, 0, 0, 0, false};
+    // Estimation failure must reach the Go caller as an error: a swallowed
+    // exception here would read as a zero-resource estimate and let the
+    // segment pass load admission without any memory/disk reservation.
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 bool

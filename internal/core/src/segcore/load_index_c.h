@@ -32,8 +32,9 @@ NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info);
 void
 DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info);
 
-LoadResourceRequest
-EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info);
+CStatus
+EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info,
+                          LoadResourceRequest* c_load_resource_request);
 
 bool
 TryReserveLoadingResourceWithTimeout(CResourceUsage size,

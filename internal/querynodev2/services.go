@@ -1733,7 +1733,10 @@ func (node *QueryNode) runAnalyzer(req *querypb.RunAnalyzerRequest) ([]*milvuspb
 
 	results := make([]*milvuspb.AnalyzerResult, len(req.GetPlaceholder()))
 	for i, text := range req.GetPlaceholder() {
-		stream := tokenizer.NewTokenStream(string(text))
+		stream, err := tokenizer.NewTokenStream(string(text))
+		if err != nil {
+			return nil, err
+		}
 
 		results[i] = &milvuspb.AnalyzerResult{
 			Tokens: make([]*milvuspb.AnalyzerToken, 0),
