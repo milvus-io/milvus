@@ -130,3 +130,13 @@ func TestReplicateBuilder(t *testing.T) {
 	assert.Equal(t, []string{"v11", "v12"}, replicateMsg.BroadcastHeader().VChannels)
 	assert.Equal(t, uint64(1), replicateMsg.BroadcastHeader().BroadcastID)
 }
+
+func TestBroadcastVChannelsPreserveFirstOccurrenceOrder(t *testing.T) {
+	msg := message.NewManualFlushMessageBuilderV2().
+		WithHeader(&message.ManualFlushMessageHeader{}).
+		WithBody(&message.ManualFlushMessageBody{}).
+		WithBroadcast([]string{"v2", "v1", "v2", "v3", "v1"}).
+		MustBuildBroadcast()
+
+	assert.Equal(t, []string{"v2", "v1", "v3"}, msg.BroadcastHeader().VChannels)
+}

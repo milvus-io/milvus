@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // NewMutableMessageBeforeAppend creates a new mutable message.
@@ -198,9 +197,20 @@ func (b *mutableMesasgeBuilder[H, B]) WithBroadcast(vchannels []string, opts ...
 	if b.properties.Exist(messageVChannel) {
 		panic("a broadcast message cannot set up vchannel property")
 	}
-	deduplicated := typeutil.NewSet(vchannels...)
+	// BroadcastHeader.VChannels is part of the durable import ordering contract.
+	// Keep first occurrence order instead of collecting a map-backed set, so
+	// ACK callbacks and CDC replicas assign identical channel ordinals.
+	deduplicated := make([]string, 0, len(vchannels))
+	seen := make(map[string]struct{}, len(vchannels))
+	for _, vchannel := range vchannels {
+		if _, ok := seen[vchannel]; ok {
+			continue
+		}
+		seen[vchannel] = struct{}{}
+		deduplicated = append(deduplicated, vchannel)
+	}
 	bhpb := &messagespb.BroadcastHeader{
-		Vchannels: deduplicated.Collect(),
+		Vchannels: deduplicated,
 	}
 	for _, opt := range opts {
 		opt(bhpb)
