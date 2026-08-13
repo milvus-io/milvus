@@ -74,7 +74,6 @@ func (p *ServiceParam) init(bt *BaseTable) {
 	p.WoodpeckerCfg.Init(bt)
 	p.PulsarCfg.Init(bt)
 	p.KafkaCfg.Init(bt)
-	p.validateMessageSizeReserve()
 	p.RocksmqCfg.Init(bt)
 	p.MinioCfg.Init(bt)
 	p.ProfileCfg.Init(bt)
@@ -112,49 +111,33 @@ func walMessageSizeLimitKey(walName string) string {
 	}
 }
 
-// validateMessageSizeReserve guarantees pulsar.messageReserveSize fits under
-// the message-size limit of every WAL backend that can actually be selected
-// on this deployment -- checked once at startup so a nonsensical combination
-// fails fast instead of silently degrading the reserve to 0 the first time a
-// WAL message is packed (see normalizePulsarMessageReserve's fallback for why
-// that runtime path exists at all).
+// ValidateWALMessageSizeReserve guarantees pulsar.messageReserveSize fits
+// under walName's message-size limit, panicking otherwise. The WAL selector
+// calls this with the backend it actually selected, right after selecting it
+// -- which happens during process startup (cmd/roles resolves the WAL name
+// before serving), so a nonsensical combination still fails fast instead of
+// silently degrading the reserve to 0 the first time a message is packed
+// (see normalizePulsarMessageReserve's fallback for why that runtime path
+// exists at all).
 //
-// Only the active backend's limit matters, so an unused backend's config can
-// never fail a startup: with mq.type set explicitly, exactly that backend is
-// checked; with mq.type "default" the backend is picked at runtime by the WAL
-// selector from whichever ones are enabled, so each enabled candidate is
-// checked (whichever wins is among them). RocksMQ budgets against the
-// Pulsar-shaped limit, so it validates the same bound Pulsar does.
+// Only the selected backend is ever validated. Enable flags cannot stand in
+// for selection here: kafka.brokerList and woodpecker.meta.prefix have
+// non-empty defaults, so "enabled" is nearly always true for backends the
+// selector will never pick, and validating those would fail startups over
+// config that is never used. RocksMQ budgets against the Pulsar-shaped
+// limit, so it validates the same bound Pulsar does.
 //
 // These config items are refreshable, so this cannot promise the invariant
 // forever: an operator can still push a bad value through a live config
 // change after startup. normalizePulsarMessageReserve keeps its own runtime
 // fallback for exactly that case; this check only removes the same mistake
 // from ever being reachable through a fresh startup.
-func (p *ServiceParam) validateMessageSizeReserve() {
+func (p *ServiceParam) ValidateWALMessageSizeReserve(walName string) {
 	reserve := p.PulsarCfg.MessageReserveSize.GetAsInt()
-	check := func(walName string) {
-		if limit := p.WALMaxMessageSize(walName); reserve >= limit {
-			panic(fmt.Sprintf(
-				"pulsar.messageReserveSize (%d) must be smaller than %s (%d)",
-				reserve, walMessageSizeLimitKey(walName), limit))
-		}
-	}
-	switch mqType := p.MQCfg.Type.GetValue(); mqType {
-	case "pulsar", "kafka", "woodpecker", "rocksmq":
-		check(mqType)
-	default:
-		// mq.type "default": the WAL selector picks from the enabled
-		// backends at runtime, so validate each candidate it could pick.
-		if p.PulsarEnable() || p.RocksmqEnable() {
-			check("pulsar")
-		}
-		if p.KafkaEnable() {
-			check("kafka")
-		}
-		if p.WoodpeckerEnable() {
-			check("woodpecker")
-		}
+	if limit := p.WALMaxMessageSize(walName); reserve >= limit {
+		panic(fmt.Sprintf(
+			"pulsar.messageReserveSize (%d) must be smaller than %s (%d)",
+			reserve, walMessageSizeLimitKey(walName), limit))
 	}
 }
 

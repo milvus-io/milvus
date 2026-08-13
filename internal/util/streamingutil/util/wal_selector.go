@@ -40,12 +40,19 @@ func InitAndSelectWALName() message.WALName {
 func MustSelectWALName() message.WALName {
 	standalone := paramtable.GetRole() == typeutil.StandaloneRole
 	params := paramtable.Get()
-	return mustSelectWALName(standalone, params.MQCfg.Type.GetValue(), walEnable{
+	walName := mustSelectWALName(standalone, params.MQCfg.Type.GetValue(), walEnable{
 		params.RocksmqEnable(),
 		params.PulsarEnable(),
 		params.KafkaEnable(),
 		params.WoodpeckerEnable(),
 	})
+	// Validated here, against the backend actually selected, rather than at
+	// paramtable init against every enabled backend: kafka.brokerList and
+	// woodpecker.meta.prefix have non-empty defaults, so backends the
+	// selector never picks still look "enabled", and their limits must not
+	// be able to fail a startup that does not use them.
+	params.ValidateWALMessageSizeReserve(walName.String())
+	return walName
 }
 
 // mustSelectWALName select wal name.

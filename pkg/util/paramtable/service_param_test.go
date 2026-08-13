@@ -552,82 +552,83 @@ func TestServiceParam(t *testing.T) {
 	})
 }
 
-// validateMessageSizeReserve fails startup fast on a nonsensical combination
-// instead of letting normalizePulsarMessageReserve silently degrade the
-// reserve to 0 the first time a WAL message is packed -- but only for the WAL
-// backend this deployment can actually select: an unused backend's limit must
-// never fail a startup. Each subtest builds its own isolated
-// BaseTable/ServiceParam so a startup config it deliberately makes invalid
-// cannot leak into any other test's global paramtable state.
+// ValidateWALMessageSizeReserve fails startup fast on a nonsensical
+// combination instead of letting normalizePulsarMessageReserve silently
+// degrade the reserve to 0 the first time a WAL message is packed -- but only
+// for the WAL backend the selector actually picked (it is called with that
+// name, from MustSelectWALName): an unused backend's limit must never fail a
+// startup, because kafka.brokerList and woodpecker.meta.prefix have non-empty
+// defaults that make "enabled" nearly always true. Each subtest builds its
+// own isolated BaseTable/ServiceParam so a config it deliberately makes
+// invalid cannot leak into any other test's global paramtable state.
 func TestServiceParamValidateMessageSizeReserve(t *testing.T) {
-	t.Run("pulsar active: reserve at or above pulsar.maxMessageSize panics", func(t *testing.T) {
+	newParams := func(t *testing.T, overrides map[string]string) *ServiceParam {
+		t.Helper()
 		bt := NewBaseTable(SkipRemote(true))
-		assert.NoError(t, bt.Save("mq.type", "pulsar"))
-		assert.NoError(t, bt.Save("pulsar.maxMessageSize", "1000"))
-		assert.NoError(t, bt.Save("pulsar.messageReserveSize", "1000"))
+		for key, value := range overrides {
+			assert.NoError(t, bt.Save(key, value))
+		}
+		var SParams ServiceParam
+		SParams.init(bt)
+		return &SParams
+	}
+
+	t.Run("pulsar: reserve at or above pulsar.maxMessageSize panics", func(t *testing.T) {
+		p := newParams(t, map[string]string{
+			"pulsar.maxMessageSize":     "1000",
+			"pulsar.messageReserveSize": "1000",
+		})
 		assert.PanicsWithValue(t,
 			"pulsar.messageReserveSize (1000) must be smaller than pulsar.maxMessageSize (1000)",
-			func() {
-				var SParams ServiceParam
-				SParams.init(bt)
-			})
+			func() { p.ValidateWALMessageSizeReserve("pulsar") })
 	})
 
-	t.Run("kafka active: reserve at or above kafka.producer.message.max.bytes panics", func(t *testing.T) {
-		bt := NewBaseTable(SkipRemote(true))
-		assert.NoError(t, bt.Save("mq.type", "kafka"))
-		// Above Kafka's 10 MiB default and above Pulsar's 2 MiB default too --
-		// the panic message proves the Kafka bound fired, not Pulsar's, since
-		// only the active backend is checked.
-		assert.NoError(t, bt.Save("pulsar.messageReserveSize", "10485760"))
+	t.Run("kafka: reserve at or above kafka.producer.message.max.bytes panics", func(t *testing.T) {
+		p := newParams(t, map[string]string{
+			"pulsar.messageReserveSize": "10485760",
+		})
 		assert.PanicsWithValue(t,
 			"pulsar.messageReserveSize (10485760) must be smaller than kafka.producer.message.max.bytes (10485760)",
-			func() {
-				var SParams ServiceParam
-				SParams.init(bt)
-			})
+			func() { p.ValidateWALMessageSizeReserve("kafka") })
 	})
 
-	t.Run("woodpecker active: reserve at or above woodpecker.maxMessageSize panics", func(t *testing.T) {
-		bt := NewBaseTable(SkipRemote(true))
-		assert.NoError(t, bt.Save("mq.type", "woodpecker"))
-		assert.NoError(t, bt.Save("pulsar.messageReserveSize", "10485760"))
+	t.Run("woodpecker: reserve at or above woodpecker.maxMessageSize panics", func(t *testing.T) {
+		p := newParams(t, map[string]string{
+			"pulsar.messageReserveSize": "10485760",
+		})
 		assert.PanicsWithValue(t,
 			"pulsar.messageReserveSize (10485760) must be smaller than woodpecker.maxMessageSize (10485760)",
-			func() {
-				var SParams ServiceParam
-				SParams.init(bt)
-			})
+			func() { p.ValidateWALMessageSizeReserve("woodpecker") })
 	})
 
-	t.Run("inactive backend's limit is not checked", func(t *testing.T) {
-		bt := NewBaseTable(SkipRemote(true))
-		// Pulsar is the active WAL with a raised limit; the reserve violates
-		// Kafka's and Woodpecker's 10 MiB defaults, but neither is active, so
-		// startup must succeed -- an unused backend's config can never fail it.
-		assert.NoError(t, bt.Save("mq.type", "pulsar"))
-		assert.NoError(t, bt.Save("pulsar.maxMessageSize", "33554432"))
-		assert.NoError(t, bt.Save("pulsar.messageReserveSize", "16777216"))
-		var SParams ServiceParam
-		assert.NotPanics(t, func() { SParams.init(bt) })
-	})
-
-	t.Run("mq.type default checks every enabled candidate", func(t *testing.T) {
-		bt := NewBaseTable(SkipRemote(true))
-		// The dev config enables Pulsar (address set) and leaves mq.type at
-		// "default": the selector could pick Pulsar, so its bound is checked.
-		assert.NoError(t, bt.Save("pulsar.maxMessageSize", "1000"))
-		assert.NoError(t, bt.Save("pulsar.messageReserveSize", "1000"))
-		assert.Panics(t, func() {
-			var SParams ServiceParam
-			SParams.init(bt)
+	t.Run("rocksmq validates the pulsar-shaped bound", func(t *testing.T) {
+		p := newParams(t, map[string]string{
+			"pulsar.maxMessageSize":     "1000",
+			"pulsar.messageReserveSize": "1000",
 		})
+		assert.PanicsWithValue(t,
+			"pulsar.messageReserveSize (1000) must be smaller than pulsar.maxMessageSize (1000)",
+			func() { p.ValidateWALMessageSizeReserve("rocksmq") })
 	})
 
-	t.Run("default configuration does not panic", func(t *testing.T) {
-		bt := NewBaseTable(SkipRemote(true))
-		var SParams ServiceParam
-		assert.NotPanics(t, func() { SParams.init(bt) })
+	t.Run("unselected backend's limit is not checked", func(t *testing.T) {
+		// The review counterexample: Pulsar selected with a raised limit and
+		// a 16 MiB reserve. That reserve violates Kafka's and Woodpecker's
+		// untouched 10 MiB defaults, but neither was selected, so validating
+		// the selected backend must succeed -- a config for a WAL this
+		// deployment never uses cannot fail its startup.
+		p := newParams(t, map[string]string{
+			"pulsar.maxMessageSize":     "33554432",
+			"pulsar.messageReserveSize": "16777216",
+		})
+		assert.NotPanics(t, func() { p.ValidateWALMessageSizeReserve("pulsar") })
+	})
+
+	t.Run("default configuration passes for every backend", func(t *testing.T) {
+		p := newParams(t, nil)
+		for _, walName := range []string{"pulsar", "kafka", "woodpecker", "rocksmq"} {
+			assert.NotPanics(t, func() { p.ValidateWALMessageSizeReserve(walName) })
+		}
 	})
 }
 
