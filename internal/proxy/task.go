@@ -1935,11 +1935,11 @@ func (t *showCollectionsTask) Execute(ctx context.Context) error {
 			}
 			t.result.CollectionIds = append(t.result.CollectionIds, id)
 			t.result.CollectionNames = append(t.result.CollectionNames, collectionName)
-			t.result.CreatedTimestamps = append(t.result.CreatedTimestamps, collectionInfo.createdTimestamp)
-			t.result.CreatedUtcTimestamps = append(t.result.CreatedUtcTimestamps, collectionInfo.createdUtcTimestamp)
+			t.result.CreatedTimestamps = append(t.result.CreatedTimestamps, collectionInfo.CreatedTimestamp)
+			t.result.CreatedUtcTimestamps = append(t.result.CreatedUtcTimestamps, collectionInfo.CreatedUtcTimestamp)
 			t.result.InMemoryPercentages = append(t.result.InMemoryPercentages, resp.InMemoryPercentages[offset])
 			t.result.QueryServiceAvailable = append(t.result.QueryServiceAvailable, resp.QueryServiceAvailable[offset])
-			t.result.ShardsNum = append(t.result.ShardsNum, collectionInfo.shardsNum)
+			t.result.ShardsNum = append(t.result.ShardsNum, collectionInfo.ShardsNum)
 		}
 	} else {
 		t.result = respFromRootCoord
@@ -2305,7 +2305,7 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	newIsoValue, isoChanged, err := detectBoolPropChange(
-		collBasicInfo.partitionKeyIsolation, common.PartitionKeyIsolationKey,
+		collBasicInfo.PartitionKeyIsolation, common.PartitionKeyIsolationKey,
 		t.Properties, t.GetDeleteKeys(),
 		func() (bool, error) {
 			return validatePartitionKeyIsolation(ctx, t.CollectionName, isPartitionKeyMode, t.Properties...)
@@ -2316,7 +2316,7 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	newQueryMode, queryModeChanged, err := detectQueryModeChange(
-		collBasicInfo.queryMode,
+		collBasicInfo.QueryMode,
 		t.Properties, t.GetDeleteKeys(),
 	)
 	if err != nil {
@@ -2327,9 +2327,9 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		mlog.String("collectionName", t.CollectionName),
 		mlog.Bool("isPartitionKeyMode", isPartitionKeyMode),
 		mlog.Bool("newIsoValue", newIsoValue),
-		mlog.Bool("oldIsoValue", collBasicInfo.partitionKeyIsolation),
+		mlog.Bool("oldIsoValue", collBasicInfo.PartitionKeyIsolation),
 		mlog.String("newQueryMode", newQueryMode),
-		mlog.String("oldQueryMode", collBasicInfo.queryMode))
+		mlog.String("oldQueryMode", collBasicInfo.QueryMode))
 
 	// If partition key isolation or query_mode changed, check for existing vector index.
 	// Changing these properties requires dropping the vector index first.
@@ -3078,8 +3078,8 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 			}
 			t.result.PartitionIDs = append(t.result.PartitionIDs, id)
 			t.result.PartitionNames = append(t.result.PartitionNames, partitionName)
-			t.result.CreatedTimestamps = append(t.result.CreatedTimestamps, partitionInfo.createdTimestamp)
-			t.result.CreatedUtcTimestamps = append(t.result.CreatedUtcTimestamps, partitionInfo.createdUtcTimestamp)
+			t.result.CreatedTimestamps = append(t.result.CreatedTimestamps, partitionInfo.CreatedTimestamp)
+			t.result.CreatedUtcTimestamps = append(t.result.CreatedUtcTimestamps, partitionInfo.CreatedUtcTimestamp)
 			t.result.InMemoryPercentages = append(t.result.InMemoryPercentages, resp.InMemoryPercentages[offset])
 		}
 	} else {

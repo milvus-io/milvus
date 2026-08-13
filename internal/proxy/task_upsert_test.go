@@ -514,8 +514,8 @@ func TestUpsertTaskForSchemaMismatch(t *testing.T) {
 		}
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-			updateTimestamp: 100,
-			schema: mustNewSchemaInfo(&schemapb.CollectionSchema{
+			UpdateTimestamp: 100,
+			Schema: mustNewSchemaInfo(&schemapb.CollectionSchema{
 				Name: "col-0",
 				Fields: []*schemapb.FieldSchema{
 					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -2746,8 +2746,8 @@ func TestUpdateTask_PreExecute_Success(t *testing.T) {
 
 		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-			updateTimestamp: 12345,
-			schema:          schema,
+			UpdateTimestamp: 12345,
+			Schema:          schema,
 		}, nil).Build()
 
 		mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
@@ -2755,7 +2755,7 @@ func TestUpdateTask_PreExecute_Success(t *testing.T) {
 		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
 
 		mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{
-			name: "_default",
+			Name: "_default",
 		}, nil).Build()
 
 		events := make([]string, 0, 2)
@@ -2867,8 +2867,8 @@ func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
 		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-			updateTimestamp: 12345,
-			schema:          schema,
+			UpdateTimestamp: 12345,
+			Schema:          schema,
 		}, nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 
@@ -2891,13 +2891,13 @@ func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-			updateTimestamp: 12345,
-			schema:          schema,
+			UpdateTimestamp: 12345,
+			Schema:          schema,
 		}, nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
 		mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{
-			name: "_default",
+			Name: "_default",
 		}, nil).Build()
 
 		task := createTestUpdateTask()
@@ -2918,13 +2918,13 @@ func TestUpdateTask_PreExecute_QueryPreExecuteError(t *testing.T) {
 		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-			updateTimestamp: 12345,
-			schema:          schema,
+			UpdateTimestamp: 12345,
+			Schema:          schema,
 		}, nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
 		mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{
-			name: "_default",
+			Name: "_default",
 		}, nil).Build()
 
 		expectedErr := merr.WrapErrParameterInvalidMsg("query pre-execute failed")
@@ -4190,11 +4190,11 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 		mockey.PatchConvey("test nullable field", t, func() {
 			// Setup mocks using mockey
 			mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345, schema: schema}, nil).Build()
+			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{UpdateTimestamp: 12345, Schema: schema}, nil).Build()
 			mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 			mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
-			mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{name: "_default"}, nil).Build()
-			mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{dbID: 0}, nil).Build()
+			mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{Name: "_default"}, nil).Build()
+			mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{DBID: 0}, nil).Build()
 			mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 
 			globalMetaCache = &MetaCache{}
@@ -4308,11 +4308,11 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 		mockey.PatchConvey("test non-nullable field", t, func() {
 			// Setup mocks using mockey
 			mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345, schema: schema}, nil).Build()
+			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{UpdateTimestamp: 12345, Schema: schema}, nil).Build()
 			mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 			mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
-			mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{name: "_default"}, nil).Build()
-			mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{dbID: 0}, nil).Build()
+			mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{Name: "_default"}, nil).Build()
+			mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{DBID: 0}, nil).Build()
 			mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 
 			globalMetaCache = &MetaCache{}
