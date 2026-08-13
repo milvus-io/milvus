@@ -1015,66 +1015,72 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
         all_remote_files.clear();
         all_remote_files.push_back({manifest_path_str});
     }
-    for (auto& remote_files_group : all_remote_files) {
-        if (dim >
-            0) {  // for vector indices try to use limited RAM when loading
-            cached_already = true;
-            // TODO add bit set handling if nullable
-            for (auto& remote_file : remote_files_group) {
-                std::vector<std::vector<std::string>> current_files;
-                std::vector<std::string> vector_file;
-                vector_file.push_back(remote_file);
-                current_files.push_back(vector_file);
-                size_t max_rows = 1000000, offset = 0;
-                while (true) {
-                    // limit download to 1000000 rows to avoid high memory consumption
-                    auto part_field_datas =
-                        manifest_path_str == ""
-                            ? GetFieldDatasFromStorageV2(
-                                  current_files,
-                                  GetFieldDataMeta().field_id,
-                                  data_type.value(),
-                                  element_type.value(),
-                                  dim,
-                                  fs_,
-                                  max_rows,
-                                  offset)
-                            : GetFieldDatasFromManifest(manifest_path_str,
-                                                        loon_ffi_properties_,
-                                                        field_meta_,
-                                                        data_type,
-                                                        dim,
-                                                        element_type,
-                                                        max_rows,
-                                                        offset);
-                    if (part_field_datas.empty()) {
-                        break;
-                    }
-                    for (auto& field_data : part_field_datas) {
-                        offset += field_data->get_num_rows();
-                        consume_field_data(field_data);
+
+    // For variable-dimension fields (dim <= 0, e.g. sparse vectors) without a
+    // manifest, GetFieldDatasFromStorageV2 already accepts the complete
+    // all_remote_files collection and returns the full field.  Calling it once
+    // outside the loop avoids redundant downloads when the segment has multiple
+    // column groups.
+    if (dim <= 0) {
+        if (manifest_path_str == "") {
+            field_datas =
+                GetFieldDatasFromStorageV2(all_remote_files,
+                                           GetFieldDataMeta().field_id,
+                                           data_type.value(),
+                                           element_type.value(),
+                                           dim,
+                                           fs_);
+        } else {
+            field_datas = GetFieldDatasFromManifest(manifest_path_str,
+                                                    loon_ffi_properties_,
+                                                    field_meta_,
+                                                    data_type,
+                                                    dim,
+                                                    element_type);
+        }
+    } else {
+        for (auto& remote_files_group : all_remote_files) {
+            if (dim >
+                0) {  // for vector indices try to use limited RAM when loading
+                cached_already = true;
+                // TODO add bit set handling if nullable
+                for (auto& remote_file : remote_files_group) {
+                    std::vector<std::vector<std::string>> current_files;
+                    std::vector<std::string> vector_file;
+                    vector_file.push_back(remote_file);
+                    current_files.push_back(vector_file);
+                    size_t max_rows = 1000000, offset = 0;
+                    while (true) {
+                        // limit download to 1000000 rows to avoid high memory consumption
+                        auto part_field_datas =
+                            manifest_path_str == ""
+                                ? GetFieldDatasFromStorageV2(
+                                      current_files,
+                                      GetFieldDataMeta().field_id,
+                                      data_type.value(),
+                                      element_type.value(),
+                                      dim,
+                                      fs_,
+                                      max_rows,
+                                      offset)
+                                : GetFieldDatasFromManifest(
+                                      manifest_path_str,
+                                      loon_ffi_properties_,
+                                      field_meta_,
+                                      data_type,
+                                      dim,
+                                      element_type,
+                                      max_rows,
+                                      offset);
+                        if (part_field_datas.empty()) {
+                            break;
+                        }
+                        for (auto& field_data : part_field_datas) {
+                            offset += field_data->get_num_rows();
+                            consume_field_data(field_data);
+                        }
                     }
                 }
-            }
-        } else {
-            if (manifest_path_str != "") {
-                AssertInfo(loon_ffi_properties_ != nullptr,
-                           "loon ffi properties is null when build index with "
-                           "manifest");
-                field_datas = GetFieldDatasFromManifest(manifest_path_str,
-                                                        loon_ffi_properties_,
-                                                        field_meta_,
-                                                        data_type,
-                                                        dim,
-                                                        element_type);
-            } else {
-                field_datas =
-                    GetFieldDatasFromStorageV2(all_remote_files,
-                                               GetFieldDataMeta().field_id,
-                                               data_type.value(),
-                                               element_type.value(),
-                                               dim,
-                                               fs_);
             }
         }
     }
@@ -1085,7 +1091,6 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                 if (field_data->IsNullable()) {
                     nullable = true;
                 }
-                total_num_rows += field_data->get_num_rows();
             }
         }
         if (nullable) {
@@ -1114,8 +1119,11 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
 
     // Write offsets file for VECTOR_ARRAY
     if (is_vector_array) {
+        // offsets must contain at least the initial sentinel (0).  When all
+        // rows are null or contain empty embedding lists the vector is {0}
+        // which is valid — VectorDiskAnnIndex handles the empty-input case.
         AssertInfo(
-            offsets.size() >= 2 && offsets.front() == 0,
+            offsets.size() >= 1 && offsets.front() == 0,
             "invalid emb_list offsets: size {}, front {}",
             offsets.size(),
             offsets.empty() ? -1 : static_cast<int64_t>(offsets.front()));
