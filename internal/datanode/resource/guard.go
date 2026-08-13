@@ -20,42 +20,43 @@ import (
 	"context"
 	"sync"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// ErrResourceExhausted means the request can never be satisfied on this node,
-// however long the caller waits. It is distinct from "not right now".
-var ErrResourceExhausted = errors.New("task resource requirement exceeds node capacity")
-
 type Snapshot struct {
 	Total    taskresource.Capacity
 	Reserved taskresource.Capacity
 	Frozen   bool
 	NonTask  int64
+	// ExclusiveTaskID is the task currently occupying the node alone, or 0.
+	ExclusiveTaskID int64
 }
 
 type Guard interface {
 	// TryAcquire reserves budget without blocking.
-	//   admitted=true             reserved
-	//   admitted=false, err=nil   temporarily short, or frozen; retry later
-	//   err=ErrResourceExhausted  impossible on this node; retrying is futile
+	//   admitted=true    reserved
+	//   admitted=false   not right now; retry later
 	//
-	// The middle value is the headroom left on the node *after* this call has
+	// There is no permanent refusal. A request larger than the whole node is not
+	// impossible, only exclusive: the coordinator places such a task on the
+	// emptiest worker on purpose, and it is admitted once every other
+	// reservation has been released, after which nothing else is admitted until
+	// it finishes.
+	//
+	// The second value is the headroom left on the node *after* this call has
 	// been decided: budget minus everything the ledger has committed, including
 	// the charge just made when admitted=true. It therefore always agrees with a
 	// Snapshot taken immediately afterwards, and a refused caller can report how
 	// far short it fell by comparing it against its own requirement. It goes
 	// negative when the budget has shrunk below what is already committed, and is
 	// deliberately not clamped: that over-commitment is a signal, not noise.
-	TryAcquire(taskID int64, taskType taskcommon.Type, req taskresource.Requirement) (bool, taskresource.Capacity, error)
+	TryAcquire(taskID int64, taskType taskcommon.Type, req taskresource.Requirement) (bool, taskresource.Capacity)
 
-	// Acquire blocks until the reservation succeeds or ctx ends. It returns
-	// ErrResourceExhausted immediately for requests larger than the node.
+	// Acquire blocks until the reservation succeeds or ctx ends. The only error
+	// it can return is ctx's: no request is ever refused permanently.
 	Acquire(ctx context.Context, taskID int64, taskType taskcommon.Type, req taskresource.Requirement) error
 
 	// Release returns a task's reservation. It is idempotent.
@@ -78,6 +79,9 @@ type guard struct {
 
 	ledger   map[int64]taskresource.Requirement
 	reserved taskresource.Requirement
+
+	// exclusiveTaskID is the task currently occupying the node alone, or 0.
+	exclusiveTaskID int64
 
 	waiters []*waiter
 
@@ -119,16 +123,22 @@ func (g *guard) setCapacityForTest(c taskresource.Capacity) {
 	g.capacityOverride = &c
 }
 
+// nodeCapacityLocked is capacity BEFORE the non-task reduction. Oversizedness
+// is a property of the machine, not of a transient memory reading: judging it
+// against the reduced budget would let a passing spike in non-task memory flip
+// an ordinary task into exclusive mode and serialise the whole node.
+func (g *guard) nodeCapacityLocked() taskresource.Capacity {
+	if g.capacityOverride != nil {
+		return *g.capacityOverride
+	}
+	return taskresource.NodeCapacity()
+}
+
 // budgetLocked is the capacity actually available to tasks: node capacity minus
 // the memory observed outside the ledger. nonTask only ever shrinks the budget;
 // see watermark.go for why it can never widen it.
 func (g *guard) budgetLocked() taskresource.Capacity {
-	var c taskresource.Capacity
-	if g.capacityOverride != nil {
-		c = *g.capacityOverride
-	} else {
-		c = taskresource.NodeCapacity()
-	}
+	c := g.nodeCapacityLocked()
 	c.Memory -= g.nonTask
 	if c.Memory < 0 {
 		c.Memory = 0
@@ -136,7 +146,12 @@ func (g *guard) budgetLocked() taskresource.Capacity {
 	return c
 }
 
-func (g *guard) TryAcquire(taskID int64, taskType taskcommon.Type, req taskresource.Requirement) (bool, taskresource.Capacity, error) {
+// isOversizedLocked reports whether req can never run alongside anything else.
+func (g *guard) isOversizedLocked(req taskresource.Requirement) bool {
+	return !req.FitsIn(g.nodeCapacityLocked())
+}
+
+func (g *guard) TryAcquire(taskID int64, taskType taskcommon.Type, req taskresource.Requirement) (bool, taskresource.Capacity) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.tryAcquireLocked(taskID, taskType, req)
@@ -154,36 +169,61 @@ func (g *guard) availLocked(budget taskresource.Capacity) taskresource.Capacity 
 	}
 }
 
-func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req taskresource.Requirement) (bool, taskresource.Capacity, error) {
+// tryAcquireLocked decides one admission.
+//
+// Note what is *not* consulted anywhere below: the process's current memory
+// usage. Admission is decided by the ledger of commitments alone, because a
+// task that was admitted a moment ago has not allocated its peak yet. Judging
+// by observation is what let issue #52180 admit eight compactions in a row
+// while every one of them was still downloading.
+func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req taskresource.Requirement) (bool, taskresource.Capacity) {
 	budget := g.budgetLocked()
 
-	// An id already on the books is answered before every rule below, including
-	// the node-capacity check. A task that already holds its charge is running:
-	// it must never be told to wait for a reservation it owns, and it must never
-	// be told its work is impossible. The budget can shrink under a running task
-	// -- that is precisely what Task 6 does when it raises nonTask -- and
-	// answering ErrResourceExhausted there would make it abort while still
-	// holding a reservation. Re-requests are idempotent for the same reason.
+	// An id already on the books is answered before every rule below. A task
+	// that already holds its charge is running: it must never be told to wait
+	// for a reservation it owns. The budget can shrink under a running task --
+	// that is precisely what Task 6 does when it raises nonTask -- and sending
+	// it back to the queue there would make it wait while still holding a
+	// reservation, head of a line it can never leave. Re-requests are idempotent
+	// for the same reason.
 	if _, exists := g.ledger[taskID]; exists {
-		return true, g.availLocked(budget), nil
-	}
-
-	// Note what is *not* consulted here: the process's current memory usage.
-	// Admission is decided by the ledger of commitments alone, because a task
-	// that was admitted a moment ago has not allocated its peak yet. Judging by
-	// observation is what let issue #52180 admit eight compactions in a row
-	// while every one of them was still downloading.
-	if !req.FitsIn(budget) {
-		return false, g.availLocked(budget), ErrResourceExhausted
+		return true, g.availLocked(budget)
 	}
 	if g.frozen {
-		return false, g.availLocked(budget), nil
+		return false, g.availLocked(budget)
 	}
+	// While an oversized task occupies the node, nothing else is admitted. The
+	// arithmetic below would refuse everyone anyway as things stand -- reserved
+	// exceeds the node, so nothing more can fit -- but node capacity is runtime
+	// config and can grow under the task, and the promise made at admission has
+	// to outlive that.
+	if g.exclusiveTaskID != 0 {
+		return false, g.availLocked(budget)
+	}
+
+	if g.isOversizedLocked(req) {
+		// It cannot share the node, so it runs alone: admitted only once every
+		// other reservation has been released. It is never refused -- the
+		// coordinator places such a task on the emptiest worker on purpose and
+		// relies on this wait.
+		if !g.reserved.IsZero() {
+			return false, g.availLocked(budget)
+		}
+		g.exclusiveTaskID = taskID
+		g.reserved = g.reserved.Add(req)
+		g.ledger[taskID] = req
+		mlog.Info(context.TODO(), "oversized task admitted for exclusive execution",
+			mlog.Int64("taskID", taskID),
+			mlog.String("taskType", taskType),
+			mlog.String("requirement", req.String()))
+		return true, g.availLocked(budget)
+	}
+
 	if g.blockedByHeadOfLineLocked(taskID, budget) {
-		return false, g.availLocked(budget), nil
+		return false, g.availLocked(budget)
 	}
 	if !g.reserved.Add(req).FitsIn(budget) {
-		return false, g.availLocked(budget), nil
+		return false, g.availLocked(budget)
 	}
 
 	g.reserved = g.reserved.Add(req)
@@ -193,21 +233,28 @@ func (g *guard) tryAcquireLocked(taskID int64, taskType taskcommon.Type, req tas
 		mlog.String("taskType", taskType),
 		mlog.String("requirement", req.String()),
 		mlog.String("reserved", g.reserved.String()))
-	return true, g.availLocked(budget), nil
+	return true, g.availLocked(budget)
 }
 
 // blockedByHeadOfLineLocked keeps the longest-waiting task's budget from being
 // eaten by later, smaller arrivals. Without it a steady trickle of small tasks
 // starves every large one.
 func (g *guard) blockedByHeadOfLineLocked(taskID int64, budget taskresource.Capacity) bool {
-	if !paramtable.Get().DataNodeCfg.ResourceHeadOfLineReserve.GetAsBool() {
-		return false
-	}
 	if len(g.waiters) == 0 {
 		return false
 	}
 	head := g.waiters[0]
 	if head.taskID == taskID {
+		return false
+	}
+	// An oversized head can only ever run on a drained node, so it always holds
+	// the line regardless of the configuration knob. Letting the knob release
+	// it would starve it forever: unlike an ordinary task it can never be
+	// admitted by a lucky gap.
+	if g.isOversizedLocked(head.req) {
+		return true
+	}
+	if !paramtable.Get().DataNodeCfg.ResourceHeadOfLineReserve.GetAsBool() {
 		return false
 	}
 	// The head is waiting because it does not fit yet. Anyone else taking
@@ -217,11 +264,7 @@ func (g *guard) blockedByHeadOfLineLocked(taskID int64, budget taskresource.Capa
 
 func (g *guard) Acquire(ctx context.Context, taskID int64, taskType taskcommon.Type, req taskresource.Requirement) error {
 	g.mu.Lock()
-	ok, _, err := g.tryAcquireLocked(taskID, taskType, req)
-	if err != nil {
-		g.mu.Unlock()
-		return err
-	}
+	ok, _ := g.tryAcquireLocked(taskID, taskType, req)
 	if ok {
 		g.mu.Unlock()
 		return nil
@@ -255,11 +298,8 @@ func (g *guard) Acquire(ctx context.Context, taskID int64, taskType taskcommon.T
 	// lock hold, so that interleaving cannot occur.)
 	for {
 		g.mu.Lock()
-		ok, _, err = g.tryAcquireLocked(taskID, taskType, req)
+		ok, _ = g.tryAcquireLocked(taskID, taskType, req)
 		g.mu.Unlock()
-		if err != nil {
-			return err
-		}
 		if ok {
 			return nil
 		}
@@ -301,6 +341,10 @@ func (g *guard) Release(taskID int64) {
 	}
 	delete(g.ledger, taskID)
 	g.reserved = g.reserved.Sub(req)
+	// The node stops being exclusive the moment its occupant lets go.
+	if g.exclusiveTaskID == taskID {
+		g.exclusiveTaskID = 0
+	}
 	g.mu.Unlock()
 
 	g.wakeWaiters()
@@ -328,10 +372,11 @@ func (g *guard) Snapshot() Snapshot {
 
 	budget := g.budgetLocked()
 	return Snapshot{
-		Total:    budget,
-		Reserved: taskresource.Capacity{CPU: g.reserved.CPU, Memory: g.reserved.Memory},
-		Frozen:   g.frozen,
-		NonTask:  g.nonTask,
+		Total:           budget,
+		Reserved:        taskresource.Capacity{CPU: g.reserved.CPU, Memory: g.reserved.Memory},
+		Frozen:          g.frozen,
+		NonTask:         g.nonTask,
+		ExclusiveTaskID: g.exclusiveTaskID,
 	}
 }
 
