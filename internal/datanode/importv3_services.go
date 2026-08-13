@@ -770,10 +770,26 @@ type importV3FinalWriter struct {
 	targetSchema    *schemapb.CollectionSchema
 	dataTS          uint64
 	clusterID       string
+	runFunctions    bool
 }
 
 func newImportV3FinalWriter(ctx context.Context, output storage.RecordWriter, temporarySchema, targetSchema *schemapb.CollectionSchema, dataTS uint64, clusterID string) storage.RecordWriter {
-	return &importV3FinalWriter{ctx: ctx, output: output, temporarySchema: temporarySchema, targetSchema: targetSchema, dataTS: dataTS, clusterID: clusterID}
+	return &importV3FinalWriter{ctx: ctx, output: output, temporarySchema: temporarySchema, targetSchema: targetSchema, dataTS: dataTS, clusterID: clusterID, runFunctions: !temporarySchemaContainsFunctionOutput(temporarySchema, targetSchema)}
+}
+
+func temporarySchemaContainsFunctionOutput(temporarySchema, targetSchema *schemapb.CollectionSchema) bool {
+	temporaryFields := make(map[int64]struct{})
+	for _, field := range typeutil.GetAllFieldSchemas(temporarySchema) {
+		temporaryFields[field.GetFieldID()] = struct{}{}
+	}
+	for _, field := range typeutil.GetAllFieldSchemas(targetSchema) {
+		if field.GetIsFunctionOutput() {
+			if _, ok := temporaryFields[field.GetFieldID()]; ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (w *importV3FinalWriter) Write(record storage.Record) error {
@@ -798,7 +814,7 @@ func (w *importV3FinalWriter) Write(record storage.Record) error {
 	} else if ts.RowNum() != rows {
 		return merr.WrapErrDataIntegrityMsg("ImportTaskV3 source timestamp rows mismatch: timestamps=%d rows=%d", ts.RowNum(), rows)
 	}
-	if len(w.targetSchema.GetFunctions()) > 0 {
+	if w.runFunctions && len(w.targetSchema.GetFunctions()) > 0 {
 		if err := embedding.RunAll(w.ctx, w.targetSchema, data, embedding.RunOptions{
 			ClusterID: w.clusterID, DBName: w.targetSchema.GetDbName(),
 			AllowNonBM25Outputs: common.GetCollectionAllowInsertNonBM25FunctionOutputs(w.targetSchema.GetProperties()),
