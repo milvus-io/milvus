@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -59,7 +60,20 @@ import (
 )
 
 type proxyLogBuffer struct {
-	bytes.Buffer
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (b *proxyLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.Write(p)
+}
+
+func (b *proxyLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.String()
 }
 
 func (*proxyLogBuffer) Sync() error {
