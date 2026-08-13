@@ -161,3 +161,16 @@ type DataCoordCatalog interface {
 	ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error)
 	DropExportSnapshotJob(ctx context.Context, jobID int64) error
 }
+
+// ImportV3Catalog is the optional catalog surface for the new import control
+// plane. It is kept separate from DataCoordCatalog so old in-process test
+// doubles and legacy deployments can continue to use V2 without implementing
+// the new records.
+type ImportV3Catalog interface {
+	SaveReshardTask(ctx context.Context, task *datapb.ReshardTask) error
+	ListReshardTasks(ctx context.Context) ([]*datapb.ReshardTask, error)
+	DropReshardTask(ctx context.Context, taskID int64) error
+	SaveImportTaskV3(ctx context.Context, task *datapb.ImportTaskV3) error
+	ListImportTasksV3(ctx context.Context) ([]*datapb.ImportTaskV3, error)
+	DropImportTaskV3(ctx context.Context, taskID int64) error
+}
