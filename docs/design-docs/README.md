@@ -1,9 +1,18 @@
 # Milvus design documents
 
-## Directory rules
+Design Docs are durable records of significant Milvus feature and architecture
+decisions. They explain the problem, alternatives, selected design,
+compatibility impact, and verification plan before or alongside implementation.
 
-- `design_docs/`: Feature and architecture Design Docs. Existing filenames and
-  topic folders, such as `cdc/` and `qviews/`, remain valid.
-- `assets/`: Images shared by Design Docs.
-- User-facing documentation belongs in
-  [`milvus-io/milvus-docs`](https://github.com/milvus-io/milvus-docs).
+## Directory layout
+
+- [`design_docs/`](design_docs/) contains Design Docs. Historical filenames and
+  topic subdirectories are retained for compatibility.
+- [`assets/`](assets/) contains images shared by Design Docs.
+
+New public user documentation belongs in
+[`milvus-io/milvus-docs`](https://github.com/milvus-io/milvus-docs). Existing
+topic directories under `design_docs/`, including their supporting material,
+remain in place for compatibility. Put current subsystem documentation under
+`docs/agent_guides/`, and keep executable experiments with the implementation,
+tests, or benchmark suite they validate.

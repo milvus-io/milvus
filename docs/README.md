@@ -1,12 +1,17 @@
 # Milvus repository documentation
 
-## Directory rules
+This directory contains documentation that must stay close to the Milvus source
+tree. Public product documentation belongs in the
+[`milvus-io/milvus-docs`](https://github.com/milvus-io/milvus-docs) repository.
 
-- `design-docs/`: Feature and architecture design records. Keep existing topic
-  folders, such as `cdc/` and `qviews/`, with their supporting files.
-- `agent_guides/`: Current subsystem documentation for contributors and agents.
-- `dev/`: Current contributor and development guides.
-- `archive/`: Historical documentation only; it is not current guidance.
-- User-facing documentation belongs in
-  [`milvus-io/milvus-docs`](https://github.com/milvus-io/milvus-docs). Do not add
-  new user guides here.
+## Directory map
+
+| Path | Purpose | Status |
+| --- | --- | --- |
+| [`agent_guides/`](agent_guides/) | Code-backed subsystem architecture, invariants, and debugging guidance | Current |
+| [`dev/`](dev/) | Contributor-facing engineering rules and development procedures | Current |
+| [`design-docs/`](design-docs/) | Design records and their supporting assets | Current and historical |
+| [`archive/`](archive/) | Superseded documentation retained for historical context | Historical, non-normative |
+
+Documentation that belongs to one component may remain next to that component.
+Other repository-wide documentation should use one of the directories above.
