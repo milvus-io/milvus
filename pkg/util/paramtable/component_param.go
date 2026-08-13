@@ -5584,6 +5584,7 @@ type dataCoordConfig struct {
 	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
 	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
 	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
+	ImportMaxMergeFanIn             ParamItem `refreshable:"true"`
 	MaxSegmentsPerCopyTask          ParamItem `refreshable:"true"`
 	CopySegmentCheckInterval        ParamItem `refreshable:"true"`
 	CopySegmentTaskRetention        ParamItem `refreshable:"true"`
@@ -6971,6 +6972,19 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		},
 	}
 	p.ImportMemoryLimitPerSlot.Init(base.mgr)
+
+	p.ImportMaxMergeFanIn = ParamItem{
+		Key:          "dataCoord.import.maxImportMergeFanIn",
+		Version:      "3.0.0",
+		Doc:          "Maximum direct merge fan-in used by ImportTaskV3. Values must be in [2,1024].",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportMaxMergeFanIn.Init(base.mgr)
+	if fanIn := p.ImportMaxMergeFanIn.GetAsInt(); fanIn < 2 || fanIn > 1024 {
+		panic("dataCoord.import.maxImportMergeFanIn must be in [2, 1024]")
+	}
 
 	p.MaxSegmentsPerCopyTask = ParamItem{
 		Key:          "dataCoord.import.maxSegmentsPerCopyTask",

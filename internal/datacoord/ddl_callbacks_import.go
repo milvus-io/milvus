@@ -49,11 +49,13 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 	// Process each vchannel with its own TimeTick (not deprecated MsgBase)
 	// Each vchannel gets its own import job with the corresponding TimeTick
 	vchannels := make([]string, 0, len(result.Results))
-	for vchannel := range result.Results {
+	for _, vchannel := range result.Message.BroadcastHeader().VChannels {
 		if funcutil.IsControlChannel(vchannel) {
 			continue
 		}
-		vchannels = append(vchannels, vchannel)
+		if _, ok := result.Results[vchannel]; ok {
+			vchannels = append(vchannels, vchannel)
+		}
 	}
 
 	// Call createImportJobFromAck directly instead of ImportV2
